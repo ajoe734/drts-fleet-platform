@@ -33,7 +33,11 @@ _LOCAL_ROOT = _SCRIPT_DIR.parent.resolve()
 
 
 def ensure_canonical_delegation(argv: list[str] | None = None) -> None:
-    if ROOT != _LOCAL_ROOT and not os.environ.get("_AI_STATUS_DELEGATED"):
+    if (
+        ROOT != _LOCAL_ROOT
+        and not os.environ.get("_AI_STATUS_DELEGATED")
+        and os.environ.get("AI_STATUS_LOCAL_EXECUTION") != "github_bus"
+    ):
         canonical_script = (ROOT / "scripts" / "ai_status.py").resolve()
         if canonical_script.exists() and canonical_script != Path(__file__).resolve():
             os.environ["_AI_STATUS_DELEGATED"] = "1"
@@ -2056,16 +2060,48 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit("Usage: progress <task-id> <message>")
     task_id, message = args[0], args[1]
     actor = current_actor()
+    reconciler = os.environ.get("AI_STATUS_RECONCILER", "").strip() == "github_bus" and actor == "Supervisor"
     task = get_task(state, task_id)
     if task is None:
         raise SystemExit(f"Unknown task: {task_id}")
-    if task.get("owner") != actor:
+    if task.get("owner") != actor and not reconciler:
         raise SystemExit(f"Only the owner ({task.get('owner')}) can progress {task_id}")
     timestamp = iso_now()
-    if task["status"] in {"backlog", "todo", "review_approved"}:
+    ci_failed = os.environ.get("INTEGRATION_STATUS", "").strip().lower() == "ci_failed"
+    review_ready = os.environ.get("RECONCILER_REVIEW_READY", "").strip() == "1"
+    if review_ready and task["status"] == "in_progress":
+        task["status"] = "review"
+        task.pop("waiting_for", None)
+    elif task["status"] in {"backlog", "todo"} or (
+        ci_failed and task["status"] in {"review", "review_approved"}
+    ):
         task["status"] = "in_progress"
     task["last_update"] = timestamp
     task["next"] = message
+    # A branch/PR/CI update is progress, not task completion. Preserve the
+    # existing lifecycle state while recording structured integration evidence
+    # so the dispatcher does not mistake external integration for more coding.
+    if os.environ.get("INTEGRATION_STATUS", "").strip():
+        task.update(integration_metadata_from_env(task_requires_commit(task), timestamp))
+    if (
+        reconciler
+        and os.environ.get("INTEGRATION_STATUS", "").strip().lower() == "merged_to_dev"
+        and task.get("merge_commit")
+    ):
+        # A protected merge is terminal integration evidence even when the
+        # worker exited before its owner closeout reached the status file.
+        # Reconcile the lifecycle forward; never infer this from CI alone.
+        task["status"] = "done"
+        task.pop("waiting_for", None)
+        mark_blockers_resolved(state, task_id)
+        mark_handoffs_done(state, task_id)
+    if reconciler:
+        push_branch = os.environ.get("PUSH_BRANCH", "").strip()
+        commit_hash = os.environ.get("COMMIT_HASH", "").strip()
+        if push_branch:
+            task["push_branch"] = push_branch
+        if commit_hash:
+            task["commit_hash"] = commit_hash
     mark_handoffs_done_for_actor(state, task_id, actor)
     append_log({"ts": timestamp, "agent": actor, "type": "progress", "task_id": task_id, "message": message})
 
@@ -2277,6 +2313,8 @@ def command_approve(state: dict[str, Any], args: list[str]) -> None:
     task = get_task(state, task_id)
     if task is None:
         raise SystemExit(f"Unknown task: {task_id}")
+    if str(task.get("integration_status") or "").strip().lower() == "ci_failed":
+        raise SystemExit(f"{task_id} cannot be review_approved while CI is failing")
     if task.get("reviewer") != actor:
         raise SystemExit(f"Only the reviewer ({task.get('reviewer')}) can approve {task_id}")
     if task.get("status") != "review":

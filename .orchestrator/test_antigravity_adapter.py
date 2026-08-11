@@ -126,10 +126,11 @@ class AntigravityAdapterTests(unittest.TestCase):
 
     def test_config_home_isolates_auth_path(self) -> None:
         from adapters import antigravity as ag
-        a = ag._app_data_dir({"config_home": "~/.antigravity2-home"})
+        from common import antigravity_app_data_dir
+        a = antigravity_app_data_dir({"config_home": "~/.antigravity2-home"})
         self.assertTrue(str(a).endswith("/.antigravity2-home/.gemini/antigravity-cli"))
         # distinct homes -> distinct token storage (two accounts)
-        b = ag._app_data_dir({"config_home": "~/.antigravity-home"})
+        b = antigravity_app_data_dir({"config_home": "~/.antigravity-home"})
         self.assertNotEqual(str(a), str(b))
 
 

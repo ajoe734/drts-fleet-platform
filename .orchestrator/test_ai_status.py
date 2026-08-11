@@ -522,6 +522,129 @@ class IntegrationGateUnitTest(unittest.TestCase):
         )
 
 
+class ProgressIntegrationMetadataTest(unittest.TestCase):
+    def test_progress_records_explicit_integration_metadata_without_completing_task(self) -> None:
+        task = {"id": "TASK-PR-001", "owner": "Codex", "reviewer": "Claude", "status": "in_progress"}
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Codex",
+            "INTEGRATION_STATUS": "ci_pending",
+            "PR_URL": "https://github.com/example/repo/pull/42",
+            "CI_STATUS": "pending",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_progress(state, ["TASK-PR-001", "PR is awaiting CI."])
+
+        self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(task["integration_status"], "ci_pending")
+        self.assertEqual(task["pr_url"], env["PR_URL"])
+        self.assertEqual(task["ci_status"], "pending")
+
+    def test_progress_without_integration_env_preserves_existing_behavior(self) -> None:
+        task = {"id": "TASK-PR-002", "owner": "Codex", "reviewer": "Claude", "status": "todo"}
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+
+        with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_progress(state, ["TASK-PR-002", "Implementation started."])
+
+        self.assertEqual(task["status"], "in_progress")
+        self.assertNotIn("integration_status", task)
+
+    def test_reconciler_advances_green_pr_to_review(self) -> None:
+        task = {
+            "id": "TASK-PR-READY-001",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "in_progress",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "RECONCILER_REVIEW_READY": "1",
+            "INTEGRATION_STATUS": "pr_open",
+            "PR_URL": "https://github.com/example/repo/pull/42",
+            "CI_STATUS": "success",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_progress(state, [task["id"], "PR checks passed."])
+
+        self.assertEqual(task["status"], "review")
+
+    def test_reconciler_does_not_clear_product_blocker_for_green_pr(self) -> None:
+        task = {
+            "id": "TASK-PRODUCT-BLOCKED-001",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "blocked",
+            "waiting_for": "Missing product contract",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "RECONCILER_REVIEW_READY": "1",
+            "INTEGRATION_STATUS": "pr_open",
+            "PR_URL": "https://github.com/example/repo/pull/43",
+            "CI_STATUS": "success",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_progress(state, [task["id"], "PR checks passed."])
+
+        self.assertEqual(task["status"], "blocked")
+        self.assertEqual(task["waiting_for"], "Missing product contract")
+
+    def test_reconciler_returns_failed_review_to_owner_repair(self) -> None:
+        task = {
+            "id": "TASK-PR-FAILED-001",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "review",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "INTEGRATION_STATUS": "ci_failed",
+            "PR_URL": "https://github.com/example/repo/pull/44",
+            "CI_STATUS": "failure",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_progress(state, [task["id"], "PR checks failed."])
+
+        self.assertEqual(task["status"], "in_progress")
+
+    def test_reconciler_marks_protected_merge_done_after_worker_closeout_gap(self) -> None:
+        task = {
+            "id": "TASK-MERGED-001",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "blocked",
+            "waiting_for": "Claude",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "INTEGRATION_STATUS": "merged_to_dev",
+            "PR_URL": "https://github.com/example/repo/pull/42",
+            "CI_STATUS": "success",
+            "MERGED_REF": "dev",
+            "MERGE_COMMIT": "a" * 40,
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_progress(state, ["TASK-MERGED-001", "Protected PR merge reconciled."])
+
+        self.assertEqual(task["status"], "done")
+        self.assertEqual(task["integration_status"], "merged_to_dev")
+        self.assertNotIn("waiting_for", task)
+
+
 class IntegrationGateCommandDoneTest(unittest.TestCase):
     def _task(self, **extra: object) -> dict:
         task = {"id": "I18N-OPS-03", "owner": "Codex", "reviewer": "Claude", "status": "review_approved"}

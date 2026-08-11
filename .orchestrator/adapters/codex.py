@@ -13,6 +13,8 @@ from common import (
     spawn_background_process,
     worker_result_path,
     worker_result_schema_path,
+    worker_scope_properties,
+    worker_scope_unit,
 )
 
 
@@ -84,6 +86,10 @@ class CodexAdapter(BaseAdapter):
         if config_home:
             env["CODEX_HOME"] = os.path.expanduser(config_home)
         apply_orchestrator_runtime_env(env, self.config, request.metadata)
+        env["ORCH_WORKER_SCOPE_UNIT"] = worker_scope_unit(run_id)
+        env["ORCH_WORKER_SCOPE_PROPERTIES"] = "\n".join(
+            worker_scope_properties(self.config, request.metadata)
+        )
 
         log_path = runtime_log_path("codex", request.agent_id)
         process, _ = spawn_background_process(
@@ -105,5 +111,5 @@ class CodexAdapter(BaseAdapter):
             log_path=str(log_path),
             pid=process.pid,
             run_id=run_id,
-            metadata={"result_path": str(result_path)},
+            metadata={"result_path": str(result_path), "scope_unit": worker_scope_unit(run_id)},
         )

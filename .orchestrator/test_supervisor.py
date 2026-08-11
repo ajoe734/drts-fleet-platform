@@ -1756,7 +1756,7 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
             "message": "wake",
         }
         state = {"queue": {"events": {}}, "workers": {}}
-        request = object()
+        request = types.SimpleNamespace(agent_id="codex")
         delivery = {"manual_confirmation_required": False, "auto_delivered": True}
 
         with (
@@ -3565,6 +3565,183 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "failed")
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_failed")
 
+    def test_dead_worker_that_reported_advancement_is_yielded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result_path = Path(tmpdir) / "result.json"
+            result_path.write_text(
+                json.dumps({"outcome": "advanced", "summary": "Verification needs a later retry."}),
+                encoding="utf-8",
+            )
+            config = {
+                "schema": {
+                    "tasks_path": "tasks",
+                    "task_id_field": "id",
+                    "assignee_field": "owner",
+                    "reviewer_field": "reviewer",
+                },
+                "supervisor": {"stall_after_seconds": 300, "worker_yield": {"cooldown_seconds": 120}},
+                "ready_dispatcher": {},
+                "providers": {},
+                "agents": {"codex": {"id": "codex", "display_name": "Codex"}},
+            }
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "EX-010",
+                        "provider": "codex",
+                        "agent_id": "codex",
+                        "status": "running",
+                        "queue_event_id": "evt-1",
+                        "pid": 999999,
+                        "last_event_at": "2026-04-06T09:00:00Z",
+                        "result_path": str(result_path),
+                    }
+                },
+            }
+            status = {"tasks": [{"id": "EX-010", "status": "in_progress", "owner": "Codex", "reviewer": "Claude"}]}
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+                mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+                mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+            ):
+                changed = supervisor.poll_workers(config, state)
+
+            self.assertTrue(changed)
+            self.assertEqual(state["workers"]["run-1"]["status"], "yielded")
+            self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
+            self.assertIn("EX-010:codex", state["worker_yields"])
+            self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_yielded")
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "write_activity_log") as second_log,
+            ):
+                self.assertFalse(supervisor.poll_workers(config, state))
+            self.assertEqual(state["workers"]["run-1"]["status"], "yielded")
+            second_log.assert_not_called()
+
+    def test_dead_worker_that_reported_blocked_updates_canonical_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            status_path = root / "ai-status.json"
+            status_path.write_text(
+                json.dumps(
+                    {"tasks": [{"id": "EX-012", "status": "in_progress", "owner": "Codex", "reviewer": "Claude"}]}
+                ),
+                encoding="utf-8",
+            )
+            result_path = root / ".orchestrator" / "worker-results" / "run-1.json"
+            result_path.parent.mkdir(parents=True)
+            result_path.write_text(
+                json.dumps({"outcome": "blocked", "summary": "git verification timed out", "blocker": "git status timed out"}),
+                encoding="utf-8",
+            )
+            config = {
+                "schema": {
+                    "tasks_path": "tasks",
+                    "task_id_field": "id",
+                    "assignee_field": "owner",
+                    "reviewer_field": "reviewer",
+                },
+                "paths": {"status_file": str(status_path), "state_file": str(root / ".orchestrator" / "state.json")},
+                "supervisor": {"stall_after_seconds": 300},
+                "ready_dispatcher": {},
+                "providers": {},
+                "agents": {"codex": {"id": "codex", "display_name": "Codex"}},
+            }
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "EX-012",
+                        "provider": "codex",
+                        "agent_id": "codex",
+                        "status": "running",
+                        "queue_event_id": "evt-1",
+                        "pid": 999999,
+                        "last_event_at": "2026-04-06T09:00:00Z",
+                        "result_path": str(result_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+                mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+                mock.patch.object(supervisor, "sync_status_pipeline", return_value=True),
+                mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+            ):
+                changed = supervisor.poll_workers(config, state)
+
+            self.assertTrue(changed)
+            self.assertEqual(state["workers"]["run-1"]["status"], "completed")
+            self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
+            task = json.loads(status_path.read_text(encoding="utf-8"))["tasks"][0]
+            self.assertEqual(task["status"], "blocked")
+            self.assertEqual(task["next"], "git status timed out")
+            self.assertIn(".orchestrator/worker-results/run-1.json", task["evidence_refs"])
+            self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_completed")
+
+    def test_dead_parent_with_live_process_group_enters_draining(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300, "process_group_drain_seconds": 30},
+            "ready_dispatcher": {},
+            "providers": {},
+            "agents": {"codex": {"id": "codex", "display_name": "Codex"}},
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "EX-011",
+                    "provider": "codex",
+                    "agent_id": "codex",
+                    "status": "running",
+                    "queue_event_id": "evt-1",
+                    "pid": 999999,
+                    "last_event_at": "2026-04-06T09:00:00Z",
+                }
+            },
+        }
+        status = {"tasks": [{"id": "EX-011", "status": "in_progress", "owner": "Codex", "reviewer": "Claude"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+            mock.patch.object(supervisor, "process_group_is_alive", return_value=True),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["workers"]["run-1"]["status"], "draining")
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "started")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_draining")
+
     def test_dead_worker_for_open_task_can_be_reassigned(self) -> None:
         config = {
             "schema": {
@@ -4469,6 +4646,51 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_superseded")
 
 
+    def test_completion_only_adapter_gets_longer_stall_watchdog(self) -> None:
+        config = {"supervisor": {"completion_only_worker_stall_after_seconds": 1200}, "agents": {"gemini": {"adapter": "antigravity"}, "codex": {"adapter": "codex"}}}
+        self.assertEqual(supervisor.worker_stall_timeout_seconds(config, {"agent_id": "gemini"}, 300), 1200)
+        self.assertEqual(supervisor.worker_stall_timeout_seconds(config, {"agent_id": "codex"}, 300), 300)
+
+    def test_completion_only_memory_guard_preempts_silent_near_limit_worker(self) -> None:
+        config = {
+            "supervisor": {
+                "completion_only_adapters": ["antigravity"],
+                "completion_only_memory_termination_ratio": 0.9,
+                "completion_only_memory_grace_seconds": 60,
+            },
+            "agents": {"gemini2": {"adapter": "antigravity"}},
+        }
+        worker = {
+            "agent_id": "gemini2",
+            "last_event_at": "2026-08-09T13:00:00Z",
+            "resource_usage": {"memory_current_bytes": 1450, "memory_max_bytes": 1600},
+        }
+        reason = supervisor.completion_only_memory_termination_reason(
+            config,
+            worker,
+            datetime(2026, 8, 9, 13, 2, tzinfo=timezone.utc),
+        )
+        self.assertTrue(reason.startswith("memory_limit_imminent:"))
+
+    def test_premature_exit_with_scope_oom_is_classified_from_telemetry(self) -> None:
+        reason = supervisor.resolve_terminal_worker_reason(
+            {"resource_usage": {"memory_events": {"oom_kill": 1}}},
+            supervisor.PREMATURE_EXIT_REASON,
+        )
+        self.assertEqual(reason, "cgroup_oom: worker scope reported memory.oom_kill")
+
+
+    def test_claude_resume_reuses_worker_scope(self) -> None:
+        config = {"paths": {"state_file": "/tmp/state.json", "status_file": "/tmp/status.json"}, "providers": {"claude": {"runtime": {"cli": "claude"}}}}
+        worker = {"run_id": "run-1", "provider": "claude", "agent_id": "claude", "task_id": "TASK-1", "session_id": "session-1", "scope_unit": "drts-worker-run-1.scope"}
+        process = types.SimpleNamespace(pid=7)
+        with mock.patch.object(supervisor, "command_exists", return_value="claude"), mock.patch.object(supervisor, "spawn_background_process", return_value=(process, Path("/tmp/resume.log"))) as spawn:
+            supervisor.resume_claude_worker(config, worker, {"providers": {"claude": {}}})
+        env = spawn.call_args.kwargs["env"]
+        self.assertEqual(env["ORCH_WORKER_SCOPE_UNIT"], "drts-worker-run-1.scope")
+        self.assertIn("ORCH_WORKER_SCOPE_PROPERTIES", env)
+
+
 class SingleSupervisorGuardTests(unittest.TestCase):
     def test_supervisor_cmdline_matches_actual_python_process(self) -> None:
         repo_root = str(supervisor.THIS_DIR.parent.resolve())
@@ -4999,6 +5221,29 @@ class WorkerReassignmentTests(unittest.TestCase):
 
 
 class ChairmanFlowTests(unittest.TestCase):
+    def test_rejected_chair_action_is_acknowledged_in_decision_packet(self) -> None:
+        config = {"agents": {"codex": {"display_name": "Codex"}}}
+        payload = {
+            "task_actions": [
+                {
+                    "task_id": "MISSING-001",
+                    "action": "dispatch_now",
+                    "target_agent": "Codex",
+                    "reason": "Dispatch it now",
+                }
+            ]
+        }
+        with (
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": []}),
+            mock.patch.object(supervisor, "write_activity_log") as activity,
+        ):
+            changed = supervisor.apply_chair_task_actions(config, {}, payload, {})
+
+        self.assertFalse(changed)
+        self.assertEqual(payload["action_outcomes"][0]["status"], "rejected")
+        self.assertEqual(payload["action_outcomes"][0]["task_id"], "MISSING-001")
+        self.assertEqual(activity.call_args.args[1]["type"], "chair_task_action_rejected")
+
     def test_chair_review_message_includes_provider_health_context(self) -> None:
         message = supervisor.build_chair_review_message(
             {
@@ -5573,7 +5818,7 @@ class ChairmanFlowTests(unittest.TestCase):
             )
             config = {
                 "paths": {"provider_capabilities": str(path)},
-                "supervisor": {"auto_refresh_provider_capabilities": False},
+                "supervisor": {"auto_refresh_provider_capabilities": True},
             }
             fresh = {"generated_at": "2026-08-04T00:00:00Z", "providers": {"claude": {}}}
             with (
@@ -5595,12 +5840,37 @@ class ChairmanFlowTests(unittest.TestCase):
             path.write_text(json.dumps(cached), encoding="utf-8")
             config = {
                 "paths": {"provider_capabilities": str(path)},
-                "supervisor": {"auto_refresh_provider_capabilities": False},
+                "supervisor": {"auto_refresh_provider_capabilities": True},
             }
             with mock.patch.object(supervisor, "build_provider_capabilities") as build:
                 report = supervisor.load_provider_report(config)
             build.assert_not_called()
             self.assertEqual(report, cached)
+
+    def test_provider_profile_path_mismatch_is_reprobed_even_when_periodic_refresh_is_off(self) -> None:
+        """A changed agy profile must not dispatch against an old auth snapshot."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "provider_capabilities.json"
+            cached = {
+                "providers": {
+                    "gemini": {"paths": {"antigravity_app_data": "/old/.gemini/antigravity-cli"}}
+                }
+            }
+            path.write_text(json.dumps(cached), encoding="utf-8")
+            config = {
+                "paths": {"provider_capabilities": str(path)},
+                "supervisor": {"auto_refresh_provider_capabilities": False},
+                "providers": {"gemini": {"antigravity": {"config_home": "/new"}}},
+            }
+            fresh = {"providers": {"gemini": {"auth_ready": False}}}
+            with (
+                mock.patch.object(supervisor, "build_provider_capabilities", return_value=fresh) as build,
+                mock.patch.object(supervisor, "write_provider_capabilities") as write,
+            ):
+                report = supervisor.load_provider_report(config)
+            build.assert_called_once()
+            write.assert_called_once_with(config, report=fresh)
+            self.assertEqual(report, fresh)
 
     def test_provider_health_review_respects_cooldown_after_recent_pause_review(self) -> None:
         state = {
@@ -5996,7 +6266,7 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertFalse(changed)
         self.assertIn("copilot", state["provider_pauses"])
-        self.assertIn("copilot", state["quota_paused_agents"])
+        self.assertEqual(state["provider_pause_schema"], 3)
 
     def test_dispatcher_skips_task_waiting_on_chair_reassignment(self) -> None:
         config = {
@@ -6074,10 +6344,12 @@ class ChairmanFlowTests(unittest.TestCase):
             },
         }
         state = {
+            "provider_pause_schema": 3,
             "queue": {"events": {}},
             "workers": {},
             "provider_pauses": {
                 "copilot": {
+                    "schema": 3,
                     "kind": "quota",
                     "reason": "quota exhausted",
                     "paused_at": "2026-04-30T15:00:00Z",
@@ -7410,8 +7682,10 @@ class ChairmanFlowTests(unittest.TestCase):
         }
         # Gemini is quota-paused; Codex2 is idle.
         state = {
+            "provider_pause_schema": 3,
             "provider_pauses": {
                 "gemini": {
+                    "schema": 3,
                     "kind": "quota",
                     "reason": "QUOTA_EXHAUSTED",
                     "paused_at": "2026-05-19T02:07:48Z",
@@ -7629,6 +7903,34 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertIn("claude", state["provider_pauses"])
         self.assertTrue(supervisor.is_agent_dispatch_paused(config, state, "claude", provider_report=provider_report))
 
+    def test_stale_auth_pause_with_capacity_evidence_is_reclassified(self) -> None:
+        config = {
+            "agents": {"gemini": {"display_name": "Gemini", "provider": "gemini"}},
+            "worker_retry": {"capacity_pause_seconds": 300},
+        }
+        state = {
+            "provider_pause_schema": 3,
+            "provider_pauses": {
+                "gemini": {
+                    "kind": "auth",
+                    "scope": "lane",
+                    "lane_id": "gemini",
+                    "reason": "Eligibility check failed: RESOURCE_EXHAUSTED (code 429)",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                    "resume_at": None,
+                }
+            },
+        }
+
+        with mock.patch.object(supervisor, "write_activity_log"):
+            expired = supervisor.expire_provider_pauses(config, state, {"providers": {}})
+
+        pause = state["provider_pauses"]["gemini"]
+        self.assertEqual(expired, [])
+        self.assertEqual(pause["kind"], "capacity")
+        self.assertEqual(pause["resume_at_source"], "reclassified_capacity")
+        self.assertGreater(pause["resume_at"], datetime.now(timezone.utc).timestamp())
+
     def test_reason_hint_pause_probes_and_clears_after_reset_time(self) -> None:
         config = {"agents": {"codex2": {"display_name": "Codex2", "provider": "codex2"}}}
         state = {
@@ -7656,7 +7958,7 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(expired, ["codex2"])
         self.assertNotIn("codex2", state["provider_pauses"])
-        self.assertNotIn("codex2", state["quota_paused_agents"])
+        self.assertNotIn("quota_paused_agents", state)
 
     def test_reason_hint_pause_stays_paused_until_probe_clears_it(self) -> None:
         config = {"agents": {"codex2": {"display_name": "Codex2", "provider": "codex2"}}}
@@ -8291,6 +8593,19 @@ class ProviderReportPreloadTests(unittest.TestCase):
 
 
 class WorkerProcessReaperTests(unittest.TestCase):
+    def test_terminate_worker_pid_stops_the_entire_process_group(self) -> None:
+        process = subprocess.Popen(
+            ["sh", "-c", "sleep 30 & wait"],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self.addCleanup(lambda: process.poll() is None and supervisor.terminate_worker_pid(process.pid))
+
+        self.assertTrue(supervisor.terminate_worker_pid(process.pid))
+        process.wait(timeout=2)
+        self.assertFalse(supervisor.process_group_is_alive(process.pid))
+
     def test_pid_is_alive_reaps_zombie_child(self) -> None:
         with mock.patch.object(supervisor.Path, "read_text", return_value="123 (codex) Z 1 1 1"), \
              mock.patch.object(supervisor.os, "waitpid", return_value=(123, 0)) as waitpid, \
@@ -8647,6 +8962,134 @@ class GovernanceRecursionGuardTests(unittest.TestCase):
         self.assertIn("governance_recursion_blocked", logged_types)
 
 
+class ReviewOverflowTests(unittest.TestCase):
+    def test_review_overflow_claims_for_preferred_idle_reviewer_only(self) -> None:
+        config = {
+            "ready_dispatcher": {
+                "review_overflow": {
+                    "enabled": True,
+                    "preferred_lanes": ["gemini", "gemini2", "codex", "codex2", "claude"],
+                }
+            },
+            "agents": {
+                "claude": {"display_name": "Claude", "provider": "claude"},
+                "gemini": {"display_name": "Gemini", "provider": "gemini"},
+                "gemini2": {"display_name": "Gemini2", "provider": "gemini2"},
+            },
+        }
+        base = {
+            "enabled": True,
+            "availability_first": False,
+            "allow_any_idle_lane": False,
+            "require_owner_higher_priority_load": True,
+        }
+        settings = supervisor.helper_claim_settings_for_task(config, base, "review", {"review"})
+        task = {"id": "REV-1", "status": "review", "owner": "Gemini2", "reviewer": "Claude"}
+
+        with mock.patch.object(supervisor, "load_provider_report", return_value={}):
+            plan = supervisor.proactive_claim_plan_for_idle_agent(
+                config,
+                task=task,
+                task_map={"REV-1": task},
+                idle_agent_name="Gemini",
+                idle_agent_names=["Gemini", "Gemini2"],
+                agent_loads={"Claude": [0], "Gemini": [], "Gemini2": []},
+                helper_settings=settings,
+                review_statuses={"review"},
+                finalize_statuses={"review_approved"},
+                dependency_done_statuses={"done"},
+                state={},
+            )
+
+        self.assertEqual(plan["new_owner"], "Gemini2")
+        self.assertEqual(plan["new_reviewer"], "Gemini")
+
+    def test_review_overflow_does_not_change_owner_task_policy(self) -> None:
+        config = {"ready_dispatcher": {"review_overflow": {"enabled": True}}}
+        base = {"availability_first": False, "require_owner_higher_priority_load": True}
+
+        self.assertIs(
+            supervisor.helper_claim_settings_for_task(config, base, "todo", {"review"}),
+            base,
+        )
+
+    def test_dispatcher_overflows_two_reviews_to_two_gemini_slots(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "review_statuses": ["review"],
+                "active_worker_statuses": ["running"],
+                "max_dispatches_per_tick": 3,
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"claude": 1, "gemini": 2, "gemini2": 2},
+                "lane_priority": ["gemini", "gemini2", "claude"],
+                "helper_claim": {
+                    "enabled": True,
+                    "availability_first": False,
+                    "allow_any_idle_lane": False,
+                    "require_owner_higher_priority_load": True,
+                },
+                "review_overflow": {
+                    "enabled": True,
+                    "preferred_lanes": ["gemini", "gemini2", "claude"],
+                },
+            },
+            "agents": {
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+                "gemini": {"id": "gemini", "display_name": "Gemini", "provider": "gemini"},
+                "gemini2": {"id": "gemini2", "display_name": "Gemini2", "provider": "gemini2"},
+            },
+            "providers": {},
+        }
+        status = {
+            "tasks": [
+                {"id": "REV-ACTIVE", "status": "review", "owner": "Gemini", "reviewer": "Claude"},
+                {"id": "REV-ONE", "status": "review", "owner": "Gemini2", "reviewer": "Claude"},
+                {"id": "REV-TWO", "status": "review", "owner": "Codex", "reviewer": "Claude"},
+            ]
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {
+                "claude-active": {
+                    "run_id": "claude-active",
+                    "task_id": "REV-ACTIVE",
+                    "agent_id": "claude",
+                    "provider": "claude",
+                    "status": "running",
+                    "request_snapshot": {"reason": "review_ready_dispatch"},
+                }
+            },
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as enqueue,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
+
+        self.assertTrue(changed)
+        self.assertEqual(persist.call_count, 2)
+        self.assertEqual(enqueue.call_count, 2)
+        self.assertEqual(
+            {call.kwargs["new_reviewer"] for call in persist.call_args_list},
+            {"Gemini"},
+        )
+        self.assertEqual(
+            {call.kwargs["new_owner"] for call in persist.call_args_list},
+            {"Gemini2", "Codex"},
+        )
+
+
 class ProactiveReassignmentAntiFlapTests(unittest.TestCase):
     """Stop the duplicate-empty-branch thrash without blocking the first claim.
 
@@ -8811,6 +9254,73 @@ class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
         supervisor._provision_worktree_node_modules(root, dest)
         self.assertFalse((dest / "node_modules").is_symlink())
 
+    def test_provisioned_symlinks_are_ignored_by_git(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        _git(root, "init")
+        (root / ".gitignore").write_text("node_modules\n", encoding="utf-8")
+        (root / "node_modules").mkdir()
+        (root / "apps" / "foo" / "node_modules").mkdir(parents=True)
+        destination = root / "worker"
+        (destination / "apps" / "foo").mkdir(parents=True)
+
+        supervisor._provision_worktree_node_modules(root, destination)
+
+        for relative_path in ("node_modules", "apps/foo/node_modules"):
+            result = subprocess.run(
+                ["git", "check-ignore", "-q", relative_path],
+                cwd=destination,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class CanonicalEvidencePathTests(unittest.TestCase):
+    def test_worker_evidence_uses_canonical_state_root(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            state_path = root / ".orchestrator" / "state.json"
+            state_path.parent.mkdir(parents=True)
+            state_path.write_text("{}", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "state_file": str(state_path),
+                }
+            }
+
+            evidence_ref = supervisor.record_worker_evidence(
+                config,
+                {"run_id": "run-1", "task_id": "TASK-1", "provider": "codex"},
+                "Worker exited before the task reached a terminal status.",
+            )
+
+            path = root / ".orchestrator" / "evidence" / "run-1.json"
+            self.assertEqual(evidence_ref, ".orchestrator/evidence/run-1.json")
+            self.assertTrue(path.exists())
+
+
+class WorkerLogCursorTests(unittest.TestCase):
+    def test_reads_only_new_log_bytes_after_initial_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "worker.log"
+            log_path.write_text('{"session_id":"session-1"}\n', encoding="utf-8")
+            worker = {"log_path": str(log_path)}
+
+            supervisor.update_from_log({}, worker)
+
+            first_offset = worker["log_offset"]
+            self.assertEqual(worker["session_id"], "session-1")
+            log_path.write_text(
+                log_path.read_text(encoding="utf-8") + "https://github.com/acme/project/pull/42\n",
+                encoding="utf-8",
+            )
+            supervisor.update_from_log({}, worker)
+
+            self.assertGreater(worker["log_offset"], first_offset)
+            self.assertEqual(worker["pr_url"], "https://github.com/acme/project/pull/42")
+
 
 class AntigravityModelRotationTests(unittest.TestCase):
     """Antigravity lanes auto-rotate Gemini <-> fallback model instead of pausing
@@ -8918,6 +9428,35 @@ class AntigravityModelRotationTests(unittest.TestCase):
             cfg, state, {}, self._worker(), {"kind": "capacity"}, "hit your limit", authorized=True
         )
         self.assertFalse(handled)
+
+    def test_dispatch_defers_when_both_rotation_pools_are_cooling(self) -> None:
+        supervisor.record_rotation_cooldown(self.config, "gemini", "gemini", 200.0)
+        supervisor.record_rotation_cooldown(self.config, "gemini", "claude", 150.0)
+
+        cooldown = supervisor.antigravity_dispatch_cooldown(self.config, "gemini", now=100.0)
+
+        self.assertIsNotNone(cooldown)
+        assert cooldown is not None
+        self.assertEqual(cooldown[0], 150.0)
+        self.assertIn("queue delivery deferred", cooldown[1])
+
+    def test_queue_does_not_retry_a_paused_target_lane(self) -> None:
+        state: dict = {}
+        supervisor.pause_provider(state, "gemini", "cooling", kind="capacity", reset_seconds=900)
+        event = {
+            "event_id": "evt-paused",
+            "target_agent": "Gemini",
+            "message": "review task",
+            "task_id": "T-1",
+        }
+        with mock.patch.object(supervisor, "load_event_queue", return_value=[event]), \
+             mock.patch.object(supervisor, "load_status", return_value={"tasks": []}), \
+             mock.patch.object(supervisor, "start_worker_for_request") as start:
+            changed = supervisor.process_queue(self.config, state, {"providers": {}})
+
+        self.assertTrue(changed)
+        self.assertEqual(supervisor.queue_status(state, "evt-paused")["status"], "pending")
+        start.assert_not_called()
 
     def test_skips_unauthorized_and_wrong_kind(self) -> None:
         state: dict = {}
@@ -9197,3 +9736,65 @@ class SupervisorTickContainmentTests(unittest.TestCase):
 
         self.assertEqual(calls, 1)
         self.assertEqual(code, 128 + 15)
+
+
+class IdentityScopedPauseTests(unittest.TestCase):
+    def test_antigravity_quota_probe_clears_pause_before_reset_hint(self) -> None:
+        config = {"agents": {"gemini": {"provider": "gemini", "adapter": "antigravity"}}, "providers": {"gemini": {"antigravity": {"cli": "agy"}}}, "supervisor": {"provider_quota_recovery_probe_cooldown_seconds": 1}}
+        state = {"provider_pause_schema": 2, "provider_pauses": {"gemini": {"kind": "quota", "scope": "lane", "lane_id": "gemini", "reason": "quota", "resume_at": 9999999999, "resume_at_source": "reason_hint"}}}
+        with mock.patch.object(supervisor, "_antigravity_quota_recovery_probe", return_value=(True, "inference_ok")), mock.patch.object(supervisor, "write_activity_log"):
+            self.assertEqual(supervisor.expire_provider_pauses(config, state, {"providers": {}}), ["gemini"])
+        self.assertEqual(state["provider_pauses"], {})
+    def test_legacy_pause_state_is_migrated_and_untrusted_command_output_is_dropped(self) -> None:
+        state = {
+            "provider_pauses": {
+                "codex": {"kind": "quota", "reason": '{"type":"item.completed","item":{}}'}
+            },
+            "quota_paused_agents": {},
+        }
+        registry = supervisor.provider_pause_registry(state)
+        self.assertEqual(state["provider_pause_schema"], 3)
+        self.assertNotIn("codex", registry)
+
+    def test_unscoped_legacy_quota_pause_does_not_block_current_codex2_identity(self) -> None:
+        state = {"provider_pause_schema": 2, "provider_pauses": {"codex2": {"kind": "quota", "scope": "lane", "lane_id": "codex2", "reason": "old quota", "resume_at": 9999999999}}}
+        config = {"agents": {"codex2": {"provider": "codex2"}}}
+        report = {"providers": {"codex2": {"auth_ready": True, "identity": {"fingerprint": "new", "quota_pool": "codex:new:terra"}}}}
+        self.assertFalse(supervisor.is_agent_dispatch_paused(config, state, "codex2", provider_report=report))
+        pause = next(iter(supervisor.provider_pause_registry(state).values()))
+        self.assertEqual(pause["scope"], "legacy")
+        self.assertTrue(pause["legacy_unscoped"])
+
+    def test_shared_quota_pool_pauses_both_lanes(self) -> None:
+        identity = {"fingerprint": "same", "quota_pool": "codex:same:terra"}
+        report = {
+            "providers": {
+                "codex": {"auth_ready": True, "identity": identity},
+                "codex2": {"auth_ready": True, "identity": identity},
+            }
+        }
+        config = {
+            "agents": {
+                "codex": {"provider": "codex"},
+                "codex2": {"provider": "codex2"},
+            }
+        }
+        state: dict[str, object] = {}
+        supervisor.pause_provider(state, "codex", "quota exhausted", kind="quota", reset_seconds=60, identity=identity)
+        self.assertTrue(supervisor.is_agent_dispatch_paused(config, state, "codex2", provider_report=report))
+
+    def test_new_identity_does_not_inherit_old_quota_pause(self) -> None:
+        old = {"fingerprint": "old", "quota_pool": "codex:old:terra"}
+        new = {"fingerprint": "new", "quota_pool": "codex:new:terra"}
+        config = {"agents": {"codex": {"provider": "codex"}}}
+        state: dict[str, object] = {}
+        supervisor.pause_provider(state, "codex", "quota exhausted", kind="quota", reset_seconds=60, identity=old)
+        self.assertFalse(
+            supervisor.is_agent_dispatch_paused(
+                config, state, "codex", provider_report={"providers": {"codex": {"auth_ready": True, "identity": new}}}
+            )
+        )
+
+    def test_suspended_approval_does_not_consume_execution_capacity(self) -> None:
+        state = {"workers": {"one": {"agent_id": "claude", "status": "suspended_approval"}}}
+        self.assertEqual(supervisor.active_worker_agent_counts(state, {"suspended_approval"}), {})

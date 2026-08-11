@@ -121,6 +121,24 @@ class DispatchPolicyTests(unittest.TestCase):
         self.assertIsNotNone(decision)
         self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
 
+    def test_blocked_ci_failure_is_dispatchable_but_other_blockers_are_not(self) -> None:
+        repair = {
+            "id": "TASK-1",
+            "status": "blocked",
+            "owner": "Codex",
+            "depends_on": [],
+            "integration_status": "ci_failed",
+            "ci_status": "CI failed on run 123",
+        }
+        decision = resolve_dispatch_target(repair, {"TASK-1": repair}, self.policy)
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
+
+        product_blocker = dict(repair, ci_status="success")
+        self.assertIsNone(
+            resolve_dispatch_target(product_blocker, {"TASK-1": product_blocker}, self.policy)
+        )
+
     def test_event_is_deterministic_and_contains_canonical_metadata(self) -> None:
         decision = resolve_dispatch_target(self.tasks["TASK-1"], self.tasks, self.policy)
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,6 +24,7 @@ def default_state() -> dict[str, Any]:
             "events": {},
         },
         "workers": {},
+        "worker_yields": {},
         "approvals": {
             "last_reconciled_at": None,
         },
@@ -36,15 +38,23 @@ def default_state() -> dict[str, Any]:
             "last_ratio": None,
             "last_main_task_wave_at": None,
         },
-        "quota_paused_agents": {},
         "provider_pauses": {},
+        "provider_pause_schema": 2,
         "failure_streaks": {},
         "chair_reassignment_guards": {},
         "dispatch_pauses": [],
+        "dispatch_pause_history": {},
         "disk_guard": {
             "last_check_at": None,
             "last_cleanup_at": None,
             "dispatch_blocked": False,
+        },
+        "resource_guard": {
+            "last_check_at": None,
+            "memory_current_bytes": None,
+            "memory_max_bytes": None,
+            "memory_pressure_some_avg10": None,
+            "memory_events": {},
         },
         "chair_review": {
             "active_review": None,
@@ -82,6 +92,10 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
                 "workers",
                 "approvals",
                 "supervisor",
+                "provider_pause_schema",
+                "pause_migration",
+                # Read once for the v1 -> v2 pause migration; the runtime
+                # removes it after converting scoped records.
                 "quota_paused_agents",
             }
         }
@@ -100,6 +114,7 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state.setdefault("queue", {})
     state["queue"].setdefault("events", {})
     state.setdefault("workers", {})
+    state.setdefault("worker_yields", {})
     state.setdefault("approvals", {})
     state["approvals"].setdefault("last_reconciled_at", None)
     state.setdefault("maintenance", {})
@@ -110,15 +125,25 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state["underutilization"].setdefault("last_sidecar_wave_reason", None)
     state["underutilization"].setdefault("last_ratio", None)
     state["underutilization"].setdefault("last_main_task_wave_at", None)
-    state.setdefault("quota_paused_agents", {})
     state.setdefault("provider_pauses", {})
+    if "provider_pause_schema" not in raw:
+        state["provider_pause_schema"] = 1 if (raw.get("quota_paused_agents") or raw.get("provider_pauses")) else 2
+    else:
+        state.setdefault("provider_pause_schema", 2)
     state.setdefault("failure_streaks", {})
     state.setdefault("chair_reassignment_guards", {})
     state.setdefault("dispatch_pauses", [])
+    state.setdefault("dispatch_pause_history", {})
     state.setdefault("disk_guard", {})
     state["disk_guard"].setdefault("last_check_at", None)
     state["disk_guard"].setdefault("last_cleanup_at", None)
     state["disk_guard"].setdefault("dispatch_blocked", False)
+    state.setdefault("resource_guard", {})
+    state["resource_guard"].setdefault("last_check_at", None)
+    state["resource_guard"].setdefault("memory_current_bytes", None)
+    state["resource_guard"].setdefault("memory_max_bytes", None)
+    state["resource_guard"].setdefault("memory_pressure_some_avg10", None)
+    state["resource_guard"].setdefault("memory_events", {})
     if not isinstance(state.get("chair_review"), dict):
         state["chair_review"] = {}
     state["chair_review"].setdefault("active_review", None)
@@ -136,17 +161,20 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state["supervisor"].setdefault("started_at", None)
     state["supervisor"].setdefault("last_heartbeat_at", None)
     state["supervisor"].setdefault("lifecycle", "running")
-    if state.get("quota_paused_agents"):
-        provider_pauses = state.setdefault("provider_pauses", {})
-        for agent_id, pause in state.get("quota_paused_agents", {}).items():
-            merged = deepcopy(pause)
-            merged.setdefault("kind", "quota")
-            provider_pauses.setdefault(agent_id, merged)
     for pause in state.get("provider_pauses", {}).values():
         if isinstance(pause, dict):
             pause.setdefault("kind", "quota")
+    legacy_pauses = state.get("quota_paused_agents")
+    if isinstance(legacy_pauses, dict):
+        provider_pauses = state.setdefault("provider_pauses", {})
+        for agent_id, pause in legacy_pauses.items():
+            if not isinstance(pause, dict):
+                continue
+            migrated_pause = deepcopy(pause)
+            migrated_pause.setdefault("kind", "quota")
+            provider_pauses.setdefault(str(agent_id), migrated_pause)
     state.pop("tasks", None)
-    state["version"] = 4
+    state["version"] = 5
     return state
 
 
@@ -203,7 +231,7 @@ def prune_worker_records(state: dict[str, Any], tasks_by_id: dict[str, str] | No
             keep[run_id] = worker
             continue
         # Drop terminal workers once the queue event is settled, or the task itself is already terminal.
-        if status in {"failed", "completed", "interrupted", "superseded", "reassigned", "rotated"}:
+        if status in {"failed", "completed", "interrupted", "superseded", "reassigned", "rotated", "yielded"}:
             continue
         keep[run_id] = worker
     state["workers"] = keep
@@ -260,6 +288,72 @@ def prune_expired_reassignment_guards(state: dict[str, Any]) -> None:
     state["chair_reassignment_guards"] = kept
 
 
+def prune_seen_event_keys(state: dict[str, Any], *, retain_recent: int = 128) -> None:
+    """Keep dispatch de-duplication bounded to the current scheduling window.
+
+    Keys embed the complete dispatch signature, so retaining every historical
+    key makes state.json grow even when their timestamps are only 20 bytes.
+    Current queue records provide durable delivery truth; this is merely a
+    short-lived duplicate suppression cache.
+    """
+    seen = state.get("seen_event_keys")
+    if not isinstance(seen, dict) or len(seen) <= retain_recent:
+        return
+    ordered = sorted(seen.items(), key=lambda item: str(item[1] or ""), reverse=True)
+    state["seen_event_keys"] = dict(ordered[:retain_recent])
+
+
+def prune_expired_worker_yields(state: dict[str, Any]) -> None:
+    """Keep only active, parseable yield cooldowns across supervisor restarts."""
+    yields = state.get("worker_yields")
+    if not isinstance(yields, dict):
+        state["worker_yields"] = {}
+        return
+    now = datetime.now(timezone.utc)
+    kept: dict[str, Any] = {}
+    for key, entry in yields.items():
+        if not isinstance(entry, dict):
+            continue
+        try:
+            resume_at = datetime.fromisoformat(str(entry.get("resume_at") or "").replace("Z", "+00:00"))
+            if resume_at.tzinfo is None:
+                resume_at = resume_at.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if resume_at > now:
+            kept[key] = entry
+    state["worker_yields"] = kept
+
+
+def compact_dispatch_pauses(state: dict[str, Any], *, retain_recent: int = 128) -> None:
+    """Bound taskless pause evidence while retaining actionable task pauses.
+
+    Provider-wide pause truth lives in ``provider_pauses``. Historical,
+    taskless worker pauses are audit data and must not grow state.json forever.
+    """
+    pauses = [item for item in state.get("dispatch_pauses", []) if isinstance(item, dict)]
+    task_pauses = [item for item in pauses if str(item.get("task_id") or "").strip()]
+    taskless = [item for item in pauses if not str(item.get("task_id") or "").strip()]
+    taskless.sort(key=lambda item: str(item.get("paused_at") or item.get("blocked_until") or ""), reverse=True)
+    retained = taskless[:retain_recent]
+    compacted = taskless[retain_recent:]
+    history = state.setdefault("dispatch_pause_history", {})
+    buckets: Counter[str] = Counter()
+    latest: dict[str, str] = {}
+    for pause in compacted:
+        day = str(pause.get("paused_at") or "unknown")[:10]
+        key = ":".join((str(pause.get("provider") or "unknown"), day, str(pause.get("failure_kind") or "unknown")))
+        buckets[key] += 1
+        latest[key] = max(latest.get(key, ""), str(pause.get("paused_at") or ""))
+    for key, count in buckets.items():
+        prior = history.get(key) if isinstance(history.get(key), dict) else {}
+        history[key] = {
+            "count": int(prior.get("count") or 0) + count,
+            "latest_at": max(str(prior.get("latest_at") or ""), latest[key]),
+        }
+    state["dispatch_pauses"] = task_pauses + retained
+
+
 def _slim_worker_for_digest(worker: dict[str, Any]) -> dict[str, Any]:
     snapshot = worker.get("request_snapshot") or {}
     return {
@@ -302,12 +396,14 @@ def build_state_digest(state: dict[str, Any]) -> dict[str, Any]:
         "last_scan_at": state.get("last_scan_at"),
         "note": "Chair-scoped digest of state.json (slim workers; watcher cursor and seen_event_keys omitted). Tasks live in ai-status.json.",
         "provider_pauses": state.get("provider_pauses", {}),
-        "quota_paused_agents": state.get("quota_paused_agents", {}),
+        "provider_pause_schema": state.get("provider_pause_schema", 1),
         "failure_streaks": state.get("failure_streaks", {}),
         "dispatch_pauses": state.get("dispatch_pauses", []),
+        "dispatch_pause_history": state.get("dispatch_pause_history", {}),
         "chair_reassignment_guards": state.get("chair_reassignment_guards", {}),
         "chair_review": state.get("chair_review", {}),
         "underutilization": state.get("underutilization", {}),
+        "resource_guard": state.get("resource_guard", {}),
         "supervisor": state.get("supervisor", {}),
         "approvals": state.get("approvals", {}),
         "workers": {run_id: _slim_worker_for_digest(worker) for run_id, worker in workers.items() if isinstance(worker, dict)},
@@ -320,6 +416,9 @@ def write_state_digest(config: dict[str, Any], state: dict[str, Any]) -> None:
 
 def save_runtime_state(config: dict[str, Any], state: dict[str, Any]) -> None:
     prune_expired_reassignment_guards(state)
+    prune_seen_event_keys(state)
+    prune_expired_worker_yields(state)
+    compact_dispatch_pauses(state)
     migrated = migrate_state(state)
     write_json(config_path(config, "state_file"), migrated)
     write_state_digest(config, migrated)

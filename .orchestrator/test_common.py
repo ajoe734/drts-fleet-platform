@@ -66,5 +66,26 @@ class JsonlAppendTests(unittest.TestCase):
                 self.assertIn("index", payload)
 
 
+class TaskSnapshotTests(unittest.TestCase):
+    def test_preserves_execution_branch_for_reassigned_work(self) -> None:
+        snapshot = common.snapshot_task(
+            {
+                "id": "TASK-1",
+                "status": "in_progress",
+                "owner": "Codex",
+                "reviewer": "Claude",
+                "execution_branch": "codex/task-1",
+            },
+            {
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+        )
+
+        self.assertEqual(snapshot["execution_branch"], "codex/task-1")
+
+
 if __name__ == "__main__":
     unittest.main()

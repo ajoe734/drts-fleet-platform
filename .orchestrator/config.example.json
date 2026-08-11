@@ -28,6 +28,15 @@
     "tick_failure_limit": 10,
     "auto_refresh_provider_capabilities": false,
     "provider_capabilities_refresh_interval_seconds": 900,
+    "resource_guard": {
+      "enabled": true,
+      "max_total_workers": 12,
+      "max_execution_workers": 12,
+      "max_control_workers": 1,
+      "max_heavy_workers": 1,
+      "dispatch_memory_high_bytes": 2684354560,
+      "dispatch_pressure_avg10": 60.0
+    },
     "optional_automation": {
       "governance_automation": {
         "enabled": true

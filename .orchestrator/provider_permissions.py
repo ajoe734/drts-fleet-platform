@@ -5,11 +5,16 @@ import json
 import os
 import shutil
 import time
+import base64
 from pathlib import Path
 from typing import Any
 
+from control_plane.domain.lane_health import identity_fingerprint, quota_pool_key
+
 from common import (
     ROOT,
+    antigravity_app_data_dir,
+    antigravity_auth_ready,
     command_exists,
     config_path,
     load_config,
@@ -85,6 +90,56 @@ def _codex_env(runtime: dict[str, Any] | None = None) -> dict[str, str]:
     return env
 
 
+def _jwt_claims(token: str | None) -> dict[str, Any]:
+    """Best-effort JWT decoding for local identity metadata, never token output."""
+    try:
+        payload = str(token or "").split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        value = base64.urlsafe_b64decode(payload.encode("ascii"))
+        decoded = json.loads(value.decode("utf-8"))
+        return decoded if isinstance(decoded, dict) else {}
+    except (IndexError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+
+
+def _codex_identity(runtime: dict[str, Any]) -> dict[str, Any]:
+    auth_path = _codex_home(runtime) / "auth.json"
+    payload = load_json(auth_path, default={}) or {}
+    tokens = payload.get("tokens") if isinstance(payload, dict) else {}
+    claims = _jwt_claims((tokens or {}).get("id_token") if isinstance(tokens, dict) else None)
+    auth = claims.get("https://api.openai.com/auth") if isinstance(claims.get("https://api.openai.com/auth"), dict) else {}
+    account = auth.get("chatgpt_account_id") or claims.get("sub") or (tokens or {}).get("account_id")
+    org = auth.get("poid") or claims.get("organization_id")
+    fingerprint = identity_fingerprint("codex", str(account or ""), str(org or ""))
+    model = str(runtime.get("model") or "default")
+    return {
+        "state": "auth_ready" if fingerprint else "identity_unknown",
+        "fingerprint": fingerprint,
+        "quota_pool": quota_pool_key("codex", fingerprint, str(runtime.get("quota_scope") or model)),
+        "provider_family": "codex",
+    }
+
+
+def _claude_identity(binary: str | None, runtime: dict[str, Any]) -> dict[str, Any]:
+    env = os.environ.copy()
+    env.update(runtime_env_overrides(runtime))
+    response = run_command([binary, "auth", "status"], env=env) if binary else None
+    try:
+        payload = json.loads(response.stdout) if response and response.returncode == 0 else {}
+    except json.JSONDecodeError:
+        payload = {}
+    account = payload.get("email") or payload.get("userId")
+    org = payload.get("orgId")
+    fingerprint = identity_fingerprint("claude", str(account or ""), str(org or ""))
+    model = str(runtime.get("model") or "default")
+    return {
+        "state": "auth_ready" if fingerprint else "unconfigured",
+        "fingerprint": fingerprint,
+        "quota_pool": quota_pool_key("claude", fingerprint, str(runtime.get("quota_scope") or model)),
+        "provider_family": "claude",
+    }
+
+
 def _truthy_env(name: str, env: dict[str, str] | None = None) -> bool:
     source = env or os.environ
     return source.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
@@ -127,29 +182,8 @@ ANTIGRAVITY_TOKEN_CANDIDATES = (
 )
 
 
-def _antigravity_app_data_dir(settings: dict[str, Any]) -> Path:
-    explicit = settings.get("app_data_dir")
-    if explicit:
-        return Path(str(explicit)).expanduser()
-    config_home = settings.get("config_home")
-    if config_home:
-        return Path(str(config_home)).expanduser() / ".gemini" / "antigravity-cli"
-    return Path.home() / ".gemini" / "antigravity-cli"
-
-
-def _antigravity_auth_ready(settings: dict[str, Any]) -> bool:
-    if str(settings.get("assume_authed") or "").strip().lower() in {"1", "true", "yes", "on"}:
-        return True
-    explicit = settings.get("token_path")
-    if explicit:
-        path = Path(str(explicit)).expanduser()
-        return path.exists() and path.stat().st_size > 0
-    base = _antigravity_app_data_dir(settings)
-    for name in ANTIGRAVITY_TOKEN_CANDIDATES:
-        path = base / name
-        if path.exists() and path.stat().st_size > 0:
-            return True
-    return False
+_antigravity_app_data_dir = antigravity_app_data_dir
+_antigravity_auth_ready = antigravity_auth_ready
 
 
 def _provider_uses_antigravity(config: dict[str, Any], provider_key: str) -> bool:
@@ -1118,7 +1152,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
         entry = dict(report["providers"].get(provider_key, {}) or {})
         paths = dict(entry.get("paths", {}) or {})
         paths["antigravity_binary"] = antigravity_cli
-        paths["antigravity_app_data"] = str(_antigravity_app_data_dir(antigravity_cfg))
+        paths["antigravity_app_data"] = str(antigravity_app_data_dir(antigravity_cfg))
         entry.update(
             {
                 "installed": bool(antigravity_cli),
@@ -1144,6 +1178,23 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
             }
         )
         report["providers"][provider_key] = entry
+
+    # Identity is deliberately collected after all provider-specific report
+    # entries are assembled so primary and secondary lanes use the same path.
+    for provider_key, provider_cfg in (config.get("providers", {}) or {}).items():
+        entry = report["providers"].get(provider_key)
+        if not isinstance(entry, dict):
+            continue
+        delivery_mode = str(provider_cfg.get("delivery_mode") or "")
+        if delivery_mode == "codex":
+            entry["identity"] = _codex_identity(provider_cfg.get("codex", {}))
+        elif delivery_mode == "claude_cli":
+            runtime = provider_cfg.get("runtime", {})
+            entry["identity"] = _claude_identity(entry.get("paths", {}).get("binary"), runtime)
+            if entry["identity"]["state"] == "unconfigured":
+                entry["auth_ready"] = False
+                entry["local_cli_worker_supported"] = False
+                entry["supports_auto_approve"] = False
     return report
 
 

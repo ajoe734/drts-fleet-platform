@@ -118,16 +118,52 @@ class SupervisorTickRunnerTests(unittest.TestCase):
         self.assertEqual(result.focus_mode, "execution")
         ordered = [
             "cleanup_worktrees",
+            "github_sync",
             "refresh_chair",
             "queue_chair",
             "dispatch_ready",
             "process_queue",
-            "github_sync",
             "save_runtime_state",
             "refresh_summary",
         ]
         positions = [calls.index(name) for name in ordered]
         self.assertEqual(positions, sorted(positions))
+
+    def test_github_transition_is_visible_to_dispatch_in_same_tick(self) -> None:
+        calls: list[str] = []
+        status = {"execution_mode": "execution", "tasks": [{"id": "T-1", "status": "in_progress"}]}
+        ports = recording_ports(calls, focus_mode="execution")
+
+        def load_status(_config: dict[str, Any]) -> dict[str, Any]:
+            calls.append("load_status")
+            return status
+
+        def github_sync(_config: dict[str, Any], _state: dict[str, Any]) -> bool:
+            calls.append("github_sync")
+            status["tasks"][0]["status"] = "review"
+            return True
+
+        def dispatch_ready(
+            _config: dict[str, Any], _state: dict[str, Any], _provider_report: dict[str, Any]
+        ) -> bool:
+            calls.append(f"dispatch_ready:{status['tasks'][0]['status']}")
+            return True
+
+        ports = SupervisorTickPorts(
+            **{
+                **ports.__dict__,
+                "load_status": load_status,
+                "sync_github_bus": github_sync,
+                "dispatch_ready_tasks": dispatch_ready,
+            }
+        )
+
+        SupervisorTickRunner(ports).run(
+            {"supervisor": {}, "watcher": {}},
+            SupervisorTickOptions(watch=False, manage_pid_file=False),
+        )
+
+        self.assertIn("dispatch_ready:review", calls)
 
 
 if __name__ == "__main__":

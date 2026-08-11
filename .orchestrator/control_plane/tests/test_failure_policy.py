@@ -96,6 +96,16 @@ class FailurePolicyTests(unittest.TestCase):
                 self.assertEqual(decision.kind, FailureKind.AUTH)
                 self.assertFalse(decision.transient)
 
+    def test_capacity_signal_wins_over_broad_eligibility_wrapper(self) -> None:
+        decision = classify_failure(
+            {},
+            {"provider": "gemini"},
+            "Eligibility check failed: quota summary returned RESOURCE_EXHAUSTED (code 429)",
+        )
+
+        self.assertEqual(decision.kind, FailureKind.CAPACITY)
+        self.assertTrue(decision.transient)
+
     def test_provider_retry_override_is_applied_before_classification(self) -> None:
         config = {
             "providers": {

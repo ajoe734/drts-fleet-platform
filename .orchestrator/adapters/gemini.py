@@ -16,6 +16,8 @@ from common import (
     runtime_log_path,
     runtime_env_overrides,
     spawn_background_process,
+    worker_scope_properties,
+    worker_scope_unit,
 )
 
 
@@ -282,6 +284,10 @@ class GeminiAdapter(BaseAdapter):
         log_path = runtime_log_path(provider_key, request.agent_id)
         env = _gemini_runtime_env(gemini_settings, ensure_dirs=True)
         apply_orchestrator_runtime_env(env, self.config, request.metadata)
+        env["ORCH_WORKER_SCOPE_UNIT"] = worker_scope_unit(run_id)
+        env["ORCH_WORKER_SCOPE_PROPERTIES"] = "\n".join(
+            worker_scope_properties(self.config, request.metadata)
+        )
         process, _ = spawn_background_process(
             command,
             cwd=workspace_root,
@@ -301,4 +307,5 @@ class GeminiAdapter(BaseAdapter):
             log_path=str(log_path),
             pid=process.pid,
             run_id=run_id,
+            metadata={"scope_unit": worker_scope_unit(run_id)},
         )

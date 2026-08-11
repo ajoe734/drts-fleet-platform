@@ -16,6 +16,8 @@ from common import (
     runtime_log_path,
     shell_quote,
     spawn_background_process,
+    worker_scope_properties,
+    worker_scope_unit,
     command_exists,
     run_command,
     runtime_env_overrides,
@@ -152,6 +154,9 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
             command.append("--verbose")
         if runtime.get("include_hook_events", True):
             command.append("--include-hook-events")
+        model = str((request.metadata or {}).get("model_preference") or runtime.get("model") or "").strip()
+        if model:
+            command.extend(["--model", model])
 
         provider_info = (self.provider_capabilities or {}).get("providers", {}).get(provider_key, {})
         if runtime.get("enable_auto_mode_if_supported", True) and provider_info.get("supports_auto_approve"):
@@ -177,6 +182,10 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
             }
         )
         apply_orchestrator_runtime_env(env, self.config, request.metadata)
+        env["ORCH_WORKER_SCOPE_UNIT"] = worker_scope_unit(run_id)
+        env["ORCH_WORKER_SCOPE_PROPERTIES"] = "\n".join(
+            worker_scope_properties(self.config, request.metadata)
+        )
         process, _ = spawn_background_process(
             command,
             cwd=workspace_root,
@@ -195,5 +204,5 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
             log_path=str(log_path),
             pid=process.pid,
             run_id=run_id,
-            metadata={"shell_command": shell_quote(command)},
+            metadata={"shell_command": shell_quote(command), "scope_unit": worker_scope_unit(run_id)},
         )

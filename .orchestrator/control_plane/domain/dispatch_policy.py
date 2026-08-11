@@ -230,6 +230,22 @@ def dependencies_satisfied(
         dependency = index.get(dependency_id)
         if dependency is not None and dependency.status not in normalized_done:
             return False
+        if dependency is not None and dependency.status in normalized_done:
+            raw = dependency.raw
+            task_class = str(raw.get("task_class") or "").strip().lower()
+            requires_integration = bool(
+                raw.get("release_gate")
+                or raw.get("mutates_canonical")
+                or task_class in {"implementation", "runtime_fix"}
+            )
+            if requires_integration:
+                integration = str(raw.get("integration_status") or "").strip().lower()
+                if integration not in {"merged_to_dev", "dev_deployed", "not_applicable"}:
+                    return False
+                if integration == "merged_to_dev" and not str(raw.get("merge_commit") or "").strip():
+                    return False
+                if integration == "not_applicable" and raw.get("commit_hash"):
+                    return False
     return True
 
 
@@ -262,6 +278,12 @@ def resolve_dispatch_target(
             record, max_age_seconds=policy.integration_in_flight_max_age_seconds
         ):
             return None
+        return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_IN_PROGRESS)
+    # A blocked task with a live PR failure is an integration repair, not a
+    # human/product blocker. Keep other blocked tasks gated.
+    if record.status == "blocked" and record.owner and ci_status_reports_failure(
+        str(record.raw.get("ci_status") or "")
+    ):
         return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_IN_PROGRESS)
     if record.status in policy.owned_statuses and record.owner:
         return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_READY)

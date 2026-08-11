@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,8 @@ class WorkerFailureSignal:
 
 
 WORKER_FAILURE_PATTERNS = (
+    re.compile(r"\bbwrap:\s*loopback:\s*Failed RTM_NEWADDR:\s*Operation not permitted\b", re.IGNORECASE),
+    re.compile(r"\bwrite failed /proc/self/uid_map:\s*Operation not permitted\b", re.IGNORECASE),
     re.compile(r"^Error when talking to gemini api\b", re.IGNORECASE),
     re.compile(r"^Error authenticating:\s*IneligibleTierError\b", re.IGNORECASE),
     re.compile(r"^reasonCode:\s*['\"]?RESTRICTED_DASHER_USER\b", re.IGNORECASE),
@@ -62,6 +66,8 @@ WORKER_FAILURE_PATTERNS = (
     re.compile(r"^fatal:", re.IGNORECASE),
 )
 JSON_WORKER_FAILURE_PATTERN = re.compile(
+    r"bwrap:\s*loopback:\s*failed rtm_newaddr:\s*operation not permitted|"
+    r"write failed /proc/self/uid_map:\s*operation not permitted|"
     r"quota_exhausted|oauth quota exceeded|free daily quota has been reached|"
     r"you have no quota|no quota remaining|payment required|"
     r"you have exhausted your capacity|exhausted your capacity|resource_exhausted|"
@@ -217,27 +223,54 @@ def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
         status = str(rate_info.get("status") or payload.get("status") or "").strip().lower()
         if status in {"allowed", "allowed_warning"}:
             return None
-        detected = _extract_failure_candidate(line)
-        return (
-            WorkerFailureSignal(detected, "rate_limit_event", True)
-            if detected
-            else None
+        reset_at = rate_info.get("resetsAt") or rate_info.get("resets_at")
+        reset_hint = ""
+        try:
+            reset_hint = " reset_at=" + datetime.fromtimestamp(
+                float(reset_at), tz=timezone.utc
+            ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        except (TypeError, ValueError, OverflowError):
+            pass
+        limit_type = str(rate_info.get("rateLimitType") or rate_info.get("rate_limit_type") or "unknown")
+        # Do not pass raw JSON to a text classifier.  It has no "rate limit"
+        # token when the provider uses snake_case, and loses its reset instant.
+        return WorkerFailureSignal(
+            f"rate limit event rejected type={limit_type}{reset_hint}",
+            "rate_limit_event",
+            True,
         )
     payload_type = str(payload.get("type") or "").strip().lower()
-    if payload_type in {"assistant", "user"}:
+    # Tool events contain arbitrary command output. Recursing through their
+    # payload turns a worker's *inspection* of old quota state into a new
+    # provider failure. Only provider terminal/result events are authoritative.
+    if payload_type in {"assistant", "user", "item.completed", "item.started", "tool", "command_execution"}:
         return None
-    candidates = _iter_json_string_values(payload)
-    candidates = [*candidates, line]
+    if payload_type == "result" and not payload.get("is_error"):
+        # Qwen reports quota exhaustion in a terminal result even when its
+        # transport-level subtype says success. Keep this narrowly scoped so
+        # ordinary successful result text cannot create a provider pause.
+        result = str(payload.get("result") or "").strip()
+        result_lines = [item.strip() for item in result.splitlines() if item.strip()]
+        if (
+            "qwen oauth quota exceeded" in result.lower()
+            and not all(_ignore_embedded_failure_line(item) for item in result_lines)
+        ):
+            return WorkerFailureSignal(result, "json_result_quota", True)
+        return None
+    if payload_type not in {"result", "error", "failed", "failure", "provider_error"}:
+        return None
+    candidates = [
+        str(payload.get(key) or "")
+        for key in ("error", "message", "reason", "error_message", "details")
+    ]
+    if payload_type == "result":
+        candidates.append(line)
     for candidate in candidates:
         detected = _extract_failure_candidate(candidate.strip())
         if not detected:
             continue
-        authorized = True
-        source = "structured_json"
-        if payload_type == "result":
-            source = "json_result_error" if payload.get("is_error") else "json_result"
-            authorized = bool(payload.get("is_error")) or _is_result_level_provider_blocker(detected)
-        return WorkerFailureSignal(detected, source, authorized)
+        source = "json_result_error" if payload_type == "result" else "structured_provider_error"
+        return WorkerFailureSignal(detected, source, True)
     return None
 
 
@@ -297,6 +330,48 @@ def detect_worker_failure_signal(worker: dict[str, Any]) -> WorkerFailureSignal 
     except OSError:
         return None
     return detect_failure_signal_in_lines(lines)
+
+
+def consume_worker_failure_signal(worker: dict[str, Any]) -> WorkerFailureSignal | None:
+    """Inspect only log bytes not already observed for this worker run.
+
+    A historical provider error remains in a worker log after the worker has
+    been rotated or recovered. Re-reading the whole file on every poll turns
+    that one event into an endless sequence of new failures.
+    """
+    log_path_value = worker.get("log_path")
+    if not log_path_value:
+        return None
+    log_path = Path(log_path_value)
+    try:
+        size = log_path.stat().st_size
+    except OSError:
+        return None
+
+    offset = int(worker.get("failure_log_offset") or 0)
+    if offset < 0 or offset > size:
+        offset = 0
+    try:
+        with log_path.open("rb") as handle:
+            handle.seek(offset)
+            content = handle.read().decode("utf-8", errors="ignore")
+    except OSError:
+        return None
+
+    worker["failure_log_offset"] = size
+    if not content:
+        return None
+    signal = detect_failure_signal_in_lines(content.splitlines())
+    if not signal:
+        return None
+    signature = sha256(
+        f"{offset}:{signal.source}:{signal.reason}".encode("utf-8")
+    ).hexdigest()
+    if worker.get("last_failure_signature") == signature:
+        return None
+    worker["last_failure_signature"] = signature
+    worker["last_failure_reason"] = signal.reason
+    return signal
 
 
 def detect_worker_failure(worker: dict[str, Any]) -> str | None:

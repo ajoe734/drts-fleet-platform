@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 
 class FailureKind(str, Enum):
+    ENVIRONMENT = "environment"
+    RESOURCE_LIMIT = "resource_limit"
     AUTH = "auth"
     QUOTA_TERMINAL = "quota_terminal"
     CAPACITY = "capacity"
@@ -72,6 +74,7 @@ QUOTA_TERMINAL_MARKERS = frozenset(
         "individual quota reached",
         "hit your usage limit",
         "exceeded your monthly quota",
+        "rate limit event rejected",
     }
 )
 CAPACITY_MARKERS = frozenset(
@@ -89,6 +92,16 @@ CAPACITY_MARKERS = frozenset(
 UNKNOWN_CRITICAL_MARKERS = frozenset(
     {"an unexpected critical error occurred", "[object object]"}
 )
+# The worker sandbox failed before the model could inspect or change a task.
+# This is lane/host health, never a product-task blocker.
+ENVIRONMENT_MARKERS = frozenset(
+    {
+        "bwrap: loopback: failed rtm_newaddr: operation not permitted",
+        "failed rtm_newaddr: operation not permitted",
+        "write failed /proc/self/uid_map: operation not permitted",
+    }
+)
+RESOURCE_LIMIT_MARKERS = frozenset({"cgroup_oom", "memory_limit_imminent", "memory limit reached"})
 # Transport-layer outages that providers sometimes report through an
 # auth-shaped message. The Antigravity CLI, for example, wraps a failed
 # quota-summary fetch as "Eligibility check failed: ... UNAVAILABLE (code 503)",
@@ -217,20 +230,22 @@ def classify_failure(
         )
     ]
 
-    # A transport-layer outage is retryable even when the provider phrases it as
-    # an eligibility or permission failure. Check it first so a one-off 503 does
-    # not land in the auth bucket, which never auto-expires. Quota exhaustion
-    # still wins, since that is a real terminal state regardless of transport.
-    if _is_transport_outage(normalized) and not any(
-        marker in normalized for marker in QUOTA_TERMINAL_MARKERS
-    ):
-        return FailureDecision(FailureKind.CAPACITY, True, "capacity/unavailable")
-    if any(marker in normalized for marker in AUTH_MARKERS):
-        return FailureDecision(FailureKind.AUTH, False, "auth")
+    if any(marker in normalized for marker in ENVIRONMENT_MARKERS):
+        return FailureDecision(FailureKind.ENVIRONMENT, False, "worker environment")
+    if any(marker in normalized for marker in RESOURCE_LIMIT_MARKERS):
+        return FailureDecision(FailureKind.RESOURCE_LIMIT, False, "cgroup memory limit")
+
+    # Specific retry and quota signals take precedence over broad provider
+    # wrappers such as "Eligibility check failed". Otherwise Gemini's 429
+    # RESOURCE_EXHAUSTED response becomes a permanent auth pause.
     if any(marker in normalized for marker in QUOTA_TERMINAL_MARKERS):
         return FailureDecision(FailureKind.QUOTA_TERMINAL, False, "quota/terminal")
+    if _is_transport_outage(normalized):
+        return FailureDecision(FailureKind.CAPACITY, True, "capacity/unavailable")
     if any(marker in normalized for marker in CAPACITY_MARKERS):
         return FailureDecision(FailureKind.CAPACITY, True, "capacity/429")
+    if any(marker in normalized for marker in AUTH_MARKERS):
+        return FailureDecision(FailureKind.AUTH, False, "auth")
     if provider == "gemini" and any(
         marker in normalized for marker in UNKNOWN_CRITICAL_MARKERS
     ):

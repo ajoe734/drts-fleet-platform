@@ -36,6 +36,8 @@ from pathlib import Path
 # --- config / tunables ---
 ROOT_DIR = Path(__file__).resolve().parent.parent
 STATE_FILE = ROOT_DIR / ".orchestrator/state.json"
+STATUS_FILE = ROOT_DIR / "ai-status.json"
+CONTROL_PLANE_SUMMARY = ROOT_DIR / ".orchestrator/projections/control-plane-summary.json"
 SUPERVISOR_LOG = ROOT_DIR / ".orchestrator/logs/supervisor-bg.log"
 LANE_HEALTH_LOG = ROOT_DIR / ".orchestrator/logs/lane-health.jsonl"
 CLAUDE_KEEPALIVE_LOG = ROOT_DIR / ".orchestrator/logs/claude-lane-keepalive.log"
@@ -85,6 +87,20 @@ def latest_keepalive_status(log_path: Path) -> dict[str, dict]:
             "message": message,
         }
     return latest
+
+
+def canonical_task_map() -> dict[str, dict]:
+    """Load task truth from ai-status, never from the runtime cache."""
+    try:
+        payload = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    tasks = payload.get("tasks") if isinstance(payload, dict) else []
+    if isinstance(tasks, list):
+        return {str(task.get("id")): task for task in tasks if isinstance(task, dict) and task.get("id")}
+    if isinstance(tasks, dict):
+        return {str(task_id): task for task_id, task in tasks.items() if isinstance(task, dict)}
+    return {}
 
 
 def collect() -> dict:
@@ -142,7 +158,9 @@ def collect() -> dict:
     try:
         with open(STATE_FILE) as f:
             s = json.load(f)
-        tasks = s.get("tasks", {}) or {}
+        tasks = canonical_task_map()
+        if not tasks:
+            result["issues"].append(f"CRITICAL: canonical task status not found at {STATUS_FILE}")
         workers = s.get("workers", {}) or {}
 
         for wid, w in workers.items():
@@ -211,7 +229,7 @@ def collect() -> dict:
 
         # heartbeat from supervisor field, else fall back to state.json mtime
         sup_state = s.get("supervisor", {}) or {}
-        hb_str = (sup_state.get("heartbeat_at") or sup_state.get("last_heartbeat")
+        hb_str = (sup_state.get("last_heartbeat_at") or sup_state.get("heartbeat_at") or sup_state.get("last_heartbeat")
                   or sup_state.get("last_tick_at") or sup_state.get("last_run_at") or "")
         if hb_str:
             try:
@@ -280,33 +298,21 @@ def collect() -> dict:
     except Exception as e:
         result["issues"].append(f"WARN: failed to scan supervisor log: {e}")
 
-    # lane health from lane-health.jsonl
+    # The supervisor projection is the canonical live view. Legacy lane-health
+    # logs are diagnostic history and must not create false outages when stale.
     try:
-        if LANE_HEALTH_LOG.exists():
-            latest = {}
-            with open(LANE_HEALTH_LOG) as f:
-                for ln in f:
-                    ln = ln.strip()
-                    if not ln:
-                        continue
-                    try:
-                        e = json.loads(ln)
-                        latest[e["lane"]] = e
-                    except Exception:
-                        pass
-            for lane, e in latest.items():
-                result["lanes"].append({
-                    "lane": lane,
-                    "status": e.get("status"),
-                    "ttl_seconds": e.get("ttl_seconds"),
-                    "as_of": e.get("ts"),
-                })
-                if e.get("status") in ("warn", "expired", "unreadable", "missing"):
-                    result["issues"].append(
-                        f"WARN: lane {lane} status={e.get('status')} "
-                        f"ttl={e.get('ttl_seconds')}")
+        projection = json.loads(CONTROL_PLANE_SUMMARY.read_text(encoding="utf-8"))
+        for lane in projection.get("lanes", []):
+            if not isinstance(lane, dict):
+                continue
+            result["lanes"].append({
+                "lane": lane.get("id") or lane.get("name"),
+                "status": "enabled" if lane.get("enabled", True) else "disabled",
+                "load": lane.get("load"),
+                "as_of": projection.get("generated_at"),
+            })
     except Exception as e:
-        result["issues"].append(f"WARN: failed to read lane-health.jsonl: {e}")
+        result["issues"].append(f"WARN: failed to read canonical control-plane summary: {e}")
 
     # keepalive probe results are stronger evidence than access-token TTL.
     try:
@@ -342,7 +348,9 @@ def collect() -> dict:
 
     crit = any(i.startswith("CRITICAL") for i in result["issues"])
     warn = any(i.startswith("WARN") for i in result["issues"])
-    result["exit_code"] = 2 if crit else (1 if warn else 0)
+    # Health warnings are observability signals, not a failed systemd unit.
+    # Callers inspect `issues`; only a genuine critical condition is non-zero.
+    result["exit_code"] = 2 if crit else 0
     return result
 
 
