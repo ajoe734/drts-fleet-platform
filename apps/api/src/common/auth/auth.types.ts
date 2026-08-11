@@ -66,6 +66,7 @@ export interface BootstrapRequestIdentity {
   audience?: string[] | null;
   issuedAt?: string | null;
   expiresAt?: string | null;
+  breakGlassGrantId?: string | null;
   roleFamilies: AuthRoleFamily[];
   roles: string[];
   scopes: string[];

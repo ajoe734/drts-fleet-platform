@@ -350,7 +350,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/IamBreakGlassActivationCommand"
+              $ref: "#/components/schemas/CreateBreakGlassRequestCommand"
   /api/platform-admin/break-glass/requests/{requestId}/approve:
     post:
       summary: Approve a break-glass access request.
@@ -367,7 +367,41 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/IamApprovalDecisionCommand"
+              $ref: "#/components/schemas/ApproveBreakGlassRequestCommand"
+  /api/platform-admin/break-glass/requests/{requestId}/activate:
+    post:
+      summary: Activate an independently approved break-glass request with a maximum 60-minute non-refreshable session.
+      operationId: activateBreakGlassRequest
+      tags: [IAM]
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IamBreakGlassActivationCommand"
+  /api/platform-admin/break-glass/requests/{requestId}/close:
+    post:
+      summary: Close a break-glass grant, revoke its session, and require post-use review.
+      operationId: closeBreakGlassGrant
+      tags: [IAM]
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloseBreakGlassGrantCommand"
 components:
   responses:
     IamPublicAuthDenied:
@@ -510,6 +544,32 @@ components:
           type: integer
           minimum: 1
           maximum: 60
+        mutation:
+          $ref: "#/components/schemas/IamMutationMetadata"
+    CreateBreakGlassRequestCommand:
+      type: object
+      required:
+        [requestedScopes, reasonCode, reasonText, proofReference, mutation]
+      properties:
+        requestedScopes:
+          type: array
+          minItems: 1
+          items: { type: string }
+        reasonCode: { type: string }
+        reasonText: { type: string }
+        proofReference: { type: string }
+        mutation:
+          $ref: "#/components/schemas/IamMutationMetadata"
+    ApproveBreakGlassRequestCommand:
+      type: object
+      required: [mutation]
+      properties:
+        mutation:
+          $ref: "#/components/schemas/IamMutationMetadata"
+    CloseBreakGlassGrantCommand:
+      type: object
+      required: [mutation]
+      properties:
         mutation:
           $ref: "#/components/schemas/IamMutationMetadata"
     CreateTenantUserCommand:
