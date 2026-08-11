@@ -170,7 +170,6 @@ resolve_step_up_reference() {
   local app_bearer_token="$1"
   local method="$2"
   local path="$3"
-  [[ -n "$app_bearer_token" ]] || return 1
 
   local request_id="e2e-stepup-$(date +%s%N | head -c 16)"
   local payload
@@ -185,9 +184,35 @@ resolve_step_up_reference() {
     -H "Content-Type: application/json"
     -H "X-Request-ID: ${request_id}"
     -H "Idempotency-Key: ${request_id}"
-    -H "x-drts-authorization: Bearer ${app_bearer_token}"
     --data "$payload"
   )
+
+  if [[ -n "$app_bearer_token" ]]; then
+    curl_args+=(-H "x-drts-authorization: Bearer ${app_bearer_token}")
+  else
+    local realm="${E2E_REALM:-}"
+    if [[ -z "$realm" ]]; then
+      case "${E2E_ACTOR_TYPE:-}" in
+        system)         realm="system"   ;;
+        platform_admin) realm="platform" ;;
+        tenant_admin)   realm="tenant"   ;;
+        ops_user)       realm="ops"      ;;
+        driver_user)    realm="driver"   ;;
+        partner_api_key) realm="partner" ;;
+        *)              realm="system"   ;;
+      esac
+    fi
+    if [[ -n "${E2E_ACTOR_TYPE:-}" ]]; then
+      curl_args+=(
+        -H "x-actor-type: ${E2E_ACTOR_TYPE}"
+        -H "x-actor-id: ${E2E_ACTOR_ID:-e2e-actor-001}"
+        -H "x-realm: ${realm}"
+      )
+    fi
+    if [[ -n "${E2E_TENANT_ID:-}" ]]; then
+      curl_args+=(-H "x-tenant-id: ${E2E_TENANT_ID}")
+    fi
+  fi
 
   if [[ -n "$E2E_AUTH_BEARER_TOKEN" ]]; then
     curl_args+=(-H "Authorization: Bearer ${E2E_AUTH_BEARER_TOKEN}")
@@ -306,13 +331,11 @@ http_call() {
     curl_args+=(-H "x-drts-authorization: Bearer ${E2E_REQUEST_BEARER_TOKEN}")
   fi
 
-  if runtime_step_up_enabled && [[ "$method" =~ ^(POST|PUT|PATCH|DELETE)$ ]]; then
-    if [[ -z "$application_bearer" ]]; then
+  if [[ "$method" =~ ^(POST|PUT|PATCH|DELETE)$ ]]; then
+    if runtime_step_up_enabled && [[ -z "$application_bearer" ]]; then
       application_bearer=$(mint_runtime_bearer_token || true)
     fi
-    if [[ -n "$application_bearer" ]]; then
-      step_up_reference=$(resolve_step_up_reference "$application_bearer" "$method" "$path" || true)
-    fi
+    step_up_reference=$(resolve_step_up_reference "$application_bearer" "$method" "$path" || true)
   fi
 
   if [[ -n "$application_bearer" && -z "${E2E_REQUEST_BEARER_TOKEN:-}" ]]; then
