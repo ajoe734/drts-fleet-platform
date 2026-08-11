@@ -59,7 +59,6 @@ def recording_ports(calls: list[str], *, focus_mode: str) -> SupervisorTickPorts
         queue_chair_review=record("queue_chair", False),
         break_full_deadlock=record("break_deadlock", False),
         dispatch_ready_tasks=record("dispatch_ready", False),
-        dispatch_optional_automation=record("dispatch_optional", False),
         process_queue=record("process_queue", False),
         sync_github_bus=record("github_sync", False),
         trim_worker_history=record("trim_workers", None),

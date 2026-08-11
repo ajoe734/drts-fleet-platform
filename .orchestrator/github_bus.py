@@ -263,11 +263,6 @@ def task_bus_entry(bus_state: dict[str, Any], task_id: str) -> dict[str, Any]:
     )
 
 
-def task_signature(task: dict[str, Any], fields: list[str]) -> str:
-    payload = {field: task.get(field) for field in fields}
-    return json.dumps(payload, sort_keys=True, ensure_ascii=False)
-
-
 def build_template_body(config: dict[str, Any], template_key: str, variables: dict[str, Any]) -> str:
     template_rel = config.get("github_bus", {}).get("templates", {}).get(template_key)
     if not template_rel:

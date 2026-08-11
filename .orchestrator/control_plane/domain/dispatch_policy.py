@@ -313,7 +313,7 @@ def resolve_dispatch_target(
         integration_evidence,
     )
     if not dependencies_ready:
-        # An explicit integration-repair attempt may work on an existing PR
+        # GitHub reconciliation may request repair of an existing failed PR
         # while feature dependencies are still integrating.
         work_intent = record.raw.get("work_intent")
         if (

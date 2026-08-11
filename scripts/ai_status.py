@@ -270,16 +270,6 @@ def flatten_canonical_document_layers(layers: dict[str, list[str]]) -> list[str]
     return flattened
 
 
-def short_summary(text: Any, max_length: int = 280) -> str:
-    raw = re.sub(r"\s+", " ", str(text or "")).strip()
-    if len(raw) <= max_length:
-        return raw
-    clipped = raw[: max_length - 1].rstrip()
-    if " " in clipped:
-        clipped = clipped.rsplit(" ", 1)[0]
-    return clipped + "…"
-
-
 def sync_canonical_document_metadata(state: dict[str, Any]) -> None:
     default_layers = default_canonical_document_layers()
     layers = state.get("canonical_document_layers")
@@ -1937,25 +1927,6 @@ def sync_docs_site() -> None:
             shutil.copy2(path, DOCS_SITE_DIR / target_name)
 
 
-def sync_task_briefs(state: dict[str, Any]) -> None:
-    orchestrator_dir = ROOT / ".orchestrator"
-    if not orchestrator_dir.exists():
-        return
-    sys.path.insert(0, str(orchestrator_dir))
-    try:
-        from common import ensure_task_brief, load_config  # type: ignore
-
-        config = load_config(orchestrator_dir / "config.json")
-        for task in state.get("tasks", []):
-            if isinstance(task, dict) and task.get("id"):
-                ensure_task_brief(config, task=task, status=state, runtime_state=state)
-    finally:
-        try:
-            sys.path.remove(str(orchestrator_dir))
-        except ValueError:
-            pass
-
-
 def sync_all(state: dict[str, Any]) -> None:
     sync_canonical_document_metadata(state)
     normalize_state_agents(state)
@@ -1965,7 +1936,6 @@ def sync_all(state: dict[str, Any]) -> None:
     recompute_workload(state)
     state["updated_at"] = iso_now()
     save_state(state)
-    sync_task_briefs(state)
     logs = load_logs()
     write_current_work(state, logs)
     sync_docs_site()
@@ -2230,35 +2200,6 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     append_log({"ts": timestamp, "agent": actor, "type": "reopen", "task_id": task_id, "message": message})
 
 
-def command_integration_repair(state: dict[str, Any], args: list[str]) -> None:
-    if len(args) < 2:
-        raise SystemExit("Usage: integration-repair <task-id> <message>")
-    task_id, message = args[0], args[1]
-    actor = current_actor()
-    task = get_task(state, task_id)
-    if task is None:
-        raise SystemExit(f"Unknown task: {task_id}")
-    if task.get("owner") != actor:
-        raise SystemExit(f"Only the owner ({task.get('owner')}) can prepare {task_id} for repair")
-    if not str(task.get("pr_url") or "").strip() or str(task.get("integration_status") or "").lower() != "ci_failed":
-        raise SystemExit(f"{task_id} must have an existing failed PR for pre-merge repair")
-    timestamp = iso_now()
-    task["status"] = "in_progress"
-    task["last_update"] = timestamp
-    task["next"] = message
-    task["work_intent"] = {
-        "kind": "integration_repair",
-        "state": "pending",
-        "scope": "existing_pr",
-        "requested_at": timestamp,
-        "message": message,
-    }
-    task.pop("waiting_for", None)
-    mark_blockers_resolved(state, task_id)
-    mark_handoffs_done(state, task_id)
-    append_log({"ts": timestamp, "agent": actor, "type": "integration_repair", "task_id": task_id, "message": message})
-
-
 def command_observe_integration(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: observe-integration <task-id> <message>")
@@ -2326,58 +2267,6 @@ def command_reduce_integration(state: dict[str, Any], args: list[str]) -> None:
     task["last_update"] = timestamp
     task["next"] = message
     append_log({"ts": timestamp, "agent": "Supervisor", "type": "integration_reduced", "task_id": task_id, "message": message})
-
-
-def command_archive_completed(state: dict[str, Any], args: list[str]) -> None:
-    if not args:
-        raise SystemExit("Usage: archive-completed <task-id> [reason]")
-    task_id = args[0]
-    reason = args[1] if len(args) > 1 else "Completed historical task removed from the live working set."
-    task = get_task(state, task_id)
-    if task is None:
-        raise SystemExit(f"Unknown task: {task_id}")
-    if str(task.get("status") or "").lower() != "done":
-        raise SystemExit(f"Only done tasks can be archived: {task_id}")
-
-    active_dependents = sorted(
-        candidate.get("id")
-        for candidate in state.get("tasks", [])
-        if candidate.get("id")
-        and candidate.get("id") != task_id
-        and str(candidate.get("status") or "").lower() != "done"
-        and task_id in (candidate.get("depends_on") or [])
-    )
-    if active_dependents:
-        raise SystemExit(
-            f"Cannot archive {task_id}; active dependents: {', '.join(active_dependents)}"
-        )
-
-    timestamp = iso_now()
-    record = dict(task)
-    record["_archived_at"] = timestamp
-    record["_archived_by"] = current_actor()
-    record["_archive_reason"] = reason
-    _append_jsonl_line(TASK_ARCHIVE_FILE, json.dumps(record, ensure_ascii=False))
-
-    state["tasks"] = [
-        candidate
-        for candidate in state.get("tasks", [])
-        if candidate.get("id") != task_id
-    ]
-    archived = state.setdefault("archived_task_ids", [])
-    if task_id not in archived:
-        archived.append(task_id)
-    mark_handoffs_done(state, task_id)
-    mark_blockers_resolved(state, task_id)
-    append_log(
-        {
-            "ts": timestamp,
-            "agent": current_actor(),
-            "type": "task_archived",
-            "task_id": task_id,
-            "message": reason,
-        }
-    )
 
 
 def command_handoff(state: dict[str, Any], args: list[str]) -> None:
@@ -2737,11 +2626,6 @@ def command_mode(state: dict[str, Any], args: list[str]) -> None:
 
 
 def command_sync(state: dict[str, Any], _args: list[str]) -> None:
-    # Bridge git-merged closeouts → state-machine `done` for tasks whose
-    # workers shipped via PR + merge but skipped `ai-status.sh done`. The
-    # supervisor calls `ai-status.sh sync` on every reassignment cycle, so
-    # this catches drift soon after a merge lands on origin/dev.
-    apply_git_merge_reconciliation(state)
     return None
 
 
@@ -2841,10 +2725,8 @@ def command_handlers() -> tuple[dict[str, Any], dict[str, Any]]:
         "progress": command_progress,
         "note": command_note,
         "reopen": command_reopen,
-        "integration-repair": command_integration_repair,
         "observe-integration": command_observe_integration,
         "reduce-integration": command_reduce_integration,
-        "archive-completed": command_archive_completed,
         "handoff": command_handoff,
         "blocker": command_blocker,
         "system-reassign": command_system_reassign,

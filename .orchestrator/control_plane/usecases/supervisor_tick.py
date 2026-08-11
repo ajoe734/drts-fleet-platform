@@ -71,7 +71,6 @@ class SupervisorTickPorts:
     queue_chair_review: Callable[..., bool]
     break_full_deadlock: Callable[..., bool]
     dispatch_ready_tasks: Callable[..., bool]
-    dispatch_optional_automation: Callable[..., bool]
     process_queue: Callable[..., bool]
     sync_github_bus: Callable[[dict[str, Any], dict[str, Any]], bool]
     trim_worker_history: Callable[[dict[str, Any], int], None]
@@ -282,7 +281,7 @@ class SupervisorTickRunner:
         changed = self.ports.dispatch_ready_tasks(
             config, state, provider_report
         ) or changed
-        return self.ports.dispatch_optional_automation(config, state) or changed
+        return changed
 
     def _deliver(
         self,

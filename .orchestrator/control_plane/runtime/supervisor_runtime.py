@@ -40,23 +40,21 @@ from control_plane.domain.dispatch_policy import (
     build_dispatch_event as build_domain_dispatch_event,
     ci_status_reports_failure,
     dependencies_satisfied as domain_dependencies_satisfied,
-    dependency_signature as domain_dependency_signature,
     has_external_integration_in_flight,
-    ready_dispatch_signature as domain_ready_dispatch_signature,
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
 from control_plane.domain.failure_policy import (
     classify_failure as classify_domain_failure,
-    infer_pause_resume_at as infer_domain_pause_resume_at,
-    retry_settings as domain_retry_settings,
+    infer_pause_resume_at,
+    retry_settings as worker_retry_settings,
 )
 from control_plane.domain.lane_health import EXECUTION_STATUSES, pause_matches_lane, worker_capacity_counts
 from control_plane.domain.resource_admission import decide as resource_admission_decision
 from control_plane.domain.chair_policy import (
-    normalize_approval_action as normalize_domain_approval_action,
-    normalize_reassignment_action as normalize_domain_reassignment_action,
+    normalize_approval_action as normalize_chair_approval_action,
+    normalize_reassignment_action as normalize_chair_reassignment_action,
     normalize_review_defaults as normalize_domain_review_defaults,
-    validate_review_payload as validate_domain_review_payload,
+    validate_review_payload as validate_chair_review_payload,
 )
 from control_plane.infra.background_task import BackgroundTask
 from control_plane.infra.approval_repo import load_approval_state
@@ -64,7 +62,6 @@ from control_plane.infra.queue_repo import (
     enqueue_event,
     load_event_queue,
     queue_repository,
-    replace_event_queue,
 )
 from control_plane.infra.runtime_repo import (
     clear_dispatch_pause,
@@ -76,16 +73,8 @@ from control_plane.infra.runtime_repo import (
 )
 from control_plane.infra.worker_failure_detector import (
     WorkerFailureSignal,
-    _captured_tool_log_line_indexes as infra_captured_tool_log_line_indexes,
-    _detect_json_worker_failure as infra_detect_json_worker_failure,
-    _detect_json_worker_failure_signal as infra_detect_json_worker_failure_signal,
-    _extract_failure_candidate as infra_extract_failure_candidate,
-    _ignore_embedded_failure_line as infra_ignore_embedded_failure_line,
-    _is_result_level_provider_blocker as infra_is_result_level_provider_blocker,
-    _iter_json_string_values as infra_iter_json_string_values,
-    consume_worker_failure_signal as infra_consume_worker_failure_signal,
-    detect_worker_failure as infra_detect_worker_failure,
-    detect_worker_failure_signal as infra_detect_worker_failure_signal,
+    consume_worker_failure_signal as detect_worker_failure_signal,
+    detect_worker_failure,
 )
 from control_plane.projections.control_plane_summary import (
     refresh_control_plane_summary,
@@ -2882,42 +2871,6 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
                 break
 
 
-def _iter_json_string_values(payload: Any) -> list[str]:
-    return infra_iter_json_string_values(payload)
-
-
-def _ignore_embedded_failure_line(stripped: str) -> bool:
-    return infra_ignore_embedded_failure_line(stripped)
-
-
-def _extract_failure_candidate(text: str) -> str | None:
-    return infra_extract_failure_candidate(text)
-
-
-def _captured_tool_log_line_indexes(lines: list[str]) -> set[int]:
-    return infra_captured_tool_log_line_indexes(lines)
-
-
-def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
-    return infra_detect_json_worker_failure_signal(line)
-
-
-def _detect_json_worker_failure(line: str) -> str | None:
-    return infra_detect_json_worker_failure(line)
-
-
-def _is_result_level_provider_blocker(candidate: str) -> bool:
-    return infra_is_result_level_provider_blocker(candidate)
-
-
-def detect_worker_failure_signal(worker: dict[str, Any]) -> WorkerFailureSignal | None:
-    return infra_consume_worker_failure_signal(worker)
-
-
-def detect_worker_failure(worker: dict[str, Any]) -> str | None:
-    return infra_detect_worker_failure(worker)
-
-
 def resolve_terminal_worker_reason(worker: dict[str, Any], reason: str) -> str:
     if reason != PREMATURE_EXIT_REASON:
         return reason
@@ -2970,14 +2923,6 @@ def _parse_iso_utc(ts: str | None) -> datetime | None:
         return datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except ValueError:
         return None
-
-
-def infer_pause_resume_at(reason: str | None, *, paused_at: datetime | None = None) -> float | None:
-    return infer_domain_pause_resume_at(reason, paused_at=paused_at)
-
-
-def worker_retry_settings(config: dict[str, Any], provider: str | None) -> dict[str, Any]:
-    return domain_retry_settings(config, provider)
 
 
 def provider_report_key_for_agent(config: dict[str, Any], agent_id: str) -> str:
@@ -3214,7 +3159,7 @@ def maybe_rotate_antigravity_lane(
     # "Resets in 29h35m13s"; retrying that pool every 900s just burns one
     # instant-fail call per cycle (~40 pointless rotations/day were observed on
     # 2026-07-27/28). Only ever extend the cooldown, never shorten it.
-    hinted_resume = infer_domain_pause_resume_at(reason)
+    hinted_resume = infer_pause_resume_at(reason)
     slot_until = now + cooldown_seconds
     if hinted_resume is not None and float(hinted_resume) > slot_until:
         slot_until = float(hinted_resume)
@@ -3616,35 +3561,6 @@ def expire_provider_pauses(
     return expired
 
 
-def quota_pause_agent(state: dict[str, Any], agent_id: str, reason: str, reset_seconds: int = 14400) -> None:
-    pause_provider(state, agent_id, reason, kind="quota", reset_seconds=reset_seconds)
-
-
-def is_agent_quota_paused(state: dict[str, Any], agent_id: str) -> bool:
-    normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
-    for entry in provider_pause_registry(state).values():
-        if not isinstance(entry, dict) or entry.get("lane_id") != normalized:
-            continue
-        if str(entry.get("scope") or "") == "legacy":
-            continue
-        if str(entry.get("resume_at_source") or "") == "reason_hint":
-            return True
-        resume_at = entry.get("resume_at")
-        if resume_at is None or float(resume_at) > datetime.now(timezone.utc).timestamp():
-            return True
-    return False
-
-
-def expire_quota_pauses(state: dict[str, Any]) -> list[str]:
-    paused = provider_pause_registry(state)
-    now = datetime.now(timezone.utc).timestamp()
-    expired = [key for key, info in paused.items() if isinstance(info, dict) and float(info.get("resume_at", 0) or 0) <= now]
-    for key in expired:
-        paused.pop(key, None)
-        console_log(f"quota pause expired: scope={key} now available", quiet=SUPERVISOR_LOG_QUIET)
-    return expired
-
-
 def worker_reassignment_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict(config.get("worker_reassignment", {}) or {})
     settings.setdefault("enabled", True)
@@ -3698,10 +3614,7 @@ def chair_review_settings(config: dict[str, Any]) -> dict[str, Any]:
         int(worker_reassignment_settings(config).get("after_attempts", 2)),
     )
     settings.setdefault("default_approval_ttl_minutes", 45)
-    settings.setdefault(
-        "default_max_sidecars",
-        int(underutilization_settings(config).get("max_new_sidecars_per_wave", 2)),
-    )
+    settings.setdefault("default_max_sidecars", 2)
     # Max depth of the auto-generated unblock/repair lineage. 1 = a first-class task
     # may get one unblock child, but that child can never spawn its own repair
     # (no -repair-repair). Raise only if you deliberately want deeper auto-chains.
@@ -4535,36 +4448,6 @@ def proactive_claim_plan_for_idle_agent(
     }
 
 
-def proactive_claim_plan_for_task(
-    config: dict[str, Any],
-    *,
-    task: dict[str, Any],
-    task_map: dict[str, dict[str, Any]],
-    idle_agent_names: list[str],
-    agent_loads: dict[str, list[int]],
-    helper_settings: dict[str, Any],
-    review_statuses: set[str],
-    finalize_statuses: set[str],
-    dependency_done_statuses: set[str],
-    state: dict[str, Any] | None = None,
-) -> dict[str, str] | None:
-    for idle_agent_name in ordered_idle_agent_names(idle_agent_names, agent_loads):
-        plan = proactive_claim_plan_for_idle_agent(
-            config,
-            task=task,
-            task_map=task_map,
-            idle_agent_name=idle_agent_name,
-            idle_agent_names=idle_agent_names,
-            agent_loads=agent_loads,
-            helper_settings=helper_settings,
-            review_statuses=review_statuses,
-            finalize_statuses=finalize_statuses,
-            dependency_done_statuses=dependency_done_statuses,
-            state=state,
-        )
-        if plan:
-            return plan
-    return None
 
 
 def execute_task_board_command(
@@ -4781,14 +4664,6 @@ def upsert_worker_dispatch_pause(
             "raw_ref": raw_ref,
             "mode_bucket": "execution",
         },
-    )
-
-
-def clear_worker_dispatch_pause(state: dict[str, Any], worker: dict[str, Any]) -> None:
-    clear_dispatch_pause(
-        state,
-        task_id=str(worker.get("task_id") or "") or None,
-        worker_run_id=str(worker.get("run_id") or "") or None,
     )
 
 
@@ -6382,70 +6257,6 @@ def helper_claim_settings_for_task(
     return settings
 
 
-def underutilization_settings(config: dict[str, Any]) -> dict[str, Any]:
-    settings = dict(config.get("underutilization_dispatch", {}) or {})
-    settings.setdefault("enabled", True)
-    settings.setdefault("threshold_ratio", 0.5)
-    settings.setdefault("continuous_window_seconds", 900)
-    settings.setdefault("cooldown_seconds", 900)
-    settings.setdefault("max_new_sidecars_per_wave", 2)
-    settings.setdefault("max_new_main_tasks_per_wave", 2)
-    settings.setdefault("max_active_sidecars_per_agent", 1)
-    settings.setdefault(
-        "productive_worker_statuses",
-        ["running", "waiting_approval", "suspended_approval", "retry_backoff"],
-    )
-    return settings
-
-
-def load_sidecar_catalog(config: dict[str, Any]) -> list[dict[str, Any]]:
-    path_value = config.get("sidecar_catalog_path") or config.get("paths", {}).get("sidecar_catalog")
-    if not path_value:
-        return []
-    payload = load_json(config_path(config, "sidecar_catalog") if "sidecar_catalog" in config.get("paths", {}) else Path(path_value), default={})
-    if isinstance(payload, dict):
-        templates = payload.get("templates", [])
-        if isinstance(templates, list):
-            return [dict(item) for item in templates if isinstance(item, dict)]
-    if isinstance(payload, list):
-        return [dict(item) for item in payload if isinstance(item, dict)]
-    return []
-
-
-def configured_worker_lane_ids(config: dict[str, Any]) -> list[str]:
-    lanes: list[str] = []
-    seen: set[str] = set()
-    for agent_id, agent in (config.get("agents", {}) or {}).items():
-        display_name = str(agent.get("display_name") or agent.get("name") or agent_id)
-        if "legacy alias" in display_name.lower():
-            continue
-        lane_id = normalize_agent_id(agent.get("provider") or agent_id)
-        if not lane_id or lane_id in seen:
-            continue
-        seen.add(lane_id)
-        lanes.append(lane_id)
-    return lanes
-
-
-def productive_worker_lane_ids(config: dict[str, Any], state: dict[str, Any], productive_statuses: set[str]) -> set[str]:
-    lanes: set[str] = set()
-    for worker in state.get("workers", {}).values():
-        if str(worker.get("status") or "") not in productive_statuses:
-            continue
-        lane_id = normalize_agent_id(worker.get("provider") or worker.get("agent_id") or "")
-        if lane_id:
-            lanes.add(lane_id)
-    return lanes
-
-
-def utilization_ratio_for_sidecars(config: dict[str, Any], state: dict[str, Any], productive_statuses: set[str]) -> float:
-    lanes = configured_worker_lane_ids(config)
-    if not lanes:
-        return 1.0
-    productive = productive_worker_lane_ids(config, state, productive_statuses)
-    return len(productive) / len(lanes)
-
-
 def task_is_sidecar(task: dict[str, Any]) -> bool:
     return str(task.get("task_class") or "").strip().lower() == "sidecar"
 
@@ -6494,34 +6305,6 @@ def governance_lineage_depth(task: dict[str, Any] | None, task_map: dict[str, di
     return depth
 
 
-def sidecar_statuses() -> set[str]:
-    return {"backlog", "todo", "in_progress", "review", "review_approved", "blocked", "done"}
-
-
-def existing_sidecar_signatures(status: dict[str, Any]) -> set[str]:
-    signatures: set[str] = set()
-    for task in status.get("tasks", []) or []:
-        if not task_is_sidecar(task):
-            continue
-        parent = str(task.get("helper_parent") or "").strip()
-        kind = str(task.get("helper_kind") or "").strip()
-        if parent and kind:
-            signatures.add(f"{parent}:{kind}")
-    return signatures
-
-
-def sidecar_task_id(parent_task_id: str, kind: str) -> str:
-    slug = kind
-    if slug.endswith("_packet"):
-        slug = slug[: -len("_packet")]
-    return f"{parent_task_id}-SIDECAR-{slug.replace('_', '-').upper()}"
-
-
-def render_sidecar_template(value: str, variables: dict[str, str]) -> str:
-    rendered = str(value)
-    for key, item in variables.items():
-        rendered = rendered.replace("{{" + key + "}}", item)
-    return rendered
 
 
 def task_phase_priority(task: dict[str, Any], task_map: dict[str, dict[str, Any]], dependency_done_statuses: set[str]) -> int:
@@ -6541,24 +6324,6 @@ def task_phase_priority(task: dict[str, Any], task_map: dict[str, dict[str, Any]
     return 9
 
 
-def dynamic_sidecar_kind(task: dict[str, Any]) -> str | None:
-    phase = str(task.get("phase") or "").lower()
-    title = str(task.get("title") or "").lower()
-    artifacts = " ".join(str(item).lower() for item in (task.get("artifacts") or []))
-    if "persona and application surfaces" in phase or "bff" in title or "surface" in title or "bff" in artifacts:
-        return "bff_handoff_packet"
-    if str(task.get("status") or "").lower() in {"review", "review_approved"}:
-        return "review_packet"
-    return "acceptance_packet"
-
-
-def preferred_agents_for_sidecar(kind: str) -> list[str]:
-    mapping = {
-        "review_packet": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
-        "acceptance_packet": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
-        "bff_handoff_packet": ["Copilot", "Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"],
-    }
-    return mapping.get(kind, ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"])
 
 
 def agent_has_dispatchable_primary_work(
@@ -6588,244 +6353,6 @@ def agent_has_dispatchable_primary_work(
     return False
 
 
-def count_open_sidecars_for_agent(status: dict[str, Any], agent_name: str) -> int:
-    count = 0
-    for task in status.get("tasks", []) or []:
-        if task.get("owner") != agent_name:
-            continue
-        if not task_is_sidecar(task):
-            continue
-        if str(task.get("status") or "").lower() == "done":
-            continue
-        count += 1
-    return count
-
-
-def eligible_idle_agents_for_sidecars(
-    config: dict[str, Any],
-    state: dict[str, Any],
-    status: dict[str, Any],
-    *,
-    max_active_sidecars_per_agent: int,
-    provider_report: dict[str, Any] | None = None,
-) -> list[str]:
-    settings = ready_dispatch_settings(config)
-    active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
-    active_agents, _active_task_agents = active_worker_indexes(state, active_statuses)
-    pending_agents, _pending_task_agents, _pending_event_keys = outstanding_delivery_indexes(config, state)
-    task_map = task_index_from_status(config, status)
-    agents: list[str] = []
-    for agent_id, agent in (config.get("agents", {}) or {}).items():
-        configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
-        display_name = task_agent_display_name(config, status, agent_id)
-        if "legacy alias" in display_name.lower():
-            continue
-        normalized = normalize_agent_id(agent_id)
-        if normalized in active_agents or normalized in pending_agents:
-            continue
-        if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
-            continue
-        if not agent_supports_auto_delivery(config, provider_report, agent_id):
-            continue
-        if configured_display_name and display_name_is_legacy_alias(configured_display_name):
-            continue
-        if count_open_sidecars_for_agent(status, display_name) >= max_active_sidecars_per_agent:
-            continue
-        if agent_has_dispatchable_primary_work(config, status, display_name, task_map):
-            continue
-        agents.append(display_name)
-    return agents
-
-
-def sidecar_support_artifact(parent_task_id: str, sidecar_id: str) -> str:
-    return f"support/sidecars/{parent_task_id}/{sidecar_id}.md"
-
-
-def build_catalog_sidecar_candidates(
-    config: dict[str, Any],
-    status: dict[str, Any],
-    task_map: dict[str, dict[str, Any]],
-    existing_signatures: set[str],
-) -> list[dict[str, Any]]:
-    settings = ready_dispatch_settings(config)
-    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    templates = load_sidecar_catalog(config)
-    candidates: list[dict[str, Any]] = []
-    for template in templates:
-        kind = str(template.get("kind") or "").strip()
-        if not kind:
-            continue
-        parent_ids = [str(item).strip() for item in template.get("parent_task_ids", []) if str(item).strip()]
-        phase_match = str(template.get("parent_phase_match") or "").strip()
-        activation_dependencies = [str(item).strip() for item in template.get("activation_dependencies", []) if str(item).strip()]
-        for parent in status.get("tasks", []) or []:
-            if is_governance_artifact(parent):
-                continue
-            parent_id = str(parent.get("id") or "").strip()
-            if not parent_id:
-                continue
-            if parent_ids and parent_id not in parent_ids:
-                continue
-            if not parent_ids and phase_match and str(parent.get("phase") or "") != phase_match:
-                continue
-            if not parent_ids and not phase_match:
-                continue
-            if str(parent.get("status") or "").lower() == "done":
-                continue
-            if any((lambda d: d is not None and str(d.get("status") or "").lower() not in dependency_done_statuses)(task_map.get(dep)) for dep in activation_dependencies):
-                continue
-            signature = f"{parent_id}:{kind}"
-            if signature in existing_signatures:
-                continue
-            reviewer = str(parent.get("owner") or "").strip()
-            if not reviewer:
-                continue
-            sidecar_id = sidecar_task_id(parent_id, kind)
-            variables = {
-                "parent_task_id": parent_id,
-                "parent_title": str(parent.get("title") or ""),
-                "parent_phase": str(parent.get("phase") or ""),
-                "sidecar_task_id": sidecar_id,
-                "kind": kind,
-                "kind_slug": kind.replace("_", "-"),
-            }
-            artifact_targets = [
-                render_sidecar_template(str(item), variables)
-                for item in (template.get("artifact_targets") or [])
-                if str(item).strip()
-            ] or [sidecar_support_artifact(parent_id, sidecar_id)]
-            candidates.append(
-                {
-                    "template_id": str(template.get("template_id") or sidecar_id),
-                    "kind": kind,
-                    "parent_task_id": parent_id,
-                    "parent_task": parent,
-                    "sidecar_id": sidecar_id,
-                    "title": render_sidecar_template(str(template.get("title_template") or sidecar_id), variables),
-                    "summary_zh": render_sidecar_template(str(template.get("summary_zh_template") or ""), variables),
-                    "phase": str(parent.get("phase") or "Support"),
-                    "depends_on": activation_dependencies,
-                    "artifacts": artifact_targets,
-                    "reviewer": reviewer,
-                    "mutates_canonical": bool(template.get("mutates_canonical", False)),
-                    "priority": task_phase_priority(parent, task_map, dependency_done_statuses),
-                }
-            )
-    return candidates
-
-
-def build_dynamic_sidecar_candidates(
-    config: dict[str, Any],
-    status: dict[str, Any],
-    task_map: dict[str, dict[str, Any]],
-    existing_signatures: set[str],
-) -> list[dict[str, Any]]:
-    settings = ready_dispatch_settings(config)
-    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    candidates: list[dict[str, Any]] = []
-    for parent in status.get("tasks", []) or []:
-        if is_governance_artifact(parent):
-            continue
-        parent_id = str(parent.get("id") or "").strip()
-        if not parent_id or str(parent.get("status") or "").lower() == "done":
-            continue
-        kind = dynamic_sidecar_kind(parent)
-        if kind not in {"review_packet", "acceptance_packet", "bff_handoff_packet"}:
-            continue
-        signature = f"{parent_id}:{kind}"
-        if signature in existing_signatures:
-            continue
-        parent_status = str(parent.get("status") or "").lower()
-        if kind in {"review_packet", "acceptance_packet"} and parent_status in {"todo", "backlog"} and not dependencies_satisfied(parent, task_map, dependency_done_statuses):
-            continue
-        activation_dependencies = [
-            dep_id
-            for dep_id in (parent.get("depends_on") or [])
-            if task_map.get(dep_id) is None or str(task_map.get(dep_id, {}).get("status") or "").lower() in dependency_done_statuses
-        ]
-        if kind == "bff_handoff_packet" and parent.get("depends_on") and not activation_dependencies:
-            continue
-        reviewer = str(parent.get("owner") or "").strip()
-        if not reviewer:
-            continue
-        sidecar_id = sidecar_task_id(parent_id, kind)
-        title_by_kind = {
-            "review_packet": f"Prepare {parent_id} review packet and evidence summary",
-            "acceptance_packet": f"Prepare {parent_id} acceptance packet and dependency map",
-            "bff_handoff_packet": f"Prepare {parent_id} BFF and frontend handoff packet",
-        }
-        summary_by_kind = {
-            "review_packet": f"平行支援 {parent_id}，先整理 review packet、evidence summary 與 reviewer handoff，不改 canonical truth。",
-            "acceptance_packet": f"平行支援 {parent_id}，先整理 acceptance checklist、dependency map 與 support packet，不改 canonical truth。",
-            "bff_handoff_packet": f"平行支援 {parent_id}，先整理 BFF query gap、operator journey 與前端 handoff materials，不改 canonical truth。",
-        }
-        candidates.append(
-            {
-                "template_id": f"dynamic:{kind}",
-                "kind": kind,
-                "parent_task_id": parent_id,
-                "parent_task": parent,
-                "sidecar_id": sidecar_id,
-                "title": title_by_kind[kind],
-                "summary_zh": summary_by_kind[kind],
-                "phase": str(parent.get("phase") or "Support"),
-                "depends_on": activation_dependencies,
-                "artifacts": [sidecar_support_artifact(parent_id, sidecar_id)],
-                "reviewer": reviewer,
-                "mutates_canonical": False,
-                "priority": task_phase_priority(parent, task_map, dependency_done_statuses),
-            }
-        )
-    return candidates
-
-
-def create_sidecar_task(
-    config: dict[str, Any],
-    *,
-    sidecar_id: str,
-    owner: str,
-    reviewer: str,
-    phase: str,
-    title: str,
-    summary_zh: str,
-    depends_on: list[str],
-    artifacts: list[str],
-    helper_parent: str,
-    helper_kind: str,
-    mutates_canonical: bool,
-) -> tuple[bool, str]:
-    metadata = {
-        "task_class": "sidecar",
-        "auto_generated": True,
-        "helper_parent": helper_parent,
-        "helper_kind": helper_kind,
-        "mutates_canonical": mutates_canonical,
-        "auto_created_by": "supervisor-underutilization",
-    }
-    result = execute_task_board_command(
-        config,
-        "assign",
-        [sidecar_id, owner, reviewer],
-        environ={
-            "AI_NAME": "Codex",
-            "TASK_PHASE": phase,
-            "TASK_TITLE": title,
-            "TASK_SUMMARY_ZH": summary_zh,
-            "TASK_DEPENDS_ON": ",".join(depends_on),
-            "TASK_ARTIFACTS": ",".join(artifacts),
-            "TASK_ACCEPTANCE": ",".join(
-                [
-                    "Create support artifacts only",
-                    "Do not edit canonical truth",
-                    "Hand off the packet to the assigned reviewer",
-                ]
-            ),
-            "TASK_METADATA_JSON": json.dumps(metadata, ensure_ascii=False),
-        },
-    )
-    if not result.ok:
-        return False, result.error
-    return True, ""
 
 
 def redispatch_candidate_statuses(config: dict[str, Any]) -> set[str]:
@@ -6903,10 +6430,6 @@ def resolve_current_dispatch_target(
         dispatch_policy_for_config(config),
         integration_evidence_for_tasks(task_map),
     )
-
-
-def task_dependency_signature(task: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> str:
-    return domain_dependency_signature(task, task_map)
 
 
 def active_worker_indexes(state: dict[str, Any], active_statuses: set[str]) -> tuple[set[str], set[tuple[str, str]]]:
@@ -7016,10 +6539,6 @@ def finalize_queue_event_record(config: dict[str, Any], state: dict[str, Any], w
 
 
 
-def save_event_queue(config: dict[str, Any], events: list[dict[str, Any]]) -> None:
-    replace_event_queue(config, events)
-
-
 def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
     task_map = task_index_from_status(config, load_status(config))
     active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
@@ -7111,10 +6630,6 @@ def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
     return queue_repository(config).update(prune_loaded_queue)
 
 
-def task_status_map(status: dict[str, Any]) -> dict[str, str]:
-    return {str(task.get("id")): str(task.get("status") or "") for task in status.get("tasks", []) if task.get("id")}
-
-
 def task_index_from_status(config: dict[str, Any], status: dict[str, Any]) -> dict[str, dict[str, Any]]:
     schema = config.get("schema", {})
     tasks_path = schema.get("tasks_path", "tasks")
@@ -7197,40 +6712,6 @@ def agent_dispatch_loads(
     return loads
 
 
-def choose_helper_claim_agent(
-    config: dict[str, Any],
-    *,
-    task: dict[str, Any],
-    owner_name: str,
-    reviewer_name: str,
-    idle_agent_name: str,
-    agent_loads: dict[str, list[int]],
-    helper_settings: dict[str, Any],
-    state: dict[str, Any] | None = None,
-) -> bool:
-    if not helper_settings.get("enabled", True):
-        return False
-    review_statuses = {str(value).lower() for value in ready_dispatch_settings(config).get("review_statuses", ["review"])}
-    finalize_statuses = {str(value).lower() for value in ready_dispatch_settings(config).get("finalize_statuses", ["review_approved"])}
-    dependency_done_statuses = {
-        str(value).lower() for value in ready_dispatch_settings(config).get("dependency_done_statuses", ["done"])
-    }
-    plan = proactive_claim_plan_for_idle_agent(
-        config,
-        task=task,
-        task_map={str(task.get("id") or ""): task},
-        idle_agent_name=idle_agent_name,
-        idle_agent_names=[idle_agent_name],
-        agent_loads=agent_loads,
-        helper_settings=helper_settings,
-        review_statuses=review_statuses,
-        finalize_statuses=finalize_statuses,
-        dependency_done_statuses=dependency_done_statuses,
-        state=state,
-    )
-    return plan is not None
-
-
 def worker_assignment_remains_valid(
     config: dict[str, Any],
     worker: dict[str, Any],
@@ -7276,10 +6757,6 @@ def stale_dispatch_skip_message(config: dict[str, Any], event: dict[str, Any], t
         return f"Skipped stale queued wake event for {task_id}: task state changed after the wake-up was queued."
 
     return None
-
-
-def ready_dispatch_signature(task: dict[str, Any], reason: str, task_map: dict[str, dict[str, Any]]) -> str:
-    return domain_ready_dispatch_signature(task, reason, task_map)
 
 
 def build_dispatch_event(task: dict[str, Any], target_agent: str, reason: str, task_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -7958,14 +7435,6 @@ def queue_chair_review(
     return True
 
 
-def normalize_chair_approval_action(action: dict[str, Any]) -> dict[str, Any]:
-    return normalize_domain_approval_action(action)
-
-
-def normalize_chair_reassignment_action(action: dict[str, Any]) -> dict[str, Any]:
-    return normalize_domain_reassignment_action(action)
-
-
 def normalize_chair_review_payload_defaults(config: dict[str, Any], payload: Any) -> Any:
     return normalize_domain_review_defaults(payload, chair_review_settings(config))
 
@@ -7992,10 +7461,6 @@ def normalize_chair_review_payload_for_reason(
         if synthesized:
             normalized["task_actions"] = [*task_actions, *synthesized]
     return normalized
-
-
-def validate_chair_review_payload(payload: Any) -> str | None:
-    return validate_domain_review_payload(payload)
 
 
 def validate_chair_review_context(
@@ -9514,379 +8979,12 @@ def dispatch_ready_tasks(
     return changed
 
 
-def dispatch_underutilization_sidecars(config: dict[str, Any], state: dict[str, Any]) -> bool:
-    settings = underutilization_settings(config)
-    tracking = state.setdefault("underutilization", {})
-    chair_state = state.setdefault("chair_review", {})
-    productive_statuses = {str(value) for value in settings.get("productive_worker_statuses", [])}
-    ratio = utilization_ratio_for_sidecars(config, state, productive_statuses)
-    threshold = float(settings.get("threshold_ratio", 0.5))
-    now = utc_now()
-    tracking["last_ratio"] = round(ratio, 4)
-    changed = False
-
-    if not settings.get("enabled", True):
-        tracking["below_threshold_since"] = None
-        return changed
-    if disk_guard_dispatch_blocked(config, state):
-        return note_dispatch_blocked_by_disk_guard(config, state, "underutilization_sidecars") or changed
-
-    if ratio >= threshold:
-        if tracking.get("below_threshold_since") is not None:
-            tracking["below_threshold_since"] = None
-            changed = True
-        return changed
-
-    if not tracking.get("below_threshold_since"):
-        tracking["below_threshold_since"] = now
-        return True
-
-    below_since = _parse_iso_utc(tracking.get("below_threshold_since"))
-    current_dt = _parse_iso_utc(now)
-    if below_since is None or current_dt is None:
-        tracking["below_threshold_since"] = now
-        return True
-
-    if (current_dt - below_since).total_seconds() < float(settings.get("continuous_window_seconds", 900)):
-        return changed
-
-    last_wave_at = _parse_iso_utc(tracking.get("last_sidecar_wave_at"))
-    if last_wave_at is not None and (current_dt - last_wave_at).total_seconds() < float(settings.get("cooldown_seconds", 900)):
-        return changed
-
-    if chair_review_settings(config).get("enabled", False):
-        sidecar_approved_until = _parse_iso_utc(chair_state.get("sidecar_approved_until"))
-        if sidecar_approved_until is None or sidecar_approved_until <= current_dt:
-            if chair_state.get("sidecar_approved_until") is not None:
-                chair_state["sidecar_approved_until"] = None
-                changed = True
-            wait_reason = "underutilized but waiting for a fresh chairman sidecar approval window"
-            if tracking.get("last_sidecar_wave_reason") != wait_reason:
-                tracking["last_sidecar_wave_reason"] = wait_reason
-                changed = True
-            return changed
-
-    status = load_status(config)
-    task_map = task_index_from_status(config, status)
-    provider_report = load_provider_report(config)
-    idle_agents = eligible_idle_agents_for_sidecars(
-        config,
-        state,
-        status,
-        max_active_sidecars_per_agent=int(settings.get("max_active_sidecars_per_agent", 1)),
-        provider_report=provider_report,
-    )
-    if not idle_agents:
-        tracking["last_sidecar_wave_at"] = now
-        tracking["last_sidecar_wave_reason"] = "underutilized but no idle agents were eligible for sidecar work"
-        write_activity_log(
-            config,
-            {
-                "type": "sidecar_wave_skipped",
-                "message": tracking["last_sidecar_wave_reason"],
-                "ratio": ratio,
-            },
-        )
-        return True
-
-    existing_signatures = existing_sidecar_signatures(status)
-    candidates = build_catalog_sidecar_candidates(config, status, task_map, existing_signatures)
-    if not candidates:
-        candidates = build_dynamic_sidecar_candidates(config, status, task_map, existing_signatures)
-    blocked_parents = {str(item).strip() for item in chair_state.get("blocked_sidecar_parents", []) if str(item).strip()}
-    if blocked_parents:
-        candidates = [candidate for candidate in candidates if str(candidate.get("parent_task_id") or "") not in blocked_parents]
-    if not candidates:
-        tracking["last_sidecar_wave_at"] = now
-        tracking["last_sidecar_wave_reason"] = "underutilized but no sidecar candidates matched the catalog or dynamic fallback"
-        write_activity_log(
-            config,
-            {
-                "type": "sidecar_wave_skipped",
-                "message": tracking["last_sidecar_wave_reason"],
-                "ratio": ratio,
-            },
-        )
-        return True
-
-    candidates.sort(key=lambda item: (int(item.get("priority", 9)), str(item.get("parent_task_id") or ""), str(item.get("kind") or "")))
-    active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
-    _active_agents, _active_task_agents = active_worker_indexes(state, active_statuses)
-    per_agent_counts = {agent: count_open_sidecars_for_agent(status, agent) for agent in idle_agents}
-    created = 0
-    max_sidecars = max(
-        1,
-        min(
-            int(settings.get("max_new_sidecars_per_wave", 2)),
-            int(chair_state.get("max_sidecars") or chair_review_settings(config).get("default_max_sidecars", 2)),
-        ),
-    )
-
-    for candidate in candidates:
-        if created >= max_sidecars:
-            break
-
-        parent_owner = str(candidate.get("reviewer") or "").strip()
-        preferred_agents = preferred_agents_for_sidecar(str(candidate.get("kind") or ""))
-        selected_owner = next(
-            (
-                agent
-                for agent in preferred_agents
-                if agent in idle_agents
-                and agent != parent_owner
-                and per_agent_counts.get(agent, 0) < int(settings.get("max_active_sidecars_per_agent", 1))
-            ),
-            None,
-        )
-        if not selected_owner:
-            selected_owner = next(
-                (
-                    agent
-                    for agent in idle_agents
-                    if agent != parent_owner
-                    and per_agent_counts.get(agent, 0) < int(settings.get("max_active_sidecars_per_agent", 1))
-                ),
-                None,
-            )
-        if not selected_owner:
-            continue
-
-        ok, error = create_sidecar_task(
-            config,
-            sidecar_id=str(candidate["sidecar_id"]),
-            owner=selected_owner,
-            reviewer=parent_owner,
-            phase=str(candidate["phase"]),
-            title=str(candidate["title"]),
-            summary_zh=str(candidate["summary_zh"]),
-            depends_on=list(candidate.get("depends_on", []) or []),
-            artifacts=list(candidate.get("artifacts", []) or []),
-            helper_parent=str(candidate["parent_task_id"]),
-            helper_kind=str(candidate["kind"]),
-            mutates_canonical=bool(candidate.get("mutates_canonical", False)),
-        )
-        if not ok:
-            write_activity_log(
-                config,
-                {
-                    "type": "sidecar_task_create_failed",
-                    "task_id": candidate["sidecar_id"],
-                    "message": f"Failed to create sidecar for {candidate['parent_task_id']}: {error}",
-                },
-            )
-            continue
-
-        status = load_status(config)
-        task_map = task_index_from_status(config, status)
-        sidecar_task = next((task for task in status.get("tasks", []) if task.get("id") == candidate["sidecar_id"]), None)
-        if not sidecar_task:
-            continue
-
-        state.setdefault("watcher", {}).setdefault("task_snapshots", {})[
-            candidate["sidecar_id"]
-        ] = snapshot_task(sidecar_task, config.get("schema", {}))
-
-        per_agent_counts[selected_owner] = per_agent_counts.get(selected_owner, 0) + 1
-        existing_signatures.add(f"{candidate['parent_task_id']}:{candidate['kind']}")
-        created += 1
-        changed = True
-        write_activity_log(
-            config,
-            {
-                "type": "sidecar_task_created",
-                "task_id": candidate["sidecar_id"],
-                "message": (
-                    f"Auto-created sidecar {candidate['sidecar_id']} for {candidate['parent_task_id']} "
-                    f"({candidate['kind']}) while utilization remained below threshold."
-                ),
-                "parent_task_id": candidate["parent_task_id"],
-                "target_agent": selected_owner,
-            },
-        )
-
-    tracking["last_sidecar_wave_at"] = now
-    if created:
-        tracking["last_sidecar_wave_reason"] = (
-            f"utilization {ratio:.2f} stayed below threshold {threshold:.2f}; created {created} visible sidecar task(s)"
-        )
-        write_activity_log(
-            config,
-            {
-                "type": "sidecar_wave_started",
-                "message": tracking["last_sidecar_wave_reason"],
-                "ratio": ratio,
-                "created": created,
-            },
-        )
-        return True
-
-    tracking["last_sidecar_wave_reason"] = "underutilized but no sidecar candidate could be assigned safely"
-    write_activity_log(
-        config,
-        {
-            "type": "sidecar_wave_skipped",
-            "message": tracking["last_sidecar_wave_reason"],
-            "ratio": ratio,
-        },
-    )
-    return True
-
-
-def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
-    """Proactively reassign uncovered main tasks to idle agents when utilization is below threshold."""
-    settings = underutilization_settings(config)
-    if not settings.get("enabled", True):
-        return False
-    if disk_guard_dispatch_blocked(config, state):
-        return note_dispatch_blocked_by_disk_guard(config, state, "underutilization_main_tasks")
-
-    tracking = state.setdefault("underutilization", {})
-    productive_statuses = {str(v) for v in settings.get("productive_worker_statuses", [])}
-    ratio = utilization_ratio_for_sidecars(config, state, productive_statuses)
-    threshold = float(settings.get("threshold_ratio", 0.5))
-    now = utc_now()
-
-    if ratio >= threshold:
-        return False
-
-    below_since = _parse_iso_utc(tracking.get("below_threshold_since"))
-    current_dt = _parse_iso_utc(now)
-    if not below_since or not current_dt:
-        return False
-    if (current_dt - below_since).total_seconds() < float(settings.get("continuous_window_seconds", 900)):
-        return False
-
-    last_wave_at = _parse_iso_utc(tracking.get("last_main_task_wave_at"))
-    if last_wave_at and (current_dt - last_wave_at).total_seconds() < float(settings.get("cooldown_seconds", 900)):
-        return False
-
-    dispatch_settings = ready_dispatch_settings(config)
-    active_statuses = {str(v) for v in dispatch_settings.get("active_worker_statuses", [])}
-    dependency_done_statuses = {str(v).lower() for v in dispatch_settings.get("dependency_done_statuses", ["done"])}
-    finalize_statuses = {str(v).lower() for v in dispatch_settings.get("finalize_statuses", ["review_approved"])}
-    review_statuses = {str(v).lower() for v in dispatch_settings.get("review_statuses", ["review"])}
-    helper_settings = helper_claim_settings(config)
-
-    status = load_status(config)
-    task_map = task_index_from_status(config, status)
-    active_agents, active_task_agents = active_worker_indexes(state, active_statuses)
-    pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
-    active_agent_counts = active_worker_agent_counts(state, active_statuses)
-    pending_agent_counts = outstanding_delivery_agent_counts(config, state)
-    active_task_ids = {tid for tid, _ in active_task_agents}
-    pending_task_ids = {tid for tid, _ in pending_task_agents}
-    agent_loads = agent_dispatch_loads(config, state, active_statuses)
-    provider_report = load_provider_report(config)
-
-    idle_agent_names: list[str] = []
-    for agent_id, agent in (config.get("agents", {}) or {}).items():
-        configured_display = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
-        display = task_agent_display_name(config, status, agent_id)
-        if display_name_is_legacy_alias(display) or display_name_is_legacy_alias(configured_display):
-            continue
-        normalized = normalize_agent_id(agent_id)
-        lane_capacity = max_tasks_per_agent_for_lane(dispatch_settings, normalized)
-        lane_load = active_agent_counts.get(normalized, 0) + pending_agent_counts.get(normalized, 0)
-        if lane_load >= lane_capacity:
-            continue
-        if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
-            continue
-        if not agent_supports_auto_delivery(config, provider_report, agent_id):
-            continue
-        idle_agent_names.append(display)
-
-    if not idle_agent_names:
-        tracking["last_main_task_wave_at"] = now
-        return False
-
-    max_per_wave = max(1, int(settings.get("max_new_main_tasks_per_wave", 2)))
-    dispatched = 0
-    changed = False
-
-    sorted_tasks = sorted(
-        [t for t in (status.get("tasks", []) or []) if t.get("id")],
-        key=lambda t: task_phase_priority(t, task_map, dependency_done_statuses),
-    )
-
-    for task in sorted_tasks:
-        if dispatched >= max_per_wave:
-            break
-        if task_is_sidecar(task):
-            continue
-        task_id = str(task.get("id") or "")
-        task_status = str(task.get("status") or "").lower()
-        if task_status not in {str(v).lower() for v in helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])}:
-            continue
-        if task_id in active_task_ids or task_id in pending_task_ids:
-            continue
-        plan = proactive_claim_plan_for_task(
-            config,
-            task=task,
-            task_map=task_map,
-            idle_agent_names=idle_agent_names,
-            agent_loads=agent_loads,
-            helper_settings=helper_settings,
-            review_statuses=review_statuses,
-            finalize_statuses=finalize_statuses,
-            dependency_done_statuses=dependency_done_statuses,
-            state=state,
-        )
-        if not plan:
-            continue
-        old_owner = str(task.get("owner") or "")
-        old_reviewer = str(task.get("reviewer") or "")
-        msg = (
-            f"Availability-first backfill by {plan['claim_agent']} "
-            f"(utilization {ratio:.2f} below threshold {threshold:.2f}; "
-            f"reassigned from {plan['assigned_agent']})."
-        )
-        if not persist_task_reassignment(
-            config,
-            task_id=task_id,
-            new_owner=plan["new_owner"],
-            new_reviewer=plan["new_reviewer"],
-            message=msg,
-            handoff_to=plan["handoff_to"],
-            handoff_from=plan["handoff_from"],
-        ):
-            continue
-        task["owner"] = plan["new_owner"]
-        task["reviewer"] = plan["new_reviewer"]
-        task["last_update"] = now
-        task["next"] = msg
-        dispatched += 1
-        changed = True
-        active_task_ids.add(task_id)
-        idle_agent_names = [name for name in idle_agent_names if name != plan["claim_agent"]]
-        write_activity_log(
-            config,
-            {
-                "type": "task_proactive_backfill",
-                "task_id": task_id,
-                "message": msg,
-                "from_owner": old_owner,
-                "to_owner": plan["new_owner"],
-                "from_reviewer": old_reviewer,
-                "to_reviewer": plan["new_reviewer"],
-                "claim_role": plan["claim_role"],
-            },
-        )
-        console_log(
-            f"proactive backfill: task={task_id} role={plan['claim_role']} to={plan['claim_agent']}",
-            quiet=SUPERVISOR_LOG_QUIET,
-        )
-
-    tracking["last_main_task_wave_at"] = now
-    return changed
-
-
 def _has_dispatchable_backlog(status: dict[str, Any]) -> bool:
     dispatchable = {"backlog", "todo", "in_progress", "review", "review_approved"}
-    for task in (status.get("tasks") or []):
-        if isinstance(task, dict) and str(task.get("status") or "") in dispatchable:
-            return True
-    return False
-
+    return any(
+        isinstance(task, dict) and str(task.get("status") or "") in dispatchable
+        for task in (status.get("tasks") or [])
+    )
 
 
 def _has_any_dispatchable_lane(
@@ -9897,17 +8995,16 @@ def _has_any_dispatchable_lane(
     settings = ready_dispatch_settings(config)
     report = provider_report or load_provider_report(config)
     for agent_id, agent in (config.get("agents", {}) or {}).items():
-        configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
-        if not configured_display_name or display_name_is_legacy_alias(configured_display_name):
+        display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        if not display_name or display_name_is_legacy_alias(display_name):
             continue
         normalized = normalize_agent_id(agent_id)
         if is_agent_dispatch_paused(config, state, normalized, provider_report=report):
             continue
         if not agent_supports_auto_delivery(config, report, normalized):
             continue
-        if max_tasks_per_agent_for_lane(settings, normalized) <= 0:
-            continue
-        return True
+        if max_tasks_per_agent_for_lane(settings, normalized) > 0:
+            return True
     return False
 
 
@@ -10001,8 +9098,6 @@ def supervisor_tick_ports() -> SupervisorTickPorts:
     optional_automation = OptionalAutomation(
         materialize_workspace_baseline_task=materialize_workspace_baseline_task_from_last_decision,
         ensure_workspace_baseline_dispatch=ensure_workspace_baseline_task_dispatch,
-        dispatch_underutilization_sidecars=dispatch_underutilization_sidecars,
-        dispatch_underutilization_main_tasks=dispatch_underutilization_main_tasks,
     )
     return SupervisorTickPorts(
         utc_now=utc_now,
@@ -10037,7 +9132,6 @@ def supervisor_tick_ports() -> SupervisorTickPorts:
         queue_chair_review=queue_chair_review,
         break_full_deadlock=break_full_deadlock,
         dispatch_ready_tasks=dispatch_ready_tasks,
-        dispatch_optional_automation=optional_automation.dispatch,
         process_queue=process_queue,
         sync_github_bus=sync_github_bus,
         trim_worker_history=trim_worker_history,
