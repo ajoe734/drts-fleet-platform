@@ -2077,7 +2077,23 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
     # existing lifecycle state while recording structured integration evidence
     # so the dispatcher does not mistake external integration for more coding.
     if os.environ.get("INTEGRATION_STATUS", "").strip():
-        task.update(integration_metadata_from_env(task_requires_commit(task), timestamp))
+        integration_metadata = integration_metadata_from_env(task_requires_commit(task), timestamp)
+        integration_status = str(integration_metadata["integration_status"])
+        if integration_status not in {"merged_to_dev", "dev_deployed", "deploy_blocked"}:
+            # Evidence is a projection of the current integration attempt. A
+            # reopened/replacement PR must not retain a prior terminal SHA.
+            for key in (
+                "merge_commit",
+                "merged_ref",
+                "dev_deploy_run_url",
+                "dev_deploy_sha",
+                "dev_deploy_source_ref",
+            ):
+                task.pop(key, None)
+        elif integration_status != "dev_deployed":
+            for key in ("dev_deploy_run_url", "dev_deploy_sha", "dev_deploy_source_ref"):
+                task.pop(key, None)
+        task.update(integration_metadata)
     if (
         reconciler
         and os.environ.get("INTEGRATION_STATUS", "").strip().lower() == "merged_to_dev"

@@ -596,6 +596,33 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         self.assertEqual(task["status"], "in_progress")
         self.assertNotIn("integration_status", task)
 
+    def test_reconciler_replacement_pr_clears_stale_terminal_evidence(self) -> None:
+        task = {
+            "id": "TASK-PR-REPLACEMENT-001",
+            "owner": "Codex",
+            "status": "done",
+            "integration_status": "merged_to_dev",
+            "merge_commit": "stale-merge",
+            "merged_ref": "dev",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "INTEGRATION_STATUS": "pr_open",
+            "PR_URL": "https://github.com/example/repo/pull/42",
+            "CI_STATUS": "success",
+            "EXECUTION_BRANCH": "codex/replacement",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_progress(state, [task["id"], "Replacement PR is authoritative."])
+
+        self.assertEqual(task["integration_status"], "pr_open")
+        self.assertEqual(task["execution_branch"], "codex/replacement")
+        self.assertNotIn("merge_commit", task)
+        self.assertNotIn("merged_ref", task)
+
     def test_reconciler_records_green_pr_without_advancing_to_review(self) -> None:
         task = {
             "id": "TASK-PR-READY-001",
