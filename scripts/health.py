@@ -34,7 +34,38 @@ except ImportError:
 from pathlib import Path
 
 # --- config / tunables ---
-ROOT_DIR = Path(__file__).resolve().parent.parent
+RUNTIME_ROOT = Path(__file__).resolve().parent.parent
+
+
+def canonical_root(runtime_root: Path = RUNTIME_ROOT) -> Path:
+    """Resolve machine truth independently of the runtime worktree."""
+    explicit = os.environ.get("ORCH_STATUS_ROOT") or os.environ.get("AI_STATUS_ROOT")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(runtime_root),
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return runtime_root
+    common_dir = Path(result.stdout.strip()) if result.returncode == 0 and result.stdout.strip() else None
+    if common_dir is not None and common_dir.name == ".git":
+        return common_dir.parent.resolve()
+    return runtime_root
+
+
+ROOT_DIR = canonical_root()
 STATE_FILE = ROOT_DIR / ".orchestrator/state.json"
 STATUS_FILE = ROOT_DIR / "ai-status.json"
 CONTROL_PLANE_SUMMARY = ROOT_DIR / ".orchestrator/projections/control-plane-summary.json"

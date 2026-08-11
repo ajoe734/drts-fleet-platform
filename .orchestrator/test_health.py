@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -15,6 +16,29 @@ SPEC.loader.exec_module(health)
 
 
 class HealthScriptTests(unittest.TestCase):
+    def test_canonical_root_honors_status_root_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, mock.patch.dict(
+            health.os.environ, {"ORCH_STATUS_ROOT": tmpdir}, clear=False
+        ):
+            self.assertEqual(health.canonical_root(), Path(tmpdir).resolve())
+
+    def test_canonical_root_uses_git_common_checkout_for_worktree(self) -> None:
+        expected = Path(
+            health.subprocess.check_output(
+                [
+                    "git",
+                    "-C",
+                    str(ROOT_DIR),
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-common-dir",
+                ],
+                text=True,
+            ).strip()
+        ).parent.resolve()
+
+        self.assertEqual(health.canonical_root(ROOT_DIR), expected)
+
     def test_latest_keepalive_status_prefers_latest_entry_per_lane(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "claude-lane-keepalive.log"
