@@ -31,7 +31,7 @@ from common import (
 )
 from github_cloud_relay import pull_commands, push_status_digest
 from github_command_parser import GitHubCommand, parse_command
-from runtime_state import enqueue_event
+from control_plane.infra.queue_repo import enqueue_event
 from watch_events import render_wakeup_message
 
 COMMENT_MARKER = "<!-- pantheon-bus -->"

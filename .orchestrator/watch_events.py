@@ -33,7 +33,8 @@ from common import (
     write_activity_log,
 )
 from branch_routing import route_task
-from runtime_state import enqueue_event, load_runtime_state, save_runtime_state
+from control_plane.infra.queue_repo import enqueue_event
+from control_plane.infra.runtime_repo import load_runtime_state, save_runtime_state
 
 
 def parse_args() -> argparse.Namespace:

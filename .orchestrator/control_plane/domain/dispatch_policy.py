@@ -40,10 +40,7 @@ class ReadyDispatchPolicy:
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> "ReadyDispatchPolicy":
-        supervisor = config.get("supervisor") or {}
-        nested = supervisor.get("ready_dispatch") or {}
-        legacy = config.get("ready_dispatcher") or {}
-        settings = {**legacy, **nested}
+        settings = config.get("ready_dispatcher") or {}
 
         def values(key: str, defaults: frozenset[str]) -> frozenset[str]:
             raw = settings.get(key)

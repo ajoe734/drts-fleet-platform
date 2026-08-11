@@ -37,9 +37,9 @@ class TaskBoardCommandExecutorTests(unittest.TestCase):
             mutation_commands={"change": mutate},
         )
 
-        result = TaskBoardCommandExecutor(runtime).execute("change", [])
+        result = TaskBoardCommandExecutor(runtime).execute_with_result("change", [])
 
-        self.assertEqual(result, 0)
+        self.assertIsNone(result)
         self.assertEqual(events, ["load", "command", "sync:2"])
 
     def test_mutation_preparer_runs_inside_transaction_before_sync(self) -> None:
@@ -62,7 +62,7 @@ class TaskBoardCommandExecutorTests(unittest.TestCase):
             commit_mutation=lambda prepared: events.append(f"commit:{prepared}"),
         )
 
-        TaskBoardCommandExecutor(runtime).execute("change", ["reason"])
+        TaskBoardCommandExecutor(runtime).execute_with_result("change", ["reason"])
 
         self.assertEqual(
             events,
@@ -91,7 +91,7 @@ class TaskBoardCommandExecutorTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(OSError, "disk full"):
-            TaskBoardCommandExecutor(runtime).execute("change", [])
+            TaskBoardCommandExecutor(runtime).execute_with_result("change", [])
 
         self.assertEqual(restored, [{"items": ["before"]}])
 
@@ -108,7 +108,7 @@ class TaskBoardCommandExecutorTests(unittest.TestCase):
             mutation_commands={},
         )
 
-        TaskBoardCommandExecutor(runtime).execute("show", [])
+        TaskBoardCommandExecutor(runtime).execute_with_result("show", [])
 
         self.assertEqual(calls, ["show:1"])
 

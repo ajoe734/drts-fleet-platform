@@ -12,7 +12,7 @@ from control_plane.infra.queue_repo import enqueue_event, load_event_queue
 
 def default_state() -> dict[str, Any]:
     return {
-        "version": 4,
+        "version": 5,
         "initialized_at": None,
         "last_scan_at": None,
         "watcher": {
@@ -32,7 +32,7 @@ def default_state() -> dict[str, Any]:
             "worker_workspace_cleanup": {},
         },
         "provider_pauses": {},
-        "provider_pause_schema": 2,
+        "provider_pause_schema": 3,
         "failure_streaks": {},
         "chair_reassignment_guards": {},
         "dispatch_pauses": [],
@@ -51,6 +51,7 @@ def default_state() -> dict[str, Any]:
         },
         "chair_review": {
             "active_review": None,
+            "interrupted_review": None,
             "rotation_index": 0,
             "cooldown_until": None,
             "last_review_at": None,
@@ -76,29 +77,12 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
             k: v
             for k, v in raw.items()
             if k in state
-            or k
-            in {
-                "queue",
-                "workers",
-                "approvals",
-                "supervisor",
-                "provider_pause_schema",
-                "pause_migration",
-                # Read once for the v1 -> v2 pause migration; the runtime
-                # removes it after converting scoped records.
-                "quota_paused_agents",
-            }
         }
     )
     state.setdefault("watcher", {})
     if not isinstance(state["watcher"], dict):
         state["watcher"] = {}
-    raw_watcher = raw.get("watcher") if isinstance(raw.get("watcher"), dict) else {}
-    legacy_task_snapshots = raw.get("tasks") if isinstance(raw.get("tasks"), dict) else {}
-    if "task_snapshots" not in raw_watcher and legacy_task_snapshots:
-        state["watcher"]["task_snapshots"] = deepcopy(legacy_task_snapshots)
-    else:
-        state["watcher"].setdefault("task_snapshots", {})
+    state["watcher"].setdefault("task_snapshots", {})
     state.setdefault("pending_handoff_keys", [])
     state.setdefault("seen_event_keys", {})
     state.setdefault("queue", {})
@@ -110,10 +94,7 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state.setdefault("maintenance", {})
     state["maintenance"].setdefault("worker_workspace_cleanup", {})
     state.setdefault("provider_pauses", {})
-    if "provider_pause_schema" not in raw:
-        state["provider_pause_schema"] = 1 if (raw.get("quota_paused_agents") or raw.get("provider_pauses")) else 2
-    else:
-        state.setdefault("provider_pause_schema", 2)
+    state["provider_pause_schema"] = 3
     state.setdefault("failure_streaks", {})
     state.setdefault("chair_reassignment_guards", {})
     state.setdefault("dispatch_pauses", [])
@@ -128,17 +109,12 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state["resource_guard"].setdefault("memory_max_bytes", None)
     state["resource_guard"].setdefault("memory_pressure_some_avg10", None)
     state["resource_guard"].setdefault("memory_events", {})
-    if not isinstance(state.get("chair_review"), dict):
-        state["chair_review"] = {}
-    state["chair_review"].setdefault("active_review", None)
-    state["chair_review"].setdefault("rotation_index", 0)
-    state["chair_review"].setdefault("cooldown_until", None)
-    state["chair_review"].setdefault("last_review_at", None)
-    state["chair_review"].setdefault("last_reviewer", None)
-    state["chair_review"].setdefault("last_reason", None)
-    state["chair_review"].setdefault("last_decision", None)
-    for retired_key in ("sidecar_approved_until", "max_sidecars", "blocked_sidecar_parents"):
-        state["chair_review"].pop(retired_key, None)
+    chair_defaults = default_state()["chair_review"]
+    raw_chair = state.get("chair_review") if isinstance(state.get("chair_review"), dict) else {}
+    state["chair_review"] = {
+        **chair_defaults,
+        **{key: value for key, value in raw_chair.items() if key in chair_defaults},
+    }
     state.setdefault("supervisor", {})
     state["supervisor"].setdefault("pid", None)
     state["supervisor"].setdefault("started_at", None)
@@ -147,16 +123,6 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     for pause in state.get("provider_pauses", {}).values():
         if isinstance(pause, dict):
             pause.setdefault("kind", "quota")
-    legacy_pauses = state.get("quota_paused_agents")
-    if isinstance(legacy_pauses, dict):
-        provider_pauses = state.setdefault("provider_pauses", {})
-        for agent_id, pause in legacy_pauses.items():
-            if not isinstance(pause, dict):
-                continue
-            migrated_pause = deepcopy(pause)
-            migrated_pause.setdefault("kind", "quota")
-            provider_pauses.setdefault(str(agent_id), migrated_pause)
-    state.pop("tasks", None)
     state["version"] = 5
     return state
 
@@ -411,10 +377,6 @@ def queue_event_record(state: dict[str, Any], event_id: str) -> dict[str, Any]:
     events = queue.setdefault("events", {})
     record = events.setdefault(event_id, {"attempt_count": 0, "status": "queued"})
     return record
-
-
-def dispatch_pauses_for_task(state: dict[str, Any], task_id: str) -> list[dict[str, Any]]:
-    return [pause for pause in state.setdefault("dispatch_pauses", []) if str(pause.get("task_id") or "") == str(task_id)]
 
 
 def upsert_dispatch_pause(state: dict[str, Any], pause: dict[str, Any]) -> None:

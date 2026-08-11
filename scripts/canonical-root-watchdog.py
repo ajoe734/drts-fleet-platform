@@ -92,10 +92,6 @@ def porcelain(repo: Path) -> list[str]:
     return [ln for ln in r.stdout.splitlines() if ln.strip()]
 
 
-def is_clean(repo: Path) -> bool:
-    return not porcelain(repo)
-
-
 def residue_files(repo: Path) -> list[str]:
     """Dirty/untracked files that are NOT exempt live-runtime paths."""
     out = []

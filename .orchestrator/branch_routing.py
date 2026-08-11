@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 
 DEFAULTS: dict[str, Any] = {
@@ -184,18 +184,6 @@ def route_task(task_id: str, config: dict[str, Any] | None = None) -> RouteDecis
         matched_rule_index=-1,
         matched_pattern="",
     )
-
-
-def route_many(task_ids: Iterable[str], config: dict[str, Any] | None = None) -> list[RouteDecision]:
-    """Bulk version, useful for triage scripts."""
-    return [route_task(t, config) for t in task_ids]
-
-
-def known_long_lived_branches(config: dict[str, Any] | None = None) -> list[str]:
-    """All long-lived branches in the new model. Used by branch protection
-    setup and triage scripts to know which names to never auto-delete."""
-    s = load_strategy(config)
-    return sorted({*s["tracks"].values(), *s["publish_branches"].values(), "main"})
 
 
 def main() -> int:

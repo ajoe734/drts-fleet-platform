@@ -27,7 +27,7 @@ from common import (
     write_json,
 )
 from provider_permissions import CLAUDE_LOCAL_SETTINGS_PATH, _verified_claude_policy
-from runtime_state import load_approval_state
+from control_plane.infra.approval_repo import load_approval_state
 from worker_tree_guard import check_chatbox_tree_guard
 
 
@@ -315,9 +315,6 @@ def parse_args() -> argparse.Namespace:
 
     hook = subparsers.add_parser("hook", help="Handle a Claude hook event.")
     hook.add_argument("event_name")
-
-    log_hook = subparsers.add_parser("log-hook", help="Backward-compatible logging-only hook entrypoint.")
-    log_hook.add_argument("event_name")
 
     remember = subparsers.add_parser("remember", help="Persist a suggested allow/deny rule into .claude/settings.local.json.")
     remember.add_argument("decision", choices=["allow", "deny", "ask"])
@@ -1399,15 +1396,6 @@ def log_event(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
     )
 
 
-def _approval_timeout_seconds(config: dict[str, Any]) -> float:
-    return float(
-        config.get("providers", {})
-        .get("claude", {})
-        .get("broker", {})
-        .get("approval_wait_seconds", 3600)
-    )
-
-
 def _approval_context(payload: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     return {
         "provider": "claude",
@@ -1818,11 +1806,7 @@ def main() -> int:
         print(json.dumps({"ok": True, "decision": args.decision, "rule": args.rule}, ensure_ascii=False))
         return 0
 
-    payload = hook_payload()
-    if args.command == "log-hook":
-        log_event(config, args.event_name, payload)
-        return 0
-    return hook_mode(config, args.event_name, payload)
+    return hook_mode(config, args.event_name, hook_payload())
 
 
 if __name__ == "__main__":

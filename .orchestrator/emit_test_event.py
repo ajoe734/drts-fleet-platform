@@ -10,7 +10,7 @@ if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
 from common import agent_config_for, load_config, new_runtime_id, relpath, selected_shared_files, utc_now
-from runtime_state import enqueue_event
+from control_plane.infra.queue_repo import enqueue_event
 
 
 def parse_args() -> argparse.Namespace:

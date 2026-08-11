@@ -51,8 +51,6 @@ from control_plane.domain.failure_policy import (
 from control_plane.domain.lane_health import EXECUTION_STATUSES, pause_matches_lane, worker_capacity_counts
 from control_plane.domain.resource_admission import decide as resource_admission_decision
 from control_plane.domain.chair_policy import (
-    normalize_approval_action as normalize_chair_approval_action,
-    normalize_reassignment_action as normalize_chair_reassignment_action,
     normalize_review_defaults as normalize_domain_review_defaults,
     validate_review_payload as validate_chair_review_payload,
 )
@@ -2970,38 +2968,8 @@ def adapter_info_for_agent(
 
 
 def provider_pause_registry(state: dict[str, Any]) -> dict[str, Any]:
-    registry = state.setdefault("provider_pauses", {})
-    if state.get("provider_pause_schema") != 3:
-        migrated: dict[str, Any] = {}
-        dropped: list[str] = []
-        legacy = {**(state.get("quota_paused_agents", {}) or {}), **registry}
-        for agent_id, pause in legacy.items():
-            if not isinstance(pause, dict):
-                continue
-            reason = str(pause.get("reason") or "")
-            # A previous JSON detector could promote command output into a quota
-            # pause. It has no provider-error provenance and must not survive.
-            if '"type":"item.completed"' in reason or '"type": "item.completed"' in reason:
-                dropped.append(str(agent_id))
-                continue
-            entry = dict(pause)
-            entry.setdefault("lane_id", normalize_agent_id(str(agent_id)))
-            # Schema v2 recorded some quota pauses at lane scope without the
-            # account/pool that produced them. They are historical evidence,
-            # not safe authority to pause today's differently configured lane.
-            if int(entry.get("schema", 0) or 0) < 3 and str(entry.get("kind") or "") == "quota" and not entry.get("identity_fingerprint") and not entry.get("quota_pool"):
-                entry.update({"scope": "legacy", "legacy_unscoped": True})
-            else:
-                entry.setdefault("scope", "lane")
-            entry["schema"] = 3
-            migrated[str(agent_id)] = entry
-        state["provider_pauses"] = migrated
-        state.pop("quota_paused_agents", None)
-        state["provider_pause_schema"] = 3
-        if dropped:
-            state.setdefault("pause_migration", {})["dropped_untrusted_legacy_entries"] = dropped
-        registry = migrated
-    return registry
+    state["provider_pause_schema"] = 3
+    return state.setdefault("provider_pauses", {})
 
 
 def _hydrate_reason_hint_resume_at(state: dict[str, Any], agent_id: str, entry: dict[str, Any]) -> float | None:
@@ -4086,10 +4054,6 @@ def known_agent_display_names(config: dict[str, Any]) -> set[str]:
     return names
 
 
-def display_name_is_legacy_alias(name: str | None) -> bool:
-    return "legacy alias" in str(name or "").lower()
-
-
 def status_agent_names_by_lane(status: dict[str, Any] | None) -> dict[str, str]:
     names: dict[str, str] = {}
     if not isinstance(status, dict):
@@ -4161,7 +4125,7 @@ def first_viable_agent(
         effective_provider_report = load_provider_report(config)
     for candidate in preferred:
         name = str(candidate or "").strip()
-        if not name or name in seen or name in exclude or display_name_is_legacy_alias(name):
+        if not name or name in seen or name in exclude:
             continue
         seen.add(name)
         if name in known:
@@ -4231,7 +4195,7 @@ def prune_completed_dispatch_pauses(
         for task in tasks
         if str(task.get("id") or "").strip()
     }
-    active_worker_statuses = {str(value) for value in ready_dispatch_settings(load_config()).get("active_worker_statuses", [])}
+    active_worker_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
     active_task_ids = {
         str(worker.get("task_id") or "")
         for worker in (state.get("workers", {}) or {}).values()
@@ -4250,9 +4214,6 @@ def prune_completed_dispatch_pauses(
     # Run-specific pauses without a task cannot describe a lane's present
     # health.  Provider pauses own lane/identity availability; discard this
     # retired schema during normal maintenance.
-    retired_taskless = [pause for pause in pauses if not str(pause.get("task_id") or "").strip()]
-    if retired_taskless:
-        state.setdefault("pause_migration", {})["retired_taskless_dispatch_pauses"] = len(retired_taskless)
     keep = [
         pause
         for pause in pauses
@@ -6161,9 +6122,8 @@ def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("review_statuses", ["review"])
     settings.setdefault("finalize_statuses", ["review_approved"])
     settings.setdefault("owned_statuses", ["in_progress", "todo", "backlog"])
-    legacy_done_statuses = settings.get("done_statuses", ["done", "review_approved"])
     settings.setdefault("dependency_done_statuses", ["done"])
-    settings.setdefault("worker_terminal_statuses", legacy_done_statuses)
+    settings.setdefault("worker_terminal_statuses", ["done", "review_approved"])
     settings.setdefault(
         "active_worker_statuses",
         ["running", "started", "waiting_approval", "suspended_approval", "retry_backoff", "manual_pending", "stalled", "draining", "fallback"],
@@ -7040,7 +7000,7 @@ def _chair_review_summary_lines(
     for agent_id, agent in (config.get("agents", {}) or {}).items():
         display_name = task_agent_display_name(config, status, agent_id)
         normalized = normalize_agent_id(agent_id)
-        if not display_name or display_name_is_legacy_alias(display_name):
+        if not display_name:
             continue
         pause = pauses.get(normalized)
         if isinstance(pause, dict):
@@ -7133,7 +7093,7 @@ def build_chair_review_message(
             # Point the chair at the bounded chair-scoped digest, not the full
             # state.json — the latter exceeds the 256 KB worker Read cap under
             # concurrent dispatch (fat per-worker request_snapshot/command/metadata
-            # + seen_event_keys). See runtime_state.build_state_digest /
+            # + seen_event_keys). See runtime_repo.build_state_digest /
             # feedback_ai_status_handoff_bloat.
             path = path.parent / "state-digest.json"
             machine_truth_lines.append(
@@ -7198,7 +7158,6 @@ def build_chair_review_message(
         "- `git push --force`、`--mirror`、`--delete`、`--all`、`--tags` 這類 broad push 一律不要 allow。\n"
         "- lane/provider id 必須精確判讀：`Claude`/`Claude2`、`Gemini`/`Gemini2`、`Codex`/`Codex2` 是不同帳號/額度 lane；不要因為 `claude` paused 就推論 `claude2` 也 paused，除非 machine truth 明確列出該 exact lane。\n"
         "- 若 provider/lane 顯示 auth、quota、capacity 或 repeated terminal degraded，不要把新工作派回該 lane；請優先用 reassignment_actions 把可改派的 owner/reviewer work 移到健康 lane。\n"
-        "- 若任務 owner/reviewer 指到 `legacy alias`，那不是可執行 lane；請用 reassignment_actions 改到真實健康 lane。\n"
         "- 若資訊不足，保守輸出 blocked_by / recommended_focus，不要猜。\n\n"
         "Pending approvals:\n"
         + "\n".join(approval_lines)
@@ -7254,9 +7213,8 @@ def choose_chair_reviewer(
     primary_work_candidates: list[tuple[str, str]] = []
     active_recovery_candidates: list[tuple[str, str]] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
-        configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
         display_name = task_agent_display_name(config, status, agent_id)
-        if not display_name or display_name_is_legacy_alias(display_name) or display_name_is_legacy_alias(configured_display_name):
+        if not display_name:
             continue
         normalized = normalize_agent_id(agent_id)
         if normalized in pending_agents:
@@ -7477,11 +7435,11 @@ def validate_chair_review_context(
         ]
         if pending_ids:
             action_ids = {
-                str(normalize_chair_approval_action(action).get("approval_id") or "").strip()
+                str(action.get("approval_id") or "").strip()
                 for action in payload.get("approval_actions", []) or []
                 if isinstance(action, dict)
-                and normalize_chair_approval_action(action).get("decision") in {"allow", "deny"}
-                and str(normalize_chair_approval_action(action).get("approval_id") or "").strip()
+                and action.get("decision") in {"allow", "deny"}
+                and str(action.get("approval_id") or "").strip()
             }
             missing = [approval_id for approval_id in pending_ids if approval_id not in action_ids]
             if missing:
@@ -7600,7 +7558,6 @@ def apply_chair_approval_actions(config: dict[str, Any], payload: dict[str, Any]
     for action in payload.get("approval_actions", []) or []:
         if not isinstance(action, dict):
             continue
-        action = normalize_chair_approval_action(action)
         approval_id = str(action.get("approval_id") or "").strip()
         decision = str(action.get("decision") or "").strip()
         approval = pending_by_id.get(approval_id)
@@ -7634,7 +7591,6 @@ def apply_chair_reassignment_action(
     action: dict[str, Any],
     provider_report: dict[str, Any],
 ) -> bool:
-    action = normalize_chair_reassignment_action(action)
     task_id = str(action.get("task_id") or "").strip()
     role = str(action.get("role") or "").strip()
     from_agent = str(action.get("from") or "").strip()
@@ -7732,7 +7688,7 @@ def apply_chair_reassignment_actions(
     ]
     actions.sort(
         key=lambda action: 0
-        if normalize_chair_reassignment_action(action).get("role") == "reviewer"
+        if action.get("role") == "reviewer"
         else 1
     )
     for action in actions:
@@ -7852,7 +7808,7 @@ def chair_unblock_agent(
         if not display_name or display_name in seen or display_name not in known:
             continue
         seen.add(display_name)
-        if display_name in exclude or display_name_is_legacy_alias(display_name):
+        if display_name in exclude:
             continue
         if is_agent_dispatch_paused(config, state, display_name, provider_report=provider_report):
             continue
@@ -8792,7 +8748,6 @@ def dispatch_ready_tasks(
             if (
                 display_name
                 and lane_load < lane_capacity
-                and not display_name_is_legacy_alias(display_name)
                 and not is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report)
             ):
                 idle_agent_names.append(display_name)
@@ -8809,7 +8764,7 @@ def dispatch_ready_tasks(
                 continue
 
             target_agent = display_name_for(config, agent_id)
-            if not target_agent or display_name_is_legacy_alias(target_agent):
+            if not target_agent:
                 continue
             candidates: list[tuple[int, int, dict[str, Any], str]] = []
             helper_claim_queued = False
@@ -8984,7 +8939,7 @@ def _has_any_dispatchable_lane(
     report = provider_report or load_provider_report(config)
     for agent_id, agent in (config.get("agents", {}) or {}).items():
         display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
-        if not display_name or display_name_is_legacy_alias(display_name):
+        if not display_name:
             continue
         normalized = normalize_agent_id(agent_id)
         if is_agent_dispatch_paused(config, state, normalized, provider_report=report):

@@ -1751,7 +1751,6 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
 
         self.assertTrue(changed)
         self.assertEqual(state["dispatch_pauses"], [])
-        self.assertEqual(state["pause_migration"]["retired_taskless_dispatch_pauses"], 2)
 
     def test_starts_current_owned_dispatch_event(self) -> None:
         current_task = {
@@ -2148,8 +2147,13 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         }
         state = {
             "queue": {"events": {}},
-            "quota_paused_agents": {
+            "provider_pause_schema": 3,
+            "provider_pauses": {
                 "codex": {
+                    "kind": "quota",
+                    "scope": "lane",
+                    "lane_id": "codex",
+                    "schema": 3,
                     "reason": "provider quota exhausted",
                     "paused_at": "2026-04-16T00:00:00Z",
                     "resume_at": 9999999999,
@@ -3333,7 +3337,6 @@ class PollWorkersRecoveryTests(unittest.TestCase):
             state = {
                 "queue": {"events": {"evt-1": {"status": "started"}}},
                 "provider_pauses": {},
-                "quota_paused_agents": {},
                 "workers": {
                     "run-1": {
                         "run_id": "run-1",
@@ -4283,8 +4286,13 @@ class WorkerReassignmentTests(unittest.TestCase):
             ]
         }
         state = {
-            "quota_paused_agents": {
+            "provider_pause_schema": 3,
+            "provider_pauses": {
                 "qwen": {
+                    "kind": "quota",
+                    "scope": "lane",
+                    "lane_id": "qwen",
+                    "schema": 3,
                     "reason": "provider quota exhausted",
                     "paused_at": "2026-04-16T00:00:00Z",
                     "resume_at": 9999999999,
@@ -4319,7 +4327,7 @@ class WorkerReassignmentTests(unittest.TestCase):
                 "fallback_mode": "none",
             },
         }
-        state = {"quota_paused_agents": {"qwen": {"resume_at": 9999999999}}}
+        state = {}
         worker = {
             "run_id": "gemini-run-wrapper",
             "task_id": "WRAP-001",
@@ -4533,7 +4541,7 @@ class WorkerReassignmentTests(unittest.TestCase):
 
     def test_finalize_terminal_wrapper_passes_state_into_reassignment(self) -> None:
         config = dict(self.config)
-        state = {"quota_paused_agents": {"qwen": {"resume_at": 9999999999}}}
+        state = {}
         worker = {
             "run_id": "claude-run-wrapper",
             "task_id": "WRAP-002",
@@ -4683,7 +4691,7 @@ class ChairmanFlowTests(unittest.TestCase):
             "approval_triage must resolve pending approvals",
             supervisor.validate_chair_review_context(payload, reason="approval_triage", approval_state=approval_state),
         )
-        payload["approval_actions"] = [{"approval_id": "apr-1", "action": "deny", "reason": "not safe"}]
+        payload["approval_actions"] = [{"approval_id": "apr-1", "decision": "deny", "reason": "not safe"}]
         self.assertIsNone(
             supervisor.validate_chair_review_context(payload, reason="approval_triage", approval_state=approval_state)
         )
@@ -5201,6 +5209,9 @@ class ChairmanFlowTests(unittest.TestCase):
             "provider_pauses": {
                 "claude": {
                     "kind": "auth",
+                    "scope": "lane",
+                    "lane_id": "claude",
+                    "schema": 3,
                     "reason": "Invalid authentication credentials",
                     "paused_at": "2026-04-30T12:51:53Z",
                     "resume_at": None,
@@ -5346,10 +5357,14 @@ class ChairmanFlowTests(unittest.TestCase):
                 "provider_pauses": {
                     "claude": {
                         "kind": "auth",
+                        "scope": "lane",
+                        "lane_id": "claude",
+                        "schema": 3,
                         "reason": "Invalid authentication credentials",
                         "paused_at": "2026-04-30T12:51:53Z",
                     }
                 },
+                "provider_pause_schema": 3,
                 "chair_review": {},
             }
             status = {
@@ -5559,18 +5574,15 @@ class ChairmanFlowTests(unittest.TestCase):
             "provider_pauses": {
                 "copilot": {
                     "kind": "quota",
+                    "scope": "lane",
+                    "lane_id": "copilot",
+                    "schema": 3,
                     "reason": "Quota exhausted",
                     "paused_at": "2026-04-30T12:51:53Z",
                     "resume_at": 4102444800.0,
                 }
             },
-            "quota_paused_agents": {
-                "copilot": {
-                    "reason": "Quota exhausted",
-                    "paused_at": "2026-04-30T12:51:53Z",
-                    "resume_at": 4102444800.0,
-                }
-            },
+            "provider_pause_schema": 3,
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5645,64 +5657,6 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertFalse(changed)
         queue_delivery_event.assert_not_called()
 
-    def test_dispatcher_skips_legacy_alias_helper_claim(self) -> None:
-        config = {
-            "schema": {
-                "tasks_path": "tasks",
-                "task_id_field": "id",
-                "status_field": "status",
-                "assignee_field": "owner",
-                "reviewer_field": "reviewer",
-            },
-            "ready_dispatcher": {
-                "helper_claim": {
-                    "enabled": True,
-                    "availability_first": True,
-                    "allow_any_idle_lane": True,
-                    "require_assigned_agent_busy": True,
-                }
-            },
-            "agents": {
-                "copilot": {"id": "copilot", "display_name": "Copilot", "provider": "copilot"},
-                "grok": {"id": "grok", "display_name": "Copilot (legacy alias)", "provider": "grok"},
-            },
-        }
-        state = {
-            "provider_pause_schema": 3,
-            "queue": {"events": {}},
-            "workers": {},
-            "provider_pauses": {
-                "copilot": {
-                    "schema": 3,
-                    "kind": "quota",
-                    "reason": "quota exhausted",
-                    "paused_at": "2026-04-30T15:00:00Z",
-                    "resume_at": None,
-                }
-            },
-        }
-        status = {
-            "tasks": [
-                {
-                    "id": "OPX-GV-004",
-                    "status": "review",
-                    "owner": "Codex2",
-                    "reviewer": "Copilot",
-                    "depends_on": [],
-                }
-            ]
-        }
-
-        with (
-            mock.patch.object(supervisor, "load_status", return_value=status),
-            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
-            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
-        ):
-            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
-
-        self.assertFalse(changed)
-        queue_delivery_event.assert_not_called()
-
     def test_refresh_chair_review_state_applies_approval_actions(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -5722,7 +5676,7 @@ class ChairmanFlowTests(unittest.TestCase):
                         "approval_actions": [
                             {
                                 "approval_id": "apr-1",
-                                "action": "allow",
+                                "decision": "allow",
                                 "reason": "read-only context check",
                                 "remember": False,
                             }
@@ -5856,7 +5810,7 @@ class ChairmanFlowTests(unittest.TestCase):
             ]
             self.assertEqual(records[-1]["type"], "chair_review_lost_queue_event")
 
-    def test_refresh_chair_review_state_accepts_reassignment_aliases_and_preserves_separation(self) -> None:
+    def test_refresh_chair_review_state_applies_reassignments_and_preserves_separation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             review_dir = root / "chair-reviews"
@@ -5878,16 +5832,16 @@ class ChairmanFlowTests(unittest.TestCase):
                             {
                                 "task_id": "OPX-MD-003",
                                 "role": "owner",
-                                "from_agent": "Codex2",
-                                "to_agent": "Codex",
-                                "rationale": "Codex2 hit repeated terminal failures.",
+                                "from": "Codex2",
+                                "to": "Codex",
+                                "reason": "Codex2 hit repeated terminal failures.",
                             },
                             {
                                 "task_id": "OPX-MD-003",
-                                "field": "reviewer",
+                                "role": "reviewer",
                                 "from": "Codex",
                                 "to": "Claude",
-                                "rationale": "Keep owner and reviewer separate after the owner move.",
+                                "reason": "Keep owner and reviewer separate after the owner move.",
                             },
                         ],
                         "task_actions": [],
@@ -7064,12 +7018,15 @@ class ChairmanFlowTests(unittest.TestCase):
             "provider_pauses": {
                 "claude": {
                     "kind": "auth",
+                    "scope": "lane",
+                    "lane_id": "claude",
+                    "schema": 3,
                     "reason": "Invalid authentication credentials",
                     "paused_at": "2026-04-30T12:51:53Z",
                     "resume_at": None,
                 }
             },
-            "quota_paused_agents": {},
+            "provider_pause_schema": 3,
         }
         provider_report = {
             "providers": {
@@ -7098,7 +7055,6 @@ class ChairmanFlowTests(unittest.TestCase):
                     "resume_at": None,
                 }
             },
-            "quota_paused_agents": {},
         }
         provider_report = {"providers": {"claude": {"auth_ready": True}}}
 
@@ -7182,18 +7138,15 @@ class ChairmanFlowTests(unittest.TestCase):
             "provider_pauses": {
                 "codex2": {
                     "kind": "quota",
+                    "scope": "lane",
+                    "lane_id": "codex2",
+                    "schema": 3,
                     "reason": "The worker log ended with repeated usage limit errors and a retry time of Jan 1, 2020 12:58 AM.",
                     "paused_at": "2026-06-28T17:03:39Z",
                     "resume_at": None,
                 }
             },
-            "quota_paused_agents": {
-                "codex2": {
-                    "reason": "The worker log ended with repeated usage limit errors and a retry time of Jan 1, 2020 12:58 AM.",
-                    "paused_at": "2026-06-28T17:03:39Z",
-                    "resume_at": None,
-                }
-            },
+            "provider_pause_schema": 3,
         }
         provider_report = {"providers": {"codex2": {"auth_ready": True}}}
         fresh_report = {"providers": {"codex2": {"installed": True, "auth_ready": True}}}
@@ -7203,7 +7156,6 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(expired, ["codex2"])
         self.assertNotIn("codex2", state["provider_pauses"])
-        self.assertNotIn("quota_paused_agents", state)
 
     def test_reason_hint_pause_stays_paused_until_probe_clears_it(self) -> None:
         config = {"agents": {"codex2": {"display_name": "Codex2", "provider": "codex2"}}}
@@ -7759,8 +7711,8 @@ class BreakFullDeadlockTests(unittest.TestCase):
             "workers": {},
             "queue": {"events": {}},
             "chair_review": {"blocked": {"reason": "no lane"}},
-            "provider_pauses": {"claude2": {"kind": "auth", "resume_at": None, "paused_at": supervisor.utc_now()}},
-            "quota_paused_agents": {},
+            "provider_pause_schema": 3,
+            "provider_pauses": {"claude2": {"kind": "auth", "scope": "lane", "lane_id": "claude2", "schema": 3, "resume_at": None, "paused_at": supervisor.utc_now()}},
         }
 
     _STATUS = {"tasks": [{"id": "T1", "status": "backlog"}]}
@@ -7799,7 +7751,6 @@ class BreakFullDeadlockTests(unittest.TestCase):
         state = self._wedged_state()
         state["chair_review"] = {}
         state["provider_pauses"] = {}
-        state["quota_paused_agents"] = {}
         with mock.patch.object(supervisor, "_force_recovery_probe") as probe:
             changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
         self.assertFalse(changed)
@@ -8765,30 +8716,10 @@ class SupervisorTickContainmentTests(unittest.TestCase):
 class IdentityScopedPauseTests(unittest.TestCase):
     def test_antigravity_quota_probe_clears_pause_before_reset_hint(self) -> None:
         config = {"agents": {"gemini": {"provider": "gemini", "adapter": "antigravity"}}, "providers": {"gemini": {"antigravity": {"cli": "agy"}}}, "supervisor": {"provider_quota_recovery_probe_cooldown_seconds": 1}}
-        state = {"provider_pause_schema": 2, "provider_pauses": {"gemini": {"kind": "quota", "scope": "lane", "lane_id": "gemini", "reason": "quota", "resume_at": 9999999999, "resume_at_source": "reason_hint"}}}
+        state = {"provider_pause_schema": 3, "provider_pauses": {"gemini": {"kind": "quota", "scope": "lane", "lane_id": "gemini", "schema": 3, "reason": "quota", "resume_at": 9999999999, "resume_at_source": "reason_hint"}}}
         with mock.patch.object(supervisor, "_antigravity_quota_recovery_probe", return_value=(True, "inference_ok")), mock.patch.object(supervisor, "write_activity_log"):
             self.assertEqual(supervisor.expire_provider_pauses(config, state, {"providers": {}}), ["gemini"])
         self.assertEqual(state["provider_pauses"], {})
-    def test_legacy_pause_state_is_migrated_and_untrusted_command_output_is_dropped(self) -> None:
-        state = {
-            "provider_pauses": {
-                "codex": {"kind": "quota", "reason": '{"type":"item.completed","item":{}}'}
-            },
-            "quota_paused_agents": {},
-        }
-        registry = supervisor.provider_pause_registry(state)
-        self.assertEqual(state["provider_pause_schema"], 3)
-        self.assertNotIn("codex", registry)
-
-    def test_unscoped_legacy_quota_pause_does_not_block_current_codex2_identity(self) -> None:
-        state = {"provider_pause_schema": 2, "provider_pauses": {"codex2": {"kind": "quota", "scope": "lane", "lane_id": "codex2", "reason": "old quota", "resume_at": 9999999999}}}
-        config = {"agents": {"codex2": {"provider": "codex2"}}}
-        report = {"providers": {"codex2": {"auth_ready": True, "identity": {"fingerprint": "new", "quota_pool": "codex:new:terra"}}}}
-        self.assertFalse(supervisor.is_agent_dispatch_paused(config, state, "codex2", provider_report=report))
-        pause = next(iter(supervisor.provider_pause_registry(state).values()))
-        self.assertEqual(pause["scope"], "legacy")
-        self.assertTrue(pause["legacy_unscoped"])
-
     def test_shared_quota_pool_pauses_both_lanes(self) -> None:
         identity = {"fingerprint": "same", "quota_pool": "codex:same:terra"}
         report = {

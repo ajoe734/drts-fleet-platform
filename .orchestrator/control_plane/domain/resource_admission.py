@@ -110,13 +110,7 @@ def decide(
     if is_heavy and heavy >= int(cfg["max_heavy_workers"]):
         return AdmissionDecision(False, "heavy verification worker limit reached", execution, control, heavy)
     if not is_control and agent_id:
-        # ready_dispatcher is canonical at the config root. Keep the nested
-        # lookup only as a compatibility fallback for older deployments.
-        ready = dict(
-            config.get("ready_dispatcher")
-            or (config.get("supervisor") or {}).get("ready_dispatcher", {})
-            or {}
-        )
+        ready = dict(config.get("ready_dispatcher") or {})
         per_lane = dict(ready.get("max_tasks_per_agent_by_lane") or {})
         limit = int(per_lane.get(str(agent_id).strip().lower(), ready.get("max_tasks_per_agent", 1)) or 0)
         if lane_workers >= max(0, limit):

@@ -6,7 +6,6 @@ Lane names are stable scheduler handles; the account behind a profile is not.
 This module deliberately keeps those concerns separate.
 """
 
-from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Mapping
 
@@ -30,14 +29,6 @@ def quota_pool_key(provider_family: str, identity: str | None, quota_scope: str 
     family = str(provider_family or "").strip().lower()
     scope = str(quota_scope or "default").strip().lower() or "default"
     return f"{family}:{identity}:{scope}"
-
-
-def lane_identity_changed(previous: Mapping[str, Any] | None, current: Mapping[str, Any] | None) -> bool:
-    if not previous or not current:
-        return False
-    old = str(previous.get("fingerprint") or "")
-    new = str(current.get("fingerprint") or "")
-    return bool(old and new and old != new)
 
 
 def worker_capacity_counts(workers: Mapping[str, Any], lane_id: str) -> dict[str, int]:
@@ -65,10 +56,3 @@ def pause_matches_lane(pause: Mapping[str, Any], identity: Mapping[str, Any] | N
     if scope == "quota_pool":
         return bool(pool_key and pause.get("quota_pool") == pool_key)
     return False
-
-
-@dataclass(frozen=True)
-class LaneAvailability:
-    state: str
-    dispatchable: bool
-    reason: str | None = None

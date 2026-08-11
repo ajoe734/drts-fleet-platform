@@ -1,6 +1,5 @@
 from control_plane.domain.lane_health import (
     identity_fingerprint,
-    lane_identity_changed,
     pause_matches_lane,
     quota_pool_key,
     worker_capacity_counts,
@@ -15,11 +14,10 @@ def test_identity_and_quota_pool_are_stable_without_exposing_account() -> None:
     assert quota_pool_key("codex", identity, "terra") == f"codex:{identity}:terra"
 
 
-def test_identity_change_does_not_inherit_a_scoped_pause() -> None:
+def test_scoped_pause_does_not_match_another_identity() -> None:
     old = {"fingerprint": identity_fingerprint("codex", "old")}
     new = {"fingerprint": identity_fingerprint("codex", "new")}
     pause = {"scope": "identity", "identity_fingerprint": old["fingerprint"]}
-    assert lane_identity_changed(old, new)
     assert not pause_matches_lane(pause, new, None)
 
 

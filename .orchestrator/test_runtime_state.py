@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-import runtime_state
+from control_plane.infra import runtime_repo as runtime_state
 
 
 class RuntimeStateMigrationTests(unittest.TestCase):
@@ -29,28 +29,6 @@ class RuntimeStateMigrationTests(unittest.TestCase):
             {"checked": 1, "skipped": 1},
         )
 
-    def test_migrate_state_preserves_quota_paused_agents(self) -> None:
-        raw = {
-            "version": 2,
-            "queue": {"events": {}},
-            "workers": {},
-            "approvals": {"last_reconciled_at": None},
-            "quota_paused_agents": {
-                "qwen": {
-                    "reason": "Qwen OAuth quota exceeded",
-                    "resume_at": 9999999999,
-                    "paused_at": "2026-04-15T16:44:26Z",
-                }
-            },
-            "supervisor": {"pid": 1234, "started_at": "2026-04-15T16:44:26Z", "last_heartbeat_at": "2026-04-15T16:44:30Z"},
-        }
-
-        migrated = runtime_state.migrate_state(raw)
-
-        self.assertIn("quota_paused_agents", migrated)
-        self.assertEqual(migrated["quota_paused_agents"]["qwen"]["reason"], "Qwen OAuth quota exceeded")
-        self.assertEqual(migrated["provider_pauses"]["qwen"]["kind"], "quota")
-
     def test_migrate_state_initializes_chair_review_and_failure_streaks(self) -> None:
         migrated = runtime_state.migrate_state({"version": 2})
 
@@ -65,6 +43,9 @@ class RuntimeStateMigrationTests(unittest.TestCase):
         migrated = runtime_state.migrate_state(
             {
                 "underutilization": {"last_ratio": 0.25},
+                "tasks": {"TASK-1": {"status": "review"}},
+                "quota_paused_agents": {"codex": {"kind": "quota"}},
+                "pause_migration": {"legacy": True},
                 "chair_review": {
                     "sidecar_approved_until": "2026-04-15T17:00:00Z",
                     "max_sidecars": 2,
@@ -74,21 +55,12 @@ class RuntimeStateMigrationTests(unittest.TestCase):
         )
 
         self.assertNotIn("underutilization", migrated)
+        self.assertNotIn("tasks", migrated)
+        self.assertNotIn("quota_paused_agents", migrated)
+        self.assertNotIn("pause_migration", migrated)
         self.assertNotIn("sidecar_approved_until", migrated["chair_review"])
         self.assertNotIn("max_sidecars", migrated["chair_review"])
         self.assertNotIn("blocked_sidecar_parents", migrated["chair_review"])
-
-    def test_migrate_state_moves_legacy_task_mirror_to_watcher_cursor(self) -> None:
-        migrated = runtime_state.migrate_state(
-            {"version": 3, "tasks": {"TASK-1": {"status": "review"}}}
-        )
-
-        self.assertEqual(migrated["version"], 5)
-        self.assertNotIn("tasks", migrated)
-        self.assertEqual(
-            migrated["watcher"]["task_snapshots"]["TASK-1"]["status"],
-            "review",
-        )
 
     def test_upsert_and_clear_dispatch_pause(self) -> None:
         state = runtime_state.default_state()
@@ -106,7 +78,7 @@ class RuntimeStateMigrationTests(unittest.TestCase):
 
         runtime_state.upsert_dispatch_pause(state, pause)
         self.assertEqual(len(state["dispatch_pauses"]), 1)
-        self.assertEqual(runtime_state.dispatch_pauses_for_task(state, "P3-002")[0]["raw_ref"], pause["raw_ref"])
+        self.assertEqual(state["dispatch_pauses"][0]["raw_ref"], pause["raw_ref"])
 
         updated = dict(pause)
         updated["summary"] = "provider failure: retry scheduled"

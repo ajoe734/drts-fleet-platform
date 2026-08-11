@@ -242,7 +242,6 @@ def build_control_plane_summary(
             "active_worker_count": len(active_workers),
             "provider_pauses": slim_provider_pauses,
             "pause_schema": runtime.get("provider_pause_schema", 1),
-            "pause_migration": runtime.get("pause_migration", {}),
             "dispatch_pauses": {
                 "total": len(dispatch_pauses),
                 "by_failure_kind": dict(sorted(dispatch_pause_counts.items())),

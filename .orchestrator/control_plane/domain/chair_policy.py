@@ -23,34 +23,6 @@ def validate_string_list(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def normalize_approval_action(action: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = dict(action)
-    if not str(normalized.get("decision") or "").strip() and str(
-        normalized.get("action") or ""
-    ).strip():
-        normalized["decision"] = normalized.get("action")
-    return normalized
-
-
-def normalize_reassignment_action(action: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = dict(action)
-    if not str(normalized.get("role") or "").strip() and str(
-        normalized.get("field") or ""
-    ).strip():
-        normalized["role"] = normalized.get("field")
-    if not str(normalized.get("from") or "").strip():
-        normalized["from"] = normalized.get("from_agent") or normalized.get(
-            "fromAgent"
-        )
-    if not str(normalized.get("to") or "").strip():
-        normalized["to"] = normalized.get("to_agent") or normalized.get("toAgent")
-    if not str(normalized.get("reason") or "").strip() and str(
-        normalized.get("rationale") or ""
-    ).strip():
-        normalized["reason"] = normalized.get("rationale")
-    return normalized
-
-
 def normalize_review_defaults(
     payload: Any, settings: Mapping[str, Any]
 ) -> Any:
@@ -95,7 +67,7 @@ def validate_review_payload(payload: Any) -> str | None:
     for raw in payload.get("approval_actions", []):
         if not isinstance(raw, dict):
             return "approval_actions items must be objects"
-        action = normalize_approval_action(raw)
+        action = raw
         if action.get("decision") not in {"allow", "deny"}:
             return "approval_actions decision must be allow or deny"
         if not isinstance(action.get("approval_id"), str) or not isinstance(
@@ -108,7 +80,7 @@ def validate_review_payload(payload: Any) -> str | None:
     for raw in payload.get("reassignment_actions", []):
         if not isinstance(raw, dict):
             return "reassignment_actions items must be objects"
-        action = normalize_reassignment_action(raw)
+        action = raw
         if action.get("role") not in {"owner", "reviewer"}:
             return "reassignment_actions role must be owner or reviewer"
         if any(

@@ -101,9 +101,7 @@ RETIRED_AGENTS = {
 }
 
 AGENT_ALIASES = {
-    "grok": "Copilot",
     "copilot": "Copilot",
-    "copilot (legacy alias)": "Copilot",
     "copilot host": "Copilot",
     "copilot_host": "Copilot",
     "claude2": "Claude2",
@@ -689,9 +687,6 @@ def canonical_agent_name(name: str | None) -> str:
     trimmed = str(name).strip()
     if not trimmed:
         return ""
-    legacy_alias_match = re.fullmatch(r"(.+?)\s+\(legacy alias\)", trimmed, re.IGNORECASE)
-    if legacy_alias_match:
-        trimmed = legacy_alias_match.group(1).strip()
     canonical_by_lower = {agent.lower(): agent for agent in {**KNOWN_AGENTS, **RETIRED_AGENTS}}
     lowered = trimmed.lower()
     if lowered in canonical_by_lower:

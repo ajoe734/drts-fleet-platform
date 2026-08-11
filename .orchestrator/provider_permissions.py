@@ -45,12 +45,6 @@ def _find_extension(prefix: str) -> tuple[Path | None, str | None]:
     return path, version
 
 
-def _load_package_json(path: Path | None) -> dict[str, Any]:
-    if not path:
-        return {}
-    return load_json(path / "package.json", default={}) or {}
-
-
 def _workspace_settings() -> dict[str, Any]:
     return load_json(WORKSPACE_SETTINGS_PATH, default={}) or {}
 
@@ -222,12 +216,6 @@ def _gemini_auth_ready(
     return False
 
 
-def _read_text(path: Path) -> str:
-    if not path.exists():
-        return ""
-    return path.read_text(encoding="utf-8", errors="ignore")
-
-
 def _code_cli_info() -> dict[str, Any]:
     binary = command_exists("code")
     if not binary:
@@ -243,12 +231,6 @@ def _code_cli_info() -> dict[str, Any]:
         "code_chat_available": code_chat_available,
         "notes": "Verified via local CLI help output.",
     }
-
-
-def _command_help_contains(command: list[str], needle: str) -> bool:
-    result = run_command(command)
-    output = (result.stdout or "") + (result.stderr or "")
-    return needle in output
 
 
 def _gh_version(binary: str | None) -> tuple[int, int, int] | None:
@@ -573,15 +555,11 @@ def desired_claude_local_settings(config: dict[str, Any], current: dict[str, Any
         next_permissions["disableBypassPermissionsMode"] = verified_policy["disableBypassPermissionsMode"]
     hooks = existing.get("hooks", {})
     merged_hooks = {**hooks}
-    legacy_hook_snippets = (
-        "python3 .orchestrator/permission_broker.py hook",
-        "permission_broker.py log-hook",
-    )
     for event, hook_entries in _verified_claude_hooks().items():
         existing_entries = [
             entry
             for entry in hooks.get(event, [])
-            if not any(snippet in json.dumps(entry, sort_keys=True) for snippet in legacy_hook_snippets)
+            if "permission_broker.py" not in json.dumps(entry, sort_keys=True)
         ]
         serialized_existing = {json.dumps(entry, sort_keys=True) for entry in existing_entries}
         merged = list(existing_entries)
@@ -938,39 +916,6 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
                 "notes": [
                     "The installed Copilot Chat extension exposes background-agent, cloud-agent, and Claude-agent sessions in VS Code.",
                     "Local worker automation requires the `copilot` CLI plus either `copilot login`, a supported token env var, or `gh auth login`; cloud delegation still requires `gh >= 2.80` plus `gh auth status`.",
-                    "The installed Copilot CLI exposes a verified `--model` flag, so Grok routing can be expressed as a Copilot model selection.",
-                ],
-            },
-            "grok": {
-                "installed": copilot_installed,
-                "host_layer": "Copilot model selection",
-                "delivery_mode": "copilot_local",
-                "approval_mode": "inherits_copilot",
-                "persistent_allow_supported": False,
-                "default_auto_approve_supported": bool(copilot_binary and copilot_auth_ready),
-                "full_access_supported": bool(copilot_binary and copilot_auth_ready),
-                "per_tool_allow_supported": bool(copilot_binary and copilot_auth_ready),
-                "local_cli_worker_supported": bool(copilot_binary and copilot_auth_ready),
-                "vscode_link_supported": bool(copilot_path),
-                "cloud_agent_supported": False,
-                "supports_auto_approve": bool(copilot_binary and copilot_auth_ready),
-                "supports_defer_resume": False,
-                "auth_ready": copilot_auth_ready,
-                "supported_models": [copilot_model_preference.get("grok")] if copilot_model_preference.get("grok") else [],
-                "selected_model": copilot_model_preference.get("grok"),
-                "applied": False,
-                "verified": "partial" if copilot_installed else "unavailable",
-                "version": copilot_version,
-                "paths": {
-                    "host_extension": str(copilot_path) if copilot_path else None,
-                    "copilot_binary": copilot_binary,
-                },
-                "settings": {
-                    "model_preference.grok": copilot_model_preference.get("grok"),
-                },
-                "notes": [
-                    "Grok is treated as a Copilot model preference rather than a standalone provider.",
-                    "The orchestrator uses the verified Copilot CLI `--model` flag to request `grok-code-fast-1` when the Grok target is selected.",
                 ],
             },
         },

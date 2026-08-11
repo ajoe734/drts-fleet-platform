@@ -4,8 +4,6 @@ import unittest
 
 from control_plane.domain.chair_policy import (
     CHAIR_REVIEW_OUTPUT_KEYS,
-    normalize_approval_action,
-    normalize_reassignment_action,
     normalize_review_defaults,
     validate_review_payload,
 )
@@ -33,29 +31,6 @@ def valid_payload() -> dict:
 class ChairPolicyTests(unittest.TestCase):
     def test_accepts_complete_typed_payload(self) -> None:
         self.assertIsNone(validate_review_payload(valid_payload()))
-
-    def test_normalizes_legacy_action_aliases(self) -> None:
-        self.assertEqual(
-            normalize_approval_action({"action": "allow"})["decision"],
-            "allow",
-        )
-        action = normalize_reassignment_action(
-            {
-                "field": "owner",
-                "fromAgent": "Claude",
-                "toAgent": "Codex",
-                "rationale": "capacity",
-            }
-        )
-        self.assertEqual(
-            {key: action[key] for key in ("role", "from", "to", "reason")},
-            {
-                "role": "owner",
-                "from": "Claude",
-                "to": "Codex",
-                "reason": "capacity",
-            },
-        )
 
     def test_defaults_are_policy_input_not_global_config_reads(self) -> None:
         normalized = normalize_review_defaults(

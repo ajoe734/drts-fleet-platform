@@ -20,6 +20,7 @@ from provider_permissions import (
     _provider_uses_antigravity,
     _verified_claude_hooks,
     _verified_claude_policy,
+    desired_claude_local_settings,
     provider_capabilities,
 )
 
@@ -32,6 +33,28 @@ class ProviderPermissionsTest(unittest.TestCase):
             command = entries[0]["hooks"][0]["command"]
             self.assertIn(expected, command)
             self.assertTrue(command.startswith("python3 /"))
+
+    def test_claude_settings_replace_managed_broker_hooks(self) -> None:
+        third_party = {"hooks": [{"type": "command", "command": "echo audit"}]}
+        stale = {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "python3 .orchestrator/permission_broker.py log-hook PreToolUse",
+                }
+            ]
+        }
+
+        settings = desired_claude_local_settings(
+            {}, {"hooks": {"PreToolUse": [third_party, stale]}}
+        )
+
+        entries = settings["hooks"]["PreToolUse"]
+        self.assertIn(third_party, entries)
+        broker_entries = [
+            entry for entry in entries if "permission_broker.py" in json.dumps(entry)
+        ]
+        self.assertEqual(broker_entries, _verified_claude_hooks()["PreToolUse"])
 
     def test_toolsearch_is_auto_allowed(self) -> None:
         evaluation = permission_broker.evaluate_tool_request("ToolSearch", {}, {})

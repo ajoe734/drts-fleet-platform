@@ -225,13 +225,6 @@
       "adapter": "copilot_local",
       "wake_template": ".orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/copilot.md"
-    },
-    "grok": {
-      "display_name": "Copilot (legacy alias)",
-      "provider": "copilot",
-      "adapter": "copilot_local",
-      "wake_template": ".orchestrator/templates/wakeup.txt",
-      "file_inbox_path": ".llm-inbox/grok.md"
     }
   },
   "providers": {
@@ -381,7 +374,6 @@
         "path": ".llm-inbox/copilot.md",
         "open_in_vscode": false,
         "agent_paths": {
-          "grok": ".llm-inbox/grok.md",
           "copilot": ".llm-inbox/copilot.md"
         }
       },
@@ -407,7 +399,6 @@
       },
       "model_preference": {
         "default": "claude",
-        "grok": null,
         "supported": ["claude"]
       }
     }

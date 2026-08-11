@@ -274,11 +274,6 @@ def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
     return None
 
 
-def _detect_json_worker_failure(line: str) -> str | None:
-    signal = _detect_json_worker_failure_signal(line)
-    return signal.reason if signal else None
-
-
 def detect_failure_signal_in_lines(lines: list[str]) -> WorkerFailureSignal | None:
     ignored_indexes = _captured_tool_log_line_indexes(lines)
     fallback: WorkerFailureSignal | None = None

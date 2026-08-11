@@ -71,14 +71,14 @@ class ResourceAdmissionTests(unittest.TestCase):
 
     def test_enforces_lane_capacity_for_direct_queue_delivery(self) -> None:
         config = _config()
-        config["supervisor"]["ready_dispatcher"] = {"max_tasks_per_agent": 1}
+        config["ready_dispatcher"] = {"max_tasks_per_agent": 1}
         state = {"workers": {"run": {"status": "waiting_approval", "agent_id": "claude"}}}
         decision = decide(config, state, {}, agent_id="claude")
         self.assertFalse(decision.allowed)
 
     def test_control_worker_does_not_consume_execution_lane_capacity(self) -> None:
         config = _config()
-        config["supervisor"]["ready_dispatcher"] = {"max_tasks_per_agent": 1}
+        config["ready_dispatcher"] = {"max_tasks_per_agent": 1}
         state = {
             "workers": {
                 "chair": {"status": "running", "agent_id": "codex", "role": "chair"},

@@ -9,10 +9,9 @@ from .dispatch_policy import (
     dependency_signature,
     resolve_dispatch_target,
 )
-from .models import ControlPlaneSnapshot, TaskRecord, WorkerRecord
+from .models import TaskRecord, WorkerRecord
 
 __all__ = [
-    "ControlPlaneSnapshot",
     "DispatchDecision",
     "DispatchReason",
     "ReadyDispatchPolicy",

@@ -56,10 +56,6 @@ class TaskBoardCommandExecutor:
     def __init__(self, runtime: TaskBoardCommandRuntime) -> None:
         self.runtime = runtime
 
-    def execute(self, command: str, args: list[str]) -> int:
-        self.execute_with_result(command, args)
-        return 0
-
     def execute_with_result(self, command: str, args: list[str]) -> Any:
         handler = self.runtime.read_only_commands.get(command)
         if handler is not None:
