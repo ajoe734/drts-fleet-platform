@@ -3553,6 +3553,77 @@ def _antigravity_quota_recovery_probe(config: dict[str, Any], agent_id: str) -> 
     return False, f"probe_exit_{result.returncode}:{failure.get('kind') or 'unknown'}"
 
 
+def _provider_auth_recovery_probe(config: dict[str, Any], agent_id: str) -> tuple[bool, str]:
+    """Verify recovered credentials with a bounded real provider request."""
+    agent = agent_config_for(config, agent_id)
+    adapter = str(agent.get("adapter") or "").strip()
+    provider = config.get("providers", {}).get(str(agent.get("provider") or ""), {})
+    if adapter == "antigravity":
+        return _antigravity_quota_recovery_probe(config, agent_id)
+    if adapter != "codex" or not isinstance(provider, dict):
+        return False, "unsupported_adapter"
+
+    settings = provider.get("codex", {}) if isinstance(provider.get("codex"), dict) else {}
+    cli = str(settings.get("cli") or "codex")
+    timeout = max(
+        10,
+        int(config.get("supervisor", {}).get("provider_auth_probe_timeout_seconds", 45)),
+    )
+    command = [
+        cli,
+        "exec",
+        "-C",
+        tempfile.gettempdir(),
+        "-s",
+        "read-only",
+        "--skip-git-repo-check",
+        "--ignore-rules",
+        "--ephemeral",
+        "--json",
+    ]
+    model = str(settings.get("model") or "").strip()
+    if model:
+        command.extend(["--model", model])
+    command.append("Reply with exactly OK. Do not use tools.")
+    env = os.environ.copy()
+    config_home = str(settings.get("config_home") or "").strip()
+    if config_home:
+        env["CODEX_HOME"] = os.path.expanduser(config_home)
+    try:
+        result = subprocess.run(
+            command,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"probe_error:{type(exc).__name__}"
+    output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    failure = classify_domain_failure(config, {"provider": agent_id}, output).as_mapping()
+    if result.returncode == 0 and failure.get("kind") not in {"auth", "auth_terminal"}:
+        return True, "inference_ok"
+    return False, f"probe_exit_{result.returncode}:{failure.get('kind') or 'unknown'}"
+
+
+def _pause_matching_lanes(
+    config: dict[str, Any], provider_report: dict[str, Any], entry: dict[str, Any]
+) -> list[str]:
+    scope = str(entry.get("scope") or "lane")
+    lane_id = str(entry.get("lane_id") or "")
+    if scope == "lane":
+        return [lane_id] if lane_id else []
+    matches: list[str] = []
+    for candidate in (config.get("agents", {}) or {}):
+        info = provider_info_for_agent(config, provider_report, candidate)
+        identity = info.get("identity") if isinstance(info.get("identity"), dict) else None
+        pool = str((identity or {}).get("quota_pool") or "") or None
+        if pause_matches_lane(entry, identity, pool):
+            matches.append(str(candidate))
+    return matches
+
+
 def expire_provider_pauses(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -3560,6 +3631,7 @@ def expire_provider_pauses(
 ) -> list[str]:
     pauses = provider_pause_registry(state)
     expired: list[str] = []
+    auth_probe_candidates: list[str] = []
     recovery_probe_candidates: list[str] = []
     now_ts = datetime.now(timezone.utc).timestamp()
     recovery_probe_cooldown = float(
@@ -3595,10 +3667,13 @@ def expire_provider_pauses(
                 )
                 kind = "capacity"
         if kind == "auth":
-            # Auth failures from real worker runs are stronger evidence than a
-            # lightweight capability probe. Keep the lane paused until a human or
-            # explicit repair flow clears it. (break_full_deadlock may clear it as
-            # a last resort when the whole fleet is wedged.)
+            last_probe_at = _parse_iso_utc(str(entry.get("last_auth_probe_at") or ""))
+            if (
+                last_probe_at is None
+                or (datetime.now(timezone.utc) - last_probe_at).total_seconds()
+                >= recovery_probe_cooldown
+            ):
+                auth_probe_candidates.append(pause_key)
             continue
         # Auth/catalog checks cannot prove quota. For Antigravity lanes, issue a
         # tiny real request at a bounded cadence so an early provider reset
@@ -3635,6 +3710,31 @@ def expire_provider_pauses(
             pauses.pop(pause_key, None)
             expired.append(pause_key)
             console_log(f"provider pause expired: scope={pause_key} now available", quiet=SUPERVISOR_LOG_QUIET)
+    for pause_key in auth_probe_candidates:
+        entry = pauses.get(pause_key)
+        if not isinstance(entry, dict):
+            continue
+        entry["last_auth_probe_at"] = utc_now()
+        probe_results: dict[str, str] = {}
+        for lane_id in _pause_matching_lanes(config, provider_report, entry):
+            recovered, probe_result = _provider_auth_recovery_probe(config, lane_id)
+            probe_results[lane_id] = probe_result
+            if not recovered:
+                continue
+            pauses.pop(pause_key, None)
+            expired.append(pause_key)
+            write_activity_log(
+                config,
+                {
+                    "type": "provider_auth_recovered",
+                    "provider": lane_id,
+                    "pause_scope": pause_key,
+                    "message": f"Cleared auth pause after real inference probe ({probe_result}).",
+                },
+            )
+            break
+        if pause_key in pauses:
+            entry["last_auth_probe_results"] = probe_results
     if recovery_probe_candidates:
         fresh_report = _force_recovery_probe(config) or provider_report
         probe_stamp = utc_now()

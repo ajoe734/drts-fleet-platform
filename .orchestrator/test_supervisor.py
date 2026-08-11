@@ -7903,6 +7903,46 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertIn("claude", state["provider_pauses"])
         self.assertTrue(supervisor.is_agent_dispatch_paused(config, state, "claude", provider_report=provider_report))
 
+    def test_identity_auth_pause_clears_after_real_probe_on_current_lane(self) -> None:
+        config = {
+            "agents": {
+                "codex": {"display_name": "Codex", "provider": "codex", "adapter": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2", "adapter": "codex"},
+            }
+        }
+        state = {
+            "provider_pause_schema": 3,
+            "provider_pauses": {
+                "identity:codex:account-b": {
+                    "kind": "auth",
+                    "scope": "identity",
+                    "lane_id": "codex",
+                    "identity_fingerprint": "account-b",
+                    "reason": "Refresh token was revoked",
+                    "paused_at": "2026-08-09T00:00:00Z",
+                    "resume_at": None,
+                }
+            },
+        }
+        provider_report = {
+            "providers": {
+                "codex": {"identity": {"fingerprint": "account-a"}},
+                "codex2": {"identity": {"fingerprint": "account-b"}},
+            }
+        }
+
+        with (
+            mock.patch.object(
+                supervisor, "_provider_auth_recovery_probe", return_value=(True, "inference_ok")
+            ) as probe,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            expired = supervisor.expire_provider_pauses(config, state, provider_report)
+
+        self.assertEqual(expired, ["identity:codex:account-b"])
+        self.assertEqual(probe.call_args.args[1], "codex2")
+        self.assertEqual(state["provider_pauses"], {})
+
     def test_stale_auth_pause_with_capacity_evidence_is_reclassified(self) -> None:
         config = {
             "agents": {"gemini": {"display_name": "Gemini", "provider": "gemini"}},
