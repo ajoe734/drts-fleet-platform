@@ -36,6 +36,7 @@ from control_plane.domain.dispatch_policy import (
     DispatchDecision as DomainDispatchDecision,
     DispatchReason as DomainDispatchReason,
     ReadyDispatchPolicy,
+    assignment_remains_valid as domain_assignment_remains_valid,
     build_dispatch_event as build_domain_dispatch_event,
     ci_status_reports_failure,
     dependencies_satisfied as domain_dependencies_satisfied,
@@ -142,6 +143,7 @@ URL_PATTERN = re.compile(r"https://github\.com/[^\s)]+")
 
 LOCAL_TZ = ZoneInfo("Asia/Taipei")
 SUPERVISOR_LOG_QUIET = False
+TASK_BOARD_COMMAND_SCRIPT = THIS_DIR.parent / "scripts" / "ai_status.py"
 # Process-lifetime counter for the fallback-reap oscillation breaker. Kept as a
 # module global (not in `state`) because `state` is reloaded from disk each cycle,
 # which would reset per-cycle increments and defeat the cap. Resets on restart.
@@ -204,148 +206,6 @@ WORKSPACE_BASELINE_MARKERS = (
     "worktree toolchain",
 )
 TASK_ID_MENTION_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+\b")
-def prune_done_handoffs(status: dict[str, Any], keep: int = 500) -> None:
-    """Trim ``status["handoffs"]`` in place, keeping all pending entries plus
-    the most recent ``keep`` done entries.
-
-    ai-status.json accumulates handoff records forever; each completed task
-    appends 1+ entries with status="done" that supervisor never reads again
-    (see the ``pending_handoffs = [...]`` filter and the iteration in
-    ``ensure_review_finalize_handoff`` / ``ensure_owner_resume_handoff`` —
-    both consume only pending entries). Without pruning the file grew to
-    ~9 MB with 17k handoffs by the 2026-05-26 incident, slowing the
-    dashboard fetch to the point of appearing dead. See
-    feedback_ai_status_handoff_bloat for the incident write-up.
-
-    Called from ``write_status_with_prune`` (the only sanctioned writer of
-    the status file) so every supervisor cycle that mutates status also
-    bounds the audit-log tail. No-op when handoffs already fit.
-    """
-    handoffs = status.get("handoffs") or []
-    if not isinstance(handoffs, list) or len(handoffs) <= keep:
-        return
-    pending = [x for x in handoffs if x.get("status") != "done"]
-    done = [x for x in handoffs if x.get("status") == "done"]
-    if len(done) <= keep:
-        return
-    status["handoffs"] = pending + done[-keep:]
-
-
-def archive_task_bodies(archive_path: Path | None, dropped: list[dict[str, Any]]) -> None:
-    """Append full bodies of pruned done-tasks to ``ai-task-archive.jsonl`` so
-    their detail stays auditable after the live status file drops them (which
-    keeps only the id in ``archived_task_ids``). Append-only JSONL + O_APPEND is
-    deliberate — it is concurrency-safe, unlike a read-modify-write of one JSON
-    object. Mirrors ``ai_status.py.archive_task_bodies``. Best-effort: archival
-    must never block or fail a status write."""
-    if not archive_path or not dropped:
-        return
-    stamp = utc_now()
-    try:
-        with archive_path.open("a", encoding="utf-8") as handle:
-            for task in dropped:
-                if not task.get("id"):
-                    continue
-                record = dict(task)
-                record["_archived_at"] = stamp
-                record["_archived_by"] = "supervisor.py"
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
-
-
-def prune_done_tasks(
-    status: dict[str, Any], keep: int = 150, archive_path: Path | None = None
-) -> None:
-    """Trim ``status["tasks"]`` in place, keeping every non-done task plus the
-    most recent ``keep`` done tasks. Dropped done-task ids are recorded in
-    ``status["archived_task_ids"]``; their full bodies are appended to
-    ``archive_path`` (``ai-task-archive.jsonl``) when supplied.
-
-    ai-status.json's tasks array accumulates every completed task forever
-    (646 done / ~1.0 MB by the 2026-05-30 incident), pushing the file past the
-    256 KB cap the chair/coordination worker's Read tool enforces — so the only
-    healthy lanes could no longer read machine truth and the supervisor thrashed
-    re-queuing chair reviews. Dropping done tasks is dependency-safe:
-    ``dependencies_satisfied`` treats a dep missing from the task map as
-    archived/done (see its comment), so archived done tasks still satisfy
-    downstream deps. See feedback_ai_status_handoff_bloat for the write-up.
-    """
-    tasks = status.get("tasks") or []
-    if not isinstance(tasks, list):
-        return
-    done = [t for t in tasks if str(t.get("status") or "").lower() == "done"]
-    if len(done) <= keep:
-        return
-    dropped = done[:-keep] if keep > 0 else done
-    dropped_ids = {t.get("id") for t in dropped if t.get("id")}
-    if not dropped_ids:
-        return
-    archive_task_bodies(archive_path, dropped)
-    status["tasks"] = [
-        t
-        for t in tasks
-        if str(t.get("status") or "").lower() != "done" or t.get("id") not in dropped_ids
-    ]
-    archived = status.setdefault("archived_task_ids", [])
-    if isinstance(archived, list):
-        already = set(archived)
-        for tid in (t.get("id") for t in dropped):
-            if tid and tid not in already:
-                archived.append(tid)
-                already.add(tid)
-
-
-def prune_blockers(status: dict[str, Any], keep: int = 100) -> None:
-    """Trim ``status["blockers"]`` keeping every unresolved blocker plus the most
-    recent ``keep`` resolved ones. Resolved blockers accumulate forever and are
-    never re-read once closed; only open blockers drive chair decisions."""
-    blockers = status.get("blockers") or []
-    if not isinstance(blockers, list):
-        return
-    resolved = [b for b in blockers if str(b.get("status") or "").lower() == "resolved"]
-    if len(resolved) <= keep:
-        return
-    dropped = {id(b) for b in (resolved[:-keep] if keep > 0 else resolved)}
-    status["blockers"] = [b for b in blockers if id(b) not in dropped]
-
-
-def write_status_with_prune(
-    status_path,
-    status: dict[str, Any],
-    *,
-    config: dict[str, Any] | None = None,
-    keep_handoffs: int | None = None,
-    keep_done_tasks: int | None = None,
-    keep_blockers: int | None = None,
-) -> None:
-    """Standard status-file write that bounds the unbounded audit tails (done
-    handoffs, done tasks, resolved blockers) so ai-status.json stays under the
-    256 KB cap the chair/coordination workers' Read tool enforces.
-
-    All supervisor paths that previously called ``write_json(status_path, status)``
-    now route through this wrapper so the prune cannot be forgotten in a new code
-    path. Keep counts are tunable via the ``supervisor.handoff_keep_count`` /
-    ``supervisor.task_keep_count`` / ``supervisor.blocker_keep_count`` config keys
-    for hosts that want a longer audit tail.
-    """
-    supervisor_cfg = (config or {}).get("supervisor", {}) if isinstance(config, dict) else {}
-    if keep_handoffs is None:
-        keep_handoffs = int(supervisor_cfg.get("handoff_keep_count", 200))
-    if keep_done_tasks is None:
-        keep_done_tasks = int(supervisor_cfg.get("task_keep_count", 150))
-    if keep_blockers is None:
-        keep_blockers = int(supervisor_cfg.get("blocker_keep_count", 100))
-    prune_done_handoffs(status, keep=keep_handoffs)
-    prune_done_tasks(
-        status,
-        keep=keep_done_tasks,
-        archive_path=Path(status_path).parent / "ai-task-archive.jsonl",
-    )
-    prune_blockers(status, keep=keep_blockers)
-    write_json(status_path, status)
-
-
 def _sd_notify(message: str) -> None:
     """Send a state message to systemd via the sd_notify protocol.
 
@@ -2577,6 +2437,7 @@ def start_worker_for_request(
         "task_branch": task_branch,
         "workspace_source": workspace_source,
         "request_snapshot": request_snapshot(request),
+        "assignment_lease": dict(request_metadata.get("assignment_lease") or {}),
         "parent_run_id": parent_run_id,
         "retry_count": 0,
         "next_retry_at": None,
@@ -4706,18 +4567,25 @@ def proactive_claim_plan_for_task(
     return None
 
 
-def sync_status_pipeline(config: dict[str, Any]) -> bool:
-    result = run_task_board_command(config, "sync")
-    if result.ok:
-        return True
-    write_activity_log(
+def execute_task_board_command(
+    config: dict[str, Any],
+    command: str,
+    args: list[str] | tuple[str, ...] = (),
+    *,
+    environ: dict[str, str] | None = None,
+):
+    command_env = {
+        "AI_NAME": "Supervisor",
+        "AI_STATUS_PRODUCER": "supervisor_runtime",
+        **(environ or {}),
+    }
+    return run_task_board_command(
         config,
-        {
-            "type": "task_reassignment_sync_failed",
-            "message": f"Status sync failed after reassignment: {result.error}",
-        },
+        command,
+        args,
+        environ=command_env,
+        command_script=TASK_BOARD_COMMAND_SCRIPT,
     )
-    return False
 
 
 # Module-level registry of in-flight reconcile jobs, keyed by canonical
@@ -4731,7 +4599,7 @@ def _start_git_reconcile_job(
     config: dict[str, Any], ref: str = "origin/dev"
 ) -> BackgroundTask[Any]:
     return BackgroundTask(
-        lambda: run_task_board_command(
+        lambda: execute_task_board_command(
             config,
             "reconcile-from-git",
             [ref],
@@ -4935,49 +4803,24 @@ def persist_task_reassignment(
     handoff_from: str | None = None,
     evidence_ref: str | None = None,
 ) -> bool:
-    status_path = config_path(config, "status_file")
     status = load_status(config)
-    tasks = status.get("tasks", []) or []
-    timestamp = utc_now()
-    task = next((item for item in tasks if item.get("id") == task_id), None)
+    task = next((item for item in status.get("tasks", []) or [] if item.get("id") == task_id), None)
     if task is None:
         return False
-
-    old_owner = str(task.get("owner") or "")
-    old_reviewer = str(task.get("reviewer") or "")
-    task["owner"] = new_owner
-    task["reviewer"] = new_reviewer
-    task["last_update"] = timestamp
     short_message = brief_reason_text(message, max_length=280)
-    task["next"] = short_message
-    if evidence_ref:
-        refs = list(task.get("evidence_refs", []) or [])
-        if evidence_ref not in refs:
-            refs.append(evidence_ref)
-        task["evidence_refs"] = refs
-
-    for handoff in status.get("handoffs", []) or []:
-        if handoff.get("task_id") != task_id or handoff.get("status") == "done":
-            continue
-        target = str(handoff.get("to") or "")
-        if target in {old_owner, old_reviewer} and target not in {new_owner, new_reviewer}:
-            handoff["status"] = "done"
-            handoff["resolved_at"] = timestamp
-
-    if handoff_to:
-        status.setdefault("handoffs", []).append(
-            {
-                "task_id": task_id,
-                "from": handoff_from or old_owner or old_reviewer or new_owner,
-                "to": handoff_to,
-                "message": short_message,
-                "status": "pending",
-                "created_at": timestamp,
-            }
-        )
-
-    write_status_with_prune(status_path, status, config=config)
-    return sync_status_pipeline(config)
+    result = execute_task_board_command(
+        config,
+        "system-reassign",
+        [task_id, new_owner, new_reviewer, short_message],
+        environ={
+            "EXPECTED_OWNER": str(task.get("owner") or ""),
+            "EXPECTED_REVIEWER": str(task.get("reviewer") or ""),
+            "HANDOFF_TO": handoff_to or "",
+            "HANDOFF_FROM": handoff_from or "",
+            "EVIDENCE_REF": evidence_ref or "",
+        },
+    )
+    return result.ok
 
 
 def maybe_reassign_task_after_worker_failure(
@@ -5504,26 +5347,23 @@ def apply_worker_reported_block(
         # A sandbox/bootstrap failure happened before task work began. Let the
         # terminal path pause/reassign the lane; never contaminate task truth.
         return False
-    status = load_status(config)
-    task = next((item for item in (status.get("tasks") or []) if item.get("id") == task_id), None)
-    if not isinstance(task, dict):
-        return False
     summary = brief_reason_text(
         reported_reason or "Worker reported a blocker.",
         max_length=280,
     )
-    task["status"] = "blocked"
-    task["next"] = summary
-    task["last_update"] = utc_now()
     result_path = str(worker.get("result_path") or "").strip()
-    if result_path:
-        reference = canonical_relpath(config, Path(result_path))
-        evidence_refs = list(task.get("evidence_refs") or [])
-        if reference not in evidence_refs:
-            evidence_refs.append(reference)
-        task["evidence_refs"] = evidence_refs
-    write_status_with_prune(config_path(config, "status_file"), status, config=config)
-    return sync_status_pipeline(config)
+    evidence_ref = canonical_relpath(config, Path(result_path)) if result_path else ""
+    result = execute_task_board_command(
+        config,
+        "system-block",
+        [task_id, summary],
+        environ={
+            "AI_STATUS_PRODUCER": "worker_result_recovery",
+            "ORCH_RUN_ID": str(worker.get("run_id") or ""),
+            "EVIDENCE_REF": evidence_ref,
+        },
+    )
+    return result.ok
 
 
 def retry_due_workers(
@@ -5832,32 +5672,12 @@ def poll_workers(
         if (
             worker.get("queue_event_id")
             and current_mode == "execution"
-            and not worker_matches_current_assignment(config, worker, task_map)
+            and not worker_assignment_remains_valid(config, worker, task_map)
         ):
             if not alive and task_status in expected_completion_statuses:
                 pass
             else:
                 if worker.get("status") == "superseded":
-                    continue
-                # Dispatch cooldown: protect freshly-dispatched workers
-                # from being killed for an assignment reshuffle. Without
-                # this guard, availability-first claims thrash the worker
-                # pool — a worker that just spawned is wasteful to kill
-                # before it has had a chance to make progress.
-                role_transition = (
-                    str((worker.get("request_snapshot") or {}).get("reason") or "")
-                    == "review_ready_dispatch"
-                    and task_status != "review"
-                )
-                if alive and not role_transition and worker_in_dispatch_cooldown(
-                    worker,
-                    ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
-                ):
-                    # supersede skipped: worker still within dispatch cooldown.
-                    # Intentionally silent — this branch is re-evaluated every
-                    # tick for every protected worker, so logging it floods the
-                    # journal with hundreds of identical lines and buries real
-                    # events. The cooldown check is cheap; only the log was noise.
                     continue
                 if alive:
                     terminate_worker(worker)
@@ -5888,59 +5708,10 @@ def poll_workers(
                 changed = True
                 continue
         if (
-            worker.get("queue_event_id")
-            and current_mode == "execution"
-            and worker.get("status") in active_worker_statuses
-            and higher_priority_ready_task_exists(config, worker, task_map, state=state, active_statuses=active_worker_statuses)
-        ):
-            # Dispatch cooldown: same protection as the assignment-moved
-            # branch. Priority escalation that fires within seconds of a
-            # dispatch is almost always thrashing — the new "higher
-            # priority" task was already visible when this worker was
-            # claimed, so the supervisor should have taken that task
-            # then rather than killing a fresh worker now.
-            if alive and worker_in_dispatch_cooldown(
-                worker,
-                ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
-            ):
-                # priority-escalation supersede skipped: worker still within
-                # dispatch cooldown. Intentionally silent for the same reason as
-                # the assignment-moved branch above — re-evaluated every tick per
-                # worker, so logging it is pure journal noise.
-                continue
-            if alive:
-                terminate_worker(worker)
-            worker["status"] = "superseded"
-            worker["last_event_at"] = utc_now()
-            worker["last_error"] = "Worker superseded to prioritize higher-priority review/finalize work."
-            finalize_queue_event_record(
-                config,
-                state,
-                worker,
-                "completed",
-                worker["last_error"],
-            )
-            write_activity_log(
-                config,
-                {
-                    "type": "worker_superseded",
-                    "provider": worker.get("provider"),
-                    "task_id": worker.get("task_id"),
-                    "message": worker["last_error"],
-                    "worker_run_id": worker.get("run_id"),
-                },
-            )
-            console_log(
-                f"worker superseded for priority escalation: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
-                quiet=SUPERVISOR_LOG_QUIET,
-            )
-            changed = True
-            continue
-        if (
             not alive
             and worker.get("queue_event_id")
             and worker.get("status") in {"fallback", "manual_pending", "retry_backoff", "stalled", "waiting_approval", "suspended_approval"}
-            and not worker_matches_current_assignment(config, worker, task_map)
+            and not worker_assignment_remains_valid(config, worker, task_map)
         ):
             workers.pop(run_id, None)
             finalize_queue_event_record(
@@ -5982,7 +5753,7 @@ def poll_workers(
             and worker.get("queue_event_id")
             and worker.get("status") == "manual_pending"
             and worker.get("mode") == "file_inbox"
-            and worker_matches_current_assignment(config, worker, task_map)
+            and worker_assignment_remains_valid(config, worker, task_map)
             and task_status in redispatch_statuses
             and provider_info.get("auth_ready")
             and provider_info.get("local_cli_worker_supported")
@@ -6510,58 +6281,6 @@ def reconcile_queue_records(config: dict[str, Any], state: dict[str, Any]) -> bo
 
 
 
-def parse_worker_dispatched_at(run_id: str | None) -> datetime | None:
-    """Extract the dispatch timestamp embedded in a worker run_id.
-
-    Production run_ids are formatted as ``<provider>-<YYYYMMDDTHHMMSSZ>-<hash>``
-    (see worker spawn paths). The supervisor never stored a dedicated
-    ``dispatched_at`` field on worker records, so parsing the run_id is the
-    least invasive way to recover the dispatch moment for cooldown checks.
-
-    Returns ``None`` when the run_id is missing or none of its dash-separated
-    components parse as the expected timestamp shape — that preserves prior
-    behaviour for synthetic test fixtures whose run_ids are short slugs like
-    ``run-1`` / ``old-run``.
-    """
-    if not run_id:
-        return None
-    for part in str(run_id).split("-"):
-        try:
-            return datetime.strptime(part, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-    return None
-
-
-def worker_in_dispatch_cooldown(
-    worker: dict[str, Any],
-    cooldown_seconds: int,
-    *,
-    now: datetime | None = None,
-) -> bool:
-    """Return True if the worker is within the dispatch cooldown window.
-
-    Cooldown only protects *running* workers — stalled / fallback / etc.
-    workers must remain recoverable via the normal supersede paths.
-
-    Returns False when:
-      - cooldown_seconds <= 0 (feature disabled)
-      - worker.status is not "running"
-      - run_id has no parseable timestamp (synthetic fixtures, legacy records)
-      - dispatched_at is older than cooldown_seconds
-    """
-    if cooldown_seconds <= 0:
-        return False
-    if worker.get("status") != "running":
-        return False
-    dispatched_at = parse_worker_dispatched_at(worker.get("run_id"))
-    if dispatched_at is None:
-        return False
-    if now is None:
-        now = datetime.now(timezone.utc)
-    return (now - dispatched_at).total_seconds() < cooldown_seconds
-
-
 def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict(config.get("ready_dispatcher", {}) or {})
     settings.setdefault("enabled", True)
@@ -6578,13 +6297,6 @@ def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("max_tasks_per_agent", 1)
     settings.setdefault("max_tasks_per_agent_by_lane", {})
     settings.setdefault("max_dispatches_per_tick", 4)
-    # Dispatch cooldown: a *running* worker dispatched within the last
-    # N seconds is protected from voluntary supersede (assignment-moved
-    # or priority-escalation paths). Dead, stalled, and fallback workers
-    # are NOT protected — recovery flows still work. Default 300s
-    # (5 min) is enough to absorb a normal supervisor reshuffle without
-    # killing real work; set to 0 to disable. See worker_in_dispatch_cooldown.
-    settings.setdefault("dispatch_cooldown_seconds", 300)
     return settings
 
 
@@ -7090,7 +6802,7 @@ def create_sidecar_task(
         "mutates_canonical": mutates_canonical,
         "auto_created_by": "supervisor-underutilization",
     }
-    result = run_task_board_command(
+    result = execute_task_board_command(
         config,
         "assign",
         [sidecar_id, owner, reviewer],
@@ -7519,94 +7231,7 @@ def choose_helper_claim_agent(
     return plan is not None
 
 
-def higher_priority_ready_task_exists(
-    config: dict[str, Any],
-    worker: dict[str, Any],
-    task_map: dict[str, dict[str, Any]],
-    *,
-    state: dict[str, Any] | None = None,
-    active_statuses: set[str] | None = None,
-) -> bool:
-    current_priority = dispatch_reason_priority(worker.get("request_snapshot", {}).get("reason"))
-    if current_priority is None:
-        return False
-
-    agent_id = normalize_agent_id(str(worker.get("agent_id") or worker.get("provider") or ""))
-    agent_name = display_name_for(config, agent_id)
-    current_task_id = str(worker.get("task_id") or "")
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    schema = config.get("schema", {})
-    owner_field = schema.get("assignee_field", "owner")
-    reviewer_field = schema.get("reviewer_field", "reviewer")
-    active_task_agents: set[tuple[str, str]] = set()
-    pending_task_agents: set[tuple[str, str]] = set()
-    if state is not None:
-        normalized_active_statuses = active_statuses or {
-            str(value) for value in settings.get("active_worker_statuses", [])
-        }
-        active_agent_counts = active_worker_agent_counts(state, normalized_active_statuses)
-        try:
-            pending_agent_counts = outstanding_delivery_agent_counts(config, state)
-            _pending_agents, pending_task_agents, _pending_event_keys = outstanding_delivery_indexes(config, state)
-        except (KeyError, OSError):
-            pending_agent_counts = {}
-            pending_task_agents = set()
-        lane_capacity = max_tasks_per_agent_for_lane(settings, agent_id)
-        lane_load = active_agent_counts.get(agent_id, 0) + pending_agent_counts.get(agent_id, 0)
-        if lane_load < lane_capacity:
-            return False
-        _active_agents, active_task_agents = active_worker_indexes(state, normalized_active_statuses)
-
-    for task_id, task in task_map.items():
-        if task_id == current_task_id:
-            continue
-        if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
-            continue
-        task_status = str(task.get("status") or "").lower()
-        candidate_priority = None
-        candidate_reason = None
-        if task_status in review_statuses and task.get(reviewer_field) == agent_name:
-            candidate_priority = 0
-            candidate_reason = "review_ready_dispatch"
-        elif task_status in finalize_statuses and task.get(owner_field) == agent_name:
-            candidate_priority = 1
-            candidate_reason = "owned_finalize_dispatch"
-        elif (
-            task_status == "in_progress"
-            and task.get(owner_field) == agent_name
-            and dependencies_satisfied(task, task_map, dependency_done_statuses)
-        ):
-            candidate_priority = 2
-            candidate_reason = "owned_in_progress_dispatch"
-        elif (
-            task_status in {"todo", "backlog"}
-            and task.get(owner_field) == agent_name
-            and dependencies_satisfied(task, task_map, dependency_done_statuses)
-        ):
-            candidate_priority = 3
-            candidate_reason = "owned_ready_dispatch"
-
-        if candidate_priority is None or candidate_reason is None or candidate_priority >= current_priority:
-            continue
-        if not task_is_dispatch_eligible_for_agent(task, agent_name):
-            continue
-        if state is not None and task_waiting_on_chair_reassignment(
-            state,
-            task,
-            reason=candidate_reason,
-            target_agent=agent_name,
-        ):
-            continue
-        if candidate_priority < current_priority:
-            return True
-
-    return False
-
-
-def worker_matches_current_assignment(
+def worker_assignment_remains_valid(
     config: dict[str, Any],
     worker: dict[str, Any],
     task_map: dict[str, dict[str, Any]],
@@ -7615,31 +7240,25 @@ def worker_matches_current_assignment(
     task = task_map.get(task_id)
     if not task:
         return False
-    agent_name = display_name_for(config, str(worker.get("agent_id") or ""))
-    agent_ids = {
-        normalize_agent_id(str(worker.get("agent_id") or "")),
-        normalize_agent_id(str(worker.get("provider") or "")),
-        normalize_agent_id(agent_name),
-    }
-    agent_ids.discard("")
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    owned_statuses = {str(value).lower() for value in settings.get("owned_statuses", ["in_progress", "todo", "backlog"])}
-    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    schema = config.get("schema", {})
-    owner_field = schema.get("assignee_field", "owner")
-    reviewer_field = schema.get("reviewer_field", "reviewer")
-    task_status = str(task.get("status") or "").lower()
-    if task_status in dependency_done_statuses:
+    lease = worker.get("assignment_lease") if isinstance(worker.get("assignment_lease"), dict) else {}
+    target_agent = str(lease.get("target_agent") or display_name_for(config, str(worker.get("agent_id") or "")))
+    reason = str(lease.get("intent") or (worker.get("request_snapshot") or {}).get("reason") or "")
+    if not target_agent:
         return False
-    if task_status in review_statuses:
-        return normalize_agent_id(str(task.get(reviewer_field) or "")) in agent_ids
-    if task_status in finalize_statuses:
-        return normalize_agent_id(str(task.get(owner_field) or "")) in agent_ids
-    if task_status in owned_statuses:
-        return normalize_agent_id(str(task.get(owner_field) or "")) in agent_ids
-    return False
+    if not reason:
+        decision = resolve_current_dispatch_target(config, task, task_map)
+        return decision is not None and decision.target_agent == target_agent
+    try:
+        return domain_assignment_remains_valid(
+            task,
+            task_map,
+            dispatch_policy_for_config(config),
+            target_agent=target_agent,
+            reason=reason,
+            integration_evidence=integration_evidence_for_tasks(task_map),
+        )
+    except ValueError:
+        return False
 
 
 def stale_dispatch_skip_message(config: dict[str, Any], event: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> str | None:
@@ -8566,7 +8185,6 @@ def apply_chair_reassignment_action(
         return False
     if is_agent_dispatch_paused(config, state, to_agent, provider_report=provider_report):
         return False
-    status_path = config_path(config, "status_file")
     status = load_status(config)
     task = next((item for item in status.get("tasks", []) or [] if str(item.get("id") or "") == task_id), None)
     if task is None or not task_is_dispatch_eligible_for_agent(task, to_agent):
@@ -8577,44 +8195,43 @@ def apply_chair_reassignment_action(
         return False
     if role == "reviewer" and to_agent == current_owner:
         return False
-    timestamp = utc_now()
+    execution_branch = ""
     if role == "reviewer":
         if str(task.get("status") or "").lower() not in {"todo", "in_progress", "review"}:
             return False
         if str(task.get("reviewer") or "") != from_agent:
             return False
-        task["reviewer"] = to_agent
     else:
         if str(task.get("status") or "").lower() not in {"backlog", "todo", "in_progress", "review_approved"}:
             return False
         if str(task.get("owner") or "") != from_agent:
             return False
-        preserved_branch = str(task.get("execution_branch") or "").strip() or latest_task_branch(state, task_id)
-        if preserved_branch:
-            task["execution_branch"] = preserved_branch
-        task["owner"] = to_agent
-        if str(task.get("status") or "").lower() in {"backlog", "todo", "in_progress"}:
-            task["status"] = "todo"
-    task["last_update"] = timestamp
-    task["next"] = brief_reason_text(f"Chairman reassigned {role} from {from_agent} to {to_agent}: {reason}", max_length=280)
-    for handoff in status.get("handoffs", []) or []:
-        if handoff.get("task_id") != task_id or handoff.get("status") == "done":
-            continue
-        if str(handoff.get("to") or "") == from_agent:
-            handoff["status"] = "done"
-            handoff["resolved_at"] = timestamp
-    status.setdefault("handoffs", []).append(
-        {
-            "task_id": task_id,
-            "from": from_agent,
-            "to": to_agent,
-            "message": task["next"],
-            "status": "pending",
-            "created_at": timestamp,
-        }
+        execution_branch = (
+            str(task.get("execution_branch") or "").strip()
+            or latest_task_branch(state, task_id)
+            or ""
+        )
+    new_owner = to_agent if role == "owner" else current_owner
+    new_reviewer = to_agent if role == "reviewer" else current_reviewer
+    message = brief_reason_text(
+        f"Chairman reassigned {role} from {from_agent} to {to_agent}: {reason}",
+        max_length=280,
     )
-    write_status_with_prune(status_path, status, config=config)
-    if not sync_status_pipeline(config):
+    result = execute_task_board_command(
+        config,
+        "system-reassign",
+        [task_id, new_owner, new_reviewer, message],
+        environ={
+            "AI_STATUS_PRODUCER": "chair_reassignment",
+            "EXPECTED_OWNER": current_owner,
+            "EXPECTED_REVIEWER": current_reviewer,
+            "HANDOFF_FROM": from_agent,
+            "HANDOFF_TO": to_agent,
+            "RESET_TO_TODO": "1" if role == "owner" else "0",
+            "EXECUTION_BRANCH": execution_branch,
+        },
+    )
+    if not result.ok:
         return False
     clear_failure_streak(state, task_id, role)
     state.setdefault("workspace_holds", {}).pop(failure_streak_key(task_id, role), None)
@@ -8631,7 +8248,7 @@ def apply_chair_reassignment_action(
         {
             "type": "chair_reassignment_applied",
             "task_id": task_id,
-            "message": task["next"],
+            "message": message,
             "role": role,
             "from_agent": from_agent,
             "to_agent": to_agent,
@@ -8868,7 +8485,7 @@ def create_chair_workspace_baseline_task(
         "auto_created_by": "chairman-reassignment-triage",
         "covers_task_ids": covered_task_ids,
     }
-    result = run_task_board_command(
+    result = execute_task_board_command(
         config,
         "assign",
         [WORKSPACE_BASELINE_TASK_ID, owner, reviewer],
@@ -9093,7 +8710,7 @@ def create_chair_unblock_task(
         "mutates_canonical": True,
         "auto_created_by": "chairman-blocked-task-triage",
     }
-    result = run_task_board_command(
+    result = execute_task_board_command(
         config,
         "assign",
         [unblock_id, owner, reviewer],
@@ -9145,7 +8762,6 @@ def apply_chair_parent_resume_action(
     if not task_id or not chair_reason:
         return False
 
-    status_path = config_path(config, "status_file")
     status = load_status(config)
     task_map = task_index_from_status(config, status)
     parent = task_map.get(task_id)
@@ -9167,20 +8783,17 @@ def apply_chair_parent_resume_action(
     if resume_status not in {"backlog", "todo", "in_progress"}:
         return False
 
-    timestamp = utc_now()
     helper_id = str(completed_helper.get("id") or "").strip()
-    parent["status"] = resume_status
-    parent["last_update"] = timestamp
-    parent["next"] = brief_reason_text(f"Chairman resumed after {helper_id}: {chair_reason}", max_length=280)
-    parent.pop("waiting_for", None)
-
-    for blocker in status.get("blockers", []) or []:
-        if blocker.get("task_id") == task_id and blocker.get("status") == "open":
-            blocker["status"] = "resolved"
-            blocker["resolved_at"] = timestamp
-
-    write_status_with_prune(status_path, status, config=config)
-    if not sync_status_pipeline(config):
+    message = brief_reason_text(
+        f"Chairman resumed after {helper_id}: {chair_reason}", max_length=280
+    )
+    result = execute_task_board_command(
+        config,
+        "system-resume",
+        [task_id, resume_status, message],
+        environ={"AI_STATUS_PRODUCER": "chair_parent_resume"},
+    )
+    if not result.ok:
         return False
 
     write_activity_log(
@@ -9190,7 +8803,7 @@ def apply_chair_parent_resume_action(
             "task_id": task_id,
             "helper_task_id": helper_id,
             "resume_status": resume_status,
-            "message": parent["next"],
+            "message": message,
         },
     )
     return True

@@ -25,7 +25,7 @@ class GitHubBusCommandTests(unittest.TestCase):
     def test_integration_check_state_maps_pending_failure_and_success(self) -> None:
         self.assertEqual(
             github_bus._integration_check_state({"state": "OPEN", "statusCheckRollup": []}),
-            ("ci_pending", "pending", None),
+            github_bus.IntegrationObservation("ci_pending", "pending"),
         )
         self.assertEqual(
             github_bus._integration_check_state({
@@ -33,22 +33,29 @@ class GitHubBusCommandTests(unittest.TestCase):
                 "mergeStateStatus": "DIRTY",
                 "statusCheckRollup": [],
             }),
-            ("ci_failed", "merge_conflict", None),
+            github_bus.IntegrationObservation("ci_failed", "merge_conflict"),
         )
         self.assertEqual(
             github_bus._integration_check_state({
                 "state": "OPEN",
                 "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": "run"}],
             }),
-            ("ci_failed", "failure", "run"),
+            github_bus.IntegrationObservation("ci_failed", "failure", ci_run_url="run"),
         )
         self.assertEqual(
             github_bus._integration_check_state({
                 "state": "OPEN",
                 "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "SUCCESS"}],
             }),
-            ("pr_open", "success", None),
+            github_bus.IntegrationObservation("pr_open", "success"),
         )
+
+        merged = github_bus._integration_check_state({
+            "state": "MERGED",
+            "mergeCommit": {"oid": "deadbeef"},
+        })
+        self.assertEqual(merged.merge_commit, "deadbeef")
+        self.assertIsNone(merged.ci_run_url)
 
     def test_reconcile_task_integrations_updates_existing_metadata(self) -> None:
         status = {"tasks": [{

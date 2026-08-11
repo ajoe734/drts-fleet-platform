@@ -230,12 +230,6 @@ def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         append_jsonl_line_unlocked(path, json.dumps(payload, ensure_ascii=False))
 
 
-# Compatibility aliases for older imports. New repository code uses the public
-# names so queue append and compaction share one lock protocol.
-_hold_jsonl_lock = hold_jsonl_lock
-_append_jsonl_line_unlocked = append_jsonl_line_unlocked
-
-
 def deep_merge(base: Any, overlay: Any) -> Any:
     if isinstance(base, dict) and isinstance(overlay, dict):
         merged = deepcopy(base)
@@ -650,7 +644,7 @@ def write_activity_log(config: dict[str, Any], entry: dict[str, Any]) -> None:
     }
     log_path = config_path(config, "activity_log")
     encoded_payload = json.dumps(payload, ensure_ascii=False)
-    with _hold_jsonl_lock(log_path):
+    with hold_jsonl_lock(log_path):
         # Rotation and append must share the same lock. Otherwise a rotator can
         # replace the file while another process appends, producing NUL-padded
         # or concatenated JSONL records that make the dashboard look broken.
@@ -658,7 +652,7 @@ def write_activity_log(config: dict[str, Any], entry: dict[str, Any]) -> None:
             _rotate_activity_log_if_oversize(log_path)
         except Exception:
             pass
-        _append_jsonl_line_unlocked(log_path, encoded_payload)
+        append_jsonl_line_unlocked(log_path, encoded_payload)
 
 
 def runtime_log_path(prefix: str, target: str) -> Path:

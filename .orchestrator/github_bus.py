@@ -7,6 +7,7 @@ import re
 import signal
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -551,7 +552,7 @@ def run_ai_status(
     if actor:
         env["AI_NAME"] = actor
     if integration_env:
-        env.update({key: value for key, value in integration_env.items() if value})
+        env.update({key: str(value) for key, value in integration_env.items()})
     if status_root:
         env["AI_STATUS_ROOT"] = status_root
         env["ORCH_STATUS_ROOT"] = status_root
@@ -569,20 +570,28 @@ def run_ai_status(
         raise GitHubBusError(trim_text((proc.stderr or proc.stdout or "ai_status failed"), 600))
 
 
-def _integration_check_state(pr: dict[str, Any]) -> tuple[str, str, str | None]:
+@dataclass(frozen=True)
+class IntegrationObservation:
+    integration_status: str
+    ci_status: str
+    ci_run_url: str | None = None
+    merge_commit: str | None = None
+
+
+def _integration_check_state(pr: dict[str, Any]) -> IntegrationObservation:
     """Map GitHub's check rollup to the existing task integration states."""
     if str(pr.get("state") or "").upper() == "MERGED":
         merge_commit = ((pr.get("mergeCommit") or {}).get("oid") or "").strip() or None
-        return "merged_to_dev", "success", merge_commit
+        return IntegrationObservation("merged_to_dev", "success", merge_commit=merge_commit)
     if str(pr.get("state") or "").upper() != "OPEN":
-        return "ci_failed", "closed_without_merge", None
+        return IntegrationObservation("ci_failed", "closed_without_merge")
 
     if str(pr.get("mergeStateStatus") or "").upper() == "DIRTY":
-        return "ci_failed", "merge_conflict", None
+        return IntegrationObservation("ci_failed", "merge_conflict")
 
     checks = pr.get("statusCheckRollup") or []
     if not isinstance(checks, list) or not checks:
-        return "ci_pending", "pending", None
+        return IntegrationObservation("ci_pending", "pending")
     failures = [
         check for check in checks
         if str(check.get("status") or "").upper() == "COMPLETED"
@@ -591,10 +600,14 @@ def _integration_check_state(pr: dict[str, Any]) -> tuple[str, str, str | None]:
     ]
     if failures:
         failed = failures[0]
-        return "ci_failed", str(failed.get("conclusion") or "failure").lower(), failed.get("detailsUrl")
+        return IntegrationObservation(
+            "ci_failed",
+            str(failed.get("conclusion") or "failure").lower(),
+            ci_run_url=failed.get("detailsUrl"),
+        )
     if any(str(check.get("status") or "").upper() != "COMPLETED" for check in checks):
-        return "ci_pending", "pending", None
-    return "pr_open", "success", None
+        return IntegrationObservation("ci_pending", "pending")
+    return IntegrationObservation("pr_open", "success")
 
 
 def discover_task_prs(repo: str) -> dict[str, list[dict[str, Any]]]:
@@ -736,8 +749,8 @@ def maybe_request_auto_merge(
     # protected auto-merge can safely wait for that; DIRTY must be repaired.
     if str(pr.get("mergeStateStatus") or "").upper() == "DIRTY":
         return False
-    integration_status, ci_status, _ = _integration_check_state(pr)
-    if integration_status != "pr_open" or ci_status != "success":
+    observation = _integration_check_state(pr)
+    if observation.integration_status != "pr_open" or observation.ci_status != "success":
         return False
     if task.get("status") not in set(policy.get("eligible_statuses", ["review", "review_approved", "blocked"])):
         return False
@@ -812,7 +825,7 @@ def reconcile_task_integrations(
                 if recovered_commit:
                     env["COMMIT_HASH"] = recovered_commit
                 run_ai_status(
-                    "progress",
+                    "observe-integration",
                     task_id,
                     f"Recovered pushed branch evidence from worker result: {recovered_branch}",
                     actor="Supervisor",
@@ -841,7 +854,10 @@ def reconcile_task_integrations(
             ])
             if not isinstance(pr, dict):
                 continue
-            integration_status, ci_status, ci_run_url = _integration_check_state(pr)
+            observation = _integration_check_state(pr)
+            integration_status = observation.integration_status
+            ci_status = observation.ci_status
+            ci_run_url = observation.ci_run_url
             head_sha = str(pr.get("headRefOid") or "").strip()
             branch = str(pr.get("headRefName") or "").strip()
             entry = bus_state.setdefault("tasks", {}).setdefault(task_id, {})
@@ -851,6 +867,7 @@ def reconcile_task_integrations(
                 and str(task.get("integration_status") or "") == integration_status
                 and str(task.get("ci_status") or "") == ci_status
                 and str(task.get("ci_run_url") or "") == str(ci_run_url or "")
+                and str(task.get("merge_commit") or "") == str(observation.merge_commit or "")
                 and (not branch or str(task.get("execution_branch") or "") == branch)
             )
             entry["integration_head_sha"] = head_sha
@@ -877,13 +894,13 @@ def reconcile_task_integrations(
                 env["EXECUTION_BRANCH"] = branch
             if ci_run_url:
                 env["CI_RUN_URL"] = str(ci_run_url)
-            merge_commit = ((pr.get("mergeCommit") or {}).get("oid") or "").strip()
+            merge_commit = observation.merge_commit
             if merge_commit:
                 env["MERGE_COMMIT"] = merge_commit
                 env["MERGED_REF"] = str(pr.get("baseRefName") or "")
             message = f"Supervisor reconciled PR #{number}: {integration_status}/{ci_status} at {head_sha[:12]}"
             run_ai_status(
-                "progress",
+                "observe-integration",
                 task_id,
                 message,
                 actor="Supervisor",
@@ -895,6 +912,15 @@ def reconcile_task_integrations(
                 config,
                 {"type": "github_integration_reconciled", "task_id": task_id, "message": message},
             )
+            if terminal_status_missing or lifecycle_transition_pending:
+                run_ai_status(
+                    "reduce-integration",
+                    task_id,
+                    message,
+                    actor="Supervisor",
+                    status_root=str(config_path(config, "status_file").parent),
+                    reconciler=True,
+                )
             changed = maybe_request_auto_merge(config, bus_state, task, pr, repo) or changed
             changed = True
         except (GitHubBusError, ValueError, TypeError) as exc:

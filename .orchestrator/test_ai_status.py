@@ -9,8 +9,6 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from unittest import mock
-
 from pathlib import Path
 from unittest import mock
 
@@ -20,6 +18,55 @@ SPEC = importlib.util.spec_from_file_location("ai_status", ROOT / "scripts" / "a
 assert SPEC is not None and SPEC.loader is not None
 ai_status = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ai_status)
+
+
+class TaskTransitionProvenanceTest(unittest.TestCase):
+    def test_changed_task_gets_revision_and_worker_provenance(self) -> None:
+        before = {
+            "tasks": [
+                {"id": "TASK-001", "status": "todo", "revision": 4}
+            ]
+        }
+        after = {
+            "tasks": [
+                {"id": "TASK-001", "status": "in_progress", "revision": 4}
+            ]
+        }
+        entries: list[dict] = []
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"AI_NAME": "Codex", "ORCH_RUN_ID": "run-123"},
+                clear=True,
+            ),
+            mock.patch.object(ai_status, "append_log", side_effect=entries.append),
+        ):
+            transitions = ai_status.prepare_task_transitions(
+                before,
+                after,
+                "progress",
+                ["TASK-001", "Implementation started."],
+            )
+            ai_status.commit_task_transitions(transitions)
+
+        self.assertEqual(after["tasks"][0]["revision"], 5)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["from_status"], "todo")
+        self.assertEqual(entries[0]["to_status"], "in_progress")
+        self.assertEqual(entries[0]["producer"], "worker")
+        self.assertEqual(entries[0]["worker_run_id"], "run-123")
+
+    def test_unchanged_task_does_not_increment_revision(self) -> None:
+        before = {"tasks": [{"id": "TASK-001", "status": "todo"}]}
+        after = {"tasks": [{"id": "TASK-001", "status": "todo"}]}
+
+        with mock.patch.object(ai_status, "append_log") as append_log:
+            transitions = ai_status.prepare_task_transitions(before, after, "sync", [])
+            ai_status.commit_task_transitions(transitions)
+
+        self.assertNotIn("revision", after["tasks"][0])
+        append_log.assert_not_called()
 
 
 class LoadLogsRecoveryTest(unittest.TestCase):
@@ -568,7 +615,7 @@ class IntegrationGateUnitTest(unittest.TestCase):
 
 
 class ProgressIntegrationMetadataTest(unittest.TestCase):
-    def test_premerge_repair_is_owner_only_and_metadata_scoped(self) -> None:
+    def test_integration_repair_is_owner_only_and_explicit(self) -> None:
         task = {
             "id": "TASK-PR-REPAIR-001",
             "owner": "Codex",
@@ -581,10 +628,11 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         state = {"tasks": [task], "blockers": [], "handoffs": []}
 
         with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_premerge_repair(state, [task["id"], "Repair commit trailer only."])
+            ai_status.command_integration_repair(state, [task["id"], "Repair commit trailer only."])
 
         self.assertEqual(task["status"], "in_progress")
-        self.assertEqual(task["premerge_repair"]["scope"], "metadata_only")
+        self.assertEqual(task["work_intent"]["kind"], "integration_repair")
+        self.assertEqual(task["work_intent"]["state"], "pending")
 
     def test_progress_records_explicit_integration_metadata_without_completing_task(self) -> None:
         task = {"id": "TASK-PR-001", "owner": "Codex", "reviewer": "Claude", "status": "in_progress"}
@@ -634,7 +682,7 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         }
 
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_progress(state, [task["id"], "Replacement PR is authoritative."])
+            ai_status.command_observe_integration(state, [task["id"], "Replacement PR is authoritative."])
 
         self.assertEqual(task["integration_status"], "pr_open")
         self.assertEqual(task["execution_branch"], "codex/replacement")
@@ -659,9 +707,32 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         }
 
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_progress(state, [task["id"], "PR checks passed."])
+            ai_status.command_observe_integration(state, [task["id"], "PR checks passed."])
 
         self.assertEqual(task["status"], "in_progress")
+        self.assertNotIn("ci_run_url", task)
+
+    def test_observation_replaces_stale_ci_url(self) -> None:
+        task = {
+            "id": "TASK-PR-URL-001",
+            "owner": "Codex",
+            "status": "in_progress",
+            "ci_run_url": "https://example.invalid/old-run",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "INTEGRATION_STATUS": "pr_open",
+            "PR_URL": "https://github.com/example/repo/pull/42",
+            "CI_STATUS": "success",
+            "CI_RUN_URL": "",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_observe_integration(state, [task["id"], "Checks passed."])
+
+        self.assertNotIn("ci_run_url", task)
 
     def test_reconciler_does_not_clear_product_blocker_for_green_pr(self) -> None:
         task = {
@@ -682,7 +753,7 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         }
 
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_progress(state, [task["id"], "PR checks passed."])
+            ai_status.command_observe_integration(state, [task["id"], "PR checks passed."])
 
         self.assertEqual(task["status"], "blocked")
         self.assertEqual(task["waiting_for"], "Missing product contract")
@@ -704,7 +775,8 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         }
 
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_progress(state, [task["id"], "PR checks failed."])
+            ai_status.command_observe_integration(state, [task["id"], "PR checks failed."])
+            ai_status.command_reduce_integration(state, [task["id"], "PR checks failed."])
 
         self.assertEqual(task["status"], "in_progress")
 
@@ -728,7 +800,8 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         }
 
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_progress(state, ["TASK-MERGED-001", "Protected PR merge reconciled."])
+            ai_status.command_observe_integration(state, ["TASK-MERGED-001", "Protected PR merge reconciled."])
+            ai_status.command_reduce_integration(state, ["TASK-MERGED-001", "Protected PR merge reconciled."])
 
         self.assertEqual(task["status"], "done")
         self.assertEqual(task["integration_status"], "merged_to_dev")

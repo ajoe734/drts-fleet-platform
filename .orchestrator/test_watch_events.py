@@ -122,6 +122,12 @@ class WatcherBookkeepingTests(unittest.TestCase):
                 "task_id": "P3-002",
                 "target_agent": "Codex",
                 "reason": "review_ready_dispatch",
+                "assignment_lease": {
+                    "task_revision": 7,
+                    "role": "reviewer",
+                    "intent": "review_ready_dispatch",
+                    "target_agent": "Codex",
+                },
                 "task": {
                     "id": "P3-002",
                     "status": "review",
@@ -140,6 +146,8 @@ class WatcherBookkeepingTests(unittest.TestCase):
             self.assertNotIn("current-work.md", payload["context_files"])
             self.assertNotIn("ai-activity-log.jsonl", payload["context_files"])
             self.assertNotIn("docs-site/index.html", payload["context_files"])
+            self.assertEqual(payload["metadata"]["assignment_lease"]["attempt_id"], payload["event_id"])
+            self.assertEqual(payload["metadata"]["assignment_lease"]["task_revision"], 7)
 
     def test_queue_delivery_event_omits_repo_external_artifact_targets(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

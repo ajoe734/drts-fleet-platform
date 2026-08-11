@@ -3234,260 +3234,6 @@ class UnderutilizationMainTaskDispatchTests(unittest.TestCase):
 
 
 class PollWorkersRecoveryTests(unittest.TestCase):
-    def test_lower_priority_worker_is_superseded_when_finalize_backlog_exists(self) -> None:
-        config = {
-            "schema": {
-                "tasks_path": "tasks",
-                "task_id_field": "id",
-                "assignee_field": "owner",
-                "reviewer_field": "reviewer",
-            },
-            "supervisor": {"stall_after_seconds": 300},
-            "ready_dispatcher": {
-                "active_worker_statuses": ["running", "started", "waiting_approval", "manual_pending", "retry_backoff", "suspended_approval", "stalled", "fallback"],
-                "finalize_statuses": ["review_approved"],
-                "dependency_done_statuses": ["done"],
-            },
-            "providers": {},
-            "agents": {
-                "copilot": {"id": "copilot", "display_name": "Copilot"},
-                "codex": {"id": "codex", "display_name": "Codex"},
-                "claude": {"id": "claude", "display_name": "Claude"},
-            },
-        }
-        state = {
-            "queue": {"events": {"evt-1": {"status": "started"}}},
-            "workers": {
-                "run-1": {
-                    "run_id": "run-1",
-                    "task_id": "FB-003",
-                    "provider": "copilot",
-                    "agent_id": "copilot",
-                    "status": "running",
-                    "queue_event_id": "evt-1",
-                    "pid": 12345,
-                    "last_event_at": "2999-01-01T00:00:00Z",
-                    "request_snapshot": {"reason": "owned_ready_dispatch"},
-                }
-            },
-        }
-        status = {
-            "tasks": [
-                {"id": "FB-003", "status": "todo", "owner": "Copilot", "reviewer": "Codex", "depends_on": []},
-                {"id": "EX-001", "status": "review_approved", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
-            ]
-        }
-
-        with (
-            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
-            mock.patch.object(supervisor, "load_status", return_value=status),
-            mock.patch.object(supervisor, "load_provider_report", return_value={}),
-            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
-            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
-            mock.patch.object(supervisor, "terminate_worker_pid") as terminate_worker_pid,
-            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
-            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
-        ):
-            changed = supervisor.poll_workers(config, state)
-
-        self.assertTrue(changed)
-        worker = state["workers"]["run-1"]
-        self.assertEqual(worker["status"], "superseded")
-        self.assertIn("prioritize higher-priority review/finalize work", worker["last_error"])
-        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
-        terminate_worker_pid.assert_called_once_with(12345)
-        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_superseded")
-
-    def test_lower_priority_worker_kept_when_lane_capacity_available(self) -> None:
-        config = {
-            "schema": {
-                "tasks_path": "tasks",
-                "task_id_field": "id",
-                "assignee_field": "owner",
-                "reviewer_field": "reviewer",
-            },
-            "supervisor": {"stall_after_seconds": 300},
-            "ready_dispatcher": {
-                "active_worker_statuses": ["running", "started", "waiting_approval", "manual_pending", "retry_backoff", "suspended_approval", "stalled", "fallback"],
-                "finalize_statuses": ["review_approved"],
-                "dependency_done_statuses": ["done"],
-                "max_tasks_per_agent": 1,
-                "max_tasks_per_agent_by_lane": {"codex2": 3},
-            },
-            "providers": {},
-            "agents": {
-                "codex2": {"id": "codex2", "display_name": "Codex2"},
-                "codex": {"id": "codex", "display_name": "Codex"},
-            },
-        }
-        state = {
-            "queue": {
-                "events": {
-                    "evt-low": {"status": "started"},
-                    "evt-high": {"status": "started"},
-                }
-            },
-            "workers": {
-                "run-low": {
-                    "run_id": "run-low",
-                    "task_id": "PBK-UI-004",
-                    "provider": "codex2",
-                    "agent_id": "codex2",
-                    "status": "running",
-                    "queue_event_id": "evt-low",
-                    "pid": 12345,
-                    "last_event_at": "2999-01-01T00:00:00Z",
-                    "request_snapshot": {"reason": "owned_ready_dispatch"},
-                },
-                "run-high": {
-                    "run_id": "run-high",
-                    "task_id": "PBK-UI-003-SIDECAR-REVIEW",
-                    "provider": "codex2",
-                    "agent_id": "codex2",
-                    "status": "running",
-                    "queue_event_id": "evt-high",
-                    "pid": 12346,
-                    "last_event_at": "2999-01-01T00:00:00Z",
-                    "request_snapshot": {"reason": "owned_finalize_dispatch"},
-                },
-            },
-        }
-        status = {
-            "tasks": [
-                {"id": "PBK-UI-003-SIDECAR-REVIEW", "status": "review_approved", "owner": "Codex2", "reviewer": "Claude2", "depends_on": []},
-                {"id": "PBK-UI-004", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": ["PBK-UI-003"]},
-                {"id": "PBK-UI-003", "status": "done", "owner": "Claude2", "reviewer": "Codex", "depends_on": []},
-            ]
-        }
-
-        with (
-            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
-            mock.patch.object(supervisor, "load_status", return_value=status),
-            mock.patch.object(supervisor, "load_provider_report", return_value={}),
-            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
-            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
-            mock.patch.object(supervisor, "terminate_worker_pid") as terminate_worker_pid,
-            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
-            mock.patch.object(supervisor, "utc_now", return_value="2026-04-06T09:01:00Z"),
-            mock.patch.object(supervisor, "write_activity_log"),
-        ):
-            supervisor.poll_workers(config, state)
-
-        self.assertEqual(state["workers"]["run-low"]["status"], "running")
-        self.assertEqual(state["workers"]["run-high"]["status"], "running")
-        terminate_worker_pid.assert_not_called()
-
-    def test_covered_higher_priority_worker_does_not_supersede_full_lane(self) -> None:
-        config = {
-            "ready_dispatcher": {
-                "active_worker_statuses": ["running"],
-                "finalize_statuses": ["review_approved"],
-                "dependency_done_statuses": ["done"],
-                "max_tasks_per_agent": 1,
-                "max_tasks_per_agent_by_lane": {"codex2": 2},
-            },
-            "agents": {"codex2": {"id": "codex2", "display_name": "Codex2"}},
-        }
-        low_worker = {
-            "task_id": "PBK-UI-004",
-            "provider": "codex2",
-            "agent_id": "codex2",
-            "status": "running",
-            "request_snapshot": {"reason": "owned_ready_dispatch"},
-        }
-        state = {
-            "queue": {"events": {}},
-            "workers": {
-                "run-low": low_worker,
-                "run-high": {
-                    "task_id": "PBK-UI-003-SIDECAR-REVIEW",
-                    "provider": "codex2",
-                    "agent_id": "codex2",
-                    "status": "running",
-                    "request_snapshot": {"reason": "owned_finalize_dispatch"},
-                },
-            },
-        }
-        task_map = {
-            "PBK-UI-003-SIDECAR-REVIEW": {"id": "PBK-UI-003-SIDECAR-REVIEW", "status": "review_approved", "owner": "Codex2", "reviewer": "Claude2", "depends_on": []},
-            "PBK-UI-004": {"id": "PBK-UI-004", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
-        }
-
-        self.assertFalse(
-            supervisor.higher_priority_ready_task_exists(
-                config,
-                low_worker,
-                task_map,
-                state=state,
-                active_statuses={"running"},
-            )
-        )
-
-    def test_chair_guarded_higher_priority_task_does_not_supersede_full_lane(self) -> None:
-        config = {
-            "schema": {
-                "tasks_path": "tasks",
-                "task_id_field": "id",
-                "assignee_field": "owner",
-                "reviewer_field": "reviewer",
-            },
-            "ready_dispatcher": {
-                "active_worker_statuses": ["running"],
-                "review_statuses": ["review"],
-                "dependency_done_statuses": ["done"],
-                "max_tasks_per_agent": 1,
-                "max_tasks_per_agent_by_lane": {"codex2": 1},
-            },
-            "agents": {"codex2": {"id": "codex2", "display_name": "Codex2"}},
-        }
-        low_worker = {
-            "task_id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
-            "provider": "codex2",
-            "agent_id": "codex2",
-            "status": "running",
-            "queue_event_id": "evt-low",
-            "request_snapshot": {"reason": "owned_in_progress_dispatch"},
-        }
-        state = {
-            "queue": {"events": {"evt-low": {"status": "started"}}},
-            "workers": {"run-low": low_worker},
-            "failure_streaks": {
-                "PBK-UI-003:reviewer": {
-                    "task_id": "PBK-UI-003",
-                    "role": "reviewer",
-                    "agent": "Codex2",
-                    "awaiting_chair": True,
-                }
-            },
-        }
-        task_map = {
-            "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR": {
-                "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
-                "status": "in_progress",
-                "owner": "Codex2",
-                "reviewer": "Claude2",
-                "depends_on": [],
-            },
-            "PBK-UI-003": {
-                "id": "PBK-UI-003",
-                "status": "review",
-                "owner": "Claude2",
-                "reviewer": "Codex2",
-                "depends_on": [],
-            },
-        }
-
-        with mock.patch.object(supervisor, "load_event_queue", return_value=[]):
-            self.assertFalse(
-                supervisor.higher_priority_ready_task_exists(
-                    config,
-                    low_worker,
-                    task_map,
-                    state=state,
-                    active_statuses={"running"},
-                )
-            )
-
     def test_agent_dispatch_loads_skip_events_with_active_workers(self) -> None:
         config = {
             "ready_dispatcher": {"active_worker_statuses": ["running"]},
@@ -3697,7 +3443,6 @@ class PollWorkersRecoveryTests(unittest.TestCase):
                 mock.patch.object(supervisor, "retry_due_workers", return_value=False),
                 mock.patch.object(supervisor, "pid_is_alive", return_value=False),
                 mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
-                mock.patch.object(supervisor, "sync_status_pipeline", return_value=True),
                 mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
             ):
                 changed = supervisor.poll_workers(config, state)
@@ -6733,9 +6478,10 @@ class ChairmanFlowTests(unittest.TestCase):
                 },
             }
 
-            with (
-                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
-                mock.patch.object(supervisor, "sync_status_pipeline", return_value=True),
+            with mock.patch.object(
+                supervisor,
+                "safe_load_approval_state",
+                return_value={"pending": [], "history": []},
             ):
                 changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
 
@@ -6790,7 +6536,7 @@ class ChairmanFlowTests(unittest.TestCase):
             }
             state = {"queue": {"events": {}}, "workers": {}, "failure_streaks": {}}
 
-            with mock.patch.object(supervisor, "sync_status_pipeline", return_value=True) as sync:
+            with mock.patch.object(supervisor, "execute_task_board_command") as execute:
                 changed = supervisor.apply_chair_reassignment_action(
                     config,
                     state,
@@ -6805,7 +6551,7 @@ class ChairmanFlowTests(unittest.TestCase):
                 )
 
             self.assertFalse(changed)
-            sync.assert_not_called()
+            execute.assert_not_called()
             task = json.loads(status_path.read_text(encoding="utf-8"))["tasks"][0]
             self.assertEqual(task["owner"], "Codex")
             self.assertEqual(task["reviewer"], "Codex2")
@@ -6908,9 +6654,10 @@ class ChairmanFlowTests(unittest.TestCase):
                 },
             }
 
-            with (
-                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
-                mock.patch.object(supervisor, "sync_status_pipeline", return_value=True),
+            with mock.patch.object(
+                supervisor,
+                "safe_load_approval_state",
+                return_value={"pending": [], "history": []},
             ):
                 changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
 
@@ -7021,9 +6768,10 @@ class ChairmanFlowTests(unittest.TestCase):
                 },
             }
 
-            with (
-                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
-                mock.patch.object(supervisor, "sync_status_pipeline", return_value=True),
+            with mock.patch.object(
+                supervisor,
+                "safe_load_approval_state",
+                return_value={"pending": [], "history": []},
             ):
                 changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
 
@@ -8252,135 +8000,6 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
 
 
 
-class DispatchCooldownTests(unittest.TestCase):
-    """Cooldown protects freshly-dispatched workers from voluntary supersede.
-
-    See `worker_in_dispatch_cooldown` in supervisor.py. Cooldown is
-    measured against the timestamp embedded in the worker run_id; for
-    workers whose run_id has no parseable timestamp (legacy / synthetic
-    fixtures), cooldown is bypassed so the historical supersede behaviour
-    is preserved.
-    """
-
-    def test_parse_returns_none_for_short_slug(self) -> None:
-        self.assertIsNone(supervisor.parse_worker_dispatched_at("run-1"))
-        self.assertIsNone(supervisor.parse_worker_dispatched_at(None))
-        self.assertIsNone(supervisor.parse_worker_dispatched_at(""))
-
-    def test_parse_extracts_timestamp_from_production_run_id(self) -> None:
-        dt = supervisor.parse_worker_dispatched_at("codex-20260526T043357Z-d168b9f0")
-        self.assertIsNotNone(dt)
-        from datetime import datetime, timezone
-        self.assertEqual(
-            dt, datetime(2026, 5, 26, 4, 33, 57, tzinfo=timezone.utc)
-        )
-
-    def test_cooldown_false_when_disabled(self) -> None:
-        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
-        self.assertFalse(supervisor.worker_in_dispatch_cooldown(worker, 0))
-        self.assertFalse(supervisor.worker_in_dispatch_cooldown(worker, -1))
-
-    def test_cooldown_false_for_non_running_worker(self) -> None:
-        from datetime import datetime, timezone
-        worker = {"status": "stalled", "run_id": "codex-20260526T043357Z-aaa"}
-        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
-        self.assertFalse(
-            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
-            "stalled workers must remain recoverable via supersede",
-        )
-
-    def test_cooldown_true_for_fresh_running_worker(self) -> None:
-        from datetime import datetime, timezone
-        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
-        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
-        self.assertTrue(
-            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
-            "running worker dispatched 3s ago is within 300s cooldown",
-        )
-
-    def test_cooldown_false_for_stale_worker(self) -> None:
-        from datetime import datetime, timezone
-        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
-        now = datetime(2026, 5, 26, 5, 30, 0, tzinfo=timezone.utc)
-        self.assertFalse(
-            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
-            "running worker dispatched 56 min ago is outside 300s cooldown",
-        )
-
-    def test_cooldown_false_when_runid_has_no_timestamp(self) -> None:
-        from datetime import datetime, timezone
-        worker = {"status": "running", "run_id": "run-active"}
-        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
-        self.assertFalse(
-            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
-            "synthetic test fixtures without timestamped run_ids must bypass cooldown",
-        )
-
-    def test_ready_dispatch_settings_default_cooldown(self) -> None:
-        settings = supervisor.ready_dispatch_settings({})
-        self.assertEqual(settings.get("dispatch_cooldown_seconds"), 300)
-
-    def test_ready_dispatch_settings_honors_explicit_zero(self) -> None:
-        settings = supervisor.ready_dispatch_settings({
-            "ready_dispatcher": {"dispatch_cooldown_seconds": 0}
-        })
-        self.assertEqual(settings.get("dispatch_cooldown_seconds"), 0)
-
-
-
-
-class PruneDoneHandoffsTests(unittest.TestCase):
-    """`prune_done_handoffs` bounds ai-status.json's handoffs audit-log tail.
-
-    Without this prune the file grew to ~9 MB / 17k entries during the
-    2026-05-26 incident, making the dashboard fetch unusably slow. See
-    feedback_ai_status_handoff_bloat.
-    """
-
-    def test_noop_under_keep_threshold(self) -> None:
-        s = {"handoffs": [{"status": "done"}] * 100}
-        supervisor.prune_done_handoffs(s, keep=500)
-        self.assertEqual(len(s["handoffs"]), 100)
-
-    def test_pending_entries_always_preserved(self) -> None:
-        # 2000 done + 5 pending; even with keep=10, pending entries survive.
-        handoffs = (
-            [{"status": "done", "task_id": f"D{i}"} for i in range(2000)]
-            + [{"status": "pending", "task_id": f"P{i}"} for i in range(5)]
-        )
-        s = {"handoffs": list(handoffs)}
-        supervisor.prune_done_handoffs(s, keep=10)
-        kinds = [x.get("status") for x in s["handoffs"]]
-        self.assertEqual(kinds.count("pending"), 5,
-                         "all pending handoffs must survive prune")
-        self.assertEqual(kinds.count("done"), 10,
-                         "only the last `keep` done entries survive")
-
-    def test_keeps_most_recent_done_by_position(self) -> None:
-        # done entries are appended chronologically; the prune must keep the
-        # tail, not the head, so audit history reflects what *just* happened.
-        handoffs = [{"status": "done", "task_id": f"T{i}"} for i in range(1000)]
-        s = {"handoffs": list(handoffs)}
-        supervisor.prune_done_handoffs(s, keep=3)
-        self.assertEqual(
-            [x["task_id"] for x in s["handoffs"]],
-            ["T997", "T998", "T999"],
-        )
-
-    def test_missing_handoffs_key_is_safe(self) -> None:
-        s = {}
-        supervisor.prune_done_handoffs(s, keep=500)  # must not raise
-        self.assertNotIn("handoffs", s)
-
-    def test_non_list_handoffs_is_safe(self) -> None:
-        # Bad data type — defensive against malformed input.
-        s = {"handoffs": "not-a-list"}
-        supervisor.prune_done_handoffs(s, keep=500)
-        self.assertEqual(s["handoffs"], "not-a-list")  # unchanged
-
-
-
-
 class ReconcileStatusFromGitAsyncTests(unittest.TestCase):
     """Git reconciliation stays asynchronous but uses the canonical writer."""
 
@@ -8657,98 +8276,6 @@ class WorkerProcessReaperTests(unittest.TestCase):
 
         self.assertEqual(count, 2)
         self.assertEqual(waitpid.call_count, 3)
-class PruneDoneTasksTests(unittest.TestCase):
-    """`prune_done_tasks` bounds ai-status.json's tasks array.
-
-    Without this prune the array accumulated 646 done tasks / ~1.0 MB by the
-    2026-05-30 incident, pushing ai-status.json past the 256 KB cap the
-    chair/coordination worker's Read tool enforces. See
-    feedback_ai_status_handoff_bloat.
-    """
-
-    def test_noop_under_keep_threshold(self) -> None:
-        s = {"tasks": [{"id": f"D{i}", "status": "done"} for i in range(100)]}
-        supervisor.prune_done_tasks(s, keep=150)
-        self.assertEqual(len(s["tasks"]), 100)
-        self.assertNotIn("archived_task_ids", s)
-
-    def test_active_tasks_always_preserved(self) -> None:
-        tasks = (
-            [{"id": f"D{i}", "status": "done"} for i in range(2000)]
-            + [{"id": f"A{i}", "status": "in_progress"} for i in range(5)]
-            + [{"id": f"B{i}", "status": "todo"} for i in range(5)]
-        )
-        s = {"tasks": list(tasks)}
-        supervisor.prune_done_tasks(s, keep=10)
-        statuses = [t["status"] for t in s["tasks"]]
-        self.assertEqual(statuses.count("in_progress"), 5)
-        self.assertEqual(statuses.count("todo"), 5)
-        self.assertEqual(statuses.count("done"), 10, "only the last `keep` done tasks survive")
-
-    def test_keeps_most_recent_done_and_preserves_order(self) -> None:
-        # Interleave active + done; prune must keep the done *tail* and leave the
-        # relative order of surviving entries intact.
-        tasks = []
-        for i in range(1000):
-            tasks.append({"id": f"T{i}", "status": "done"})
-            if i % 100 == 0:
-                tasks.append({"id": f"ACT{i}", "status": "todo"})
-        s = {"tasks": list(tasks)}
-        supervisor.prune_done_tasks(s, keep=3)
-        done_ids = [t["id"] for t in s["tasks"] if t["status"] == "done"]
-        self.assertEqual(done_ids, ["T997", "T998", "T999"])
-        # all active survive, in original order
-        active_ids = [t["id"] for t in s["tasks"] if t["status"] == "todo"]
-        self.assertEqual(active_ids, [f"ACT{i}" for i in range(0, 1000, 100)])
-
-    def test_dropped_ids_recorded_in_archive_without_duplicates(self) -> None:
-        s = {
-            "tasks": [{"id": f"D{i}", "status": "done"} for i in range(10)],
-            "archived_task_ids": ["D0"],  # already archived once
-        }
-        supervisor.prune_done_tasks(s, keep=3)
-        # D0..D6 dropped; D0 not duplicated; recent D7..D9 kept in tasks.
-        self.assertEqual([t["id"] for t in s["tasks"]], ["D7", "D8", "D9"])
-        self.assertEqual(s["archived_task_ids"].count("D0"), 1)
-        for i in range(7):
-            self.assertIn(f"D{i}", s["archived_task_ids"])
-
-    def test_missing_and_non_list_tasks_are_safe(self) -> None:
-        empty: dict = {}
-        supervisor.prune_done_tasks(empty, keep=150)
-        self.assertNotIn("tasks", empty)
-        bad = {"tasks": "not-a-list"}
-        supervisor.prune_done_tasks(bad, keep=150)
-        self.assertEqual(bad["tasks"], "not-a-list")
-
-
-class PruneBlockersTests(unittest.TestCase):
-    """`prune_blockers` keeps every open blocker plus the recent resolved tail."""
-
-    def test_open_blockers_always_preserved(self) -> None:
-        blockers = (
-            [{"task_id": f"R{i}", "status": "resolved"} for i in range(500)]
-            + [{"task_id": "OPEN1", "status": "open"}]
-        )
-        s = {"blockers": list(blockers)}
-        supervisor.prune_blockers(s, keep=10)
-        statuses = [b["status"] for b in s["blockers"]]
-        self.assertEqual(statuses.count("open"), 1, "open blockers must survive prune")
-        self.assertEqual(statuses.count("resolved"), 10)
-
-    def test_keeps_most_recent_resolved(self) -> None:
-        s = {"blockers": [{"task_id": f"R{i}", "status": "resolved"} for i in range(100)]}
-        supervisor.prune_blockers(s, keep=2)
-        self.assertEqual([b["task_id"] for b in s["blockers"]], ["R98", "R99"])
-
-    def test_noop_under_threshold_and_safe_on_bad_input(self) -> None:
-        s = {"blockers": [{"status": "resolved"}] * 5}
-        supervisor.prune_blockers(s, keep=100)
-        self.assertEqual(len(s["blockers"]), 5)
-        empty: dict = {}
-        supervisor.prune_blockers(empty, keep=100)  # must not raise
-        self.assertNotIn("blockers", empty)
-
 
 if __name__ == "__main__":
     unittest.main()

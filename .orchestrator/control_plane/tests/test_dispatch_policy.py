@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from control_plane.domain.dispatch_policy import (
     DispatchReason,
+    assignment_remains_valid,
     has_external_integration_in_flight,
     ReadyDispatchPolicy,
     build_dispatch_event,
@@ -70,6 +71,33 @@ class DispatchPolicyTests(unittest.TestCase):
         self.assertEqual(decision.target_agent, "Claude")
         self.assertEqual(decision.reason, DispatchReason.REVIEW_READY)
 
+    def test_expected_closeout_transition_keeps_same_assignment_valid(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "review_approved",
+            "owner": "Codex",
+            "reviewer": "Claude",
+        }
+
+        self.assertTrue(
+            assignment_remains_valid(
+                task,
+                {"TASK-1": task},
+                self.policy,
+                target_agent="Claude",
+                reason=DispatchReason.REVIEW_READY,
+            )
+        )
+        self.assertFalse(
+            assignment_remains_valid(
+                task,
+                {"TASK-1": task},
+                self.policy,
+                target_agent="Gemini",
+                reason=DispatchReason.REVIEW_READY,
+            )
+        )
+
     def test_finalize_waits_on_dependencies_and_pending_ci(self) -> None:
         task = {
             "id": "TASK-1",
@@ -88,7 +116,7 @@ class DispatchPolicyTests(unittest.TestCase):
         task["integration_recorded_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         self.assertIsNone(resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy))
 
-    def test_metadata_only_premerge_repair_can_run_before_dependencies(self) -> None:
+    def test_explicit_integration_repair_can_run_before_dependencies(self) -> None:
         task = {
             "id": "TASK-1",
             "status": "blocked",
@@ -96,7 +124,11 @@ class DispatchPolicyTests(unittest.TestCase):
             "depends_on": ["BLOCKED-DEP"],
             "pr_url": "https://github.com/example/repo/pull/1",
             "ci_status": "failure",
-            "premerge_repair": {"scope": "metadata_only"},
+            "work_intent": {
+                "kind": "integration_repair",
+                "state": "pending",
+                "scope": "existing_pr",
+            },
         }
         tasks = task_index([{"id": "BLOCKED-DEP", "status": "todo"}, task])
 
@@ -200,6 +232,15 @@ class DispatchPolicyTests(unittest.TestCase):
         self.assertEqual(first["target_agent"], "Codex")
         self.assertEqual(first["metadata"], {"source": "test", "mode": "execution"})
         self.assertEqual(first["task"]["execution_branch"], "codex/task-1-existing-pr")
+        self.assertEqual(
+            first["assignment_lease"],
+            {
+                "task_revision": 0,
+                "role": "owner",
+                "intent": "owned_ready_dispatch",
+                "target_agent": "Codex",
+            },
+        )
 
     def test_event_signature_ignores_observation_timestamp(self) -> None:
         decision = resolve_dispatch_target(self.tasks["TASK-1"], self.tasks, self.policy)

@@ -485,8 +485,12 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
         context_files.append(label)
     raw_target_files = event.get("target_files") if "target_files" in event else task_payload.get("artifacts")
     target_files, _skipped_external_targets = repo_scoped_target_files(raw_target_files or [])
+    event_id = new_runtime_id("evt")
+    assignment_lease = dict(event.get("assignment_lease") or {})
+    if assignment_lease:
+        assignment_lease["attempt_id"] = event_id
     queue_payload = {
-        "event_id": new_runtime_id("evt"),
+        "event_id": event_id,
         "created_at": utc_now(),
         "event_key": event.get("key"),
         "task_id": event.get("task_id"),
@@ -501,6 +505,7 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
             "handoff": event.get("handoff"),
             "task": task_payload,
             "mode": event_mode_bucket(event),
+            "assignment_lease": assignment_lease,
         },
     }
     enqueue_event(config, queue_payload)

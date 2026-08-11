@@ -313,14 +313,13 @@ def resolve_dispatch_target(
         integration_evidence,
     )
     if not dependencies_ready:
-        # A task may repair a known pre-merge metadata failure while its feature
-        # dependencies are still integrating. This narrow mode cannot start
-        # new implementation or finalize the PR; it only lets the owner repair
-        # an existing failed PR (for example, an invalid commit trailer).
-        premerge_repair = record.raw.get("premerge_repair")
+        # An explicit integration-repair attempt may work on an existing PR
+        # while feature dependencies are still integrating.
+        work_intent = record.raw.get("work_intent")
         if (
-            isinstance(premerge_repair, Mapping)
-            and premerge_repair.get("scope") == "metadata_only"
+            isinstance(work_intent, Mapping)
+            and work_intent.get("kind") == "integration_repair"
+            and work_intent.get("state") == "pending"
             and record.owner
             and str(record.raw.get("pr_url") or "").strip()
             and ci_status_reports_failure(str(record.raw.get("ci_status") or ""))
@@ -342,6 +341,53 @@ def resolve_dispatch_target(
     if record.status in policy.owned_statuses and record.owner:
         return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_READY)
     return None
+
+
+def assignment_remains_valid(
+    task: TaskRecord | Mapping[str, Any],
+    tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
+    policy: ReadyDispatchPolicy,
+    *,
+    target_agent: str,
+    reason: DispatchReason | str,
+    integration_evidence: Mapping[str, bool] | None = None,
+) -> bool:
+    """Keep a worker only while its dispatched role still owns the attempt."""
+    record = _task(task)
+    normalized_reason = DispatchReason(
+        reason.value if isinstance(reason, DispatchReason) else str(reason)
+    )
+    decision = resolve_dispatch_target(
+        record,
+        tasks_by_id,
+        policy,
+        integration_evidence,
+    )
+    if decision is not None and (
+            decision.target_agent == target_agent
+            and decision.reason == normalized_reason
+    ):
+        return True
+
+    # A worker may write its expected closeout state shortly before its process
+    # exits. That is completion of the same lease, not a reassignment.
+    if normalized_reason == DispatchReason.REVIEW_READY:
+        return record.reviewer == target_agent and record.status in {
+            *policy.finalize_statuses,
+            *policy.dependency_done_statuses,
+        }
+    if normalized_reason == DispatchReason.OWNED_FINALIZE:
+        return record.owner == target_agent and record.status in policy.dependency_done_statuses
+    if normalized_reason in {
+        DispatchReason.OWNED_READY,
+        DispatchReason.OWNED_IN_PROGRESS,
+    }:
+        return record.owner == target_agent and record.status in {
+            *policy.review_statuses,
+            *policy.finalize_statuses,
+            *policy.dependency_done_statuses,
+        }
+    return False
 
 
 def ready_dispatch_signature(
@@ -397,6 +443,12 @@ def build_dispatch_event(
         "target_agent": decision.target_agent,
         "reason": reason,
         "task": task_payload,
+        "assignment_lease": {
+            "task_revision": int(record.raw.get("revision") or 0),
+            "role": "reviewer" if decision.reason == DispatchReason.REVIEW_READY else "owner",
+            "intent": reason,
+            "target_agent": decision.target_agent,
+        },
     }
     if source is not None:
         event["event_id"] = f"evt-{record.id.lower()}-{reason}"

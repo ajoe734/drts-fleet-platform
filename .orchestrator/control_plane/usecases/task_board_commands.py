@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-import io
 import os
 import sys
 import threading
-from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +16,10 @@ from control_plane.infra.task_board_repo import task_board_transaction
 
 
 TaskBoardHandler = Callable[[dict[str, Any], list[str]], Any]
+TaskBoardMutationPreparer = Callable[
+    [dict[str, Any], dict[str, Any], str, list[str]], Any
+]
+TaskBoardMutationCommitter = Callable[[Any], None]
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,8 @@ class TaskBoardCommandRuntime:
     sync_all: Callable[[dict[str, Any]], None]
     read_only_commands: Mapping[str, TaskBoardHandler]
     mutation_commands: Mapping[str, TaskBoardHandler]
+    prepare_mutation: TaskBoardMutationPreparer | None = None
+    commit_mutation: TaskBoardMutationCommitter | None = None
 
 
 @dataclass(frozen=True)
@@ -69,11 +74,16 @@ class TaskBoardCommandExecutor:
             state = self.runtime.load_state()
             state_before = deepcopy(state)
             result = handler(state, args)
+            prepared: Any = None
             try:
+                if self.runtime.prepare_mutation is not None:
+                    prepared = self.runtime.prepare_mutation(state_before, state, command, args)
                 self.runtime.sync_all(state)
             except Exception:
                 self.runtime.save_state(state_before)
                 raise
+            if self.runtime.commit_mutation is not None:
+                self.runtime.commit_mutation(prepared)
         return result
 
 
@@ -125,6 +135,7 @@ def run_task_board_command(
     args: list[str] | tuple[str, ...] = (),
     *,
     environ: Mapping[str, str] | None = None,
+    command_script: Path | None = None,
 ) -> TaskBoardCommandResult:
     """Invoke the canonical task-board command path without a subprocess."""
 
@@ -134,26 +145,18 @@ def run_task_board_command(
         return TaskBoardCommandResult(2, stderr="Missing paths.status_file")
     status_file = Path(str(status_value)).expanduser().resolve()
     status_root = status_file.parent
-    script = status_root / "scripts" / "ai_status.py"
+    script = (command_script or status_root / "scripts" / "ai_status.py").resolve()
     if not script.exists():
         return TaskBoardCommandResult(2, stderr=f"Status command module not found at {script}")
 
     command_env = {str(key): str(value) for key, value in (environ or {}).items()}
     try:
         module = _load_task_board_module(status_root, script)
-        if hasattr(module, "execute_command"):
-            with _temporary_environ(command_env):
-                payload = module.execute_command(command, list(map(str, args)))
-            return TaskBoardCommandResult(0, payload=payload)
-
-        # Compatibility for older/custom command modules. The repository-owned
-        # module exposes ``execute_command`` and never uses this process-global
-        # output redirection path.
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-        with _temporary_environ(command_env), redirect_stdout(stdout), redirect_stderr(stderr):
-            returncode = int(module.main([str(script), command, *map(str, args)]))
-        return TaskBoardCommandResult(returncode, stdout.getvalue(), stderr.getvalue())
+        if not hasattr(module, "execute_command"):
+            return TaskBoardCommandResult(2, stderr="Task-board module does not expose execute_command")
+        with _temporary_environ(command_env):
+            payload = module.execute_command(command, list(map(str, args)))
+        return TaskBoardCommandResult(0, payload=payload)
     except SystemExit as exc:
         code = exc.code if isinstance(exc.code, int) else 1
         message = str(exc.code) if exc.code and not isinstance(exc.code, int) else ""

@@ -809,6 +809,21 @@ def load_state() -> dict[str, Any]:
         state = default_state()
     else:
         state = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+    defaults = default_state()
+    for key, value in defaults.items():
+        state.setdefault(key, deepcopy(value))
+    for task in state.get("tasks", []):
+        if not isinstance(task, dict):
+            continue
+        task_id = str(task.get("id") or "")
+        task.setdefault("title", task_id)
+        task.setdefault("summary_zh", "")
+        task.setdefault("phase", "Unassigned")
+        task.setdefault("depends_on", [])
+        task.setdefault("artifacts", [])
+        task.setdefault("acceptance", [])
+        task.setdefault("next", "")
+        task.setdefault("last_update", None)
     state["status_authority_version"] = STATUS_AUTHORITY_VERSION
     state["status_authority_handshake"] = STATUS_AUTHORITY_HANDSHAKE
     sync_canonical_document_metadata(state)
@@ -845,10 +860,9 @@ def atomic_write_text(path: Path, content: str) -> None:
 def _retention_keeps() -> dict[str, int]:
     """Resolve status-file retention keep counts from orchestrator config.
 
-    ai_status.py is the dominant writer of ai-status.json (the worker
-    ``ai-status.sh`` CLI runs it on every status mutation), so the same prune
-    that ``supervisor.write_status_with_prune`` applies MUST also live here —
-    otherwise handoffs/tasks regrow unbounded (17.8k handoffs / 8.7 MB by the
+    The canonical command transaction invokes this retention policy from its
+    single save callback so handoffs/tasks cannot regrow unbounded (17.8k
+    handoffs / 8.7 MB by the
     2026-05-31 incident) and the file blows past the 256 KB cap the
     chair/coordination worker Read tool enforces, re-breaking machine-truth
     reads. Keeps are read from the orchestrator config (config.local.json
@@ -899,8 +913,7 @@ def archive_task_bodies(dropped: list[dict[str, Any]]) -> None:
 
 def prune_state_for_size(state: dict[str, Any]) -> None:
     """Bound the unbounded audit tails (done handoffs, done tasks, resolved
-    blockers) in place. Mirrors supervisor.{prune_done_handoffs,prune_done_tasks,
-    prune_blockers}; pending handoffs and open blockers are never trimmed, and
+    blockers) in place. Pending handoffs and open blockers are never trimmed, and
     dropped done-task ids are recorded in ``archived_task_ids`` (dependency-safe
     because ``dependencies_satisfied`` treats a missing dep as archived/done).
     Dropped done-task bodies are appended to ``ai-task-archive.jsonl`` first so
@@ -953,6 +966,71 @@ def save_state(state: dict[str, Any]) -> None:
 
 def append_log(entry: dict[str, Any]) -> None:
     _append_jsonl_line(LOG_FILE, json.dumps(entry, ensure_ascii=False))
+
+
+def prepare_task_transitions(
+    state_before: dict[str, Any],
+    state_after: dict[str, Any],
+    command: str,
+    args: list[str],
+) -> list[dict[str, Any]]:
+    """Version changed tasks and record who produced each transition."""
+    before = {
+        str(task.get("id")): task
+        for task in state_before.get("tasks", [])
+        if isinstance(task, dict) and task.get("id")
+    }
+    after = {
+        str(task.get("id")): task
+        for task in state_after.get("tasks", [])
+        if isinstance(task, dict) and task.get("id")
+    }
+    timestamp = iso_now()
+    actor = current_actor()
+    reconciler = os.environ.get("AI_STATUS_RECONCILER", "").strip()
+    producer = (
+        os.environ.get("AI_STATUS_PRODUCER", "").strip()
+        or reconciler
+        or ("worker" if os.environ.get("ORCH_RUN_ID") else "cli")
+    )
+    cause = args[1] if len(args) > 1 else (args[0] if args else command)
+
+    transitions: list[dict[str, Any]] = []
+    for task_id in sorted(set(before) | set(after)):
+        previous = before.get(task_id)
+        current = after.get(task_id)
+        if previous == current:
+            continue
+
+        previous_revision = int((previous or {}).get("revision") or 0)
+        revision = previous_revision + 1
+        if current is not None:
+            current["revision"] = revision
+
+        transitions.append(
+            {
+                "ts": timestamp,
+                "agent": actor,
+                "type": "task_transition",
+                "transition_id": f"transition-{uuid.uuid4().hex}",
+                "task_id": task_id,
+                "command": command,
+                "from_status": (previous or {}).get("status"),
+                "to_status": (current or {}).get("status", "archived"),
+                "from_revision": previous_revision,
+                "revision": revision,
+                "producer": producer,
+                "worker_run_id": os.environ.get("ORCH_RUN_ID") or None,
+                "cause": cause,
+                "message": f"{command}: {cause}",
+            }
+        )
+    return transitions
+
+
+def commit_task_transitions(transitions: list[dict[str, Any]] | None) -> None:
+    for transition in transitions or []:
+        append_log(transition)
 
 
 def ensure_agent(name: str, *, allow_retired: bool = False) -> dict[str, Any]:
@@ -2050,6 +2128,7 @@ def command_start(state: dict[str, Any], args: list[str]) -> None:
     task["status"] = "in_progress"
     task["last_update"] = timestamp
     task["next"] = message
+    task.pop("work_intent", None)
     mark_handoffs_done_for_actor(state, task_id, actor)
     mark_blockers_resolved(state, task_id)
     append_log({"ts": timestamp, "agent": actor, "type": "start", "task_id": task_id, "message": message})
@@ -2060,12 +2139,12 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit("Usage: progress <task-id> <message>")
     task_id, message = args[0], args[1]
     actor = current_actor()
-    reconciler = os.environ.get("AI_STATUS_RECONCILER", "").strip() == "github_bus" and actor == "Supervisor"
     task = get_task(state, task_id)
     if task is None:
         raise SystemExit(f"Unknown task: {task_id}")
-    if task.get("owner") != actor and not reconciler:
+    if task.get("owner") != actor:
         raise SystemExit(f"Only the owner ({task.get('owner')}) can progress {task_id}")
+    task.pop("work_intent", None)
     timestamp = iso_now()
     ci_failed = os.environ.get("INTEGRATION_STATUS", "").strip().lower() == "ci_failed"
     if task["status"] in {"backlog", "todo"} or (
@@ -2095,33 +2174,9 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
             for key in ("dev_deploy_run_url", "dev_deploy_sha", "dev_deploy_source_ref"):
                 task.pop(key, None)
         task.update(integration_metadata)
-        if not reconciler:
-            # Owner progress is a new integration attempt. A prior reviewer
-            # rejection must not remain attached once the owner has supplied
-            # fresh integration evidence.
-            task.pop("rework_required_at", None)
-    if (
-        reconciler
-        and os.environ.get("INTEGRATION_STATUS", "").strip().lower() == "merged_to_dev"
-        and task.get("merge_commit")
-    ):
-        # A protected merge is terminal integration evidence even when the
-        # worker exited before its owner closeout reached the status file.
-        # Reconcile the lifecycle forward; never infer this from CI alone.
-        task["status"] = "done"
-        task.pop("waiting_for", None)
-        mark_blockers_resolved(state, task_id)
-        mark_handoffs_done(state, task_id)
-    if reconciler:
-        push_branch = os.environ.get("PUSH_BRANCH", "").strip()
-        execution_branch = os.environ.get("EXECUTION_BRANCH", "").strip()
-        commit_hash = os.environ.get("COMMIT_HASH", "").strip()
-        if push_branch:
-            task["push_branch"] = push_branch
-        if commit_hash:
-            task["commit_hash"] = commit_hash
-        if execution_branch:
-            task["execution_branch"] = execution_branch
+        # Owner progress is a new integration attempt. A prior reviewer
+        # rejection must not remain attached once fresh evidence is supplied.
+        task.pop("rework_required_at", None)
     mark_handoffs_done_for_actor(state, task_id, actor)
     append_log({"ts": timestamp, "agent": actor, "type": "progress", "task_id": task_id, "message": message})
 
@@ -2175,9 +2230,9 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     append_log({"ts": timestamp, "agent": actor, "type": "reopen", "task_id": task_id, "message": message})
 
 
-def command_premerge_repair(state: dict[str, Any], args: list[str]) -> None:
+def command_integration_repair(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
-        raise SystemExit("Usage: premerge-repair <task-id> <message>")
+        raise SystemExit("Usage: integration-repair <task-id> <message>")
     task_id, message = args[0], args[1]
     actor = current_actor()
     task = get_task(state, task_id)
@@ -2191,15 +2246,86 @@ def command_premerge_repair(state: dict[str, Any], args: list[str]) -> None:
     task["status"] = "in_progress"
     task["last_update"] = timestamp
     task["next"] = message
-    task["premerge_repair"] = {
-        "scope": "metadata_only",
+    task["work_intent"] = {
+        "kind": "integration_repair",
+        "state": "pending",
+        "scope": "existing_pr",
         "requested_at": timestamp,
         "message": message,
     }
     task.pop("waiting_for", None)
     mark_blockers_resolved(state, task_id)
     mark_handoffs_done(state, task_id)
-    append_log({"ts": timestamp, "agent": actor, "type": "premerge_repair", "task_id": task_id, "message": message})
+    append_log({"ts": timestamp, "agent": actor, "type": "integration_repair", "task_id": task_id, "message": message})
+
+
+def command_observe_integration(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 2:
+        raise SystemExit("Usage: observe-integration <task-id> <message>")
+    if current_actor() != "Supervisor" or os.environ.get("AI_STATUS_RECONCILER") != "github_bus":
+        raise SystemExit("observe-integration is restricted to the GitHub reconciler")
+    task_id, message = args[0], args[1]
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    timestamp = iso_now()
+    metadata = integration_metadata_from_env(task_requires_commit(task), timestamp)
+    evidence_fields = {
+        "pr_url",
+        "ci_status",
+        "ci_run_url",
+        "merged_ref",
+        "merge_commit",
+        "dev_deploy_run_url",
+        "dev_deploy_sha",
+        "dev_deploy_source_ref",
+    }
+    for key in evidence_fields:
+        task.pop(key, None)
+    task.update(metadata)
+    execution_branch = os.environ.get("EXECUTION_BRANCH", "").strip()
+    if execution_branch:
+        task["execution_branch"] = execution_branch
+    if metadata["integration_status"] != "ci_failed":
+        intent = task.get("work_intent")
+        if isinstance(intent, dict) and intent.get("kind") == "integration_repair":
+            task.pop("work_intent", None)
+    task["last_update"] = timestamp
+    append_log({"ts": timestamp, "agent": "Supervisor", "type": "integration_observed", "task_id": task_id, "message": message})
+
+
+def command_reduce_integration(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 2:
+        raise SystemExit("Usage: reduce-integration <task-id> <message>")
+    if current_actor() != "Supervisor" or os.environ.get("AI_STATUS_RECONCILER") != "github_bus":
+        raise SystemExit("reduce-integration is restricted to the GitHub reconciler")
+    task_id, message = args[0], args[1]
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    timestamp = iso_now()
+    integration_status = str(task.get("integration_status") or "").lower()
+    task_status = str(task.get("status") or "").lower()
+    if integration_status == "merged_to_dev" and task.get("merge_commit"):
+        task["status"] = "done"
+        task.pop("waiting_for", None)
+        task.pop("work_intent", None)
+        mark_blockers_resolved(state, task_id)
+        mark_handoffs_done(state, task_id)
+    elif integration_status == "ci_failed" and task_status in {"review", "review_approved"}:
+        task["status"] = "in_progress"
+        task["work_intent"] = {
+            "kind": "integration_repair",
+            "state": "pending",
+            "scope": "existing_pr",
+            "requested_at": timestamp,
+            "message": message,
+        }
+    else:
+        return
+    task["last_update"] = timestamp
+    task["next"] = message
+    append_log({"ts": timestamp, "agent": "Supervisor", "type": "integration_reduced", "task_id": task_id, "message": message})
 
 
 def command_archive_completed(state: dict[str, Any], args: list[str]) -> None:
@@ -2275,6 +2401,7 @@ def command_handoff(state: dict[str, Any], args: list[str]) -> None:
     task["last_update"] = timestamp
     task["next"] = message
     task.pop("rework_required_at", None)
+    task.pop("work_intent", None)
     mark_handoffs_done_for_actor(state, task_id, actor)
     mark_blockers_resolved(state, task_id)
     state.setdefault("handoffs", []).append(
@@ -2307,6 +2434,7 @@ def command_blocker(state: dict[str, Any], args: list[str]) -> None:
     task["waiting_for"] = waiting_for
     task["last_update"] = timestamp
     task["next"] = message
+    task.pop("work_intent", None)
     mark_handoffs_done_for_actor(state, task_id, actor)
     state.setdefault("blockers", []).append(
         {
@@ -2319,6 +2447,141 @@ def command_blocker(state: dict[str, Any], args: list[str]) -> None:
         }
     )
     append_log({"ts": timestamp, "agent": actor, "type": "blocker", "task_id": task_id, "message": f"Blocked on {waiting_for}: {message}"})
+
+
+def command_system_reassign(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 4:
+        raise SystemExit("Usage: system-reassign <task-id> <owner> <reviewer> <message>")
+    task_id, owner, reviewer, message = (
+        args[0],
+        canonical_agent_name(args[1]),
+        canonical_agent_name(args[2]),
+        args[3],
+    )
+    ensure_agent(owner)
+    ensure_agent(reviewer)
+    if owner == reviewer:
+        raise SystemExit("Reviewer cannot equal owner")
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+
+    expected_owner = os.environ.get("EXPECTED_OWNER", "").strip()
+    expected_reviewer = os.environ.get("EXPECTED_REVIEWER", "").strip()
+    if expected_owner and canonical_agent_name(task.get("owner")) != canonical_agent_name(expected_owner):
+        raise SystemExit(f"{task_id} owner changed before reassignment")
+    if expected_reviewer and canonical_agent_name(task.get("reviewer")) != canonical_agent_name(expected_reviewer):
+        raise SystemExit(f"{task_id} reviewer changed before reassignment")
+
+    timestamp = iso_now()
+    old_owner = canonical_agent_name(task.get("owner"))
+    old_reviewer = canonical_agent_name(task.get("reviewer"))
+    task["owner"] = owner
+    task["reviewer"] = reviewer
+    task["last_update"] = timestamp
+    task.pop("work_intent", None)
+    task["next"] = message
+    if os.environ.get("RESET_TO_TODO", "").strip().lower() in {"1", "true", "yes"}:
+        if str(task.get("status") or "").lower() in {"backlog", "todo", "in_progress"}:
+            task["status"] = "todo"
+    execution_branch = os.environ.get("EXECUTION_BRANCH", "").strip()
+    if execution_branch:
+        task["execution_branch"] = execution_branch
+    evidence_ref = os.environ.get("EVIDENCE_REF", "").strip()
+    if evidence_ref:
+        refs = list(task.get("evidence_refs") or [])
+        if evidence_ref not in refs:
+            refs.append(evidence_ref)
+        task["evidence_refs"] = refs
+
+    for handoff in state.get("handoffs", []) or []:
+        if handoff.get("task_id") != task_id or handoff.get("status") == "done":
+            continue
+        target = canonical_agent_name(handoff.get("to"))
+        if target in {old_owner, old_reviewer} and target not in {owner, reviewer}:
+            handoff["status"] = "done"
+            handoff["resolved_at"] = timestamp
+
+    handoff_to = canonical_agent_name(os.environ.get("HANDOFF_TO", ""))
+    if handoff_to:
+        ensure_agent(handoff_to)
+        handoff_from = canonical_agent_name(os.environ.get("HANDOFF_FROM", ""))
+        state.setdefault("handoffs", []).append(
+            {
+                "task_id": task_id,
+                "from": handoff_from or old_owner or old_reviewer or owner,
+                "to": handoff_to,
+                "message": message,
+                "status": "pending",
+                "created_at": timestamp,
+            }
+        )
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": current_actor(),
+            "type": "system_reassign",
+            "task_id": task_id,
+            "message": message,
+        }
+    )
+
+
+def command_system_block(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 2:
+        raise SystemExit("Usage: system-block <task-id> <message>")
+    task_id, message = args[0], args[1]
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    timestamp = iso_now()
+    task["status"] = "blocked"
+    task["next"] = message
+    task["last_update"] = timestamp
+    task.pop("work_intent", None)
+    evidence_ref = os.environ.get("EVIDENCE_REF", "").strip()
+    if evidence_ref:
+        refs = list(task.get("evidence_refs") or [])
+        if evidence_ref not in refs:
+            refs.append(evidence_ref)
+        task["evidence_refs"] = refs
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": current_actor(),
+            "type": "system_block",
+            "task_id": task_id,
+            "message": message,
+        }
+    )
+
+
+def command_system_resume(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 3:
+        raise SystemExit("Usage: system-resume <task-id> <status> <message>")
+    task_id, resume_status, message = args[0], args[1].strip().lower(), args[2]
+    if resume_status not in {"backlog", "todo", "in_progress"}:
+        raise SystemExit(f"Unsupported resume status: {resume_status}")
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    if str(task.get("status") or "").lower() != "blocked":
+        raise SystemExit(f"{task_id} is no longer blocked")
+    timestamp = iso_now()
+    task["status"] = resume_status
+    task["next"] = message
+    task["last_update"] = timestamp
+    task.pop("waiting_for", None)
+    mark_blockers_resolved(state, task_id)
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": current_actor(),
+            "type": "system_resume",
+            "task_id": task_id,
+            "message": message,
+        }
+    )
 
 
 def _load_orchestrator_config() -> dict[str, Any]:
@@ -2393,6 +2656,7 @@ def command_done(state: dict[str, Any], args: list[str]) -> None:
     task["next"] = message
     task.update(completion_metadata)
     task.pop("waiting_for", None)
+    task.pop("work_intent", None)
     mark_blockers_resolved(state, task_id)
     mark_handoffs_done(state, task_id)
     apply_unblock_parent_resolution(
@@ -2563,12 +2827,7 @@ def command_audit(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(1)
 
 
-def main(argv: list[str]) -> int:
-    ensure_canonical_delegation(argv)
-    state = load_state()
-    command = argv[1] if len(argv) > 1 else "sync"
-    args = argv[2:]
-
+def command_handlers() -> tuple[dict[str, Any], dict[str, Any]]:
     read_only_commands = {
         "audit": command_audit,
         "prompt": command_prompt,
@@ -2582,31 +2841,53 @@ def main(argv: list[str]) -> int:
         "progress": command_progress,
         "note": command_note,
         "reopen": command_reopen,
-        "premerge-repair": command_premerge_repair,
+        "integration-repair": command_integration_repair,
+        "observe-integration": command_observe_integration,
+        "reduce-integration": command_reduce_integration,
         "archive-completed": command_archive_completed,
         "handoff": command_handoff,
         "blocker": command_blocker,
+        "system-reassign": command_system_reassign,
+        "system-block": command_system_block,
+        "system-resume": command_system_resume,
         "done": command_done,
         "approve": command_approve,
         "mode": command_mode,
         "sync": command_sync,
         "reconcile-from-git": command_reconcile_from_git,
     }
+    return read_only_commands, commands
 
-    if command in read_only_commands:
-        read_only_commands[command](state, args)
-        return 0
 
-    if command not in commands:
-        raise SystemExit(f"Unknown command: {command}")
+def execute_command(command: str, args: list[str]) -> Any:
+    orchestrator_dir = _LOCAL_ROOT / ".orchestrator"
+    if str(orchestrator_dir) not in sys.path:
+        sys.path.insert(0, str(orchestrator_dir))
+    from control_plane.usecases.task_board_commands import (  # type: ignore
+        TaskBoardCommandExecutor,
+        TaskBoardCommandRuntime,
+    )
 
-    state_before = deepcopy(state)
-    commands[command](state, args)
-    try:
-        sync_all(state)
-    except Exception:
-        save_state(state_before)
-        raise
+    read_only_commands, mutation_commands = command_handlers()
+    runtime = TaskBoardCommandRuntime(
+        status_file=STATUS_FILE,
+        load_state=load_state,
+        save_state=save_state,
+        sync_all=sync_all,
+        read_only_commands=read_only_commands,
+        mutation_commands=mutation_commands,
+        prepare_mutation=prepare_task_transitions,
+        commit_mutation=commit_task_transitions,
+    )
+    return TaskBoardCommandExecutor(runtime).execute_with_result(command, args)
+
+
+def main(argv: list[str]) -> int:
+    ensure_canonical_delegation(argv)
+    command = argv[1] if len(argv) > 1 else "sync"
+    args = argv[2:]
+
+    execute_command(command, args)
     return 0
 
 

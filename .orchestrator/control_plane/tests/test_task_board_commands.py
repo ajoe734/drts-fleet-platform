@@ -42,6 +42,33 @@ class TaskBoardCommandExecutorTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(events, ["load", "command", "sync:2"])
 
+    def test_mutation_preparer_runs_inside_transaction_before_sync(self) -> None:
+        events: list[str] = []
+
+        def mutate(payload: dict, _args: list[str]) -> None:
+            payload["value"] = 2
+            events.append("command")
+
+        runtime = TaskBoardCommandRuntime(
+            status_file=self.status_file,
+            load_state=lambda: {"value": 1},
+            save_state=lambda _payload: events.append("save"),
+            sync_all=lambda payload: events.append(f"sync:{payload['value']}"),
+            read_only_commands={},
+            mutation_commands={"change": mutate},
+            prepare_mutation=lambda before, after, command, args: events.append(
+                f"prepare:{before['value']}:{after['value']}:{command}:{','.join(args)}"
+            ) or "prepared",
+            commit_mutation=lambda prepared: events.append(f"commit:{prepared}"),
+        )
+
+        TaskBoardCommandExecutor(runtime).execute("change", ["reason"])
+
+        self.assertEqual(
+            events,
+            ["command", "prepare:1:2:change:reason", "sync:2", "commit:prepared"],
+        )
+
     def test_sync_failure_restores_pre_command_state(self) -> None:
         restored: list[dict] = []
         state = {"items": ["before"]}
@@ -59,6 +86,8 @@ class TaskBoardCommandExecutorTests(unittest.TestCase):
             sync_all=fail_sync,
             read_only_commands={},
             mutation_commands={"change": mutate},
+            prepare_mutation=lambda *_args: "transition",
+            commit_mutation=lambda prepared: restored.append({"committed": prepared}),
         )
 
         with self.assertRaisesRegex(OSError, "disk full"):
@@ -85,7 +114,7 @@ class TaskBoardCommandExecutorTests(unittest.TestCase):
 
 
 class TaskBoardGatewayTests(unittest.TestCase):
-    def test_gateway_loads_repo_command_module_and_captures_output(self) -> None:
+    def test_gateway_loads_module_through_canonical_command_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             scripts = root / "scripts"
@@ -93,9 +122,8 @@ class TaskBoardGatewayTests(unittest.TestCase):
             (root / "ai-status.json").write_text("{}", encoding="utf-8")
             (scripts / "ai_status.py").write_text(
                 "import os\n"
-                "def main(argv):\n"
-                "    print(f'{argv[1]}:{os.environ.get(\"AI_NAME\")}')\n"
-                "    return 0\n",
+                "def execute_command(command, args):\n"
+                "    return f'{command}:{os.environ.get(\"AI_NAME\")}'\n",
                 encoding="utf-8",
             )
             config = {"paths": {"status_file": str(root / "ai-status.json")}}
@@ -107,7 +135,7 @@ class TaskBoardGatewayTests(unittest.TestCase):
             )
 
         self.assertTrue(result.ok)
-        self.assertEqual(result.stdout.strip(), "sync:Codex2")
+        self.assertEqual(result.payload, "sync:Codex2")
 
     def test_gateway_reports_missing_module_without_raising(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
