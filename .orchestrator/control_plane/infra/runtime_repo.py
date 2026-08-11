@@ -137,6 +137,8 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state["chair_review"].setdefault("last_reviewer", None)
     state["chair_review"].setdefault("last_reason", None)
     state["chair_review"].setdefault("last_decision", None)
+    for retired_key in ("sidecar_approved_until", "max_sidecars", "blocked_sidecar_parents"):
+        state["chair_review"].pop(retired_key, None)
     state.setdefault("supervisor", {})
     state["supervisor"].setdefault("pid", None)
     state["supervisor"].setdefault("started_at", None)

@@ -61,6 +61,23 @@ class RuntimeStateMigrationTests(unittest.TestCase):
         self.assertEqual(migrated["chair_reassignment_guards"], {})
         self.assertEqual(migrated["supervisor"]["lifecycle"], "running")
 
+    def test_migrate_state_drops_retired_sidecar_allocator_state(self) -> None:
+        migrated = runtime_state.migrate_state(
+            {
+                "underutilization": {"last_ratio": 0.25},
+                "chair_review": {
+                    "sidecar_approved_until": "2026-04-15T17:00:00Z",
+                    "max_sidecars": 2,
+                    "blocked_sidecar_parents": ["TASK-1"],
+                },
+            }
+        )
+
+        self.assertNotIn("underutilization", migrated)
+        self.assertNotIn("sidecar_approved_until", migrated["chair_review"])
+        self.assertNotIn("max_sidecars", migrated["chair_review"])
+        self.assertNotIn("blocked_sidecar_parents", migrated["chair_review"])
+
     def test_migrate_state_moves_legacy_task_mirror_to_watcher_cursor(self) -> None:
         migrated = runtime_state.migrate_state(
             {"version": 3, "tasks": {"TASK-1": {"status": "review"}}}
