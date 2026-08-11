@@ -105,6 +105,24 @@ class DispatchPolicyTests(unittest.TestCase):
         self.assertIsNotNone(decision)
         self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
 
+    def test_reviewer_rework_overrides_fresh_ci_pending_evidence(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "depends_on": [],
+            "integration_status": "ci_pending",
+            "ci_status": "pending",
+            "integration_recorded_at": "2026-08-11T10:00:00Z",
+            "rework_required_at": "2026-08-11T10:01:00Z",
+        }
+
+        decision = resolve_dispatch_target(task, {"TASK-1": task}, self.policy)
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
+
     def test_ci_failure_overrides_a_stale_in_flight_integration_status(self) -> None:
         task = {
             "id": "TASK-1",

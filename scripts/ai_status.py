@@ -2094,6 +2094,11 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
             for key in ("dev_deploy_run_url", "dev_deploy_sha", "dev_deploy_source_ref"):
                 task.pop(key, None)
         task.update(integration_metadata)
+        if not reconciler:
+            # Owner progress is a new integration attempt. A prior reviewer
+            # rejection must not remain attached once the owner has supplied
+            # fresh integration evidence.
+            task.pop("rework_required_at", None)
     if (
         reconciler
         and os.environ.get("INTEGRATION_STATUS", "").strip().lower() == "merged_to_dev"
@@ -2151,6 +2156,7 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     task["status"] = "in_progress"
     task["last_update"] = timestamp
     task["next"] = message
+    task["rework_required_at"] = timestamp
     task.pop("waiting_for", None)
     mark_blockers_resolved(state, task_id)
     mark_handoffs_done(state, task_id)
@@ -2240,6 +2246,7 @@ def command_handoff(state: dict[str, Any], args: list[str]) -> None:
     task["status"] = "review"
     task["last_update"] = timestamp
     task["next"] = message
+    task.pop("rework_required_at", None)
     mark_handoffs_done_for_actor(state, task_id, actor)
     mark_blockers_resolved(state, task_id)
     state.setdefault("handoffs", []).append(

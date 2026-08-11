@@ -147,6 +147,35 @@ def integration_record_is_stale(
     return (reference - stamped).total_seconds() > max_age_seconds
 
 
+def rework_supersedes_integration(record: TaskRecord | Mapping[str, Any]) -> bool:
+    """Whether a reviewer has explicitly sent an integration attempt back to owner.
+
+    A rejected review can leave a real PR and its CI observation intact.  That
+    evidence must remain visible, but it cannot suppress the repair worker that
+    the reviewer explicitly requested.
+    """
+    raw = _task(record).raw
+    rework_at = raw.get("rework_required_at")
+    if not rework_at:
+        return False
+    try:
+        rework_time = datetime.fromisoformat(str(rework_at).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if rework_time.tzinfo is None:
+        rework_time = rework_time.replace(tzinfo=timezone.utc)
+    integration_at = raw.get("integration_recorded_at")
+    if not integration_at:
+        return True
+    try:
+        integration_time = datetime.fromisoformat(str(integration_at).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if integration_time.tzinfo is None:
+        integration_time = integration_time.replace(tzinfo=timezone.utc)
+    return rework_time >= integration_time
+
+
 def has_external_integration_in_flight(
     record: TaskRecord | Mapping[str, Any],
     *,
@@ -174,6 +203,8 @@ def has_external_integration_in_flight(
     is only believed while it is recent.
     """
     record = _task(record)
+    if rework_supersedes_integration(record):
+        return False
     ci_status = str(record.raw.get("ci_status") or "").strip().lower()
     # CI is the freshest execution signal. A delayed integration_status must not
     # trap a failed task in a permanent no-dispatch state.
