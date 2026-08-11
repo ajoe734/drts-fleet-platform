@@ -865,6 +865,27 @@ export class IdentityRepository {
     );
   }
 
+  async listSessionsByTenant(
+    tenantId: string,
+  ): Promise<CanonicalIdentitySessionRecord[]> {
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackSessions.values())
+        .filter((session) => session.tenantId === tenantId)
+        .map((session) => ({ ...session }));
+    }
+
+    const result = await this.databaseService!.query<PersistedSessionRow>(
+      `SELECT * FROM iam.identity_sessions
+       WHERE record->>'tenantId' = $1
+       ORDER BY updated_at DESC`,
+      [tenantId],
+    );
+
+    return result.rows.map((row) =>
+      this.hydrateSessionRecord(row, "iam.identity_sessions"),
+    );
+  }
+
   async findActiveSessionByDevice(
     deviceId: string,
   ): Promise<CanonicalIdentitySessionRecord | null> {

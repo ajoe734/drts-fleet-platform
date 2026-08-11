@@ -92,6 +92,12 @@ export function createTenantNavEntries(t: Translate): TenantNavEntry[] {
       icon: "users",
       label: t("nav.users"),
     },
+    {
+      key: "sessions",
+      href: "/sessions",
+      icon: "users",
+      label: t("nav.sessions"),
+    },
     { divider: t("shell.nav.notifications") },
     {
       key: "notifications",
