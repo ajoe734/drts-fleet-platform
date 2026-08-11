@@ -254,6 +254,8 @@
       },
       "runtime": {
         "cli": "claude",
+        "model": "claude-sonnet-5",
+        "effort": "medium",
         "output_format": "stream-json",
         "include_hook_events": true,
         "permission_mode": "acceptEdits",
@@ -287,6 +289,8 @@
       "runtime": {
         "cli": "claude",
         "config_home": "~/.claude2-home",
+        "model": "claude-sonnet-5",
+        "effort": "medium",
         "output_format": "stream-json",
         "include_hook_events": true,
         "permission_mode": "acceptEdits",

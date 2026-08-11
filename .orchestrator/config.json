@@ -7,11 +7,11 @@
     "state_file": ".orchestrator/state.json",
     "event_queue": ".orchestrator/event-queue.jsonl",
     "approval_queue": ".orchestrator/approval-queue.json",
-    "sidecar_catalog": ".orchestrator/sidecar_catalog.json",
     "github_bus_state": ".orchestrator/github-bus-state.json",
     "github_webhook_events": ".orchestrator/github-webhook-events.jsonl",
     "github_relay_state": ".orchestrator/github-relay-state.json",
     "provider_capabilities": ".orchestrator/provider_capabilities.json",
+    "control_plane_summary": ".orchestrator/projections/control-plane-summary.json",
     "antigravity_rotation": ".orchestrator/antigravity-rotation.json",
     "claude_mcp_config": ".orchestrator/claude-approval-broker.mcp.json"
   },
@@ -27,6 +27,15 @@
     "max_worker_history": 200,
     "auto_refresh_provider_capabilities": false,
     "git_reconcile_interval_seconds": 600,
+    "resource_guard": {
+      "enabled": true,
+      "max_total_workers": 12,
+      "max_execution_workers": 12,
+      "max_control_workers": 1,
+      "max_heavy_workers": 1,
+      "dispatch_memory_high_bytes": 2684354560,
+      "dispatch_pressure_avg10": 60.0
+    },
     "worker_workspace_cleanup": {
       "enabled": true,
       "archive_dirty_worktrees": true,
@@ -101,39 +110,31 @@
       "Copilot": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"]
     }
   },
-  "underutilization_dispatch": {
-    "enabled": true,
-    "threshold_ratio": 0.5,
-    "continuous_window_seconds": 900,
-    "cooldown_seconds": 900,
-    "max_new_sidecars_per_wave": 2,
-    "max_new_main_tasks_per_wave": 2,
-    "max_active_sidecars_per_agent": 1,
-    "productive_worker_statuses": [
-      "running",
-      "waiting_approval",
-      "suspended_approval",
-      "retry_backoff"
-    ]
-  },
   "chair_review": {
     "enabled": true,
     "cooldown_seconds": 900,
     "failure_streak_threshold": 2,
-    "default_approval_ttl_minutes": 45,
-    "default_max_sidecars": 2
+    "default_approval_ttl_minutes": 45
   },
   "approvals": {
     "stale_pending_seconds": 1800
   },
   "github_bus": {
     "enabled": false,
+    "integration_reconcile_enabled": true,
     "command_timeout_seconds": 8,
     "poll_interval_seconds": 30,
     "repo": null,
     "default_branch": "master",
     "offline_backoff_seconds": 300,
     "auto_request_reviewers": false,
+    "auto_open_pr": {
+      "enabled": true
+    },
+    "auto_merge": {
+      "enabled": true,
+      "eligible_statuses": ["review", "review_approved", "blocked"]
+    },
     "close_resolved_issues": false,
     "labels": {
       "review": ["pantheon-bus", "pantheon-review"],
@@ -254,13 +255,6 @@
       "adapter": "copilot_local",
       "wake_template": ".orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/copilot.md"
-    },
-    "grok": {
-      "display_name": "Copilot (legacy alias)",
-      "provider": "copilot",
-      "adapter": "copilot_local",
-      "wake_template": ".orchestrator/templates/wakeup.txt",
-      "file_inbox_path": ".llm-inbox/grok.md"
     }
   },
   "providers": {
@@ -272,6 +266,7 @@
       },
       "runtime": {
         "cli": "claude",
+        "model": "claude-sonnet-5",
         "output_format": "stream-json",
         "include_hook_events": true,
         "permission_mode": "acceptEdits",
@@ -305,6 +300,7 @@
       "runtime": {
         "cli": "claude",
         "config_home": "~/.claude2-home",
+        "model": "claude-sonnet-5",
         "output_format": "stream-json",
         "include_hook_events": true,
         "permission_mode": "acceptEdits",
@@ -346,7 +342,7 @@
       },
       "antigravity": {
         "cli": "agy",
-        "config_home": "~/.antigravity-home",
+        "config_home": "~/.gemini-ag2",
         "skip_permissions": true,
         "include_directories": true,
         "model_rotation": {
@@ -389,7 +385,7 @@
       },
       "antigravity": {
         "cli": "agy",
-        "config_home": "~/.antigravity2-home",
+        "config_home": "~/.gemini-ag3",
         "skip_permissions": true,
         "include_directories": true,
         "extra_include_directories": ["/home/edna/workspace/tenant-commute-hub"],
@@ -422,14 +418,15 @@
       },
       "codex": {
         "cli": "codex",
+        "model": "gpt-5.6-terra",
         "ask_for_approval": "never",
-        "sandbox_mode": "workspace-write",
+        "sandbox_mode": "danger-full-access",
         "dangerously_bypass": true
       },
       "approval": {
         "orchestrator_only": true,
         "ask_for_approval": "never",
-        "sandbox_mode": "workspace-write",
+        "sandbox_mode": "danger-full-access",
         "dangerously_bypass": true
       }
     },
@@ -442,14 +439,15 @@
       "codex": {
         "cli": "codex",
         "config_home": "~/.codex2",
+        "model": "gpt-5.6-terra",
         "ask_for_approval": "never",
-        "sandbox_mode": "workspace-write",
+        "sandbox_mode": "danger-full-access",
         "dangerously_bypass": true
       },
       "approval": {
         "orchestrator_only": true,
         "ask_for_approval": "never",
-        "sandbox_mode": "workspace-write",
+        "sandbox_mode": "danger-full-access",
         "dangerously_bypass": true
       }
     },
@@ -459,7 +457,6 @@
         "path": ".llm-inbox/copilot.md",
         "open_in_vscode": false,
         "agent_paths": {
-          "grok": ".llm-inbox/grok.md",
           "copilot": ".llm-inbox/copilot.md"
         }
       },
@@ -485,7 +482,6 @@
       },
       "model_preference": {
         "default": null,
-        "grok": null,
         "supported": []
       }
     }
@@ -525,11 +521,12 @@
         "review",
         "review_approved"
       ],
-      "availability_first": false,
-      "allow_any_idle_lane": false,
+      "availability_first": true,
+      "allow_any_idle_lane": true,
       "prefer_assigned_when_idle": true,
-      "require_assigned_agent_busy": true,
-      "require_owner_higher_priority_load": true
+      "require_assigned_agent_busy": false,
+      "require_owner_higher_priority_load": false,
+      "respect_explicit_owner_when_paused": false
     },
     "max_tasks_per_agent_by_lane": {
       "claude": 3,
@@ -540,7 +537,6 @@
       "gemini2": 2,
       "copilot": 2
     },
-    "max_dispatches_per_tick": 4,
-    "dispatch_cooldown_seconds": 600
+    "max_dispatches_per_tick": 4
   }
 }

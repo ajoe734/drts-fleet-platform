@@ -881,14 +881,13 @@ def archive_task_bodies(dropped: list[dict[str, Any]]) -> None:
         return
     stamp = iso_now()
     try:
-        with TASK_ARCHIVE_FILE.open("a", encoding="utf-8") as handle:
-            for task in dropped:
-                if not task.get("id"):
-                    continue
-                record = dict(task)
-                record["_archived_at"] = stamp
-                record["_archived_by"] = "ai_status.py"
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        for task in dropped:
+            if not task.get("id"):
+                continue
+            record = dict(task)
+            record["_archived_at"] = stamp
+            record["_archived_by"] = "ai_status.py"
+            _append_jsonl_line(TASK_ARCHIVE_FILE, json.dumps(record, ensure_ascii=False))
     except OSError:
         pass
 
@@ -2066,6 +2065,11 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
         task["status"] = "in_progress"
     task["last_update"] = timestamp
     task["next"] = message
+    # A branch/PR/CI update is progress, not task completion. Preserve the
+    # existing lifecycle state while recording structured integration evidence
+    # so the dispatcher does not mistake external integration for more coding.
+    if os.environ.get("INTEGRATION_STATUS", "").strip():
+        task.update(integration_metadata_from_env(task_requires_commit(task), timestamp))
     mark_handoffs_done_for_actor(state, task_id, actor)
     append_log({"ts": timestamp, "agent": actor, "type": "progress", "task_id": task_id, "message": message})
 
@@ -2116,6 +2120,58 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
             }
         )
     append_log({"ts": timestamp, "agent": actor, "type": "reopen", "task_id": task_id, "message": message})
+
+
+def command_archive_completed(state: dict[str, Any], args: list[str]) -> None:
+    if not args:
+        raise SystemExit("Usage: archive-completed <task-id> [reason]")
+    task_id = args[0]
+    reason = args[1] if len(args) > 1 else "Completed historical task removed from the live working set."
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    if str(task.get("status") or "").lower() != "done":
+        raise SystemExit(f"Only done tasks can be archived: {task_id}")
+
+    active_dependents = sorted(
+        candidate.get("id")
+        for candidate in state.get("tasks", [])
+        if candidate.get("id")
+        and candidate.get("id") != task_id
+        and str(candidate.get("status") or "").lower() != "done"
+        and task_id in (candidate.get("depends_on") or [])
+    )
+    if active_dependents:
+        raise SystemExit(
+            f"Cannot archive {task_id}; active dependents: {', '.join(active_dependents)}"
+        )
+
+    timestamp = iso_now()
+    record = dict(task)
+    record["_archived_at"] = timestamp
+    record["_archived_by"] = current_actor()
+    record["_archive_reason"] = reason
+    _append_jsonl_line(TASK_ARCHIVE_FILE, json.dumps(record, ensure_ascii=False))
+
+    state["tasks"] = [
+        candidate
+        for candidate in state.get("tasks", [])
+        if candidate.get("id") != task_id
+    ]
+    archived = state.setdefault("archived_task_ids", [])
+    if task_id not in archived:
+        archived.append(task_id)
+    mark_handoffs_done(state, task_id)
+    mark_blockers_resolved(state, task_id)
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": current_actor(),
+            "type": "task_archived",
+            "task_id": task_id,
+            "message": reason,
+        }
+    )
 
 
 def command_handoff(state: dict[str, Any], args: list[str]) -> None:
@@ -2443,6 +2499,7 @@ def main(argv: list[str]) -> int:
         "progress": command_progress,
         "note": command_note,
         "reopen": command_reopen,
+        "archive-completed": command_archive_completed,
         "handoff": command_handoff,
         "blocker": command_blocker,
         "done": command_done,

@@ -29,31 +29,16 @@ def parse_args() -> argparse.Namespace:
 
 
 def read_message() -> dict[str, Any] | None:
-    headers: dict[str, str] = {}
-    while True:
-        line = sys.stdin.buffer.readline()
-        if not line:
-            return None
-        if line in {b"\r\n", b"\n"}:
-            break
-        text = line.decode("utf-8").strip()
-        if ":" in text:
-            key, value = text.split(":", 1)
-            headers[key.strip().lower()] = value.strip()
-    length = int(headers.get("content-length", "0") or "0")
-    if length <= 0:
-        return None
-    payload = sys.stdin.buffer.read(length)
-    if not payload:
-        return None
-    return json.loads(payload.decode("utf-8"))
+    while line := sys.stdin.buffer.readline():
+        payload = line.strip()
+        if payload:
+            return json.loads(payload.decode("utf-8"))
+    return None
 
 
 def write_message(payload: dict[str, Any]) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    header = f"Content-Length: {len(body)}\r\n\r\n".encode("utf-8")
-    sys.stdout.buffer.write(header)
-    sys.stdout.buffer.write(body)
+    sys.stdout.buffer.write(body + b"\n")
     sys.stdout.buffer.flush()
 
 

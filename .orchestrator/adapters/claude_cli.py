@@ -153,6 +153,13 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
         if runtime.get("include_hook_events", True):
             command.append("--include-hook-events")
 
+        model = str(runtime.get("model") or "").strip()
+        if model:
+            command.extend(["--model", model])
+        effort = str(runtime.get("effort") or "").strip()
+        if effort:
+            command.extend(["--effort", effort])
+
         provider_info = (self.provider_capabilities or {}).get("providers", {}).get(provider_key, {})
         if runtime.get("enable_auto_mode_if_supported", True) and provider_info.get("supports_auto_approve"):
             command.extend(["--permission-mode", runtime.get("auto_permission_mode", "auto")])
