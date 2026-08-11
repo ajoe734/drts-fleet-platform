@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Optional, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Optional, Param, Post, Query, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import jwt from "jsonwebtoken";
 
@@ -6,6 +6,7 @@ import type {
   CreatePartnerBootstrapSessionCommand,
   DriverDeviceProvisioningSession,
   CreateTenantBootstrapSessionCommand,
+  IamCallbackSessionExchangeCommand,
   IdentityContext,
   PartnerBootstrapSession,
   RefreshDriverDeviceSessionCommand,
@@ -34,7 +35,7 @@ import {
 } from "../../common/auth/jwt-auth.service";
 import { validateInternalKey } from "../../common/auth/internal-key.middleware";
 import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extractor";
-import type { AuthBootstrapHeaders } from "../../common/auth/auth.types";
+import type { AuthBootstrapHeaders, AuthRealm } from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { CurrentIdentity } from "../../common/auth";
@@ -42,6 +43,7 @@ import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { IAPSubjectAdapter } from "./iap-subject.adapter";
+import { OidcPkceService } from "./oidc-pkce.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import {
@@ -87,7 +89,177 @@ export class AuthController {
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
     @Optional()
     private readonly serviceWorkloadIdentityAdapter?: ServiceWorkloadIdentityAdapter,
+    // Appended, and optional, so the positional contract the existing tests
+    // construct this controller with is unchanged. The module always provides
+    // it; `requireOidcPkceService` turns its absence into a clear failure
+    // rather than a property access on undefined.
+    @Optional()
+    private readonly oidcPkceService?: OidcPkceService,
   ) {}
+
+  private requireOidcPkceService(): OidcPkceService {
+    if (!this.oidcPkceService) {
+      throw new ApiRequestError(
+        503,
+        "AUTH_OIDC_UNAVAILABLE",
+        "OIDC login is not configured on this deployment.",
+      );
+    }
+    return this.oidcPkceService;
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Get(":realm/login")
+  getOidcLoginUrl(
+    @Param("realm") realm: AuthRealm,
+    @Query("redirect_uri") redirectUri?: string,
+    @Query("tenant_id") tenantId?: string,
+    @Query("partner_id") partnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (realm !== "tenant" && realm !== "partner") {
+      throw new ApiRequestError(
+        400,
+        "AUTH_REALM_INVALID",
+        `Unsupported OIDC realm '${realm}'. Only 'tenant' and 'partner' are supported.`,
+      );
+    }
+    const result = this.requireOidcPkceService().generateLoginParameters(realm, {
+      redirectUri: redirectUri ?? null,
+      tenantId: tenantId ?? null,
+      partnerId: partnerId ?? null,
+    });
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("tenant/callback-session")
+  async exchangeTenantCallbackSession(
+    @Body() command: IamCallbackSessionExchangeCommand,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("x-real-ip") realIp?: string,
+    @Headers("user-agent") userAgent?: string,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("x-oidc-state-token") stateTokenHeader?: string,
+  ) {
+    const stateToken = stateTokenHeader?.trim();
+    if (!stateToken) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Missing x-oidc-state-token header. Managed HttpOnly BFF boundary requires state token in header.",
+      );
+    }
+    const meta = this.buildMeta(
+      forwardedFor,
+      realIp,
+      userAgent,
+      requestId,
+      stateToken,
+    );
+    try {
+      const session = await this.requireOidcPkceService().exchangeTenantCallbackSession(
+        command,
+        meta,
+      );
+      return toApiSuccessEnvelope(session, requestId);
+    } catch (error) {
+      throw toPublicTenantAuthError(error);
+    }
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/callback-session")
+  async exchangePartnerCallbackSession(
+    @Body() command: IamCallbackSessionExchangeCommand,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("x-real-ip") realIp?: string,
+    @Headers("user-agent") userAgent?: string,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("x-oidc-state-token") stateTokenHeader?: string,
+  ) {
+    const stateToken = stateTokenHeader?.trim();
+    if (!stateToken) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        "Missing x-oidc-state-token header. Managed HttpOnly BFF boundary requires state token in header.",
+      );
+    }
+    const meta = this.buildMeta(
+      forwardedFor,
+      realIp,
+      userAgent,
+      requestId,
+      stateToken,
+    );
+    try {
+      const session = await this.requireOidcPkceService().exchangePartnerCallbackSession(
+        command,
+        meta,
+      );
+      return toApiSuccessEnvelope(session, requestId);
+    } catch (error) {
+      throw toPublicPartnerAuthError(error);
+    }
+  }
+
+  private buildMeta(
+    forwardedFor?: string,
+    realIp?: string,
+    userAgent?: string,
+    requestId?: string,
+    stateToken?: string,
+  ) {
+    const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
+    const meta: {
+      sourceIp?: string;
+      userAgent?: string;
+      requestId?: string;
+      stateToken?: string;
+    } = {};
+    if (sourceIp) meta.sourceIp = sourceIp;
+    if (userAgent) meta.userAgent = userAgent;
+    if (requestId) meta.requestId = requestId;
+    if (stateToken) meta.stateToken = stateToken;
+    return meta;
+  }
+
+  @Get("session")
+  getAuthSession(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "Active session required.",
+      );
+    }
+    return toApiSuccessEnvelope(
+      {
+        active: true,
+        identity,
+      },
+      requestId,
+    );
+  }
+
+  @OpenRoute()
+  @Post("logout")
+  revokeAuthSession(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      {
+        loggedOut: true,
+        message: "Session successfully revoked.",
+      },
+      requestId,
+    );
+  }
 
   @OpenRoute()
   @Post("token")

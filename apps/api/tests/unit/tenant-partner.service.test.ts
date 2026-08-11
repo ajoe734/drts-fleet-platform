@@ -1802,6 +1802,51 @@ describe("TenantPartnerService sensitive-data governance", () => {
     ).toEqual(persistedVerification);
   });
 
+  it("allows partner_user callers (from OIDC PKCE login) to hydrate and resolve partner eligibility verifications", async () => {
+    const producer = new TenantPartnerService(new AuditNotificationService());
+    const persistedVerification = await producer.verifyPartnerEligibility({
+      entrySlug: "bank-demo-alpha-airport",
+      cardLast4: "2468",
+    });
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      findPartnerEligibilityVerification: vi.fn(
+        async () => persistedVerification,
+      ),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const consumer = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    const partnerUserIdentity = {
+      actorType: "partner_user" as const,
+      actorId: "passenger_partner_oidc_123",
+      realm: "partner" as const,
+      tenantId: persistedVerification.tenantId,
+      partnerId: persistedVerification.partnerId,
+      partnerProgramId: persistedVerification.partnerProgramId,
+      partnerEntrySlug: persistedVerification.partnerEntrySlug,
+      scopes: ["partner:book"],
+    };
+
+    await expect(
+      consumer.hydratePartnerEligibilityVerification(
+        persistedVerification.eligibilityVerificationId,
+        partnerUserIdentity,
+      ),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      consumer.resolvePartnerEligibilityVerification(
+        persistedVerification.eligibilityVerificationId,
+        "req-partner-user-elig-001",
+        partnerUserIdentity,
+      ),
+    ).resolves.toEqual(persistedVerification);
+  });
+
   it("loads and atomically resolves a review created by another API instance", async () => {
     const producer = new TenantPartnerService(new AuditNotificationService());
     const verified = await producer.verifyPartnerEligibility({

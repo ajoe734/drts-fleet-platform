@@ -793,6 +793,7 @@ export interface IdentityContext {
     | "ops_user"
     | "driver_user"
     | "partner_api_key"
+    | "partner_user"
     | "referral_passenger";
   actorId: string | null;
   realm: "system" | "platform" | "tenant" | "ops" | "driver" | "partner";
@@ -1272,6 +1273,7 @@ export interface AuditLogRecord {
     | "tenant_admin"
     | "ops_user"
     | "partner_api_key"
+    | "partner_user"
     | "referral_passenger";
   tenantId: string | null;
   moduleName: string;
@@ -2602,6 +2604,8 @@ export interface TenantUserRoleRecord {
   approvalNotificationOptOut: boolean;
   invitedAt: string;
   updatedAt: string;
+  subjectId?: string;
+  subject?: string;
 }
 
 export interface CreateTenantUserCommand {
