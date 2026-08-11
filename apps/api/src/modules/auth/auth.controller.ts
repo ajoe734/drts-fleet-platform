@@ -316,6 +316,128 @@ export class AuthController {
     return toApiSuccessEnvelope(result, requestId);
   }
 
+  @Post("logout")
+  async logout(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        401,
+        "UNAUTHENTICATED",
+        "Authentication is required to log out.",
+      );
+    }
+    const sessionId = identity.sessionId ?? null;
+    if (sessionId) {
+      await this.jwtAuthService.revokeCurrentSession(
+        sessionId,
+        "user_logout",
+        identity.principalId ?? identity.actorId ?? undefined,
+      );
+    }
+    return toApiSuccessEnvelope({ loggedOut: true, sessionId }, requestId);
+  }
+
+  @Post("logout-all")
+  async logoutAll(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        401,
+        "UNAUTHENTICATED",
+        "Authentication is required to log out all sessions.",
+      );
+    }
+    const principalId = identity.principalId ?? identity.actorId;
+    if (!principalId) {
+      throw new ApiRequestError(
+        400,
+        "IDENTITY_REQUIRED",
+        "Principal identity is required to logout all sessions.",
+      );
+    }
+    const revokedCount = await this.jwtAuthService.revokeAllSessionsForPrincipal(
+      principalId,
+      "user_logout_all",
+      principalId,
+    );
+
+    if (identity.realm === "tenant" && identity.tenantId && identity.actorId) {
+      const user = this.tenantPartnerService.findTenantUser(
+        identity.tenantId,
+        identity.actorId,
+      );
+      if (user) {
+        const identityContext: IdentityContext = {
+          actorType: identity.actorType,
+          actorId: identity.actorId,
+          realm: identity.realm,
+          authMode: identity.authMode,
+          roleFamilies: identity.roleFamilies,
+          roles: identity.roles,
+          scopes: identity.scopes,
+          tenantId: identity.tenantId,
+          supportedExecutionModes: [
+            "discussion_planning",
+            "supervisor_managed_execution",
+          ],
+        };
+        this.tenantPartnerService.updateTenantUserRole(
+          identity.tenantId,
+          user.userId,
+          { roleCode: user.roleCode, status: user.status },
+          requestId,
+          identityContext,
+        );
+      }
+    }
+
+    return toApiSuccessEnvelope(
+      { loggedOutAll: true, revokedCount },
+      requestId,
+    );
+  }
+
+  @Post("sessions/revoke")
+  async revokeSessionSelf(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() command: { sessionId?: string },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        401,
+        "UNAUTHENTICATED",
+        "Authentication is required to revoke session.",
+      );
+    }
+    const sessionId = command?.sessionId?.trim();
+    if (!sessionId) {
+      throw new ApiRequestError(
+        400,
+        "FIELD_REQUIRED",
+        "sessionId is required.",
+      );
+    }
+    const callerPrincipalId = identity.principalId ?? identity.actorId;
+    if (!callerPrincipalId) {
+      throw new ApiRequestError(
+        400,
+        "IDENTITY_REQUIRED",
+        "Principal identity is required to revoke session.",
+      );
+    }
+    const result = await this.jwtAuthService.revokeSessionSelf(
+      sessionId,
+      callerPrincipalId,
+      "user_self_revocation",
+    );
+    return toApiSuccessEnvelope(result, requestId);
+  }
+
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("tenant/oidc-session")
