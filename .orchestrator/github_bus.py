@@ -799,10 +799,21 @@ def reconcile_task_integrations(
 ) -> bool:
     """Refresh PR/CI evidence for active tasks without creating new work."""
     changed = False
-    discovered = discover_task_prs(repo)
-    for task in status.get("tasks", []) or []:
-        if not isinstance(task, dict) or task.get("status") == "done":
-            continue
+    discovered: dict[str, list[dict[str, Any]]] | None = None
+    tasks = [
+        task
+        for task in status.get("tasks", []) or []
+        if isinstance(task, dict) and task.get("status") != "done"
+    ]
+    # Known PRs are the normal path. Reconcile those before the expensive
+    # fallback discovery so a slow repository-wide query cannot starve repair.
+    tasks.sort(
+        key=lambda task: (
+            parse_number_from_url(str(task.get("pr_url") or "")) is None,
+            str(task.get("id") or ""),
+        )
+    )
+    for task in tasks:
         task_id = str(task.get("id") or "").strip()
         owner = str(task.get("owner") or "").strip()
         pr_url = str(task.get("pr_url") or "").strip()
@@ -831,10 +842,13 @@ def reconcile_task_integrations(
                 task["integration_status"] = "branch_pushed"
                 task["push_branch"] = recovered_branch
                 task["commit_hash"] = recovered_commit or task.get("commit_hash")
-        candidates = discovered.get(task_id.upper(), [])
-        number, discovered_url = choose_task_pr(task, number, candidates)
-        if discovered_url:
-            pr_url = discovered_url
+        if not number:
+            if discovered is None:
+                discovered = discover_task_prs(repo)
+            candidates = discovered.get(task_id.upper(), [])
+            number, discovered_url = choose_task_pr(task, number, candidates)
+            if discovered_url:
+                pr_url = discovered_url
         if not number:
             number, opened_url = open_pr_for_pushed_task(config, task, repo)
             if opened_url:

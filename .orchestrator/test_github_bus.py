@@ -146,7 +146,7 @@ class GitHubBusCommandTests(unittest.TestCase):
             "integration_branch": pr["headRefName"],
         }}}
         with (
-            mock.patch.object(github_bus, "discover_task_prs", return_value={}),
+            mock.patch.object(github_bus, "discover_task_prs", return_value={}) as discover_task_prs,
             mock.patch.object(github_bus, "gh_json", return_value=pr),
             mock.patch.object(github_bus, "run_ai_status") as run_ai_status,
             mock.patch.object(github_bus, "write_activity_log"),
@@ -157,6 +157,7 @@ class GitHubBusCommandTests(unittest.TestCase):
 
         self.assertTrue(changed)
         run_ai_status.assert_called_once()
+        discover_task_prs.assert_not_called()
         self.assertEqual(
             run_ai_status.call_args.kwargs["integration_env"]["INTEGRATION_STATUS"],
             "ci_failed",
@@ -396,7 +397,7 @@ class GitHubBusProcessTests(unittest.TestCase):
             "mergeStateStatus": "CLEAN",
         }
         with (
-            mock.patch.object(github_bus, "discover_task_prs", return_value={"S1F-ENT-002": [pr]}),
+            mock.patch.object(github_bus, "discover_task_prs", return_value={"S1F-ENT-002": [pr]}) as discover_task_prs,
             mock.patch.object(github_bus, "gh_json", return_value=pr),
             mock.patch.object(github_bus, "run_ai_status") as run_ai_status,
             mock.patch.object(github_bus, "write_activity_log"),
@@ -405,6 +406,7 @@ class GitHubBusProcessTests(unittest.TestCase):
 
         self.assertTrue(changed)
         run_ai_status.assert_called_once()
+        discover_task_prs.assert_called_once_with("ajoe734/drts-fleet-platform")
         self.assertEqual(run_ai_status.call_args.kwargs["actor"], "Supervisor")
         self.assertTrue(run_ai_status.call_args.kwargs["reconciler"])
         self.assertEqual(run_ai_status.call_args.kwargs["integration_env"]["PR_URL"], pr["url"])
