@@ -871,9 +871,17 @@ def reconcile_task_integrations(
             # terminal reconciliation once; otherwise identical observations
             # remain idempotent.
             task_status = str(task.get("status") or "").lower()
+            repair_intent = task.get("work_intent")
+            repair_intent_pending = (
+                isinstance(repair_intent, dict)
+                and repair_intent.get("kind") == "integration_repair"
+                and repair_intent.get("state") == "pending"
+            )
             lifecycle_transition_pending = (
                 (integration_status == "merged_to_dev" and task_status != "done")
-                or (integration_status == "ci_failed" and task_status in {"review", "review_approved"})
+                # Re-run one stable failed observation until the canonical
+                # status transaction has materialized its repair intent.
+                or (integration_status == "ci_failed" and not repair_intent_pending)
                 or (integration_status == "pr_open" and ci_status == "success" and task_status == "in_progress")
             )
             if same_observation and not lifecycle_transition_pending:

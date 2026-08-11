@@ -2247,8 +2247,12 @@ def command_reconcile_integration(state: dict[str, Any], args: list[str]) -> Non
         task.pop("work_intent", None)
         mark_blockers_resolved(state, task_id)
         mark_handoffs_done(state, task_id)
-    elif integration_status == "ci_failed" and task_status in {"review", "review_approved"}:
-        task["status"] = "in_progress"
+    elif integration_status == "ci_failed":
+        # A failed PR always needs an owner repair attempt. Older task records
+        # can already be in_progress, so limiting this to review states leaves
+        # them stranded without a dispatchable intent.
+        if task_status in {"review", "review_approved"}:
+            task["status"] = "in_progress"
         task["work_intent"] = {
             "kind": "integration_repair",
             "state": "pending",

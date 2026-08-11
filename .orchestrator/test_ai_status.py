@@ -714,6 +714,32 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
             ai_status.command_reconcile_integration(state, [task["id"], "PR checks failed."])
 
         self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(task["work_intent"]["kind"], "integration_repair")
+        self.assertEqual(task["work_intent"]["state"], "pending")
+
+    def test_reconciler_materializes_repair_for_existing_in_progress_failure(self) -> None:
+        task = {
+            "id": "TASK-PR-FAILED-LEGACY-001",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "in_progress",
+            "depends_on": ["UNFINISHED-DEPENDENCY"],
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "INTEGRATION_STATUS": "ci_failed",
+            "PR_URL": "https://github.com/example/repo/pull/45",
+            "CI_STATUS": "merge_conflict",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_reconcile_integration(state, [task["id"], "PR cannot merge."])
+
+        self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(task["work_intent"]["kind"], "integration_repair")
+        self.assertEqual(task["work_intent"]["scope"], "existing_pr")
 
     def test_reconciler_marks_protected_merge_done_after_worker_closeout_gap(self) -> None:
         task = {

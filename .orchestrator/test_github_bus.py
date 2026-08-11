@@ -121,6 +121,47 @@ class GitHubBusCommandTests(unittest.TestCase):
         self.assertNotIn("RECONCILER_REVIEW_READY", env)
         self.assertEqual(env["EXECUTION_BRANCH"], "codex/iam-ui-ten-001")
 
+    def test_stable_ci_failure_retries_until_repair_intent_is_materialized(self) -> None:
+        status = {"tasks": [{
+            "id": "IAM-MFA-001",
+            "status": "in_progress",
+            "owner": "Gemini2",
+            "pr_url": "https://github.com/ajoe734/pantheon/pull/1323",
+            "integration_status": "ci_failed",
+            "ci_status": "merge_conflict",
+        }]}
+        pr = {
+            "state": "OPEN",
+            "headRefName": "gemini2/iam-mfa-001",
+            "headRefOid": "abc123456789",
+            "baseRefName": "dev",
+            "mergeCommit": None,
+            "mergeStateStatus": "DIRTY",
+            "statusCheckRollup": [],
+            "url": status["tasks"][0]["pr_url"],
+            "reviewDecision": "",
+        }
+        bus_state = {"tasks": {"IAM-MFA-001": {
+            "integration_head_sha": pr["headRefOid"],
+            "integration_branch": pr["headRefName"],
+        }}}
+        with (
+            mock.patch.object(github_bus, "discover_task_prs", return_value={}),
+            mock.patch.object(github_bus, "gh_json", return_value=pr),
+            mock.patch.object(github_bus, "run_ai_status") as run_ai_status,
+            mock.patch.object(github_bus, "write_activity_log"),
+        ):
+            changed = github_bus.reconcile_task_integrations(
+                self.config, bus_state, status, "ajoe734/pantheon"
+            )
+
+        self.assertTrue(changed)
+        run_ai_status.assert_called_once()
+        self.assertEqual(
+            run_ai_status.call_args.kwargs["integration_env"]["INTEGRATION_STATUS"],
+            "ci_failed",
+        )
+
     def test_replacement_pr_branch_is_reconciled_not_reported_as_ci_failure(self) -> None:
         status = {"tasks": [{
             "id": "IAM-ACC-003",
