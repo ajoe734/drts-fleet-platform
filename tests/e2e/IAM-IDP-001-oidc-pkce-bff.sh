@@ -22,7 +22,7 @@ pnpm exec vitest run tests/unit/auth-bootstrap.test.ts
 
 # Step 3: Run E2E integration test suite for OIDC PKCE
 echo "[3/3] Verifying Web BFF Auth routes, real provider OIDC exchange, and middleware boundaries..."
-pnpm exec vitest run tests/integ/oidc-pkce-bff.test.ts tests/e2e/oidc-pkce-bff.spec.ts
+pnpm exec vitest run tests/integ/oidc-pkce-bff.test.ts tests/integ/oidc-pkce-bff-route.test.ts
 
 echo "============================================================"
 echo "IAM-IDP-001 OIDC PKCE BFF E2E Verification COMPLETE - SUCCESS"

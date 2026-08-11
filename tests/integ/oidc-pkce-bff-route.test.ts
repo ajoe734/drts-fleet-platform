@@ -8,7 +8,7 @@ import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service"
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 
-describe("E2E-IAM-IDP-001: Web App BFF Cookie & OIDC PKCE End-to-End Suite", () => {
+describe("E2E-IAM-IDP-001: Web App BFF Cookie & OIDC PKCE Route Handler Integration Suite", () => {
   const jwtAuthService = new JwtAuthService();
   const tenantPartnerService = new TenantPartnerService(new AuditNotificationService());
   const oidcService = new OidcPkceService(jwtAuthService, tenantPartnerService);
