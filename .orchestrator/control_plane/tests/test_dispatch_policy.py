@@ -136,6 +136,15 @@ class DispatchPolicyTests(unittest.TestCase):
 
         self.assertEqual(decision.target_agent, "Codex")
         self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
+        self.assertTrue(
+            assignment_remains_valid(
+                tasks["TASK-1"],
+                tasks,
+                self.policy,
+                target_agent="Codex",
+                reason=DispatchReason.OWNED_IN_PROGRESS,
+            )
+        )
 
     def test_holds_in_progress_task_while_external_ci_is_pending(self) -> None:
         task = {

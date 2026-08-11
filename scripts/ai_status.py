@@ -2091,6 +2091,11 @@ def command_assign(state: dict[str, Any], args: list[str]) -> None:
     )
 
 
+def has_integration_repair_intent(task: dict[str, Any]) -> bool:
+    intent = task.get("work_intent")
+    return isinstance(intent, dict) and intent.get("kind") == "integration_repair"
+
+
 def command_start(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: start <task-id> <message>")
@@ -2106,7 +2111,8 @@ def command_start(state: dict[str, Any], args: list[str]) -> None:
     task["status"] = "in_progress"
     task["last_update"] = timestamp
     task["next"] = message
-    task.pop("work_intent", None)
+    if not has_integration_repair_intent(task):
+        task.pop("work_intent", None)
     mark_handoffs_done_for_actor(state, task_id, actor)
     mark_blockers_resolved(state, task_id)
     append_log({"ts": timestamp, "agent": actor, "type": "start", "task_id": task_id, "message": message})
@@ -2122,7 +2128,8 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Unknown task: {task_id}")
     if task.get("owner") != actor:
         raise SystemExit(f"Only the owner ({task.get('owner')}) can progress {task_id}")
-    task.pop("work_intent", None)
+    if not has_integration_repair_intent(task):
+        task.pop("work_intent", None)
     timestamp = iso_now()
     ci_failed = os.environ.get("INTEGRATION_STATUS", "").strip().lower() == "ci_failed"
     if task["status"] in {"backlog", "todo"} or (
@@ -2154,6 +2161,9 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
         task.update(integration_metadata)
         # Owner progress is a new integration attempt. A prior reviewer
         # rejection must not remain attached once fresh evidence is supplied.
+        if integration_status != "ci_failed" and has_integration_repair_intent(task):
+            # GitHub has observed a new integration state, ending this repair.
+            task.pop("work_intent", None)
         task.pop("rework_required_at", None)
     mark_handoffs_done_for_actor(state, task_id, actor)
     append_log({"ts": timestamp, "agent": actor, "type": "progress", "task_id": task_id, "message": message})

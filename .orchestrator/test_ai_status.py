@@ -590,6 +590,36 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         self.assertEqual(task["pr_url"], env["PR_URL"])
         self.assertEqual(task["ci_status"], "pending")
 
+    def test_repair_intent_survives_owner_updates_until_ci_recovers(self) -> None:
+        task = {
+            "id": "TASK-PR-REPAIR-001",
+            "owner": "Codex",
+            "status": "in_progress",
+            "work_intent": {
+                "kind": "integration_repair",
+                "state": "pending",
+                "scope": "existing_pr",
+            },
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+
+        with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_start(state, [task["id"], "Repairing the failed PR."])
+            ai_status.command_progress(state, [task["id"], "Investigating the CI failure."])
+
+        self.assertEqual(task["work_intent"]["kind"], "integration_repair")
+
+        env = {
+            "AI_NAME": "Codex",
+            "INTEGRATION_STATUS": "pr_open",
+            "PR_URL": "https://github.com/example/repo/pull/46",
+            "CI_STATUS": "success",
+        }
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_progress(state, [task["id"], "Repaired PR checks are green."])
+
+        self.assertNotIn("work_intent", task)
+
     def test_progress_without_integration_env_preserves_existing_behavior(self) -> None:
         task = {"id": "TASK-PR-002", "owner": "Codex", "reviewer": "Claude", "status": "todo"}
         state = {"tasks": [task], "blockers": [], "handoffs": []}
