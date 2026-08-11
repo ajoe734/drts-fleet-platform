@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import time
 import base64
 from pathlib import Path
@@ -1148,98 +1147,6 @@ def write_provider_capabilities(config: dict[str, Any], report: dict[str, Any] |
     target = config_path(config, "provider_capabilities")
     write_json(target, report)
     return target
-
-
-def desired_sync_state(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {
-        "workspace_settings": desired_workspace_settings(config),
-        "claude_local_settings": desired_claude_local_settings(config, current=_claude_local_settings()),
-        "gemini_settings": desired_gemini_settings(config),
-    }
-
-
-def apply_workspace_settings(config: dict[str, Any]) -> dict[str, Any]:
-    settings = _workspace_settings()
-    updated = {**settings, **desired_workspace_settings(config)}
-    write_json(WORKSPACE_SETTINGS_PATH, updated)
-    return updated
-
-
-def apply_claude_local_settings(config: dict[str, Any]) -> dict[str, Any]:
-    updated = desired_claude_local_settings(config, current=_claude_local_settings())
-    write_json(CLAUDE_LOCAL_SETTINGS_PATH, updated)
-    return updated
-
-
-def apply_gemini_settings(config: dict[str, Any]) -> dict[str, Any]:
-    current = _gemini_settings()
-    desired = desired_gemini_settings(config)
-    merged_security = {**current.get("security", {}), **desired.get("security", {})}
-    if desired.get("security", {}).get("auth"):
-        merged_security["auth"] = {
-            **current.get("security", {}).get("auth", {}),
-            **desired["security"]["auth"],
-        }
-    updated = {
-        "general": {**current.get("general", {}), **desired.get("general", {})},
-        "security": merged_security,
-    }
-    GEMINI_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    write_json(GEMINI_SETTINGS_PATH, updated)
-    return updated
-
-
-def backup_targets(config: dict[str, Any]) -> list[Path]:
-    return [WORKSPACE_SETTINGS_PATH, CLAUDE_LOCAL_SETTINGS_PATH, GEMINI_SETTINGS_PATH]
-
-
-def latest_backup_dir() -> Path | None:
-    backups_dir = ROOT / ".orchestrator" / "backups"
-    if not backups_dir.exists():
-        return None
-    candidates = [path for path in backups_dir.iterdir() if path.is_dir()]
-    if not candidates:
-        return None
-    return sorted(candidates)[-1]
-
-
-def write_backup_manifest(backup_dir: Path, manifest: dict[str, Any]) -> None:
-    write_json(backup_dir / "manifest.json", manifest)
-
-
-def load_backup_manifest(backup_dir: Path) -> dict[str, Any]:
-    return load_json(backup_dir / "manifest.json", default={}) or {}
-
-
-def create_backup(config: dict[str, Any]) -> Path:
-    backup_dir = ROOT / ".orchestrator" / "backups" / utc_now().replace(":", "").replace("-", "")
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {"created_at": utc_now(), "files": []}
-    for index, target in enumerate(backup_targets(config), start=1):
-        entry = {"target_path": str(target), "existed": target.exists(), "backup_file": None}
-        if target.exists():
-            backup_name = f"{index:02d}-{target.name}"
-            shutil.copy2(target, backup_dir / backup_name)
-            entry["backup_file"] = backup_name
-        manifest["files"].append(entry)
-    write_backup_manifest(backup_dir, manifest)
-    return backup_dir
-
-
-def restore_backup(backup_dir: Path) -> list[str]:
-    manifest = load_backup_manifest(backup_dir)
-    restored: list[str] = []
-    for entry in manifest.get("files", []):
-        target = Path(entry["target_path"])
-        if entry.get("existed"):
-            backup_file = backup_dir / entry["backup_file"]
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(backup_file, target)
-            restored.append(str(target))
-        elif target.exists():
-            target.unlink()
-            restored.append(str(target))
-    return restored
 
 
 def main() -> int:
