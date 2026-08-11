@@ -174,6 +174,9 @@ const CONTROL_PLANE_REALMS: Record<ControlPlaneActorType, AuthRealm> = {
 // `apps/api/tests/unit/ops-driver-tasks-scope.test.ts`.
 const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
   platform_admin: [
+    "identity:break-glass:request",
+    "identity:break-glass:approve",
+    "identity:break-glass:activate",
     "identity:read",
     "foundation:read",
     "foundation:write",
