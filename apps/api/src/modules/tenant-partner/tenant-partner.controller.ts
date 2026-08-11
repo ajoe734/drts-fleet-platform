@@ -9,6 +9,7 @@ import {
   Put,
   Query,
   Req,
+  Optional,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
@@ -19,6 +20,8 @@ import type {
   CreatePartnerIngressHandoffCommand,
   CreateReferralEmbedHandoffArtifactCommand,
   IdentityContext,
+  RevokeTenantSessionCommand,
+  TenantSessionInventoryRecord,
   EscalateTenantBookingApprovalRequestCommand,
   IssuePartnerIngressCredentialCommand,
   CreateTenantUserCommand,
@@ -87,6 +90,8 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { IdentityRepository } from "../identity/identity.repository";
 import {
   isJwtKeyMaterialNotConfiguredError,
   JwtAuthService,
@@ -129,6 +134,8 @@ export class TenantPartnerController {
     private readonly billingSettlementService: BillingSettlementService,
     private readonly ownedMobilityService: OwnedMobilityService,
     private readonly jwtAuthService: JwtAuthService,
+    @Optional() private readonly identityRepository?: IdentityRepository,
+    @Optional() private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 
   private requireTenantId(tenantId?: string) {
@@ -159,6 +166,31 @@ export class TenantPartnerController {
 
   private resolveTenantActorRoleCode(identity: IdentityContext | null) {
     return identity?.roles?.[0] ?? null;
+  }
+
+  private requireTenantSessionAdmin(identity: IdentityContext | null) {
+    const role = identity?.roles?.map((value) => value.toLowerCase()) ?? [];
+    if (!role.some((value) => ["tenant_admin", "tc_admin", "tenant_integration_mgr", "tc_integration_mgr"].includes(value))) {
+      throw new ApiRequestError(403, "TENANT_SESSION_ADMIN_REQUIRED", "Tenant session administration is required.");
+    }
+  }
+
+  private toTenantSessionInventory(
+    session: Awaited<ReturnType<IdentityRepository["listSessionsByTenant"]>>[number],
+    tenantId: string,
+  ): TenantSessionInventoryRecord {
+    return {
+      sessionId: session.sessionId,
+      tenantId,
+      principalId: session.principalId,
+      subject: session.subject ?? null,
+      authMethod: session.authMethods[0] ?? "unknown",
+      status: session.status,
+      createdAt: session.createdAt,
+      lastSeenAt: session.updatedAt,
+      expiresAt: session.absoluteExpiresAt,
+      revokedAt: session.revokedAt,
+    };
   }
 
   private async issueJwtSession(
@@ -1403,6 +1435,77 @@ export class TenantPartnerController {
       this.requireTenantId(tenantId),
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/sessions")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listTenantSessions(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    this.requireTenantSessionAdmin(identity);
+    const normalizedTenantId = this.requireTenantId(tenantId);
+    return this.identityRepository!
+      .listSessionsByTenant(normalizedTenantId)
+      .then((sessions) =>
+        toApiSuccessEnvelope(
+          toApiListData(
+            sessions.map((session) =>
+              this.toTenantSessionInventory(session, normalizedTenantId),
+            ),
+          ),
+          requestId,
+        ),
+      );
+  }
+
+  @Post("tenant/sessions/:sessionId/revoke")
+  async revokeTenantSession(
+    @Param("sessionId") sessionId: string,
+    @Body() command: RevokeTenantSessionCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    this.requireTenantSessionAdmin(identity);
+    const normalizedTenantId = this.requireTenantId(tenantId);
+    const session = await this.identityRepository!.getSession(sessionId);
+    if (
+      !session ||
+      session.tenantId !== normalizedTenantId ||
+      session.realm !== "tenant"
+    ) {
+      throw new ApiRequestError(404, "TENANT_SESSION_NOT_FOUND", "Tenant session was not found.");
+    }
+    const revoked = await this.identityRepository!.revokeSession(
+      sessionId,
+      command.reason?.trim() || "tenant_admin_revocation",
+      identity?.principalId ?? identity?.actorId ?? undefined,
+    );
+    if (revoked) {
+      this.auditNotificationService?.recordAuditLog({
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "system"
+            : identity?.actorType ?? "system",
+        tenantId: normalizedTenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant_session.revoke",
+        resourceType: "tenant_session",
+        resourceId: sessionId,
+        newValuesSummary: {
+          status: "revoked",
+          reason: command.reason?.trim() || "tenant_admin_revocation",
+        },
+        ...(requestId ? { requestId } : {}),
+      });
+    }
+    return toApiSuccessEnvelope(
+      revoked ? this.toTenantSessionInventory(revoked, normalizedTenantId) : null,
+      requestId,
+    );
   }
 
   @Get("tenant/roles")

@@ -2573,6 +2573,23 @@ export interface ConsumeAndRotateRefreshTokenResult {
 }
 
 // --- Tenant User & Roles ---
+export interface TenantSessionInventoryRecord {
+  sessionId: string;
+  tenantId: string;
+  principalId: string;
+  subject: string | null;
+  authMethod: string;
+  status: SessionStatus;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+}
+
+export interface RevokeTenantSessionCommand {
+  reason?: string;
+}
+
 export type TenantUserRoleStatus = "invited" | "active" | "suspended";
 
 export interface TenantUserRoleRecord {
