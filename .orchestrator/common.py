@@ -72,12 +72,7 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
 
 
 def runtime_claude_mcp_config_path(config: dict[str, Any]) -> Path:
-    """Write the Claude broker config from the running supervisor bundle.
-
-    The canonical checkout owns mutable state, while this runtime bundle owns
-    executable policy.  Keeping the broker pointed at the bundle prevents a
-    dirty or older canonical checkout from silently changing worker policy.
-    """
+    """Write the Claude broker config from the canonical runtime root."""
     state_root = config_path(config, "state_file").parent
     path = state_root / "generated" / "claude-approval-broker.runtime.json"
     payload = {
