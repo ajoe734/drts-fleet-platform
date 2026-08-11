@@ -41,4 +41,3 @@ import { ServiceWorkloadIdentityAdapter } from "./service-workload-identity.adap
   ],
 })
 export class AuthModule {}
-
