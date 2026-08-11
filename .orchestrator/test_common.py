@@ -43,6 +43,22 @@ class CommandExistsTests(unittest.TestCase):
                 self.assertEqual(common.command_exists("gemini", search_roots=[workspace_root]), str(local_cli))
 
 
+class RuntimeClaudeMcpConfigTests(unittest.TestCase):
+    def test_uses_runtime_broker_and_canonical_state_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            state_file = root / ".orchestrator" / "state.json"
+            config = {"paths": {"state_file": str(state_file)}}
+
+            with mock.patch.object(common, "ORCHESTRATOR_DIR", Path("/runtime/.orchestrator")):
+                path = common.runtime_claude_mcp_config_path(config)
+
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            server = payload["mcpServers"]["orchestrator_approval_broker"]
+            self.assertEqual(server["args"][0], "/runtime/.orchestrator/claude_permission_prompt_mcp.py")
+            self.assertEqual(server["args"][2], str(root / ".orchestrator" / "config.json"))
+
+
 class JsonlAppendTests(unittest.TestCase):
     def test_append_jsonl_keeps_every_line_parseable_under_concurrency(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -64,6 +80,27 @@ class JsonlAppendTests(unittest.TestCase):
                 payload = json.loads(line)
                 self.assertIn("worker", payload)
                 self.assertIn("index", payload)
+
+
+class TaskSnapshotTests(unittest.TestCase):
+    def test_preserves_execution_branch_for_reassigned_work(self) -> None:
+        snapshot = common.snapshot_task(
+            {
+                "id": "TASK-1",
+                "status": "in_progress",
+                "owner": "Codex",
+                "reviewer": "Claude",
+                "execution_branch": "codex/task-1",
+            },
+            {
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+        )
+
+        self.assertEqual(snapshot["execution_branch"], "codex/task-1")
 
 
 if __name__ == "__main__":

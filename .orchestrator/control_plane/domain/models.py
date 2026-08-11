@@ -42,9 +42,6 @@ class TaskRecord:
             raw=MappingProxyType(raw),
         )
 
-    def to_mapping(self) -> dict[str, Any]:
-        return dict(self.raw)
-
 
 @dataclass(frozen=True)
 class WorkerRecord:
@@ -67,45 +64,4 @@ class WorkerRecord:
             provider=str(raw.get("provider") or "").strip(),
             queue_event_id=str(raw.get("queue_event_id") or "").strip(),
             raw=MappingProxyType(raw),
-        )
-
-
-@dataclass(frozen=True)
-class ControlPlaneSnapshot:
-    tasks: Mapping[str, TaskRecord]
-    workers: Mapping[str, WorkerRecord]
-    queued_events: tuple[Mapping[str, Any], ...] = ()
-    provider_report: Mapping[str, Any] = field(default_factory=dict)
-    approval_state: Mapping[str, Any] = field(default_factory=dict)
-    runtime_state: Mapping[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_payloads(
-        cls,
-        status: Mapping[str, Any],
-        runtime_state: Mapping[str, Any],
-        *,
-        queued_events: list[Mapping[str, Any]] | None = None,
-        provider_report: Mapping[str, Any] | None = None,
-        approval_state: Mapping[str, Any] | None = None,
-    ) -> "ControlPlaneSnapshot":
-        tasks = {
-            task.id: task
-            for item in status.get("tasks", [])
-            if isinstance(item, Mapping)
-            for task in [TaskRecord.from_mapping(item)]
-            if task.id
-        }
-        workers = {
-            str(run_id): WorkerRecord.from_mapping(str(run_id), worker)
-            for run_id, worker in (runtime_state.get("workers") or {}).items()
-            if isinstance(worker, Mapping)
-        }
-        return cls(
-            tasks=MappingProxyType(tasks),
-            workers=MappingProxyType(workers),
-            queued_events=tuple(MappingProxyType(dict(event)) for event in queued_events or []),
-            provider_report=MappingProxyType(dict(provider_report or {})),
-            approval_state=MappingProxyType(dict(approval_state or {})),
-            runtime_state=MappingProxyType(dict(runtime_state)),
         )

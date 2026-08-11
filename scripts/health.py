@@ -34,7 +34,38 @@ except ImportError:
 from pathlib import Path
 
 # --- config / tunables ---
-ROOT_DIR = Path(__file__).resolve().parent.parent
+RUNTIME_ROOT = Path(__file__).resolve().parent.parent
+
+
+def canonical_root(runtime_root: Path = RUNTIME_ROOT) -> Path:
+    """Resolve machine truth independently of the runtime worktree."""
+    explicit = os.environ.get("ORCH_STATUS_ROOT") or os.environ.get("AI_STATUS_ROOT")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(runtime_root),
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return runtime_root
+    common_dir = Path(result.stdout.strip()) if result.returncode == 0 and result.stdout.strip() else None
+    if common_dir is not None and common_dir.name == ".git":
+        return common_dir.parent.resolve()
+    return runtime_root
+
+
+ROOT_DIR = canonical_root()
 STATE_FILE = ROOT_DIR / ".orchestrator/state.json"
 STATUS_FILE = ROOT_DIR / "ai-status.json"
 CONTROL_PLANE_SUMMARY = ROOT_DIR / ".orchestrator/projections/control-plane-summary.json"
@@ -47,7 +78,7 @@ DONE_GAP_WARN = int(os.environ.get("HEALTH_DONE_GAP_WARN", "1800"))
 SUPERSEDE_RATE_WARN = int(os.environ.get("HEALTH_SUPERSEDE_RATE_WARN", "8"))
 
 # Supervisor writes log timestamps via `datetime.now(ZoneInfo("Asia/Taipei"))`
-# regardless of host tz (see supervisor.py LOCAL_TZ). Parse with that explicit
+# regardless of host tz (see supervisor runtime LOCAL_TZ). Parse with that explicit
 # zone so cutoff math is correct on hosts in UTC (or any other tz).
 SUPERVISOR_LOG_TZ = ZoneInfo("Asia/Taipei") if ZoneInfo else None
 
@@ -122,10 +153,10 @@ def collect() -> dict:
 
     # supervisor presence
     try:
-        out = subprocess.check_output(["pgrep", "-af", "supervisor.py"],
+        out = subprocess.check_output(["pgrep", "-af", "supervisor_runtime.py"],
                                       text=True, stderr=subprocess.DEVNULL).strip()
         pids = [int(line.split()[0]) for line in out.splitlines()
-                if "supervisor.py" in line and "grep" not in line
+                if "supervisor_runtime.py" in line and "grep" not in line
                 and "claude -p" not in line]
         if pids:
             pid = pids[0]
@@ -263,7 +294,7 @@ def collect() -> dict:
     try:
         if SUPERSEDE_RATE_WARN >= 0 and SUPERVISOR_LOG.exists():
             # supervisor-bg.log timestamps are written with the hardcoded
-            # Asia/Taipei tz (supervisor.py LOCAL_TZ). Stamp them with that
+            # Asia/Taipei tz (supervisor runtime LOCAL_TZ). Stamp them with that
             # zone before comparing to a UTC cutoff so we don't over/under
             # count by the host tz offset.
             cutoff_dt = now_dt - timedelta(seconds=3600)

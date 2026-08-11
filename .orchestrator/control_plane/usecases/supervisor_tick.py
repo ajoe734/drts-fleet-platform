@@ -71,7 +71,6 @@ class SupervisorTickPorts:
     queue_chair_review: Callable[..., bool]
     break_full_deadlock: Callable[..., bool]
     dispatch_ready_tasks: Callable[..., bool]
-    dispatch_optional_automation: Callable[..., bool]
     process_queue: Callable[..., bool]
     sync_github_bus: Callable[[dict[str, Any], dict[str, Any]], bool]
     trim_worker_history: Callable[[dict[str, Any], int], None]
@@ -248,6 +247,12 @@ class SupervisorTickRunner:
         changed = self.ports.cleanup_inactive_worker_worktrees(config, state) or changed
         changed = self.ports.reconcile_queue_records(config, state) or changed
         self.ports.reconcile_status_from_git(config, state)
+        # External integration is task evidence, so reconcile it before policy
+        # chooses the next worker. Keeping this in FINALIZE made every dispatch
+        # decision use the previous GitHub observation and could strand a green
+        # PR indefinitely when no worker remained to change canonical status.
+        changed = self.ports.sync_github_bus(config, state) or changed
+        status = self.ports.load_status(config)
         changed = self.ports.prune_event_queue(config, state) or changed
         changed = self.ports.prune_completed_dispatch_pauses(
             state, status, config=config, provider_report=provider_report
@@ -276,7 +281,7 @@ class SupervisorTickRunner:
         changed = self.ports.dispatch_ready_tasks(
             config, state, provider_report
         ) or changed
-        return self.ports.dispatch_optional_automation(config, state) or changed
+        return changed
 
     def _deliver(
         self,
@@ -303,5 +308,4 @@ class SupervisorTickRunner:
             state, status, config=config, provider_report=provider_report
         ) or changed
         changed = self.ports.prune_failure_streaks(state, status) or changed
-        changed = self.ports.sync_github_bus(config, state) or changed
         return changed, status

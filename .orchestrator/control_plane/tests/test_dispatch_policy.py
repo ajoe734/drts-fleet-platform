@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from control_plane.domain.dispatch_policy import (
     DispatchReason,
+    assignment_remains_valid,
     has_external_integration_in_flight,
     ReadyDispatchPolicy,
     build_dispatch_event,
@@ -55,24 +56,86 @@ class DispatchPolicyTests(unittest.TestCase):
 
         self.assertIsNone(resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy))
 
-    def test_review_and_finalize_do_not_wait_on_dependencies(self) -> None:
-        for status, expected_agent, expected_reason in (
-            ("review", "Claude", DispatchReason.REVIEW_READY),
-            ("review_approved", "Codex", DispatchReason.OWNED_FINALIZE),
-        ):
-            task = {
-                "id": "TASK-1",
-                "status": status,
-                "owner": "Codex",
-                "reviewer": "Claude",
-                "depends_on": ["BLOCKED-DEP"],
-            }
-            tasks = task_index([{"id": "BLOCKED-DEP", "status": "todo"}, task])
+    def test_review_does_not_wait_on_dependencies(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "review",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "depends_on": ["BLOCKED-DEP"],
+        }
+        tasks = task_index([{"id": "BLOCKED-DEP", "status": "todo"}, task])
 
-            decision = resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy)
+        decision = resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy)
 
-            self.assertEqual(decision.target_agent, expected_agent)
-            self.assertEqual(decision.reason, expected_reason)
+        self.assertEqual(decision.target_agent, "Claude")
+        self.assertEqual(decision.reason, DispatchReason.REVIEW_READY)
+
+    def test_expected_closeout_transition_keeps_same_assignment_valid(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "review_approved",
+            "owner": "Codex",
+            "reviewer": "Claude",
+        }
+
+        self.assertTrue(
+            assignment_remains_valid(
+                task,
+                {"TASK-1": task},
+                self.policy,
+                target_agent="Claude",
+                reason=DispatchReason.REVIEW_READY,
+            )
+        )
+        self.assertFalse(
+            assignment_remains_valid(
+                task,
+                {"TASK-1": task},
+                self.policy,
+                target_agent="Gemini",
+                reason=DispatchReason.REVIEW_READY,
+            )
+        )
+
+    def test_finalize_waits_on_dependencies_and_pending_ci(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "review_approved",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "depends_on": ["BLOCKED-DEP"],
+        }
+        tasks = task_index([{"id": "BLOCKED-DEP", "status": "todo"}, task])
+        self.assertIsNone(resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy))
+
+        task["depends_on"] = []
+        task["pr_url"] = "https://github.com/example/repo/pull/1"
+        task["integration_status"] = "ci_pending"
+        task["ci_status"] = "pending"
+        task["integration_recorded_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.assertIsNone(resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy))
+
+    def test_explicit_integration_repair_can_run_before_dependencies(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "blocked",
+            "owner": "Codex",
+            "depends_on": ["BLOCKED-DEP"],
+            "pr_url": "https://github.com/example/repo/pull/1",
+            "ci_status": "failure",
+            "work_intent": {
+                "kind": "integration_repair",
+                "state": "pending",
+                "scope": "existing_pr",
+            },
+        }
+        tasks = task_index([{"id": "BLOCKED-DEP", "status": "todo"}, task])
+
+        decision = resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy)
+
+        self.assertEqual(decision.target_agent, "Codex")
+        self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
 
     def test_holds_in_progress_task_while_external_ci_is_pending(self) -> None:
         task = {
@@ -105,6 +168,26 @@ class DispatchPolicyTests(unittest.TestCase):
         self.assertIsNotNone(decision)
         self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
 
+    def test_reviewer_rework_overrides_reconciled_ci_pending_evidence(self) -> None:
+        task = {
+            "id": "TASK-1",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "depends_on": [],
+            "integration_status": "ci_pending",
+            "ci_status": "pending",
+            # A reconciler can observe CI after the reviewer rejected it. That
+            # newer observation must not clear the rework lifecycle latch.
+            "integration_recorded_at": "2026-08-11T10:02:00Z",
+            "rework_required_at": "2026-08-11T10:01:00Z",
+        }
+
+        decision = resolve_dispatch_target(task, {"TASK-1": task}, self.policy)
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
+
     def test_ci_failure_overrides_a_stale_in_flight_integration_status(self) -> None:
         task = {
             "id": "TASK-1",
@@ -121,6 +204,24 @@ class DispatchPolicyTests(unittest.TestCase):
         self.assertIsNotNone(decision)
         self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
 
+    def test_blocked_ci_failure_is_dispatchable_but_other_blockers_are_not(self) -> None:
+        repair = {
+            "id": "TASK-1",
+            "status": "blocked",
+            "owner": "Codex",
+            "depends_on": [],
+            "integration_status": "ci_failed",
+            "ci_status": "CI failed on run 123",
+        }
+        decision = resolve_dispatch_target(repair, {"TASK-1": repair}, self.policy)
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.reason, DispatchReason.OWNED_IN_PROGRESS)
+
+        product_blocker = dict(repair, ci_status="success")
+        self.assertIsNone(
+            resolve_dispatch_target(product_blocker, {"TASK-1": product_blocker}, self.policy)
+        )
+
     def test_event_is_deterministic_and_contains_canonical_metadata(self) -> None:
         decision = resolve_dispatch_target(self.tasks["TASK-1"], self.tasks, self.policy)
 
@@ -131,6 +232,40 @@ class DispatchPolicyTests(unittest.TestCase):
         self.assertEqual(first["target_agent"], "Codex")
         self.assertEqual(first["metadata"], {"source": "test", "mode": "execution"})
         self.assertEqual(first["task"]["execution_branch"], "codex/task-1-existing-pr")
+        self.assertEqual(
+            first["assignment_lease"],
+            {
+                "task_revision": 0,
+                "role": "owner",
+                "intent": "owned_ready_dispatch",
+                "target_agent": "Codex",
+            },
+        )
+
+    def test_event_signature_ignores_observation_timestamp(self) -> None:
+        decision = resolve_dispatch_target(self.tasks["TASK-1"], self.tasks, self.policy)
+        first = build_dispatch_event(self.tasks["TASK-1"], decision, self.tasks)
+        changed = {**self.tasks["TASK-1"].raw, "last_update": "2026-08-11T08:00:00Z"}
+        second = build_dispatch_event(changed, decision, self.tasks)
+
+        self.assertEqual(first["key"], second["key"])
+
+    def test_dependency_requires_verified_merge_evidence_when_provided(self) -> None:
+        tasks = task_index(
+            [
+                {
+                    "id": "DEP-1",
+                    "status": "done",
+                    "task_class": "implementation",
+                    "integration_status": "merged_to_dev",
+                    "merge_commit": "abc123",
+                },
+                {"id": "TASK-1", "status": "todo", "owner": "Codex", "depends_on": ["DEP-1"]},
+            ]
+        )
+
+        self.assertIsNone(resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy, {"DEP-1": False}))
+        self.assertIsNotNone(resolve_dispatch_target(tasks["TASK-1"], tasks, self.policy, {"DEP-1": True}))
 
 
     def test_runtime_event_omits_external_envelope_fields(self) -> None:

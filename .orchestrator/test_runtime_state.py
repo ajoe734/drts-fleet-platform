@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-import runtime_state
+from control_plane.infra import runtime_repo as runtime_state
 
 
 class RuntimeStateMigrationTests(unittest.TestCase):
@@ -29,28 +29,6 @@ class RuntimeStateMigrationTests(unittest.TestCase):
             {"checked": 1, "skipped": 1},
         )
 
-    def test_migrate_state_preserves_quota_paused_agents(self) -> None:
-        raw = {
-            "version": 2,
-            "queue": {"events": {}},
-            "workers": {},
-            "approvals": {"last_reconciled_at": None},
-            "quota_paused_agents": {
-                "qwen": {
-                    "reason": "Qwen OAuth quota exceeded",
-                    "resume_at": 9999999999,
-                    "paused_at": "2026-04-15T16:44:26Z",
-                }
-            },
-            "supervisor": {"pid": 1234, "started_at": "2026-04-15T16:44:26Z", "last_heartbeat_at": "2026-04-15T16:44:30Z"},
-        }
-
-        migrated = runtime_state.migrate_state(raw)
-
-        self.assertIn("quota_paused_agents", migrated)
-        self.assertEqual(migrated["quota_paused_agents"]["qwen"]["reason"], "Qwen OAuth quota exceeded")
-        self.assertEqual(migrated["provider_pauses"]["qwen"]["kind"], "quota")
-
     def test_migrate_state_initializes_chair_review_and_failure_streaks(self) -> None:
         migrated = runtime_state.migrate_state({"version": 2})
 
@@ -61,17 +39,28 @@ class RuntimeStateMigrationTests(unittest.TestCase):
         self.assertEqual(migrated["chair_reassignment_guards"], {})
         self.assertEqual(migrated["supervisor"]["lifecycle"], "running")
 
-    def test_migrate_state_moves_legacy_task_mirror_to_watcher_cursor(self) -> None:
+    def test_migrate_state_drops_retired_sidecar_allocator_state(self) -> None:
         migrated = runtime_state.migrate_state(
-            {"version": 3, "tasks": {"TASK-1": {"status": "review"}}}
+            {
+                "underutilization": {"last_ratio": 0.25},
+                "tasks": {"TASK-1": {"status": "review"}},
+                "quota_paused_agents": {"codex": {"kind": "quota"}},
+                "pause_migration": {"legacy": True},
+                "chair_review": {
+                    "sidecar_approved_until": "2026-04-15T17:00:00Z",
+                    "max_sidecars": 2,
+                    "blocked_sidecar_parents": ["TASK-1"],
+                },
+            }
         )
 
-        self.assertEqual(migrated["version"], 4)
+        self.assertNotIn("underutilization", migrated)
         self.assertNotIn("tasks", migrated)
-        self.assertEqual(
-            migrated["watcher"]["task_snapshots"]["TASK-1"]["status"],
-            "review",
-        )
+        self.assertNotIn("quota_paused_agents", migrated)
+        self.assertNotIn("pause_migration", migrated)
+        self.assertNotIn("sidecar_approved_until", migrated["chair_review"])
+        self.assertNotIn("max_sidecars", migrated["chair_review"])
+        self.assertNotIn("blocked_sidecar_parents", migrated["chair_review"])
 
     def test_upsert_and_clear_dispatch_pause(self) -> None:
         state = runtime_state.default_state()
@@ -89,7 +78,7 @@ class RuntimeStateMigrationTests(unittest.TestCase):
 
         runtime_state.upsert_dispatch_pause(state, pause)
         self.assertEqual(len(state["dispatch_pauses"]), 1)
-        self.assertEqual(runtime_state.dispatch_pauses_for_task(state, "P3-002")[0]["raw_ref"], pause["raw_ref"])
+        self.assertEqual(state["dispatch_pauses"][0]["raw_ref"], pause["raw_ref"])
 
         updated = dict(pause)
         updated["summary"] = "provider failure: retry scheduled"
@@ -99,6 +88,53 @@ class RuntimeStateMigrationTests(unittest.TestCase):
 
         runtime_state.clear_dispatch_pause(state, task_id="P3-002", worker_run_id="codex-1")
         self.assertEqual(state["dispatch_pauses"], [])
+
+    def test_compact_dispatch_pauses_preserves_task_records_and_summarizes_history(self) -> None:
+        state = runtime_state.default_state()
+        state["dispatch_pauses"] = [
+            {"provider": "codex", "paused_at": f"2026-08-0{index}T00:00:00Z", "failure_kind": "quota"}
+            for index in range(1, 5)
+        ] + [{"provider": "claude", "task_id": "TASK-1", "paused_at": "2026-08-05T00:00:00Z"}]
+
+        runtime_state.compact_dispatch_pauses(state, retain_recent=2)
+
+        self.assertEqual(len(state["dispatch_pauses"]), 3)
+        self.assertEqual(state["dispatch_pauses"][0]["task_id"], "TASK-1")
+        self.assertEqual(sum(item["count"] for item in state["dispatch_pause_history"].values()), 2)
+
+    def test_prune_seen_event_keys_keeps_the_newest_dispatch_signatures(self) -> None:
+        state = runtime_state.default_state()
+        state["seen_event_keys"] = {
+            f"very-long-dispatch-signature-{index}": f"2026-08-09T00:0{index}:00Z"
+            for index in range(5)
+        }
+
+        runtime_state.prune_seen_event_keys(state, retain_recent=2)
+
+        self.assertEqual(set(state["seen_event_keys"]), {
+            "very-long-dispatch-signature-4",
+            "very-long-dispatch-signature-3",
+        })
+
+    def test_prune_expired_worker_yields_keeps_only_future_cooldowns(self) -> None:
+        state = {
+            "worker_yields": {
+                "expired": {"resume_at": "2020-01-01T00:00:00Z"},
+                "future": {"resume_at": "2030-01-01T00:00:00Z"},
+                "invalid": {"resume_at": "not-a-date"},
+            }
+        }
+
+        runtime_state.prune_expired_worker_yields(state)
+
+        self.assertEqual(set(state["worker_yields"]), {"future"})
+
+    def test_migrate_state_preserves_active_worker_yield(self) -> None:
+        migrated = runtime_state.migrate_state(
+            {"worker_yields": {"TASK-1:codex": {"resume_at": "2030-01-01T00:00:00Z"}}}
+        )
+
+        self.assertIn("TASK-1:codex", migrated["worker_yields"])
 
 
 

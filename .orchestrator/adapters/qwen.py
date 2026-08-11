@@ -16,6 +16,8 @@ from common import (
     runtime_log_path,
     shell_quote,
     spawn_background_process,
+    worker_scope_properties,
+    worker_scope_unit,
 )
 
 
@@ -165,6 +167,10 @@ class QwenAdapter(BaseAdapter):
         env = os.environ.copy()
         env.update(_runtime_env(runtime))
         apply_orchestrator_runtime_env(env, self.config, request.metadata)
+        env["ORCH_WORKER_SCOPE_UNIT"] = worker_scope_unit(run_id)
+        env["ORCH_WORKER_SCOPE_PROPERTIES"] = "\n".join(
+            worker_scope_properties(self.config, request.metadata)
+        )
         process, _ = spawn_background_process(
             command,
             cwd=workspace_root,
@@ -188,5 +194,6 @@ class QwenAdapter(BaseAdapter):
                 "shell_command": shell_quote(command),
                 "model_preference": model_name,
                 "env_keys": sorted(_runtime_env(runtime)),
+                "scope_unit": worker_scope_unit(run_id),
             },
         )

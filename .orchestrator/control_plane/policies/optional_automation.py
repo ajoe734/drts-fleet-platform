@@ -8,8 +8,6 @@ from typing import Any, Callable
 class OptionalAutomation:
     materialize_workspace_baseline_task: Callable[..., bool]
     ensure_workspace_baseline_dispatch: Callable[..., bool]
-    dispatch_underutilization_sidecars: Callable[..., bool]
-    dispatch_underutilization_main_tasks: Callable[..., bool]
 
     def reconcile(
         self,
@@ -25,12 +23,6 @@ class OptionalAutomation:
         return self.ensure_workspace_baseline_dispatch(
             config, state, provider_report
         ) or changed
-
-    def dispatch(self, config: dict[str, Any], state: dict[str, Any]) -> bool:
-        if not self._enabled(config, "underutilization", True):
-            return False
-        changed = self.dispatch_underutilization_sidecars(config, state)
-        return self.dispatch_underutilization_main_tasks(config, state) or changed
 
     @staticmethod
     def _enabled(config: dict[str, Any], name: str, default: bool) -> bool:

@@ -3,13 +3,18 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
+import shlex
 import time
+import base64
 from pathlib import Path
 from typing import Any
 
+from control_plane.domain.lane_health import identity_fingerprint, quota_pool_key
+
 from common import (
     ROOT,
+    antigravity_app_data_dir,
+    antigravity_auth_ready,
     command_exists,
     config_path,
     load_config,
@@ -38,12 +43,6 @@ def _find_extension(prefix: str) -> tuple[Path | None, str | None]:
     path = matches[-1]
     version = path.name[len(prefix) + 1 :]
     return path, version
-
-
-def _load_package_json(path: Path | None) -> dict[str, Any]:
-    if not path:
-        return {}
-    return load_json(path / "package.json", default={}) or {}
 
 
 def _workspace_settings() -> dict[str, Any]:
@@ -83,6 +82,56 @@ def _codex_env(runtime: dict[str, Any] | None = None) -> dict[str, str]:
     if runtime and str(runtime.get("config_home") or "").strip():
         env["CODEX_HOME"] = str(home)
     return env
+
+
+def _jwt_claims(token: str | None) -> dict[str, Any]:
+    """Best-effort JWT decoding for local identity metadata, never token output."""
+    try:
+        payload = str(token or "").split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        value = base64.urlsafe_b64decode(payload.encode("ascii"))
+        decoded = json.loads(value.decode("utf-8"))
+        return decoded if isinstance(decoded, dict) else {}
+    except (IndexError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+
+
+def _codex_identity(runtime: dict[str, Any]) -> dict[str, Any]:
+    auth_path = _codex_home(runtime) / "auth.json"
+    payload = load_json(auth_path, default={}) or {}
+    tokens = payload.get("tokens") if isinstance(payload, dict) else {}
+    claims = _jwt_claims((tokens or {}).get("id_token") if isinstance(tokens, dict) else None)
+    auth = claims.get("https://api.openai.com/auth") if isinstance(claims.get("https://api.openai.com/auth"), dict) else {}
+    account = auth.get("chatgpt_account_id") or claims.get("sub") or (tokens or {}).get("account_id")
+    org = auth.get("poid") or claims.get("organization_id")
+    fingerprint = identity_fingerprint("codex", str(account or ""), str(org or ""))
+    model = str(runtime.get("model") or "default")
+    return {
+        "state": "auth_ready" if fingerprint else "identity_unknown",
+        "fingerprint": fingerprint,
+        "quota_pool": quota_pool_key("codex", fingerprint, str(runtime.get("quota_scope") or model)),
+        "provider_family": "codex",
+    }
+
+
+def _claude_identity(binary: str | None, runtime: dict[str, Any]) -> dict[str, Any]:
+    env = os.environ.copy()
+    env.update(runtime_env_overrides(runtime))
+    response = run_command([binary, "auth", "status"], env=env) if binary else None
+    try:
+        payload = json.loads(response.stdout) if response and response.returncode == 0 else {}
+    except json.JSONDecodeError:
+        payload = {}
+    account = payload.get("email") or payload.get("userId")
+    org = payload.get("orgId")
+    fingerprint = identity_fingerprint("claude", str(account or ""), str(org or ""))
+    model = str(runtime.get("model") or "default")
+    return {
+        "state": "auth_ready" if fingerprint else "unconfigured",
+        "fingerprint": fingerprint,
+        "quota_pool": quota_pool_key("claude", fingerprint, str(runtime.get("quota_scope") or model)),
+        "provider_family": "claude",
+    }
 
 
 def _truthy_env(name: str, env: dict[str, str] | None = None) -> bool:
@@ -127,29 +176,8 @@ ANTIGRAVITY_TOKEN_CANDIDATES = (
 )
 
 
-def _antigravity_app_data_dir(settings: dict[str, Any]) -> Path:
-    explicit = settings.get("app_data_dir")
-    if explicit:
-        return Path(str(explicit)).expanduser()
-    config_home = settings.get("config_home")
-    if config_home:
-        return Path(str(config_home)).expanduser() / ".gemini" / "antigravity-cli"
-    return Path.home() / ".gemini" / "antigravity-cli"
-
-
-def _antigravity_auth_ready(settings: dict[str, Any]) -> bool:
-    if str(settings.get("assume_authed") or "").strip().lower() in {"1", "true", "yes", "on"}:
-        return True
-    explicit = settings.get("token_path")
-    if explicit:
-        path = Path(str(explicit)).expanduser()
-        return path.exists() and path.stat().st_size > 0
-    base = _antigravity_app_data_dir(settings)
-    for name in ANTIGRAVITY_TOKEN_CANDIDATES:
-        path = base / name
-        if path.exists() and path.stat().st_size > 0:
-            return True
-    return False
+_antigravity_app_data_dir = antigravity_app_data_dir
+_antigravity_auth_ready = antigravity_auth_ready
 
 
 def _provider_uses_antigravity(config: dict[str, Any], provider_key: str) -> bool:
@@ -188,12 +216,6 @@ def _gemini_auth_ready(
     return False
 
 
-def _read_text(path: Path) -> str:
-    if not path.exists():
-        return ""
-    return path.read_text(encoding="utf-8", errors="ignore")
-
-
 def _code_cli_info() -> dict[str, Any]:
     binary = command_exists("code")
     if not binary:
@@ -209,12 +231,6 @@ def _code_cli_info() -> dict[str, Any]:
         "code_chat_available": code_chat_available,
         "notes": "Verified via local CLI help output.",
     }
-
-
-def _command_help_contains(command: list[str], needle: str) -> bool:
-    result = run_command(command)
-    output = (result.stdout or "") + (result.stderr or "")
-    return needle in output
 
 
 def _gh_version(binary: str | None) -> tuple[int, int, int] | None:
@@ -484,9 +500,12 @@ def _verified_claude_policy(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _verified_claude_hooks() -> dict[str, Any]:
+def _verified_claude_hooks(config: dict[str, Any]) -> dict[str, Any]:
     broker_path = ROOT / ".orchestrator" / "permission_broker.py"
-    command = f"python3 {broker_path} hook"
+    config_file = str(config.get("_runtime_config_file") or "").strip()
+    if not config_file:
+        raise ValueError("Loaded orchestrator config is missing _runtime_config_file")
+    command = shlex.join(["python3", str(broker_path), "--config", config_file, "hook"])
     hook = lambda event: [{"hooks": [{"type": "command", "command": f"{command} {event}", "shell": "bash"}]}]
     return {
         "PreToolUse": hook("PreToolUse"),
@@ -539,15 +558,11 @@ def desired_claude_local_settings(config: dict[str, Any], current: dict[str, Any
         next_permissions["disableBypassPermissionsMode"] = verified_policy["disableBypassPermissionsMode"]
     hooks = existing.get("hooks", {})
     merged_hooks = {**hooks}
-    legacy_hook_snippets = (
-        "python3 .orchestrator/permission_broker.py hook",
-        "permission_broker.py log-hook",
-    )
-    for event, hook_entries in _verified_claude_hooks().items():
+    for event, hook_entries in _verified_claude_hooks(config).items():
         existing_entries = [
             entry
             for entry in hooks.get(event, [])
-            if not any(snippet in json.dumps(entry, sort_keys=True) for snippet in legacy_hook_snippets)
+            if "permission_broker.py" not in json.dumps(entry, sort_keys=True)
         ]
         serialized_existing = {json.dumps(entry, sort_keys=True) for entry in existing_entries}
         merged = list(existing_entries)
@@ -904,39 +919,6 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
                 "notes": [
                     "The installed Copilot Chat extension exposes background-agent, cloud-agent, and Claude-agent sessions in VS Code.",
                     "Local worker automation requires the `copilot` CLI plus either `copilot login`, a supported token env var, or `gh auth login`; cloud delegation still requires `gh >= 2.80` plus `gh auth status`.",
-                    "The installed Copilot CLI exposes a verified `--model` flag, so Grok routing can be expressed as a Copilot model selection.",
-                ],
-            },
-            "grok": {
-                "installed": copilot_installed,
-                "host_layer": "Copilot model selection",
-                "delivery_mode": "copilot_local",
-                "approval_mode": "inherits_copilot",
-                "persistent_allow_supported": False,
-                "default_auto_approve_supported": bool(copilot_binary and copilot_auth_ready),
-                "full_access_supported": bool(copilot_binary and copilot_auth_ready),
-                "per_tool_allow_supported": bool(copilot_binary and copilot_auth_ready),
-                "local_cli_worker_supported": bool(copilot_binary and copilot_auth_ready),
-                "vscode_link_supported": bool(copilot_path),
-                "cloud_agent_supported": False,
-                "supports_auto_approve": bool(copilot_binary and copilot_auth_ready),
-                "supports_defer_resume": False,
-                "auth_ready": copilot_auth_ready,
-                "supported_models": [copilot_model_preference.get("grok")] if copilot_model_preference.get("grok") else [],
-                "selected_model": copilot_model_preference.get("grok"),
-                "applied": False,
-                "verified": "partial" if copilot_installed else "unavailable",
-                "version": copilot_version,
-                "paths": {
-                    "host_extension": str(copilot_path) if copilot_path else None,
-                    "copilot_binary": copilot_binary,
-                },
-                "settings": {
-                    "model_preference.grok": copilot_model_preference.get("grok"),
-                },
-                "notes": [
-                    "Grok is treated as a Copilot model preference rather than a standalone provider.",
-                    "The orchestrator uses the verified Copilot CLI `--model` flag to request `grok-code-fast-1` when the Grok target is selected.",
                 ],
             },
         },
@@ -1118,7 +1100,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
         entry = dict(report["providers"].get(provider_key, {}) or {})
         paths = dict(entry.get("paths", {}) or {})
         paths["antigravity_binary"] = antigravity_cli
-        paths["antigravity_app_data"] = str(_antigravity_app_data_dir(antigravity_cfg))
+        paths["antigravity_app_data"] = str(antigravity_app_data_dir(antigravity_cfg))
         entry.update(
             {
                 "installed": bool(antigravity_cli),
@@ -1144,6 +1126,23 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
             }
         )
         report["providers"][provider_key] = entry
+
+    # Identity is deliberately collected after all provider-specific report
+    # entries are assembled so primary and secondary lanes use the same path.
+    for provider_key, provider_cfg in (config.get("providers", {}) or {}).items():
+        entry = report["providers"].get(provider_key)
+        if not isinstance(entry, dict):
+            continue
+        delivery_mode = str(provider_cfg.get("delivery_mode") or "")
+        if delivery_mode == "codex":
+            entry["identity"] = _codex_identity(provider_cfg.get("codex", {}))
+        elif delivery_mode == "claude_cli":
+            runtime = provider_cfg.get("runtime", {})
+            entry["identity"] = _claude_identity(entry.get("paths", {}).get("binary"), runtime)
+            if entry["identity"]["state"] == "unconfigured":
+                entry["auth_ready"] = False
+                entry["local_cli_worker_supported"] = False
+                entry["supports_auto_approve"] = False
     return report
 
 
@@ -1152,98 +1151,6 @@ def write_provider_capabilities(config: dict[str, Any], report: dict[str, Any] |
     target = config_path(config, "provider_capabilities")
     write_json(target, report)
     return target
-
-
-def desired_sync_state(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {
-        "workspace_settings": desired_workspace_settings(config),
-        "claude_local_settings": desired_claude_local_settings(config, current=_claude_local_settings()),
-        "gemini_settings": desired_gemini_settings(config),
-    }
-
-
-def apply_workspace_settings(config: dict[str, Any]) -> dict[str, Any]:
-    settings = _workspace_settings()
-    updated = {**settings, **desired_workspace_settings(config)}
-    write_json(WORKSPACE_SETTINGS_PATH, updated)
-    return updated
-
-
-def apply_claude_local_settings(config: dict[str, Any]) -> dict[str, Any]:
-    updated = desired_claude_local_settings(config, current=_claude_local_settings())
-    write_json(CLAUDE_LOCAL_SETTINGS_PATH, updated)
-    return updated
-
-
-def apply_gemini_settings(config: dict[str, Any]) -> dict[str, Any]:
-    current = _gemini_settings()
-    desired = desired_gemini_settings(config)
-    merged_security = {**current.get("security", {}), **desired.get("security", {})}
-    if desired.get("security", {}).get("auth"):
-        merged_security["auth"] = {
-            **current.get("security", {}).get("auth", {}),
-            **desired["security"]["auth"],
-        }
-    updated = {
-        "general": {**current.get("general", {}), **desired.get("general", {})},
-        "security": merged_security,
-    }
-    GEMINI_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    write_json(GEMINI_SETTINGS_PATH, updated)
-    return updated
-
-
-def backup_targets(config: dict[str, Any]) -> list[Path]:
-    return [WORKSPACE_SETTINGS_PATH, CLAUDE_LOCAL_SETTINGS_PATH, GEMINI_SETTINGS_PATH]
-
-
-def latest_backup_dir() -> Path | None:
-    backups_dir = ROOT / ".orchestrator" / "backups"
-    if not backups_dir.exists():
-        return None
-    candidates = [path for path in backups_dir.iterdir() if path.is_dir()]
-    if not candidates:
-        return None
-    return sorted(candidates)[-1]
-
-
-def write_backup_manifest(backup_dir: Path, manifest: dict[str, Any]) -> None:
-    write_json(backup_dir / "manifest.json", manifest)
-
-
-def load_backup_manifest(backup_dir: Path) -> dict[str, Any]:
-    return load_json(backup_dir / "manifest.json", default={}) or {}
-
-
-def create_backup(config: dict[str, Any]) -> Path:
-    backup_dir = ROOT / ".orchestrator" / "backups" / utc_now().replace(":", "").replace("-", "")
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {"created_at": utc_now(), "files": []}
-    for index, target in enumerate(backup_targets(config), start=1):
-        entry = {"target_path": str(target), "existed": target.exists(), "backup_file": None}
-        if target.exists():
-            backup_name = f"{index:02d}-{target.name}"
-            shutil.copy2(target, backup_dir / backup_name)
-            entry["backup_file"] = backup_name
-        manifest["files"].append(entry)
-    write_backup_manifest(backup_dir, manifest)
-    return backup_dir
-
-
-def restore_backup(backup_dir: Path) -> list[str]:
-    manifest = load_backup_manifest(backup_dir)
-    restored: list[str] = []
-    for entry in manifest.get("files", []):
-        target = Path(entry["target_path"])
-        if entry.get("existed"):
-            backup_file = backup_dir / entry["backup_file"]
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(backup_file, target)
-            restored.append(str(target))
-        elif target.exists():
-            target.unlink()
-            restored.append(str(target))
-    return restored
 
 
 def main() -> int:

@@ -16,6 +16,44 @@ from adapters.claude_cli import ClaudeCLIAdapter
 
 
 class ClaudeCLIAdapterTests(unittest.TestCase):
+    def test_claude_command_uses_provider_model_and_task_override(self) -> None:
+        config = {
+            "paths": {"status_file": "/canonical/ai-status.json"},
+            "agents": {
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+                "claude2": {"id": "claude2", "display_name": "Claude2", "provider": "claude2"},
+            },
+            "providers": {
+                "claude": {"runtime": {"cli": "claude", "model": "claude-sonnet-5"}},
+                "claude2": {"runtime": {"cli": "claude", "model": "claude-sonnet-5"}},
+            },
+        }
+        process = mock.Mock(pid=43210)
+        with (
+            mock.patch("adapters.claude_cli.command_exists", return_value="/usr/bin/claude"),
+            mock.patch("adapters.claude_cli._claude_auth_ready", return_value=True),
+            mock.patch("adapters.claude_cli.spawn_background_process", return_value=(process, Path("/tmp/claude.log"))) as spawn,
+            mock.patch("adapters.claude_cli.runtime_log_path", return_value=Path("/tmp/claude.log")),
+            mock.patch("adapters.claude_cli.new_runtime_id", return_value="claude-test"),
+        ):
+            for agent_id, expected_model, metadata in (
+                ("claude", "claude-sonnet-5", {}),
+                ("claude2", "claude-fable-5", {"model_preference": "claude-fable-5"}),
+            ):
+                with self.subTest(agent_id=agent_id):
+                    request = DeliveryRequest(
+                        agent_id=agent_id,
+                        provider=agent_id,
+                        delivery_mode="claude_cli",
+                        message="wake up",
+                        task_id="OPS-CLAUDE-001",
+                        metadata=metadata,
+                    )
+                    result = ClaudeCLIAdapter(config=config, provider_capabilities={}).deliver(request)
+                    command = spawn.call_args.args[0]
+                    self.assertTrue(result.ok)
+                    self.assertEqual(command[command.index("--model") + 1], expected_model)
+
     def test_claude_cli_resolves_from_configured_workspace_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)

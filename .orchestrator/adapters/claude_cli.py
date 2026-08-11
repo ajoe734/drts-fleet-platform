@@ -16,9 +16,12 @@ from common import (
     runtime_log_path,
     shell_quote,
     spawn_background_process,
+    worker_scope_properties,
+    worker_scope_unit,
     command_exists,
     run_command,
     runtime_env_overrides,
+    runtime_claude_mcp_config_path,
 )
 
 
@@ -152,6 +155,9 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
             command.append("--verbose")
         if runtime.get("include_hook_events", True):
             command.append("--include-hook-events")
+        model = str((request.metadata or {}).get("model_preference") or runtime.get("model") or "").strip()
+        if model:
+            command.extend(["--model", model])
 
         model = str(runtime.get("model") or "").strip()
         if model:
@@ -168,7 +174,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
 
         mcp_config = runtime.get("mcp_config")
         if mcp_config:
-            command.extend(["--mcp-config", str(config_path(self.config, "claude_mcp_config"))])
+            command.extend(["--mcp-config", str(runtime_claude_mcp_config_path(self.config))])
 
         run_id = new_runtime_id(provider_key)
         log_path = runtime_log_path(provider_key, request.agent_id)
@@ -184,6 +190,10 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
             }
         )
         apply_orchestrator_runtime_env(env, self.config, request.metadata)
+        env["ORCH_WORKER_SCOPE_UNIT"] = worker_scope_unit(run_id)
+        env["ORCH_WORKER_SCOPE_PROPERTIES"] = "\n".join(
+            worker_scope_properties(self.config, request.metadata)
+        )
         process, _ = spawn_background_process(
             command,
             cwd=workspace_root,
@@ -202,5 +212,5 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
             log_path=str(log_path),
             pid=process.pid,
             run_id=run_id,
-            metadata={"shell_command": shell_quote(command)},
+            metadata={"shell_command": shell_quote(command), "scope_unit": worker_scope_unit(run_id)},
         )

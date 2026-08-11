@@ -40,10 +40,7 @@ class ReadyDispatchPolicy:
 
     @classmethod
     def from_config(cls, config: Mapping[str, Any]) -> "ReadyDispatchPolicy":
-        supervisor = config.get("supervisor") or {}
-        nested = supervisor.get("ready_dispatch") or {}
-        legacy = config.get("ready_dispatcher") or {}
-        settings = {**legacy, **nested}
+        settings = config.get("ready_dispatcher") or {}
 
         def values(key: str, defaults: frozenset[str]) -> frozenset[str]:
             raw = settings.get(key)
@@ -147,6 +144,22 @@ def integration_record_is_stale(
     return (reference - stamped).total_seconds() > max_age_seconds
 
 
+def rework_supersedes_integration(record: TaskRecord | Mapping[str, Any]) -> bool:
+    """Whether a reviewer has explicitly sent an integration attempt back to owner.
+
+    A rejected review can leave a real PR and its CI observation intact.  That
+    evidence must remain visible, but it cannot suppress the repair worker that
+    the reviewer explicitly requested.
+    """
+    raw = _task(record).raw
+    # This is a lifecycle latch, not a comparison between two observations.
+    # GitHub reconciliation refreshes integration_recorded_at on every poll;
+    # letting that refresh clear a reviewer rejection would strand the task in
+    # ci_pending even though its owner must make the requested repair. The
+    # owner clears the latch by reporting fresh progress or handing off again.
+    return bool(raw.get("rework_required_at"))
+
+
 def has_external_integration_in_flight(
     record: TaskRecord | Mapping[str, Any],
     *,
@@ -174,6 +187,8 @@ def has_external_integration_in_flight(
     is only believed while it is recent.
     """
     record = _task(record)
+    if rework_supersedes_integration(record):
+        return False
     ci_status = str(record.raw.get("ci_status") or "").strip().lower()
     # CI is the freshest execution signal. A delayed integration_status must not
     # trap a failed task in a permanent no-dispatch state.
@@ -222,6 +237,7 @@ def dependencies_satisfied(
     task: TaskRecord | Mapping[str, Any],
     tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
     done_statuses: set[str] | frozenset[str],
+    integration_evidence: Mapping[str, bool] | None = None,
 ) -> bool:
     record = _task(task)
     index = _tasks(tasks_by_id)
@@ -230,6 +246,28 @@ def dependencies_satisfied(
         dependency = index.get(dependency_id)
         if dependency is not None and dependency.status not in normalized_done:
             return False
+        if dependency is not None and dependency.status in normalized_done:
+            raw = dependency.raw
+            task_class = str(raw.get("task_class") or "").strip().lower()
+            requires_integration = bool(
+                raw.get("release_gate")
+                or raw.get("mutates_canonical")
+                or task_class in {"implementation", "runtime_fix"}
+            )
+            if requires_integration:
+                integration = str(raw.get("integration_status") or "").strip().lower()
+                if integration not in {"merged_to_dev", "dev_deployed", "not_applicable"}:
+                    return False
+                if integration == "merged_to_dev" and not str(raw.get("merge_commit") or "").strip():
+                    return False
+                # Reachability is resolved by infrastructure before this pure
+                # policy is evaluated.  Every dispatch consumer receives the
+                # same evidence instead of running its own Git check.
+                if integration in {"merged_to_dev", "dev_deployed"} and integration_evidence is not None:
+                    if integration_evidence.get(dependency_id) is not True:
+                        return False
+                if integration == "not_applicable" and raw.get("commit_hash"):
+                    return False
     return True
 
 
@@ -249,13 +287,41 @@ def resolve_dispatch_target(
     task: TaskRecord | Mapping[str, Any],
     tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
     policy: ReadyDispatchPolicy,
+    integration_evidence: Mapping[str, bool] | None = None,
 ) -> DispatchDecision | None:
     record = _task(task)
     if record.status in policy.review_statuses and record.reviewer:
         return DispatchDecision(record.id, record.reviewer, DispatchReason.REVIEW_READY)
     if record.status in policy.finalize_statuses and record.owner:
-        return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_FINALIZE)
-    if not dependencies_satisfied(record, tasks_by_id, policy.dependency_done_statuses):
+        if dependencies_satisfied(
+            record,
+            tasks_by_id,
+            policy.dependency_done_statuses,
+            integration_evidence,
+        ) and not has_external_integration_in_flight(
+            record, max_age_seconds=policy.integration_in_flight_max_age_seconds
+        ):
+            return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_FINALIZE)
+        return None
+    dependencies_ready = dependencies_satisfied(
+        record,
+        tasks_by_id,
+        policy.dependency_done_statuses,
+        integration_evidence,
+    )
+    if not dependencies_ready:
+        # GitHub reconciliation may request repair of an existing failed PR
+        # while feature dependencies are still integrating.
+        work_intent = record.raw.get("work_intent")
+        if (
+            isinstance(work_intent, Mapping)
+            and work_intent.get("kind") == "integration_repair"
+            and work_intent.get("state") == "pending"
+            and record.owner
+            and str(record.raw.get("pr_url") or "").strip()
+            and ci_status_reports_failure(str(record.raw.get("ci_status") or ""))
+        ):
+            return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_IN_PROGRESS)
         return None
     if record.status in policy.in_progress_statuses and record.owner:
         if has_external_integration_in_flight(
@@ -263,9 +329,62 @@ def resolve_dispatch_target(
         ):
             return None
         return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_IN_PROGRESS)
+    # A blocked task with a live PR failure is an integration repair, not a
+    # human/product blocker. Keep other blocked tasks gated.
+    if record.status == "blocked" and record.owner and ci_status_reports_failure(
+        str(record.raw.get("ci_status") or "")
+    ):
+        return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_IN_PROGRESS)
     if record.status in policy.owned_statuses and record.owner:
         return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_READY)
     return None
+
+
+def assignment_remains_valid(
+    task: TaskRecord | Mapping[str, Any],
+    tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
+    policy: ReadyDispatchPolicy,
+    *,
+    target_agent: str,
+    reason: DispatchReason | str,
+    integration_evidence: Mapping[str, bool] | None = None,
+) -> bool:
+    """Keep a worker only while its dispatched role still owns the attempt."""
+    record = _task(task)
+    normalized_reason = DispatchReason(
+        reason.value if isinstance(reason, DispatchReason) else str(reason)
+    )
+    decision = resolve_dispatch_target(
+        record,
+        tasks_by_id,
+        policy,
+        integration_evidence,
+    )
+    if decision is not None and (
+            decision.target_agent == target_agent
+            and decision.reason == normalized_reason
+    ):
+        return True
+
+    # A worker may write its expected closeout state shortly before its process
+    # exits. That is completion of the same lease, not a reassignment.
+    if normalized_reason == DispatchReason.REVIEW_READY:
+        return record.reviewer == target_agent and record.status in {
+            *policy.finalize_statuses,
+            *policy.dependency_done_statuses,
+        }
+    if normalized_reason == DispatchReason.OWNED_FINALIZE:
+        return record.owner == target_agent and record.status in policy.dependency_done_statuses
+    if normalized_reason in {
+        DispatchReason.OWNED_READY,
+        DispatchReason.OWNED_IN_PROGRESS,
+    }:
+        return record.owner == target_agent and record.status in {
+            *policy.review_statuses,
+            *policy.finalize_statuses,
+            *policy.dependency_done_statuses,
+        }
+    return False
 
 
 def ready_dispatch_signature(
@@ -280,7 +399,6 @@ def ready_dispatch_signature(
         "ci_status": record.raw.get("ci_status"),
         "execution_branch": record.raw.get("execution_branch"),
         "integration_status": record.raw.get("integration_status"),
-        "last_update": record.last_update,
         "owner": record.owner or None,
         "reason": str(reason.value if isinstance(reason, DispatchReason) else reason),
         "reviewer": record.reviewer or None,
@@ -322,28 +440,14 @@ def build_dispatch_event(
         "target_agent": decision.target_agent,
         "reason": reason,
         "task": task_payload,
+        "assignment_lease": {
+            "task_revision": int(record.raw.get("revision") or 0),
+            "role": "reviewer" if decision.reason == DispatchReason.REVIEW_READY else "owner",
+            "intent": reason,
+            "target_agent": decision.target_agent,
+        },
     }
     if source is not None:
         event["event_id"] = f"evt-{record.id.lower()}-{reason}"
         event["metadata"] = {"source": source, "mode": "execution"}
     return event
-
-
-def dispatch_preview(
-    task: TaskRecord | Mapping[str, Any],
-    tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
-    policy: ReadyDispatchPolicy,
-    *,
-    source: str,
-) -> dict[str, Any] | None:
-    decision = resolve_dispatch_target(task, tasks_by_id, policy)
-    if decision is None:
-        return None
-    return {
-        "decision": {
-            "task_id": decision.task_id,
-            "target_agent": decision.target_agent,
-            "reason": decision.reason.value,
-        },
-        "queue_event": build_dispatch_event(task, decision, tasks_by_id, source=source),
-    }

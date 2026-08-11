@@ -7,12 +7,9 @@ CHAIR_REVIEW_OUTPUT_KEYS = frozenset(
     {
         "version",
         "decision",
-        "sidecar_approved",
         "approval_ttl_minutes",
-        "max_sidecars",
         "reason",
         "blocked_by",
-        "blocked_sidecar_parents",
         "approval_actions",
         "reassignment_actions",
         "task_actions",
@@ -26,34 +23,6 @@ def validate_string_list(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def normalize_approval_action(action: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = dict(action)
-    if not str(normalized.get("decision") or "").strip() and str(
-        normalized.get("action") or ""
-    ).strip():
-        normalized["decision"] = normalized.get("action")
-    return normalized
-
-
-def normalize_reassignment_action(action: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = dict(action)
-    if not str(normalized.get("role") or "").strip() and str(
-        normalized.get("field") or ""
-    ).strip():
-        normalized["role"] = normalized.get("field")
-    if not str(normalized.get("from") or "").strip():
-        normalized["from"] = normalized.get("from_agent") or normalized.get(
-            "fromAgent"
-        )
-    if not str(normalized.get("to") or "").strip():
-        normalized["to"] = normalized.get("to_agent") or normalized.get("toAgent")
-    if not str(normalized.get("reason") or "").strip() and str(
-        normalized.get("rationale") or ""
-    ).strip():
-        normalized["reason"] = normalized.get("rationale")
-    return normalized
-
-
 def normalize_review_defaults(
     payload: Any, settings: Mapping[str, Any]
 ) -> Any:
@@ -64,8 +33,6 @@ def normalize_review_defaults(
         normalized["approval_ttl_minutes"] = int(
             settings.get("default_approval_ttl_minutes", 45)
         )
-    if normalized.get("max_sidecars") is None:
-        normalized["max_sidecars"] = int(settings.get("default_max_sidecars", 2))
     return normalized
 
 
@@ -79,24 +46,13 @@ def validate_review_payload(payload: Any) -> str | None:
         return "version must be 1"
     if not isinstance(payload.get("decision"), str):
         return "decision must be a string"
-    if not isinstance(payload.get("sidecar_approved"), bool):
-        return "sidecar_approved must be a boolean"
     approval_ttl = payload.get("approval_ttl_minutes")
-    max_sidecars = payload.get("max_sidecars")
-    if payload.get("sidecar_approved") and not isinstance(approval_ttl, int):
-        return "approval_ttl_minutes must be an integer when sidecar_approved is true"
     if approval_ttl is not None and not isinstance(approval_ttl, int):
         return "approval_ttl_minutes must be an integer or null"
-    if payload.get("sidecar_approved") and not isinstance(max_sidecars, int):
-        return "max_sidecars must be an integer when sidecar_approved is true"
-    if max_sidecars is not None and not isinstance(max_sidecars, int):
-        return "max_sidecars must be an integer or null"
     if not isinstance(payload.get("reason"), str):
         return "reason must be a string"
     if not validate_string_list(payload.get("blocked_by")):
         return "blocked_by must be a string list"
-    if not validate_string_list(payload.get("blocked_sidecar_parents")):
-        return "blocked_sidecar_parents must be a string list"
     for key in (
         "approval_actions",
         "reassignment_actions",
@@ -111,7 +67,7 @@ def validate_review_payload(payload: Any) -> str | None:
     for raw in payload.get("approval_actions", []):
         if not isinstance(raw, dict):
             return "approval_actions items must be objects"
-        action = normalize_approval_action(raw)
+        action = raw
         if action.get("decision") not in {"allow", "deny"}:
             return "approval_actions decision must be allow or deny"
         if not isinstance(action.get("approval_id"), str) or not isinstance(
@@ -124,7 +80,7 @@ def validate_review_payload(payload: Any) -> str | None:
     for raw in payload.get("reassignment_actions", []):
         if not isinstance(raw, dict):
             return "reassignment_actions items must be objects"
-        action = normalize_reassignment_action(raw)
+        action = raw
         if action.get("role") not in {"owner", "reviewer"}:
             return "reassignment_actions role must be owner or reviewer"
         if any(

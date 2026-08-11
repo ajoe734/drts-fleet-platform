@@ -51,10 +51,7 @@ class ControlPlaneSummaryTests(unittest.TestCase):
         )
 
         self.assertEqual(summary["tasks"]["by_status"], {"backlog": 1})
-        self.assertEqual(
-            summary["tasks"]["dispatch_previews"]["TASK-1"]["target_agent"],
-            "Codex",
-        )
+        self.assertNotIn("dispatch_previews", summary["tasks"])
         self.assertEqual(summary["runtime"]["active_worker_count"], 1)
         self.assertNotIn(
             "request_snapshot", summary["runtime"]["active_workers"][0]
@@ -85,6 +82,31 @@ class ControlPlaneSummaryTests(unittest.TestCase):
 
         self.assertEqual(payload["version"], 1)
         self.assertEqual(payload["tasks"]["total"], 0)
+
+    def test_default_projection_uses_canonical_state_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            status_path = root / "ai-status.json"
+            state_path = root / ".orchestrator" / "state.json"
+            approval_path = root / ".orchestrator" / "approval-queue.json"
+            queue_path = root / ".orchestrator" / "event-queue.jsonl"
+            status_path.write_text('{"tasks": []}', encoding="utf-8")
+            state_path.parent.mkdir(parents=True)
+            state_path.write_text("{}", encoding="utf-8")
+            approval_path.write_text('{"pending": [], "history": []}', encoding="utf-8")
+            queue_path.write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(state_path),
+                    "approval_queue": str(approval_path),
+                    "event_queue": str(queue_path),
+                }
+            }
+
+            refresh_control_plane_summary(config, {"workers": {}, "queue": {}})
+
+            self.assertTrue((root / ".orchestrator" / "projections" / "control-plane-summary.json").exists())
 
 
 if __name__ == "__main__":

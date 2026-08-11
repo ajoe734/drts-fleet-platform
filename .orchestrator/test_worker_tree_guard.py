@@ -22,7 +22,7 @@ def _chatbox_config(*, log_only: bool = False) -> dict:
                 "chatbox_enabled": True,
                 "log_only": log_only,
                 "blocking_globs": [
-                    ".orchestrator/supervisor.py",
+                    ".orchestrator/control_plane/runtime/supervisor_runtime.py",
                     ".orchestrator/skills/**",
                     "docs/**",
                 ],
@@ -59,7 +59,7 @@ class CheckChatboxTreeGuardTests(unittest.TestCase):
         with mock.patch.object(
             worker_tree_guard.subprocess,
             "run",
-            return_value=_porcelain([".orchestrator/supervisor.py"]),
+            return_value=_porcelain([".orchestrator/control_plane/runtime/supervisor_runtime.py"]),
         ):
             for tool in ["Bash", "Read", "Grep", "Glob", "WebFetch", "Task"]:
                 with self.subTest(tool=tool):
@@ -91,7 +91,7 @@ class CheckChatboxTreeGuardTests(unittest.TestCase):
         with mock.patch.object(
             worker_tree_guard.subprocess,
             "run",
-            return_value=_porcelain([".orchestrator/supervisor.py"]),
+            return_value=_porcelain([".orchestrator/control_plane/runtime/supervisor_runtime.py"]),
         ):
             result = worker_tree_guard.check_chatbox_tree_guard(
                 _chatbox_config(log_only=True), tool_name="Edit"
@@ -126,14 +126,14 @@ class CheckChatboxTreeGuardTests(unittest.TestCase):
                 "worker_tree_guard": {
                     "enabled": False,
                     "chatbox_enabled": True,
-                    "blocking_globs": [".orchestrator/supervisor.py"],
+                    "blocking_globs": [".orchestrator/control_plane/runtime/supervisor_runtime.py"],
                 }
             }
         }
         with mock.patch.object(
             worker_tree_guard.subprocess,
             "run",
-            return_value=_porcelain([".orchestrator/supervisor.py"]),
+            return_value=_porcelain([".orchestrator/control_plane/runtime/supervisor_runtime.py"]),
         ):
             self.assertIsNotNone(
                 worker_tree_guard.check_chatbox_tree_guard(config, tool_name="Edit")
@@ -150,14 +150,14 @@ class CheckChatboxTreeGuardTests(unittest.TestCase):
                 "worker_tree_guard": {
                     "enabled": True,
                     "chatbox_enabled": False,
-                    "blocking_globs": [".orchestrator/supervisor.py"],
+                    "blocking_globs": [".orchestrator/control_plane/runtime/supervisor_runtime.py"],
                 }
             }
         }
         with mock.patch.object(
             worker_tree_guard.subprocess,
             "run",
-            return_value=_porcelain([".orchestrator/supervisor.py"]),
+            return_value=_porcelain([".orchestrator/control_plane/runtime/supervisor_runtime.py"]),
         ):
             self.assertIsNone(
                 worker_tree_guard.check_chatbox_tree_guard(config, tool_name="Edit")

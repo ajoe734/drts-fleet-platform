@@ -7,6 +7,7 @@ from adapters.base import BaseAdapter, DeliveryCapability, DeliveryRequest, Deli
 from adapters.file_inbox import FileInboxAdapter
 from common import (
     agent_config_for,
+    antigravity_auth_ready,
     antigravity_rotation_config,
     apply_orchestrator_runtime_env,
     command_exists,
@@ -17,6 +18,8 @@ from common import (
     runtime_log_path,
     select_rotation_model,
     spawn_background_process,
+    worker_scope_properties,
+    worker_scope_unit,
 )
 
 
@@ -26,10 +29,6 @@ from common import (
 # Auth is a one-time interactive sign-in (`agy` with no args -> browser OAuth); on
 # SSH/headless hosts it persists a file-based token under the app-data dir.
 DEFAULT_CLI = "agy"
-DEFAULT_APP_DATA_DIR = Path.home() / ".gemini" / "antigravity-cli"
-# Candidate token filenames written after sign-in (file-based token storage). The
-# exact name is locked in after the first real sign-in; `token_path` overrides.
-TOKEN_CANDIDATES = ("antigravity-oauth-token", "auth.json", "credentials.json", "token.json", "oauth_creds.json")
 
 
 def _string_list(value: object) -> list[str]:
@@ -76,32 +75,6 @@ def _runtime_env(settings: dict, *, ensure_dirs: bool = False) -> dict[str, str]
 def _cli_path(config: dict, settings: dict) -> str | None:
     workspace_root = config_path(config, "status_file").parents[0]
     return command_exists(settings.get("cli") or DEFAULT_CLI, search_roots=[workspace_root])
-
-
-def _app_data_dir(settings: dict) -> Path:
-    explicit = settings.get("app_data_dir")
-    if explicit:
-        return Path(str(explicit)).expanduser()
-    config_home = settings.get("config_home")
-    if config_home:
-        # agy stores app data under $HOME/.gemini/antigravity-cli; config_home maps to HOME.
-        return Path(str(config_home)).expanduser() / ".gemini" / "antigravity-cli"
-    return DEFAULT_APP_DATA_DIR
-
-
-def _auth_ready(settings: dict) -> bool:
-    if _truthy(settings.get("assume_authed"), default=False):
-        return True
-    explicit = settings.get("token_path")
-    if explicit:
-        path = Path(str(explicit)).expanduser()
-        return path.exists() and path.stat().st_size > 0
-    base = _app_data_dir(settings)
-    for name in TOKEN_CANDIDATES:
-        path = base / name
-        if path.exists() and path.stat().st_size > 0:
-            return True
-    return False
 
 
 def _include_directories(config: dict, settings: dict, workspace_root: Path) -> list[str]:
@@ -166,7 +139,7 @@ class AntigravityAdapter(BaseAdapter):
     def capability(self, agent_id: str) -> DeliveryCapability:
         provider_key, _, settings = _provider_for_agent(self.config, agent_id)
         cli = _cli_path(self.config, settings)
-        auth_ready = _auth_ready(settings)
+        auth_ready = antigravity_auth_ready(settings)
         supported = bool(cli and auth_ready)
         if cli and auth_ready:
             notes = f"Uses the verified Antigravity CLI `agy --print` (Cascade agent) for provider `{provider_key}`."
@@ -220,9 +193,21 @@ class AntigravityAdapter(BaseAdapter):
             if both_cooling:
                 note = (
                     "Antigravity model rotation: both the Gemini and fallback pools are "
-                    "cooling down; deferring to inbox until one frees."
+                    "cooling down; Supervisor must defer the queue event until one frees."
                 )
-                return _fallback_to_inbox(self, request, note, hard_error=False)
+                # A file-inbox delivery is not a degraded form of an automatic
+                # Agy dispatch.  Returning it here used to create a manual worker
+                # that the health loop immediately reaped and redispatched.
+                return DeliveryResult(
+                    ok=False,
+                    adapter=self.name,
+                    mode="antigravity",
+                    target=agent_config_for(self.config, request.agent_id).get("display_name", request.agent_id),
+                    auto_delivered=False,
+                    manual_confirmation_required=False,
+                    notes=note,
+                    error="antigravity_both_pools_cooling",
+                )
             model = str(rotation_model or "").strip()
         else:
             model = str(request.metadata.get("model_preference") or settings.get("model") or "").strip()
@@ -244,6 +229,10 @@ class AntigravityAdapter(BaseAdapter):
         log_path = runtime_log_path(provider_key, request.agent_id)
         env = _runtime_env(settings, ensure_dirs=True)
         apply_orchestrator_runtime_env(env, self.config, request.metadata)
+        env["ORCH_WORKER_SCOPE_UNIT"] = worker_scope_unit(run_id)
+        env["ORCH_WORKER_SCOPE_PROPERTIES"] = "\n".join(
+            worker_scope_properties(self.config, request.metadata)
+        )
         process, _ = spawn_background_process(command, cwd=workspace_root, log_path=log_path, env=env)
 
         return DeliveryResult(
@@ -259,8 +248,8 @@ class AntigravityAdapter(BaseAdapter):
             pid=process.pid,
             run_id=run_id,
             metadata=(
-                {"rotation_slot": rotation_slot, "rotation_model": rotation_model}
+                {"rotation_slot": rotation_slot, "rotation_model": rotation_model, "scope_unit": worker_scope_unit(run_id)}
                 if rotation_slot
-                else {}
+                else {"scope_unit": worker_scope_unit(run_id)}
             ),
         )

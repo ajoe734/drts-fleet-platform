@@ -12,6 +12,7 @@ from github_command_parser import GitHubCommand
 class GitHubBusCommandTests(unittest.TestCase):
     def setUp(self) -> None:
         self.config = {
+            "paths": {"status_file": "ai-status.json"},
             "github_bus": {
                 "reviewers": {
                     "Claude": ["ajoe734"],
@@ -20,6 +21,173 @@ class GitHubBusCommandTests(unittest.TestCase):
             }
         }
         self.bus_state = {"tasks": {}}
+
+    def test_integration_check_state_maps_pending_failure_and_success(self) -> None:
+        self.assertEqual(
+            github_bus._integration_check_state({"state": "OPEN", "statusCheckRollup": []}),
+            github_bus.IntegrationObservation("ci_pending", "pending"),
+        )
+        self.assertEqual(
+            github_bus._integration_check_state({
+                "state": "OPEN",
+                "mergeStateStatus": "DIRTY",
+                "statusCheckRollup": [],
+            }),
+            github_bus.IntegrationObservation("ci_failed", "merge_conflict"),
+        )
+        self.assertEqual(
+            github_bus._integration_check_state({
+                "state": "OPEN",
+                "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "FAILURE", "detailsUrl": "run"}],
+            }),
+            github_bus.IntegrationObservation("ci_failed", "failure", ci_run_url="run"),
+        )
+        self.assertEqual(
+            github_bus._integration_check_state({
+                "state": "OPEN",
+                "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "SUCCESS"}],
+            }),
+            github_bus.IntegrationObservation("pr_open", "success"),
+        )
+
+        merged = github_bus._integration_check_state({
+            "state": "MERGED",
+            "mergeCommit": {"oid": "deadbeef"},
+        })
+        self.assertEqual(merged.merge_commit, "deadbeef")
+        self.assertIsNone(merged.ci_run_url)
+
+    def test_reconcile_task_integrations_updates_existing_metadata(self) -> None:
+        status = {"tasks": [{
+            "id": "IAM-UI-DRV-001",
+            "status": "blocked",
+            "owner": "Codex",
+            "pr_url": "https://github.com/ajoe734/pantheon/pull/1364",
+            "integration_status": "ci_pending",
+            "ci_status": "pending",
+        }]}
+        pr = {
+            "state": "OPEN",
+            "headRefName": "codex/iam-ui-drv-001-ci-fix",
+            "headRefOid": "abc123456789",
+            "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "SUCCESS"}],
+        }
+        with (
+            mock.patch.object(github_bus, "gh_json", return_value=pr),
+            mock.patch.object(github_bus, "run_ai_status") as run_ai_status,
+            mock.patch.object(github_bus, "write_activity_log"),
+        ):
+            changed = github_bus.reconcile_task_integrations(self.config, self.bus_state, status, "ajoe734/pantheon")
+        self.assertTrue(changed)
+        run_ai_status.assert_called_once()
+        self.assertEqual(run_ai_status.call_args.kwargs["integration_env"]["INTEGRATION_STATUS"], "pr_open")
+        self.assertEqual(self.bus_state["tasks"]["IAM-UI-DRV-001"]["integration_head_sha"], "abc123456789")
+
+    def test_green_pr_reconciles_owner_lifecycle_to_review(self) -> None:
+        status = {"tasks": [{
+            "id": "IAM-UI-TEN-001",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "pr_url": "https://github.com/ajoe734/pantheon/pull/1373",
+            "integration_status": "pr_open",
+            "ci_status": "success",
+        }]}
+        pr = {
+            "state": "OPEN",
+            "headRefName": "codex/iam-ui-ten-001",
+            "headRefOid": "abc123456789",
+            "baseRefName": "dev",
+            "mergeCommit": None,
+            "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "SUCCESS"}],
+            "url": status["tasks"][0]["pr_url"],
+            "reviewDecision": "",
+            "mergeStateStatus": "CLEAN",
+        }
+        bus_state = {"tasks": {"IAM-UI-TEN-001": {"integration_head_sha": pr["headRefOid"]}}}
+        with (
+            mock.patch.object(github_bus, "discover_task_prs", return_value={}),
+            mock.patch.object(github_bus, "gh_json", return_value=pr),
+            mock.patch.object(github_bus, "run_ai_status") as run_ai_status,
+            mock.patch.object(github_bus, "write_activity_log"),
+        ):
+            changed = github_bus.reconcile_task_integrations(
+                self.config, bus_state, status, "ajoe734/pantheon"
+            )
+
+        self.assertTrue(changed)
+        self.assertEqual(run_ai_status.call_args.args[0], "reconcile-integration")
+        env = run_ai_status.call_args.kwargs["integration_env"]
+        self.assertNotIn("RECONCILER_REVIEW_READY", env)
+        self.assertEqual(env["EXECUTION_BRANCH"], "codex/iam-ui-ten-001")
+
+    def test_replacement_pr_branch_is_reconciled_not_reported_as_ci_failure(self) -> None:
+        status = {"tasks": [{
+            "id": "IAM-ACC-003",
+            "status": "in_progress",
+            "owner": "Codex",
+            "execution_branch": "codex/iam-acc-003-old",
+            "pr_url": "https://github.com/ajoe734/pantheon/pull/1375",
+            "integration_status": "ci_failed",
+            "ci_status": "integration_invalid_branch",
+        }]}
+        pr = {
+            "state": "OPEN",
+            "headRefName": "codex/iam-acc-003-reintegration",
+            "headRefOid": "abc123456789",
+            "baseRefName": "dev",
+            "mergeCommit": None,
+            "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "SUCCESS"}],
+            "url": status["tasks"][0]["pr_url"],
+            "reviewDecision": "",
+            "mergeStateStatus": "CLEAN",
+        }
+        with (
+            mock.patch.object(github_bus, "discover_task_prs", return_value={}),
+            mock.patch.object(github_bus, "gh_json", return_value=pr),
+            mock.patch.object(github_bus, "run_ai_status") as run_ai_status,
+            mock.patch.object(github_bus, "write_activity_log"),
+        ):
+            github_bus.reconcile_task_integrations(self.config, self.bus_state, status, "ajoe734/pantheon")
+
+        env = run_ai_status.call_args.kwargs["integration_env"]
+        self.assertEqual(env["INTEGRATION_STATUS"], "pr_open")
+        self.assertEqual(env["CI_STATUS"], "success")
+        self.assertEqual(env["EXECUTION_BRANCH"], "codex/iam-acc-003-reintegration")
+
+    def test_green_pr_does_not_override_product_blocker(self) -> None:
+        status = {"tasks": [{
+            "id": "IAM-UI-TEN-001",
+            "status": "blocked",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "waiting_for": "Missing product contract",
+            "pr_url": "https://github.com/ajoe734/pantheon/pull/1373",
+            "integration_status": "ci_pending",
+            "ci_status": "pending",
+        }]}
+        pr = {
+            "state": "OPEN",
+            "headRefName": "codex/iam-ui-ten-001",
+            "headRefOid": "abc123456789",
+            "baseRefName": "dev",
+            "mergeCommit": None,
+            "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "SUCCESS"}],
+            "url": status["tasks"][0]["pr_url"],
+            "reviewDecision": "",
+            "mergeStateStatus": "CLEAN",
+        }
+        with (
+            mock.patch.object(github_bus, "discover_task_prs", return_value={}),
+            mock.patch.object(github_bus, "gh_json", return_value=pr),
+            mock.patch.object(github_bus, "run_ai_status") as run_ai_status,
+            mock.patch.object(github_bus, "write_activity_log"),
+        ):
+            github_bus.reconcile_task_integrations(
+                self.config, {"tasks": {}}, status, "ajoe734/pantheon"
+            )
+
+        self.assertNotIn("RECONCILER_REVIEW_READY", run_ai_status.call_args.kwargs["integration_env"])
 
     def test_apply_bus_command_review_approve_uses_reviewer_actor(self) -> None:
         status = {
@@ -161,6 +329,86 @@ class GitHubBusCommandTests(unittest.TestCase):
 
 
 class GitHubBusProcessTests(unittest.TestCase):
+    def test_reconcile_discovers_pr_when_task_url_is_missing(self) -> None:
+        config = {
+            "paths": {"status_file": "/tmp/ai-status.json"},
+            "github_bus": {"auto_merge": {"enabled": False}},
+        }
+        status = {
+            "tasks": [{
+                "id": "S1F-ENT-002",
+                "status": "blocked",
+                "owner": "Codex",
+            }]
+        }
+        bus_state = {"tasks": {}}
+        pr = {
+            "number": 1356,
+            "url": "https://github.com/ajoe734/drts-fleet-platform/pull/1356",
+            "state": "OPEN",
+            "headRefName": "codex/s1f-ent-002",
+            "headRefOid": "abc123",
+            "baseRefName": "dev",
+            "mergeCommit": None,
+            "statusCheckRollup": [],
+            "reviewDecision": "",
+            "mergeStateStatus": "CLEAN",
+        }
+        with (
+            mock.patch.object(github_bus, "discover_task_prs", return_value={"S1F-ENT-002": [pr]}),
+            mock.patch.object(github_bus, "gh_json", return_value=pr),
+            mock.patch.object(github_bus, "run_ai_status") as run_ai_status,
+            mock.patch.object(github_bus, "write_activity_log"),
+        ):
+            changed = github_bus.reconcile_task_integrations(config, bus_state, status, "ajoe734/drts-fleet-platform")
+
+        self.assertTrue(changed)
+        run_ai_status.assert_called_once()
+        self.assertEqual(run_ai_status.call_args.kwargs["actor"], "Supervisor")
+        self.assertTrue(run_ai_status.call_args.kwargs["reconciler"])
+        self.assertEqual(run_ai_status.call_args.kwargs["integration_env"]["PR_URL"], pr["url"])
+
+    def test_choose_task_pr_prefers_merged_evidence_over_old_failed_open_pr(self) -> None:
+        merged = {
+            "number": 1364,
+            "url": "https://github.com/ajoe734/pantheon/pull/1364",
+            "state": "MERGED",
+            "mergedAt": "2026-08-10T23:45:04Z",
+        }
+        failed_open = {
+            "number": 1360,
+            "url": "https://github.com/ajoe734/pantheon/pull/1360",
+            "state": "OPEN",
+            "mergeStateStatus": "DIRTY",
+        }
+        number, url = github_bus.choose_task_pr(
+            {"pr_url": failed_open["url"]}, 1360, [failed_open, merged]
+        )
+        self.assertEqual(number, 1364)
+        self.assertEqual(url, merged["url"])
+
+    def test_auto_merge_requests_protected_merge_only_after_ci_and_review(self) -> None:
+        config = {"github_bus": {"auto_merge": {"enabled": True}}}
+        state = {"tasks": {}}
+        task = {"id": "IAM-BG-001", "status": "review_approved", "security_sensitive": True}
+        pr = {
+            "number": 7,
+            "state": "OPEN",
+            "baseRefName": "dev",
+            "headRefOid": "abc123",
+            "mergeStateStatus": "CLEAN",
+            "reviewDecision": "APPROVED",
+            "statusCheckRollup": [{"status": "COMPLETED", "conclusion": "SUCCESS"}],
+        }
+        with (
+            mock.patch.object(github_bus, "run_gh", return_value=subprocess.CompletedProcess(["gh"], 0, "", "")) as run_gh,
+            mock.patch.object(github_bus, "write_activity_log"),
+        ):
+            self.assertTrue(github_bus.maybe_request_auto_merge(config, state, task, pr, "ajoe734/drts-fleet-platform"))
+        args = run_gh.call_args.args[0]
+        self.assertIn("--auto", args)
+        self.assertNotIn("--admin", args)
+
     def test_run_gh_process_kills_process_group_on_timeout(self) -> None:
         class FakePopen:
             def __init__(self) -> None:

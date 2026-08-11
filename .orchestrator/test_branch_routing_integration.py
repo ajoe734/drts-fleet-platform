@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 import branch_routing
-import supervisor
+from control_plane.runtime import supervisor_runtime as supervisor
 from adapters import copilot_cloud
 from adapters.base import DeliveryRequest
 

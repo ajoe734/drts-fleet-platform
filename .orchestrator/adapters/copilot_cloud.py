@@ -14,6 +14,8 @@ from common import (
     runtime_log_path,
     shell_quote,
     spawn_background_process,
+    worker_scope_properties,
+    worker_scope_unit,
 )
 
 
@@ -145,6 +147,10 @@ class CopilotCloudAdapter(BaseAdapter):
                 "ORCH_PROVIDER": "copilot_cloud",
             }
         )
+        env["ORCH_WORKER_SCOPE_UNIT"] = worker_scope_unit(run_id)
+        env["ORCH_WORKER_SCOPE_PROPERTIES"] = "\n".join(
+            worker_scope_properties(self.config, request.metadata)
+        )
         process, _ = spawn_background_process(command, cwd=root, log_path=log_path, env=env)
         return DeliveryResult(
             ok=True,
@@ -158,5 +164,5 @@ class CopilotCloudAdapter(BaseAdapter):
             log_path=str(log_path),
             pid=process.pid,
             run_id=run_id,
-            metadata={"shell_command": shell_quote(command), "repo": repo},
+            metadata={"shell_command": shell_quote(command), "repo": repo, "scope_unit": worker_scope_unit(run_id)},
         )

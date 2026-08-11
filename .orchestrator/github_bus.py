@@ -7,6 +7,7 @@ import re
 import signal
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -30,7 +31,7 @@ from common import (
 )
 from github_cloud_relay import pull_commands, push_status_digest
 from github_command_parser import GitHubCommand, parse_command
-from runtime_state import enqueue_event
+from control_plane.infra.queue_repo import enqueue_event
 from watch_events import render_wakeup_message
 
 COMMENT_MARKER = "<!-- pantheon-bus -->"
@@ -90,6 +91,7 @@ def save_bus_state(config: dict[str, Any], state: dict[str, Any]) -> None:
                 entry.get("ops_issue"),
                 entry.get("last_review_hash"),
                 entry.get("last_issue_hash"),
+                entry.get("integration_head_sha"),
             )
         ):
             pruned_tasks[task_id] = entry
@@ -259,11 +261,6 @@ def task_bus_entry(bus_state: dict[str, Any], task_id: str) -> dict[str, Any]:
             "last_issue_hash": None,
         },
     )
-
-
-def task_signature(task: dict[str, Any], fields: list[str]) -> str:
-    payload = {field: task.get(field) for field in fields}
-    return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
 
 def build_template_body(config: dict[str, Any], template_key: str, variables: dict[str, Any]) -> str:
@@ -535,19 +532,393 @@ def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: 
     return True
 
 
-def run_ai_status(command: str, target: str, message: str, *, actor: str | None = None) -> None:
+def run_ai_status(
+    command: str,
+    target: str,
+    message: str,
+    *,
+    actor: str | None = None,
+    integration_env: dict[str, str] | None = None,
+    status_root: str | None = None,
+    reconciler: bool = False,
+) -> None:
     env = os.environ.copy()
     if actor:
         env["AI_NAME"] = actor
+    if integration_env:
+        env.update({key: str(value) for key, value in integration_env.items()})
+    if status_root:
+        env["AI_STATUS_ROOT"] = status_root
+        env["ORCH_STATUS_ROOT"] = status_root
+    command_root = Path(status_root).resolve() if status_root else ROOT
+    if reconciler:
+        env["AI_STATUS_RECONCILER"] = "github_bus"
     proc = subprocess.run(
-        ["python3", "scripts/ai_status.py", command, target, message],
-        cwd=str(ROOT),
+        ["python3", str(command_root / "scripts" / "ai_status.py"), command, target, message],
+        cwd=str(command_root),
         capture_output=True,
         text=True,
         env=env,
     )
     if proc.returncode != 0:
         raise GitHubBusError(trim_text((proc.stderr or proc.stdout or "ai_status failed"), 600))
+
+
+@dataclass(frozen=True)
+class IntegrationObservation:
+    integration_status: str
+    ci_status: str
+    ci_run_url: str | None = None
+    merge_commit: str | None = None
+
+
+def _integration_check_state(pr: dict[str, Any]) -> IntegrationObservation:
+    """Map GitHub's check rollup to the existing task integration states."""
+    if str(pr.get("state") or "").upper() == "MERGED":
+        merge_commit = ((pr.get("mergeCommit") or {}).get("oid") or "").strip() or None
+        return IntegrationObservation("merged_to_dev", "success", merge_commit=merge_commit)
+    if str(pr.get("state") or "").upper() != "OPEN":
+        return IntegrationObservation("ci_failed", "closed_without_merge")
+
+    if str(pr.get("mergeStateStatus") or "").upper() == "DIRTY":
+        return IntegrationObservation("ci_failed", "merge_conflict")
+
+    checks = pr.get("statusCheckRollup") or []
+    if not isinstance(checks, list) or not checks:
+        return IntegrationObservation("ci_pending", "pending")
+    failures = [
+        check for check in checks
+        if str(check.get("status") or "").upper() == "COMPLETED"
+        and str(check.get("conclusion") or "").upper()
+        not in {"SUCCESS", "SKIPPED", "NEUTRAL"}
+    ]
+    if failures:
+        failed = failures[0]
+        return IntegrationObservation(
+            "ci_failed",
+            str(failed.get("conclusion") or "failure").lower(),
+            ci_run_url=failed.get("detailsUrl"),
+        )
+    if any(str(check.get("status") or "").upper() != "COMPLETED" for check in checks):
+        return IntegrationObservation("ci_pending", "pending")
+    return IntegrationObservation("pr_open", "success")
+
+
+def discover_task_prs(repo: str) -> dict[str, list[dict[str, Any]]]:
+    """Find dev PR candidates, retaining merged evidence over old open PRs."""
+    prs = gh_json([
+        "pr", "list", "--repo", repo, "--base", "dev", "--state", "all",
+        "--limit", "200", "--json", "number,title,headRefName,headRefOid,url,state,mergedAt",
+    ])
+    discovered: dict[str, list[dict[str, Any]]] = {}
+    if not isinstance(prs, list):
+        return discovered
+    for pr in prs:
+        if not isinstance(pr, dict):
+            continue
+        branch = str(pr.get("headRefName") or "").strip().lower()
+        if "unblock-" in branch or branch.endswith("-unblock"):
+            continue
+        haystack = " ".join(
+            str(pr.get(key) or "") for key in ("title", "headRefName")
+        ).upper()
+        for token in re.findall(r"[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+", haystack):
+            discovered.setdefault(token, []).append(pr)
+    for candidates in discovered.values():
+        # A merged PR is terminal evidence. It must outrank a newer-looking
+        # historical open PR that was never integrated.
+        candidates.sort(
+            key=lambda item: (
+                str(item.get("state") or "").upper() == "MERGED",
+                str(item.get("mergedAt") or ""),
+                int(item.get("number") or 0),
+            ),
+            reverse=True,
+        )
+    return discovered
+
+
+def choose_task_pr(
+    task: dict[str, Any],
+    current_number: int | None,
+    candidates: list[dict[str, Any]],
+) -> tuple[int | None, str]:
+    """Prefer terminal merged evidence, then the newest active replacement."""
+    if not candidates:
+        return current_number, str(task.get("pr_url") or "").strip()
+    merged = [item for item in candidates if str(item.get("state") or "").upper() == "MERGED"]
+    candidate = merged[0] if merged else candidates[0]
+    number = int(candidate.get("number") or 0) or current_number
+    url = str(candidate.get("url") or "").strip()
+    return number, url
+
+
+def open_pr_for_pushed_task(
+    config: dict[str, Any],
+    task: dict[str, Any],
+    repo: str,
+) -> tuple[int | None, str]:
+    """Create a normal PR for a verified branch-pushed implementation."""
+    policy = (config.get("github_bus", {}) or {}).get("auto_open_pr", {}) or {}
+    if not policy.get("enabled", False):
+        return None, ""
+    if str(task.get("integration_status") or "").lower() != "branch_pushed":
+        return None, ""
+    task_id = str(task.get("id") or "").strip()
+    owner = str(task.get("owner") or "").strip().lower()
+    branch = str(task.get("push_branch") or task.get("execution_branch") or "").strip()
+    if not branch and task_id and owner:
+        branch = f"{owner}/{task_id.lower()}"
+    if not branch or not task_id:
+        return None, ""
+    ref = branch.replace("/", "%2F")
+    probe = run_gh(["api", f"repos/{repo}/git/ref/heads/{ref}"])
+    if probe.returncode != 0:
+        return None, ""
+    title = str(task.get("title") or task_id).strip()[:80]
+    body = f"Task-ID: {task_id}\n\nOpened automatically from the verified pushed branch `{branch}`."
+    created = run_gh([
+        "pr", "create", "--repo", repo, "--base", "dev", "--head", branch,
+        "--title", title, "--body", body,
+    ])
+    if created.returncode != 0:
+        write_activity_log(config, {
+            "type": "github_pr_open_failed",
+            "task_id": task_id,
+            "message": trim_text(created.stderr or created.stdout or "PR creation failed.", 500),
+        })
+        return None, ""
+    url = (created.stdout or "").strip().splitlines()[-1] if (created.stdout or "").strip() else ""
+    number = parse_number_from_url(url)
+    write_activity_log(config, {
+        "type": "github_pr_opened",
+        "task_id": task_id,
+        "message": f"Opened PR #{number or '?'} from {branch}.",
+        "github_url": url,
+    })
+    return number, url
+
+
+def recover_pushed_branch_evidence(config: dict[str, Any], task: dict[str, Any]) -> tuple[str, str]:
+    """Recover branch/commit facts from worker evidence before opening a PR."""
+    task_id = str(task.get("id") or "").strip().lower()
+    owner = str(task.get("owner") or "").strip().lower()
+    sources = [str(task.get("next") or "")]
+    status_root = config_path(config, "status_file").parent
+    for ref in task.get("evidence_refs") or []:
+        path = status_root / str(ref)
+        if path.exists():
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                sources.append(json.dumps(payload, ensure_ascii=False))
+            except (OSError, ValueError, TypeError):
+                continue
+    text = "\n".join(sources)
+    branch = ""
+    for match in re.findall(r"(?:origin/|origin\\s+)([A-Za-z0-9._-]+/[A-Za-z0-9._/-]+)", text):
+        candidate = match.strip("`'\".,);]")
+        if task_id in candidate.lower() and (not owner or candidate.lower().startswith(owner + "/")):
+            branch = candidate
+            break
+    commit_match = re.search(r"\b[0-9a-f]{40}\b", text, re.IGNORECASE)
+    return branch, commit_match.group(0) if commit_match else ""
+
+
+def maybe_request_auto_merge(
+    config: dict[str, Any],
+    bus_state: dict[str, Any],
+    task: dict[str, Any],
+    pr: dict[str, Any],
+    repo: str,
+) -> bool:
+    """Request GitHub's protected auto-merge for a verified PR, never admin-merge."""
+    policy = (config.get("github_bus", {}) or {}).get("auto_merge", {}) or {}
+    if not policy.get("enabled", False):
+        return False
+    if str(pr.get("state") or "").upper() != "OPEN":
+        return False
+    if str(pr.get("baseRefName") or "dev") != "dev":
+        return False
+    # BLOCKED commonly means a required reviewer is still pending. GitHub's
+    # protected auto-merge can safely wait for that; DIRTY must be repaired.
+    if str(pr.get("mergeStateStatus") or "").upper() == "DIRTY":
+        return False
+    observation = _integration_check_state(pr)
+    if observation.integration_status != "pr_open" or observation.ci_status != "success":
+        return False
+    if task.get("status") not in set(policy.get("eligible_statuses", ["review", "review_approved", "blocked"])):
+        return False
+    high_risk = any(
+        bool(task.get(field))
+        for field in ("security_sensitive", "release_gate", "mutates_canonical")
+    )
+    task_review_approved = str(task.get("status") or "").lower() == "review_approved"
+    github_review_approved = str(pr.get("reviewDecision") or "").upper() == "APPROVED"
+    if high_risk and not (task_review_approved or github_review_approved):
+        return False
+    task_id = str(task.get("id") or "")
+    head_sha = str(pr.get("headRefOid") or "")
+    entry = bus_state.setdefault("tasks", {}).setdefault(task_id, {})
+    if entry.get("auto_merge_requested_sha") == head_sha:
+        return False
+    number = pr.get("number")
+    target = str(pr.get("url") or number)
+    try:
+        result = run_gh(["pr", "merge", target, "--repo", repo, "--squash", "--auto"])
+    except GitHubBusError as exc:
+        write_activity_log(config, {
+            "type": "github_auto_merge_deferred",
+            "task_id": task_id,
+            "message": trim_text(str(exc), 500),
+            "github_pr": number,
+        })
+        return False
+    if result.returncode != 0:
+        write_activity_log(config, {
+            "type": "github_auto_merge_deferred",
+            "task_id": task_id,
+            "message": trim_text(result.stderr or result.stdout or "GitHub auto-merge was not accepted.", 500),
+            "github_pr": number,
+        })
+        return False
+    entry["auto_merge_requested_sha"] = head_sha
+    write_activity_log(config, {
+        "type": "github_auto_merge_requested",
+        "task_id": task_id,
+        "message": f"Requested protected squash auto-merge for PR #{number} at {head_sha[:12]}.",
+        "github_pr": number,
+    })
+    return True
+
+
+def reconcile_task_integrations(
+    config: dict[str, Any],
+    bus_state: dict[str, Any],
+    status: dict[str, Any],
+    repo: str,
+) -> bool:
+    """Refresh PR/CI evidence for active tasks without creating new work."""
+    changed = False
+    discovered = discover_task_prs(repo)
+    for task in status.get("tasks", []) or []:
+        if not isinstance(task, dict) or task.get("status") == "done":
+            continue
+        task_id = str(task.get("id") or "").strip()
+        owner = str(task.get("owner") or "").strip()
+        pr_url = str(task.get("pr_url") or "").strip()
+        number = parse_number_from_url(pr_url)
+        if not task_id or not owner:
+            continue
+        if not str(task.get("integration_status") or "").strip():
+            recovered_branch, recovered_commit = recover_pushed_branch_evidence(config, task)
+            if recovered_branch:
+                env = {
+                    "INTEGRATION_STATUS": "branch_pushed",
+                    "PUSH_BRANCH": recovered_branch,
+                }
+                if recovered_commit:
+                    env["COMMIT_HASH"] = recovered_commit
+                run_ai_status(
+                    "reconcile-integration",
+                    task_id,
+                    f"Recovered pushed branch evidence from worker result: {recovered_branch}",
+                    actor="Supervisor",
+                    integration_env=env,
+                    status_root=str(config_path(config, "status_file").parent),
+                    reconciler=True,
+                )
+                changed = True
+                task["integration_status"] = "branch_pushed"
+                task["push_branch"] = recovered_branch
+                task["commit_hash"] = recovered_commit or task.get("commit_hash")
+        candidates = discovered.get(task_id.upper(), [])
+        number, discovered_url = choose_task_pr(task, number, candidates)
+        if discovered_url:
+            pr_url = discovered_url
+        if not number:
+            number, opened_url = open_pr_for_pushed_task(config, task, repo)
+            if opened_url:
+                pr_url = opened_url
+        if not number:
+            continue
+        try:
+            pr = gh_json([
+                "pr", "view", str(number), "--repo", repo,
+                "--json", "state,headRefName,headRefOid,baseRefName,mergeCommit,statusCheckRollup,url,reviewDecision,mergeStateStatus",
+            ])
+            if not isinstance(pr, dict):
+                continue
+            observation = _integration_check_state(pr)
+            integration_status = observation.integration_status
+            ci_status = observation.ci_status
+            ci_run_url = observation.ci_run_url
+            head_sha = str(pr.get("headRefOid") or "").strip()
+            branch = str(pr.get("headRefName") or "").strip()
+            entry = bus_state.setdefault("tasks", {}).setdefault(task_id, {})
+            same_observation = (
+                entry.get("integration_head_sha") == head_sha
+                and entry.get("integration_branch") == branch
+                and str(task.get("integration_status") or "") == integration_status
+                and str(task.get("ci_status") or "") == ci_status
+                and str(task.get("ci_run_url") or "") == str(ci_run_url or "")
+                and str(task.get("merge_commit") or "") == str(observation.merge_commit or "")
+                and (not branch or str(task.get("execution_branch") or "") == branch)
+            )
+            entry["integration_head_sha"] = head_sha
+            entry["integration_branch"] = branch
+            # A prior observation may have recorded the merge while the
+            # worker-closeout gap left lifecycle status blocked. Re-run that
+            # terminal reconciliation once; otherwise identical observations
+            # remain idempotent.
+            task_status = str(task.get("status") or "").lower()
+            lifecycle_transition_pending = (
+                (integration_status == "merged_to_dev" and task_status != "done")
+                or (integration_status == "ci_failed" and task_status in {"review", "review_approved"})
+                or (integration_status == "pr_open" and ci_status == "success" and task_status == "in_progress")
+            )
+            if same_observation and not lifecycle_transition_pending:
+                changed = maybe_request_auto_merge(config, bus_state, task, pr, repo) or changed
+                continue
+            env = {
+                "INTEGRATION_STATUS": integration_status,
+                "PR_URL": pr_url,
+                "CI_STATUS": ci_status,
+            }
+            if branch:
+                env["EXECUTION_BRANCH"] = branch
+            if ci_run_url:
+                env["CI_RUN_URL"] = str(ci_run_url)
+            merge_commit = observation.merge_commit
+            if merge_commit:
+                env["MERGE_COMMIT"] = merge_commit
+                env["MERGED_REF"] = str(pr.get("baseRefName") or "")
+            message = f"Supervisor reconciled PR #{number}: {integration_status}/{ci_status} at {head_sha[:12]}"
+            run_ai_status(
+                "reconcile-integration",
+                task_id,
+                message,
+                actor="Supervisor",
+                integration_env=env,
+                status_root=str(config_path(config, "status_file").parent),
+                reconciler=True,
+            )
+            write_activity_log(
+                config,
+                {"type": "github_integration_reconciled", "task_id": task_id, "message": message},
+            )
+            fresh_status = load_status(config)
+            fresh_task = next(
+                (item for item in fresh_status.get("tasks", []) if item.get("id") == task_id),
+                task,
+            )
+            changed = maybe_request_auto_merge(config, bus_state, fresh_task, pr, repo) or changed
+            changed = True
+        except (GitHubBusError, ValueError, TypeError) as exc:
+            write_activity_log(
+                config,
+                {"type": "github_integration_reconcile_failed", "task_id": task_id, "message": trim_text(str(exc), 600)},
+            )
+    return changed
 
 
 def post_issue_comment(repo: str, issue_number: int, body: str) -> None:
@@ -834,6 +1205,15 @@ def poll_pr_reviews(config: dict[str, Any], bus_state: dict[str, Any], status: d
             state_value = str(review.get("state") or "").upper()
             body = trim_text(review.get("body"), 240)
             if state_value == "APPROVED":
+                if str(task.get("integration_status") or "").lower() == "ci_failed":
+                    seen.add(key)
+                    write_activity_log(config, {
+                        "type": "github_review_approval_deferred",
+                        "task_id": task["id"],
+                        "message": f"Ignored PR #{number} approval while latest CI is failing.",
+                        "github_pr": number,
+                    })
+                    continue
                 run_ai_status("approve", task["id"], f"GitHub PR approved via PR #{number} by @{actor}.", actor=str(task.get("reviewer") or "").strip() or None)
                 write_activity_log(config, {"type": "github_review_approved", "task_id": task["id"], "message": f"PR #{number} approved by @{actor}.", "github_pr": number})
                 changed = True
@@ -1019,7 +1399,8 @@ def mark_offline(config: dict[str, Any], bus_state: dict[str, Any], error: str) 
 
 def sync_github_bus(config: dict[str, Any], runtime_state: dict[str, Any]) -> bool:
     bus_cfg = config.get("github_bus", {}) or {}
-    if not bus_cfg.get("enabled", False):
+    integration_enabled = bool(bus_cfg.get("integration_reconcile_enabled", False))
+    if not bus_cfg.get("enabled", False) and not integration_enabled:
         return False
 
     bus_state = load_bus_state(config)
@@ -1042,6 +1423,14 @@ def sync_github_bus(config: dict[str, Any], runtime_state: dict[str, Any]) -> bo
 
     try:
         changed = False
+        if integration_enabled:
+            changed = reconcile_task_integrations(config, bus_state, status, repo) or changed
+            status = load_status(config)
+        if not bus_cfg.get("enabled", False):
+            bus_state["offline_until"] = None
+            bus_state["last_error"] = None
+            save_bus_state(config, bus_state)
+            return changed
         changed = sync_outbound(config, bus_state, status, runtime_state, repo) or changed
         status = load_status(config)
         changed = consume_webhook_events(config, bus_state, status, repo) or changed
@@ -1068,4 +1457,4 @@ def sync_github_bus(config: dict[str, Any], runtime_state: dict[str, Any]) -> bo
 
 
 if __name__ == "__main__":
-    raise SystemExit("Use sync_github_bus() from .orchestrator/supervisor.py")
+    raise SystemExit("Use sync_github_bus() from the supervisor runtime")

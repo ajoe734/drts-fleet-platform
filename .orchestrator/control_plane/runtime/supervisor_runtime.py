@@ -18,13 +18,14 @@ import sys
 import tempfile
 import time
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 THIS_DIR = Path(__file__).resolve().parents[2]
-SUPERVISOR_ENTRYPOINT = THIS_DIR / "supervisor.py"
+SUPERVISOR_ENTRYPOINT = Path(__file__).resolve()
 if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
@@ -36,23 +37,23 @@ from control_plane.domain.dispatch_policy import (
     DispatchDecision as DomainDispatchDecision,
     DispatchReason as DomainDispatchReason,
     ReadyDispatchPolicy,
+    assignment_remains_valid as domain_assignment_remains_valid,
     build_dispatch_event as build_domain_dispatch_event,
+    ci_status_reports_failure,
     dependencies_satisfied as domain_dependencies_satisfied,
-    dependency_signature as domain_dependency_signature,
     has_external_integration_in_flight,
-    ready_dispatch_signature as domain_ready_dispatch_signature,
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
 from control_plane.domain.failure_policy import (
     classify_failure as classify_domain_failure,
-    infer_pause_resume_at as infer_domain_pause_resume_at,
-    retry_settings as domain_retry_settings,
+    infer_pause_resume_at,
+    retry_settings as worker_retry_settings,
 )
+from control_plane.domain.lane_health import EXECUTION_STATUSES, pause_matches_lane, worker_capacity_counts
+from control_plane.domain.resource_admission import decide as resource_admission_decision
 from control_plane.domain.chair_policy import (
-    normalize_approval_action as normalize_domain_approval_action,
-    normalize_reassignment_action as normalize_domain_reassignment_action,
     normalize_review_defaults as normalize_domain_review_defaults,
-    validate_review_payload as validate_domain_review_payload,
+    validate_review_payload as validate_chair_review_payload,
 )
 from control_plane.infra.background_task import BackgroundTask
 from control_plane.infra.approval_repo import load_approval_state
@@ -60,7 +61,6 @@ from control_plane.infra.queue_repo import (
     enqueue_event,
     load_event_queue,
     queue_repository,
-    replace_event_queue,
 )
 from control_plane.infra.runtime_repo import (
     clear_dispatch_pause,
@@ -72,15 +72,8 @@ from control_plane.infra.runtime_repo import (
 )
 from control_plane.infra.worker_failure_detector import (
     WorkerFailureSignal,
-    _captured_tool_log_line_indexes as infra_captured_tool_log_line_indexes,
-    _detect_json_worker_failure as infra_detect_json_worker_failure,
-    _detect_json_worker_failure_signal as infra_detect_json_worker_failure_signal,
-    _extract_failure_candidate as infra_extract_failure_candidate,
-    _ignore_embedded_failure_line as infra_ignore_embedded_failure_line,
-    _is_result_level_provider_blocker as infra_is_result_level_provider_blocker,
-    _iter_json_string_values as infra_iter_json_string_values,
-    detect_worker_failure as infra_detect_worker_failure,
-    detect_worker_failure_signal as infra_detect_worker_failure_signal,
+    consume_worker_failure_signal as detect_worker_failure_signal,
+    detect_worker_failure,
 )
 from control_plane.projections.control_plane_summary import (
     refresh_control_plane_summary,
@@ -91,14 +84,16 @@ from control_plane.usecases.supervisor_tick import (
     SupervisorTickPorts,
     SupervisorTickRunner,
 )
-from control_plane.usecases.task_board_commands import run_task_board_command
+from worker_tree_guard import check_worker_tree_guard
 from common import (
     AI_GUIDE_PATH,
     ROTATION_FALLBACK_SLOT,
     ROTATION_PRIMARY_SLOT,
     agent_config_for,
+    antigravity_app_data_dir,
     antigravity_rotation_config,
     command_exists,
+    canonical_relpath,
     config_path,
     load_rotation_cooldowns,
     record_rotation_cooldown,
@@ -112,11 +107,14 @@ from common import (
     normalize_agent_id,
     relpath,
     runtime_env_overrides,
+    runtime_claude_mcp_config_path,
     selected_shared_files,
     shell_quote,
     snapshot_task,
     spawn_background_process,
     utc_now,
+    worker_scope_properties,
+    worker_scope_unit,
     write_json,
     write_activity_log,
 )
@@ -145,7 +143,16 @@ ACTIVE_RUNTIME_STATUSES = {
     "manual_pending",
     "retry_backoff",
     "stalled",
+    "draining",
     "fallback",
+}
+TERMINAL_WORKER_STATUSES = {
+    "completed",
+    "failed",
+    "reassigned",
+    "rotated",
+    "superseded",
+    "yielded",
 }
 MODE_BUCKETS = ("planning", "execution", "coordination")
 EXECUTION_DISPATCH_REASONS = {
@@ -186,148 +193,6 @@ WORKSPACE_BASELINE_MARKERS = (
     "worktree toolchain",
 )
 TASK_ID_MENTION_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+\b")
-def prune_done_handoffs(status: dict[str, Any], keep: int = 500) -> None:
-    """Trim ``status["handoffs"]`` in place, keeping all pending entries plus
-    the most recent ``keep`` done entries.
-
-    ai-status.json accumulates handoff records forever; each completed task
-    appends 1+ entries with status="done" that supervisor never reads again
-    (see the ``pending_handoffs = [...]`` filter and the iteration in
-    ``ensure_review_finalize_handoff`` / ``ensure_owner_resume_handoff`` —
-    both consume only pending entries). Without pruning the file grew to
-    ~9 MB with 17k handoffs by the 2026-05-26 incident, slowing the
-    dashboard fetch to the point of appearing dead. See
-    feedback_ai_status_handoff_bloat for the incident write-up.
-
-    Called from ``write_status_with_prune`` (the only sanctioned writer of
-    the status file) so every supervisor cycle that mutates status also
-    bounds the audit-log tail. No-op when handoffs already fit.
-    """
-    handoffs = status.get("handoffs") or []
-    if not isinstance(handoffs, list) or len(handoffs) <= keep:
-        return
-    pending = [x for x in handoffs if x.get("status") != "done"]
-    done = [x for x in handoffs if x.get("status") == "done"]
-    if len(done) <= keep:
-        return
-    status["handoffs"] = pending + done[-keep:]
-
-
-def archive_task_bodies(archive_path: Path | None, dropped: list[dict[str, Any]]) -> None:
-    """Append full bodies of pruned done-tasks to ``ai-task-archive.jsonl`` so
-    their detail stays auditable after the live status file drops them (which
-    keeps only the id in ``archived_task_ids``). Append-only JSONL + O_APPEND is
-    deliberate — it is concurrency-safe, unlike a read-modify-write of one JSON
-    object. Mirrors ``ai_status.py.archive_task_bodies``. Best-effort: archival
-    must never block or fail a status write."""
-    if not archive_path or not dropped:
-        return
-    stamp = utc_now()
-    try:
-        with archive_path.open("a", encoding="utf-8") as handle:
-            for task in dropped:
-                if not task.get("id"):
-                    continue
-                record = dict(task)
-                record["_archived_at"] = stamp
-                record["_archived_by"] = "supervisor.py"
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
-
-
-def prune_done_tasks(
-    status: dict[str, Any], keep: int = 150, archive_path: Path | None = None
-) -> None:
-    """Trim ``status["tasks"]`` in place, keeping every non-done task plus the
-    most recent ``keep`` done tasks. Dropped done-task ids are recorded in
-    ``status["archived_task_ids"]``; their full bodies are appended to
-    ``archive_path`` (``ai-task-archive.jsonl``) when supplied.
-
-    ai-status.json's tasks array accumulates every completed task forever
-    (646 done / ~1.0 MB by the 2026-05-30 incident), pushing the file past the
-    256 KB cap the chair/coordination worker's Read tool enforces — so the only
-    healthy lanes could no longer read machine truth and the supervisor thrashed
-    re-queuing chair reviews. Dropping done tasks is dependency-safe:
-    ``dependencies_satisfied`` treats a dep missing from the task map as
-    archived/done (see its comment), so archived done tasks still satisfy
-    downstream deps. See feedback_ai_status_handoff_bloat for the write-up.
-    """
-    tasks = status.get("tasks") or []
-    if not isinstance(tasks, list):
-        return
-    done = [t for t in tasks if str(t.get("status") or "").lower() == "done"]
-    if len(done) <= keep:
-        return
-    dropped = done[:-keep] if keep > 0 else done
-    dropped_ids = {t.get("id") for t in dropped if t.get("id")}
-    if not dropped_ids:
-        return
-    archive_task_bodies(archive_path, dropped)
-    status["tasks"] = [
-        t
-        for t in tasks
-        if str(t.get("status") or "").lower() != "done" or t.get("id") not in dropped_ids
-    ]
-    archived = status.setdefault("archived_task_ids", [])
-    if isinstance(archived, list):
-        already = set(archived)
-        for tid in (t.get("id") for t in dropped):
-            if tid and tid not in already:
-                archived.append(tid)
-                already.add(tid)
-
-
-def prune_blockers(status: dict[str, Any], keep: int = 100) -> None:
-    """Trim ``status["blockers"]`` keeping every unresolved blocker plus the most
-    recent ``keep`` resolved ones. Resolved blockers accumulate forever and are
-    never re-read once closed; only open blockers drive chair decisions."""
-    blockers = status.get("blockers") or []
-    if not isinstance(blockers, list):
-        return
-    resolved = [b for b in blockers if str(b.get("status") or "").lower() == "resolved"]
-    if len(resolved) <= keep:
-        return
-    dropped = {id(b) for b in (resolved[:-keep] if keep > 0 else resolved)}
-    status["blockers"] = [b for b in blockers if id(b) not in dropped]
-
-
-def write_status_with_prune(
-    status_path,
-    status: dict[str, Any],
-    *,
-    config: dict[str, Any] | None = None,
-    keep_handoffs: int | None = None,
-    keep_done_tasks: int | None = None,
-    keep_blockers: int | None = None,
-) -> None:
-    """Standard status-file write that bounds the unbounded audit tails (done
-    handoffs, done tasks, resolved blockers) so ai-status.json stays under the
-    256 KB cap the chair/coordination workers' Read tool enforces.
-
-    All supervisor paths that previously called ``write_json(status_path, status)``
-    now route through this wrapper so the prune cannot be forgotten in a new code
-    path. Keep counts are tunable via the ``supervisor.handoff_keep_count`` /
-    ``supervisor.task_keep_count`` / ``supervisor.blocker_keep_count`` config keys
-    for hosts that want a longer audit tail.
-    """
-    supervisor_cfg = (config or {}).get("supervisor", {}) if isinstance(config, dict) else {}
-    if keep_handoffs is None:
-        keep_handoffs = int(supervisor_cfg.get("handoff_keep_count", 200))
-    if keep_done_tasks is None:
-        keep_done_tasks = int(supervisor_cfg.get("task_keep_count", 150))
-    if keep_blockers is None:
-        keep_blockers = int(supervisor_cfg.get("blocker_keep_count", 100))
-    prune_done_handoffs(status, keep=keep_handoffs)
-    prune_done_tasks(
-        status,
-        keep=keep_done_tasks,
-        archive_path=Path(status_path).parent / "ai-task-archive.jsonl",
-    )
-    prune_blockers(status, keep=keep_blockers)
-    write_json(status_path, status)
-
-
 def _sd_notify(message: str) -> None:
     """Send a state message to systemd via the sd_notify protocol.
 
@@ -470,6 +335,19 @@ def active_worker_workspace_roots(state: dict[str, Any]) -> set[str]:
             for index, token in enumerate(command[:-1]):
                 if token == "-C":
                     roots.add(str(Path(str(command[index + 1])).expanduser().resolve()))
+    now = datetime.now(timezone.utc)
+    holds = state.setdefault("workspace_holds", {})
+    for key, hold in list(holds.items()):
+        if not isinstance(hold, dict):
+            holds.pop(key, None)
+            continue
+        expires_at = _parse_iso_utc(str(hold.get("expires_at") or ""))
+        if expires_at is not None and expires_at <= now:
+            holds.pop(key, None)
+            continue
+        workspace_root = hold.get("workspace_root")
+        if workspace_root:
+            roots.add(str(Path(str(workspace_root)).expanduser().resolve()))
     return roots
 
 
@@ -935,9 +813,10 @@ def _disk_guard_should_cleanup(record: dict[str, Any], settings: dict[str, Any],
 
 
 def maintain_disk_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
+    resource_changed = maintain_resource_guard(config, state)
     settings = disk_guard_settings(config)
     if not settings.get("enabled", False):
-        return False
+        return resource_changed
 
     record = state.setdefault("disk_guard", {})
     path = _disk_guard_path(config, settings)
@@ -947,7 +826,7 @@ def maintain_disk_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
         record["last_error"] = f"Unable to read disk usage for {path}"
         return True
 
-    changed = False
+    changed = resource_changed
     before_blocked = bool(record.get("dispatch_blocked"))
     record.update(snapshot)
     record["last_check_at"] = utc_now()
@@ -1016,6 +895,132 @@ def maintain_disk_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
             ),
             quiet=SUPERVISOR_LOG_QUIET,
         )
+    return changed
+
+
+def _current_cgroup_path() -> Path | None:
+    """Return this supervisor's unified-cgroup directory when available."""
+    try:
+        for line in Path("/proc/self/cgroup").read_text(encoding="utf-8").splitlines():
+            if line.startswith("0::"):
+                relative = line.split("::", 1)[1].lstrip("/")
+                current = Path("/sys/fs/cgroup") / relative
+                # Worker transient scopes are siblings of this service below
+                # app.slice.  Sampling that parent keeps global admission aware
+                # of both the supervisor and every worker scope.
+                return current.parent if current.name.endswith(".service") else current
+    except OSError:
+        return None
+    return None
+
+
+def _read_cgroup_number(path: Path, name: str) -> int | None:
+    try:
+        value = (path / name).read_text(encoding="utf-8").strip()
+        return None if value == "max" else int(value)
+    except (OSError, ValueError):
+        return None
+
+
+def _read_memory_pressure_avg10(path: Path) -> float | None:
+    try:
+        for line in (path / "memory.pressure").read_text(encoding="utf-8").splitlines():
+            if line.startswith("some "):
+                match = re.search(r"avg10=([0-9.]+)", line)
+                return float(match.group(1)) if match else None
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _host_available_memory_bytes() -> int | None:
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def maintain_resource_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
+    """Persist a cheap cgroup snapshot used by every dispatch admission check."""
+    record = state.setdefault("resource_guard", {})
+    now = datetime.now(timezone.utc)
+    last = _parse_iso_utc(str(record.get("last_check_at") or ""))
+    interval = float(((config.get("supervisor") or {}).get("resource_guard") or {}).get("check_interval_seconds", 5.0))
+    if last is not None and (now - last).total_seconds() < max(1.0, interval):
+        return False
+    cgroup = _current_cgroup_path()
+    worker_scopes: dict[str, int] = {}
+    control_scopes: dict[str, int] = {}
+    workers_by_scope = {
+        str(worker.get("scope_unit") or ""): worker
+        for worker in (state.get("workers") or {}).values()
+        if isinstance(worker, dict) and worker.get("scope_unit")
+    }
+    scope_roles = {
+        scope: str(worker.get("role") or (worker.get("metadata") or {}).get("control_role") or "")
+        for scope, worker in workers_by_scope.items()
+    }
+    if cgroup:
+        try:
+            for child in cgroup.glob("drts-worker-*.scope"):
+                usage = _read_cgroup_number(child, "memory.current")
+                if usage is None:
+                    continue
+                events: dict[str, int] = {}
+                try:
+                    events = {
+                        key: int(value)
+                        for key, value in (
+                            line.split(maxsplit=1)
+                            for line in (child / "memory.events").read_text(encoding="utf-8").splitlines()
+                            if " " in line
+                        )
+                    }
+                except (OSError, ValueError):
+                    pass
+                worker = workers_by_scope.get(child.name)
+                if worker is not None:
+                    previous = worker.get("resource_usage") if isinstance(worker.get("resource_usage"), dict) else {}
+                    previous_peak = int(previous.get("memory_peak_bytes") or 0)
+                    sampled_peak = _read_cgroup_number(child, "memory.peak") or usage
+                    worker["resource_usage"] = {
+                        "sampled_at": utc_now(),
+                        "memory_current_bytes": usage,
+                        "memory_peak_bytes": max(previous_peak, sampled_peak, usage),
+                        "memory_high_bytes": _read_cgroup_number(child, "memory.high"),
+                        "memory_max_bytes": _read_cgroup_number(child, "memory.max"),
+                        "memory_events": events,
+                    }
+                if scope_roles.get(child.name) == "chair":
+                    control_scopes[child.name] = usage
+                else:
+                    worker_scopes[child.name] = usage
+        except OSError:
+            pass
+    snapshot = {
+        "last_check_at": utc_now(),
+        "cgroup_path": str(cgroup) if cgroup else None,
+        "memory_current_bytes": _read_cgroup_number(cgroup, "memory.current") if cgroup else None,
+        "worker_memory_current_bytes": sum(worker_scopes.values()),
+        "control_memory_current_bytes": sum(control_scopes.values()),
+        "worker_scope_count": len(worker_scopes),
+        "control_scope_count": len(control_scopes),
+        "host_available_bytes": _host_available_memory_bytes(),
+        "memory_max_bytes": _read_cgroup_number(cgroup, "memory.max") if cgroup else None,
+        "memory_pressure_some_avg10": _read_memory_pressure_avg10(cgroup) if cgroup else None,
+    }
+    try:
+        events = (cgroup / "memory.events").read_text(encoding="utf-8") if cgroup else ""
+        snapshot["memory_events"] = {
+            key: int(value) for key, value in (line.split(maxsplit=1) for line in events.splitlines() if " " in line)
+        }
+    except (OSError, ValueError):
+        snapshot["memory_events"] = {}
+    changed = any(record.get(key) != value for key, value in snapshot.items())
+    record.update(snapshot)
     return changed
 
 
@@ -1134,13 +1139,13 @@ def _supervisor_script_arg_matches(
 def supervisor_cmdline_matches_current_script(parts: list[str], proc_cwd: str) -> bool:
     current_script = str(SUPERVISOR_ENTRYPOINT.resolve())
     current_script_name = SUPERVISOR_ENTRYPOINT.name
-    current_script_rel = ".orchestrator/supervisor.py"
+    current_script_rel = ".orchestrator/control_plane/runtime/supervisor_runtime.py"
     current_repo_root = str(THIS_DIR.parent.resolve())
     if proc_cwd != current_repo_root or not parts:
         return False
 
     # Only match the actual supervisor process, not a parent wrapper such as
-    # `timeout ... python3 .orchestrator/supervisor.py` or a shell/nohup launcher.
+    # `timeout ... python3 <runtime>` or a shell/nohup launcher.
     executable = Path(parts[0]).name
     if _supervisor_script_arg_matches(
         parts[0],
@@ -1822,7 +1827,7 @@ def mark_supervisor_stopped(
         if worker.get("pid"):
             worker["stopped_pid"] = worker.get("pid")
         if terminate_workers:
-            terminate_worker_pid(worker.get("pid"))
+            terminate_worker(worker)
         worker["pid"] = None
         queue_event_id = worker.get("queue_event_id")
         if queue_event_id:
@@ -2064,17 +2069,23 @@ def provider_report_age_seconds(
 def load_provider_report(config: dict[str, Any]) -> dict[str, Any]:
     try:
         supervisor_cfg = config.get("supervisor", {})
-        if supervisor_cfg.get("auto_refresh_provider_capabilities", True):
-            report = build_provider_capabilities(config)
-            write_provider_capabilities(config, report=report)
-            return report
         path = config_path(config, "provider_capabilities")
         report = load_json(path, default={}) or {}
-        # Probing every tick is too expensive, which is why auto-refresh is off.
-        # But a cache that is never refreshed can strand a healthy lane: one
-        # stale or wrong auth_ready=False removes it from dispatch with no
-        # pause, no error and no log line. Re-probe on an interval so the cache
-        # can heal itself; an undateable or missing report refreshes at once.
+        # A profile switch changes the token path immediately. Never trust a
+        # capability snapshot that was produced for a different profile.
+        for provider_key, provider_cfg in (config.get("providers", {}) or {}).items():
+            antigravity_cfg = provider_cfg.get("antigravity") if isinstance(provider_cfg, dict) else None
+            if not isinstance(antigravity_cfg, dict):
+                continue
+            recorded = ((report.get("providers", {}).get(provider_key, {}) or {}).get("paths", {}) or {}).get("antigravity_app_data")
+            if recorded and recorded != str(antigravity_app_data_dir(antigravity_cfg)):
+                refreshed = build_provider_capabilities(config)
+                write_provider_capabilities(config, report=refreshed)
+                return refreshed
+        if not supervisor_cfg.get("auto_refresh_provider_capabilities", True):
+            return report
+        # Capability checks spawn provider CLIs. Refresh a cache at a bounded
+        # cadence rather than once for every supervisor decision in a tick.
         interval = float(
             supervisor_cfg.get("provider_capabilities_refresh_interval_seconds", 900.0)
         )
@@ -2250,6 +2261,56 @@ def start_worker_for_request(
     activity_message: str | None = None,
 ) -> tuple[bool, str | None, dict[str, Any] | None]:
     agent = agent_config_for(config, request.agent_id)
+    request_metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    admission = resource_admission_decision(config, state, request_metadata, agent_id=agent["id"])
+    if not admission.allowed:
+        reason = f"resource_admission:{admission.reason}"
+        queue_record = queue_status(state, event_id_for_log) if event_id_for_log else {}
+        # Capacity is a normal waiting state. Emit evidence when the blocker
+        # changes, rather than on every poll while the same lane is full.
+        if queue_record.get("blocked_reason") != reason:
+            write_activity_log(
+                config,
+                {
+                    "type": "worker_dispatch_deferred",
+                    "task_id": request.task_id,
+                    "provider": request.provider,
+                    "target_agent": display_name_for(config, agent["id"]),
+                    "queue_event_id": event_id_for_log,
+                    "message": reason,
+                    "execution_count": admission.execution_count,
+                    "control_count": admission.control_count,
+                    "heavy_count": admission.heavy_count,
+                },
+            )
+        return False, reason, None
+    cooldown = antigravity_dispatch_cooldown(config, agent["id"])
+    if cooldown is not None:
+        resume_at, reason = cooldown
+        reset_seconds = max(1, int(resume_at - datetime.now(timezone.utc).timestamp()))
+        identity = provider_info_for_agent(config, provider_report, agent["id"]).get("identity")
+        pause_provider(
+            state,
+            agent["id"],
+            reason,
+            kind="capacity",
+            reset_seconds=reset_seconds,
+            identity=identity if isinstance(identity, dict) else None,
+        )
+        write_activity_log(
+            config,
+            {
+                "type": "worker_dispatch_deferred",
+                "task_id": request.task_id,
+                "provider": request.provider,
+                "target_agent": display_name_for(config, agent["id"]),
+                "queue_event_id": event_id_for_log,
+                "parent_run_id": parent_run_id,
+                "resume_at": datetime.fromtimestamp(resume_at, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                "message": reason,
+            },
+        )
+        return False, "antigravity_both_pools_cooling", None
     if request.task_id:
         ensure_task_brief(config, task=(request.metadata or {}).get("task"), task_id=request.task_id)
     # OPS-GIT-WORKFLOW-006: refuse dispatch when a fragile-surface diff is
@@ -2309,6 +2370,8 @@ def start_worker_for_request(
 
     adapter_name = delivery_mode_override or agent.get("adapter", "file_inbox")
     adapter = build_adapter(adapter_name, config=config, provider_capabilities=provider_report)
+    if adapter_name == "antigravity" and not adapter.capability(request.agent_id).can_auto_deliver:
+        return False, "provider_auth_not_ready", None
     result = adapter.deliver(request)
     if not result.ok:
         write_activity_log(
@@ -2326,6 +2389,7 @@ def start_worker_for_request(
         return False, result.error or result.notes or "Worker delivery failed.", None
 
     worker_run_id = result.run_id or new_runtime_id(request.provider)
+    provider_identity = provider_info_for_agent(config, provider_report, agent["id"]).get("identity")
     # Branch-strategy routing: stamp the worker record with the integration
     # track it belongs to so the dashboard, promote-nightly workflow, and
     # any downstream PR-creation can see where this work is supposed to land.
@@ -2334,6 +2398,8 @@ def start_worker_for_request(
         "run_id": worker_run_id,
         "provider": request.provider,
         "agent_id": agent["id"],
+        "identity": provider_identity if isinstance(provider_identity, dict) else None,
+        "role": "chair" if request_metadata.get("control_role") == "chair" else "worker",
         "task_id": request.task_id,
         "session_id": result.session_id,
         "mode": result.mode,
@@ -2348,6 +2414,8 @@ def start_worker_for_request(
         "command": result.command,
         "log_path": result.log_path,
         "payload_path": result.payload_path,
+        "result_path": result.metadata.get("result_path") if isinstance(result.metadata, dict) else None,
+        "scope_unit": result.metadata.get("scope_unit") if isinstance(result.metadata, dict) else None,
         "pid": result.pid,
         "notes": result.notes,
         "metadata": result.metadata,
@@ -2356,6 +2424,7 @@ def start_worker_for_request(
         "task_branch": task_branch,
         "workspace_source": workspace_source,
         "request_snapshot": request_snapshot(request),
+        "assignment_lease": dict(request_metadata.get("assignment_lease") or {}),
         "parent_run_id": parent_run_id,
         "retry_count": 0,
         "next_retry_at": None,
@@ -2370,6 +2439,10 @@ def start_worker_for_request(
         "routing_matched_rule": routing.matched_rule_index if routing else None,
     }
     clear_dispatch_pause(state, task_id=request.task_id, worker_run_id=worker_run_id)
+    state.setdefault("worker_yields", {}).pop(
+        worker_yield_key(request.task_id, display_name_for(config, agent["id"])),
+        None,
+    )
     write_activity_log(
         config,
         {
@@ -2390,6 +2463,37 @@ def start_worker_for_request(
     return True, worker_run_id, result.as_dict()
 
 
+def antigravity_dispatch_cooldown(
+    config: dict[str, Any], agent_id: str, *, now: float | None = None
+) -> tuple[float, str] | None:
+    """Return the next usable time when both Agy rotation pools are cooling.
+
+    This is evaluated before delivery so model-pool exhaustion remains a
+    schedulable lane state instead of becoming a fake file-inbox worker.
+    """
+    agent = agent_config_for(config, agent_id)
+    if str(agent.get("adapter") or "") != "antigravity":
+        return None
+    provider_key = str(agent.get("provider") or "").strip()
+    provider = config.get("providers", {}).get(provider_key, {})
+    settings = provider.get("antigravity", {}) if isinstance(provider, dict) else {}
+    rotation = antigravity_rotation_config(settings)
+    if not rotation.get("enabled"):
+        return None
+    current = now if now is not None else datetime.now(timezone.utc).timestamp()
+    cooldowns = load_rotation_cooldowns(config, provider_key)
+    primary_until = float(cooldowns.get(f"{ROTATION_PRIMARY_SLOT}_until", 0) or 0)
+    fallback_until = float(cooldowns.get(f"{ROTATION_FALLBACK_SLOT}_until", 0) or 0)
+    if primary_until <= current or fallback_until <= current:
+        return None
+    resume_at = min(primary_until, fallback_until)
+    return (
+        resume_at,
+        "Antigravity model rotation: both Gemini and fallback pools are cooling; "
+        "queue delivery deferred until the next pool is available.",
+    )
+
+
 def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report: dict[str, Any]) -> bool:
     changed = False
     task_map = task_index_from_status(config, load_status(config))
@@ -2400,6 +2504,9 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
             continue
         record = queue_status(state, event_id)
         if record.get("status") in {"started", "manual_pending", "completed", "failed"}:
+            continue
+        retry_at = _parse_iso_utc(str(record.get("next_retry_at") or ""))
+        if retry_at is not None and retry_at > datetime.now(timezone.utc):
             continue
         active_worker = next(
             (
@@ -2462,27 +2569,69 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
             changed = True
             continue
         request = build_request(config, event)
-        record["attempt_count"] = int(record.get("attempt_count", 0)) + 1
-        record["last_attempt_at"] = utc_now()
+        pause_reason = agent_dispatch_pause_reason(
+            config,
+            state,
+            request.agent_id,
+            provider_report=provider_report,
+        )
+        if pause_reason:
+            # A queued event must remain queued while its target lane is paused.
+            # Retrying here bypasses the dispatcher selection gate and used to
+            # emit the same Antigravity capacity defer every poll cycle.
+            retry_seconds = max(1, int((config.get("supervisor") or {}).get("dispatch_defer_retry_seconds", 15)))
+            next_retry_at = (datetime.now(timezone.utc) + timedelta(seconds=retry_seconds)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            if (
+                record.get("status") != "pending"
+                or record.get("blocked_reason") != pause_reason
+                or record.get("next_retry_at") != next_retry_at
+            ):
+                blocker_changed = record.get("blocked_reason") != pause_reason
+                record["status"] = "pending"
+                record["blocked_reason"] = pause_reason
+                record["blocked_at"] = utc_now() if blocker_changed else record.get("blocked_at") or utc_now()
+                record["last_checked_at"] = utc_now()
+                record["next_retry_at"] = next_retry_at
+                record.pop("error", None)
+                changed = True
+            continue
+        next_attempt = int(record.get("attempt_count", 0)) + 1
         ok, outcome, delivery = start_worker_for_request(
             config,
             state,
             provider_report,
             request,
             queue_event_id=event_id,
-            attempt_count=record["attempt_count"],
+            attempt_count=next_attempt,
             event_id_for_log=event_id,
         )
         if not ok:
-            record["status"] = "failed"
+            deferred = str(outcome or "").startswith(("antigravity_both_pools_cooling", "resource_admission:"))
+            record["status"] = "waiting_capacity" if deferred else "failed"
             record["error"] = outcome
+            if deferred:
+                seconds = max(1, int((config.get("supervisor") or {}).get("dispatch_defer_retry_seconds", 15)))
+                record["next_retry_at"] = (datetime.now(timezone.utc) + timedelta(seconds=seconds)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+                record["capacity_deferrals"] = int(record.get("capacity_deferrals", 0)) + 1
+                record["last_capacity_deferred_at"] = utc_now()
+                record["blocked_reason"] = str(outcome or "")
+            else:
+                record["next_retry_at"] = None
             changed = True
             continue
 
         worker_run_id = outcome or event_id
+        record["attempt_count"] = next_attempt
+        record["last_attempt_at"] = utc_now()
         record["status"] = "manual_pending" if delivery and delivery.get("manual_confirmation_required") and not delivery.get("auto_delivered") else "started"
         record["run_id"] = worker_run_id
         record["processed_at"] = utc_now()
+        record.pop("error", None)
+        for key in ("blocked_reason", "blocked_at", "last_checked_at"):
+            record.pop(key, None)
+        record.pop("capacity_deferrals", None)
+        record.pop("last_capacity_deferred_at", None)
+        record["next_retry_at"] = None
         changed = True
     return changed
 
@@ -2505,6 +2654,39 @@ def pid_is_alive(pid: int | None) -> bool:
     except OSError:
         return False
     return True
+
+
+def worker_scope_is_active(scope_unit: str | None) -> bool:
+    if not scope_unit or not command_exists("systemctl"):
+        return False
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "is-active", "--quiet", str(scope_unit)],
+            capture_output=True,
+            timeout=2,
+            check=False,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def terminate_worker(worker: dict[str, Any]) -> bool:
+    """Stop the durable scope first, then retain PID fallback for legacy runs."""
+    scope_unit = str(worker.get("scope_unit") or "")
+    if scope_unit and command_exists("systemctl"):
+        try:
+            result = subprocess.run(
+                ["systemctl", "--user", "stop", scope_unit],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+            if result.returncode == 0:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    return terminate_worker_pid(worker.get("pid"))
 
 
 def reap_child_pid(pid: int | None) -> bool:
@@ -2534,9 +2716,11 @@ def terminate_worker_pid(pid: int | None) -> bool:
     if not pid:
         return False
     signaled = False
+    grouped = False
     try:
         os.killpg(pid, signal.SIGTERM)
         signaled = True
+        grouped = True
     except OSError:
         try:
             os.kill(pid, signal.SIGTERM)
@@ -2545,7 +2729,10 @@ def terminate_worker_pid(pid: int | None) -> bool:
             return False
     deadline = time.time() + 1.0
     while time.time() < deadline:
-        if not pid_is_alive(pid):
+        if grouped and not process_group_is_alive(pid):
+            reap_child_pid(pid)
+            return True
+        if not grouped and not pid_is_alive(pid):
             reap_child_pid(pid)
             return True
         time.sleep(0.05)
@@ -2556,8 +2743,51 @@ def terminate_worker_pid(pid: int | None) -> bool:
             os.kill(pid, signal.SIGKILL)
         except OSError:
             return signaled
-    reap_child_pid(pid)
-    return True
+    deadline = time.time() + 1.0
+    while time.time() < deadline:
+        if grouped and not process_group_is_alive(pid):
+            reap_child_pid(pid)
+            return True
+        if not grouped and not pid_is_alive(pid):
+            reap_child_pid(pid)
+            return True
+        time.sleep(0.05)
+    return not process_group_is_alive(pid) if grouped else not pid_is_alive(pid)
+
+
+def process_group_is_alive(pgid: int | None) -> bool:
+    if not pgid:
+        return False
+    try:
+        os.killpg(int(pgid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    # killpg(..., 0) reports zombies as group members. They cannot make
+    # closeout progress and should not keep a worker in draining forever.
+    try:
+        proc_entries = list(Path("/proc").iterdir())
+    except OSError:
+        # Non-Linux hosts do not expose procfs; retain the conservative signal
+        # result instead of claiming a possibly-live process group is gone.
+        return True
+    for entry in proc_entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = (entry / "stat").read_text(encoding="utf-8", errors="ignore")
+            fields = stat.rsplit(") ", 1)[1].split()
+            state, process_group = fields[0], int(fields[2])
+        except (IndexError, OSError, ValueError):
+            continue
+        if process_group != int(pgid):
+            continue
+        if state != "Z":
+            return True
+    return False
 
 
 def normalize_pr_url(config: dict[str, Any], url: str | None) -> str | None:
@@ -2589,7 +2819,15 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
     if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
         worker["last_event_at"] = mtime
     try:
-        content = log_path.read_text(encoding="utf-8", errors="ignore")
+        file_size = log_path.stat().st_size
+        offset = max(0, int(worker.get("log_offset", 0) or 0))
+        # Rotation/truncation invalidates the cursor; rescan the replacement log.
+        if offset > file_size:
+            offset = 0
+        with log_path.open("r", encoding="utf-8", errors="ignore") as handle:
+            handle.seek(offset)
+            content = handle.read()
+            worker["log_offset"] = handle.tell()
     except OSError:
         return
     for line in content.splitlines():
@@ -2631,47 +2869,45 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
                 break
 
 
-def _iter_json_string_values(payload: Any) -> list[str]:
-    return infra_iter_json_string_values(payload)
-
-
-def _ignore_embedded_failure_line(stripped: str) -> bool:
-    return infra_ignore_embedded_failure_line(stripped)
-
-
-def _extract_failure_candidate(text: str) -> str | None:
-    return infra_extract_failure_candidate(text)
-
-
-def _captured_tool_log_line_indexes(lines: list[str]) -> set[int]:
-    return infra_captured_tool_log_line_indexes(lines)
-
-
-def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
-    return infra_detect_json_worker_failure_signal(line)
-
-
-def _detect_json_worker_failure(line: str) -> str | None:
-    return infra_detect_json_worker_failure(line)
-
-
-def _is_result_level_provider_blocker(candidate: str) -> bool:
-    return infra_is_result_level_provider_blocker(candidate)
-
-
-def detect_worker_failure_signal(worker: dict[str, Any]) -> WorkerFailureSignal | None:
-    return infra_detect_worker_failure_signal(worker)
-
-
-def detect_worker_failure(worker: dict[str, Any]) -> str | None:
-    return infra_detect_worker_failure(worker)
-
-
 def resolve_terminal_worker_reason(worker: dict[str, Any], reason: str) -> str:
     if reason != PREMATURE_EXIT_REASON:
         return reason
-    detected = detect_worker_failure(worker)
+    usage = worker.get("resource_usage") if isinstance(worker.get("resource_usage"), dict) else {}
+    events = usage.get("memory_events") if isinstance(usage.get("memory_events"), dict) else {}
+    if int(events.get("oom_kill") or 0) > 0:
+        return "cgroup_oom: worker scope reported memory.oom_kill"
+    # Live failure detection consumes each log range once. Re-scanning the
+    # complete log here would resurrect a historical provider error after a
+    # worker has already recovered or been rotated.
+    detected = str(worker.get("last_failure_reason") or "").strip()
+    # A process that has already exited may not have reached the live polling
+    # branch. One terminal-time scan is safe because this record is finalized
+    # immediately afterwards and terminal workers are never polled again.
+    if not detected:
+        detected = detect_worker_failure(worker) or ""
     return detected or reason
+
+
+def completion_only_memory_termination_reason(config: dict[str, Any], worker: dict[str, Any], now: datetime) -> str | None:
+    """Return a pre-OOM termination reason for a silent completion-only worker."""
+    settings = config.get("supervisor") or {}
+    completion_only = {str(value).strip().lower() for value in settings.get("completion_only_adapters", ["antigravity"])}
+    agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+    if str(agent_config_for(config, agent_id).get("adapter") or "").lower() not in completion_only:
+        return None
+    usage = worker.get("resource_usage") if isinstance(worker.get("resource_usage"), dict) else {}
+    current = int(usage.get("memory_current_bytes") or 0)
+    maximum = int(usage.get("memory_max_bytes") or 0)
+    if not current or not maximum:
+        return None
+    ratio = float(settings.get("completion_only_memory_termination_ratio", 0.90))
+    if current < maximum * min(0.99, max(0.50, ratio)):
+        return None
+    last_event = _parse_iso_utc(str(worker.get("last_event_at") or ""))
+    grace = max(1, int(settings.get("completion_only_memory_grace_seconds", 60)))
+    if last_event is None or (now - last_event).total_seconds() < grace:
+        return None
+    return f"memory_limit_imminent: {current}/{maximum} bytes with no progress for {grace}s"
 
 
 def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reason: str | None) -> dict[str, Any]:
@@ -2685,14 +2921,6 @@ def _parse_iso_utc(ts: str | None) -> datetime | None:
         return datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except ValueError:
         return None
-
-
-def infer_pause_resume_at(reason: str | None, *, paused_at: datetime | None = None) -> float | None:
-    return infer_domain_pause_resume_at(reason, paused_at=paused_at)
-
-
-def worker_retry_settings(config: dict[str, Any], provider: str | None) -> dict[str, Any]:
-    return domain_retry_settings(config, provider)
 
 
 def provider_report_key_for_agent(config: dict[str, Any], agent_id: str) -> str:
@@ -2740,25 +2968,8 @@ def adapter_info_for_agent(
 
 
 def provider_pause_registry(state: dict[str, Any]) -> dict[str, Any]:
-    registry = state.setdefault("provider_pauses", {})
-    quota_registry = state.setdefault("quota_paused_agents", {})
-    for agent_id, pause in list(quota_registry.items()):
-        if agent_id not in registry and isinstance(pause, dict):
-            merged = dict(pause)
-            merged.setdefault("kind", "quota")
-            registry[agent_id] = merged
-    return registry
-
-
-def _sync_quota_pause_metadata(state: dict[str, Any], agent_id: str, entry: dict[str, Any]) -> None:
-    quota_entry = state.setdefault("quota_paused_agents", {}).get(agent_id)
-    if not isinstance(quota_entry, dict):
-        return
-    quota_entry["resume_at"] = entry.get("resume_at")
-    if entry.get("resume_at_source") is not None:
-        quota_entry["resume_at_source"] = entry.get("resume_at_source")
-    else:
-        quota_entry.pop("resume_at_source", None)
+    state["provider_pause_schema"] = 3
+    return state.setdefault("provider_pauses", {})
 
 
 def _hydrate_reason_hint_resume_at(state: dict[str, Any], agent_id: str, entry: dict[str, Any]) -> float | None:
@@ -2779,7 +2990,6 @@ def _hydrate_reason_hint_resume_at(state: dict[str, Any], agent_id: str, entry: 
         return None
     entry["resume_at"] = hinted
     entry["resume_at_source"] = "reason_hint"
-    _sync_quota_pause_metadata(state, agent_id, entry)
     return hinted
 
 
@@ -2790,6 +3000,7 @@ def pause_provider(
     *,
     kind: str,
     reset_seconds: int | None = None,
+    identity: dict[str, Any] | None = None,
 ) -> None:
     normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
     resume_at = (
@@ -2812,18 +3023,23 @@ def pause_provider(
         "reason": reason,
         "paused_at": utc_now(),
         "resume_at": resume_at,
+        "schema": 3,
+        "lane_id": normalized,
     }
+    pool = str((identity or {}).get("quota_pool") or "")
+    fingerprint = str((identity or {}).get("fingerprint") or "")
+    if kind == "quota" and pool:
+        entry.update({"scope": "quota_pool", "quota_pool": pool, "identity_fingerprint": fingerprint})
+        registry_key = f"pool:{pool}"
+    elif fingerprint:
+        entry.update({"scope": "identity", "identity_fingerprint": fingerprint})
+        registry_key = f"identity:{normalized}:{fingerprint}"
+    else:
+        entry["scope"] = "lane"
+        registry_key = normalized
     if resume_source:
         entry["resume_at_source"] = resume_source
-    provider_pause_registry(state)[normalized] = entry
-    if kind == "quota":
-        state.setdefault("quota_paused_agents", {})[normalized] = {
-            "reason": reason,
-            "resume_at": entry["resume_at"],
-            "paused_at": entry["paused_at"],
-        }
-        if resume_source:
-            state.setdefault("quota_paused_agents", {})[normalized]["resume_at_source"] = resume_source
+    provider_pause_registry(state)[registry_key] = entry
     console_log(
         f"{kind} pause: agent={normalized} reset_in={reset_seconds or 0}s reason={reason}",
         quiet=SUPERVISOR_LOG_QUIET,
@@ -2841,9 +3057,9 @@ def maybe_pause_provider_for_terminal_failure(
     if not agent_id:
         return
     if failure.get("kind") == "quota_terminal":
-        pause_provider(state, agent_id, reason, kind="quota", reset_seconds=14400)
+        pause_provider(state, agent_id, reason, kind="quota", reset_seconds=14400, identity=worker.get("identity"))
     elif failure.get("kind") == "auth":
-        pause_provider(state, agent_id, reason, kind="auth", reset_seconds=None)
+        pause_provider(state, agent_id, reason, kind="auth", reset_seconds=None, identity=worker.get("identity"))
 
 
 def _antigravity_rotation_for_worker(config: dict[str, Any], worker: dict[str, Any]) -> dict[str, Any]:
@@ -2911,14 +3127,14 @@ def maybe_rotate_antigravity_lane(
     # "Resets in 29h35m13s"; retrying that pool every 900s just burns one
     # instant-fail call per cycle (~40 pointless rotations/day were observed on
     # 2026-07-27/28). Only ever extend the cooldown, never shorten it.
-    hinted_resume = infer_domain_pause_resume_at(reason)
+    hinted_resume = infer_pause_resume_at(reason)
     slot_until = now + cooldown_seconds
     if hinted_resume is not None and float(hinted_resume) > slot_until:
         slot_until = float(hinted_resume)
     cooldowns = record_rotation_cooldown(config, agent_id, slot, slot_until)
     other_until = float(cooldowns.get(f"{other}_until", 0) or 0)
 
-    terminate_worker_pid(worker.get("pid"))
+    terminate_worker(worker)
     _failure_kind, failure_summary = summarize_worker_failure(config, worker, reason)
 
     if other_until > now:
@@ -2999,8 +3215,10 @@ def maybe_rotate_antigravity_lane(
 
 def clear_provider_pause(state: dict[str, Any], agent_id: str) -> None:
     normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
-    provider_pause_registry(state).pop(normalized, None)
-    state.setdefault("quota_paused_agents", {}).pop(normalized, None)
+    registry = provider_pause_registry(state)
+    for key, entry in list(registry.items()):
+        if key == normalized or (isinstance(entry, dict) and entry.get("lane_id") == normalized):
+            registry.pop(key, None)
 
 
 def is_agent_dispatch_paused(
@@ -3010,23 +3228,42 @@ def is_agent_dispatch_paused(
     *,
     provider_report: dict[str, Any] | None = None,
 ) -> bool:
+    return agent_dispatch_pause_reason(
+        config,
+        state,
+        agent_id,
+        provider_report=provider_report,
+    ) is not None
+
+
+def agent_dispatch_pause_reason(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    agent_id: str,
+    *,
+    provider_report: dict[str, Any] | None = None,
+) -> str | None:
     normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
     report = provider_report or load_provider_report(config)
     provider_info = provider_info_for_agent(config, report, normalized)
     if provider_info.get("auth_ready") is False:
-        return True
+        return "provider_auth_not_ready"
+    identity = provider_info.get("identity") if isinstance(provider_info.get("identity"), dict) else None
+    pool = str((identity or {}).get("quota_pool") or "") or None
     pauses = provider_pause_registry(state)
-    entry = pauses.get(normalized)
-    if not entry:
-        return False
-    if str(entry.get("kind") or "") == "auth":
-        return True
-    if str(entry.get("resume_at_source") or "") == "reason_hint":
-        return True
-    resume_at = entry.get("resume_at")
-    if resume_at is None:
-        return True
-    return float(resume_at) > datetime.now(timezone.utc).timestamp()
+    for entry in pauses.values():
+        if not isinstance(entry, dict) or not pause_matches_lane(entry, identity, pool):
+            continue
+        if str(entry.get("scope") or "lane") == "lane" and entry.get("lane_id") not in {None, normalized}:
+            continue
+        if str(entry.get("kind") or "") == "auth":
+            return "provider_auth_pause"
+        if str(entry.get("resume_at_source") or "") == "reason_hint":
+            return "provider_reason_hint_pause"
+        resume_at = entry.get("resume_at")
+        if resume_at is None or float(resume_at) > datetime.now(timezone.utc).timestamp():
+            return f"provider_{str(entry.get('kind') or 'pause')}_pause"
+    return None
 
 
 def _force_recovery_probe(config: dict[str, Any]) -> dict[str, Any] | None:
@@ -3063,6 +3300,105 @@ def _lane_probe_healthy(
     return bool(auth_ready)
 
 
+def _antigravity_quota_recovery_probe(config: dict[str, Any], agent_id: str) -> tuple[bool, str]:
+    """Perform one bounded real inference request for a quota-paused agy lane."""
+    agent = agent_config_for(config, agent_id)
+    if str(agent.get("adapter") or "") != "antigravity":
+        return False, "not_antigravity"
+    provider = config.get("providers", {}).get(str(agent.get("provider") or ""), {})
+    settings = provider.get("antigravity", {}) if isinstance(provider, dict) else {}
+    cli = str(settings.get("cli") or "agy")
+    env = os.environ.copy()
+    env.update(runtime_env_overrides(settings))
+    timeout = max(5, int(config.get("supervisor", {}).get("provider_quota_probe_timeout_seconds", 30)))
+    command = [
+        cli, "--print", "Reply with exactly: OK", "--output-format", "json",
+        "--print-timeout", f"{timeout}s", "--disable-slash-commands",
+    ]
+    try:
+        result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=timeout + 5, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"probe_error:{type(exc).__name__}"
+    output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    failure = classify_domain_failure(config, {"provider": agent_id}, output).as_mapping()
+    if failure.get("kind") == "quota_terminal":
+        return False, "quota_terminal"
+    if result.returncode == 0:
+        return True, "inference_ok"
+    return False, f"probe_exit_{result.returncode}:{failure.get('kind') or 'unknown'}"
+
+
+def _provider_auth_recovery_probe(config: dict[str, Any], agent_id: str) -> tuple[bool, str]:
+    """Verify recovered credentials with a bounded real provider request."""
+    agent = agent_config_for(config, agent_id)
+    adapter = str(agent.get("adapter") or "").strip()
+    provider = config.get("providers", {}).get(str(agent.get("provider") or ""), {})
+    if adapter == "antigravity":
+        return _antigravity_quota_recovery_probe(config, agent_id)
+    if adapter != "codex" or not isinstance(provider, dict):
+        return False, "unsupported_adapter"
+
+    settings = provider.get("codex", {}) if isinstance(provider.get("codex"), dict) else {}
+    cli = str(settings.get("cli") or "codex")
+    timeout = max(
+        10,
+        int(config.get("supervisor", {}).get("provider_auth_probe_timeout_seconds", 45)),
+    )
+    command = [
+        cli,
+        "exec",
+        "-C",
+        tempfile.gettempdir(),
+        "-s",
+        "read-only",
+        "--skip-git-repo-check",
+        "--ignore-rules",
+        "--ephemeral",
+        "--json",
+    ]
+    model = str(settings.get("model") or "").strip()
+    if model:
+        command.extend(["--model", model])
+    command.append("Reply with exactly OK. Do not use tools.")
+    env = os.environ.copy()
+    config_home = str(settings.get("config_home") or "").strip()
+    if config_home:
+        env["CODEX_HOME"] = os.path.expanduser(config_home)
+    try:
+        result = subprocess.run(
+            command,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"probe_error:{type(exc).__name__}"
+    output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    failure = classify_domain_failure(config, {"provider": agent_id}, output).as_mapping()
+    if result.returncode == 0 and failure.get("kind") not in {"auth", "auth_terminal"}:
+        return True, "inference_ok"
+    return False, f"probe_exit_{result.returncode}:{failure.get('kind') or 'unknown'}"
+
+
+def _pause_matching_lanes(
+    config: dict[str, Any], provider_report: dict[str, Any], entry: dict[str, Any]
+) -> list[str]:
+    scope = str(entry.get("scope") or "lane")
+    lane_id = str(entry.get("lane_id") or "")
+    if scope == "lane":
+        return [lane_id] if lane_id else []
+    matches: list[str] = []
+    for candidate in (config.get("agents", {}) or {}):
+        info = provider_info_for_agent(config, provider_report, candidate)
+        identity = info.get("identity") if isinstance(info.get("identity"), dict) else None
+        pool = str((identity or {}).get("quota_pool") or "") or None
+        if pause_matches_lane(entry, identity, pool):
+            matches.append(str(candidate))
+    return matches
+
+
 def expire_provider_pauses(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -3070,23 +3406,69 @@ def expire_provider_pauses(
 ) -> list[str]:
     pauses = provider_pause_registry(state)
     expired: list[str] = []
+    auth_probe_candidates: list[str] = []
     recovery_probe_candidates: list[str] = []
     now_ts = datetime.now(timezone.utc).timestamp()
     recovery_probe_cooldown = float(
         config.get("supervisor", {}).get("provider_pause_recovery_probe_cooldown_seconds", 300)
     )
-    for agent_id, entry in list(pauses.items()):
+    quota_probe_cooldown = float(
+        config.get("supervisor", {}).get("provider_quota_recovery_probe_cooldown_seconds", 900)
+    )
+    for pause_key, entry in list(pauses.items()):
         kind = str(entry.get("kind") or "")
+        lane_id = str(entry.get("lane_id") or "")
         if kind == "auth":
-            # Auth failures from real worker runs are stronger evidence than a
-            # lightweight capability probe. Keep the lane paused until a human or
-            # explicit repair flow clears it. (break_full_deadlock may clear it as
-            # a last resort when the whole fleet is wedged.)
+            # Older policy versions classified Gemini's broad eligibility
+            # wrapper before its explicit 429/RESOURCE_EXHAUSTED payload. Repair
+            # that persisted state here, where pause expiry is already owned.
+            reclassified = classify_domain_failure(
+                config, {"provider": lane_id}, str(entry.get("reason") or "")
+            )
+            if reclassified.kind.value == "capacity":
+                entry["kind"] = "capacity"
+                entry["resume_at"] = now_ts + float(
+                    worker_retry_settings(config, lane_id).get("capacity_pause_seconds", 300)
+                )
+                entry["resume_at_source"] = "reclassified_capacity"
+                entry["reclassified_at"] = utc_now()
+                write_activity_log(
+                    config,
+                    {
+                        "type": "provider_pause_reclassified",
+                        "provider": lane_id,
+                        "message": "Converted stale auth pause to temporary capacity pause.",
+                    },
+                )
+                kind = "capacity"
+        if kind == "auth":
+            last_probe_at = _parse_iso_utc(str(entry.get("last_auth_probe_at") or ""))
+            if (
+                last_probe_at is None
+                or (datetime.now(timezone.utc) - last_probe_at).total_seconds()
+                >= recovery_probe_cooldown
+            ):
+                auth_probe_candidates.append(pause_key)
             continue
+        # Auth/catalog checks cannot prove quota. For Antigravity lanes, issue a
+        # tiny real request at a bounded cadence so an early provider reset
+        # automatically clears stale pause state without an operator screenshot.
+        if kind == "quota" and lane_id:
+            last_probe_at = _parse_iso_utc(str(entry.get("last_quota_probe_at") or ""))
+            due = last_probe_at is None or (datetime.now(timezone.utc) - last_probe_at).total_seconds() >= quota_probe_cooldown
+            if due:
+                entry["last_quota_probe_at"] = utc_now()
+                recovered, probe_result = _antigravity_quota_recovery_probe(config, lane_id)
+                entry["last_quota_probe_result"] = probe_result
+                if recovered:
+                    pauses.pop(pause_key, None)
+                    expired.append(pause_key)
+                    write_activity_log(config, {"type": "provider_quota_recovered", "provider": lane_id, "message": f"Cleared quota pause after real inference probe ({probe_result})."})
+                    continue
         resume_at = entry.get("resume_at")
         resume_source = str(entry.get("resume_at_source") or "")
         if resume_at is None:
-            resume_at = _hydrate_reason_hint_resume_at(state, agent_id, entry)
+            resume_at = _hydrate_reason_hint_resume_at(state, pause_key, entry)
             resume_source = str(entry.get("resume_at_source") or "")
         if resume_source == "reason_hint":
             if resume_at is None or float(resume_at) > now_ts:
@@ -3097,52 +3479,53 @@ def expire_provider_pauses(
                 and (datetime.now(timezone.utc) - last_probe_at).total_seconds() < recovery_probe_cooldown
             ):
                 continue
-            recovery_probe_candidates.append(agent_id)
+            recovery_probe_candidates.append(pause_key)
             continue
         if resume_at is not None and float(resume_at) <= now_ts:
-            clear_provider_pause(state, agent_id)
-            expired.append(agent_id)
-            console_log(f"provider pause expired: agent={agent_id} now available", quiet=SUPERVISOR_LOG_QUIET)
+            pauses.pop(pause_key, None)
+            expired.append(pause_key)
+            console_log(f"provider pause expired: scope={pause_key} now available", quiet=SUPERVISOR_LOG_QUIET)
+    for pause_key in auth_probe_candidates:
+        entry = pauses.get(pause_key)
+        if not isinstance(entry, dict):
+            continue
+        entry["last_auth_probe_at"] = utc_now()
+        probe_results: dict[str, str] = {}
+        for lane_id in _pause_matching_lanes(config, provider_report, entry):
+            recovered, probe_result = _provider_auth_recovery_probe(config, lane_id)
+            probe_results[lane_id] = probe_result
+            if not recovered:
+                continue
+            pauses.pop(pause_key, None)
+            expired.append(pause_key)
+            write_activity_log(
+                config,
+                {
+                    "type": "provider_auth_recovered",
+                    "provider": lane_id,
+                    "pause_scope": pause_key,
+                    "message": f"Cleared auth pause after real inference probe ({probe_result}).",
+                },
+            )
+            break
+        if pause_key in pauses:
+            entry["last_auth_probe_results"] = probe_results
     if recovery_probe_candidates:
         fresh_report = _force_recovery_probe(config) or provider_report
         probe_stamp = utc_now()
-        for agent_id in recovery_probe_candidates:
-            entry = pauses.get(agent_id)
+        for pause_key in recovery_probe_candidates:
+            entry = pauses.get(pause_key)
             if not isinstance(entry, dict):
                 continue
             entry["last_recovery_probe_at"] = probe_stamp
-            if _lane_probe_healthy(config, fresh_report, agent_id) is True:
-                clear_provider_pause(state, agent_id)
-                expired.append(agent_id)
+            lane_id = str(entry.get("lane_id") or "")
+            if _lane_probe_healthy(config, fresh_report, lane_id) is True:
+                pauses.pop(pause_key, None)
+                expired.append(pause_key)
                 console_log(
-                    f"provider pause cleared after hinted reset and healthy probe: agent={agent_id}",
+                    f"provider pause cleared after hinted reset and healthy probe: scope={pause_key}",
                     quiet=SUPERVISOR_LOG_QUIET,
                 )
-    return expired
-
-
-def quota_pause_agent(state: dict[str, Any], agent_id: str, reason: str, reset_seconds: int = 14400) -> None:
-    pause_provider(state, agent_id, reason, kind="quota", reset_seconds=reset_seconds)
-
-
-def is_agent_quota_paused(state: dict[str, Any], agent_id: str) -> bool:
-    normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
-    entry = provider_pause_registry(state).get(normalized)
-    if not entry:
-        return False
-    if str(entry.get("resume_at_source") or "") == "reason_hint":
-        return True
-    resume_at = entry.get("resume_at")
-    return bool(resume_at is not None and float(resume_at) > datetime.now(timezone.utc).timestamp())
-
-
-def expire_quota_pauses(state: dict[str, Any]) -> list[str]:
-    paused = state.get("quota_paused_agents") or {}
-    now = datetime.now(timezone.utc).timestamp()
-    expired = [aid for aid, info in paused.items() if float(info.get("resume_at", 0) or 0) <= now]
-    for aid in expired:
-        clear_provider_pause(state, aid)
-        console_log(f"quota pause expired: agent={aid} now available", quiet=SUPERVISOR_LOG_QUIET)
     return expired
 
 
@@ -3173,35 +3556,16 @@ def worker_reassignment_settings(config: dict[str, Any]) -> dict[str, Any]:
     return settings
 
 
-# Tree-guard primitives are defined in worker_tree_guard.py so the chatbox
-# PreToolUse hook (permission_broker.py) can share them without pulling
-# supervisor's heavy import graph. Re-exported here so historical
-# `supervisor.X` references — including the unit-test mock
-# `mock.patch.object(supervisor.subprocess, "run", ...)` — keep working.
-from worker_tree_guard import (  # noqa: E402
-    DEFAULT_WORKER_TREE_GUARD_BLOCKING_GLOBS,
-    WORKER_TREE_GUARD_SKIP_REASONS,
-    _worker_tree_guard_matches,
-    _worker_tree_guard_porcelain,
-    check_chatbox_tree_guard,
-    check_worker_tree_guard,
-    worker_tree_guard_settings,
-)
-
-
 def chair_review_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict(config.get("chair_review", {}) or {})
     settings.setdefault("enabled", False)
     settings.setdefault("cooldown_seconds", 900)
+    settings.setdefault("control_slots_per_lane", 1)
     settings.setdefault(
         "failure_streak_threshold",
         int(worker_reassignment_settings(config).get("after_attempts", 2)),
     )
     settings.setdefault("default_approval_ttl_minutes", 45)
-    settings.setdefault(
-        "default_max_sidecars",
-        int(underutilization_settings(config).get("max_new_sidecars_per_wave", 2)),
-    )
     # Max depth of the auto-generated unblock/repair lineage. 1 = a first-class task
     # may get one unblock child, but that child can never spawn its own repair
     # (no -repair-repair). Raise only if you deliberately want deeper auto-chains.
@@ -3371,6 +3735,36 @@ def clear_failure_streak(state: dict[str, Any], task_id: str, role: str | None =
             registry.pop(key, None)
         return
     registry.pop(failure_streak_key(task_id, role), None)
+
+
+def hold_workspace_for_chair_reassignment(
+    config: dict[str, Any], state: dict[str, Any], worker: dict[str, Any], role: str
+) -> None:
+    workspace_root = str(worker.get("workspace_root") or "").strip()
+    if not workspace_root:
+        return
+    seconds = max(60, int((config.get("supervisor") or {}).get("workspace_hold_seconds", 3600)))
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    state.setdefault("workspace_holds", {})[failure_streak_key(str(worker.get("task_id") or ""), role)] = {
+        "workspace_root": workspace_root,
+        "task_branch": worker.get("task_branch"),
+        "worker_run_id": worker.get("run_id"),
+        "expires_at": expires_at.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+
+
+def latest_task_branch(state: dict[str, Any], task_id: str) -> str | None:
+    candidates = [
+        worker
+        for worker in (state.get("workers") or {}).values()
+        if isinstance(worker, dict)
+        and str(worker.get("task_id") or "") == task_id
+        and str(worker.get("task_branch") or "").strip()
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda worker: str(worker.get("last_event_at") or ""), reverse=True)
+    return str(candidates[0].get("task_branch") or "").strip() or None
 
 
 def task_role_for_dispatch_reason(reason: str | None) -> str | None:
@@ -3644,10 +4038,6 @@ def known_agent_display_names(config: dict[str, Any]) -> set[str]:
     return names
 
 
-def display_name_is_legacy_alias(name: str | None) -> bool:
-    return "legacy alias" in str(name or "").lower()
-
-
 def status_agent_names_by_lane(status: dict[str, Any] | None) -> dict[str, str]:
     names: dict[str, str] = {}
     if not isinstance(status, dict):
@@ -3719,7 +4109,7 @@ def first_viable_agent(
         effective_provider_report = load_provider_report(config)
     for candidate in preferred:
         name = str(candidate or "").strip()
-        if not name or name in seen or name in exclude or display_name_is_legacy_alias(name):
+        if not name or name in seen or name in exclude:
             continue
         seen.add(name)
         if name in known:
@@ -3741,7 +4131,7 @@ def ordered_idle_agent_names(idle_agent_names: list[str], agent_loads: dict[str,
     indexed.sort(
         key=lambda item: (
             len(agent_loads.get(item[1], [])),
-            min(agent_loads.get(item[1], [99])),
+            min(agent_loads.get(item[1]) or [99]),
             item[0],
         )
     )
@@ -3789,7 +4179,7 @@ def prune_completed_dispatch_pauses(
         for task in tasks
         if str(task.get("id") or "").strip()
     }
-    active_worker_statuses = {str(value) for value in ready_dispatch_settings(load_config()).get("active_worker_statuses", [])}
+    active_worker_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
     active_task_ids = {
         str(worker.get("task_id") or "")
         for worker in (state.get("workers", {}) or {}).values()
@@ -3805,10 +4195,14 @@ def prune_completed_dispatch_pauses(
         return bool(paused_at and last_update and last_update > paused_at)
 
     pauses = list(state.get("dispatch_pauses", []) or [])
+    # Run-specific pauses without a task cannot describe a lane's present
+    # health.  Provider pauses own lane/identity availability; discard this
+    # retired schema during normal maintenance.
     keep = [
         pause
         for pause in pauses
-        if str(task_by_id.get(str(pause.get("task_id") or ""), {}).get("status") or "").strip().lower() not in {"done", "review_approved"}
+        if str(pause.get("task_id") or "").strip()
+        and str(task_by_id.get(str(pause.get("task_id") or ""), {}).get("status") or "").strip().lower() not in {"done", "review_approved"}
         and str(pause.get("task_id") or "") not in active_task_ids
         and not pause_is_stale_for_updated_task(pause)
         and not recovered_taskless_dispatch_pause(config, state, pause, provider_report)
@@ -3919,12 +4313,24 @@ def proactive_claim_plan_for_idle_agent(
         agent_loads,
     )
     if claim_role == "reviewer":
-        fallback_candidates = normalized_mapping_values(reassignment_settings.get("reviewer_fallbacks", {}), assigned_agent)
+        preferred_reviewers = helper_settings.get("preferred_reviewer_lanes")
+        if isinstance(preferred_reviewers, list) and preferred_reviewers:
+            fallback_candidates = [
+                display_name_for(config, str(candidate))
+                for candidate in preferred_reviewers
+            ]
+        else:
+            fallback_candidates = normalized_mapping_values(
+                reassignment_settings.get("reviewer_fallbacks", {}), assigned_agent
+            )
     else:
         fallback_candidates = normalized_mapping_values(reassignment_settings.get("owner_fallbacks", {}), assigned_agent)
     candidate_order = list(fallback_candidates)
     if helper_settings.get("availability_first", True) or helper_settings.get("allow_any_idle_lane", True):
         candidate_order.extend(ordered_idle)
+    if helper_settings.get("require_candidate_idle", False):
+        idle_set = set(idle_agent_names)
+        candidate_order = [candidate for candidate in candidate_order if candidate in idle_set]
     best_agent = first_viable_agent(
         config,
         candidate_order,
@@ -3986,50 +4392,67 @@ def proactive_claim_plan_for_idle_agent(
     }
 
 
-def proactive_claim_plan_for_task(
+
+
+def execute_task_board_command(
     config: dict[str, Any],
+    command: str,
+    args: list[str] | tuple[str, ...] = (),
     *,
-    task: dict[str, Any],
-    task_map: dict[str, dict[str, Any]],
-    idle_agent_names: list[str],
-    agent_loads: dict[str, list[int]],
-    helper_settings: dict[str, Any],
-    review_statuses: set[str],
-    finalize_statuses: set[str],
-    dependency_done_statuses: set[str],
-    state: dict[str, Any] | None = None,
-) -> dict[str, str] | None:
-    for idle_agent_name in ordered_idle_agent_names(idle_agent_names, agent_loads):
-        plan = proactive_claim_plan_for_idle_agent(
-            config,
-            task=task,
-            task_map=task_map,
-            idle_agent_name=idle_agent_name,
-            idle_agent_names=idle_agent_names,
-            agent_loads=agent_loads,
-            helper_settings=helper_settings,
-            review_statuses=review_statuses,
-            finalize_statuses=finalize_statuses,
-            dependency_done_statuses=dependency_done_statuses,
-            state=state,
+    environ: dict[str, str] | None = None,
+):
+    status_root = config_path(config, "status_file").parent
+    task_board_script = status_root / "scripts" / "ai_status.py"
+    command_env = os.environ.copy()
+    command_env.update({
+        "AI_NAME": "Supervisor",
+        "AI_STATUS_PRODUCER": "supervisor_runtime",
+        "AI_STATUS_ROOT": str(status_root),
+        "ORCH_STATUS_ROOT": str(status_root),
+        "AI_STATUS_PRINT_RESULT": "1",
+        **(environ or {}),
+    })
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(task_board_script), command, *map(str, args)],
+            cwd=str(status_root),
+            env=command_env,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
-        if plan:
-            return plan
-    return None
-
-
-def sync_status_pipeline(config: dict[str, Any]) -> bool:
-    result = run_task_board_command(config, "sync")
-    if result.ok:
-        return True
-    write_activity_log(
-        config,
-        {
-            "type": "task_reassignment_sync_failed",
-            "message": f"Status sync failed after reassignment: {result.error}",
-        },
+    except subprocess.TimeoutExpired:
+        return TaskBoardCommandResult(124, stderr=f"Task-board command timed out: {command}")
+    payload: Any = None
+    for line in reversed((completed.stdout or "").splitlines()):
+        if line.startswith("AI_STATUS_RESULT="):
+            try:
+                payload = json.loads(line.removeprefix("AI_STATUS_RESULT="))
+            except json.JSONDecodeError:
+                payload = None
+            break
+    return TaskBoardCommandResult(
+        completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+        payload=payload,
     )
-    return False
+
+
+@dataclass(frozen=True)
+class TaskBoardCommandResult:
+    returncode: int
+    stdout: str = ""
+    stderr: str = ""
+    payload: Any = None
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0
+
+    @property
+    def error(self) -> str:
+        return self.stderr.strip() or self.stdout.strip() or "unknown error"
 
 
 # Module-level registry of in-flight reconcile jobs, keyed by canonical
@@ -4043,7 +4466,7 @@ def _start_git_reconcile_job(
     config: dict[str, Any], ref: str = "origin/dev"
 ) -> BackgroundTask[Any]:
     return BackgroundTask(
-        lambda: run_task_board_command(
+        lambda: execute_task_board_command(
             config,
             "reconcile-from-git",
             [ref],
@@ -4184,7 +4607,7 @@ def summarize_worker_failure(config: dict[str, Any], worker: dict[str, Any], rea
 
 def record_worker_evidence(config: dict[str, Any], worker: dict[str, Any], reason: str) -> str:
     run_id = str(worker.get("run_id") or new_runtime_id("worker")).strip()
-    path = evidence_path(run_id)
+    path = evidence_path(config, run_id)
     label, summary = summarize_worker_failure(config, worker, reason)
     payload = {
         "created_at": utc_now(),
@@ -4197,9 +4620,10 @@ def record_worker_evidence(config: dict[str, Any], worker: dict[str, Any], reaso
         "log_path": worker.get("log_path"),
         "payload_path": worker.get("payload_path"),
         "raw_message": reason,
+        "resource_usage": worker.get("resource_usage"),
     }
     write_json(path, payload)
-    return relpath(path)
+    return canonical_relpath(config, path)
 
 
 def upsert_worker_dispatch_pause(
@@ -4227,14 +4651,6 @@ def upsert_worker_dispatch_pause(
     )
 
 
-def clear_worker_dispatch_pause(state: dict[str, Any], worker: dict[str, Any]) -> None:
-    clear_dispatch_pause(
-        state,
-        task_id=str(worker.get("task_id") or "") or None,
-        worker_run_id=str(worker.get("run_id") or "") or None,
-    )
-
-
 def persist_task_reassignment(
     config: dict[str, Any],
     *,
@@ -4246,49 +4662,24 @@ def persist_task_reassignment(
     handoff_from: str | None = None,
     evidence_ref: str | None = None,
 ) -> bool:
-    status_path = config_path(config, "status_file")
     status = load_status(config)
-    tasks = status.get("tasks", []) or []
-    timestamp = utc_now()
-    task = next((item for item in tasks if item.get("id") == task_id), None)
+    task = next((item for item in status.get("tasks", []) or [] if item.get("id") == task_id), None)
     if task is None:
         return False
-
-    old_owner = str(task.get("owner") or "")
-    old_reviewer = str(task.get("reviewer") or "")
-    task["owner"] = new_owner
-    task["reviewer"] = new_reviewer
-    task["last_update"] = timestamp
     short_message = brief_reason_text(message, max_length=280)
-    task["next"] = short_message
-    if evidence_ref:
-        refs = list(task.get("evidence_refs", []) or [])
-        if evidence_ref not in refs:
-            refs.append(evidence_ref)
-        task["evidence_refs"] = refs
-
-    for handoff in status.get("handoffs", []) or []:
-        if handoff.get("task_id") != task_id or handoff.get("status") == "done":
-            continue
-        target = str(handoff.get("to") or "")
-        if target in {old_owner, old_reviewer} and target not in {new_owner, new_reviewer}:
-            handoff["status"] = "done"
-            handoff["resolved_at"] = timestamp
-
-    if handoff_to:
-        status.setdefault("handoffs", []).append(
-            {
-                "task_id": task_id,
-                "from": handoff_from or old_owner or old_reviewer or new_owner,
-                "to": handoff_to,
-                "message": short_message,
-                "status": "pending",
-                "created_at": timestamp,
-            }
-        )
-
-    write_status_with_prune(status_path, status, config=config)
-    return sync_status_pipeline(config)
+    result = execute_task_board_command(
+        config,
+        "system-reassign",
+        [task_id, new_owner, new_reviewer, short_message],
+        environ={
+            "EXPECTED_OWNER": str(task.get("owner") or ""),
+            "EXPECTED_REVIEWER": str(task.get("reviewer") or ""),
+            "HANDOFF_TO": handoff_to or "",
+            "HANDOFF_FROM": handoff_from or "",
+            "EVIDENCE_REF": evidence_ref or "",
+        },
+    )
+    return result.ok
 
 
 def maybe_reassign_task_after_worker_failure(
@@ -4306,7 +4697,9 @@ def maybe_reassign_task_after_worker_failure(
 
     if chair_review_settings(config).get("enabled", True):
         if state is not None and terminal:
-            register_worker_failure_streak(config, state, worker, reason, terminal=True)
+            record = register_worker_failure_streak(config, state, worker, reason, terminal=True)
+            if record and record.get("awaiting_chair"):
+                hold_workspace_for_chair_reassignment(config, state, worker, str(record.get("role") or ""))
         return None
 
     attempt_number = int(worker.get("retry_count", 0)) + 1
@@ -4614,6 +5007,25 @@ def finalize_terminal_worker_outcome(
     reason = resolve_terminal_worker_reason(worker, reason)
     if allow_provider_pause:
         maybe_pause_provider_for_terminal_failure(config, state, worker, reason)
+    failure = classify_worker_failure(config, worker, reason)
+    if failure.get("kind") == "environment":
+        # A lane whose sandbox cannot start is unavailable, not flaky task
+        # execution. Pause it once and let normal reassignment select a healthy
+        # lane instead of repeating the same host failure across tasks.
+        agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+        if agent_id:
+            seconds = max(
+                30,
+                int((config.get("supervisor") or {}).get("worker_environment_pause_seconds", 300)),
+            )
+            pause_provider(
+                state,
+                agent_id,
+                reason,
+                kind="capacity",
+                reset_seconds=seconds,
+                identity=worker.get("identity"),
+            )
     # Lane-health safety net runs regardless of allow_provider_pause: an
     # unclassified/unauthorized terminal failure (e.g. codex's revoked-token 401
     # that surfaces only as a premature exit) still counts toward the lane's
@@ -4708,6 +5120,109 @@ def worker_expected_completion_statuses(
     elif agent_id and agent_id == owner_id:
         statuses.update(review_statuses)
     return statuses
+
+
+def worker_yield_settings(config: dict[str, Any]) -> dict[str, Any]:
+    settings = dict((config.get("supervisor") or {}).get("worker_yield", {}) or {})
+    settings.setdefault("cooldown_seconds", 120)
+    return settings
+
+
+def worker_yield_key(task_id: str | None, agent_id: str | None) -> str:
+    return f"{str(task_id or '').strip()}:{normalize_agent_id(str(agent_id or ''))}"
+
+
+def worker_yield_is_active(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    task_id: str,
+    agent_id: str,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    entry = (state.get("worker_yields") or {}).get(worker_yield_key(task_id, agent_id))
+    if not isinstance(entry, dict):
+        return False
+    resume_at = _parse_iso_utc(str(entry.get("resume_at") or ""))
+    if resume_at is None or resume_at <= (now or datetime.now(timezone.utc)):
+        (state.get("worker_yields") or {}).pop(worker_yield_key(task_id, agent_id), None)
+        return False
+    return True
+
+
+def worker_reported_outcome(worker: dict[str, Any]) -> dict[str, Any] | None:
+    result_path = str(worker.get("result_path") or "").strip()
+    if not result_path:
+        return None
+    try:
+        payload = json.loads(Path(result_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    outcome = str(payload.get("outcome") or "").strip().lower()
+    if outcome not in {"advanced", "progress", "blocked", "failed"}:
+        return None
+    return payload
+
+
+def mark_worker_yielded(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    outcome: dict[str, Any],
+) -> None:
+    cooldown_seconds = max(0, int(worker_yield_settings(config).get("cooldown_seconds", 120)))
+    resume_at = datetime.now(timezone.utc) + timedelta(seconds=cooldown_seconds)
+    state.setdefault("worker_yields", {})[
+        worker_yield_key(worker.get("task_id"), worker.get("agent_id"))
+    ] = {
+        "task_id": worker.get("task_id"),
+        "agent_id": worker.get("agent_id"),
+        "worker_run_id": worker.get("run_id"),
+        "yielded_at": utc_now(),
+        "resume_at": resume_at.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "summary": brief_reason_text(str(outcome.get("summary") or "Worker reported progress."), max_length=280),
+    }
+    worker["status"] = "yielded"
+    worker["last_event_at"] = utc_now()
+
+
+def apply_worker_reported_block(
+    config: dict[str, Any], worker: dict[str, Any], outcome: dict[str, Any]
+) -> bool:
+    """Persist an explicit worker block when the worker exited before doing so.
+
+    Codex writes its final structured result after completing the user-facing
+    response. A shell or git closeout can still exit before the task-board write;
+    in that case the canonical supervisor, rather than a runtime worktree, owns
+    the final state transition.
+    """
+    task_id = str(worker.get("task_id") or "").strip()
+    if not task_id:
+        return False
+    reported_reason = str(outcome.get("blocker") or outcome.get("summary") or "")
+    if classify_worker_failure(config, worker, reported_reason).get("kind") == "environment":
+        # A sandbox/bootstrap failure happened before task work began. Let the
+        # terminal path pause/reassign the lane; never contaminate task truth.
+        return False
+    summary = brief_reason_text(
+        reported_reason or "Worker reported a blocker.",
+        max_length=280,
+    )
+    result_path = str(worker.get("result_path") or "").strip()
+    evidence_ref = canonical_relpath(config, Path(result_path)) if result_path else ""
+    result = execute_task_board_command(
+        config,
+        "system-block",
+        [task_id, summary],
+        environ={
+            "AI_STATUS_PRODUCER": "worker_result_recovery",
+            "ORCH_RUN_ID": str(worker.get("run_id") or ""),
+            "EVIDENCE_REF": evidence_ref,
+        },
+    )
+    return result.ok
 
 
 def retry_due_workers(
@@ -4859,7 +5374,7 @@ def resume_claude_worker(
         command.extend(["--permission-mode", runtime.get("permission_mode", "acceptEdits")])
     mcp_config = runtime.get("mcp_config")
     if mcp_config:
-        command.extend(["--mcp-config", str(config_path(config, "claude_mcp_config"))])
+        command.extend(["--mcp-config", str(runtime_claude_mcp_config_path(config))])
     log_path = config_path(config, "state_file").parent / "logs" / f"{new_runtime_id(f'{provider_key}-resume')}.log"
     env = os.environ.copy()
     runtime_overrides = runtime_env_overrides(runtime)
@@ -4875,6 +5390,11 @@ def resume_claude_worker(
             "ORCH_SESSION_ID": str(session_id),
         }
     )
+    metadata = worker.get("metadata") if isinstance(worker.get("metadata"), dict) else {}
+    scope_unit = str(worker.get("scope_unit") or "").strip() or worker_scope_unit(worker["run_id"])
+    env["ORCH_WORKER_SCOPE_UNIT"] = scope_unit
+    env["ORCH_WORKER_SCOPE_PROPERTIES"] = "\n".join(worker_scope_properties(config, metadata))
+    worker["scope_unit"] = scope_unit
     process, _ = spawn_background_process(
         command,
         cwd=config_path(config, "status_file").parents[0],
@@ -4902,6 +5422,17 @@ def resume_claude_worker(
         "pid": process.pid,
         "allowed_tools": allowed_tools,
     }
+
+
+def worker_stall_timeout_seconds(config: dict[str, Any], worker: dict[str, Any], default: float) -> float:
+    """Use a longer watchdog only for providers that cannot stream progress."""
+    settings = config.get("supervisor") or {}
+    completion_only = {str(value).strip().lower() for value in settings.get("completion_only_adapters", ["antigravity"])}
+    agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+    adapter = str(agent_config_for(config, agent_id).get("adapter") or "").lower()
+    if adapter in completion_only:
+        return max(default, float(settings.get("completion_only_worker_stall_after_seconds", 1200)))
+    return default
 
 
 def poll_workers(
@@ -4932,6 +5463,10 @@ def poll_workers(
     changed = retry_due_workers(config, state, provider_report, now) or changed
     workers = state.setdefault("workers", {})
     for run_id, worker in list(workers.items()):
+        # Terminal records are evidence, not live processes. Polling them can
+        # replay historical log failures and trigger duplicate remediation.
+        if str(worker.get("status") or "") in TERMINAL_WORKER_STATUSES:
+            continue
         previous_last_event_at = worker.get("last_event_at")
         task = task_map.get(worker.get("task_id"), {})
         if worker.get("queue_event_id") and worker.get("queue_event_id") not in valid_queue_event_ids:
@@ -4955,7 +5490,7 @@ def poll_workers(
                 changed = True
                 continue
         update_from_log(config, worker)
-        alive = pid_is_alive(worker.get("pid"))
+        alive = pid_is_alive(worker.get("pid")) or worker_scope_is_active(worker.get("scope_unit"))
         last_event_advanced = bool(
             previous_last_event_at
             and worker.get("last_event_at")
@@ -4965,32 +5500,46 @@ def poll_workers(
         task_status = str(task.get("status") or "").lower()
         expected_completion_statuses = worker_expected_completion_statuses(config, worker, task)
         if (
+            not alive
+            and worker.get("status") in ACTIVE_RUNTIME_STATUSES
+            and process_group_is_alive(worker.get("pid"))
+        ):
+            drain_timeout = max(0, int((config.get("supervisor") or {}).get("process_group_drain_seconds", 30)))
+            draining_since = _parse_iso_utc(str(worker.get("draining_since") or ""))
+            if draining_since is None:
+                worker["status"] = "draining"
+                worker["draining_since"] = utc_now()
+                worker["last_event_at"] = utc_now()
+                write_activity_log(
+                    config,
+                    {
+                        "type": "worker_draining",
+                        "provider": worker.get("provider"),
+                        "task_id": worker.get("task_id"),
+                        "message": "Worker parent exited while its process group still has live children.",
+                        "worker_run_id": worker.get("run_id"),
+                    },
+                )
+                changed = True
+                continue
+            if (now - draining_since).total_seconds() < drain_timeout:
+                continue
+            terminate_worker(worker)
+            if process_group_is_alive(worker.get("pid")):
+                continue
+            worker.pop("draining_since", None)
+        if (
             worker.get("queue_event_id")
             and current_mode == "execution"
-            and not worker_matches_current_assignment(config, worker, task_map)
+            and not worker_assignment_remains_valid(config, worker, task_map)
         ):
             if not alive and task_status in expected_completion_statuses:
                 pass
             else:
                 if worker.get("status") == "superseded":
                     continue
-                # Dispatch cooldown: protect freshly-dispatched workers
-                # from being killed for an assignment reshuffle. Without
-                # this guard, availability-first claims thrash the worker
-                # pool — a worker that just spawned is wasteful to kill
-                # before it has had a chance to make progress.
-                if alive and worker_in_dispatch_cooldown(
-                    worker,
-                    ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
-                ):
-                    # supersede skipped: worker still within dispatch cooldown.
-                    # Intentionally silent — this branch is re-evaluated every
-                    # tick for every protected worker, so logging it floods the
-                    # journal with hundreds of identical lines and buries real
-                    # events. The cooldown check is cheap; only the log was noise.
-                    continue
                 if alive:
-                    terminate_worker_pid(worker.get("pid"))
+                    terminate_worker(worker)
                 worker["status"] = "superseded"
                 worker["last_event_at"] = utc_now()
                 worker["last_error"] = "Worker superseded after task responsibility moved to another agent."
@@ -5018,59 +5567,10 @@ def poll_workers(
                 changed = True
                 continue
         if (
-            worker.get("queue_event_id")
-            and current_mode == "execution"
-            and worker.get("status") in active_worker_statuses
-            and higher_priority_ready_task_exists(config, worker, task_map, state=state, active_statuses=active_worker_statuses)
-        ):
-            # Dispatch cooldown: same protection as the assignment-moved
-            # branch. Priority escalation that fires within seconds of a
-            # dispatch is almost always thrashing — the new "higher
-            # priority" task was already visible when this worker was
-            # claimed, so the supervisor should have taken that task
-            # then rather than killing a fresh worker now.
-            if alive and worker_in_dispatch_cooldown(
-                worker,
-                ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
-            ):
-                # priority-escalation supersede skipped: worker still within
-                # dispatch cooldown. Intentionally silent for the same reason as
-                # the assignment-moved branch above — re-evaluated every tick per
-                # worker, so logging it is pure journal noise.
-                continue
-            if alive:
-                terminate_worker_pid(worker.get("pid"))
-            worker["status"] = "superseded"
-            worker["last_event_at"] = utc_now()
-            worker["last_error"] = "Worker superseded to prioritize higher-priority review/finalize work."
-            finalize_queue_event_record(
-                config,
-                state,
-                worker,
-                "completed",
-                worker["last_error"],
-            )
-            write_activity_log(
-                config,
-                {
-                    "type": "worker_superseded",
-                    "provider": worker.get("provider"),
-                    "task_id": worker.get("task_id"),
-                    "message": worker["last_error"],
-                    "worker_run_id": worker.get("run_id"),
-                },
-            )
-            console_log(
-                f"worker superseded for priority escalation: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
-                quiet=SUPERVISOR_LOG_QUIET,
-            )
-            changed = True
-            continue
-        if (
             not alive
             and worker.get("queue_event_id")
             and worker.get("status") in {"fallback", "manual_pending", "retry_backoff", "stalled", "waiting_approval", "suspended_approval"}
-            and not worker_matches_current_assignment(config, worker, task_map)
+            and not worker_assignment_remains_valid(config, worker, task_map)
         ):
             workers.pop(run_id, None)
             finalize_queue_event_record(
@@ -5112,7 +5612,7 @@ def poll_workers(
             and worker.get("queue_event_id")
             and worker.get("status") == "manual_pending"
             and worker.get("mode") == "file_inbox"
-            and worker_matches_current_assignment(config, worker, task_map)
+            and worker_assignment_remains_valid(config, worker, task_map)
             and task_status in redispatch_statuses
             and provider_info.get("auth_ready")
             and provider_info.get("local_cli_worker_supported")
@@ -5295,6 +5795,12 @@ def poll_workers(
             changed = True
 
         if alive:
+            memory_reason = completion_only_memory_termination_reason(config, worker, now)
+            if memory_reason:
+                terminate_worker(worker)
+                finalize_terminal_worker_outcome(config, state, worker, memory_reason)
+                changed = True
+                continue
             live_failure_signal = detect_worker_failure_signal(worker)
             if live_failure_signal:
                 live_failure_reason = live_failure_signal.reason
@@ -5315,15 +5821,15 @@ def poll_workers(
                     ):
                         changed = True
                         continue
-                    terminate_worker_pid(worker.get("pid"))
+                    terminate_worker(worker)
                     if failure.get("kind") == "quota_terminal" and live_failure_signal.provider_pause_authorized:
                         agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                         if agent_id:
-                            pause_provider(state, agent_id, live_failure_reason, kind="quota", reset_seconds=14400)
+                            pause_provider(state, agent_id, live_failure_reason, kind="quota", reset_seconds=14400, identity=worker.get("identity"))
                     if failure.get("kind") == "auth" and live_failure_signal.provider_pause_authorized:
                         agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                         if agent_id:
-                            pause_provider(state, agent_id, live_failure_reason, kind="auth", reset_seconds=None)
+                            pause_provider(state, agent_id, live_failure_reason, kind="auth", reset_seconds=None, identity=worker.get("identity"))
                     if failure.get("kind") == "capacity" and current_mode == "coordination":
                         agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                         reset_seconds = int(worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300))
@@ -5386,8 +5892,9 @@ def poll_workers(
             if last_event:
                 last_dt = datetime.fromisoformat(last_event.replace("Z", "+00:00"))
                 stalled_for_seconds = (now - last_dt).total_seconds()
-                if worker.get("status") == "stalled" and stalled_for_seconds >= stall_after * 2:
-                    terminate_worker_pid(worker.get("pid"))
+                stall_timeout = worker_stall_timeout_seconds(config, worker, stall_after)
+                if worker.get("status") == "stalled" and stalled_for_seconds >= stall_timeout * 2:
+                    terminate_worker(worker)
                     reason = f"Worker remained stalled for {int(stalled_for_seconds)} seconds and was terminated for redispatch."
                     finalize_terminal_worker_outcome(config, state, worker, reason)
                     console_log(
@@ -5396,7 +5903,7 @@ def poll_workers(
                     )
                     changed = True
                     continue
-                if (now - last_dt).total_seconds() >= stall_after and worker.get("status") != "stalled":
+                if (now - last_dt).total_seconds() >= stall_timeout and worker.get("status") != "stalled":
                     worker["status"] = "stalled"
                     write_activity_log(
                         config,
@@ -5404,7 +5911,7 @@ def poll_workers(
                             "type": "worker_stalled",
                             "provider": worker.get("provider"),
                             "task_id": worker.get("task_id"),
-                            "message": f"Worker appears stalled after {int(stall_after)} seconds.",
+                            "message": f"Worker appears stalled after {int(stall_timeout)} seconds.",
                             "worker_run_id": worker["run_id"],
                         },
                     )
@@ -5433,11 +5940,11 @@ def poll_workers(
             if failure.get("kind") == "quota_terminal" and failure_signal.provider_pause_authorized:
                 agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                 if agent_id:
-                    pause_provider(state, agent_id, failure_reason, kind="quota", reset_seconds=14400)
+                    pause_provider(state, agent_id, failure_reason, kind="quota", reset_seconds=14400, identity=worker.get("identity"))
             if failure.get("kind") == "auth" and failure_signal.provider_pause_authorized:
                 agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                 if agent_id:
-                    pause_provider(state, agent_id, failure_reason, kind="auth", reset_seconds=None)
+                    pause_provider(state, agent_id, failure_reason, kind="auth", reset_seconds=None, identity=worker.get("identity"))
             if failure.get("kind") == "capacity" and current_mode == "coordination":
                 agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                 reset_seconds = int(worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300))
@@ -5511,6 +6018,50 @@ def poll_workers(
                 )
                 finalize_queue_event_record(config, state, worker, "completed")
             else:
+                outcome = worker_reported_outcome(worker)
+                if outcome and outcome.get("outcome") == "blocked":
+                    reported_reason = str(outcome.get("blocker") or outcome.get("summary") or "")
+                    if classify_worker_failure(config, worker, reported_reason).get("kind") == "environment":
+                        finalize_terminal_worker_outcome(
+                            config,
+                            state,
+                            worker,
+                            reported_reason,
+                            allow_provider_pause=True,
+                        )
+                        changed = True
+                        continue
+                if outcome and outcome.get("outcome") == "blocked" and apply_worker_reported_block(config, worker, outcome):
+                    worker["status"] = "completed"
+                    worker["last_event_at"] = utc_now()
+                    finalize_queue_event_record(config, state, worker, "completed")
+                    write_activity_log(
+                        config,
+                        {
+                            "type": "worker_completed",
+                            "provider": worker.get("provider"),
+                            "task_id": worker.get("task_id"),
+                            "message": "Supervisor persisted the worker's reported task blocker.",
+                            "worker_run_id": worker["run_id"],
+                        },
+                    )
+                    changed = True
+                    continue
+                if outcome and outcome.get("outcome") in {"advanced", "progress"}:
+                    mark_worker_yielded(config, state, worker, outcome)
+                    finalize_queue_event_record(config, state, worker, "completed")
+                    write_activity_log(
+                        config,
+                        {
+                            "type": "worker_yielded",
+                            "provider": worker.get("provider"),
+                            "task_id": worker.get("task_id"),
+                            "message": "Worker exited after reporting progress; redispatch is cooling down.",
+                            "worker_run_id": worker["run_id"],
+                        },
+                    )
+                    changed = True
+                    continue
                 # Race protection: the worker may have written status='review' (or another
                 # expected_completion status) to ai-status.json moments before exiting.
                 # The task_map cached at the start of this tick can predate that write, so
@@ -5589,82 +6140,34 @@ def reconcile_queue_records(config: dict[str, Any], state: dict[str, Any]) -> bo
 
 
 
-def parse_worker_dispatched_at(run_id: str | None) -> datetime | None:
-    """Extract the dispatch timestamp embedded in a worker run_id.
-
-    Production run_ids are formatted as ``<provider>-<YYYYMMDDTHHMMSSZ>-<hash>``
-    (see worker spawn paths). The supervisor never stored a dedicated
-    ``dispatched_at`` field on worker records, so parsing the run_id is the
-    least invasive way to recover the dispatch moment for cooldown checks.
-
-    Returns ``None`` when the run_id is missing or none of its dash-separated
-    components parse as the expected timestamp shape — that preserves prior
-    behaviour for synthetic test fixtures whose run_ids are short slugs like
-    ``run-1`` / ``old-run``.
-    """
-    if not run_id:
-        return None
-    for part in str(run_id).split("-"):
-        try:
-            return datetime.strptime(part, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-    return None
-
-
-def worker_in_dispatch_cooldown(
-    worker: dict[str, Any],
-    cooldown_seconds: int,
-    *,
-    now: datetime | None = None,
-) -> bool:
-    """Return True if the worker is within the dispatch cooldown window.
-
-    Cooldown only protects *running* workers — stalled / fallback / etc.
-    workers must remain recoverable via the normal supersede paths.
-
-    Returns False when:
-      - cooldown_seconds <= 0 (feature disabled)
-      - worker.status is not "running"
-      - run_id has no parseable timestamp (synthetic fixtures, legacy records)
-      - dispatched_at is older than cooldown_seconds
-    """
-    if cooldown_seconds <= 0:
-        return False
-    if worker.get("status") != "running":
-        return False
-    dispatched_at = parse_worker_dispatched_at(worker.get("run_id"))
-    if dispatched_at is None:
-        return False
-    if now is None:
-        now = datetime.now(timezone.utc)
-    return (now - dispatched_at).total_seconds() < cooldown_seconds
-
-
 def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict(config.get("ready_dispatcher", {}) or {})
     settings.setdefault("enabled", True)
     settings.setdefault("review_statuses", ["review"])
     settings.setdefault("finalize_statuses", ["review_approved"])
     settings.setdefault("owned_statuses", ["in_progress", "todo", "backlog"])
-    legacy_done_statuses = settings.get("done_statuses", ["done", "review_approved"])
     settings.setdefault("dependency_done_statuses", ["done"])
-    settings.setdefault("worker_terminal_statuses", legacy_done_statuses)
+    settings.setdefault("worker_terminal_statuses", ["done", "review_approved"])
     settings.setdefault(
         "active_worker_statuses",
-        ["running", "started", "waiting_approval", "suspended_approval", "retry_backoff", "manual_pending", "stalled", "fallback"],
+        ["running", "started", "waiting_approval", "suspended_approval", "retry_backoff", "manual_pending", "stalled", "draining", "fallback"],
     )
     settings.setdefault("max_tasks_per_agent", 1)
     settings.setdefault("max_tasks_per_agent_by_lane", {})
     settings.setdefault("max_dispatches_per_tick", 4)
-    # Dispatch cooldown: a *running* worker dispatched within the last
-    # N seconds is protected from voluntary supersede (assignment-moved
-    # or priority-escalation paths). Dead, stalled, and fallback workers
-    # are NOT protected — recovery flows still work. Default 300s
-    # (5 min) is enough to absorb a normal supervisor reshuffle without
-    # killing real work; set to 0 to disable. See worker_in_dispatch_cooldown.
-    settings.setdefault("dispatch_cooldown_seconds", 300)
     return settings
+
+
+def ranked_agent_ids(config: dict[str, Any], agent_ids: list[str]) -> list[str]:
+    """Apply one explicit lane order before any availability fallback logic."""
+    priority = [normalize_agent_id(str(value)) for value in ready_dispatch_settings(config).get("lane_priority", [])]
+    if not priority:
+        return list(agent_ids)
+    ranks = {agent_id: index for index, agent_id in enumerate(priority)}
+    return sorted(
+        agent_ids,
+        key=lambda agent_id: (ranks.get(normalize_agent_id(agent_id), len(ranks)), agent_ids.index(agent_id)),
+    )
 
 
 def max_tasks_per_agent_for_lane(settings: dict[str, Any], agent_id: str) -> int:
@@ -5703,68 +6206,38 @@ def helper_claim_settings(config: dict[str, Any]) -> dict[str, Any]:
     return settings
 
 
-def underutilization_settings(config: dict[str, Any]) -> dict[str, Any]:
-    settings = dict(config.get("underutilization_dispatch", {}) or {})
-    settings.setdefault("enabled", True)
-    settings.setdefault("threshold_ratio", 0.5)
-    settings.setdefault("continuous_window_seconds", 900)
-    settings.setdefault("cooldown_seconds", 900)
-    settings.setdefault("max_new_sidecars_per_wave", 2)
-    settings.setdefault("max_new_main_tasks_per_wave", 2)
-    settings.setdefault("max_active_sidecars_per_agent", 1)
-    settings.setdefault(
-        "productive_worker_statuses",
-        ["running", "waiting_approval", "suspended_approval", "retry_backoff"],
+def helper_claim_settings_for_task(
+    config: dict[str, Any],
+    base: dict[str, Any],
+    task_status: str,
+    review_statuses: set[str],
+) -> dict[str, Any]:
+    """Enable availability-first overflow for reviews without moving owner work."""
+    if task_status not in review_statuses:
+        return base
+    overflow = dict(ready_dispatch_settings(config).get("review_overflow", {}) or {})
+    if not overflow.get("enabled", False):
+        return base
+    settings = dict(base)
+    settings.update(
+        {
+            "enabled": True,
+            "availability_first": True,
+            "allow_any_idle_lane": True,
+            "prefer_assigned_when_idle": True,
+            "require_assigned_agent_busy": True,
+            "require_owner_higher_priority_load": False,
+            "respect_explicit_owner_when_paused": False,
+            "require_candidate_idle": True,
+            "preferred_reviewer_lanes": list(
+                overflow.get(
+                    "preferred_lanes",
+                    ["gemini", "gemini2", "codex", "codex2", "claude"],
+                )
+            ),
+        }
     )
     return settings
-
-
-def load_sidecar_catalog(config: dict[str, Any]) -> list[dict[str, Any]]:
-    path_value = config.get("sidecar_catalog_path") or config.get("paths", {}).get("sidecar_catalog")
-    if not path_value:
-        return []
-    payload = load_json(config_path(config, "sidecar_catalog") if "sidecar_catalog" in config.get("paths", {}) else Path(path_value), default={})
-    if isinstance(payload, dict):
-        templates = payload.get("templates", [])
-        if isinstance(templates, list):
-            return [dict(item) for item in templates if isinstance(item, dict)]
-    if isinstance(payload, list):
-        return [dict(item) for item in payload if isinstance(item, dict)]
-    return []
-
-
-def configured_worker_lane_ids(config: dict[str, Any]) -> list[str]:
-    lanes: list[str] = []
-    seen: set[str] = set()
-    for agent_id, agent in (config.get("agents", {}) or {}).items():
-        display_name = str(agent.get("display_name") or agent.get("name") or agent_id)
-        if "legacy alias" in display_name.lower():
-            continue
-        lane_id = normalize_agent_id(agent.get("provider") or agent_id)
-        if not lane_id or lane_id in seen:
-            continue
-        seen.add(lane_id)
-        lanes.append(lane_id)
-    return lanes
-
-
-def productive_worker_lane_ids(config: dict[str, Any], state: dict[str, Any], productive_statuses: set[str]) -> set[str]:
-    lanes: set[str] = set()
-    for worker in state.get("workers", {}).values():
-        if str(worker.get("status") or "") not in productive_statuses:
-            continue
-        lane_id = normalize_agent_id(worker.get("provider") or worker.get("agent_id") or "")
-        if lane_id:
-            lanes.add(lane_id)
-    return lanes
-
-
-def utilization_ratio_for_sidecars(config: dict[str, Any], state: dict[str, Any], productive_statuses: set[str]) -> float:
-    lanes = configured_worker_lane_ids(config)
-    if not lanes:
-        return 1.0
-    productive = productive_worker_lane_ids(config, state, productive_statuses)
-    return len(productive) / len(lanes)
 
 
 def task_is_sidecar(task: dict[str, Any]) -> bool:
@@ -5815,34 +6288,6 @@ def governance_lineage_depth(task: dict[str, Any] | None, task_map: dict[str, di
     return depth
 
 
-def sidecar_statuses() -> set[str]:
-    return {"backlog", "todo", "in_progress", "review", "review_approved", "blocked", "done"}
-
-
-def existing_sidecar_signatures(status: dict[str, Any]) -> set[str]:
-    signatures: set[str] = set()
-    for task in status.get("tasks", []) or []:
-        if not task_is_sidecar(task):
-            continue
-        parent = str(task.get("helper_parent") or "").strip()
-        kind = str(task.get("helper_kind") or "").strip()
-        if parent and kind:
-            signatures.add(f"{parent}:{kind}")
-    return signatures
-
-
-def sidecar_task_id(parent_task_id: str, kind: str) -> str:
-    slug = kind
-    if slug.endswith("_packet"):
-        slug = slug[: -len("_packet")]
-    return f"{parent_task_id}-SIDECAR-{slug.replace('_', '-').upper()}"
-
-
-def render_sidecar_template(value: str, variables: dict[str, str]) -> str:
-    rendered = str(value)
-    for key, item in variables.items():
-        rendered = rendered.replace("{{" + key + "}}", item)
-    return rendered
 
 
 def task_phase_priority(task: dict[str, Any], task_map: dict[str, dict[str, Any]], dependency_done_statuses: set[str]) -> int:
@@ -5862,24 +6307,6 @@ def task_phase_priority(task: dict[str, Any], task_map: dict[str, dict[str, Any]
     return 9
 
 
-def dynamic_sidecar_kind(task: dict[str, Any]) -> str | None:
-    phase = str(task.get("phase") or "").lower()
-    title = str(task.get("title") or "").lower()
-    artifacts = " ".join(str(item).lower() for item in (task.get("artifacts") or []))
-    if "persona and application surfaces" in phase or "bff" in title or "surface" in title or "bff" in artifacts:
-        return "bff_handoff_packet"
-    if str(task.get("status") or "").lower() in {"review", "review_approved"}:
-        return "review_packet"
-    return "acceptance_packet"
-
-
-def preferred_agents_for_sidecar(kind: str) -> list[str]:
-    mapping = {
-        "review_packet": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
-        "acceptance_packet": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
-        "bff_handoff_packet": ["Copilot", "Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"],
-    }
-    return mapping.get(kind, ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"])
 
 
 def agent_has_dispatchable_primary_work(
@@ -5909,244 +6336,6 @@ def agent_has_dispatchable_primary_work(
     return False
 
 
-def count_open_sidecars_for_agent(status: dict[str, Any], agent_name: str) -> int:
-    count = 0
-    for task in status.get("tasks", []) or []:
-        if task.get("owner") != agent_name:
-            continue
-        if not task_is_sidecar(task):
-            continue
-        if str(task.get("status") or "").lower() == "done":
-            continue
-        count += 1
-    return count
-
-
-def eligible_idle_agents_for_sidecars(
-    config: dict[str, Any],
-    state: dict[str, Any],
-    status: dict[str, Any],
-    *,
-    max_active_sidecars_per_agent: int,
-    provider_report: dict[str, Any] | None = None,
-) -> list[str]:
-    settings = ready_dispatch_settings(config)
-    active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
-    active_agents, _active_task_agents = active_worker_indexes(state, active_statuses)
-    pending_agents, _pending_task_agents, _pending_event_keys = outstanding_delivery_indexes(config, state)
-    task_map = task_index_from_status(config, status)
-    agents: list[str] = []
-    for agent_id, agent in (config.get("agents", {}) or {}).items():
-        configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
-        display_name = task_agent_display_name(config, status, agent_id)
-        if "legacy alias" in display_name.lower():
-            continue
-        normalized = normalize_agent_id(agent_id)
-        if normalized in active_agents or normalized in pending_agents:
-            continue
-        if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
-            continue
-        if not agent_supports_auto_delivery(config, provider_report, agent_id):
-            continue
-        if configured_display_name and display_name_is_legacy_alias(configured_display_name):
-            continue
-        if count_open_sidecars_for_agent(status, display_name) >= max_active_sidecars_per_agent:
-            continue
-        if agent_has_dispatchable_primary_work(config, status, display_name, task_map):
-            continue
-        agents.append(display_name)
-    return agents
-
-
-def sidecar_support_artifact(parent_task_id: str, sidecar_id: str) -> str:
-    return f"support/sidecars/{parent_task_id}/{sidecar_id}.md"
-
-
-def build_catalog_sidecar_candidates(
-    config: dict[str, Any],
-    status: dict[str, Any],
-    task_map: dict[str, dict[str, Any]],
-    existing_signatures: set[str],
-) -> list[dict[str, Any]]:
-    settings = ready_dispatch_settings(config)
-    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    templates = load_sidecar_catalog(config)
-    candidates: list[dict[str, Any]] = []
-    for template in templates:
-        kind = str(template.get("kind") or "").strip()
-        if not kind:
-            continue
-        parent_ids = [str(item).strip() for item in template.get("parent_task_ids", []) if str(item).strip()]
-        phase_match = str(template.get("parent_phase_match") or "").strip()
-        activation_dependencies = [str(item).strip() for item in template.get("activation_dependencies", []) if str(item).strip()]
-        for parent in status.get("tasks", []) or []:
-            if is_governance_artifact(parent):
-                continue
-            parent_id = str(parent.get("id") or "").strip()
-            if not parent_id:
-                continue
-            if parent_ids and parent_id not in parent_ids:
-                continue
-            if not parent_ids and phase_match and str(parent.get("phase") or "") != phase_match:
-                continue
-            if not parent_ids and not phase_match:
-                continue
-            if str(parent.get("status") or "").lower() == "done":
-                continue
-            if any((lambda d: d is not None and str(d.get("status") or "").lower() not in dependency_done_statuses)(task_map.get(dep)) for dep in activation_dependencies):
-                continue
-            signature = f"{parent_id}:{kind}"
-            if signature in existing_signatures:
-                continue
-            reviewer = str(parent.get("owner") or "").strip()
-            if not reviewer:
-                continue
-            sidecar_id = sidecar_task_id(parent_id, kind)
-            variables = {
-                "parent_task_id": parent_id,
-                "parent_title": str(parent.get("title") or ""),
-                "parent_phase": str(parent.get("phase") or ""),
-                "sidecar_task_id": sidecar_id,
-                "kind": kind,
-                "kind_slug": kind.replace("_", "-"),
-            }
-            artifact_targets = [
-                render_sidecar_template(str(item), variables)
-                for item in (template.get("artifact_targets") or [])
-                if str(item).strip()
-            ] or [sidecar_support_artifact(parent_id, sidecar_id)]
-            candidates.append(
-                {
-                    "template_id": str(template.get("template_id") or sidecar_id),
-                    "kind": kind,
-                    "parent_task_id": parent_id,
-                    "parent_task": parent,
-                    "sidecar_id": sidecar_id,
-                    "title": render_sidecar_template(str(template.get("title_template") or sidecar_id), variables),
-                    "summary_zh": render_sidecar_template(str(template.get("summary_zh_template") or ""), variables),
-                    "phase": str(parent.get("phase") or "Support"),
-                    "depends_on": activation_dependencies,
-                    "artifacts": artifact_targets,
-                    "reviewer": reviewer,
-                    "mutates_canonical": bool(template.get("mutates_canonical", False)),
-                    "priority": task_phase_priority(parent, task_map, dependency_done_statuses),
-                }
-            )
-    return candidates
-
-
-def build_dynamic_sidecar_candidates(
-    config: dict[str, Any],
-    status: dict[str, Any],
-    task_map: dict[str, dict[str, Any]],
-    existing_signatures: set[str],
-) -> list[dict[str, Any]]:
-    settings = ready_dispatch_settings(config)
-    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    candidates: list[dict[str, Any]] = []
-    for parent in status.get("tasks", []) or []:
-        if is_governance_artifact(parent):
-            continue
-        parent_id = str(parent.get("id") or "").strip()
-        if not parent_id or str(parent.get("status") or "").lower() == "done":
-            continue
-        kind = dynamic_sidecar_kind(parent)
-        if kind not in {"review_packet", "acceptance_packet", "bff_handoff_packet"}:
-            continue
-        signature = f"{parent_id}:{kind}"
-        if signature in existing_signatures:
-            continue
-        parent_status = str(parent.get("status") or "").lower()
-        if kind in {"review_packet", "acceptance_packet"} and parent_status in {"todo", "backlog"} and not dependencies_satisfied(parent, task_map, dependency_done_statuses):
-            continue
-        activation_dependencies = [
-            dep_id
-            for dep_id in (parent.get("depends_on") or [])
-            if task_map.get(dep_id) is None or str(task_map.get(dep_id, {}).get("status") or "").lower() in dependency_done_statuses
-        ]
-        if kind == "bff_handoff_packet" and parent.get("depends_on") and not activation_dependencies:
-            continue
-        reviewer = str(parent.get("owner") or "").strip()
-        if not reviewer:
-            continue
-        sidecar_id = sidecar_task_id(parent_id, kind)
-        title_by_kind = {
-            "review_packet": f"Prepare {parent_id} review packet and evidence summary",
-            "acceptance_packet": f"Prepare {parent_id} acceptance packet and dependency map",
-            "bff_handoff_packet": f"Prepare {parent_id} BFF and frontend handoff packet",
-        }
-        summary_by_kind = {
-            "review_packet": f"平行支援 {parent_id}，先整理 review packet、evidence summary 與 reviewer handoff，不改 canonical truth。",
-            "acceptance_packet": f"平行支援 {parent_id}，先整理 acceptance checklist、dependency map 與 support packet，不改 canonical truth。",
-            "bff_handoff_packet": f"平行支援 {parent_id}，先整理 BFF query gap、operator journey 與前端 handoff materials，不改 canonical truth。",
-        }
-        candidates.append(
-            {
-                "template_id": f"dynamic:{kind}",
-                "kind": kind,
-                "parent_task_id": parent_id,
-                "parent_task": parent,
-                "sidecar_id": sidecar_id,
-                "title": title_by_kind[kind],
-                "summary_zh": summary_by_kind[kind],
-                "phase": str(parent.get("phase") or "Support"),
-                "depends_on": activation_dependencies,
-                "artifacts": [sidecar_support_artifact(parent_id, sidecar_id)],
-                "reviewer": reviewer,
-                "mutates_canonical": False,
-                "priority": task_phase_priority(parent, task_map, dependency_done_statuses),
-            }
-        )
-    return candidates
-
-
-def create_sidecar_task(
-    config: dict[str, Any],
-    *,
-    sidecar_id: str,
-    owner: str,
-    reviewer: str,
-    phase: str,
-    title: str,
-    summary_zh: str,
-    depends_on: list[str],
-    artifacts: list[str],
-    helper_parent: str,
-    helper_kind: str,
-    mutates_canonical: bool,
-) -> tuple[bool, str]:
-    metadata = {
-        "task_class": "sidecar",
-        "auto_generated": True,
-        "helper_parent": helper_parent,
-        "helper_kind": helper_kind,
-        "mutates_canonical": mutates_canonical,
-        "auto_created_by": "supervisor-underutilization",
-    }
-    result = run_task_board_command(
-        config,
-        "assign",
-        [sidecar_id, owner, reviewer],
-        environ={
-            "AI_NAME": "Codex",
-            "TASK_PHASE": phase,
-            "TASK_TITLE": title,
-            "TASK_SUMMARY_ZH": summary_zh,
-            "TASK_DEPENDS_ON": ",".join(depends_on),
-            "TASK_ARTIFACTS": ",".join(artifacts),
-            "TASK_ACCEPTANCE": ",".join(
-                [
-                    "Create support artifacts only",
-                    "Do not edit canonical truth",
-                    "Hand off the packet to the assigned reviewer",
-                ]
-            ),
-            "TASK_METADATA_JSON": json.dumps(metadata, ensure_ascii=False),
-        },
-    )
-    if not result.ok:
-        return False, result.error
-    return True, ""
 
 
 def redispatch_candidate_statuses(config: dict[str, Any]) -> set[str]:
@@ -6157,12 +6346,73 @@ def redispatch_candidate_statuses(config: dict[str, Any]) -> set[str]:
     return statuses
 
 
+_DEPENDENCY_REACHABILITY_CACHE: dict[str, tuple[float, bool]] = {}
+_RUNTIME_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _integration_commit_reachable(commit: str) -> bool:
+    commit = str(commit or "").strip()
+    if not commit:
+        return False
+    now = time.monotonic()
+    cached = _DEPENDENCY_REACHABILITY_CACHE.get(commit)
+    if cached and now - cached[0] < 60:
+        return cached[1]
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit, "origin/dev"],
+        cwd=str(_RUNTIME_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    reachable = result.returncode == 0
+    _DEPENDENCY_REACHABILITY_CACHE[commit] = (now, reachable)
+    return reachable
+
+
+def integration_evidence_for_tasks(task_map: dict[str, dict[str, Any]]) -> dict[str, bool]:
+    """Resolve Git-backed dependency evidence once for every policy consumer."""
+    evidence: dict[str, bool] = {}
+    for task_id, task in task_map.items():
+        integration = str(task.get("integration_status") or "").strip().lower()
+        if integration not in {"merged_to_dev", "dev_deployed"}:
+            continue
+        merge_commit = str(task.get("merge_commit") or "").strip()
+        evidence[str(task_id)] = bool(merge_commit and _integration_commit_reachable(merge_commit))
+    return evidence
+
+
 def dependencies_satisfied(task: dict[str, Any], task_map: dict[str, dict[str, Any]], done_statuses: set[str]) -> bool:
-    return domain_dependencies_satisfied(task, task_map, done_statuses)
+    return domain_dependencies_satisfied(
+        task,
+        task_map,
+        done_statuses,
+        integration_evidence_for_tasks(task_map),
+    )
 
 
-def task_dependency_signature(task: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> str:
-    return domain_dependency_signature(task, task_map)
+def dispatch_policy_for_config(config: dict[str, Any]) -> ReadyDispatchPolicy:
+    settings = ready_dispatch_settings(config)
+    return ReadyDispatchPolicy(
+        review_statuses=frozenset(str(value).lower() for value in settings.get("review_statuses", ["review"])),
+        finalize_statuses=frozenset(str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])),
+        in_progress_statuses=frozenset(str(value).lower() for value in settings.get("in_progress_statuses", ["in_progress"])),
+        owned_statuses=frozenset(str(value).lower() for value in settings.get("owned_statuses", ["in_progress", "todo", "backlog"])),
+        dependency_done_statuses=frozenset(str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])),
+    )
+
+
+def resolve_current_dispatch_target(
+    config: dict[str, Any],
+    task: dict[str, Any],
+    task_map: dict[str, dict[str, Any]],
+) -> DomainDispatchDecision | None:
+    return resolve_domain_dispatch_target(
+        task,
+        task_map,
+        dispatch_policy_for_config(config),
+        integration_evidence_for_tasks(task_map),
+    )
 
 
 def active_worker_indexes(state: dict[str, Any], active_statuses: set[str]) -> tuple[set[str], set[tuple[str, str]]]:
@@ -6183,7 +6433,9 @@ def active_worker_indexes(state: dict[str, Any], active_statuses: set[str]) -> t
 def active_worker_agent_counts(state: dict[str, Any], active_statuses: set[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for worker in state.get("workers", {}).values():
-        if worker.get("status") not in active_statuses:
+        if worker.get("status") not in active_statuses or str(worker.get("status") or "") not in EXECUTION_STATUSES:
+            continue
+        if str(worker.get("role") or "") == "chair":
             continue
         agent_id = str(worker.get("agent_id") or "")
         if agent_id:
@@ -6268,10 +6520,6 @@ def finalize_queue_event_record(config: dict[str, Any], state: dict[str, Any], w
     else:
         record.pop("error", None)
 
-
-
-def save_event_queue(config: dict[str, Any], events: list[dict[str, Any]]) -> None:
-    replace_event_queue(config, events)
 
 
 def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
@@ -6365,10 +6613,6 @@ def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
     return queue_repository(config).update(prune_loaded_queue)
 
 
-def task_status_map(status: dict[str, Any]) -> dict[str, str]:
-    return {str(task.get("id")): str(task.get("status") or "") for task in status.get("tasks", []) if task.get("id")}
-
-
 def task_index_from_status(config: dict[str, Any], status: dict[str, Any]) -> dict[str, dict[str, Any]]:
     schema = config.get("schema", {})
     tasks_path = schema.get("tasks_path", "tasks")
@@ -6390,35 +6634,12 @@ def current_dispatch_event_key(config: dict[str, Any], event: dict[str, Any], ta
     if not task:
         return None
 
-    schema = config.get("schema", {})
-    owner_field = schema.get("assignee_field", "owner")
-    reviewer_field = schema.get("reviewer_field", "reviewer")
     target_agent = str(event.get("target_display_name") or display_name_for(config, str(event.get("target_agent") or "")))
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    task_status = str(task.get("status") or "").lower()
-
-    eligible = False
-    if reason == "review_ready_dispatch":
-        eligible = task_status in review_statuses and task.get(reviewer_field) == target_agent
-    elif reason == "owned_finalize_dispatch":
-        eligible = task_status in finalize_statuses and task.get(owner_field) == target_agent
-    elif reason == "owned_in_progress_dispatch":
-        eligible = (
-            task_status == "in_progress"
-            and task.get(owner_field) == target_agent
-            and not has_external_integration_in_flight(task)
-            and dependencies_satisfied(task, task_map, dependency_done_statuses)
-        )
-    elif reason == "owned_ready_dispatch":
-        eligible = task_status in {"todo", "backlog"} and task.get(owner_field) == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses)
-
-    if not eligible:
+    decision = resolve_current_dispatch_target(config, task, task_map)
+    if decision is None or decision.target_agent != target_agent or decision.reason.value != reason:
         return None
 
-    return str(build_dispatch_event(task, target_agent, reason, task_map).get("key") or "")
+    return str(build_dispatch_event(task, decision.target_agent, decision.reason.value, task_map).get("key") or "")
 
 
 def dispatch_reason_priority(reason: str | None) -> int | None:
@@ -6430,42 +6651,6 @@ def dispatch_reason_priority(reason: str | None) -> int | None:
         "owned_ready_dispatch": 3,
     }
     return priorities.get(normalized)
-
-
-def dispatch_priority_for_task(
-    config: dict[str, Any],
-    task: dict[str, Any],
-    agent_name: str,
-    *,
-    dependencies_done_statuses: set[str] | None = None,
-) -> int | None:
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    dependency_done_statuses = dependencies_done_statuses or {
-        str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])
-    }
-    schema = config.get("schema", {})
-    owner_field = schema.get("assignee_field", "owner")
-    reviewer_field = schema.get("reviewer_field", "reviewer")
-    task_status = str(task.get("status") or "").lower()
-    if task_status in review_statuses and task.get(reviewer_field) == agent_name:
-        return 0
-    if task_status in finalize_statuses and task.get(owner_field) == agent_name:
-        return 1
-    if (
-        task_status == "in_progress"
-        and task.get(owner_field) == agent_name
-        and dependencies_satisfied(task, {str(task.get("id") or ""): task}, dependency_done_statuses)
-    ):
-        return 2
-    if (
-        task_status in {"todo", "backlog"}
-        and task.get(owner_field) == agent_name
-        and dependencies_satisfied(task, {str(task.get("id") or ""): task}, dependency_done_statuses)
-    ):
-        return 3
-    return None
 
 
 def agent_dispatch_loads(
@@ -6510,128 +6695,7 @@ def agent_dispatch_loads(
     return loads
 
 
-def choose_helper_claim_agent(
-    config: dict[str, Any],
-    *,
-    task: dict[str, Any],
-    owner_name: str,
-    reviewer_name: str,
-    idle_agent_name: str,
-    agent_loads: dict[str, list[int]],
-    helper_settings: dict[str, Any],
-    state: dict[str, Any] | None = None,
-) -> bool:
-    if not helper_settings.get("enabled", True):
-        return False
-    review_statuses = {str(value).lower() for value in ready_dispatch_settings(config).get("review_statuses", ["review"])}
-    finalize_statuses = {str(value).lower() for value in ready_dispatch_settings(config).get("finalize_statuses", ["review_approved"])}
-    dependency_done_statuses = {
-        str(value).lower() for value in ready_dispatch_settings(config).get("dependency_done_statuses", ["done"])
-    }
-    plan = proactive_claim_plan_for_idle_agent(
-        config,
-        task=task,
-        task_map={str(task.get("id") or ""): task},
-        idle_agent_name=idle_agent_name,
-        idle_agent_names=[idle_agent_name],
-        agent_loads=agent_loads,
-        helper_settings=helper_settings,
-        review_statuses=review_statuses,
-        finalize_statuses=finalize_statuses,
-        dependency_done_statuses=dependency_done_statuses,
-        state=state,
-    )
-    return plan is not None
-
-
-def higher_priority_ready_task_exists(
-    config: dict[str, Any],
-    worker: dict[str, Any],
-    task_map: dict[str, dict[str, Any]],
-    *,
-    state: dict[str, Any] | None = None,
-    active_statuses: set[str] | None = None,
-) -> bool:
-    current_priority = dispatch_reason_priority(worker.get("request_snapshot", {}).get("reason"))
-    if current_priority is None:
-        return False
-
-    agent_id = normalize_agent_id(str(worker.get("agent_id") or worker.get("provider") or ""))
-    agent_name = display_name_for(config, agent_id)
-    current_task_id = str(worker.get("task_id") or "")
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    schema = config.get("schema", {})
-    owner_field = schema.get("assignee_field", "owner")
-    reviewer_field = schema.get("reviewer_field", "reviewer")
-    active_task_agents: set[tuple[str, str]] = set()
-    pending_task_agents: set[tuple[str, str]] = set()
-    if state is not None:
-        normalized_active_statuses = active_statuses or {
-            str(value) for value in settings.get("active_worker_statuses", [])
-        }
-        active_agent_counts = active_worker_agent_counts(state, normalized_active_statuses)
-        try:
-            pending_agent_counts = outstanding_delivery_agent_counts(config, state)
-            _pending_agents, pending_task_agents, _pending_event_keys = outstanding_delivery_indexes(config, state)
-        except (KeyError, OSError):
-            pending_agent_counts = {}
-            pending_task_agents = set()
-        lane_capacity = max_tasks_per_agent_for_lane(settings, agent_id)
-        lane_load = active_agent_counts.get(agent_id, 0) + pending_agent_counts.get(agent_id, 0)
-        if lane_load < lane_capacity:
-            return False
-        _active_agents, active_task_agents = active_worker_indexes(state, normalized_active_statuses)
-
-    for task_id, task in task_map.items():
-        if task_id == current_task_id:
-            continue
-        if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
-            continue
-        task_status = str(task.get("status") or "").lower()
-        candidate_priority = None
-        candidate_reason = None
-        if task_status in review_statuses and task.get(reviewer_field) == agent_name:
-            candidate_priority = 0
-            candidate_reason = "review_ready_dispatch"
-        elif task_status in finalize_statuses and task.get(owner_field) == agent_name:
-            candidate_priority = 1
-            candidate_reason = "owned_finalize_dispatch"
-        elif (
-            task_status == "in_progress"
-            and task.get(owner_field) == agent_name
-            and dependencies_satisfied(task, task_map, dependency_done_statuses)
-        ):
-            candidate_priority = 2
-            candidate_reason = "owned_in_progress_dispatch"
-        elif (
-            task_status in {"todo", "backlog"}
-            and task.get(owner_field) == agent_name
-            and dependencies_satisfied(task, task_map, dependency_done_statuses)
-        ):
-            candidate_priority = 3
-            candidate_reason = "owned_ready_dispatch"
-
-        if candidate_priority is None or candidate_reason is None or candidate_priority >= current_priority:
-            continue
-        if not task_is_dispatch_eligible_for_agent(task, agent_name):
-            continue
-        if state is not None and task_waiting_on_chair_reassignment(
-            state,
-            task,
-            reason=candidate_reason,
-            target_agent=agent_name,
-        ):
-            continue
-        if candidate_priority < current_priority:
-            return True
-
-    return False
-
-
-def worker_matches_current_assignment(
+def worker_assignment_remains_valid(
     config: dict[str, Any],
     worker: dict[str, Any],
     task_map: dict[str, dict[str, Any]],
@@ -6640,31 +6704,25 @@ def worker_matches_current_assignment(
     task = task_map.get(task_id)
     if not task:
         return False
-    agent_name = display_name_for(config, str(worker.get("agent_id") or ""))
-    agent_ids = {
-        normalize_agent_id(str(worker.get("agent_id") or "")),
-        normalize_agent_id(str(worker.get("provider") or "")),
-        normalize_agent_id(agent_name),
-    }
-    agent_ids.discard("")
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    owned_statuses = {str(value).lower() for value in settings.get("owned_statuses", ["in_progress", "todo", "backlog"])}
-    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    schema = config.get("schema", {})
-    owner_field = schema.get("assignee_field", "owner")
-    reviewer_field = schema.get("reviewer_field", "reviewer")
-    task_status = str(task.get("status") or "").lower()
-    if task_status in dependency_done_statuses:
+    lease = worker.get("assignment_lease") if isinstance(worker.get("assignment_lease"), dict) else {}
+    target_agent = str(lease.get("target_agent") or display_name_for(config, str(worker.get("agent_id") or "")))
+    reason = str(lease.get("intent") or (worker.get("request_snapshot") or {}).get("reason") or "")
+    if not target_agent:
         return False
-    if task_status in review_statuses:
-        return normalize_agent_id(str(task.get(reviewer_field) or "")) in agent_ids
-    if task_status in finalize_statuses:
-        return normalize_agent_id(str(task.get(owner_field) or "")) in agent_ids
-    if task_status in owned_statuses:
-        return normalize_agent_id(str(task.get(owner_field) or "")) in agent_ids
-    return False
+    if not reason:
+        decision = resolve_current_dispatch_target(config, task, task_map)
+        return decision is not None and decision.target_agent == target_agent
+    try:
+        return domain_assignment_remains_valid(
+            task,
+            task_map,
+            dispatch_policy_for_config(config),
+            target_agent=target_agent,
+            reason=reason,
+            integration_evidence=integration_evidence_for_tasks(task_map),
+        )
+    except ValueError:
+        return False
 
 
 def stale_dispatch_skip_message(config: dict[str, Any], event: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> str | None:
@@ -6682,10 +6740,6 @@ def stale_dispatch_skip_message(config: dict[str, Any], event: dict[str, Any], t
         return f"Skipped stale queued wake event for {task_id}: task state changed after the wake-up was queued."
 
     return None
-
-
-def ready_dispatch_signature(task: dict[str, Any], reason: str, task_map: dict[str, dict[str, Any]]) -> str:
-    return domain_ready_dispatch_signature(task, reason, task_map)
 
 
 def build_dispatch_event(task: dict[str, Any], target_agent: str, reason: str, task_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -6730,6 +6784,19 @@ def pending_approval_items(approval_state: dict[str, Any]) -> list[dict[str, Any
 
 
 def blocked_task_triage_kind(task: dict[str, Any]) -> str:
+    explicit = str(task.get("blocker_kind") or "").strip().lower()
+    if explicit:
+        return explicit
+    integration = str(task.get("integration_status") or "").strip().lower()
+    ci_status = str(task.get("ci_status") or "").strip().lower()
+    if integration == "branch_pushed":
+        return "integration_missing"
+    if integration == "ci_failed" and ci_status == "merge_conflict":
+        return "merge_conflict"
+    if integration == "ci_failed":
+        return "ci_failure"
+    if integration == "pr_open" and ci_status == "success" and task.get("waiting_for"):
+        return "review_required"
     text = " ".join(
         str(value or "")
         for value in (
@@ -6795,6 +6862,13 @@ def dependency_ready_blocked_task_records(
         if task_is_sidecar(task) and not include_sidecars:
             continue
         if not dependencies_satisfied(task, task_map, dependency_done_statuses):
+            continue
+        if blocked_task_triage_kind(task) in {
+            "integration_missing",
+            "merge_conflict",
+            "ci_failure",
+            "review_required",
+        }:
             continue
         action, helper_task_id = blocked_task_triage_action(status, task)
         if action == "wait_for_unblock_task":
@@ -6950,7 +7024,7 @@ def _chair_review_summary_lines(
     for agent_id, agent in (config.get("agents", {}) or {}).items():
         display_name = task_agent_display_name(config, status, agent_id)
         normalized = normalize_agent_id(agent_id)
-        if not display_name or display_name_is_legacy_alias(display_name):
+        if not display_name:
             continue
         pause = pauses.get(normalized)
         if isinstance(pause, dict):
@@ -7043,7 +7117,7 @@ def build_chair_review_message(
             # Point the chair at the bounded chair-scoped digest, not the full
             # state.json — the latter exceeds the 256 KB worker Read cap under
             # concurrent dispatch (fat per-worker request_snapshot/command/metadata
-            # + seen_event_keys). See runtime_state.build_state_digest /
+            # + seen_event_keys). See runtime_repo.build_state_digest /
             # feedback_ai_status_handoff_bloat.
             path = path.parent / "state-digest.json"
             machine_truth_lines.append(
@@ -7068,13 +7142,10 @@ def build_chair_review_message(
         "JSON 必須完整符合以下 schema：\n"
         "{\n"
         '  "version": 1,\n'
-        '  "decision": "approve_sidecars",\n'
-        '  "sidecar_approved": true,\n'
+        '  "decision": "operational_review",\n'
         '  "approval_ttl_minutes": 45,\n'
-        '  "max_sidecars": 2,\n'
         '  "reason": "why",\n'
         '  "blocked_by": [],\n'
-        '  "blocked_sidecar_parents": [],\n'
         '  "approval_actions": [],\n'
         '  "reassignment_actions": [\n'
         '    {"task_id": "TASK-ID", "role": "owner", "from": "OldAgent", "to": "NewAgent", "reason": "why"}\n'
@@ -7090,7 +7161,7 @@ def build_chair_review_message(
         '  "recommended_focus": []\n'
         "}\n\n"
         "硬規則：\n"
-        "- `approval_ttl_minutes` 與 `max_sidecars` 必須是整數；即使 `sidecar_approved=false` 也不要填 `null`。\n"
+        "- `approval_ttl_minutes` 必須是整數，不要填 `null`。\n"
         "- reassignment_actions 必須使用 `role` 與 `reason`；不要用 `field` / `rationale`。\n"
         "- reviewer 改派只允許 `todo` / `in_progress` / `review` 狀態，用來維持 owner/reviewer 分離或處理 review 交接。\n"
         "- owner 改派只允許 `backlog` / `todo` / `in_progress` / `review_approved`；若是 `backlog` / `todo` / `in_progress`，代表重開成 `todo` 重新派工。\n"
@@ -7111,7 +7182,6 @@ def build_chair_review_message(
         "- `git push --force`、`--mirror`、`--delete`、`--all`、`--tags` 這類 broad push 一律不要 allow。\n"
         "- lane/provider id 必須精確判讀：`Claude`/`Claude2`、`Gemini`/`Gemini2`、`Codex`/`Codex2` 是不同帳號/額度 lane；不要因為 `claude` paused 就推論 `claude2` 也 paused，除非 machine truth 明確列出該 exact lane。\n"
         "- 若 provider/lane 顯示 auth、quota、capacity 或 repeated terminal degraded，不要把新工作派回該 lane；請優先用 reassignment_actions 把可改派的 owner/reviewer work 移到健康 lane。\n"
-        "- 若任務 owner/reviewer 指到 `legacy alias`，那不是可執行 lane；請用 reassignment_actions 改到真實健康 lane。\n"
         "- 若資訊不足，保守輸出 blocked_by / recommended_focus，不要猜。\n\n"
         "Pending approvals:\n"
         + "\n".join(approval_lines)
@@ -7155,6 +7225,7 @@ def choose_chair_reviewer(
     allow_primary_work_fallback: bool = False,
 ) -> tuple[str, str] | None:
     settings = ready_dispatch_settings(config)
+    control_slots = max(1, int(chair_review_settings(config).get("control_slots_per_lane", 1)))
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
     active_agents, _active_task_agents = active_worker_indexes(state, active_statuses)
     pending_agents, _pending_task_agents, _pending_event_keys = outstanding_delivery_indexes(config, state)
@@ -7166,9 +7237,8 @@ def choose_chair_reviewer(
     primary_work_candidates: list[tuple[str, str]] = []
     active_recovery_candidates: list[tuple[str, str]] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
-        configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
         display_name = task_agent_display_name(config, status, agent_id)
-        if not display_name or display_name_is_legacy_alias(display_name) or display_name_is_legacy_alias(configured_display_name):
+        if not display_name:
             continue
         normalized = normalize_agent_id(agent_id)
         if normalized in pending_agents:
@@ -7182,9 +7252,10 @@ def choose_chair_reviewer(
                 continue
             if display_name in failing_agents:
                 continue
-            lane_capacity = max_tasks_per_agent_for_lane(settings, normalized)
-            lane_load = active_agent_counts.get(normalized, 0) + pending_agent_counts.get(normalized, 0)
-            if lane_load < lane_capacity:
+            capacity = worker_capacity_counts(state.get("workers", {}), normalized)
+            # Chair work has a reserved control slot: product execution and a
+            # suspended approval session must never consume it.
+            if capacity["control"] < control_slots:
                 active_recovery_candidates.append((normalized, display_name))
             continue
         if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
@@ -7307,6 +7378,7 @@ def queue_chair_review(
         "target_files": [str(markdown_path.resolve()), str(json_path.resolve())],
         "metadata": {
             "mode": "coordination",
+            "control_role": "chair",
             "workspace_key": f"chair-{reason}",
             "chair_review": {
                 "reason": reason,
@@ -7341,14 +7413,6 @@ def queue_chair_review(
     return True
 
 
-def normalize_chair_approval_action(action: dict[str, Any]) -> dict[str, Any]:
-    return normalize_domain_approval_action(action)
-
-
-def normalize_chair_reassignment_action(action: dict[str, Any]) -> dict[str, Any]:
-    return normalize_domain_reassignment_action(action)
-
-
 def normalize_chair_review_payload_defaults(config: dict[str, Any], payload: Any) -> Any:
     return normalize_domain_review_defaults(payload, chair_review_settings(config))
 
@@ -7377,10 +7441,6 @@ def normalize_chair_review_payload_for_reason(
     return normalized
 
 
-def validate_chair_review_payload(payload: Any) -> str | None:
-    return validate_domain_review_payload(payload)
-
-
 def validate_chair_review_context(
     payload: dict[str, Any],
     *,
@@ -7399,11 +7459,11 @@ def validate_chair_review_context(
         ]
         if pending_ids:
             action_ids = {
-                str(normalize_chair_approval_action(action).get("approval_id") or "").strip()
+                str(action.get("approval_id") or "").strip()
                 for action in payload.get("approval_actions", []) or []
                 if isinstance(action, dict)
-                and normalize_chair_approval_action(action).get("decision") in {"allow", "deny"}
-                and str(normalize_chair_approval_action(action).get("approval_id") or "").strip()
+                and action.get("decision") in {"allow", "deny"}
+                and str(action.get("approval_id") or "").strip()
             }
             missing = [approval_id for approval_id in pending_ids if approval_id not in action_ids]
             if missing:
@@ -7522,31 +7582,30 @@ def apply_chair_approval_actions(config: dict[str, Any], payload: dict[str, Any]
     for action in payload.get("approval_actions", []) or []:
         if not isinstance(action, dict):
             continue
-        action = normalize_chair_approval_action(action)
         approval_id = str(action.get("approval_id") or "").strip()
         decision = str(action.get("decision") or "").strip()
-        if not approval_id or decision not in {"allow", "deny"}:
-            continue
         approval = pending_by_id.get(approval_id)
-        if approval is None:
-            continue
-        note = str(action.get("reason") or payload.get("reason") or "").strip() or None
-        remember = bool(action.get("remember", False))
-        resolved_decision = decision
-        if decision == "allow" and not _approval_is_routine_safe(approval):
-            resolved_decision = "deny"
-            note = note or "Denied by supervisor policy: approval exceeded chairman routine-allow scope."
-        try:
-            resolve_approval(
-                config,
-                approval_id,
-                decision=resolved_decision,
-                note=note,
-                remember=remember if resolved_decision == "allow" else False,
-            )
-            changed = True
-        except KeyError:
-            continue
+        applied = False
+        if approval_id and decision in {"allow", "deny"} and approval is not None:
+            note = str(action.get("reason") or payload.get("reason") or "").strip() or None
+            remember = bool(action.get("remember", False))
+            resolved_decision = decision
+            if decision == "allow" and not _approval_is_routine_safe(approval):
+                resolved_decision = "deny"
+                note = note or "Denied by supervisor policy: approval exceeded chairman routine-allow scope."
+            try:
+                resolve_approval(
+                    config,
+                    approval_id,
+                    decision=resolved_decision,
+                    note=note,
+                    remember=remember if resolved_decision == "allow" else False,
+                )
+                applied = True
+            except KeyError:
+                applied = False
+        record_chair_action_outcome(config, payload, "approval", action, applied)
+        changed = applied or changed
     return changed
 
 
@@ -7556,7 +7615,6 @@ def apply_chair_reassignment_action(
     action: dict[str, Any],
     provider_report: dict[str, Any],
 ) -> bool:
-    action = normalize_chair_reassignment_action(action)
     task_id = str(action.get("task_id") or "").strip()
     role = str(action.get("role") or "").strip()
     from_agent = str(action.get("from") or "").strip()
@@ -7568,7 +7626,6 @@ def apply_chair_reassignment_action(
         return False
     if is_agent_dispatch_paused(config, state, to_agent, provider_report=provider_report):
         return False
-    status_path = config_path(config, "status_file")
     status = load_status(config)
     task = next((item for item in status.get("tasks", []) or [] if str(item.get("id") or "") == task_id), None)
     if task is None or not task_is_dispatch_eligible_for_agent(task, to_agent):
@@ -7579,43 +7636,46 @@ def apply_chair_reassignment_action(
         return False
     if role == "reviewer" and to_agent == current_owner:
         return False
-    timestamp = utc_now()
+    execution_branch = ""
     if role == "reviewer":
         if str(task.get("status") or "").lower() not in {"todo", "in_progress", "review"}:
             return False
         if str(task.get("reviewer") or "") != from_agent:
             return False
-        task["reviewer"] = to_agent
     else:
         if str(task.get("status") or "").lower() not in {"backlog", "todo", "in_progress", "review_approved"}:
             return False
         if str(task.get("owner") or "") != from_agent:
             return False
-        task["owner"] = to_agent
-        if str(task.get("status") or "").lower() in {"backlog", "todo", "in_progress"}:
-            task["status"] = "todo"
-    task["last_update"] = timestamp
-    task["next"] = brief_reason_text(f"Chairman reassigned {role} from {from_agent} to {to_agent}: {reason}", max_length=280)
-    for handoff in status.get("handoffs", []) or []:
-        if handoff.get("task_id") != task_id or handoff.get("status") == "done":
-            continue
-        if str(handoff.get("to") or "") == from_agent:
-            handoff["status"] = "done"
-            handoff["resolved_at"] = timestamp
-    status.setdefault("handoffs", []).append(
-        {
-            "task_id": task_id,
-            "from": from_agent,
-            "to": to_agent,
-            "message": task["next"],
-            "status": "pending",
-            "created_at": timestamp,
-        }
+        execution_branch = (
+            str(task.get("execution_branch") or "").strip()
+            or latest_task_branch(state, task_id)
+            or ""
+        )
+    new_owner = to_agent if role == "owner" else current_owner
+    new_reviewer = to_agent if role == "reviewer" else current_reviewer
+    message = brief_reason_text(
+        f"Chairman reassigned {role} from {from_agent} to {to_agent}: {reason}",
+        max_length=280,
     )
-    write_status_with_prune(status_path, status, config=config)
-    if not sync_status_pipeline(config):
+    result = execute_task_board_command(
+        config,
+        "system-reassign",
+        [task_id, new_owner, new_reviewer, message],
+        environ={
+            "AI_STATUS_PRODUCER": "chair_reassignment",
+            "EXPECTED_OWNER": current_owner,
+            "EXPECTED_REVIEWER": current_reviewer,
+            "HANDOFF_FROM": from_agent,
+            "HANDOFF_TO": to_agent,
+            "RESET_TO_TODO": "1" if role == "owner" else "0",
+            "EXECUTION_BRANCH": execution_branch,
+        },
+    )
+    if not result.ok:
         return False
     clear_failure_streak(state, task_id, role)
+    state.setdefault("workspace_holds", {}).pop(failure_streak_key(task_id, role), None)
     remember_chair_reassignment_guard(
         config,
         state,
@@ -7629,7 +7689,7 @@ def apply_chair_reassignment_action(
         {
             "type": "chair_reassignment_applied",
             "task_id": task_id,
-            "message": task["next"],
+            "message": message,
             "role": role,
             "from_agent": from_agent,
             "to_agent": to_agent,
@@ -7652,11 +7712,13 @@ def apply_chair_reassignment_actions(
     ]
     actions.sort(
         key=lambda action: 0
-        if normalize_chair_reassignment_action(action).get("role") == "reviewer"
+        if action.get("role") == "reviewer"
         else 1
     )
     for action in actions:
-        changed = apply_chair_reassignment_action(config, state, action, provider_report) or changed
+        applied = apply_chair_reassignment_action(config, state, action, provider_report)
+        record_chair_action_outcome(config, payload, "reassignment", action, applied)
+        changed = applied or changed
     return changed
 
 
@@ -7770,7 +7832,7 @@ def chair_unblock_agent(
         if not display_name or display_name in seen or display_name not in known:
             continue
         seen.add(display_name)
-        if display_name in exclude or display_name_is_legacy_alias(display_name):
+        if display_name in exclude:
             continue
         if is_agent_dispatch_paused(config, state, display_name, provider_report=provider_report):
             continue
@@ -7864,7 +7926,7 @@ def create_chair_workspace_baseline_task(
         "auto_created_by": "chairman-reassignment-triage",
         "covers_task_ids": covered_task_ids,
     }
-    result = run_task_board_command(
+    result = execute_task_board_command(
         config,
         "assign",
         [WORKSPACE_BASELINE_TASK_ID, owner, reviewer],
@@ -7906,28 +7968,6 @@ def create_chair_workspace_baseline_task(
             },
         )
         return False
-
-    status = load_status(config)
-    task_map = task_index_from_status(config, status)
-    task = task_map.get(WORKSPACE_BASELINE_TASK_ID)
-    if task is not None:
-        state.setdefault("watcher", {}).setdefault("task_snapshots", {})[
-            WORKSPACE_BASELINE_TASK_ID
-        ] = snapshot_task(task, config.get("schema", {}))
-        dispatch_plan = chair_dispatch_action_reason(config, task, task_map)
-        if dispatch_plan is not None:
-            target_agent, dispatch_reason = dispatch_plan
-            active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
-            active_agent_counts = active_worker_agent_counts(state, active_statuses)
-            pending_agent_counts = outstanding_delivery_agent_counts(config, state)
-            lane_id = normalize_agent_id(target_agent)
-            lane_capacity = max_tasks_per_agent_for_lane(ready_dispatch_settings(config), lane_id)
-            lane_load = active_agent_counts.get(lane_id, 0) + pending_agent_counts.get(lane_id, 0)
-            if lane_load < lane_capacity and not is_agent_dispatch_paused(config, state, target_agent, provider_report=provider_report):
-                _pending_agents, _pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
-                event = build_dispatch_event(task, target_agent, dispatch_reason, task_map)
-                if event["key"] not in pending_event_keys and queue_delivery_event(config, event):
-                    state.setdefault("seen_event_keys", {})[event["key"]] = utc_now()
 
     write_activity_log(
         config,
@@ -7973,45 +8013,10 @@ def ensure_workspace_baseline_task_dispatch(
     state: dict[str, Any],
     provider_report: dict[str, Any],
 ) -> bool:
-    status = load_status(config)
-    task_map = task_index_from_status(config, status)
-    task = task_map.get(WORKSPACE_BASELINE_TASK_ID)
-    if task is None or not _task_is_open(task):
-        return False
-    dispatch_plan = chair_dispatch_action_reason(config, task, task_map)
-    if dispatch_plan is None:
-        return False
-    target_agent, dispatch_reason = dispatch_plan
-    if is_agent_dispatch_paused(config, state, target_agent, provider_report=provider_report):
-        return False
-    active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
-    active_agent_counts = active_worker_agent_counts(state, active_statuses)
-    pending_agent_counts = outstanding_delivery_agent_counts(config, state)
-    lane_id = normalize_agent_id(target_agent)
-    lane_capacity = max_tasks_per_agent_for_lane(ready_dispatch_settings(config), lane_id)
-    lane_load = active_agent_counts.get(lane_id, 0) + pending_agent_counts.get(lane_id, 0)
-    if lane_load >= lane_capacity:
-        return False
-    _pending_agents, _pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
-    event = build_dispatch_event(task, target_agent, dispatch_reason, task_map)
-    if event["key"] in pending_event_keys:
-        return False
-    if not queue_delivery_event(config, event):
-        return False
-    state.setdefault("seen_event_keys", {})[event["key"]] = utc_now()
-    write_activity_log(
-        config,
-        {
-            "type": "workspace_baseline_dispatch_queued",
-            "task_id": WORKSPACE_BASELINE_TASK_ID,
-            "target_agent": target_agent,
-            "message": (
-                f"Queued dispatch for {WORKSPACE_BASELINE_TASK_ID} to {target_agent} "
-                f"after chairman materialized the shared baseline repair."
-            ),
-        },
-    )
-    return True
+    # Task materialization is intentionally separate from delivery.  The
+    # ready dispatcher will see the task on its normal pass and is the sole
+    # execution queue producer.
+    return False
 
 
 def escalate_governance_recursion_for_human(
@@ -8146,7 +8151,7 @@ def create_chair_unblock_task(
         "mutates_canonical": True,
         "auto_created_by": "chairman-blocked-task-triage",
     }
-    result = run_task_board_command(
+    result = execute_task_board_command(
         config,
         "assign",
         [unblock_id, owner, reviewer],
@@ -8173,28 +8178,6 @@ def create_chair_unblock_task(
         )
         return False
 
-    status = load_status(config)
-    task_map = task_index_from_status(config, status)
-    unblock_task = task_map.get(unblock_id)
-    if unblock_task is not None:
-        state.setdefault("watcher", {}).setdefault("task_snapshots", {})[
-            unblock_id
-        ] = snapshot_task(unblock_task, config.get("schema", {}))
-        dispatch_plan = chair_dispatch_action_reason(config, unblock_task, task_map)
-        if dispatch_plan is not None:
-            target_agent, dispatch_reason = dispatch_plan
-            active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
-            active_agent_counts = active_worker_agent_counts(state, active_statuses)
-            pending_agent_counts = outstanding_delivery_agent_counts(config, state)
-            lane_id = normalize_agent_id(target_agent)
-            lane_capacity = max_tasks_per_agent_for_lane(ready_dispatch_settings(config), lane_id)
-            lane_load = active_agent_counts.get(lane_id, 0) + pending_agent_counts.get(lane_id, 0)
-            if lane_load < lane_capacity and not is_agent_dispatch_paused(config, state, target_agent, provider_report=provider_report):
-                _pending_agents, _pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
-                event = build_dispatch_event(unblock_task, target_agent, dispatch_reason, task_map)
-                if event["key"] not in pending_event_keys and queue_delivery_event(config, event):
-                    state.setdefault("seen_event_keys", {})[event["key"]] = utc_now()
-
     write_activity_log(
         config,
         {
@@ -8220,7 +8203,6 @@ def apply_chair_parent_resume_action(
     if not task_id or not chair_reason:
         return False
 
-    status_path = config_path(config, "status_file")
     status = load_status(config)
     task_map = task_index_from_status(config, status)
     parent = task_map.get(task_id)
@@ -8242,20 +8224,17 @@ def apply_chair_parent_resume_action(
     if resume_status not in {"backlog", "todo", "in_progress"}:
         return False
 
-    timestamp = utc_now()
     helper_id = str(completed_helper.get("id") or "").strip()
-    parent["status"] = resume_status
-    parent["last_update"] = timestamp
-    parent["next"] = brief_reason_text(f"Chairman resumed after {helper_id}: {chair_reason}", max_length=280)
-    parent.pop("waiting_for", None)
-
-    for blocker in status.get("blockers", []) or []:
-        if blocker.get("task_id") == task_id and blocker.get("status") == "open":
-            blocker["status"] = "resolved"
-            blocker["resolved_at"] = timestamp
-
-    write_status_with_prune(status_path, status, config=config)
-    if not sync_status_pipeline(config):
+    message = brief_reason_text(
+        f"Chairman resumed after {helper_id}: {chair_reason}", max_length=280
+    )
+    result = execute_task_board_command(
+        config,
+        "system-resume",
+        [task_id, resume_status, message],
+        environ={"AI_STATUS_PRODUCER": "chair_parent_resume"},
+    )
+    if not result.ok:
         return False
 
     write_activity_log(
@@ -8265,7 +8244,7 @@ def apply_chair_parent_resume_action(
             "task_id": task_id,
             "helper_task_id": helper_id,
             "resume_status": resume_status,
-            "message": parent["next"],
+            "message": message,
         },
     )
     return True
@@ -8312,27 +8291,6 @@ def apply_chair_task_action(
         streak_record["chair_cleared_at"] = utc_now()
         streak_record["chair_clear_reason"] = chair_reason
 
-    agent_id = normalize_agent_id(target_agent)
-    if agent_id not in (config.get("agents", {}) or {}):
-        return False
-    if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
-        return False
-
-    _active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
-    _active_agents, active_task_agents = active_worker_indexes(state, _active_statuses)
-    _pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
-    if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
-        return False
-    if not task_is_dispatch_eligible_for_agent(task, target_agent):
-        return False
-
-    event = build_dispatch_event(task, target_agent, dispatch_reason, task_map)
-    if event["key"] in pending_event_keys:
-        return False
-    if not queue_delivery_event(config, event):
-        return False
-
-    state.setdefault("seen_event_keys", {})[event["key"]] = utc_now()
     write_activity_log(
         config,
         {
@@ -8341,7 +8299,7 @@ def apply_chair_task_action(
             "action": action_name,
             "dispatch_reason": dispatch_reason,
             "target_agent": target_agent,
-            "message": f"Chairman triggered {dispatch_reason} for {task_id}: {chair_reason}",
+            "message": f"Chairman released {dispatch_reason} for {task_id}; ready dispatcher will deliver it: {chair_reason}",
         },
     )
     return True
@@ -8355,7 +8313,11 @@ def apply_chair_task_actions(
 ) -> bool:
     changed = False
     for action in payload.get("task_actions", []) or []:
-        changed = apply_chair_task_action(config, state, action, provider_report) or changed
+        if not isinstance(action, dict):
+            continue
+        applied = apply_chair_task_action(config, state, action, provider_report)
+        record_chair_action_outcome(config, payload, "task", action, applied)
+        changed = applied or changed
     return changed
 
 
@@ -8406,12 +8368,6 @@ def apply_chair_provider_action(
             and existing.get("resume_at") is not None
         ):
             existing["reason"] = reason
-            if kind == "quota":
-                state.setdefault("quota_paused_agents", {})[agent_id] = {
-                    "reason": reason,
-                    "resume_at": existing.get("resume_at"),
-                    "paused_at": existing.get("paused_at"),
-                }
             write_activity_log(
                 config,
                 {
@@ -8461,7 +8417,7 @@ def apply_chair_provider_action(
             return False
         if str(existing.get("kind") or "") == "auth" and not reason:
             return False
-    if agent_id in provider_pause_registry(state) or agent_id in state.setdefault("quota_paused_agents", {}):
+    if agent_id in provider_pause_registry(state):
         clear_provider_pause(state, agent_id)
         write_activity_log(
             config,
@@ -8514,8 +8470,52 @@ def apply_chair_provider_actions(
 ) -> bool:
     changed = False
     for action in payload.get("provider_actions", []) or []:
-        changed = apply_chair_provider_action(config, state, action) or changed
+        if not isinstance(action, dict):
+            continue
+        applied = apply_chair_provider_action(config, state, action)
+        record_chair_action_outcome(config, payload, "provider", action, applied)
+        changed = applied or changed
     return changed
+
+
+def record_chair_action_outcome(
+    config: dict[str, Any],
+    payload: dict[str, Any],
+    category: str,
+    action: dict[str, Any],
+    applied: bool,
+) -> None:
+    """Attach an acknowledgement to every requested chair action.
+
+    The decision packet is processed once, so recording a rejected/no-op action
+    here is both durable and non-spamming. Previously the packet received one
+    generic ``chair_review_applied`` event even when every requested action had
+    returned False.
+    """
+    outcome = {
+        "category": category,
+        "status": "applied" if applied else "rejected",
+        "approval_id": str(action.get("approval_id") or "").strip() or None,
+        "task_id": str(action.get("task_id") or "").strip() or None,
+        "agent": str(action.get("agent") or "").strip() or None,
+        "action": str(
+            action.get("action") or action.get("decision") or action.get("role") or ""
+        ).strip() or None,
+    }
+    payload.setdefault("action_outcomes", []).append(outcome)
+    if applied:
+        return
+    write_activity_log(
+        config,
+        {
+            "type": f"chair_{category}_action_rejected",
+            **outcome,
+            "message": (
+                f"Chair {category} action was not applied because its current-state "
+                "preconditions were not satisfied."
+            ),
+        },
+    )
 
 
 def _chair_review_active_worker(
@@ -8658,14 +8658,6 @@ def refresh_chair_review_state(
                 preferred_owner=str(active.get("agent") or "").strip() or None,
             ) or changed
         ttl_minutes = int(payload.get("approval_ttl_minutes") or chair_review_settings(config).get("default_approval_ttl_minutes", 45))
-        if bool(payload.get("sidecar_approved")):
-            chair_state["sidecar_approved_until"] = (
-                datetime.now(timezone.utc) + timedelta(minutes=max(1, ttl_minutes))
-            ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        else:
-            chair_state["sidecar_approved_until"] = None
-        chair_state["max_sidecars"] = int(payload.get("max_sidecars") or chair_review_settings(config).get("default_max_sidecars", 2))
-        chair_state["blocked_sidecar_parents"] = list(payload.get("blocked_sidecar_parents", []) or [])
         chair_state["last_review_at"] = now
         chair_state["last_reviewer"] = active.get("agent")
         chair_state["last_reason"] = active.get("reason")
@@ -8674,13 +8666,21 @@ def refresh_chair_review_state(
             datetime.now(timezone.utc) + timedelta(seconds=float(chair_review_settings(config).get("cooldown_seconds", 900)))
         ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         chair_state["active_review"] = None
+        outcomes = list(payload.get("action_outcomes", []) or [])
+        applied_count = sum(item.get("status") == "applied" for item in outcomes if isinstance(item, dict))
+        rejected_count = sum(item.get("status") == "rejected" for item in outcomes if isinstance(item, dict))
         write_activity_log(
             config,
             {
-                "type": "chair_review_applied",
-                "message": f"Applied chairman review from {active.get('agent')} ({active.get('reason')}).",
+                "type": "chair_review_processed",
+                "message": (
+                    f"Processed chairman review from {active.get('agent')} ({active.get('reason')}): "
+                    f"{applied_count} action(s) applied, {rejected_count} rejected."
+                ),
                 "target_agent": active.get("agent"),
                 "queue_event_id": queue_event_id or None,
+                "applied_action_count": applied_count,
+                "rejected_action_count": rejected_count,
             },
         )
         return True or changed
@@ -8722,23 +8722,12 @@ def dispatch_ready_tasks(
     task_map = {task.get(task_id_field): task for task in tasks}
     review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
     finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    owned_statuses = [str(value).lower() for value in settings.get("owned_statuses", ["in_progress", "todo", "backlog"])]
     dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    domain_policy = ReadyDispatchPolicy(
-        review_statuses=frozenset(review_statuses),
-        finalize_statuses=frozenset(finalize_statuses),
-        in_progress_statuses=frozenset(
-            str(value).lower()
-            for value in settings.get("in_progress_statuses", ["in_progress"])
-        ),
-        owned_statuses=frozenset(owned_statuses),
-        dependency_done_statuses=frozenset(dependency_done_statuses),
-    )
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
     max_dispatches_per_tick = max(1, int(settings.get("max_dispatches_per_tick", 4)))
     provider_report = provider_report or load_provider_report(config)
 
-    agent_ids = list(config.get("agents", {}).keys())
+    agent_ids = ranked_agent_ids(config, list(config.get("agents", {}).keys()))
     dispatcher_state = state.setdefault("ready_dispatcher", {})
     start_cursor = 0
     if agent_ids:
@@ -8746,7 +8735,9 @@ def dispatch_ready_tasks(
             start_cursor = int(dispatcher_state.get("next_agent_cursor", 0)) % len(agent_ids)
         except (TypeError, ValueError):
             start_cursor = 0
-    ordered_agent_ids = agent_ids[start_cursor:] + agent_ids[:start_cursor]
+    # Explicit health-aware lane order is stable.  Keep legacy round-robin only
+    # when no priority was configured for older installations.
+    ordered_agent_ids = agent_ids if settings.get("lane_priority") else agent_ids[start_cursor:] + agent_ids[:start_cursor]
     active_agents, active_task_agents = active_worker_indexes(state, active_statuses)
     pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
     active_agent_counts = active_worker_agent_counts(state, active_statuses)
@@ -8755,13 +8746,11 @@ def dispatch_ready_tasks(
     pending_task_ids = {task_id for task_id, _agent_id in pending_task_agents if task_id}
     agent_loads = agent_dispatch_loads(config, state, active_statuses)
     helper_settings = helper_claim_settings(config)
-    seen = state.setdefault("seen_event_keys", {})
     changed = False
     dispatches = 0
     last_dispatched_agent_id: str | None = None
 
     def record_pending_dispatch(agent_id: str, target_agent: str, task_id: str, reason: str, event_key: str) -> None:
-        seen[event_key] = utc_now()
         pending_event_keys.add(event_key)
         pending_agents.add(agent_id)
         pending_task_agents.add((task_id, agent_id))
@@ -8783,7 +8772,6 @@ def dispatch_ready_tasks(
             if (
                 display_name
                 and lane_load < lane_capacity
-                and not display_name_is_legacy_alias(display_name)
                 and not is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report)
             ):
                 idle_agent_names.append(display_name)
@@ -8800,13 +8788,15 @@ def dispatch_ready_tasks(
                 continue
 
             target_agent = display_name_for(config, agent_id)
-            if not target_agent or display_name_is_legacy_alias(target_agent):
+            if not target_agent:
                 continue
             candidates: list[tuple[int, int, dict[str, Any], str]] = []
             helper_claim_queued = False
             for index, task in enumerate(tasks):
                 task_id = str(task.get(task_id_field) or "")
                 if not task_id:
+                    continue
+                if worker_yield_is_active(config, state, task_id, target_agent):
                     continue
                 task_status = str(task.get("status") or "").lower()
                 task_owner = task.get(owner_field)
@@ -8823,11 +8813,7 @@ def dispatch_ready_tasks(
                     "owner": task_owner,
                     "reviewer": task_reviewer,
                 }
-                decision = resolve_domain_dispatch_target(
-                    normalized_task,
-                    task_map,
-                    domain_policy,
-                )
+                decision = resolve_current_dispatch_target(config, normalized_task, task_map)
                 if decision is not None and decision.target_agent != target_agent:
                     decision = None
                 reason = decision.reason.value if decision is not None else None
@@ -8836,7 +8822,10 @@ def dispatch_ready_tasks(
                 if reason and task_waiting_on_chair_reassignment(state, task, reason=reason, target_agent=target_agent):
                     continue
 
-                helper_claim_allowed_statuses = {str(v).lower() for v in helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])}
+                task_helper_settings = helper_claim_settings_for_task(
+                    config, helper_settings, task_status, review_statuses
+                )
+                helper_claim_allowed_statuses = {str(v).lower() for v in task_helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])}
                 helper_claim_plan = None
                 if (
                     task_status in helper_claim_allowed_statuses
@@ -8851,7 +8840,7 @@ def dispatch_ready_tasks(
                         idle_agent_name=target_agent,
                         idle_agent_names=idle_agent_names,
                         agent_loads=agent_loads,
-                        helper_settings=helper_settings,
+                        helper_settings=task_helper_settings,
                         review_statuses=review_statuses,
                         finalize_statuses=finalize_statuses,
                         dependency_done_statuses=dependency_done_statuses,
@@ -8957,390 +8946,31 @@ def dispatch_ready_tasks(
     return changed
 
 
-def dispatch_underutilization_sidecars(config: dict[str, Any], state: dict[str, Any]) -> bool:
-    settings = underutilization_settings(config)
-    tracking = state.setdefault("underutilization", {})
-    chair_state = state.setdefault("chair_review", {})
-    productive_statuses = {str(value) for value in settings.get("productive_worker_statuses", [])}
-    ratio = utilization_ratio_for_sidecars(config, state, productive_statuses)
-    threshold = float(settings.get("threshold_ratio", 0.5))
-    now = utc_now()
-    tracking["last_ratio"] = round(ratio, 4)
-    changed = False
-
-    if not settings.get("enabled", True):
-        tracking["below_threshold_since"] = None
-        return changed
-    if disk_guard_dispatch_blocked(config, state):
-        return note_dispatch_blocked_by_disk_guard(config, state, "underutilization_sidecars") or changed
-
-    if ratio >= threshold:
-        if tracking.get("below_threshold_since") is not None:
-            tracking["below_threshold_since"] = None
-            changed = True
-        return changed
-
-    if not tracking.get("below_threshold_since"):
-        tracking["below_threshold_since"] = now
-        return True
-
-    below_since = _parse_iso_utc(tracking.get("below_threshold_since"))
-    current_dt = _parse_iso_utc(now)
-    if below_since is None or current_dt is None:
-        tracking["below_threshold_since"] = now
-        return True
-
-    if (current_dt - below_since).total_seconds() < float(settings.get("continuous_window_seconds", 900)):
-        return changed
-
-    last_wave_at = _parse_iso_utc(tracking.get("last_sidecar_wave_at"))
-    if last_wave_at is not None and (current_dt - last_wave_at).total_seconds() < float(settings.get("cooldown_seconds", 900)):
-        return changed
-
-    if chair_review_settings(config).get("enabled", False):
-        sidecar_approved_until = _parse_iso_utc(chair_state.get("sidecar_approved_until"))
-        if sidecar_approved_until is None or sidecar_approved_until <= current_dt:
-            if chair_state.get("sidecar_approved_until") is not None:
-                chair_state["sidecar_approved_until"] = None
-                changed = True
-            wait_reason = "underutilized but waiting for a fresh chairman sidecar approval window"
-            if tracking.get("last_sidecar_wave_reason") != wait_reason:
-                tracking["last_sidecar_wave_reason"] = wait_reason
-                changed = True
-            return changed
-
-    status = load_status(config)
-    task_map = task_index_from_status(config, status)
-    provider_report = load_provider_report(config)
-    idle_agents = eligible_idle_agents_for_sidecars(
-        config,
-        state,
-        status,
-        max_active_sidecars_per_agent=int(settings.get("max_active_sidecars_per_agent", 1)),
-        provider_report=provider_report,
-    )
-    if not idle_agents:
-        tracking["last_sidecar_wave_at"] = now
-        tracking["last_sidecar_wave_reason"] = "underutilized but no idle agents were eligible for sidecar work"
-        write_activity_log(
-            config,
-            {
-                "type": "sidecar_wave_skipped",
-                "message": tracking["last_sidecar_wave_reason"],
-                "ratio": ratio,
-            },
-        )
-        return True
-
-    existing_signatures = existing_sidecar_signatures(status)
-    candidates = build_catalog_sidecar_candidates(config, status, task_map, existing_signatures)
-    if not candidates:
-        candidates = build_dynamic_sidecar_candidates(config, status, task_map, existing_signatures)
-    blocked_parents = {str(item).strip() for item in chair_state.get("blocked_sidecar_parents", []) if str(item).strip()}
-    if blocked_parents:
-        candidates = [candidate for candidate in candidates if str(candidate.get("parent_task_id") or "") not in blocked_parents]
-    if not candidates:
-        tracking["last_sidecar_wave_at"] = now
-        tracking["last_sidecar_wave_reason"] = "underutilized but no sidecar candidates matched the catalog or dynamic fallback"
-        write_activity_log(
-            config,
-            {
-                "type": "sidecar_wave_skipped",
-                "message": tracking["last_sidecar_wave_reason"],
-                "ratio": ratio,
-            },
-        )
-        return True
-
-    candidates.sort(key=lambda item: (int(item.get("priority", 9)), str(item.get("parent_task_id") or ""), str(item.get("kind") or "")))
-    active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
-    _active_agents, _active_task_agents = active_worker_indexes(state, active_statuses)
-    _pending_agents, _pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
-    seen = state.setdefault("seen_event_keys", {})
-    per_agent_counts = {agent: count_open_sidecars_for_agent(status, agent) for agent in idle_agents}
-    created = 0
-    max_sidecars = max(
-        1,
-        min(
-            int(settings.get("max_new_sidecars_per_wave", 2)),
-            int(chair_state.get("max_sidecars") or chair_review_settings(config).get("default_max_sidecars", 2)),
-        ),
-    )
-
-    for candidate in candidates:
-        if created >= max_sidecars:
-            break
-
-        parent_owner = str(candidate.get("reviewer") or "").strip()
-        preferred_agents = preferred_agents_for_sidecar(str(candidate.get("kind") or ""))
-        selected_owner = next(
-            (
-                agent
-                for agent in preferred_agents
-                if agent in idle_agents
-                and agent != parent_owner
-                and per_agent_counts.get(agent, 0) < int(settings.get("max_active_sidecars_per_agent", 1))
-            ),
-            None,
-        )
-        if not selected_owner:
-            selected_owner = next(
-                (
-                    agent
-                    for agent in idle_agents
-                    if agent != parent_owner
-                    and per_agent_counts.get(agent, 0) < int(settings.get("max_active_sidecars_per_agent", 1))
-                ),
-                None,
-            )
-        if not selected_owner:
-            continue
-
-        ok, error = create_sidecar_task(
-            config,
-            sidecar_id=str(candidate["sidecar_id"]),
-            owner=selected_owner,
-            reviewer=parent_owner,
-            phase=str(candidate["phase"]),
-            title=str(candidate["title"]),
-            summary_zh=str(candidate["summary_zh"]),
-            depends_on=list(candidate.get("depends_on", []) or []),
-            artifacts=list(candidate.get("artifacts", []) or []),
-            helper_parent=str(candidate["parent_task_id"]),
-            helper_kind=str(candidate["kind"]),
-            mutates_canonical=bool(candidate.get("mutates_canonical", False)),
-        )
-        if not ok:
-            write_activity_log(
-                config,
-                {
-                    "type": "sidecar_task_create_failed",
-                    "task_id": candidate["sidecar_id"],
-                    "message": f"Failed to create sidecar for {candidate['parent_task_id']}: {error}",
-                },
-            )
-            continue
-
-        status = load_status(config)
-        task_map = task_index_from_status(config, status)
-        sidecar_task = next((task for task in status.get("tasks", []) if task.get("id") == candidate["sidecar_id"]), None)
-        if not sidecar_task:
-            continue
-
-        state.setdefault("watcher", {}).setdefault("task_snapshots", {})[
-            candidate["sidecar_id"]
-        ] = snapshot_task(sidecar_task, config.get("schema", {}))
-
-        event = build_dispatch_event(sidecar_task, selected_owner, "owned_ready_dispatch", task_map)
-        if event["key"] in pending_event_keys:
-            continue
-        if queue_delivery_event(config, event):
-            seen[event["key"]] = utc_now()
-            pending_event_keys.add(event["key"])
-
-        per_agent_counts[selected_owner] = per_agent_counts.get(selected_owner, 0) + 1
-        existing_signatures.add(f"{candidate['parent_task_id']}:{candidate['kind']}")
-        created += 1
-        changed = True
-        write_activity_log(
-            config,
-            {
-                "type": "sidecar_task_created",
-                "task_id": candidate["sidecar_id"],
-                "message": (
-                    f"Auto-created sidecar {candidate['sidecar_id']} for {candidate['parent_task_id']} "
-                    f"({candidate['kind']}) while utilization remained below threshold."
-                ),
-                "parent_task_id": candidate["parent_task_id"],
-                "target_agent": selected_owner,
-            },
-        )
-
-    tracking["last_sidecar_wave_at"] = now
-    if created:
-        tracking["last_sidecar_wave_reason"] = (
-            f"utilization {ratio:.2f} stayed below threshold {threshold:.2f}; created {created} visible sidecar task(s)"
-        )
-        write_activity_log(
-            config,
-            {
-                "type": "sidecar_wave_started",
-                "message": tracking["last_sidecar_wave_reason"],
-                "ratio": ratio,
-                "created": created,
-            },
-        )
-        return True
-
-    tracking["last_sidecar_wave_reason"] = "underutilized but no sidecar candidate could be assigned safely"
-    write_activity_log(
-        config,
-        {
-            "type": "sidecar_wave_skipped",
-            "message": tracking["last_sidecar_wave_reason"],
-            "ratio": ratio,
-        },
-    )
-    return True
-
-
-def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
-    """Proactively reassign uncovered main tasks to idle agents when utilization is below threshold."""
-    settings = underutilization_settings(config)
-    if not settings.get("enabled", True):
-        return False
-    if disk_guard_dispatch_blocked(config, state):
-        return note_dispatch_blocked_by_disk_guard(config, state, "underutilization_main_tasks")
-
-    tracking = state.setdefault("underutilization", {})
-    productive_statuses = {str(v) for v in settings.get("productive_worker_statuses", [])}
-    ratio = utilization_ratio_for_sidecars(config, state, productive_statuses)
-    threshold = float(settings.get("threshold_ratio", 0.5))
-    now = utc_now()
-
-    if ratio >= threshold:
-        return False
-
-    below_since = _parse_iso_utc(tracking.get("below_threshold_since"))
-    current_dt = _parse_iso_utc(now)
-    if not below_since or not current_dt:
-        return False
-    if (current_dt - below_since).total_seconds() < float(settings.get("continuous_window_seconds", 900)):
-        return False
-
-    last_wave_at = _parse_iso_utc(tracking.get("last_main_task_wave_at"))
-    if last_wave_at and (current_dt - last_wave_at).total_seconds() < float(settings.get("cooldown_seconds", 900)):
-        return False
-
-    dispatch_settings = ready_dispatch_settings(config)
-    active_statuses = {str(v) for v in dispatch_settings.get("active_worker_statuses", [])}
-    dependency_done_statuses = {str(v).lower() for v in dispatch_settings.get("dependency_done_statuses", ["done"])}
-    finalize_statuses = {str(v).lower() for v in dispatch_settings.get("finalize_statuses", ["review_approved"])}
-    review_statuses = {str(v).lower() for v in dispatch_settings.get("review_statuses", ["review"])}
-    helper_settings = helper_claim_settings(config)
-
-    status = load_status(config)
-    task_map = task_index_from_status(config, status)
-    active_agents, active_task_agents = active_worker_indexes(state, active_statuses)
-    pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
-    active_agent_counts = active_worker_agent_counts(state, active_statuses)
-    pending_agent_counts = outstanding_delivery_agent_counts(config, state)
-    active_task_ids = {tid for tid, _ in active_task_agents}
-    pending_task_ids = {tid for tid, _ in pending_task_agents}
-    agent_loads = agent_dispatch_loads(config, state, active_statuses)
-    provider_report = load_provider_report(config)
-
-    idle_agent_names: list[str] = []
-    for agent_id, agent in (config.get("agents", {}) or {}).items():
-        configured_display = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
-        display = task_agent_display_name(config, status, agent_id)
-        if display_name_is_legacy_alias(display) or display_name_is_legacy_alias(configured_display):
-            continue
-        normalized = normalize_agent_id(agent_id)
-        lane_capacity = max_tasks_per_agent_for_lane(dispatch_settings, normalized)
-        lane_load = active_agent_counts.get(normalized, 0) + pending_agent_counts.get(normalized, 0)
-        if lane_load >= lane_capacity:
-            continue
-        if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
-            continue
-        if not agent_supports_auto_delivery(config, provider_report, agent_id):
-            continue
-        idle_agent_names.append(display)
-
-    if not idle_agent_names:
-        tracking["last_main_task_wave_at"] = now
-        return False
-
-    seen = state.setdefault("seen_event_keys", {})
-    max_per_wave = max(1, int(settings.get("max_new_main_tasks_per_wave", 2)))
-    dispatched = 0
-    changed = False
-
-    sorted_tasks = sorted(
-        [t for t in (status.get("tasks", []) or []) if t.get("id")],
-        key=lambda t: task_phase_priority(t, task_map, dependency_done_statuses),
-    )
-
-    for task in sorted_tasks:
-        if dispatched >= max_per_wave:
-            break
-        if task_is_sidecar(task):
-            continue
-        task_id = str(task.get("id") or "")
-        task_status = str(task.get("status") or "").lower()
-        if task_status not in {str(v).lower() for v in helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])}:
-            continue
-        if task_id in active_task_ids or task_id in pending_task_ids:
-            continue
-        plan = proactive_claim_plan_for_task(
-            config,
-            task=task,
-            task_map=task_map,
-            idle_agent_names=idle_agent_names,
-            agent_loads=agent_loads,
-            helper_settings=helper_settings,
-            review_statuses=review_statuses,
-            finalize_statuses=finalize_statuses,
-            dependency_done_statuses=dependency_done_statuses,
-            state=state,
-        )
-        if not plan:
-            continue
-        old_owner = str(task.get("owner") or "")
-        old_reviewer = str(task.get("reviewer") or "")
-        msg = (
-            f"Availability-first backfill by {plan['claim_agent']} "
-            f"(utilization {ratio:.2f} below threshold {threshold:.2f}; "
-            f"reassigned from {plan['assigned_agent']})."
-        )
-        if not persist_task_reassignment(
-            config,
-            task_id=task_id,
-            new_owner=plan["new_owner"],
-            new_reviewer=plan["new_reviewer"],
-            message=msg,
-            handoff_to=plan["handoff_to"],
-            handoff_from=plan["handoff_from"],
-        ):
-            continue
-        task["owner"] = plan["new_owner"]
-        task["reviewer"] = plan["new_reviewer"]
-        task["last_update"] = now
-        task["next"] = msg
-        event = build_dispatch_event(task, plan["claim_agent"], plan["reason"], task_map)
-        if event["key"] not in pending_event_keys and queue_delivery_event(config, event):
-            seen[event["key"]] = now
-            pending_event_keys.add(event["key"])
-            dispatched += 1
-            changed = True
-            active_task_ids.add(task_id)
-            idle_agent_names = [name for name in idle_agent_names if name != plan["claim_agent"]]
-            write_activity_log(
-                config,
-                {
-                    "type": "task_proactive_backfill",
-                    "task_id": task_id,
-                    "message": msg,
-                    "from_owner": old_owner,
-                    "to_owner": plan["new_owner"],
-                    "from_reviewer": old_reviewer,
-                    "to_reviewer": plan["new_reviewer"],
-                    "claim_role": plan["claim_role"],
-                },
-            )
-            console_log(
-                f"proactive backfill: task={task_id} role={plan['claim_role']} to={plan['claim_agent']}",
-                quiet=SUPERVISOR_LOG_QUIET,
-            )
-
-    tracking["last_main_task_wave_at"] = now
-    return changed
-
-
 def _has_dispatchable_backlog(status: dict[str, Any]) -> bool:
     dispatchable = {"backlog", "todo", "in_progress", "review", "review_approved"}
-    for task in (status.get("tasks") or []):
-        if isinstance(task, dict) and str(task.get("status") or "") in dispatchable:
+    return any(
+        isinstance(task, dict) and str(task.get("status") or "") in dispatchable
+        for task in (status.get("tasks") or [])
+    )
+
+
+def _has_any_dispatchable_lane(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any] | None = None,
+) -> bool:
+    settings = ready_dispatch_settings(config)
+    report = provider_report or load_provider_report(config)
+    for agent_id, agent in (config.get("agents", {}) or {}).items():
+        display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        if not display_name:
+            continue
+        normalized = normalize_agent_id(agent_id)
+        if is_agent_dispatch_paused(config, state, normalized, provider_report=report):
+            continue
+        if not agent_supports_auto_delivery(config, report, normalized):
+            continue
+        if max_tasks_per_agent_for_lane(settings, normalized) > 0:
             return True
     return False
 
@@ -9355,7 +8985,7 @@ def _has_any_dispatchable_lane(
     report = provider_report or load_provider_report(config)
     for agent_id, agent in (config.get("agents", {}) or {}).items():
         configured_display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
-        if not configured_display_name or display_name_is_legacy_alias(configured_display_name):
+        if not configured_display_name:
             continue
         normalized = normalize_agent_id(agent_id)
         if is_agent_dispatch_paused(config, state, normalized, provider_report=report):
@@ -9458,8 +9088,6 @@ def supervisor_tick_ports() -> SupervisorTickPorts:
     optional_automation = OptionalAutomation(
         materialize_workspace_baseline_task=materialize_workspace_baseline_task_from_last_decision,
         ensure_workspace_baseline_dispatch=ensure_workspace_baseline_task_dispatch,
-        dispatch_underutilization_sidecars=dispatch_underutilization_sidecars,
-        dispatch_underutilization_main_tasks=dispatch_underutilization_main_tasks,
     )
     return SupervisorTickPorts(
         utc_now=utc_now,
@@ -9494,7 +9122,6 @@ def supervisor_tick_ports() -> SupervisorTickPorts:
         queue_chair_review=queue_chair_review,
         break_full_deadlock=break_full_deadlock,
         dispatch_ready_tasks=dispatch_ready_tasks,
-        dispatch_optional_automation=optional_automation.dispatch,
         process_queue=process_queue,
         sync_github_bus=sync_github_bus,
         trim_worker_history=trim_worker_history,

@@ -14,7 +14,8 @@ import os
 from pathlib import Path
 from unittest import mock
 
-import supervisor
+from control_plane.runtime import supervisor_runtime as supervisor
+import worker_tree_guard
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -25,6 +26,12 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         check=True,
     )
+
+
+def _install_canonical_status_script(root: Path) -> None:
+    script = root / "scripts" / "ai_status.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.symlink_to(supervisor._RUNTIME_ROOT / "scripts" / "ai_status.py")
 
 
 class CommandActivityLogSummaryTests(unittest.TestCase):
@@ -1013,6 +1020,39 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertEqual(record["status"], "completed")
         self.assertEqual(record["skip_reason"], "stale_dispatch_event")
 
+    def test_dispatch_and_stale_validation_share_dependency_evidence(self) -> None:
+        dependency = {
+            "id": "DEP-1",
+            "status": "done",
+            "task_class": "implementation",
+            "integration_status": "merged_to_dev",
+            "merge_commit": "abc123",
+        }
+        task = {
+            "id": "BUS-VAL-PARITY-001",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Gemini",
+            "depends_on": ["DEP-1"],
+        }
+        tasks = {"DEP-1": dependency, task["id"]: task}
+        event = {
+            "task_id": task["id"],
+            "target_agent": "codex",
+            "target_display_name": "Codex",
+            "reason": "owned_in_progress_dispatch",
+        }
+
+        with mock.patch.object(supervisor, "integration_evidence_for_tasks", return_value={"DEP-1": True}):
+            decision = supervisor.resolve_current_dispatch_target(self.config, task, tasks)
+            self.assertIsNotNone(decision)
+            queued = supervisor.build_dispatch_event(task, decision.target_agent, decision.reason.value, tasks)
+            self.assertEqual(supervisor.current_dispatch_event_key(self.config, event, tasks), queued["key"])
+
+        with mock.patch.object(supervisor, "integration_evidence_for_tasks", return_value={"DEP-1": False}):
+            self.assertIsNone(supervisor.resolve_current_dispatch_target(self.config, task, tasks))
+            self.assertIsNone(supervisor.current_dispatch_event_key(self.config, event, tasks))
+
     def test_marks_event_without_message_manual_pending_without_crashing(self) -> None:
         task = {
             "id": "BUS-VAL-MALFORMED-001",
@@ -1717,19 +1757,7 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         )
 
         self.assertTrue(changed)
-        self.assertEqual(
-            state["dispatch_pauses"],
-            [
-                {
-                    "provider": "gemini",
-                    "task_id": None,
-                    "worker_run_id": "gemini-quota",
-                    "failure_kind": "quota/terminal",
-                    "summary": "quota/terminal: reason: 'QUOTA_EXHAUSTED'",
-                    "paused_at": "2026-05-17T13:51:45Z",
-                }
-            ],
-        )
+        self.assertEqual(state["dispatch_pauses"], [])
 
     def test_starts_current_owned_dispatch_event(self) -> None:
         current_task = {
@@ -1756,7 +1784,7 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
             "message": "wake",
         }
         state = {"queue": {"events": {}}, "workers": {}}
-        request = object()
+        request = types.SimpleNamespace(agent_id="codex")
         delivery = {"manual_confirmation_required": False, "auto_delivered": True}
 
         with (
@@ -2126,8 +2154,13 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         }
         state = {
             "queue": {"events": {}},
-            "quota_paused_agents": {
+            "provider_pause_schema": 3,
+            "provider_pauses": {
                 "codex": {
+                    "kind": "quota",
+                    "scope": "lane",
+                    "lane_id": "codex",
+                    "schema": 3,
                     "reason": "provider quota exhausted",
                     "paused_at": "2026-04-16T00:00:00Z",
                     "resume_at": 9999999999,
@@ -2593,8 +2626,6 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
             mock.patch.object(supervisor, "reconcile_queue_records", return_value=False),
             mock.patch.object(supervisor, "prune_event_queue", return_value=False),
             mock.patch.object(supervisor, "dispatch_ready_tasks", return_value=False),
-            mock.patch.object(supervisor, "dispatch_underutilization_sidecars", return_value=False),
-            mock.patch.object(supervisor, "dispatch_underutilization_main_tasks", return_value=False) as main_backfill,
             mock.patch.object(supervisor, "process_queue", return_value=False),
             mock.patch.object(supervisor, "sync_github_bus", return_value=False),
             mock.patch.object(supervisor, "trim_worker_history"),
@@ -2606,7 +2637,6 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
         self.assertEqual(saved_state["supervisor"]["pid"], os.getpid())
         self.assertIsNotNone(saved_state["supervisor"]["last_heartbeat_at"])
         self.assertEqual(saved_state["supervisor"]["started_at"], saved_state["supervisor"]["last_heartbeat_at"])
-        main_backfill.assert_called_once()
 
     def test_run_once_can_skip_pid_file_management(self) -> None:
         config = {
@@ -2634,8 +2664,6 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
             mock.patch.object(supervisor, "reconcile_queue_records", return_value=False),
             mock.patch.object(supervisor, "prune_event_queue", return_value=False),
             mock.patch.object(supervisor, "dispatch_ready_tasks", return_value=False),
-            mock.patch.object(supervisor, "dispatch_underutilization_sidecars", return_value=False),
-            mock.patch.object(supervisor, "dispatch_underutilization_main_tasks", return_value=False) as main_backfill,
             mock.patch.object(supervisor, "process_queue", return_value=False),
             mock.patch.object(supervisor, "sync_github_bus", return_value=False),
             mock.patch.object(supervisor, "trim_worker_history"),
@@ -2645,7 +2673,6 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
             supervisor.run_once(config, watch=False, replay=False, once=True, manage_pid_file=False)
 
         write_pid.assert_not_called()
-        main_backfill.assert_called_once()
 
     def test_main_once_skips_daemon_pid_management(self) -> None:
         args = mock.Mock(
@@ -2796,683 +2823,7 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
         start_job.assert_not_called()
 
 
-class UnderutilizationSidecarDispatchTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmpdir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmpdir.cleanup)
-        self.root = Path(self.tmpdir.name)
-        (self.root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
-        (self.root / "sidecar_catalog.json").write_text('{"templates": []}\n', encoding="utf-8")
-        (self.root / "activity-log.jsonl").write_text("", encoding="utf-8")
-        (self.root / "event-queue.jsonl").write_text("", encoding="utf-8")
-        self.config = {
-            "schema": {
-                "tasks_path": "tasks",
-                "task_id_field": "id",
-                "status_field": "status",
-                "assignee_field": "owner",
-                "reviewer_field": "reviewer",
-            },
-            "paths": {
-                "status_file": str(self.root / "ai-status.json"),
-                "sidecar_catalog": str(self.root / "sidecar_catalog.json"),
-                "activity_log": str(self.root / "activity-log.jsonl"),
-                "event_queue": str(self.root / "event-queue.jsonl"),
-            },
-            "ready_dispatcher": {
-                "active_worker_statuses": [
-                    "running",
-                    "started",
-                    "waiting_approval",
-                    "manual_pending",
-                    "retry_backoff",
-                    "suspended_approval",
-                    "stalled",
-                    "fallback",
-                ],
-                "dependency_done_statuses": ["done"],
-            },
-            "underutilization_dispatch": {
-                "enabled": True,
-                "threshold_ratio": 0.5,
-                "continuous_window_seconds": 900,
-                "cooldown_seconds": 900,
-                "max_new_sidecars_per_wave": 2,
-                "max_active_sidecars_per_agent": 1,
-                "productive_worker_statuses": ["running", "waiting_approval", "suspended_approval", "retry_backoff"],
-            },
-            "agents": {
-                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
-                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
-                "gemini": {"id": "gemini", "display_name": "Gemini", "provider": "gemini"},
-                "qwen": {"id": "qwen", "display_name": "Qwen", "provider": "qwen"},
-            },
-        }
-
-    def test_waits_full_window_before_creating_sidecars(self) -> None:
-        state = {"queue": {"events": {}}, "workers": {}, "underutilization": {}}
-
-        with (
-            mock.patch.object(supervisor, "create_sidecar_task", side_effect=AssertionError("should not create before the window")),
-            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
-        ):
-            changed = supervisor.dispatch_underutilization_sidecars(self.config, state)
-
-        self.assertTrue(changed)
-        self.assertIsNotNone(state["underutilization"]["below_threshold_since"])
-        self.assertIsNone(state["underutilization"].get("last_sidecar_wave_at"))
-        write_activity_log.assert_not_called()
-
-    def test_creates_visible_sidecar_after_continuous_low_utilization_window(self) -> None:
-        state = {
-            "queue": {"events": {}},
-            "workers": {
-                "run-1": {
-                    "run_id": "run-1",
-                    "task_id": "TEL-001",
-                    "agent_id": "codex",
-                    "provider": "codex",
-                    "status": "running",
-                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
-                }
-            },
-            "underutilization": {
-                "below_threshold_since": "2026-04-10T00:00:00Z",
-                "last_sidecar_wave_at": None,
-                "last_sidecar_wave_reason": None,
-            },
-        }
-        parent_task = {
-            "id": "APP-001",
-            "phase": "Phase 5: Persona and Application Surfaces",
-            "status": "todo",
-            "owner": "Claude",
-            "reviewer": "Codex",
-            "depends_on": [],
-            "title": "Define BFF query surfaces",
-            "summary_zh": "整理 operator console 與 workbench 的 BFF query contract。",
-            "artifacts": ["services/control-plane/bff/"],
-            "last_update": "2026-04-10T00:05:00Z",
-        }
-        created_sidecar = {
-            "id": "APP-001-SIDECAR-BFF-HANDOFF",
-            "phase": "Phase 5: Persona and Application Surfaces",
-            "status": "todo",
-            # preferred_agents_for_sidecar('bff_handoff_packet') no longer
-            # includes Qwen (Qwen was retired from the active agent roster);
-            # Gemini is the next preferred idle agent in this test's state.
-            "owner": "Gemini",
-            "reviewer": "Claude",
-            "depends_on": [],
-            "title": "Prepare APP-001 BFF and frontend handoff packet",
-            "summary_zh": "平行支援 APP-001，先整理 BFF query gap、operator journey 與前端 handoff materials，不改 canonical truth。",
-            "artifacts": ["support/sidecars/APP-001/APP-001-SIDECAR-BFF-HANDOFF.md"],
-            "task_class": "sidecar",
-            "auto_generated": True,
-            "helper_parent": "APP-001",
-            "helper_kind": "bff_handoff_packet",
-            "mutates_canonical": False,
-            "auto_created_by": "supervisor-underutilization",
-            "last_update": "2026-04-10T00:16:05Z",
-        }
-        status_before = {"tasks": [parent_task]}
-        status_after = {"tasks": [parent_task, created_sidecar]}
-
-        with (
-            mock.patch.object(supervisor, "load_status", side_effect=[status_before, status_after]),
-            mock.patch.object(supervisor, "load_sidecar_catalog", return_value=[]),
-            mock.patch.object(supervisor, "create_sidecar_task", return_value=(True, "")) as create_sidecar_task,
-            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
-            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
-            mock.patch.object(supervisor, "utc_now", return_value="2026-04-10T00:16:05Z"),
-        ):
-            changed = supervisor.dispatch_underutilization_sidecars(self.config, state)
-
-        self.assertTrue(changed)
-        create_sidecar_task.assert_called_once()
-        kwargs = create_sidecar_task.call_args.kwargs
-        self.assertEqual(kwargs["sidecar_id"], "APP-001-SIDECAR-BFF-HANDOFF")
-        self.assertEqual(kwargs["owner"], "Gemini")
-        self.assertEqual(kwargs["reviewer"], "Claude")
-        self.assertEqual(kwargs["helper_parent"], "APP-001")
-        self.assertEqual(kwargs["helper_kind"], "bff_handoff_packet")
-        self.assertFalse(kwargs["mutates_canonical"])
-        queue_delivery_event.assert_called_once()
-        queued_event = queue_delivery_event.call_args.args[1]
-        self.assertEqual(queued_event["task_id"], "APP-001-SIDECAR-BFF-HANDOFF")
-        self.assertEqual(queued_event["target_agent"], "Gemini")
-        self.assertEqual(queued_event["task"]["task_class"], "sidecar")
-        self.assertEqual(state["underutilization"]["last_sidecar_wave_at"], "2026-04-10T00:16:05Z")
-        self.assertIn("created 1 visible sidecar", state["underutilization"]["last_sidecar_wave_reason"])
-        self.assertIn(
-            "APP-001-SIDECAR-BFF-HANDOFF",
-            state.get("watcher", {}).get("task_snapshots", {}),
-        )
-        activity_types = [call.args[1]["type"] for call in write_activity_log.call_args_list]
-        self.assertIn("sidecar_task_created", activity_types)
-        self.assertIn("sidecar_wave_started", activity_types)
-
-    def test_sidecar_owner_uses_status_canonical_name_when_config_display_is_tool_name(self) -> None:
-        state = {
-            "queue": {"events": {}},
-            "workers": {
-                "run-1": {
-                    "run_id": "run-1",
-                    "task_id": "TEL-001",
-                    "agent_id": "codex",
-                    "provider": "codex",
-                    "status": "running",
-                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
-                }
-            },
-            "underutilization": {
-                "below_threshold_since": "2026-04-10T00:00:00Z",
-                "last_sidecar_wave_at": None,
-            },
-        }
-        config = json.loads(json.dumps(self.config))
-        config["agents"]["gemini"]["display_name"] = "Antigravity"
-        parent_task = {
-            "id": "APP-001",
-            "phase": "Phase 5: Persona and Application Surfaces",
-            "status": "todo",
-            "owner": "Claude",
-            "reviewer": "Codex",
-            "depends_on": [],
-            "title": "Define BFF query surfaces",
-            "artifacts": ["services/control-plane/bff/"],
-        }
-        created_sidecar = {
-            "id": "APP-001-SIDECAR-BFF-HANDOFF",
-            "phase": "Phase 5: Persona and Application Surfaces",
-            "status": "todo",
-            "owner": "Gemini",
-            "reviewer": "Claude",
-            "depends_on": [],
-            "task_class": "sidecar",
-            "helper_parent": "APP-001",
-            "helper_kind": "bff_handoff_packet",
-            "artifacts": ["support/sidecars/APP-001/APP-001-SIDECAR-BFF-HANDOFF.md"],
-        }
-        status_before = {
-            "agents": [{"name": "Codex"}, {"name": "Claude"}, {"name": "Gemini"}],
-            "tasks": [parent_task],
-        }
-        status_after = {
-            "agents": [{"name": "Codex"}, {"name": "Claude"}, {"name": "Gemini"}],
-            "tasks": [parent_task, created_sidecar],
-        }
-
-        with (
-            mock.patch.object(supervisor, "load_status", side_effect=[status_before, status_after]),
-            mock.patch.object(supervisor, "load_sidecar_catalog", return_value=[]),
-            mock.patch.object(supervisor, "load_provider_report", return_value={"agent_adapters": {"gemini": {"can_auto_deliver": True}}}),
-            mock.patch.object(supervisor, "create_sidecar_task", return_value=(True, "")) as create_sidecar_task,
-            mock.patch.object(supervisor, "queue_delivery_event", return_value=True),
-            mock.patch.object(supervisor, "write_activity_log"),
-            mock.patch.object(supervisor, "utc_now", return_value="2026-04-10T00:16:05Z"),
-        ):
-            changed = supervisor.dispatch_underutilization_sidecars(config, state)
-
-        self.assertTrue(changed)
-        self.assertEqual(create_sidecar_task.call_args.kwargs["owner"], "Gemini")
-
-    def test_resets_underutilization_timer_when_utilization_recovers(self) -> None:
-        state = {
-            "queue": {"events": {}},
-            "workers": {
-                "run-1": {"run_id": "run-1", "task_id": "REG-004", "agent_id": "codex", "provider": "codex", "status": "running"},
-                "run-2": {"run_id": "run-2", "task_id": "OSS-001", "agent_id": "gemini", "provider": "gemini", "status": "running"},
-            },
-            "underutilization": {
-                "below_threshold_since": "2026-04-10T00:00:00Z",
-                "last_sidecar_wave_at": None,
-                "last_sidecar_wave_reason": None,
-            },
-        }
-
-        changed = supervisor.dispatch_underutilization_sidecars(self.config, state)
-
-        self.assertTrue(changed)
-        self.assertIsNone(state["underutilization"]["below_threshold_since"])
-
-    def test_cooldown_prevents_duplicate_sidecar_wave(self) -> None:
-        state = {
-            "queue": {"events": {}},
-            "workers": {},
-            "underutilization": {
-                "below_threshold_since": "2026-04-10T00:00:00Z",
-                "last_sidecar_wave_at": "2026-04-10T00:10:00Z",
-                "last_sidecar_wave_reason": "already created a wave recently",
-            },
-        }
-
-        with (
-            mock.patch.object(supervisor, "create_sidecar_task", side_effect=AssertionError("cooldown should prevent new sidecars")),
-            mock.patch.object(supervisor, "utc_now", return_value="2026-04-10T00:20:00Z"),
-        ):
-            changed = supervisor.dispatch_underutilization_sidecars(self.config, state)
-
-        self.assertFalse(changed)
-        self.assertEqual(state["underutilization"]["last_sidecar_wave_reason"], "already created a wave recently")
-
-    def test_skips_duplicate_signature_when_matching_sidecar_already_exists(self) -> None:
-        state = {
-            "queue": {"events": {}},
-            "workers": {},
-            "underutilization": {
-                "below_threshold_since": "2026-04-10T00:00:00Z",
-                "last_sidecar_wave_at": None,
-                "last_sidecar_wave_reason": None,
-            },
-        }
-        parent_task = {
-            "id": "APP-001",
-            "phase": "Phase 5: Persona and Application Surfaces",
-            "status": "todo",
-            "owner": "Claude",
-            "reviewer": "Codex",
-            "depends_on": [],
-            "title": "Define BFF query surfaces",
-            "summary_zh": "整理 operator console 與 workbench 的 BFF query contract。",
-            "artifacts": ["services/control-plane/bff/"],
-            "last_update": "2026-04-10T00:05:00Z",
-        }
-        existing_sidecar = {
-            "id": "APP-001-SIDECAR-BFF-HANDOFF",
-            "phase": "Phase 5: Persona and Application Surfaces",
-            "status": "done",
-            "owner": "Qwen",
-            "reviewer": "Claude",
-            "depends_on": [],
-            "title": "Prepare APP-001 BFF and frontend handoff packet",
-            "summary_zh": "已完成支援包。",
-            "artifacts": ["support/sidecars/APP-001/APP-001-SIDECAR-BFF-HANDOFF.md"],
-            "task_class": "sidecar",
-            "auto_generated": True,
-            "helper_parent": "APP-001",
-            "helper_kind": "bff_handoff_packet",
-            "mutates_canonical": False,
-            "auto_created_by": "supervisor-underutilization",
-            "last_update": "2026-04-10T00:07:00Z",
-        }
-        status = {"tasks": [parent_task, existing_sidecar]}
-
-        with (
-            mock.patch.object(supervisor, "load_status", return_value=status),
-            mock.patch.object(supervisor, "load_sidecar_catalog", return_value=[]),
-            mock.patch.object(supervisor, "create_sidecar_task", side_effect=AssertionError("duplicate signature should not create another sidecar")),
-            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
-            mock.patch.object(supervisor, "utc_now", return_value="2026-04-10T00:16:05Z"),
-        ):
-            changed = supervisor.dispatch_underutilization_sidecars(self.config, state)
-
-        self.assertTrue(changed)
-        self.assertEqual(
-            state["underutilization"]["last_sidecar_wave_reason"],
-            "underutilized but no sidecar candidates matched the catalog or dynamic fallback",
-        )
-        activity_types = [call.args[1]["type"] for call in write_activity_log.call_args_list]
-        self.assertEqual(activity_types, ["sidecar_wave_skipped"])
-
-
-class UnderutilizationMainTaskDispatchTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmpdir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmpdir.cleanup)
-        self.root = Path(self.tmpdir.name)
-        (self.root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
-        (self.root / "activity-log.jsonl").write_text("", encoding="utf-8")
-        (self.root / "event-queue.jsonl").write_text("", encoding="utf-8")
-        self.config = {
-            "schema": {
-                "tasks_path": "tasks",
-                "task_id_field": "id",
-                "status_field": "status",
-                "assignee_field": "owner",
-                "reviewer_field": "reviewer",
-            },
-            "paths": {
-                "status_file": str(self.root / "ai-status.json"),
-                "activity_log": str(self.root / "activity-log.jsonl"),
-                "event_queue": str(self.root / "event-queue.jsonl"),
-            },
-            "ready_dispatcher": {
-                "active_worker_statuses": [
-                    "running",
-                    "started",
-                    "waiting_approval",
-                    "manual_pending",
-                    "retry_backoff",
-                    "suspended_approval",
-                    "stalled",
-                    "fallback",
-                ],
-                "dependency_done_statuses": ["done"],
-                "helper_claim": {
-                    "enabled": True,
-                    "task_statuses": ["todo", "in_progress", "review", "review_approved"],
-                    "availability_first": True,
-                    "allow_any_idle_lane": True,
-                    "require_assigned_agent_busy": True,
-                },
-            },
-            "underutilization_dispatch": {
-                "enabled": True,
-                "threshold_ratio": 0.5,
-                "continuous_window_seconds": 900,
-                "cooldown_seconds": 900,
-                "max_new_main_tasks_per_wave": 2,
-                "productive_worker_statuses": ["running", "waiting_approval", "suspended_approval", "retry_backoff"],
-            },
-            "agents": {
-                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
-                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
-                "qwen": {"id": "qwen", "display_name": "Qwen", "provider": "qwen"},
-            },
-        }
-
-    def test_backfills_main_review_task_to_idle_lane(self) -> None:
-        state = {
-            "queue": {"events": {}},
-            "workers": {
-                "run-1": {
-                    "run_id": "run-1",
-                    "task_id": "BUSY-REVIEW",
-                    "agent_id": "codex",
-                    "provider": "codex",
-                    "status": "running",
-                    "request_snapshot": {"reason": "review_ready_dispatch"},
-                }
-            },
-            "underutilization": {
-                "below_threshold_since": "2026-04-10T00:00:00Z",
-                "last_main_task_wave_at": None,
-            },
-        }
-        status = {
-            "tasks": [
-                {"id": "BUSY-REVIEW", "status": "review", "owner": "Claude", "reviewer": "Codex", "depends_on": []},
-                {"id": "MAIN-101", "status": "review", "owner": "Claude", "reviewer": "Codex", "depends_on": []},
-            ]
-        }
-
-        with (
-            mock.patch.object(supervisor, "load_status", return_value=status),
-            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
-            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
-            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
-            mock.patch.object(supervisor, "write_activity_log"),
-            mock.patch.object(supervisor, "utc_now", return_value="2026-04-10T00:16:05Z"),
-        ):
-            changed = supervisor.dispatch_underutilization_main_tasks(self.config, state)
-
-        self.assertTrue(changed)
-        kwargs = persist.call_args.kwargs
-        self.assertEqual(kwargs["task_id"], "MAIN-101")
-        self.assertEqual(kwargs["new_owner"], "Claude")
-        self.assertEqual(kwargs["new_reviewer"], "Qwen")
-        queued_event = queue_delivery_event.call_args.args[1]
-        self.assertEqual(queued_event["task_id"], "MAIN-101")
-        self.assertEqual(queued_event["target_agent"], "Qwen")
-        self.assertEqual(queued_event["reason"], "review_ready_dispatch")
-
-
 class PollWorkersRecoveryTests(unittest.TestCase):
-    def test_lower_priority_worker_is_superseded_when_finalize_backlog_exists(self) -> None:
-        config = {
-            "schema": {
-                "tasks_path": "tasks",
-                "task_id_field": "id",
-                "assignee_field": "owner",
-                "reviewer_field": "reviewer",
-            },
-            "supervisor": {"stall_after_seconds": 300},
-            "ready_dispatcher": {
-                "active_worker_statuses": ["running", "started", "waiting_approval", "manual_pending", "retry_backoff", "suspended_approval", "stalled", "fallback"],
-                "finalize_statuses": ["review_approved"],
-                "dependency_done_statuses": ["done"],
-            },
-            "providers": {},
-            "agents": {
-                "copilot": {"id": "copilot", "display_name": "Copilot"},
-                "codex": {"id": "codex", "display_name": "Codex"},
-                "claude": {"id": "claude", "display_name": "Claude"},
-            },
-        }
-        state = {
-            "queue": {"events": {"evt-1": {"status": "started"}}},
-            "workers": {
-                "run-1": {
-                    "run_id": "run-1",
-                    "task_id": "FB-003",
-                    "provider": "copilot",
-                    "agent_id": "copilot",
-                    "status": "running",
-                    "queue_event_id": "evt-1",
-                    "pid": 12345,
-                    "last_event_at": "2999-01-01T00:00:00Z",
-                    "request_snapshot": {"reason": "owned_ready_dispatch"},
-                }
-            },
-        }
-        status = {
-            "tasks": [
-                {"id": "FB-003", "status": "todo", "owner": "Copilot", "reviewer": "Codex", "depends_on": []},
-                {"id": "EX-001", "status": "review_approved", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
-            ]
-        }
-
-        with (
-            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
-            mock.patch.object(supervisor, "load_status", return_value=status),
-            mock.patch.object(supervisor, "load_provider_report", return_value={}),
-            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
-            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
-            mock.patch.object(supervisor, "terminate_worker_pid") as terminate_worker_pid,
-            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
-            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
-        ):
-            changed = supervisor.poll_workers(config, state)
-
-        self.assertTrue(changed)
-        worker = state["workers"]["run-1"]
-        self.assertEqual(worker["status"], "superseded")
-        self.assertIn("prioritize higher-priority review/finalize work", worker["last_error"])
-        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
-        terminate_worker_pid.assert_called_once_with(12345)
-        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_superseded")
-
-    def test_lower_priority_worker_kept_when_lane_capacity_available(self) -> None:
-        config = {
-            "schema": {
-                "tasks_path": "tasks",
-                "task_id_field": "id",
-                "assignee_field": "owner",
-                "reviewer_field": "reviewer",
-            },
-            "supervisor": {"stall_after_seconds": 300},
-            "ready_dispatcher": {
-                "active_worker_statuses": ["running", "started", "waiting_approval", "manual_pending", "retry_backoff", "suspended_approval", "stalled", "fallback"],
-                "finalize_statuses": ["review_approved"],
-                "dependency_done_statuses": ["done"],
-                "max_tasks_per_agent": 1,
-                "max_tasks_per_agent_by_lane": {"codex2": 3},
-            },
-            "providers": {},
-            "agents": {
-                "codex2": {"id": "codex2", "display_name": "Codex2"},
-                "codex": {"id": "codex", "display_name": "Codex"},
-            },
-        }
-        state = {
-            "queue": {
-                "events": {
-                    "evt-low": {"status": "started"},
-                    "evt-high": {"status": "started"},
-                }
-            },
-            "workers": {
-                "run-low": {
-                    "run_id": "run-low",
-                    "task_id": "PBK-UI-004",
-                    "provider": "codex2",
-                    "agent_id": "codex2",
-                    "status": "running",
-                    "queue_event_id": "evt-low",
-                    "pid": 12345,
-                    "last_event_at": "2999-01-01T00:00:00Z",
-                    "request_snapshot": {"reason": "owned_ready_dispatch"},
-                },
-                "run-high": {
-                    "run_id": "run-high",
-                    "task_id": "PBK-UI-003-SIDECAR-REVIEW",
-                    "provider": "codex2",
-                    "agent_id": "codex2",
-                    "status": "running",
-                    "queue_event_id": "evt-high",
-                    "pid": 12346,
-                    "last_event_at": "2999-01-01T00:00:00Z",
-                    "request_snapshot": {"reason": "owned_finalize_dispatch"},
-                },
-            },
-        }
-        status = {
-            "tasks": [
-                {"id": "PBK-UI-003-SIDECAR-REVIEW", "status": "review_approved", "owner": "Codex2", "reviewer": "Claude2", "depends_on": []},
-                {"id": "PBK-UI-004", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": ["PBK-UI-003"]},
-                {"id": "PBK-UI-003", "status": "done", "owner": "Claude2", "reviewer": "Codex", "depends_on": []},
-            ]
-        }
-
-        with (
-            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
-            mock.patch.object(supervisor, "load_status", return_value=status),
-            mock.patch.object(supervisor, "load_provider_report", return_value={}),
-            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
-            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
-            mock.patch.object(supervisor, "terminate_worker_pid") as terminate_worker_pid,
-            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
-            mock.patch.object(supervisor, "utc_now", return_value="2026-04-06T09:01:00Z"),
-            mock.patch.object(supervisor, "write_activity_log"),
-        ):
-            supervisor.poll_workers(config, state)
-
-        self.assertEqual(state["workers"]["run-low"]["status"], "running")
-        self.assertEqual(state["workers"]["run-high"]["status"], "running")
-        terminate_worker_pid.assert_not_called()
-
-    def test_covered_higher_priority_worker_does_not_supersede_full_lane(self) -> None:
-        config = {
-            "ready_dispatcher": {
-                "active_worker_statuses": ["running"],
-                "finalize_statuses": ["review_approved"],
-                "dependency_done_statuses": ["done"],
-                "max_tasks_per_agent": 1,
-                "max_tasks_per_agent_by_lane": {"codex2": 2},
-            },
-            "agents": {"codex2": {"id": "codex2", "display_name": "Codex2"}},
-        }
-        low_worker = {
-            "task_id": "PBK-UI-004",
-            "provider": "codex2",
-            "agent_id": "codex2",
-            "status": "running",
-            "request_snapshot": {"reason": "owned_ready_dispatch"},
-        }
-        state = {
-            "queue": {"events": {}},
-            "workers": {
-                "run-low": low_worker,
-                "run-high": {
-                    "task_id": "PBK-UI-003-SIDECAR-REVIEW",
-                    "provider": "codex2",
-                    "agent_id": "codex2",
-                    "status": "running",
-                    "request_snapshot": {"reason": "owned_finalize_dispatch"},
-                },
-            },
-        }
-        task_map = {
-            "PBK-UI-003-SIDECAR-REVIEW": {"id": "PBK-UI-003-SIDECAR-REVIEW", "status": "review_approved", "owner": "Codex2", "reviewer": "Claude2", "depends_on": []},
-            "PBK-UI-004": {"id": "PBK-UI-004", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
-        }
-
-        self.assertFalse(
-            supervisor.higher_priority_ready_task_exists(
-                config,
-                low_worker,
-                task_map,
-                state=state,
-                active_statuses={"running"},
-            )
-        )
-
-    def test_chair_guarded_higher_priority_task_does_not_supersede_full_lane(self) -> None:
-        config = {
-            "schema": {
-                "tasks_path": "tasks",
-                "task_id_field": "id",
-                "assignee_field": "owner",
-                "reviewer_field": "reviewer",
-            },
-            "ready_dispatcher": {
-                "active_worker_statuses": ["running"],
-                "review_statuses": ["review"],
-                "dependency_done_statuses": ["done"],
-                "max_tasks_per_agent": 1,
-                "max_tasks_per_agent_by_lane": {"codex2": 1},
-            },
-            "agents": {"codex2": {"id": "codex2", "display_name": "Codex2"}},
-        }
-        low_worker = {
-            "task_id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
-            "provider": "codex2",
-            "agent_id": "codex2",
-            "status": "running",
-            "queue_event_id": "evt-low",
-            "request_snapshot": {"reason": "owned_in_progress_dispatch"},
-        }
-        state = {
-            "queue": {"events": {"evt-low": {"status": "started"}}},
-            "workers": {"run-low": low_worker},
-            "failure_streaks": {
-                "PBK-UI-003:reviewer": {
-                    "task_id": "PBK-UI-003",
-                    "role": "reviewer",
-                    "agent": "Codex2",
-                    "awaiting_chair": True,
-                }
-            },
-        }
-        task_map = {
-            "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR": {
-                "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
-                "status": "in_progress",
-                "owner": "Codex2",
-                "reviewer": "Claude2",
-                "depends_on": [],
-            },
-            "PBK-UI-003": {
-                "id": "PBK-UI-003",
-                "status": "review",
-                "owner": "Claude2",
-                "reviewer": "Codex2",
-                "depends_on": [],
-            },
-        }
-
-        with mock.patch.object(supervisor, "load_event_queue", return_value=[]):
-            self.assertFalse(
-                supervisor.higher_priority_ready_task_exists(
-                    config,
-                    low_worker,
-                    task_map,
-                    state=state,
-                    active_statuses={"running"},
-                )
-            )
-
     def test_agent_dispatch_loads_skip_events_with_active_workers(self) -> None:
         config = {
             "ready_dispatcher": {"active_worker_statuses": ["running"]},
@@ -3564,6 +2915,183 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertEqual(worker["last_error"], "Worker exited before the task reached a terminal status.")
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "failed")
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_failed")
+
+    def test_dead_worker_that_reported_advancement_is_yielded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result_path = Path(tmpdir) / "result.json"
+            result_path.write_text(
+                json.dumps({"outcome": "advanced", "summary": "Verification needs a later retry."}),
+                encoding="utf-8",
+            )
+            config = {
+                "schema": {
+                    "tasks_path": "tasks",
+                    "task_id_field": "id",
+                    "assignee_field": "owner",
+                    "reviewer_field": "reviewer",
+                },
+                "supervisor": {"stall_after_seconds": 300, "worker_yield": {"cooldown_seconds": 120}},
+                "ready_dispatcher": {},
+                "providers": {},
+                "agents": {"codex": {"id": "codex", "display_name": "Codex"}},
+            }
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "EX-010",
+                        "provider": "codex",
+                        "agent_id": "codex",
+                        "status": "running",
+                        "queue_event_id": "evt-1",
+                        "pid": 999999,
+                        "last_event_at": "2026-04-06T09:00:00Z",
+                        "result_path": str(result_path),
+                    }
+                },
+            }
+            status = {"tasks": [{"id": "EX-010", "status": "in_progress", "owner": "Codex", "reviewer": "Claude"}]}
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+                mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+                mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+            ):
+                changed = supervisor.poll_workers(config, state)
+
+            self.assertTrue(changed)
+            self.assertEqual(state["workers"]["run-1"]["status"], "yielded")
+            self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
+            self.assertIn("EX-010:codex", state["worker_yields"])
+            self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_yielded")
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_status", return_value=status),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "write_activity_log") as second_log,
+            ):
+                self.assertFalse(supervisor.poll_workers(config, state))
+            self.assertEqual(state["workers"]["run-1"]["status"], "yielded")
+            second_log.assert_not_called()
+
+    def test_dead_worker_that_reported_blocked_updates_canonical_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _install_canonical_status_script(root)
+            status_path = root / "ai-status.json"
+            status_path.write_text(
+                json.dumps(
+                    {"tasks": [{"id": "EX-012", "status": "in_progress", "owner": "Codex", "reviewer": "Claude"}]}
+                ),
+                encoding="utf-8",
+            )
+            result_path = root / ".orchestrator" / "worker-results" / "run-1.json"
+            result_path.parent.mkdir(parents=True)
+            result_path.write_text(
+                json.dumps({"outcome": "blocked", "summary": "git verification timed out", "blocker": "git status timed out"}),
+                encoding="utf-8",
+            )
+            config = {
+                "schema": {
+                    "tasks_path": "tasks",
+                    "task_id_field": "id",
+                    "assignee_field": "owner",
+                    "reviewer_field": "reviewer",
+                },
+                "paths": {"status_file": str(status_path), "state_file": str(root / ".orchestrator" / "state.json")},
+                "supervisor": {"stall_after_seconds": 300},
+                "ready_dispatcher": {},
+                "providers": {},
+                "agents": {"codex": {"id": "codex", "display_name": "Codex"}},
+            }
+            state = {
+                "queue": {"events": {"evt-1": {"status": "started"}}},
+                "workers": {
+                    "run-1": {
+                        "run_id": "run-1",
+                        "task_id": "EX-012",
+                        "provider": "codex",
+                        "agent_id": "codex",
+                        "status": "running",
+                        "queue_event_id": "evt-1",
+                        "pid": 999999,
+                        "last_event_at": "2026-04-06T09:00:00Z",
+                        "result_path": str(result_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+                mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+                mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+            ):
+                changed = supervisor.poll_workers(config, state)
+
+            self.assertTrue(changed)
+            self.assertEqual(state["workers"]["run-1"]["status"], "completed")
+            self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
+            task = json.loads(status_path.read_text(encoding="utf-8"))["tasks"][0]
+            self.assertEqual(task["status"], "blocked")
+            self.assertEqual(task["next"], "git status timed out")
+            self.assertIn(".orchestrator/worker-results/run-1.json", task["evidence_refs"])
+            self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_completed")
+
+    def test_dead_parent_with_live_process_group_enters_draining(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300, "process_group_drain_seconds": 30},
+            "ready_dispatcher": {},
+            "providers": {},
+            "agents": {"codex": {"id": "codex", "display_name": "Codex"}},
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "EX-011",
+                    "provider": "codex",
+                    "agent_id": "codex",
+                    "status": "running",
+                    "queue_event_id": "evt-1",
+                    "pid": 999999,
+                    "last_event_at": "2026-04-06T09:00:00Z",
+                }
+            },
+        }
+        status = {"tasks": [{"id": "EX-011", "status": "in_progress", "owner": "Codex", "reviewer": "Claude"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+            mock.patch.object(supervisor, "process_group_is_alive", return_value=True),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["workers"]["run-1"]["status"], "draining")
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "started")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_draining")
 
     def test_dead_worker_for_open_task_can_be_reassigned(self) -> None:
         config = {
@@ -3817,7 +3345,6 @@ class PollWorkersRecoveryTests(unittest.TestCase):
             state = {
                 "queue": {"events": {"evt-1": {"status": "started"}}},
                 "provider_pauses": {},
-                "quota_paused_agents": {},
                 "workers": {
                     "run-1": {
                         "run_id": "run-1",
@@ -4469,13 +3996,58 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_superseded")
 
 
+    def test_completion_only_adapter_gets_longer_stall_watchdog(self) -> None:
+        config = {"supervisor": {"completion_only_worker_stall_after_seconds": 1200}, "agents": {"gemini": {"adapter": "antigravity"}, "codex": {"adapter": "codex"}}}
+        self.assertEqual(supervisor.worker_stall_timeout_seconds(config, {"agent_id": "gemini"}, 300), 1200)
+        self.assertEqual(supervisor.worker_stall_timeout_seconds(config, {"agent_id": "codex"}, 300), 300)
+
+    def test_completion_only_memory_guard_preempts_silent_near_limit_worker(self) -> None:
+        config = {
+            "supervisor": {
+                "completion_only_adapters": ["antigravity"],
+                "completion_only_memory_termination_ratio": 0.9,
+                "completion_only_memory_grace_seconds": 60,
+            },
+            "agents": {"gemini2": {"adapter": "antigravity"}},
+        }
+        worker = {
+            "agent_id": "gemini2",
+            "last_event_at": "2026-08-09T13:00:00Z",
+            "resource_usage": {"memory_current_bytes": 1450, "memory_max_bytes": 1600},
+        }
+        reason = supervisor.completion_only_memory_termination_reason(
+            config,
+            worker,
+            datetime(2026, 8, 9, 13, 2, tzinfo=timezone.utc),
+        )
+        self.assertTrue(reason.startswith("memory_limit_imminent:"))
+
+    def test_premature_exit_with_scope_oom_is_classified_from_telemetry(self) -> None:
+        reason = supervisor.resolve_terminal_worker_reason(
+            {"resource_usage": {"memory_events": {"oom_kill": 1}}},
+            supervisor.PREMATURE_EXIT_REASON,
+        )
+        self.assertEqual(reason, "cgroup_oom: worker scope reported memory.oom_kill")
+
+
+    def test_claude_resume_reuses_worker_scope(self) -> None:
+        config = {"paths": {"state_file": "/tmp/state.json", "status_file": "/tmp/status.json"}, "providers": {"claude": {"runtime": {"cli": "claude"}}}}
+        worker = {"run_id": "run-1", "provider": "claude", "agent_id": "claude", "task_id": "TASK-1", "session_id": "session-1", "scope_unit": "drts-worker-run-1.scope"}
+        process = types.SimpleNamespace(pid=7)
+        with mock.patch.object(supervisor, "command_exists", return_value="claude"), mock.patch.object(supervisor, "spawn_background_process", return_value=(process, Path("/tmp/resume.log"))) as spawn:
+            supervisor.resume_claude_worker(config, worker, {"providers": {"claude": {}}})
+        env = spawn.call_args.kwargs["env"]
+        self.assertEqual(env["ORCH_WORKER_SCOPE_UNIT"], "drts-worker-run-1.scope")
+        self.assertIn("ORCH_WORKER_SCOPE_PROPERTIES", env)
+
+
 class SingleSupervisorGuardTests(unittest.TestCase):
     def test_supervisor_cmdline_matches_actual_python_process(self) -> None:
         repo_root = str(supervisor.THIS_DIR.parent.resolve())
 
         self.assertTrue(
             supervisor.supervisor_cmdline_matches_current_script(
-                ["/usr/bin/python3", ".orchestrator/supervisor.py", "--config", "config.json"],
+                ["/usr/bin/python3", ".orchestrator/control_plane/runtime/supervisor_runtime.py", "--config", "config.json"],
                 repo_root,
             )
         )
@@ -4485,7 +4057,7 @@ class SingleSupervisorGuardTests(unittest.TestCase):
 
         self.assertFalse(
             supervisor.supervisor_cmdline_matches_current_script(
-                ["timeout", "15", "/usr/bin/python3", ".orchestrator/supervisor.py", "--verbose"],
+                ["timeout", "15", "/usr/bin/python3", ".orchestrator/control_plane/runtime/supervisor_runtime.py", "--verbose"],
                 repo_root,
             )
         )
@@ -4495,7 +4067,7 @@ class SingleSupervisorGuardTests(unittest.TestCase):
 
         self.assertFalse(
             supervisor.supervisor_cmdline_matches_current_script(
-                ["/bin/bash", "-lc", "python3 .orchestrator/supervisor.py --verbose"],
+                ["/bin/bash", "-lc", "python3 .orchestrator/control_plane/runtime/supervisor_runtime.py --verbose"],
                 repo_root,
             )
         )
@@ -4722,8 +4294,13 @@ class WorkerReassignmentTests(unittest.TestCase):
             ]
         }
         state = {
-            "quota_paused_agents": {
+            "provider_pause_schema": 3,
+            "provider_pauses": {
                 "qwen": {
+                    "kind": "quota",
+                    "scope": "lane",
+                    "lane_id": "qwen",
+                    "schema": 3,
                     "reason": "provider quota exhausted",
                     "paused_at": "2026-04-16T00:00:00Z",
                     "resume_at": 9999999999,
@@ -4758,7 +4335,7 @@ class WorkerReassignmentTests(unittest.TestCase):
                 "fallback_mode": "none",
             },
         }
-        state = {"quota_paused_agents": {"qwen": {"resume_at": 9999999999}}}
+        state = {}
         worker = {
             "run_id": "gemini-run-wrapper",
             "task_id": "WRAP-001",
@@ -4972,7 +4549,7 @@ class WorkerReassignmentTests(unittest.TestCase):
 
     def test_finalize_terminal_wrapper_passes_state_into_reassignment(self) -> None:
         config = dict(self.config)
-        state = {"quota_paused_agents": {"qwen": {"resume_at": 9999999999}}}
+        state = {}
         worker = {
             "run_id": "claude-run-wrapper",
             "task_id": "WRAP-002",
@@ -4999,6 +4576,29 @@ class WorkerReassignmentTests(unittest.TestCase):
 
 
 class ChairmanFlowTests(unittest.TestCase):
+    def test_rejected_chair_action_is_acknowledged_in_decision_packet(self) -> None:
+        config = {"agents": {"codex": {"display_name": "Codex"}}}
+        payload = {
+            "task_actions": [
+                {
+                    "task_id": "MISSING-001",
+                    "action": "dispatch_now",
+                    "target_agent": "Codex",
+                    "reason": "Dispatch it now",
+                }
+            ]
+        }
+        with (
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": []}),
+            mock.patch.object(supervisor, "write_activity_log") as activity,
+        ):
+            changed = supervisor.apply_chair_task_actions(config, {}, payload, {})
+
+        self.assertFalse(changed)
+        self.assertEqual(payload["action_outcomes"][0]["status"], "rejected")
+        self.assertEqual(payload["action_outcomes"][0]["task_id"], "MISSING-001")
+        self.assertEqual(activity.call_args.args[1]["type"], "chair_task_action_rejected")
+
     def test_chair_review_message_includes_provider_health_context(self) -> None:
         message = supervisor.build_chair_review_message(
             {
@@ -5075,13 +4675,10 @@ class ChairmanFlowTests(unittest.TestCase):
     def test_validate_chair_review_context_requires_pending_approval_resolution(self) -> None:
         payload = {
             "version": 1,
-            "decision": "approve_sidecars",
-            "sidecar_approved": False,
+                        "decision": "operational_review",
             "approval_ttl_minutes": 45,
-            "max_sidecars": 2,
             "reason": "approval remains unsafe",
             "blocked_by": [],
-            "blocked_sidecar_parents": [],
             "approval_actions": [],
             "reassignment_actions": [],
             "task_actions": [],
@@ -5102,7 +4699,7 @@ class ChairmanFlowTests(unittest.TestCase):
             "approval_triage must resolve pending approvals",
             supervisor.validate_chair_review_context(payload, reason="approval_triage", approval_state=approval_state),
         )
-        payload["approval_actions"] = [{"approval_id": "apr-1", "action": "deny", "reason": "not safe"}]
+        payload["approval_actions"] = [{"approval_id": "apr-1", "decision": "deny", "reason": "not safe"}]
         self.assertIsNone(
             supervisor.validate_chair_review_context(payload, reason="approval_triage", approval_state=approval_state)
         )
@@ -5282,12 +4879,9 @@ class ChairmanFlowTests(unittest.TestCase):
         payload = {
             "version": 1,
             "decision": "operational_review",
-            "sidecar_approved": False,
             "approval_ttl_minutes": 45,
-            "max_sidecars": 2,
             "reason": "blocked task needs repair",
             "blocked_by": [],
-            "blocked_sidecar_parents": [],
             "approval_actions": [],
             "reassignment_actions": [],
             "task_actions": [],
@@ -5334,12 +4928,9 @@ class ChairmanFlowTests(unittest.TestCase):
         payload = {
             "version": 1,
             "decision": "operational_review",
-            "sidecar_approved": False,
             "approval_ttl_minutes": 45,
-            "max_sidecars": 2,
             "reason": "blocked parent should resume after existing unblock child",
             "blocked_by": [],
-            "blocked_sidecar_parents": [],
             "approval_actions": [],
             "reassignment_actions": [],
             "task_actions": [],
@@ -5401,14 +4992,11 @@ class ChairmanFlowTests(unittest.TestCase):
         payload = {
             "version": 1,
             "decision": "operational_review",
-            "sidecar_approved": False,
             "approval_ttl_minutes": 45,
-            "max_sidecars": 2,
             "reason": "reassign the failing owner first",
             "blocked_by": [
                 "UI-FE-DRV-ONB remains blocked (history_repair); not reassignable while blocked."
             ],
-            "blocked_sidecar_parents": [],
             "approval_actions": [],
             "reassignment_actions": [],
             "task_actions": [],
@@ -5478,14 +5066,11 @@ class ChairmanFlowTests(unittest.TestCase):
         payload = {
             "version": 1,
             "decision": "operational_review",
-            "sidecar_approved": False,
             "approval_ttl_minutes": 45,
-            "max_sidecars": 2,
             "reason": "reassign other work but resume the repaired blocked parent",
             "blocked_by": [
                 "ADM-UI-RD-006 remains blocked only because the parent has not been resumed yet."
             ],
-            "blocked_sidecar_parents": [],
             "approval_actions": [],
             "reassignment_actions": [],
             "task_actions": [],
@@ -5573,7 +5158,7 @@ class ChairmanFlowTests(unittest.TestCase):
             )
             config = {
                 "paths": {"provider_capabilities": str(path)},
-                "supervisor": {"auto_refresh_provider_capabilities": False},
+                "supervisor": {"auto_refresh_provider_capabilities": True},
             }
             fresh = {"generated_at": "2026-08-04T00:00:00Z", "providers": {"claude": {}}}
             with (
@@ -5595,18 +5180,46 @@ class ChairmanFlowTests(unittest.TestCase):
             path.write_text(json.dumps(cached), encoding="utf-8")
             config = {
                 "paths": {"provider_capabilities": str(path)},
-                "supervisor": {"auto_refresh_provider_capabilities": False},
+                "supervisor": {"auto_refresh_provider_capabilities": True},
             }
             with mock.patch.object(supervisor, "build_provider_capabilities") as build:
                 report = supervisor.load_provider_report(config)
             build.assert_not_called()
             self.assertEqual(report, cached)
 
+    def test_provider_profile_path_mismatch_is_reprobed_even_when_periodic_refresh_is_off(self) -> None:
+        """A changed agy profile must not dispatch against an old auth snapshot."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "provider_capabilities.json"
+            cached = {
+                "providers": {
+                    "gemini": {"paths": {"antigravity_app_data": "/old/.gemini/antigravity-cli"}}
+                }
+            }
+            path.write_text(json.dumps(cached), encoding="utf-8")
+            config = {
+                "paths": {"provider_capabilities": str(path)},
+                "supervisor": {"auto_refresh_provider_capabilities": False},
+                "providers": {"gemini": {"antigravity": {"config_home": "/new"}}},
+            }
+            fresh = {"providers": {"gemini": {"auth_ready": False}}}
+            with (
+                mock.patch.object(supervisor, "build_provider_capabilities", return_value=fresh) as build,
+                mock.patch.object(supervisor, "write_provider_capabilities") as write,
+            ):
+                report = supervisor.load_provider_report(config)
+            build.assert_called_once()
+            write.assert_called_once_with(config, report=fresh)
+            self.assertEqual(report, fresh)
+
     def test_provider_health_review_respects_cooldown_after_recent_pause_review(self) -> None:
         state = {
             "provider_pauses": {
                 "claude": {
                     "kind": "auth",
+                    "scope": "lane",
+                    "lane_id": "claude",
+                    "schema": 3,
                     "reason": "Invalid authentication credentials",
                     "paused_at": "2026-04-30T12:51:53Z",
                     "resume_at": None,
@@ -5752,10 +5365,14 @@ class ChairmanFlowTests(unittest.TestCase):
                 "provider_pauses": {
                     "claude": {
                         "kind": "auth",
+                        "scope": "lane",
+                        "lane_id": "claude",
+                        "schema": 3,
                         "reason": "Invalid authentication credentials",
                         "paused_at": "2026-04-30T12:51:53Z",
                     }
                 },
+                "provider_pause_schema": 3,
                 "chair_review": {},
             }
             status = {
@@ -5965,18 +5582,15 @@ class ChairmanFlowTests(unittest.TestCase):
             "provider_pauses": {
                 "copilot": {
                     "kind": "quota",
+                    "scope": "lane",
+                    "lane_id": "copilot",
+                    "schema": 3,
                     "reason": "Quota exhausted",
                     "paused_at": "2026-04-30T12:51:53Z",
                     "resume_at": 4102444800.0,
                 }
             },
-            "quota_paused_agents": {
-                "copilot": {
-                    "reason": "Quota exhausted",
-                    "paused_at": "2026-04-30T12:51:53Z",
-                    "resume_at": 4102444800.0,
-                }
-            },
+            "provider_pause_schema": 3,
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5996,7 +5610,7 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertFalse(changed)
         self.assertIn("copilot", state["provider_pauses"])
-        self.assertIn("copilot", state["quota_paused_agents"])
+        self.assertEqual(state["provider_pause_schema"], 3)
 
     def test_dispatcher_skips_task_waiting_on_chair_reassignment(self) -> None:
         config = {
@@ -6051,132 +5665,7 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertFalse(changed)
         queue_delivery_event.assert_not_called()
 
-    def test_dispatcher_skips_legacy_alias_helper_claim(self) -> None:
-        config = {
-            "schema": {
-                "tasks_path": "tasks",
-                "task_id_field": "id",
-                "status_field": "status",
-                "assignee_field": "owner",
-                "reviewer_field": "reviewer",
-            },
-            "ready_dispatcher": {
-                "helper_claim": {
-                    "enabled": True,
-                    "availability_first": True,
-                    "allow_any_idle_lane": True,
-                    "require_assigned_agent_busy": True,
-                }
-            },
-            "agents": {
-                "copilot": {"id": "copilot", "display_name": "Copilot", "provider": "copilot"},
-                "grok": {"id": "grok", "display_name": "Copilot (legacy alias)", "provider": "grok"},
-            },
-        }
-        state = {
-            "queue": {"events": {}},
-            "workers": {},
-            "provider_pauses": {
-                "copilot": {
-                    "kind": "quota",
-                    "reason": "quota exhausted",
-                    "paused_at": "2026-04-30T15:00:00Z",
-                    "resume_at": None,
-                }
-            },
-        }
-        status = {
-            "tasks": [
-                {
-                    "id": "OPX-GV-004",
-                    "status": "review",
-                    "owner": "Codex2",
-                    "reviewer": "Copilot",
-                    "depends_on": [],
-                }
-            ]
-        }
-
-        with (
-            mock.patch.object(supervisor, "load_status", return_value=status),
-            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
-            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
-        ):
-            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
-
-        self.assertFalse(changed)
-        queue_delivery_event.assert_not_called()
-
-    def test_underutilization_sidecars_wait_for_chair_approval_when_enabled(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            (root / "ai-status.json").write_text(
-                json.dumps(
-                    {
-                        "tasks": [
-                            {
-                                "id": "MAIN-1",
-                                "status": "in_progress",
-                                "owner": "Codex",
-                                "reviewer": "Claude",
-                                "depends_on": [],
-                                "title": "Main task",
-                            }
-                        ]
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
-            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
-            (root / "sidecar_catalog.json").write_text('{"templates": []}\n', encoding="utf-8")
-            config = {
-                "schema": {
-                    "tasks_path": "tasks",
-                    "task_id_field": "id",
-                    "status_field": "status",
-                    "assignee_field": "owner",
-                    "reviewer_field": "reviewer",
-                },
-                "paths": {
-                    "status_file": str(root / "ai-status.json"),
-                    "activity_log": str(root / "activity-log.jsonl"),
-                    "event_queue": str(root / "event-queue.jsonl"),
-                    "sidecar_catalog": str(root / "sidecar_catalog.json"),
-                },
-                "chair_review": {"enabled": True},
-                "underutilization_dispatch": {
-                    "enabled": True,
-                    "threshold_ratio": 0.5,
-                    "continuous_window_seconds": 60,
-                    "cooldown_seconds": 60,
-                    "max_new_sidecars_per_wave": 2,
-                },
-                "agents": {
-                    "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
-                    "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
-                },
-            }
-            state = {
-                "queue": {"events": {}},
-                "workers": {},
-                "underutilization": {"below_threshold_since": "2026-04-10T00:00:00Z"},
-                "chair_review": {},
-            }
-
-            with mock.patch.object(supervisor, "create_sidecar_task") as create_sidecar_task:
-                changed = supervisor.dispatch_underutilization_sidecars(config, state)
-
-            self.assertTrue(changed)
-            create_sidecar_task.assert_not_called()
-            self.assertEqual(
-                state["underutilization"]["last_sidecar_wave_reason"],
-                "underutilized but waiting for a fresh chairman sidecar approval window",
-            )
-
-    def test_refresh_chair_review_state_applies_sidecar_window_and_approval_actions(self) -> None:
+    def test_refresh_chair_review_state_applies_approval_actions(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             review_dir = root / "chair-reviews"
@@ -6188,17 +5677,14 @@ class ChairmanFlowTests(unittest.TestCase):
                 json.dumps(
                     {
                         "version": 1,
-                        "decision": "approve_sidecars",
-                        "sidecar_approved": True,
+                        "decision": "operational_review",
                         "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
                         "reason": "safe and idle",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [
                             {
                                 "approval_id": "apr-1",
-                                "action": "allow",
+                                "decision": "allow",
                                 "reason": "read-only context check",
                                 "remember": False,
                             }
@@ -6284,8 +5770,6 @@ class ChairmanFlowTests(unittest.TestCase):
             )
             self.assertIsNone(state["chair_review"]["active_review"])
             self.assertEqual(state["chair_review"]["last_reviewer"], "Claude")
-            self.assertEqual(state["chair_review"]["max_sidecars"], 2)
-            self.assertIsNotNone(state["chair_review"]["sidecar_approved_until"])
             self.assertNotIn("gemini2", state.get("provider_pauses", {}))
 
     def test_refresh_chair_review_state_classifies_lost_queue_event(self) -> None:
@@ -6334,9 +5818,10 @@ class ChairmanFlowTests(unittest.TestCase):
             ]
             self.assertEqual(records[-1]["type"], "chair_review_lost_queue_event")
 
-    def test_refresh_chair_review_state_accepts_reassignment_aliases_and_preserves_separation(self) -> None:
+    def test_refresh_chair_review_state_applies_reassignments_and_preserves_separation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
+            _install_canonical_status_script(root)
             review_dir = root / "chair-reviews"
             review_dir.mkdir(parents=True, exist_ok=True)
             markdown_path = review_dir / "20260429T000000Z-claude2.md"
@@ -6347,28 +5832,25 @@ class ChairmanFlowTests(unittest.TestCase):
                 json.dumps(
                     {
                         "version": 1,
-                        "decision": "approve_sidecars",
-                        "sidecar_approved": True,
+                        "decision": "operational_review",
                         "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
                         "reason": "break owner failure loop",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [
                             {
                                 "task_id": "OPX-MD-003",
                                 "role": "owner",
-                                "from_agent": "Codex2",
-                                "to_agent": "Codex",
-                                "rationale": "Codex2 hit repeated terminal failures.",
+                                "from": "Codex2",
+                                "to": "Codex",
+                                "reason": "Codex2 hit repeated terminal failures.",
                             },
                             {
                                 "task_id": "OPX-MD-003",
-                                "field": "reviewer",
+                                "role": "reviewer",
                                 "from": "Codex",
                                 "to": "Claude",
-                                "rationale": "Keep owner and reviewer separate after the owner move.",
+                                "reason": "Keep owner and reviewer separate after the owner move.",
                             },
                         ],
                         "task_actions": [],
@@ -6446,9 +5928,10 @@ class ChairmanFlowTests(unittest.TestCase):
                 },
             }
 
-            with (
-                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
-                mock.patch.object(supervisor, "sync_status_pipeline", return_value=True),
+            with mock.patch.object(
+                supervisor,
+                "safe_load_approval_state",
+                return_value={"pending": [], "history": []},
             ):
                 changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
 
@@ -6503,7 +5986,7 @@ class ChairmanFlowTests(unittest.TestCase):
             }
             state = {"queue": {"events": {}}, "workers": {}, "failure_streaks": {}}
 
-            with mock.patch.object(supervisor, "sync_status_pipeline", return_value=True) as sync:
+            with mock.patch.object(supervisor, "execute_task_board_command") as execute:
                 changed = supervisor.apply_chair_reassignment_action(
                     config,
                     state,
@@ -6518,7 +6001,7 @@ class ChairmanFlowTests(unittest.TestCase):
                 )
 
             self.assertFalse(changed)
-            sync.assert_not_called()
+            execute.assert_not_called()
             task = json.loads(status_path.read_text(encoding="utf-8"))["tasks"][0]
             self.assertEqual(task["owner"], "Codex")
             self.assertEqual(task["reviewer"], "Codex2")
@@ -6526,6 +6009,7 @@ class ChairmanFlowTests(unittest.TestCase):
     def test_refresh_chair_review_state_reassigns_backlog_owner_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
+            _install_canonical_status_script(root)
             review_dir = root / "chair-reviews"
             review_dir.mkdir(parents=True, exist_ok=True)
             markdown_path = review_dir / "20260430T000000Z-gemini.md"
@@ -6537,12 +6021,9 @@ class ChairmanFlowTests(unittest.TestCase):
                     {
                         "version": 1,
                         "decision": "operational_review",
-                        "sidecar_approved": False,
                         "approval_ttl_minutes": None,
-                        "max_sidecars": None,
                         "reason": "Claude auth lane is degraded; move backlog owner work.",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [
                             {
@@ -6621,9 +6102,10 @@ class ChairmanFlowTests(unittest.TestCase):
                 },
             }
 
-            with (
-                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
-                mock.patch.object(supervisor, "sync_status_pipeline", return_value=True),
+            with mock.patch.object(
+                supervisor,
+                "safe_load_approval_state",
+                return_value={"pending": [], "history": []},
             ):
                 changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
 
@@ -6637,6 +6119,7 @@ class ChairmanFlowTests(unittest.TestCase):
     def test_refresh_chair_review_state_applies_provider_pause_and_reassignment(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
+            _install_canonical_status_script(root)
             review_dir = root / "chair-reviews"
             review_dir.mkdir(parents=True, exist_ok=True)
             markdown_path = review_dir / "20260430T000000Z-claude.md"
@@ -6648,12 +6131,9 @@ class ChairmanFlowTests(unittest.TestCase):
                     {
                         "version": 1,
                         "decision": "operational_review",
-                        "sidecar_approved": False,
                         "approval_ttl_minutes": None,
-                        "max_sidecars": None,
                         "reason": "Gemini2 lane is degraded; pause it and move backlog work to a healthy owner.",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [
                             {
@@ -6734,9 +6214,10 @@ class ChairmanFlowTests(unittest.TestCase):
                 },
             }
 
-            with (
-                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
-                mock.patch.object(supervisor, "sync_status_pipeline", return_value=True),
+            with mock.patch.object(
+                supervisor,
+                "safe_load_approval_state",
+                return_value={"pending": [], "history": []},
             ):
                 changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
 
@@ -6763,13 +6244,10 @@ class ChairmanFlowTests(unittest.TestCase):
                 json.dumps(
                     {
                         "version": 1,
-                        "decision": "approve_sidecars",
-                        "sidecar_approved": False,
-                        "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
+                        "decision": "operational_review",
+            "approval_ttl_minutes": 45,
                         "reason": "finalize owner should be woken now",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [],
                         "task_actions": [
@@ -6865,9 +6343,7 @@ class ChairmanFlowTests(unittest.TestCase):
             self.assertTrue(changed)
             self.assertIsNone(state["chair_review"]["active_review"])
             events = [json.loads(line) for line in event_queue_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-            self.assertEqual(len(events), 1)
-            self.assertEqual(events[0]["task_id"], "OPX-CM-003")
-            self.assertEqual(events[0]["reason"], "owned_finalize_dispatch")
+            self.assertEqual(events, [])
 
     def test_refresh_chair_review_state_applies_unblock_task_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -6883,12 +6359,9 @@ class ChairmanFlowTests(unittest.TestCase):
                     {
                         "version": 1,
                         "decision": "operational_review",
-                        "sidecar_approved": False,
-                        "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
+            "approval_ttl_minutes": 45,
                         "reason": "blocked parent needs an unblock task",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [],
                         "task_actions": [
@@ -6986,14 +6459,11 @@ class ChairmanFlowTests(unittest.TestCase):
                     {
                         "version": 1,
                         "decision": "operational_review",
-                        "sidecar_approved": False,
-                        "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
+            "approval_ttl_minutes": 45,
                         "reason": "No reassignment improves machine truth.",
                         "blocked_by": [
                             "Shared workspace-baseline blocker keeps the UI-FE wave from typecheck/build completion."
                         ],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [],
                         "task_actions": [],
@@ -7069,14 +6539,11 @@ class ChairmanFlowTests(unittest.TestCase):
                     {
                         "version": 1,
                         "decision": "operational_review",
-                        "sidecar_approved": False,
-                        "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
+            "approval_ttl_minutes": 45,
                         "reason": "Move failing owner off Codex and unblock the blocked parent.",
                         "blocked_by": [
                             "UI-FE-DRV-ONB remains blocked (history_repair); not reassignable while blocked."
                         ],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [],
                         "task_actions": [],
@@ -7193,36 +6660,14 @@ class ChairmanFlowTests(unittest.TestCase):
             preferred_owner="Claude",
         )
 
-    def test_ensure_workspace_baseline_task_dispatch_queues_owner_event(self) -> None:
-        task = {
-            "id": "UI-BASELINE-001",
-            "status": "backlog",
-            "owner": "Claude",
-            "reviewer": "Codex",
-        }
-        state = {}
-
-        with (
-            mock.patch.object(supervisor, "load_status", return_value={"tasks": [task]}),
-            mock.patch.object(supervisor, "chair_dispatch_action_reason", return_value=("Claude", "owned_ready_dispatch")),
-            mock.patch.object(supervisor, "is_agent_dispatch_paused", return_value=False),
-            mock.patch.object(supervisor, "ready_dispatch_settings", return_value={"active_worker_statuses": ["running"]}),
-            mock.patch.object(supervisor, "outstanding_delivery_agent_counts", return_value={}),
-            mock.patch.object(supervisor, "outstanding_delivery_indexes", return_value=(set(), {}, set())),
-            mock.patch.object(supervisor, "build_dispatch_event", return_value={"key": "evt-baseline", "task_id": "UI-BASELINE-001"}),
-            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_event,
-            mock.patch.object(supervisor, "write_activity_log") as write_log,
-        ):
-            changed = supervisor.ensure_workspace_baseline_task_dispatch(
+    def test_workspace_baseline_delivery_is_owned_by_ready_dispatcher(self) -> None:
+        self.assertFalse(
+            supervisor.ensure_workspace_baseline_task_dispatch(
                 {"paths": {"status_file": "ai-status.json"}},
-                state,
+                {},
                 provider_report={},
             )
-
-        self.assertTrue(changed)
-        queue_event.assert_called_once()
-        write_log.assert_called_once()
-        self.assertIn("evt-baseline", state["seen_event_keys"])
+        )
 
     def test_refresh_chair_review_state_applies_resume_parent_task_action(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -7238,12 +6683,9 @@ class ChairmanFlowTests(unittest.TestCase):
                     {
                         "version": 1,
                         "decision": "blocked_task_triage",
-                        "sidecar_approved": False,
-                        "approval_ttl_minutes": 45,
-                        "max_sidecars": 2,
+            "approval_ttl_minutes": 45,
                         "reason": "existing unblock child is already done",
                         "blocked_by": [],
-                        "blocked_sidecar_parents": [],
                         "approval_actions": [],
                         "reassignment_actions": [],
                         "task_actions": [
@@ -7410,8 +6852,10 @@ class ChairmanFlowTests(unittest.TestCase):
         }
         # Gemini is quota-paused; Codex2 is idle.
         state = {
+            "provider_pause_schema": 3,
             "provider_pauses": {
                 "gemini": {
+                    "schema": 3,
                     "kind": "quota",
                     "reason": "QUOTA_EXHAUSTED",
                     "paused_at": "2026-05-19T02:07:48Z",
@@ -7585,12 +7029,15 @@ class ChairmanFlowTests(unittest.TestCase):
             "provider_pauses": {
                 "claude": {
                     "kind": "auth",
+                    "scope": "lane",
+                    "lane_id": "claude",
+                    "schema": 3,
                     "reason": "Invalid authentication credentials",
                     "paused_at": "2026-04-30T12:51:53Z",
                     "resume_at": None,
                 }
             },
-            "quota_paused_agents": {},
+            "provider_pause_schema": 3,
         }
         provider_report = {
             "providers": {
@@ -7619,7 +7066,6 @@ class ChairmanFlowTests(unittest.TestCase):
                     "resume_at": None,
                 }
             },
-            "quota_paused_agents": {},
         }
         provider_report = {"providers": {"claude": {"auth_ready": True}}}
 
@@ -7629,24 +7075,89 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertIn("claude", state["provider_pauses"])
         self.assertTrue(supervisor.is_agent_dispatch_paused(config, state, "claude", provider_report=provider_report))
 
+    def test_identity_auth_pause_clears_after_real_probe_on_current_lane(self) -> None:
+        config = {
+            "agents": {
+                "codex": {"display_name": "Codex", "provider": "codex", "adapter": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2", "adapter": "codex"},
+            }
+        }
+        state = {
+            "provider_pause_schema": 3,
+            "provider_pauses": {
+                "identity:codex:account-b": {
+                    "kind": "auth",
+                    "scope": "identity",
+                    "lane_id": "codex",
+                    "identity_fingerprint": "account-b",
+                    "reason": "Refresh token was revoked",
+                    "paused_at": "2026-08-09T00:00:00Z",
+                    "resume_at": None,
+                }
+            },
+        }
+        provider_report = {
+            "providers": {
+                "codex": {"identity": {"fingerprint": "account-a"}},
+                "codex2": {"identity": {"fingerprint": "account-b"}},
+            }
+        }
+
+        with (
+            mock.patch.object(
+                supervisor, "_provider_auth_recovery_probe", return_value=(True, "inference_ok")
+            ) as probe,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            expired = supervisor.expire_provider_pauses(config, state, provider_report)
+
+        self.assertEqual(expired, ["identity:codex:account-b"])
+        self.assertEqual(probe.call_args.args[1], "codex2")
+        self.assertEqual(state["provider_pauses"], {})
+
+    def test_stale_auth_pause_with_capacity_evidence_is_reclassified(self) -> None:
+        config = {
+            "agents": {"gemini": {"display_name": "Gemini", "provider": "gemini"}},
+            "worker_retry": {"capacity_pause_seconds": 300},
+        }
+        state = {
+            "provider_pause_schema": 3,
+            "provider_pauses": {
+                "gemini": {
+                    "kind": "auth",
+                    "scope": "lane",
+                    "lane_id": "gemini",
+                    "reason": "Eligibility check failed: RESOURCE_EXHAUSTED (code 429)",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                    "resume_at": None,
+                }
+            },
+        }
+
+        with mock.patch.object(supervisor, "write_activity_log"):
+            expired = supervisor.expire_provider_pauses(config, state, {"providers": {}})
+
+        pause = state["provider_pauses"]["gemini"]
+        self.assertEqual(expired, [])
+        self.assertEqual(pause["kind"], "capacity")
+        self.assertEqual(pause["resume_at_source"], "reclassified_capacity")
+        self.assertGreater(pause["resume_at"], datetime.now(timezone.utc).timestamp())
+
     def test_reason_hint_pause_probes_and_clears_after_reset_time(self) -> None:
         config = {"agents": {"codex2": {"display_name": "Codex2", "provider": "codex2"}}}
         state = {
             "provider_pauses": {
                 "codex2": {
                     "kind": "quota",
+                    "scope": "lane",
+                    "lane_id": "codex2",
+                    "schema": 3,
                     "reason": "The worker log ended with repeated usage limit errors and a retry time of Jan 1, 2020 12:58 AM.",
                     "paused_at": "2026-06-28T17:03:39Z",
                     "resume_at": None,
                 }
             },
-            "quota_paused_agents": {
-                "codex2": {
-                    "reason": "The worker log ended with repeated usage limit errors and a retry time of Jan 1, 2020 12:58 AM.",
-                    "paused_at": "2026-06-28T17:03:39Z",
-                    "resume_at": None,
-                }
-            },
+            "provider_pause_schema": 3,
         }
         provider_report = {"providers": {"codex2": {"auth_ready": True}}}
         fresh_report = {"providers": {"codex2": {"installed": True, "auth_ready": True}}}
@@ -7656,7 +7167,6 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(expired, ["codex2"])
         self.assertNotIn("codex2", state["provider_pauses"])
-        self.assertNotIn("codex2", state["quota_paused_agents"])
 
     def test_reason_hint_pause_stays_paused_until_probe_clears_it(self) -> None:
         config = {"agents": {"codex2": {"display_name": "Codex2", "provider": "codex2"}}}
@@ -7737,12 +7247,12 @@ class ChairmanFlowTests(unittest.TestCase):
 
 class WorkerTreeGuardSettingsTests(unittest.TestCase):
     def test_defaults_off_with_canonical_blocking_globs(self) -> None:
-        settings = supervisor.worker_tree_guard_settings({})
+        settings = worker_tree_guard.worker_tree_guard_settings({})
         self.assertFalse(settings["enabled"])
         self.assertFalse(settings["log_only"])
         # All fragile surfaces from branch-strategy.md §11.1.
         for needed in [
-            ".orchestrator/supervisor.py",
+            ".orchestrator/control_plane/runtime/supervisor_runtime.py",
             ".orchestrator/control_plane/**",
             ".orchestrator/skills/**",
             ".orchestrator/templates/*",
@@ -7763,19 +7273,19 @@ class WorkerTreeGuardSettingsTests(unittest.TestCase):
                 }
             }
         }
-        settings = supervisor.worker_tree_guard_settings(config)
+        settings = worker_tree_guard.worker_tree_guard_settings(config)
         self.assertTrue(settings["enabled"])
         self.assertEqual(settings["blocking_globs"], ["my-special-file.txt"])
 
     def test_empty_globs_list_falls_back_to_defaults(self) -> None:
         config = {"branch_strategy": {"worker_tree_guard": {"blocking_globs": []}}}
-        settings = supervisor.worker_tree_guard_settings(config)
-        self.assertIn(".orchestrator/supervisor.py", settings["blocking_globs"])
+        settings = worker_tree_guard.worker_tree_guard_settings(config)
+        self.assertIn(".orchestrator/control_plane/runtime/supervisor_runtime.py", settings["blocking_globs"])
 
 
 class WorkerTreeGuardMatchingTests(unittest.TestCase):
     GLOBS = [
-        ".orchestrator/supervisor.py",
+        ".orchestrator/control_plane/runtime/supervisor_runtime.py",
         ".orchestrator/skills/**",
         ".orchestrator/templates/*",
         ".orchestrator/config*.json",
@@ -7785,25 +7295,25 @@ class WorkerTreeGuardMatchingTests(unittest.TestCase):
 
     def test_exact_file_matches(self) -> None:
         self.assertEqual(
-            supervisor._worker_tree_guard_matches(".orchestrator/supervisor.py", self.GLOBS),
-            ".orchestrator/supervisor.py",
+            worker_tree_guard._worker_tree_guard_matches(".orchestrator/control_plane/runtime/supervisor_runtime.py", self.GLOBS),
+            ".orchestrator/control_plane/runtime/supervisor_runtime.py",
         )
 
     def test_double_star_matches_direct_child(self) -> None:
         self.assertEqual(
-            supervisor._worker_tree_guard_matches(".orchestrator/skills/task-closeout.md", self.GLOBS),
+            worker_tree_guard._worker_tree_guard_matches(".orchestrator/skills/task-closeout.md", self.GLOBS),
             ".orchestrator/skills/**",
         )
 
     def test_double_star_matches_nested_child(self) -> None:
         self.assertEqual(
-            supervisor._worker_tree_guard_matches("docs/ops/branch-strategy.md", self.GLOBS),
+            worker_tree_guard._worker_tree_guard_matches("docs/ops/branch-strategy.md", self.GLOBS),
             "docs/**",
         )
 
     def test_single_star_matches_one_level_only(self) -> None:
         self.assertEqual(
-            supervisor._worker_tree_guard_matches(".orchestrator/templates/wakeup.txt", self.GLOBS),
+            worker_tree_guard._worker_tree_guard_matches(".orchestrator/templates/wakeup.txt", self.GLOBS),
             ".orchestrator/templates/*",
         )
 
@@ -7813,12 +7323,12 @@ class WorkerTreeGuardMatchingTests(unittest.TestCase):
                 # docs-site is outside the docs/** blocking pattern when
                 # treated as a separate top-level directory.
                 self.assertIsNone(
-                    supervisor._worker_tree_guard_matches(path, self.GLOBS)
+                    worker_tree_guard._worker_tree_guard_matches(path, self.GLOBS)
                 )
 
     def test_unrelated_paths_do_not_match(self) -> None:
         self.assertIsNone(
-            supervisor._worker_tree_guard_matches("apps/driver/src/index.tsx", self.GLOBS)
+            worker_tree_guard._worker_tree_guard_matches("apps/driver/src/index.tsx", self.GLOBS)
         )
 
 
@@ -7830,7 +7340,7 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
                     "enabled": True,
                     "log_only": log_only,
                     "blocking_globs": [
-                        ".orchestrator/supervisor.py",
+                        ".orchestrator/control_plane/runtime/supervisor_runtime.py",
                         ".orchestrator/skills/**",
                         "docs/**",
                     ],
@@ -7846,23 +7356,23 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
         return proc
 
     def test_disabled_returns_none(self) -> None:
-        result = supervisor.check_worker_tree_guard({}, reason="owned_in_progress_dispatch")
+        result = worker_tree_guard.check_worker_tree_guard({}, reason="owned_in_progress_dispatch")
         self.assertIsNone(result)
 
     def test_skip_reason_owned_finalize_dispatch_returns_none(self) -> None:
         with mock.patch.object(
-            supervisor.subprocess, "run", return_value=self._porcelain([".orchestrator/supervisor.py"])
+            worker_tree_guard.subprocess, "run", return_value=self._porcelain([".orchestrator/control_plane/runtime/supervisor_runtime.py"])
         ):
-            result = supervisor.check_worker_tree_guard(
+            result = worker_tree_guard.check_worker_tree_guard(
                 self._enabled_config(), reason="owned_finalize_dispatch"
             )
         self.assertIsNone(result)
 
     def test_dirty_fragile_surface_returns_block_payload(self) -> None:
         with mock.patch.object(
-            supervisor.subprocess, "run", return_value=self._porcelain([".orchestrator/skills/foo.md"])
+            worker_tree_guard.subprocess, "run", return_value=self._porcelain([".orchestrator/skills/foo.md"])
         ):
-            result = supervisor.check_worker_tree_guard(
+            result = worker_tree_guard.check_worker_tree_guard(
                 self._enabled_config(), reason="owned_in_progress_dispatch"
             )
         self.assertIsNotNone(result)
@@ -7872,22 +7382,22 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
 
     def test_dirty_only_runtime_state_returns_none(self) -> None:
         with mock.patch.object(
-            supervisor.subprocess,
+            worker_tree_guard.subprocess,
             "run",
             return_value=self._porcelain(["ai-status.json", "current-work.md"]),
         ):
-            result = supervisor.check_worker_tree_guard(
+            result = worker_tree_guard.check_worker_tree_guard(
                 self._enabled_config(), reason="owned_in_progress_dispatch"
             )
         self.assertIsNone(result)
 
     def test_log_only_mode_carries_flag_through(self) -> None:
         with mock.patch.object(
-            supervisor.subprocess,
+            worker_tree_guard.subprocess,
             "run",
-            return_value=self._porcelain([".orchestrator/supervisor.py"]),
+            return_value=self._porcelain([".orchestrator/control_plane/runtime/supervisor_runtime.py"]),
         ):
-            result = supervisor.check_worker_tree_guard(
+            result = worker_tree_guard.check_worker_tree_guard(
                 self._enabled_config(log_only=True), reason="owned_in_progress_dispatch"
             )
         self.assertIsNotNone(result)
@@ -7898,8 +7408,8 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
         proc.returncode = 128
         proc.stdout = ""
         proc.stderr = "fatal: not a git repository"
-        with mock.patch.object(supervisor.subprocess, "run", return_value=proc):
-            result = supervisor.check_worker_tree_guard(
+        with mock.patch.object(worker_tree_guard.subprocess, "run", return_value=proc):
+            result = worker_tree_guard.check_worker_tree_guard(
                 self._enabled_config(), reason="owned_in_progress_dispatch"
             )
         self.assertIsNone(result, "guard must not block on its own diagnostic failure")
@@ -7909,141 +7419,12 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
         proc.returncode = 0
         proc.stdout = "R  old/path.md -> .orchestrator/skills/renamed.md"
         proc.stderr = ""
-        with mock.patch.object(supervisor.subprocess, "run", return_value=proc):
-            result = supervisor.check_worker_tree_guard(
+        with mock.patch.object(worker_tree_guard.subprocess, "run", return_value=proc):
+            result = worker_tree_guard.check_worker_tree_guard(
                 self._enabled_config(), reason="owned_in_progress_dispatch"
             )
         self.assertIsNotNone(result)
         self.assertEqual(result["dirty_paths"], [".orchestrator/skills/renamed.md"])
-
-
-
-
-class DispatchCooldownTests(unittest.TestCase):
-    """Cooldown protects freshly-dispatched workers from voluntary supersede.
-
-    See `worker_in_dispatch_cooldown` in supervisor.py. Cooldown is
-    measured against the timestamp embedded in the worker run_id; for
-    workers whose run_id has no parseable timestamp (legacy / synthetic
-    fixtures), cooldown is bypassed so the historical supersede behaviour
-    is preserved.
-    """
-
-    def test_parse_returns_none_for_short_slug(self) -> None:
-        self.assertIsNone(supervisor.parse_worker_dispatched_at("run-1"))
-        self.assertIsNone(supervisor.parse_worker_dispatched_at(None))
-        self.assertIsNone(supervisor.parse_worker_dispatched_at(""))
-
-    def test_parse_extracts_timestamp_from_production_run_id(self) -> None:
-        dt = supervisor.parse_worker_dispatched_at("codex-20260526T043357Z-d168b9f0")
-        self.assertIsNotNone(dt)
-        from datetime import datetime, timezone
-        self.assertEqual(
-            dt, datetime(2026, 5, 26, 4, 33, 57, tzinfo=timezone.utc)
-        )
-
-    def test_cooldown_false_when_disabled(self) -> None:
-        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
-        self.assertFalse(supervisor.worker_in_dispatch_cooldown(worker, 0))
-        self.assertFalse(supervisor.worker_in_dispatch_cooldown(worker, -1))
-
-    def test_cooldown_false_for_non_running_worker(self) -> None:
-        from datetime import datetime, timezone
-        worker = {"status": "stalled", "run_id": "codex-20260526T043357Z-aaa"}
-        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
-        self.assertFalse(
-            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
-            "stalled workers must remain recoverable via supersede",
-        )
-
-    def test_cooldown_true_for_fresh_running_worker(self) -> None:
-        from datetime import datetime, timezone
-        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
-        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
-        self.assertTrue(
-            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
-            "running worker dispatched 3s ago is within 300s cooldown",
-        )
-
-    def test_cooldown_false_for_stale_worker(self) -> None:
-        from datetime import datetime, timezone
-        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
-        now = datetime(2026, 5, 26, 5, 30, 0, tzinfo=timezone.utc)
-        self.assertFalse(
-            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
-            "running worker dispatched 56 min ago is outside 300s cooldown",
-        )
-
-    def test_cooldown_false_when_runid_has_no_timestamp(self) -> None:
-        from datetime import datetime, timezone
-        worker = {"status": "running", "run_id": "run-active"}
-        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
-        self.assertFalse(
-            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
-            "synthetic test fixtures without timestamped run_ids must bypass cooldown",
-        )
-
-    def test_ready_dispatch_settings_default_cooldown(self) -> None:
-        settings = supervisor.ready_dispatch_settings({})
-        self.assertEqual(settings.get("dispatch_cooldown_seconds"), 300)
-
-    def test_ready_dispatch_settings_honors_explicit_zero(self) -> None:
-        settings = supervisor.ready_dispatch_settings({
-            "ready_dispatcher": {"dispatch_cooldown_seconds": 0}
-        })
-        self.assertEqual(settings.get("dispatch_cooldown_seconds"), 0)
-
-
-
-
-class PruneDoneHandoffsTests(unittest.TestCase):
-    """`prune_done_handoffs` bounds ai-status.json's handoffs audit-log tail.
-
-    Without this prune the file grew to ~9 MB / 17k entries during the
-    2026-05-26 incident, making the dashboard fetch unusably slow. See
-    feedback_ai_status_handoff_bloat.
-    """
-
-    def test_noop_under_keep_threshold(self) -> None:
-        s = {"handoffs": [{"status": "done"}] * 100}
-        supervisor.prune_done_handoffs(s, keep=500)
-        self.assertEqual(len(s["handoffs"]), 100)
-
-    def test_pending_entries_always_preserved(self) -> None:
-        # 2000 done + 5 pending; even with keep=10, pending entries survive.
-        handoffs = (
-            [{"status": "done", "task_id": f"D{i}"} for i in range(2000)]
-            + [{"status": "pending", "task_id": f"P{i}"} for i in range(5)]
-        )
-        s = {"handoffs": list(handoffs)}
-        supervisor.prune_done_handoffs(s, keep=10)
-        kinds = [x.get("status") for x in s["handoffs"]]
-        self.assertEqual(kinds.count("pending"), 5,
-                         "all pending handoffs must survive prune")
-        self.assertEqual(kinds.count("done"), 10,
-                         "only the last `keep` done entries survive")
-
-    def test_keeps_most_recent_done_by_position(self) -> None:
-        # done entries are appended chronologically; the prune must keep the
-        # tail, not the head, so audit history reflects what *just* happened.
-        handoffs = [{"status": "done", "task_id": f"T{i}"} for i in range(1000)]
-        s = {"handoffs": list(handoffs)}
-        supervisor.prune_done_handoffs(s, keep=3)
-        self.assertEqual(
-            [x["task_id"] for x in s["handoffs"]],
-            ["T997", "T998", "T999"],
-        )
-
-    def test_missing_handoffs_key_is_safe(self) -> None:
-        s = {}
-        supervisor.prune_done_handoffs(s, keep=500)  # must not raise
-        self.assertNotIn("handoffs", s)
-
-    def test_non_list_handoffs_is_safe(self) -> None:
-        # Bad data type — defensive against malformed input.
-        s = {"handoffs": "not-a-list"}
-        supervisor.prune_done_handoffs(s, keep=500)
-        self.assertEqual(s["handoffs"], "not-a-list")  # unchanged
 
 
 
@@ -8291,6 +7672,19 @@ class ProviderReportPreloadTests(unittest.TestCase):
 
 
 class WorkerProcessReaperTests(unittest.TestCase):
+    def test_terminate_worker_pid_stops_the_entire_process_group(self) -> None:
+        process = subprocess.Popen(
+            ["sh", "-c", "sleep 30 & wait"],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self.addCleanup(lambda: process.poll() is None and supervisor.terminate_worker_pid(process.pid))
+
+        self.assertTrue(supervisor.terminate_worker_pid(process.pid))
+        process.wait(timeout=2)
+        self.assertFalse(supervisor.process_group_is_alive(process.pid))
+
     def test_pid_is_alive_reaps_zombie_child(self) -> None:
         with mock.patch.object(supervisor.Path, "read_text", return_value="123 (codex) Z 1 1 1"), \
              mock.patch.object(supervisor.os, "waitpid", return_value=(123, 0)) as waitpid, \
@@ -8311,98 +7705,6 @@ class WorkerProcessReaperTests(unittest.TestCase):
 
         self.assertEqual(count, 2)
         self.assertEqual(waitpid.call_count, 3)
-class PruneDoneTasksTests(unittest.TestCase):
-    """`prune_done_tasks` bounds ai-status.json's tasks array.
-
-    Without this prune the array accumulated 646 done tasks / ~1.0 MB by the
-    2026-05-30 incident, pushing ai-status.json past the 256 KB cap the
-    chair/coordination worker's Read tool enforces. See
-    feedback_ai_status_handoff_bloat.
-    """
-
-    def test_noop_under_keep_threshold(self) -> None:
-        s = {"tasks": [{"id": f"D{i}", "status": "done"} for i in range(100)]}
-        supervisor.prune_done_tasks(s, keep=150)
-        self.assertEqual(len(s["tasks"]), 100)
-        self.assertNotIn("archived_task_ids", s)
-
-    def test_active_tasks_always_preserved(self) -> None:
-        tasks = (
-            [{"id": f"D{i}", "status": "done"} for i in range(2000)]
-            + [{"id": f"A{i}", "status": "in_progress"} for i in range(5)]
-            + [{"id": f"B{i}", "status": "todo"} for i in range(5)]
-        )
-        s = {"tasks": list(tasks)}
-        supervisor.prune_done_tasks(s, keep=10)
-        statuses = [t["status"] for t in s["tasks"]]
-        self.assertEqual(statuses.count("in_progress"), 5)
-        self.assertEqual(statuses.count("todo"), 5)
-        self.assertEqual(statuses.count("done"), 10, "only the last `keep` done tasks survive")
-
-    def test_keeps_most_recent_done_and_preserves_order(self) -> None:
-        # Interleave active + done; prune must keep the done *tail* and leave the
-        # relative order of surviving entries intact.
-        tasks = []
-        for i in range(1000):
-            tasks.append({"id": f"T{i}", "status": "done"})
-            if i % 100 == 0:
-                tasks.append({"id": f"ACT{i}", "status": "todo"})
-        s = {"tasks": list(tasks)}
-        supervisor.prune_done_tasks(s, keep=3)
-        done_ids = [t["id"] for t in s["tasks"] if t["status"] == "done"]
-        self.assertEqual(done_ids, ["T997", "T998", "T999"])
-        # all active survive, in original order
-        active_ids = [t["id"] for t in s["tasks"] if t["status"] == "todo"]
-        self.assertEqual(active_ids, [f"ACT{i}" for i in range(0, 1000, 100)])
-
-    def test_dropped_ids_recorded_in_archive_without_duplicates(self) -> None:
-        s = {
-            "tasks": [{"id": f"D{i}", "status": "done"} for i in range(10)],
-            "archived_task_ids": ["D0"],  # already archived once
-        }
-        supervisor.prune_done_tasks(s, keep=3)
-        # D0..D6 dropped; D0 not duplicated; recent D7..D9 kept in tasks.
-        self.assertEqual([t["id"] for t in s["tasks"]], ["D7", "D8", "D9"])
-        self.assertEqual(s["archived_task_ids"].count("D0"), 1)
-        for i in range(7):
-            self.assertIn(f"D{i}", s["archived_task_ids"])
-
-    def test_missing_and_non_list_tasks_are_safe(self) -> None:
-        empty: dict = {}
-        supervisor.prune_done_tasks(empty, keep=150)
-        self.assertNotIn("tasks", empty)
-        bad = {"tasks": "not-a-list"}
-        supervisor.prune_done_tasks(bad, keep=150)
-        self.assertEqual(bad["tasks"], "not-a-list")
-
-
-class PruneBlockersTests(unittest.TestCase):
-    """`prune_blockers` keeps every open blocker plus the recent resolved tail."""
-
-    def test_open_blockers_always_preserved(self) -> None:
-        blockers = (
-            [{"task_id": f"R{i}", "status": "resolved"} for i in range(500)]
-            + [{"task_id": "OPEN1", "status": "open"}]
-        )
-        s = {"blockers": list(blockers)}
-        supervisor.prune_blockers(s, keep=10)
-        statuses = [b["status"] for b in s["blockers"]]
-        self.assertEqual(statuses.count("open"), 1, "open blockers must survive prune")
-        self.assertEqual(statuses.count("resolved"), 10)
-
-    def test_keeps_most_recent_resolved(self) -> None:
-        s = {"blockers": [{"task_id": f"R{i}", "status": "resolved"} for i in range(100)]}
-        supervisor.prune_blockers(s, keep=2)
-        self.assertEqual([b["task_id"] for b in s["blockers"]], ["R98", "R99"])
-
-    def test_noop_under_threshold_and_safe_on_bad_input(self) -> None:
-        s = {"blockers": [{"status": "resolved"}] * 5}
-        supervisor.prune_blockers(s, keep=100)
-        self.assertEqual(len(s["blockers"]), 5)
-        empty: dict = {}
-        supervisor.prune_blockers(empty, keep=100)  # must not raise
-        self.assertNotIn("blockers", empty)
-
 
 if __name__ == "__main__":
     unittest.main()
@@ -8420,8 +7722,8 @@ class BreakFullDeadlockTests(unittest.TestCase):
             "workers": {},
             "queue": {"events": {}},
             "chair_review": {"blocked": {"reason": "no lane"}},
-            "provider_pauses": {"claude2": {"kind": "auth", "resume_at": None, "paused_at": supervisor.utc_now()}},
-            "quota_paused_agents": {},
+            "provider_pause_schema": 3,
+            "provider_pauses": {"claude2": {"kind": "auth", "scope": "lane", "lane_id": "claude2", "schema": 3, "resume_at": None, "paused_at": supervisor.utc_now()}},
         }
 
     _STATUS = {"tasks": [{"id": "T1", "status": "backlog"}]}
@@ -8460,7 +7762,6 @@ class BreakFullDeadlockTests(unittest.TestCase):
         state = self._wedged_state()
         state["chair_review"] = {}
         state["provider_pauses"] = {}
-        state["quota_paused_agents"] = {}
         with mock.patch.object(supervisor, "_force_recovery_probe") as probe:
             changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
         self.assertFalse(changed)
@@ -8647,6 +7948,134 @@ class GovernanceRecursionGuardTests(unittest.TestCase):
         self.assertIn("governance_recursion_blocked", logged_types)
 
 
+class ReviewOverflowTests(unittest.TestCase):
+    def test_review_overflow_claims_for_preferred_idle_reviewer_only(self) -> None:
+        config = {
+            "ready_dispatcher": {
+                "review_overflow": {
+                    "enabled": True,
+                    "preferred_lanes": ["gemini", "gemini2", "codex", "codex2", "claude"],
+                }
+            },
+            "agents": {
+                "claude": {"display_name": "Claude", "provider": "claude"},
+                "gemini": {"display_name": "Gemini", "provider": "gemini"},
+                "gemini2": {"display_name": "Gemini2", "provider": "gemini2"},
+            },
+        }
+        base = {
+            "enabled": True,
+            "availability_first": False,
+            "allow_any_idle_lane": False,
+            "require_owner_higher_priority_load": True,
+        }
+        settings = supervisor.helper_claim_settings_for_task(config, base, "review", {"review"})
+        task = {"id": "REV-1", "status": "review", "owner": "Gemini2", "reviewer": "Claude"}
+
+        with mock.patch.object(supervisor, "load_provider_report", return_value={}):
+            plan = supervisor.proactive_claim_plan_for_idle_agent(
+                config,
+                task=task,
+                task_map={"REV-1": task},
+                idle_agent_name="Gemini",
+                idle_agent_names=["Gemini", "Gemini2"],
+                agent_loads={"Claude": [0], "Gemini": [], "Gemini2": []},
+                helper_settings=settings,
+                review_statuses={"review"},
+                finalize_statuses={"review_approved"},
+                dependency_done_statuses={"done"},
+                state={},
+            )
+
+        self.assertEqual(plan["new_owner"], "Gemini2")
+        self.assertEqual(plan["new_reviewer"], "Gemini")
+
+    def test_review_overflow_does_not_change_owner_task_policy(self) -> None:
+        config = {"ready_dispatcher": {"review_overflow": {"enabled": True}}}
+        base = {"availability_first": False, "require_owner_higher_priority_load": True}
+
+        self.assertIs(
+            supervisor.helper_claim_settings_for_task(config, base, "todo", {"review"}),
+            base,
+        )
+
+    def test_dispatcher_overflows_two_reviews_to_two_gemini_slots(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "review_statuses": ["review"],
+                "active_worker_statuses": ["running"],
+                "max_dispatches_per_tick": 3,
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"claude": 1, "gemini": 2, "gemini2": 2},
+                "lane_priority": ["gemini", "gemini2", "claude"],
+                "helper_claim": {
+                    "enabled": True,
+                    "availability_first": False,
+                    "allow_any_idle_lane": False,
+                    "require_owner_higher_priority_load": True,
+                },
+                "review_overflow": {
+                    "enabled": True,
+                    "preferred_lanes": ["gemini", "gemini2", "claude"],
+                },
+            },
+            "agents": {
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+                "gemini": {"id": "gemini", "display_name": "Gemini", "provider": "gemini"},
+                "gemini2": {"id": "gemini2", "display_name": "Gemini2", "provider": "gemini2"},
+            },
+            "providers": {},
+        }
+        status = {
+            "tasks": [
+                {"id": "REV-ACTIVE", "status": "review", "owner": "Gemini", "reviewer": "Claude"},
+                {"id": "REV-ONE", "status": "review", "owner": "Gemini2", "reviewer": "Claude"},
+                {"id": "REV-TWO", "status": "review", "owner": "Codex", "reviewer": "Claude"},
+            ]
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {
+                "claude-active": {
+                    "run_id": "claude-active",
+                    "task_id": "REV-ACTIVE",
+                    "agent_id": "claude",
+                    "provider": "claude",
+                    "status": "running",
+                    "request_snapshot": {"reason": "review_ready_dispatch"},
+                }
+            },
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as enqueue,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
+
+        self.assertTrue(changed)
+        self.assertEqual(persist.call_count, 2)
+        self.assertEqual(enqueue.call_count, 2)
+        self.assertEqual(
+            {call.kwargs["new_reviewer"] for call in persist.call_args_list},
+            {"Gemini"},
+        )
+        self.assertEqual(
+            {call.kwargs["new_owner"] for call in persist.call_args_list},
+            {"Gemini2", "Codex"},
+        )
+
+
 class ProactiveReassignmentAntiFlapTests(unittest.TestCase):
     """Stop the duplicate-empty-branch thrash without blocking the first claim.
 
@@ -8811,6 +8240,73 @@ class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
         supervisor._provision_worktree_node_modules(root, dest)
         self.assertFalse((dest / "node_modules").is_symlink())
 
+    def test_provisioned_symlinks_are_ignored_by_git(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        _git(root, "init")
+        (root / ".gitignore").write_text("node_modules\n", encoding="utf-8")
+        (root / "node_modules").mkdir()
+        (root / "apps" / "foo" / "node_modules").mkdir(parents=True)
+        destination = root / "worker"
+        (destination / "apps" / "foo").mkdir(parents=True)
+
+        supervisor._provision_worktree_node_modules(root, destination)
+
+        for relative_path in ("node_modules", "apps/foo/node_modules"):
+            result = subprocess.run(
+                ["git", "check-ignore", "-q", relative_path],
+                cwd=destination,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class CanonicalEvidencePathTests(unittest.TestCase):
+    def test_worker_evidence_uses_canonical_state_root(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            state_path = root / ".orchestrator" / "state.json"
+            state_path.parent.mkdir(parents=True)
+            state_path.write_text("{}", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "state_file": str(state_path),
+                }
+            }
+
+            evidence_ref = supervisor.record_worker_evidence(
+                config,
+                {"run_id": "run-1", "task_id": "TASK-1", "provider": "codex"},
+                "Worker exited before the task reached a terminal status.",
+            )
+
+            path = root / ".orchestrator" / "evidence" / "run-1.json"
+            self.assertEqual(evidence_ref, ".orchestrator/evidence/run-1.json")
+            self.assertTrue(path.exists())
+
+
+class WorkerLogCursorTests(unittest.TestCase):
+    def test_reads_only_new_log_bytes_after_initial_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "worker.log"
+            log_path.write_text('{"session_id":"session-1"}\n', encoding="utf-8")
+            worker = {"log_path": str(log_path)}
+
+            supervisor.update_from_log({}, worker)
+
+            first_offset = worker["log_offset"]
+            self.assertEqual(worker["session_id"], "session-1")
+            log_path.write_text(
+                log_path.read_text(encoding="utf-8") + "https://github.com/acme/project/pull/42\n",
+                encoding="utf-8",
+            )
+            supervisor.update_from_log({}, worker)
+
+            self.assertGreater(worker["log_offset"], first_offset)
+            self.assertEqual(worker["pr_url"], "https://github.com/acme/project/pull/42")
+
 
 class AntigravityModelRotationTests(unittest.TestCase):
     """Antigravity lanes auto-rotate Gemini <-> fallback model instead of pausing
@@ -8918,6 +8414,35 @@ class AntigravityModelRotationTests(unittest.TestCase):
             cfg, state, {}, self._worker(), {"kind": "capacity"}, "hit your limit", authorized=True
         )
         self.assertFalse(handled)
+
+    def test_dispatch_defers_when_both_rotation_pools_are_cooling(self) -> None:
+        supervisor.record_rotation_cooldown(self.config, "gemini", "gemini", 200.0)
+        supervisor.record_rotation_cooldown(self.config, "gemini", "claude", 150.0)
+
+        cooldown = supervisor.antigravity_dispatch_cooldown(self.config, "gemini", now=100.0)
+
+        self.assertIsNotNone(cooldown)
+        assert cooldown is not None
+        self.assertEqual(cooldown[0], 150.0)
+        self.assertIn("queue delivery deferred", cooldown[1])
+
+    def test_queue_does_not_retry_a_paused_target_lane(self) -> None:
+        state: dict = {}
+        supervisor.pause_provider(state, "gemini", "cooling", kind="capacity", reset_seconds=900)
+        event = {
+            "event_id": "evt-paused",
+            "target_agent": "Gemini",
+            "message": "review task",
+            "task_id": "T-1",
+        }
+        with mock.patch.object(supervisor, "load_event_queue", return_value=[event]), \
+             mock.patch.object(supervisor, "load_status", return_value={"tasks": []}), \
+             mock.patch.object(supervisor, "start_worker_for_request") as start:
+            changed = supervisor.process_queue(self.config, state, {"providers": {}})
+
+        self.assertTrue(changed)
+        self.assertEqual(supervisor.queue_status(state, "evt-paused")["status"], "pending")
+        start.assert_not_called()
 
     def test_skips_unauthorized_and_wrong_kind(self) -> None:
         state: dict = {}
@@ -9197,3 +8722,45 @@ class SupervisorTickContainmentTests(unittest.TestCase):
 
         self.assertEqual(calls, 1)
         self.assertEqual(code, 128 + 15)
+
+
+class IdentityScopedPauseTests(unittest.TestCase):
+    def test_antigravity_quota_probe_clears_pause_before_reset_hint(self) -> None:
+        config = {"agents": {"gemini": {"provider": "gemini", "adapter": "antigravity"}}, "providers": {"gemini": {"antigravity": {"cli": "agy"}}}, "supervisor": {"provider_quota_recovery_probe_cooldown_seconds": 1}}
+        state = {"provider_pause_schema": 3, "provider_pauses": {"gemini": {"kind": "quota", "scope": "lane", "lane_id": "gemini", "schema": 3, "reason": "quota", "resume_at": 9999999999, "resume_at_source": "reason_hint"}}}
+        with mock.patch.object(supervisor, "_antigravity_quota_recovery_probe", return_value=(True, "inference_ok")), mock.patch.object(supervisor, "write_activity_log"):
+            self.assertEqual(supervisor.expire_provider_pauses(config, state, {"providers": {}}), ["gemini"])
+        self.assertEqual(state["provider_pauses"], {})
+    def test_shared_quota_pool_pauses_both_lanes(self) -> None:
+        identity = {"fingerprint": "same", "quota_pool": "codex:same:terra"}
+        report = {
+            "providers": {
+                "codex": {"auth_ready": True, "identity": identity},
+                "codex2": {"auth_ready": True, "identity": identity},
+            }
+        }
+        config = {
+            "agents": {
+                "codex": {"provider": "codex"},
+                "codex2": {"provider": "codex2"},
+            }
+        }
+        state: dict[str, object] = {}
+        supervisor.pause_provider(state, "codex", "quota exhausted", kind="quota", reset_seconds=60, identity=identity)
+        self.assertTrue(supervisor.is_agent_dispatch_paused(config, state, "codex2", provider_report=report))
+
+    def test_new_identity_does_not_inherit_old_quota_pause(self) -> None:
+        old = {"fingerprint": "old", "quota_pool": "codex:old:terra"}
+        new = {"fingerprint": "new", "quota_pool": "codex:new:terra"}
+        config = {"agents": {"codex": {"provider": "codex"}}}
+        state: dict[str, object] = {}
+        supervisor.pause_provider(state, "codex", "quota exhausted", kind="quota", reset_seconds=60, identity=old)
+        self.assertFalse(
+            supervisor.is_agent_dispatch_paused(
+                config, state, "codex", provider_report={"providers": {"codex": {"auth_ready": True, "identity": new}}}
+            )
+        )
+
+    def test_suspended_approval_does_not_consume_execution_capacity(self) -> None:
+        state = {"workers": {"one": {"agent_id": "claude", "status": "suspended_approval"}}}
+        self.assertEqual(supervisor.active_worker_agent_counts(state, {"suspended_approval"}), {})

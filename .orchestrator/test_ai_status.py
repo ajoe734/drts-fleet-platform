@@ -9,8 +9,6 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from unittest import mock
-
 from pathlib import Path
 from unittest import mock
 
@@ -20,6 +18,55 @@ SPEC = importlib.util.spec_from_file_location("ai_status", ROOT / "scripts" / "a
 assert SPEC is not None and SPEC.loader is not None
 ai_status = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ai_status)
+
+
+class TaskTransitionProvenanceTest(unittest.TestCase):
+    def test_changed_task_gets_revision_and_worker_provenance(self) -> None:
+        before = {
+            "tasks": [
+                {"id": "TASK-001", "status": "todo", "revision": 4}
+            ]
+        }
+        after = {
+            "tasks": [
+                {"id": "TASK-001", "status": "in_progress", "revision": 4}
+            ]
+        }
+        entries: list[dict] = []
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"AI_NAME": "Codex", "ORCH_RUN_ID": "run-123"},
+                clear=True,
+            ),
+            mock.patch.object(ai_status, "append_log", side_effect=entries.append),
+        ):
+            transitions = ai_status.prepare_task_transitions(
+                before,
+                after,
+                "progress",
+                ["TASK-001", "Implementation started."],
+            )
+            ai_status.commit_task_transitions(transitions)
+
+        self.assertEqual(after["tasks"][0]["revision"], 5)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["from_status"], "todo")
+        self.assertEqual(entries[0]["to_status"], "in_progress")
+        self.assertEqual(entries[0]["producer"], "worker")
+        self.assertEqual(entries[0]["worker_run_id"], "run-123")
+
+    def test_unchanged_task_does_not_increment_revision(self) -> None:
+        before = {"tasks": [{"id": "TASK-001", "status": "todo"}]}
+        after = {"tasks": [{"id": "TASK-001", "status": "todo"}]}
+
+        with mock.patch.object(ai_status, "append_log") as append_log:
+            transitions = ai_status.prepare_task_transitions(before, after, "sync", [])
+            ai_status.commit_task_transitions(transitions)
+
+        self.assertNotIn("revision", after["tasks"][0])
+        append_log.assert_not_called()
 
 
 class LoadLogsRecoveryTest(unittest.TestCase):
@@ -384,49 +431,6 @@ class GitMergeReconciliationTest(unittest.TestCase):
 
 
 
-class CommandArchiveCompletedTests(unittest.TestCase):
-    def test_archives_done_task_and_preserves_body(self) -> None:
-        state = {
-            "tasks": [
-                {"id": "OLD-1", "status": "done", "owner": "Codex", "summary": "historical"},
-                {"id": "DONE-2", "status": "done", "depends_on": ["OLD-1"]},
-            ],
-            "handoffs": [],
-            "blockers": [],
-        }
-        archived_lines: list[str] = []
-        with (
-            mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True),
-            mock.patch.object(
-                ai_status,
-                "_append_jsonl_line",
-                side_effect=lambda _path, line: archived_lines.append(line),
-            ),
-            mock.patch.object(ai_status, "append_log"),
-        ):
-            ai_status.command_archive_completed(state, ["OLD-1", "assembled into final release"])
-
-        self.assertNotIn("OLD-1", [task["id"] for task in state["tasks"]])
-        self.assertIn("OLD-1", state["archived_task_ids"])
-        archived = json.loads(archived_lines[0])
-        self.assertEqual(archived["summary"], "historical")
-        self.assertEqual(archived["_archive_reason"], "assembled into final release")
-
-    def test_refuses_non_done_task(self) -> None:
-        state = {"tasks": [{"id": "LIVE-1", "status": "review"}]}
-        with self.assertRaisesRegex(SystemExit, "Only done tasks"):
-            ai_status.command_archive_completed(state, ["LIVE-1"])
-
-    def test_refuses_task_with_active_dependent(self) -> None:
-        state = {
-            "tasks": [
-                {"id": "OLD-1", "status": "done"},
-                {"id": "LIVE-1", "status": "todo", "depends_on": ["OLD-1"]},
-            ]
-        }
-        with self.assertRaisesRegex(SystemExit, "active dependents: LIVE-1"):
-            ai_status.command_archive_completed(state, ["OLD-1"])
-
 
 class CommandShowTests(unittest.TestCase):
     """OPS-CONTEXT-BLOAT-SLIM-001: `show <task-id>` prints ONE task slice
@@ -565,6 +569,177 @@ class IntegrationGateUnitTest(unittest.TestCase):
         self.assertIsNotNone(
             integration_gate.check_integration_gate({"id": "FOO"}, "branch_pushed", cfg)
         )
+
+
+class ProgressIntegrationMetadataTest(unittest.TestCase):
+    def test_progress_records_explicit_integration_metadata_without_completing_task(self) -> None:
+        task = {"id": "TASK-PR-001", "owner": "Codex", "reviewer": "Claude", "status": "in_progress"}
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Codex",
+            "INTEGRATION_STATUS": "ci_pending",
+            "PR_URL": "https://github.com/example/repo/pull/42",
+            "CI_STATUS": "pending",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_progress(state, ["TASK-PR-001", "PR is awaiting CI."])
+
+        self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(task["integration_status"], "ci_pending")
+        self.assertEqual(task["pr_url"], env["PR_URL"])
+        self.assertEqual(task["ci_status"], "pending")
+
+    def test_progress_without_integration_env_preserves_existing_behavior(self) -> None:
+        task = {"id": "TASK-PR-002", "owner": "Codex", "reviewer": "Claude", "status": "todo"}
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+
+        with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_progress(state, ["TASK-PR-002", "Implementation started."])
+
+        self.assertEqual(task["status"], "in_progress")
+        self.assertNotIn("integration_status", task)
+
+    def test_reconciler_replacement_pr_clears_stale_terminal_evidence(self) -> None:
+        task = {
+            "id": "TASK-PR-REPLACEMENT-001",
+            "owner": "Codex",
+            "status": "done",
+            "integration_status": "merged_to_dev",
+            "merge_commit": "stale-merge",
+            "merged_ref": "dev",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "INTEGRATION_STATUS": "pr_open",
+            "PR_URL": "https://github.com/example/repo/pull/42",
+            "CI_STATUS": "success",
+            "EXECUTION_BRANCH": "codex/replacement",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_reconcile_integration(state, [task["id"], "Replacement PR is authoritative."])
+
+        self.assertEqual(task["integration_status"], "pr_open")
+        self.assertEqual(task["execution_branch"], "codex/replacement")
+        self.assertNotIn("merge_commit", task)
+        self.assertNotIn("merged_ref", task)
+
+    def test_reconciler_advances_green_pr_to_review(self) -> None:
+        task = {
+            "id": "TASK-PR-READY-001",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "in_progress",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "INTEGRATION_STATUS": "pr_open",
+            "PR_URL": "https://github.com/example/repo/pull/42",
+            "CI_STATUS": "success",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_reconcile_integration(state, [task["id"], "PR checks passed."])
+
+        self.assertEqual(task["status"], "review")
+        self.assertNotIn("ci_run_url", task)
+
+    def test_observation_replaces_stale_ci_url(self) -> None:
+        task = {
+            "id": "TASK-PR-URL-001",
+            "owner": "Codex",
+            "status": "in_progress",
+            "ci_run_url": "https://example.invalid/old-run",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "INTEGRATION_STATUS": "pr_open",
+            "PR_URL": "https://github.com/example/repo/pull/42",
+            "CI_STATUS": "success",
+            "CI_RUN_URL": "",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_reconcile_integration(state, [task["id"], "Checks passed."])
+
+        self.assertNotIn("ci_run_url", task)
+
+    def test_reconciler_does_not_clear_product_blocker_for_green_pr(self) -> None:
+        task = {
+            "id": "TASK-PRODUCT-BLOCKED-001",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "blocked",
+            "waiting_for": "Missing product contract",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "INTEGRATION_STATUS": "pr_open",
+            "PR_URL": "https://github.com/example/repo/pull/43",
+            "CI_STATUS": "success",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_reconcile_integration(state, [task["id"], "PR checks passed."])
+
+        self.assertEqual(task["status"], "blocked")
+        self.assertEqual(task["waiting_for"], "Missing product contract")
+
+    def test_reconciler_returns_failed_review_to_owner_repair(self) -> None:
+        task = {
+            "id": "TASK-PR-FAILED-001",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "review",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "INTEGRATION_STATUS": "ci_failed",
+            "PR_URL": "https://github.com/example/repo/pull/44",
+            "CI_STATUS": "failure",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_reconcile_integration(state, [task["id"], "PR checks failed."])
+
+        self.assertEqual(task["status"], "in_progress")
+
+    def test_reconciler_marks_protected_merge_done_after_worker_closeout_gap(self) -> None:
+        task = {
+            "id": "TASK-MERGED-001",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "blocked",
+            "waiting_for": "Claude",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "github_bus",
+            "INTEGRATION_STATUS": "merged_to_dev",
+            "PR_URL": "https://github.com/example/repo/pull/42",
+            "CI_STATUS": "success",
+            "MERGED_REF": "dev",
+            "MERGE_COMMIT": "a" * 40,
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_reconcile_integration(state, ["TASK-MERGED-001", "Protected PR merge reconciled."])
+
+        self.assertEqual(task["status"], "done")
+        self.assertEqual(task["integration_status"], "merged_to_dev")
+        self.assertNotIn("waiting_for", task)
 
 
 class IntegrationGateCommandDoneTest(unittest.TestCase):

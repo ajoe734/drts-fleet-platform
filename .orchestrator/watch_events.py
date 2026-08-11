@@ -33,7 +33,8 @@ from common import (
     write_activity_log,
 )
 from branch_routing import route_task
-from runtime_state import enqueue_event, load_runtime_state, save_runtime_state
+from control_plane.infra.queue_repo import enqueue_event
+from control_plane.infra.runtime_repo import load_runtime_state, save_runtime_state
 
 
 def parse_args() -> argparse.Namespace:
@@ -54,10 +55,6 @@ def handoff_key(handoff: dict[str, Any]) -> str:
         str(handoff.get("message") or ""),
     ]
     return "|".join(parts)
-
-
-def enqueue_runtime_events_enabled(config: dict[str, Any]) -> bool:
-    return bool(config.get("events", {}).get("enqueue_runtime_events", False))
 
 
 def build_snapshot(config: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
@@ -445,7 +442,7 @@ def build_branch_protocol_block(
         f"elif git show-ref --verify --quiet refs/heads/{branch}; then git switch {branch}; "
         f"else git switch -c {branch} origin/{base_branch}; fi\n"
         "  ```\n"
-        "- working tree 不是暫存區。改動觸及 fragile surface（`.orchestrator/supervisor.py`、"
+        "- working tree 不是暫存區。改動觸及 fragile surface（`.orchestrator/control_plane/runtime/supervisor_runtime.py`、"
         "`.orchestrator/control_plane/**`、"
         "`.orchestrator/skills/**`、`.orchestrator/templates/*`、`docs/**`、`.github/workflows/**`、"
         "`.husky/*`、`config*.json`），或跨檔案、預計跨 supervisor cycle、即將 yield 時，"
@@ -489,8 +486,12 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
         context_files.append(label)
     raw_target_files = event.get("target_files") if "target_files" in event else task_payload.get("artifacts")
     target_files, _skipped_external_targets = repo_scoped_target_files(raw_target_files or [])
+    event_id = new_runtime_id("evt")
+    assignment_lease = dict(event.get("assignment_lease") or {})
+    if assignment_lease:
+        assignment_lease["attempt_id"] = event_id
     queue_payload = {
-        "event_id": new_runtime_id("evt"),
+        "event_id": event_id,
         "created_at": utc_now(),
         "event_key": event.get("key"),
         "task_id": event.get("task_id"),
@@ -505,6 +506,7 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
             "handoff": event.get("handoff"),
             "task": task_payload,
             "mode": event_mode_bucket(event),
+            "assignment_lease": assignment_lease,
         },
     }
     enqueue_event(config, queue_payload)
@@ -525,11 +527,8 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
 
 
 def trim_seen_events(state: dict[str, Any], max_entries: int) -> None:
-    seen = state.get("seen_event_keys", {})
-    if len(seen) <= max_entries:
-        return
-    ordered = sorted(seen.items(), key=lambda item: item[1])
-    state["seen_event_keys"] = dict(ordered[-max_entries:])
+    """Retire the watcher-era dedupe cache; durable queue records own dedupe."""
+    state.pop("seen_event_keys", None)
 
 
 def run_scan(config: dict[str, Any], state: dict[str, Any], replay: bool, provider_capabilities: dict[str, Any]) -> bool:
@@ -554,25 +553,15 @@ def run_scan(config: dict[str, Any], state: dict[str, Any], replay: bool, provid
             merged_events[event["key"]] = event
         events = list(merged_events.values())
 
-    seen = state.setdefault("seen_event_keys", {})
-    changed = False
-    if enqueue_runtime_events_enabled(config):
-        for event in events:
-            if event["key"] in seen and not replay:
-                continue
-            queued = queue_delivery_event(config, event)
-            if queued:
-                seen[event["key"]] = utc_now()
-                changed = True
-    elif events:
-        changed = True
+    # The watcher observes task and handoff changes only.  The supervisor's
+    # ready dispatcher is the sole producer of execution queue records.
+    changed = bool(events)
 
     state["initialized_at"] = state.get("initialized_at") or utc_now()
     state["last_scan_at"] = utc_now()
     state.setdefault("watcher", {})["task_snapshots"] = snapshot["tasks"]
     state.pop("tasks", None)
     state["pending_handoff_keys"] = snapshot["pending_handoff_keys"]
-    trim_seen_events(state, int(config.get("watcher", {}).get("max_seen_events", 2000)))
     save_runtime_state(config, state)
     return changed
 

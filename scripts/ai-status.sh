@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -n "${AI_STATUS_ROOT:-}" ]]; then
-  ROOT_DIR="$AI_STATUS_ROOT"
-elif [[ -n "${ORCH_STATUS_ROOT:-}" ]]; then
-  ROOT_DIR="$ORCH_STATUS_ROOT"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GIT_COMMON_DIR="$(git -C "$SCRIPT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+if [[ "$GIT_COMMON_DIR" == */.git ]]; then
+  ROOT_DIR="${GIT_COMMON_DIR%/.git}"
 else
-  ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 fi
 
-CANONICAL_SCRIPT="${AI_STATUS_RUNTIME_SCRIPT:-$ROOT_DIR/scripts/ai_status.py}"
+CANONICAL_SCRIPT="$ROOT_DIR/scripts/ai_status.py"
 if [[ ! -f "$CANONICAL_SCRIPT" ]]; then
   echo "Error: Canonical status script not found at $CANONICAL_SCRIPT" >&2
   exit 1

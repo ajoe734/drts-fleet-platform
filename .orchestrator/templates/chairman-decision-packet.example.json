@@ -1,14 +1,11 @@
 {
   "version": 1,
   "decision": "operational_review",
-  "sidecar_approved": false,
   "approval_ttl_minutes": 45,
-  "max_sidecars": 2,
   "reason": "Brief operational decision summary.",
   "blocked_by": [
     "List unresolved blockers when chairman should not force progress."
   ],
-  "blocked_sidecar_parents": [],
   "approval_actions": [
     {
       "approval_id": "apr-safe-read-001",

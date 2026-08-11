@@ -27,6 +27,33 @@ LOCAL_CONFIG_PATH = ORCHESTRATOR_DIR / "config.local.json"
 TASK_BRIEFS_DIR = ORCHESTRATOR_DIR / "task-briefs"
 EVIDENCE_DIR = ORCHESTRATOR_DIR / "evidence"
 AI_GUIDE_PATH = ROOT / "AI_COLLABORATION_GUIDE.md"
+ANTIGRAVITY_TOKEN_CANDIDATES = (
+    "antigravity-oauth-token", "auth.json", "credentials.json", "token.json", "oauth_creds.json",
+)
+
+
+def antigravity_app_data_dir(settings: dict[str, Any]) -> Path:
+    """Resolve the exact OAuth location used by both probe and dispatch."""
+    explicit = settings.get("app_data_dir")
+    if explicit:
+        return Path(str(explicit)).expanduser()
+    config_home = settings.get("config_home")
+    if config_home:
+        return Path(str(config_home)).expanduser() / ".gemini" / "antigravity-cli"
+    return Path.home() / ".gemini" / "antigravity-cli"
+
+
+def antigravity_auth_ready(settings: dict[str, Any]) -> bool:
+    if str(settings.get("assume_authed") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return True
+    explicit = settings.get("token_path")
+    if explicit:
+        path = Path(str(explicit)).expanduser()
+        return path.exists() and path.stat().st_size > 0
+    return any(
+        (path := antigravity_app_data_dir(settings) / name).exists() and path.stat().st_size > 0
+        for name in ANTIGRAVITY_TOKEN_CANDIDATES
+    )
 
 
 def utc_now() -> str:
@@ -42,6 +69,32 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
     tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     tmp_path.write_text(content, encoding=encoding)
     tmp_path.replace(path)
+
+
+def runtime_claude_mcp_config_path(config: dict[str, Any]) -> Path:
+    """Write the Claude broker config from the running supervisor bundle.
+
+    The canonical checkout owns mutable state, while this runtime bundle owns
+    executable policy.  Keeping the broker pointed at the bundle prevents a
+    dirty or older canonical checkout from silently changing worker policy.
+    """
+    state_root = config_path(config, "state_file").parent
+    path = state_root / "generated" / "claude-approval-broker.runtime.json"
+    payload = {
+        "mcpServers": {
+            "orchestrator_approval_broker": {
+                "command": "python3",
+                "args": [
+                    str((ORCHESTRATOR_DIR / "claude_permission_prompt_mcp.py").resolve()),
+                    "--config",
+                    str((state_root / "config.json").resolve()),
+                ],
+                "env": {"PYTHONUNBUFFERED": "1"},
+            }
+        }
+    }
+    atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    return path
 
 
 def _jsonl_lock_path(path: Path) -> Path:
@@ -177,12 +230,6 @@ def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
         append_jsonl_line_unlocked(path, json.dumps(payload, ensure_ascii=False))
 
 
-# Compatibility aliases for older imports. New repository code uses the public
-# names so queue append and compaction share one lock protocol.
-_hold_jsonl_lock = hold_jsonl_lock
-_append_jsonl_line_unlocked = append_jsonl_line_unlocked
-
-
 def deep_merge(base: Any, overlay: Any) -> Any:
     if isinstance(base, dict) and isinstance(overlay, dict):
         merged = deepcopy(base)
@@ -220,12 +267,19 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     config = load_json(config_file, default={})
     if LOCAL_CONFIG_PATH.exists():
         config = deep_merge(config, load_json(LOCAL_CONFIG_PATH, default={}))
+    # Runtime code may live in an isolated worktree while the operational
+    # config belongs to the canonical checkout. Keep relative paths anchored to
+    # the latter so a deployment cannot silently write a second state tree.
+    config["_runtime_config_file"] = str(config_file.resolve())
+    config["_runtime_config_root"] = str(config_file.parent.parent.resolve())
     return config
 
 
 def config_path(config: dict[str, Any], key: str, default: str | None = None) -> Path:
     value = config.get("paths", {}).get(key, default)
-    path = resolve_path(value)
+    path = Path(value) if value is not None else None
+    if path is not None and not path.is_absolute():
+        path = Path(str(config.get("_runtime_config_root") or ROOT)) / path
     if path is None:
         raise KeyError(f"Missing config path for {key}")
     return path
@@ -233,7 +287,39 @@ def config_path(config: dict[str, Any], key: str, default: str | None = None) ->
 
 def canonical_workspace_root(config: dict[str, Any]) -> Path:
     """Return the workspace that owns canonical machine-truth files."""
-    return config_path(config, "status_file").parents[0]
+    if (config.get("paths") or {}).get("status_file"):
+        return config_path(config, "status_file").parents[0]
+    if (config.get("paths") or {}).get("state_file"):
+        return config_path(config, "state_file").parent.parent
+    return ROOT
+
+
+def canonical_orchestrator_root(config: dict[str, Any]) -> Path:
+    """Return the canonical directory for generated control-plane artifacts."""
+    if (config.get("paths") or {}).get("state_file"):
+        return config_path(config, "state_file").parent
+    return canonical_workspace_root(config) / ".orchestrator"
+
+
+def canonical_artifact_path(config: dict[str, Any], key: str, default: str) -> Path:
+    """Resolve a generated artifact without falling back to this code checkout.
+
+    The supervisor can run from an isolated runtime worktree while state belongs
+    to the canonical checkout. Relative artifact defaults must therefore be
+    anchored at canonical machine truth, not ``ROOT``.
+    """
+    configured = (config.get("paths") or {}).get(key)
+    if configured:
+        return config_path(config, key)
+    return canonical_orchestrator_root(config) / default
+
+
+def canonical_relpath(config: dict[str, Any], path: Path) -> str:
+    """Return a machine-truth-relative reference when possible."""
+    try:
+        return str(path.relative_to(canonical_workspace_root(config)))
+    except ValueError:
+        return str(path)
 
 
 def delivery_workspace_root(config: dict[str, Any], metadata: dict[str, Any] | None = None) -> Path:
@@ -555,7 +641,7 @@ def write_activity_log(config: dict[str, Any], entry: dict[str, Any]) -> None:
     }
     log_path = config_path(config, "activity_log")
     encoded_payload = json.dumps(payload, ensure_ascii=False)
-    with _hold_jsonl_lock(log_path):
+    with hold_jsonl_lock(log_path):
         # Rotation and append must share the same lock. Otherwise a rotator can
         # replace the file while another process appends, producing NUL-padded
         # or concatenated JSONL records that make the dashboard look broken.
@@ -563,7 +649,7 @@ def write_activity_log(config: dict[str, Any], entry: dict[str, Any]) -> None:
             _rotate_activity_log_if_oversize(log_path)
         except Exception:
             pass
-        _append_jsonl_line_unlocked(log_path, encoded_payload)
+        append_jsonl_line_unlocked(log_path, encoded_payload)
 
 
 def runtime_log_path(prefix: str, target: str) -> Path:
@@ -587,13 +673,40 @@ def spawn_background_process(
 ) -> tuple[subprocess.Popen[str], Path]:
     ensure_parent(log_path)
     handle = log_path.open("w", encoding="utf-8")
+    child_env = dict(env) if env is not None else os.environ.copy()
+    # A worker cannot notify the supervisor's systemd service. Inheriting this
+    # socket produces rejected notifications and makes the service journal noisy.
+    for key in ("NOTIFY_SOCKET", "WATCHDOG_USEC", "WATCHDOG_PID"):
+        child_env.pop(key, None)
+    # Workers run in a transient user scope when the dispatcher supplies one.
+    # That keeps descendants out of the supervisor cgroup and gives restart
+    # reconciliation a durable handle instead of relying only on a parent PID.
+    scope_unit = str(child_env.get("ORCH_WORKER_SCOPE_UNIT") or "").strip()
+    scope_properties = [
+        value
+        for value in str(child_env.get("ORCH_WORKER_SCOPE_PROPERTIES") or "").split("\n")
+        if value.strip()
+    ]
+    launched_command = list(command)
+    if scope_unit and shutil.which("systemd-run"):
+        launched_command = [
+            "systemd-run",
+            "--user",
+            "--scope",
+            "--quiet",
+            "--collect",
+            f"--unit={scope_unit}",
+            *[f"--property={value}" for value in scope_properties],
+            "--",
+            *command,
+        ]
     process = subprocess.Popen(
-        command,
+        launched_command,
         cwd=str(cwd or ROOT),
         stdout=handle,
         stderr=subprocess.STDOUT,
         text=True,
-        env=env,
+        env=child_env,
         start_new_session=True,
     )
     return process, log_path
@@ -620,6 +733,7 @@ def snapshot_task(task: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any
         "mutates_canonical",
         "auto_created_by",
         "planning_ref",
+        "execution_branch",
     ):
         if key in task:
             payload[key] = task.get(key)
@@ -722,8 +836,40 @@ def task_brief_path(task_id: str) -> Path:
     return TASK_BRIEFS_DIR / f"{task_id}.md"
 
 
-def evidence_path(run_id: str) -> Path:
-    return EVIDENCE_DIR / f"{run_id}.json"
+def evidence_path(config: dict[str, Any], run_id: str) -> Path:
+    return canonical_artifact_path(config, "evidence_dir", "evidence") / f"{run_id}.json"
+
+
+def worker_result_path(config: dict[str, Any], run_id: str) -> Path:
+    directory = canonical_artifact_path(config, "worker_results_dir", "worker-results")
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"{run_id}.json"
+
+
+def worker_scope_unit(run_id: str) -> str:
+    """Return the stable transient-systemd unit name for one worker run."""
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(run_id or "worker")).strip("-.")
+    return f"drts-worker-{slug[:180]}.scope"
+
+
+def worker_scope_properties(config: dict[str, Any], metadata: dict[str, Any] | None = None) -> list[str]:
+    """Return bounded systemd properties for an isolated worker scope."""
+    settings = dict((config.get("supervisor") or {}).get("worker_scopes", {}) or {})
+    metadata = metadata or {}
+    role = str(metadata.get("control_role") or "").strip().lower()
+    profile = "control" if role == "chair" else str(metadata.get("resource_profile") or "execution").strip().lower()
+    profiles = settings.get("profiles") if isinstance(settings.get("profiles"), dict) else {}
+    selected = dict(profiles.get(profile) or profiles.get("execution") or {})
+    properties: list[str] = []
+    for config_key, systemd_key in (("memory_high", "MemoryHigh"), ("memory_max", "MemoryMax"), ("cpu_quota", "CPUQuota")):
+        value = str(selected.get(config_key) or "").strip()
+        if value:
+            properties.append(f"{systemd_key}={value}")
+    return properties
+
+
+def worker_result_schema_path() -> Path:
+    return ORCHESTRATOR_DIR / "schemas" / "worker-result.schema.json"
 
 
 def build_task_brief(
