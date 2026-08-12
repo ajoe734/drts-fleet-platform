@@ -1473,6 +1473,8 @@ def sync_github_bus(config: dict[str, Any], runtime_state: dict[str, Any]) -> bo
         save_bus_state(config, bus_state)
         return False
     except Exception as exc:  # pragma: no cover - defensive bus isolation
+        if str(exc).strip() == "signal:SIGTERM":
+            return False
         mark_offline(config, bus_state, f"GitHub bus error: {trim_text(str(exc), 600)}")
         save_bus_state(config, bus_state)
         return False

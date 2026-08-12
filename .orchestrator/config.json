@@ -27,6 +27,13 @@
     "max_worker_history": 200,
     "auto_refresh_provider_capabilities": false,
     "git_reconcile_interval_seconds": 600,
+    "worker_scopes": {
+      "profiles": {
+        "execution": { "memory_high": "4G", "memory_max": "5G" },
+        "heavy": { "memory_high": "5G", "memory_max": "6G" },
+        "control": { "memory_high": "1G", "memory_max": "2G" }
+      }
+    },
     "resource_guard": {
       "enabled": true,
       "max_total_workers": 12,
@@ -387,7 +394,9 @@
         "config_home": "~/.gemini-ag3",
         "skip_permissions": true,
         "include_directories": true,
-        "extra_include_directories": ["/home/edna/workspace/tenant-commute-hub"],
+        "extra_include_directories": [
+          "/home/edna/workspace/tenant-commute-hub"
+        ],
         "model_rotation": {
           "enabled": true,
           "primary": "",

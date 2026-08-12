@@ -59,6 +59,34 @@ class RuntimeClaudeMcpConfigTests(unittest.TestCase):
             self.assertEqual(server["args"][2], str(root / ".orchestrator" / "config.json"))
 
 
+class WorkerScopePropertiesTests(unittest.TestCase):
+    def test_selects_bounded_profile_for_execution_heavy_and_control_workers(self) -> None:
+        config = {
+            "supervisor": {
+                "worker_scopes": {
+                    "profiles": {
+                        "execution": {"memory_high": "4G", "memory_max": "5G"},
+                        "heavy": {"memory_high": "5G", "memory_max": "6G"},
+                        "control": {"memory_high": "1G", "memory_max": "2G"},
+                    }
+                }
+            }
+        }
+
+        self.assertEqual(
+            common.worker_scope_properties(config),
+            ["MemoryHigh=4G", "MemoryMax=5G"],
+        )
+        self.assertEqual(
+            common.worker_scope_properties(config, {"resource_profile": "heavy"}),
+            ["MemoryHigh=5G", "MemoryMax=6G"],
+        )
+        self.assertEqual(
+            common.worker_scope_properties(config, {"control_role": "chair"}),
+            ["MemoryHigh=1G", "MemoryMax=2G"],
+        )
+
+
 class JsonlAppendTests(unittest.TestCase):
     def test_append_jsonl_keeps_every_line_parseable_under_concurrency(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

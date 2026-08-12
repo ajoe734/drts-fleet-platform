@@ -475,6 +475,26 @@ class GitHubBusProcessTests(unittest.TestCase):
         killpg.assert_called_once_with(4321, github_bus.signal.SIGKILL)
         self.assertEqual(fake_process.wait_calls, [1.0, 0.2])
 
+    def test_shutdown_signal_does_not_create_github_offline_backoff(self) -> None:
+        config = {
+            "paths": {"status_file": "ai-status.json"},
+            "github_bus": {"enabled": True, "poll_interval_seconds": 0},
+        }
+        bus_state = {"tasks": {}}
+
+        with (
+            mock.patch.object(github_bus, "load_bus_state", return_value=bus_state),
+            mock.patch.object(github_bus, "infer_repo_slug", return_value="example/repo"),
+            mock.patch.object(github_bus, "load_status", return_value={"tasks": []}),
+            mock.patch.object(github_bus, "sync_outbound", side_effect=RuntimeError("signal:SIGTERM")),
+            mock.patch.object(github_bus, "mark_offline") as mark_offline,
+            mock.patch.object(github_bus, "save_bus_state") as save_bus_state,
+        ):
+            self.assertFalse(github_bus.sync_github_bus(config, {}))
+
+        mark_offline.assert_not_called()
+        save_bus_state.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
