@@ -1,10 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  DEFAULT_QUEUE_DATA,
-  DEMO_SUBMISSION_DIFF,
-  DEMO_SUBMISSION_DOCS,
-  PSR_REVIEWER,
-  PSR_SUB_STATUS,
   approveSubmissionAction,
   fetchSupplyReviewDetail,
   fetchSupplyReviewSubmissions,
@@ -148,7 +143,12 @@ describe("Supply Review Client & Data Model", () => {
       }),
     } as unknown as ApiClient;
 
-    const res = await startReviewAction(mockClient, "sub_s38", 1, "Review started");
+    const res = await startReviewAction(
+      mockClient,
+      "sub_s38",
+      1,
+      "Review started",
+    );
 
     expect(mockClient.startSupplyReview).toHaveBeenCalledWith("sub_s38", {
       expectedRevisionNo: 1,

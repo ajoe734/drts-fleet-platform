@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import React, { useEffect, useState, type CSSProperties } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
@@ -30,7 +29,11 @@ import {
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
-type DetailMode = "review" | "approve_confirm" | "revision_modal" | "reject_modal";
+type DetailMode =
+  | "review"
+  | "approve_confirm"
+  | "revision_modal"
+  | "reject_modal";
 
 const selectStyle: CSSProperties = {
   width: "100%",
@@ -50,11 +53,12 @@ export default function SupplyReviewDetailPage() {
   const client = usePlatformAdminClient();
 
   const rawSubmissionId = params?.submissionId;
-  const submissionId = typeof rawSubmissionId === "string"
-    ? rawSubmissionId
-    : Array.isArray(rawSubmissionId)
-      ? rawSubmissionId[0]
-      : "sub_s39";
+  const submissionId =
+    typeof rawSubmissionId === "string"
+      ? rawSubmissionId
+      : Array.isArray(rawSubmissionId)
+        ? rawSubmissionId[0]
+        : "sub_s39";
 
   const [data, setData] = useState<SupplyReviewDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,8 +71,13 @@ export default function SupplyReviewDetailPage() {
   const [reasonCode, setReasonCode] = useState<string>("all_documents_valid");
   const [comment, setComment] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
-  const [apiError, setApiError] = useState<{ code: string; message: string } | null>(null);
-  const [previewDoc, setPreviewDoc] = useState<SupplyReviewDocItem | null>(null);
+  const [apiError, setApiError] = useState<{
+    code: string;
+    message: string;
+  } | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<SupplyReviewDocItem | null>(
+    null,
+  );
 
   const loadData = async () => {
     setLoading(true);
@@ -85,7 +94,8 @@ export default function SupplyReviewDetailPage() {
         setComment(detail.submission.reviewComment);
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to load submission detail";
+      const msg =
+        err instanceof Error ? err.message : "Failed to load submission detail";
       setError(msg);
     } finally {
       setLoading(false);
@@ -107,7 +117,9 @@ export default function SupplyReviewDetailPage() {
   const sub = data.submission;
   const statusInfo = PSR_SUB_STATUS[sub.status] || PSR_SUB_STATUS.submitted;
 
-  const filteredDiff = onlyDiff ? data.diff.filter((d) => d.isChanged) : data.diff;
+  const filteredDiff = onlyDiff
+    ? data.diff.filter((d) => d.isChanged)
+    : data.diff;
 
   const handleStartReview = async () => {
     setSubmitting(true);
@@ -129,8 +141,13 @@ export default function SupplyReviewDetailPage() {
           : null,
       );
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: { code?: string } } }; code?: string; message?: string };
-      const code = e?.response?.data?.error?.code || e?.code || "START_REVIEW_FAILED";
+      const e = err as {
+        response?: { data?: { error?: { code?: string } } };
+        code?: string;
+        message?: string;
+      };
+      const code =
+        e?.response?.data?.error?.code || e?.code || "START_REVIEW_FAILED";
       setApiError({ code, message: e?.message || "無法開始審核" });
     } finally {
       setSubmitting(false);
@@ -141,7 +158,12 @@ export default function SupplyReviewDetailPage() {
     setSubmitting(true);
     setApiError(null);
     try {
-      const res = await approveSubmissionAction(client, sub.submissionId, sub.rev, comment);
+      const res = await approveSubmissionAction(
+        client,
+        sub.submissionId,
+        sub.rev,
+        comment,
+      );
       setData((prev) =>
         prev
           ? {
@@ -156,15 +178,23 @@ export default function SupplyReviewDetailPage() {
               },
               canonicalPreview: {
                 ...prev.canonicalPreview,
-                vehicleOrDriver: res.canonicalVehicleId || res.canonicalDriverId || prev.canonicalPreview.vehicleOrDriver,
+                vehicleOrDriver:
+                  res.canonicalVehicleId ||
+                  res.canonicalDriverId ||
+                  prev.canonicalPreview.vehicleOrDriver,
               },
             }
           : null,
       );
       setMode("review");
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: { code?: string } } }; code?: string; message?: string };
-      const code = e?.response?.data?.error?.code || e?.code || "APPROVE_FAILED";
+      const e = err as {
+        response?: { data?: { error?: { code?: string } } };
+        code?: string;
+        message?: string;
+      };
+      const code =
+        e?.response?.data?.error?.code || e?.code || "APPROVE_FAILED";
       setApiError({ code, message: e?.message || "核可失敗" });
     } finally {
       setSubmitting(false);
@@ -175,7 +205,8 @@ export default function SupplyReviewDetailPage() {
     if (!reasonCode || reasonCode === "all_documents_valid") {
       setApiError({
         code: "REASON_CODE_REQUIRED",
-        message: "退回補正需選擇具體的 reason code (例如：document_expired, document_missing)。",
+        message:
+          "退回補正需選擇具體的 reason code (例如：document_expired, document_missing)。",
       });
       return;
     }
@@ -183,7 +214,13 @@ export default function SupplyReviewDetailPage() {
     setSubmitting(true);
     setApiError(null);
     try {
-      const res = await requestRevisionAction(client, sub.submissionId, sub.rev, reasonCode, comment);
+      const res = await requestRevisionAction(
+        client,
+        sub.submissionId,
+        sub.rev,
+        reasonCode,
+        comment,
+      );
       setData((prev) =>
         prev
           ? {
@@ -199,8 +236,13 @@ export default function SupplyReviewDetailPage() {
       );
       setMode("review");
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: { code?: string } } }; code?: string; message?: string };
-      const code = e?.response?.data?.error?.code || e?.code || "REVISION_FAILED";
+      const e = err as {
+        response?: { data?: { error?: { code?: string } } };
+        code?: string;
+        message?: string;
+      };
+      const code =
+        e?.response?.data?.error?.code || e?.code || "REVISION_FAILED";
       setApiError({ code, message: e?.message || "退回補正失敗" });
     } finally {
       setSubmitting(false);
@@ -219,7 +261,13 @@ export default function SupplyReviewDetailPage() {
     setSubmitting(true);
     setApiError(null);
     try {
-      const res = await rejectSubmissionAction(client, sub.submissionId, sub.rev, reasonCode, comment);
+      const res = await rejectSubmissionAction(
+        client,
+        sub.submissionId,
+        sub.rev,
+        reasonCode,
+        comment,
+      );
       setData((prev) =>
         prev
           ? {
@@ -235,7 +283,11 @@ export default function SupplyReviewDetailPage() {
       );
       setMode("review");
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: { code?: string } } }; code?: string; message?: string };
+      const e = err as {
+        response?: { data?: { error?: { code?: string } } };
+        code?: string;
+        message?: string;
+      };
       const code = e?.response?.data?.error?.code || e?.code || "REJECT_FAILED";
       setApiError({ code, message: e?.message || "駁回失敗" });
     } finally {
@@ -247,7 +299,15 @@ export default function SupplyReviewDetailPage() {
     { h: "類型", w: 150, r: (r) => r.zh },
     { h: "檔名", k: "file", w: 170, mono: true },
     { h: "生效起迄", w: 170, mono: true, r: (r) => `${r.from} ~ ${r.until}` },
-    { h: "狀態", w: 100, r: (r) => <CanvasPill theme={theme} tone={r.tone} dot>{r.s}</CanvasPill> },
+    {
+      h: "狀態",
+      w: 100,
+      r: (r) => (
+        <CanvasPill theme={theme} tone={r.tone} dot>
+          {r.s}
+        </CanvasPill>
+      ),
+    },
     {
       h: "",
       w: 80,
@@ -269,7 +329,9 @@ export default function SupplyReviewDetailPage() {
       <CanvasPageHeader
         theme={theme}
         title={
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
+          >
             {sub.id} · {sub.type}審核{" "}
             <CanvasPill theme={theme} tone={statusInfo.tone} dot>
               {statusInfo.zh}
@@ -347,7 +409,11 @@ export default function SupplyReviewDetailPage() {
             title="SUBMISSION_REVISION_CONFLICT · 409"
             body="此 submission 已被更新（revision conflict）。請重新載入後再審，系統不允許盲蓋。"
             actions={
-              <CanvasBtn theme={theme} variant="primary" onClick={() => void loadData()}>
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                onClick={() => void loadData()}
+              >
                 重新載入
               </CanvasBtn>
             }
@@ -404,7 +470,10 @@ export default function SupplyReviewDetailPage() {
                   style={{ cursor: "pointer" }}
                   onClick={() => setOnlyDiff(false)}
                 >
-                  <CanvasPill theme={theme} tone={onlyDiff ? "neutral" : "accent"}>
+                  <CanvasPill
+                    theme={theme}
+                    tone={onlyDiff ? "neutral" : "accent"}
+                  >
                     看全部
                   </CanvasPill>
                 </span>
@@ -412,14 +481,23 @@ export default function SupplyReviewDetailPage() {
                   style={{ cursor: "pointer" }}
                   onClick={() => setOnlyDiff(true)}
                 >
-                  <CanvasPill theme={theme} tone={onlyDiff ? "accent" : "neutral"}>
+                  <CanvasPill
+                    theme={theme}
+                    tone={onlyDiff ? "accent" : "neutral"}
+                  >
                     只看差異
                   </CanvasPill>
                 </span>
               </div>
             }
           >
-            <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr 1fr", fontSize: 12.5 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1.3fr 1fr 1fr",
+                fontSize: 12.5,
+              }}
+            >
               <div
                 style={{
                   fontWeight: 700,
@@ -521,7 +599,12 @@ export default function SupplyReviewDetailPage() {
               title={`文件預覽 · ${previewDoc.zh}`}
               body={`檔名：${previewDoc.file} | 有效期限：${previewDoc.from} ~ ${previewDoc.until} | 審核狀態：${previewDoc.s}`}
               actions={
-                <CanvasBtn theme={theme} size="xs" variant="secondary" onClick={() => setPreviewDoc(null)}>
+                <CanvasBtn
+                  theme={theme}
+                  size="xs"
+                  variant="secondary"
+                  onClick={() => setPreviewDoc(null)}
+                >
                   關閉預覽
                 </CanvasBtn>
               }
@@ -561,11 +644,21 @@ export default function SupplyReviewDetailPage() {
                 value={reasonCode}
                 onChange={(e) => setReasonCode(e.target.value)}
               >
-                <option value="all_documents_valid">all_documents_valid（核可免填）</option>
-                <option value="document_expired">document_expired（保單/證件過期）</option>
-                <option value="document_missing">document_missing（缺少必填文件）</option>
-                <option value="invalid_format">invalid_format（格式不符）</option>
-                <option value="manual_screening">manual_screening（人工抽查）</option>
+                <option value="all_documents_valid">
+                  all_documents_valid（核可免填）
+                </option>
+                <option value="document_expired">
+                  document_expired（保單/證件過期）
+                </option>
+                <option value="document_missing">
+                  document_missing（缺少必填文件）
+                </option>
+                <option value="invalid_format">
+                  invalid_format（格式不符）
+                </option>
+                <option value="manual_screening">
+                  manual_screening（人工抽查）
+                </option>
                 <option value="other">other（其他）</option>
               </select>
             </CanvasField>
@@ -594,7 +687,11 @@ export default function SupplyReviewDetailPage() {
           {/* Canonical Write Preview / Audit Receipt */}
           <CanvasCard
             theme={theme}
-            title={sub.status === "approved" ? "核可完成憑證 · audit receipt" : "核可將寫入 · canonical preview"}
+            title={
+              sub.status === "approved"
+                ? "核可完成憑證 · audit receipt"
+                : "核可將寫入 · canonical preview"
+            }
             subtitle={
               sub.status === "approved"
                 ? "VQ-6 · 單一交易 canonical provisioning 已完成"
@@ -608,7 +705,10 @@ export default function SupplyReviewDetailPage() {
               items={[
                 {
                   k: "建立 / 更新 vehicle/driver",
-                  v: sub.canonicalVehicleId || sub.canonicalDriverId || data.canonicalPreview.vehicleOrDriver,
+                  v:
+                    sub.canonicalVehicleId ||
+                    sub.canonicalDriverId ||
+                    data.canonicalPreview.vehicleOrDriver,
                   mono: true,
                 },
                 {
@@ -683,11 +783,24 @@ export default function SupplyReviewDetailPage() {
             <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 700 }}>
               確認核可並寫入 canonical？
             </h3>
-            <p style={{ margin: "0 0 16px", fontSize: 13, color: theme.textMuted }}>
-              此動作將在單一交易內建立/更新 canonical vehicle/driver 紀錄、建立 affiliation、重算 readiness 並寫入 audit。動作具不可逆語意。
+            <p
+              style={{
+                margin: "0 0 16px",
+                fontSize: 13,
+                color: theme.textMuted,
+              }}
+            >
+              此動作將在單一交易內建立/更新 canonical vehicle/driver 紀錄、建立
+              affiliation、重算 readiness 並寫入 audit。動作具不可逆語意。
             </p>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <CanvasBtn theme={theme} variant="secondary" onClick={() => setMode("review")}>
+            <div
+              style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+            >
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                onClick={() => setMode("review")}
+              >
                 取消
               </CanvasBtn>
               <CanvasBtn
@@ -728,11 +841,23 @@ export default function SupplyReviewDetailPage() {
             <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 700 }}>
               退回車行補正
             </h3>
-            <p style={{ margin: "0 0 16px", fontSize: 13, color: theme.textMuted }}>
+            <p
+              style={{
+                margin: "0 0 16px",
+                fontSize: 13,
+                color: theme.textMuted,
+              }}
+            >
               請選擇原因並填寫說明。提交後狀態將轉為 needs_revision 並通知車行。
             </p>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <CanvasBtn theme={theme} variant="secondary" onClick={() => setMode("review")}>
+            <div
+              style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+            >
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                onClick={() => setMode("review")}
+              >
                 取消
               </CanvasBtn>
               <CanvasBtn
@@ -770,14 +895,33 @@ export default function SupplyReviewDetailPage() {
               boxShadow: "0 20px 25px -5px rgba(0,0,0,0.2)",
             }}
           >
-            <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 700, color: theme.danger }}>
+            <h3
+              style={{
+                margin: "0 0 12px",
+                fontSize: 16,
+                fontWeight: 700,
+                color: theme.danger,
+              }}
+            >
               確認駁回此 Submission？
             </h3>
-            <p style={{ margin: "0 0 16px", fontSize: 13, color: theme.textMuted }}>
+            <p
+              style={{
+                margin: "0 0 16px",
+                fontSize: 13,
+                color: theme.textMuted,
+              }}
+            >
               駁回為最終狀態 (rejected)。請確定此 submission 不合規且無法補正。
             </p>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <CanvasBtn theme={theme} variant="secondary" onClick={() => setMode("review")}>
+            <div
+              style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+            >
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                onClick={() => setMode("review")}
+              >
                 取消
               </CanvasBtn>
               <CanvasBtn

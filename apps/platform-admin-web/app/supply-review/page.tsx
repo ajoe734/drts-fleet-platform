@@ -8,7 +8,6 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasIcon,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -61,7 +60,10 @@ export default function SupplyReviewQueuePage() {
       const data = await fetchSupplyReviewSubmissions(client);
       setItems(data);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to load supply review submissions";
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Failed to load supply review submissions";
       setError(msg);
     } finally {
       setLoading(false);
@@ -75,37 +77,60 @@ export default function SupplyReviewQueuePage() {
   const counts = useMemo(() => {
     const pending = items.filter((i) => i.status === "submitted").length;
     const mine = items.filter(
-      (i) => i.status === "in_review" && (i.lockedBy === PSR_REVIEWER.display || i.lockedBy === PSR_REVIEWER.name),
+      (i) =>
+        i.status === "in_review" &&
+        (i.lockedBy === PSR_REVIEWER.display ||
+          i.lockedBy === PSR_REVIEWER.name),
     ).length;
     const history = items.filter((i) =>
-      ["approved", "rejected", "needs_revision", "withdrawn"].includes(i.status),
+      ["approved", "rejected", "needs_revision", "withdrawn"].includes(
+        i.status,
+      ),
     ).length;
     return { pending, mine, history };
   }, [items]);
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
-      if (activeTab === "pending" && item.status !== "submitted" && item.status !== "in_review") {
+      if (
+        activeTab === "pending" &&
+        item.status !== "submitted" &&
+        item.status !== "in_review"
+      ) {
         return false;
       }
       if (
         activeTab === "mine" &&
         (item.status !== "in_review" ||
-          (item.lockedBy !== PSR_REVIEWER.display && item.lockedBy !== PSR_REVIEWER.name))
+          (item.lockedBy !== PSR_REVIEWER.display &&
+            item.lockedBy !== PSR_REVIEWER.name))
       ) {
         return false;
       }
       if (
         activeTab === "history" &&
-        !["approved", "rejected", "needs_revision", "withdrawn"].includes(item.status)
+        !["approved", "rejected", "needs_revision", "withdrawn"].includes(
+          item.status,
+        )
       ) {
         return false;
       }
 
-      if (fleetFilter !== "all" && item.fleet !== fleetFilter && item.fleetPartnerId !== fleetFilter) {
+      if (
+        fleetFilter !== "all" &&
+        item.fleet !== fleetFilter &&
+        item.fleetPartnerId !== fleetFilter
+      ) {
         return false;
       }
-      if (typeFilter !== "all" && item.type !== typeFilter && item.submissionType !== typeFilter) {
+      if (
+        typeFilter !== "all" &&
+        item.type !== typeFilter &&
+        item.submissionType !== typeFilter
+      ) {
+        return false;
+      }
+      if (productFilter !== "all" && item.svc !== productFilter) {
         return false;
       }
       if (areaFilter !== "all" && item.area !== areaFilter) {
@@ -114,7 +139,7 @@ export default function SupplyReviewQueuePage() {
 
       return true;
     });
-  }, [items, activeTab, fleetFilter, typeFilter, areaFilter]);
+  }, [items, activeTab, fleetFilter, typeFilter, productFilter, areaFilter]);
 
   const handleStartReview = async (item: SupplyReviewItem) => {
     setStartingId(item.id);
@@ -156,7 +181,11 @@ export default function SupplyReviewQueuePage() {
       r: (r) => (
         <Link
           href={`/supply-review/${encodeURIComponent(r.id)}`}
-          style={{ color: theme.accent, fontWeight: 600, textDecoration: "none" }}
+          style={{
+            color: theme.accent,
+            fontWeight: 600,
+            textDecoration: "none",
+          }}
         >
           {r.id}
         </Link>
@@ -165,7 +194,11 @@ export default function SupplyReviewQueuePage() {
     {
       h: "類型",
       w: 72,
-      r: (r) => <CanvasPill theme={theme} tone="neutral">{r.type}</CanvasPill>,
+      r: (r) => (
+        <CanvasPill theme={theme} tone="neutral">
+          {r.type}
+        </CanvasPill>
+      ),
     },
     { h: "車行 · fleet", k: "fleet", w: 130 },
     { h: "subject", k: "subject", w: 210 },
@@ -188,7 +221,11 @@ export default function SupplyReviewQueuePage() {
       w: 150,
       r: (r) => (
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {r.missing > 0 && <CanvasPill theme={theme} tone="warn">缺 {r.missing}</CanvasPill>}
+          {r.missing > 0 && (
+            <CanvasPill theme={theme} tone="warn">
+              缺 {r.missing}
+            </CanvasPill>
+          )}
           {r.lockedBy && (
             <span
               style={{
@@ -199,14 +236,23 @@ export default function SupplyReviewQueuePage() {
                 color: theme.textMuted,
               }}
             >
-              <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+              <svg
+                width={11}
+                height={11}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.8}
+              >
                 <rect x={3} y={11} width={18} height={11} rx={2} ry={2} />
                 <path d="M7 11V7a5 5 0 0110 0v4" />
               </svg>
               {r.lockedBy}
             </span>
           )}
-          {r.missing === 0 && !r.lockedBy && <span style={{ fontSize: 11, color: theme.textDim }}>—</span>}
+          {r.missing === 0 && !r.lockedBy && (
+            <span style={{ fontSize: 11, color: theme.textDim }}>—</span>
+          )}
         </div>
       ),
     },
@@ -230,7 +276,9 @@ export default function SupplyReviewQueuePage() {
             size="xs"
             variant="ghost"
             icon="arrow"
-            onClick={() => router.push(`/supply-review/${encodeURIComponent(r.id)}`)}
+            onClick={() =>
+              router.push(`/supply-review/${encodeURIComponent(r.id)}`)
+            }
           >
             開啟
           </CanvasBtn>
@@ -246,31 +294,49 @@ export default function SupplyReviewQueuePage() {
         subtitle="車行送件 → 審核 → 核可寫入 canonical registry"
         actions={
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <select style={selectStyle} value={fleetFilter} onChange={(e) => setFleetFilter(e.target.value)}>
+            <select
+              style={selectStyle}
+              value={fleetFilter}
+              onChange={(e) => setFleetFilter(e.target.value)}
+            >
               <option value="all">車行：全部</option>
               <option value="大都會車隊">大都會車隊</option>
               <option value="蘭陽小客車">蘭陽小客車</option>
               <option value="海線車隊">海線車隊</option>
             </select>
-            <select style={selectStyle} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+            <select
+              style={selectStyle}
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+            >
               <option value="all">類型：全部</option>
               <option value="車輛">車輛</option>
               <option value="司機">司機</option>
               <option value="保險">保險</option>
             </select>
-            <select style={selectStyle} value={productFilter} onChange={(e) => setProductFilter(e.target.value)}>
+            <select
+              style={selectStyle}
+              value={productFilter}
+              onChange={(e) => setProductFilter(e.target.value)}
+            >
               <option value="all">服務產品：全部</option>
               <option value="realtime">即時叫車 (realtime)</option>
               <option value="airport">機場接送 (airport)</option>
               <option value="business">商務專車 (business)</option>
             </select>
-            <select style={selectStyle} value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)}>
+            <select
+              style={selectStyle}
+              value={areaFilter}
+              onChange={(e) => setAreaFilter(e.target.value)}
+            >
               <option value="all">營業區：全部</option>
               <option value="台北市">台北市</option>
               <option value="宜蘭縣">宜蘭縣</option>
               <option value="台中市">台中市</option>
             </select>
-            <CanvasBtn theme={theme} icon="filter">更多篩選</CanvasBtn>
+            <CanvasBtn theme={theme} icon="filter">
+              更多篩選
+            </CanvasBtn>
           </div>
         }
       />
@@ -301,14 +367,32 @@ export default function SupplyReviewQueuePage() {
           </CanvasBtn>
         </div>
 
+        {loading && (
+          <div
+            style={{ marginBottom: 16, color: theme.textMuted, fontSize: 13 }}
+          >
+            載入審核佇列中…
+          </div>
+        )}
+
         {error && (
           <div style={{ marginBottom: 16 }}>
-            <CanvasBanner theme={theme} tone="danger" icon="warn" title="載入錯誤" body={error} />
+            <CanvasBanner
+              theme={theme}
+              tone="danger"
+              icon="warn"
+              title="載入錯誤"
+              body={error}
+            />
           </div>
         )}
 
         <CanvasCard theme={theme} padding={0}>
-          <CanvasTable<SupplyReviewItem> theme={theme} columns={columns} rows={filteredItems} />
+          <CanvasTable<SupplyReviewItem>
+            theme={theme}
+            columns={columns}
+            rows={filteredItems}
+          />
         </CanvasCard>
       </div>
     </div>

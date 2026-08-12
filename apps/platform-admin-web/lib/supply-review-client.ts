@@ -1,6 +1,5 @@
 import type { ApiClient } from "@drts/api-client";
 import type {
-  SupplyDocumentRecord,
   SupplyReviewActionCommand,
   SupplySubmissionRecord,
   SupplySubmissionStatus,
@@ -68,7 +67,11 @@ export const PSR_REVIEWER = {
 
 export const PSR_SUB_STATUS: Record<
   SupplySubmissionStatus,
-  { zh: string; en: string; tone: "info" | "accent" | "warn" | "success" | "danger" | "neutral" }
+  {
+    zh: string;
+    en: string;
+    tone: "info" | "accent" | "warn" | "success" | "danger" | "neutral";
+  }
 > = {
   draft: { zh: "草稿", en: "draft", tone: "neutral" },
   submitted: { zh: "待受理", en: "submitted", tone: "info" },
@@ -198,22 +201,63 @@ export const DEFAULT_QUEUE_DATA: SupplyReviewItem[] = [
 
 export const DEMO_SUBMISSION_DIFF: Record<string, SupplyReviewDiffItem[]> = {
   sub_s39: [
-    { label: "座位數 · seat count", submissionValue: "9", canonicalValue: "7", isChanged: true },
-    { label: "行李容量 · luggage", submissionValue: "6", canonicalValue: "6", isChanged: false },
-    { label: "機場接送資格 · airport eligible", submissionValue: "是 true", canonicalValue: "否 false", isChanged: true },
-    { label: "支援產品 · products", submissionValue: "realtime, business, airport", canonicalValue: "realtime, business", isChanged: true },
-    { label: "保險到期 · insurance until", submissionValue: "2027-07-01", canonicalValue: "2026-07-02", isChanged: true },
+    {
+      label: "座位數 · seat count",
+      submissionValue: "9",
+      canonicalValue: "7",
+      isChanged: true,
+    },
+    {
+      label: "行李容量 · luggage",
+      submissionValue: "6",
+      canonicalValue: "6",
+      isChanged: false,
+    },
+    {
+      label: "機場接送資格 · airport eligible",
+      submissionValue: "是 true",
+      canonicalValue: "否 false",
+      isChanged: true,
+    },
+    {
+      label: "支援產品 · products",
+      submissionValue: "realtime, business, airport",
+      canonicalValue: "realtime, business",
+      isChanged: true,
+    },
+    {
+      label: "保險到期 · insurance until",
+      submissionValue: "2027-07-01",
+      canonicalValue: "2026-07-02",
+      isChanged: true,
+    },
   ],
 };
 
 export const DEMO_SUBMISSION_DOCS: Record<string, SupplyReviewDocItem[]> = {
   sub_s39: [
-    { zh: "行照 · registration", file: "reg_kab7720.pdf", from: "2024-01", until: "2029-01", s: "已核可", tone: "success" },
-    { zh: "保險保單 · insurance", file: "policy_kab7720.pdf", from: "2026-07", until: "2027-07", s: "待審", tone: "info" },
+    {
+      zh: "行照 · registration",
+      file: "reg_kab7720.pdf",
+      from: "2024-01",
+      until: "2029-01",
+      s: "已核可",
+      tone: "success",
+    },
+    {
+      zh: "保險保單 · insurance",
+      file: "policy_kab7720.pdf",
+      from: "2026-07",
+      until: "2027-07",
+      s: "待審",
+      tone: "info",
+    },
   ],
 };
 
-export function formatSubmissionTypeLabel(type: SupplySubmissionType | string): string {
+export function formatSubmissionTypeLabel(
+  type: SupplySubmissionType | string,
+): string {
   switch (type) {
     case "driver_onboarding":
     case "driver_affiliation":
@@ -230,19 +274,29 @@ export function formatSubmissionTypeLabel(type: SupplySubmissionType | string): 
   }
 }
 
-export function transformRecordToItem(record: SupplySubmissionRecord): SupplyReviewItem {
+export function transformRecordToItem(
+  record: SupplySubmissionRecord,
+): SupplyReviewItem {
   return {
     id: record.submissionId,
     submissionId: record.submissionId,
     type: formatSubmissionTypeLabel(record.submissionType),
     submissionType: record.submissionType,
-    fleet: record.fleetPartnerId === "fleet-demo-001" ? "大都會車隊" : record.fleetPartnerId,
+    fleet:
+      record.fleetPartnerId === "fleet-demo-001"
+        ? "大都會車隊"
+        : record.fleetPartnerId,
     fleetPartnerId: record.fleetPartnerId,
-    subject: record.subjectVehicleId || record.subjectDriverId || `${record.submissionType} (${record.submissionId})`,
+    subject:
+      record.subjectVehicleId ||
+      record.subjectDriverId ||
+      `${record.submissionType} (${record.submissionId})`,
     rev: record.revisionNo,
     revisionNo: record.revisionNo,
     status: record.status,
-    at: record.submittedAt ? record.submittedAt.slice(5, 16).replace("T", " ") : "—",
+    at: record.submittedAt
+      ? record.submittedAt.slice(5, 16).replace("T", " ")
+      : "—",
     submittedAt: record.submittedAt || record.createdAt,
     missing: 0,
     lockedBy: record.reviewStartedBy || null,
@@ -256,14 +310,18 @@ export function transformRecordToItem(record: SupplySubmissionRecord): SupplyRev
   };
 }
 
-export async function fetchSupplyReviewSubmissions(client: ApiClient): Promise<SupplyReviewItem[]> {
+export async function fetchSupplyReviewSubmissions(
+  client: ApiClient,
+): Promise<SupplyReviewItem[]> {
   try {
     const apiRecords = await client.listSupplyReviewSubmissions();
     if (apiRecords && Array.isArray(apiRecords) && apiRecords.length > 0) {
       const transformed = apiRecords.map(transformRecordToItem);
       // Merge defaults that are not present in API results
       const existingIds = new Set(transformed.map((t) => t.id));
-      const missingDefaults = DEFAULT_QUEUE_DATA.filter((d) => !existingIds.has(d.id));
+      const missingDefaults = DEFAULT_QUEUE_DATA.filter(
+        (d) => !existingIds.has(d.id),
+      );
       return [...transformed, ...missingDefaults];
     }
   } catch {
@@ -290,7 +348,9 @@ export async function fetchSupplyReviewDetail(
   }
 
   if (!item) {
-    item = DEFAULT_QUEUE_DATA.find((i) => i.id === targetId || i.submissionId === targetId);
+    item = DEFAULT_QUEUE_DATA.find(
+      (i) => i.id === targetId || i.submissionId === targetId,
+    );
   }
 
   if (!item) {
@@ -315,8 +375,10 @@ export async function fetchSupplyReviewDetail(
     };
   }
 
-  const diff: SupplyReviewDiffItem[] = DEMO_SUBMISSION_DIFF[targetId] || DEMO_SUBMISSION_DIFF["sub_s39"] || [];
-  const documents: SupplyReviewDocItem[] = DEMO_SUBMISSION_DOCS[targetId] || DEMO_SUBMISSION_DOCS["sub_s39"] || [];
+  const diff: SupplyReviewDiffItem[] =
+    DEMO_SUBMISSION_DIFF[targetId] || DEMO_SUBMISSION_DIFF["sub_s39"] || [];
+  const documents: SupplyReviewDocItem[] =
+    DEMO_SUBMISSION_DOCS[targetId] || DEMO_SUBMISSION_DOCS["sub_s39"] || [];
 
   return {
     submission: item,
@@ -371,7 +433,8 @@ export async function approveSubmissionAction(
   const command: SupplyReviewActionCommand = {
     expectedRevisionNo,
     reasonCode: "all_documents_valid",
-    comment: comment || "Approval completed and canonical registry provisioned.",
+    comment:
+      comment || "Approval completed and canonical registry provisioned.",
   };
 
   return client.approveSupplySubmission(submissionId, command);
