@@ -2,11 +2,10 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_DIFF_ROWS,
-  DEFAULT_DOCUMENT_ROWS,
-  FX_PSR_QUEUE,
   PSR_SUB_STATUS,
   REASON_CODES,
+  buildDocumentRows,
+  buildSideBySideDiff,
   classifySupplyReviewError,
   mapSubmissionToTypeZh,
 } from "../../app/supply-review/supply-review-shared";
@@ -86,11 +85,32 @@ describe("S1F-ADM-001 Platform Admin Supply Review UI & Behavior", () => {
     expect(detailSource).toContain("rejectAdminSupplySubmission");
   });
 
-  it("presents VQ-1 through VQ-6 design canvas artifacts in detail view", () => {
-    expect(DEFAULT_DIFF_ROWS.length).toBeGreaterThan(0);
-    expect(DEFAULT_DOCUMENT_ROWS.length).toBeGreaterThan(0);
-    expect(FX_PSR_QUEUE.length).toBeGreaterThan(0);
+  it("presents VQ-1 through VQ-6 design canvas artifacts in detail view without operational fixture fallbacks", () => {
     expect(REASON_CODES.length).toBeGreaterThan(0);
+
+    // Verify buildSideBySideDiff returns [] when no payload draft is provided
+    const emptyDiff = buildSideBySideDiff(
+      "sub_test",
+      "vehicle_onboarding",
+      null,
+      null,
+      null,
+      null,
+      [],
+    );
+    expect(emptyDiff).toEqual([]);
+
+    // Verify buildDocumentRows returns [] when no document payload is provided
+    const emptyDocs = buildDocumentRows([]);
+    expect(emptyDocs).toEqual([]);
+
+    const sharedSource = readFileSync(
+      resolve(__dirname, "../../app/supply-review/supply-review-shared.ts"),
+      "utf-8",
+    );
+    expect(sharedSource).not.toContain("FX_PSR_QUEUE");
+    expect(sharedSource).not.toContain("DEFAULT_DIFF_ROWS");
+    expect(sharedSource).not.toContain("DEFAULT_DOCUMENT_ROWS");
 
     const detailSource = readFileSync(
       resolve(__dirname, "../../app/supply-review/[submissionId]/page.tsx"),
