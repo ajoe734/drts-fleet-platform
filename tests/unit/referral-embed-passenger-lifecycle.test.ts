@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   cancelReferralTripServer,
@@ -231,5 +232,25 @@ describe("referral embed passenger lifecycle API integration", () => {
       idempotencyKey: "rate-idemp-1",
     });
     expect(result.score).toBe(5);
+  });
+
+  it("routes completed and cancelled mutations into BFF readback screens", () => {
+    const component = readFileSync(
+      "apps/referral-embed-web/components/passenger-embed.tsx",
+      "utf8",
+    );
+    const page = readFileSync(
+      "apps/referral-embed-web/app/embed/[entrySlug]/page.tsx",
+      "utf8",
+    );
+
+    expect(component).toContain("/api/referral/cancel/");
+    expect(component).toContain("/api/referral/rating/");
+    expect(component).toContain("screen: \"cancelled\"");
+    expect(component).toContain("downloadUrl: liveData.receipt.downloadUrl");
+    expect(component).not.toContain("embedTripHistory");
+    expect(component).not.toContain("embedReceipt");
+    expect(page).toContain("getReferralTripHistoryServer()");
+    expect(page).toContain("getReferralTripReceiptServer(receiptOrderId)");
   });
 });
