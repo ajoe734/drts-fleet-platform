@@ -95,7 +95,7 @@ export class IdentityController {
   ) {
     if (!this.stepUpProofService) {
       throw new ApiRequestError(
-        503,
+        HttpStatus.SERVICE_UNAVAILABLE,
         "SERVICE_UNAVAILABLE",
         "Step-up proof service is not configured.",
       );
