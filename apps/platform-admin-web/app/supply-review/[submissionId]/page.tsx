@@ -25,10 +25,10 @@ import type {
 } from "@drts/contracts";
 import {
   PSR_SUB_STATUS,
-  REASON_CODES,
   buildDocumentRows,
   buildSideBySideDiff,
   classifySupplyReviewError,
+  getReasonCodes,
   mapSubmissionToTypeZh,
   type DiffRow,
   type DocumentRow,
@@ -106,6 +106,8 @@ export default function SupplyReviewDetailPage() {
   const params = useParams();
   const client = usePlatformAdminClient();
 
+  const reasonCodes = useMemo(() => getReasonCodes(t), [t]);
+
   const rawId = params?.submissionId;
   const submissionId: string =
     typeof rawId === "string"
@@ -156,7 +158,7 @@ export default function SupplyReviewDetailPage() {
   const loadDetail = async () => {
     if (!submissionId) {
       setLoading(false);
-      setErrorMsg("無效的 submissionId");
+      setErrorMsg(t("supplyReview.err.invalidId"));
       setRecord(null);
       return;
     }
@@ -179,17 +181,19 @@ export default function SupplyReviewDetailPage() {
         setCanonicalVehicle(rawData.canonicalVehicle || null);
       } else {
         setRecord(null);
-        setErrorMsg("找不到該筆 supply submission 紀錄");
+        setErrorMsg(t("supplyReview.err.notFound"));
       }
     } catch (e: any) {
-      const info = classifySupplyReviewError(e);
+      const info = classifySupplyReviewError(e, t);
       setRecord(null);
       setDriverDraft(null);
       setVehicleDraft(null);
       setDocuments([]);
       setCanonicalDriver(null);
       setCanonicalVehicle(null);
-      setErrorMsg(`載入詳情失敗: ${info.message}`);
+      setErrorMsg(
+        t("supplyReview.err.loadDetailFailed", { msg: info.message }),
+      );
     } finally {
       setLoading(false);
     }
@@ -197,15 +201,17 @@ export default function SupplyReviewDetailPage() {
 
   useEffect(() => {
     loadDetail();
-  }, [submissionId]);
+  }, [submissionId, t]);
 
   const currentStatus = record?.status || "submitted";
   const statusMeta = PSR_SUB_STATUS[currentStatus] || PSR_SUB_STATUS.submitted;
   const revisionNo = record?.revisionNo || 1;
-  const typeZh = mapSubmissionToTypeZh(record?.submissionType);
+  const typeZh = mapSubmissionToTypeZh(record?.submissionType, t);
   const fleetName =
     record?.fleetPartnerName ||
-    (record?.fleetPartnerId ? `車行 (${record.fleetPartnerId})` : "未指定車行");
+    (record?.fleetPartnerId
+      ? t("supplyReview.fleetWithId", { id: record.fleetPartnerId })
+      : t("supplyReview.unspecifiedFleet"));
   const subjectStr =
     record?.subject ||
     (vehicleDraft
@@ -225,6 +231,7 @@ export default function SupplyReviewDetailPage() {
         canonicalVehicle,
         canonicalDriver,
         documents,
+        t,
       ),
     [
       submissionId,
@@ -234,6 +241,7 @@ export default function SupplyReviewDetailPage() {
       canonicalVehicle,
       canonicalDriver,
       documents,
+      t,
     ],
   );
 
@@ -246,8 +254,8 @@ export default function SupplyReviewDetailPage() {
 
   // VQ-2 Documents table generated strictly from server payload
   const docRows: DocumentRow[] = useMemo(
-    () => buildDocumentRows(documents),
-    [documents],
+    () => buildDocumentRows(documents, t),
+    [documents, t],
   );
 
   // Dynamic VQ-3 Validation check
@@ -276,12 +284,12 @@ export default function SupplyReviewDetailPage() {
       const updated = await client.approveAdminSupplySubmission(submissionId, {
         expectedRevisionNo: revisionNo,
         reasonCode: reasonCode || "all_documents_valid",
-        comment: comment || "核可並寫入 canonical registry",
+        comment: comment || t("supplyReview.defaultCommentApprove"),
       });
       setRecord(updated);
       setShowApproveConfirm(false);
     } catch (e: any) {
-      const info = classifySupplyReviewError(e);
+      const info = classifySupplyReviewError(e, t);
       if (info.isConflict) {
         setConflictError(true);
       } else if (info.isSelfApprovalDenied) {
@@ -296,11 +304,11 @@ export default function SupplyReviewDetailPage() {
 
   const handleRequestRevisionSubmit = async () => {
     if (!reasonCode) {
-      setErrorMsg("退回補正需選擇 reason code");
+      setErrorMsg(t("supplyReview.err.selectReasonRequired"));
       return;
     }
     if (!comment || !comment.trim()) {
-      setErrorMsg("退回補正需填寫說明 (comment)");
+      setErrorMsg(t("supplyReview.err.commentRequired"));
       return;
     }
     setSubmitting(true);
@@ -316,7 +324,7 @@ export default function SupplyReviewDetailPage() {
       setRecord(updated);
       setShowActionModal(null);
     } catch (e: any) {
-      const info = classifySupplyReviewError(e);
+      const info = classifySupplyReviewError(e, t);
       if (info.isConflict) {
         setConflictError(true);
       } else {
@@ -329,11 +337,11 @@ export default function SupplyReviewDetailPage() {
 
   const handleRejectSubmit = async () => {
     if (!reasonCode) {
-      setErrorMsg("駁回需選擇 reason code");
+      setErrorMsg(t("supplyReview.err.rejectReasonRequired"));
       return;
     }
     if (!comment || !comment.trim()) {
-      setErrorMsg("駁回需填寫說明 (comment)");
+      setErrorMsg(t("supplyReview.err.rejectCommentRequired"));
       return;
     }
     setSubmitting(true);
@@ -349,7 +357,7 @@ export default function SupplyReviewDetailPage() {
       setRecord(updated);
       setShowActionModal(null);
     } catch (e: any) {
-      const info = classifySupplyReviewError(e);
+      const info = classifySupplyReviewError(e, t);
       if (info.isConflict) {
         setConflictError(true);
       } else {
@@ -362,23 +370,25 @@ export default function SupplyReviewDetailPage() {
 
   const canonicalDlItems: CanvasDLItem[] = [
     {
-      k: "建立 / 更新 vehicle",
+      k: record?.canonicalVehicleId
+        ? t("supplyReview.dl.createUpdateVehicle")
+        : t("supplyReview.dl.createUpdateDriver"),
       v: record?.canonicalVehicleId
         ? `${record.canonicalVehicleId} (created)`
         : record?.canonicalDriverId
           ? `${record.canonicalDriverId} (created)`
-          : "— (未建立)",
+          : t("supplyReview.diff.notCreated"),
       mono: true,
     },
     {
-      k: "affiliation",
+      k: t("supplyReview.dl.affiliation"),
       v: record?.fleetPartnerId
         ? `${record.fleetPartnerId} ↔ ${record.canonicalVehicleId || record.canonicalDriverId || "canonical"}`
         : "—",
       mono: true,
     },
     {
-      k: "重算 readiness",
+      k: t("supplyReview.dl.recalcReadiness"),
       v: (
         <CanvasPill
           tone={currentStatus === "approved" ? "success" : "neutral"}
@@ -389,8 +399,8 @@ export default function SupplyReviewDetailPage() {
       ),
     },
     {
-      k: "通知",
-      v: "車行 + 司機",
+      k: t("supplyReview.dl.notifications"),
+      v: t("supplyReview.dl.notifyTargets"),
       mono: false,
     },
   ];
@@ -405,11 +415,11 @@ export default function SupplyReviewDetailPage() {
       const updated = await client.startAdminSupplyReview(submissionId, {
         expectedRevisionNo: revisionNo,
         reasonCode: "manual_screening",
-        comment: "平台審核人受理審核",
+        comment: t("supplyReview.defaultCommentStart"),
       });
       setRecord(updated);
     } catch (e: any) {
-      const info = classifySupplyReviewError(e);
+      const info = classifySupplyReviewError(e, t);
       setErrorMsg(info.message);
     } finally {
       setSubmitting(false);
@@ -421,14 +431,14 @@ export default function SupplyReviewDetailPage() {
       <div data-screen-id="PSR-DETAIL-01">
         <CanvasPageHeader
           title={`${submissionId || "Detail"} · ${t("supplyReview.detail.loadingTitle")}...`}
-          subtitle="正在從伺服器載入 supply submission 詳情..."
+          subtitle={t("supplyReview.banner.loadingBody")}
         />
         <div style={{ padding: 24 }}>
           <CanvasBanner
             tone="info"
             icon="info"
             title={t("supplyReview.detail.loadingTitle")}
-            body="正在處理，請稍候..."
+            body={t("supplyReview.banner.processing")}
           />
         </div>
       </div>
@@ -439,8 +449,8 @@ export default function SupplyReviewDetailPage() {
     return (
       <div data-screen-id="PSR-DETAIL-01">
         <CanvasPageHeader
-          title={`${submissionId || "Detail"} · 載入失敗`}
-          subtitle="無法讀取此筆 supply submission 資料"
+          title={`${submissionId || "Detail"} · ${t("supplyReview.detail.loadFailedTitle")}`}
+          subtitle={t("supplyReview.banner.loadDetailFailedSubtitle")}
           actions={
             <Link href="/supply-review" style={{ textDecoration: "none" }}>
               <CanvasBtn variant="secondary">
@@ -454,7 +464,7 @@ export default function SupplyReviewDetailPage() {
             tone="danger"
             icon="warn"
             title={t("supplyReview.detail.loadFailedTitle")}
-            body={errorMsg || "找不到該筆 supply submission 紀錄"}
+            body={errorMsg || t("supplyReview.err.notFound")}
             actions={
               <CanvasBtn variant="primary" icon="refresh" onClick={loadDetail}>
                 {t("supplyReview.detail.retry")}
@@ -473,7 +483,8 @@ export default function SupplyReviewDetailPage() {
           <span
             style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
           >
-            {submissionId} · {t("supplyReview.detail.reviewHeader", { typeZh })}
+            {submissionId} ·{" "}
+            {t("supplyReview.detail.reviewHeader", { type: typeZh })}
             <CanvasPill tone={statusMeta.tone} dot>
               {t(statusMeta.key)}
               <span style={subMonoStyle}>{statusMeta.code}</span>
@@ -533,8 +544,8 @@ export default function SupplyReviewDetailPage() {
           <CanvasBanner
             tone="danger"
             icon="warn"
-            title="SUBMISSION_REVISION_CONFLICT · 409"
-            body={`此 submission 已被更新（revision ${revisionNo}）。請重新載入後再審，系統不允許盲蓋。`}
+            title={t("supplyReview.banner.conflictTitle")}
+            body={t("supplyReview.banner.conflictBody", { rev: revisionNo })}
             actions={
               <CanvasBtn variant="primary" icon="refresh" onClick={loadDetail}>
                 {t("supplyReview.detail.reload")}
@@ -549,8 +560,8 @@ export default function SupplyReviewDetailPage() {
           <CanvasBanner
             tone="danger"
             icon="warn"
-            title="REVIEWER_SELF_APPROVAL_DENIED"
-            body="審核人不得核可自己以車行身分提交的資料（REVIEWER_SELF_APPROVAL_DENIED）。"
+            title={t("supplyReview.banner.selfApprovalTitle")}
+            body={t("supplyReview.banner.selfApprovalBody")}
           />
         </div>
       )}
@@ -571,7 +582,7 @@ export default function SupplyReviewDetailPage() {
           {/* VQ-1 Side-by-side diff */}
           <CanvasCard
             title={t("supplyReview.detail.diffTitle")}
-            subtitle="VQ-1 · 變更欄位以強調色標示"
+            subtitle={t("supplyReview.detail.diffSubtitle")}
             actions={
               <div style={{ display: "flex", gap: 6 }}>
                 <span
@@ -670,7 +681,7 @@ export default function SupplyReviewDetailPage() {
           {/* VQ-2 Document review */}
           <CanvasCard
             title={t("supplyReview.detail.docTitle")}
-            subtitle="VQ-2 · 類型 / 檔名 / 生效 / 審核狀態"
+            subtitle={t("supplyReview.detail.docSubtitle")}
           >
             {docRows.length === 0 ? (
               <div
@@ -685,16 +696,25 @@ export default function SupplyReviewDetailPage() {
             ) : (
               <CanvasTable
                 columns={[
-                  { h: "類型", w: 150, r: (r) => String(r.zh) },
-                  { h: "檔名", k: "file", w: 170, mono: true },
                   {
-                    h: "生效起迄",
+                    h: t("supplyReview.docCol.type"),
+                    w: 150,
+                    r: (r) => String(r.zh),
+                  },
+                  {
+                    h: t("supplyReview.docCol.filename"),
+                    k: "file",
+                    w: 170,
+                    mono: true,
+                  },
+                  {
+                    h: t("supplyReview.docCol.period"),
                     w: 170,
                     mono: true,
                     r: (r) => `${r.from} ~ ${r.until}`,
                   },
                   {
-                    h: "狀態",
+                    h: t("supplyReview.docCol.status"),
                     w: 100,
                     r: (r) => (
                       <CanvasPill tone={r.tone as any} dot>
@@ -734,12 +754,12 @@ export default function SupplyReviewDetailPage() {
                   <CanvasBanner
                     tone="success"
                     icon="check"
-                    body="必填欄位齊全 · 文件類型完整 · 無重複標的。"
+                    body={t("supplyReview.validation.completeBody")}
                   />
                   <CanvasBanner
                     tone="info"
                     icon="info"
-                    body="保險保單與加盟合約已完成校對，核可後將同步更新 canonical 紀錄與 readiness。"
+                    body={t("supplyReview.validation.completeInfo")}
                   />
                 </>
               ) : (
@@ -748,7 +768,7 @@ export default function SupplyReviewDetailPage() {
                     <CanvasBanner
                       tone="danger"
                       icon="warn"
-                      body="缺必要文件（行照 / 保險保單），完整性未過，不可核可。"
+                      body={t("supplyReview.validation.missingDocs")}
                     />
                   )}
                   {validationInfo.expiredDocs.map((doc) => (
@@ -756,7 +776,10 @@ export default function SupplyReviewDetailPage() {
                       key={doc.documentId}
                       tone="danger"
                       icon="warn"
-                      body={`文件過期：${doc.originalFileName || doc.documentType} 已於 ${doc.effectiveUntil} 到期，需要求車行補正。`}
+                      body={t("supplyReview.validation.docExpired", {
+                        name: doc.originalFileName || doc.documentType,
+                        until: doc.effectiveUntil || "—",
+                      })}
                     />
                   ))}
                 </>
@@ -769,9 +792,9 @@ export default function SupplyReviewDetailPage() {
           {/* Reviewer note + Reason code (VQ-3) */}
           <CanvasCard
             title={t("supplyReview.detail.reviewerNoteTitle")}
-            subtitle="VQ-3 · 退補 / 駁回需填 reason code"
+            subtitle={t("supplyReview.detail.noteSubtitle")}
           >
-            <CanvasField label="reason code（退補 / 駁回必填）">
+            <CanvasField label={t("supplyReview.modal.reasonLabel")}>
               <select
                 style={selectStyle}
                 value={reasonCode}
@@ -782,7 +805,7 @@ export default function SupplyReviewDetailPage() {
                 <option value="">
                   {t("supplyReview.detail.approveNoNote")}
                 </option>
-                {REASON_CODES.map((opt) => (
+                {reasonCodes.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
@@ -790,7 +813,7 @@ export default function SupplyReviewDetailPage() {
               </select>
             </CanvasField>
 
-            <CanvasField label="comment">
+            <CanvasField label={t("supplyReview.modal.commentLabel")}>
               <textarea
                 value={comment}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
@@ -816,7 +839,7 @@ export default function SupplyReviewDetailPage() {
           {/* VQ-4 Canonical preview */}
           <CanvasCard
             title={t("supplyReview.detail.canonicalPreviewTitle")}
-            subtitle="VQ-4 · approve 會改動 registry（不可逆）"
+            subtitle={t("supplyReview.detail.previewSubtitle")}
             style={{ borderTop: `2px solid ${theme.accent}` }}
           >
             <CanvasDL cols={1} items={canonicalDlItems} />
@@ -824,7 +847,7 @@ export default function SupplyReviewDetailPage() {
               <CanvasBanner
                 tone="warn"
                 icon="warn"
-                body="核可為單一交易：provision canonical + affiliation + readiness + audit。完整性未過則 SUBMISSION_INCOMPLETE，不可核可。"
+                body={t("supplyReview.detail.previewWarn")}
               />
             </div>
           </CanvasCard>
@@ -834,7 +857,7 @@ export default function SupplyReviewDetailPage() {
             <CanvasBanner
               tone="info"
               icon="lock"
-              body="審核人不得核可自己以車行身分提交的資料（REVIEWER_SELF_APPROVAL_DENIED），不得繞過必填文件。"
+              body={t("supplyReview.detail.guardrailBody")}
             />
           </CanvasCard>
 
@@ -919,7 +942,9 @@ export default function SupplyReviewDetailPage() {
                 onClick={handleApproveSubmit}
                 disabled={submitting}
               >
-                {submitting ? "處理中…" : "確認核可 · provision"}
+                {submitting
+                  ? t("supplyReview.modal.processing")
+                  : t("supplyReview.modal.confirmApproveBtn")}
               </CanvasBtn>
             </div>
           </div>
@@ -931,11 +956,11 @@ export default function SupplyReviewDetailPage() {
           <div style={modalContainerStyle}>
             <div style={{ fontWeight: 700, fontSize: 16, color: theme.text }}>
               {showActionModal === "request_revision"
-                ? "確認退回車行補正？"
-                : "確認駁回此送審案？"}
+                ? t("supplyReview.modal.confirmRevisionTitle")
+                : t("supplyReview.modal.confirmRejectTitle")}
             </div>
 
-            <CanvasField label="reason code（必填）">
+            <CanvasField label={t("supplyReview.modal.reasonLabel")}>
               <select
                 style={selectStyle}
                 value={reasonCode}
@@ -946,7 +971,7 @@ export default function SupplyReviewDetailPage() {
                 <option value="">
                   {t("supplyReview.detail.selectReason")}
                 </option>
-                {REASON_CODES.map((opt) => (
+                {reasonCodes.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>
@@ -954,7 +979,7 @@ export default function SupplyReviewDetailPage() {
               </select>
             </CanvasField>
 
-            <CanvasField label="說明 / comment（必填）">
+            <CanvasField label={t("supplyReview.modal.commentLabel")}>
               <textarea
                 value={comment}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
@@ -997,10 +1022,10 @@ export default function SupplyReviewDetailPage() {
                 disabled={submitting}
               >
                 {submitting
-                  ? "處理中…"
+                  ? t("supplyReview.modal.processing")
                   : showActionModal === "request_revision"
-                    ? "確認退補"
-                    : "確認駁回"}
+                    ? t("supplyReview.modal.confirmRevisionBtn")
+                    : t("supplyReview.modal.confirmRejectBtn")}
               </CanvasBtn>
             </div>
           </div>

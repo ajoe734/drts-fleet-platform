@@ -17,9 +17,9 @@ import {
 } from "@drts/ui-web";
 import type { SupplySubmissionStatus } from "@drts/contracts";
 import {
-  PSR_REVIEWER,
   PSR_SUB_STATUS,
   classifySupplyReviewError,
+  getPsrReviewer,
   mapSubmissionToTypeZh,
   type SupplyQueueRow,
 } from "./supply-review-shared";
@@ -69,6 +69,8 @@ export default function SupplyReviewQueuePage() {
   const router = useRouter();
   const client = usePlatformAdminClient();
 
+  const psrReviewer = getPsrReviewer(t);
+
   const [activeTab, setActiveTab] = useState<"pending" | "mine" | "history">(
     "pending",
   );
@@ -92,14 +94,16 @@ export default function SupplyReviewQueuePage() {
       const mapped: SupplyQueueRow[] = (remoteList || []).map((sub: any) => {
         const fleetName =
           sub.fleetPartnerName ||
-          (sub.fleetPartnerId ? `車行 (${sub.fleetPartnerId})` : "車行");
+          (sub.fleetPartnerId
+            ? t("supplyReview.fleetWithId", { id: sub.fleetPartnerId })
+            : t("supplyReview.unspecifiedFleet"));
         const subject = sub.subject || `Submission #${sub.submissionId}`;
         const area =
           sub.businessArea === "yilan"
-            ? "宜蘭縣"
+            ? t("supplyReview.areaYilan")
             : sub.businessArea === "taichung"
-              ? "台中市"
-              : "台北市";
+              ? t("supplyReview.areaTaichung")
+              : t("supplyReview.areaTaipei");
         const svc =
           Array.isArray(sub.supportedServiceProductCodes) &&
           sub.supportedServiceProductCodes.includes("airport")
@@ -112,14 +116,14 @@ export default function SupplyReviewQueuePage() {
           typeof sub.missingItemsCount === "number" ? sub.missingItemsCount : 0;
         const lockedBy =
           sub.lockedBy ||
-          (sub.reviewStartedBy === PSR_REVIEWER.name
-            ? PSR_REVIEWER.display
+          (sub.reviewStartedBy === psrReviewer.name
+            ? psrReviewer.display
             : null);
 
         return {
           id: sub.submissionId,
           submissionId: sub.submissionId,
-          type: mapSubmissionToTypeZh(sub.submissionType),
+          type: mapSubmissionToTypeZh(sub.submissionType, t),
           submissionType: sub.submissionType,
           fleet: fleetName,
           fleetPartnerId: sub.fleetPartnerId || "",
@@ -139,15 +143,15 @@ export default function SupplyReviewQueuePage() {
       });
       setSubmissions(mapped);
     } catch (e: any) {
-      const info = classifySupplyReviewError(e);
-      setError(`載入佇列失敗: ${info.message}`);
+      const info = classifySupplyReviewError(e, t);
+      setError(t("supplyReview.err.loadQueueFailed", { msg: info.message }));
       setSubmissions([]);
     }
   };
 
   useEffect(() => {
     fetchSubmissions();
-  }, []);
+  }, [t]);
 
   const handleStartReview = async (row: SupplyQueueRow) => {
     setStartingId(row.submissionId);
@@ -156,12 +160,17 @@ export default function SupplyReviewQueuePage() {
       await client.startAdminSupplyReview(row.submissionId, {
         expectedRevisionNo: row.revisionNo,
         reasonCode: "manual_screening",
-        comment: "平台審核人受理審核",
+        comment: t("supplyReview.defaultCommentStart"),
       });
       router.push(`/supply-review/${encodeURIComponent(row.submissionId)}`);
     } catch (e: any) {
-      const info = classifySupplyReviewError(e);
-      setError(`無法開始審核 submission ${row.submissionId}: ${info.message}`);
+      const info = classifySupplyReviewError(e, t);
+      setError(
+        t("supplyReview.err.startReviewFailed", {
+          id: row.submissionId,
+          msg: info.message,
+        }),
+      );
     } finally {
       setStartingId(null);
     }
@@ -177,10 +186,10 @@ export default function SupplyReviewQueuePage() {
       submissions.filter(
         (r) =>
           r.status === "in_review" &&
-          (r.lockedBy === PSR_REVIEWER.display ||
-            r.lockedBy === PSR_REVIEWER.name),
+          (r.lockedBy === psrReviewer.display ||
+            r.lockedBy === psrReviewer.name),
       ).length,
-    [submissions],
+    [submissions, psrReviewer.display, psrReviewer.name],
   );
 
   const filteredSubmissions = useMemo(() => {
@@ -190,8 +199,8 @@ export default function SupplyReviewQueuePage() {
         activeTab === "mine" &&
         !(
           r.status === "in_review" &&
-          (r.lockedBy === PSR_REVIEWER.display ||
-            r.lockedBy === PSR_REVIEWER.name ||
+          (r.lockedBy === psrReviewer.display ||
+            r.lockedBy === psrReviewer.name ||
             !r.lockedBy)
         )
       ) {
@@ -204,27 +213,41 @@ export default function SupplyReviewQueuePage() {
         return false;
       }
 
-      if (
-        fleetFilter !== "all" &&
-        r.fleet !== fleetFilter &&
-        r.fleetPartnerId !== fleetFilter
-      )
-        return false;
-      if (
-        typeFilter !== "all" &&
-        r.type !== typeFilter &&
-        r.submissionType !== typeFilter
-      )
-        return false;
+      if (fleetFilter !== "all") {
+        const matchFleet =
+          r.fleet === fleetFilter ||
+          r.fleetPartnerId === fleetFilter ||
+          (fleetFilter === "Metropolitan" &&
+            (r.fleet.includes("Metropolitan") || r.fleet.includes("大都會"))) ||
+          (fleetFilter === "Lanyang" &&
+            (r.fleet.includes("Lanyang") || r.fleet.includes("蘭陽"))) ||
+          (fleetFilter === "Coastal" &&
+            (r.fleet.includes("Coastal") || r.fleet.includes("海線")));
+        if (!matchFleet) return false;
+      }
+
+      if (typeFilter !== "all") {
+        const matchType =
+          r.type === typeFilter ||
+          r.submissionType === typeFilter ||
+          (typeFilter === "vehicle" && r.submissionType.includes("vehicle")) ||
+          (typeFilter === "driver" && r.submissionType.includes("driver")) ||
+          (typeFilter === "insurance" &&
+            r.submissionType.includes("insurance"));
+        if (!matchType) return false;
+      }
+
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
       if (serviceFilter !== "all" && r.svc !== serviceFilter) return false;
-      if (
-        areaFilter !== "all" &&
-        ((areaFilter === "taipei" && !r.area.includes("台北")) ||
-          (areaFilter === "yilan" && !r.area.includes("宜蘭")) ||
-          (areaFilter === "taichung" && !r.area.includes("台中")))
-      ) {
-        return false;
+      if (areaFilter !== "all") {
+        const matchArea =
+          (areaFilter === "taipei" &&
+            (r.area.includes("台北") || r.area.includes("Taipei"))) ||
+          (areaFilter === "yilan" &&
+            (r.area.includes("宜蘭") || r.area.includes("Yilan"))) ||
+          (areaFilter === "taichung" &&
+            (r.area.includes("台中") || r.area.includes("Taichung")));
+        if (!matchArea) return false;
       }
       if (missingFilter === "has_missing" && r.missing === 0) return false;
       if (missingFilter === "no_missing" && r.missing > 0) return false;
@@ -251,12 +274,14 @@ export default function SupplyReviewQueuePage() {
     areaFilter,
     missingFilter,
     dateFilter,
+    psrReviewer.display,
+    psrReviewer.name,
   ]);
 
   const columns: CanvasTableColumn<SupplyQueueRow & Record<string, unknown>>[] =
     [
       {
-        h: "ID",
+        h: t("supplyReview.col.id"),
         w: 110,
         mono: true,
         r: (r) => (
@@ -266,34 +291,34 @@ export default function SupplyReviewQueuePage() {
         ),
       },
       {
-        h: "類型",
+        h: t("supplyReview.col.type"),
         w: 80,
         r: (r) => <CanvasPill tone="neutral">{String(r.type)}</CanvasPill>,
       },
       {
-        h: "車行 · fleet",
+        h: t("supplyReview.col.fleet"),
         k: "fleet",
         w: 130,
       },
       {
-        h: "subject",
+        h: t("supplyReview.col.subject"),
         k: "subject",
         w: 220,
       },
       {
-        h: "營業區",
+        h: t("supplyReview.col.area"),
         k: "area",
         w: 90,
       },
       {
-        h: "rev",
+        h: t("supplyReview.col.rev"),
         w: 54,
         align: "center",
         mono: true,
         r: (r) => Number(r.rev || r.revisionNo),
       },
       {
-        h: "狀態",
+        h: t("supplyReview.col.status"),
         w: 140,
         r: (r) => {
           const st = (r.status as SupplySubmissionStatus) || "submitted";
@@ -307,13 +332,13 @@ export default function SupplyReviewQueuePage() {
         },
       },
       {
-        h: "送審",
+        h: t("supplyReview.col.submittedAt"),
         k: "at",
         w: 110,
         mono: true,
       },
       {
-        h: "缺件 / 鎖定",
+        h: t("supplyReview.col.missingOrLock"),
         w: 160,
         r: (r) => {
           const missing = Number(r.missing || 0);
@@ -346,7 +371,7 @@ export default function SupplyReviewQueuePage() {
         },
       },
       {
-        h: "",
+        h: t("supplyReview.col.actions"),
         w: 110,
         r: (r) => {
           const rowData = r as unknown as SupplyQueueRow;
@@ -466,13 +491,13 @@ export default function SupplyReviewQueuePage() {
                 }
               >
                 <option value="all">{t("supplyReview.filter.fleetAll")}</option>
-                <option value="大都會車隊">
+                <option value="Metropolitan">
                   {t("supplyReview.filter.fleetMetropolitan")}
                 </option>
-                <option value="蘭陽小客車">
+                <option value="Lanyang">
                   {t("supplyReview.filter.fleetLanyang")}
                 </option>
-                <option value="海線車隊">
+                <option value="Coastal">
                   {t("supplyReview.filter.fleetCoastal")}
                 </option>
               </select>
@@ -486,13 +511,13 @@ export default function SupplyReviewQueuePage() {
                 }
               >
                 <option value="all">{t("supplyReview.filter.typeAll")}</option>
-                <option value="車輛">
+                <option value="vehicle">
                   {t("supplyReview.filter.typeVehicle")}
                 </option>
-                <option value="司機">
+                <option value="driver">
                   {t("supplyReview.filter.typeDriver")}
                 </option>
-                <option value="保險">
+                <option value="insurance">
                   {t("supplyReview.filter.typeInsurance")}
                 </option>
               </select>

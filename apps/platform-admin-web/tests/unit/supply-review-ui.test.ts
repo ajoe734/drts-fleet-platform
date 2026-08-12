@@ -181,12 +181,12 @@ describe("S1F-ADM-001 Platform Admin Supply Review UI & Behavior", () => {
     expect(detailPageSource).toContain("setErrorMsg");
     expect(detailPageSource).not.toContain("rgba(11, 18, 32, 0.5)");
 
-    // Detail page must require comment for revision request and rejection
+    // Detail page must require comment for revision request and rejection via i18n keys
     expect(detailPageSource).toContain(
-      'setErrorMsg("退回補正需填寫說明 (comment)")',
+      'setErrorMsg(t("supplyReview.err.commentRequired"))',
     );
     expect(detailPageSource).toContain(
-      'setErrorMsg("駁回需填寫說明 (comment)")',
+      'setErrorMsg(t("supplyReview.err.rejectCommentRequired"))',
     );
   });
 });
