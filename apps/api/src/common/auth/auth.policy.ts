@@ -74,7 +74,13 @@ export function resolveRouteAuthPolicy(
     return {
       routeKey: "auth:logout",
       requiredScopes: [],
-      allowedRealms: baseAllowedRealms("platform", "ops", "tenant", "partner", "driver"),
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "ops",
+        "tenant",
+        "partner",
+        "driver",
+      ),
       description: "Authenticated self session logout",
     };
   }
@@ -83,7 +89,13 @@ export function resolveRouteAuthPolicy(
     return {
       routeKey: "auth:logout-all",
       requiredScopes: [],
-      allowedRealms: baseAllowedRealms("platform", "ops", "tenant", "partner", "driver"),
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "ops",
+        "tenant",
+        "partner",
+        "driver",
+      ),
       description: "Authenticated self session logout-all",
     };
   }
@@ -92,7 +104,13 @@ export function resolveRouteAuthPolicy(
     return {
       routeKey: "auth:sessions:list",
       requiredScopes: [],
-      allowedRealms: baseAllowedRealms("platform", "ops", "tenant", "partner", "driver"),
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "ops",
+        "tenant",
+        "partner",
+        "driver",
+      ),
       description: "Authenticated self session inventory listing",
     };
   }
@@ -105,7 +123,13 @@ export function resolveRouteAuthPolicy(
     return {
       routeKey: "auth:sessions:revoke",
       requiredScopes: [],
-      allowedRealms: baseAllowedRealms("platform", "ops", "tenant", "partner", "driver"),
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "ops",
+        "tenant",
+        "partner",
+        "driver",
+      ),
       description: "Authenticated self session revocation",
     };
   }
@@ -113,7 +137,11 @@ export function resolveRouteAuthPolicy(
   if (routePath === "identity/sessions" && upperMethod === "GET") {
     return {
       routeKey: "identity:sessions:list",
-      requiredScopes: methodScope("identity:sessions:read", "identity:sessions:write", upperMethod),
+      requiredScopes: methodScope(
+        "identity:sessions:read",
+        "identity:sessions:write",
+        upperMethod,
+      ),
       allowedRealms: baseAllowedRealms("platform", "ops", "tenant"),
       description: "Administrative session inventory query",
     };
@@ -762,10 +790,29 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "identity/step-up-proofs" && upperMethod === "POST") {
+    return {
+      routeKey: "identity:step-up-proofs:create",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms(
+        "platform",
+        "tenant",
+        "ops",
+        "partner",
+        "driver",
+      ),
+      description: "Creation of step-up proof for privileged action",
+    };
+  }
+
   if (routePath.startsWith("identity/") || routePath === "identity") {
     return {
       routeKey: `identity:${upperMethod}`,
-      requiredScopes: methodScope("identity:read", "identity:write", upperMethod),
+      requiredScopes: methodScope(
+        "identity:read",
+        "identity:write",
+        upperMethod,
+      ),
       allowedRealms: baseAllowedRealms("platform", "tenant", "ops"),
       description: "Identity and privileged role governance access",
     };

@@ -278,6 +278,27 @@ describe("bootstrap auth extraction", () => {
     });
   });
 
+  it("resolves POST /api/identity/step-up-proofs for authenticated realms without requiring identity:write", () => {
+    const policy = resolveRouteAuthPolicy(
+      "POST",
+      "/api/identity/step-up-proofs",
+    );
+
+    expect(policy).toEqual({
+      routeKey: "identity:step-up-proofs:create",
+      requiredScopes: [],
+      allowedRealms: [
+        "system",
+        "platform",
+        "tenant",
+        "ops",
+        "partner",
+        "driver",
+      ],
+      description: "Creation of step-up proof for privileged action",
+    });
+  });
+
   it("keeps call-center order creation on ops-only callcenter scopes", () => {
     const policy = resolveRouteAuthPolicy("POST", "/api/call-center/orders");
 
