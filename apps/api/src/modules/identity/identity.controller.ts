@@ -42,9 +42,9 @@ interface RequestWithHeaders {
 @Controller("identity")
 export class IdentityController {
   constructor(
-    @Optional() private readonly stepUpProofService?: StepUpProofService,
     @Optional() private readonly identityRepository?: IdentityRepository,
     @Optional() private readonly securityEventsService?: SecurityEventsService,
+    @Optional() private readonly stepUpProofService?: StepUpProofService,
   ) {}
 
   @OpenRoute()

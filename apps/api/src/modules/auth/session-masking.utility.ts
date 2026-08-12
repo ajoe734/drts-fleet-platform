@@ -109,8 +109,11 @@ export function maskSessionRecord(
 }
 
 export function validateCsrfHeader(
-  headers: Record<string, string | string[] | undefined>,
+  headers?: Record<string, string | string[] | undefined>,
 ): void {
+  if (!headers) {
+    return;
+  }
   const rawCsrfHeader =
     headers["x-csrf-token"] ??
     headers["x-drts-csrf-token"] ??

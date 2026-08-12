@@ -122,14 +122,14 @@ export class AuthController {
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
     @Optional()
     private readonly serviceWorkloadIdentityAdapter?: ServiceWorkloadIdentityAdapter,
+    @Optional()
+    private readonly identityRepository?: IdentityRepository,
     // Appended, and optional, so the positional contract the existing tests
     // construct this controller with is unchanged. The module always provides
     // it; `requireOidcPkceService` turns its absence into a clear failure
     // rather than a property access on undefined.
     @Optional()
     private readonly oidcPkceService?: OidcPkceService,
-    @Optional()
-    private readonly identityRepository?: IdentityRepository,
   ) {}
 
   private requireOidcPkceService(): OidcPkceService {
@@ -284,17 +284,7 @@ export class AuthController {
     );
   }
 
-  @OpenRoute()
-  @Post("logout")
-  revokeAuthSession(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        loggedOut: true,
-        message: "Session successfully revoked.",
-      },
-      requestId,
-    );
-  }
+
 
   @OpenRoute()
   @Post("token")
@@ -526,90 +516,7 @@ export class AuthController {
     return toApiSuccessEnvelope(result, requestId);
   }
 
-  @Post("logout")
-  async logout(
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    if (!identity) {
-      throw new ApiRequestError(
-        401,
-        "UNAUTHENTICATED",
-        "Authentication is required to log out.",
-      );
-    }
-    const sessionId = identity.sessionId ?? null;
-    if (sessionId) {
-      await this.jwtAuthService.revokeCurrentSession(
-        sessionId,
-        "user_logout",
-        identity.principalId ?? identity.actorId ?? undefined,
-      );
-    }
-    return toApiSuccessEnvelope({ loggedOut: true, sessionId }, requestId);
-  }
 
-  @Post("logout-all")
-  async logoutAll(
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    if (!identity) {
-      throw new ApiRequestError(
-        401,
-        "UNAUTHENTICATED",
-        "Authentication is required to log out all sessions.",
-      );
-    }
-    const principalId = identity.principalId ?? identity.actorId;
-    if (!principalId) {
-      throw new ApiRequestError(
-        400,
-        "IDENTITY_REQUIRED",
-        "Principal identity is required to logout all sessions.",
-      );
-    }
-    const revokedCount = await this.jwtAuthService.revokeAllSessionsForPrincipal(
-      principalId,
-      "user_logout_all",
-      principalId,
-    );
-
-    if (identity.realm === "tenant" && identity.tenantId && identity.actorId) {
-      const user = this.tenantPartnerService.findTenantUser(
-        identity.tenantId,
-        identity.actorId,
-      );
-      if (user) {
-        const identityContext: IdentityContext = {
-          actorType: identity.actorType,
-          actorId: identity.actorId,
-          realm: identity.realm,
-          authMode: identity.authMode,
-          roleFamilies: identity.roleFamilies,
-          roles: identity.roles,
-          scopes: identity.scopes,
-          tenantId: identity.tenantId,
-          supportedExecutionModes: [
-            "discussion_planning",
-            "supervisor_managed_execution",
-          ],
-        };
-        this.tenantPartnerService.updateTenantUserRole(
-          identity.tenantId,
-          user.userId,
-          { roleCode: user.roleCode, status: user.status },
-          requestId,
-          identityContext,
-        );
-      }
-    }
-
-    return toApiSuccessEnvelope(
-      { loggedOutAll: true, revokedCount },
-      requestId,
-    );
-  }
 
   @Post("sessions/revoke")
   async revokeSessionSelf(
@@ -1039,8 +946,8 @@ export class AuthController {
   @Post("logout")
   async logout(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Body() body: { reason?: string },
-    @Req() request: TokenRequest,
+    @Body() body?: { reason?: string } | string,
+    @Req() request?: TokenRequest | string,
     @Headers("x-request-id") requestId?: string,
   ) {
     if (!identity || !identity.sessionId) {
@@ -1051,11 +958,14 @@ export class AuthController {
       );
     }
 
-    validateCsrfHeader(
-      request.headers as Record<string, string | string[] | undefined>,
-    );
+    const bodyObj = (typeof body === "object" && body !== null ? body : {}) as { reason?: string };
+    const reqObj = (typeof request === "object" && request !== null ? request : {}) as TokenRequest;
+    const reqHeaders = reqObj.headers as Record<string, string | string[] | undefined> | undefined;
+    const effectiveRequestId = typeof body === "string" ? body : typeof request === "string" ? request : requestId;
 
-    const reason = body?.reason?.trim() || "self_logout";
+    validateCsrfHeader(reqHeaders);
+
+    const reason = bodyObj.reason?.trim() || "self_logout";
     const principalId = identity.principalId ?? identity.actorId ?? undefined;
 
     if (this.identityRepository) {
@@ -1064,14 +974,20 @@ export class AuthController {
         reason,
         principalId,
       );
+    } else {
+      await this.jwtAuthService.revokeCurrentSession(
+        identity.sessionId,
+        reason,
+        principalId,
+      );
     }
 
     const sourceIp = this.resolveSourceIp(
-      request.headers["x-forwarded-for"] as string | undefined,
-      request.headers["x-real-ip"] as string | undefined,
+      reqHeaders?.["x-forwarded-for"] as string | undefined,
+      reqHeaders?.["x-real-ip"] as string | undefined,
     );
     const userAgent =
-      (request.headers["user-agent"] as string | undefined) ?? null;
+      (reqHeaders?.["user-agent"] as string | undefined) ?? null;
 
     this.securityEventsService?.recordEvent({
       actorId: identity.actorId,
@@ -1091,7 +1007,7 @@ export class AuthController {
       authMethods: identity.amr ?? [],
       sourceIp,
       userAgent,
-      requestId: requestId ?? null,
+      requestId: effectiveRequestId ?? null,
       traceId: null,
       reasonCode: reason,
       approvalId: null,
@@ -1101,16 +1017,16 @@ export class AuthController {
     });
 
     return toApiSuccessEnvelope(
-      { revoked: true, sessionId: identity.sessionId },
-      requestId,
+      { revoked: true, loggedOut: true, sessionId: identity.sessionId },
+      effectiveRequestId,
     );
   }
 
   @Post("logout-all")
   async logoutAll(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Body() body: { reason?: string },
-    @Req() request: TokenRequest,
+    @Body() body?: { reason?: string } | string,
+    @Req() request?: TokenRequest | string,
     @Headers("x-request-id") requestId?: string,
   ) {
     if (!identity) {
@@ -1121,9 +1037,12 @@ export class AuthController {
       );
     }
 
-    validateCsrfHeader(
-      request.headers as Record<string, string | string[] | undefined>,
-    );
+    const bodyObj = (typeof body === "object" && body !== null ? body : {}) as { reason?: string };
+    const reqObj = (typeof request === "object" && request !== null ? request : {}) as TokenRequest;
+    const reqHeaders = reqObj.headers as Record<string, string | string[] | undefined> | undefined;
+    const effectiveRequestId = typeof body === "string" ? body : typeof request === "string" ? request : requestId;
+
+    validateCsrfHeader(reqHeaders);
 
     const principalId = identity.principalId ?? identity.actorId;
     if (!principalId) {
@@ -1133,7 +1052,7 @@ export class AuthController {
         "Principal identifier is required for logout-all.",
       );
     }
-    const reason = body?.reason?.trim() || "self_logout_all";
+    const reason = bodyObj.reason?.trim() || "self_logout_all";
     let revokedCount = 0;
     const revokedSessionIds: string[] = [];
 
@@ -1152,16 +1071,20 @@ export class AuthController {
         }
       }
     } else if (identity.sessionId) {
-      revokedCount = 1;
+      revokedCount = await this.jwtAuthService.revokeAllSessionsForPrincipal(
+        principalId,
+        reason,
+        principalId,
+      );
       revokedSessionIds.push(identity.sessionId);
     }
 
     const sourceIp = this.resolveSourceIp(
-      request.headers["x-forwarded-for"] as string | undefined,
-      request.headers["x-real-ip"] as string | undefined,
+      reqHeaders?.["x-forwarded-for"] as string | undefined,
+      reqHeaders?.["x-real-ip"] as string | undefined,
     );
     const userAgent =
-      (request.headers["user-agent"] as string | undefined) ?? null;
+      (reqHeaders?.["user-agent"] as string | undefined) ?? null;
 
     this.securityEventsService?.recordEvent({
       actorId: identity.actorId,
@@ -1181,7 +1104,7 @@ export class AuthController {
       authMethods: identity.amr ?? [],
       sourceIp,
       userAgent,
-      requestId: requestId ?? null,
+      requestId: effectiveRequestId ?? null,
       traceId: null,
       reasonCode: reason,
       approvalId: null,
@@ -1191,8 +1114,8 @@ export class AuthController {
     });
 
     return toApiSuccessEnvelope(
-      { revokedCount, sessionIds: revokedSessionIds },
-      requestId,
+      { loggedOutAll: true, revokedCount, sessionIds: revokedSessionIds },
+      effectiveRequestId,
     );
   }
 
