@@ -27,11 +27,11 @@ import type {
 import type { PlatformAdminAssistantPageBridge } from "../../apps/platform-admin-web/components/assistant/route-context";
 
 describe("Platform Admin route registry", () => {
-  it("registers exactly the 35 current platform-admin routes", () => {
+  it("registers exactly the 37 current platform-admin routes", () => {
     // 23 existing platform-admin routes plus 9 sandbox compliance /
-    // investigation surfaces and 3 P5 back-office surfaces.
-    expect(PLATFORM_ADMIN_ROUTES).toHaveLength(35);
-    expect(new Set(PLATFORM_ADMIN_ROUTE_KEYS).size).toBe(35);
+    // investigation surfaces, 3 P5 back-office surfaces, and 2 supply-review routes.
+    expect(PLATFORM_ADMIN_ROUTES).toHaveLength(37);
+    expect(new Set(PLATFORM_ADMIN_ROUTE_KEYS).size).toBe(37);
   });
 
   it("has a unique, valid descriptor per route key", () => {

@@ -141,7 +141,7 @@ async function applyUpstreamAuth(
   });
 
   Object.entries(controlPlaneAuth.headers).forEach(([key, value]) => {
-    headers.set(key, value);
+    headers.set(key, value as string);
   });
 
   if (process.env.DRTS_API_AUTH_AUDIENCE) {

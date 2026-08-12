@@ -221,6 +221,7 @@ import type {
   TenantApiKeyRecord,
   SupplyDocumentRecord,
   SupplyReadinessRecord,
+  SupplyReviewActionCommand,
   SupplySubmissionRecord,
   SupplySubmissionStatus,
   SupplySubmissionType,
@@ -2082,6 +2083,65 @@ export class ApiClient {
   }> {
     return this.get(
       `/api/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}`,
+    );
+  }
+
+  async listAdminSupplyReviewSubmissions(): Promise<SupplySubmissionRecord[]> {
+    return this.getList<SupplySubmissionRecord>(
+      "/api/admin/supply-review/submissions",
+    );
+  }
+
+  async getAdminSupplyReviewSubmission(submissionId: string): Promise<
+    {
+      submission: SupplySubmissionRecord;
+      driverDraft: DriverSupplyDraft | null;
+      vehicleDraft: VehicleSupplyDraft | null;
+      documents: SupplyDocumentRecord[];
+    } & SupplySubmissionRecord
+  > {
+    return this.get(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}`,
+    );
+  }
+
+  async startAdminSupplyReview(
+    submissionId: string,
+    command: SupplyReviewActionCommand,
+  ): Promise<SupplySubmissionRecord> {
+    return this.post<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/start`,
+      { body: command },
+    );
+  }
+
+  async requestAdminSupplyRevision(
+    submissionId: string,
+    command: SupplyReviewActionCommand,
+  ): Promise<SupplySubmissionRecord> {
+    return this.post<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/request-revision`,
+      { body: command },
+    );
+  }
+
+  async approveAdminSupplySubmission(
+    submissionId: string,
+    command: SupplyReviewActionCommand,
+  ): Promise<SupplySubmissionRecord> {
+    return this.post<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/approve`,
+      { body: command },
+    );
+  }
+
+  async rejectAdminSupplySubmission(
+    submissionId: string,
+    command: SupplyReviewActionCommand,
+  ): Promise<SupplySubmissionRecord> {
+    return this.post<SupplySubmissionRecord>(
+      `/api/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/reject`,
+      { body: command },
     );
   }
 
