@@ -181,6 +181,54 @@ This packet does not claim:
 
 ## Delivery evidence
 
-Closeout commit, push, and review metadata are recorded through the normal
-task lifecycle (`progress` → commit/push → `handoff` to `Codex2`) once this
-packet lands.
+Task-scoped commit/push evidence for this unblock task itself (a support
+artifact, not a code change):
+
+- `COMMIT_HASH=48e91b0b3` — `IAM-RBAC-002-UNBLOCK-PLANNING-DECISION: route CI
+  failure, not a planning gap`
+- `COMMIT_HASH=fe4a63a88` — `IAM-RBAC-002-UNBLOCK-PLANNING-DECISION: fix
+  required-check count against live branch protection`
+- `PUSH_REMOTE=origin`, `PUSH_BRANCH=claude/iam-rbac-002-unblock-planning-decision`
+  (pushed; `git ls-remote --heads origin
+  claude/iam-rbac-002-unblock-planning-decision` resolves to `fe4a63a88`)
+- `INTEGRATION_STATUS=branch_pushed`
+
+### Parent-PR linkage
+
+This unblock task does not open, and must not open, a PR of its own against
+`dev`. It only routes the existing parent. The parent's actual code change
+ships through its own existing PR #1378
+(`gemini2/iam-rbac-002` → `dev`), owned by `Gemini2`, reviewed by `Codex` —
+unchanged by this unblock task. This task's branch
+(`claude/iam-rbac-002-unblock-planning-decision`) carries only the routing
+artifact at `support/unblock/IAM-RBAC-002/`; it is evidence for *this* task's
+own commit-evidence requirement, not a competing implementation branch.
+
+### Parent update to apply at closeout
+
+`apply_unblock_parent_resolution` in `scripts/ai_status.py` only mutates the
+parent when this task's owner runs `done` (which itself requires
+`review_approved`, i.e. `Codex2` sign-off first). The exact values to pass at
+that point are:
+
+```bash
+AI_NAME=Claude \
+PARENT_STATUS=in_progress \
+PARENT_WAITING_FOR=Gemini2 \
+PARENT_NEXT="Fix the concurrency assertion failure in PR #1378 (https://github.com/ajoe734/drts-fleet-platform/pull/1378, branch gemini2/iam-rbac-002): unit and Smoke acceptance both fail at tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts:1297 (11. Real DATABASE_URL-Backed Concurrent Removal Integration) -- expect(fulfilled).toHaveLength(1) got 0 fulfilled instead of exactly one of the two concurrent removeGrant calls succeeding. Investigate the pg_advisory_xact_lock / expectedVersion last-admin-removal path for a real-DB timing/serialization difference, fix or stabilize it, push, and re-run CI." \
+INTEGRATION_STATUS=branch_pushed \
+COMMIT_HASH=<owner's own commit for this task, if any additional one lands> \
+COMMIT_SUBJECT="IAM-RBAC-002-UNBLOCK-PLANNING-DECISION: route parent back to execution" \
+PUSH_REMOTE=origin \
+PUSH_BRANCH=claude/iam-rbac-002-unblock-planning-decision \
+./scripts/ai-status.sh done IAM-RBAC-002-UNBLOCK-PLANNING-DECISION \
+  "Routed IAM-RBAC-002 to in_progress/Gemini2 with the PR #1378 concurrency-fix pointer as next step"
+```
+
+This replaces the parent's stale `next` ("Supervisor reconciled PR #1378:
+ci_pending/pending at fe26d46e9450") with the concrete, reproducible failure
+pointer above, moves `IAM-RBAC-002.status` from `blocked` back to
+`in_progress`, and keeps `owner=Gemini2` / `reviewer=Codex` unchanged. It does
+not touch `IAM-RBAC-002`'s existing `commit_hash` / `pr_url` / `ci_status`
+fields, which continue to describe PR #1378 as recorded by the normal
+`progress`/`reconcile-integration` flow on that task.
