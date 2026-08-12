@@ -451,6 +451,7 @@ export class IAPSubjectAdapter {
         new Set(activeBindings.map((b) => b.roleCode)),
       );
       const assignedRoles = allAssignedRoles.filter((r) => {
+        if (m.realm === "platform") {
           return (
             r === "superadmin" ||
             r === "platform_admin" ||
@@ -458,10 +459,11 @@ export class IAPSubjectAdapter {
             r === "viewer" ||
             r === "security_admin"
           );
+        }
         if (m.realm === "ops") {
           return r === "operator" || r === "ops_user";
         }
-        return false;
+        return true;
       });
 
       const missingGroupsForM: string[] = [];
@@ -766,7 +768,8 @@ export class IAPSubjectAdapter {
     const rawAmr = payload["amr"] ?? payload["gcp_ia_gsuite_amr"];
     if (Array.isArray(rawAmr)) {
       const filtered = rawAmr.filter(
-        (item): item is string => typeof item === "string" && item.trim().length > 0,
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
       );
       if (filtered.length > 0) {
         return filtered;
@@ -775,8 +778,15 @@ export class IAPSubjectAdapter {
       return [rawAmr.trim()];
     }
 
-    const rawAcr = typeof payload["acr"] === "string" ? payload["acr"].trim().toLowerCase() : null;
-    if (rawAcr === "aal2" || rawAcr === "aal3" || rawAcr === "urn:mace:incommon:iap:silver") {
+    const rawAcr =
+      typeof payload["acr"] === "string"
+        ? payload["acr"].trim().toLowerCase()
+        : null;
+    if (
+      rawAcr === "aal2" ||
+      rawAcr === "aal3" ||
+      rawAcr === "urn:mace:incommon:iap:silver"
+    ) {
       return ["verified_iap_workforce"];
     }
 
@@ -790,14 +800,25 @@ export class IAPSubjectAdapter {
     payload: IapJwtPayload,
     authMethods: string[],
   ): "aal1" | "aal2" | "aal3" {
-    const rawAcr = typeof payload["acr"] === "string" ? payload["acr"].trim().toLowerCase() : null;
+    const rawAcr =
+      typeof payload["acr"] === "string"
+        ? payload["acr"].trim().toLowerCase()
+        : null;
     if (rawAcr === "aal3" || rawAcr === "3") {
       return "aal3";
     }
-    if (rawAcr === "aal2" || rawAcr === "2" || rawAcr === "urn:mace:incommon:iap:silver") {
+    if (
+      rawAcr === "aal2" ||
+      rawAcr === "2" ||
+      rawAcr === "urn:mace:incommon:iap:silver"
+    ) {
       return "aal2";
     }
-    if (rawAcr === "aal1" || rawAcr === "1" || rawAcr === "urn:mace:incommon:iap:bronze") {
+    if (
+      rawAcr === "aal1" ||
+      rawAcr === "1" ||
+      rawAcr === "urn:mace:incommon:iap:bronze"
+    ) {
       return "aal1";
     }
 
@@ -810,7 +831,9 @@ export class IAPSubjectAdapter {
       "fido2",
       "verified_iap_workforce",
     ]);
-    if (authMethods.some((method) => trustedMfaMethods.has(method.toLowerCase()))) {
+    if (
+      authMethods.some((method) => trustedMfaMethods.has(method.toLowerCase()))
+    ) {
       return "aal2";
     }
 
