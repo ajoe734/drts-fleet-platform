@@ -1392,25 +1392,29 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
-      - name: Assert deployed candidate SHA and retired surfaces
+      - name: Execute candidate-bound operational journeys
         env:
-          DRTS_OPERATIONAL_API_URL: ${{ needs.health-check.outputs.api }}
-          DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ${{ needs.health-check.outputs.platform_admin }}
-          DRTS_OPERATIONAL_OPS_CONSOLE_URL: ${{ needs.health-check.outputs.ops_console }}
-          DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_URL: ${{ needs.health-check.outputs.fleet_partner_portal }}
-          DRTS_OPERATIONAL_TENANT_CONSOLE_URL: ${{ needs.health-check.outputs.tenant_console }}
-          DRTS_OPERATIONAL_BANK_CONSOLE_URL: ${{ needs.health-check.outputs.bank_console }}
-          DRTS_OPERATIONAL_REFERRAL_EMBED_URL: ${{ needs.health-check.outputs.referral_embed }}
-          DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_URL: ${{ needs.health-check.outputs.enterprise_dispatch }}
-          DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_URL: ${{ needs.health-check.outputs.channel_partner_portal }}
+          DRTS_DEV_REFERRAL_EMBED_BASE_URL: ${{ needs.health-check.outputs.referral_embed }}
+          DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL: ${{ needs.health-check.outputs.enterprise_dispatch }}
+          DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.fleet_partner_portal }}
+          DRTS_DEV_PLATFORM_ADMIN_BASE_URL: ${{ needs.health-check.outputs.platform_admin }}
+          DRTS_DEV_TENANT_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.tenant_console }}
+          DRTS_DEV_BANK_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.bank_console }}
+          DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.channel_partner_portal }}
         run: |
           set -euo pipefail
           # Deleted Cloud Run services retain their service hostname; the control
           # plane returns 404, which is the retire/paused contract under test.
-          api_url="${DRTS_OPERATIONAL_API_URL}"
+          api_url="${{ needs.health-check.outputs.api }}"
           cloud_run_suffix="${api_url#https://drts-dev-api-}"
-          export DRTS_OPERATIONAL_PARTNER_BOOKING_URL="https://drts-dev-partner-booking-web-${cloud_run_suffix}"
-          export DRTS_OPERATIONAL_CONCIERGE_PORTAL_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"
-          export DRTS_OPERATIONAL_PASSENGER_WEB_URL="https://drts-passenger-web-${cloud_run_suffix}"
+          export DRTS_DEV_PARTNER_BOOKING_BASE_URL="https://drts-dev-partner-booking-web-${cloud_run_suffix}"
+          export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"
           scripts/run-operational-browser-acceptance.sh \
             --sha "${{ needs.build-push.outputs.candidate_sha }}"
+      - name: Upload operational evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operational-browser-evidence-${{ needs.build-push.outputs.candidate_sha }}
+          path: test-results/operational-browser/
+          if-no-files-found: error

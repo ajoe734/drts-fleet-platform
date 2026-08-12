@@ -1,0 +1,164 @@
+{
+  "$schema": "https://drts.local/schemas/operational-browser-journeys.v1.json",
+  "version": 1,
+  "candidateSha": "__SET_DRTS_CANDIDATE_SHA__",
+  "journeys": [
+    {
+      "id": "referral-create-read-cancel-rate-receipt",
+      "surface": "referral",
+      "baseUrlEnv": "DRTS_DEV_REFERRAL_EMBED_BASE_URL",
+      "route": "/embed/yuhe-residence",
+      "actorScope": "partner-scoped referral passenger",
+      "operations": [
+        {
+          "name": "create",
+          "control": "[data-drt-operation='referral-create']",
+          "requestUrlIncludes": "/api/referral/booking",
+          "requestMethod": "POST",
+          "resultIdPath": "data.orderId",
+          "readbackUrl": "/api/referral/history/{resultId}",
+          "readbackIdPath": "data.orderId",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "CONFIRMED"
+        }
+      ]
+    },
+    {
+      "id": "enterprise-create-read-update-cancel",
+      "surface": "enterprise",
+      "baseUrlEnv": "DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL",
+      "route": "/bookings/new",
+      "actorScope": "tenant_admin",
+      "operations": [
+        {
+          "name": "create",
+          "control": "[data-drt-operation='enterprise-create']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "POST",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/bookings/{resultId}",
+          "readbackIdPath": "data.id",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "PENDING"
+        }
+      ]
+    },
+    {
+      "id": "fleet-submit-read-withdraw-resubmit",
+      "surface": "fleet",
+      "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+      "route": "/supply",
+      "actorScope": "fleet partner",
+      "operations": [
+        {
+          "name": "submit",
+          "control": "[data-drt-operation='fleet-submit']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "POST",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
+          "readbackIdPath": "data.id",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "SUBMITTED"
+        }
+      ]
+    },
+    {
+      "id": "admin-review-approve-readback",
+      "surface": "platform-admin",
+      "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+      "route": "/supply-review",
+      "actorScope": "platform_admin",
+      "operations": [
+        {
+          "name": "approve",
+          "control": "[data-drt-operation='admin-approve']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "POST",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
+          "readbackIdPath": "data.id",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "APPROVED"
+        }
+      ]
+    },
+    {
+      "id": "tenant-ops-dispatch-downstream-read",
+      "surface": "tenant-ops",
+      "baseUrlEnv": "DRTS_DEV_TENANT_CONSOLE_BASE_URL",
+      "route": "/bookings",
+      "actorScope": "tenant_admin and dispatcher",
+      "operations": [
+        {
+          "name": "dispatch",
+          "control": "[data-drt-operation='tenant-dispatch']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "POST",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/bookings/{resultId}",
+          "readbackIdPath": "data.id",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "DISPATCHED"
+        }
+      ]
+    },
+    {
+      "id": "bank-statement-download-readback",
+      "surface": "bank",
+      "baseUrlEnv": "DRTS_DEV_BANK_CONSOLE_BASE_URL",
+      "route": "/statements",
+      "actorScope": "bank_program_admin",
+      "operations": [
+        {
+          "name": "download",
+          "control": "[data-drt-operation='bank-statement-download']",
+          "requestUrlIncludes": "/api/statements/",
+          "requestMethod": "GET",
+          "resultIdPath": "statementId",
+          "readbackUrl": "/artifacts/statements/{resultId}",
+          "readbackIdPath": "id",
+          "readbackStatePath": "status",
+          "expectedReadbackState": "READY"
+        }
+      ]
+    },
+    {
+      "id": "channel-statement-download-readback",
+      "surface": "channel",
+      "baseUrlEnv": "DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL",
+      "route": "/statements",
+      "actorScope": "channel partner",
+      "operations": [
+        {
+          "name": "download",
+          "control": "[data-drt-operation='channel-statement-download']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "GET",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/statements/{resultId}",
+          "readbackIdPath": "data.id",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "PUBLISHED"
+        }
+      ]
+    }
+  ],
+  "retiredSurfaces": [
+    {
+      "id": "partner-booking-site",
+      "baseUrlEnv": "DRTS_DEV_PARTNER_BOOKING_BASE_URL",
+      "path": "/ctbc/program/site"
+    },
+    {
+      "id": "partner-booking-embed",
+      "baseUrlEnv": "DRTS_DEV_PARTNER_BOOKING_BASE_URL",
+      "path": "/ctbc/program/embed"
+    },
+    {
+      "id": "concierge",
+      "baseUrlEnv": "DRTS_DEV_CONCIERGE_BASE_URL",
+      "path": "/"
+    }
+  ]
+}
