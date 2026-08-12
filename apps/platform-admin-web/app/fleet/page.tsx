@@ -41,6 +41,22 @@ const REFRESH_TIER: RefreshTier = "medium_slow";
 const REFRESH_INTERVAL_MS = 30_000;
 const OPS_CONSOLE_ORIGIN =
   process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN?.replace(/\/$/, "") ?? "";
+const SUPPORTED_ACTIONS = new Set([
+  "refresh_tab",
+  "create_driver",
+  "create_contract",
+  "update_vehicle_compliance",
+  "activate_driver",
+  "suspend_driver",
+  "retire_driver",
+  "revoke_device_binding",
+  "approve_exclusivity",
+  "reject_exclusivity",
+  "initiate_offboarding",
+  "complete_debranding",
+  "open_ops_vehicle",
+  "open_ops_driver",
+]);
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -527,6 +543,10 @@ function openExternal(href: string) {
   window.open(href, "_blank", "noopener,noreferrer");
 }
 
+function isSupportedAction(action: string) {
+  return SUPPORTED_ACTIONS.has(action);
+}
+
 export default function FleetPage() {
   const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
@@ -638,12 +658,7 @@ export default function FleetPage() {
 
   const runAction = useCallback(
     async (descriptor: ResourceActionDescriptor, context: ActionContext) => {
-      if (!descriptor.enabled) {
-        if (descriptor.disabledReasonCode) {
-          window.alert(
-            formatPlatformCodeLabel(locale, descriptor.disabledReasonCode),
-          );
-        }
+      if (!descriptor.enabled || !isSupportedAction(descriptor.action)) {
         return;
       }
 
@@ -835,7 +850,7 @@ export default function FleetPage() {
             );
             break;
           default:
-            window.alert(t("fleetUi.actionNotWired"));
+            setError(t("fleetUi.actionNotWired"));
         }
       } catch (nextError) {
         setError(
@@ -1001,6 +1016,7 @@ export default function FleetPage() {
       return (
         <div style={actionRowStyle}>
           {actions.map((descriptor, index) => {
+            const supported = isSupportedAction(descriptor.action);
             const resolved = actionTone(descriptor);
             const keyBase =
               context.kind === "page"
@@ -1016,12 +1032,15 @@ export default function FleetPage() {
                         : context.kind === "exclusivity"
                           ? context.exclusivity.vehicleId
                           : context.vehicle.vehicleId;
-            const busy = busyAction === `${descriptor.action}:${keyBase}`;
-            const title = descriptor.enabled
+            const enabled = descriptor.enabled && supported;
+            const busy = enabled && busyAction === `${descriptor.action}:${keyBase}`;
+            const title = enabled
               ? undefined
-              : descriptor.disabledReasonCode
-                ? formatPlatformCodeLabel(locale, descriptor.disabledReasonCode)
-                : t("fleetUi.unavailable");
+              : !supported
+                ? t("fleetUi.actionNotWired")
+                : descriptor.disabledReasonCode
+                  ? formatPlatformCodeLabel(locale, descriptor.disabledReasonCode)
+                  : t("fleetUi.unavailable");
             return (
               <span key={`${descriptor.action}-${index}`} title={title}>
                 <CanvasBtn
@@ -1031,7 +1050,7 @@ export default function FleetPage() {
                   {...(resolved.danger !== undefined
                     ? { danger: resolved.danger }
                     : {})}
-                  disabled={!descriptor.enabled || busy}
+                  disabled={!enabled || busy}
                   onClick={() => void runAction(descriptor, context)}
                 >
                   {busy
@@ -1582,15 +1601,11 @@ export default function FleetPage() {
         activeTab={tabs[TAB_ORDER.indexOf(activeTab)]}
         actions={
           <>
-            <CanvasBtn
-              theme={theme}
-              icon="filter"
-              onClick={() =>
-                window.alert(t("fleetUi.filterReserved"))
-              }
-            >
-              {t("fleetUi.filter")}
-            </CanvasBtn>
+            <span title={t("fleetUi.filterReserved")}>
+              <CanvasBtn theme={theme} icon="filter" disabled>
+                {t("fleetUi.filter")}
+              </CanvasBtn>
+            </span>
             {activeHeaderActions.length > 0
               ? renderActionButtons(activeHeaderActions, {
                   kind: "page",
@@ -1646,9 +1661,11 @@ export default function FleetPage() {
             })}
             body={t("fleetUi.blockedDriversBody")}
             actions={
-              <CanvasBtn theme={theme} variant="secondary">
-                {t("fleetUi.exportList")}
-              </CanvasBtn>
+              <span title={t("fleetUi.filterReserved")}>
+                <CanvasBtn theme={theme} variant="secondary" disabled>
+                  {t("fleetUi.exportList")}
+                </CanvasBtn>
+              </span>
             }
           />
         ) : null}
