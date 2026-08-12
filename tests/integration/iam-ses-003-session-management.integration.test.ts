@@ -84,13 +84,15 @@ describe("Session Management (IAM-SES-003)", () => {
     securityEventsService = new SecurityEventsService();
     jwtAuthService = new JwtAuthService(identityRepository);
     const auditNotificationService = new AuditNotificationService();
-    const tenantPartnerService = new TenantPartnerService(auditNotificationService);
+    const tenantPartnerService = new TenantPartnerService(
+      auditNotificationService,
+    );
     const driverDeviceSessionService = new DriverDeviceSessionService(
       jwtAuthService,
       new DriverProfileService(auditNotificationService),
       undefined,
+      undefined,
       securityEventsService,
-      identityRepository,
     );
 
     authController = new AuthController(
@@ -113,7 +115,9 @@ describe("Session Management (IAM-SES-003)", () => {
     it("should mask IPv4 and IPv6 addresses correctly", () => {
       expect(maskIpAddress("192.168.1.100")).toBe("192.168.***.***");
       expect(maskIpAddress("10.0.0.1")).toBe("10.0.***.***");
-      expect(maskIpAddress("2001:db8:85a3::8a2e:370:7334")).toBe("2001:db8:****:****");
+      expect(maskIpAddress("2001:db8:85a3::8a2e:370:7334")).toBe(
+        "2001:db8:****:****",
+      );
       expect(maskIpAddress(null)).toBeNull();
       expect(maskIpAddress("")).toBeNull();
     });
@@ -151,13 +155,13 @@ describe("Session Management (IAM-SES-003)", () => {
     });
 
     it("should reject invalid CSRF header values", () => {
-      expect(() =>
-        validateCsrfHeader({ "x-csrf-token": "invalid" }),
-      ).toThrow(ApiRequestError);
+      expect(() => validateCsrfHeader({ "x-csrf-token": "invalid" })).toThrow(
+        ApiRequestError,
+      );
 
-      expect(() =>
-        validateCsrfHeader({ "x-csrf-token": "bad_token" }),
-      ).toThrow(ApiRequestError);
+      expect(() => validateCsrfHeader({ "x-csrf-token": "bad_token" })).toThrow(
+        ApiRequestError,
+      );
     });
 
     it("should reject cookie session mutations missing CSRF header", () => {
@@ -170,7 +174,10 @@ describe("Session Management (IAM-SES-003)", () => {
     });
 
     it("should enforce controller-level CSRF denial on logout, logoutAll, revokeSelfSession, and revokeAdminSession", async () => {
-      const cookieHeader = { cookie: "session_id=sid_user_session_1", "x-auth-mode": "cookie" };
+      const cookieHeader = {
+        cookie: "session_id=sid_user_session_1",
+        "x-auth-mode": "cookie",
+      };
 
       // authController.logout with missing CSRF
       await expect(
@@ -267,7 +274,8 @@ describe("Session Management (IAM-SES-003)", () => {
     });
 
     it("should reject token verification once session is revoked", async () => {
-      process.env.JWT_SECRET = "test_secret_key_material_at_least_32_chars_long_12345";
+      process.env.JWT_SECRET =
+        "test_secret_key_material_at_least_32_chars_long_12345";
       const issued = await jwtAuthService.issueSessionToken({
         authMode: "jwt_bearer",
         actorType: "ops_user",
@@ -282,13 +290,21 @@ describe("Session Management (IAM-SES-003)", () => {
         requestId: "req_rev_tok",
       });
 
-      const beforeLogoutPayload = await jwtAuthService.verifyAccessToken(issued.token);
+      const beforeLogoutPayload = await jwtAuthService.verifyAccessToken(
+        issued.token,
+      );
       expect(beforeLogoutPayload).not.toBeNull();
       expect(beforeLogoutPayload?.sid).toBe(issued.sessionId);
 
-      await identityRepository.revokeSession(issued.sessionId, "logout", "prn_rev_test");
+      await identityRepository.revokeSession(
+        issued.sessionId,
+        "logout",
+        "prn_rev_test",
+      );
 
-      const afterLogoutPayload = await jwtAuthService.verifyAccessToken(issued.token);
+      const afterLogoutPayload = await jwtAuthService.verifyAccessToken(
+        issued.token,
+      );
       expect(afterLogoutPayload).toBeNull();
     });
 

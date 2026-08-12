@@ -254,9 +254,9 @@ describe("JWT Session Claims Integration", () => {
     const driverDeviceSessionService = new DriverDeviceSessionService(
       jwtAuthService,
       driverProfileService,
-      regulatoryRegistryService,
       undefined,
-      repo,
+      regulatoryRegistryService,
+      repo as any,
     );
 
     const registered = await driverDeviceSessionService.register({

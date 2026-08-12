@@ -12,6 +12,7 @@ import { DriverProfileService } from "../../src/modules/driver-profile/driver-pr
 import { IdentityRepository } from "../../src/modules/identity/identity.repository";
 import { MultiTaxiController } from "../../src/modules/multi-taxi/multi-taxi.controller";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
+import { SecurityEventsService } from "../../src/modules/security-events/security-events.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import {
   AUTH_REALM_PATH_MATRIX,
@@ -56,6 +57,7 @@ function createAuthFixture() {
     auditNotificationService,
   );
   const identityRepository = new IdentityRepository();
+  const securityEventsService = new SecurityEventsService();
   const jwtAuthService = new JwtAuthService(
     identityRepository,
     tenantPartnerService,
@@ -64,9 +66,9 @@ function createAuthFixture() {
   const driverDeviceSessionService = new DriverDeviceSessionService(
     jwtAuthService,
     driverProfileService,
-    regulatoryRegistryService,
     undefined,
-    identityRepository,
+    regulatoryRegistryService,
+    securityEventsService,
   );
   const controller = new AuthController(
     jwtAuthService,
