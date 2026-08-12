@@ -31,7 +31,7 @@ class ClaudeCLIAdapterTests(unittest.TestCase):
         process = mock.Mock(pid=43210)
         with (
             mock.patch("adapters.claude_cli.command_exists", return_value="/usr/bin/claude"),
-            mock.patch("adapters.claude_cli._claude_auth_ready", return_value=True),
+            mock.patch("adapters.claude_cli.claude_auth_ready", return_value=True),
             mock.patch("adapters.claude_cli.spawn_background_process", return_value=(process, Path("/tmp/claude.log"))) as spawn,
             mock.patch("adapters.claude_cli.runtime_log_path", return_value=Path("/tmp/claude.log")),
             mock.patch("adapters.claude_cli.new_runtime_id", return_value="claude-test"),
@@ -92,7 +92,7 @@ class ClaudeCLIAdapterTests(unittest.TestCase):
             process.pid = 43210
             with (
                 mock.patch.dict(os.environ, {"PATH": ""}),
-                mock.patch("adapters.claude_cli._claude_auth_ready", return_value=True),
+                mock.patch("adapters.claude_cli.claude_auth_ready", return_value=True),
                 mock.patch("adapters.claude_cli.spawn_background_process", return_value=(process, Path("/tmp/claude.log"))) as spawn,
                 mock.patch("adapters.claude_cli.runtime_log_path", return_value=Path("/tmp/claude.log")),
                 mock.patch("adapters.claude_cli.new_runtime_id", return_value="claude2-test"),

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import threading
@@ -41,6 +42,26 @@ class CommandExistsTests(unittest.TestCase):
 
             with mock.patch.object(common, "ROOT", code_root), mock.patch.dict("os.environ", {"PATH": ""}):
                 self.assertEqual(common.command_exists("gemini", search_roots=[workspace_root]), str(local_cli))
+
+
+class ClaudeAuthTests(unittest.TestCase):
+    def test_live_cli_status_is_authoritative_over_stale_credential_files(self) -> None:
+        status = subprocess.CompletedProcess(
+            ["claude", "auth", "status"], 0, '{"loggedIn": true}\n', ""
+        )
+        with mock.patch.object(common, "run_command", return_value=status) as command:
+            self.assertTrue(common.claude_auth_ready("/usr/bin/claude"))
+
+        command.assert_called_once_with(
+            ["/usr/bin/claude", "auth", "status"], env=None
+        )
+
+    def test_rejects_cli_logged_out_status(self) -> None:
+        status = subprocess.CompletedProcess(
+            ["claude", "auth", "status"], 0, '{"loggedIn": false}\n', ""
+        )
+        with mock.patch.object(common, "run_command", return_value=status):
+            self.assertFalse(common.claude_auth_ready("/usr/bin/claude"))
 
 
 class RuntimeClaudeMcpConfigTests(unittest.TestCase):

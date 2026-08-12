@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import shlex
-import time
 import base64
 from pathlib import Path
 from typing import Any
@@ -15,6 +14,7 @@ from common import (
     ROOT,
     antigravity_app_data_dir,
     antigravity_auth_ready,
+    claude_auth_ready,
     command_exists,
     config_path,
     load_config,
@@ -243,50 +243,6 @@ def _gh_version(binary: str | None) -> tuple[int, int, int] | None:
     if not match:
         return None
     return tuple(int(part) for part in match.groups())
-
-
-def _json_command(command: list[str], *, env: dict[str, str] | None = None) -> dict[str, Any]:
-    result = run_command(command, env=env)
-    if result.returncode != 0 or not result.stdout:
-        return {}
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return {}
-
-
-def _claude_auth_ready(binary: str | None, *, env: dict[str, str] | None = None) -> bool:
-    if not binary:
-        return False
-    payload = _json_command([binary, "auth", "status"], env=env)
-    if not payload.get("loggedIn"):
-        return False
-    return _claude_credentials_not_expired(env=env)
-
-
-def _claude_credentials_not_expired(*, env: dict[str, str] | None = None) -> bool:
-    source = env or os.environ
-    candidates: list[Path] = []
-    config_dir = source.get("CLAUDE_CONFIG_DIR")
-    if config_dir:
-        candidates.append(Path(os.path.expandvars(os.path.expanduser(config_dir))) / ".credentials.json")
-    home = Path(os.path.expandvars(os.path.expanduser(source.get("HOME") or str(Path.home()))))
-    candidates.extend([home / ".credentials.json", home / ".claude" / ".credentials.json"])
-    for path in candidates:
-        if not path.exists():
-            continue
-        payload = load_json(path, default={}) or {}
-        expires_at = (payload.get("claudeAiOauth") or {}).get("expiresAt")
-        if expires_at is None:
-            return True
-        try:
-            expiry = float(expires_at)
-        except (TypeError, ValueError):
-            return False
-        if expiry > 10_000_000_000:
-            expiry /= 1000
-        return expiry > time.time() + 60
-    return True
 
 
 def _codex_auth_ready(binary: str | None, *, env: dict[str, str] | None = None) -> bool:
@@ -626,7 +582,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
     gh_binary = command_exists("gh")
     gh_version = _gh_version(gh_binary)
     gh_auth_ready = _gh_auth_ready(gh_binary)
-    claude_auth_ready = _claude_auth_ready(claude_binary)
+    claude_authenticated = claude_auth_ready(claude_binary)
     codex_auth_ready = _codex_auth_ready(codex_binary, env=_codex_env(config.get("providers", {}).get("codex", {}).get("codex", {})))
     copilot_auth_ready = _copilot_auth_ready(gh_binary)
     copilot_settings = config.get("providers", {}).get("copilot", {})
@@ -716,12 +672,12 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
                 "default_auto_approve_supported": True,
                 "full_access_supported": True,
                 "per_tool_allow_supported": True,
-                "local_cli_worker_supported": bool(claude_binary and claude_auth_ready),
+                "local_cli_worker_supported": bool(claude_binary and claude_authenticated),
                 "vscode_link_supported": bool(claude_path),
                 "cloud_agent_supported": False,
-                "supports_auto_approve": bool(claude_binary and claude_auth_ready),
+                "supports_auto_approve": bool(claude_binary and claude_authenticated),
                 "supports_defer_resume": bool(claude_binary),
-                "auth_ready": claude_auth_ready,
+                "auth_ready": claude_authenticated,
                 "supported_models": claude_local.get("availableModels", []) or [],
                 "selected_model": claude_local.get("model"),
                 "applied": claude_applied,
@@ -982,7 +938,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
         runtime_env = os.environ.copy()
         runtime_overrides = runtime_env_overrides(runtime)
         runtime_env.update(runtime_overrides)
-        runtime_auth_ready = _claude_auth_ready(runtime_cli, env=runtime_env)
+        runtime_auth_ready = claude_auth_ready(runtime_cli, env=runtime_env)
         paths = dict(claude_template.get("paths", {}) or {})
         paths.update(
             {

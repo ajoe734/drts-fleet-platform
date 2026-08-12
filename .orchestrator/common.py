@@ -472,6 +472,20 @@ def run_command(
     )
 
 
+def claude_auth_ready(binary: str | None, *, env: dict[str, str] | None = None) -> bool:
+    """Use Claude CLI's live auth status as the single credential authority."""
+    if not binary:
+        return False
+    status = run_command([binary, "auth", "status"], env=env)
+    if status.returncode != 0 or not status.stdout:
+        return False
+    try:
+        payload = json.loads(status.stdout)
+    except json.JSONDecodeError:
+        return False
+    return bool(payload.get("loggedIn"))
+
+
 def _cli_search_roots(extra_roots: Iterable[str | Path] | None = None) -> list[Path]:
     roots: list[Path] = []
     seen: set[str] = set()

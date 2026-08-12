@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import json
-import time
 from pathlib import Path
 
 from adapters.base import DeliveryCapability, DeliveryRequest, DeliveryResult
@@ -18,8 +16,8 @@ from common import (
     spawn_background_process,
     worker_scope_properties,
     worker_scope_unit,
+    claude_auth_ready,
     command_exists,
-    run_command,
     runtime_env_overrides,
     runtime_claude_mcp_config_path,
 )
@@ -47,49 +45,6 @@ def _claude_cli_path(config: dict, runtime: dict) -> str | None:
     return command_exists(runtime.get("cli") or "claude", search_roots=[workspace_root])
 
 
-def _claude_auth_ready(cli: str | None, env: dict[str, str] | None = None) -> bool:
-    if not cli:
-        return False
-    status = run_command([cli, "auth", "status"], env=env)
-    if status.returncode != 0 or not status.stdout:
-        return False
-    try:
-        payload = json.loads(status.stdout)
-    except json.JSONDecodeError:
-        return False
-    if not payload.get("loggedIn"):
-        return False
-    return _claude_credentials_not_expired(env=env)
-
-
-def _claude_credentials_not_expired(*, env: dict[str, str] | None = None) -> bool:
-    source = env or os.environ
-    candidates: list[Path] = []
-    config_dir = source.get("CLAUDE_CONFIG_DIR")
-    if config_dir:
-        candidates.append(Path(os.path.expandvars(os.path.expanduser(config_dir))) / ".credentials.json")
-    home = Path(os.path.expandvars(os.path.expanduser(source.get("HOME") or str(Path.home()))))
-    candidates.extend([home / ".credentials.json", home / ".claude" / ".credentials.json"])
-    for path in candidates:
-        if not path.exists():
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return False
-        expires_at = (payload.get("claudeAiOauth") or {}).get("expiresAt")
-        if expires_at is None:
-            return True
-        try:
-            expiry = float(expires_at)
-        except (TypeError, ValueError):
-            return False
-        if expiry > 10_000_000_000:
-            expiry /= 1000
-        return expiry > time.time() + 60
-    return True
-
-
 class ClaudeCLIAdapter(ClaudeCodeAdapter):
     name = "claude_cli"
 
@@ -98,7 +53,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
         runtime = provider.get("runtime", {})
         cli = _claude_cli_path(self.config, runtime)
         auth_env = _claude_runtime_env(runtime)
-        if cli and _claude_auth_ready(cli, env=auth_env):
+        if cli and claude_auth_ready(cli, env=auth_env):
             notes = "Uses non-interactive Claude CLI sessions with the local approval broker hooks."
             if runtime.get("config_home"):
                 notes = f"{notes} Auth is isolated by provider runtime.config_home."
@@ -132,7 +87,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
         runtime = provider.get("runtime", {})
         cli = _claude_cli_path(self.config, runtime)
         env = _claude_runtime_env(runtime, ensure_dirs=True)
-        auth_ready = _claude_auth_ready(cli, env=env)
+        auth_ready = claude_auth_ready(cli, env=env)
         if not cli or not auth_ready:
             result = super().deliver(request)
             result.adapter = self.name
