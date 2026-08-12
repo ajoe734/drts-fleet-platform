@@ -1,0 +1,69 @@
+{
+  "drillType": "account_takeover",
+  "timestamp": "2026-08-12T13:50:34.027339+00:00",
+  "principalId": "usr_tenant_admin_001",
+  "durationSeconds": 0.00036215782165527344,
+  "revocationSlaSeconds": 7.772445678710938e-05,
+  "revocationSlaPassed": true,
+  "sessionsRevoked": 2,
+  "accountState": "suspended",
+  "evidenceChecksum": "cbafd1d1e2d5ab058a21b9338c53cebfab02e6bb52ca3597984b205b573f6e76",
+  "recoveryGuardVerified": true,
+  "evidencePayload": {
+    "drillType": "account_takeover",
+    "principalId": "usr_tenant_admin_001",
+    "timestamp": "2026-08-12T13:50:34.027339+00:00",
+    "sessionSnapshots": [
+      {
+        "sessionId": "sid_ato_usr_tenant_admin_001_01",
+        "realm": "tenant",
+        "status": "revoked",
+        "authTime": "2026-08-12T13:50:34.027339+00:00",
+        "ipHash": "2a39f1eedcd9f986",
+        "userAgentHash": "96c73371d5f53adf",
+        "tokenVersion": 1,
+        "revokedAt": "2026-08-12T13:50:34.027459+00:00",
+        "revokeReason": "ATO incident containment - remote logout-all"
+      },
+      {
+        "sessionId": "sid_ato_usr_tenant_admin_001_02",
+        "realm": "driver",
+        "status": "revoked",
+        "authTime": "2026-08-12T13:50:34.027339+00:00",
+        "ipHash": "330046ae0dc3d58e",
+        "userAgentHash": "3cafe2c8c9567612",
+        "tokenVersion": 1,
+        "revokedAt": "2026-08-12T13:50:34.027467+00:00",
+        "revokeReason": "ATO incident containment - remote logout-all"
+      }
+    ],
+    "suspensionRecord": {
+      "principalId": "usr_tenant_admin_001",
+      "stateBefore": "active",
+      "stateAfter": "suspended",
+      "reasonCode": "SECURITY_INCIDENT_ATO",
+      "reasonText": "Account suspended due to active Account Takeover investigation",
+      "updatedAt": "2026-08-12T13:50:34.027517+00:00"
+    },
+    "auditEvents": [
+      {
+        "eventId": "evt_ato_1786542634_1",
+        "eventType": "authz.denied",
+        "actorId": "usr_tenant_admin_001",
+        "realm": "tenant",
+        "outcome": "denied",
+        "timestamp": "2026-08-12T13:50:34.027339+00:00",
+        "detail": "Cross-tenant access attempt blocked"
+      },
+      {
+        "eventId": "evt_ato_1786542634_2",
+        "eventType": "session.revoke",
+        "actorId": "secops_admin_01",
+        "targetId": "usr_tenant_admin_001",
+        "outcome": "success",
+        "timestamp": "2026-08-12T13:50:34.027339+00:00",
+        "detail": "Emergency remote session revocation executed"
+      }
+    ]
+  }
+}
