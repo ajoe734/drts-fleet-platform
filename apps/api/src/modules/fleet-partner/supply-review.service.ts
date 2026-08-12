@@ -334,7 +334,7 @@ const REVIEW_DOCUMENTS_SEED: SupplyDocumentRecord[] = [
     documentId: "doc-s39-reg",
     fleetPartnerId: "fleet-demo-001",
     submissionId: "sub_s39",
-    documentType: "registration",
+    documentType: "vehicle_registration",
     fileObjectKey: "files/reg_kab7720.pdf",
     originalFileName: "reg_kab7720.pdf",
     contentType: "application/pdf",
@@ -359,7 +359,7 @@ const REVIEW_DOCUMENTS_SEED: SupplyDocumentRecord[] = [
     checksumSha256: "sha256-policy-kab7720",
     effectiveFrom: "2026-07-01",
     effectiveUntil: "2027-07-01",
-    reviewStatus: "submitted",
+    reviewStatus: "pending",
     reviewComment: null,
     uploadedBy: "fleet-user-1",
     uploadedAt: "2026-06-18T14:02:00.000Z",
@@ -368,7 +368,7 @@ const REVIEW_DOCUMENTS_SEED: SupplyDocumentRecord[] = [
     documentId: "doc-s38-lic",
     fleetPartnerId: "fleet-demo-001",
     submissionId: "sub_s38",
-    documentType: "driver_license",
+    documentType: "professional_driver_license",
     fileObjectKey: "files/pdl_3801.pdf",
     originalFileName: "pdl_3801.pdf",
     contentType: "application/pdf",
@@ -376,7 +376,7 @@ const REVIEW_DOCUMENTS_SEED: SupplyDocumentRecord[] = [
     checksumSha256: "sha256-pdl-3801",
     effectiveFrom: "2023-01-01",
     effectiveUntil: "2028-12-31",
-    reviewStatus: "submitted",
+    reviewStatus: "pending",
     reviewComment: null,
     uploadedBy: "fleet-user-1",
     uploadedAt: "2026-06-18T09:40:00.000Z",
@@ -500,33 +500,47 @@ export class SupplyReviewService implements OnModuleInit {
     }
 
     return rawSubmissions.map((sub) => {
-      const vDraft = vehicleDrafts.find((d) => d.submissionId === sub.submissionId);
-      const dDraft = driverDrafts.find((d) => d.submissionId === sub.submissionId);
-      const docs = documents.filter((doc) => doc.submissionId === sub.submissionId);
+      const vDraft = vehicleDrafts.find(
+        (d) => d.submissionId === sub.submissionId,
+      );
+      const dDraft = driverDrafts.find(
+        (d) => d.submissionId === sub.submissionId,
+      );
+      const docs = documents.filter(
+        (doc) => doc.submissionId === sub.submissionId,
+      );
 
       let subject = "物件送審";
       if (sub.submissionId === "sub_s39") subject = "KAB-7720 · Hyundai Custo";
       else if (sub.submissionId === "sub_s38") subject = "蔡明憲";
       else if (sub.submissionId === "sub_t02") subject = "游志豪";
-      else if (sub.submissionId === "sub_r33") subject = "KAB-6610 · Toyota Sienta";
+      else if (sub.submissionId === "sub_r33")
+        subject = "KAB-6610 · Toyota Sienta";
       else if (sub.submissionId === "sub_u51") subject = "TXG-1180 · 保單";
       else if (sub.submissionId === "sub_a20") subject = "高至誠 → d_9120";
-      else if (vDraft) subject = `${vDraft.plateNo} · ${vDraft.brand || ""} ${vDraft.model || ""}`.trim();
+      else if (vDraft)
+        subject =
+          `${vDraft.plateNo} · ${vDraft.brand || ""} ${vDraft.model || ""}`.trim();
       else if (dDraft) subject = dDraft.name;
 
       let businessArea = "taipei";
       if (sub.submissionId === "sub_t02") businessArea = "yilan";
       else if (sub.submissionId === "sub_u51") businessArea = "taichung";
       else if (vDraft?.businessArea) businessArea = vDraft.businessArea;
-      else if (dDraft?.taxiDriverRegistrationArea) businessArea = dDraft.taxiDriverRegistrationArea;
+      else if (dDraft?.taxiDriverRegistrationArea)
+        businessArea = dDraft.taxiDriverRegistrationArea;
 
       let missingItemsCount = 0;
       if (sub.submissionId === "sub_t02") missingItemsCount = 1;
-      else if (docs.length === 0 && sub.status === "submitted") missingItemsCount = 1;
+      else if (docs.length === 0 && sub.status === "submitted")
+        missingItemsCount = 1;
 
       let lockedBy: string | null = null;
       if (sub.status === "in_review") {
-        if (sub.reviewStartedBy === "LP" || sub.reviewStartedBy === "platform-admin-demo-001") {
+        if (
+          sub.reviewStartedBy === "LP" ||
+          sub.reviewStartedBy === "platform-admin-demo-001"
+        ) {
           lockedBy = "林佩璇";
         } else {
           lockedBy = sub.reviewStartedBy || "審核員";
@@ -538,7 +552,8 @@ export class SupplyReviewService implements OnModuleInit {
         fleetPartnerName: this.getFleetPartnerName(sub.fleetPartnerId),
         subject,
         businessArea,
-        supportedServiceProductCodes: vDraft?.supportedServiceProductCodes || dDraft?.supportedServiceProductCodes || ["realtime"],
+        supportedServiceProductCodes: vDraft?.supportedServiceProductCodes ||
+          dDraft?.supportedServiceProductCodes || ["realtime"],
         missingItemsCount,
         lockedBy,
       };
@@ -562,24 +577,24 @@ export class SupplyReviewService implements OnModuleInit {
 
     const canonicalDriver =
       submission.canonicalDriverId || submission.subjectDriverId
-        ? this.regulatoryRegistryService
+        ? (this.regulatoryRegistryService
             ?.listDrivers()
             .find(
               (d) =>
                 d.driverId ===
                 (submission.canonicalDriverId || submission.subjectDriverId),
-            ) ?? null
+            ) ?? null)
         : null;
 
     const canonicalVehicle =
       submission.canonicalVehicleId || submission.subjectVehicleId
-        ? this.regulatoryRegistryService
+        ? (this.regulatoryRegistryService
             ?.listVehicles()
             .find(
               (v) =>
                 v.vehicleId ===
                 (submission.canonicalVehicleId || submission.subjectVehicleId),
-            ) ?? null
+            ) ?? null)
         : null;
 
     const missingDocuments: string[] = [];
