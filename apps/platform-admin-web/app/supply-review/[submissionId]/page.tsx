@@ -23,7 +23,6 @@ import type {
   VehicleSupplyDraft,
 } from "@drts/contracts";
 import {
-  FX_PSR_QUEUE,
   PSR_SUB_STATUS,
   REASON_CODES,
   buildDocumentRows,
@@ -105,30 +104,18 @@ export default function SupplyReviewDetailPage() {
   const params = useParams();
   const client = usePlatformAdminClient();
 
+  const rawId = params?.submissionId;
   const submissionId: string =
-    typeof params?.submissionId === "string" && params.submissionId
-      ? params.submissionId
-      : Array.isArray(params?.submissionId) && params.submissionId[0]
-        ? params.submissionId[0]
-        : "sub_s39";
+    typeof rawId === "string"
+      ? rawId
+      : Array.isArray(rawId) && rawId[0]
+        ? rawId[0]
+        : "";
 
-  const seedMatch = useMemo(
-    () => FX_PSR_QUEUE.find((x) => x.submissionId === submissionId),
-    [submissionId],
-  );
-
+  const [loading, setLoading] = useState<boolean>(true);
   const [record, setRecord] = useState<
-    Partial<SupplySubmissionRecord> & Record<string, any>
-  >({
-    submissionId,
-    fleetPartnerId: seedMatch?.fleetPartnerId || "fleet-demo-001",
-    submissionType: seedMatch?.submissionType || "vehicle_onboarding",
-    status: seedMatch?.status || "in_review",
-    revisionNo: seedMatch?.revisionNo || 1,
-    submittedBy: "fleet-user-1",
-    submittedAt: seedMatch?.submittedAt || "2026-06-18T14:02:00.000Z",
-    reviewStartedBy: seedMatch?.lockedBy || "林佩璇",
-  });
+    (Partial<SupplySubmissionRecord> & Record<string, any>) | null
+  >(null);
 
   const [driverDraft, setDriverDraft] = useState<DriverSupplyDraft | null>(
     null,
@@ -165,6 +152,14 @@ export default function SupplyReviewDetailPage() {
   );
 
   const loadDetail = async () => {
+    if (!submissionId) {
+      setLoading(false);
+      setErrorMsg("無效的 submissionId");
+      setRecord(null);
+      return;
+    }
+
+    setLoading(true);
     setErrorMsg(null);
     setConflictError(false);
     setSelfApprovalError(false);
@@ -173,18 +168,28 @@ export default function SupplyReviewDetailPage() {
       const data = await client.getAdminSupplyReviewSubmission(submissionId);
       if (data) {
         const rawData = data as any;
-        setRecord(data.submission || data);
-        if (data.driverDraft) setDriverDraft(data.driverDraft);
-        if (data.vehicleDraft) setVehicleDraft(data.vehicleDraft);
-        if (data.documents) setDocuments(data.documents);
-        if (rawData.canonicalDriver)
-          setCanonicalDriver(rawData.canonicalDriver);
-        if (rawData.canonicalVehicle)
-          setCanonicalVehicle(rawData.canonicalVehicle);
+        const subRecord = data.submission || data;
+        setRecord(subRecord);
+        setDriverDraft(data.driverDraft || null);
+        setVehicleDraft(data.vehicleDraft || null);
+        setDocuments(data.documents || []);
+        setCanonicalDriver(rawData.canonicalDriver || null);
+        setCanonicalVehicle(rawData.canonicalVehicle || null);
+      } else {
+        setRecord(null);
+        setErrorMsg("找不到該筆 supply submission 紀錄");
       }
     } catch (e: any) {
       const info = classifySupplyReviewError(e);
+      setRecord(null);
+      setDriverDraft(null);
+      setVehicleDraft(null);
+      setDocuments([]);
+      setCanonicalDriver(null);
+      setCanonicalVehicle(null);
       setErrorMsg(`載入詳情失敗: ${info.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -192,28 +197,27 @@ export default function SupplyReviewDetailPage() {
     loadDetail();
   }, [submissionId]);
 
-  const currentStatus = record.status || "in_review";
-  const statusMeta = PSR_SUB_STATUS[currentStatus] || PSR_SUB_STATUS.in_review;
-  const revisionNo = record.revisionNo || 1;
-  const typeZh = mapSubmissionToTypeZh(record.submissionType);
+  const currentStatus = record?.status || "submitted";
+  const statusMeta = PSR_SUB_STATUS[currentStatus] || PSR_SUB_STATUS.submitted;
+  const revisionNo = record?.revisionNo || 1;
+  const typeZh = mapSubmissionToTypeZh(record?.submissionType);
   const fleetName =
-    record.fleetPartnerName ||
-    seedMatch?.fleet ||
-    `車行 (${record.fleetPartnerId || "fleet-demo-001"})`;
+    record?.fleetPartnerName ||
+    (record?.fleetPartnerId ? `車行 (${record.fleetPartnerId})` : "未指定車行");
   const subjectStr =
-    record.subject ||
+    record?.subject ||
     (vehicleDraft
       ? `${vehicleDraft.plateNo} · ${vehicleDraft.brand} ${vehicleDraft.model}`
       : driverDraft
         ? driverDraft.name
-        : seedMatch?.subject || "KAB-7720 · Hyundai Custo");
+        : "—");
 
-  // VQ-1 Side-by-side diff generated dynamically from payload!
+  // VQ-1 Side-by-side diff generated strictly from server payload
   const diffRows: DiffRow[] = useMemo(
     () =>
       buildSideBySideDiff(
         submissionId,
-        record.submissionType || "vehicle_onboarding",
+        record?.submissionType || "",
         vehicleDraft,
         driverDraft,
         canonicalVehicle,
@@ -222,7 +226,7 @@ export default function SupplyReviewDetailPage() {
       ),
     [
       submissionId,
-      record.submissionType,
+      record?.submissionType,
       vehicleDraft,
       driverDraft,
       canonicalVehicle,
@@ -238,7 +242,7 @@ export default function SupplyReviewDetailPage() {
     return diffRows;
   }, [diffRows, onlyDiff]);
 
-  // VQ-2 Documents table generated dynamically from payload!
+  // VQ-2 Documents table generated strictly from server payload
   const docRows: DocumentRow[] = useMemo(
     () => buildDocumentRows(documents),
     [documents],
@@ -251,14 +255,14 @@ export default function SupplyReviewDetailPage() {
       (d) => d.effectiveUntil && d.effectiveUntil < today,
     );
     const hasMissingDocs =
-      record.submissionType === "vehicle_onboarding" && documents.length === 0;
+      record?.submissionType === "vehicle_onboarding" && documents.length === 0;
 
     return {
       isComplete: expiredDocs.length === 0 && !hasMissingDocs,
       expiredDocs,
       hasMissingDocs,
     };
-  }, [documents, record.submissionType]);
+  }, [documents, record?.submissionType]);
 
   const handleApproveSubmit = async () => {
     setSubmitting(true);
@@ -357,21 +361,28 @@ export default function SupplyReviewDetailPage() {
   const canonicalDlItems: CanvasDLItem[] = [
     {
       k: "建立 / 更新 vehicle",
-      v: record.canonicalVehicleId
+      v: record?.canonicalVehicleId
         ? `${record.canonicalVehicleId} (created)`
-        : "veh_9120 (update)",
+        : record?.canonicalDriverId
+          ? `${record.canonicalDriverId} (created)`
+          : "— (未建立)",
       mono: true,
     },
     {
       k: "affiliation",
-      v: `${record.fleetPartnerId || "METRO_FLEET"} ↔ veh_9120`,
+      v: record?.fleetPartnerId
+        ? `${record.fleetPartnerId} ↔ ${record.canonicalVehicleId || record.canonicalDriverId || "canonical"}`
+        : "—",
       mono: true,
     },
     {
       k: "重算 readiness",
       v: (
-        <CanvasPill tone="success" dot>
-          ready
+        <CanvasPill
+          tone={currentStatus === "approved" ? "success" : "neutral"}
+          dot
+        >
+          {currentStatus === "approved" ? "ready" : "pending"}
         </CanvasPill>
       ),
     },
@@ -402,6 +413,54 @@ export default function SupplyReviewDetailPage() {
       setSubmitting(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div data-screen-id="PSR-DETAIL-01">
+        <CanvasPageHeader
+          title={`${submissionId || "Detail"} · 載入中...`}
+          subtitle="正在從伺服器載入 supply submission 詳情..."
+        />
+        <div style={{ padding: 24 }}>
+          <CanvasBanner
+            tone="info"
+            icon="info"
+            title="載入中"
+            body="正在處理，請稍候..."
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (errorMsg || !record) {
+    return (
+      <div data-screen-id="PSR-DETAIL-01">
+        <CanvasPageHeader
+          title={`${submissionId || "Detail"} · 載入失敗`}
+          subtitle="無法讀取此筆 supply submission 資料"
+          actions={
+            <Link href="/supply-review" style={{ textDecoration: "none" }}>
+              <CanvasBtn variant="secondary">返回佇列</CanvasBtn>
+            </Link>
+          }
+        />
+        <div style={{ padding: 24 }}>
+          <CanvasBanner
+            tone="danger"
+            icon="warn"
+            title="載入詳情失敗"
+            body={errorMsg || "找不到該筆 supply submission 紀錄"}
+            actions={
+              <CanvasBtn variant="primary" icon="refresh" onClick={loadDetail}>
+                重新嘗試
+              </CanvasBtn>
+            }
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div data-screen-id="PSR-DETAIL-01">
@@ -528,62 +587,74 @@ export default function SupplyReviewDetailPage() {
               </div>
             }
           >
-            <div style={diffGridStyle}>
-              <div style={diffHeaderStyle}>欄位</div>
-              <div style={{ ...diffHeaderStyle, color: theme.accent }}>
-                提交值 · submission
+            {displayedDiffRows.length === 0 ? (
+              <div
+                style={{
+                  padding: "16px 20px",
+                  color: theme.textMuted,
+                  fontSize: 13,
+                }}
+              >
+                無欄位對照資料
               </div>
-              <div style={diffHeaderStyle}>目前 · canonical</div>
+            ) : (
+              <div style={diffGridStyle}>
+                <div style={diffHeaderStyle}>欄位</div>
+                <div style={{ ...diffHeaderStyle, color: theme.accent }}>
+                  提交值 · submission
+                </div>
+                <div style={diffHeaderStyle}>目前 · canonical</div>
 
-              {displayedDiffRows.map((r, i) => (
-                <React.Fragment key={i}>
-                  <div
-                    style={{
-                      padding: "9px 10px",
-                      borderBottom: `1px solid ${theme.border}`,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                    }}
-                  >
-                    {r.changed && (
-                      <span
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: 3,
-                          backgroundColor: theme.accent,
-                        }}
-                      />
-                    )}
-                    {r.label}
-                  </div>
-                  <div
-                    style={{
-                      padding: "9px 10px",
-                      borderBottom: `1px solid ${theme.border}`,
-                      fontFamily: theme.monoFamily,
-                      backgroundColor: r.changed
-                        ? theme.accentBg
-                        : "transparent",
-                      fontWeight: r.changed ? 700 : 400,
-                    }}
-                  >
-                    {r.submitted}
-                  </div>
-                  <div
-                    style={{
-                      padding: "9px 10px",
-                      borderBottom: `1px solid ${theme.border}`,
-                      fontFamily: theme.monoFamily,
-                      color: theme.textMuted,
-                    }}
-                  >
-                    {r.canonical}
-                  </div>
-                </React.Fragment>
-              ))}
-            </div>
+                {displayedDiffRows.map((r, i) => (
+                  <React.Fragment key={i}>
+                    <div
+                      style={{
+                        padding: "9px 10px",
+                        borderBottom: `1px solid ${theme.border}`,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
+                    >
+                      {r.changed && (
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: 3,
+                            backgroundColor: theme.accent,
+                          }}
+                        />
+                      )}
+                      {r.label}
+                    </div>
+                    <div
+                      style={{
+                        padding: "9px 10px",
+                        borderBottom: `1px solid ${theme.border}`,
+                        fontFamily: theme.monoFamily,
+                        backgroundColor: r.changed
+                          ? theme.accentBg
+                          : "transparent",
+                        fontWeight: r.changed ? 700 : 400,
+                      }}
+                    >
+                      {r.submitted}
+                    </div>
+                    <div
+                      style={{
+                        padding: "9px 10px",
+                        borderBottom: `1px solid ${theme.border}`,
+                        fontFamily: theme.monoFamily,
+                        color: theme.textMuted,
+                      }}
+                    >
+                      {r.canonical}
+                    </div>
+                  </React.Fragment>
+                ))}
+              </div>
+            )}
           </CanvasCard>
 
           {/* VQ-2 Document review */}
@@ -591,64 +662,58 @@ export default function SupplyReviewDetailPage() {
             title="文件檢視 · documents"
             subtitle="VQ-2 · 類型 / 檔名 / 生效 / 審核狀態"
           >
-            <CanvasTable
-              columns={[
-                { h: "類型", w: 150, r: (r) => String(r.zh) },
-                { h: "檔名", k: "file", w: 170, mono: true },
-                {
-                  h: "生效起迄",
-                  w: 170,
-                  mono: true,
-                  r: (r) => `${r.from} ~ ${r.until}`,
-                },
-                {
-                  h: "狀態",
-                  w: 100,
-                  r: (r) => (
-                    <CanvasPill tone={r.tone as any} dot>
-                      {String(r.s)}
-                    </CanvasPill>
-                  ),
-                },
-                {
-                  h: "",
-                  w: 80,
-                  r: (r) => (
-                    <CanvasBtn
-                      size="xs"
-                      variant="ghost"
-                      icon="eye"
-                      onClick={() =>
-                        setPreviewDoc(
-                          (r as unknown as DocumentRow).rawDoc ||
-                            ({
-                              documentId: "doc-preview",
-                              fleetPartnerId:
-                                record.fleetPartnerId || "fleet-001",
-                              submissionId,
-                              documentType: "vehicle_registration",
-                              fileObjectKey: `files/${r.file}`,
-                              originalFileName: String(r.file),
-                              contentType: "application/pdf",
-                              fileSize: 2048,
-                              checksumSha256: "sha256-mock",
-                              effectiveFrom: String(r.from),
-                              effectiveUntil: String(r.until),
-                              reviewStatus: "approved",
-                              reviewComment: null,
-                              uploadedBy: "fleet-user",
-                              uploadedAt: "2026-06-18T14:02:00.000Z",
-                            } as SupplyDocumentRecord),
-                        )
-                      }
-                    >
-                      預覽
-                    </CanvasBtn>
-                  ),
-                },
-              ]}
-              rows={docRows as unknown as Record<string, unknown>[]}
-            />
+            {docRows.length === 0 ? (
+              <div
+                style={{
+                  padding: "16px 20px",
+                  color: theme.textMuted,
+                  fontSize: 13,
+                }}
+              >
+                無附隨文件
+              </div>
+            ) : (
+              <CanvasTable
+                columns={[
+                  { h: "類型", w: 150, r: (r) => String(r.zh) },
+                  { h: "檔名", k: "file", w: 170, mono: true },
+                  {
+                    h: "生效起迄",
+                    w: 170,
+                    mono: true,
+                    r: (r) => `${r.from} ~ ${r.until}`,
+                  },
+                  {
+                    h: "狀態",
+                    w: 100,
+                    r: (r) => (
+                      <CanvasPill tone={r.tone as any} dot>
+                        {String(r.s)}
+                      </CanvasPill>
+                    ),
+                  },
+                  {
+                    h: "",
+                    w: 80,
+                    r: (r) => {
+                      const rawDoc = (r as unknown as DocumentRow).rawDoc;
+                      if (!rawDoc) return null;
+                      return (
+                        <CanvasBtn
+                          size="xs"
+                          variant="ghost"
+                          icon="eye"
+                          onClick={() => setPreviewDoc(rawDoc)}
+                        >
+                          預覽
+                        </CanvasBtn>
+                      );
+                    },
+                  },
+                ]}
+                rows={docRows as unknown as Record<string, unknown>[]}
+              />
+            )}
           </CanvasCard>
 
           {/* VQ-3 Dynamic Validation warnings */}
@@ -769,22 +834,22 @@ export default function SupplyReviewDetailPage() {
                 items={[
                   {
                     k: "canonicalDriverId",
-                    v: record.canonicalDriverId || "d_9120",
+                    v: record.canonicalDriverId || "—",
                     mono: true,
                   },
                   {
                     k: "canonicalVehicleId",
-                    v: record.canonicalVehicleId || "veh_9120",
+                    v: record.canonicalVehicleId || "—",
                     mono: true,
                   },
                   {
                     k: "canonicalContractId",
-                    v: record.canonicalContractId || "contract_9120",
+                    v: record.canonicalContractId || "—",
                     mono: true,
                   },
                   {
                     k: "canonicalPolicyId",
-                    v: record.canonicalPolicyId || "policy_9120",
+                    v: record.canonicalPolicyId || "—",
                     mono: true,
                   },
                   {
@@ -797,13 +862,8 @@ export default function SupplyReviewDetailPage() {
                   },
                   {
                     k: "reviewedBy",
-                    v: record.reviewedBy || "LP (林佩璇)",
+                    v: record.reviewedBy || record.reviewStartedBy || "—",
                     mono: false,
-                  },
-                  {
-                    k: "reviewedAt",
-                    v: record.reviewedAt || new Date().toISOString(),
-                    mono: true,
                   },
                 ]}
               />
@@ -812,7 +872,128 @@ export default function SupplyReviewDetailPage() {
         </div>
       </div>
 
-      {/* Document Preview Modal (VQ-2) */}
+      {/* Confirmation Modals */}
+      {showApproveConfirm && (
+        <div style={modalOverlayStyle}>
+          <div style={modalContainerStyle}>
+            <div style={{ fontWeight: 700, fontSize: 16, color: theme.text }}>
+              確認核可並寫入 canonical？
+            </div>
+            <div
+              style={{ fontSize: 13, color: theme.textMuted, lineHeight: 1.5 }}
+            >
+              此動作將把該筆 submission ({submissionId}) 核可，並在單一交易內：
+              <br />
+              1. Provision / 更新 canonical 紀錄
+              <br />
+              2. 綁定車行 affiliation 關係
+              <br />
+              3. 重新計算 readiness
+              <br />
+              4. 寫入 audit log 並發送通知
+            </div>
+            <div
+              style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+            >
+              <CanvasBtn
+                variant="secondary"
+                onClick={() => setShowApproveConfirm(false)}
+                disabled={submitting}
+              >
+                取消
+              </CanvasBtn>
+              <CanvasBtn
+                variant="primary"
+                onClick={handleApproveSubmit}
+                disabled={submitting}
+              >
+                {submitting ? "處理中…" : "確認核可 · provision"}
+              </CanvasBtn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showActionModal && (
+        <div style={modalOverlayStyle}>
+          <div style={modalContainerStyle}>
+            <div style={{ fontWeight: 700, fontSize: 16, color: theme.text }}>
+              {showActionModal === "request_revision"
+                ? "確認退回車行補正？"
+                : "確認駁回此送審案？"}
+            </div>
+
+            <CanvasField label="reason code（必填）">
+              <select
+                style={selectStyle}
+                value={reasonCode}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                  setReasonCode(e.target.value)
+                }
+              >
+                <option value="">— 請選擇 —</option>
+                {REASON_CODES.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </CanvasField>
+
+            <CanvasField label="說明 / comment（必填）">
+              <textarea
+                value={comment}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  setComment(e.target.value)
+                }
+                placeholder="說明具體補正要求或駁回原因…"
+                style={{
+                  width: "100%",
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                  minHeight: 80,
+                  fontSize: 12.5,
+                  color: theme.text,
+                  backgroundColor: theme.surface,
+                  boxSizing: "border-box",
+                  fontFamily: "inherit",
+                }}
+              />
+            </CanvasField>
+
+            <div
+              style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
+            >
+              <CanvasBtn
+                variant="secondary"
+                onClick={() => setShowActionModal(null)}
+                disabled={submitting}
+              >
+                取消
+              </CanvasBtn>
+              <CanvasBtn
+                variant="primary"
+                danger={showActionModal === "reject"}
+                onClick={
+                  showActionModal === "request_revision"
+                    ? handleRequestRevisionSubmit
+                    : handleRejectSubmit
+                }
+                disabled={submitting}
+              >
+                {submitting
+                  ? "處理中…"
+                  : showActionModal === "request_revision"
+                    ? "確認退補"
+                    : "確認駁回"}
+              </CanvasBtn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VQ-2 Preview Document Modal */}
       {previewDoc && (
         <div style={modalOverlayStyle}>
           <div style={modalContainerStyle}>
@@ -826,13 +1007,16 @@ export default function SupplyReviewDetailPage() {
                 color: theme.textMuted,
                 display: "flex",
                 flexDirection: "column",
-                gap: 8,
+                gap: 6,
+                padding: 12,
+                backgroundColor: theme.accentBg,
+                borderRadius: 8,
+                fontFamily: theme.monoFamily,
               }}
             >
-              <div>• 檔名: {previewDoc.originalFileName || "document.pdf"}</div>
-              <div>• 檔案 Key: {previewDoc.fileObjectKey}</div>
-              <div>• 類型: {previewDoc.documentType}</div>
-              <div>• 格式: {previewDoc.contentType}</div>
+              <div>• Document ID: {previewDoc.documentId}</div>
+              <div>• File Key: {previewDoc.fileObjectKey}</div>
+              <div>• Content-Type: {previewDoc.contentType}</div>
               <div>• 大小: {previewDoc.fileSize} bytes</div>
               <div>• SHA-256 Checksum: {previewDoc.checksumSha256}</div>
               <div>
@@ -849,137 +1033,6 @@ export default function SupplyReviewDetailPage() {
                 onClick={() => setPreviewDoc(null)}
               >
                 關閉預覽
-              </CanvasBtn>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Action modal for request revision / reject */}
-      {showActionModal && (
-        <div style={modalOverlayStyle}>
-          <div style={modalContainerStyle}>
-            <div style={{ fontWeight: 700, fontSize: 16, color: theme.text }}>
-              {showActionModal === "request_revision"
-                ? "確認退回車行補正？"
-                : "確認駁回此送審案？"}
-            </div>
-            <CanvasBanner
-              tone={showActionModal === "request_revision" ? "warn" : "danger"}
-              icon="warn"
-              body={
-                showActionModal === "request_revision"
-                  ? "此動作將將狀態變更為 needs_revision，退回車行補充文件或修正資料。"
-                  : "此動作將狀態變更為 rejected，終止此次送審。"
-              }
-            />
-
-            <CanvasField label="reason code (必填)">
-              <select
-                style={selectStyle}
-                value={reasonCode}
-                onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
-                  setReasonCode(e.target.value)
-                }
-              >
-                {REASON_CODES.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </CanvasField>
-
-            <CanvasField label="comment 說明 (必填)">
-              <textarea
-                value={comment}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                  setComment(e.target.value)
-                }
-                placeholder="請輸入說明..."
-                style={{
-                  width: "100%",
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: 8,
-                  padding: "8px 10px",
-                  minHeight: 60,
-                  boxSizing: "border-box",
-                }}
-              />
-            </CanvasField>
-
-            <div
-              style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
-            >
-              <CanvasBtn
-                variant="secondary"
-                onClick={() => setShowActionModal(null)}
-              >
-                取消
-              </CanvasBtn>
-              <CanvasBtn
-                variant="primary"
-                danger={showActionModal === "reject"}
-                disabled={submitting || !reasonCode || !comment.trim()}
-                onClick={
-                  showActionModal === "request_revision"
-                    ? handleRequestRevisionSubmit
-                    : handleRejectSubmit
-                }
-              >
-                {showActionModal === "request_revision"
-                  ? "確認退補"
-                  : "確認駁回"}
-              </CanvasBtn>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Approve confirmation modal (VQ-4) */}
-      {showApproveConfirm && (
-        <div style={modalOverlayStyle}>
-          <div style={modalContainerStyle}>
-            <div style={{ fontWeight: 700, fontSize: 16, color: theme.text }}>
-              確認核可並寫入 canonical？
-            </div>
-            <CanvasBanner
-              tone="warn"
-              icon="warn"
-              body="此動作將在單一交易內建立/更新 canonical vehicle veh_9120、建立 affiliation、重算 readiness 並寫入 audit。動作具不可逆語意。"
-            />
-
-            <div
-              style={{
-                backgroundColor: theme.neutralBg,
-                padding: 12,
-                borderRadius: 8,
-                fontSize: 12.5,
-              }}
-            >
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                將寫入紀錄：
-              </div>
-              <div>• Canonical Vehicle: veh_9120</div>
-              <div>• Affiliation: METRO_FLEET ↔ veh_9120</div>
-              <div>• Readiness recalculation: ready</div>
-            </div>
-
-            <div
-              style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
-            >
-              <CanvasBtn
-                variant="secondary"
-                onClick={() => setShowApproveConfirm(false)}
-              >
-                取消
-              </CanvasBtn>
-              <CanvasBtn
-                variant="primary"
-                disabled={submitting || !validationInfo.isComplete}
-                onClick={handleApproveSubmit}
-              >
-                確認核可 · provision
               </CanvasBtn>
             </div>
           </div>
