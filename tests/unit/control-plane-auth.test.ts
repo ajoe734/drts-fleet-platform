@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import jwt from "jsonwebtoken";
 import { describe, expect, it } from "vitest";
 
@@ -15,6 +16,40 @@ import {
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 
 describe("control-plane auth helper", () => {
+  it("keeps the package runtime type aligned with its CommonJS output", () => {
+    const packageManifest = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../packages/control-plane-auth/package.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    const tsconfig = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../packages/control-plane-auth/tsconfig.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    const sourceManifest = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../packages/control-plane-auth/src/package.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+
+    expect(packageManifest.type).toBe("commonjs");
+    expect(sourceManifest.type).toBe("module");
+    expect(tsconfig.compilerOptions.module).toBe("CommonJS");
+  });
+
   it("extracts the normalized IAP user email from request headers", () => {
     expect(
       extractAuthenticatedUserEmail({
