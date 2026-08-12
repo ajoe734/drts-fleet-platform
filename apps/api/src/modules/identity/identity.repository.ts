@@ -1295,13 +1295,13 @@ export class IdentityRepository implements OnModuleInit {
                     jsonb_set(
                       jsonb_set(
                         jsonb_set(COALESCE(record, '{}'::jsonb), '{status}', '"revoked"'::jsonb),
-                        '{revokedAt}', to_jsonb($2::text)
+                        '{revokedAt}', COALESCE(to_jsonb($2::text), 'null'::jsonb)
                       ),
-                      '{revokedByPrincipalId}', to_jsonb($3::text)
+                      '{revokedByPrincipalId}', COALESCE(to_jsonb($3::text), 'null'::jsonb)
                     ),
-                    '{revokeReason}', to_jsonb($4::text)
+                    '{revokeReason}', COALESCE(to_jsonb($4::text), 'null'::jsonb)
                   ),
-                  '{updatedAt}', to_jsonb($2::text)
+                  '{updatedAt}', COALESCE(to_jsonb($2::text), 'null'::jsonb)
                 ),
                 '{status}', '"revoked"'::jsonb
               )
@@ -1323,7 +1323,7 @@ export class IdentityRepository implements OnModuleInit {
               updated_at = $2::timestamptz,
               record = jsonb_set(
                 jsonb_set(COALESCE(record, '{}'::jsonb), '{status}', '"revoked"'::jsonb),
-                '{updatedAt}', to_jsonb($2::text)
+                '{updatedAt}', COALESCE(to_jsonb($2::text), 'null'::jsonb)
               )
           WHERE session_id = $1::text AND status = 'active'
         `,
@@ -1399,11 +1399,11 @@ export class IdentityRepository implements OnModuleInit {
                 jsonb_set(
                   jsonb_set(
                     jsonb_set(COALESCE(record, '{}'::jsonb), '{status}', '"revoked"'::jsonb),
-                    '{revokedAt}', to_jsonb($2::text)
+                    '{revokedAt}', COALESCE(to_jsonb($2::text), 'null'::jsonb)
                   ),
-                  '{revokedByPrincipalId}', to_jsonb($3::text)
+                  '{revokedByPrincipalId}', COALESCE(to_jsonb($3::text), 'null'::jsonb)
                 ),
-                '{revokeReason}', to_jsonb($4::text)
+                '{revokeReason}', COALESCE(to_jsonb($4::text), 'null'::jsonb)
               )
           WHERE principal_id = $1::text AND status = 'active'
           RETURNING session_id
@@ -1420,7 +1420,7 @@ export class IdentityRepository implements OnModuleInit {
                 updated_at = $2::timestamptz,
                 record = jsonb_set(
                   jsonb_set(COALESCE(record, '{}'::jsonb), '{status}', '"revoked"'::jsonb),
-                  '{updatedAt}', to_jsonb($2::text)
+                  '{updatedAt}', COALESCE(to_jsonb($2::text), 'null'::jsonb)
                 )
             WHERE session_id = ANY($1::text[]) AND status = 'active'
           `,
@@ -1640,13 +1640,13 @@ export class IdentityRepository implements OnModuleInit {
                   jsonb_set(
                     jsonb_set(
                       jsonb_set(COALESCE(record, '{}'::jsonb), '{status}', '"revoked"'::jsonb),
-                      '{revokedAt}', to_jsonb($2::text)
+                      '{revokedAt}', COALESCE(to_jsonb($2::text), 'null'::jsonb)
                     ),
-                    '{revokedByPrincipalId}', to_jsonb($3::text)
+                    '{revokedByPrincipalId}', COALESCE(to_jsonb($3::text), 'null'::jsonb)
                   ),
-                  '{revokeReason}', to_jsonb($4::text)
+                  '{revokeReason}', COALESCE(to_jsonb($4::text), 'null'::jsonb)
                 ),
-                '{updatedAt}', to_jsonb($2::text)
+                '{updatedAt}', COALESCE(to_jsonb($2::text), 'null'::jsonb)
               )
           WHERE (principal_id = $1::text OR record->>'actorId' = $1::text)
             AND status = 'active'
@@ -1664,7 +1664,7 @@ export class IdentityRepository implements OnModuleInit {
                 updated_at = $2::timestamptz,
                 record = jsonb_set(
                   jsonb_set(COALESCE(record, '{}'::jsonb), '{status}', '"revoked"'::jsonb),
-                  '{updatedAt}', to_jsonb($2::text)
+                  '{updatedAt}', COALESCE(to_jsonb($2::text), 'null'::jsonb)
                 )
             WHERE session_id = ANY($1::text[]) AND status = 'active'
           `,
@@ -2199,9 +2199,9 @@ export class IdentityRepository implements OnModuleInit {
                   record = jsonb_set(
                     jsonb_set(
                       jsonb_set(COALESCE(record, '{}'::jsonb), '{status}', '"compromised"'::jsonb),
-                      '{compromisedAt}', to_jsonb($1::text)
+                      '{compromisedAt}', COALESCE(to_jsonb($1::text), 'null'::jsonb)
                     ),
-                    '{updatedAt}', to_jsonb($1::text)
+                    '{updatedAt}', COALESCE(to_jsonb($1::text), 'null'::jsonb)
                   )
               WHERE family_id = $2::text
             `,
@@ -2219,11 +2219,11 @@ export class IdentityRepository implements OnModuleInit {
                     jsonb_set(
                       jsonb_set(
                         jsonb_set(COALESCE(record, '{}'::jsonb), '{status}', '"compromised"'::jsonb),
-                        '{revokedAt}', to_jsonb($1::text)
+                        '{revokedAt}', COALESCE(to_jsonb($1::text), 'null'::jsonb)
                       ),
                       '{revokeReason}', '"REFRESH_TOKEN_REUSE_DETECTED"'::jsonb
                     ),
-                    '{updatedAt}', to_jsonb($1::text)
+                    '{updatedAt}', COALESCE(to_jsonb($1::text), 'null'::jsonb)
                   )
               WHERE session_id = $2::text
             `,
@@ -2296,7 +2296,7 @@ export class IdentityRepository implements OnModuleInit {
                 updated_at = $1::timestamptz,
                 record = jsonb_set(
                   jsonb_set(COALESCE(record, '{}'::jsonb), '{status}', '"expired"'::jsonb),
-                  '{updatedAt}', to_jsonb($1::text)
+                  '{updatedAt}', COALESCE(to_jsonb($1::text), 'null'::jsonb)
                 )
             WHERE family_id = $2::text
           `,
@@ -2309,7 +2309,7 @@ export class IdentityRepository implements OnModuleInit {
                 updated_at = $1::timestamptz,
                 record = jsonb_set(
                   jsonb_set(COALESCE(record, '{}'::jsonb), '{status}', '"expired"'::jsonb),
-                  '{updatedAt}', to_jsonb($1::text)
+                  '{updatedAt}', COALESCE(to_jsonb($1::text), 'null'::jsonb)
                 )
             WHERE session_id = $2::text
           `,
@@ -2339,15 +2339,15 @@ export class IdentityRepository implements OnModuleInit {
                 jsonb_set(
                   jsonb_set(
                     jsonb_set(
-                      jsonb_set(COALESCE(record, '{}'::jsonb), '{currentTokenHash}', to_jsonb($1::text)),
-                      '{counter}', to_jsonb(counter + 1)
+                      jsonb_set(COALESCE(record, '{}'::jsonb), '{currentTokenHash}', COALESCE(to_jsonb($1::text), 'null'::jsonb)),
+                      '{counter}', COALESCE(to_jsonb(counter + 1), '0'::jsonb)
                     ),
                     '{previousHashes}',
-                    coalesce(record->'previousHashes', '[]'::jsonb) || to_jsonb($4::text)
+                    coalesce(record->'previousHashes', '[]'::jsonb) || COALESCE(to_jsonb($4::text), 'null'::jsonb)
                   ),
-                  '{expiresAt}', to_jsonb($2::text)
+                  '{expiresAt}', COALESCE(to_jsonb($2::text), 'null'::jsonb)
                 ),
-                '{updatedAt}', to_jsonb($3::text)
+                '{updatedAt}', COALESCE(to_jsonb($3::text), 'null'::jsonb)
               )
           WHERE family_id = $5::text AND current_token_hash = $4::text AND status = 'active'
           RETURNING *
@@ -2372,10 +2372,10 @@ export class IdentityRepository implements OnModuleInit {
               updated_at = $2::timestamptz,
               record = jsonb_set(
                 jsonb_set(
-                  jsonb_set(COALESCE(record, '{}'::jsonb), '{currentTokenId}', to_jsonb($3::text)),
-                  '{tokenVersion}', to_jsonb($1::bigint)
+                  jsonb_set(COALESCE(record, '{}'::jsonb), '{currentTokenId}', COALESCE(to_jsonb($3::text), 'null'::jsonb)),
+                  '{tokenVersion}', COALESCE(to_jsonb($1::bigint), '1'::jsonb)
                 ),
-                '{updatedAt}', to_jsonb($2::text)
+                '{updatedAt}', COALESCE(to_jsonb($2::text), 'null'::jsonb)
               )
           WHERE session_id = $4::text
           RETURNING *
