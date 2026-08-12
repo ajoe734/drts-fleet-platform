@@ -286,7 +286,11 @@ export class DriverDeviceSessionService implements OnModuleInit {
       requestId,
     );
 
-    const session = this.issueSession(savedBinding, plaintextRefreshToken);
+    const session = await this.issueSession(
+      savedBinding,
+      plaintextRefreshToken,
+      "driver_device_registration",
+    );
 
     this.securityEventsService?.recordEvent?.({
       actorId: savedBinding.driverId,
@@ -496,7 +500,11 @@ export class DriverDeviceSessionService implements OnModuleInit {
       nowIso,
     );
 
-    const session = this.issueSession(binding, newPlaintextRefreshToken);
+    const session = await this.issueSession(
+      binding,
+      newPlaintextRefreshToken,
+      "driver_refresh_token",
+    );
 
     this.securityEventsService?.recordEvent?.({
       actorId: binding.driverId,
@@ -772,6 +780,10 @@ export class DriverDeviceSessionService implements OnModuleInit {
       }
       this.refreshFamiliesByBindingId.set(bindingId, family);
     }
+
+    if (this.jwtAuthService?.revokeCurrentSession) {
+      await this.jwtAuthService.revokeCurrentSession(bindingId, reasonCode);
+    }
   }
 
   private async resolveBindingForRevoke(
@@ -904,27 +916,56 @@ export class DriverDeviceSessionService implements OnModuleInit {
     };
   }
 
-  private issueSession(
+  private async issueSession(
     binding: DriverDeviceBindingRecord,
     plaintextRefreshToken: string,
-  ): DriverDeviceProvisioningSession {
+    amrMethod: string = "driver_device_registration",
+  ): Promise<DriverDeviceProvisioningSession> {
     const issuedAt = new Date().toISOString();
-    const accessToken = this.jwtAuthService.sign(
-      {
-        authMode: "jwt_bearer",
-        actorType: "driver_user",
-        actorId: binding.driverId,
-        realm: "driver",
-        tenantId: null,
-        roleFamilies: ["driver"],
-        roles: ["driver_user"],
-        scopes: ["driver:read", "driver:write", "dispatch:read"],
-        requestId: null,
-        driverBindingId: binding.bindingId,
-        driverDeviceId: binding.deviceId,
-      },
-      { expiresIn: DRIVER_ACCESS_TOKEN_EXPIRES_IN },
-    );
+    let accessToken: string;
+
+    if (this.jwtAuthService?.issueSessionToken) {
+      const sessionToken = await this.jwtAuthService.issueSessionToken(
+        {
+          authMode: "jwt_bearer",
+          actorType: "driver_user",
+          actorId: binding.driverId,
+          realm: "driver",
+          tenantId: null,
+          roleFamilies: ["driver"],
+          roles: ["driver_user"],
+          scopes: ["driver:read", "driver:write", "dispatch:read"],
+          requestId: null,
+          driverBindingId: binding.bindingId,
+          driverDeviceId: binding.deviceId,
+          subject: binding.driverId,
+          principalId: binding.driverId,
+          amr: [amrMethod],
+        },
+        {
+          sessionId: binding.bindingId,
+          expiresIn: DRIVER_ACCESS_TOKEN_EXPIRES_IN,
+        },
+      );
+      accessToken = sessionToken.token;
+    } else {
+      accessToken = this.jwtAuthService.sign(
+        {
+          authMode: "jwt_bearer",
+          actorType: "driver_user",
+          actorId: binding.driverId,
+          realm: "driver",
+          tenantId: null,
+          roleFamilies: ["driver"],
+          roles: ["driver_user"],
+          scopes: ["driver:read", "driver:write", "dispatch:read"],
+          requestId: null,
+          driverBindingId: binding.bindingId,
+          driverDeviceId: binding.deviceId,
+        },
+        { expiresIn: DRIVER_ACCESS_TOKEN_EXPIRES_IN },
+      );
+    }
 
     return {
       accessToken,
