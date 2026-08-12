@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import React, { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -64,6 +65,7 @@ const selectStyle: CSSProperties = {
 };
 
 export default function SupplyReviewQueuePage() {
+  const { t } = useTranslation();
   const router = useRouter();
   const client = usePlatformAdminClient();
 
@@ -298,8 +300,8 @@ export default function SupplyReviewQueuePage() {
           const meta = PSR_SUB_STATUS[st] || PSR_SUB_STATUS.submitted;
           return (
             <CanvasPill tone={meta.tone} dot>
-              {meta.zh}
-              <span style={subMonoStyle}>{meta.en}</span>
+              {t(meta.key)}
+              <span style={subMonoStyle}>{meta.code}</span>
             </CanvasPill>
           );
         },
@@ -318,7 +320,11 @@ export default function SupplyReviewQueuePage() {
           const lockedBy = r.lockedBy ? String(r.lockedBy) : null;
           return (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {missing > 0 && <CanvasPill tone="warn">缺 {missing}</CanvasPill>}
+              {missing > 0 && (
+                <CanvasPill tone="warn">
+                  {t("supplyReview.queue.missingCount", { count: missing })}
+                </CanvasPill>
+              )}
               {lockedBy && (
                 <span
                   style={{
@@ -352,7 +358,7 @@ export default function SupplyReviewQueuePage() {
                 disabled={startingId === rowData.submissionId}
                 onClick={() => handleStartReview(rowData)}
               >
-                受理審核
+                {t("supplyReview.queue.startReview")}
               </CanvasBtn>
             );
           }
@@ -362,7 +368,7 @@ export default function SupplyReviewQueuePage() {
               style={{ textDecoration: "none" }}
             >
               <CanvasBtn size="xs" variant="ghost" icon="arrow-right">
-                開啟
+                {t("supplyReview.queue.openDetail")}
               </CanvasBtn>
             </Link>
           );
@@ -381,7 +387,8 @@ export default function SupplyReviewQueuePage() {
       }}
       onClick={() => setActiveTab("pending")}
     >
-      待審 <CanvasPill tone="accent">{String(pendingCount)}</CanvasPill>
+      {t("supplyReview.queue.tabPending")}{" "}
+      <CanvasPill tone="accent">{String(pendingCount)}</CanvasPill>
     </div>,
     <div
       key="mine"
@@ -393,14 +400,15 @@ export default function SupplyReviewQueuePage() {
       }}
       onClick={() => setActiveTab("mine")}
     >
-      我審核中 <CanvasPill tone="neutral">{String(mineCount)}</CanvasPill>
+      {t("supplyReview.queue.tabMine")}{" "}
+      <CanvasPill tone="neutral">{String(mineCount)}</CanvasPill>
     </div>,
     <div
       key="history"
       style={{ cursor: "pointer" }}
       onClick={() => setActiveTab("history")}
     >
-      歷史
+      {t("supplyReview.queue.tabHistory")}
     </div>,
   ];
 
@@ -414,13 +422,13 @@ export default function SupplyReviewQueuePage() {
   return (
     <div data-screen-id="PSR-QUEUE-01">
       <CanvasPageHeader
-        title="供給審核佇列 · Supply Review"
-        subtitle="車行送件 → 審核 → 核可寫入 canonical registry"
+        title={t("supplyReview.queue.title")}
+        subtitle={t("supplyReview.queue.subtitle")}
         tabs={tabNodes}
         activeTab={activeTabNode}
         actions={
           <CanvasBtn icon="filter" variant="secondary">
-            更多篩選
+            {t("supplyReview.queue.moreFilters")}
           </CanvasBtn>
         }
       />
@@ -430,9 +438,13 @@ export default function SupplyReviewQueuePage() {
           <CanvasBanner
             tone="danger"
             icon="warn"
-            title="載入佇列失敗"
+            title={t("supplyReview.queue.loadFailed")}
             body={error}
-            actions={<CanvasBtn onClick={fetchSubmissions}>重新整理</CanvasBtn>}
+            actions={
+              <CanvasBtn onClick={fetchSubmissions}>
+                {t("supplyReview.queue.refresh")}
+              </CanvasBtn>
+            }
           />
         )}
 
@@ -453,10 +465,16 @@ export default function SupplyReviewQueuePage() {
                   setFleetFilter(e.target.value)
                 }
               >
-                <option value="all">車行：全部</option>
-                <option value="大都會車隊">大都會車隊</option>
-                <option value="蘭陽小客車">蘭陽小客車</option>
-                <option value="海線車隊">海線車隊</option>
+                <option value="all">{t("supplyReview.filter.fleetAll")}</option>
+                <option value="大都會車隊">
+                  {t("supplyReview.filter.fleetMetropolitan")}
+                </option>
+                <option value="蘭陽小客車">
+                  {t("supplyReview.filter.fleetLanyang")}
+                </option>
+                <option value="海線車隊">
+                  {t("supplyReview.filter.fleetCoastal")}
+                </option>
               </select>
 
               {/* Filter 2: Type */}
@@ -467,10 +485,16 @@ export default function SupplyReviewQueuePage() {
                   setTypeFilter(e.target.value)
                 }
               >
-                <option value="all">類型：全部</option>
-                <option value="車輛">車輛</option>
-                <option value="司機">司機</option>
-                <option value="保險">保險</option>
+                <option value="all">{t("supplyReview.filter.typeAll")}</option>
+                <option value="車輛">
+                  {t("supplyReview.filter.typeVehicle")}
+                </option>
+                <option value="司機">
+                  {t("supplyReview.filter.typeDriver")}
+                </option>
+                <option value="保險">
+                  {t("supplyReview.filter.typeInsurance")}
+                </option>
               </select>
 
               {/* Filter 3: Service product */}
@@ -481,10 +505,18 @@ export default function SupplyReviewQueuePage() {
                   setServiceFilter(e.target.value)
                 }
               >
-                <option value="all">服務產品：全部</option>
-                <option value="realtime">即時派車</option>
-                <option value="airport">機場接送</option>
-                <option value="business">商務包車</option>
+                <option value="all">
+                  {t("supplyReview.filter.serviceAll")}
+                </option>
+                <option value="realtime">
+                  {t("supplyReview.filter.serviceRealtime")}
+                </option>
+                <option value="airport">
+                  {t("supplyReview.filter.serviceAirport")}
+                </option>
+                <option value="business">
+                  {t("supplyReview.filter.serviceBusiness")}
+                </option>
               </select>
 
               {/* Filter 4: Business Area */}
@@ -495,10 +527,16 @@ export default function SupplyReviewQueuePage() {
                   setAreaFilter(e.target.value)
                 }
               >
-                <option value="all">營業區：全部</option>
-                <option value="taipei">台北市</option>
-                <option value="yilan">宜蘭縣</option>
-                <option value="taichung">台中市</option>
+                <option value="all">{t("supplyReview.filter.areaAll")}</option>
+                <option value="taipei">
+                  {t("supplyReview.filter.areaTaipei")}
+                </option>
+                <option value="yilan">
+                  {t("supplyReview.filter.areaYilan")}
+                </option>
+                <option value="taichung">
+                  {t("supplyReview.filter.areaTaichung")}
+                </option>
               </select>
 
               {/* Filter 5: Status */}
@@ -509,12 +547,24 @@ export default function SupplyReviewQueuePage() {
                   setStatusFilter(e.target.value)
                 }
               >
-                <option value="all">狀態：全部</option>
-                <option value="submitted">待受理 submitted</option>
-                <option value="in_review">審核中 in_review</option>
-                <option value="needs_revision">已退補正 needs_revision</option>
-                <option value="approved">已核可 approved</option>
-                <option value="rejected">已駁回 rejected</option>
+                <option value="all">
+                  {t("supplyReview.filter.statusAll")}
+                </option>
+                <option value="submitted">
+                  {t("supplyReview.filter.statusSubmitted")}
+                </option>
+                <option value="in_review">
+                  {t("supplyReview.filter.statusInReview")}
+                </option>
+                <option value="needs_revision">
+                  {t("supplyReview.filter.statusNeedsRevision")}
+                </option>
+                <option value="approved">
+                  {t("supplyReview.filter.statusApproved")}
+                </option>
+                <option value="rejected">
+                  {t("supplyReview.filter.statusRejected")}
+                </option>
               </select>
 
               {/* Filter 6: Missing items */}
@@ -525,9 +575,15 @@ export default function SupplyReviewQueuePage() {
                   setMissingFilter(e.target.value)
                 }
               >
-                <option value="all">缺件狀態：全部</option>
-                <option value="has_missing">有缺件</option>
-                <option value="no_missing">無缺件</option>
+                <option value="all">
+                  {t("supplyReview.filter.missingAll")}
+                </option>
+                <option value="has_missing">
+                  {t("supplyReview.filter.missingHasMissing")}
+                </option>
+                <option value="no_missing">
+                  {t("supplyReview.filter.missingNoMissing")}
+                </option>
               </select>
 
               {/* Filter 7: Date */}
@@ -538,9 +594,13 @@ export default function SupplyReviewQueuePage() {
                   setDateFilter(e.target.value)
                 }
               >
-                <option value="all">送審日期：全部</option>
-                <option value="today">今日送審</option>
-                <option value="recent">近 7 日</option>
+                <option value="all">{t("supplyReview.filter.dateAll")}</option>
+                <option value="today">
+                  {t("supplyReview.filter.dateToday")}
+                </option>
+                <option value="recent">
+                  {t("supplyReview.filter.dateRecent")}
+                </option>
               </select>
             </div>
           </div>

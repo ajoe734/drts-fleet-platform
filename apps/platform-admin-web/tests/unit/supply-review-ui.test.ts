@@ -42,7 +42,7 @@ describe("S1F-ADM-001 Platform Admin Supply Review UI & Behavior", () => {
 
     statuses.forEach((st) => {
       expect(PSR_SUB_STATUS[st]).toBeDefined();
-      expect(PSR_SUB_STATUS[st].zh).toBeTruthy();
+      expect(PSR_SUB_STATUS[st].key).toBeTruthy();
       expect(PSR_SUB_STATUS[st].tone).toBeTruthy();
     });
   });
@@ -131,31 +131,31 @@ describe("S1F-ADM-001 Platform Admin Supply Review UI & Behavior", () => {
 
     // 1. Fleet partner filter
     expect(queuePageSource).toContain("fleetFilter");
-    expect(queuePageSource).toContain("車行：全部");
+    expect(queuePageSource).toContain("supplyReview.filter.fleetAll");
 
     // 2. Submission type filter
     expect(queuePageSource).toContain("typeFilter");
-    expect(queuePageSource).toContain("類型：全部");
+    expect(queuePageSource).toContain("supplyReview.filter.typeAll");
 
     // 3. Submitted date filter
     expect(queuePageSource).toContain("dateFilter");
-    expect(queuePageSource).toContain("送審日期：全部");
+    expect(queuePageSource).toContain("supplyReview.filter.dateAll");
 
     // 4. Status filter
     expect(queuePageSource).toContain("statusFilter");
-    expect(queuePageSource).toContain("狀態：全部");
+    expect(queuePageSource).toContain("supplyReview.filter.statusAll");
 
     // 5. Missing items filter
     expect(queuePageSource).toContain("missingFilter");
-    expect(queuePageSource).toContain("缺件狀態：全部");
+    expect(queuePageSource).toContain("supplyReview.filter.missingAll");
 
     // 6. Service product filter
     expect(queuePageSource).toContain("serviceFilter");
-    expect(queuePageSource).toContain("服務產品：全部");
+    expect(queuePageSource).toContain("supplyReview.filter.serviceAll");
 
     // 7. Business area filter
     expect(queuePageSource).toContain("areaFilter");
-    expect(queuePageSource).toContain("營業區：全部");
+    expect(queuePageSource).toContain("supplyReview.filter.areaAll");
   });
 
   it("enforces strict API error handling without FX fixture fallback or fake success navigation", () => {

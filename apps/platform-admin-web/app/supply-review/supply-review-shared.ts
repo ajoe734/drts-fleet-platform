@@ -20,19 +20,43 @@ export const PSR_REVIEWER: SupplyReviewActor = {
 };
 
 export interface StatusMeta {
-  zh: string;
-  en: string;
+  key: string;
+  code: string;
   tone: CanvasTone;
 }
 
 export const PSR_SUB_STATUS: Record<SupplySubmissionStatus, StatusMeta> = {
-  draft: { zh: "草稿", en: "draft", tone: "neutral" },
-  submitted: { zh: "待受理", en: "submitted", tone: "info" },
-  in_review: { zh: "審核中", en: "in_review", tone: "accent" },
-  needs_revision: { zh: "已退補正", en: "needs_revision", tone: "warn" },
-  approved: { zh: "已核可", en: "approved", tone: "success" },
-  rejected: { zh: "已駁回", en: "rejected", tone: "danger" },
-  withdrawn: { zh: "已撤回", en: "withdrawn", tone: "neutral" },
+  draft: { key: "supplyReview.status.draft", code: "draft", tone: "neutral" },
+  submitted: {
+    key: "supplyReview.status.submitted",
+    code: "submitted",
+    tone: "info",
+  },
+  in_review: {
+    key: "supplyReview.status.in_review",
+    code: "in_review",
+    tone: "accent",
+  },
+  needs_revision: {
+    key: "supplyReview.status.needs_revision",
+    code: "needs_revision",
+    tone: "warn",
+  },
+  approved: {
+    key: "supplyReview.status.approved",
+    code: "approved",
+    tone: "success",
+  },
+  rejected: {
+    key: "supplyReview.status.rejected",
+    code: "rejected",
+    tone: "danger",
+  },
+  withdrawn: {
+    key: "supplyReview.status.withdrawn",
+    code: "withdrawn",
+    tone: "neutral",
+  },
 };
 
 export interface SupplyQueueRow {

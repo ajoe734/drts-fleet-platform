@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import React, { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -101,6 +102,7 @@ const modalContainerStyle: CSSProperties = {
 };
 
 export default function SupplyReviewDetailPage() {
+  const { t } = useTranslation();
   const params = useParams();
   const client = usePlatformAdminClient();
 
@@ -418,14 +420,14 @@ export default function SupplyReviewDetailPage() {
     return (
       <div data-screen-id="PSR-DETAIL-01">
         <CanvasPageHeader
-          title={`${submissionId || "Detail"} · 載入中...`}
+          title={`${submissionId || "Detail"} · ${t("supplyReview.detail.loadingTitle")}...`}
           subtitle="正在從伺服器載入 supply submission 詳情..."
         />
         <div style={{ padding: 24 }}>
           <CanvasBanner
             tone="info"
             icon="info"
-            title="載入中"
+            title={t("supplyReview.detail.loadingTitle")}
             body="正在處理，請稍候..."
           />
         </div>
@@ -441,7 +443,9 @@ export default function SupplyReviewDetailPage() {
           subtitle="無法讀取此筆 supply submission 資料"
           actions={
             <Link href="/supply-review" style={{ textDecoration: "none" }}>
-              <CanvasBtn variant="secondary">返回佇列</CanvasBtn>
+              <CanvasBtn variant="secondary">
+                {t("supplyReview.detail.backToQueue")}
+              </CanvasBtn>
             </Link>
           }
         />
@@ -449,11 +453,11 @@ export default function SupplyReviewDetailPage() {
           <CanvasBanner
             tone="danger"
             icon="warn"
-            title="載入詳情失敗"
+            title={t("supplyReview.detail.loadFailedTitle")}
             body={errorMsg || "找不到該筆 supply submission 紀錄"}
             actions={
               <CanvasBtn variant="primary" icon="refresh" onClick={loadDetail}>
-                重新嘗試
+                {t("supplyReview.detail.retry")}
               </CanvasBtn>
             }
           />
@@ -469,10 +473,10 @@ export default function SupplyReviewDetailPage() {
           <span
             style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
           >
-            {submissionId} · {typeZh}審核
+            {submissionId} · {t("supplyReview.detail.reviewHeader", { typeZh })}
             <CanvasPill tone={statusMeta.tone} dot>
-              {statusMeta.zh}
-              <span style={subMonoStyle}>{statusMeta.en}</span>
+              {t(statusMeta.key)}
+              <span style={subMonoStyle}>{statusMeta.code}</span>
             </CanvasPill>
           </span>
         }
@@ -486,7 +490,7 @@ export default function SupplyReviewDetailPage() {
                 disabled={submitting}
                 onClick={handleStartReview}
               >
-                受理審核 · start review
+                {t("supplyReview.detail.startReview")}
               </CanvasBtn>
             </>
           ) : isEditable ? (
@@ -496,7 +500,7 @@ export default function SupplyReviewDetailPage() {
                 icon="edit"
                 onClick={() => setShowActionModal("request_revision")}
               >
-                退回補正
+                {t("supplyReview.detail.requestRevision")}
               </CanvasBtn>
               <CanvasBtn
                 variant="secondary"
@@ -504,19 +508,21 @@ export default function SupplyReviewDetailPage() {
                 icon="x"
                 onClick={() => setShowActionModal("reject")}
               >
-                駁回
+                {t("supplyReview.detail.reject")}
               </CanvasBtn>
               <CanvasBtn
                 variant="primary"
                 icon="check"
                 onClick={() => setShowApproveConfirm(true)}
               >
-                核可 · provision
+                {t("supplyReview.detail.approveProvision")}
               </CanvasBtn>
             </>
           ) : (
             <Link href="/supply-review" style={{ textDecoration: "none" }}>
-              <CanvasBtn variant="secondary">返回佇列</CanvasBtn>
+              <CanvasBtn variant="secondary">
+                {t("supplyReview.detail.backToQueue")}
+              </CanvasBtn>
             </Link>
           )
         }
@@ -531,7 +537,7 @@ export default function SupplyReviewDetailPage() {
             body={`此 submission 已被更新（revision ${revisionNo}）。請重新載入後再審，系統不允許盲蓋。`}
             actions={
               <CanvasBtn variant="primary" icon="refresh" onClick={loadDetail}>
-                重新載入
+                {t("supplyReview.detail.reload")}
               </CanvasBtn>
             }
           />
@@ -554,7 +560,7 @@ export default function SupplyReviewDetailPage() {
           <CanvasBanner
             tone="danger"
             icon="warn"
-            title="操作錯誤"
+            title={t("supplyReview.detail.opError")}
             body={errorMsg}
           />
         </div>
@@ -564,7 +570,7 @@ export default function SupplyReviewDetailPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {/* VQ-1 Side-by-side diff */}
           <CanvasCard
-            title="逐欄位對照 · submission vs canonical"
+            title={t("supplyReview.detail.diffTitle")}
             subtitle="VQ-1 · 變更欄位以強調色標示"
             actions={
               <div style={{ display: "flex", gap: 6 }}>
@@ -573,7 +579,7 @@ export default function SupplyReviewDetailPage() {
                   style={{ cursor: "pointer" }}
                 >
                   <CanvasPill tone={!onlyDiff ? "accent" : "neutral"}>
-                    看全部
+                    {t("supplyReview.detail.viewAll")}
                   </CanvasPill>
                 </span>
                 <span
@@ -581,7 +587,7 @@ export default function SupplyReviewDetailPage() {
                   style={{ cursor: "pointer" }}
                 >
                   <CanvasPill tone={onlyDiff ? "accent" : "neutral"}>
-                    只看差異
+                    {t("supplyReview.detail.viewDiffOnly")}
                   </CanvasPill>
                 </span>
               </div>
@@ -595,15 +601,19 @@ export default function SupplyReviewDetailPage() {
                   fontSize: 13,
                 }}
               >
-                無欄位對照資料
+                {t("supplyReview.detail.noDiffData")}
               </div>
             ) : (
               <div style={diffGridStyle}>
-                <div style={diffHeaderStyle}>欄位</div>
-                <div style={{ ...diffHeaderStyle, color: theme.accent }}>
-                  提交值 · submission
+                <div style={diffHeaderStyle}>
+                  {t("supplyReview.detail.colField")}
                 </div>
-                <div style={diffHeaderStyle}>目前 · canonical</div>
+                <div style={{ ...diffHeaderStyle, color: theme.accent }}>
+                  {t("supplyReview.detail.colSubmitted")}
+                </div>
+                <div style={diffHeaderStyle}>
+                  {t("supplyReview.detail.colCanonical")}
+                </div>
 
                 {displayedDiffRows.map((r, i) => (
                   <React.Fragment key={i}>
@@ -659,7 +669,7 @@ export default function SupplyReviewDetailPage() {
 
           {/* VQ-2 Document review */}
           <CanvasCard
-            title="文件檢視 · documents"
+            title={t("supplyReview.detail.docTitle")}
             subtitle="VQ-2 · 類型 / 檔名 / 生效 / 審核狀態"
           >
             {docRows.length === 0 ? (
@@ -670,7 +680,7 @@ export default function SupplyReviewDetailPage() {
                   fontSize: 13,
                 }}
               >
-                無附隨文件
+                {t("supplyReview.detail.noDocuments")}
               </div>
             ) : (
               <CanvasTable
@@ -705,7 +715,7 @@ export default function SupplyReviewDetailPage() {
                           icon="eye"
                           onClick={() => setPreviewDoc(rawDoc)}
                         >
-                          預覽
+                          {t("supplyReview.detail.docPreview")}
                         </CanvasBtn>
                       );
                     },
@@ -717,7 +727,7 @@ export default function SupplyReviewDetailPage() {
           </CanvasCard>
 
           {/* VQ-3 Dynamic Validation warnings */}
-          <CanvasCard title="完整性檢核 · validation">
+          <CanvasCard title={t("supplyReview.detail.validationTitle")}>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {validationInfo.isComplete ? (
                 <>
@@ -758,7 +768,7 @@ export default function SupplyReviewDetailPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Reviewer note + Reason code (VQ-3) */}
           <CanvasCard
-            title="審核意見 · reviewer note"
+            title={t("supplyReview.detail.reviewerNoteTitle")}
             subtitle="VQ-3 · 退補 / 駁回需填 reason code"
           >
             <CanvasField label="reason code（退補 / 駁回必填）">
@@ -769,7 +779,9 @@ export default function SupplyReviewDetailPage() {
                   setReasonCode(e.target.value)
                 }
               >
-                <option value="">— 核可免填 —</option>
+                <option value="">
+                  {t("supplyReview.detail.approveNoNote")}
+                </option>
                 {REASON_CODES.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
@@ -784,7 +796,7 @@ export default function SupplyReviewDetailPage() {
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                   setComment(e.target.value)
                 }
-                placeholder="輸入給車行的審核說明…"
+                placeholder={t("supplyReview.detail.commentPlaceholder")}
                 style={{
                   width: "100%",
                   border: `1px solid ${theme.border}`,
@@ -803,7 +815,7 @@ export default function SupplyReviewDetailPage() {
 
           {/* VQ-4 Canonical preview */}
           <CanvasCard
-            title="核可將寫入 · canonical preview"
+            title={t("supplyReview.detail.canonicalPreviewTitle")}
             subtitle="VQ-4 · approve 會改動 registry（不可逆）"
             style={{ borderTop: `2px solid ${theme.accent}` }}
           >
@@ -818,7 +830,7 @@ export default function SupplyReviewDetailPage() {
           </CanvasCard>
 
           {/* Guardrail */}
-          <CanvasCard title="把關 · guardrail">
+          <CanvasCard title={t("supplyReview.detail.guardrailTitle")}>
             <CanvasBanner
               tone="info"
               icon="lock"
@@ -828,7 +840,7 @@ export default function SupplyReviewDetailPage() {
 
           {/* VQ-6 Audit Receipt (when approved) */}
           {currentStatus === "approved" && (
-            <CanvasCard title="審核憑證 · audit receipt">
+            <CanvasCard title={t("supplyReview.detail.auditReceiptTitle")}>
               <CanvasDL
                 cols={1}
                 items={[
@@ -877,20 +889,20 @@ export default function SupplyReviewDetailPage() {
         <div style={modalOverlayStyle}>
           <div style={modalContainerStyle}>
             <div style={{ fontWeight: 700, fontSize: 16, color: theme.text }}>
-              確認核可並寫入 canonical？
+              {t("supplyReview.detail.confirmApproveTitle")}
             </div>
             <div
               style={{ fontSize: 13, color: theme.textMuted, lineHeight: 1.5 }}
             >
-              此動作將把該筆 submission ({submissionId}) 核可，並在單一交易內：
+              {t("supplyReview.detail.confirmApproveIntro", { submissionId })}
               <br />
-              1. Provision / 更新 canonical 紀錄
+              {t("supplyReview.detail.confirmApproveStep1")}
               <br />
-              2. 綁定車行 affiliation 關係
+              {t("supplyReview.detail.confirmApproveStep2")}
               <br />
-              3. 重新計算 readiness
+              {t("supplyReview.detail.confirmApproveStep3")}
               <br />
-              4. 寫入 audit log 並發送通知
+              {t("supplyReview.detail.confirmApproveStep4")}
             </div>
             <div
               style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
@@ -900,7 +912,7 @@ export default function SupplyReviewDetailPage() {
                 onClick={() => setShowApproveConfirm(false)}
                 disabled={submitting}
               >
-                取消
+                {t("supplyReview.detail.cancel")}
               </CanvasBtn>
               <CanvasBtn
                 variant="primary"
@@ -931,7 +943,9 @@ export default function SupplyReviewDetailPage() {
                   setReasonCode(e.target.value)
                 }
               >
-                <option value="">— 請選擇 —</option>
+                <option value="">
+                  {t("supplyReview.detail.selectReason")}
+                </option>
                 {REASON_CODES.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
@@ -946,7 +960,7 @@ export default function SupplyReviewDetailPage() {
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                   setComment(e.target.value)
                 }
-                placeholder="說明具體補正要求或駁回原因…"
+                placeholder={t("supplyReview.detail.actionCommentPlaceholder")}
                 style={{
                   width: "100%",
                   border: `1px solid ${theme.border}`,
@@ -970,7 +984,7 @@ export default function SupplyReviewDetailPage() {
                 onClick={() => setShowActionModal(null)}
                 disabled={submitting}
               >
-                取消
+                {t("supplyReview.detail.cancel")}
               </CanvasBtn>
               <CanvasBtn
                 variant="primary"
@@ -998,7 +1012,7 @@ export default function SupplyReviewDetailPage() {
         <div style={modalOverlayStyle}>
           <div style={modalContainerStyle}>
             <div style={{ fontWeight: 700, fontSize: 16, color: theme.text }}>
-              文件預覽 ·{" "}
+              {t("supplyReview.detail.previewDocTitle")}{" "}
               {previewDoc.originalFileName || previewDoc.documentType}
             </div>
             <div
@@ -1014,16 +1028,34 @@ export default function SupplyReviewDetailPage() {
                 fontFamily: theme.monoFamily,
               }}
             >
-              <div>• Document ID: {previewDoc.documentId}</div>
-              <div>• File Key: {previewDoc.fileObjectKey}</div>
-              <div>• Content-Type: {previewDoc.contentType}</div>
-              <div>• 大小: {previewDoc.fileSize} bytes</div>
-              <div>• SHA-256 Checksum: {previewDoc.checksumSha256}</div>
               <div>
-                • 生效起迄: {previewDoc.effectiveFrom} ~{" "}
-                {previewDoc.effectiveUntil}
+                {t("supplyReview.detail.docId")}
+                {previewDoc.documentId}
               </div>
-              <div>• 審核狀態: {previewDoc.reviewStatus}</div>
+              <div>
+                {t("supplyReview.detail.fileKey")}
+                {previewDoc.fileObjectKey}
+              </div>
+              <div>
+                {t("supplyReview.detail.contentType")}
+                {previewDoc.contentType}
+              </div>
+              <div>
+                {t("supplyReview.detail.fileSize")}
+                {previewDoc.fileSize} bytes
+              </div>
+              <div>
+                {t("supplyReview.detail.checksum")}
+                {previewDoc.checksumSha256}
+              </div>
+              <div>
+                {t("supplyReview.detail.effectivePeriod")}
+                {previewDoc.effectiveFrom} ~ {previewDoc.effectiveUntil}
+              </div>
+              <div>
+                {t("supplyReview.detail.reviewStatus")}
+                {previewDoc.reviewStatus}
+              </div>
             </div>
             <div
               style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}
@@ -1032,7 +1064,7 @@ export default function SupplyReviewDetailPage() {
                 variant="secondary"
                 onClick={() => setPreviewDoc(null)}
               >
-                關閉預覽
+                {t("supplyReview.detail.closePreview")}
               </CanvasBtn>
             </div>
           </div>
