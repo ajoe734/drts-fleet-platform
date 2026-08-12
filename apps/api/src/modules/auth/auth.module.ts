@@ -9,6 +9,7 @@ import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { AuthController } from "./auth.controller";
 import { BreakGlassController } from "./break-glass.controller";
 import { ConsumedOidcStateRepository } from "./consumed-oidc-state.repository";
+import { DriverDeviceSessionRepository } from "./driver-device-session.repository";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { OidcPkceService } from "./oidc-pkce.service";
@@ -25,6 +26,7 @@ import { ServiceWorkloadIdentityAdapter } from "./service-workload-identity.adap
   controllers: [AuthController, BreakGlassController],
   providers: [
     JwtAuthService,
+    DriverDeviceSessionRepository,
     DriverDeviceSessionService,
     IAPSubjectAdapter,
     ServiceWorkloadIdentityAdapter,
@@ -33,6 +35,7 @@ import { ServiceWorkloadIdentityAdapter } from "./service-workload-identity.adap
   ],
   exports: [
     JwtAuthService,
+    DriverDeviceSessionRepository,
     DriverDeviceSessionService,
     IAPSubjectAdapter,
     ServiceWorkloadIdentityAdapter,

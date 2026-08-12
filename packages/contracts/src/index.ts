@@ -923,6 +923,53 @@ export interface DriverDeviceBindingSummary {
   revokedAt: string | null;
 }
 
+export interface DriverDeviceInvitationRecord {
+  invitationId: string;
+  driverId: string;
+  registrationCodeHash: string;
+  status: "pending" | "used" | "expired" | "revoked";
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DriverRefreshFamilyRecord {
+  familyId: string;
+  bindingId: string;
+  driverId: string;
+  currentTokenHash: string;
+  previousTokenHashes: string[];
+  rotationCounter: number;
+  status: "active" | "revoked" | "compromised" | "expired";
+  expiresAt: string;
+  revokedAt: string | null;
+  compromisedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DriverDeviceBindingRecord {
+  bindingId: string;
+  driverId: string;
+  deviceId: string;
+  deviceLabel: string | null;
+  status: "active" | "revoked";
+  issuedAt: string;
+  refreshedAt: string;
+  revokedAt: string | null;
+  reboundFromBindingId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IssueDriverDeviceInvitationCommand {
+  driverId: string;
+  registrationCode?: string;
+  expiresInHours?: number;
+}
+
 export interface TenantPartnerSummary {
   supportedRoots: Array<"tenant" | "partner" | "site" | "call_point">;
   sourceOfTruth: "tenant_partner_service" | "foundation_bootstrap_placeholder";
