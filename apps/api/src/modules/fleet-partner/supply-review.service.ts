@@ -564,10 +564,10 @@ export class SupplyReviewService implements OnModuleInit {
     const submission = await this.findSubmission(submissionId);
     let artifacts: SubmissionApprovalArtifacts;
     if (this.supplySubmissionRepository?.isEnabled()) {
-      artifacts = await this.supplySubmissionRepository.loadApprovalArtifacts(
-        null,
-        submissionId,
-      );
+      artifacts =
+        await this.supplySubmissionRepository.loadApprovalArtifactsForSubmission(
+          submissionId,
+        );
     } else if (this.supplySubmissionRepository) {
       const state = await this.supplySubmissionRepository.loadState();
       artifacts = this.loadApprovalArtifactsFromState(state, submissionId);

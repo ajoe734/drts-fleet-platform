@@ -468,14 +468,13 @@ export class SupplySubmissionRepository {
   }
 
   async loadApprovalArtifacts(
-    executor: SupplySubmissionQueryExecutor | null | undefined,
+    executor: SupplySubmissionQueryExecutor,
     submissionId: string,
   ): Promise<SubmissionApprovalArtifacts> {
-    const activeExecutor = executor ?? this.databaseService!;
     const [driverDraftResult, vehicleDraftResult, documentsResult] =
       await Promise.all([
         this.loadExecutorQuery<DriverSupplyDraftRow>(
-          activeExecutor,
+          executor,
           "fleet.driver_supply_drafts",
           `
             SELECT *
@@ -486,7 +485,7 @@ export class SupplySubmissionRepository {
           [submissionId],
         ),
         this.loadExecutorQuery<VehicleSupplyDraftRow>(
-          activeExecutor,
+          executor,
           "fleet.vehicle_supply_drafts",
           `
             SELECT *
@@ -497,7 +496,7 @@ export class SupplySubmissionRepository {
           [submissionId],
         ),
         this.loadExecutorQuery<SupplyDocumentRow>(
-          activeExecutor,
+          executor,
           "fleet.supply_documents",
           `
             SELECT *
@@ -518,6 +517,15 @@ export class SupplySubmissionRepository {
         : null,
       documents: documentsResult.rows.map((row) => this.mapDocumentRow(row)),
     };
+  }
+
+  async loadApprovalArtifactsForSubmission(
+    submissionId: string,
+  ): Promise<SubmissionApprovalArtifacts> {
+    if (!this.databaseService) {
+      throw new Error("DatabaseService is not initialized");
+    }
+    return this.loadApprovalArtifacts(this.databaseService, submissionId);
   }
 
   async assertVehiclePlateAvailable(
