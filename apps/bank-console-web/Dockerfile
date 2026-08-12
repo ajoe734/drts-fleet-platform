@@ -26,6 +26,8 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 
 FROM deps AS build
+ARG DRTS_CANDIDATE_SHA
+ENV DRTS_CANDIDATE_SHA=$DRTS_CANDIDATE_SHA
 COPY apps/bank-console-web/ apps/bank-console-web/
 COPY tsconfig.base.json .
 

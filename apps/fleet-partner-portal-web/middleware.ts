@@ -10,6 +10,8 @@ export function middleware(request: NextRequest) {
 
   // 1. Security Headers
   const response = NextResponse.next();
+  const candidateSha = process.env.DRTS_CANDIDATE_SHA?.trim() || "unconfigured";
+  response.headers.set("x-drts-candidate-sha", candidateSha);
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
