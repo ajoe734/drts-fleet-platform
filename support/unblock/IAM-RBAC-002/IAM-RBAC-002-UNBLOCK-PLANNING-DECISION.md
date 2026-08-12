@@ -48,13 +48,21 @@ If a real planning gap existed, it would be named in one of these. It is not.
 `mergeable: MERGEABLE`, `mergeStateStatus: BLOCKED` (blocked by required-check
 failures, not by a merge conflict or missing review).
 
-Of 18 required checks, 15 pass. Two independent jobs fail on the exact same
-underlying test, and a third (`ci-integ`) fails only because it aggregates the
-other required checks:
+PR #1378 reports 18 CI checks total, but `origin/dev` branch protection only
+requires 6 of them (confirmed live via `gh api
+repos/ajoe734/drts-fleet-platform/branches/dev/protection`, not the 3 listed
+in `docs/ops/branch-strategy.md` §6, which is stale): `Commit trailers`,
+`Runtime mirror guard`, `Smoke acceptance`, `build`, `typecheck`, `unit`.
+
+Of those 6 required checks, 4 pass (`Commit trailers`, `Runtime mirror guard`,
+`build`, `typecheck`) and 2 fail on the exact same underlying test:
 
 - `unit` — FAIL
 - `Smoke acceptance` — FAIL
-- `ci-integ` — FAIL (aggregator; fails because `unit` failed)
+
+(`ci-integ`, which also fails, is a non-required aggregator job that fails
+only because `unit` failed; it is not one of the 6 checks `origin/dev`
+protection enforces.)
 
 ### 4. The failure is a single, precise, reproducible assertion — not ambiguous CI flake noise
 
@@ -168,6 +176,8 @@ This packet does not claim:
 - PR #1378: https://github.com/ajoe734/drts-fleet-platform/pull/1378
 - CI run (unit): https://github.com/ajoe734/drts-fleet-platform/actions/runs/31555656039/job/93987483032
 - CI run (Smoke acceptance): https://github.com/ajoe734/drts-fleet-platform/actions/runs/31555656040/job/93987421402
+- `origin/dev` branch protection (live): `gh api repos/ajoe734/drts-fleet-platform/branches/dev/protection` — required contexts: `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance`, `build`, `typecheck`, `unit`
+- `docs/ops/branch-strategy.md` §6 (stale: lists only 3 required checks; live branch protection requires 6)
 
 ## Delivery evidence
 
