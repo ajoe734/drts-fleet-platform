@@ -137,4 +137,36 @@ describe("S1F-ADM-001 Platform Admin Supply Review UI & Behavior", () => {
     expect(queuePageSource).toContain("areaFilter");
     expect(queuePageSource).toContain("營業區：全部");
   });
+
+  it("enforces strict API error handling without FX fixture fallback or fake success navigation", () => {
+    const queuePageSource = readFileSync(
+      resolve(__dirname, "../../app/supply-review/page.tsx"),
+      "utf-8",
+    );
+    const detailPageSource = readFileSync(
+      resolve(__dirname, "../../app/supply-review/[submissionId]/page.tsx"),
+      "utf-8",
+    );
+
+    // Queue page must not set FX_PSR_QUEUE in fetchSubmissions catch block
+    expect(queuePageSource).not.toMatch(
+      /catch\s*\(e[^)]*\)\s*\{[^}]*setSubmissions\(\s*FX_PSR_QUEUE\s*\)/,
+    );
+    // Queue start review catch block must not navigate to detail page
+    expect(queuePageSource).not.toMatch(
+      /catch\s*\(e[^)]*\)\s*\{[^}]*router\.push/,
+    );
+
+    // Detail page must set error message and not use raw rgba(11, 18, 32, 0.5)
+    expect(detailPageSource).toContain("setErrorMsg");
+    expect(detailPageSource).not.toContain("rgba(11, 18, 32, 0.5)");
+
+    // Detail page must require comment for revision request and rejection
+    expect(detailPageSource).toContain(
+      'setErrorMsg("退回補正需填寫說明 (comment)")',
+    );
+    expect(detailPageSource).toContain(
+      'setErrorMsg("駁回需填寫說明 (comment)")',
+    );
+  });
 });

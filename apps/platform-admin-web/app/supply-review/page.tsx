@@ -14,14 +14,11 @@ import {
   buildCanvasTheme,
   type CanvasTableColumn,
 } from "@drts/ui-web";
-import type {
-  SupplySubmissionRecord,
-  SupplySubmissionStatus,
-} from "@drts/contracts";
+import type { SupplySubmissionStatus } from "@drts/contracts";
 import {
-  FX_PSR_QUEUE,
   PSR_REVIEWER,
   PSR_SUB_STATUS,
+  classifySupplyReviewError,
   mapSubmissionToTypeZh,
   type SupplyQueueRow,
 } from "./supply-review-shared";
@@ -73,7 +70,7 @@ export default function SupplyReviewQueuePage() {
   const [activeTab, setActiveTab] = useState<"pending" | "mine" | "history">(
     "pending",
   );
-  const [submissions, setSubmissions] = useState<SupplyQueueRow[]>(FX_PSR_QUEUE);
+  const [submissions, setSubmissions] = useState<SupplyQueueRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [startingId, setStartingId] = useState<string | null>(null);
 
@@ -90,74 +87,59 @@ export default function SupplyReviewQueuePage() {
     setError(null);
     try {
       const remoteList = await client.listAdminSupplyReviewSubmissions();
-      if (remoteList && remoteList.length > 0) {
-        const mapped: SupplyQueueRow[] = remoteList.map((sub: any) => {
-          const matchedSeed = FX_PSR_QUEUE.find(
-            (item) => item.submissionId === sub.submissionId,
-          );
-          const fleetName =
-            sub.fleetPartnerName ||
-            matchedSeed?.fleet ||
-            `車行 (${sub.fleetPartnerId})`;
-          const subject =
-            sub.subject ||
-            matchedSeed?.subject ||
-            `Submission #${sub.submissionId}`;
-          const area =
-            sub.businessArea === "yilan"
-              ? "宜蘭縣"
-              : sub.businessArea === "taichung"
-                ? "台中市"
-                : matchedSeed?.area || "台北市";
-          const svc =
-            Array.isArray(sub.supportedServiceProductCodes) &&
-            sub.supportedServiceProductCodes.includes("airport")
-              ? "airport"
-              : Array.isArray(sub.supportedServiceProductCodes) &&
-                  sub.supportedServiceProductCodes.includes("business")
-                ? "business"
-                : matchedSeed?.svc || "realtime";
-          const missing =
-            typeof sub.missingItemsCount === "number"
-              ? sub.missingItemsCount
-              : matchedSeed?.missing || 0;
-          const lockedBy =
-            sub.lockedBy ||
-            (sub.reviewStartedBy === PSR_REVIEWER.name
-              ? PSR_REVIEWER.display
-              : matchedSeed?.lockedBy || null);
+      const mapped: SupplyQueueRow[] = (remoteList || []).map((sub: any) => {
+        const fleetName =
+          sub.fleetPartnerName ||
+          (sub.fleetPartnerId ? `車行 (${sub.fleetPartnerId})` : "車行");
+        const subject = sub.subject || `Submission #${sub.submissionId}`;
+        const area =
+          sub.businessArea === "yilan"
+            ? "宜蘭縣"
+            : sub.businessArea === "taichung"
+              ? "台中市"
+              : "台北市";
+        const svc =
+          Array.isArray(sub.supportedServiceProductCodes) &&
+          sub.supportedServiceProductCodes.includes("airport")
+            ? "airport"
+            : Array.isArray(sub.supportedServiceProductCodes) &&
+                sub.supportedServiceProductCodes.includes("business")
+              ? "business"
+              : "realtime";
+        const missing =
+          typeof sub.missingItemsCount === "number" ? sub.missingItemsCount : 0;
+        const lockedBy =
+          sub.lockedBy ||
+          (sub.reviewStartedBy === PSR_REVIEWER.name
+            ? PSR_REVIEWER.display
+            : null);
 
-          return {
-            id: sub.submissionId,
-            submissionId: sub.submissionId,
-            type: mapSubmissionToTypeZh(sub.submissionType),
-            submissionType: sub.submissionType,
-            fleet: fleetName,
-            fleetPartnerId: sub.fleetPartnerId,
-            subject,
-            rev: sub.revisionNo || 1,
-            revisionNo: sub.revisionNo || 1,
-            status: sub.status,
-            at: sub.submittedAt
-              ? sub.submittedAt.slice(5, 16).replace("T", " ")
-              : matchedSeed?.at || "06-18 10:00",
-            submittedAt: sub.submittedAt || null,
-            missing,
-            lockedBy,
-            area,
-            svc,
-          };
-        });
-        setSubmissions(mapped);
-      } else {
-        setSubmissions(FX_PSR_QUEUE);
-      }
+        return {
+          id: sub.submissionId,
+          submissionId: sub.submissionId,
+          type: mapSubmissionToTypeZh(sub.submissionType),
+          submissionType: sub.submissionType,
+          fleet: fleetName,
+          fleetPartnerId: sub.fleetPartnerId || "",
+          subject,
+          rev: sub.revisionNo || 1,
+          revisionNo: sub.revisionNo || 1,
+          status: sub.status,
+          at: sub.submittedAt
+            ? sub.submittedAt.slice(5, 16).replace("T", " ")
+            : "—",
+          submittedAt: sub.submittedAt || null,
+          missing,
+          lockedBy,
+          area,
+          svc,
+        };
+      });
+      setSubmissions(mapped);
     } catch (e: any) {
-      console.warn(
-        "Failed to fetch admin supply review queue from API, using fallback data:",
-        e,
-      );
-      setSubmissions(FX_PSR_QUEUE);
+      const info = classifySupplyReviewError(e);
+      setError(`載入佇列失敗: ${info.message}`);
+      setSubmissions([]);
     }
   };
 
@@ -167,6 +149,7 @@ export default function SupplyReviewQueuePage() {
 
   const handleStartReview = async (row: SupplyQueueRow) => {
     setStartingId(row.submissionId);
+    setError(null);
     try {
       await client.startAdminSupplyReview(row.submissionId, {
         expectedRevisionNo: row.revisionNo,
@@ -175,11 +158,8 @@ export default function SupplyReviewQueuePage() {
       });
       router.push(`/supply-review/${encodeURIComponent(row.submissionId)}`);
     } catch (e: any) {
-      console.warn(
-        "Failed to start review via API, navigating to detail page:",
-        e,
-      );
-      router.push(`/supply-review/${encodeURIComponent(row.submissionId)}`);
+      const info = classifySupplyReviewError(e);
+      setError(`無法開始審核 submission ${row.submissionId}: ${info.message}`);
     } finally {
       setStartingId(null);
     }
@@ -222,8 +202,18 @@ export default function SupplyReviewQueuePage() {
         return false;
       }
 
-      if (fleetFilter !== "all" && r.fleet !== fleetFilter && r.fleetPartnerId !== fleetFilter) return false;
-      if (typeFilter !== "all" && r.type !== typeFilter && r.submissionType !== typeFilter) return false;
+      if (
+        fleetFilter !== "all" &&
+        r.fleet !== fleetFilter &&
+        r.fleetPartnerId !== fleetFilter
+      )
+        return false;
+      if (
+        typeFilter !== "all" &&
+        r.type !== typeFilter &&
+        r.submissionType !== typeFilter
+      )
+        return false;
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
       if (serviceFilter !== "all" && r.svc !== serviceFilter) return false;
       if (
@@ -239,7 +229,8 @@ export default function SupplyReviewQueuePage() {
       if (dateFilter === "today") {
         const dateStr = r.submittedAt || r.at || "";
         const nowIso = new Date().toISOString().slice(0, 10);
-        const isMatchToday = dateStr.includes(nowIso) || dateStr.includes("06-18");
+        const isMatchToday =
+          dateStr.includes(nowIso) || dateStr.includes("06-18");
         if (!isMatchToday) return false;
       } else if (dateFilter === "recent") {
         const dateStr = r.submittedAt || r.at || "";

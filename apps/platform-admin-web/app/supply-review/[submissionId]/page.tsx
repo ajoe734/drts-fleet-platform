@@ -79,7 +79,7 @@ const selectStyle: CSSProperties = {
 const modalOverlayStyle: CSSProperties = {
   position: "fixed",
   inset: 0,
-  backgroundColor: "rgba(11, 18, 32, 0.5)",
+  backgroundColor: `${theme.text}80`,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -183,10 +183,8 @@ export default function SupplyReviewDetailPage() {
           setCanonicalVehicle(rawData.canonicalVehicle);
       }
     } catch (e: any) {
-      console.warn(
-        "Failed to fetch supply submission detail from server, using canvas fallback:",
-        e,
-      );
+      const info = classifySupplyReviewError(e);
+      setErrorMsg(`載入詳情失敗: ${info.message}`);
     }
   };
 
@@ -295,6 +293,10 @@ export default function SupplyReviewDetailPage() {
       setErrorMsg("退回補正需選擇 reason code");
       return;
     }
+    if (!comment || !comment.trim()) {
+      setErrorMsg("退回補正需填寫說明 (comment)");
+      return;
+    }
     setSubmitting(true);
     setErrorMsg(null);
     setConflictError(false);
@@ -303,7 +305,7 @@ export default function SupplyReviewDetailPage() {
       const updated = await client.requestAdminSupplyRevision(submissionId, {
         expectedRevisionNo: revisionNo,
         reasonCode,
-        comment: comment || "請補正缺漏文件",
+        comment: comment.trim(),
       });
       setRecord(updated);
       setShowActionModal(null);
@@ -324,6 +326,10 @@ export default function SupplyReviewDetailPage() {
       setErrorMsg("駁回需選擇 reason code");
       return;
     }
+    if (!comment || !comment.trim()) {
+      setErrorMsg("駁回需填寫說明 (comment)");
+      return;
+    }
     setSubmitting(true);
     setErrorMsg(null);
     setConflictError(false);
@@ -332,7 +338,7 @@ export default function SupplyReviewDetailPage() {
       const updated = await client.rejectAdminSupplySubmission(submissionId, {
         expectedRevisionNo: revisionNo,
         reasonCode,
-        comment: comment || "退件駁回",
+        comment: comment.trim(),
       });
       setRecord(updated);
       setShowActionModal(null);
@@ -884,7 +890,7 @@ export default function SupplyReviewDetailPage() {
               </select>
             </CanvasField>
 
-            <CanvasField label="comment 說明">
+            <CanvasField label="comment 說明 (必填)">
               <textarea
                 value={comment}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
@@ -914,7 +920,7 @@ export default function SupplyReviewDetailPage() {
               <CanvasBtn
                 variant="primary"
                 danger={showActionModal === "reject"}
-                disabled={submitting}
+                disabled={submitting || !reasonCode || !comment.trim()}
                 onClick={
                   showActionModal === "request_revision"
                     ? handleRequestRevisionSubmit
