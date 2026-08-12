@@ -124,6 +124,33 @@ Scope boundary for the session wave:
   block `IAM-SES-002` from extending the identity/session contracts to match
   the accepted minimum authority envelope from the architecture packet.
 
+`IAM-SES-001` reconciliation: `IAM-SES-002` depends on `IAM-SES-001` and, in
+building the canonical claim envelope, had to deliver the durable session,
+refresh-family and refresh-token-record foundation first. That foundation
+landed on `origin/dev` at `276a499d5940b4e4f4ce788ef47f36c6be71940c`
+(`IAM-SES-002: atomically rotate durable session claims (#1277)`) before
+`IAM-SES-001`'s own owner branches (`origin/gemini/iam-ses-001`,
+`origin/codex/iam-ses-001`, `origin/codex2/iam-ses-001`) merged, so those
+branches were never merged and are superseded. `IAM-SES-001`'s acceptance
+criteria are satisfied by what is already on `dev`:
+
+- raw refresh/session secrets are never stored: `hashIdentitySecret` (SHA-256)
+  is the only persisted form in
+  `apps/api/src/modules/identity/identity.repository.ts`;
+- concurrent refresh has one winner: `consumeAndRotateRefreshToken` locks the
+  family/session rows with `FOR UPDATE OF f, s` inside a transaction before
+  rotating;
+- revoked state survives process restart and expiry/family revocation are
+  enforced: `infra/migrations/V0070__identity_sessions_and_refresh_families.sql`
+  persists `iam.identity_sessions` / `iam.identity_refresh_families`, and
+  `apps/api/tests/integration/identity-session-db.integration.test.ts` proves
+  restart persistence, expiry-across-restart and concurrent single-winner
+  rotation with reuse detection.
+
+No new schema or repository code is added under `IAM-SES-001`; this closeout
+records the reconciliation so machine truth reflects delivered scope instead
+of duplicating the already-merged implementation.
+
 ### 5.3 Accounts, authorization and privileged governance
 
 | Task | Priority | Execution contract |
