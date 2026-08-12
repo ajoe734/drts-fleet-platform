@@ -278,6 +278,27 @@ describe("bootstrap auth extraction", () => {
     });
   });
 
+  it("resolves POST /api/identity/step-up-proofs for authenticated realms without requiring identity:write", () => {
+    const policy = resolveRouteAuthPolicy(
+      "POST",
+      "/api/identity/step-up-proofs",
+    );
+
+    expect(policy).toEqual({
+      routeKey: "identity:step-up-proofs:create",
+      requiredScopes: [],
+      allowedRealms: [
+        "system",
+        "platform",
+        "tenant",
+        "ops",
+        "partner",
+        "driver",
+      ],
+      description: "Creation of step-up proof for privileged action",
+    });
+  });
+
   it("keeps call-center order creation on ops-only callcenter scopes", () => {
     const policy = resolveRouteAuthPolicy("POST", "/api/call-center/orders");
 
@@ -498,23 +519,20 @@ describe("bootstrap auth guard", () => {
     const invitedSnapshot =
       await fixture.identityRepository.syncLegacyTenantUserRole(invitedUser);
 
-    const invitedToken = await issueDurableBearerToken(
-      fixture.jwtAuthService,
-      {
-        authMode: "jwt_bearer",
-        actorType: "tenant_admin",
-        actorId: invitedUser.userId,
-        principalId: invitedSnapshot.principal.principalId,
-        membershipId: invitedSnapshot.membership.membershipId,
-        subject: invitedUser.userId,
-        realm: "tenant",
-        tenantId: invitedUser.tenantId,
-        roleFamilies: ["tenant"],
-        roles: [invitedUser.roleCode],
-        scopes: ["tenant:read"],
-        requestId: "req-proof-pending-token-001",
-      },
-    );
+    const invitedToken = await issueDurableBearerToken(fixture.jwtAuthService, {
+      authMode: "jwt_bearer",
+      actorType: "tenant_admin",
+      actorId: invitedUser.userId,
+      principalId: invitedSnapshot.principal.principalId,
+      membershipId: invitedSnapshot.membership.membershipId,
+      subject: invitedUser.userId,
+      realm: "tenant",
+      tenantId: invitedUser.tenantId,
+      roleFamilies: ["tenant"],
+      roles: [invitedUser.roleCode],
+      scopes: ["tenant:read"],
+      requestId: "req-proof-pending-token-001",
+    });
 
     await expect(
       fixture.jwtAuthService.verifyAccessToken(invitedToken),
@@ -1166,7 +1184,7 @@ describe("bootstrap auth guard", () => {
       tenantId: "tenant-demo-001",
       roleFamilies: ["tenant"],
       roles: ["tenant_admin"],
-      scopes: ["tenant:read"],
+      scopes: ["tenant:read", "identity:read"],
       requestId: null,
     });
     const guard = new BootstrapAuthGuard(new Reflector(), jwtAuthService);
@@ -1564,9 +1582,18 @@ describe("tenant bootstrap-session auth controller", () => {
     process.env.TENANT_OIDC_JWT_SECRET = "tenant-oidc-test-secret";
     const { controller } = createAuthFixture();
     const idToken = jwt.sign(
-      { sub: "oidc-user-002", email: "admin@acme.example", email_verified: true, amr: ["pwd"] },
+      {
+        sub: "oidc-user-002",
+        email: "admin@acme.example",
+        email_verified: true,
+        amr: ["pwd"],
+      },
       process.env.TENANT_OIDC_JWT_SECRET,
-      { issuer: process.env.TENANT_OIDC_ISSUER, audience: process.env.TENANT_OIDC_AUDIENCE, expiresIn: "5m" },
+      {
+        issuer: process.env.TENANT_OIDC_ISSUER,
+        audience: process.env.TENANT_OIDC_AUDIENCE,
+        expiresIn: "5m",
+      },
     );
 
     await expectApiRequestError(

@@ -27,6 +27,7 @@ export const DEFAULT_IAP_ROLE_GROUP_MAPPING: Record<string, string> = {
   viewer: "platform-admins@platform.drts",
   operator: "ops-users@platform.drts",
   platform_admin: "platform-admins@platform.drts",
+  security_admin: "platform-admins@platform.drts",
   ops_user: "ops-users@platform.drts",
 };
 
@@ -56,6 +57,7 @@ export const DEFAULT_ROLE_SCOPES: Record<string, readonly string[]> = {
   admin: AUTH_SCOPE_PRESETS.platform_admin,
   viewer: PLATFORM_VIEWER_SCOPES,
   platform_admin: AUTH_SCOPE_PRESETS.platform_admin,
+  security_admin: AUTH_SCOPE_PRESETS.platform_admin,
   operator: AUTH_SCOPE_PRESETS.ops_user,
   ops_user: AUTH_SCOPE_PRESETS.ops_user,
 };
@@ -454,13 +456,14 @@ export class IAPSubjectAdapter {
             r === "superadmin" ||
             r === "platform_admin" ||
             r === "admin" ||
-            r === "viewer"
+            r === "viewer" ||
+            r === "security_admin"
           );
         }
         if (m.realm === "ops") {
           return r === "operator" || r === "ops_user";
         }
-        return false;
+        return true;
       });
 
       const missingGroupsForM: string[] = [];
@@ -765,7 +768,8 @@ export class IAPSubjectAdapter {
     const rawAmr = payload["amr"] ?? payload["gcp_ia_gsuite_amr"];
     if (Array.isArray(rawAmr)) {
       const filtered = rawAmr.filter(
-        (item): item is string => typeof item === "string" && item.trim().length > 0,
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
       );
       if (filtered.length > 0) {
         return filtered;
@@ -774,8 +778,15 @@ export class IAPSubjectAdapter {
       return [rawAmr.trim()];
     }
 
-    const rawAcr = typeof payload["acr"] === "string" ? payload["acr"].trim().toLowerCase() : null;
-    if (rawAcr === "aal2" || rawAcr === "aal3" || rawAcr === "urn:mace:incommon:iap:silver") {
+    const rawAcr =
+      typeof payload["acr"] === "string"
+        ? payload["acr"].trim().toLowerCase()
+        : null;
+    if (
+      rawAcr === "aal2" ||
+      rawAcr === "aal3" ||
+      rawAcr === "urn:mace:incommon:iap:silver"
+    ) {
       return ["verified_iap_workforce"];
     }
 
@@ -789,14 +800,25 @@ export class IAPSubjectAdapter {
     payload: IapJwtPayload,
     authMethods: string[],
   ): "aal1" | "aal2" | "aal3" {
-    const rawAcr = typeof payload["acr"] === "string" ? payload["acr"].trim().toLowerCase() : null;
+    const rawAcr =
+      typeof payload["acr"] === "string"
+        ? payload["acr"].trim().toLowerCase()
+        : null;
     if (rawAcr === "aal3" || rawAcr === "3") {
       return "aal3";
     }
-    if (rawAcr === "aal2" || rawAcr === "2" || rawAcr === "urn:mace:incommon:iap:silver") {
+    if (
+      rawAcr === "aal2" ||
+      rawAcr === "2" ||
+      rawAcr === "urn:mace:incommon:iap:silver"
+    ) {
       return "aal2";
     }
-    if (rawAcr === "aal1" || rawAcr === "1" || rawAcr === "urn:mace:incommon:iap:bronze") {
+    if (
+      rawAcr === "aal1" ||
+      rawAcr === "1" ||
+      rawAcr === "urn:mace:incommon:iap:bronze"
+    ) {
       return "aal1";
     }
 
@@ -809,7 +831,9 @@ export class IAPSubjectAdapter {
       "fido2",
       "verified_iap_workforce",
     ]);
-    if (authMethods.some((method) => trustedMfaMethods.has(method.toLowerCase()))) {
+    if (
+      authMethods.some((method) => trustedMfaMethods.has(method.toLowerCase()))
+    ) {
       return "aal2";
     }
 
@@ -849,7 +873,8 @@ export class IAPSubjectAdapter {
           r === "superadmin" ||
           r === "platform_admin" ||
           r === "admin" ||
-          r === "viewer",
+          r === "viewer" ||
+          r === "security_admin",
       );
       const hasOpsRole = roles.some(
         (r) => r === "operator" || r === "ops_user",

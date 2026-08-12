@@ -813,6 +813,7 @@ export interface IdentityContext {
   tokenVersion?: number | null;
   authTime?: string | null;
   amr?: string[];
+  authMethods?: string[];
   acr?: string | null;
   policyVersion?: string | null;
   issuer?: string | null;
@@ -822,6 +823,8 @@ export interface IdentityContext {
   partnerId?: string | null;
   partnerProgramId?: string | null;
   partnerEntrySlug?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
   supportedExecutionModes: SupervisorExecutionMode[];
 }
 

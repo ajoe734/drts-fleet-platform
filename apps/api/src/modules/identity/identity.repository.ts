@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { Injectable, Logger, OnModuleInit, Optional } from "@nestjs/common";
-import type { PoolClient } from "pg";
+import type { PoolClient, QueryResultRow } from "pg";
 
 import type {
   CanonicalAccountStatus,
@@ -15,6 +15,8 @@ import type {
   ConsumeAndRotateRefreshTokenCommand,
   ConsumeAndRotateRefreshTokenResult,
   IamSessionInventoryQuery,
+  PrivilegedRoleApprovalRequestRecord,
+  PrivilegedRoleGrantRecord,
   TenantUserRoleRecord,
 } from "@drts/contracts";
 
@@ -119,6 +121,21 @@ export class IdentityRepository implements OnModuleInit {
   private readonly fallbackConsumedWorkloadAssertions = new Map<
     string,
     ConsumeWorkloadIdentityAssertionInput & { consumedAt: string }
+  >();
+
+  private readonly fallbackConsumedStepUpNonces = new Map<
+    string,
+    { nonce: string; expiresAt: string; consumedAt: string }
+  >();
+
+  private readonly fallbackPrivilegedRoleRequests = new Map<
+    string,
+    PrivilegedRoleApprovalRequestRecord
+  >();
+
+  private readonly fallbackPrivilegedRoleGrants = new Map<
+    string,
+    PrivilegedRoleGrantRecord
   >();
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {
@@ -483,7 +500,9 @@ export class IdentityRepository implements OnModuleInit {
             !candidate.acceptedAt &&
             !candidate.revokedAt,
         )
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+        .sort((left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt),
+        )[0];
       return invitation ? { ...invitation } : null;
     }
     const result = await this.databaseService!.query<JsonRecordRow>(
@@ -931,35 +950,137 @@ export class IdentityRepository implements OnModuleInit {
 
   async findRoleBindingsByMembershipId(
     membershipId: string,
+    client?: PoolClient,
   ): Promise<CanonicalIdentityRoleBindingRecord[]> {
+    let directBindings: CanonicalIdentityRoleBindingRecord[] = [];
     if (!this.isEnabled()) {
-      const results: CanonicalIdentityRoleBindingRecord[] = [];
       for (const binding of this.fallbackRoleBindings.values()) {
         if (binding.membershipId === membershipId) {
-          results.push({ ...binding });
+          directBindings.push({ ...binding });
         }
       }
-      return results;
+    } else {
+      const dbClient = client ?? (await this.databaseService!.connect());
+      try {
+        const result = await dbClient.query<JsonRecordRow>(
+          `
+            SELECT record FROM iam.identity_role_bindings
+            WHERE membership_id = $1
+          `,
+          [membershipId],
+        );
+        directBindings = result.rows.map((row) =>
+          this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+            row.record,
+            "iam.identity_role_bindings",
+          ),
+        );
+      } finally {
+        if (!client) {
+          dbClient.release();
+        }
+      }
     }
 
-    const client = await this.databaseService!.connect();
-    try {
-      const result = await client.query<JsonRecordRow>(
-        `
-          SELECT record FROM iam.identity_role_bindings
-          WHERE membership_id = $1
-        `,
-        [membershipId],
-      );
-      return result.rows.map((row) =>
-        this.parseRecord<CanonicalIdentityRoleBindingRecord>(
-          row.record,
-          "iam.identity_role_bindings",
-        ),
-      );
-    } finally {
-      client.release();
+    const activeGrants = await this.findActivePrivilegedGrantsForMembership(
+      membershipId,
+      Date.now(),
+      client,
+    );
+
+    const projectedBindings: CanonicalIdentityRoleBindingRecord[] =
+      activeGrants.map((grant) => ({
+        roleBindingId: `grant_binding_${grant.grantId}`,
+        sourceRef: grant.requestId
+          ? `privileged_request:${grant.requestId}`
+          : `privileged_grant:${grant.grantId}`,
+        membershipId: grant.targetMembershipId || membershipId,
+        roleCode: grant.roleCode,
+        grantedByPrincipalId: grant.grantedByPrincipalId,
+        approvalId: grant.approvalId,
+        validFrom: grant.validFrom,
+        validTo: grant.validTo ?? null,
+        createdAt: grant.createdAt,
+        updatedAt: grant.updatedAt,
+      }));
+
+    const existingRoles = new Set(directBindings.map((b) => b.roleCode));
+    const merged = [...directBindings];
+    for (const pb of projectedBindings) {
+      if (!existingRoles.has(pb.roleCode)) {
+        merged.push(pb);
+        existingRoles.add(pb.roleCode);
+      }
     }
+
+    return merged;
+  }
+
+  async findActivePrivilegedGrantsForMembership(
+    membershipId: string,
+    currentTimeMs = Date.now(),
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleGrantRecord[]> {
+    let membership: CanonicalIdentityMembershipRecord | undefined;
+    if (!this.isEnabled()) {
+      membership = this.fallbackMemberships.get(membershipId);
+    } else {
+      const dbClient = client ?? (await this.databaseService!.connect());
+      try {
+        const result = await dbClient.query<JsonRecordRow>(
+          `SELECT record FROM iam.identity_memberships WHERE membership_id = $1`,
+          [membershipId],
+        );
+        if (result.rows[0]?.record) {
+          membership = this.parseRecord<CanonicalIdentityMembershipRecord>(
+            result.rows[0].record,
+            "iam.identity_memberships",
+          );
+        }
+      } finally {
+        if (!client) {
+          dbClient.release();
+        }
+      }
+    }
+
+    let allGrants: PrivilegedRoleGrantRecord[] = [];
+    if (!this.isEnabled()) {
+      allGrants = Array.from(this.fallbackPrivilegedRoleGrants.values());
+    } else {
+      allGrants = await this.listPrivilegedRoleGrants(
+        membership?.tenantId ?? null,
+        client,
+      );
+    }
+
+    return allGrants.filter((grant) => {
+      if (grant.status !== "active") return false;
+
+      const validFromMs = new Date(grant.validFrom).getTime();
+      if (isNaN(validFromMs) || validFromMs > currentTimeMs) return false;
+
+      if (grant.validTo) {
+        const validToMs = new Date(grant.validTo).getTime();
+        if (isNaN(validToMs) || validToMs <= currentTimeMs) return false;
+      }
+
+      const matchesTarget =
+        grant.targetMembershipId === membershipId ||
+        (membership && grant.targetUserId === membership.principalId);
+
+      if (!matchesTarget) return false;
+
+      if (
+        grant.tenantId &&
+        membership?.tenantId &&
+        grant.tenantId !== membership.tenantId
+      ) {
+        return false;
+      }
+
+      return true;
+    });
   }
 
   async upsertWorkforceIdentity(
@@ -1016,8 +1137,15 @@ export class IdentityRepository implements OnModuleInit {
     session: CanonicalIdentitySessionRecord,
   ): Promise<CanonicalIdentitySessionRecord> {
     if (!this.isEnabled()) {
-      this.fallbackSessions.set(session.sessionId, { ...session });
-      return { ...session };
+      const record: CanonicalIdentitySessionRecord = {
+        ...session,
+        status: session.status ?? "active",
+        tokenVersion: session.tokenVersion ?? 1,
+        createdAt: session.createdAt ?? new Date().toISOString(),
+        updatedAt: session.updatedAt ?? new Date().toISOString(),
+      };
+      this.fallbackSessions.set(session.sessionId, record);
+      return { ...record };
     }
 
     const client = await this.databaseService!.connect();
@@ -1443,11 +1571,114 @@ export class IdentityRepository implements OnModuleInit {
       sql += ` LIMIT $${params.length}`;
     }
 
-    const result =
-      await this.databaseService!.query<PersistedSessionRow>(sql, params);
+    const result = await this.databaseService!.query<PersistedSessionRow>(
+      sql,
+      params,
+    );
     return result.rows.map((row) =>
       this.hydrateSessionRecord(row, "iam.identity_sessions"),
     );
+  }
+
+  async revokeSessionsByPrincipal(
+    principalId: string,
+    reason: string,
+    revokedByPrincipalId?: string,
+    client?: PoolClient,
+  ): Promise<number> {
+    const revokedAt = new Date().toISOString();
+    let count = 0;
+    if (!this.isEnabled()) {
+      for (const [id, session] of this.fallbackSessions.entries()) {
+        if (
+          (session.principalId === principalId ||
+            session.actorId === principalId) &&
+          session.status === "active"
+        ) {
+          const updated: CanonicalIdentitySessionRecord = {
+            ...session,
+            status: "revoked",
+            revokedAt,
+            revokedByPrincipalId: revokedByPrincipalId || null,
+            revokeReason: reason,
+            updatedAt: revokedAt,
+          };
+          this.fallbackSessions.set(id, updated);
+          count++;
+
+          for (const [
+            familyId,
+            family,
+          ] of this.fallbackRefreshFamilies.entries()) {
+            if (family.sessionId === id && family.status === "active") {
+              this.fallbackRefreshFamilies.set(familyId, {
+                ...family,
+                status: "revoked",
+                updatedAt: revokedAt,
+              });
+            }
+          }
+        }
+      }
+      return count;
+    }
+
+    const runner = client || (await this.databaseService!.connect());
+    const isOwnClient = !client;
+    try {
+      if (isOwnClient) await runner.query("BEGIN");
+      const result = await runner.query<{ session_id: string }>(
+        `
+          UPDATE iam.identity_sessions
+          SET status = 'revoked',
+              revoked_at = $2::timestamptz,
+              revoked_by_principal_id = $3::text,
+              revoke_reason = $4::text,
+              updated_at = $2::timestamptz,
+              record = jsonb_set(
+                jsonb_set(
+                  jsonb_set(
+                    jsonb_set(
+                      jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                      '{revokedAt}', to_jsonb($2::text)
+                    ),
+                    '{revokedByPrincipalId}', to_jsonb($3::text)
+                  ),
+                  '{revokeReason}', to_jsonb($4::text)
+                ),
+                '{updatedAt}', to_jsonb($2::text)
+              )
+          WHERE (principal_id = $1::text OR record->>'actorId' = $1::text)
+            AND status = 'active'
+          RETURNING session_id
+        `,
+        [principalId, revokedAt, revokedByPrincipalId || null, reason],
+      );
+
+      const sessionIds = result.rows.map((r) => r.session_id);
+      if (sessionIds.length > 0) {
+        await runner.query(
+          `
+            UPDATE iam.identity_refresh_families
+            SET status = 'revoked',
+                updated_at = $2::timestamptz,
+                record = jsonb_set(
+                  jsonb_set(record, '{status}', '"revoked"'::jsonb),
+                  '{updatedAt}', to_jsonb($2::text)
+                )
+            WHERE session_id = ANY($1::text[]) AND status = 'active'
+          `,
+          [sessionIds, revokedAt],
+        );
+      }
+      if (isOwnClient) await runner.query("COMMIT");
+      return sessionIds.length;
+    } catch (err) {
+      if (isOwnClient) await runner.query("ROLLBACK");
+      throw err;
+    } finally {
+      if (isOwnClient) runner.release();
+    }
   }
 
   async findActiveSessionByDevice(
@@ -1683,6 +1914,75 @@ export class IdentityRepository implements OnModuleInit {
       );
 
       return result.rows.length > 0;
+    } finally {
+      client.release();
+    }
+  }
+
+  async consumeStepUpNonce(input: {
+    nonce: string;
+    expiresAt: string;
+    actorId?: string;
+    action?: string;
+    targetId?: string;
+  }): Promise<boolean> {
+    const consumedAt = new Date().toISOString();
+
+    if (!this.isEnabled()) {
+      const now = Date.now();
+      for (const [nonce, record] of this.fallbackConsumedStepUpNonces) {
+        if (Date.parse(record.expiresAt) < now) {
+          this.fallbackConsumedStepUpNonces.delete(nonce);
+        }
+      }
+
+      if (this.fallbackConsumedStepUpNonces.has(input.nonce)) {
+        return false;
+      }
+
+      this.fallbackConsumedStepUpNonces.set(input.nonce, {
+        nonce: input.nonce,
+        expiresAt: input.expiresAt,
+        consumedAt,
+      });
+      return true;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query(
+        `
+          DELETE FROM iam.step_up_nonces
+          WHERE expires_at < NOW()
+        `,
+      );
+
+      const result = await client.query<{ nonce: string }>(
+        `
+          INSERT INTO iam.step_up_nonces (
+            nonce,
+            expires_at,
+            consumed_at,
+            actor_id,
+            action,
+            target_id
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6
+          )
+          ON CONFLICT (nonce) DO NOTHING
+          RETURNING nonce
+        `,
+        [
+          input.nonce,
+          input.expiresAt,
+          consumedAt,
+          input.actorId ?? null,
+          input.action ?? null,
+          input.targetId ?? null,
+        ],
+      );
+
+      return (result.rows?.length ?? 0) > 0;
     } finally {
       client.release();
     }
@@ -2623,5 +2923,229 @@ export class IdentityRepository implements OnModuleInit {
     }
 
     return parsed;
+  }
+
+  private async executeSql<R extends QueryResultRow = JsonRecordRow>(
+    sql: string,
+    params: unknown[],
+    client?: PoolClient,
+  ) {
+    if (client) {
+      return client.query<R>(sql, params as unknown[]);
+    }
+    return this.databaseService!.query<R>(sql, params);
+  }
+
+  deleteFallbackPrivilegedRoleRequest(requestId: string): void {
+    this.fallbackPrivilegedRoleRequests.delete(requestId);
+  }
+
+  deleteFallbackPrivilegedRoleGrant(grantId: string): void {
+    this.fallbackPrivilegedRoleGrants.delete(grantId);
+  }
+
+  async savePrivilegedRoleRequest(
+    request: PrivilegedRoleApprovalRequestRecord,
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleApprovalRequestRecord> {
+    if (!this.isEnabled()) {
+      this.fallbackPrivilegedRoleRequests.set(request.requestId, {
+        ...request,
+      });
+      return { ...request };
+    }
+
+    const result = await this.executeSql(
+      `
+        INSERT INTO iam.privileged_role_approval_requests (
+          request_id, tenant_id, realm, target_user_id, target_membership_id,
+          target_email, requested_role_code, requester_principal_id, requester_actor_type,
+          reason, status, approver_principal_id, approval_decision, decided_at,
+          valid_from, valid_to, version, created_at, updated_at, record
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20::jsonb
+        )
+        ON CONFLICT (request_id) DO UPDATE SET
+          status = EXCLUDED.status,
+          approver_principal_id = EXCLUDED.approver_principal_id,
+          approval_decision = EXCLUDED.approval_decision,
+          decided_at = EXCLUDED.decided_at,
+          version = EXCLUDED.version,
+          updated_at = EXCLUDED.updated_at,
+          record = EXCLUDED.record
+        RETURNING record
+      `,
+      [
+        request.requestId,
+        request.tenantId,
+        request.realm,
+        request.targetUserId,
+        request.targetMembershipId || null,
+        request.targetEmail || null,
+        request.requestedRoleCode,
+        request.requesterPrincipalId,
+        request.requesterActorType,
+        request.reason,
+        request.status,
+        request.approverPrincipalId || null,
+        request.approvalDecision || null,
+        request.decidedAt || null,
+        request.validFrom,
+        request.validTo || null,
+        request.version,
+        request.createdAt,
+        request.updatedAt,
+        JSON.stringify(request),
+      ],
+      client,
+    );
+
+    if (!result.rows[0]?.record) {
+      throw new Error(
+        "Failed to persist privileged role request: no row returned",
+      );
+    }
+
+    return this.parseRecord<PrivilegedRoleApprovalRequestRecord>(
+      result.rows[0].record,
+      "iam.privileged_role_approval_requests",
+    );
+  }
+
+  async getPrivilegedRoleRequest(
+    requestId: string,
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleApprovalRequestRecord | null> {
+    if (!this.isEnabled()) {
+      const found = this.fallbackPrivilegedRoleRequests.get(requestId);
+      return found ? { ...found } : null;
+    }
+
+    const result = await this.executeSql(
+      `SELECT record FROM iam.privileged_role_approval_requests WHERE request_id = $1 LIMIT 1`,
+      [requestId],
+      client,
+    );
+
+    if (!result.rows[0]?.record) {
+      return null;
+    }
+
+    return this.parseRecord<PrivilegedRoleApprovalRequestRecord>(
+      result.rows[0].record,
+      "iam.privileged_role_approval_requests",
+    );
+  }
+
+  async listPrivilegedRoleRequests(
+    tenantId?: string | null,
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleApprovalRequestRecord[]> {
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackPrivilegedRoleRequests.values())
+        .filter((r) => !tenantId || r.tenantId === tenantId)
+        .map((r) => ({ ...r }));
+    }
+
+    const result = await this.executeSql(
+      `
+        SELECT record FROM iam.privileged_role_approval_requests
+        WHERE ($1::text IS NULL OR tenant_id = $1::text)
+        ORDER BY updated_at DESC
+      `,
+      [tenantId || null],
+      client,
+    );
+
+    return result.rows.map((row) =>
+      this.parseRecord<PrivilegedRoleApprovalRequestRecord>(
+        row.record,
+        "iam.privileged_role_approval_requests",
+      ),
+    );
+  }
+
+  async savePrivilegedRoleGrant(
+    grant: PrivilegedRoleGrantRecord,
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleGrantRecord> {
+    if (!this.isEnabled()) {
+      this.fallbackPrivilegedRoleGrants.set(grant.grantId, { ...grant });
+      return { ...grant };
+    }
+
+    const result = await this.executeSql(
+      `
+        INSERT INTO iam.privileged_role_grants (
+          grant_id, request_id, tenant_id, realm, target_user_id, target_membership_id,
+          role_code, granted_by_principal_id, approval_id, valid_from, valid_to, status,
+          created_at, updated_at, record
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb
+        )
+        ON CONFLICT (grant_id) DO UPDATE SET
+          status = EXCLUDED.status,
+          updated_at = EXCLUDED.updated_at,
+          record = EXCLUDED.record
+        RETURNING record
+      `,
+      [
+        grant.grantId,
+        grant.requestId || null,
+        grant.tenantId || null,
+        grant.realm,
+        grant.targetUserId,
+        grant.targetMembershipId || null,
+        grant.roleCode,
+        grant.grantedByPrincipalId || null,
+        grant.approvalId || null,
+        grant.validFrom,
+        grant.validTo || null,
+        grant.status,
+        grant.createdAt,
+        grant.updatedAt,
+        JSON.stringify(grant),
+      ],
+      client,
+    );
+
+    if (!result.rows[0]?.record) {
+      throw new Error(
+        "Failed to persist privileged role grant: no row returned",
+      );
+    }
+
+    return this.parseRecord<PrivilegedRoleGrantRecord>(
+      result.rows[0].record,
+      "iam.privileged_role_grants",
+    );
+  }
+
+  async listPrivilegedRoleGrants(
+    tenantId?: string | null,
+    client?: PoolClient,
+  ): Promise<PrivilegedRoleGrantRecord[]> {
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackPrivilegedRoleGrants.values())
+        .filter((g) => !tenantId || g.tenantId === tenantId)
+        .map((g) => ({ ...g }));
+    }
+
+    const result = await this.executeSql(
+      `
+        SELECT record FROM iam.privileged_role_grants
+        WHERE ($1::text IS NULL OR tenant_id = $1::text)
+        ORDER BY updated_at DESC
+      `,
+      [tenantId || null],
+      client,
+    );
+
+    return result.rows.map((row) =>
+      this.parseRecord<PrivilegedRoleGrantRecord>(
+        row.record,
+        "iam.privileged_role_grants",
+      ),
+    );
   }
 }
