@@ -1,0 +1,77 @@
+global:
+  resolve_timeout: 5m
+  pagerduty_url: "https://events.pagerduty.com/v2/enqueue"
+
+route:
+  receiver: "default-security-catchall"
+  group_by: ["alertname", "severity", "owner_team", "realm"]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 4h
+
+  routes:
+    - match:
+        route_channel: security-pager-p1
+      receiver: "pagerduty-p1-critical"
+      continue: true
+
+    - match:
+        route_channel: security-oncall
+      receiver: "slack-security-oncall"
+      continue: true
+
+    - match:
+        route_channel: security-platform-owner
+      receiver: "slack-platform-security"
+      continue: true
+
+    - match:
+        route_channel: ops-ticket
+      receiver: "jira-ops-tickets"
+      continue: false
+
+    - match:
+        route_channel: iam-team
+      receiver: "slack-iam-engineering"
+      continue: false
+
+receivers:
+  - name: "default-security-catchall"
+    slack_configs:
+      - channel: "#sec-ops-feed"
+        send_resolved: true
+        title: "[{{ .Status | toUpper }}] IAM Security Alert: {{ .CommonAnnotations.summary }}"
+        text: "{{ .CommonAnnotations.description }}\nRunbook: {{ .CommonAnnotations.runbook_url }}"
+
+  - name: "pagerduty-p1-critical"
+    pagerduty_configs:
+      - routing_key: "sec-ops-p1-high-priority-key"
+        severity: "{{ .CommonLabels.severity }}"
+        summary: "[P1 CRITICAL] {{ .CommonAnnotations.summary }}"
+        details:
+          alertname: "{{ .CommonLabels.alertname }}"
+          owner_team: "{{ .CommonLabels.owner_team }}"
+          runbook: "{{ .CommonAnnotations.runbook_url }}"
+
+  - name: "slack-security-oncall"
+    slack_configs:
+      - channel: "#sec-oncall-alerts"
+        send_resolved: true
+        title: "[{{ .Status | toUpper }}] {{ .CommonAnnotations.summary }}"
+        text: "Owner: {{ .CommonLabels.owner_team }}\nDetails: {{ .CommonAnnotations.description }}"
+
+  - name: "slack-platform-security"
+    slack_configs:
+      - channel: "#platform-sec-governance"
+        send_resolved: true
+        title: "[PRIVILEGED MUTATION] {{ .CommonAnnotations.summary }}"
+
+  - name: "jira-ops-tickets"
+    webhook_configs:
+      - url: "https://jira.drts.internal/rest/cb/1.0/webhook/ops-credentials"
+
+  - name: "slack-iam-engineering"
+    slack_configs:
+      - channel: "#iam-sec-engineering"
+        send_resolved: true
+        title: "[IAM DRIFT] {{ .CommonAnnotations.summary }}"
