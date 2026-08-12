@@ -233,6 +233,16 @@ def _tasks(values: Mapping[str, TaskRecord | Mapping[str, Any]]) -> dict[str, Ta
     return {task_id: _task(value) for task_id, value in values.items()}
 
 
+def requires_integration_evidence(record: TaskRecord | Mapping[str, Any]) -> bool:
+    raw = _task(record).raw
+    task_class = str(raw.get("task_class") or "").strip().lower()
+    return bool(
+        raw.get("release_gate")
+        or raw.get("mutates_canonical")
+        or task_class in {"implementation", "runtime_fix"}
+    )
+
+
 def dependencies_satisfied(
     task: TaskRecord | Mapping[str, Any],
     tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
@@ -248,13 +258,7 @@ def dependencies_satisfied(
             return False
         if dependency is not None and dependency.status in normalized_done:
             raw = dependency.raw
-            task_class = str(raw.get("task_class") or "").strip().lower()
-            requires_integration = bool(
-                raw.get("release_gate")
-                or raw.get("mutates_canonical")
-                or task_class in {"implementation", "runtime_fix"}
-            )
-            if requires_integration:
+            if requires_integration_evidence(dependency):
                 integration = str(raw.get("integration_status") or "").strip().lower()
                 if integration not in {"merged_to_dev", "dev_deployed", "not_applicable"}:
                     return False

@@ -8764,3 +8764,98 @@ class IdentityScopedPauseTests(unittest.TestCase):
     def test_suspended_approval_does_not_consume_execution_capacity(self) -> None:
         state = {"workers": {"one": {"agent_id": "claude", "status": "suspended_approval"}}}
         self.assertEqual(supervisor.active_worker_agent_counts(state, {"suspended_approval"}), {})
+
+
+class CompletedIntegrationEvidenceRecoveryTests(unittest.TestCase):
+    def test_reopens_aged_unreachable_completed_integration(self) -> None:
+        task = {
+            "id": "STALE-MERGE-001",
+            "status": "done",
+            "task_class": "implementation",
+            "integration_status": "merged_to_dev",
+            "merge_commit": "deadbeef",
+            "integration_recorded_at": "2020-01-01T00:00:00Z",
+        }
+        dependent = {"id": "WAITING-001", "status": "todo", "depends_on": [task["id"]]}
+        config = {
+            "supervisor": {"integration_evidence_recovery_grace_seconds": 60},
+            "paths": {"status_file": "/tmp/ai-status.json"},
+        }
+        result = supervisor.TaskBoardCommandResult(0)
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [task, dependent]}),
+            mock.patch.object(supervisor, "integration_evidence_for_tasks", return_value={task["id"]: False}),
+            mock.patch.object(supervisor, "execute_task_board_command", return_value=result) as command,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            self.assertTrue(supervisor.reconcile_invalid_completed_integrations(config, {}))
+
+        self.assertEqual(command.call_args.args[1], "reconcile-integration")
+        self.assertEqual(command.call_args.args[2][0], task["id"])
+        self.assertEqual(
+            command.call_args.kwargs["environ"],
+            {
+                "AI_STATUS_RECONCILER": "integration_evidence",
+                "INTEGRATION_STATUS": "evidence_invalid",
+            },
+        )
+
+    def test_keeps_recent_completed_integration_for_git_refresh_grace(self) -> None:
+        task = {
+            "id": "RECENT-MERGE-001",
+            "status": "done",
+            "task_class": "implementation",
+            "integration_status": "merged_to_dev",
+            "merge_commit": "deadbeef",
+            "integration_recorded_at": supervisor.utc_now(),
+        }
+        dependent = {"id": "WAITING-001", "status": "todo", "depends_on": [task["id"]]}
+        config = {
+            "supervisor": {"integration_evidence_recovery_grace_seconds": 60},
+            "paths": {"status_file": "/tmp/ai-status.json"},
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [task, dependent]}),
+            mock.patch.object(supervisor, "integration_evidence_for_tasks", return_value={task["id"]: False}),
+            mock.patch.object(supervisor, "execute_task_board_command") as command,
+        ):
+            self.assertFalse(supervisor.reconcile_invalid_completed_integrations(config, {}))
+
+        command.assert_not_called()
+
+    def test_keeps_unrelated_historical_completed_integration_closed(self) -> None:
+        task = {
+            "id": "HISTORICAL-MERGE-001",
+            "status": "done",
+            "task_class": "implementation",
+            "integration_status": "merged_to_dev",
+            "merge_commit": "deadbeef",
+            "integration_recorded_at": "2020-01-01T00:00:00Z",
+        }
+        config = {
+            "supervisor": {"integration_evidence_recovery_grace_seconds": 60},
+            "paths": {"status_file": "/tmp/ai-status.json"},
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [task]}),
+            mock.patch.object(supervisor, "integration_evidence_for_tasks", return_value={task["id"]: False}),
+            mock.patch.object(supervisor, "execute_task_board_command") as command,
+        ):
+            self.assertFalse(supervisor.reconcile_invalid_completed_integrations(config, {}))
+
+        command.assert_not_called()
+
+    def test_chair_dispatch_uses_the_shared_domain_decision(self) -> None:
+        decision = supervisor.DomainDispatchDecision(
+            "TASK-001", "Codex", supervisor.DomainDispatchReason.OWNED_READY
+        )
+        with mock.patch.object(supervisor, "resolve_current_dispatch_target", return_value=decision) as resolve:
+            result = supervisor.chair_dispatch_action_reason(
+                {"ready_dispatcher": {}}, {"id": "TASK-001"}, {}
+            )
+
+        self.assertEqual(result, ("Codex", "owned_ready_dispatch"))
+        resolve.assert_called_once()

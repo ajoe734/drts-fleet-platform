@@ -771,6 +771,36 @@ class ProgressIntegrationMetadataTest(unittest.TestCase):
         self.assertEqual(task["work_intent"]["kind"], "integration_repair")
         self.assertEqual(task["work_intent"]["scope"], "existing_pr")
 
+    def test_reconciler_reopens_completed_task_with_invalid_integration_evidence(self) -> None:
+        task = {
+            "id": "TASK-UNREACHABLE-MERGE-001",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "status": "done",
+            "integration_status": "merged_to_dev",
+            "merge_commit": "stale-merge",
+            "merged_ref": "dev",
+        }
+        state = {"tasks": [task], "blockers": [], "handoffs": []}
+        env = {
+            "AI_NAME": "Supervisor",
+            "AI_STATUS_RECONCILER": "integration_evidence",
+            "INTEGRATION_STATUS": "evidence_invalid",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_reconcile_integration(
+                state,
+                [task["id"], "Recorded merge is not reachable from origin/dev."],
+            )
+
+        self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(task["integration_status"], "evidence_invalid")
+        self.assertEqual(task["work_intent"]["kind"], "integration_repair")
+        self.assertEqual(task["work_intent"]["scope"], "invalid_completed_evidence")
+        self.assertNotIn("merge_commit", task)
+        self.assertNotIn("merged_ref", task)
+
     def test_reconciler_marks_protected_merge_done_after_worker_closeout_gap(self) -> None:
         task = {
             "id": "TASK-MERGED-001",

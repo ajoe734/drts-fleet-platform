@@ -1419,7 +1419,7 @@ def mark_offline(config: dict[str, Any], bus_state: dict[str, Any], error: str) 
     bus_state["last_error"] = error
 
 
-def sync_github_bus(config: dict[str, Any], runtime_state: dict[str, Any]) -> bool:
+def sync_github_bus(config: dict[str, Any], runtime_state: dict[str, Any], *, force: bool = False) -> bool:
     bus_cfg = config.get("github_bus", {}) or {}
     integration_enabled = bool(bus_cfg.get("integration_reconcile_enabled", False))
     if not bus_cfg.get("enabled", False) and not integration_enabled:
@@ -1431,7 +1431,7 @@ def sync_github_bus(config: dict[str, Any], runtime_state: dict[str, Any]) -> bo
 
     last_sync = _parse_iso(bus_state.get("last_sync_at"))
     interval = int(bus_cfg.get("poll_interval_seconds", 30))
-    if last_sync and (_iso_now_dt() - last_sync).total_seconds() < interval:
+    if not force and last_sync and (_iso_now_dt() - last_sync).total_seconds() < interval:
         return False
 
     repo = infer_repo_slug(config, bus_state)

@@ -62,6 +62,7 @@ class SupervisorTickPorts:
     cleanup_inactive_worker_worktrees: Callable[[dict[str, Any], dict[str, Any]], bool]
     reconcile_queue_records: Callable[[dict[str, Any], dict[str, Any]], bool]
     reconcile_status_from_git: Callable[[dict[str, Any], dict[str, Any]], bool]
+    reconcile_invalid_completed_integrations: Callable[[dict[str, Any], dict[str, Any]], bool]
     prune_event_queue: Callable[[dict[str, Any], dict[str, Any]], bool]
     prune_completed_dispatch_pauses: Callable[..., bool]
     prune_failure_streaks: Callable[[dict[str, Any], dict[str, Any]], bool]
@@ -247,11 +248,17 @@ class SupervisorTickRunner:
         changed = self.ports.cleanup_inactive_worker_worktrees(config, state) or changed
         changed = self.ports.reconcile_queue_records(config, state) or changed
         self.ports.reconcile_status_from_git(config, state)
+        recovered_completed_evidence = self.ports.reconcile_invalid_completed_integrations(
+            config, state
+        )
+        changed = recovered_completed_evidence or changed
         # External integration is task evidence, so reconcile it before policy
         # chooses the next worker. Keeping this in FINALIZE made every dispatch
         # decision use the previous GitHub observation and could strand a green
         # PR indefinitely when no worker remained to change canonical status.
-        changed = self.ports.sync_github_bus(config, state) or changed
+        changed = self.ports.sync_github_bus(
+            config, state, force=recovered_completed_evidence
+        ) or changed
         status = self.ports.load_status(config)
         changed = self.ports.prune_event_queue(config, state) or changed
         changed = self.ports.prune_completed_dispatch_pauses(

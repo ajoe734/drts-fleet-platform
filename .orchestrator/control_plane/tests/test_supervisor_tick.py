@@ -50,6 +50,7 @@ def recording_ports(calls: list[str], *, focus_mode: str) -> SupervisorTickPorts
         cleanup_inactive_worker_worktrees=record("cleanup_worktrees", False),
         reconcile_queue_records=record("reconcile_queue", False),
         reconcile_status_from_git=record("reconcile_git", False),
+        reconcile_invalid_completed_integrations=record("recover_completed_evidence", False),
         prune_event_queue=record("prune_queue", False),
         prune_completed_dispatch_pauses=record("prune_dispatch_pauses", False),
         prune_failure_streaks=record("prune_failure_streaks", False),
@@ -117,6 +118,7 @@ class SupervisorTickRunnerTests(unittest.TestCase):
         self.assertEqual(result.focus_mode, "execution")
         ordered = [
             "cleanup_worktrees",
+            "recover_completed_evidence",
             "github_sync",
             "refresh_chair",
             "queue_chair",
@@ -137,7 +139,7 @@ class SupervisorTickRunnerTests(unittest.TestCase):
             calls.append("load_status")
             return status
 
-        def github_sync(_config: dict[str, Any], _state: dict[str, Any]) -> bool:
+        def github_sync(_config: dict[str, Any], _state: dict[str, Any], **_kwargs: Any) -> bool:
             calls.append("github_sync")
             status["tasks"][0]["status"] = "review"
             return True
@@ -163,6 +165,35 @@ class SupervisorTickRunnerTests(unittest.TestCase):
         )
 
         self.assertIn("dispatch_ready:review", calls)
+
+    def test_completed_evidence_recovery_forces_same_tick_github_discovery(self) -> None:
+        calls: list[str] = []
+        ports = recording_ports(calls, focus_mode="execution")
+        force_values: list[bool] = []
+
+        def recover(_config: dict[str, Any], _state: dict[str, Any]) -> bool:
+            calls.append("recover_completed_evidence")
+            return True
+
+        def github_sync(_config: dict[str, Any], _state: dict[str, Any], **kwargs: Any) -> bool:
+            calls.append("github_sync")
+            force_values.append(bool(kwargs.get("force")))
+            return False
+
+        ports = SupervisorTickPorts(
+            **{
+                **ports.__dict__,
+                "reconcile_invalid_completed_integrations": recover,
+                "sync_github_bus": github_sync,
+            }
+        )
+
+        SupervisorTickRunner(ports).run(
+            {"supervisor": {}, "watcher": {}},
+            SupervisorTickOptions(watch=False, manage_pid_file=False),
+        )
+
+        self.assertEqual(force_values, [True])
 
 
 if __name__ == "__main__":

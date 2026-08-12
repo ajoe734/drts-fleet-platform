@@ -475,6 +475,7 @@ INTEGRATION_STATUS_VALUES = {
     "pr_open",
     "ci_pending",
     "ci_failed",
+    "evidence_invalid",
     "merged_to_dev",
     "deploy_blocked",
     "dev_deployed",
@@ -2221,7 +2222,11 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
 def command_reconcile_integration(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: reconcile-integration <task-id> <message>")
-    if current_actor() != "Supervisor" or os.environ.get("AI_STATUS_RECONCILER") != "github_bus":
+    reconciler = os.environ.get("AI_STATUS_RECONCILER")
+    if current_actor() != "Supervisor" or reconciler not in {
+        "github_bus",
+        "integration_evidence",
+    }:
         raise SystemExit("reconcile-integration is restricted to the GitHub reconciler")
     task_id, message = args[0], args[1]
     task = get_task(state, task_id)
@@ -2245,7 +2250,7 @@ def command_reconcile_integration(state: dict[str, Any], args: list[str]) -> Non
     execution_branch = os.environ.get("EXECUTION_BRANCH", "").strip()
     if execution_branch:
         task["execution_branch"] = execution_branch
-    if metadata["integration_status"] != "ci_failed":
+    if metadata["integration_status"] not in {"ci_failed", "evidence_invalid"}:
         intent = task.get("work_intent")
         if isinstance(intent, dict) and intent.get("kind") == "integration_repair":
             task.pop("work_intent", None)
@@ -2257,6 +2262,17 @@ def command_reconcile_integration(state: dict[str, Any], args: list[str]) -> Non
         task.pop("work_intent", None)
         mark_blockers_resolved(state, task_id)
         mark_handoffs_done(state, task_id)
+    elif integration_status == "evidence_invalid":
+        task["status"] = "in_progress"
+        task["work_intent"] = {
+            "kind": "integration_repair",
+            "state": "pending",
+            "scope": "invalid_completed_evidence",
+            "requested_at": timestamp,
+            "message": message,
+        }
+        task["rework_required_at"] = timestamp
+        task.pop("waiting_for", None)
     elif integration_status == "ci_failed":
         # A failed PR always needs an owner repair attempt. Older task records
         # can already be in_progress, so limiting this to review states leaves

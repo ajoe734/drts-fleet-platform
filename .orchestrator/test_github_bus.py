@@ -495,6 +495,28 @@ class GitHubBusProcessTests(unittest.TestCase):
         mark_offline.assert_not_called()
         save_bus_state.assert_not_called()
 
+    def test_force_sync_bypasses_normal_poll_interval_for_evidence_recovery(self) -> None:
+        config = {
+            "paths": {"status_file": "ai-status.json"},
+            "github_bus": {
+                "enabled": False,
+                "integration_reconcile_enabled": True,
+                "poll_interval_seconds": 3600,
+            },
+        }
+        bus_state = {"tasks": {}, "last_sync_at": "2999-01-01T00:00:00Z"}
+
+        with (
+            mock.patch.object(github_bus, "load_bus_state", return_value=bus_state),
+            mock.patch.object(github_bus, "infer_repo_slug", return_value="example/repo"),
+            mock.patch.object(github_bus, "load_status", return_value={"tasks": []}),
+            mock.patch.object(github_bus, "reconcile_task_integrations", return_value=False) as reconcile,
+            mock.patch.object(github_bus, "save_bus_state"),
+        ):
+            self.assertFalse(github_bus.sync_github_bus(config, {}, force=True))
+
+        reconcile.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

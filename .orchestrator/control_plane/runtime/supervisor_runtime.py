@@ -38,6 +38,7 @@ from control_plane.domain.dispatch_policy import (
     DispatchReason as DomainDispatchReason,
     ReadyDispatchPolicy,
     assignment_remains_valid as domain_assignment_remains_valid,
+    requires_integration_evidence,
     build_dispatch_event as build_domain_dispatch_event,
     ci_status_reports_failure,
     dependencies_satisfied as domain_dependencies_satisfied,
@@ -6382,6 +6383,87 @@ def integration_evidence_for_tasks(task_map: dict[str, dict[str, Any]]) -> dict[
     return evidence
 
 
+def completed_integration_recovery_grace_seconds(config: dict[str, Any]) -> int:
+    settings = config.get("supervisor", {}) or {}
+    configured = settings.get("integration_evidence_recovery_grace_seconds")
+    if configured is not None:
+        try:
+            return max(60, int(configured))
+        except (TypeError, ValueError):
+            pass
+    git_interval = int(settings.get("git_reconcile_interval_seconds", 600))
+    return max(900, git_interval + 60)
+
+
+def reconcile_invalid_completed_integrations(config: dict[str, Any], state: dict[str, Any]) -> bool:
+    """Reopen aged unverifiable integrations only when they block unfinished work."""
+    status = load_status(config)
+    task_map = task_index_from_status(config, status)
+    evidence = integration_evidence_for_tasks(task_map)
+    active_dependency_ids: set[str] = set()
+    for candidate in task_map.values():
+        if str(candidate.get("status") or "").lower() == "done":
+            continue
+        dependencies = candidate.get("depends_on") or []
+        if isinstance(dependencies, str):
+            dependencies = [dependencies]
+        active_dependency_ids.update(
+            str(dependency).strip()
+            for dependency in dependencies
+            if str(dependency).strip()
+        )
+    now = datetime.now(timezone.utc)
+    grace_seconds = completed_integration_recovery_grace_seconds(config)
+    changed = False
+    for task_id, task in task_map.items():
+        if task_id not in active_dependency_ids:
+            continue
+        if str(task.get("status") or "").lower() != "done":
+            continue
+        if not requires_integration_evidence(task):
+            continue
+        integration = str(task.get("integration_status") or "").strip().lower()
+        if integration not in {"merged_to_dev", "dev_deployed"} or evidence.get(task_id) is True:
+            continue
+        recorded_at = _parse_iso_utc(task.get("integration_recorded_at") or task.get("last_update"))
+        if recorded_at is not None and (now - recorded_at).total_seconds() < grace_seconds:
+            continue
+        message = brief_reason_text(
+            "Reopened because completed integration evidence is not reachable from origin/dev; "
+            "recover an existing replacement PR before creating new branch history.",
+            max_length=280,
+        )
+        result = execute_task_board_command(
+            config,
+            "reconcile-integration",
+            [task_id, message],
+            environ={
+                "AI_STATUS_RECONCILER": "integration_evidence",
+                "INTEGRATION_STATUS": "evidence_invalid",
+            },
+        )
+        if not result.ok:
+            write_activity_log(
+                config,
+                {
+                    "type": "completed_integration_evidence_recovery_failed",
+                    "task_id": task_id,
+                    "message": result.error,
+                },
+            )
+            continue
+        write_activity_log(
+            config,
+            {
+                "type": "completed_integration_evidence_recovered",
+                "task_id": task_id,
+                "message": message,
+            },
+        )
+        changed = True
+    return changed
+
+
 def dependencies_satisfied(task: dict[str, Any], task_map: dict[str, dict[str, Any]], done_statuses: set[str]) -> bool:
     return domain_dependencies_satisfied(
         task,
@@ -7727,28 +7809,10 @@ def chair_dispatch_action_reason(
     task: dict[str, Any],
     task_map: dict[str, dict[str, Any]],
 ) -> tuple[str, str] | None:
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    status_value = str(task.get("status") or "").lower()
-    owner = str(task.get("owner") or "").strip()
-    reviewer = str(task.get("reviewer") or "").strip()
-
-    if status_value in review_statuses and reviewer:
-        return reviewer, "review_ready_dispatch"
-    if status_value in finalize_statuses and owner:
-        return owner, "owned_finalize_dispatch"
-    if (
-        status_value == "in_progress"
-        and owner
-        and not has_external_integration_in_flight(task)
-        and dependencies_satisfied(task, task_map, dependency_done_statuses)
-    ):
-        return owner, "owned_in_progress_dispatch"
-    if status_value in {"todo", "backlog"} and owner and dependencies_satisfied(task, task_map, dependency_done_statuses):
-        return owner, "owned_ready_dispatch"
-    return None
+    decision = resolve_current_dispatch_target(config, task, task_map)
+    if decision is None:
+        return None
+    return decision.target_agent, decision.reason.value
 
 
 def chair_unblock_task_id(parent_task_id: str, unblock_kind: str) -> str:
@@ -9113,6 +9177,7 @@ def supervisor_tick_ports() -> SupervisorTickPorts:
         cleanup_inactive_worker_worktrees=cleanup_inactive_worker_worktrees,
         reconcile_queue_records=reconcile_queue_records,
         reconcile_status_from_git=reconcile_status_from_git,
+        reconcile_invalid_completed_integrations=reconcile_invalid_completed_integrations,
         prune_event_queue=prune_event_queue,
         prune_completed_dispatch_pauses=prune_completed_dispatch_pauses,
         prune_failure_streaks=prune_failure_streaks,
