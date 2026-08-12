@@ -10,23 +10,24 @@ Reviewer: `Codex`
 
 This note documents the unblock analysis for `S1F-UIX-001`.
 
-1. **Upstream Code Dependencies**: Resolved. All seven (7) declared dependencies for `S1F-UIX-001` are confirmed `done` in machine truth and merged to `origin/dev`.
-2. **Current Parent Machine Truth**: `S1F-UIX-001` remains in state **`blocked`** (recorded at `2026-08-12T12:17:41Z`).
-3. **Artifact Correction**: Earlier drafts of this document incorrectly stated that `S1F-UIX-001` was set to `todo`/`in_progress` and could proceed with execution. That was inaccurate. The parent task cannot proceed to execution because it remains blocked by runtime deployment inputs and git force-push restrictions.
+1. **Upstream Code Dependencies**: Resolved. All seven (7) declared code dependencies for `S1F-UIX-001` are verified `done` in machine truth (`ai-status.json`) and merged to `origin/dev`.
+2. **Clarification on PR #1384**: PR #1384 is the pull request for task `S1F-UIX-001-UNBLOCK-MANUAL-UNBLOCK` itself (this unblock documentation note). It is NOT what proves completion of the seven upstream code dependencies. Upstream code dependency completion is proven by machine-truth status and their respective merge commits on `origin/dev` detailed below.
+3. **Current Parent Machine Truth**: `S1F-UIX-001` remains in state **`blocked`** (recorded at `2026-08-12T12:17:41Z`).
+4. **Parent Execution Status**: The parent task cannot proceed to execution because it remains blocked by runtime deployment inputs (`DRTS_CANDIDATE_SHA`, candidate journey manifest, deployed base URLs) and git branch non-fast-forward/force-push restrictions.
 
-## Dependency Verification (Completed)
+## Dependency Verification (Machine Truth & `origin/dev` Evidence)
 
-All seven (7) declared code dependencies are merged to `origin/dev`:
+All seven (7) declared code dependencies are confirmed complete in machine truth (`status: done`, `integration_status: merged_to_dev`) and verified present on `origin/dev`:
 
-1. `S1F-REF-002` (Referral active history, cancel, rating, receipt lifecycle) -> `done` (PR #1377 merged to dev)
-2. `S1F-ENT-002` (Enterprise booking lifecycle) -> `done` (reconciled on dev @ `37b0e2f23b07`)
-3. `S1F-FLT-003` (Fleet & Admin operational UI/API lifecycle) -> `done` (reconciled on dev @ `7b0ce401868d`)
-4. `S1F-ADM-001` (Platform Admin supply review integration & i18n) -> `done` (PR #1383 merged to dev)
-5. `S1F-ADM-002` (Platform Admin false fallbacks & inert actions removal) -> `done` (PR #1348 merged to dev)
-6. `S1F-BANK-002` (Bank console auth boundary & operational surfaces) -> `done` (PR #1355 merged to dev)
-7. `S1F-CHAN-001` (Channel partner portal surfaces & lifecycle) -> `done` (PR #1362 merged to dev)
-
-PR #1384 proves the completion of all 7 code dependencies.
+| Dependency Task | Task Title / Scope | Machine Truth Status | PR Number | `origin/dev` Merge Commit SHA | Merge Commit Subject |
+|---|---|---|---|---|---|
+| `S1F-REF-002` | Complete Referral active history cancel rating and receipt lifecycle | `done` (`merged_to_dev`) | PR #1377 | `da30c8236cf0e244c72cda32898b40d0b8c5551a` | `feat(S1F-REF-002): complete referral active history cancel rating and receipt lifecycle (#1377)` |
+| `S1F-ENT-002` | Enterprise booking lifecycle | `done` (`merged_to_dev`) | PR #1356 | `37b0e2f23b07eebdaf2c44eb7cf4e7faa173cac5` | `S1F-ENT-002: finalize enterprise booking lifecycle (#1356)` |
+| `S1F-FLT-003` | Wire Fleet statement document and case actions | `done` (`merged_to_dev`) | PR #1350 | `7b0ce401868db1d01750e4fb30fbe682523c2692` | `S1F-FLT-003: wire fleet statement document and case actions (#1350)` |
+| `S1F-ADM-001` | Build Platform Admin supply review queue and detail | `done` (`merged_to_dev`) | PR #1383 | `59414312025f4c3a453e67624887e10d55f5e9cd` | `S1F-ADM-001: recover supply review integration and i18n compliance (#1383)` |
+| `S1F-ADM-002` | Platform Admin false fallbacks & inert actions removal | `done` (`merged_to_dev`) | PR #1348 | `674d70c69b16e71b1ecc022b9c3e8294d7869c0b` | `S1F-ADM-002: remove Platform Admin false fallbacks and inert operational actions (#1348)` |
+| `S1F-BANK-002` | Complete Bank statement downloads and minimum role actions | `done` (`merged_to_dev`) | PR #1355 | `6a31e401252717a972137a109ab604a6087c0202` | `S1F-BANK-002: complete bank statement downloads and role authorization controls (#1355)` |
+| `S1F-CHAN-001` | Bind Channel Partner Portal to formal Yuhe identity | `done` (`merged_to_dev`) | PR #1362 | `bc6579dc105d0a8cb01bf5e9a70e60d09f788b81` | `feat(S1F-CHAN-001): bind Channel Partner Portal to formal Yuhe identity (#1362)` |
 
 ## Remaining Blockers Holding `S1F-UIX-001` in `blocked` State
 
