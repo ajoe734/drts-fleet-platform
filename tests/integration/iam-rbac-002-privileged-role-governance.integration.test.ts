@@ -1483,7 +1483,12 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
 
   describe("13. Process Expiries Endpoint System Authority Policy", () => {
     it("denies process-expiries for non-system identities and allows system identity", async () => {
-      const controller = new IdentityController(service);
+      const controller = new IdentityController(
+        undefined,
+        undefined,
+        undefined,
+        service,
+      );
 
       const tenantAdminUser = createMockIdentity({
         actorId: "usr_tenant_admin",

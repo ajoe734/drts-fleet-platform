@@ -54,30 +54,13 @@ interface RequestWithHeaders {
 
 @Controller("identity")
 export class IdentityController {
-  private readonly identityRepository: IdentityRepository | undefined;
-  private readonly securityEventsService: SecurityEventsService | undefined;
-  private readonly stepUpProofService: StepUpProofService | undefined;
-  private readonly privilegedRoleGovernanceService:
-    | PrivilegedRoleGovernanceService
-    | undefined;
-
   constructor(
-    @Optional() arg1?: IdentityRepository | PrivilegedRoleGovernanceService,
-    @Optional() arg2?: SecurityEventsService | StepUpProofService,
-    @Optional() arg3?: StepUpProofService,
-    @Optional() arg4?: PrivilegedRoleGovernanceService,
-  ) {
-    if (arg1 && typeof (arg1 as any).expireStaleGrants === "function") {
-      this.privilegedRoleGovernanceService =
-        arg1 as PrivilegedRoleGovernanceService;
-      this.stepUpProofService = arg2 as StepUpProofService;
-    } else {
-      this.identityRepository = arg1 as IdentityRepository;
-      this.securityEventsService = arg2 as SecurityEventsService;
-      this.stepUpProofService = arg3;
-      this.privilegedRoleGovernanceService = arg4;
-    }
-  }
+    @Optional() private readonly identityRepository?: IdentityRepository,
+    @Optional() private readonly securityEventsService?: SecurityEventsService,
+    @Optional() private readonly stepUpProofService?: StepUpProofService,
+    @Optional()
+    private readonly privilegedRoleGovernanceService?: PrivilegedRoleGovernanceService,
+  ) {}
 
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
