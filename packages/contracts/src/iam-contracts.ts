@@ -125,11 +125,44 @@ export interface TenantOidcSessionExchangeCommand {
 
 export interface IamSessionInventoryQuery {
   actorId?: string | null;
+  principalId?: string | null;
   realm?: string | null;
   tenantId?: string | null;
+  status?: string | null;
   includeRevoked?: boolean;
   limit?: number | null;
 }
+
+export interface IamSessionRevokeCommand {
+  reason?: string | null;
+  expectedVersion?: number | null;
+  isCompromised?: boolean | null;
+}
+
+export interface MaskedSessionSummary {
+  sessionId: string;
+  principalId: string;
+  actorType?: string | null;
+  actorId?: string | null;
+  realm: string;
+  tenantId?: string | null;
+  partnerId?: string | null;
+  status: string;
+  authTime: string;
+  authMethods: string[];
+  tokenVersion: number;
+  idleExpiresAt: string | null;
+  absoluteExpiresAt: string;
+  revokedAt: string | null;
+  revokedByPrincipalId: string | null;
+  revokeReason: string | null;
+  deviceSummary: Record<string, unknown>;
+  riskSummary: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  isCurrent?: boolean;
+}
+
 
 export interface IamAccountMembershipQuery {
   principalId?: string | null;
@@ -354,6 +387,42 @@ export const IAM_STAGE15_OPERATION_CATALOG = [
     method: "post",
     path: "/api/auth/driver/device/revoke",
     domain: "device",
+  },
+  {
+    operationId: "logoutSelfSession",
+    method: "post",
+    path: "/api/auth/logout",
+    domain: "session",
+  },
+  {
+    operationId: "logoutAllSelfSessions",
+    method: "post",
+    path: "/api/auth/logout-all",
+    domain: "session",
+  },
+  {
+    operationId: "listSelfSessions",
+    method: "get",
+    path: "/api/auth/sessions",
+    domain: "session",
+  },
+  {
+    operationId: "revokeSelfSession",
+    method: "post",
+    path: "/api/auth/sessions/{sid}/revoke",
+    domain: "session",
+  },
+  {
+    operationId: "listAdminSessions",
+    method: "get",
+    path: "/api/identity/sessions",
+    domain: "session",
+  },
+  {
+    operationId: "revokeAdminSession",
+    method: "post",
+    path: "/api/identity/sessions/{sid}/revoke",
+    domain: "session",
   },
   {
     operationId: "getIdentityContext",

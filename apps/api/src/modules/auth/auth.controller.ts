@@ -3,10 +3,12 @@ import { Throttle } from "@nestjs/throttler";
 import jwt from "jsonwebtoken";
 
 import type {
+  CanonicalIdentitySessionRecord,
   CreatePartnerBootstrapSessionCommand,
   DriverDeviceProvisioningSession,
   CreateTenantBootstrapSessionCommand,
   IamCallbackSessionExchangeCommand,
+  IamSessionRevokeCommand,
   IdentityContext,
   PartnerBootstrapSession,
   RefreshDriverDeviceSessionCommand,
@@ -46,6 +48,11 @@ import { IAPSubjectAdapter } from "./iap-subject.adapter";
 import { OidcPkceService } from "./oidc-pkce.service";
 import { SecurityEventsService } from "../security-events/security-events.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { IdentityRepository } from "../identity/identity.repository";
+import {
+  maskSessionRecord,
+  validateCsrfHeader,
+} from "./session-masking.utility";
 import {
   extractWorkloadIdentityExchangeNonce,
   extractRequestedWorkloadTokenAudience,
@@ -115,6 +122,8 @@ export class AuthController {
     private readonly iapSubjectAdapter?: IAPSubjectAdapter,
     @Optional()
     private readonly serviceWorkloadIdentityAdapter?: ServiceWorkloadIdentityAdapter,
+    @Optional()
+    private readonly identityRepository?: IdentityRepository,
     // Appended, and optional, so the positional contract the existing tests
     // construct this controller with is unchanged. The module always provides
     // it; `requireOidcPkceService` turns its absence into a clear failure
@@ -275,17 +284,7 @@ export class AuthController {
     );
   }
 
-  @OpenRoute()
-  @Post("logout")
-  revokeAuthSession(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        loggedOut: true,
-        message: "Session successfully revoked.",
-      },
-      requestId,
-    );
-  }
+
 
   @OpenRoute()
   @Post("token")
@@ -517,90 +516,7 @@ export class AuthController {
     return toApiSuccessEnvelope(result, requestId);
   }
 
-  @Post("logout")
-  async logout(
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    if (!identity) {
-      throw new ApiRequestError(
-        401,
-        "UNAUTHENTICATED",
-        "Authentication is required to log out.",
-      );
-    }
-    const sessionId = identity.sessionId ?? null;
-    if (sessionId) {
-      await this.jwtAuthService.revokeCurrentSession(
-        sessionId,
-        "user_logout",
-        identity.principalId ?? identity.actorId ?? undefined,
-      );
-    }
-    return toApiSuccessEnvelope({ loggedOut: true, sessionId }, requestId);
-  }
 
-  @Post("logout-all")
-  async logoutAll(
-    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    if (!identity) {
-      throw new ApiRequestError(
-        401,
-        "UNAUTHENTICATED",
-        "Authentication is required to log out all sessions.",
-      );
-    }
-    const principalId = identity.principalId ?? identity.actorId;
-    if (!principalId) {
-      throw new ApiRequestError(
-        400,
-        "IDENTITY_REQUIRED",
-        "Principal identity is required to logout all sessions.",
-      );
-    }
-    const revokedCount = await this.jwtAuthService.revokeAllSessionsForPrincipal(
-      principalId,
-      "user_logout_all",
-      principalId,
-    );
-
-    if (identity.realm === "tenant" && identity.tenantId && identity.actorId) {
-      const user = this.tenantPartnerService.findTenantUser(
-        identity.tenantId,
-        identity.actorId,
-      );
-      if (user) {
-        const identityContext: IdentityContext = {
-          actorType: identity.actorType,
-          actorId: identity.actorId,
-          realm: identity.realm,
-          authMode: identity.authMode,
-          roleFamilies: identity.roleFamilies,
-          roles: identity.roles,
-          scopes: identity.scopes,
-          tenantId: identity.tenantId,
-          supportedExecutionModes: [
-            "discussion_planning",
-            "supervisor_managed_execution",
-          ],
-        };
-        this.tenantPartnerService.updateTenantUserRole(
-          identity.tenantId,
-          user.userId,
-          { roleCode: user.roleCode, status: user.status },
-          requestId,
-          identityContext,
-        );
-      }
-    }
-
-    return toApiSuccessEnvelope(
-      { loggedOutAll: true, revokedCount },
-      requestId,
-    );
-  }
 
   @Post("sessions/revoke")
   async revokeSessionSelf(
@@ -1025,6 +941,363 @@ export class AuthController {
       });
       throw toPublicPartnerAuthError(error);
     }
+  }
+
+  @Post("logout")
+  async logout(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() body?: { reason?: string } | string,
+    @Req() request?: TokenRequest | string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity || !identity.sessionId) {
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "An active authenticated session is required to perform logout.",
+      );
+    }
+
+    const bodyObj = (typeof body === "object" && body !== null ? body : {}) as { reason?: string };
+    const reqObj = (typeof request === "object" && request !== null ? request : {}) as TokenRequest;
+    const reqHeaders = reqObj.headers as Record<string, string | string[] | undefined> | undefined;
+    const effectiveRequestId = typeof body === "string" ? body : typeof request === "string" ? request : requestId;
+
+    validateCsrfHeader(reqHeaders);
+
+    const reason = bodyObj.reason?.trim() || "self_logout";
+    const principalId = identity.principalId ?? identity.actorId ?? undefined;
+
+    if (this.identityRepository) {
+      await this.identityRepository.revokeSession(
+        identity.sessionId,
+        reason,
+        principalId,
+      );
+    } else {
+      await this.jwtAuthService.revokeCurrentSession(
+        identity.sessionId,
+        reason,
+        principalId,
+      );
+    }
+
+    const sourceIp = this.resolveSourceIp(
+      reqHeaders?.["x-forwarded-for"] as string | undefined,
+      reqHeaders?.["x-real-ip"] as string | undefined,
+    );
+    const userAgent =
+      (reqHeaders?.["user-agent"] as string | undefined) ?? null;
+
+    this.securityEventsService?.recordEvent({
+      actorId: identity.actorId,
+      actorType: identity.actorType,
+      subjectId: identity.subject ?? identity.actorId,
+      realm: identity.realm,
+      tenantId: identity.tenantId,
+      partnerId: identity.partnerId ?? null,
+      eventType: "session.logout",
+      eventFamily: "auth",
+      outcome: "success",
+      severity: "low",
+      targetType: "session",
+      targetId: identity.sessionId,
+      sessionId: identity.sessionId ?? null,
+      tokenId: identity.tokenId ?? null,
+      authMethods: identity.amr ?? [],
+      sourceIp,
+      userAgent,
+      requestId: effectiveRequestId ?? null,
+      traceId: null,
+      reasonCode: reason,
+      approvalId: null,
+      beforeSummary: { status: "active" },
+      afterSummary: { status: "revoked" },
+      maskedContext: null,
+    });
+
+    return toApiSuccessEnvelope(
+      { revoked: true, loggedOut: true, sessionId: identity.sessionId },
+      effectiveRequestId,
+    );
+  }
+
+  @Post("logout-all")
+  async logoutAll(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() body?: { reason?: string } | string,
+    @Req() request?: TokenRequest | string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "An active authenticated session is required for logout-all.",
+      );
+    }
+
+    const bodyObj = (typeof body === "object" && body !== null ? body : {}) as { reason?: string };
+    const reqObj = (typeof request === "object" && request !== null ? request : {}) as TokenRequest;
+    const reqHeaders = reqObj.headers as Record<string, string | string[] | undefined> | undefined;
+    const effectiveRequestId = typeof body === "string" ? body : typeof request === "string" ? request : requestId;
+
+    validateCsrfHeader(reqHeaders);
+
+    const principalId = identity.principalId ?? identity.actorId;
+    if (!principalId) {
+      throw new ApiRequestError(
+        400,
+        "PRINCIPAL_REQUIRED",
+        "Principal identifier is required for logout-all.",
+      );
+    }
+    const reason = bodyObj.reason?.trim() || "self_logout_all";
+    let revokedCount = 0;
+    const revokedSessionIds: string[] = [];
+
+    if (this.identityRepository) {
+      const activeSessions =
+        await this.identityRepository.listSessionsByPrincipal(principalId);
+      for (const session of activeSessions) {
+        if (session.status === "active") {
+          await this.identityRepository.revokeSession(
+            session.sessionId,
+            reason,
+            principalId,
+          );
+          revokedCount++;
+          revokedSessionIds.push(session.sessionId);
+        }
+      }
+    } else if (identity.sessionId) {
+      revokedCount = await this.jwtAuthService.revokeAllSessionsForPrincipal(
+        principalId,
+        reason,
+        principalId,
+      );
+      revokedSessionIds.push(identity.sessionId);
+    }
+
+    const sourceIp = this.resolveSourceIp(
+      reqHeaders?.["x-forwarded-for"] as string | undefined,
+      reqHeaders?.["x-real-ip"] as string | undefined,
+    );
+    const userAgent =
+      (reqHeaders?.["user-agent"] as string | undefined) ?? null;
+
+    this.securityEventsService?.recordEvent({
+      actorId: identity.actorId,
+      actorType: identity.actorType,
+      subjectId: identity.subject ?? identity.actorId,
+      realm: identity.realm,
+      tenantId: identity.tenantId,
+      partnerId: identity.partnerId ?? null,
+      eventType: "session.logout_all",
+      eventFamily: "auth",
+      outcome: "success",
+      severity: "medium",
+      targetType: "principal",
+      targetId: principalId,
+      sessionId: identity.sessionId ?? null,
+      tokenId: identity.tokenId ?? null,
+      authMethods: identity.amr ?? [],
+      sourceIp,
+      userAgent,
+      requestId: effectiveRequestId ?? null,
+      traceId: null,
+      reasonCode: reason,
+      approvalId: null,
+      beforeSummary: { revokedCount },
+      afterSummary: { revokedCount, sessionIds: revokedSessionIds },
+      maskedContext: null,
+    });
+
+    return toApiSuccessEnvelope(
+      { loggedOutAll: true, revokedCount, sessionIds: revokedSessionIds },
+      effectiveRequestId,
+    );
+  }
+
+  @Get("sessions")
+  async listSelfSessions(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "An active authenticated session is required to list sessions.",
+      );
+    }
+
+    const principalId = identity.principalId ?? identity.actorId;
+    let sessions: CanonicalIdentitySessionRecord[] = [];
+
+    if (this.identityRepository && principalId) {
+      sessions =
+        await this.identityRepository.listSessionsByPrincipal(principalId);
+    }
+
+    const activeSessions = sessions.filter((s) => s.status === "active");
+    const masked = activeSessions.map((session) =>
+      maskSessionRecord(session, identity.sessionId),
+    );
+
+    return toApiSuccessEnvelope(masked, requestId);
+  }
+
+  @Post("sessions/:sid/revoke")
+  async revokeSelfSession(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Param("sid") sid: string,
+    @Body() command: IamSessionRevokeCommand,
+    @Req() request: TokenRequest,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        401,
+        "AUTHENTICATION_REQUIRED",
+        "An active authenticated session is required to revoke session.",
+      );
+    }
+
+    validateCsrfHeader(
+      request.headers as Record<string, string | string[] | undefined>,
+    );
+
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "IDENTITY_REPOSITORY_NOT_AVAILABLE",
+        "Identity repository is not available.",
+      );
+    }
+
+    const targetSession = await this.identityRepository.getSession(sid);
+    if (!targetSession) {
+      throw new ApiRequestError(
+        404,
+        "SESSION_NOT_FOUND",
+        "Target session to revoke was not found.",
+        { sid },
+      );
+    }
+
+    if (
+      command.expectedVersion !== undefined &&
+      command.expectedVersion !== null
+    ) {
+      if (
+        targetSession.status === "revoked" ||
+        targetSession.tokenVersion !== command.expectedVersion
+      ) {
+        throw new ApiRequestError(
+          409,
+          "IAM_CONCURRENCY_CONFLICT",
+          "Session token version mismatch or session already revoked.",
+          {
+            sid,
+            expectedVersion: command.expectedVersion,
+            currentVersion: targetSession.tokenVersion,
+            status: targetSession.status,
+          },
+        );
+      }
+    }
+
+    const callerPrincipalId = identity.principalId ?? identity.actorId;
+    const isSelf = targetSession.principalId === callerPrincipalId;
+
+    if (!isSelf) {
+      const isPlatformOrOpsAdmin =
+        (identity.realm === "platform" || identity.realm === "ops") &&
+        (identity.actorType === "platform_admin" ||
+          identity.roles.includes("platform_superadmin") ||
+          identity.roles.includes("platform_user_admin") ||
+          identity.roles.includes("ops_admin") ||
+          identity.scopes.includes("platform:superadmin") ||
+          identity.scopes.includes("identity:sessions:write") ||
+          identity.scopes.includes("identity:users:write"));
+
+      const isTenantAdmin =
+        identity.realm === "tenant" &&
+        (identity.actorType === "tenant_admin" ||
+          identity.roles.includes("tenant_admin") ||
+          identity.scopes.includes("identity:users:write") ||
+          identity.scopes.includes("identity:sessions:write"));
+
+      if (!isPlatformOrOpsAdmin && !isTenantAdmin) {
+        throw new ApiRequestError(
+          403,
+          "AUTHZ_SCOPE_DENIED",
+          "You are not authorized to revoke another user's session.",
+        );
+      }
+
+      if (
+        identity.realm === "tenant" &&
+        targetSession.tenantId !== identity.tenantId
+      ) {
+        throw new ApiRequestError(
+          403,
+          "RESOURCE_SCOPE_DENIED",
+          "Tenant administrators cannot revoke sessions outside their tenant boundary.",
+        );
+      }
+    }
+
+    const reason = command.reason?.trim() || "remote_revoke";
+    const updated = await this.identityRepository.revokeSession(
+      sid,
+      reason,
+      callerPrincipalId ?? undefined,
+    );
+
+    const sourceIp = this.resolveSourceIp(
+      request.headers["x-forwarded-for"] as string | undefined,
+      request.headers["x-real-ip"] as string | undefined,
+    );
+    const userAgent =
+      (request.headers["user-agent"] as string | undefined) ?? null;
+
+    this.securityEventsService?.recordEvent({
+      actorId: identity.actorId,
+      actorType: identity.actorType,
+      subjectId: identity.subject ?? identity.actorId,
+      realm: identity.realm,
+      tenantId: identity.tenantId,
+      partnerId: identity.partnerId ?? null,
+      eventType: "session.revoke",
+      eventFamily: "auth",
+      outcome: "success",
+      severity: "medium",
+      targetType: "session",
+      targetId: sid,
+      sessionId: identity.sessionId ?? null,
+      tokenId: identity.tokenId ?? null,
+      authMethods: identity.amr ?? [],
+      sourceIp,
+      userAgent,
+      requestId: requestId ?? null,
+      traceId: null,
+      reasonCode: reason,
+      approvalId: null,
+      beforeSummary: { status: targetSession.status },
+      afterSummary: { status: "revoked" },
+      maskedContext: null,
+    });
+
+    return toApiSuccessEnvelope(
+      {
+        revoked: true,
+        sessionId: sid,
+        session: updated ? maskSessionRecord(updated) : null,
+      },
+      requestId,
+    );
   }
 
   private extractErrorCode(error: unknown) {

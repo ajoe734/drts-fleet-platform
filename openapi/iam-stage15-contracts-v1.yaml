@@ -170,6 +170,48 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/IamCredentialMutationCommand"
+  /api/auth/logout:
+    post:
+      summary: Revoke the active authenticated session for the caller.
+      operationId: logoutSelfSession
+      tags: [Session]
+  /api/auth/logout-all:
+    post:
+      summary: Revoke all active sessions belonging to the caller principal.
+      operationId: logoutAllSelfSessions
+      tags: [Session]
+  /api/auth/sessions:
+    get:
+      summary: Return masked self session inventory for the active principal.
+      operationId: listSelfSessions
+      tags: [Session]
+  /api/auth/sessions/{sid}/revoke:
+    post:
+      summary: Revoke a specific session with CSRF and concurrency checks.
+      operationId: revokeSelfSession
+      tags: [Session]
+      parameters:
+        - name: sid
+          in: path
+          required: true
+          schema:
+            type: string
+  /api/identity/sessions:
+    get:
+      summary: Return tenant/role-bounded admin session inventory with masked summaries.
+      operationId: listAdminSessions
+      tags: [Session, IAM]
+  /api/identity/sessions/{sid}/revoke:
+    post:
+      summary: Boundary-safe admin remote revoke of a target session.
+      operationId: revokeAdminSession
+      tags: [Session, IAM]
+      parameters:
+        - name: sid
+          in: path
+          required: true
+          schema:
+            type: string
   /api/identity/context:
     get:
       summary: Return the caller identity context and active IAM authority.
