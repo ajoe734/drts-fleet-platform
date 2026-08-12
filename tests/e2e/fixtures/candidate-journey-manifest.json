@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Stage 1 Operational Candidate Executable Journey Manifest",
+  "taskRef": "S1F-REL-001-PREDEPLOY",
+  "manifestVersion": "1.0.0",
+  "candidateSha": "__DRTS_CANDIDATE_SHA__",
+  "requiredResponseHeader": "x-drts-candidate-sha",
+  "activeSurfaces": [
+    {
+      "id": "platform-admin-web",
+      "service": "drts-dev-platform-admin-web",
+      "path": "/",
+      "expectedStatus": 200,
+      "role": "platform-admin",
+      "description": "Platform Admin Control Plane"
+    },
+    {
+      "id": "ops-console-web",
+      "service": "drts-dev-ops-console-web",
+      "path": "/",
+      "expectedStatus": 200,
+      "role": "ops-admin",
+      "description": "Ops Console Operations"
+    },
+    {
+      "id": "tenant-console-web",
+      "service": "drts-dev-tenant-console-web",
+      "path": "/",
+      "expectedStatus": 200,
+      "role": "tenant-admin",
+      "description": "Tenant Console Administration"
+    },
+    {
+      "id": "enterprise-dispatch-web",
+      "service": "drts-dev-enterprise-dispatch-web",
+      "path": "/",
+      "expectedStatus": 200,
+      "role": "enterprise-user",
+      "description": "Enterprise Dispatch Web"
+    },
+    {
+      "id": "fleet-partner-portal-web",
+      "service": "drts-dev-fleet-partner-portal-web",
+      "path": "/",
+      "expectedStatus": 200,
+      "role": "fleet-admin",
+      "description": "Fleet Partner Portal"
+    },
+    {
+      "id": "bank-console-web",
+      "service": "drts-dev-bank-console-web",
+      "path": "/",
+      "expectedStatus": 200,
+      "role": "bank-admin",
+      "description": "Issuing Bank Console"
+    },
+    {
+      "id": "channel-partner-portal-web",
+      "service": "drts-channel-partner-portal-web",
+      "path": "/",
+      "expectedStatus": 200,
+      "role": "channel-admin",
+      "description": "Channel Partner Governance Portal"
+    },
+    {
+      "id": "referral-embed-web",
+      "service": "drts-dev-referral-embed-web",
+      "path": "/embed/yuhe-residence",
+      "expectedStatus": 200,
+      "role": "referral-user",
+      "description": "Embedded Ride-Hailing Entry (Yuhe Residence)"
+    },
+    {
+      "id": "passenger-web",
+      "service": "drts-dev-passenger-web",
+      "path": "/",
+      "expectedStatus": 200,
+      "role": "passenger",
+      "description": "Passenger Ride Booking Surface"
+    },
+    {
+      "id": "api",
+      "service": "drts-dev-api",
+      "path": "/api/health",
+      "expectedStatus": 200,
+      "role": "system",
+      "description": "Control Plane API Health Check"
+    }
+  ],
+  "pausedOrRetiredSurfaces": [
+    {
+      "id": "partner-booking-web",
+      "service": "drts-dev-partner-booking-web",
+      "path": "/",
+      "expectedStatus": 404,
+      "status": "paused",
+      "reason": "Explicit user-approved pause under DEV_PARTNER_BOOKING_STATE=paused"
+    },
+    {
+      "id": "concierge-portal-web",
+      "service": "drts-dev-concierge-portal-web",
+      "path": "/",
+      "expectedStatus": 404,
+      "status": "retired",
+      "reason": "Decommissioned retired surface"
+    }
+  ],
+  "journeys": [
+    {
+      "taskId": "S1F-REF-002",
+      "title": "Referral active history cancel rating and receipt lifecycle",
+      "surfaceId": "referral-embed-web",
+      "verificationState": "verified"
+    },
+    {
+      "taskId": "S1F-ENT-002",
+      "title": "Enterprise booking lifecycle",
+      "surfaceId": "enterprise-dispatch-web",
+      "verificationState": "verified"
+    },
+    {
+      "taskId": "S1F-FLT-003",
+      "title": "Fleet statement document and case actions",
+      "surfaceId": "fleet-partner-portal-web",
+      "verificationState": "verified"
+    },
+    {
+      "taskId": "S1F-ADM-001",
+      "title": "Platform Admin supply review queue and detail",
+      "surfaceId": "platform-admin-web",
+      "verificationState": "verified"
+    },
+    {
+      "taskId": "S1F-ADM-002",
+      "title": "Platform Admin false fallbacks & inert actions removal",
+      "surfaceId": "platform-admin-web",
+      "verificationState": "verified"
+    },
+    {
+      "taskId": "S1F-BANK-002",
+      "title": "Bank statement downloads and minimum role actions",
+      "surfaceId": "bank-console-web",
+      "verificationState": "verified"
+    },
+    {
+      "taskId": "S1F-CHAN-001",
+      "title": "Channel Partner Portal Yuhe identity binding",
+      "surfaceId": "channel-partner-portal-web",
+      "verificationState": "verified"
+    },
+    {
+      "taskId": "S1F-DRV-001",
+      "title": "Replay the current-SHA Android Driver journey",
+      "surfaceId": "driver-app",
+      "verificationState": "verified"
+    }
+  ]
+}

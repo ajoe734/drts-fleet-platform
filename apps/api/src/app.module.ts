@@ -67,6 +67,8 @@ import { VehicleEvidenceModule } from "./modules/vehicle-evidence/vehicle-eviden
 import { AccidentInvestigationModule } from "./modules/accident-investigation/accident-investigation.module";
 import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regulatory-reporting.module";
 
+import { CandidateShaMiddleware } from "./common/candidate-sha.middleware";
+
 @Module({
   imports: [
     EventEmitterModule.forRoot(),
@@ -146,6 +148,10 @@ import { RegulatoryReportingModule } from "./modules/regulatory-reporting/regula
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(CandidateShaMiddleware)
+      .forRoutes({ path: "*", method: RequestMethod.ALL });
+
     consumer
       .apply(InternalKeyMiddleware)
       .exclude(
