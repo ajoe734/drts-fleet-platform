@@ -172,6 +172,12 @@ describe("S1F-ADM-001 Platform Admin Supply Review UI & Behavior", () => {
     expect(queuePageSource).not.toMatch(
       /catch\s*\(e[^)]*\)\s*\{[^}]*setSubmissions\(\s*FX_PSR_QUEUE\s*\)/,
     );
+    // Queue page must reset submissions to empty list on error
+    expect(queuePageSource).toContain("setSubmissions([])");
+
+    // Detail page must reset record to null on error
+    expect(detailPageSource).toContain("setRecord(null)");
+
     // Queue start review catch block must not navigate to detail page
     expect(queuePageSource).not.toMatch(
       /catch\s*\(e[^)]*\)\s*\{[^}]*router\.push/,
@@ -188,5 +194,25 @@ describe("S1F-ADM-001 Platform Admin Supply Review UI & Behavior", () => {
     expect(detailPageSource).toContain(
       'setErrorMsg(t("supplyReview.err.rejectCommentRequired"))',
     );
+  });
+
+  it("handles server 403 scope denial and custom HTTP error envelopes correctly", () => {
+    const forbiddenErr = classifySupplyReviewError({
+      response: {
+        error: {
+          code: "FORBIDDEN",
+          message: "Access denied: platform_supply_reviewer role required",
+        },
+      },
+    });
+    expect(forbiddenErr.code).toBe("FORBIDDEN");
+    expect(forbiddenErr.message).toBe(
+      "Access denied: platform_supply_reviewer role required",
+    );
+    expect(forbiddenErr.isConflict).toBe(false);
+    expect(forbiddenErr.isSelfApprovalDenied).toBe(false);
+
+    const genericErr = classifySupplyReviewError(new Error("Network timeout"));
+    expect(genericErr.message).toBe("Network timeout");
   });
 });
