@@ -1169,6 +1169,110 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
       try {
         await realDb.query("CREATE SCHEMA IF NOT EXISTS iam;");
         await realDb.query(`
+          CREATE TABLE IF NOT EXISTS iam.identity_principals (
+            principal_id varchar(100) PRIMARY KEY,
+            source_ref varchar(255) UNIQUE,
+            issuer varchar(255) NOT NULL,
+            subject varchar(255) NOT NULL,
+            principal_type varchar(50) NOT NULL,
+            email_normalized varchar(320),
+            email_verified boolean NOT NULL DEFAULT false,
+            display_name varchar(255),
+            account_status varchar(50) NOT NULL,
+            created_at timestamptz NOT NULL,
+            updated_at timestamptz NOT NULL,
+            record jsonb NOT NULL,
+            CONSTRAINT uq_identity_principals_issuer_subject UNIQUE (issuer, subject),
+            CONSTRAINT chk_identity_principals_type CHECK (
+              principal_type IN ('human', 'service', 'device', 'partner_machine')
+            ),
+            CONSTRAINT chk_identity_principals_status CHECK (
+              account_status IN (
+                'invited',
+                'pending_verification',
+                'active',
+                'locked',
+                'suspended',
+                'disabled',
+                'deletion_pending',
+                'deleted',
+                'migration_pending'
+              )
+            )
+          );
+
+          CREATE TABLE IF NOT EXISTS iam.identity_memberships (
+            membership_id varchar(100) PRIMARY KEY,
+            source_ref varchar(255) UNIQUE,
+            principal_id varchar(100) NOT NULL REFERENCES iam.identity_principals(principal_id),
+            realm varchar(50) NOT NULL,
+            scope_ref varchar(255) NOT NULL,
+            tenant_id varchar(100),
+            partner_id varchar(100),
+            membership_status varchar(50) NOT NULL,
+            invited_by_principal_id varchar(100) REFERENCES iam.identity_principals(principal_id),
+            invitation_id varchar(100),
+            created_at timestamptz NOT NULL,
+            updated_at timestamptz NOT NULL,
+            record jsonb NOT NULL,
+            CONSTRAINT uq_identity_memberships_context UNIQUE (principal_id, realm, scope_ref),
+            CONSTRAINT chk_identity_memberships_status CHECK (
+              membership_status IN (
+                'invited',
+                'pending_verification',
+                'active',
+                'locked',
+                'suspended',
+                'disabled',
+                'deletion_pending',
+                'deleted',
+                'migration_pending'
+              )
+            )
+          );
+
+          CREATE TABLE IF NOT EXISTS iam.identity_sessions (
+            session_id varchar(100) PRIMARY KEY,
+            source_ref varchar(255) UNIQUE,
+            principal_id varchar(100) NOT NULL REFERENCES iam.identity_principals(principal_id),
+            membership_id varchar(100) REFERENCES iam.identity_memberships(membership_id),
+            realm varchar(50) NOT NULL,
+            status varchar(50) NOT NULL,
+            auth_time timestamptz NOT NULL,
+            auth_methods text[] NOT NULL DEFAULT '{}',
+            token_version bigint NOT NULL DEFAULT 1,
+            idle_expires_at timestamptz,
+            absolute_expires_at timestamptz NOT NULL,
+            revoked_at timestamptz,
+            revoked_by_principal_id varchar(100) REFERENCES iam.identity_principals(principal_id),
+            revoke_reason varchar(255),
+            device_summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+            risk_summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+            created_at timestamptz NOT NULL,
+            updated_at timestamptz NOT NULL,
+            record jsonb NOT NULL,
+            CONSTRAINT chk_identity_sessions_status CHECK (
+              status IN ('active', 'revoked', 'expired', 'compromised')
+            )
+          );
+
+          CREATE TABLE IF NOT EXISTS iam.identity_refresh_families (
+            family_id varchar(100) PRIMARY KEY,
+            source_ref varchar(255) UNIQUE,
+            session_id varchar(100) NOT NULL REFERENCES iam.identity_sessions(session_id) ON DELETE CASCADE,
+            current_token_hash varchar(128) NOT NULL UNIQUE,
+            counter integer NOT NULL DEFAULT 0,
+            status varchar(50) NOT NULL,
+            expires_at timestamptz NOT NULL,
+            compromised_at timestamptz,
+            created_at timestamptz NOT NULL,
+            updated_at timestamptz NOT NULL,
+            record jsonb NOT NULL,
+            CONSTRAINT chk_identity_refresh_families_status CHECK (
+              status IN ('active', 'revoked', 'expired', 'compromised')
+            )
+          );
+
           CREATE TABLE IF NOT EXISTS iam.privileged_role_approval_requests (
             request_id varchar(100) PRIMARY KEY,
             tenant_id varchar(100),
@@ -1227,9 +1331,9 @@ describe("IAM-RBAC-002 Privileged Role Governance Integration", () => {
         `);
 
         const check = await realDb.query(
-          "SELECT to_regclass('iam.privileged_role_grants') as tbl;",
+          "SELECT to_regclass('iam.privileged_role_grants') as tbl1, to_regclass('iam.identity_sessions') as tbl2;",
         );
-        return Boolean(check.rows[0]?.tbl);
+        return Boolean(check.rows[0]?.tbl1 && check.rows[0]?.tbl2);
       } catch {
         return false;
       }
