@@ -54,12 +54,30 @@ interface RequestWithHeaders {
 
 @Controller("identity")
 export class IdentityController {
+  private readonly identityRepository: IdentityRepository | undefined;
+  private readonly securityEventsService: SecurityEventsService | undefined;
+  private readonly stepUpProofService: StepUpProofService | undefined;
+  private readonly privilegedRoleGovernanceService:
+    | PrivilegedRoleGovernanceService
+    | undefined;
+
   constructor(
-    @Optional() private readonly identityRepository?: IdentityRepository,
-    @Optional() private readonly securityEventsService?: SecurityEventsService,
-    @Optional() private readonly stepUpProofService?: StepUpProofService,
-    @Optional() private readonly privilegedRoleGovernanceService?: PrivilegedRoleGovernanceService,
-  ) {}
+    @Optional() arg1?: IdentityRepository | PrivilegedRoleGovernanceService,
+    @Optional() arg2?: SecurityEventsService | StepUpProofService,
+    @Optional() arg3?: StepUpProofService,
+    @Optional() arg4?: PrivilegedRoleGovernanceService,
+  ) {
+    if (arg1 && typeof (arg1 as any).expireStaleGrants === "function") {
+      this.privilegedRoleGovernanceService =
+        arg1 as PrivilegedRoleGovernanceService;
+      this.stepUpProofService = arg2 as StepUpProofService;
+    } else {
+      this.identityRepository = arg1 as IdentityRepository;
+      this.securityEventsService = arg2 as SecurityEventsService;
+      this.stepUpProofService = arg3;
+      this.privilegedRoleGovernanceService = arg4;
+    }
+  }
 
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
@@ -139,7 +157,8 @@ export class IdentityController {
       effectiveQuery.tenantId = identity.tenantId;
     }
 
-    let sessions: import("@drts/contracts").CanonicalIdentitySessionRecord[] = [];
+    let sessions: import("@drts/contracts").CanonicalIdentitySessionRecord[] =
+      [];
     if (this.identityRepository) {
       sessions = await this.identityRepository.listSessions(effectiveQuery);
     }
@@ -218,12 +237,17 @@ export class IdentityController {
         403,
         "RESOURCE_SCOPE_DENIED",
         "Tenant administrators cannot revoke session outside their tenant boundary.",
-        { sid, targetTenantId: targetSession.tenantId, callerTenantId: identity.tenantId },
+        {
+          sid,
+          targetTenantId: targetSession.tenantId,
+          callerTenantId: identity.tenantId,
+        },
       );
     }
 
     const reason = command.reason?.trim() || "admin_revoke";
-    const callerPrincipalId = identity.principalId ?? identity.actorId ?? undefined;
+    const callerPrincipalId =
+      identity.principalId ?? identity.actorId ?? undefined;
     const updated = await this.identityRepository.revokeSession(
       sid,
       reason,
@@ -297,7 +321,10 @@ export class IdentityController {
         "Privileged role governance service is not configured.",
       );
     }
-    const result = await this.privilegedRoleGovernanceService.createRequest(command, identity);
+    const result = await this.privilegedRoleGovernanceService.createRequest(
+      command,
+      identity,
+    );
     return toApiSuccessEnvelope(result, requestId);
   }
 
@@ -322,7 +349,10 @@ export class IdentityController {
         "Privileged role governance service is not configured.",
       );
     }
-    const items = await this.privilegedRoleGovernanceService.listRequests(identity, tenantId);
+    const items = await this.privilegedRoleGovernanceService.listRequests(
+      identity,
+      tenantId,
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
@@ -347,7 +377,10 @@ export class IdentityController {
         "Privileged role governance service is not configured.",
       );
     }
-    const result = await this.privilegedRoleGovernanceService.getRequest(requestIdParam, identity);
+    const result = await this.privilegedRoleGovernanceService.getRequest(
+      requestIdParam,
+      identity,
+    );
     if (!result) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -436,7 +469,10 @@ export class IdentityController {
         "Privileged role governance service is not configured.",
       );
     }
-    const result = await this.privilegedRoleGovernanceService.removeGrant(command, identity);
+    const result = await this.privilegedRoleGovernanceService.removeGrant(
+      command,
+      identity,
+    );
     return toApiSuccessEnvelope(result, requestId);
   }
 
@@ -462,7 +498,8 @@ export class IdentityController {
         "Privileged role governance service is not configured.",
       );
     }
-    const expired = await this.privilegedRoleGovernanceService.expireStaleGrants();
+    const expired =
+      await this.privilegedRoleGovernanceService.expireStaleGrants();
     return toApiSuccessEnvelope(toApiListData(expired), requestId);
   }
 

@@ -500,7 +500,9 @@ export class IdentityRepository implements OnModuleInit {
             !candidate.acceptedAt &&
             !candidate.revokedAt,
         )
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+        .sort((left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt),
+        )[0];
       return invitation ? { ...invitation } : null;
     }
     const result = await this.databaseService!.query<JsonRecordRow>(
@@ -986,18 +988,21 @@ export class IdentityRepository implements OnModuleInit {
       client,
     );
 
-    const projectedBindings: CanonicalIdentityRoleBindingRecord[] = activeGrants.map((grant) => ({
-      roleBindingId: `grant_binding_${grant.grantId}`,
-      sourceRef: grant.requestId ? `privileged_request:${grant.requestId}` : `privileged_grant:${grant.grantId}`,
-      membershipId: grant.targetMembershipId || membershipId,
-      roleCode: grant.roleCode,
-      grantedByPrincipalId: grant.grantedByPrincipalId,
-      approvalId: grant.approvalId,
-      validFrom: grant.validFrom,
-      validTo: grant.validTo ?? null,
-      createdAt: grant.createdAt,
-      updatedAt: grant.updatedAt,
-    }));
+    const projectedBindings: CanonicalIdentityRoleBindingRecord[] =
+      activeGrants.map((grant) => ({
+        roleBindingId: `grant_binding_${grant.grantId}`,
+        sourceRef: grant.requestId
+          ? `privileged_request:${grant.requestId}`
+          : `privileged_grant:${grant.grantId}`,
+        membershipId: grant.targetMembershipId || membershipId,
+        roleCode: grant.roleCode,
+        grantedByPrincipalId: grant.grantedByPrincipalId,
+        approvalId: grant.approvalId,
+        validFrom: grant.validFrom,
+        validTo: grant.validTo ?? null,
+        createdAt: grant.createdAt,
+        updatedAt: grant.updatedAt,
+      }));
 
     const existingRoles = new Set(directBindings.map((b) => b.roleCode));
     const merged = [...directBindings];
@@ -1043,7 +1048,10 @@ export class IdentityRepository implements OnModuleInit {
     if (!this.isEnabled()) {
       allGrants = Array.from(this.fallbackPrivilegedRoleGrants.values());
     } else {
-      allGrants = await this.listPrivilegedRoleGrants(membership?.tenantId ?? null, client);
+      allGrants = await this.listPrivilegedRoleGrants(
+        membership?.tenantId ?? null,
+        client,
+      );
     }
 
     return allGrants.filter((grant) => {
@@ -1063,7 +1071,11 @@ export class IdentityRepository implements OnModuleInit {
 
       if (!matchesTarget) return false;
 
-      if (grant.tenantId && membership?.tenantId && grant.tenantId !== membership.tenantId) {
+      if (
+        grant.tenantId &&
+        membership?.tenantId &&
+        grant.tenantId !== membership.tenantId
+      ) {
         return false;
       }
 
@@ -1476,6 +1488,11 @@ export class IdentityRepository implements OnModuleInit {
       [tenantId],
     );
 
+    return result.rows.map((row) =>
+      this.hydrateSessionRecord(row, "iam.identity_sessions"),
+    );
+  }
+
   async listSessions(
     query?: IamSessionInventoryQuery,
   ): Promise<CanonicalIdentitySessionRecord[]> {
@@ -1554,8 +1571,10 @@ export class IdentityRepository implements OnModuleInit {
       sql += ` LIMIT $${params.length}`;
     }
 
-    const result =
-      await this.databaseService!.query<PersistedSessionRow>(sql, params);
+    const result = await this.databaseService!.query<PersistedSessionRow>(
+      sql,
+      params,
+    );
     return result.rows.map((row) =>
       this.hydrateSessionRecord(row, "iam.identity_sessions"),
     );
@@ -1572,7 +1591,8 @@ export class IdentityRepository implements OnModuleInit {
     if (!this.isEnabled()) {
       for (const [id, session] of this.fallbackSessions.entries()) {
         if (
-          (session.principalId === principalId || session.actorId === principalId) &&
+          (session.principalId === principalId ||
+            session.actorId === principalId) &&
           session.status === "active"
         ) {
           const updated: CanonicalIdentitySessionRecord = {
@@ -1586,7 +1606,10 @@ export class IdentityRepository implements OnModuleInit {
           this.fallbackSessions.set(id, updated);
           count++;
 
-          for (const [familyId, family] of this.fallbackRefreshFamilies.entries()) {
+          for (const [
+            familyId,
+            family,
+          ] of this.fallbackRefreshFamilies.entries()) {
             if (family.sessionId === id && family.status === "active") {
               this.fallbackRefreshFamilies.set(familyId, {
                 ...family,
@@ -2926,7 +2949,9 @@ export class IdentityRepository implements OnModuleInit {
     client?: PoolClient,
   ): Promise<PrivilegedRoleApprovalRequestRecord> {
     if (!this.isEnabled()) {
-      this.fallbackPrivilegedRoleRequests.set(request.requestId, { ...request });
+      this.fallbackPrivilegedRoleRequests.set(request.requestId, {
+        ...request,
+      });
       return { ...request };
     }
 
@@ -2976,7 +3001,9 @@ export class IdentityRepository implements OnModuleInit {
     );
 
     if (!result.rows[0]?.record) {
-      throw new Error("Failed to persist privileged role request: no row returned");
+      throw new Error(
+        "Failed to persist privileged role request: no row returned",
+      );
     }
 
     return this.parseRecord<PrivilegedRoleApprovalRequestRecord>(
@@ -3083,7 +3110,9 @@ export class IdentityRepository implements OnModuleInit {
     );
 
     if (!result.rows[0]?.record) {
-      throw new Error("Failed to persist privileged role grant: no row returned");
+      throw new Error(
+        "Failed to persist privileged role grant: no row returned",
+      );
     }
 
     return this.parseRecord<PrivilegedRoleGrantRecord>(
