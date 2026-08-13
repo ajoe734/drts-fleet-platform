@@ -1394,6 +1394,8 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Execute candidate-bound operational journeys
         env:
+          DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}
+          DRTS_DEV_OPS_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
           DRTS_DEV_REFERRAL_EMBED_BASE_URL: ${{ needs.health-check.outputs.referral_embed }}
           DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL: ${{ needs.health-check.outputs.enterprise_dispatch }}
           DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.fleet_partner_portal }}
@@ -1409,6 +1411,7 @@ jobs:
           cloud_run_suffix="${api_url#https://drts-dev-api-}"
           export DRTS_DEV_PARTNER_BOOKING_BASE_URL="https://drts-dev-partner-booking-web-${cloud_run_suffix}"
           export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"
+          export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"
           scripts/run-operational-browser-acceptance.sh \
             --sha "${{ needs.build-push.outputs.candidate_sha }}"
       - name: Upload operational evidence
