@@ -10,6 +10,7 @@ import {
   loadSupplySubmissionDetail,
   loadSupplySubmissions,
 } from "../../lib/fleet-portal-supply.server";
+import { isEditableStatus } from "../../lib/fleet-portal-supply";
 
 describe("fleet portal supply loaders", () => {
   const originalEnv = process.env.DRTS_FLEET_PARTNER_ID;
@@ -68,5 +69,13 @@ describe("fleet portal supply loaders", () => {
     expect(
       result.rows.some((row) => row.submission.submissionId === "sub_r33"),
     ).toBe(true);
+  });
+
+  it("considers draft, needs_revision, and withdrawn as editable statuses", () => {
+    expect(isEditableStatus("draft")).toBe(true);
+    expect(isEditableStatus("needs_revision")).toBe(true);
+    expect(isEditableStatus("withdrawn")).toBe(true);
+    expect(isEditableStatus("submitted")).toBe(false);
+    expect(isEditableStatus("approved")).toBe(false);
   });
 });
