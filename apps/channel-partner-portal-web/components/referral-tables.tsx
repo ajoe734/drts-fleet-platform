@@ -198,6 +198,7 @@ export function ReferralStatementsTable({
       r: (r) => (
         <Link
           href={`/statements/${encodeURIComponent(r.period)}`}
+          data-drt-operation="channel-statement-download"
           style={{
             color: theme.accent,
             textDecoration: "none",
