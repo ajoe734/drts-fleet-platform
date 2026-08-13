@@ -111,7 +111,7 @@
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
           "resultIdPath": "data.submission.submissionId",
-          "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
+          "readbackUrl": "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
           "readbackIdPath": "data.submission.submissionId",
           "readbackStatePath": "data.submission.status",
           "expectedReadbackState": "submitted"
@@ -122,7 +122,7 @@
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
           "resultIdPath": "data.submission.submissionId",
-          "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
+          "readbackUrl": "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
           "readbackIdPath": "data.submission.submissionId",
           "readbackStatePath": "data.submission.status",
           "expectedReadbackState": "withdrawn"
@@ -133,7 +133,7 @@
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
           "resultIdPath": "data.submission.submissionId",
-          "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
+          "readbackUrl": "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
           "readbackIdPath": "data.submission.submissionId",
           "readbackStatePath": "data.submission.status",
           "expectedReadbackState": "submitted"
@@ -153,7 +153,7 @@
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
           "resultIdPath": "data.submissionId",
-          "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
+          "readbackUrl": "/control-plane-proxy/admin/supply-review/submissions/{resultId}",
           "readbackIdPath": "data.submission.submissionId",
           "readbackStatePath": "data.submission.status",
           "expectedReadbackState": "approved"
