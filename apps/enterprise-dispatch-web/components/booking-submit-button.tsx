@@ -78,6 +78,7 @@ export function BookingSubmitButton({
       <button
         type="button"
         data-testid="enterprise-booking-submit"
+        data-drt-operation={bookingId ? "enterprise-update" : "enterprise-create"}
         data-ready={isHydrated ? "true" : "false"}
         disabled={isDisabled}
         onClick={submitBooking}

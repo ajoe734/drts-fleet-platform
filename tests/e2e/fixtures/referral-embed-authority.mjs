@@ -264,6 +264,46 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  const cancelMatch = url.pathname.match(
+    /^\/partner\/referral\/passenger\/orders\/([^/]+)\/cancel$/,
+  );
+  if (request.method === "POST" && cancelMatch) {
+    const orderId = decodeURIComponent(cancelMatch[1]);
+    const orders = getPassengerOrders(request);
+    const order = orders.find((item) => item.orderId === orderId) || orders[0];
+    if (order) {
+      order.status = "CANCELLED";
+      order.statusCode = "CANCELLED";
+    }
+    writeJson(response, 200, {
+      data: {
+        orderId: order ? order.orderId : orderId,
+        status: "CANCELLED",
+      },
+    });
+    return;
+  }
+
+  const ratingMatch = url.pathname.match(
+    /^\/partner\/referral\/passenger\/orders\/([^/]+)\/rating$/,
+  );
+  if (request.method === "POST" && ratingMatch) {
+    const orderId = decodeURIComponent(ratingMatch[1]);
+    const orders = getPassengerOrders(request);
+    const order = orders.find((item) => item.orderId === orderId) || orders[0];
+    if (order) {
+      order.rated = true;
+    }
+    writeJson(response, 200, {
+      data: {
+        orderId: order ? order.orderId : orderId,
+        status: order ? order.status : "CANCELLED",
+        rated: true,
+      },
+    });
+    return;
+  }
+
   const receiptMatch = url.pathname.match(
     /^\/partner\/referral\/passenger\/orders\/([^/]+)\/receipt$/,
   );
