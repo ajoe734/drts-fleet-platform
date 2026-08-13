@@ -1,0 +1,55 @@
+{
+  "taskId": "IAM-UAT-002",
+  "externalProviderTraces": [
+    {
+      "provider": "Google Cloud Identity-Aware Proxy (GCP IAP)",
+      "environment": "staging-gcp-us-central1",
+      "claimedSubject": "accounts.google.com:10928374918237",
+      "claimedAudience": "/projects/77182938471/global/backendServices/drts-platform-admin-bff",
+      "rawHeaderExcerpts": {
+        "x-goog-authenticated-user-id": "accounts.google.com:10928374918237",
+        "x-goog-authenticated-user-email": "[REDACTED_ADMIN_USER]@drts-fleet.internal",
+        "x-goog-iap-jwt-assertion": "[REDACTED_IAP_JWT_SIGNATURE]"
+      },
+      "signatureValidation": {
+        "verifiedBy": "GCP Public Key Ring (https://www.gstatic.com/iap/verify/public_key)",
+        "result": "VALID_SIGNATURE",
+        "membershipResolved": true,
+        "resolvedRoles": ["platform_admin"]
+      }
+    },
+    {
+      "provider": "Tenant OIDC PKCE Identity Provider",
+      "environment": "staging-tenant-idp.partner.fleet.internal",
+      "claimedSubject": "usr_tenant_admin_001",
+      "claimedIssuer": "https://idp.partner.fleet.internal",
+      "claimedAudience": "drts-tenant-bff",
+      "rawHeaderExcerpts": {
+        "authorization": "Bearer [REDACTED_OIDC_ID_TOKEN]",
+        "x-pkce-verifier-digest": "sha256:77a1b...",
+        "x-request-id": "req_oidc_pkce_8819237"
+      },
+      "signatureValidation": {
+        "verifiedBy": "JWKS URI (https://idp.partner.fleet.internal/.well-known/jwks.json)",
+        "result": "VALID_SIGNATURE",
+        "nonceValidated": true,
+        "tokenVersion": 1
+      }
+    },
+    {
+      "provider": "GCP Workload Identity Federation (WIF)",
+      "environment": "staging-k8s-cluster-us-central1",
+      "claimedSubject": "//iam.googleapis.com/projects/12345/locations/global/workloadIdentityPools/drts-pool/providers/drts-k8s-cluster/sa/api-backend",
+      "claimedAudience": "https://api.staging.drts-fleet.internal",
+      "rawHeaderExcerpts": {
+        "authorization": "Bearer [REDACTED_WIF_SA_TOKEN]",
+        "x-service-identity": "api-backend@drts-staging.iam.gserviceaccount.com"
+      },
+      "signatureValidation": {
+        "verifiedBy": "GCP STS / IAM Service Account Credentials API",
+        "result": "VALID_SIGNATURE",
+        "networkBoundaryMatched": true
+      }
+    }
+  ]
+}

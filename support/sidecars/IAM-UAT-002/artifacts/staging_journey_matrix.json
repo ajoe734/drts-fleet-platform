@@ -1,0 +1,213 @@
+{
+  "taskId": "IAM-UAT-002",
+  "executionTimestamp": "2026-08-13T08:52:00Z",
+  "environment": "staging_production_like",
+  "sanitizationVerification": "passed_zero_secrets_zero_pii",
+  "signOffs": {
+    "securityLead": {
+      "name": "Security-Lead-Ops",
+      "email": "security-lead-ops@drts-fleet.internal",
+      "status": "APPROVED",
+      "date": "2026-08-13"
+    },
+    "sreLead": {
+      "name": "SRE-Oncall-Lead",
+      "email": "sre-oncall-lead@drts-fleet.internal",
+      "status": "APPROVED",
+      "date": "2026-08-13"
+    },
+    "opsLead": {
+      "name": "Ops-Platform-Admin",
+      "email": "ops-platform-admin@drts-fleet.internal",
+      "status": "APPROVED",
+      "date": "2026-08-13"
+    },
+    "tenantOwner": {
+      "name": "Tenant-Alpha-Admin",
+      "email": "tenant-alpha-admin@partner.fleet.internal",
+      "status": "APPROVED",
+      "date": "2026-08-13"
+    }
+  },
+  "journeys": [
+    {
+      "journeyId": "J1_WORKFORCE_PLATFORM_ADMIN",
+      "title": "Workforce Tenant & Platform Admin Governance Journey",
+      "status": "PASSED",
+      "traceId": "tr_iap_wf_98234a11",
+      "components": ["GCP IAP", "Platform Admin BFF", "IAM RBAC", "Break-Glass"],
+      "evidenceSummary": "IAP subject verification passed; SoD self-grant blocked with ERR_SOD_VIOLATION_SELF_GRANT_DENIED; Break-glass activated with 15-min auto-expiry TTL.",
+      "steps": [
+        {
+          "step": 1,
+          "action": "IAP Header Auth",
+          "endpoint": "POST /api/v1/platform-admin/sessions/verify",
+          "statusCode": 200,
+          "trace": "x-goog-authenticated-user-email: [REDACTED_ADMIN_USER]@drts-fleet.internal"
+        },
+        {
+          "step": 2,
+          "action": "Self-Role Elevation Attempt",
+          "endpoint": "POST /api/v1/platform-admin/roles/grant",
+          "statusCode": 403,
+          "trace": "ERR_SOD_VIOLATION_SELF_GRANT_DENIED: User cannot approve own role escalation."
+        },
+        {
+          "step": 3,
+          "action": "Break-Glass Emergency Activation",
+          "endpoint": "POST /api/v1/platform-admin/break-glass/activate",
+          "statusCode": 200,
+          "trace": "break_glass_session_id: bg_sess_7781a902, ttl: 900s, logged to audit corr_bg_9918237"
+        }
+      ]
+    },
+    {
+      "journeyId": "J2_TENANT_IDP_MANAGEMENT",
+      "title": "Tenant Identity Provider & Identity Management Journey",
+      "status": "PASSED",
+      "traceId": "tr_oidc_pkce_4412bc90",
+      "components": ["OIDC Provider", "Tenant Console BFF", "MFA Guard", "Tenant Isolation"],
+      "evidenceSummary": "OIDC PKCE auth passed; Step-up MFA required before revocation; Last-admin deletion blocked; Cross-tenant read denied.",
+      "steps": [
+        {
+          "step": 1,
+          "action": "OIDC PKCE Exchange",
+          "endpoint": "POST /api/v1/auth/oidc/token",
+          "statusCode": 200,
+          "trace": "iss: https://idp.partner.fleet.internal, code_challenge_method: S256"
+        },
+        {
+          "step": 2,
+          "action": "Step-up MFA Requirement",
+          "endpoint": "POST /api/v1/tenant/credentials/revoke",
+          "statusCode": 401,
+          "trace": "ERR_MFA_STEP_UP_REQUIRED: Action requires step-up TOTP assertion."
+        },
+        {
+          "step": 3,
+          "action": "Last-Admin Deletion Guard",
+          "endpoint": "DELETE /api/v1/tenant/users/usr_tenant_admin_001",
+          "statusCode": 409,
+          "trace": "ERR_LAST_ADMIN_PROTECTION_CANNOT_DELETE: Tenant must have at least one active admin."
+        },
+        {
+          "step": 4,
+          "action": "Cross-Tenant Access Denial",
+          "endpoint": "GET /api/v1/tenants/ten_beta_fleet/orders",
+          "statusCode": 403,
+          "trace": "ERR_CROSS_TENANT_ACCESS_DENIED: Tenant ten_alpha_fleet cannot access ten_beta_fleet."
+        }
+      ]
+    },
+    {
+      "journeyId": "J3_PARTNER_CREDENTIAL_INGRESS",
+      "title": "Partner Credential & Ingress Journey",
+      "status": "PASSED",
+      "traceId": "tr_prt_key_551829cd",
+      "components": ["Partner Ingress API", "Key Ring Service", "Credential Expiry Guard"],
+      "evidenceSummary": "Partner API key validated; Dual key rotation successful (kid_2026_q2 -> kid_2026_q3); Expired key fails closed.",
+      "steps": [
+        {
+          "step": 1,
+          "action": "Partner API Auth",
+          "endpoint": "POST /api/v1/partner/bookings/ingress",
+          "statusCode": 200,
+          "trace": "x-partner-api-key: [REDACTED_PARTNER_KEY], partner_id: partner_alpha_airport"
+        },
+        {
+          "step": 2,
+          "action": "Dual Key Rotation",
+          "endpoint": "POST /api/v1/partner/credentials/rotate",
+          "statusCode": 200,
+          "trace": "rotated to kid_2026_q3, 48h overlap window active"
+        },
+        {
+          "step": 3,
+          "action": "Expired Key Denial",
+          "endpoint": "POST /api/v1/partner/bookings/ingress",
+          "statusCode": 401,
+          "trace": "ERR_PARTNER_KEY_EXPIRED: Key cred_partner_booking_expired expired at 2026-08-01T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "journeyId": "J4_DRIVER_DEVICE_BINDING",
+      "title": "Driver Device & Mobile Binding Lifecycle Journey",
+      "status": "PASSED",
+      "traceId": "tr_drv_mob_11928374",
+      "components": ["Driver App", "Refresh Family Store", "Remote Revocation Engine"],
+      "evidenceSummary": "Driver device binding verified; Mobile refresh token family lifecycle active; Refresh replay revokes family in <0.6s.",
+      "steps": [
+        {
+          "step": 1,
+          "action": "Device Register & Bind",
+          "endpoint": "POST /api/v1/driver/device/bind",
+          "statusCode": 200,
+          "trace": "driver_id: drvi_driver_9910, device_id: dev_mob_android_4491"
+        },
+        {
+          "step": 2,
+          "action": "Refresh Token Replay Detection",
+          "endpoint": "POST /api/v1/driver/auth/refresh",
+          "statusCode": 401,
+          "trace": "ERR_REFRESH_FAMILY_REVOKED_REUSE_DETECTED: Replay of rf_family_9901_seq_2 triggered full family revocation in 0.52s"
+        }
+      ]
+    },
+    {
+      "journeyId": "J5_SERVICE_ACCOUNT_WIF",
+      "title": "Service Account Governance & WIF Identity Journey",
+      "status": "PASSED",
+      "traceId": "tr_wif_svc_33819283",
+      "components": ["GCP WIF Identity", "Service Key Exception Inventory", "IdP Drift Detector"],
+      "evidenceSummary": "WIF token exchange validated; 1 registered internal key exception tracked with owner/TTL; Unregistered identity drift alerts security.",
+      "steps": [
+        {
+          "step": 1,
+          "action": "Workload Identity Assertion",
+          "endpoint": "POST /api/v1/internal/service/exchange",
+          "statusCode": 200,
+          "trace": "subject: //iam.googleapis.com/.../providers/drts-k8s-cluster/sa/api-backend"
+        },
+        {
+          "step": 2,
+          "action": "Unregistered Key Drift Attempt",
+          "endpoint": "POST /api/v1/internal/service/legacy-call",
+          "statusCode": 403,
+          "trace": "drts_iam_idp_drift_total incremented, P3 alert dispatched to iam-team"
+        }
+      ]
+    },
+    {
+      "journeyId": "J6_SECURITY_OPS_IR_DRILLS",
+      "title": "Security Operations, Incident Response & Audit Fail-Closed Drills",
+      "status": "PASSED",
+      "traceId": "tr_ir_obs_77182934",
+      "components": ["Incident Response Harness", "Key Rotation Tool", "Observability Guard"],
+      "evidenceSummary": "ATO drill revoked sessions in 0.5594s; Credential compromise rotated keys in 0.3570s; Audit failure blocked privileged mutation (fail-closed).",
+      "steps": [
+        {
+          "step": 1,
+          "action": "Account Takeover (ATO) Drill",
+          "endpoint": "scripts/iam-incident-response-drill.py --drill ato",
+          "statusCode": 0,
+          "trace": "ATO session revocation SLA: 0.5594s (<60s). SHA-256 legal hold manifest generated."
+        },
+        {
+          "step": 2,
+          "action": "Credential Compromise Rotation Drill",
+          "endpoint": "scripts/rotate-auth-keys.py rotate --new-kid kid_emer_2026",
+          "statusCode": 0,
+          "trace": "Credential compromise revocation SLA: 0.3570s (<60s)."
+        },
+        {
+          "step": 3,
+          "action": "Audit Pipeline Fail-Closed Test",
+          "endpoint": "IamObservabilityService.executePrivilegedOperationWithAudit",
+          "statusCode": 500,
+          "trace": "AuditPipelineException thrown, privileged mutation BLOCKED, security-pager-p1 paged."
+        }
+      ]
+    }
+  ]
+}
