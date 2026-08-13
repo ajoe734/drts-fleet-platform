@@ -3124,6 +3124,15 @@ class UnderutilizationMainTaskDispatchTests(unittest.TestCase):
         self.assertEqual(queued_event["reason"], "review_ready_dispatch")
 
 
+class WorkerProcessActivityTests(unittest.TestCase):
+    def test_parses_proc_stat_with_spaces_in_process_name(self) -> None:
+        parsed = supervisor.parse_proc_stat_process_accounting(
+            "123 (worker with spaces) R 7 0 0 0 0 0 0 0 0 0 11 13"
+        )
+
+        self.assertEqual(parsed, (7, 24))
+
+
 class PollWorkersRecoveryTests(unittest.TestCase):
     def test_lower_priority_worker_is_superseded_when_review_backlog_exists(self) -> None:
         config = {
@@ -4025,6 +4034,113 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(state["workers"]["run-1"]["status"], "running")
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_recovered")
+
+    def test_process_activity_prevents_quiet_verification_from_stalling(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {
+                "review_statuses": ["review"],
+                "owned_statuses": ["in_progress", "todo"],
+                "done_statuses": ["done"],
+                "active_worker_statuses": ["running", "waiting_approval", "suspended_approval", "manual_pending", "retry_backoff", "stalled"],
+            },
+            "providers": {},
+            "agents": {"codex": {"id": "codex", "display_name": "Codex"}},
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "LP-CPU-001",
+                    "provider": "codex",
+                    "agent_id": "codex",
+                    "status": "running",
+                    "queue_event_id": "evt-1",
+                    "pid": 1234,
+                    "last_event_at": "2026-04-06T14:20:00Z",
+                    "process_tree_cpu_ticks": 100,
+                    "last_process_activity_at": "2026-04-06T14:20:00Z",
+                }
+            },
+        }
+        status = {"tasks": [{"id": "LP-CPU-001", "status": "in_progress", "owner": "Codex", "reviewer": "Copilot"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+            mock.patch.object(supervisor, "worker_process_tree_cpu_ticks", return_value={1234: 101}),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "running")
+        self.assertEqual(worker["process_tree_cpu_ticks"], 101)
+        self.assertGreater(worker["last_process_activity_at"], worker["last_event_at"])
+        write_activity_log.assert_not_called()
+
+    def test_process_activity_recovers_a_stalled_worker(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {
+                "review_statuses": ["review"],
+                "owned_statuses": ["in_progress", "todo"],
+                "done_statuses": ["done"],
+                "active_worker_statuses": ["running", "waiting_approval", "suspended_approval", "manual_pending", "retry_backoff", "stalled"],
+            },
+            "providers": {},
+            "agents": {"codex": {"id": "codex", "display_name": "Codex"}},
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "LP-CPU-002",
+                    "provider": "codex",
+                    "agent_id": "codex",
+                    "status": "stalled",
+                    "queue_event_id": "evt-1",
+                    "pid": 1234,
+                    "last_event_at": "2026-04-06T14:20:00Z",
+                    "process_tree_cpu_ticks": 100,
+                    "last_process_activity_at": "2026-04-06T14:20:00Z",
+                }
+            },
+        }
+        status = {"tasks": [{"id": "LP-CPU-002", "status": "in_progress", "owner": "Codex", "reviewer": "Copilot"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+            mock.patch.object(supervisor, "worker_process_tree_cpu_ticks", return_value={1234: 101}),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["workers"]["run-1"]["status"], "running")
+        self.assertIn("local process activity", write_activity_log.call_args.args[1]["message"])
 
     def test_manual_pending_file_inbox_worker_is_reaped_after_auth_recovers(self) -> None:
         config = {
