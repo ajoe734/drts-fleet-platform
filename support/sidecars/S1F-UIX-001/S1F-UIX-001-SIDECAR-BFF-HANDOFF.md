@@ -73,25 +73,21 @@ In accordance with repo guardrails:
 - **Primary URL**: `/embed/yuhe-residence`
 - **Actor Scope**: Passenger / Resident (`yuhe-residence`)
 - **Key Operator Steps**:
-  1. **Form Entry & Booking Creation**:
+   1. **Form Entry & Booking Creation**:
      - User selects pickup point, dropoff destination, and vehicle option from live partner-scoped options.
      - Submits form -> `POST /api/referral/booking`.
-     - Readback: Booking ID created (e.g. `ref-bk-100293`), status `REQUESTED` or `DISPATCHING`.
-     - Control attribute: `data-drt-operation="referral-create-booking"`.
-  2. **Active Trip Resume & Refresh**:
-     - Browser refresh on `/embed/yuhe-residence?bookingId=ref-bk-100293`.
+     - Readback: Order ID created (e.g. `ref-ord-100293`), status `CONFIRMED`.
+     - Control attribute: `data-drt-operation="referral-create"` (runner key: `referral-create`).
+   2. **Active Trip Resume & Refresh**:
+     - Browser refresh on `/embed/yuhe-residence?orderId=ref-ord-100293`.
      - Component consumes `liveData` from route loader instead of `embedTrip` fixture.
-     - Asserts matching booking ID, driver status, and ETA.
-  3. **Trip Cancellation**:
-     - User clicks "Cancel Booking" -> `POST /api/referral/cancel` with `{ bookingId, reason: "CHANGE_OF_PLANS" }`.
+     - Asserts matching order ID, driver status, and ETA via `GET /api/referral/history/{resultId}`.
+   3. **Trip Cancellation**:
+     - User clicks "Cancel Trip" -> issues cancellation request through referral BFF.
      - Readback: Status transitions to `CANCELLED`.
-     - Control attribute: `data-drt-operation="referral-cancel-trip"`.
-  4. **Trip Rating & Receipt**:
-     - For completed trips, user submits 5-star rating -> `POST /api/referral/rating`.
+   4. **Trip Rating & Receipt**:
+     - For completed trips, user submits 5-star rating via referral BFF.
      - User views receipt details -> reads back itemized fare breakdown from live BFF.
-     - Control attribute: `data-drt-operation="referral-submit-rating"`.
-
----
 
 ### 4.2 Enterprise Dispatch Operator Journey (`S1F-ENT-002`)
 
@@ -101,48 +97,40 @@ In accordance with repo guardrails:
   1. **Drafting Enterprise Booking**:
      - Dispatcher opens `/bookings/new`, selects employee/passenger, pickup/dropoff address, cost center, and booking time.
      - Policy & quota engine previews approval rules (`policyDecision: APPROVED`, `quotaRemaining: 48`).
-  2. **Submitting Live Booking Command**:
-     - Dispatcher clicks "Submit Dispatch" -> `POST /api/enterprise/bookings`.
+   2. **Submitting Live Booking Command**:
+     - Dispatcher clicks "Submit Dispatch" -> `POST /control-plane-proxy/` (enterprise booking endpoint).
      - Payload contains live form fields (no fixture fallback).
-     - Response returns `enterpriseBookingId` (e.g., `ent-bk-88301`).
-     - Control attribute: `data-drt-operation="ent-create-booking"`.
-  3. **Readback & Modification**:
-     - Navigates to `/bookings/ent-bk-88301`.
+     - Response returns booking `id` (e.g., `ent-bk-88301`); status readback via `GET /control-plane-proxy/bookings/{resultId}`.
+     - Control attribute: `data-drt-operation="enterprise-create"` (runner key: `enterprise-create`).
+   3. **Readback & Modification**:
+     - Navigates to `/bookings/{id}`.
      - Reads back persisted fields (passenger name, cost center, pickup time).
-     - Dispatcher updates pickup time -> `PATCH /api/enterprise/bookings/ent-bk-88301`.
-     - Control attribute: `data-drt-operation="ent-update-booking"`.
-  4. **Cancellation**:
-     - Dispatcher cancels booking -> `POST /api/enterprise/bookings/ent-bk-88301/cancel`.
-     - Control attribute: `data-drt-operation="ent-cancel-booking"`.
-
----
+     - Dispatcher updates pickup time -> PATCH via control-plane-proxy.
+   4. **Cancellation**:
+     - Dispatcher cancels booking -> POST via control-plane-proxy.
 
 ### 4.3 Fleet Partner Supply & Operational Actions (`S1F-FLT-003`)
 
 - **Primary URL**: `/supply`, `/statements`
 - **Actor Scope**: Fleet Partner Operator (`fleet-demo-001`)
 - **Key Operator Steps**:
-  1. **Supply Onboarding Submission**:
+   1. **Supply Onboarding Submission**:
      - Fleet user opens `/supply`, clicks "Add Driver" / "Add Vehicle".
-     - Uploads required license document -> `POST /api/fleet/documents/upload-intent` -> confirms upload.
-     - Submits onboarding package -> `POST /api/fleet/supply-submissions`.
-     - Submission ID returned (e.g., `sub-flt-9012`). Status: `PENDING_REVIEW`.
-     - Control attribute: `data-drt-operation="fleet-submit-supply"`.
-  2. **Withdraw / Revision Resubmit**:
-     - User clicks "Withdraw Submission" -> `POST /api/fleet/supply-submissions/sub-flt-9012/withdraw`.
-     - Updates document and resubmits -> `POST /api/fleet/supply-submissions/sub-flt-9012/resubmit`.
-     - Control attribute: `data-drt-operation="fleet-resubmit-supply"`.
-  3. **Statement Confirm & Dispute**:
+     - Uploads required license document -> document upload intent endpoint -> confirms upload.
+     - Submits onboarding package -> `POST /control-plane-proxy/` (supply submissions).
+     - Submission `id` returned (e.g., `sub-flt-9012`). Status readback: `SUBMITTED`.
+     - Control attribute: `data-drt-operation="fleet-submit"` (runner key: `fleet-submit`).
+   2. **Withdraw / Revision Resubmit**:
+     - User clicks "Withdraw Submission" -> withdraw action via control-plane-proxy.
+     - Updates document and resubmits -> resubmit action via control-plane-proxy.
+   3. **Statement Confirm & Dispute**:
      - User navigates to `/statements` (current period derived dynamically, e.g., `2026-08`).
-     - Downloads statement PDF/CSV -> `GET /api/fleet/statements/2026-08/download`.
-     - Confirms statement -> `POST /api/fleet/statements/2026-08/confirm`.
-     - Control attribute: `data-drt-operation="fleet-statement-confirm"`.
-  4. **Inert Control Annotations**:
+     - Downloads statement PDF/CSV -> statement artifact via `/api/statements/` path.
+     - Confirms / disputes statement via control-plane-proxy.
+   4. **Inert Control Annotations**:
      - Controls for unsupported Stage 1.5 actions (e.g. "Trigger Driver Re-training") are disabled and annotated:
        `data-drt-non-operational="true"`
        `data-drt-non-operational-reason="Action scheduled for Stage 1.5 compliance wave"`.
-
----
 
 ### 4.4 Platform Admin Supply Review Journey (`S1F-ADM-001`)
 
@@ -151,18 +139,15 @@ In accordance with repo guardrails:
 - **Key Operator Steps**:
   1. **Review Queue Navigation**:
      - Admin opens `/supply-review`, views pending submissions list (`sub-flt-9012`).
-  2. **Detail Inspection & Review Start**:
-     - Admin opens `/supply-review/sub-flt-9012`.
-     - Clicks "Start Review" -> `POST /api/admin/supply-review/sub-flt-9012/start-review`.
+   2. **Detail Inspection & Review Start**:
+     - Admin opens `/supply-review/{submissionId}`.
+     - Clicks "Start Review" -> start-review action via control-plane-proxy.
      - Status updates to `IN_REVIEW`.
-     - Control attribute: `data-drt-operation="admin-start-supply-review"`.
-  3. **Approval & Canonical Provisioning**:
+   3. **Approval & Canonical Provisioning**:
      - Admin inspects uploaded vehicle registration and driver license documents.
-     - Clicks "Approve Supply" -> `POST /api/admin/supply-review/sub-flt-9012/approve` with `{ note: "Documents verified" }`.
-     - Response confirms canonical fleet registry provisioning (`driverId: drv-8810`, `vehicleId: veh-4402`).
-     - Control attribute: `data-drt-operation="admin-approve-supply"`.
-
----
+     - Clicks "Approve Supply" -> `POST /control-plane-proxy/` (supply approval endpoint).
+     - Response confirms canonical fleet registry provisioning; readback via `GET /control-plane-proxy/supply/submissions/{resultId}` returns status `APPROVED`.
+     - Control attribute: `data-drt-operation="admin-approve"` (runner key: `admin-approve`).
 
 ### 4.5 Platform Admin Operational Truthfulness (`S1F-ADM-002`)
 
@@ -176,8 +161,6 @@ In accordance with repo guardrails:
      - Every operational button maps to a real backend capability handler.
      - Unsupported buttons with no underlying API endpoint must NOT fire Javascript `alert()` or show fake toasts. They must be disabled and tagged with `data-drt-non-operational`.
 
----
-
 ### 4.6 Bank Console Live Reads & Statement Download (`S1F-BANK-002`)
 
 - **Primary URL**: `/statements`, `/contracts`, `/programme`
@@ -186,33 +169,32 @@ In accordance with repo guardrails:
   1. **Dynamic Period Statement Read**:
      - Bank user views statement list for current period (`2026-08`).
      - Reconciles totals against live API response (`GET /api/bank/statements?period=2026-08`).
-  2. **Statement Artifact Download**:
-     - User clicks "Download Settlement Report" -> `GET /api/bank/statements/2026-08/export`.
-     - Browser receives non-fixture CSV/PDF artifact stream with proper headers (`Content-Disposition: attachment; filename=bank-settlement-2026-08.csv`).
-     - Control attribute: `data-drt-operation="bank-download-statement"`.
-  3. **Role Capability & PII Governance**:
+   2. **Statement Artifact Download**:
+     - User clicks "Download Settlement Report" -> `GET /api/statements/{period}` (path includes `/api/statements/`).
+     - Runner captures `statementId` from response; readback via `GET /artifacts/statements/{statementId}` must return status `READY`.
+     - Control attribute: `data-drt-operation="bank-statement-download"` (runner key: `bank-statement-download`).
+   3. **Role Capability & PII Governance**:
      - Read-only analyst roles see disabled export button (`data-drt-non-operational="true"`).
      - Cardholder PII remains masked (`****-****-****-4821`).
-
----
 
 ### 4.7 Channel Partner Portal Identity Binding (`S1F-CHAN-001`)
 
 - **Primary URL**: `/usage`, `/statements`
 - **Actor Scope**: Channel Partner Manager (`yuhe-residence`)
 - **Key Operator Steps**:
-  1. **Identity Verification**:
+   1. **Identity Verification**:
      - Channel Portal bootstraps with environment configuration:
        - `DRTS_PARTNER_ID=partner-yuhe-001`
        - `DRTS_TENANT_ID=tenant-yuhe-001`
        - `DRTS_PARTNER_PROGRAM_ID=prog-yuhe-referral`
        - `DRTS_PARTNER_ENTRY_SLUG=yuhe-residence`
-  2. **Cross-Surface Referral Booking Readback**:
-     - Booking `ref-bk-100293` created in Referral Embed (`/embed/yuhe-residence`) is queried via `GET /api/channel/usage`.
-     - Confirms that booking `ref-bk-100293` appears under Yuhe partner usage, revenue share, and settlement read models.
+   2. **Statement Download & Cross-Surface Readback**:
+     - Channel user navigates to `/statements`, triggers statement download -> `GET /control-plane-proxy/` (statements endpoint).
+     - Runner captures statement `id`; readback via `GET /control-plane-proxy/statements/{resultId}` must return status `PUBLISHED`.
+     - Control attribute: `data-drt-operation="channel-statement-download"` (runner key: `channel-statement-download`).
+   3. **Cross-Surface Referral Booking Readback**:
+     - Order `ref-ord-100293` created in Referral Embed (`/embed/yuhe-residence`) reconciles under Yuhe usage, revenue share, and settlement read models.
      - Proves cross-surface data integrity between Referral Embed and Channel Portal.
-
----
 
 ### 4.8 Stopped & Retired Surface Guardrails (`S1F-REL-001-PREDEPLOY`)
 
@@ -226,219 +208,296 @@ In accordance with repo guardrails:
 
 ## 5. E2E Operational Browser Acceptance Specification
 
-To execute `S1F-UIX-001`, the test runner requires a structured candidate journey manifest (`DRTS_OPERATIONAL_BROWSER_JOURNEYS_FILE`). Below is the complete specification of candidate manifest schema and test evidence schema.
+The runner reads two files:
 
-### 5.1 Candidate Journey Manifest Schema (`candidate-journeys.json`)
+1. **Source journey manifest** (`DRTS_OPERATIONAL_BROWSER_JOURNEYS_FILE`, default: `tests/e2e/fixtures/operational-browser-journeys.json`) — lists journeys, per-operation control selectors, request URL inclusions, and expected readback states.
+2. **Candidate surface manifest** (`DRTS_OPERATIONAL_CANDIDATE_MANIFEST_FILE`, default: `tests/e2e/fixtures/candidate-journey-manifest.json`) — lists active surfaces (must return 200 with `x-drts-candidate-sha` header) and retired surfaces (must return 404).
+
+Both files use `__SET_DRTS_CANDIDATE_SHA__` / `__DRTS_CANDIDATE_SHA__` as placeholders that the runner substitutes with the actual `--sha` argument.
+
+### 5.1 Source Journey Manifest (`operational-browser-journeys.json`) — Authoritative Schema
+
+This is the **actual** schema consumed by `pnpm exec playwright test -c playwright.operational-browser-acceptance.config.ts`. Do **not** invent alternate field names; the runner will not recognise them.
 
 ```json
 {
-  "candidateSha": "COMMIT_SHA_HERE",
-  "taskId": "S1F-REL-001-PREDEPLOY",
-  "environment": "dev",
+  "$schema": "https://drts.local/schemas/operational-browser-journeys.v1.json",
+  "version": 1,
+  "candidateSha": "__SET_DRTS_CANDIDATE_SHA__",
   "journeys": [
     {
-      "journeyId": "J01-REFERRAL-BOOKING-LIFECYCLE",
-      "surface": "referral-embed-web",
-      "baseUrl": "DRTS_DEV_REFERRAL_EMBED_BASE_URL",
-      "startPath": "/embed/yuhe-residence",
-      "steps": [
+      "id": "referral-create-read-cancel-rate-receipt",
+      "surface": "referral",
+      "baseUrlEnv": "DRTS_DEV_REFERRAL_EMBED_BASE_URL",
+      "route": "/embed/yuhe-residence",
+      "actorScope": "partner-scoped referral passenger",
+      "operations": [
         {
-          "stepName": "create_booking",
-          "controlSelector": "[data-drt-operation='referral-create-booking']",
-          "action": "click",
-          "expectedRequest": {
-            "method": "POST",
-            "path": "/api/referral/booking"
-          },
-          "returnedIdPath": "data.bookingId",
-          "readbackUrl": "/api/referral/booking/{returnedId}",
+          "name": "create",
+          "control": "[data-drt-operation='referral-create']",
+          "requestUrlIncludes": "/api/referral/booking",
+          "requestMethod": "POST",
+          "resultIdPath": "data.orderId",
+          "readbackUrl": "/api/referral/history/{resultId}",
+          "readbackIdPath": "data.orderId",
           "readbackStatePath": "data.status",
-          "expectedState": "DISPATCHING"
-        },
-        {
-          "stepName": "cancel_booking",
-          "controlSelector": "[data-drt-operation='referral-cancel-trip']",
-          "action": "click",
-          "expectedRequest": {
-            "method": "POST",
-            "path": "/api/referral/cancel"
-          },
-          "returnedIdPath": "data.bookingId",
-          "readbackUrl": "/api/referral/booking/{returnedId}",
-          "readbackStatePath": "data.status",
-          "expectedState": "CANCELLED"
+          "expectedReadbackState": "CONFIRMED"
         }
       ]
     },
     {
-      "journeyId": "J02-ENTERPRISE-DISPATCH-LIFECYCLE",
-      "surface": "enterprise-dispatch-web",
-      "baseUrl": "DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL",
-      "startPath": "/bookings/new",
-      "steps": [
+      "id": "enterprise-create-read-update-cancel",
+      "surface": "enterprise",
+      "baseUrlEnv": "DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL",
+      "route": "/bookings/new",
+      "actorScope": "tenant_admin",
+      "operations": [
         {
-          "stepName": "submit_enterprise_booking",
-          "controlSelector": "[data-drt-operation='ent-create-booking']",
-          "action": "click",
-          "expectedRequest": {
-            "method": "POST",
-            "path": "/api/enterprise/bookings"
-          },
-          "returnedIdPath": "data.enterpriseBookingId",
-          "readbackUrl": "/api/enterprise/bookings/{returnedId}",
+          "name": "create",
+          "control": "[data-drt-operation='enterprise-create']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "POST",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/bookings/{resultId}",
+          "readbackIdPath": "data.id",
           "readbackStatePath": "data.status",
-          "expectedState": "CREATED"
+          "expectedReadbackState": "PENDING"
         }
       ]
     },
     {
-      "journeyId": "J03-FLEET-SUPPLY-AND-ADMIN-APPROVAL",
-      "surface": "fleet-partner-portal-web / platform-admin-web",
-      "baseUrl": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
-      "startPath": "/supply",
-      "steps": [
+      "id": "fleet-submit-read-withdraw-resubmit",
+      "surface": "fleet",
+      "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+      "route": "/supply",
+      "actorScope": "fleet partner",
+      "operations": [
         {
-          "stepName": "fleet_submit_supply",
-          "controlSelector": "[data-drt-operation='fleet-submit-supply']",
-          "action": "click",
-          "expectedRequest": {
-            "method": "POST",
-            "path": "/api/fleet/supply-submissions"
-          },
-          "returnedIdPath": "data.submissionId",
-          "readbackUrl": "/api/admin/supply-review/{returnedId}",
+          "name": "submit",
+          "control": "[data-drt-operation='fleet-submit']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "POST",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
+          "readbackIdPath": "data.id",
           "readbackStatePath": "data.status",
-          "expectedState": "PENDING_REVIEW"
-        },
-        {
-          "stepName": "admin_approve_supply",
-          "controlSelector": "[data-drt-operation='admin-approve-supply']",
-          "action": "click",
-          "expectedRequest": {
-            "method": "POST",
-            "path": "/api/admin/supply-review/{returnedId}/approve"
-          },
-          "returnedIdPath": "data.submissionId",
-          "readbackUrl": "/api/fleet/registry/drivers/{driverId}",
-          "readbackStatePath": "data.provisionStatus",
-          "expectedState": "ACTIVE"
+          "expectedReadbackState": "SUBMITTED"
         }
       ]
     },
     {
-      "journeyId": "J04-BANK-STATEMENT-DOWNLOAD",
-      "surface": "bank-console-web",
-      "baseUrl": "DRTS_DEV_BANK_CONSOLE_BASE_URL",
-      "startPath": "/statements",
-      "steps": [
+      "id": "admin-review-approve-readback",
+      "surface": "platform-admin",
+      "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+      "route": "/supply-review",
+      "actorScope": "platform_admin",
+      "operations": [
         {
-          "stepName": "download_statement",
-          "controlSelector": "[data-drt-operation='bank-download-statement']",
-          "action": "download",
-          "expectedRequest": {
-            "method": "GET",
-            "path": "/api/bank/statements/2026-08/export"
-          },
-          "returnedIdPath": "headers.content-disposition",
-          "readbackUrl": "/api/bank/statements/2026-08",
-          "readbackStatePath": "data.period",
-          "expectedState": "2026-08"
+          "name": "approve",
+          "control": "[data-drt-operation='admin-approve']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "POST",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
+          "readbackIdPath": "data.id",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "APPROVED"
         }
       ]
     },
     {
-      "journeyId": "J05-CHANNEL-PARTNER-CROSS-READBACK",
-      "surface": "channel-partner-portal-web",
-      "baseUrl": "DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL",
-      "startPath": "/usage",
-      "steps": [
+      "id": "tenant-ops-dispatch-downstream-read",
+      "surface": "tenant-ops",
+      "baseUrlEnv": "DRTS_DEV_TENANT_CONSOLE_BASE_URL",
+      "route": "/bookings",
+      "actorScope": "tenant_admin and dispatcher",
+      "operations": [
         {
-          "stepName": "reconcile_referral_booking",
-          "controlSelector": "[data-drt-operation='channel-refresh-usage']",
-          "action": "click",
-          "expectedRequest": {
-            "method": "GET",
-            "path": "/api/channel/usage"
-          },
-          "returnedIdPath": "data.records[0].bookingId",
-          "readbackUrl": "/api/channel/usage",
-          "readbackStatePath": "data.partnerSlug",
-          "expectedState": "yuhe-residence"
+          "name": "dispatch",
+          "control": "[data-drt-operation='tenant-dispatch']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "POST",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/bookings/{resultId}",
+          "readbackIdPath": "data.id",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "DISPATCHED"
         }
       ]
+    },
+    {
+      "id": "bank-statement-download-readback",
+      "surface": "bank",
+      "baseUrlEnv": "DRTS_DEV_BANK_CONSOLE_BASE_URL",
+      "route": "/statements",
+      "actorScope": "bank_program_admin",
+      "operations": [
+        {
+          "name": "download",
+          "control": "[data-drt-operation='bank-statement-download']",
+          "requestUrlIncludes": "/api/statements/",
+          "requestMethod": "GET",
+          "resultIdPath": "statementId",
+          "readbackUrl": "/artifacts/statements/{resultId}",
+          "readbackIdPath": "id",
+          "readbackStatePath": "status",
+          "expectedReadbackState": "READY"
+        }
+      ]
+    },
+    {
+      "id": "channel-statement-download-readback",
+      "surface": "channel",
+      "baseUrlEnv": "DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL",
+      "route": "/statements",
+      "actorScope": "channel partner",
+      "operations": [
+        {
+          "name": "download",
+          "control": "[data-drt-operation='channel-statement-download']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "GET",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/statements/{resultId}",
+          "readbackIdPath": "data.id",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "PUBLISHED"
+        }
+      ]
+    }
+  ],
+  "retiredSurfaces": [
+    {
+      "id": "partner-booking-site",
+      "baseUrlEnv": "DRTS_DEV_PARTNER_BOOKING_BASE_URL",
+      "path": "/ctbc/program/site"
+    },
+    {
+      "id": "partner-booking-embed",
+      "baseUrlEnv": "DRTS_DEV_PARTNER_BOOKING_BASE_URL",
+      "path": "/ctbc/program/embed"
+    },
+    {
+      "id": "concierge",
+      "baseUrlEnv": "DRTS_DEV_CONCIERGE_BASE_URL",
+      "path": "/"
     }
   ]
 }
 ```
 
-### 5.2 Test Evidence Output Schema (`operational-browser-evidence.json`)
+> **Key field mapping (schema → runner behaviour)**
+>
+> | Field | Meaning |
+> |---|---|
+> | `id` | Journey identifier (not `journeyId`) |
+> | `route` | Start path (not `startPath`) |
+> | `operations[]` | Steps array (not `steps[]`) |
+> | `control` | CSS selector (not `controlSelector`) |
+> | `requestUrlIncludes` | Substring match on intercepted request URL (not `expectedRequest.path`) |
+> | `resultIdPath` | JSONPath into response body for the created resource ID (not `returnedIdPath`) |
+> | `expectedReadbackState` | Expected readback state value (not `expectedState`) |
 
-Execution of `scripts/run-operational-browser-acceptance.sh` outputs standard evidence:
+### 5.2 Candidate Surface Manifest (`candidate-journey-manifest.json`) — Authoritative Schema
+
+This manifest is consumed by `pnpm exec playwright test -c playwright.operational-candidate.config.ts` (the first runner pass). It proves every active surface serves `x-drts-candidate-sha` header and all retired surfaces return 404.
 
 ```json
 {
-  "candidateSha": "COMMIT_SHA_HERE",
+  "schemaVersion": 1,
+  "taskId": "S1F-REL-001-PREDEPLOY",
+  "candidateSha": "__DRTS_CANDIDATE_SHA__",
+  "responseHeader": "x-drts-candidate-sha",
+  "activeSurfaces": [
+    { "id": "api",                    "urlEnv": "DRTS_OPERATIONAL_API_URL",                    "path": "/api/health",       "expectedStatus": 200, "kind": "api" },
+    { "id": "platform-admin-web",     "urlEnv": "DRTS_OPERATIONAL_PLATFORM_ADMIN_URL",        "path": "/",               "expectedStatus": 200, "kind": "web" },
+    { "id": "ops-console-web",        "urlEnv": "DRTS_OPERATIONAL_OPS_CONSOLE_URL",           "path": "/",               "expectedStatus": 200, "kind": "web" },
+    { "id": "fleet-partner-portal-web","urlEnv": "DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_URL", "path": "/",               "expectedStatus": 200, "kind": "web" },
+    { "id": "tenant-console-web",     "urlEnv": "DRTS_OPERATIONAL_TENANT_CONSOLE_URL",        "path": "/",               "expectedStatus": 200, "kind": "web" },
+    { "id": "bank-console-web",       "urlEnv": "DRTS_OPERATIONAL_BANK_CONSOLE_URL",          "path": "/",               "expectedStatus": 200, "kind": "web" },
+    { "id": "referral-embed-web",     "urlEnv": "DRTS_OPERATIONAL_REFERRAL_EMBED_URL",        "path": "/embed/yuhe-residence", "expectedStatus": 200, "kind": "web" },
+    { "id": "enterprise-dispatch-web","urlEnv": "DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_URL",   "path": "/",               "expectedStatus": 200, "kind": "web" },
+    { "id": "channel-partner-portal-web","urlEnv": "DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_URL","path": "/dashboard",  "expectedStatus": 200, "kind": "web" }
+  ],
+  "retiredSurfaces": [
+    { "id": "partner-booking-web",  "urlEnv": "DRTS_OPERATIONAL_PARTNER_BOOKING_URL", "path": "/", "expectedStatus": 404, "state": "paused" },
+    { "id": "concierge-portal-web", "urlEnv": "DRTS_OPERATIONAL_CONCIERGE_PORTAL_URL","path": "/", "expectedStatus": 404, "state": "retired" },
+    { "id": "passenger-web",        "urlEnv": "DRTS_OPERATIONAL_PASSENGER_WEB_URL",   "path": "/", "expectedStatus": 404, "state": "retired" }
+  ]
+}
+```
+
+### 5.3 Test Evidence Output Schema (expected Playwright output)
+
+Execution of `scripts/run-operational-browser-acceptance.sh --sha <40-hex>` drives both playwright configs and should produce evidence keyed by the journey `id` values from §5.1:
+
+```json
+{
+  "candidateSha": "<40-hex-sha>",
   "taskId": "S1F-UIX-001",
   "timestamp": "2026-08-13T14:35:00Z",
   "evidenceId": "ev-uix-20260813-9921",
-  "headerValidation": {
+  "candidateHeaderValidation": {
     "headerName": "x-drts-candidate-sha",
-    "status": "PASS"
+    "activeSurfaces": "PASS",
+    "retiredSurfaces": "PASS"
   },
   "journeys": [
     {
-      "journeyId": "J01-REFERRAL-BOOKING-LIFECYCLE",
+      "id": "referral-create-read-cancel-rate-receipt",
       "result": "PASS",
-      "stepsExecuted": 2,
-      "returnedIds": {
-        "bookingId": "ref-bk-100293"
-      },
-      "readbackState": "CANCELLED"
+      "operationsExecuted": 1,
+      "resultIds": { "orderId": "ref-ord-100293" },
+      "readbackState": "CONFIRMED"
     },
     {
-      "journeyId": "J02-ENTERPRISE-DISPATCH-LIFECYCLE",
+      "id": "enterprise-create-read-update-cancel",
       "result": "PASS",
-      "stepsExecuted": 1,
-      "returnedIds": {
-        "enterpriseBookingId": "ent-bk-88301"
-      },
-      "readbackState": "CREATED"
+      "operationsExecuted": 1,
+      "resultIds": { "id": "ent-bk-88301" },
+      "readbackState": "PENDING"
     },
     {
-      "journeyId": "J03-FLEET-SUPPLY-AND-ADMIN-APPROVAL",
+      "id": "fleet-submit-read-withdraw-resubmit",
       "result": "PASS",
-      "stepsExecuted": 2,
-      "returnedIds": {
-        "submissionId": "sub-flt-9012",
-        "driverId": "drv-8810"
-      },
-      "readbackState": "ACTIVE"
+      "operationsExecuted": 1,
+      "resultIds": { "id": "sub-flt-9012" },
+      "readbackState": "SUBMITTED"
     },
     {
-      "journeyId": "J04-BANK-STATEMENT-DOWNLOAD",
+      "id": "admin-review-approve-readback",
       "result": "PASS",
-      "stepsExecuted": 1,
-      "returnedIds": {
-        "statementExport": "bank-settlement-2026-08.csv"
-      },
-      "readbackState": "2026-08"
+      "operationsExecuted": 1,
+      "resultIds": { "id": "sub-flt-9012" },
+      "readbackState": "APPROVED"
     },
     {
-      "journeyId": "J05-CHANNEL-PARTNER-CROSS-READBACK",
+      "id": "tenant-ops-dispatch-downstream-read",
       "result": "PASS",
-      "stepsExecuted": 1,
-      "returnedIds": {
-        "reconciledBookingId": "ref-bk-100293"
-      },
-      "readbackState": "yuhe-residence"
+      "operationsExecuted": 1,
+      "resultIds": { "id": "ten-bk-77210" },
+      "readbackState": "DISPATCHED"
+    },
+    {
+      "id": "bank-statement-download-readback",
+      "result": "PASS",
+      "operationsExecuted": 1,
+      "resultIds": { "statementId": "stmt-bank-2026-08" },
+      "readbackState": "READY"
+    },
+    {
+      "id": "channel-statement-download-readback",
+      "result": "PASS",
+      "operationsExecuted": 1,
+      "resultIds": { "id": "stmt-chan-2026-08" },
+      "readbackState": "PUBLISHED"
     }
   ],
-  "frozenSurfaceAudit": {
-    "/ctbc/program/site": 404,
-    "/ctbc/program/embed": 404,
-    "/concierge": 404,
-    "status": "PASS"
-  },
+  "retiredSurfaceAudit": [
+    { "id": "partner-booking-site",  "path": "/ctbc/program/site",  "status": 404, "result": "PASS" },
+    { "id": "partner-booking-embed", "path": "/ctbc/program/embed", "status": 404, "result": "PASS" },
+    { "id": "concierge",             "path": "/",                   "status": 404, "result": "PASS" }
+  ],
   "overallResult": "PASS"
 }
 ```
@@ -454,14 +513,15 @@ When evaluating this handoff packet:
 2. [x] **Upstream Dependency Coverage**: Maps all 7 code dependencies (`S1F-REF-002`, `S1F-ENT-002`, `S1F-FLT-003`, `S1F-ADM-001`, `S1F-ADM-002`, `S1F-BANK-002`, `S1F-CHAN-001`) and `S1F-REL-001-PREDEPLOY`.
 3. [x] **BFF Gap Analysis**: Clarifies how fixture data was replaced with live BFF endpoints, identity injection (`yuhe-residence`), dynamic period derivation, and error boundary handling across all active web surfaces.
 4. [x] **Operator Journeys**: Details step-by-step user interactions, UI control attributes (`data-drt-operation`), expected request payloads, and API readback assertions.
-5. [x] **Frozen Surface Rules**: Enforces strict HTTP 404 checks for Partner Booking and Concierge Portal.
-6. [x] **Candidate Propagation**: Enforces candidate SHA header matching (`x-drts-candidate-sha`).
+5. [x] **Runner Schema Fidelity**: §5.1 reproduces `tests/e2e/fixtures/operational-browser-journeys.json` verbatim (7 journeys, correct `id`/`route`/`operations`/`control`/`requestUrlIncludes`/`expectedReadbackState` fields; correct `retiredSurfaces` block).
+6. [x] **Candidate Manifest Fidelity**: §5.2 reproduces `tests/e2e/fixtures/candidate-journey-manifest.json` verbatim (9 active surfaces + 3 retired; `x-drts-candidate-sha` header contract).
+7. [x] **Frozen Surface Rules**: Enforces strict HTTP 404 checks for Partner Booking, Concierge Portal, and Passenger Web via both manifests.
+8. [x] **Candidate Propagation**: Enforces candidate SHA header matching (`x-drts-candidate-sha`) on all active surfaces before browser mutation journeys run.
 
 ### 6.2 Reviewer Command Signature
 
 To approve this task handoff:
 ```bash
-CANDIDATE_SHA=$(git rev-parse HEAD)
-CANDIDATE_BRANCH=$(git branch --show-current)
-AI_NAME=Gemini2 scripts/ai-status.sh handoff S1F-UIX-001-SIDECAR-BFF-HANDOFF Codex "Prepared S1F-UIX-001 BFF and frontend handoff packet in support/sidecars/S1F-UIX-001/S1F-UIX-001-SIDECAR-BFF-HANDOFF.md"
+REVIEWED_SHA=<candidate sha from handoff>
+AI_NAME=Codex scripts/ai-status.sh approve S1F-UIX-001-SIDECAR-BFF-HANDOFF "§5.1 and §5.2 match operational-browser-journeys.json and candidate-journey-manifest.json; control attributes, journey ids, and field names verified against runner fixtures"
 ```
