@@ -1,12 +1,9 @@
 name: CI (integration trunk)
 
-# v4: post-merge integration suite on `dev`. Triggered by `push` only —
-# PR-time gating is handled by ci.yml's 3 named checks (Commit trailers /
-# Runtime mirror guard / Smoke acceptance).
-#
-# A green ci-integ on dev HEAD is the prerequisite for nightly-publish.yml
-# to cut the next publish/v<date> snapshot. Without ci-integ green,
-# nightly-publish skips with a warning.
+# Runs the full integration candidate on pull requests to `dev`, then repeats
+# it on the merged `dev` head. `ci-integ` is a required PR check; a green dev
+# result remains the prerequisite for nightly-publish.yml to cut the next
+# publish/v<date> snapshot.
 
 on:
   push:
