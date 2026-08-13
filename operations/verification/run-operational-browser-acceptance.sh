@@ -59,4 +59,3 @@ export DRTS_OPERATIONAL_PASSENGER_WEB_URL="$DRTS_DEV_PASSENGER_BASE_URL"
 # execute the higher-level browser mutations and readbacks against those same URLs.
 npx playwright test -c playwright.operational-candidate.config.ts "$@"
 npx playwright test -c playwright.operational-browser-acceptance.config.ts "$@"
-
