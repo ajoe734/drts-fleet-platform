@@ -24,7 +24,9 @@ ROOT = Path(__file__).resolve().parents[1]
 ORCHESTRATOR_DIR = ROOT / ".orchestrator"
 DEFAULT_CONFIG_PATH = ORCHESTRATOR_DIR / "config.json"
 LOCAL_CONFIG_PATH = ORCHESTRATOR_DIR / "config.local.json"
-TASK_BRIEFS_DIR = ORCHESTRATOR_DIR / "task-briefs"
+# Task briefs are regenerated from canonical task state, so they must never
+# overwrite the small set of authored briefs tracked alongside source code.
+TASK_BRIEFS_DIR = ORCHESTRATOR_DIR / "generated" / "task-briefs"
 EVIDENCE_DIR = ORCHESTRATOR_DIR / "evidence"
 AI_GUIDE_PATH = ROOT / "AI_COLLABORATION_GUIDE.md"
 

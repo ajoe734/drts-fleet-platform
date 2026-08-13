@@ -43,6 +43,14 @@ class CommandExistsTests(unittest.TestCase):
                 self.assertEqual(common.command_exists("gemini", search_roots=[workspace_root]), str(local_cli))
 
 
+class TaskBriefPathTests(unittest.TestCase):
+    def test_generated_briefs_do_not_share_the_tracked_source_directory(self) -> None:
+        self.assertEqual(
+            common.task_brief_path("TASK-001"),
+            common.ORCHESTRATOR_DIR / "generated" / "task-briefs" / "TASK-001.md",
+        )
+
+
 class JsonlAppendTests(unittest.TestCase):
     def test_append_jsonl_keeps_every_line_parseable_under_concurrency(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
