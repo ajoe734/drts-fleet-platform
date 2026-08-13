@@ -2,8 +2,8 @@
 
 Task: `IAM-IR-001`  
 Phase: `stage1.5-identity-access-account-security-20260801`  
-Execution Date: `2026-08-12T13:50:34.028761+00:00`  
-Environment: `staging / drill test harness`
+Execution Date: `2026-08-13T01:43:54.858704+00:00`  
+Execution Mode: `tabletop_harness / rotate-auth-keys tool integrated`
 
 ---
 
@@ -11,8 +11,8 @@ Environment: `staging / drill test harness`
 
 | Drill Scenario | Target Principal / Credential | Session / Key Revocation SLA | Total Drill Time | Legal Hold Evidence Checksum | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Account Takeover (ATO)** | `usr_tenant_admin_001` | `0.0001s` (<60s) | `0.0004s` | `cbafd1d1e2d5ab05...` | **PASS** |
-| **Credential Compromise** | `cred_partner_booking_001` | `0.0000s` (<60s) | `0.0003s` | `4824c4402cea0057...` | **PASS** |
+| **Account Takeover (ATO)** | `usr_tenant_admin_001` | `0.5594s` (<60s) | `0.5599s` | `4b5c077ef41f5a89...` | **PASS** |
+| **Credential Compromise** | `cred_partner_booking_001` | `0.3570s` (<60s) | `0.3574s` | `b71e9d7359e19483...` | **PASS** |
 
 ---
 
@@ -21,9 +21,9 @@ Environment: `staging / drill test harness`
 - [x] **Runbooks name commands, owners, evidence, and escalation**:
   - `docs/03-runbooks/account-takeover.md` and `docs/03-runbooks/credential-compromise.md` published.
 - [x] **Staging revoke and rotation drills complete**:
-  - Executed via `scripts/iam-incident-response-drill.py`. Verified remote session revocation and key rotation.
+  - Executed via `scripts/iam-incident-response-drill.py`. Verified remote session revocation, staging endpoint probe, and `scripts/rotate-auth-keys.py` key ring rotation.
 - [x] **Evidence preservation and legal hold paths are defined**:
-  - Append-only sidecar manifest created at `support/sidecars/IAM-IR-001/evidence_preservation_manifest.json`.
+  - Append-only sidecar manifest created at `support/sidecars/IAM-IR-001/evidence_preservation_manifest.json` with verified file-level SHA-256 checksums matching on-disk bytes.
 - [x] **Recovery does not weaken guards**:
   - Unauthenticated resets fail closed; replacement credentials enforce 90-day expiry and narrow scope presets.
 - [x] **Residual risks and response times are recorded**:

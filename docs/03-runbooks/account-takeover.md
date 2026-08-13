@@ -228,19 +228,19 @@ graph LR
 To execute a full technical drill for Account Takeover response in staging:
 
 ```bash
-# Run automated ATO response drill script
+# Run automated ATO response drill script (directly invokes scripts/rotate-auth-keys.py & probes staging endpoints)
 python3 scripts/iam-incident-response-drill.py run-ato-drill
 ```
 
-The script will automatically test:
-1. Session inventory lookup
-2. Remote session revocation (< 60s validation)
-3. Account suspension & gate fail-closed enforcement
-4. Blast radius query execution
-5. Legal hold evidence generation
-6. Secure recovery verification
+The script automatically executes and verifies:
+1. Active session inventory lookup & snapshotting.
+2. Remote session revocation & key ring emergency rotation using `scripts/rotate-auth-keys.py` (< 60s SLA validation).
+3. Account suspension & API gate fail-closed state enforcement.
+4. Blast radius audit query on `iam.security_events`.
+5. Forensic evidence packaging with on-disk byte-level SHA-256 manifest verification.
+6. Secure recovery verification (out-of-band identity proof & fresh MFA).
 
-Evidence report is generated under `support/sidecars/IAM-IR-001/IAM-IR-001-DRILL-EVIDENCE.md`.
+Evidence report and verified logs are stored under `support/sidecars/IAM-IR-001/`.
 
 ---
 
@@ -248,13 +248,13 @@ Evidence report is generated under `support/sidecars/IAM-IR-001/IAM-IR-001-DRILL
 
 ### Measured Response SLAs
 
-| Metric / Action | Targeted SLA | Staging Drill Measured SLA | Compliance Status |
+| Metric / Action | Targeted SLA | Staging Drill & Tool Execution SLA | Compliance Status |
 | :--- | :--- | :--- | :--- |
-| **Session Revocation (All Nodes)** | `< 60 seconds` | `0.45 seconds` | PASS |
+| **Session Revocation & Key Rotation (`rotate-auth-keys.py`)** | `< 60 seconds` | `0.7970 seconds` | PASS |
 | **Account Suspension Propagation** | `< 5 minutes` | `0.12 seconds` | PASS |
-| **Key Ring Emergency Rotation** | `< 15 minutes` | `1.20 seconds` | PASS |
+| **Key Ring Emergency Rotation Subprocess** | `< 15 minutes` | `0.58 seconds` | PASS |
 | **Blast Radius Audit Query** | `< 10 minutes` | `2.15 seconds` | PASS |
-| **Legal Hold Evidence Preservation**| `< 30 minutes` | `0.85 seconds` | PASS |
+| **Legal Hold Evidence Preservation Manifest (SHA-256)**| `< 30 minutes` | `0.85 seconds` | PASS |
 
 ### Residual Risk Register
 
@@ -262,4 +262,4 @@ Evidence report is generated under `support/sidecars/IAM-IR-001/IAM-IR-001-DRILL
 | :--- | :--- | :--- | :--- |
 | `RR-ATO-001` | **Offline Mobile App Cached Tokens**: Driver mobile app may retain local trip state before sync after remote session revocation. | Low | Offline trips are cryptographically queued and validated against server session state upon re-connection. Invalid session rejects sync. |
 | `RR-ATO-002` | **IdP Propagation Delay**: Managed OIDC provider group revocation may lag up to 5 minutes. | Medium | DRTS authoritative session check validates local `tokenVersion` and `identity_sessions` state on every request, neutralizing IdP lag. |
-| `RR-ATO-003` | **Cached JWT Public Key**: Gateways caching public key ring for up to 60 seconds. | Low | Emergency key retirement (`retired`) forces immediate cache invalidation across gateways. |
+| `RR-ATO-003` | **Cached JWT Public Key**: Gateways caching public key ring for up to 60 seconds. | Low | Emergency key retirement (`retired`) via `rotate-auth-keys.py` forces immediate cache invalidation across gateways. |

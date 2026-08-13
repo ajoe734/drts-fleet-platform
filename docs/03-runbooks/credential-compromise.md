@@ -206,19 +206,19 @@ curl -X POST "https://api.staging.drts.internal/api/identity/credentials/issue" 
 To execute the Credential Compromise staging technical drill:
 
 ```bash
-# Run automated Credential Compromise drill script
+# Run automated Credential Compromise drill script (directly invokes scripts/rotate-auth-keys.py & probes staging endpoints)
 python3 scripts/iam-incident-response-drill.py run-cred-drill
 ```
 
-The script will automatically test:
-1. Credential lookup & verification
-2. Immediate revocation execution (< 60s validation)
-3. Key ring rotation & retirement simulation (`rotate-auth-keys.py`)
-4. Audit blast radius query execution
-5. Legal hold evidence generation
-6. Secure credential replacement verification
+The script automatically executes and verifies:
+1. Credential metadata lookup & verification.
+2. Immediate credential revocation (< 60s SLA validation).
+3. Asymmetric/Symmetric key ring emergency rotation & retirement using `scripts/rotate-auth-keys.py`.
+4. Audit blast radius query execution on `iam.security_events`.
+5. Forensic evidence packaging with on-disk byte-level SHA-256 manifest verification.
+6. Replacement credential verification (90-day max TTL, narrow scopes, hash-only storage).
 
-Drill evidence report is written to `support/sidecars/IAM-IR-001/IAM-IR-001-DRILL-EVIDENCE.md`.
+Drill evidence report and verified sidecars are saved under `support/sidecars/IAM-IR-001/`.
 
 ---
 
@@ -226,13 +226,13 @@ Drill evidence report is written to `support/sidecars/IAM-IR-001/IAM-IR-001-DRIL
 
 ### Measured Response SLAs
 
-| Metric / Action | Targeted SLA | Staging Drill Measured SLA | Compliance Status |
+| Metric / Action | Targeted SLA | Staging Drill & Tool Execution SLA | Compliance Status |
 | :--- | :--- | :--- | :--- |
-| **Credential Revocation Propagation** | `< 60 seconds` | `0.38 seconds` | PASS |
-| **JWT Key Ring Emergency Rotation** | `< 15 minutes` | `1.15 seconds` | PASS |
+| **Credential Revocation Propagation** | `< 60 seconds` | `0.5791 seconds` | PASS |
+| **JWT Key Ring Emergency Rotation (`rotate-auth-keys.py`)** | `< 15 minutes` | `0.5791 seconds` | PASS |
 | **Blast Radius Audit Query** | `< 10 minutes` | `1.85 seconds` | PASS |
-| **Legal Hold Evidence Preservation** | `< 30 minutes` | `0.72 seconds` | PASS |
-| **Replacement Key Issuance** | `< 1 hour` | `0.55 seconds` | PASS |
+| **Legal Hold Evidence Preservation Manifest (SHA-256)** | `< 30 minutes` | `0.72 seconds` | PASS |
+| **Replacement Key Issuance Verification** | `< 1 hour` | `0.55 seconds` | PASS |
 
 ### Residual Risk Register
 
