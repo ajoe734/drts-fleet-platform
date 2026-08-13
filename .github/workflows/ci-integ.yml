@@ -428,6 +428,10 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
+      # This runner owns its web server. Parallel E2E jobs cannot consume the
+      # API build produced by cross-surface-e2e's ephemeral filesystem.
+      - name: Build API
+        run: pnpm --filter @drts/api build
       - name: Run deterministic 39-route UI suite
         run: |
           PGPASSWORD=postgres psql \
