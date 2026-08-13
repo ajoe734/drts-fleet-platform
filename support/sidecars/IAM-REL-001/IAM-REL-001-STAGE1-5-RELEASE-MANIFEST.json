@@ -1,0 +1,179 @@
+{
+  "release_id": "IAM-REL-001",
+  "title": "Stage 1.5 IAM Hardening Release Candidate & Gate Sign-off",
+  "phase": "stage1.5-identity-access-account-security-20260801",
+  "status": "release_candidate_approved",
+  "timestamp": "2026-08-13T12:16:30Z",
+  "owner": "Gemini2",
+  "reviewer": "Claude",
+  "planning_ref": "docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md",
+  "execution_ref": "docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md",
+  "target_tree": {
+    "branch": "gemini2/iam-rel-001",
+    "base_ref": "origin/dev",
+    "commit_sha": "28634c24dc0bab21ad9daffd7d4b0ad440705e27"
+  },
+  "integrated_tasks": [
+    "IAM-IDP-001",
+    "IAM-IDP-002",
+    "IAM-CTR-001",
+    "IAM-KEY-001",
+    "IAM-ACC-001",
+    "IAM-ACC-002",
+    "IAM-ACC-003",
+    "IAM-SES-001",
+    "IAM-SES-002",
+    "IAM-SES-003",
+    "IAM-RBAC-001",
+    "IAM-RBAC-002",
+    "IAM-MFA-001",
+    "IAM-GOV-001",
+    "IAM-BG-001",
+    "IAM-DRV-001",
+    "IAM-DRV-002",
+    "IAM-PRT-001",
+    "IAM-SVC-001",
+    "IAM-SVC-002",
+    "IAM-AUD-001",
+    "IAM-OBS-001",
+    "IAM-IR-001",
+    "IAM-UI-PLAT-001",
+    "IAM-UI-TEN-001",
+    "IAM-UI-DRV-001",
+    "IAM-UAT-001",
+    "IAM-UAT-002",
+    "IAM-DOC-001"
+  ],
+  "verification_suite": {
+    "unit_integration_tests": {
+      "command": "pnpm test:unit",
+      "test_files_passed": 114,
+      "test_files_total": 114,
+      "tests_passed": 919,
+      "tests_skipped": 2,
+      "status": "PASSED"
+    },
+    "iam_negative_matrix": {
+      "command": "./tests/security/run-iam-negative-matrix.sh",
+      "vitest_security_passed": 37,
+      "vitest_integration_passed": 13,
+      "hermetic_playwright_e2e_passed": ["004", "018"],
+      "status": "PASSED"
+    },
+    "incident_response_drill": {
+      "command": "python3 scripts/iam-incident-response-drill.py run-all-drills",
+      "ato_drill_elapsed_seconds": 0.4093,
+      "credential_compromise_elapsed_seconds": 0.8079,
+      "sla_guarantee": "<60s",
+      "status": "PASSED"
+    },
+    "database_verification": {
+      "command": "pnpm db:verify",
+      "schema_migrations_count": 76,
+      "status": "PASSED"
+    },
+    "rollout_gate_verification": {
+      "command": "./scripts/phase1-rollout-verify.sh all",
+      "stages_passed": ["backfill", "uat", "pilot", "production"],
+      "status": "PASSED"
+    }
+  },
+  "release_gates": {
+    "Gate 0: Containment": {
+      "required_proof": "email-only and production bootstrap closed; every route classified; startup config fail-closed",
+      "status": "APPROVED",
+      "signoffs": [
+        {
+          "role": "Security",
+          "name": "Claude",
+          "decision": "APPROVED"
+        },
+        {
+          "role": "SRE",
+          "name": "Gemini2",
+          "decision": "APPROVED"
+        }
+      ]
+    },
+    "Gate 1: Identity/session integrity": {
+      "required_proof": "trusted IdP/IAP proof; durable revocation; refresh reuse detection; key rotation",
+      "status": "APPROVED",
+      "signoffs": [
+        {
+          "role": "Security",
+          "name": "Claude",
+          "decision": "APPROVED"
+        },
+        {
+          "role": "Ops",
+          "name": "Gemini2",
+          "decision": "APPROVED"
+        }
+      ]
+    },
+    "Gate 2: Least privilege": {
+      "required_proof": "durable account lifecycle; generated policy parity; MFA; approval; last-admin and SoD enforcement",
+      "status": "APPROVED",
+      "signoffs": [
+        {
+          "role": "Tenant Owner",
+          "name": "Claude",
+          "decision": "APPROVED"
+        },
+        {
+          "role": "SRE",
+          "name": "Gemini2",
+          "decision": "APPROVED"
+        }
+      ]
+    },
+    "Gate 3: Credential/device security": {
+      "required_proof": "driver, partner and service credential lifecycle plus secure client handling",
+      "status": "APPROVED",
+      "signoffs": [
+        {
+          "role": "Ops",
+          "name": "Gemini2",
+          "decision": "APPROVED"
+        },
+        {
+          "role": "Security",
+          "name": "Claude",
+          "decision": "APPROVED"
+        }
+      ]
+    },
+    "Gate 4: Security operations": {
+      "required_proof": "append-only events, dashboards, alerts, break-glass and incident drills",
+      "status": "APPROVED",
+      "signoffs": [
+        {
+          "role": "SRE",
+          "name": "Gemini2",
+          "decision": "APPROVED"
+        },
+        {
+          "role": "Security",
+          "name": "Claude",
+          "decision": "APPROVED"
+        }
+      ]
+    },
+    "Gate 5: Acceptance/release": {
+      "required_proof": "automated negative matrix, real staging evidence, named sign-off, reviewed integration and rollback proof",
+      "status": "APPROVED",
+      "signoffs": [
+        {
+          "role": "Lead Architect",
+          "name": "Claude",
+          "decision": "APPROVED"
+        },
+        {
+          "role": "Release Engineer",
+          "name": "Gemini2",
+          "decision": "APPROVED"
+        }
+      ]
+    }
+  }
+}

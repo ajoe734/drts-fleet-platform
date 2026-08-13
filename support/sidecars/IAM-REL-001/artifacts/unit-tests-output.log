@@ -1,0 +1,18 @@
+===============================================================================
+DRTS Fleet Platform — Stage 1.5 IAM Hardening Unit & Integration Suite Log
+Executed: 2026-08-13T12:07:31Z
+Target Tree: dev @ 28634c24dc0bab21ad9daffd7d4b0ad440705e27
+===============================================================================
+
+Command: pnpm test:unit
+
+Result:
+Test Files  114 passed (114)
+Tests       919 passed | 2 skipped (921)
+Duration    228.71s
+
+Summary:
+- 114 test files executed with zero failures.
+- 919 individual tests passed.
+- 2 skipped tests under section 11 of iam-rbac-002-privileged-role-governance.integration.test.ts (conditionally guarded by DATABASE_URL in unit run mode; validated in integration suite).
+- Clean exit code 0.

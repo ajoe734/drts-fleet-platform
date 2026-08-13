@@ -1,0 +1,17 @@
+===============================================================================
+DRTS Fleet Platform — Stage 1.5 IAM Hardening Rollout Gate Verification Log
+Executed: 2026-08-13T12:16:02Z
+Target Tree: dev @ 28634c24dc0bab21ad9daffd7d4b0ad440705e27
+===============================================================================
+
+Command: ./scripts/phase1-rollout-verify.sh all
+
+Stages Completed:
+1. Backfill Assets & Database Verification: PASSED (76 migrations, seed lineage verified)
+2. UAT Gate: PASSED (@drts/contracts build/lint, @drts/api typecheck/lint, pnpm test:unit 114 files, @drts/api test 153 files)
+3. Pilot Metrics Gate: PASSED (read models and reporting outputs verified)
+4. Production Build Gate: PASSED (@drts/contracts build, @drts/control-plane-auth build, @drts/api build)
+
+Result:
+[done] phase1 rollout gate "all" completed
+Exit Code: 0
