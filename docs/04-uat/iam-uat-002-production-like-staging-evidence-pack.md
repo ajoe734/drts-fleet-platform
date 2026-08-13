@@ -6,8 +6,8 @@ Owner: `Gemini2`
 Reviewer: `Claude`  
 Execution Date: `2026-08-13T10:06:26Z`  
 Execution Environment: `local_hermetic_staging_harness` (with API port 3101 & DB integration; live GCP cloud staging deployment unprovisioned)  
-Architecture Plan: [`docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-uat-002/docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md)  
-Runbook Reference: [`docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-uat-002/docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md)
+Architecture Plan: [`docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`](../02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md)  
+Runbook Reference: [`docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md`](../03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md)
 
 ---
 
@@ -171,4 +171,4 @@ Task `IAM-UAT-002` rework has resolved all reviewer findings:
 4. Release Gates 0-5 are unmocked and evaluated with clear cloud staging status.
 5. Evidence contains zero secrets or unmasked PII.
 
-All artifacts are persisted under [`support/sidecars/IAM-UAT-002/`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-uat-002/support/sidecars/IAM-UAT-002/) and [`docs/04-uat/iam-uat-002-production-like-staging-evidence-pack.md`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-uat-002/docs/04-uat/iam-uat-002-production-like-staging-evidence-pack.md).
+All artifacts are persisted under [`support/sidecars/IAM-UAT-002/`](../../support/sidecars/IAM-UAT-002/) and this document (`docs/04-uat/iam-uat-002-production-like-staging-evidence-pack.md`).
