@@ -2,7 +2,7 @@
 
 - Parent task: `S1F-REL-001` — Finalize the verified Stage 1 functional release candidate
 - Sidecar task: `S1F-REL-001-SIDECAR-ACCEPTANCE`
-- Owner: `Codex2`; reviewer: `Gemini2`
+- Owner: `Codex2`; reviewer: `Codex`
 - Scope: reviewer-facing support material only. This packet neither changes nor supersedes canonical product truth, machine truth, runtime code, deployment state, or release evidence.
 - Snapshot: 2026-08-13 UTC
 
@@ -47,7 +47,7 @@ For the browser gate, invoke `scripts/run-operational-browser-acceptance.sh` onl
 
 Record or link the generated `test-results/operational-browser/operational-browser-evidence.json` with the release evidence. It must capture the candidate SHA, URL, actor scope, operation, request/result ID, and readback state. A 200 route-only check is availability evidence, not operational acceptance.
 
-## Reviewer hotspots for Gemini2
+## Reviewer hotspots for Codex
 
 1. Verify the packet remains support-only and does not create new product semantics or change canonical records.
 2. Confirm every dependency status above through `scripts/ai-status.sh show <task-id>` at review time; treat this snapshot as context, not a substitute for fresh machine truth.
@@ -70,10 +70,11 @@ Owner handoff after committing and pushing this support artifact:
 ```bash
 CANDIDATE_SHA=$(git rev-parse HEAD) \
 CANDIDATE_BRANCH=$(git branch --show-current) \
-AI_NAME=Codex2 scripts/ai-status.sh handoff S1F-REL-001-SIDECAR-ACCEPTANCE Gemini2 \
+AI_NAME=Codex2 scripts/ai-status.sh handoff S1F-REL-001-SIDECAR-ACCEPTANCE Codex \
   "Support-only S1F-REL-001 acceptance packet is ready at support/sidecars/S1F-REL-001/S1F-REL-001-SIDECAR-ACCEPTANCE.md. It maps PREDEPLOY/UIX/DRV dependencies, distinguishes historic/template evidence from final-candidate proof, and supplies the G1-G8 exact-SHA release checklist. Verification: markdown link/path scan and git diff --check."
 ```
 
 ## Change log
 
 - 2026-08-13 UTC — Initial packet prepared from the task machine-truth slices and the cited Stage 1 gap, execution runbook, operational-browser runbook, predeploy template, and driver evidence pack.
+- 2026-08-13 UTC — Corrected reviewer and handoff target to `Codex`, matching task machine truth.
