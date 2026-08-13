@@ -1,6 +1,6 @@
 {
   "taskId": "IAM-IR-001",
-  "generatedAt": "2026-08-13T01:43:54.858704+00:00",
+  "generatedAt": "2026-08-13T09:56:25.505758+00:00",
   "drillsExecuted": [
     "account_takeover",
     "credential_compromise"
@@ -8,7 +8,7 @@
   "legalHoldActive": true,
   "retentionDays": 2555,
   "files": {
-    "account_takeover_drill_log.json": "b6bd382568967de3b12b4ae0b7945b35423ae2478285623183ab7c0840049a24",
-    "credential_compromise_drill_log.json": "5960694d2c62705b564950db6cbdd260d895623287bfd7a652dc373bb4ae27f6"
+    "account_takeover_drill_log.json": "9a34983e1cae7f81e38d14eef436cafc1b6f61b8f03cbb8b641b3db47de8ee68",
+    "credential_compromise_drill_log.json": "f21aa7754aa8b3f42668d1fd90d75c6d8f600ce552d854f681fb311f2f676ed1"
   }
 }

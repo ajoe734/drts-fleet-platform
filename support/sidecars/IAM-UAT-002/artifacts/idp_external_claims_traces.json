@@ -1,9 +1,11 @@
 {
   "taskId": "IAM-UAT-002",
+  "executionEnvironment": "local_hermetic_staging_harness",
+  "cloudStagingNote": "Live GCP cloud staging environment is unprovisioned; external provider claim validation is executed against local hermetic assertion verifiers in integration test suites.",
   "externalProviderTraces": [
     {
       "provider": "Google Cloud Identity-Aware Proxy (GCP IAP)",
-      "environment": "staging-gcp-us-central1",
+      "environment": "local_hermetic_staging_harness (simulated GCP IAP assertion)",
       "claimedSubject": "accounts.google.com:10928374918237",
       "claimedAudience": "/projects/77182938471/global/backendServices/drts-platform-admin-bff",
       "rawHeaderExcerpts": {
@@ -12,7 +14,7 @@
         "x-goog-iap-jwt-assertion": "[REDACTED_IAP_JWT_SIGNATURE]"
       },
       "signatureValidation": {
-        "verifiedBy": "GCP Public Key Ring (https://www.gstatic.com/iap/verify/public_key)",
+        "verifiedBy": "GCP Public Key Ring Adapter (local hermetic test keys)",
         "result": "VALID_SIGNATURE",
         "membershipResolved": true,
         "resolvedRoles": ["platform_admin"]
@@ -20,7 +22,7 @@
     },
     {
       "provider": "Tenant OIDC PKCE Identity Provider",
-      "environment": "staging-tenant-idp.partner.fleet.internal",
+      "environment": "local_hermetic_staging_harness (simulated Tenant OIDC PKCE)",
       "claimedSubject": "usr_tenant_admin_001",
       "claimedIssuer": "https://idp.partner.fleet.internal",
       "claimedAudience": "drts-tenant-bff",
@@ -30,7 +32,7 @@
         "x-request-id": "req_oidc_pkce_8819237"
       },
       "signatureValidation": {
-        "verifiedBy": "JWKS URI (https://idp.partner.fleet.internal/.well-known/jwks.json)",
+        "verifiedBy": "Hermetic JWKS Adapter (local OIDC key verifier)",
         "result": "VALID_SIGNATURE",
         "nonceValidated": true,
         "tokenVersion": 1
@@ -38,7 +40,7 @@
     },
     {
       "provider": "GCP Workload Identity Federation (WIF)",
-      "environment": "staging-k8s-cluster-us-central1",
+      "environment": "local_hermetic_staging_harness (simulated WIF assertion)",
       "claimedSubject": "//iam.googleapis.com/projects/12345/locations/global/workloadIdentityPools/drts-pool/providers/drts-k8s-cluster/sa/api-backend",
       "claimedAudience": "https://api.staging.drts-fleet.internal",
       "rawHeaderExcerpts": {
@@ -46,7 +48,7 @@
         "x-service-identity": "api-backend@drts-staging.iam.gserviceaccount.com"
       },
       "signatureValidation": {
-        "verifiedBy": "GCP STS / IAM Service Account Credentials API",
+        "verifiedBy": "Hermetic Service Account Assertion Adapter",
         "result": "VALID_SIGNATURE",
         "networkBoundaryMatched": true
       }
