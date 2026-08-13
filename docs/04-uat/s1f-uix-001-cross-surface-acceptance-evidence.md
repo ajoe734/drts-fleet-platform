@@ -46,15 +46,15 @@ All test artifacts are committed to `origin/dev` as of HEAD `af5cd21a5`.
 The fixture manifest at `tests/e2e/fixtures/operational-browser-journeys.json`
 declares **7 formal journeys** covering all Stage 1 surfaces:
 
-| Journey ID                                 | Surface                | Actor Scope                       | Operations                      | API Readback State |
-| ------------------------------------------ | ---------------------- | --------------------------------- | ------------------------------- | ------------------ |
-| `referral-create-read-cancel-rate-receipt` | Referral Embed         | partner-scoped referral passenger | create, cancel, rate, receipt   | `CANCELLED`        |
-| `enterprise-create-read-update-cancel`     | Enterprise Dispatch    | tenant_admin                      | create, update, cancel          | `CANCELLED`        |
-| `fleet-submit-read-withdraw-resubmit`      | Fleet Partner Portal   | fleet partner                     | submit, withdraw, resubmit      | `SUBMITTED`        |
-| `admin-review-approve-readback`            | Platform Admin         | platform_admin                    | approve                         | `APPROVED`         |
-| `tenant-ops-dispatch-downstream-read`      | Tenant Console         | tenant_admin and dispatcher       | dispatch                        | `DISPATCHED`       |
-| `bank-statement-download-readback`         | Bank Console           | bank_program_admin                | download                        | `READY`            |
-| `channel-statement-download-readback`      | Channel Partner Portal | channel partner                   | download                        | `PUBLISHED`        |
+| Journey ID                                 | Surface                | Actor Scope                       | Operations                    | API Readback State |
+| ------------------------------------------ | ---------------------- | --------------------------------- | ----------------------------- | ------------------ |
+| `referral-create-read-cancel-rate-receipt` | Referral Embed         | partner-scoped referral passenger | create, cancel, rate, receipt | `CANCELLED`        |
+| `enterprise-create-read-update-cancel`     | Enterprise Dispatch    | tenant_admin                      | create, update, cancel        | `CANCELLED`        |
+| `fleet-submit-read-withdraw-resubmit`      | Fleet Partner Portal   | fleet partner                     | submit, withdraw, resubmit    | `SUBMITTED`        |
+| `admin-review-approve-readback`            | Platform Admin         | platform_admin                    | approve                       | `APPROVED`         |
+| `tenant-ops-dispatch-downstream-read`      | Tenant Console         | tenant_admin and dispatcher       | dispatch                      | `DISPATCHED`       |
+| `bank-statement-download-readback`         | Bank Console           | bank_program_admin                | download                      | `READY`            |
+| `channel-statement-download-readback`      | Channel Partner Portal | channel partner                   | download                      | `PUBLISHED`        |
 
 Each operation asserts:
 
