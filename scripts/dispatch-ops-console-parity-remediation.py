@@ -4,11 +4,11 @@
 Source of truth: docs/05-ui/ops-console-body-parity-audit-20260602.md
 
 Why a NEW wave (new task IDs) instead of re-opening UI-FE-OPS-*:
-  The prior UI-FE-OPS-* per-page briefs are marked `review_approved` but the
+  The prior UI-FE-OPS-* per-page briefs use a legacy approval status but the
   work is NOT on origin/dev (audit verified: /complaints/[caseNo] and
   /contracts/[contractId] are 404; /callcenter is still bespoke; detail pages
   still mix Management `Stepper`/`Timeline` + `WorkflowEmptyState`). Stranded
-  review_approved tasks are not re-queued by `assign` (it does not reset
+  legacy-approved tasks are not re-queued by `assign` (it does not reset
   status), so this wave uses fresh `OPS-PARITY-*` IDs (status -> backlog ->
   supervisor dispatch) that reference the audit doc.
 

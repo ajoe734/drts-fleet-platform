@@ -199,7 +199,7 @@ def prune_worker_records(state: dict[str, Any], tasks_by_id: dict[str, str] | No
         if event_id and event_id in queue_events and queue_events[event_id].get("status") not in {"completed", "failed", "done"}:
             keep[run_id] = worker
             continue
-        if task_status and task_status not in {"done", "review_approved"} and status == "completed":
+        if task_status and task_status != "done" and status == "completed":
             keep[run_id] = worker
             continue
         # Drop terminal workers once the queue event is settled, or the task itself is already terminal.

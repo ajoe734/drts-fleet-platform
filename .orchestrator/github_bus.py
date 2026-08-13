@@ -294,6 +294,9 @@ def edit_label_args(labels: list[str]) -> list[str]:
 
 
 def review_branch_for_task(config: dict[str, Any], status: dict[str, Any], task: dict[str, Any]) -> str | None:
+    candidate_branch = str(task.get("candidate_branch") or "").strip()
+    if candidate_branch and candidate_branch != "not_applicable":
+        return candidate_branch
     meta = task.get("github") or {}
     explicit = meta.get("head_branch")
     if explicit and branch_exists(str(explicit)):
@@ -424,6 +427,32 @@ def close_ops_issue(config: dict[str, Any], entry: dict[str, Any], task_id: str,
 def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: dict[str, Any], repo: str, task: dict[str, Any]) -> bool:
     entry = task_bus_entry(bus_state, task["id"])
     pr_ref = entry.get("review_pr")
+    candidate_sha = str(task.get("candidate_sha") or "").strip()
+    if not candidate_sha or candidate_sha == "not_applicable":
+        skip_hash = json.dumps(
+            {"state": "skipped_no_candidate", "task_id": task["id"]},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        if entry.get("last_review_hash") == skip_hash and (pr_ref or {}).get("state") == "skipped_no_candidate":
+            return False
+        entry["review_pr"] = {
+            "number": None,
+            "url": None,
+            "title": f"[ReviewBus] {task['id']} {task['title']}",
+            "branch": None,
+            "state": "skipped_no_candidate",
+        }
+        entry["last_review_hash"] = skip_hash
+        write_activity_log(
+            config,
+            {
+                "type": "github_review_pr_skipped",
+                "task_id": task["id"],
+                "message": "Review task has no canonical candidate SHA; GitHub PR creation is not applicable.",
+            },
+        )
+        return True
     branch = review_branch_for_task(config, status, task)
     if not branch:
         skip_hash = json.dumps({"state": "skipped_no_branch", "task_id": task["id"], "status": task.get("status")}, ensure_ascii=False, sort_keys=True)
@@ -449,7 +478,7 @@ def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: 
 
     base = default_branch(config)
     title = f"[ReviewBus] {task['id']} {task['title']}"
-    head_sha = branch_head_sha(branch)
+    head_sha = candidate_sha
     variables = {
         "marker": COMMENT_MARKER,
         "task_id": task["id"],
@@ -515,6 +544,13 @@ def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: 
     finally:
         body_file.unlink(missing_ok=True)
 
+    # A PR only becomes ready once `handoff` locked the candidate SHA. Previous
+    # owner checkpoints are never candidates, so they cannot start full CI.
+    if pr.get("number"):
+        observation = candidate_pr_observation(repo, int(pr["number"]))
+        if observation.get("isDraft"):
+            run_gh(["pr", "ready", str(pr["number"]), "--repo", repo])
+
     entry["review_pr"] = {
         "number": pr.get("number"),
         "url": pr.get("url"),
@@ -535,10 +571,18 @@ def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: 
     return True
 
 
-def run_ai_status(command: str, target: str, message: str, *, actor: str | None = None) -> None:
+def run_ai_status(
+    command: str,
+    target: str,
+    message: str,
+    *,
+    actor: str | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> None:
     env = os.environ.copy()
     if actor:
         env["AI_NAME"] = actor
+    env.update({key: value for key, value in (extra_env or {}).items() if value})
     proc = subprocess.run(
         ["python3", "scripts/ai_status.py", command, target, message],
         cwd=str(ROOT),
@@ -548,6 +592,189 @@ def run_ai_status(command: str, target: str, message: str, *, actor: str | None 
     )
     if proc.returncode != 0:
         raise GitHubBusError(trim_text((proc.stderr or proc.stdout or "ai_status failed"), 600))
+
+
+def candidate_pr_observation(repo: str, number: int) -> dict[str, Any]:
+    data = gh_json(
+        [
+            "pr",
+            "view",
+            str(number),
+            "--repo",
+            repo,
+            "--json",
+            "url,state,isDraft,headRefName,headRefOid,mergeStateStatus,mergeCommit,statusCheckRollup",
+        ]
+    )
+    if not isinstance(data, dict):
+        raise GitHubBusError(f"GitHub did not return PR #{number} metadata")
+    return data
+
+
+def candidate_ci_status(observation: dict[str, Any]) -> tuple[str, str]:
+    """Map GitHub's check rollup to the small lifecycle vocabulary."""
+    if str(observation.get("state") or "").upper() == "MERGED":
+        return "success", ""
+    if str(observation.get("state") or "").upper() != "OPEN":
+        return "closed", ""
+    if str(observation.get("mergeStateStatus") or "").upper() == "DIRTY":
+        return "merge_conflict", ""
+
+    checks = observation.get("statusCheckRollup") or []
+    if not isinstance(checks, list) or not checks:
+        return "queued", ""
+    details_url = ""
+    pending = False
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        conclusion = str(check.get("conclusion") or "").upper()
+        status = str(check.get("status") or "").upper()
+        details_url = details_url or str(check.get("detailsUrl") or "")
+        if conclusion in {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}:
+            return "failure", details_url
+        if status != "COMPLETED" or not conclusion:
+            pending = True
+    return ("running" if pending else "success"), details_url
+
+
+def candidate_pr_for_task(
+    config: dict[str, Any],
+    bus_state: dict[str, Any],
+    repo: str,
+    task: dict[str, Any],
+) -> int | None:
+    entry = task_bus_entry(bus_state, str(task.get("id") or ""))
+    review_pr = entry.get("review_pr") or {}
+    number = review_pr.get("number")
+    if number:
+        return int(number)
+    branch = str(task.get("candidate_branch") or "").strip()
+    if not branch or branch == "not_applicable":
+        return None
+    found = find_existing_pr(repo, str(task.get("id") or ""), branch)
+    if not found or not found.get("number"):
+        return None
+    entry["review_pr"] = {"number": found["number"], "url": found.get("url"), "branch": branch, "state": "open"}
+    return int(found["number"])
+
+
+def reconcile_candidate_lifecycle(
+    config: dict[str, Any],
+    bus_state: dict[str, Any],
+    status: dict[str, Any],
+    repo: str,
+) -> bool:
+    """Write GitHub CI/merge evidence only through ai-status' candidate transaction."""
+    if not (config.get("github_bus", {}) or {}).get("candidate_reconcile_enabled", True):
+        return False
+
+    changed = False
+    for task in status.get("tasks", []):
+        if task.get("status") not in {"review", "integrating"}:
+            continue
+        candidate_sha = str(task.get("candidate_sha") or "").strip()
+        if not candidate_sha or candidate_sha == "not_applicable":
+            continue
+        number = candidate_pr_for_task(config, bus_state, repo, task)
+        if not number:
+            continue
+        observation = candidate_pr_observation(repo, number)
+        head_sha = str(observation.get("headRefOid") or "").strip()
+        ci_status, ci_run_url = candidate_ci_status(observation)
+        merge = observation.get("mergeCommit") or {}
+        merge_sha = str(merge.get("oid") or "").strip() if isinstance(merge, dict) else ""
+        env = {
+            "CANDIDATE_HEAD_SHA": head_sha,
+            "CANDIDATE_CI_STATUS": ci_status,
+            "CANDIDATE_BRANCH": str(observation.get("headRefName") or task.get("candidate_branch") or ""),
+            "PR_URL": str(observation.get("url") or ""),
+            "CI_RUN_URL": ci_run_url,
+            "MERGE_SHA": merge_sha,
+        }
+        # Polling is intentionally frequent. Do not turn an unchanged GitHub
+        # observation into a second state transaction or another worker wakeup.
+        observed_fields = {
+            "ci_sha": head_sha,
+            "ci_status": ci_status,
+            "candidate_branch": env["CANDIDATE_BRANCH"],
+            "pr_url": env["PR_URL"],
+            "ci_run_url": ci_run_url,
+            "merge_sha": merge_sha,
+        }
+        if candidate_sha == head_sha and all(
+            str(task.get(field) or "") == value
+            for field, value in observed_fields.items()
+        ):
+            continue
+        run_ai_status(
+            "reconcile-candidate",
+            str(task["id"]),
+            f"GitHub reconciled candidate {candidate_sha[:12]} from PR #{number}.",
+            actor="Supervisor",
+            extra_env=env,
+        )
+        entry = task_bus_entry(bus_state, str(task["id"]))
+        entry["review_pr"] = {
+            "number": number,
+            "url": observation.get("url"),
+            "branch": observation.get("headRefName"),
+            "head_sha": head_sha,
+            "state": str(observation.get("state") or "").lower(),
+        }
+        changed = True
+    return changed
+
+
+def request_candidate_auto_merge(
+    config: dict[str, Any],
+    bus_state: dict[str, Any],
+    status: dict[str, Any],
+    repo: str,
+) -> bool:
+    settings = (config.get("github_bus", {}) or {}).get("auto_merge", {}) or {}
+    if not settings.get("enabled", False):
+        return False
+    changed = False
+    for task in status.get("tasks", []):
+        if task.get("status") != "integrating":
+            continue
+        candidate_sha = str(task.get("candidate_sha") or "")
+        if not candidate_sha or task.get("reviewed_sha") != candidate_sha:
+            continue
+        if task.get("ci_sha") != candidate_sha or task.get("ci_status") != "success":
+            continue
+        number = candidate_pr_for_task(config, bus_state, repo, task)
+        if not number:
+            continue
+        entry = task_bus_entry(bus_state, str(task["id"]))
+        if entry.get("auto_merge_candidate_sha") == candidate_sha:
+            continue
+        try:
+            run_gh(["pr", "merge", str(number), "--repo", repo, "--auto", "--squash"])
+        except GitHubBusError as exc:
+            write_activity_log(
+                config,
+                {
+                    "type": "candidate_auto_merge_deferred",
+                    "task_id": task.get("id"),
+                    "message": trim_text(str(exc), 600),
+                    "github_pr": number,
+                },
+            )
+            continue
+        entry["auto_merge_candidate_sha"] = candidate_sha
+        write_activity_log(
+            config,
+            {
+                "type": "candidate_auto_merge_requested",
+                "task_id": task.get("id"),
+                "message": f"Requested auto-merge for reviewed, same-SHA candidate {candidate_sha[:12]}.",
+                "github_pr": number,
+            },
+        )
+        changed = True
+    return changed
 
 
 def post_issue_comment(repo: str, issue_number: int, body: str) -> None:
@@ -613,6 +840,7 @@ def apply_bus_command(
                 task_id,
                 f"GitHub approval bus approved via {'issue #' + str(issue_number) if issue_number else 'relay/webhook'} by @{actor}.",
                 actor=reviewer,
+                extra_env={"REVIEWED_SHA": str(target_task.get("candidate_sha") or "")},
             )
         else:
             run_ai_status(
@@ -834,8 +1062,14 @@ def poll_pr_reviews(config: dict[str, Any], bus_state: dict[str, Any], status: d
             state_value = str(review.get("state") or "").upper()
             body = trim_text(review.get("body"), 240)
             if state_value == "APPROVED":
-                run_ai_status("approve", task["id"], f"GitHub PR approved via PR #{number} by @{actor}.", actor=str(task.get("reviewer") or "").strip() or None)
-                write_activity_log(config, {"type": "github_review_approved", "task_id": task["id"], "message": f"PR #{number} approved by @{actor}.", "github_pr": number})
+                run_ai_status(
+                    "approve",
+                    task["id"],
+                    f"GitHub PR approved via PR #{number} by @{actor}.",
+                    actor=str(task.get("reviewer") or "").strip() or None,
+                    extra_env={"REVIEWED_SHA": str(review.get("commit_id") or task.get("candidate_sha") or "")},
+                )
+                write_activity_log(config, {"type": "github_candidate_approved", "task_id": task["id"], "message": f"PR #{number} approved by @{actor}.", "github_pr": number})
                 changed = True
             elif state_value == "CHANGES_REQUESTED":
                 detail = f"GitHub PR requested changes via PR #{number} by @{actor}."
@@ -899,7 +1133,13 @@ def consume_webhook_events(config: dict[str, Any], bus_state: dict[str, Any], st
                     state_value = str(review.get("state") or "").upper()
                     body = trim_text(review.get("body"), 240)
                     if state_value == "APPROVED":
-                        run_ai_status("approve", task_id, f"GitHub PR approved via webhook PR #{pr_number} by @{actor}.", actor=str(task.get("reviewer") or "").strip() or None)
+                        run_ai_status(
+                            "approve",
+                            task_id,
+                            f"GitHub PR approved via webhook PR #{pr_number} by @{actor}.",
+                            actor=str(task.get("reviewer") or "").strip() or None,
+                            extra_env={"REVIEWED_SHA": str(review.get("commit_id") or task.get("candidate_sha") or "")},
+                        )
                         changed = True
                     elif state_value == "CHANGES_REQUESTED":
                         detail = f"GitHub PR requested changes via webhook PR #{pr_number} by @{actor}."
@@ -1044,9 +1284,15 @@ def sync_github_bus(config: dict[str, Any], runtime_state: dict[str, Any]) -> bo
         changed = False
         changed = sync_outbound(config, bus_state, status, runtime_state, repo) or changed
         status = load_status(config)
+        changed = reconcile_candidate_lifecycle(config, bus_state, status, repo) or changed
+        status = load_status(config)
         changed = consume_webhook_events(config, bus_state, status, repo) or changed
         status = load_status(config)
         changed = poll_pr_reviews(config, bus_state, status, repo) or changed
+        status = load_status(config)
+        changed = reconcile_candidate_lifecycle(config, bus_state, status, repo) or changed
+        status = load_status(config)
+        changed = request_candidate_auto_merge(config, bus_state, status, repo) or changed
         status = load_status(config)
         changed = poll_issue_comments(config, bus_state, status, repo) or changed
         status = load_status(config)

@@ -248,7 +248,9 @@ export function deriveAgentState(status, orchState) {
         [...ownedReview, ...incomingReview].map((task) => [task.id, task]),
       ).values(),
     ];
-    const approved = owned.filter((t) => t.status === "review_approved");
+    const evidence = owned.filter((t) =>
+      ["integrating", "acceptance"].includes(t.status),
+    );
     const queued = owned.filter((task) => queuedTaskStatuses.has(task.status));
     const ready = queued.filter((task) =>
       (task.depends_on || []).every(
@@ -328,11 +330,11 @@ export function deriveAgentState(status, orchState) {
     } else if (reviewTasks.length) {
       derivedStatus = "reviewing";
       derivedTaskIds = reviewTasks.map((t) => t.id);
-    } else if (approved.length) {
-      derivedStatus = "finalize";
-      derivedTaskIds = approved.map((t) => t.id);
-      derivedNext = approved[0].next || derivedNext;
-      derivedLastUpdate = approved[0].last_update || derivedLastUpdate;
+    } else if (evidence.length) {
+      derivedStatus = "integrating";
+      derivedTaskIds = evidence.map((t) => t.id);
+      derivedNext = evidence[0].next || derivedNext;
+      derivedLastUpdate = evidence[0].last_update || derivedLastUpdate;
     } else if (
       agentDispatchPauses.length ||
       agentProviderPauses.length ||
@@ -418,7 +420,7 @@ export function deriveAgentState(status, orchState) {
       queued_count: queued.length,
       ready_count: ready.length,
       waiting_count: waiting.length,
-      approved_count: approved.length,
+      evidence_count: evidence.length,
       review_count: reviewTasks.length,
       live_running_count: liveRunningWorkers.length,
       live_pending_count: livePendingWorkers.length,
@@ -438,7 +440,8 @@ export function deriveAgentState(status, orchState) {
 export function dependencyBatchState(task, index, unresolvedDeps = []) {
   const status = String(task?.status || "").toLowerCase();
   if (status === "done") return { key: "completed", label: "已完成" };
-  if (status === "review_approved") return { key: "approved", label: "待收尾" };
+  if (status === "integrating") return { key: "integrating", label: "整合中" };
+  if (status === "acceptance") return { key: "integrating", label: "驗收中" };
   if (status === "blocked") return { key: "blocked", label: "已阻塞" };
   if (activeTaskStatuses.has(status)) {
     return unresolvedDeps.length > 0
@@ -459,8 +462,8 @@ export function buildDependencySchedule(tasks) {
   const remaining = allTasks.filter((t) =>
     scheduleOpenTaskStatuses.has(String(t.status || "").toLowerCase()),
   );
-  const approved = allTasks.filter(
-    (t) => String(t.status || "").toLowerCase() === "review_approved",
+  const integration = allTasks.filter(
+    (t) => ["integrating", "acceptance"].includes(String(t.status || "").toLowerCase()),
   );
   const taskMap = new Map(allTasks.map((t) => [t.id, t]));
   const remainingIds = new Set(remaining.map((t) => t.id));
@@ -530,7 +533,7 @@ export function buildDependencySchedule(tasks) {
   const explicitBlocked = remaining.filter(
     (t) => t.status === "blocked",
   ).length;
-  const approvedNow = approved.length;
+  const integrationNow = integration.length;
 
   return {
     waves,
@@ -540,7 +543,7 @@ export function buildDependencySchedule(tasks) {
     activeNow,
     waitingNow,
     explicitBlocked,
-    approvedNow,
-    approved,
+    integrationNow,
+    integration,
   };
 }

@@ -4,7 +4,7 @@
 {{shared_files}}
 {{task_brief_inline}}
 
-找出目前分配給你、等待你回應、剛交接給你的 task，或已進入 `review_approved` 並等待你正式收尾為 `done` 的 task，然後直接繼續工作。
+找出目前分配給你、等待你回應或剛交接給你的 task，然後直接繼續工作。
 {{branch_protocol}}
 {{task_commit_guardrails}}
 狀態更新請優先使用 `scripts/ai-status.sh` 或 `python3 scripts/ai_status.py`。
@@ -17,13 +17,12 @@
 重要：不能只在最後文字回覆「完成」。supervisor 只認 machine truth 狀態。
 - 執行狀態命令時若 `AI_NAME` 沒有自動設定，請顯式加上 `AI_NAME={{target_agent}}`。
 - owner 收到 `backlog` / `todo` / `in_progress` 任務後，先用 `AI_NAME={{target_agent}} scripts/ai-status.sh start {{task_id}} "<你正在做什麼>"` 或 `progress` 落盤。
-- owner 完成 acceptance 並跑完可執行檢查後，必須用 `AI_NAME={{target_agent}} scripts/ai-status.sh handoff {{task_id}} <reviewer> "<完成內容與驗證>"` 交給 reviewer，讓狀態進入 `review`。
-- reviewer 收到 `review` 任務後，通過就用 `AI_NAME={{target_agent}} scripts/ai-status.sh approve {{task_id}} "<review 結論>"`；不通過就 `reopen` 或 `blocker`。
-- owner 收到 `review_approved` closeout 時，只有在已完成 task-scoped commit、普通 non-force push，且可提供 `COMMIT_HASH` / `COMMIT_SUBJECT` / `PUSH_REMOTE` / `PUSH_BRANCH` 後，才能 `done`。
-- `done` 不是整個開發閉環完成。finalize 時必須用 `INTEGRATION_STATUS` 標明目前層級：`branch_pushed` / `pr_open` / `ci_pending` / `ci_failed` / `merged_to_dev` / `deploy_blocked` / `dev_deployed` / `not_applicable`。沒有 `dev_deployed` 證據時，不要說已 publish 到 dev 測試機。
+- owner 完成實作與可執行檢查後，先 commit、普通 non-force push，再用 `CANDIDATE_SHA=$(git rev-parse HEAD) CANDIDATE_BRANCH=$(git branch --show-current) AI_NAME={{target_agent}} scripts/ai-status.sh handoff {{task_id}} <reviewer> "<完成內容與驗證>"` 鎖定 candidate，讓狀態進入 `review`。
+- reviewer 收到 `review` 任務後只能檢查 candidate，不得修改 branch；通過時用 `REVIEWED_SHA=<candidate sha> AI_NAME={{target_agent}} scripts/ai-status.sh approve {{task_id}} "<review 結論>"`，不通過就 `reopen` 或 `blocker`。
+- `done` 由同一 candidate 的 review、CI、merge 及 task 所需 acceptance evidence 自動推導。不要嘗試直接 `done`，也不要以 branch-only 或文字宣告取代 merge/acceptance 證據。
 - 如果你無法完成，請用 `progress` 或 `blocker` 說清楚卡點；不要安靜退出，否則會被 supervisor 視為 failure。
 {{sidecar_guardrails}}
-{{closeout_guardrails}}
+{{review_guardrails}}
 
 Task ID: {{task_id}}
 目標 Agent: {{target_agent}}

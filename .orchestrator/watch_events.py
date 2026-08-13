@@ -361,18 +361,15 @@ def render_wakeup_message(
             "- 盡量把輸出限制在上面列出的相關檔案；若需新增檔案，只能新增 support artifact。\n"
             "- 完成後請交接給指定 reviewer，由 parent owner 決定是否吸收進主線。\n"
         )
-    closeout_guardrails = ""
-    if str(event.get("reason") or "") == "owned_finalize_dispatch":
-        closeout_guardrails = (
-            "\n這是 `review_approved` owner closeout，不是一般繼續開發。\n"
-            "- canonical 任務必須先整理 diff、確認只 stage task-owned files、建立 task-scoped commit。\n"
-            "- commit subject 必須包含 Task ID；commit body 必須含 `LLM-Agent:`、`Task-ID:`、`Reviewer:`、`Verification:`。\n"
-            "- commit 後必須做 scoped normal non-force push，例如 `git push` 或 `git push -u origin HEAD:<branch>`。\n"
-            "- `git push --force`、`--mirror`、`--delete`、`--all`、`--tags` 一律禁止。\n"
-            "- push 成功後才能用 `COMMIT_HASH`、`COMMIT_SUBJECT`、`PUSH_REMOTE`、`PUSH_BRANCH` 呼叫 `scripts/ai-status.sh done`。\n"
-            "- `done` 必須帶 `INTEGRATION_STATUS`：branch-only 用 `branch_pushed`，已 merge 用 `merged_to_dev`，已部署 dev 才能用 `dev_deployed`。\n"
-            "- 沒有 `dev_deployed` + deploy run evidence，不要把任務描述成已 publish 到 dev 測試機。\n"
-            "- 如果不能安全 push，請改用 blocker/progress 說清楚原因，不要標 `done`。\n"
+    is_reviewer_dispatch = str(event.get("reason") or "") == "review_ready_dispatch"
+    review_guardrails = ""
+    if is_reviewer_dispatch:
+        candidate_sha = str(task_payload.get("candidate_sha") or "").strip()
+        review_guardrails = (
+            "\n這是 candidate review，不是實作工作。\n"
+            f"- 只能檢查鎖定 candidate `{candidate_sha or '(missing)'}`；先確認 `git rev-parse HEAD` 或 PR head 與它完全一致。\n"
+            "- 不要修改檔案、commit、push、amend、rebase 或切換 task branch。發現問題時用 `reopen`，不要直接修。\n"
+            "- 通過時用 `REVIEWED_SHA=<candidate sha> ... ai-status.sh approve`；之後由 GitHub bus 對同一 SHA 記錄 CI 與 merge。\n"
         )
     lane = str(agent.get("id") or target_agent or "").strip()
     task_id_kebab = raw_task_id.lower() if raw_task_id else ""
@@ -381,12 +378,14 @@ def render_wakeup_message(
         base_branch = routing.base_branch
     else:
         base_branch = ""
-    branch_protocol = build_branch_protocol_block(
-        task_id=raw_task_id,
-        lane=lane,
-        branch=execution_branch_for_task(task_payload, lane, task_id_kebab),
-        base_branch=base_branch,
-    )
+    branch_protocol = ""
+    if not is_reviewer_dispatch:
+        branch_protocol = build_branch_protocol_block(
+            task_id=raw_task_id,
+            lane=lane,
+            branch=execution_branch_for_task(task_payload, lane, task_id_kebab),
+            base_branch=base_branch,
+        )
     task_commit_guardrails = ""
     if raw_task_id:
         task_commit_guardrails = (
@@ -395,7 +394,8 @@ def render_wakeup_message(
             "先做 task-scoped anchor commit 或正式 closeout commit。\n"
             "工作樹已有不相關修改不是跳過 commit 的理由；只 stage 你 own 的檔案，必要時切到乾淨 branch/worktree 再繼續。\n"
             "若安全 commit 或普通 non-force push 做不到，必須明確回報 `progress` / `blocker` 與原因，不能把工作描述成已完成。\n"
-            "branch closeout 不等於 integration closeout；PR/CI/merge/dev deploy 必須用 `INTEGRATION_STATUS` 與 evidence 另外記錄。"
+            "完成實作時，先用 `CANDIDATE_SHA=$(git rev-parse HEAD)` 與 `CANDIDATE_BRANCH=$(git branch --show-current)` handoff；"
+            "不要呼叫 `done`。CI、merge 與外部 acceptance 由 candidate lifecycle 寫入。"
         )
     variables = {
         "shared_files": shared_files,
@@ -407,7 +407,7 @@ def render_wakeup_message(
         "reason": event.get("reason") or "wakeup",
         "target_files": "\n".join(f"- {path}" for path in display_target_files) if display_target_files else "- (none inferred)",
         "sidecar_guardrails": sidecar_guardrails.rstrip(),
-        "closeout_guardrails": closeout_guardrails.rstrip(),
+        "review_guardrails": review_guardrails.rstrip(),
         "branch_protocol": branch_protocol.rstrip(),
         "task_commit_guardrails": task_commit_guardrails.rstrip(),
         "task_brief_inline": task_brief_inline.rstrip(),

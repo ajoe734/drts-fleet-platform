@@ -48,6 +48,7 @@ class SupervisorTickPorts:
     load_status: Callable[[dict[str, Any]], dict[str, Any]]
     load_provider_report: Callable[[dict[str, Any]], dict[str, Any]]
     safe_load_approval_state: Callable[[dict[str, Any]], dict[str, Any]]
+    ensure_candidate_lifecycle_migration: Callable[[dict[str, Any], dict[str, Any]], bool]
     write_supervisor_pid: Callable[[dict[str, Any]], None]
     write_activity_log: Callable[[dict[str, Any], dict[str, Any]], None]
     console_log: Callable[..., None]
@@ -61,7 +62,6 @@ class SupervisorTickPorts:
     poll_workers: Callable[..., bool]
     cleanup_inactive_worker_worktrees: Callable[[dict[str, Any], dict[str, Any]], bool]
     reconcile_queue_records: Callable[[dict[str, Any], dict[str, Any]], bool]
-    reconcile_status_from_git: Callable[[dict[str, Any], dict[str, Any]], bool]
     prune_event_queue: Callable[[dict[str, Any], dict[str, Any]], bool]
     prune_completed_dispatch_pauses: Callable[..., bool]
     prune_failure_streaks: Callable[[dict[str, Any], dict[str, Any]], bool]
@@ -123,6 +123,9 @@ class SupervisorTickRunner:
             self.ports.write_supervisor_pid(config)
 
         status = self.ports.load_status(config)
+        if self.ports.ensure_candidate_lifecycle_migration(config, status):
+            changed = True
+            status = self.ports.load_status(config)
         focus_mode = self.ports.desired_focus_mode(status)
         previous_heartbeat = state.get("supervisor", {}).get("last_heartbeat_at")
         self.ports.notify("WATCHDOG=1")
@@ -247,7 +250,6 @@ class SupervisorTickRunner:
         changed = self.ports.poll_workers(config, state, provider_report) or changed
         changed = self.ports.cleanup_inactive_worker_worktrees(config, state) or changed
         changed = self.ports.reconcile_queue_records(config, state) or changed
-        self.ports.reconcile_status_from_git(config, state)
         changed = self.ports.prune_event_queue(config, state) or changed
         changed = self.ports.prune_completed_dispatch_pauses(
             state, status, config=config, provider_report=provider_report

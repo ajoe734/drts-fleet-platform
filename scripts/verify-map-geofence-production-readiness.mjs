@@ -158,9 +158,10 @@ for (const taskId of manifest.requiredTaskIds || []) {
 
 const ownerTask = tasks.get("FLEETS-CLOSEOUT-008");
 assert(
-  ownerTask?.status === "in_progress" ||
+    ownerTask?.status === "in_progress" ||
     ownerTask?.status === "review" ||
-    ownerTask?.status === "review_approved" ||
+    ownerTask?.status === "integrating" ||
+    ownerTask?.status === "acceptance" ||
     ownerTask?.status === "done",
   "FLEETS-CLOSEOUT-008 status is compatible with readiness verification",
   failures,
