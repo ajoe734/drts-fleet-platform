@@ -6,33 +6,33 @@
     {
       "provider": "Google Cloud Identity-Aware Proxy (GCP IAP)",
       "environment": "local_hermetic_staging_harness (IAPSubjectAdapter)",
-      "claimedSubject": "accounts.google.com:10928374918237",
-      "claimedAudience": "/projects/77182938471/global/backendServices/drts-platform-admin-bff",
+      "claimedSubject": "google_subject_integ_001",
+      "claimedAudience": "/projects/1122334455/apps/drts-control-plane-prod",
       "rawHeaderExcerpts": {
-        "x-goog-authenticated-user-id": "accounts.google.com:10928374918237",
-        "x-goog-authenticated-user-email": "[REDACTED_ADMIN_USER]@drts-fleet.internal",
-        "x-goog-iap-jwt-assertion": "[REDACTED_IAP_JWT_SIGNATURE]"
+        "x-goog-authenticated-user-id": "google_subject_integ_001",
+        "x-goog-authenticated-user-email": "ops-lead@platform.drts",
+        "x-goog-iap-jwt-assertion": "[TEST_SIGNED_IAP_JWT_HEADER.PAYLOAD.SIGNATURE]"
       },
       "signatureValidation": {
         "verifiedBy": "IAPSubjectAdapter (apps/api/src/modules/auth/iap-subject.adapter.ts & tests/integration/iap-subject-adapter.integration.test.ts)",
         "result": "VALID_SIGNATURE",
         "membershipResolved": true,
-        "resolvedRoles": ["platform_admin"]
+        "resolvedRoles": ["operator"]
       }
     },
     {
       "provider": "Tenant OIDC PKCE Identity Provider",
       "environment": "local_hermetic_staging_harness (OidcPkceService)",
-      "claimedSubject": "usr_tenant_admin_001",
-      "claimedIssuer": "https://idp.partner.fleet.internal",
-      "claimedAudience": "drts-tenant-bff",
+      "claimedSubject": "admin@acme.example",
+      "claimedIssuer": "https://auth.staging.drts.internal",
+      "claimedAudience": "drts-bff-client",
       "rawHeaderExcerpts": {
         "authorization": "Bearer [REDACTED_OIDC_ID_TOKEN]",
-        "x-pkce-verifier-digest": "sha256:77a1b...",
-        "x-request-id": "req_oidc_pkce_8819237"
+        "code": "e2e_valid_code_001",
+        "redirect_uri": "http://localhost:3000/api/auth/callback"
       },
       "signatureValidation": {
-        "verifiedBy": "OidcPkceService (apps/api/src/modules/auth/oidc-pkce.service.ts & tests/integ/oidc-pkce-bff.test.ts)",
+        "verifiedBy": "OidcPkceService (apps/api/src/modules/auth/oidc-pkce.service.ts, tests/unit/auth-oidc-pkce.test.ts & tests/integ/oidc-pkce-bff.test.ts)",
         "result": "VALID_SIGNATURE",
         "nonceValidated": true,
         "tokenVersion": 1
@@ -41,11 +41,13 @@
     {
       "provider": "GCP Workload Identity Federation (WIF)",
       "environment": "local_hermetic_staging_harness (ServiceWorkloadIdentityAdapter)",
-      "claimedSubject": "//iam.googleapis.com/projects/12345/locations/global/workloadIdentityPools/drts-pool/providers/drts-k8s-cluster/sa/api-backend",
-      "claimedAudience": "https://api.staging.drts-fleet.internal",
+      "claimedSubject": "dispatch-runtime",
+      "claimedIssuer": "https://workload.staging.drts.internal",
+      "claimedAudience": "https://auth.staging.drts.internal/token-exchange",
       "rawHeaderExcerpts": {
-        "authorization": "Bearer [REDACTED_WIF_SA_TOKEN]",
-        "x-service-identity": "api-backend@drts-staging.iam.gserviceaccount.com"
+        "x-workload-assertion": "[WORKLOAD_ASSERTION_JWT]",
+        "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+        "principalId": "svc-dispatch-runtime"
       },
       "signatureValidation": {
         "verifiedBy": "ServiceWorkloadIdentityAdapter (apps/api/src/modules/auth/service-workload-identity.adapter.ts & apps/api/tests/integration/service-workload-identity.integration.test.ts)",

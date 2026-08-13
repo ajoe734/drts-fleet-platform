@@ -51,7 +51,11 @@
       "journeyId": "J1_WORKFORCE_IAP_MFA",
       "title": "Workforce User IAP + MFA Authentication & Role Membership Journey",
       "status": "PASSED",
-      "verifiedServices": ["IAPSubjectAdapter", "PrivilegedRoleGovernanceService", "BreakGlassService"],
+      "verifiedServices": [
+        "IAPSubjectAdapter",
+        "PrivilegedRoleGovernanceService",
+        "BreakGlassService"
+      ],
       "verifiedTestFiles": [
         "tests/integration/iap-subject-adapter.integration.test.ts",
         "tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts",
@@ -89,7 +93,10 @@
       "journeyId": "J2_TENANT_OIDC_INVITE_READONLY",
       "title": "Tenant OIDC + MFA Login, Invitation & Governance Enforcement Journey",
       "status": "PASSED",
-      "verifiedServices": ["OidcPkceService", "PlatformTenantGovernanceService"],
+      "verifiedServices": [
+        "OidcPkceService",
+        "PlatformTenantGovernanceService"
+      ],
       "verifiedTestFiles": [
         "tests/unit/auth-oidc-pkce.test.ts",
         "tests/integ/oidc-pkce-bff.test.ts",
@@ -111,7 +118,7 @@
           "verifier": "PlatformTenantGovernanceService",
           "testCitation": "tests/integ/tenant-governance-negative.test.ts",
           "result": "DENIED (400 Bad Request / 404 Not Found)",
-          "detail": "Unknown or cross-tenant cost center lookup returns COST_CENTER_UNKNOWN and preserves validation audit evidence."
+          "detail": "Unknown or cross-tenant cost center lookup returns BOOKING_COST_CENTER_UNKNOWN and preserves validation audit evidence."
         },
         {
           "step": 3,
@@ -119,7 +126,7 @@
           "verifier": "PlatformTenantGovernanceService",
           "testCitation": "tests/integ/tenant-governance-negative.test.ts",
           "result": "DENIED (400 Bad Request / 409 Conflict)",
-          "detail": "Fails closed on quota_insufficient without leaving behind orphan booking or quota residue."
+          "detail": "Fails closed on QUOTA_INSUFFICIENT_AT_COMMIT without leaving behind orphan booking or quota residue."
         }
       ]
     },
@@ -127,7 +134,10 @@
       "journeyId": "J3_TENANT_ROLE_ELEVATION_STEPUP",
       "title": "Tenant Admin Role Elevation & Step-Up MFA / Session Invalidation Journey",
       "status": "PASSED",
-      "verifiedServices": ["StepUpProofService", "PrivilegedRoleGovernanceService"],
+      "verifiedServices": [
+        "StepUpProofService",
+        "PrivilegedRoleGovernanceService"
+      ],
       "verifiedTestFiles": [
         "tests/unit/step-up-policy-catalog.test.ts",
         "tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts"
@@ -186,7 +196,7 @@
           "verifier": "IdentityRepository",
           "testCitation": "apps/api/tests/integration/identity-session-db.integration.test.ts",
           "result": "DENIED (401 Unauthorized)",
-          "detail": "Replay of previously consumed refresh token revokes full refresh family (rf_family_*) and active sessions across node cluster."
+          "detail": "Replay of previously consumed refresh token revokes full refresh family (drvfam*) and active sessions across node cluster."
         }
       ]
     },
@@ -215,7 +225,7 @@
           "verifier": "SigningKeyRing",
           "testCitation": "apps/api/tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts",
           "result": "PASSED (200 OK)",
-          "detail": "Rotated to new key kid_2026_q3 while keeping previous key valid during 48h overlap window."
+          "detail": "Rotated to new generated key ID while keeping previous key valid during 48h overlap window."
         },
         {
           "step": 3,
@@ -231,7 +241,11 @@
       "journeyId": "J6_USER_OFFBOARDING_REVOCATION",
       "title": "User Offboarding, Session, Key & Device Revocation Journey",
       "status": "PASSED",
-      "verifiedServices": ["PrivilegedRoleGovernanceService", "AccessReviewService", "DriverDeviceSessionService"],
+      "verifiedServices": [
+        "PrivilegedRoleGovernanceService",
+        "AccessReviewService",
+        "DriverDeviceSessionService"
+      ],
       "verifiedTestFiles": [
         "tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts",
         "tests/integration/access-review.integration.test.ts",
@@ -290,7 +304,11 @@
       "journeyId": "J8_SECURITY_OPS_WIF_IR_DRILLS",
       "title": "Service Account WIF Identity & Incident Response Drills Journey",
       "status": "PASSED",
-      "verifiedServices": ["ServiceWorkloadIdentityAdapter", "INTERNAL_KEY_EXCEPTION_REGISTRY", "IamObservabilityService"],
+      "verifiedServices": [
+        "ServiceWorkloadIdentityAdapter",
+        "INTERNAL_KEY_EXCEPTION_REGISTRY",
+        "IamObservabilityService"
+      ],
       "verifiedTestFiles": [
         "apps/api/tests/integration/service-workload-identity.integration.test.ts",
         "tests/unit/internal-key-exception-registry.test.ts",

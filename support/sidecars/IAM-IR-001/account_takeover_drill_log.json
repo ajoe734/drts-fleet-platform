@@ -1,41 +1,41 @@
 {
   "drillType": "account_takeover",
   "executionMode": "tabletop_harness",
-  "timestamp": "2026-08-13T10:52:39.613366+00:00",
+  "timestamp": "2026-08-13T11:07:15.555256+00:00",
   "principalId": "usr_tenant_admin_001",
-  "durationSeconds": 0.6368567943572998,
-  "revocationSlaSeconds": 0.6364336013793945,
+  "durationSeconds": 0.461961030960083,
+  "revocationSlaSeconds": 0.4615483283996582,
   "revocationSlaPassed": true,
   "sessionsRevoked": 2,
   "accountState": "suspended",
-  "evidenceChecksum": "87b0ff5963482e53ff0fed9161c275fe7f1e915f97105e04eef58dd97226ee61",
+  "evidenceChecksum": "a237581a409f5e5e4eb000db8b44f1f82b12b2adf8d8185dc228b427216af030",
   "recoveryGuardVerified": true,
   "evidencePayload": {
     "drillType": "account_takeover",
     "executionMode": "tabletop_harness",
     "principalId": "usr_tenant_admin_001",
-    "timestamp": "2026-08-13T10:52:39.613366+00:00",
+    "timestamp": "2026-08-13T11:07:15.555256+00:00",
     "sessionSnapshots": [
       {
         "sessionId": "sid_ato_usr_tenant_admin_001_01",
         "realm": "tenant",
         "status": "revoked",
-        "authTime": "2026-08-13T10:52:39.613366+00:00",
+        "authTime": "2026-08-13T11:07:15.555256+00:00",
         "ipHash": "2a39f1eedcd9f986",
         "userAgentHash": "96c73371d5f53adf",
         "tokenVersion": 1,
-        "revokedAt": "2026-08-13T10:52:39.613536+00:00",
+        "revokedAt": "2026-08-13T11:07:15.555359+00:00",
         "revokeReason": "ATO incident containment - remote logout-all"
       },
       {
         "sessionId": "sid_ato_usr_tenant_admin_001_02",
         "realm": "driver",
         "status": "revoked",
-        "authTime": "2026-08-13T10:52:39.613366+00:00",
+        "authTime": "2026-08-13T11:07:15.555256+00:00",
         "ipHash": "330046ae0dc3d58e",
         "userAgentHash": "3cafe2c8c9567612",
         "tokenVersion": 1,
-        "revokedAt": "2026-08-13T10:52:39.613550+00:00",
+        "revokedAt": "2026-08-13T11:07:15.555366+00:00",
         "revokeReason": "ATO incident containment - remote logout-all"
       }
     ],
@@ -45,7 +45,7 @@
       "stateAfter": "suspended",
       "reasonCode": "SECURITY_INCIDENT_ATO",
       "reasonText": "Account suspended due to active Account Takeover investigation",
-      "updatedAt": "2026-08-13T10:52:40.249982+00:00",
+      "updatedAt": "2026-08-13T11:07:16.016944+00:00",
       "endpointProbe": {
         "mode": "tabletop_harness",
         "endpoint": "/api/auth/logout-all",
@@ -55,30 +55,30 @@
     },
     "keyRingRotation": {
       "executionTool": "scripts/rotate-auth-keys.py",
-      "newActiveKid": "key-ato-emerg-1786618359",
+      "newActiveKid": "key-ato-emerg-1786619235",
       "compromisedKidStatus": "retired_simulated",
-      "rotationToolElapsedSeconds": 0.6363329887390137,
-      "rotationTimestamp": "2026-08-13T10:52:40.249907+00:00",
+      "rotationToolElapsedSeconds": 0.46148109436035156,
+      "rotationTimestamp": "2026-08-13T11:07:16.016865+00:00",
       "strictClaimGuardsPreserved": true,
-      "stdoutSnippet": "Rotated Key Ring: New active key is 'key-ato-emerg-1786618359' Key Ring Summary: [   {     \"kid\": \"key-ato-emerg-1786618359\",     \"status\": \"active\",     \"algorithm\": \"RS256\",     \"publicKey\": \"-----B"
+      "stdoutSnippet": "Rotated Key Ring: New active key is 'key-ato-emerg-1786619235' Key Ring Summary: [   {     \"kid\": \"key-ato-emerg-1786619235\",     \"status\": \"active\",     \"algorithm\": \"RS256\",     \"publicKey\": \"-----B"
     },
     "auditEvents": [
       {
-        "eventId": "evt_ato_1786618360_1",
+        "eventId": "evt_ato_1786619236_1",
         "eventType": "authz.denied",
         "actorId": "usr_tenant_admin_001",
         "realm": "tenant",
         "outcome": "denied",
-        "timestamp": "2026-08-13T10:52:39.613366+00:00",
+        "timestamp": "2026-08-13T11:07:15.555256+00:00",
         "detail": "Cross-tenant access attempt blocked"
       },
       {
-        "eventId": "evt_ato_1786618360_2",
+        "eventId": "evt_ato_1786619236_2",
         "eventType": "session.revoke",
         "actorId": "secops_admin_01",
         "targetId": "usr_tenant_admin_001",
         "outcome": "success",
-        "timestamp": "2026-08-13T10:52:39.613366+00:00",
+        "timestamp": "2026-08-13T11:07:15.555256+00:00",
         "detail": "Emergency remote session revocation executed"
       }
     ]

@@ -2,7 +2,7 @@
 
 Task: `IAM-IR-001`  
 Phase: `stage1.5-identity-access-account-security-20260801`  
-Execution Date: `2026-08-13T10:52:40.703579+00:00`  
+Execution Date: `2026-08-13T11:07:16.697794+00:00`  
 Execution Mode: `tabletop_harness / rotate-auth-keys tool integrated`
 
 ---
@@ -11,8 +11,8 @@ Execution Mode: `tabletop_harness / rotate-auth-keys tool integrated`
 
 | Drill Scenario             | Target Principal / Credential | Session / Key Revocation SLA | Total Drill Time | Legal Hold Evidence Checksum | Status   |
 | :------------------------- | :---------------------------- | :--------------------------- | :--------------- | :--------------------------- | :------- |
-| **Account Takeover (ATO)** | `usr_tenant_admin_001`        | `0.6364s` (<60s)             | `0.6369s`        | `87b0ff5963482e53...`        | **PASS** |
-| **Credential Compromise**  | `cred_partner_booking_001`    | `0.4521s` (<60s)             | `0.4524s`        | `a4c9e4fac50e7fb2...`        | **PASS** |
+| **Account Takeover (ATO)** | `usr_tenant_admin_001`        | `0.4615s` (<60s)             | `0.4620s`        | `a237581a409f5e5e...`        | **PASS** |
+| **Credential Compromise**  | `cred_partner_booking_001`    | `0.6794s` (<60s)             | `0.6796s`        | `ba0bb7835928ba7a...`        | **PASS** |
 
 ---
 
