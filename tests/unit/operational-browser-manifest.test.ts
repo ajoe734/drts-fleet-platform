@@ -17,6 +17,9 @@ describe("operational browser journeys manifest guard", () => {
 
     for (const op of fleetJourney.operations) {
       expect(op.resultIdPath).toBe("data.submission.submissionId");
+      expect(op.readbackUrl).toBe(
+        "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
+      );
       expect(op.readbackIdPath).toBe("data.submission.submissionId");
       expect(op.readbackStatePath).toBe("data.submission.status");
       expect(["submitted", "withdrawn"]).toContain(op.expectedReadbackState);
@@ -28,6 +31,9 @@ describe("operational browser journeys manifest guard", () => {
     expect(adminJourney).toBeDefined();
     const approveOp = adminJourney.operations[0];
     expect(approveOp.resultIdPath).toBe("data.submissionId");
+    expect(approveOp.readbackUrl).toBe(
+      "/control-plane-proxy/admin/supply-review/submissions/{resultId}",
+    );
     expect(approveOp.readbackIdPath).toBe("data.submission.submissionId");
     expect(approveOp.readbackStatePath).toBe("data.submission.status");
     expect(approveOp.expectedReadbackState).toBe("approved");
