@@ -2349,6 +2349,77 @@ const en = {
   "users.form.emailPlaceholder": "staff@platform.drts",
   "users.empty": "No users found.",
 
+  // ── Users: Account & Session Governance (IAM-UI-PLAT-001) ──
+  "users.governance.detail.accountTitle": "Account & Membership Authority",
+  "users.governance.detail.roleBindingLabel": "Role Binding:",
+  "users.governance.detail.mfaStatusLabel": "MFA Status:",
+  "users.governance.detail.sessionsTitle": "Active & Historical Sessions",
+  "users.governance.detail.sessionsLoading": "Loading sessions…",
+  "users.governance.detail.sessionsEmpty": "No active sessions recorded",
+
+  "users.governance.roleApproval.reviewStepUp": "Review / Step-Up",
+  "users.governance.roleApproval.viewDetail": "View Detail",
+  "users.governance.roleApproval.title":
+    "Privileged Role Approvals & SoD Governance",
+  "users.governance.roleApproval.requestButton": "Request Privileged Role",
+  "users.governance.roleApproval.loading": "Loading requests…",
+  "users.governance.roleApproval.empty":
+    "No privileged role requests recorded",
+  "users.governance.roleApproval.modalTitle":
+    "Request Privileged Role Elevation",
+  "users.governance.roleApproval.roleSuperadmin":
+    "platform_super_admin (High Risk)",
+  "users.governance.roleApproval.roleAdmin": "platform_admin (Medium Risk)",
+  "users.governance.roleApproval.roleOperator":
+    "platform_operator (Low Risk)",
+  "users.governance.roleApproval.justificationPlaceholder":
+    "e.g. Incident response INC-9921 requiring superadmin emergency fix",
+  "users.governance.roleApproval.reviewModalTitle":
+    "Review Role Elevation Request:",
+  "users.governance.roleApproval.stepUpTitle": "Step-Up Approval Required",
+  "users.governance.roleApproval.reasonPlaceholder":
+    "Provide audit reason for approval or rejection",
+
+  "users.governance.accessReview.campaignsTitle":
+    "Periodic Access Review Campaigns",
+  "users.governance.accessReview.sweepOverdue": "Sweep Overdue",
+  "users.governance.accessReview.newCampaign": "New Review Campaign",
+  "users.governance.accessReview.loadingCampaigns": "Loading campaigns…",
+  "users.governance.accessReview.campaignsEmpty":
+    "No access review campaigns configured",
+  "users.governance.accessReview.evidenceTitle":
+    "Access Review Audit Evidence Log",
+  "users.governance.accessReview.evidenceEmpty":
+    "No certification evidence entries logged",
+  "users.governance.accessReview.createCampaignModalTitle":
+    "Create Access Review Campaign",
+  "users.governance.accessReview.titlePlaceholder":
+    "e.g. Q3 Platform Admin Access Certification",
+
+  "users.governance.breakGlass.manageGrant": "Manage Grant",
+  "users.governance.breakGlass.activeSessionTitle":
+    "ACTIVE EMERGENCY BREAK-GLASS SESSION IN PROGRESS",
+  "users.governance.breakGlass.surfaceTitle":
+    "Break-Glass Emergency Access Surface",
+  "users.governance.breakGlass.requestButton": "Request Emergency Access",
+  "users.governance.breakGlass.empty":
+    "No active or recent emergency break-glass requests recorded",
+  "users.governance.breakGlass.requestModalTitle":
+    "Request Break-Glass Emergency Access",
+  "users.governance.breakGlass.escalationWarningTitle":
+    "Emergency Escalation Warning",
+  "users.governance.breakGlass.justificationPlaceholder":
+    "Describe severe incident justification requiring emergency access",
+  "users.governance.breakGlass.proofReferenceLabel": "Proof Reference",
+  "users.governance.breakGlass.proofReferencePlaceholder":
+    "e.g. ticket link or screenshot hash supporting the request",
+  "users.governance.breakGlass.grantModalTitle": "Emergency Grant:",
+  "users.governance.breakGlass.reasonCodeLabel": "Reason Code:",
+  "users.governance.breakGlass.postUseAuditLabel": "Post-Use Audit:",
+
+  "breakGlass.banner.activeLabel": "BREAK-GLASS EMERGENCY ACCESS ACTIVE",
+  "breakGlass.banner.expiresInLabel": "Expires in:",
+
   // ── Fleet ──
   "fleet.title": "Fleet & Devices",
   "fleet.subtitle":
@@ -5401,6 +5472,64 @@ const zh: typeof en = {
   "users.form.role": "角色",
   "users.form.emailPlaceholder": "staff@platform.drts",
   "users.empty": "沒有使用者。",
+
+  // ── Users: Account & Session Governance (IAM-UI-PLAT-001) ──
+  "users.governance.detail.accountTitle": "帳號與成員資格權限",
+  "users.governance.detail.roleBindingLabel": "角色綁定：",
+  "users.governance.detail.mfaStatusLabel": "MFA 狀態：",
+  "users.governance.detail.sessionsTitle": "現有與歷史工作階段",
+  "users.governance.detail.sessionsLoading": "載入工作階段中…",
+  "users.governance.detail.sessionsEmpty": "尚無現行工作階段紀錄",
+
+  "users.governance.roleApproval.reviewStepUp": "審核 / 二次驗證",
+  "users.governance.roleApproval.viewDetail": "檢視詳情",
+  "users.governance.roleApproval.title": "特權角色審批與職責分離治理",
+  "users.governance.roleApproval.requestButton": "申請特權角色",
+  "users.governance.roleApproval.loading": "載入申請中…",
+  "users.governance.roleApproval.empty": "尚無特權角色申請紀錄",
+  "users.governance.roleApproval.modalTitle": "申請特權角色提升",
+  "users.governance.roleApproval.roleSuperadmin":
+    "platform_super_admin（高風險）",
+  "users.governance.roleApproval.roleAdmin": "platform_admin（中風險）",
+  "users.governance.roleApproval.roleOperator": "platform_operator（低風險）",
+  "users.governance.roleApproval.justificationPlaceholder":
+    "例如：INC-9921 事件回應需要超級管理員緊急修復",
+  "users.governance.roleApproval.reviewModalTitle": "審核角色提升申請：",
+  "users.governance.roleApproval.stepUpTitle": "需要二次驗證核准",
+  "users.governance.roleApproval.reasonPlaceholder":
+    "請提供核准或拒絕的稽核理由",
+
+  "users.governance.accessReview.campaignsTitle": "定期存取審查活動",
+  "users.governance.accessReview.sweepOverdue": "掃描逾期項目",
+  "users.governance.accessReview.newCampaign": "新增審查活動",
+  "users.governance.accessReview.loadingCampaigns": "載入活動中…",
+  "users.governance.accessReview.campaignsEmpty": "尚未設定存取審查活動",
+  "users.governance.accessReview.evidenceTitle": "存取審查稽核證據紀錄",
+  "users.governance.accessReview.evidenceEmpty": "尚無認證證據紀錄",
+  "users.governance.accessReview.createCampaignModalTitle":
+    "建立存取審查活動",
+  "users.governance.accessReview.titlePlaceholder":
+    "例如：Q3 平台管理員存取認證",
+
+  "users.governance.breakGlass.manageGrant": "管理授權",
+  "users.governance.breakGlass.activeSessionTitle":
+    "緊急破窗存取工作階段進行中",
+  "users.governance.breakGlass.surfaceTitle": "緊急破窗存取介面",
+  "users.governance.breakGlass.requestButton": "申請緊急存取",
+  "users.governance.breakGlass.empty": "尚無現行或近期的緊急破窗申請紀錄",
+  "users.governance.breakGlass.requestModalTitle": "申請緊急破窗存取",
+  "users.governance.breakGlass.escalationWarningTitle": "緊急升級警告",
+  "users.governance.breakGlass.justificationPlaceholder":
+    "請描述需要緊急存取的嚴重事故理由",
+  "users.governance.breakGlass.proofReferenceLabel": "佐證依據",
+  "users.governance.breakGlass.proofReferencePlaceholder":
+    "例如：支援此申請的工單連結或截圖雜湊值",
+  "users.governance.breakGlass.grantModalTitle": "緊急授權：",
+  "users.governance.breakGlass.reasonCodeLabel": "理由代碼：",
+  "users.governance.breakGlass.postUseAuditLabel": "使用後稽核：",
+
+  "breakGlass.banner.activeLabel": "緊急破窗存取進行中",
+  "breakGlass.banner.expiresInLabel": "剩餘時間：",
 
   // ── Fleet ──
   "fleet.title": "車隊與裝置",

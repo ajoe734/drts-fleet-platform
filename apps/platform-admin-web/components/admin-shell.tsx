@@ -6,6 +6,7 @@ import {
   PlatformAdminAssistantProvider,
 } from "@/components/assistant/route-context";
 import { PlatformAssistantOverlay } from "@/components/assistant/platform-assistant-overlay";
+import { BreakGlassBanner } from "@/components/break-glass-context";
 import { usePathname } from "next/navigation";
 import {
   Activity,
@@ -716,15 +717,18 @@ export function AdminShell({ children }: AdminShellProps) {
 
   return (
     <PlatformAdminAssistantProvider>
-      <div style={shellStyle}>
-        <Sidebar
-          activeRoute={activeRoute}
-          locale={locale}
-          setLocale={setLocale}
-        />
-        <Topbar activeRoute={activeRoute} pathname={pathname} locale={locale} />
-        <main style={mainStyle}>{children}</main>
-        <PlatformAssistantOverlay />
+      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden" }}>
+        <BreakGlassBanner />
+        <div style={shellStyle}>
+          <Sidebar
+            activeRoute={activeRoute}
+            locale={locale}
+            setLocale={setLocale}
+          />
+          <Topbar activeRoute={activeRoute} pathname={pathname} locale={locale} />
+          <main style={mainStyle}>{children}</main>
+          <PlatformAssistantOverlay />
+        </div>
       </div>
     </PlatformAdminAssistantProvider>
   );

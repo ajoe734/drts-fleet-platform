@@ -34,6 +34,12 @@ import {
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
+import {
+  UserDetailDrawer,
+  RoleApprovalPanel,
+  AccessReviewPanel,
+  BreakGlassPanel,
+} from "./users-governance-components";
 
 // Platform Admin canvas body parity: PA_Users (docs/05-ui/drts-design-canvas/
 // platform-screens-1.jsx). Table-first canvas layout — header invite action +
@@ -242,9 +248,18 @@ function statusTone(status: PlatformAdminUserStatus): CanvasTone {
   return "danger";
 }
 
+type GovernanceTab =
+  | "users"
+  | "role-approvals"
+  | "access-reviews"
+  | "break-glass";
+
 export default function UsersPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
+  const [activeTab, setActiveTab] = useState<GovernanceTab>("users");
+  const [selectedUserForDrawer, setSelectedUserForDrawer] =
+    useState<PlatformAdminUserRecord | null>(null);
   const [users, setUsers] = useState<PlatformAdminUserRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -265,6 +280,10 @@ export default function UsersPage() {
       ? {
           title: "Platform staff",
           subtitle: "6 roles · RBAC gatekeeping stays backend-authoritative",
+          tabUsers: "Users & Memberships",
+          tabRoleApprovals: "Role Approvals & SoD",
+          tabAccessReviews: "Access Reviews",
+          tabBreakGlass: "Break-Glass Emergency",
           refresh: t("common.refresh"),
           refreshing: "Refreshing…",
           invite: "Invite",
@@ -277,6 +296,7 @@ export default function UsersPage() {
           colStatus: "STATUS",
           colUpdated: "UPDATED",
           colActions: "ACTIONS",
+          actionDetail: "Detail",
           actionRole: "Role",
           actionSuspend: "Suspend",
           actionActivate: "Activate",
@@ -307,6 +327,10 @@ export default function UsersPage() {
       : {
           title: "平台人員",
           subtitle: "6 個角色 · RBAC 守門以後端為準",
+          tabUsers: "人員與會籍",
+          tabRoleApprovals: "特權角色核准",
+          tabAccessReviews: "存取權審查",
+          tabBreakGlass: "緊急 Break-Glass",
           refresh: t("common.refresh"),
           refreshing: "重新整理中…",
           invite: "邀請",
@@ -319,6 +343,7 @@ export default function UsersPage() {
           colStatus: "STATUS",
           colUpdated: "更新",
           colActions: "ACTIONS",
+          actionDetail: "詳細資訊",
           actionRole: "更新角色",
           actionSuspend: "停用",
           actionActivate: "啟用",
@@ -492,6 +517,15 @@ export default function UsersPage() {
         const isActive = row.status === "active";
         return (
           <div style={rowActionsStyle}>
+            <CanvasBtn
+              theme={theme}
+              size="xs"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => setSelectedUserForDrawer(row)}
+            >
+              {copy.actionDetail}
+            </CanvasBtn>
             <CanvasBtn
               theme={theme}
               size="xs"
@@ -807,31 +841,79 @@ export default function UsersPage() {
     );
   }
 
+  const tabBtnStyle = (active: boolean): CSSProperties => ({
+    padding: "6px 12px",
+    fontSize: 12.5,
+    fontWeight: active ? 700 : 500,
+    color: active ? theme.accent : theme.textMuted,
+    background: active ? theme.surface : "transparent",
+    border: `1px solid ${active ? theme.border : "transparent"}`,
+    borderRadius: 6,
+    cursor: "pointer",
+    fontFamily: theme.fontFamily,
+  });
+
   return (
     <>
       <CanvasPageHeader
         theme={theme}
         title={copy.title}
         subtitle={copy.subtitle}
+        tabs={[
+          <button
+            key="users"
+            type="button"
+            onClick={() => setActiveTab("users")}
+            style={tabBtnStyle(activeTab === "users")}
+          >
+            {copy.tabUsers}
+          </button>,
+          <button
+            key="role-approvals"
+            type="button"
+            onClick={() => setActiveTab("role-approvals")}
+            style={tabBtnStyle(activeTab === "role-approvals")}
+          >
+            {copy.tabRoleApprovals}
+          </button>,
+          <button
+            key="access-reviews"
+            type="button"
+            onClick={() => setActiveTab("access-reviews")}
+            style={tabBtnStyle(activeTab === "access-reviews")}
+          >
+            {copy.tabAccessReviews}
+          </button>,
+          <button
+            key="break-glass"
+            type="button"
+            onClick={() => setActiveTab("break-glass")}
+            style={tabBtnStyle(activeTab === "break-glass")}
+          >
+            {copy.tabBreakGlass}
+          </button>,
+        ]}
         actions={
-          <>
-            <CanvasBtn
-              theme={theme}
-              variant="secondary"
-              icon="arrow"
-              onClick={() => void loadUsers()}
-            >
-              {loading && users.length > 0 ? copy.refreshing : copy.refresh}
-            </CanvasBtn>
-            <CanvasBtn
-              theme={theme}
-              variant="primary"
-              icon="plus"
-              onClick={() => setShowInvite(true)}
-            >
-              {copy.invite}
-            </CanvasBtn>
-          </>
+          activeTab === "users" ? (
+            <>
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                icon="arrow"
+                onClick={() => void loadUsers()}
+              >
+                {loading && users.length > 0 ? copy.refreshing : copy.refresh}
+              </CanvasBtn>
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                icon="plus"
+                onClick={() => setShowInvite(true)}
+              >
+                {copy.invite}
+              </CanvasBtn>
+            </>
+          ) : undefined
         }
       />
 
@@ -845,18 +927,33 @@ export default function UsersPage() {
           />
         ) : null}
 
-        <CanvasCard theme={theme} padding={0} style={{ overflow: "hidden" }}>
-          {loading && users.length === 0 ? (
-            <div style={loadingStateStyle}>{copy.loading}</div>
-          ) : rows.length === 0 ? (
-            <div style={emptyStateStyle}>{copy.empty}</div>
-          ) : (
-            <CanvasTable<UserRow> theme={theme} columns={columns} rows={rows} />
-          )}
-        </CanvasCard>
+        {activeTab === "users" ? (
+          <CanvasCard theme={theme} padding={0} style={{ overflow: "hidden" }}>
+            {loading && users.length === 0 ? (
+              <div style={loadingStateStyle}>{copy.loading}</div>
+            ) : rows.length === 0 ? (
+              <div style={emptyStateStyle}>{copy.empty}</div>
+            ) : (
+              <CanvasTable<UserRow> theme={theme} columns={columns} rows={rows} />
+            )}
+          </CanvasCard>
+        ) : activeTab === "role-approvals" ? (
+          <RoleApprovalPanel />
+        ) : activeTab === "access-reviews" ? (
+          <AccessReviewPanel />
+        ) : (
+          <BreakGlassPanel />
+        )}
       </div>
 
       {renderModal()}
+
+      {selectedUserForDrawer ? (
+        <UserDetailDrawer
+          user={selectedUserForDrawer}
+          onClose={() => setSelectedUserForDrawer(null)}
+        />
+      ) : null}
     </>
   );
 }
