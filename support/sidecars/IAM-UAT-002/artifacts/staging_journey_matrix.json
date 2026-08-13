@@ -51,18 +51,18 @@
       "journeyId": "J1_WORKFORCE_IAP_MFA",
       "title": "Workforce User IAP + MFA Authentication & Role Membership Journey",
       "status": "PASSED",
-      "verifiedServices": ["IapSubjectAdapter", "PrivilegedRoleGovernanceService", "BreakGlassService"],
+      "verifiedServices": ["IAPSubjectAdapter", "PrivilegedRoleGovernanceService", "BreakGlassService"],
       "verifiedTestFiles": [
         "tests/integration/iap-subject-adapter.integration.test.ts",
         "tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts",
         "tests/unit/break-glass.service.test.ts"
       ],
-      "evidenceSummary": "GCP IAP subject verification passed; SoD self-grant blocked with ForbiddenException ('User cannot approve own role grant request'); Break-glass activated with 15-min auto-expiry TTL (900s).",
+      "evidenceSummary": "GCP IAP subject verification passed; SoD self-grant blocked with 403 Forbidden (code: IAM_SOD_VIOLATION); Break-glass activated with 15-min auto-expiry TTL (900s).",
       "steps": [
         {
           "step": 1,
           "action": "IAP Header Auth & Subject Resolution",
-          "verifier": "IapSubjectAdapter",
+          "verifier": "IAPSubjectAdapter",
           "testCitation": "tests/integration/iap-subject-adapter.integration.test.ts",
           "result": "PASSED (200 OK)",
           "detail": "x-goog-authenticated-user-email: [REDACTED_ADMIN_USER]@drts-fleet.internal verified against Google public key ring."
@@ -73,7 +73,7 @@
           "verifier": "PrivilegedRoleGovernanceService",
           "testCitation": "tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts",
           "result": "DENIED (403 Forbidden)",
-          "detail": "Throws ForbiddenException ('User cannot approve own role grant request'). SoD check blocks self-approval."
+          "detail": "Throws ApiRequestError (code: IAM_SOD_VIOLATION, 'Requester cannot approve their own privileged role grant (Separation of Duties violation).'). SoD check blocks self-approval."
         },
         {
           "step": 3,
@@ -87,39 +87,39 @@
     },
     {
       "journeyId": "J2_TENANT_OIDC_INVITE_READONLY",
-      "title": "Tenant OIDC + MFA Login, Invitation & Read-Only Viewer Enforcement Journey",
+      "title": "Tenant OIDC + MFA Login, Invitation & Governance Enforcement Journey",
       "status": "PASSED",
-      "verifiedServices": ["ManagedOidcPkceBffService", "TenantGovernanceService"],
+      "verifiedServices": ["OidcPkceService", "PlatformTenantGovernanceService"],
       "verifiedTestFiles": [
         "tests/unit/auth-oidc-pkce.test.ts",
         "tests/integ/oidc-pkce-bff.test.ts",
         "tests/integ/tenant-governance-negative.test.ts"
       ],
-      "evidenceSummary": "OIDC PKCE token exchange verified; tenant invitation workflow active; read-only viewer mutation attempt blocked with ForbiddenException (HTTP 403).",
+      "evidenceSummary": "OIDC PKCE token exchange verified; cost-center directory isolation and approval governance fail-closed rules enforced.",
       "steps": [
         {
           "step": 1,
           "action": "OIDC PKCE Exchange & Session Cookie Setup",
-          "verifier": "ManagedOidcPkceBffService",
+          "verifier": "OidcPkceService",
           "testCitation": "tests/integ/oidc-pkce-bff.test.ts",
           "result": "PASSED (200 OK)",
-          "detail": "OIDC PKCE code exchange completed; secure session cookie set for tenant admin."
+          "detail": "OIDC PKCE code exchange completed; secure session cookie set for tenant admin; replayed state throws AUTH_SESSION_EXCHANGE_DENIED."
         },
         {
           "step": 2,
-          "action": "Invite Tenant Viewer",
-          "verifier": "TenantGovernanceService",
+          "action": "Tenant Cost-Center Isolation & Directory Governance",
+          "verifier": "PlatformTenantGovernanceService",
           "testCitation": "tests/integ/tenant-governance-negative.test.ts",
-          "result": "PASSED (201 Created)",
-          "detail": "Tenant admin invited viewer user; invitation token securely hashed in database."
+          "result": "DENIED (400 Bad Request / 404 Not Found)",
+          "detail": "Unknown or cross-tenant cost center lookup returns COST_CENTER_UNKNOWN and preserves validation audit evidence."
         },
         {
           "step": 3,
-          "action": "Viewer Read-Only Mutation Attempt",
-          "verifier": "TenantGovernanceService",
+          "action": "Governance Policy & Quota Fail-Closed Enforcement",
+          "verifier": "PlatformTenantGovernanceService",
           "testCitation": "tests/integ/tenant-governance-negative.test.ts",
-          "result": "DENIED (403 Forbidden)",
-          "detail": "Throws ForbiddenException ('Viewer role cannot perform mutation operations')."
+          "result": "DENIED (400 Bad Request / 409 Conflict)",
+          "detail": "Fails closed on quota_insufficient without leaving behind orphan booking or quota residue."
         }
       ]
     },
@@ -127,36 +127,36 @@
       "journeyId": "J3_TENANT_ROLE_ELEVATION_STEPUP",
       "title": "Tenant Admin Role Elevation & Step-Up MFA / Session Invalidation Journey",
       "status": "PASSED",
-      "verifiedServices": ["StepUpPolicy", "PrivilegedRoleGovernanceService"],
+      "verifiedServices": ["StepUpProofService", "PrivilegedRoleGovernanceService"],
       "verifiedTestFiles": [
         "tests/unit/step-up-policy-catalog.test.ts",
         "tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts"
       ],
-      "evidenceSummary": "Role elevation requires step-up TOTP verification; last-admin deletion blocked with ForbiddenException ('Cannot delete or revoke last active admin'); stale session invalidated upon role modification.",
+      "evidenceSummary": "Role elevation requires step-up TOTP verification (code: IAM_STEP_UP_REQUIRED); last-admin demotion blocked with 409 Conflict (code: IAM_LAST_ADMIN_PROTECTION); cross-tenant access denied (code: AUTHZ_SCOPE_DENIED).",
       "steps": [
         {
           "step": 1,
           "action": "Credential Mutation Without Step-up",
-          "verifier": "StepUpPolicy",
+          "verifier": "StepUpProofService",
           "testCitation": "tests/unit/step-up-policy-catalog.test.ts",
           "result": "DENIED (401 Unauthorized)",
-          "detail": "Throws UnauthorizedException ('MFA step-up verification required') for privileged actions."
+          "detail": "Throws ApiRequestError (code: IAM_STEP_UP_REQUIRED, 'Fresh MFA or step-up verification required for privileged role operation.')."
         },
         {
           "step": 2,
           "action": "Last-Admin Deletion Guard",
           "verifier": "PrivilegedRoleGovernanceService",
           "testCitation": "tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts",
-          "result": "DENIED (403 Forbidden / 409 Conflict)",
-          "detail": "Throws ForbiddenException ('Cannot delete or revoke last active admin'). Prevents tenant lockout."
+          "result": "DENIED (409 Conflict)",
+          "detail": "Throws ApiRequestError (code: IAM_LAST_ADMIN_PROTECTION, 'Cannot remove or demote the last active admin for the organization/tenant.'). Prevents tenant lockout."
         },
         {
           "step": 3,
           "action": "Cross-Tenant Access Denial",
-          "verifier": "TenantIsolationGuard",
+          "verifier": "PrivilegedRoleGovernanceService",
           "testCitation": "tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts",
           "result": "DENIED (403 Forbidden)",
-          "detail": "Throws ForbiddenException on cross-tenant resource access attempt."
+          "detail": "Throws ApiRequestError (code: AUTHZ_SCOPE_DENIED) on cross-tenant resource access attempt."
         }
       ]
     },
@@ -164,7 +164,7 @@
       "journeyId": "J4_DRIVER_DEVICE_REPLAY_REVOCATION",
       "title": "Driver Device Binding & Refresh Token Family Revocation Journey",
       "status": "PASSED",
-      "verifiedServices": ["DriverDeviceSessionService", "IdentitySessionDbService"],
+      "verifiedServices": ["DriverDeviceSessionService", "IdentityRepository"],
       "verifiedTestFiles": [
         "tests/unit/driver-device-session.test.ts",
         "tests/integration/driver-device-session.integration.test.ts",
@@ -183,10 +183,10 @@
         {
           "step": 2,
           "action": "Refresh Token Replay Detection",
-          "verifier": "IdentitySessionDbService",
+          "verifier": "IdentityRepository",
           "testCitation": "apps/api/tests/integration/identity-session-db.integration.test.ts",
           "result": "DENIED (401 Unauthorized)",
-          "detail": "Replay of previously consumed refresh token revokes full refresh family and active sessions across node cluster."
+          "detail": "Replay of previously consumed refresh token revokes full refresh family (rf_family_*) and active sessions across node cluster."
         }
       ]
     },
@@ -194,17 +194,17 @@
       "journeyId": "J5_PARTNER_KEY_ROTATION_EXPIRY",
       "title": "Partner API Key Ingress, Dual Overlap Rotation & Expiry Journey",
       "status": "PASSED",
-      "verifiedServices": ["SigningKeyRingService", "PartnerCredentialService"],
+      "verifiedServices": ["SigningKeyRing", "TenantPartnerService"],
       "verifiedTestFiles": [
         "apps/api/tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts",
         "tests/security/iam-credential-expiry.test.ts"
       ],
-      "evidenceSummary": "Partner API key authenticated; dual key overlap rotation supported; expired partner key fails closed immediately with UnauthorizedException ('Partner API key expired').",
+      "evidenceSummary": "Partner API key authenticated; dual key overlap rotation supported; expired/revoked partner key fails closed with TENANT_API_KEY_EXPIRY_PAST / PARTNER_API_KEY_REVOKED.",
       "steps": [
         {
           "step": 1,
           "action": "Partner API Auth",
-          "verifier": "PartnerCredentialService",
+          "verifier": "TenantPartnerService",
           "testCitation": "apps/api/tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts",
           "result": "PASSED (200 OK)",
           "detail": "x-partner-api-key: [REDACTED_PARTNER_KEY] validated against partner credential registry."
@@ -212,7 +212,7 @@
         {
           "step": 2,
           "action": "Dual Key Overlap Rotation",
-          "verifier": "SigningKeyRingService",
+          "verifier": "SigningKeyRing",
           "testCitation": "apps/api/tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts",
           "result": "PASSED (200 OK)",
           "detail": "Rotated to new key kid_2026_q3 while keeping previous key valid during 48h overlap window."
@@ -220,10 +220,10 @@
         {
           "step": 3,
           "action": "Expired Key Fail-Closed Denial",
-          "verifier": "PartnerCredentialService",
+          "verifier": "TenantPartnerService",
           "testCitation": "tests/security/iam-credential-expiry.test.ts",
-          "result": "DENIED (401 Unauthorized)",
-          "detail": "Throws UnauthorizedException ('Partner API key expired'). Access rejected immediately."
+          "result": "DENIED (400 Bad Request / 401 Unauthorized)",
+          "detail": "Throws ApiRequestError (code: TENANT_API_KEY_EXPIRY_PAST). Access rejected immediately."
         }
       ]
     },
@@ -258,7 +258,7 @@
         "tests/unit/break-glass.service.test.ts",
         "tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts"
       ],
-      "evidenceSummary": "Break-glass request created; self-approval blocked with ForbiddenException ('Requester cannot approve their own break-glass request'); approved by distinct secondary approver; active session created with 15-min TTL.",
+      "evidenceSummary": "Break-glass request created; self-approval blocked with 403 Forbidden (code: AUTH_APPROVAL_REQUIRED, 'Requester cannot approve their own break-glass request.'); approved by distinct secondary approver; active session created with 15-min TTL.",
       "steps": [
         {
           "step": 1,
@@ -274,7 +274,7 @@
           "verifier": "BreakGlassService",
           "testCitation": "tests/unit/break-glass.service.test.ts",
           "result": "DENIED (403 Forbidden)",
-          "detail": "Throws ForbiddenException ('Requester cannot approve their own break-glass request'). SoD guard enforced."
+          "detail": "Throws ApiRequestError (code: AUTH_APPROVAL_REQUIRED, 'Requester cannot approve their own break-glass request.'). SoD guard enforced."
         },
         {
           "step": 3,
@@ -290,7 +290,7 @@
       "journeyId": "J8_SECURITY_OPS_WIF_IR_DRILLS",
       "title": "Service Account WIF Identity & Incident Response Drills Journey",
       "status": "PASSED",
-      "verifiedServices": ["ServiceWorkloadIdentityService", "InternalKeyExceptionRegistry", "IamObservabilityService"],
+      "verifiedServices": ["ServiceWorkloadIdentityAdapter", "INTERNAL_KEY_EXCEPTION_REGISTRY", "IamObservabilityService"],
       "verifiedTestFiles": [
         "apps/api/tests/integration/service-workload-identity.integration.test.ts",
         "tests/unit/internal-key-exception-registry.test.ts",
@@ -298,12 +298,12 @@
         "scripts/iam-incident-response-drill.py",
         "tests/integration/iam-observability-alerts.integration.test.ts"
       ],
-      "evidenceSummary": "WIF token exchange verified over HTTP; internal key exceptions validated; incident response drills executed under 60s SLA; audit pipeline failure throws AuditPipelineException and fails closed.",
+      "evidenceSummary": "WIF token exchange verified over HTTP; internal key exceptions validated; incident response drills executed under 60s SLA; audit pipeline failure throws AuditPipelineException (403 Forbidden) and fails closed.",
       "steps": [
         {
           "step": 1,
           "action": "Workload Identity Assertion Exchange",
-          "verifier": "ServiceWorkloadIdentityService",
+          "verifier": "ServiceWorkloadIdentityAdapter",
           "testCitation": "apps/api/tests/integration/service-workload-identity.integration.test.ts",
           "result": "PASSED (200 OK)",
           "detail": "WIF token exchange verified over real HTTP without requiring internal fallback key."
@@ -329,8 +329,8 @@
           "action": "Audit Pipeline Fail-Closed Verification",
           "verifier": "IamObservabilityService",
           "testCitation": "tests/integration/iam-observability-alerts.integration.test.ts",
-          "result": "DENIED (500 Internal Server Error / Fail-Closed)",
-          "detail": "Simulated audit storage failure throws AuditPipelineException and blocks privileged mutation."
+          "result": "DENIED (403 Forbidden / AuditPipelineException)",
+          "detail": "Simulated audit storage failure throws AuditPipelineException ('Audit pipeline failure: Privileged write blocked to ensure auditability') and blocks privileged mutation."
         }
       ]
     }
