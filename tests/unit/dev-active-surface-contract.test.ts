@@ -56,7 +56,9 @@ describe("dev active surface contract", () => {
 
     expect(source).not.toContain("drts-referral-embed-web");
     expect(source).not.toContain('"" "drts-api")');
-    expect(source).not.toContain("concierge-portal-web");
+    // Candidate acceptance derives retired URLs only to assert their
+    // retire/paused behavior; these surfaces remain absent from build/deploy.
+    expect(source).not.toMatch(/(?:Deploy|Build & push) — .*concierge/i);
     expect(
       source
         .split("\n")
@@ -65,7 +67,11 @@ describe("dev active surface contract", () => {
     ).toEqual([
       'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
+      'export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"',
     ]);
+    expect(source).toContain(
+      'export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"',
+    );
     expect(source).not.toMatch(/Deploy — .*passenger/i);
     expect(source).not.toMatch(/Build & push — .*passenger/i);
     expect(source).not.toContain("DEV_GCP_PASSENGER");
