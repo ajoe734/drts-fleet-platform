@@ -56,7 +56,7 @@ def tool_list() -> list[dict[str, Any]]:
         },
         {
             "name": "drts_task_slice",
-            "description": "Read one task slice from ai-status machine truth using scripts/ai_status.py get-task.",
+            "description": "Read one task slice from ai-status machine truth using scripts/ai-status.sh show.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

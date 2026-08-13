@@ -136,7 +136,7 @@ class WatcherBookkeepingTests(unittest.TestCase):
 
             self.assertTrue(queued)
             payload = json.loads(event_queue_path.read_text(encoding="utf-8").splitlines()[0])
-            self.assertNotIn(".orchestrator/task-briefs/P3-002.md", payload["context_files"])
+            self.assertNotIn(".orchestrator/generated/task-briefs/P3-002.md", payload["context_files"])
             self.assertIn("# Task Brief: P3-002", payload["message"])
             self.assertNotIn("current-work.md", payload["context_files"])
             self.assertNotIn("ai-activity-log.jsonl", payload["context_files"])

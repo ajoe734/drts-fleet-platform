@@ -107,7 +107,7 @@ Bounded tools exposed to OpenClaw:
 
 These tools are deliberately narrow:
 
-- `drts_task_slice` shells only to `python3 scripts/ai_status.py get-task <id>`
+- `drts_task_slice` shells only to `scripts/ai-status.sh show <id>`
   with a task-id regex guard.
 - `drts_runtime_profile` returns booleans about injected credentials but never
   reveals token contents.
