@@ -3,15 +3,9 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import io
-import sys
-import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
-
 from pathlib import Path
-from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,740 +15,238 @@ ai_status = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ai_status)
 
 
-class LoadLogsRecoveryTest(unittest.TestCase):
-    def test_load_logs_ignores_nul_padding_and_salvages_later_valid_entries(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            log_path = Path(tmpdir) / "ai-activity-log.jsonl"
-            log_path.write_text(
-                '\n'.join([
-                    '{"ts":"2026-06-02T16:34:50Z","type":"healthy","message":"ok"}',
-                    '\x00\x00\x00\x00',
-                    '{"ts":"2026-06-02T17:05:11Z","type":"broken","hook_payload":{"cwd"'
-                    '{"ts":"2026-06-02T23:24:47Z","type":"recovered","message":"still usable"}',
-                ])
-                + "\n",
-                encoding="utf-8",
-            )
-            stderr = io.StringIO()
-            with (
-                mock.patch.object(ai_status, "LOG_FILE", log_path),
-                redirect_stderr(stderr),
-            ):
-                logs = ai_status.load_logs()
-
-        self.assertEqual([entry["type"] for entry in logs], ["healthy", "recovered"])
-        self.assertEqual(stderr.getvalue(), "")
-
-
-class CompletionMetadataTest(unittest.TestCase):
-    def _canonical_task(self) -> dict[str, str]:
-        return {
+class CandidateLifecycleTest(unittest.TestCase):
+    def state(self, *, required_acceptance: list[str] | None = None, task_class: str | None = None) -> dict:
+        task = {
             "id": "TASK-001",
             "owner": "Codex",
             "reviewer": "Claude",
-            "status": "review_approved",
+            "status": "in_progress",
+            "next": "Implementing",
         }
-
-    def test_canonical_done_requires_push_metadata(self) -> None:
-        env = {
-            "COMMIT_HASH": "abc123",
-            "COMMIT_SUBJECT": "feat(task-001): deliver slice",
-        }
-
-        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "git_commit_exists", return_value=True):
-            with self.assertRaisesRegex(SystemExit, "PUSH_REMOTE and PUSH_BRANCH"):
-                ai_status.completion_metadata_from_env(self._canonical_task(), "Codex")
-
-    def test_canonical_done_records_commit_and_push_metadata(self) -> None:
-        env = {
-            "COMMIT_HASH": "abc123",
-            "COMMIT_SUBJECT": "feat(task-001): deliver slice",
-            "PUSH_REMOTE": "origin",
-            "PUSH_BRANCH": "feat/task-001",
-        }
-
-        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "git_commit_exists", return_value=True):
-            metadata = ai_status.completion_metadata_from_env(self._canonical_task(), "Codex")
-
-        self.assertEqual(metadata["commit_hash"], "abc123")
-        self.assertEqual(metadata["push_remote"], "origin")
-        self.assertEqual(metadata["push_branch"], "feat/task-001")
-        self.assertEqual(metadata["push_ref"], "origin/feat/task-001")
-        self.assertEqual(metadata["push_commit"], "abc123")
-
-    def test_sidecar_no_commit_closeout_does_not_require_push_metadata(self) -> None:
-        task = {
-            "id": "TASK-001-SIDECAR-ACCEPTANCE",
-            "owner": "Codex",
-            "reviewer": "Claude",
-            "status": "review_approved",
-            "task_class": "sidecar",
-        }
-
-        with mock.patch.dict(os.environ, {"NO_COMMIT_REQUIRED": "1"}, clear=True):
-            metadata = ai_status.completion_metadata_from_env(task, "Codex")
-
-        self.assertEqual(metadata["commit_hash"], "-")
-        self.assertEqual(metadata["commit_subject"], "no-commit closeout")
-
-    def test_release_gate_noncanonical_done_still_requires_commit_metadata(self) -> None:
-        task = {
-            "id": "TASK-001-RELEASE",
-            "owner": "Codex",
-            "reviewer": "Claude",
-            "status": "review_approved",
-            "mutates_canonical": False,
-            "release_gate": True,
-        }
-
-        with mock.patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(SystemExit, "done requires COMMIT_HASH"):
-                ai_status.completion_metadata_from_env(task, "Codex")
-
-    def test_required_integration_noncanonical_done_still_requires_commit_metadata(self) -> None:
-        task = {
-            "id": "TASK-001-DEPLOY",
-            "owner": "Codex",
-            "reviewer": "Claude",
-            "status": "review_approved",
-            "mutates_canonical": False,
-            "required_integration_status": "dev_deployed",
-        }
-
-        with mock.patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(SystemExit, "done requires COMMIT_HASH"):
-                ai_status.completion_metadata_from_env(task, "Codex")
-
-
-class UnblockParentResolutionTest(unittest.TestCase):
-    def test_unblock_done_resumes_parent_to_todo(self) -> None:
-        state = {
-            "tasks": [
-                {
-                    "id": "ADM-UI-RD-006",
-                    "owner": "Codex",
-                    "reviewer": "Claude",
-                    "status": "blocked",
-                    "next": "Waiting on history repair.",
-                    "waiting_for": "Claude",
-                },
-                {
-                    "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
-                    "owner": "Claude2",
-                    "reviewer": "Codex",
-                    "status": "review_approved",
-                    "task_class": "unblock",
-                    "helper_parent": "ADM-UI-RD-006",
-                    "helper_kind": "history_repair",
-                    "mutates_canonical": False,
-                },
-            ],
-            "blockers": [
-                {
-                    "task_id": "ADM-UI-RD-006",
-                    "owner": "Codex",
-                    "waiting_for": "Claude",
-                    "message": "Waiting on history repair.",
-                    "status": "open",
-                    "created_at": "2026-05-18T00:00:00Z",
-                }
-            ],
-            "handoffs": [],
-        }
-
-        with mock.patch.dict(os.environ, {"AI_NAME": "Claude2"}, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_done(
-                state,
-                ["ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR", "Repair packet complete and parent can resume."],
-            )
-
-        parent = next(task for task in state["tasks"] if task["id"] == "ADM-UI-RD-006")
-        child = next(task for task in state["tasks"] if task["id"] == "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR")
-        self.assertEqual(child["status"], "done")
-        self.assertEqual(parent["status"], "todo")
-        self.assertIn("ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR", parent["next"])
-        self.assertEqual(child["resolved_parent_status"], "todo")
-        self.assertEqual(state["blockers"][0]["status"], "resolved")
-        self.assertEqual(len(state["handoffs"]), 1)
-        self.assertEqual(state["handoffs"][0]["to"], "Codex")
-
-    def test_unblock_done_can_keep_parent_blocked(self) -> None:
-        state = {
-            "tasks": [
-                {
-                    "id": "ADM-UI-RD-006",
-                    "owner": "Codex",
-                    "reviewer": "Claude",
-                    "status": "blocked",
-                    "next": "Waiting on history repair.",
-                    "waiting_for": "Claude",
-                },
-                {
-                    "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
-                    "owner": "Claude2",
-                    "reviewer": "Codex",
-                    "status": "review_approved",
-                    "task_class": "unblock",
-                    "helper_parent": "ADM-UI-RD-006",
-                    "helper_kind": "history_repair",
-                    "mutates_canonical": False,
-                },
-            ],
-            "blockers": [],
-            "handoffs": [],
-        }
-
-        env = {
-            "AI_NAME": "Claude2",
-            "PARENT_STATUS": "blocked",
-            "PARENT_WAITING_FOR": "Codex",
-            "PARENT_NEXT": "Artifact path still needs canonical reconciliation before owner resume.",
-        }
-        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
-            ai_status.command_done(
-                state,
-                ["ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR", "Repair packet complete but artifact reconcile remains."],
-            )
-
-        parent = next(task for task in state["tasks"] if task["id"] == "ADM-UI-RD-006")
-        child = next(task for task in state["tasks"] if task["id"] == "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR")
-        self.assertEqual(parent["status"], "blocked")
-        self.assertEqual(parent["waiting_for"], "Codex")
-        self.assertEqual(parent["next"], "Artifact path still needs canonical reconciliation before owner resume.")
-        self.assertEqual(child["resolved_parent_status"], "blocked")
-        self.assertEqual(child["resolved_parent_waiting_for"], "Codex")
-        self.assertEqual(len(state["handoffs"]), 0)
-        self.assertEqual(len(state["blockers"]), 1)
-        self.assertEqual(state["blockers"][0]["status"], "open")
-
-
-class GitMergeReconciliationTest(unittest.TestCase):
-    def _state(self) -> dict[str, object]:
-        return {
-            "tasks": [
-                {
-                    "id": "PH1GC-E2E-010",
-                    "owner": "Codex",
-                    "reviewer": "Claude",
-                    "status": "backlog",
-                    "next": "Waiting on dispatch.",
-                },
-                {
-                    "id": "PH1GC-COM-001",
-                    "owner": "Codex",
-                    "reviewer": "Claude",
-                    "status": "in_progress",
-                },
-                {
-                    "id": "PH1GC-DONE-EXAMPLE",
-                    "owner": "Codex2",
-                    "reviewer": "Codex",
-                    "status": "done",
-                },
-                {
-                    "id": "REL-REF-EMBED-001",
-                    "owner": "Codex2",
-                    "reviewer": "Codex",
-                    "status": "review_approved",
-                    "required_integration_status": "dev_deployed",
-                },
-            ],
-            "blockers": [
-                {
-                    "task_id": "PH1GC-E2E-010",
-                    "owner": "Codex",
-                    "waiting_for": "Claude",
-                    "message": "Waiting on dispatch.",
-                    "status": "open",
-                    "created_at": "2026-05-18T00:00:00Z",
-                }
-            ],
-            "handoffs": [
-                {
-                    "task_id": "PH1GC-E2E-010",
-                    "from": "Claude",
-                    "to": "Codex",
-                    "message": "Owner finalize",
-                    "status": "pending",
-                    "created_at": "2026-05-18T00:00:00Z",
-                }
-            ],
-        }
-
-    def test_reconcile_marks_merged_task_done(self) -> None:
-        state = self._state()
-        closeouts = {
-            "PH1GC-E2E-010": {
-                "sha": "49b49a25002a611c5b3433e3ee36c11a73fb7b83",
-                "subject": "PH1GC-E2E-010: governance-aware billing/reporting E2E script (#256)",
-                "commit_date": "2026-05-23T13:48:47+00:00",
-            }
-        }
-        with mock.patch.object(ai_status, "_git_log_closeouts", return_value=closeouts), mock.patch.object(ai_status, "append_log"):
-            reconciled = ai_status.apply_git_merge_reconciliation(state)
-
-        self.assertEqual(len(reconciled), 1)
-        self.assertEqual(reconciled[0]["task_id"], "PH1GC-E2E-010")
-        self.assertEqual(reconciled[0]["prior_status"], "backlog")
-
-        task = next(t for t in state["tasks"] if t["id"] == "PH1GC-E2E-010")
-        self.assertEqual(task["status"], "done")
-        self.assertEqual(task["commit_hash"], "49b49a25002a611c5b3433e3ee36c11a73fb7b83")
-        self.assertEqual(task["push_remote"], "origin")
-        self.assertEqual(task["push_branch"], "dev")
-        self.assertEqual(task["push_ref"], "origin/dev")
-        self.assertEqual(task["reconciled_from_git_prior_status"], "backlog")
-        self.assertEqual(state["blockers"][0]["status"], "resolved")
-        self.assertEqual(state["handoffs"][0]["status"], "done")
-
-    def test_reconcile_skips_already_done_tasks(self) -> None:
-        state = self._state()
-        closeouts = {
-            "PH1GC-DONE-EXAMPLE": {
-                "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-                "subject": "PH1GC-DONE-EXAMPLE: already shipped",
-                "commit_date": "2026-05-23T13:48:47+00:00",
-            }
-        }
-        with mock.patch.object(ai_status, "_git_log_closeouts", return_value=closeouts), mock.patch.object(ai_status, "append_log"):
-            reconciled = ai_status.apply_git_merge_reconciliation(state)
-
-        self.assertEqual(reconciled, [])
-
-    def test_reconcile_skips_tasks_without_closeout_commit(self) -> None:
-        state = self._state()
-        with mock.patch.object(ai_status, "_git_log_closeouts", return_value={}), mock.patch.object(ai_status, "append_log"):
-            reconciled = ai_status.apply_git_merge_reconciliation(state)
-
-        self.assertEqual(reconciled, [])
-        task = next(t for t in state["tasks"] if t["id"] == "PH1GC-E2E-010")
-        self.assertEqual(task["status"], "backlog")
-
-    def test_reconcile_skips_dev_deploy_required_tasks(self) -> None:
-        state = self._state()
-        closeouts = {
-            "REL-REF-EMBED-001": {
-                "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-                "subject": "REL-REF-EMBED-001: preserve release evidence gate",
-                "commit_date": "2026-08-02T03:48:47+00:00",
-            }
-        }
-        with mock.patch.object(ai_status, "_git_log_closeouts", return_value=closeouts), mock.patch.object(ai_status, "append_log"):
-            reconciled = ai_status.apply_git_merge_reconciliation(state)
-
-        self.assertEqual(reconciled, [])
-        task = next(t for t in state["tasks"] if t["id"] == "REL-REF-EMBED-001")
-        self.assertEqual(task["status"], "review_approved")
-
-    def test_reconcile_skips_any_required_integration_task(self) -> None:
-        state = self._state()
-        state["tasks"].append(
-            {
-                "id": "REL-MERGE-ONLY-001",
-                "owner": "Codex2",
-                "reviewer": "Codex",
-                "status": "review_approved",
-                "required_integration_status": "merged_to_dev",
-            }
-        )
-        closeouts = {
-            "REL-MERGE-ONLY-001": {
-                "sha": "feedfacefeedfacefeedfacefeedfacefeedface",
-                "subject": "REL-MERGE-ONLY-001: requires explicit integration evidence",
-                "commit_date": "2026-08-02T03:48:47+00:00",
-            }
-        }
-        with mock.patch.object(ai_status, "_git_log_closeouts", return_value=closeouts), mock.patch.object(ai_status, "append_log"):
-            reconciled = ai_status.apply_git_merge_reconciliation(state)
-
-        self.assertEqual(reconciled, [])
-        task = next(t for t in state["tasks"] if t["id"] == "REL-MERGE-ONLY-001")
-        self.assertEqual(task["status"], "review_approved")
-
-    def test_closeout_regex_excludes_anchor_commits(self) -> None:
-        self.assertIsNotNone(
-            ai_status.CLOSEOUT_SUBJECT_RE.match("PH1GC-E2E-010: governance-aware E2E script (#256)")
-        )
-        # Anchor commits with `wip(TASK):` prefix must NOT be treated as closeouts.
-        self.assertIsNone(
-            ai_status.CLOSEOUT_SUBJECT_RE.match("wip(PH1GC-E2E-010): in-flight anchor")
-        )
-
-
-
-
-class CommandShowTests(unittest.TestCase):
-    """OPS-CONTEXT-BLOAT-SLIM-001: `show <task-id>` prints ONE task slice
-    so workers don't have to Read the 2MB ai-status.json wholesale (which
-    burns ~500K input tokens every read)."""
-
-    def test_show_prints_matching_task_json(self) -> None:
-        state = {"tasks": [
-            {"id": "T1", "status": "todo", "owner": "Codex2"},
-            {"id": "T2", "status": "done", "owner": "Claude"},
-        ]}
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            ai_status.command_show(state, ["T2"])
-        out = buf.getvalue()
-        self.assertIn('"id": "T2"', out)
-        self.assertIn('"status": "done"', out)
-        self.assertNotIn('"id": "T1"', out, "must NOT leak other tasks")
-
-    def test_show_missing_task_exits_nonzero(self) -> None:
-        state = {"tasks": [{"id": "T1", "status": "todo"}]}
-        with self.assertRaises(SystemExit) as cm:
-            ai_status.command_show(state, ["DOES-NOT-EXIST"])
-        self.assertNotEqual(cm.exception.code, 0)
-
-    def test_show_no_args_exits_nonzero(self) -> None:
-        with self.assertRaises(SystemExit):
-            ai_status.command_show({"tasks": []}, [])
-
-
-class CommandListTests(unittest.TestCase):
-    """`list [--status X] [--owner Y] ...` is the compact alternative for
-    when a worker needs to enumerate tasks. One line per task vs 2 MB JSON.
-    """
-
-    def _state(self) -> dict:
-        return {"tasks": [
-            {"id": "A", "status": "todo", "owner": "Codex", "reviewer": "Codex2"},
-            {"id": "B", "status": "in_progress", "owner": "Codex2", "reviewer": "Codex"},
-            {"id": "C", "status": "todo", "owner": "Claude", "reviewer": "Claude2"},
-        ]}
-
-    def test_list_no_filter_prints_all(self) -> None:
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            ai_status.command_list(self._state(), [])
-        out = buf.getvalue()
-        ids = sorted(ln.split()[0] for ln in out.splitlines() if ln.strip() and not ln.startswith("("))
-        self.assertEqual(ids, ["A", "B", "C"])
-
-    def test_list_filter_by_status(self) -> None:
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            ai_status.command_list(self._state(), ["--status", "todo"])
-        out = buf.getvalue()
-        ids = sorted(ln.split()[0] for ln in out.splitlines() if ln.strip() and not ln.startswith("("))
-        self.assertEqual(ids, ["A", "C"])
-
-    def test_list_combine_filters(self) -> None:
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            ai_status.command_list(self._state(), ["--status", "todo", "--owner", "Codex"])
-        out = buf.getvalue()
-        # Match task-id at column start to avoid colliding with 'Codex'/'Claude2'.
-        ids_present = [ln.split()[0] for ln in out.splitlines() if ln.strip() and not ln.startswith("(")]
-        self.assertEqual(ids_present, ["A"], f'expected only A, got {ids_present}')
-
-    def test_list_no_matches_prints_placeholder(self) -> None:
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            ai_status.command_list(self._state(), ["--status", "nothing"])
-        out = buf.getvalue()
-        self.assertIn("(no matches)", out)
-
-
-# --- Integration gate (branch-strategy.md §11.6 enforcement) ---
-_GATE_SPEC = importlib.util.spec_from_file_location(
-    "integration_gate", ROOT / ".orchestrator" / "integration_gate.py"
-)
-assert _GATE_SPEC is not None and _GATE_SPEC.loader is not None
-integration_gate = importlib.util.module_from_spec(_GATE_SPEC)
-_GATE_SPEC.loader.exec_module(integration_gate)
-
-
-class IntegrationGateUnitTest(unittest.TestCase):
-    def _cfg(self, **gate) -> dict:
-        return {"branch_strategy": {"integration_gate": {"enabled": True, **gate}}}
-
-    def test_disabled_gate_allows_everything(self) -> None:
-        cfg = {"branch_strategy": {"integration_gate": {"enabled": False}}}
-        self.assertIsNone(
-            integration_gate.check_integration_gate({"id": "X"}, "branch_pushed", cfg)
-        )
-
-    def test_branch_only_status_blocks_when_enabled(self) -> None:
-        reason = integration_gate.check_integration_gate(
-            {"id": "I18N-OPS-03"}, "branch_pushed", self._cfg()
-        )
-        self.assertIsNotNone(reason)
-        self.assertIn("I18N-OPS-03", reason)
-        self.assertIn("not integrated to dev", reason)
-
-    def test_integrated_statuses_allow(self) -> None:
-        for status in ("merged_to_dev", "dev_deployed", "not_applicable"):
-            self.assertIsNone(
-                integration_gate.check_integration_gate({"id": "X"}, status, self._cfg()),
-                status,
-            )
-
-    def test_required_integration_status_blocks_unmatched_statuses(self) -> None:
-        task = {"id": "REL-REF-EMBED-001", "required_integration_status": "dev_deployed"}
-        for status in ("merged_to_dev", "not_applicable", "branch_pushed", "ci_failed"):
-            reason = integration_gate.check_integration_gate(task, status, self._cfg())
-            self.assertIsNotNone(reason, f"Expected block for status {status}")
-            self.assertIn("REL-REF-EMBED-001", reason)
-            self.assertIn("required_integration_status=dev_deployed", reason)
-        self.assertIsNone(
-            integration_gate.check_integration_gate(task, "dev_deployed", self._cfg())
-        )
-
-    def test_exempt_pattern_allows(self) -> None:
-        cfg = self._cfg(exempt_task_patterns=[r"-SIDECAR-ACCEPTANCE$"])
-        self.assertIsNone(
-            integration_gate.check_integration_gate(
-                {"id": "FOO-SIDECAR-ACCEPTANCE"}, "branch_pushed", cfg
-            )
-        )
-        # non-matching id still blocks
-        self.assertIsNotNone(
-            integration_gate.check_integration_gate({"id": "FOO"}, "branch_pushed", cfg)
-        )
-
-    def test_malformed_exempt_pattern_does_not_crash(self) -> None:
-        cfg = self._cfg(exempt_task_patterns=["[unclosed"])
-        # malformed regex must not raise and must not exempt
-        self.assertIsNotNone(
-            integration_gate.check_integration_gate({"id": "FOO"}, "branch_pushed", cfg)
-        )
-
-
-class IntegrationGateCommandDoneTest(unittest.TestCase):
-    def _task(self, **extra: object) -> dict:
-        task = {"id": "I18N-OPS-03", "owner": "Codex", "reviewer": "Claude", "status": "review_approved"}
-        task.update(extra)
-        return task
-
-    def _state(self, task: dict) -> dict:
+        if required_acceptance:
+            task["required_acceptance"] = required_acceptance
+        if task_class:
+            task["task_class"] = task_class
         return {"tasks": [task], "blockers": [], "handoffs": []}
 
-    def _done_env(self, **extra: str) -> dict:
+    def task(self, state: dict) -> dict:
+        return state["tasks"][0]
+
+    @mock.patch.object(ai_status, "append_log")
+    @mock.patch.object(ai_status, "git_commit_exists", return_value=True)
+    def test_canonical_handoff_locks_sha_and_branch(self, _exists: mock.Mock, _log: mock.Mock) -> None:
+        state = self.state()
+        env = {"AI_NAME": "Codex", "CANDIDATE_SHA": "abc123", "CANDIDATE_BRANCH": "codex/task-001"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            ai_status.command_handoff(state, ["TASK-001", "Claude", "Ready for review"])
+
+        task = self.task(state)
+        self.assertEqual(task["status"], "review")
+        self.assertEqual(task["candidate_sha"], "abc123")
+        self.assertEqual(task["candidate_branch"], "codex/task-001")
+        self.assertEqual(state["handoffs"][0]["to"], "Claude")
+
+    @mock.patch.object(ai_status, "append_log")
+    @mock.patch.object(ai_status, "git_commit_exists", return_value=True)
+    def test_handoff_rejects_canonical_work_without_candidate_evidence(self, _exists: mock.Mock, _log: mock.Mock) -> None:
+        with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True):
+            with self.assertRaisesRegex(SystemExit, "CANDIDATE_SHA"):
+                ai_status.command_handoff(self.state(), ["TASK-001", "Claude", "Ready"])
+
+    @mock.patch.object(ai_status, "append_log")
+    @mock.patch.object(ai_status, "git_commit_exists", return_value=True)
+    def test_reviewer_approval_requires_same_sha(self, _exists: mock.Mock, _log: mock.Mock) -> None:
+        state = self.state()
+        task = self.task(state)
+        task.update({"status": "review", "candidate_sha": "abc123", "candidate_branch": "codex/task-001"})
+        with mock.patch.dict(os.environ, {"AI_NAME": "Claude", "REVIEWED_SHA": "different"}, clear=True):
+            with self.assertRaisesRegex(SystemExit, "exactly match"):
+                ai_status.command_approve(state, ["TASK-001", "No"])
+
+        with mock.patch.dict(os.environ, {"AI_NAME": "Claude", "REVIEWED_SHA": "abc123"}, clear=True):
+            ai_status.command_approve(state, ["TASK-001", "Approved"])
+        self.assertEqual(task["status"], "integrating")
+        self.assertEqual(task["reviewed_sha"], "abc123")
+
+    @mock.patch.object(ai_status, "append_log")
+    def test_changed_head_invalidates_review_and_ci_evidence(self, _log: mock.Mock) -> None:
+        state = self.state()
+        task = self.task(state)
+        task.update(
+            {
+                "status": "integrating",
+                "candidate_sha": "abc123",
+                "candidate_branch": "codex/task-001",
+                "reviewed_sha": "abc123",
+                "ci_sha": "abc123",
+                "ci_status": "success",
+                "pr_url": "https://example.test/pr/1",
+            }
+        )
+        with mock.patch.dict(os.environ, {"AI_NAME": "Supervisor", "CANDIDATE_HEAD_SHA": "def456"}, clear=True):
+            ai_status.command_reconcile_candidate(state, ["TASK-001"])
+
+        self.assertEqual(task["status"], "in_progress")
+        self.assertNotIn("candidate_sha", task)
+        self.assertNotIn("reviewed_sha", task)
+        self.assertNotIn("ci_sha", task)
+
+    @mock.patch.object(ai_status, "append_log")
+    def test_merge_waits_for_required_acceptance_before_done(self, _log: mock.Mock) -> None:
+        state = self.state(required_acceptance=["staging_signoff"])
+        task = self.task(state)
+        task.update(
+            {
+                "status": "integrating",
+                "candidate_sha": "abc123",
+                "candidate_branch": "codex/task-001",
+                "reviewed_sha": "abc123",
+            }
+        )
         env = {
-            "AI_NAME": "Codex",
-            "COMMIT_HASH": "abc123",
-            "COMMIT_SUBJECT": "I18N-OPS-03: centralize complaints i18n",
-            "PUSH_REMOTE": "origin",
-            "PUSH_BRANCH": "codex/i18n-ops-03",
+            "AI_NAME": "Supervisor",
+            "CANDIDATE_HEAD_SHA": "abc123",
+            "CANDIDATE_CI_STATUS": "success",
+            "MERGE_SHA": "fedcba",
         }
-        env.update(extra)
-        return env
+        with mock.patch.dict(os.environ, env, clear=True):
+            ai_status.command_reconcile_candidate(state, ["TASK-001", "Merged"])
+        self.assertEqual(task["status"], "acceptance")
 
-    def test_branch_only_done_is_refused_when_enabled(self) -> None:
-        task = self._task()
-        state = self._state(task)
-        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
-        with (
-            mock.patch.dict(os.environ, self._done_env(), clear=True),
-            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
-            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
-            mock.patch.object(ai_status, "append_log"),
+        with mock.patch.dict(
+            os.environ,
+            {"AI_NAME": "Codex", "ACCEPTANCE_EVIDENCE_JSON": '{"staging_signoff":"run-42"}'},
+            clear=True,
         ):
-            with self.assertRaisesRegex(SystemExit, "not integrated to dev"):
-                ai_status.command_done(state, ["I18N-OPS-03", "branch work complete"])
-        # task must NOT have advanced to done
-        self.assertEqual(task["status"], "review_approved")
-
-    def test_merged_to_dev_done_is_allowed_when_enabled(self) -> None:
-        task = self._task()
-        state = self._state(task)
-        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
-        env = self._done_env(INTEGRATION_STATUS="merged_to_dev", MERGED_REF="origin/dev")
-        with (
-            mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
-            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
-            mock.patch.object(ai_status, "append_log"),
-        ):
-            ai_status.command_done(state, ["I18N-OPS-03", "merged to dev"])
+            ai_status.command_record_acceptance(state, ["TASK-001", "Staging accepted"])
         self.assertEqual(task["status"], "done")
-        self.assertEqual(task["integration_status"], "merged_to_dev")
+        self.assertEqual(task["acceptance_evidence"]["staging_signoff"], "run-42")
 
-    def test_log_only_allows_branch_only_done_with_canary(self) -> None:
-        task = self._task()
-        state = self._state(task)
-        cfg = {"branch_strategy": {"integration_gate": {"enabled": True, "log_only": True}}}
-        stderr = io.StringIO()
-        with (
-            mock.patch.dict(os.environ, self._done_env(), clear=True),
-            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
-            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
-            mock.patch.object(ai_status, "append_log"),
-            redirect_stderr(stderr),
-        ):
-            ai_status.command_done(state, ["I18N-OPS-03", "branch work complete"])
+    @mock.patch.object(ai_status, "append_log")
+    def test_sidecar_approval_can_complete_without_git_merge(self, _log: mock.Mock) -> None:
+        state = self.state(task_class="sidecar")
+        task = self.task(state)
+        task.update({"status": "review", "candidate_sha": "not_applicable", "candidate_branch": "not_applicable"})
+        with mock.patch.dict(os.environ, {"AI_NAME": "Claude", "REVIEWED_SHA": "not_applicable"}, clear=True):
+            ai_status.command_approve(state, ["TASK-001", "Packet approved"])
         self.assertEqual(task["status"], "done")
-        self.assertIn("integration-gate canary", stderr.getvalue())
+        self.assertEqual(task["merge_sha"], "not_applicable")
 
-    def test_disabled_gate_allows_branch_only_done(self) -> None:
-        task = self._task()
-        state = self._state(task)
-        cfg = {"branch_strategy": {"integration_gate": {"enabled": False}}}
-        with (
-            mock.patch.dict(os.environ, self._done_env(), clear=True),
-            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
-            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
-            mock.patch.object(ai_status, "append_log"),
-        ):
-            ai_status.command_done(state, ["I18N-OPS-03", "branch work complete"])
-        self.assertEqual(task["status"], "done")
-
-    def test_dev_deploy_required_task_rejects_not_applicable(self) -> None:
-        task = self._task(required_integration_status="dev_deployed")
-        state = self._state(task)
-        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
-        env = self._done_env(INTEGRATION_STATUS="not_applicable")
-        with (
-            mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
-            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
-            mock.patch.object(ai_status, "append_log"),
-        ):
-            with self.assertRaisesRegex(SystemExit, "requires INTEGRATION_STATUS>=dev_deployed"):
-                ai_status.command_done(state, ["I18N-OPS-03", "attempted support-only closeout"])
-        self.assertEqual(task["status"], "review_approved")
-
-    def test_dev_deploy_required_task_rejects_merge_only_done(self) -> None:
-        task = self._task(required_integration_status="dev_deployed")
-        state = self._state(task)
-        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
-        env = self._done_env(
-            INTEGRATION_STATUS="merged_to_dev",
-            PR_URL="https://example.test/pr/123",
-            CI_STATUS="passed",
-            CI_RUN_URL="https://example.test/ci/123",
-            MERGED_REF="origin/dev",
-            MERGE_COMMIT="abc123",
+    @mock.patch.object(ai_status, "append_log")
+    def test_supervisor_reassigns_through_candidate_writer(self, _log: mock.Mock) -> None:
+        state = self.state()
+        task = self.task(state)
+        task.update(
+            {
+                "candidate_sha": "abc123",
+                "candidate_branch": "codex/task-001",
+                "reviewed_sha": "abc123",
+            }
         )
-        with (
-            mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
-            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
-            mock.patch.object(ai_status, "append_log"),
+        state["handoffs"] = [{"task_id": "TASK-001", "to": "Codex", "status": "pending"}]
+        env = {
+            "AI_NAME": "Supervisor",
+            "TASK_EXPECTED_OWNER": "Codex",
+            "TASK_EXPECTED_REVIEWER": "Claude",
+            "TASK_REASSIGN_REOPEN": "1",
+            "TASK_HANDOFF_FROM": "Codex",
+            "TASK_HANDOFF_TO": "Gemini",
+            "TASK_EVIDENCE_REF": "support/reassign/TASK-001.json",
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            ai_status.command_reassign(
+                state,
+                ["TASK-001", "Gemini", "Claude", "Move to the healthy lane"],
+            )
+
+        self.assertEqual(task["owner"], "Gemini")
+        self.assertEqual(task["status"], "todo")
+        self.assertNotIn("candidate_sha", task)
+        self.assertEqual(task["evidence_refs"], ["support/reassign/TASK-001.json"])
+        self.assertEqual(state["handoffs"][0]["status"], "done")
+        self.assertEqual(state["handoffs"][1]["to"], "Gemini")
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AI_NAME": "Supervisor",
+                "TASK_EXPECTED_OWNER": "Gemini",
+                "TASK_EXPECTED_REVIEWER": "Claude",
+            },
+            clear=True,
         ):
-            with self.assertRaisesRegex(SystemExit, "requires INTEGRATION_STATUS>=dev_deployed"):
-                ai_status.command_done(state, ["I18N-OPS-03", "merged but not deployed"])
-        self.assertEqual(task["status"], "review_approved")
+            ai_status.command_reassign(
+                state,
+                ["TASK-001", "Gemini", "Claude2", "Switch reviewer after owner move"],
+            )
+        self.assertEqual(task["owner"], "Gemini")
+        self.assertEqual(task["reviewer"], "Claude2")
 
-    def test_dev_deploy_required_task_requires_full_evidence(self) -> None:
-        task = self._task(required_integration_status="dev_deployed")
-        state = self._state(task)
-        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
-        env = self._done_env(
-            INTEGRATION_STATUS="dev_deployed",
-            PR_URL="https://example.test/pr/123",
-            CI_STATUS="passed",
-            CI_RUN_URL="https://example.test/ci/123",
-            MERGED_REF="origin/dev",
-            MERGE_COMMIT="abc123",
-            DEV_DEPLOY_RUN_URL="https://example.test/deploy/123",
-            DEV_DEPLOY_SHA="abc123",
-        )
-        with (
-            mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
-            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
-            mock.patch.object(ai_status, "append_log"),
-        ):
-            with self.assertRaisesRegex(SystemExit, "missing DEV_DEPLOY_SOURCE_REF"):
-                ai_status.command_done(state, ["I18N-OPS-03", "deployed but source ref missing"])
-        self.assertEqual(task["status"], "review_approved")
+    @mock.patch.object(ai_status, "append_log")
+    def test_supervisor_resume_resolves_blocker_in_same_transaction(self, _log: mock.Mock) -> None:
+        state = self.state()
+        task = self.task(state)
+        task.update({"status": "blocked", "waiting_for": "Claude"})
+        state["blockers"] = [{"task_id": "TASK-001", "status": "open"}]
+        with mock.patch.dict(os.environ, {"AI_NAME": "Supervisor"}, clear=True):
+            ai_status.command_resume_blocked(state, ["TASK-001", "todo", "Unblock evidence is complete"])
 
-    def test_dev_deploy_required_task_accepts_full_evidence(self) -> None:
-        task = self._task(required_integration_status="dev_deployed")
-        state = self._state(task)
-        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
-        env = self._done_env(
-            INTEGRATION_STATUS="dev_deployed",
-            PR_URL="https://example.test/pr/123",
-            CI_STATUS="passed",
-            CI_RUN_URL="https://example.test/ci/123",
-            MERGED_REF="origin/dev",
-            MERGE_COMMIT="abc123",
-            DEV_DEPLOY_RUN_URL="https://example.test/deploy/123",
-            DEV_DEPLOY_SHA="abc123",
-            DEV_DEPLOY_SOURCE_REF="publish/v2026.08.02.0",
-        )
-        with (
-            mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(ai_status, "git_commit_exists", return_value=True),
-            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
-            mock.patch.object(ai_status, "append_log"),
-        ):
-            ai_status.command_done(state, ["I18N-OPS-03", "merged and deployed to dev"])
-        self.assertEqual(task["status"], "done")
-        self.assertEqual(task["integration_status"], "dev_deployed")
+        self.assertEqual(task["status"], "todo")
+        self.assertNotIn("waiting_for", task)
+        self.assertEqual(state["blockers"][0]["status"], "resolved")
 
-    def test_support_only_sidecar_still_allows_not_applicable(self) -> None:
-        task = self._task(task_class="sidecar", mutates_canonical=False)
-        state = self._state(task)
-        cfg = {"branch_strategy": {"integration_gate": {"enabled": True}}}
-        with (
-            mock.patch.dict(os.environ, {"AI_NAME": "Codex", "NO_COMMIT_REQUIRED": "1"}, clear=True),
-            mock.patch.object(ai_status, "_load_orchestrator_config", return_value=cfg),
-            mock.patch.object(ai_status, "append_log"),
-        ):
-            ai_status.command_done(state, ["I18N-OPS-03", "support-only packet finalized"])
-        self.assertEqual(task["status"], "done")
-        self.assertEqual(task["integration_status"], "not_applicable")
-
-    def test_status_authority_version_stamped_on_load(self) -> None:
-        state = ai_status.default_state()
-        self.assertEqual(state.get("status_authority_version"), "2026-08-02.v1")
-        self.assertEqual(state.get("status_authority_handshake"), "ORCH-STATUS-AUTHORITY-003")
-
-    def test_required_evidence_fields_enforcement(self) -> None:
-        task = {
-            "id": "REL-REF-EMBED-002",
-            "owner": "Codex",
-            "reviewer": "Claude",
-            "status": "review_approved",
-            "required_integration_status": "dev_deployed",
-            "required_evidence_fields": [
-                "pr_url",
-                "ci_run_url",
-                "merge_commit",
-                "dev_deploy_run_url",
-                "dev_deploy_sha",
-                "live_verification_urls",
+    @mock.patch.object(ai_status, "archive_task_bodies")
+    @mock.patch.object(ai_status, "_retention_keeps", return_value={"handoffs": 1, "tasks": 1, "blockers": 1})
+    def test_canonical_writer_prunes_closed_history(
+        self, _keeps: mock.Mock, archive: mock.Mock
+    ) -> None:
+        state = {
+            "handoffs": [
+                {"task_id": "A", "status": "pending"},
+                {"task_id": "B", "status": "done"},
+                {"task_id": "C", "status": "done"},
+            ],
+            "tasks": [
+                {"id": "A", "status": "todo"},
+                {"id": "B", "status": "done"},
+                {"id": "C", "status": "done"},
+            ],
+            "blockers": [
+                {"task_id": "A", "status": "open"},
+                {"task_id": "B", "status": "resolved"},
+                {"task_id": "C", "status": "resolved"},
             ],
         }
-        completion_metadata = {
-            "integration_status": "dev_deployed",
-            "pr_url": "https://github.com/test/pr/1",
-            "ci_run_url": "https://github.com/test/ci/1",
-            "merge_commit": "abc123",
-            "dev_deploy_run_url": "https://github.com/test/deploy/1",
-            "dev_deploy_sha": "abc123",
-        }
-        with self.assertRaisesRegex(SystemExit, "requires evidence fields: live_verification_urls"):
-            ai_status.enforce_required_integration_closeout(task, completion_metadata)
 
-    def test_delegation_to_canonical_root(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            canonical_root = Path(tmpdir) / "canonical"
-            worktree_root = Path(tmpdir) / "worktree"
-            (canonical_root / "scripts").mkdir(parents=True)
-            (worktree_root / "scripts").mkdir(parents=True)
+        ai_status.prune_state_for_size(state)
 
-            canonical_script = canonical_root / "scripts" / "ai_status.py"
-            canonical_script.write_text("# canonical\n", encoding="utf-8")
+        self.assertEqual([item["task_id"] for item in state["handoffs"]], ["A", "C"])
+        self.assertEqual([item["id"] for item in state["tasks"]], ["A", "C"])
+        self.assertEqual(state["archived_task_ids"], ["B"])
+        archive.assert_called_once()
+        self.assertEqual([item["task_id"] for item in state["blockers"]], ["A", "C"])
 
-            with (
-                mock.patch.object(ai_status, "ROOT", canonical_root),
-                mock.patch.object(ai_status, "_LOCAL_ROOT", worktree_root),
-                mock.patch.dict(os.environ, {}, clear=True),
-                mock.patch.object(os, "execv") as mock_execv,
-            ):
-                ai_status.ensure_canonical_delegation(["ai_status.py", "show", "T1"])
-
-            mock_execv.assert_called_once_with(
-                sys.executable,
-                [sys.executable, str(canonical_script), "show", "T1"],
-            )
-            self.assertTrue(canonical_script.exists())
+    @mock.patch.object(ai_status, "append_log")
+    def test_migration_reopens_unbound_legacy_approval(self, _log: mock.Mock) -> None:
+        state = self.state()
+        task = self.task(state)
+        task.update(
+            {
+                "status": "review_approved",
+                "required_integration_status": "dev_deployed",
+                "dev_deploy_run_url": "https://example.test/deploy/42",
+                "dev_deploy_sha": "abc123",
+                "dev_deploy_source_ref": "origin/dev",
+            }
+        )
+        ai_status.command_migrate_candidate_lifecycle(state, [])
+        self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(task["required_acceptance"], ["dev_deployed"])
+        self.assertNotIn("required_integration_status", task)
+        migrated_at = task["candidate_lifecycle_migrated_at"]
+        ai_status.command_migrate_candidate_lifecycle(state, [])
+        self.assertEqual(task["candidate_lifecycle_migrated_at"], migrated_at)
 
 
 if __name__ == "__main__":

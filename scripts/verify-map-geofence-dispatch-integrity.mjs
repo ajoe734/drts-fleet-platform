@@ -156,7 +156,7 @@ assert(
   failures,
 );
 assert(
-  ["in_progress", "review", "review_approved", "done"].includes(
+  ["in_progress", "review", "integrating", "acceptance", "done"].includes(
     ownerTask?.status,
   ),
   "task FLEETS-CLOSEOUT-008 is active or complete",

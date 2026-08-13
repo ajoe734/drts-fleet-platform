@@ -33,6 +33,25 @@ env:
   CI: true
 
 jobs:
+  # Owner checkpoints are intentionally cheap. A review candidate is the first
+  # immutable SHA that may start the full integration gate.
+  candidate:
+    runs-on: ubuntu-latest
+    outputs:
+      run_full_ci: ${{ steps.gate.outputs.run_full_ci }}
+    steps:
+      - id: gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$PR_DRAFT" = "true" ]; then
+            echo "run_full_ci=false" >> "$GITHUB_OUTPUT"
+            echo "Draft PR: waiting for the owner to hand off an immutable candidate."
+          else
+            echo "run_full_ci=true" >> "$GITHUB_OUTPUT"
+          fi
+
   # Every other job in this workflow finishes inside six minutes; e2e runs for
   # twenty. It alone decides how long a PR waits, so it is the only job worth
   # gating. Roughly two in five recent PRs touch nothing it can exercise —
@@ -42,6 +61,7 @@ jobs:
   # it. A deny-list, not an allow-list: a directory nobody has thought about yet
   # still runs the suite. Anything that is not a pull request runs it too.
   changes:
+    needs: candidate
     runs-on: ubuntu-latest
     outputs:
       e2e: ${{ steps.filter.outputs.e2e }}
@@ -81,6 +101,8 @@ jobs:
           fi
 
   lint:
+    needs: candidate
+    if: needs.candidate.outputs.run_full_ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -97,6 +119,8 @@ jobs:
       - run: pnpm run lint
 
   typecheck:
+    needs: candidate
+    if: needs.candidate.outputs.run_full_ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -113,6 +137,8 @@ jobs:
       - run: pnpm run typecheck
 
   unit:
+    needs: candidate
+    if: needs.candidate.outputs.run_full_ci == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -168,6 +194,8 @@ jobs:
         run: pnpm run test:unit
 
   integration:
+    needs: candidate
+    if: needs.candidate.outputs.run_full_ci == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -207,6 +235,8 @@ jobs:
         run: pnpm --filter @drts/api run test:integration:postgres-gates
 
   iam-negative-matrix:
+    needs: candidate
+    if: needs.candidate.outputs.run_full_ci == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -257,6 +287,8 @@ jobs:
         run: pnpm run test:security:iam-negative-matrix
 
   build:
+    needs: candidate
+    if: needs.candidate.outputs.run_full_ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -273,6 +305,8 @@ jobs:
       - run: pnpm run build
 
   i18n-guard:
+    needs: candidate
+    if: needs.candidate.outputs.run_full_ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -289,6 +323,8 @@ jobs:
       - run: pnpm run i18n:guard
 
   orchestrator-tests:
+    needs: candidate
+    if: needs.candidate.outputs.run_full_ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -302,9 +338,9 @@ jobs:
   # API runtime. This is the gate that proves the named business-line workflows
   # (enterprise dispatch, forwarded order, partner airport/booking, tenant
   # governance, driver multi-platform, fleet revenue share, etc.) stay green.
-  e2e:
-    needs: changes
-    if: needs.changes.outputs.e2e == 'true'
+  cross-surface-e2e:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -350,11 +386,49 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build API
         run: pnpm --filter @drts/api build
-      - name: Run cross-surface E2E suite (hermetic — reset DB + restart API per scenario)
+      - name: Run cross-surface E2E suite (hermetic baseline clone + restart API per scenario)
         run: ./tests/e2e/run-e2e-hermetic.sh
-      - name: Run deterministic 39-route UI suite
+      - name: API logs on failure
+        if: failure()
+        run: tail -n 100 /tmp/drts-e2e-api.log || true
+
+  # This suite is independent from the API lifecycle exercised above. Running
+  # it in a second runner removes a serialized 39-route tail from every CI run.
+  ui-route-e2e:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_route_suite
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_route_suite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: pnpm install --frozen-lockfile
+      - name: Run deterministic 39-route UI suite
         run: |
           PGPASSWORD=postgres psql \
             postgresql://postgres:postgres@localhost:5432/postgres \
@@ -365,14 +439,32 @@ jobs:
           pnpm db:seed
           pnpm exec playwright install --with-deps chromium
           pnpm exec playwright test -c playwright.deterministic-route-suite.config.ts
-      - name: API logs on failure
-        if: failure()
-        run: tail -n 100 /tmp/drts-e2e-api.log || true
+
+  e2e:
+    needs: [candidate, changes, cross-surface-e2e, ui-route-e2e]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Aggregate E2E gates
+        run: |
+          if [ '${{ needs.candidate.outputs.run_full_ci }}' != 'true' ]; then
+            echo "E2E skipped for an owner checkpoint draft."
+            exit 0
+          fi
+          [ '${{ needs.changes.result }}' = 'success' ] || { echo "changes gate failed"; exit 1; }
+          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}'; do
+            case "$result" in
+              success) ;;
+              skipped) echo "E2E skipped: no changed path can exercise it." ;;
+              *) echo "Required E2E gate failed: $result"; exit 1 ;;
+            esac
+          done
 
   # Aggregate job for branch-protection "required check" simplicity.
   ci-integ:
     needs:
       [
+        candidate,
         changes,
         lint,
         typecheck,
@@ -392,6 +484,11 @@ jobs:
           # `changes` must succeed on its own: if the gate breaks, e2e reports
           # "skipped" for the wrong reason, and treating that as a pass would
           # silently disable the suite.
+          [ '${{ needs.candidate.result }}' = 'success' ] || { echo "Candidate gate failed"; exit 1; }
+          if [ '${{ needs.candidate.outputs.run_full_ci }}' != 'true' ]; then
+            echo "Owner checkpoint draft accepted; full CI starts only for a locked candidate."
+            exit 0
+          fi
           for r in '${{ needs.changes.result }}' '${{ needs.lint.result }}' '${{ needs.typecheck.result }}' '${{ needs.unit.result }}' '${{ needs.integration.result }}' '${{ needs.iam-negative-matrix.result }}' '${{ needs.build.result }}' '${{ needs.i18n-guard.result }}' '${{ needs.orchestrator-tests.result }}'; do
             [ "$r" = "success" ] || { echo "Required check failed: $r"; exit 1; }
           done

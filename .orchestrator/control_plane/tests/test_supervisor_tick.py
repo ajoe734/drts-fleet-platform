@@ -36,6 +36,7 @@ def recording_ports(calls: list[str], *, focus_mode: str) -> SupervisorTickPorts
         load_status=record("load_status", {"execution_mode": focus_mode}),
         load_provider_report=record("load_provider_report", {}),
         safe_load_approval_state=record("load_approvals", {"pending": []}),
+        ensure_candidate_lifecycle_migration=record("migrate_candidate", False),
         write_supervisor_pid=record("write_pid", None),
         write_activity_log=record("activity_log", None),
         console_log=record("console_log", None),
@@ -49,7 +50,6 @@ def recording_ports(calls: list[str], *, focus_mode: str) -> SupervisorTickPorts
         poll_workers=record("poll_workers", False),
         cleanup_inactive_worker_worktrees=record("cleanup_worktrees", False),
         reconcile_queue_records=record("reconcile_queue", False),
-        reconcile_status_from_git=record("reconcile_git", False),
         prune_event_queue=record("prune_queue", False),
         prune_completed_dispatch_pauses=record("prune_dispatch_pauses", False),
         prune_failure_streaks=record("prune_failure_streaks", False),
@@ -117,6 +117,7 @@ class SupervisorTickRunnerTests(unittest.TestCase):
 
         self.assertEqual(result.focus_mode, "execution")
         ordered = [
+            "migrate_candidate",
             "cleanup_worktrees",
             "refresh_chair",
             "queue_chair",

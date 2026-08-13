@@ -10,7 +10,6 @@
     "scripts/sync-state.sh",
     "scripts/dashboard_server.py",
     "scripts/launch-docs-site.sh",
-    "scripts/orchestrator_bundle.py",
     "scripts/run-supervisor.sh",
     "scripts/run-dashboard.sh",
     "scripts/setup-llm-cli.sh"

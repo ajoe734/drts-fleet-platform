@@ -61,7 +61,9 @@ function renderProgressBar(status) {
   ).length;
   const total = tasks.length + archivedDone;
   const done = tasks.filter((t) => t.status === "done").length + archivedDone;
-  const approved = tasks.filter((t) => t.status === "review_approved").length;
+  const integration = tasks.filter((t) =>
+    ["integrating", "acceptance"].includes(t.status),
+  ).length;
   const open = tasks.filter((t) =>
     ["backlog", "todo", "in_progress", "review", "blocked"].includes(
       String(t.status || "").toLowerCase(),
@@ -71,7 +73,7 @@ function renderProgressBar(status) {
   const label = qs("#progress-label");
   const fill = qs("#progress-fill");
   if (label)
-    label.textContent = `Sprint 進度：正式完成 ${done} / ${total} (${pct}%) · 待收尾 ${approved} · 其他 open ${open}`;
+    label.textContent = `Sprint 進度：正式完成 ${done} / ${total} (${pct}%) · 整合 / 驗收 ${integration} · 其他 open ${open}`;
   if (fill) fill.style.width = `${pct}%`;
 }
 
@@ -89,7 +91,9 @@ function renderOverviewMetrics(status, orchState, approvalQueue) {
   ).length;
   const total = tasks.length + archivedDone;
   const done = tasks.filter((t) => t.status === "done").length + archivedDone;
-  const approvedTasks = tasks.filter((t) => t.status === "review_approved");
+  const integrationTasks = tasks.filter((t) =>
+    ["integrating", "acceptance"].includes(t.status),
+  );
   const backlogTasks = tasks.filter((t) =>
     ["backlog", "todo", "in_progress", "review", "blocked"].includes(
       String(t.status || "").toLowerCase(),
@@ -152,22 +156,22 @@ function renderOverviewMetrics(status, orchState, approvalQueue) {
     {
       label: "正式完成",
       value: `${done} / ${total}`,
-      note: `待收尾 ${approvedTasks.length} · 其他 backlog ${backlogTasks.length}`,
+      note: `整合 / 驗收 ${integrationTasks.length} · 其他 backlog ${backlogTasks.length}`,
     },
     {
-      label: "已批准待收尾",
-      value: approvedTasks.length,
-      note: approvedTasks.length
-        ? "review 通過，但仍需 owner finalize 成 done"
-        : "目前沒有 review_approved 任務",
-      tasks: approvedTasks,
-      emptyLabel: "目前沒有待收尾任務",
+      label: "整合 / 驗收中",
+      value: integrationTasks.length,
+      note: integrationTasks.length
+        ? "候選已審查，等待同 SHA CI、merge 或必要驗收 evidence"
+        : "目前沒有整合或驗收中的任務",
+      tasks: integrationTasks,
+      emptyLabel: "目前沒有整合或驗收中的任務",
     },
     {
       label: "其他 open backlog",
       value: backlogTasks.length,
       note: backlogTasks.length
-        ? "待開始、審查中或阻塞中的非 finalize 任務"
+        ? "待開始、執行、審查或阻塞中的工作任務"
         : "目前沒有其他 open backlog",
       tasks: backlogTasks,
       emptyLabel: "目前沒有其他 open backlog",
@@ -225,7 +229,7 @@ function agentStatusIcon(agent, running, failed) {
   if (agent?.status === "blocked" || failed > 0) return "🔴";
   if (agent?.status === "ready") return "🟢";
   if (["waiting", "pending"].includes(agent?.status)) return "🟠";
-  if (["reviewing", "finalize"].includes(agent?.status)) return "🔵";
+  if (["reviewing", "integrating"].includes(agent?.status)) return "🔵";
   return "⚪";
 }
 
@@ -398,7 +402,7 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
               <span class="chip">可開工 ${agent.ready_count || 0}</span>
               <span class="chip">等前置 ${agent.waiting_count || 0}</span>
               <span class="chip">待審查 ${agent.review_count || 0}</span>
-              <span class="chip">待收尾 ${agent.approved_count || 0}</span>
+              <span class="chip">整合 / 驗收 ${agent.evidence_count || 0}</span>
               ${agent.dispatch_pause_count ? `<span class="chip">dispatch pause ${agent.dispatch_pause_count}</span>` : ""}
               ${agent.provider_pause_kind ? `<span class="chip">provider ${agent.provider_pause_kind}</span>` : ""}
             `
@@ -542,7 +546,11 @@ function renderActivity(entries, options = {}) {
     "approval_resolved",
     "task_reassigned",
     "handoff",
-    "review_approved",
+    "candidate_handoff",
+    "candidate_approved",
+    "candidate_invalidated",
+    "candidate_reconciled",
+    "acceptance_recorded",
     "done",
     "blocker",
   ]);

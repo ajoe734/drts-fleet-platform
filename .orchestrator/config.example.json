@@ -120,9 +120,13 @@
     "command_timeout_seconds": 8,
     "poll_interval_seconds": 30,
     "repo": null,
-    "default_branch": "master",
+    "default_branch": "dev",
     "offline_backoff_seconds": 300,
     "auto_request_reviewers": true,
+    "candidate_reconcile_enabled": true,
+    "auto_merge": {
+      "enabled": true
+    },
     "close_resolved_issues": true,
     "labels": {
       "review": ["pantheon-bus", "pantheon-review"],
@@ -427,20 +431,14 @@
     "worker_worktrees": {
       "enabled": true,
       "root": ".artifacts/worktrees/auto"
-    },
-    "integration_gate": {
-      "enabled": false,
-      "log_only": false,
-      "exempt_task_patterns": []
     }
   },
   "ready_dispatcher": {
     "enabled": true,
     "review_statuses": ["review"],
-    "finalize_statuses": ["review_approved"],
     "owned_statuses": ["in_progress", "todo"],
     "dependency_done_statuses": ["done"],
-    "worker_terminal_statuses": ["done", "review_approved"],
+    "worker_terminal_statuses": ["done"],
     "active_worker_statuses": [
       "running",
       "waiting_approval",

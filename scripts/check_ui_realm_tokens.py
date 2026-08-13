@@ -12,7 +12,7 @@ flags brand/realm theme variables in `apps/*-web/**/globals.css` whose value is 
 raw hex NOT in that allowlist. Neutral surfaces (white/black) are tolerated.
 
 Report-only by default (prints findings, exit 0); pass `--enforce` to exit 1 on
-any finding — mirrors the integration_gate canary→enforce rollout.
+any finding — supports staged report-only to enforce rollout.
 """
 
 from __future__ import annotations

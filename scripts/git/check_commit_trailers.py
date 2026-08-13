@@ -97,7 +97,7 @@ def main() -> int:
                 print(f"  - {e}", file=sys.stderr)
             print(
                 "\nReference: docs/ops/branch-strategy.md, "
-                ".orchestrator/skills/task-closeout-finalization.md",
+                ".orchestrator/skills/candidate-lifecycle.md",
                 file=sys.stderr,
             )
             print("To bypass (emergency only): COMMIT_TRAILER_BYPASS=1 git commit ...", file=sys.stderr)

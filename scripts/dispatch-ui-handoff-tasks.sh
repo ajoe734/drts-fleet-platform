@@ -16,7 +16,7 @@
 # - planning_ref points to the handoff JSX in /tmp/driver-app-handoff/
 #
 # Dependencies UI-CANVAS-DS-001 / UI-CANVAS-<SURFACE>-CHROME-001 are listed for
-# traceability; they're already review_approved so won't actually block.
+# traceability; they must be `done` before dependent work is dispatched.
 #
 # Usage: AI_NAME=Claude bash scripts/dispatch-ui-handoff-tasks.sh
 

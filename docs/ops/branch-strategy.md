@@ -317,7 +317,7 @@ git commit -m "wip(<TASK-ID>): anchor <scope>" \
   -m "LLM-Agent: <lane>" -m "Task-ID: <TASK-ID>" -m "Reviewer: <reviewer>"
 ```
 
-The anchor commit is **not the deliverable**; it is a flag that says "this lane has a claim on this surface." Closeout still requires the formal commit per [`task-closeout-finalization.md`](../../.orchestrator/skills/task-closeout-finalization.md).
+The anchor commit is **not the candidate**; it is a recoverability checkpoint that says "this lane has a claim on this surface." The owner locks the final pushed head with `CANDIDATE_SHA` at handoff; review, CI, and merge evidence are valid only for that exact SHA.
 
 ### 11.2 Do not stash design-intent diffs
 
@@ -361,7 +361,7 @@ The three surface classes most often overwritten by parallel lanes are:
 | Surface class                              | Examples                                                          | Why fragile                                      |
 | ------------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------ |
 | `docs/**`                                  | `docs/ops/branch-strategy.md`, `docs/03-runbooks/**`              | chair-review and supervisor lanes both edit them |
-| `.orchestrator/skills/**`                  | `task-closeout-finalization.md`, `chairman-operational-review.md` | supervisor/chair changes touch these             |
+| `.orchestrator/skills/**`                  | `candidate-lifecycle.md`, `chairman-operational-review.md`        | supervisor/chair changes touch these             |
 | `.orchestrator/config*.json`, schema files | `config.example.json`, provider/capability schema                 | enabled-flag toggles by many lanes               |
 
 For these, **never** keep edits in the working tree across more than one supervisor cycle. The required flow:
@@ -376,49 +376,30 @@ git push -u origin <lane>/<topic>
 gh pr create --base dev --title "<TASK-ID>: <summary>" ...
 ```
 
-### 11.6 Branch closeout is not development closeout
+### 11.6 Candidate lifecycle is the development closeout
 
-The worker state `done` records a task lifecycle event. It does not, by itself,
-prove that the branch has passed PR CI, merged into `dev`, or reached the dev
-test machine.
+The task state machine has one completion path:
 
-After branch closeout, implementation and umbrella owners must continue or hand
-off the integration closeout:
+`backlog/todo -> in_progress -> review -> integrating -> acceptance -> done`
 
-- PR to `dev` exists and includes task evidence.
-- CI is green before merge; failing CI creates a blocker/progress note.
-- Delivered commit is reachable from `origin/dev`.
-- Dev publish/deploy is verified when the acceptance target is the shared dev environment.
+The owner may push anchor commits while working. Once implementation verification
+is complete, the owner records the pushed `CANDIDATE_SHA` and
+`CANDIDATE_BRANCH` with `ai-status.sh handoff`. The reviewer checks that exact
+SHA and records the same value as `REVIEWED_SHA`; reviewers never modify the
+candidate branch.
 
-Workers record the layer reached with `INTEGRATION_STATUS`:
+The GitHub bus is the sole adapter that records PR head, CI, and merge evidence.
+It accepts CI or merge only when the PR head equals `CANDIDATE_SHA`. A later push
+invalidates prior review and CI evidence and returns the task to `in_progress`.
+After same-SHA CI and merge, a task with `required_acceptance` enters
+`acceptance`; it becomes `done` only when all named evidence keys are recorded.
 
-- `branch_pushed`, `pr_open`, `ci_pending`, `ci_failed`
-- `merged_to_dev`
-- `deploy_blocked`, `dev_deployed`
-- `not_applicable` for sidecar/support-only work
-
-Only `dev_deployed` plus deploy run evidence may be described as "published to
-dev" or "ready on the dev test machine".
-
-**Enforcement (`INTEGRATION_GATE`).** The above is no longer convention-only.
-`.orchestrator/integration_gate.py` (opt-in via
-`branch_strategy.integration_gate.enabled`, with a `log_only` canary) refuses
-`scripts/ai_status.py done` when a task's `INTEGRATION_STATUS` is branch-only
-(`branch_pushed`/`pr_open`/`ci_pending`/`ci_failed`/`deploy_blocked`): the task
-stays at `review_approved` until its commit reaches `origin/dev`, at which point
-`apply_git_merge_reconciliation` flips it to `done`. Use
-`INTEGRATION_STATUS=not_applicable` for sidecar/support/externally-held tasks.
-This closes the recurring "done at branch, never merged to dev → work stranded"
-failure mode.
-
-Task-level release gates may be stricter than §11.6's default integrated floor.
-If a task carries `required_integration_status=dev_deployed`, owner closeout
-must record explicit PR/CI/merge/dev-deploy evidence and may not finalize with
-`not_applicable`, `merged_to_dev`, or git merge reconciliation alone.
+This keeps code completion, integration, and external acceptance explicit
+without a second owner-closeout transition or git-log inference.
 
 ### 11.7 Trigger checklist (before each significant save)
 
-Worker prompts (wakeup + closeout skill) carry this checklist; it is reproduced here for human reference:
+Worker prompts (wakeup + candidate lifecycle skill) carry this checklist; it is reproduced here for human reference:
 
 1. Am I touching a fragile surface from §11.1?
 2. Will this take more than one supervisor cycle?
@@ -433,8 +414,8 @@ git switch -c <lane>/<task-id-kebab> origin/dev
 
 ### 11.8 Related artifacts
 
-- [`.orchestrator/skills/worker-anchor-commit.md`](../../.orchestrator/skills/worker-anchor-commit.md) — worker-facing operational skill for anchor commits (companion to closeout skill)
-- [`.orchestrator/skills/integration-closeout.md`](../../.orchestrator/skills/integration-closeout.md) — worker-facing protocol for PR / CI / merge / dev deploy evidence
+- [`.orchestrator/skills/worker-anchor-commit.md`](../../.orchestrator/skills/worker-anchor-commit.md) — owner-only operational skill for recoverable checkpoints
+- [`.orchestrator/skills/candidate-lifecycle.md`](../../.orchestrator/skills/candidate-lifecycle.md) — locked SHA review, CI, merge, and acceptance protocol
 - [`.orchestrator/templates/wakeup.txt`](../../.orchestrator/templates/wakeup.txt) — supervisor wakeup template that injects branch context (target of OPS-GIT-WORKFLOW-005)
 - [`.orchestrator/worker_tree_guard.py`](../../.orchestrator/worker_tree_guard.py) — shared tree-guard primitives (extracted by OPS-GIT-WORKFLOW-007). Backs both surfaces:
   - `check_worker_tree_guard` — supervisor dispatch guard, gated by `branch_strategy.worker_tree_guard.enabled` (OPS-GIT-WORKFLOW-006, opt-in)

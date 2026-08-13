@@ -1,6 +1,6 @@
 # Worker Anchor Commit
 
-Use this checklist **during** task work (between dispatch and closeout) whenever you have a non-trivial in-flight change. Companion to `task-closeout-finalization.md`, which covers the formal `review_approved → done` commit.
+Use this checklist only while you are the **owner** of an in-progress task with a non-trivial change. A reviewer never uses this workflow: review is read-only against the locked candidate SHA.
 
 ## When to anchor commit
 
@@ -56,7 +56,7 @@ Working tree is **not** a staging area for design intent. Stash is **not** an al
    ```bash
    git push -u origin <lane>/<task-id-kebab>
    ```
-7. Continue the task. Subsequent anchors on the same branch are allowed and encouraged; closeout will squash or keep them per `task-closeout-finalization.md` step 5a.
+7. Continue the task. Subsequent anchors on the same branch are allowed and encouraged. When the implementation is ready, run the required checks, push the final SHA, then hand off that exact SHA as the candidate.
 
 ## Rules
 
@@ -67,7 +67,7 @@ Working tree is **not** a staging area for design intent. Stash is **not** an al
   git fetch origin
   git rebase origin/dev
   ```
-- **Anchor commits are not closeouts.** They have `wip:` prefix and do not require a `Verification:` trailer. Both subject forms — anchor `wip(<TASK-ID>): <summary>` and closeout `<TASK-ID>: <summary>` — satisfy the CI subject regex (see `scripts/git/check_commit_trailers.py`); the formal closeout commit is the one made per `task-closeout-finalization.md` and additionally carries a `Verification:` trailer.
+- **Anchor commits are not candidates.** They have a `wip:` prefix and exist only to preserve recoverable work. The candidate is the exact final branch head supplied to `ai-status.sh handoff`; any later push invalidates review and CI evidence.
 - **doc / skill / config changes** (per `branch-strategy.md` §11.5) always go branch → commit → push → PR. They must not accumulate in-session across supervisor cycles.
 
 ## Trigger checklist (ask before each significant save)
@@ -96,5 +96,5 @@ git push -u origin claude/ops-git-workflow-004
 ## References
 
 - [`docs/ops/branch-strategy.md`](../../docs/ops/branch-strategy.md) §11 — protocol rationale + table of fragile surfaces
-- [`task-closeout-finalization.md`](task-closeout-finalization.md) — formal closeout commit (after `review_approved`)
+- [`candidate-lifecycle.md`](candidate-lifecycle.md) — handoff, same-SHA review, CI, merge, and acceptance evidence
 - [`.orchestrator/templates/wakeup.txt`](../templates/wakeup.txt) — supervisor wakeup template (will reference this skill once OPS-GIT-WORKFLOW-005 lands)

@@ -18,7 +18,7 @@ Hard rules:
 - Do not route work to a provider lane that is auth-paused, quota-paused, capacity-paused, or in a repeated terminal loop.
 - Treat numbered lanes as separate accounts/quotas unless machine truth says otherwise. `Claude`/`Claude2`, `Gemini`/`Gemini2`, and `Codex`/`Codex2` are exact lane identities; a pause on `claude` does not automatically pause `claude2`.
 - Reviewer reassignment is only valid while the task is in `todo`, `in_progress`, or `review`.
-- Owner reassignment is only valid while the task is in `backlog`, `todo`, `in_progress`, or `review_approved`.
+- Owner reassignment is only valid while the task is in `backlog`, `todo`, or `in_progress`. A locked candidate is not reassigned; its reviewer can be reassigned only while the task remains in `review`.
 - Task dispatch actions are only valid when the current task state is already eligible under machine truth.
 - Provider actions are only valid for exact lanes. Use `pause` for auth, quota, capacity, or manual degradation; use `clear_pause` only after machine truth shows the lane is healthy again.
 - `legacy alias` is not an executable lane. If owner/reviewer assignment points at a legacy alias, use `reassignment_actions` to move that role to a real healthy lane.

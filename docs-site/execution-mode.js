@@ -96,7 +96,7 @@ export function renderAgentLanes(status, orchState) {
         <span class="chip">可開工 ${agent.ready_count || 0}</span>
         <span class="chip">等前置 ${agent.waiting_count || 0}</span>
         <span class="chip">待審查 ${agent.review_count || 0}</span>
-        <span class="chip">已批准 ${agent.approved_count || 0}</span>
+        <span class="chip">整合 / 驗收 ${agent.evidence_count || 0}</span>
         ${agent.dispatch_pause_count ? `<span class="chip">dispatch pause ${agent.dispatch_pause_count}</span>` : ""}
         ${agent.provider_pause_kind ? `<span class="chip">provider ${agent.provider_pause_kind}</span>` : ""}
       </div>
@@ -291,9 +291,9 @@ export function renderTaskBoard(status, orchState) {
         task.display_status !== task.status
           ? `<span class="chip">canonical ${statusLabel(task.status)}</span>`
           : "";
-      const approvedFollowupBadge =
-        task.status === "review_approved"
-          ? `<span class="chip">待收尾回到 ${task.owner}</span>`
+      const integrationBadge =
+        ["integrating", "acceptance"].includes(task.status)
+          ? `<span class="chip">等待 GitHub / 驗收 evidence</span>`
           : "";
       const summary = compactCopy(task.summary_zh || task.title, 120);
       const detailSummary = task.summary_zh || "尚未補上中文說明。";
@@ -317,7 +317,7 @@ export function renderTaskBoard(status, orchState) {
         <div class="task-meta">
           ${runtimeBadge}
           ${canonicalBadge}
-          ${approvedFollowupBadge}
+          ${integrationBadge}
         </div>
         ${taskBadgeRow(task)}
         <details class="task-details">
@@ -388,9 +388,9 @@ export function renderDependencySchedule(status) {
       note: "已有 blocker 狀態記錄",
     },
     {
-      label: "已批准待收尾",
-      value: schedule.approvedNow,
-      note: "review_approved 尚未正式完成，需由 owner 收尾成 done",
+      label: "整合 / 驗收中",
+      value: schedule.integrationNow,
+      note: "候選已審查，等待同 SHA CI、merge 或必要驗收 evidence",
     },
   ];
 
@@ -404,33 +404,33 @@ export function renderDependencySchedule(status) {
     summary.appendChild(card);
   }
 
-  if (schedule.approved.length) {
-    const approvedSection = document.createElement("section");
-    approvedSection.className = "dependency-wave dependency-approved";
-    approvedSection.innerHTML = `
+  if (schedule.integration.length) {
+    const integrationSection = document.createElement("section");
+    integrationSection.className = "dependency-wave dependency-integration";
+    integrationSection.innerHTML = `
       <div class="dependency-wave-head">
         <div>
-          <h3>已批准待收尾</h3>
-          <p class="section-copy">${schedule.approved.length} 個任務</p>
+          <h3>整合 / 驗收中</h3>
+          <p class="section-copy">${schedule.integration.length} 個任務</p>
         </div>
         <div class="chip-row">
-          <span class="status-pill batch-pill batch-approved">review_approved ${schedule.approved.length}</span>
+          <span class="status-pill batch-pill batch-integration">整合中 ${schedule.integration.length}</span>
         </div>
       </div>
       <div class="dependency-grid"></div>
     `;
-    const approvedGrid = approvedSection.querySelector(".dependency-grid");
-    for (const task of schedule.approved) {
+    const integrationGrid = integrationSection.querySelector(".dependency-grid");
+    for (const task of schedule.integration) {
       const depends = (task.depends_on || []).length
         ? task.depends_on.join(", ")
         : "無";
       const card = document.createElement("article");
-      card.className = "dependency-card batch-approved";
+      card.className = "dependency-card batch-integration";
       card.innerHTML = `
         <div class="task-head">
           <strong>${task.id}</strong>
           <div class="chip-row">
-            <span class="status-pill batch-pill batch-approved">待收尾</span>
+            <span class="status-pill batch-pill batch-integration">整合 / 驗收</span>
             <span class="status-pill status-${task.status}">${statusLabel(task.status)}</span>
           </div>
         </div>
@@ -442,18 +442,18 @@ export function renderDependencySchedule(status) {
           <span class="chip">前置 ${depends}</span>
         </div>
         ${taskBadgeRow(task, "dependency-meta")}
-        <p class="dependency-copy">這些任務已通過 review gate，但尚未正式完成；owner 收尾成 done 後，才會解除下游依賴。</p>
+        <p class="dependency-copy">這些任務已鎖定候選版本，等待同 SHA CI、merge 或必要驗收 evidence；條件完整後才會自動解除下游依賴。</p>
       `;
-      approvedGrid.appendChild(card);
+      integrationGrid.appendChild(card);
     }
-    container.appendChild(approvedSection);
+    container.appendChild(integrationSection);
   }
 
   if (!schedule.waves.length && !schedule.cyclic.length) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = schedule.approved.length
-      ? "目前沒有新的開發 / 審查波次；上方仍有已批准待 owner 收尾的任務。"
+    empty.textContent = schedule.integration.length
+      ? "目前沒有新的開發 / 審查波次；上方仍有等待整合或驗收 evidence 的任務。"
       : "目前沒有可排程的未完成任務。";
     container.appendChild(empty);
     return;
@@ -480,13 +480,14 @@ export function renderDependencySchedule(status) {
         acc[batch] = (acc[batch] || 0) + 1;
         return acc;
       },
-      { completed: 0, active: 0, ready: 0, waiting: 0, blocked: 0 },
+      { completed: 0, active: 0, integrating: 0, ready: 0, waiting: 0, blocked: 0 },
     );
     section.innerHTML = `
       <div class="dependency-wave-head">
         <div><h3>${title}</h3><p class="section-copy">${wave.length} 個任務</p></div>
         <div class="chip-row">
           ${counts.active ? `<span class="status-pill status-running">進行中 ${counts.active}</span>` : ""}
+          ${counts.integrating ? `<span class="status-pill status-integrating">整合 / 驗收 ${counts.integrating}</span>` : ""}
           ${counts.ready ? `<span class="status-pill status-ready">可開工 ${counts.ready}</span>` : ""}
           ${counts.waiting ? `<span class="status-pill status-pending">等待前置 ${counts.waiting}</span>` : ""}
           ${counts.blocked ? `<span class="status-pill status-blocked">阻塞 ${counts.blocked}</span>` : ""}
@@ -535,6 +536,8 @@ export function renderDependencySchedule(status) {
             ? "這一波中的工作已完成，後續可以往下一波推進。"
             : batchState.key === "active"
               ? "這一波正在被執行或審查，完成後會推動下一波。"
+              : batchState.key === "integrating"
+                ? "候選已鎖定，等待同 SHA CI、merge 或必要驗收 evidence。"
               : batchState.key === "ready"
                 ? "這一波可直接開工。"
                 : batchState.key === "blocked"
