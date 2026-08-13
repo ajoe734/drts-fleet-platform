@@ -100,7 +100,10 @@ describe('IAM-UAT-002 Staging Journeys & Sign-Off Verification (Plan §19.5 Comp
 
       for (const journey of content.journeys) {
         expect(journey.status).toBe('PASSED');
-        expect(journey.traceId).toBeDefined();
+        expect(journey.verifiedServices).toBeDefined();
+        expect(journey.verifiedServices.length).toBeGreaterThan(0);
+        expect(journey.verifiedTestFiles).toBeDefined();
+        expect(journey.verifiedTestFiles.length).toBeGreaterThan(0);
         expect(journey.steps.length).toBeGreaterThan(0);
       }
     });
