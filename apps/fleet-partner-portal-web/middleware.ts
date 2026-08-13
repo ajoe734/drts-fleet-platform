@@ -41,8 +41,11 @@ export function middleware(request: NextRequest) {
     }
   }
 
-  // 3. Protected Route Session Check
-  if (!isPublic) {
+  // The portal does not ship a login route yet.  Keeping the unfinished gate
+  // enabled turns every deployed route into /login → 404, including the
+  // required operational dashboard.  Auth remains opt-in until that flow is
+  // deployed as one complete surface.
+  if (!isPublic && process.env.DRTS_FLEET_PORTAL_AUTH_REQUIRED === "true") {
     const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
     if (!sessionCookie) {
       const loginUrl = new URL("/login", request.url);
