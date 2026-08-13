@@ -102,7 +102,7 @@
       "id": "fleet-submit-read-withdraw-resubmit",
       "surface": "fleet",
       "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
-      "route": "/supply",
+      "route": "/supply/submissions/sub_d41",
       "actorScope": "fleet partner",
       "operations": [
         {
@@ -144,7 +144,7 @@
       "id": "admin-review-approve-readback",
       "surface": "platform-admin",
       "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
-      "route": "/supply-review",
+      "route": "/supply-review/sub_s38",
       "actorScope": "platform_admin",
       "operations": [
         {

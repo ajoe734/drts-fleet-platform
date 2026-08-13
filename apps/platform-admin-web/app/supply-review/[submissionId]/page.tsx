@@ -524,7 +524,9 @@ export default function SupplyReviewDetailPage() {
               <CanvasBtn
                 variant="primary"
                 icon="check"
-                onClick={() => setShowApproveConfirm(true)}
+                disabled={submitting}
+                data-drt-operation="admin-approve"
+                onClick={handleApproveSubmit}
               >
                 {t("supplyReview.detail.approveProvision")}
               </CanvasBtn>

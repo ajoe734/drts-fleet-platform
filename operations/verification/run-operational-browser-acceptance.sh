@@ -57,5 +57,6 @@ export DRTS_OPERATIONAL_PASSENGER_WEB_URL="$DRTS_DEV_PASSENGER_BASE_URL"
 
 # First prove every active API/BFF response serves this exact candidate. Then
 # execute the higher-level browser mutations and readbacks against those same URLs.
-pnpm exec playwright test -c playwright.operational-candidate.config.ts "$@"
-pnpm exec playwright test -c playwright.operational-browser-acceptance.config.ts "$@"
+npx playwright test -c playwright.operational-candidate.config.ts "$@"
+npx playwright test -c playwright.operational-browser-acceptance.config.ts "$@"
+

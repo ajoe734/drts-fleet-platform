@@ -1007,7 +1007,9 @@ export function ActionButton({
         danger={danger}
         disabled={isDisabled}
         type={type}
-        data-drt-operation={dataDrtOperation}
+        {...(dataDrtOperation
+          ? { "data-drt-operation": dataDrtOperation }
+          : {})}
         {...buttonClickProps}
         style={{ width: "100%", justifyContent: "center" }}
       >
