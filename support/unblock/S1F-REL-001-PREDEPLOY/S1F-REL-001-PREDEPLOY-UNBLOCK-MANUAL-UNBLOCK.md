@@ -1,8 +1,8 @@
 # S1F-REL-001-PREDEPLOY Manual Unblock Diagnosis
 
-Last updated: 2026-08-13  
-Task: `S1F-REL-001-PREDEPLOY-UNBLOCK-MANUAL-UNBLOCK`  
-Parent: `S1F-REL-001-PREDEPLOY`  
+Last updated: 2026-08-13
+Task: `S1F-REL-001-PREDEPLOY-UNBLOCK-MANUAL-UNBLOCK`
+Parent: `S1F-REL-001-PREDEPLOY`
 Candidate: `295069bcbd9d24f4e5ec5e4cef3da759a858a274`
 
 ## Result
