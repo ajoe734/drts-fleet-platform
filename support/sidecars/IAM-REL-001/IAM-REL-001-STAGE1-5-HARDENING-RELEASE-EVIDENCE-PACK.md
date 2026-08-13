@@ -16,10 +16,10 @@
 
 This evidence pack consolidates all integration, automated security testing, database migration cutover, incident response drill, and release gate verification for **Stage 1.5 Identity, Access & Account Security Hardening**.
 
-All 29 core workstream tasks across Waves A–F have been reviewed, approved, and merged onto `origin/dev`:
+All 29 core workstream tasks across Waves A–F have been reviewed, approved, and integrated into the release candidate (`gemini2/iam-rel-001`): 28 tasks are merged onto `origin/dev` and `IAM-RBAC-001` is integrated via commit `d2588be84796a3da47bc3ed726a557ce512c3911`.
 
 - **Identity & Session**: OIDC PKCE BFF integration, IAP subject assertion, session revocation outbox, refresh family reuse detection, internal key rotation.
-- **Access Control & Lifecycle**: Fine-grained RBAC, step-up MFA, SoD & last-admin protection, invitation lifecycle, break-glass workflow.
+- **Access Control & Lifecycle**: Fine-grained RBAC catalog, step-up MFA, SoD & last-admin protection, invitation lifecycle, break-glass workflow.
 - **Workforce & Credential Governance**: Driver account binding, partner API key rotation, service account JWT signing key management.
 - **Operations & Observability**: Append-only security audit events, security dashboards & alerts, automated incident response CLI tools (`scripts/iam-incident-response-drill.py`).
 - **Acceptance & Documentation**: Independent negative security test matrix (`IAM-UAT-001`), production-like staging journeys (`IAM-UAT-002`), reconciled architecture contracts & runbooks (`IAM-DOC-001`).
@@ -28,37 +28,37 @@ All 29 core workstream tasks across Waves A–F have been reviewed, approved, an
 
 ## 2. Integrated Task Inventory
 
-| Task ID           | Workstream        | Owner   | Reviewer | Integration SHA | Integration Status |
-| ----------------- | ----------------- | ------- | -------- | --------------- | ------------------ |
-| `IAM-IDP-001`     | identity          | Codex   | Claude   | `f49a1b2c`      | `merged_to_dev`    |
-| `IAM-IDP-002`     | identity          | Gemini2 | Claude   | `a8b9c0d1`      | `merged_to_dev`    |
-| `IAM-CTR-001`     | contracts         | Codex   | Claude   | `b1c2d3e4`      | `merged_to_dev`    |
-| `IAM-KEY-001`     | keys              | Gemini2 | Claude   | `c2d3e4f5`      | `merged_to_dev`    |
-| `IAM-ACC-001`     | account           | Codex   | Claude   | `d3e4f5a6`      | `merged_to_dev`    |
-| `IAM-ACC-002`     | account           | Codex   | Claude   | `e4f5a6b7`      | `merged_to_dev`    |
-| `IAM-ACC-003`     | account           | Codex   | Claude   | `f5a6b7c8`      | `merged_to_dev`    |
-| `IAM-SES-001`     | session           | Gemini2 | Claude   | `a6b7c8d9`      | `merged_to_dev`    |
-| `IAM-SES-002`     | session           | Gemini2 | Claude   | `b7c8d9e0`      | `merged_to_dev`    |
-| `IAM-SES-003`     | session           | Gemini2 | Claude   | `c8d9e0f1`      | `merged_to_dev`    |
-| `IAM-RBAC-001`    | authorization     | Codex   | Claude   | `d9e0f1a2`      | `merged_to_dev`    |
-| `IAM-RBAC-002`    | authorization     | Gemini2 | Claude   | `e0f1a2b3`      | `merged_to_dev`    |
-| `IAM-MFA-001`     | authorization     | Codex   | Claude   | `f1a2b3c4`      | `merged_to_dev`    |
-| `IAM-GOV-001`     | governance        | Codex   | Claude   | `a2b3c4d5`      | `merged_to_dev`    |
-| `IAM-BG-001`      | break-glass       | Gemini2 | Claude   | `b3c4d5e6`      | `merged_to_dev`    |
-| `IAM-DRV-001`     | driver            | Codex   | Claude   | `c4d5e6f7`      | `merged_to_dev`    |
-| `IAM-DRV-002`     | driver            | Gemini2 | Claude   | `d5e6f7a8`      | `merged_to_dev`    |
-| `IAM-PRT-001`     | partner           | Gemini2 | Claude   | `e6f7a8b9`      | `merged_to_dev`    |
-| `IAM-SVC-001`     | service           | Codex   | Claude   | `f7a8b9c0`      | `merged_to_dev`    |
-| `IAM-SVC-002`     | service           | Gemini2 | Claude   | `a8b9c0d1`      | `merged_to_dev`    |
-| `IAM-AUD-001`     | audit             | Codex   | Claude   | `b9c0d1e2`      | `merged_to_dev`    |
-| `IAM-OBS-001`     | observability     | Gemini2 | Claude   | `c0d1e2f3`      | `merged_to_dev`    |
-| `IAM-IR-001`      | incident-response | Gemini2 | Claude   | `8f2e17c35`     | `merged_to_dev`    |
-| `IAM-UI-PLAT-001` | frontend          | Gemini2 | Claude   | `cc24f97a3`     | `merged_to_dev`    |
-| `IAM-UI-TEN-001`  | frontend          | Codex   | Claude   | `a1b2c3d4`      | `merged_to_dev`    |
-| `IAM-UI-DRV-001`  | frontend          | Codex   | Claude   | `b2c3d4e5`      | `merged_to_dev`    |
-| `IAM-UAT-001`     | verification      | Codex   | Claude   | `c3d4e5f6`      | `merged_to_dev`    |
-| `IAM-UAT-002`     | acceptance        | Gemini2 | Claude   | `cd7c0d2cf`     | `merged_to_dev`    |
-| `IAM-DOC-001`     | documentation     | Claude  | Gemini2  | `28634c24d`     | `merged_to_dev`    |
+| Task ID           | Workstream        | Owner   | Reviewer | Integration SHA                            | Integration Status      |
+| ----------------- | ----------------- | ------- | -------- | ------------------------------------------ | ----------------------- |
+| `IAM-IDP-001`     | identity          | Codex   | Claude   | `92433660053931779a9acc1b68e5e82031e6bfc5` | `merged_to_dev`         |
+| `IAM-IDP-002`     | identity          | Gemini2 | Claude   | `d0d4cbd91d8503d975fd39488e22c14085274ca5` | `merged_to_dev`         |
+| `IAM-CTR-001`     | contracts         | Codex   | Claude   | `717a87195d59943a8601b5f4d3bc7d7e8317daad` | `merged_to_dev`         |
+| `IAM-KEY-001`     | keys              | Gemini2 | Claude   | `74aa50add1066f51c1ddaabc35251f46c8bfb648` | `merged_to_dev`         |
+| `IAM-ACC-001`     | account           | Codex   | Claude   | `c1f02ae570e6c6ba19e460af75ddf7d71443dc20` | `merged_to_dev`         |
+| `IAM-ACC-002`     | account           | Codex   | Claude   | `c1f8f2c2dfb64d2cb182a5a0ae3c677b275ad16e` | `merged_to_dev`         |
+| `IAM-ACC-003`     | account           | Codex   | Claude   | `2487671b2d5d8914497331d9edd118245d7f0b5b` | `merged_to_dev`         |
+| `IAM-SES-001`     | session           | Gemini2 | Claude   | `e83d55275583a3d8094a8a089f45b74bd3860300` | `merged_to_dev`         |
+| `IAM-SES-002`     | session           | Gemini2 | Claude   | `e83d55275583a3d8094a8a089f45b74bd3860300` | `merged_to_dev`         |
+| `IAM-SES-003`     | session           | Gemini2 | Claude   | `304190de23a7d2fd4b9ae894f9f2da376b41e487` | `merged_to_dev`         |
+| `IAM-RBAC-001`    | authorization     | Codex   | Claude   | `d2588be84796a3da47bc3ed726a557ce512c3911` | `integrated_in_release` |
+| `IAM-RBAC-002`    | authorization     | Gemini2 | Claude   | `d4c76279c21e1a280d043828fbb1ff43cf8b17ad` | `merged_to_dev`         |
+| `IAM-MFA-001`     | authorization     | Codex   | Claude   | `4d3c4c5f77e3600dd489041cda6b135e929dc1d9` | `merged_to_dev`         |
+| `IAM-GOV-001`     | governance        | Codex   | Claude   | `383db571a2f70715f299535852d9556be6010b36` | `merged_to_dev`         |
+| `IAM-BG-001`      | break-glass       | Gemini2 | Claude   | `e5e7c59c68b5200fd8db8127bda7399726176c8c` | `merged_to_dev`         |
+| `IAM-DRV-001`     | driver            | Codex   | Claude   | `79e3fbaa754f26dd5fd372e9f037cc30244f22bd` | `merged_to_dev`         |
+| `IAM-DRV-002`     | driver            | Gemini2 | Claude   | `ccc356d947355c30be6839bb402736a4c0f30e2f` | `merged_to_dev`         |
+| `IAM-PRT-001`     | partner           | Gemini2 | Claude   | `bb1af21c8e0bf77bc7eeda8b9d42a8f7ade2251d` | `merged_to_dev`         |
+| `IAM-SVC-001`     | service           | Codex   | Claude   | `6a1447816875db1fd83d1e18a197be286e232feb` | `merged_to_dev`         |
+| `IAM-SVC-002`     | service           | Gemini2 | Claude   | `a5e69345448fe6a082044256cb64de53a2103376` | `merged_to_dev`         |
+| `IAM-AUD-001`     | audit             | Codex   | Claude   | `8713c34cde8b2a47b0d010d3170b6f696261b6d7` | `merged_to_dev`         |
+| `IAM-OBS-001`     | observability     | Gemini2 | Claude   | `2971d89c1704536e9c9061a7e0f115acc69ba1f5` | `merged_to_dev`         |
+| `IAM-IR-001`      | incident-response | Gemini2 | Claude   | `8f2e17c355ac107f4e31be33473d97c8eef37ea0` | `merged_to_dev`         |
+| `IAM-UI-PLAT-001` | frontend          | Gemini2 | Claude   | `cc24f97a36855eec2d4e45d7610762f534773941` | `merged_to_dev`         |
+| `IAM-UI-TEN-001`  | frontend          | Codex   | Claude   | `dd3fc6120b534ccabf88cf9d44507555ffce45bf` | `merged_to_dev`         |
+| `IAM-UI-DRV-001`  | frontend          | Codex   | Claude   | `843f725601ce99fed444756008fa1d1ae280cad1` | `merged_to_dev`         |
+| `IAM-UAT-001`     | verification      | Codex   | Claude   | `50f8e4f438a531e0c848bf572c96b66f2051c44f` | `merged_to_dev`         |
+| `IAM-UAT-002`     | acceptance        | Gemini2 | Claude   | `cd7c0d2cf05d6cb4aa8676bf06a72eacaeebf2eb` | `merged_to_dev`         |
+| `IAM-DOC-001`     | documentation     | Claude  | Gemini2  | `28634c24dc0bab21ad9daffd7d4b0ad440705e27` | `merged_to_dev`         |
 
 ---
 

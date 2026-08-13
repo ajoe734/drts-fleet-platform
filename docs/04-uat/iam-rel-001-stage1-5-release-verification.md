@@ -11,7 +11,7 @@
 
 ## Executive Summary
 
-Task `IAM-REL-001` integrates, verifies, and validates the complete Stage 1.5 Identity, Access & Account Security Hardening release candidate. All 29 task dependencies across Waves A through F (`IAM-IDP-001` through `IAM-DOC-001`) have been merged to `origin/dev`.
+Task `IAM-REL-001` integrates, verifies, and validates the complete Stage 1.5 Identity, Access & Account Security Hardening release candidate. All 29 task dependencies across Waves A through F (`IAM-IDP-001` through `IAM-DOC-001`) are integrated into the release branch `gemini2/iam-rel-001` (28 tasks merged onto `origin/dev` and `IAM-RBAC-001` integrated directly via commit `d2588be84796a3da47bc3ed726a557ce512c3911`).
 
 All verification suites have passed cleanly on the target tree:
 

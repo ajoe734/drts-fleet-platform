@@ -1,12 +1,7 @@
-===============================================================================
-DRTS Fleet Platform — Stage 1.5 IAM Hardening Database Verification Log
-Executed: 2026-08-13T12:10:50Z
-Target Tree: dev @ 28634c24dc0bab21ad9daffd7d4b0ad440705e27
-===============================================================================
 
-Command: pnpm db:verify
+> drts-fleet-platform@0.1.0 db:verify /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-rel-001
+> ./scripts/db-verify.sh
 
-Output:
 [info] DATABASE_URL not set; defaulting to postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
 DO
       metric       | value 

@@ -1,17 +1,395 @@
-===============================================================================
-DRTS Fleet Platform — Stage 1.5 IAM Hardening Rollout Gate Verification Log
-Executed: 2026-08-13T12:16:02Z
-Target Tree: dev @ 28634c24dc0bab21ad9daffd7d4b0ad440705e27
-===============================================================================
 
-Command: ./scripts/phase1-rollout-verify.sh all
+== Backfill Assets ==
+[ok] infra/seeds/S0001__reference_seed.sql
+[ok] infra/seeds/S0002__demo_operational_seed.sql
+[ok] infra/seeds/templates/vehicles_import_template.csv
+[ok] infra/seeds/templates/drivers_import_template.csv
+[ok] infra/seeds/templates/vehicle_contracts_import_template.csv
+[ok] infra/seeds/templates/insurance_policies_import_template.csv
+[ok] infra/seeds/templates/passengers_import_template.csv
+[ok] infra/seeds/templates/addresses_import_template.csv
 
-Stages Completed:
-1. Backfill Assets & Database Verification: PASSED (76 migrations, seed lineage verified)
-2. UAT Gate: PASSED (@drts/contracts build/lint, @drts/api typecheck/lint, pnpm test:unit 114 files, @drts/api test 153 files)
-3. Pilot Metrics Gate: PASSED (read models and reporting outputs verified)
-4. Production Build Gate: PASSED (@drts/contracts build, @drts/control-plane-auth build, @drts/api build)
+== Backfill Database ==
+[step] pnpm db:verify
 
-Result:
-[done] phase1 rollout gate "all" completed
-Exit Code: 0
+> drts-fleet-platform@0.1.0 db:verify /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-rel-001
+> ./scripts/db-verify.sh
+
+[info] DATABASE_URL not set; defaulting to postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+DO
+      metric       | value 
+-------------------+-------
+ complaints        |     1
+ drivers           |     3
+ driver_statements |     1
+ orders            |     3
+ schema_migrations |    76
+ seed_runs         |     2
+ tenants           |     2
+ vehicles          |     3
+(8 rows)
+
+[done] schema verification passed
+[sql] seed lineage and baseline dataset
+[info] DATABASE_URL not set; defaulting to postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+DO
+        metric        | value 
+----------------------+-------
+ complaint_cases      |     1
+ driver_fee_plans     |     1
+ drivers              |     3
+ filing_packages      |     1
+ orders               |     3
+ placard_versions     |     1
+ public_info_versions |     1
+ report_jobs          |     1
+ tenants              |     2
+ vehicles             |     3
+(10 rows)
+
+
+== UAT Gate ==
+[step] pnpm db:verify
+
+> drts-fleet-platform@0.1.0 db:verify /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-rel-001
+> ./scripts/db-verify.sh
+
+DO
+      metric       | value 
+-------------------+-------
+ complaints        |     1
+ drivers           |     3
+ driver_statements |     1
+ orders            |     3
+ schema_migrations |    76
+ seed_runs         |     2
+ tenants           |     2
+ vehicles          |     3
+(8 rows)
+
+[done] schema verification passed
+[step] pnpm --filter @drts/contracts build
+
+> @drts/contracts@0.1.0 build /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-rel-001/packages/contracts
+> tsc -p tsconfig.json
+
+[step] pnpm --filter @drts/contracts lint
+
+> @drts/contracts@0.1.0 lint /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-rel-001/packages/contracts
+> eslint src --max-warnings=0
+
+[step] pnpm --filter @drts/api typecheck
+
+> @drts/api@0.1.0 typecheck /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-rel-001/apps/api
+> tsc -p tsconfig.json --noEmit
+
+[step] pnpm --filter @drts/api lint
+
+> @drts/api@0.1.0 lint /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-rel-001/apps/api
+> eslint src --max-warnings=0
+
+[step] pnpm test:unit
+
+> drts-fleet-platform@0.1.0 test:unit /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-rel-001
+> vitest run
+
+
+ RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-rel-001
+
+ ✓ tests/unit/map-domain-service.test.ts (35 tests) 1636ms
+ ✓ tests/unit/client-integration.test.ts (25 tests) 55ms
+ ✓ tests/unit/iap-subject-adapter.test.ts (23 tests) 113ms
+[95m[Nest] 606754  - [39m08/13/2026, 12:25:30 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 1ms for supply_lifecycle_updated (00faab75-2370-4f41-a5a2-55c747a0e9c0)[39m
+[95m[Nest] 606754  - [39m08/13/2026, 12:25:30 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for supply_lifecycle_updated (00faab75-2370-4f41-a5a2-55c747a0e9c0)[39m
+[95m[Nest] 606754  - [39m08/13/2026, 12:25:30 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for supply_lifecycle_updated (00faab75-2370-4f41-a5a2-55c747a0e9c0)[39m
+[95m[Nest] 606754  - [39m08/13/2026, 12:25:30 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for supply_lifecycle_updated (00faab75-2370-4f41-a5a2-55c747a0e9c0)[39m
+[95m[Nest] 606754  - [39m08/13/2026, 12:25:31 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for supply_lifecycle_updated (3ed1e30b-f796-4700-aad2-753440588387)[39m
+[95m[Nest] 606754  - [39m08/13/2026, 12:25:31 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for driver_location_updated (5887081e-aac6-4a26-a82d-6feb3f58693b)[39m
+[95m[Nest] 606754  - [39m08/13/2026, 12:25:31 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for driver_location_updated (5887081e-aac6-4a26-a82d-6feb3f58693b)[39m
+ ✓ tests/unit/regulatory-registry.test.ts (16 tests) 66ms
+ ✓ tests/unit/tenant-partner-foundation.test.ts (25 tests) 113ms
+ ✓ tests/unit/auth-oidc-pkce.test.ts (28 tests) 155ms
+[32m[Nest] 606711  - [39m08/13/2026, 12:25:32 PM [32m    LOG[39m [38;5;3m[PrivilegedRoleGovernanceSchedulerService] [39m[32mStarting PrivilegedRoleGovernanceSchedulerService with interval 10000ms[39m
+[32m[Nest] 606711  - [39m08/13/2026, 12:25:32 PM [32m    LOG[39m [38;5;3m[PrivilegedRoleGovernanceSchedulerService] [39m[32mProcessed 1 expired/activated privileged role grant(s).[39m
+ ✓ tests/unit/iam-min-accses-001.test.ts (9 tests) 59ms
+[32m[Nest] 606739  - [39m08/13/2026, 12:25:32 PM [32m    LOG[39m [38;5;3m[InternalKeyMiddleware] [39m[32m[AUTH_BREAKGLASS_INTERNAL_KEY_USED] exceptionId=INTERNAL_KEY_EXCP_003 keyState=active owner=sre-ops route=GET [39m
+[32m[Nest] 606739  - [39m08/13/2026, 12:25:32 PM [32m    LOG[39m [38;5;3m[InternalKeyMiddleware] [39m[32m[AUTH_BREAKGLASS_INTERNAL_KEY_USED] exceptionId=INTERNAL_KEY_EXCP_003 keyState=active owner=sre-ops route=GET [39m
+ ✓ tests/integration/iam-ses-003-session-management.integration.test.ts (20 tests) 64ms
+[32m[Nest] 606739  - [39m08/13/2026, 12:25:32 PM [32m    LOG[39m [38;5;3m[InternalKeyMiddleware] [39m[32m[AUTH_BREAKGLASS_INTERNAL_KEY_USED] exceptionId=INTERNAL_KEY_EXCP_003 keyState=active owner=sre-ops route=GET [39m
+ ✓ tests/integration/iap-subject-adapter.integration.test.ts (14 tests) 114ms
+ ✓ tests/unit/wire-contract-conformance.test.ts (25 tests) 35ms
+ ✓ tests/unit/auth-startup-config.test.ts (33 tests) 113ms
+[95m[Nest] 606711  - [39m08/13/2026, 12:25:32 PM [95m  DEBUG[39m [38;5;3m[DatabaseService] [39m[95mClosed Postgres connection pool.[39m
+[95m[Nest] 606711  - [39m08/13/2026, 12:25:32 PM [95m  DEBUG[39m [38;5;3m[DatabaseService] [39m[95mClosed Postgres connection pool.[39m
+ ✓ tests/unit/map-geofence-ops-visibility-proof.test.ts (1 test) 59ms
+ ✓ tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts (53 tests) 355ms
+ ✓ tests/unit/platform-admin.test.ts (12 tests) 57ms
+ ✓ tests/unit/mtx-full-suite-contract.test.ts (5 tests) 32ms
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (249b5052-5c88-4d3a-afb4-92ceb68b0001)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (7e6003b3-d469-45ff-a8f0-dfae03fb765a)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_assigned (16bc4163-f98c-4e71-a0af-b3c4093ee1c0)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 1ms for dispatch_job_updated (7e6003b3-d469-45ff-a8f0-dfae03fb765a)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (700bcf07-1c96-4459-aebc-d2f775125341)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (700bcf07-1c96-4459-aebc-d2f775125341)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (fd371efe-7f00-4147-ab91-b0c97b06c28b)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (fd371efe-7f00-4147-ab91-b0c97b06c28b)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (7e6003b3-d469-45ff-a8f0-dfae03fb765a)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (7e6003b3-d469-45ff-a8f0-dfae03fb765a)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (7e6003b3-d469-45ff-a8f0-dfae03fb765a)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (7e6003b3-d469-45ff-a8f0-dfae03fb765a)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 1ms for task_updated (1cd8dbf9-170f-4b81-a18a-2ffbca3b67e8)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (7e6003b3-d469-45ff-a8f0-dfae03fb765a)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 1ms for order_created (8dc98dc4-108e-4a89-ae30-207832a478e7)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (b6b520e6-1f83-4dca-ad90-a43c731ab016)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (6dc94133-99ee-4075-aa3a-7da91b80da23)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_assigned (cce67e2f-f206-41bc-ad08-2ae4097233d8)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (6dc94133-99ee-4075-aa3a-7da91b80da23)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (a43d52e0-f0a3-4bd7-a79d-b4580005f53e)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (a43d52e0-f0a3-4bd7-a79d-b4580005f53e)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (6dc94133-99ee-4075-aa3a-7da91b80da23)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (6dc94133-99ee-4075-aa3a-7da91b80da23)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (0e0430be-33fb-4e8c-a379-8e12c0a76d24)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (165d15d6-cf8c-4f11-abec-cd801ea78c66)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_assigned (dab02471-bb0f-42d0-a700-7002592cb411)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (165d15d6-cf8c-4f11-abec-cd801ea78c66)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (d82ab4de-4244-4826-a823-1995c8e72ea1)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (d82ab4de-4244-4826-a823-1995c8e72ea1)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (d82ab4de-4244-4826-a823-1995c8e72ea1)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (d82ab4de-4244-4826-a823-1995c8e72ea1)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (165d15d6-cf8c-4f11-abec-cd801ea78c66)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (165d15d6-cf8c-4f11-abec-cd801ea78c66)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (165d15d6-cf8c-4f11-abec-cd801ea78c66)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (165d15d6-cf8c-4f11-abec-cd801ea78c66)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (e897ec09-816c-4806-a1ab-e16d9156cd54)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (165d15d6-cf8c-4f11-abec-cd801ea78c66)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (1341753f-2e92-48c0-ad09-36192740ef2d)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (90f82017-d7ea-4711-a785-fa242da8353b)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (245d409f-13f4-4973-aaca-8e2fe92289a4)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (ad6459fb-9c6b-4cf9-a465-c77ba167964e)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_assigned (a8ad944a-925a-4a90-acee-2f7744396d68)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (ad6459fb-9c6b-4cf9-a465-c77ba167964e)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (5998d1b0-7c44-4440-af79-0d13f6045ad0)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (5998d1b0-7c44-4440-af79-0d13f6045ad0)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (304cc8b8-76ab-4be6-acda-126288f1414f)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (304cc8b8-76ab-4be6-acda-126288f1414f)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (ad6459fb-9c6b-4cf9-a465-c77ba167964e)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (ad6459fb-9c6b-4cf9-a465-c77ba167964e)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (ad6459fb-9c6b-4cf9-a465-c77ba167964e)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (ad6459fb-9c6b-4cf9-a465-c77ba167964e)[39m
+[32m[Nest] 607673  - [39m08/13/2026, 12:25:33 PM [32m    LOG[39m [38;5;3m[TenantsService] [39m[32mCreated tenant tenant-blocked-rollout (blocked_rollout)[39m
+[32m[Nest] 607673  - [39m08/13/2026, 12:25:33 PM [32m    LOG[39m [38;5;3m[TenantsService] [39m[32mTenant tenant-blocked-rollout placed in rollback_hold[39m
+[95m[Nest] 606717  - [39m04/14/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (5f717257-32c3-4aed-af58-88726bce630f)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (f0f41c94-a90e-4467-a2e7-34223cc35ba3)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (e3496f2c-2fdc-44cf-aaa4-aba015d5c263)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (bbecbd35-4b95-406e-ac67-077009835462)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (4219ebbd-cc79-4d26-ac28-5aa85774fbd8)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_assigned (f6a0df2a-ac42-433f-a1a1-80a768445043)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (4219ebbd-cc79-4d26-ac28-5aa85774fbd8)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (b3d5d9a8-5538-4327-a314-07f9cf43cf65)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (c70a0242-68a3-4b04-a888-6ef2f829970d)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (c70a0242-68a3-4b04-a888-6ef2f829970d)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (c70a0242-68a3-4b04-a888-6ef2f829970d)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (4219ebbd-cc79-4d26-ac28-5aa85774fbd8)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (4219ebbd-cc79-4d26-ac28-5aa85774fbd8)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (4219ebbd-cc79-4d26-ac28-5aa85774fbd8)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (4219ebbd-cc79-4d26-ac28-5aa85774fbd8)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (961c220c-7ab1-41ee-a1cd-6b4cb6ed9f8b)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (4219ebbd-cc79-4d26-ac28-5aa85774fbd8)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (b4fb8192-bdab-4f3f-af21-55793ddd5de3)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (aac44b88-dc39-452a-a538-bcf9462d3d98)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (2e08b561-6cf9-47c7-af73-87f6740bb8d6)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_assigned (ab038050-bdae-468d-a030-a3c8e4b6751e)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (2e08b561-6cf9-47c7-af73-87f6740bb8d6)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (be7d404a-d6d0-4d6f-a3f2-7931833c3dc6)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (be7d404a-d6d0-4d6f-a3f2-7931833c3dc6)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (be7d404a-d6d0-4d6f-a3f2-7931833c3dc6)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (be7d404a-d6d0-4d6f-a3f2-7931833c3dc6)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (2e08b561-6cf9-47c7-af73-87f6740bb8d6)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (2e08b561-6cf9-47c7-af73-87f6740bb8d6)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (2e08b561-6cf9-47c7-af73-87f6740bb8d6)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (2e08b561-6cf9-47c7-af73-87f6740bb8d6)[39m
+[32m[Nest] 607673  - [39m08/13/2026, 12:25:33 PM [32m    LOG[39m [38;5;3m[AuditNotificationEmailAdapter] [39m[32mQueued approval notification email email-55e83e66-ecc9-41ab-810d-ec82898c9fad to admin@acme.example[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_updated (8f76db4a-1fbf-4cf7-a817-813bae609864)[39m
+[95m[Nest] 606717  - [39m04/16/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (2e08b561-6cf9-47c7-af73-87f6740bb8d6)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (3277922f-7c10-4350-af4a-f955cecdfc4d)[39m
+[32m[Nest] 607673  - [39m08/13/2026, 12:25:33 PM [32m    LOG[39m [38;5;3m[AuditNotificationEmailAdapter] [39m[32mQueued approval notification email email-3b6cadd1-f53b-4b93-8b82-7a747a39f5f8 to finance@acme.example[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (06553848-ccb9-4f4c-a1f3-0237504e6569)[39m
+[95m[Nest] 606717  - [39m04/15/2026, 8:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (eeb95a25-e6f6-465d-a7f2-d63ce1cc80ad)[39m
+[95m[Nest] 606717  - [39m04/15/2026, 6:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (3a747934-73eb-4598-ac78-c973042b5468)[39m
+[95m[Nest] 606717  - [39m04/15/2026, 6:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (ae05366a-0355-41a4-a65c-e93019945576)[39m
+[95m[Nest] 606717  - [39m04/15/2026, 6:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (f0950600-68a9-4d8e-a6c0-6dd4fc94697f)[39m
+[32m[Nest] 607673  - [39m08/13/2026, 12:25:33 PM [32m    LOG[39m [38;5;3m[AuditNotificationEmailAdapter] [39m[32mQueued approval notification email email-a06acee1-c2a2-4fbf-9510-89abbdb67f07 to finance@acme.example[39m
+[95m[Nest] 606717  - [39m04/15/2026, 6:00:00 AM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (250a07ac-cc85-4e6e-a7b8-06877cb954a9)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (f4b32776-83e9-459f-ae55-c0cf8a687617)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (30460aa3-600d-4627-abb0-885af01a75f4)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 0ms for task_assigned (8bb88cda-f26b-47d0-ab4c-934954d61803)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (30460aa3-600d-4627-abb0-885af01a75f4)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OwnedMobilityTaskEventsService] [39m[95mEvent publication lag: 1ms for task_cancelled (0f41e6a1-6d81-4790-a646-e14f49e80adc)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (30460aa3-600d-4627-abb0-885af01a75f4)[39m
+[32m[Nest] 607673  - [39m08/13/2026, 12:25:33 PM [32m    LOG[39m [38;5;3m[AuditNotificationEmailAdapter] [39m[32mQueued approval notification email email-548e702b-b20a-448f-ab42-a4dff75e977c to finance@acme.example[39m
+[32m[Nest] 607673  - [39m08/13/2026, 12:25:33 PM [32m    LOG[39m [38;5;3m[AuditNotificationEmailAdapter] [39m[32mQueued approval notification email email-38cca04f-fe14-471c-8c05-dddba6e44be7 to finance@acme.example[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for dispatch_job_updated (0987e317-c46c-40fc-a0fb-e24cd7d4f136)[39m
+[32m[Nest] 607673  - [39m05/19/2026, 8:00:00 AM [32m    LOG[39m [38;5;3m[AuditNotificationEmailAdapter] [39m[32mQueued approval notification email email-93cc28bf-51cb-4c05-86ad-467c886f644f to finance@acme.example[39m
+[32m[Nest] 607673  - [39m05/21/2026, 9:00:00 AM [32m    LOG[39m [38;5;3m[AuditNotificationEmailAdapter] [39m[32mQueued approval notification email email-d473e68c-038f-4159-a3e6-ceb5bc03ac59 to admin@acme.example[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (02c76bc6-d96f-4a63-a07b-2b094b32d150)[39m
+ ✓ tests/integ/tenant-governance-negative.test.ts (11 tests) 155ms
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 1ms for order_created (0d51b24c-4763-4e70-a11b-5725e0f24c43)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (437a61c6-7aa5-4dd4-a132-8a496d27633a)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (0701b4ac-ec39-4cd4-a335-a21ef185439a)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 1ms for order_created (c963dc23-1827-4548-a2f8-6514fc79aa3f)[39m
+[95m[Nest] 606717  - [39m08/13/2026, 12:25:33 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (3bc393a7-9102-4416-a7f6-11f6f627eae7)[39m
+ ✓ tests/unit/owned-mobility.test.ts (25 tests) 301ms
+ ✓ tests/unit/billing-settlement.test.ts (8 tests) 64ms
+ ✓ tests/unit/control-plane-auth.test.ts (23 tests) 109ms
+[95m[Nest] 607888  - [39m08/13/2026, 12:25:34 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (e9b17b4e-6922-403d-a3e1-38014a84bc80)[39m
+[95m[Nest] 607888  - [39m08/13/2026, 12:25:34 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (78faf686-58c6-45c1-ac86-78429438e034)[39m
+[95m[Nest] 607888  - [39m08/13/2026, 12:25:34 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (f2497e80-1da4-49bf-a05b-6b12d369d107)[39m
+[95m[Nest] 607888  - [39m08/13/2026, 12:25:34 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (555ba119-f9f4-4dd9-ac0b-69108e035786)[39m
+[95m[Nest] 607888  - [39m08/13/2026, 12:25:34 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (e7e89fe4-5866-4134-ac62-022a1365e17f)[39m
+ ✓ tests/unit/reporting-filing.test.ts (4 tests) 77ms
+[32m[Nest] 607997  - [39m08/13/2026, 12:25:34 PM [32m    LOG[39m [38;5;3m[TenantInvitationDeliveryService] [39m[32mQueued tenant invitation tenant-invitation-invitation_8b9eb632-eccf-4225-b6ee-e46a4a35602a for viewer@example.com[39m
+[32m[Nest] 607997  - [39m08/13/2026, 12:25:34 PM [32m    LOG[39m [38;5;3m[TenantInvitationDeliveryService] [39m[32mQueued tenant invitation tenant-invitation-invitation_ebb0c671-e12d-4ebd-9746-84638c61b2a0 for primary-admin@example.com[39m
+[32m[Nest] 607997  - [39m08/13/2026, 12:25:34 PM [32m    LOG[39m [38;5;3m[TenantInvitationDeliveryService] [39m[32mQueued tenant invitation tenant-invitation-invitation_31c76e3a-9175-4cc1-8c62-318fe3cda8dd for replacement-admin@example.com[39m
+[32m[Nest] 607997  - [39m08/13/2026, 12:25:34 PM [32m    LOG[39m [38;5;3m[TenantInvitationDeliveryService] [39m[32mQueued tenant invitation tenant-invitation-invitation_18493517-c119-4416-a829-26588c69c28f for session-user@example.com[39m
+[32m[Nest] 607880  - [39m08/13/2026, 12:25:34 PM [32m    LOG[39m [38;5;3m[AccessReviewService] [39m[32mRevoked 0 active sessions for target principal usr_target_01 upon access review removal decision.[39m
+ ✓ tests/unit/identity-canonical-repository.test.ts (7 tests) 46ms
+ ✓ tests/integ/oidc-pkce-bff-route.test.ts (7 tests) 86ms
+[32m[Nest] 607880  - [39m08/13/2026, 12:25:34 PM [32m    LOG[39m [38;5;3m[AccessReviewService] [39m[32mRevoked 1 active sessions for target principal usr_target_01 upon access review removal decision.[39m
+ ✓ tests/integration/access-review.integration.test.ts (6 tests) 56ms
+ ✓ tests/unit/internal-key-exception-registry.test.ts (13 tests) 28ms
+ ✓ tests/integ/oidc-pkce-bff.test.ts (5 tests) 514ms
+     ✓ executes real HTTP token exchange and RS256 JWKS ID token signature verification  471ms
+ ✓ tests/unit/platform-admin-assistant-context-packet.test.ts (8 tests) 56ms
+ ✓ tests/unit/platform-admin-assistant-route-context.test.ts (17 tests) 75ms
+ ✓ tests/unit/api-client-geo-service-area.test.ts (4 tests) 31ms
+ ✓ tests/unit/driver-app-settings-form.test.ts (26 tests) 28ms
+[95m[Nest] 607977  - [39m08/13/2026, 12:25:35 PM [95m  DEBUG[39m [38;5;3m[JwtAuthService] [39m[95mJWT verification failed: Signing key 'key-v1-retired' has been retired[39m
+[95m[Nest] 607977  - [39m08/13/2026, 12:25:35 PM [95m  DEBUG[39m [38;5;3m[JwtAuthService] [39m[95mJWT verification failed: jwt issuer invalid. expected: https://auth.local.drts.internal[39m
+ ✓ tests/unit/dev-active-surface-contract.test.ts (4 tests) 31ms
+ ✓ tests/unit/cloud-run-deploy-retry.test.ts (7 tests) 354ms
+[95m[Nest] 608320  - [39m08/13/2026, 12:25:36 PM [95m  DEBUG[39m [38;5;3m[DriverDeviceSessionService] [39m[95mRevoking binding drvbind_9ee1cacd0fa943288278fd252fe3928c for reason: REFRESH_TOKEN_REUSE_DETECTED[39m
+[95m[Nest] 608320  - [39m08/13/2026, 12:25:36 PM [95m  DEBUG[39m [38;5;3m[DriverDeviceSessionService] [39m[95mRevoking binding drvbind_be71be51880d40b3962319443662c9dc for reason: DEVICE_REBOUND[39m
+[95m[Nest] 608320  - [39m08/13/2026, 12:25:36 PM [95m  DEBUG[39m [38;5;3m[DriverDeviceSessionService] [39m[95mRevoking binding drvbind_73303ef204b444478c3fb27b553613f9 for reason: DRIVER_SUSPENDED[39m
+ ✓ tests/unit/driver-device-session.test.ts (5 tests) 64ms
+ ✓ tests/integration/auth-signing-key-rotation.integration.test.ts (5 tests) 723ms
+     ✓ 5. Python rotation CLI tool (rotate-auth-keys.py) executes inspect, generate, rotate, retire, and rollback  675ms
+ ✓ tests/unit/cleanup-paused-partner-booking-service.test.ts (16 tests) 1035ms
+ ✓ tests/unit/complaint.test.ts (5 tests) 35ms
+ ✓ tests/integration/auth-startup-config.integration.test.ts (10 tests) 34ms
+ ✓ tests/unit/supply-submission.test.ts (5 tests) 28ms
+ ✓ tests/security/iam-uat-002-staging-verification.test.ts (12 tests) 56ms
+ ✓ tests/unit/forwarder.test.ts (4 tests) 72ms
+[95m[Nest] 608498  - [39m08/13/2026, 12:25:36 PM [95m  DEBUG[39m [38;5;3m[JwtAuthService] [39m[95mJWT verification failed: Signing key 'key-v1' has been retired[39m
+ ✓ tests/unit/signing-key-ring.test.ts (5 tests) 45ms
+ ✓ tests/unit/p5-records-operations-ui.test.ts (10 tests) 101ms
+ ✓ tests/unit/referral-embed-passenger-lifecycle.test.ts (9 tests) 114ms
+ ✓ tests/unit/callcenter.test.ts (5 tests) 33ms
+[32m[Nest] 609132  - [39m08/13/2026, 12:25:37 PM [32m    LOG[39m [38;5;3m[InternalKeyMiddleware] [39m[32m[AUTH_LEGACY_INTERNAL_KEY_USED] exceptionId=INTERNAL_KEY_EXCP_002 keyState=active owner=control-plane-ops route=POST /api/partner/ingress/handoff[39m
+[32m[Nest] 609132  - [39m08/13/2026, 12:25:37 PM [32m    LOG[39m [38;5;3m[InternalKeyMiddleware] [39m[32m[AUTH_LEGACY_INTERNAL_KEY_USED] exceptionId=INTERNAL_KEY_EXCP_002 keyState=rotated_previous owner=control-plane-ops route=POST /api/partner/ingress/handoff[39m
+[33m[Nest] 609132  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[InternalKeyMiddleware] [39m[33m[AUTH_INTERNAL_KEY_DRIFT_ALERT] code=INTERNAL_KEY_REVOKED reason=Provided internal key for exception INTERNAL_KEY_EXCP_002 has been revoked. exceptionId=INTERNAL_KEY_EXCP_002 keyState=revoked route=POST /api/partner/ingress/handoff[39m
+[32m[Nest] 609132  - [39m08/13/2026, 12:25:37 PM [32m    LOG[39m [38;5;3m[InternalKeyMiddleware] [39m[32m[AUTH_SCOPED_INTERNAL_KEY_USED] exceptionId=INTERNAL_KEY_EXCP_001 keyState=active owner=referral-team header=x-drts-referral-handoff-key route=POST /api/partner/ingress/referral-embed-handoff[39m
+[32m[Nest] 609132  - [39m08/13/2026, 12:25:37 PM [32m    LOG[39m [38;5;3m[InternalKeyMiddleware] [39m[32m[AUTH_SCOPED_INTERNAL_KEY_USED] exceptionId=INTERNAL_KEY_EXCP_001 keyState=rotated_previous owner=referral-team header=x-drts-referral-handoff-key route=POST /api/partner/ingress/referral-embed-handoff[39m
+[33m[Nest] 609132  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[InternalKeyMiddleware] [39m[33m[AUTH_SCOPED_INTERNAL_KEY_DRIFT_ALERT] code=INTERNAL_KEY_REVOKED reason=Provided internal key for exception INTERNAL_KEY_EXCP_001 has been revoked. exceptionId=INTERNAL_KEY_EXCP_001 keyState=revoked header=x-drts-referral-handoff-key route=POST /api/partner/ingress/referral-embed-handoff[39m
+[33m[Nest] 609132  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[InternalKeyMiddleware] [39m[33m[AUTH_INTERNAL_KEY_DRIFT_ALERT] code=INTERNAL_KEY_EXPIRED reason=Internal key exception INTERNAL_KEY_EXCP_002 expired on 2025-01-01T00:00:00Z. exceptionId=INTERNAL_KEY_EXCP_002 keyState=expired route=POST /api/partner/ingress/handoff[39m
+[33m[Nest] 609132  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[InternalKeyMiddleware] [39m[33m[AUTH_SCOPED_INTERNAL_KEY_DRIFT_ALERT] code=INTERNAL_KEY_UNDOCUMENTED reason=No documented exception metadata found for header 'x-drts-undocumented-header' matching route POST /api/some/custom/path. exceptionId=undefined keyState=undocumented header=x-drts-undocumented-header route=POST /api/some/custom/path[39m
+ ✓ tests/integration/internal-key-rotation-retirement.integration.test.ts (6 tests) 33ms
+ ✓ tests/unit/p2-dp-c2-roc-tokens.test.ts (31 tests) 31ms
+ ✓ tests/unit/step-up-iap-path.test.ts (9 tests) 21ms
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [WARNING] Metric: drts_iam_auth_abuse_total -> Route: security-oncall (Owner: Security Ops)[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [CRITICAL] Metric: drts_iam_refresh_token_reuse_total -> Route: security-pager-p1 (Owner: Security Ops)[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [HIGH] Metric: drts_iam_cross_tenant_attempts_total -> Route: security-oncall (Owner: Security Ops)[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [INFO] Metric: drts_iam_privileged_changes_total -> Route: security-platform-owner (Owner: Platform Security)[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [HIGH] Metric: drts_iam_break_glass_total -> Route: security-pager-p1 (Owner: Security Lead)[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [WARNING] Metric: drts_iam_dormant_credential_usage_total -> Route: security-oncall (Owner: Security Ops)[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [WARNING] Metric: drts_iam_credential_expiry_warnings_total -> Route: ops-ticket (Owner: Credential Owner)[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [WARNING] Metric: drts_iam_idp_drift_total -> Route: iam-team (Owner: IAM Security)[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:37 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [CRITICAL] Metric: drts_iam_audit_pipeline_failures_total -> Route: security-pager-p1 (Owner: SRE & Security)[39m
+[32m[Nest] 609174  - [39m08/13/2026, 12:25:38 PM [32m    LOG[39m [38;5;3m[IamObservabilityService] [39m[32mExecuting security alert drill: refresh_reuse[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:38 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [CRITICAL] Metric: drts_iam_refresh_token_reuse_total -> Route: security-pager-p1 (Owner: Security Ops)[39m
+[32m[Nest] 609174  - [39m08/13/2026, 12:25:38 PM [32m    LOG[39m [38;5;3m[IamObservabilityService] [39m[32mExecuting security alert drill: privileged_change[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:38 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [HIGH] Metric: drts_iam_privileged_changes_total -> Route: security-platform-owner (Owner: Platform Security)[39m
+[32m[Nest] 609174  - [39m08/13/2026, 12:25:38 PM [32m    LOG[39m [38;5;3m[IamObservabilityService] [39m[32mExecuting security alert drill: audit_failure[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:38 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [CRITICAL] Metric: drts_iam_audit_pipeline_failures_total -> Route: security-pager-p1 (Owner: SRE & Security)[39m
+[31m[Nest] 609174  - [39m08/13/2026, 12:25:38 PM [31m  ERROR[39m [38;5;3m[IamObservabilityService] [39m[31mAudit pipeline failed during privileged mutation [grant_admin_privilege]: PostgreSQL connection timeout during audit append. Blocking write (fail-closed).[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:38 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [CRITICAL] Metric: drts_iam_audit_pipeline_failures_total -> Route: security-pager-p1 (Owner: SRE & Security)[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:38 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33mAudit recording failed for non-privileged operation [get_public_feed]. Continuing with warning.[39m
+[33m[Nest] 609174  - [39m08/13/2026, 12:25:38 PM [33m   WARN[39m [38;5;3m[IamObservabilityService] [39m[33m[SECURITY ALERT] [CRITICAL] Metric: drts_iam_audit_pipeline_failures_total -> Route: security-pager-p1 (Owner: SRE & Security)[39m
+ ✓ tests/integration/iam-observability-alerts.integration.test.ts (9 tests) 32ms
+ ✓ tests/unit/multi-tenant-header-routing.test.ts (4 tests) 30ms
+ ✓ tests/unit/cleanup-retired-dev-service.test.ts (16 tests) 689ms
+ ✓ tests/unit/security-events.test.ts (4 tests) 34ms
+ ✓ tests/unit/service-product.test.ts (8 tests) 23ms
+ ✓ tests/unit/fleet-partner.service.test.ts (3 tests) 39ms
+ ✓ tests/unit/platform-admin-fare-anomalies.test.ts (11 tests) 28ms
+ ✓ tests/unit/billing-settlement.service.test.ts (3 tests) 42ms
+ ✓ tests/unit/audit-notification.test.ts (5 tests) 120ms
+ ✓ tests/unit/internal-key.middleware.test.ts (7 tests) 19ms
+ ✓ tests/security/iam-auth-negative-matrix.test.ts (4 tests) 68ms
+ ✓ tests/unit/auth-bootstrap.test.ts (4 tests) 31ms
+ ✓ tests/unit/internal-key-alerts.test.ts (6 tests) 118ms
+ ✓ tests/unit/incident.test.ts (9 tests) 31ms
+[95m[Nest] 609741  - [39m08/13/2026, 12:25:40 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (374d3efb-0c34-459f-ac07-f80b7551c88c)[39m
+ ✓ tests/unit/billing-settlement-statements.test.ts (8 tests) 53ms
+[95m[Nest] 609741  - [39m08/13/2026, 12:25:40 PM [95m  DEBUG[39m [38;5;3m[OpsDispatchEventsService] [39m[95mEvent publication lag: 0ms for order_created (b5da1c12-a5e2-47c3-a530-285c4472f3f4)[39m
+ ✓ tests/unit/sandbox-webhook.adapter.test.ts (2 tests) 29ms
+ ✓ tests/unit/platform-admin-assistant-tools.test.ts (5 tests) 17ms
+ ✓ tests/unit/identity-session.test.ts (2 tests) 20ms
+ ✓ tests/unit/driver-profile.test.ts (7 tests) 20ms
+ ✓ tests/security/iam-route-inventory.test.ts (2 tests) 420ms
+     ✓ classifies every security-critical controller route  400ms
+ ✓ tests/unit/referral-embed-security.test.ts (7 tests) 32ms
+ ✓ tests/unit/step-up-policy-catalog.test.ts (2 tests) 46ms
+ ✓ tests/unit/vehicle-eligibility.test.ts (4 tests) 33ms
+ ✓ tests/unit/step-up-proof-policy.test.ts (3 tests) 48ms
+ ✓ tests/unit/maintenance.test.ts (8 tests) 25ms
+ ✓ tests/unit/platform-admin-switchboard-placard-source.test.ts (4 tests) 13ms
+ ✓ tests/unit/break-glass.service.test.ts (2 tests) 25ms
+ ✓ tests/unit/map-geofence-alerts.test.ts (3 tests) 13ms
+ ✓ tests/unit/shift-attendance.test.ts (8 tests) 37ms
+ ✓ tests/unit/phase1-foundation.test.ts (4 tests) 19ms
+ ✓ tests/unit/run-e2e-hermetic-harness.test.ts (4 tests) 4222ms
+     ✓ derives an isolated database name from the worktree root and honors overrides  971ms
+     ✓ keeps success and failure logs and reports bounded timeout status  1638ms
+     ✓ repairs unhealthy local node_modules only when auto-repair is enabled  1601ms
+[32m[Nest] 610658  - [39m08/13/2026, 12:25:42 PM [32m    LOG[39m [38;5;3m[TenantInvitationDeliveryService] [39m[32mQueued tenant invitation tenant-invitation-invitation_392f6fde-62d3-4f96-bc7b-e9d41cbdae6c for joiner@example.com[39m
+[32m[Nest] 610658  - [39m08/13/2026, 12:25:42 PM [32m    LOG[39m [38;5;3m[TenantInvitationDeliveryService] [39m[32mQueued tenant invitation tenant-invitation-invitation_91ec87c1-381b-45a6-b14a-40a7d679bf1c for resend@example.com[39m
+[32m[Nest] 610658  - [39m08/13/2026, 12:25:42 PM [32m    LOG[39m [38;5;3m[TenantInvitationDeliveryService] [39m[32mQueued tenant invitation tenant-invitation-invitation_89f13d15-b7a9-4d51-823f-9c71ff4e4a82 for resend@example.com[39m
+ ✓ tests/unit/driver-completion-outbox-migrations.test.ts (4 tests) 14ms
+ ✓ tests/unit/tenant-invitation-lifecycle.test.ts (2 tests) 47ms
+ ✓ tests/unit/channel-partner-portal-auth-guard.test.ts (2 tests) 14ms
+ ✓ tests/unit/sandbox-governance.test.ts (4 tests) 26ms
+ ✓ tests/integration/control-plane-auth-prod-resolution.integration.test.ts (4 tests) 3491ms
+     ✓ verifies production docker container resolves @drts/control-plane-auth to dist/index.js and starts API without ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING  3380ms
+[95m[Nest] 610561  - [39m08/13/2026, 12:25:43 PM [95m  DEBUG[39m [38;5;3m[DriverDeviceSessionService] [39m[95mRevoking binding drvbind_86bf232eff91443ba75b439b0d495901 for reason: MANUAL_REVOKE[39m
+ ✓ tests/integration/driver-device-session.integration.test.ts (1 test) 51ms
+ ✓ tests/unit/multi-taxi-authorizations-ui.test.ts (6 tests) 26ms
+ ✓ tests/unit/referral-embed-routing.test.ts (7 tests) 78ms
+ ✓ tests/unit/map-provider-config.test.ts (6 tests) 248ms
+ ✓ tests/unit/driver-settings.test.ts (5 tests) 23ms
+ ✓ tests/unit/bootstrap-auth-guard-strict-env.test.ts (3 tests) 63ms
+ ✓ tests/unit/driver-app-completion-proof.test.ts (4 tests) 16ms
+ ✓ tests/unit/api-client-dispatch-queue.test.ts (2 tests) 22ms
+ ✓ tests/unit/iam-policy-catalog.test.ts (6 tests) 19ms
+ ✓ tests/unit/dispatch-location-state.test.ts (4 tests) 11ms
+ ✓ tests/security/iam-browser-storage-and-secret-leakage.test.ts (2 tests) 283ms
+ ✓ tests/unit/platform-earnings.test.ts (3 tests) 15ms
+ ✓ tests/unit/platform-admin-light-theme.test.ts (3 tests) 29ms
+ ✓ tests/unit/hourly-promote-workflow.test.ts (3 tests) 16ms
+ ✓ tests/unit/driver-app-trip-workflow.test.ts (11 tests) 30ms
+ ✓ tests/unit/jwt-auth-controller-error-mapping.test.ts (2 tests) 59ms
+ ✓ tests/unit/platform-admin-p5-ui.test.ts (3 tests) 22ms
+ ✓ tests/unit/maintenance-action-receipt.test.ts (2 tests) 16ms
+ ✓ tests/unit/action-receipt.test.ts (3 tests) 39ms
+ ✓ tests/unit/driver-app-trip-metrics.test.ts (4 tests) 20ms
+ ✓ tests/unit/fleet-partner.repository.test.ts (1 test) 12ms
+ ✓ tests/unit/billing-settlement.repository.test.ts (1 test) 15ms
+ ✓ tests/contract/iam-contracts.test.ts (5 tests) 17ms
+ ✓ tests/unit/driver-profile.repository.test.ts (2 tests) 18ms
+ ✓ tests/unit/platform-admin-switchboard-placard-version-code.test.ts (3 tests) 16ms
+ ✓ tests/unit/channel-partner-portal-data.test.ts (1 test) 33ms
+ ✓ tests/security/iam-credential-expiry.test.ts (1 test) 20ms
+ ✓ tests/unit/platform-admin-i18n-stability.test.ts (2 tests) 10ms
+ ✓ tests/unit/platform-admin-client.test.ts (2 tests) 7ms
+ ✓ tests/unit/platform-admin-datetime-local.test.ts (2 tests) 10ms
+ ✓ tests/unit/bootstrap.test.ts (1 test) 7ms
+ ✓ tests/unit/tenant-default-authority.test.ts (2 tests) 7ms
