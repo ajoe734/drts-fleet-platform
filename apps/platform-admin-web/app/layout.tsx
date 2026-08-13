@@ -3,6 +3,7 @@ import { PlatformAdminAssistantProvider } from "@/components/assistant/route-con
 import { AdminShell } from "@/components/admin-shell";
 import { LanguageProvider } from "@/lib/i18n";
 import { PlatformAdminAuthorityProvider } from "@/lib/platform-admin-authority";
+import { BreakGlassProvider } from "@/components/break-glass-context";
 import { getServerLocale } from "@/lib/server-locale";
 import { getServerPlatformAdminAuthority } from "@/lib/server-platform-admin-authority";
 import { RuntimeConfigScript } from "@/lib/runtime-config";
@@ -25,7 +26,9 @@ export default async function RootLayout({
         <LanguageProvider defaultLocale={locale}>
           <PlatformAdminAuthorityProvider authority={authority}>
             <PlatformAdminAssistantProvider>
-              <AdminShell>{children}</AdminShell>
+              <BreakGlassProvider>
+                <AdminShell>{children}</AdminShell>
+              </BreakGlassProvider>
             </PlatformAdminAssistantProvider>
           </PlatformAdminAuthorityProvider>
         </LanguageProvider>
