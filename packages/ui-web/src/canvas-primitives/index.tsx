@@ -726,6 +726,7 @@ export interface BtnProps {
   type?: "button" | "submit" | "reset";
   onClick?: () => void;
   style?: CSSProperties;
+  "data-drt-operation"?: string;
 }
 
 export interface CanvasActionButtonProps {
@@ -756,6 +757,7 @@ export function Btn({
   type = "button",
   onClick,
   style,
+  "data-drt-operation": dataDrtOperation,
 }: BtnProps) {
   const theme = resolveTheme(providedTheme);
   const sizing =
@@ -792,6 +794,7 @@ export function Btn({
       type={type}
       disabled={disabled}
       onClick={onClick}
+      data-drt-operation={dataDrtOperation}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -961,6 +964,7 @@ export interface ActionButtonProps {
   type?: "button" | "submit" | "reset";
   onClick?: () => void;
   style?: CSSProperties;
+  "data-drt-operation"?: string;
 }
 
 export function ActionButton({
@@ -976,6 +980,7 @@ export function ActionButton({
   type = "button",
   onClick,
   style,
+  "data-drt-operation": dataDrtOperation,
 }: ActionButtonProps) {
   const theme = resolveTheme(providedTheme);
   const isDisabled = busy || disabled;
@@ -1002,6 +1007,9 @@ export function ActionButton({
         danger={danger}
         disabled={isDisabled}
         type={type}
+        {...(dataDrtOperation
+          ? { "data-drt-operation": dataDrtOperation }
+          : {})}
         {...buttonClickProps}
         style={{ width: "100%", justifyContent: "center" }}
       >
