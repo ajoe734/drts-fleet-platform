@@ -46,7 +46,7 @@ In accordance with repo guardrails:
 4. **G4 Cross-Surface Truth**: Referral bookings and Fleet supply approvals created in one surface immediately appear in downstream scoped surfaces (Channel Portal, Platform Registry).
 5. **G5 Native Truth**: Android emulator replay validates driver task lifecycle and SOS on candidate SHA.
 6. **G6 Runtime Truth**: All active services pass `/healthz` and operational journeys on the exact deployed candidate SHA.
-7. **G7 Frozen Surfaces**: Paused Partner Booking (`/`, `/ctbc/program/*`), retired Concierge Portal (`/`, `/concierge/*`), and retired Passenger Web (`/`) return HTTP 404.
+7. **G7 Frozen Surfaces**: Paused Partner Booking (`/` in candidate manifest; `/ctbc/program/site` and `/ctbc/program/embed` in operational journey manifest), retired Concierge Portal (`/` in both manifests), and retired Passenger Web (`/` in candidate manifest) return HTTP 404.
 8. **G8 Regression Truth**: Existing unit, integration, API E2E (22/22), and route smoke (39/39) remain 100% green.
 
 ---
@@ -198,12 +198,18 @@ In accordance with repo guardrails:
 
 ### 4.8 Stopped & Retired Surface Guardrails (`S1F-REL-001-PREDEPLOY`)
 
-- **URL Rules**:
-  - Partner Booking (`/`, `/ctbc/program/site`, `/ctbc/program/embed`) -> **MUST RETURN HTTP 404**.
-  - Concierge Portal (`/`, `/concierge/*`) -> **MUST RETURN HTTP 404**.
-  - Passenger Web (`/`) -> **MUST RETURN HTTP 404**.
+- **URL Rules & Manifest Split**:
+  - `candidate-journey-manifest.json` (Pass 1 - candidate surface check):
+    - Partner Booking (`/`) -> **MUST RETURN HTTP 404**.
+    - Concierge Portal (`/`) -> **MUST RETURN HTTP 404**.
+    - Passenger Web (`/`) -> **MUST RETURN HTTP 404**.
+  - `operational-browser-journeys.json` (Pass 2 - operational browser journey check):
+    - Partner Booking (`/ctbc/program/site`, `/ctbc/program/embed`) -> **MUST RETURN HTTP 404**.
+    - Concierge Portal (`/`) -> **MUST RETURN HTTP 404**.
+    - *(Passenger Web is not included in Pass 2).*
 - **Verification Rule**:
-  - Enforced across two manifest passes (`operational-candidate.spec.ts` via `candidate-journey-manifest.json` and `operational-browser-acceptance.spec.ts` via `operational-browser-journeys.json`). `scripts/run-operational-browser-acceptance.sh` executes both runners. Any HTTP 200, 301, 302, or 500 response on these surfaces causes the acceptance run to **FAIL IMMEDIATELY**.
+  - Enforced across two separate manifest passes (`operational-candidate.spec.ts` via `candidate-journey-manifest.json` and `operational-browser-acceptance.spec.ts` via `operational-browser-journeys.json`). `scripts/run-operational-browser-acceptance.sh` executes both runners. Any HTTP 200, 301, 302, or 500 response on these paths causes the acceptance run to **FAIL IMMEDIATELY**.
+  - **Runner Scope Note**: Neither runner checks `/concierge/*` wildcards (only root `/` is checked for Concierge in both manifests). Partner Booking and Concierge path checks differ between the two manifests as defined in their respective fixture JSON schemas.
 
 ---
 
@@ -499,7 +505,7 @@ When evaluating this handoff packet:
 4. [x] **Operator Journeys**: Details step-by-step user interactions, UI control attributes (`data-drt-operation`), expected request payloads, and API readback assertions.
 5. [x] **Runner Schema Fidelity**: §5.1 reproduces `tests/e2e/fixtures/operational-browser-journeys.json` verbatim (7 journeys, correct `id`/`route`/`operations`/`control`/`requestUrlIncludes`/`expectedReadbackState` fields; correct `retiredSurfaces` block).
 6. [x] **Candidate Manifest Fidelity**: §5.2 reproduces `tests/e2e/fixtures/candidate-journey-manifest.json` verbatim (9 active surfaces + 3 retired; `x-drts-candidate-sha` header contract).
-7. [x] **Frozen Surface Rules**: Enforces strict HTTP 404 checks for Partner Booking (`/`, `/ctbc/program/site`, `/ctbc/program/embed`), Concierge Portal (`/`, `/concierge/*`), and Passenger Web (`/`). (Passenger Web 404 is enforced via `candidate-journey-manifest.json` in pass 1; Partner Booking and Concierge are enforced across both `candidate-journey-manifest.json` and `operational-browser-journeys.json`).
+7. [x] **Frozen Surface Rules**: Enforces strict HTTP 404 checks matching exact runner manifests: `candidate-journey-manifest.json` checks `/` for Partner Booking, Concierge, and Passenger; `operational-browser-journeys.json` checks `/ctbc/program/site` and `/ctbc/program/embed` for Partner Booking, and `/` for Concierge. (No runner checks `/concierge/*` wildcards, and Partner Booking/Concierge paths are not identical across both manifests).
 8. [x] **Candidate Propagation**: Enforces candidate SHA header matching (`x-drts-candidate-sha`) on all active surfaces before browser mutation journeys run.
 
 ### 6.2 Reviewer Command Signature
