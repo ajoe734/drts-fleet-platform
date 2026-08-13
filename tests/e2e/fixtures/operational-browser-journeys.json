@@ -110,33 +110,33 @@
           "control": "[data-drt-operation='fleet-submit']",
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
-          "resultIdPath": "data.id",
+          "resultIdPath": "data.submission.submissionId",
           "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
-          "readbackIdPath": "data.id",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "SUBMITTED"
+          "readbackIdPath": "data.submission.submissionId",
+          "readbackStatePath": "data.submission.status",
+          "expectedReadbackState": "submitted"
         },
         {
           "name": "withdraw",
           "control": "[data-drt-operation='fleet-withdraw']",
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
-          "resultIdPath": "data.id",
+          "resultIdPath": "data.submission.submissionId",
           "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
-          "readbackIdPath": "data.id",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "WITHDRAWN"
+          "readbackIdPath": "data.submission.submissionId",
+          "readbackStatePath": "data.submission.status",
+          "expectedReadbackState": "withdrawn"
         },
         {
           "name": "resubmit",
           "control": "[data-drt-operation='fleet-resubmit']",
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
-          "resultIdPath": "data.id",
+          "resultIdPath": "data.submission.submissionId",
           "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
-          "readbackIdPath": "data.id",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "SUBMITTED"
+          "readbackIdPath": "data.submission.submissionId",
+          "readbackStatePath": "data.submission.status",
+          "expectedReadbackState": "submitted"
         }
       ]
     },
@@ -152,11 +152,11 @@
           "control": "[data-drt-operation='admin-approve']",
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
-          "resultIdPath": "data.id",
+          "resultIdPath": "data.submissionId",
           "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
-          "readbackIdPath": "data.id",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "APPROVED"
+          "readbackIdPath": "data.submission.submissionId",
+          "readbackStatePath": "data.submission.status",
+          "expectedReadbackState": "approved"
         }
       ]
     },
