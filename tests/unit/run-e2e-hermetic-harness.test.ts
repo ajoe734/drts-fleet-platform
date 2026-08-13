@@ -158,6 +158,7 @@ describe("run-e2e-hermetic harness", () => {
     expect(source).toContain("build_baseline_db()");
     expect(source).toContain("restore_baseline_db()");
     expect(source).toContain("TEMPLATE");
+    expect(source).toContain("REPORTING_SNAPSHOT_SCHEDULER_ENABLED");
     expect(source).toContain('"$HERMETIC_DB_MIGRATE_TIMEOUT_SECONDS"');
     expect(source).toContain("-db-migrate.log");
     expect(source).toContain('"$HERMETIC_DB_SEED_TIMEOUT_SECONDS"');

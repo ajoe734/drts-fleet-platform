@@ -42,6 +42,9 @@ export JWT_AUDIENCE="${JWT_AUDIENCE:-drts-api}"
 export CONTROLLED_DOWNLOAD_SIGNING_SECRET="${CONTROLLED_DOWNLOAD_SIGNING_SECRET:-ci-e2e-controlled-download-secret}"
 export PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT="${PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT:-ci-e2e-alpha-ingress-key}"
 export PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT="${PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT:-ci-e2e-beta-ingress-key}"
+# Each scenario owns the exact snapshots it asserts. The production scheduler
+# would add a clock-boundary row and make the monthly-report test non-hermetic.
+export REPORTING_SNAPSHOT_SCHEDULER_ENABLED="${REPORTING_SNAPSHOT_SCHEDULER_ENABLED:-false}"
 DEFAULT_API_START_CMD="pnpm --filter @drts/api start"
 API_BUILD_CMD="${API_BUILD_CMD:-pnpm --filter @drts/api build}"
 API_START_CMD="${API_START_CMD:-$DEFAULT_API_START_CMD}"
