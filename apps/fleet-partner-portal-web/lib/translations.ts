@@ -47,10 +47,12 @@ const en: Dict = {
   "supply.dashboard.empty": "There are no pending submissions in this lane.",
   "supply.empty.none": "No items right now",
   "supply.submissions.title": "Submission list",
-  "supply.submissions.subtitle": "status / submissionType / revisionNo / reviewer note",
+  "supply.submissions.subtitle":
+    "status / submissionType / revisionNo / reviewer note",
   "supply.submissions.fallback": "Showing fallback submission data.",
   "supply.submissions.all": "All submissions",
-  "supply.documents.subtitle": "Pre-signed upload, expiry tracking, and submission entry",
+  "supply.documents.subtitle":
+    "Pre-signed upload, expiry tracking, and submission entry",
   "supply.documents.uploadFlowTitle": "Pre-signed upload flow",
   "supply.documents.uploadFlowBody":
     "The frontend first requests an upload URL, then confirms the file with objectKey and checksum. Actual remediation happens on each submission detail.",
@@ -65,7 +67,8 @@ const en: Dict = {
   "supply.draft.tipTitle": "Submission tip",
   "supply.draft.tipBody":
     "After the draft is created, go to the detail page to upload documents, then submit with the revision-aware submit flow.",
-  "supply.draft.saveHelper": "After creation, you will be taken to the submission detail.",
+  "supply.draft.saveHelper":
+    "After creation, you will be taken to the submission detail.",
   "supply.detail.titleSuffix": "Submission detail",
   "supply.detail.fallback": "Showing fallback submission detail.",
   "supply.detail.draftFields": "Draft fields",
@@ -76,13 +79,15 @@ const en: Dict = {
   "supply.detail.canonicalIds": "Canonical IDs",
   "supply.detail.preApproval": "Pre-approval: not yet canonical",
   "supply.detail.saveHelper":
-    "Only available in draft / needs_revision. Every update carries expectedRevisionNo.",
-  "supply.detail.submitHelper": "Submit after draft creation or revision remediation.",
+    "Only available in draft / needs_revision / withdrawn. Every update carries expectedRevisionNo.",
+  "supply.detail.submitHelper":
+    "Submit after draft creation or revision remediation.",
   "supply.detail.withdrawHelper":
     "Only submitted items can be withdrawn, and they move to withdrawn.",
   "supply.detail.attachments": "Document attachments",
   "supply.detail.noDocumentsTitle": "No documents yet",
-  "supply.detail.noDocumentsBody": "Required documents must be uploaded before submission.",
+  "supply.detail.noDocumentsBody":
+    "Required documents must be uploaded before submission.",
   "supply.detail.uploadTitle": "Upload document",
   "supply.detail.effectiveFrom": "Effective from",
   "supply.detail.effectiveUntil": "Effective until",
@@ -134,27 +139,21 @@ const en: Dict = {
     "Current driver submissionId",
   "supply.vehicleField.doorCount": "Door count",
   "supply.vehicleField.color": "Color",
-  "supply.vehicleField.airportTransferEligible":
-    "Airport transfer eligible",
+  "supply.vehicleField.airportTransferEligible": "Airport transfer eligible",
   "supply.vehicleField.fixedFareAllowed": "Fixed fare allowed",
   "supply.error.selectFile": "Select a file first.",
-  "supply.document.professional_driver_license":
-    "Professional driver license",
+  "supply.document.professional_driver_license": "Professional driver license",
   "supply.document.taxi_driver_registration": "Taxi registration",
   "supply.document.vehicle_registration": "Vehicle registration",
   "supply.document.insurance_policy": "Insurance policy",
   "supply.document.fleet_participation_contract":
     "Fleet participation contract",
-  "supply.document.driver_management_contract":
-    "Driver management contract",
-  "supply.document.vehicle_management_contract":
-    "Vehicle management contract",
+  "supply.document.driver_management_contract": "Driver management contract",
+  "supply.document.vehicle_management_contract": "Vehicle management contract",
   "supply.document.other": "Other",
   "supply.reason.driver_license_missing": "Missing professional driver license",
-  "supply.reason.driver_license_expired":
-    "Professional driver license expired",
-  "supply.reason.driver_registration_missing":
-    "Missing taxi registration",
+  "supply.reason.driver_license_expired": "Professional driver license expired",
+  "supply.reason.driver_registration_missing": "Missing taxi registration",
   "supply.reason.driver_registration_expired": "Taxi registration expired",
   "supply.reason.vehicle_document_missing": "Missing vehicle documents",
   "supply.reason.insurance_missing": "Missing insurance",
@@ -554,7 +553,8 @@ const zh: Dict = {
   "nav.supplyDashboard": "送件總覽",
   "nav.supplySubmissions": "送件清單",
   "supply.dashboard.title": "供給送件總覽",
-  "supply.dashboard.subtitle": "自主建檔 -> 送審 -> 核可寫入 canonical registry",
+  "supply.dashboard.subtitle":
+    "自主建檔 -> 送審 -> 核可寫入 canonical registry",
   "supply.dashboard.documents": "文件總覽",
   "supply.dashboard.addDriver": "新增司機",
   "supply.dashboard.addVehicle": "新增車輛",
@@ -569,7 +569,8 @@ const zh: Dict = {
   "supply.dashboard.empty": "此群組目前沒有待處理送件。",
   "supply.empty.none": "目前沒有項目",
   "supply.submissions.title": "送件清單",
-  "supply.submissions.subtitle": "status / submissionType / revisionNo / reviewer note",
+  "supply.submissions.subtitle":
+    "status / submissionType / revisionNo / reviewer note",
   "supply.submissions.fallback": "目前顯示 fallback 送件資料。",
   "supply.submissions.all": "所有 submissions",
   "supply.documents.subtitle": "pre-signed upload · 到期追蹤 · submission 入口",
@@ -582,7 +583,8 @@ const zh: Dict = {
   "supply.driverNew.subtitle": "Driver draft · create -> upload docs -> submit",
   "supply.driverNew.cardTitle": "DriverSupplyDraft",
   "supply.vehicleNew.title": "新增車輛",
-  "supply.vehicleNew.subtitle": "Vehicle draft · create -> upload docs -> submit",
+  "supply.vehicleNew.subtitle":
+    "Vehicle draft · create -> upload docs -> submit",
   "supply.vehicleNew.cardTitle": "VehicleSupplyDraft",
   "supply.draft.tipTitle": "送件提示",
   "supply.draft.tipBody":
@@ -598,7 +600,7 @@ const zh: Dict = {
   "supply.detail.canonicalIds": "Canonical IDs",
   "supply.detail.preApproval": "Pre-approval: not yet canonical",
   "supply.detail.saveHelper":
-    "僅限 draft / needs_revision。每次更新都會走 expectedRevisionNo。",
+    "僅限 draft / needs_revision / withdrawn。每次更新都會走 expectedRevisionNo。",
   "supply.detail.submitHelper": "draft 或補正完成後送審。",
   "supply.detail.withdrawHelper": "只有 submitted 可撤回，會轉成 withdrawn。",
   "supply.detail.attachments": "文件附件",
@@ -752,7 +754,8 @@ const zh: Dict = {
   "statements.request.disputed": "已提出異議",
   "statements.request.persistedNote": "{action} · {at}",
   "statements.request.confirmPrompt": "請輸入此次確認對帳單請求的原因。",
-  "statements.request.disputePrompt": "請輸入此次提出異議請求的補充說明（可留空）。",
+  "statements.request.disputePrompt":
+    "請輸入此次提出異議請求的補充說明（可留空）。",
   "statements.request.confirmReasonRequired": "確認對帳單前必須填寫原因。",
   "revenue.currentPeriod": "當期分潤 · {period}",
   "revenue.breakdownSubtitle": "組成明細 · 以後端計算為準",
