@@ -20,6 +20,39 @@
           "readbackIdPath": "data.orderId",
           "readbackStatePath": "data.status",
           "expectedReadbackState": "CONFIRMED"
+        },
+        {
+          "name": "cancel",
+          "control": "[data-drt-operation='referral-cancel']",
+          "requestUrlIncludes": "/api/referral/cancel",
+          "requestMethod": "POST",
+          "resultIdPath": "data.orderId",
+          "readbackUrl": "/api/referral/history/{resultId}",
+          "readbackIdPath": "data.orderId",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "CANCELLED"
+        },
+        {
+          "name": "rate",
+          "control": "[data-drt-operation='referral-rate']",
+          "requestUrlIncludes": "/api/referral/rating",
+          "requestMethod": "POST",
+          "resultIdPath": "data.orderId",
+          "readbackUrl": "/api/referral/history/{resultId}",
+          "readbackIdPath": "data.orderId",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "CANCELLED"
+        },
+        {
+          "name": "receipt",
+          "control": "[data-drt-operation='referral-receipt']",
+          "requestUrlIncludes": "/api/referral/receipt",
+          "requestMethod": "GET",
+          "resultIdPath": "data.orderId",
+          "readbackUrl": "/api/referral/receipt/{resultId}",
+          "readbackIdPath": "data.orderId",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "CANCELLED"
         }
       ]
     },
@@ -40,6 +73,28 @@
           "readbackIdPath": "data.id",
           "readbackStatePath": "data.status",
           "expectedReadbackState": "PENDING"
+        },
+        {
+          "name": "update",
+          "control": "[data-drt-operation='enterprise-update']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "PUT",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/bookings/{resultId}",
+          "readbackIdPath": "data.id",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "PENDING"
+        },
+        {
+          "name": "cancel",
+          "control": "[data-drt-operation='enterprise-cancel']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "POST",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/bookings/{resultId}",
+          "readbackIdPath": "data.id",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "CANCELLED"
         }
       ]
     },
@@ -53,6 +108,28 @@
         {
           "name": "submit",
           "control": "[data-drt-operation='fleet-submit']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "POST",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
+          "readbackIdPath": "data.id",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "SUBMITTED"
+        },
+        {
+          "name": "withdraw",
+          "control": "[data-drt-operation='fleet-withdraw']",
+          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestMethod": "POST",
+          "resultIdPath": "data.id",
+          "readbackUrl": "/control-plane-proxy/supply/submissions/{resultId}",
+          "readbackIdPath": "data.id",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "WITHDRAWN"
+        },
+        {
+          "name": "resubmit",
+          "control": "[data-drt-operation='fleet-resubmit']",
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
           "resultIdPath": "data.id",

@@ -1774,6 +1774,7 @@ function TripScreen({
             variant="danger"
             onClick={handleCancel}
             disabled={isPending}
+            dataDrtOperation="referral-cancel"
           />
         </>
       }
@@ -2306,6 +2307,7 @@ function OutcomeScreen({
               label="查看收據"
               theme={theme}
               icon="receipt"
+              dataDrtOperation="referral-receipt"
             />
             <ActionButton
               href={buildHref(context, { screen: "book", state: "handoff" })}
@@ -2348,7 +2350,7 @@ function OutcomeScreen({
               }}
             >
               {[1, 2, 3, 4, 5].map((n) => (
-                <button key={n} type="button" onClick={() => submitRating(n)} disabled={!trip || isPending || score !== null} aria-label={`評分 ${n} 星`} style={{ border: 0, padding: 0, background: "transparent", color: score !== null && n > score ? theme.line : theme.warnFg, cursor: !trip || isPending || score !== null ? "default" : "pointer" }}>
+                <button key={n} type="button" data-drt-operation="referral-rate" onClick={() => submitRating(n)} disabled={!trip || isPending || score !== null} aria-label={`評分 ${n} 星`} style={{ border: 0, padding: 0, background: "transparent", color: score !== null && n > score ? theme.line : theme.warnFg, cursor: !trip || isPending || score !== null ? "default" : "pointer" }}>
                   <Icon name="spark" size={30} />
                 </button>
               ))}
