@@ -2353,6 +2353,109 @@ def pid_is_alive(pid: int | None) -> bool:
     return True
 
 
+def parse_proc_stat_process_accounting(stat_text: str) -> tuple[int, int] | None:
+    """Return a process's parent PID and accumulated CPU ticks from /proc."""
+    closing_paren = stat_text.rfind(")")
+    if closing_paren < 0:
+        return None
+    fields = stat_text[closing_paren + 1 :].strip().split()
+    # Fields begin at Linux procfs field 3 (state): ppid=4, utime=14, stime=15.
+    if len(fields) < 13:
+        return None
+    try:
+        return int(fields[1]), int(fields[11]) + int(fields[12])
+    except ValueError:
+        return None
+
+
+def worker_process_tree_cpu_ticks(worker_pids: list[int]) -> dict[int, int]:
+    """Return cumulative CPU ticks for each worker and all of its descendants.
+
+    A long verification command can be quiet at the agent protocol layer while
+    its child compiler/test processes continue to make progress. Walking only
+    known worker process trees avoids a full /proc scan on every poll.
+    """
+    roots = {pid for pid in worker_pids if pid > 0}
+    if not roots:
+        return {}
+
+    def read_accounting(pid: int) -> tuple[int, int] | None:
+        try:
+            return parse_proc_stat_process_accounting(
+                Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="ignore")
+            )
+        except OSError:
+            return None
+
+    def child_pids(pid: int) -> list[int]:
+        try:
+            values = Path(f"/proc/{pid}/task/{pid}/children").read_text(encoding="utf-8").split()
+        except OSError:
+            return []
+        return [int(value) for value in values if value.isdigit()]
+
+    totals: dict[int, int] = {}
+    for root_pid in roots:
+        root_details = read_accounting(root_pid)
+        # Worker PIDs are spawned directly by this supervisor. Reject a stale
+        # state PID that has since been reused by an unrelated process.
+        if root_details is None or root_details[0] != os.getpid():
+            continue
+        pending = [root_pid]
+        seen: set[int] = set()
+        total = 0
+        while pending:
+            pid = pending.pop()
+            if pid in seen:
+                continue
+            seen.add(pid)
+            details = read_accounting(pid)
+            if details is None:
+                continue
+            total += details[1]
+            pending.extend(child_pids(pid))
+        if root_pid in seen and total:
+            totals[root_pid] = total
+    return totals
+
+
+def observe_worker_process_activity(worker: dict[str, Any], cpu_ticks: int | None, now: datetime) -> tuple[bool, bool]:
+    """Return whether process activity advanced and whether state must persist it."""
+    if cpu_ticks is None:
+        return False, False
+    try:
+        previous_ticks = int(worker.get("process_tree_cpu_ticks"))
+    except (TypeError, ValueError):
+        previous_ticks = None
+    worker["process_tree_cpu_ticks"] = cpu_ticks
+    if previous_ticks is not None and cpu_ticks <= previous_ticks:
+        return False, False
+
+    now_text = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    previous_activity = worker.get("last_process_activity_at")
+    if previous_ticks is None:
+        worker["last_process_activity_at"] = now_text
+        return True, True
+    try:
+        previous_dt = datetime.fromisoformat(str(previous_activity).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        previous_dt = None
+    if previous_dt is None or (now - previous_dt).total_seconds() >= 30:
+        worker["last_process_activity_at"] = now_text
+        return True, True
+    return True, False
+
+
+def worker_last_activity_at(worker: dict[str, Any]) -> str | None:
+    """Use the newest semantic event or observed local process progress."""
+    timestamps = [
+        str(worker.get(key) or "").strip()
+        for key in ("last_event_at", "last_process_activity_at")
+    ]
+    timestamps = [value for value in timestamps if value]
+    return max(timestamps) if timestamps else None
+
+
 def reap_child_pid(pid: int | None) -> bool:
     if not pid:
         return False
@@ -4629,6 +4732,9 @@ def poll_workers(
     provider_report = provider_report or load_provider_report(config)
     changed = retry_due_workers(config, state, provider_report, now) or changed
     workers = state.setdefault("workers", {})
+    worker_cpu_ticks = worker_process_tree_cpu_ticks(
+        [int(worker["pid"]) for worker in workers.values() if str(worker.get("pid") or "").isdigit()]
+    )
     for run_id, worker in list(workers.items()):
         previous_last_event_at = worker.get("last_event_at")
         task = task_map.get(worker.get("task_id"), {})
@@ -4654,6 +4760,12 @@ def poll_workers(
                 continue
         update_from_log(config, worker)
         alive = pid_is_alive(worker.get("pid"))
+        process_activity_advanced, process_activity_persisted = observe_worker_process_activity(
+            worker,
+            worker_cpu_ticks.get(int(worker["pid"])) if str(worker.get("pid") or "").isdigit() else None,
+            now,
+        )
+        changed = process_activity_persisted or changed
         last_event_advanced = bool(
             previous_last_event_at
             and worker.get("last_event_at")
@@ -5061,7 +5173,7 @@ def poll_workers(
                     finalize_terminal_worker_outcome(config, state, worker, live_failure_reason)
                     changed = True
                     continue
-            if worker.get("status") == "stalled" and last_event_advanced:
+            if worker.get("status") == "stalled" and (last_event_advanced or process_activity_advanced):
                 worker["status"] = "running"
                 worker["last_event_at"] = worker.get("last_event_at") or utc_now()
                 write_activity_log(
@@ -5070,7 +5182,7 @@ def poll_workers(
                         "type": "worker_recovered",
                         "provider": worker.get("provider"),
                         "task_id": worker.get("task_id"),
-                        "message": "Worker produced new output after being marked stalled; status restored to running.",
+                        "message": "Worker produced new output or local process activity after being marked stalled; status restored to running.",
                         "worker_run_id": worker["run_id"],
                     },
                 )
@@ -5080,9 +5192,9 @@ def poll_workers(
                 )
                 changed = True
                 continue
-            last_event = worker.get("last_event_at")
-            if last_event:
-                last_dt = datetime.fromisoformat(last_event.replace("Z", "+00:00"))
+            last_activity = worker_last_activity_at(worker)
+            if last_activity:
+                last_dt = datetime.fromisoformat(last_activity.replace("Z", "+00:00"))
                 stalled_for_seconds = (now - last_dt).total_seconds()
                 if worker.get("status") == "stalled" and stalled_for_seconds >= stall_after * 2:
                     terminate_worker_pid(worker.get("pid"))
