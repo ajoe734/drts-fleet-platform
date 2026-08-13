@@ -253,6 +253,7 @@ function ActionButton({
   onClick,
   disabled = false,
   type = "button",
+  dataDrtOperation,
 }: {
   href?: string;
   label: string;
@@ -263,6 +264,7 @@ function ActionButton({
   onClick?: () => void;
   disabled?: boolean;
   type?: "button" | "submit" | "reset";
+  dataDrtOperation?: string;
 }) {
   const palette = buttonPalette(theme, variant);
   const content = (
@@ -295,6 +297,7 @@ function ActionButton({
         type={type}
         onClick={onClick}
         disabled={disabled}
+        data-drt-operation={dataDrtOperation}
         style={{
           ...style,
           cursor: disabled ? "progress" : "pointer",
@@ -1405,6 +1408,7 @@ function BookScreen({ context }: { context: EmbedContext }) {
             iconRight="arrow"
             onClick={handleSubmit}
             disabled={isPending}
+            dataDrtOperation="referral-create"
           />
         </>
       }

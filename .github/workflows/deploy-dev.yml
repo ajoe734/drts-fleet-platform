@@ -368,6 +368,7 @@ jobs:
     needs: prepare
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
+      candidate_sha: ${{ steps.tag.outputs.candidate_sha }}
 
     steps:
       - name: Checkout
@@ -379,6 +380,7 @@ jobs:
         id: tag
         run: |
           echo "tag=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
@@ -429,6 +431,7 @@ jobs:
         with:
           context: .
           file: apps/platform-admin-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/platform-admin-web:${{ steps.tag.outputs.tag }}
@@ -441,6 +444,7 @@ jobs:
         with:
           context: .
           file: apps/ops-console-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/ops-console-web:${{ steps.tag.outputs.tag }}
@@ -453,6 +457,7 @@ jobs:
         with:
           context: .
           file: apps/fleet-partner-portal-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:${{ steps.tag.outputs.tag }}
@@ -465,6 +470,7 @@ jobs:
         with:
           context: .
           file: apps/tenant-console-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/tenant-console-web:${{ steps.tag.outputs.tag }}
@@ -477,6 +483,7 @@ jobs:
         with:
           context: .
           file: apps/bank-console-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/bank-console-web:${{ steps.tag.outputs.tag }}
@@ -489,6 +496,7 @@ jobs:
         with:
           context: .
           file: apps/referral-embed-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/referral-embed-web:${{ steps.tag.outputs.tag }}
@@ -501,6 +509,7 @@ jobs:
         with:
           context: .
           file: apps/enterprise-dispatch-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:${{ steps.tag.outputs.tag }}
@@ -513,6 +522,7 @@ jobs:
         with:
           context: .
           file: apps/channel-partner-portal-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:${{ steps.tag.outputs.tag }}
@@ -765,7 +775,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          env_vars="NODE_ENV=production,DRTS_ENV=development,AUTH_MODE=explicit,API_PORT=3001,JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER},WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE},LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }},MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},AUTH_MODE=explicit,API_PORT=3001,JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER},WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE},LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }},MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
             env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi
@@ -821,7 +831,7 @@ jobs:
             api_origin="${{ steps.api_url.outputs.url }}"
           fi
 
-          env_vars="NODE_ENV=production,DRTS_ENV=development,JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,DRTS_FLEET_PARTNER_ID=fleet-demo-001,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,DRTS_TENANT_CONSOLE_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},NEXT_PUBLIC_DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,DRTS_FLEET_PARTNER_ID=fleet-demo-001,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,DRTS_TENANT_CONSOLE_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
             env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi
@@ -1362,3 +1372,52 @@ jobs:
             "${RETIRED_SERVICE_CLEANUP}" \
             "${{ needs.prepare.outputs.project_id }}" \
             "${{ needs.prepare.outputs.region }}"
+
+  operational-candidate-acceptance:
+    name: Candidate SHA operational acceptance
+    runs-on: ubuntu-latest
+    needs: [prepare, build-push, health-check, ui-smoke]
+    if: ${{ always() && needs.health-check.result == 'success' && needs.ui-smoke.result == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-push.outputs.candidate_sha }}
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Execute candidate-bound operational journeys
+        env:
+          DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}
+          DRTS_DEV_OPS_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
+          DRTS_DEV_REFERRAL_EMBED_BASE_URL: ${{ needs.health-check.outputs.referral_embed }}
+          DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL: ${{ needs.health-check.outputs.enterprise_dispatch }}
+          DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.fleet_partner_portal }}
+          DRTS_DEV_PLATFORM_ADMIN_BASE_URL: ${{ needs.health-check.outputs.platform_admin }}
+          DRTS_DEV_TENANT_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.tenant_console }}
+          DRTS_DEV_BANK_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.bank_console }}
+          DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL: ${{ needs.health-check.outputs.channel_partner_portal }}
+        run: |
+          set -euo pipefail
+          # Deleted Cloud Run services retain their service hostname; the control
+          # plane returns 404, which is the retire/paused contract under test.
+          api_url="${{ needs.health-check.outputs.api }}"
+          cloud_run_suffix="${api_url#https://drts-dev-api-}"
+          export DRTS_DEV_PARTNER_BOOKING_BASE_URL="https://drts-dev-partner-booking-web-${cloud_run_suffix}"
+          export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"
+          export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"
+          scripts/run-operational-browser-acceptance.sh \
+            --sha "${{ needs.build-push.outputs.candidate_sha }}"
+      - name: Upload operational evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operational-browser-evidence-${{ needs.build-push.outputs.candidate_sha }}
+          path: test-results/operational-browser/
+          if-no-files-found: error

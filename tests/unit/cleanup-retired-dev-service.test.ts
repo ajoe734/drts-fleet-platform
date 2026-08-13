@@ -123,7 +123,11 @@ describe("retired Cloud Run service cleanup", () => {
     ).toEqual([
       'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
+      'export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"',
     ]);
+    expect(source).toContain(
+      'export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"',
+    );
   });
 
   it("does not query or delete anything for none", () => {

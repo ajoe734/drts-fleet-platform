@@ -26,6 +26,8 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 
 FROM deps AS build
+ARG DRTS_CANDIDATE_SHA
+ENV DRTS_CANDIDATE_SHA=$DRTS_CANDIDATE_SHA
 ARG NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE
 ENV NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE=$NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE
 COPY apps/ops-console-web/ apps/ops-console-web/

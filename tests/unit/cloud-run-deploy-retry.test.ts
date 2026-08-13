@@ -128,7 +128,10 @@ describe("Cloud Run deploy quota retry", () => {
       workflow.match(/scripts\/deploy-cloud-run-service\.sh/g),
     ).toHaveLength(9);
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
-    expect(workflow).not.toContain("concierge-portal-web");
+    // Retired surfaces must never be built or deployed. The candidate-bound
+    // acceptance job may still derive their former service URLs to prove the
+    // retired/paused response contract against the deployed candidate.
+    expect(workflow).not.toMatch(/(?:Deploy|Build & push) — .*concierge/i);
     expect(
       workflow
         .split("\n")
@@ -137,7 +140,11 @@ describe("Cloud Run deploy quota retry", () => {
     ).toEqual([
       'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
+      'export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"',
     ]);
+    expect(workflow).toContain(
+      'export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"',
+    );
     expect(workflow).not.toMatch(/Deploy — .*passenger/i);
     expect(workflow).not.toMatch(/Build & push — .*passenger/i);
 

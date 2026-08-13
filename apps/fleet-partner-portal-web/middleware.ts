@@ -10,6 +10,8 @@ export function middleware(request: NextRequest) {
 
   // 1. Security Headers
   const response = NextResponse.next();
+  const candidateSha = process.env.DRTS_CANDIDATE_SHA?.trim() || "unconfigured";
+  response.headers.set("x-drts-candidate-sha", candidateSha);
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -39,8 +41,11 @@ export function middleware(request: NextRequest) {
     }
   }
 
-  // 3. Protected Route Session Check
-  if (!isPublic) {
+  // The portal does not ship a login route yet.  Keeping the unfinished gate
+  // enabled turns every deployed route into /login → 404, including the
+  // required operational dashboard.  Auth remains opt-in until that flow is
+  // deployed as one complete surface.
+  if (!isPublic && process.env.DRTS_FLEET_PORTAL_AUTH_REQUIRED === "true") {
     const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
     if (!sessionCookie) {
       const loginUrl = new URL("/login", request.url);
