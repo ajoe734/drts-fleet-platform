@@ -50,7 +50,7 @@ This runbook defines the triage, containment, escalation, and post-incident reco
   1. Confirm that fail-closed protection successfully blocked the privileged mutation (`AuditPipelineException` thrown).
   2. Inspect API & PostgreSQL database health logs:
      ```bash
-     python3 scripts/ai_status.py get-task IAM-OBS-001
+     scripts/ai-status.sh show IAM-OBS-001
      docker logs drts-postgres-audit --tail 100
      ```
   3. Check disk space, database connection pool, and table lock status on `admin.security_events`.

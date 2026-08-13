@@ -1225,7 +1225,7 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
                 },
             )
 
-            self.assertIn(".orchestrator/task-briefs/BUS-VAL-002.md", request.context_files)
+            self.assertIn(".orchestrator/generated/task-briefs/BUS-VAL-002.md", request.context_files)
             self.assertNotIn("current-work.md", request.context_files)
             self.assertNotIn("ai-activity-log.jsonl", request.context_files)
             self.assertNotIn("docs-site/index.html", request.context_files)

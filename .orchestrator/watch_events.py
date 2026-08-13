@@ -317,10 +317,10 @@ def render_wakeup_message(
     visible_shared_paths = []
     for path in shared_paths:
         path_label = relpath(path)
-        if path_label.startswith(".orchestrator/task-briefs/"):
+        if path_label.startswith(".orchestrator/generated/task-briefs/"):
             try:
                 task_brief_inline = (
-                    "\n本次 task brief 已內嵌如下；不要再讀 `.orchestrator/task-briefs/*`，"
+                    "\n本次 task brief 已內嵌如下；不要再讀 `.orchestrator/generated/task-briefs/*`，"
                     "因為部分 worker 的 file tool 會尊重 `.gitignore` 而拒絕該路徑。\n\n"
                     "```markdown\n"
                     f"{path.read_text(encoding='utf-8').strip()}\n"
@@ -484,7 +484,7 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
         status=status,
     ):
         label = relpath(path)
-        if label.startswith(".orchestrator/task-briefs/"):
+        if label.startswith(".orchestrator/generated/task-briefs/"):
             continue
         context_files.append(label)
     raw_target_files = event.get("target_files") if "target_files" in event else task_payload.get("artifacts")

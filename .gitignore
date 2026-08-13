@@ -58,7 +58,7 @@ ai-task-archive.jsonl
 .orchestrator/.state.json.*.tmp
 .orchestrator/chair-reviews/
 .orchestrator/evidence/
-.orchestrator/task-briefs/
+.orchestrator/generated/
 docs-site/approval-queue.json
 docs-site/ai-activity-log.jsonl
 docs-site/ai-status.json
