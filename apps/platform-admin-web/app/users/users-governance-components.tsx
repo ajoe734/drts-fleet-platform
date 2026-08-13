@@ -16,7 +16,6 @@ import {
 import type {
   AccessReviewCampaignRecord,
   AccessReviewEvidenceRecord,
-  AccessReviewItemRecord,
   BreakGlassGrantRecord,
   MaskedSessionSummary,
   PlatformAdminUserRecord,
@@ -134,6 +133,7 @@ export function UserDetailDrawer({
 }) {
   const rawClient = usePlatformAdminClient();
   const iamClient = createPlatformAdminIamClient(rawClient);
+  const { t } = useTranslation();
 
   const [sessions, setSessions] = useState<MaskedSessionSummary[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
@@ -216,10 +216,10 @@ export function UserDetailDrawer({
       <div style={bodyStyle}>
         {error ? <CanvasBanner theme={theme} tone="danger" icon="warn" title={error} /> : null}
 
-        <CanvasCard theme={theme} title="Account & Membership Authority">
+        <CanvasCard theme={theme} title={t("users.governance.detail.accountTitle")}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, fontSize: 12.5 }}>
             <div>
-              <span style={{ color: theme.textMuted }}>Role Binding:</span>{" "}
+              <span style={{ color: theme.textMuted }}>{t("users.governance.detail.roleBindingLabel")}</span>{" "}
               <CanvasPill theme={theme} tone="info">{user.roleCode}</CanvasPill>
             </div>
             <div>
@@ -231,7 +231,7 @@ export function UserDetailDrawer({
               <span style={{ fontFamily: theme.monoFamily }}>{formatDateTime(user.updatedAt)}</span>
             </div>
             <div>
-              <span style={{ color: theme.textMuted }}>MFA Status:</span>{" "}
+              <span style={{ color: theme.textMuted }}>{t("users.governance.detail.mfaStatusLabel")}</span>{" "}
               <CanvasPill theme={theme} tone="success" dot>AAL2 Enforced</CanvasPill>
             </div>
           </div>
@@ -239,7 +239,7 @@ export function UserDetailDrawer({
 
         <CanvasCard
           theme={theme}
-          title="Active & Historical Sessions"
+          title={t("users.governance.detail.sessionsTitle")}
           subtitle="Durable server-authoritative session inventory"
           actions={
             <CanvasBtn theme={theme} size="xs" variant="secondary" onClick={() => void loadSessions()}>
@@ -248,9 +248,9 @@ export function UserDetailDrawer({
           }
         >
           {loadingSessions ? (
-            <div style={{ padding: 16, textAlign: "center", color: theme.textMuted }}>Loading sessions…</div>
+            <div style={{ padding: 16, textAlign: "center", color: theme.textMuted }}>{t("users.governance.detail.sessionsLoading")}</div>
           ) : sessions.length === 0 ? (
-            <div style={{ padding: 16, textAlign: "center", color: theme.textMuted }}>No active sessions recorded</div>
+            <div style={{ padding: 16, textAlign: "center", color: theme.textMuted }}>{t("users.governance.detail.sessionsEmpty")}</div>
           ) : (
             <CanvasTable
               theme={theme}
@@ -269,6 +269,7 @@ export function UserDetailDrawer({
 export function RoleApprovalPanel() {
   const rawClient = usePlatformAdminClient();
   const iamClient = createPlatformAdminIamClient(rawClient);
+  const { t } = useTranslation();
 
   const [requests, setRequests] = useState<PrivilegedRoleApprovalRequestRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -400,11 +401,11 @@ export function RoleApprovalPanel() {
               variant="primary"
               onClick={() => setSelectedReq(r)}
             >
-              Review / Step-Up
+              {t("users.governance.roleApproval.reviewStepUp")}
             </CanvasBtn>
           ) : (
             <CanvasBtn theme={theme} size="xs" variant="secondary" onClick={() => setSelectedReq(r)}>
-              View Detail
+              {t("users.governance.roleApproval.viewDetail")}
             </CanvasBtn>
           )}
         </div>
@@ -418,7 +419,7 @@ export function RoleApprovalPanel() {
 
       <CanvasCard
         theme={theme}
-        title="Privileged Role Approvals & SoD Governance"
+        title={t("users.governance.roleApproval.title")}
         subtitle="Two-person approval and Separation of Duties enforcement for elevated workforce roles"
         actions={
           <>
@@ -426,16 +427,16 @@ export function RoleApprovalPanel() {
               Refresh
             </CanvasBtn>
             <CanvasBtn theme={theme} icon="plus" variant="primary" onClick={() => setShowCreateModal(true)}>
-              Request Privileged Role
+              {t("users.governance.roleApproval.requestButton")}
             </CanvasBtn>
           </>
         }
       >
         {loading ? (
-          <div style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>Loading requests…</div>
+          <div style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>{t("users.governance.roleApproval.loading")}</div>
         ) : requests.length === 0 ? (
           <div style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>
-            No privileged role requests recorded
+            {t("users.governance.roleApproval.empty")}
           </div>
         ) : (
           <CanvasTable theme={theme} columns={reqCols} rows={requests.map((r) => ({ ...r }))} />
@@ -447,7 +448,7 @@ export function RoleApprovalPanel() {
         <div style={overlayStyle} role="dialog" aria-modal="true">
           <div style={modalStyle}>
             <div style={headerStyle}>
-              <h2 style={titleStyle}>Request Privileged Role Elevation</h2>
+              <h2 style={titleStyle}>{t("users.governance.roleApproval.modalTitle")}</h2>
               <CanvasBtn theme={theme} variant="ghost" onClick={() => setShowCreateModal(false)}>✕</CanvasBtn>
             </div>
             <form onSubmit={handleCreate}>
@@ -469,9 +470,9 @@ export function RoleApprovalPanel() {
                     onChange={(e) => setRequestedRoleCode(e.target.value as PlatformAdminUserRole)}
                     style={controlStyle}
                   >
-                    <option value="superadmin">platform_super_admin (High Risk)</option>
-                    <option value="admin">platform_admin (Medium Risk)</option>
-                    <option value="operator">platform_operator (Low Risk)</option>
+                    <option value="superadmin">{t("users.governance.roleApproval.roleSuperadmin")}</option>
+                    <option value="admin">{t("users.governance.roleApproval.roleAdmin")}</option>
+                    <option value="operator">{t("users.governance.roleApproval.roleOperator")}</option>
                   </select>
                 </CanvasField>
 
@@ -481,7 +482,7 @@ export function RoleApprovalPanel() {
                     rows={3}
                     value={justification}
                     onChange={(e) => setJustification(e.target.value)}
-                    placeholder="e.g. Incident response INC-9921 requiring superadmin emergency fix"
+                    placeholder={t("users.governance.roleApproval.justificationPlaceholder")}
                     style={{ ...controlStyle, resize: "vertical" }}
                   />
                 </CanvasField>
@@ -517,7 +518,7 @@ export function RoleApprovalPanel() {
         <div style={overlayStyle} role="dialog" aria-modal="true">
           <div style={modalStyle}>
             <div style={headerStyle}>
-              <h2 style={titleStyle}>Review Role Elevation Request: {selectedReq.requestId}</h2>
+              <h2 style={titleStyle}>{t("users.governance.roleApproval.reviewModalTitle")} {selectedReq.requestId}</h2>
               <CanvasBtn theme={theme} variant="ghost" onClick={() => setSelectedReq(null)}>✕</CanvasBtn>
             </div>
             <div style={bodyStyle}>
@@ -540,7 +541,7 @@ export function RoleApprovalPanel() {
                 theme={theme}
                 tone="info"
                 icon="info"
-                title="Step-Up Approval Required"
+                title={t("users.governance.roleApproval.stepUpTitle")}
                 body="Secondary administrator sign-off is required before the privileged role becomes active."
               />
 
@@ -549,7 +550,7 @@ export function RoleApprovalPanel() {
                   rows={3}
                   value={actionReason}
                   onChange={(e) => setActionReason(e.target.value)}
-                  placeholder="Provide audit reason for approval or rejection"
+                  placeholder={t("users.governance.roleApproval.reasonPlaceholder")}
                   style={{ ...controlStyle, resize: "vertical" }}
                 />
               </CanvasField>
@@ -582,6 +583,7 @@ export function RoleApprovalPanel() {
 export function AccessReviewPanel() {
   const rawClient = usePlatformAdminClient();
   const iamClient = createPlatformAdminIamClient(rawClient);
+  const { t } = useTranslation();
 
   const [campaigns, setCampaigns] = useState<AccessReviewCampaignRecord[]>([]);
   const [evidence, setEvidence] = useState<AccessReviewEvidenceRecord[]>([]);
@@ -667,33 +669,33 @@ export function AccessReviewPanel() {
 
       <CanvasCard
         theme={theme}
-        title="Periodic Access Review Campaigns"
+        title={t("users.governance.accessReview.campaignsTitle")}
         subtitle="Certify, reduce, or remove privileged role bindings before overdue policy auto-revokes access"
         actions={
           <>
             <CanvasBtn theme={theme} variant="secondary" icon="arrow" onClick={() => void handleSweep()}>
-              Sweep Overdue
+              {t("users.governance.accessReview.sweepOverdue")}
             </CanvasBtn>
             <CanvasBtn theme={theme} variant="primary" icon="plus" onClick={() => setShowCreateModal(true)}>
-              New Review Campaign
+              {t("users.governance.accessReview.newCampaign")}
             </CanvasBtn>
           </>
         }
       >
         {loading ? (
-          <div style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>Loading campaigns…</div>
+          <div style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>{t("users.governance.accessReview.loadingCampaigns")}</div>
         ) : campaigns.length === 0 ? (
           <div style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>
-            No access review campaigns configured
+            {t("users.governance.accessReview.campaignsEmpty")}
           </div>
         ) : (
           <CanvasTable theme={theme} columns={campaignCols} rows={campaigns.map((c) => ({ ...c }))} />
         )}
       </CanvasCard>
 
-      <CanvasCard theme={theme} title="Access Review Audit Evidence Log" subtitle="Audit trail for certified, reduced, or remediated access decisions">
+      <CanvasCard theme={theme} title={t("users.governance.accessReview.evidenceTitle")} subtitle="Audit trail for certified, reduced, or remediated access decisions">
         {evidence.length === 0 ? (
-          <div style={{ padding: 16, textAlign: "center", color: theme.textMuted }}>No certification evidence entries logged</div>
+          <div style={{ padding: 16, textAlign: "center", color: theme.textMuted }}>{t("users.governance.accessReview.evidenceEmpty")}</div>
         ) : (
           <CanvasTable
             theme={theme}
@@ -715,7 +717,7 @@ export function AccessReviewPanel() {
         <div style={overlayStyle} role="dialog" aria-modal="true">
           <div style={modalStyle}>
             <div style={headerStyle}>
-              <h2 style={titleStyle}>Create Access Review Campaign</h2>
+              <h2 style={titleStyle}>{t("users.governance.accessReview.createCampaignModalTitle")}</h2>
               <CanvasBtn theme={theme} variant="ghost" onClick={() => setShowCreateModal(false)}>✕</CanvasBtn>
             </div>
             <form onSubmit={handleCreateCampaign}>
@@ -726,7 +728,7 @@ export function AccessReviewPanel() {
                     required
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g. Q3 Platform Admin Access Certification"
+                    placeholder={t("users.governance.accessReview.titlePlaceholder")}
                     style={controlStyle}
                   />
                 </CanvasField>
@@ -794,6 +796,7 @@ export function AccessReviewPanel() {
 export function BreakGlassPanel() {
   const rawClient = usePlatformAdminClient();
   const iamClient = createPlatformAdminIamClient(rawClient);
+  const { t } = useTranslation();
   const { activateSession, isBreakGlassActive, grant: activeGrant } = useBreakGlass();
 
   const [grants, setGrants] = useState<BreakGlassGrantRecord[]>([]);
@@ -888,7 +891,7 @@ export function BreakGlassPanel() {
       w: 160,
       r: (r) => (
         <CanvasBtn theme={theme} size="xs" variant="primary" onClick={() => setSelectedGrant(r)}>
-          Manage Grant
+          {t("users.governance.breakGlass.manageGrant")}
         </CanvasBtn>
       ),
     },
@@ -903,24 +906,24 @@ export function BreakGlassPanel() {
           theme={theme}
           tone="danger"
           icon="warn"
-          title="ACTIVE EMERGENCY BREAK-GLASS SESSION IN PROGRESS"
+          title={t("users.governance.breakGlass.activeSessionTitle")}
           body={`Grant ID ${activeGrant.grantId} is currently active. The persistent top banner displays countdown TTL and exit controls.`}
         />
       ) : null}
 
       <CanvasCard
         theme={theme}
-        title="Break-Glass Emergency Access Surface"
+        title={t("users.governance.breakGlass.surfaceTitle")}
         subtitle="Two-person approval emergency privilege elevation with mandatory countdown and persistent banner"
         actions={
           <CanvasBtn theme={theme} icon="plus" variant="primary" danger onClick={() => setShowRequestModal(true)}>
-            Request Emergency Access
+            {t("users.governance.breakGlass.requestButton")}
           </CanvasBtn>
         }
       >
         {grants.length === 0 ? (
           <div style={{ padding: 24, textAlign: "center", color: theme.textMuted }}>
-            No active or recent emergency break-glass requests recorded
+            {t("users.governance.breakGlass.empty")}
           </div>
         ) : (
           <CanvasTable theme={theme} columns={grantCols} rows={grants.map((g) => ({ ...g }))} />
@@ -932,7 +935,7 @@ export function BreakGlassPanel() {
         <div style={overlayStyle} role="dialog" aria-modal="true">
           <div style={modalStyle}>
             <div style={headerStyle}>
-              <h2 style={titleStyle}>Request Break-Glass Emergency Access</h2>
+              <h2 style={titleStyle}>{t("users.governance.breakGlass.requestModalTitle")}</h2>
               <CanvasBtn theme={theme} variant="ghost" onClick={() => setShowRequestModal(false)}>✕</CanvasBtn>
             </div>
             <form onSubmit={handleRequest}>
@@ -941,7 +944,7 @@ export function BreakGlassPanel() {
                   theme={theme}
                   tone="warn"
                   icon="warn"
-                  title="Emergency Escalation Warning"
+                  title={t("users.governance.breakGlass.escalationWarningTitle")}
                   body="Break-glass grants immediate superadmin privileges for emergency recovery. Two-person approval and mandatory post-incident audit apply."
                 />
 
@@ -971,8 +974,18 @@ export function BreakGlassPanel() {
                     rows={3}
                     value={reasonText}
                     onChange={(e) => setReasonText(e.target.value)}
-                    placeholder="Describe severe incident justification requiring emergency access"
+                    placeholder={t("users.governance.breakGlass.justificationPlaceholder")}
                     style={{ ...controlStyle, resize: "vertical" }}
+                  />
+                </CanvasField>
+
+                <CanvasField theme={theme} label={t("users.governance.breakGlass.proofReferenceLabel")}>
+                  <input
+                    type="text"
+                    value={proofReference}
+                    onChange={(e) => setProofReference(e.target.value)}
+                    placeholder={t("users.governance.breakGlass.proofReferencePlaceholder")}
+                    style={controlStyle}
                   />
                 </CanvasField>
               </div>
@@ -1007,16 +1020,16 @@ export function BreakGlassPanel() {
         <div style={overlayStyle} role="dialog" aria-modal="true">
           <div style={modalStyle}>
             <div style={headerStyle}>
-              <h2 style={titleStyle}>Emergency Grant: {selectedGrant.grantId}</h2>
+              <h2 style={titleStyle}>{t("users.governance.breakGlass.grantModalTitle")} {selectedGrant.grantId}</h2>
               <CanvasBtn theme={theme} variant="ghost" onClick={() => setSelectedGrant(null)}>✕</CanvasBtn>
             </div>
 
             <div style={bodyStyle}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, fontSize: 12.5 }}>
                 <div><span style={{ color: theme.textMuted }}>Requester:</span> {selectedGrant.requesterId}</div>
-                <div><span style={{ color: theme.textMuted }}>Reason Code:</span> {selectedGrant.reasonCode}</div>
+                <div><span style={{ color: theme.textMuted }}>{t("users.governance.breakGlass.reasonCodeLabel")}</span> {selectedGrant.reasonCode}</div>
                 <div><span style={{ color: theme.textMuted }}>Status:</span> <CanvasPill theme={theme} tone={statusTone(selectedGrant.status)} dot>{selectedGrant.status}</CanvasPill></div>
-                <div><span style={{ color: theme.textMuted }}>Post-Use Audit:</span> Required</div>
+                <div><span style={{ color: theme.textMuted }}>{t("users.governance.breakGlass.postUseAuditLabel")}</span> Required</div>
               </div>
 
               <div style={{ background: theme.surfaceLo, padding: 12, borderRadius: 8, fontSize: 12 }}>

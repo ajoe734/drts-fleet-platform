@@ -11,6 +11,7 @@ import {
 } from "react";
 import type { BreakGlassGrantRecord } from "@drts/contracts";
 import { usePlatformAdminClient } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import { createPlatformAdminIamClient } from "@/lib/platform-admin-iam-client";
 import {
   buildCanvasTheme,
@@ -178,6 +179,7 @@ export function useBreakGlass() {
 export function BreakGlassBanner() {
   const { isBreakGlassActive, grant, secondsRemaining, exitSession } =
     useBreakGlass();
+  const { t } = useTranslation();
   const [exiting, setExiting] = useState(false);
 
   if (!isBreakGlassActive || !grant) {
@@ -222,7 +224,7 @@ export function BreakGlassBanner() {
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontSize: 14 }}>🚨</span>
         <span style={{ fontWeight: 700, letterSpacing: 0.3 }}>
-          BREAK-GLASS EMERGENCY ACCESS ACTIVE
+          {t("breakGlass.banner.activeLabel")}
         </span>
         <span
           style={{
@@ -265,7 +267,7 @@ export function BreakGlassBanner() {
           }}
         >
           <span style={{ fontSize: 11, textTransform: "uppercase", opacity: 0.85 }}>
-            Expires in:
+            {t("breakGlass.banner.expiresInLabel")}
           </span>
           <span
             style={{
