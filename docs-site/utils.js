@@ -9,11 +9,14 @@ export const boardColumns = [
   { key: "todo", label: "待開始" },
   { key: "in_progress", label: "進行中" },
   { key: "review", label: "待審查" },
-  { key: "review_approved", label: "已批准待收尾" },
+  { key: "integrating", label: "整合中" },
+  { key: "acceptance", label: "驗收中" },
   { key: "blocked", label: "已阻塞" },
   { key: "done", label: "已完成" },
 ];
 
+// Candidate integration is evidence-driven, not executable work. Keep it out of
+// the active scheduler so a task is represented once in the integration section.
 export const activeTaskStatuses = new Set(["in_progress", "review"]);
 export const scheduleOpenTaskStatuses = new Set([
   "backlog",
@@ -30,7 +33,6 @@ export const statusLabelMap = {
   idle: "待命",
   working: "工作中",
   reviewing: "審查中",
-  finalize: "待收尾",
   ready: "可開工",
   waiting: "等前置",
   paused: "暫停中",
@@ -39,7 +41,8 @@ export const statusLabelMap = {
   todo: "待開始",
   in_progress: "進行中",
   review: "待審查",
-  review_approved: "已批准待收尾",
+  integrating: "整合中",
+  acceptance: "驗收中",
   blocked: "已阻塞",
   done: "已完成",
   pending: "待處理",
@@ -96,7 +99,11 @@ export const activityTypeLabel = {
   blocker: "阻塞",
   assign: "指派",
   reopen: "打回修改",
-  review_approved: "審查通過",
+  candidate_handoff: "候選交接",
+  candidate_approved: "候選審查通過",
+  candidate_invalidated: "候選已失效",
+  candidate_reconciled: "候選狀態同步",
+  acceptance_recorded: "驗收證據已記錄",
   done: "完成",
 };
 

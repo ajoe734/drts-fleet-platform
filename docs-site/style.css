@@ -273,7 +273,8 @@ h1 {
 
 .status-review,
 .status-reviewing,
-.status-review_approved,
+.status-integrating,
+.status-acceptance,
 .status-waiting_approval {
   color: var(--amber);
   background: var(--amber-soft);
@@ -658,8 +659,8 @@ h1 {
   border-color: rgba(33, 128, 141, 0.2);
 }
 
-.batch-pill.batch-approved,
-.dependency-card.batch-approved {
+.batch-pill.batch-integration,
+.dependency-card.batch-integration {
   background: rgba(59, 130, 246, 0.08);
   border-color: rgba(59, 130, 246, 0.22);
 }

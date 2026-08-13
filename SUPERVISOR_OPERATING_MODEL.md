@@ -141,63 +141,23 @@ If that discussion reveals new official backlog:
 - sync the mirrors
 - only then report project status externally
 
-## Commit Gate
+## Candidate Lifecycle
 
-Primary implementation tasks must not close with `done` until all of the following are true:
+Canonical implementation tasks have one lifecycle and one state writer:
 
-- the task is already `review_approved`
-- the owner has created a local git commit for the delivered slice
-- the owner records `COMMIT_HASH` and `COMMIT_SUBJECT` when finalizing the task
-- the commit subject includes the task id
-- the commit body records these trailers:
-  - `LLM-Agent: <lane>`
-  - `Task-ID: <task-id>`
-  - `Reviewer: <reviewer>`
-- the owner has pushed the task-scoped commit with a normal non-force push
-- the owner records `PUSH_REMOTE` and `PUSH_BRANCH` when finalizing the task
-- the owner records `INTEGRATION_STATUS` so machine truth distinguishes branch-only closeout from merge/deploy closeout
-- if a safe normal push is not possible, the task must stay open with a blocker/progress note
+`backlog/todo -> in_progress -> review -> integrating -> acceptance -> done`
 
-## Integration Closeout Gate
+- Owners may make ordinary checkpoint commits while a task is `in_progress`; those commits never start the full gate.
+- `handoff` locks `candidate_sha` and `candidate_branch`. A reviewer only reviews that SHA and cannot commit, rebase, or push.
+- A changed PR head invalidates the candidate, review and CI evidence, and returns the task to its owner.
+- GitHub bus is the only CI/PR/merge reconciler. It records `reviewed_sha`, `ci_sha`, `ci_status`, `ci_run_url`, `pr_url`, and `merge_sha` through the canonical status transaction.
+- Auto-merge is allowed only when review and green CI both name the locked candidate SHA. It targets `dev` and uses normal GitHub protections.
+- `acceptance` records only the task's explicit required evidence. `done` is derived after merge and all required acceptance keys are present; workers never write `done` directly.
+- On its first reconcile tick, the supervisor detects any task without `candidate_lifecycle_version=1` and runs the one-way canonical migration. New tasks are created at version 1, so this never becomes a recurring sync job.
 
-`done` is a task state, not a release claim. For canonical implementation work,
-branch closeout is only the first layer of the development loop.
+Workers must leave a progress or blocker note when they cannot construct a candidate. They must not invent a separate closeout task or infer completion from a local branch, git log, or a prior CI run.
 
-Use these completion levels:
-
-- `branch_pushed`: review approved, committed, and pushed, but not merged to `dev`
-- `pr_open` / `ci_pending` / `ci_failed`: integration is still being worked or blocked
-- `merged_to_dev`: the delivered commit is reachable from `origin/dev`
-- `deploy_blocked`: merged, but dev deploy is blocked or failed
-- `dev_deployed`: included in a successful `Deploy - Dev` workflow run
-- `not_applicable`: support-only sidecar work with no canonical product deploy target
-
-Workers and chairman reviews must not report "development complete", "ready on
-dev", or "published to dev" unless the task or umbrella has evidence for
-`INTEGRATION_STATUS=dev_deployed`.
-
-If a worker cannot complete PR, CI, merge, or dev deploy, it must leave a
-machine-truth trail instead of silently ending:
-
-- record the exact `INTEGRATION_STATUS`
-- attach PR / CI / merge / deploy evidence when available
-- create or hand off an explicit integration closeout follow-up when work remains
-- keep the task open with `progress` or `blocker` if branch closeout itself is incomplete
-
-Merge authority is review-gated, not categorically worker-forbidden. Workers
-must not merge to `dev` before an explicit reviewer approval, green required CI,
-and no unresolved blocking feedback. After those gates pass, an
-integration-authorized worker, supervisor, release manager, or human reviewer may
-perform the merge and must record the resulting `INTEGRATION_STATUS` evidence.
-
-Support-only tasks may skip commit evidence only when they are explicitly non-canonical:
-
-- sidecar review packets
-- acceptance packets
-- stale helper closures
-- other no-op support artifacts
-
-Those closeouts must use `NO_COMMIT_REQUIRED=1` and must not be used for primary delivery work.
+Support-only sidecars use the same review transaction, with `candidate_sha=not_applicable`; their required acceptance may complete without a product merge.
 
 ## Chairman Operational Review
 
@@ -221,7 +181,7 @@ actions:
 - approve a sidecar window with a TTL and maximum sidecar count
 - block sidecar parents for the current approval window
 - reassign a reviewer only while a task is in `review`
-- reassign an owner only while a task is in `todo`, `in_progress`, or `review_approved`
+- reassign an owner only while a task is in `todo` or `in_progress`
 - trigger `dispatch_now` only for tasks that are already eligible under machine truth
 - pause or clear an exact provider lane through `provider_actions`
 

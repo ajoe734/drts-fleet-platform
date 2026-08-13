@@ -169,7 +169,6 @@ def build_control_plane_summary(
             "focus_mode",
             "mode_status",
             "lifecycle",
-            "last_git_reconcile_at",
         )
     }
     disk_guard = runtime.get("disk_guard") or {}

@@ -67,46 +67,42 @@ The orchestrator already shells out for PR creation; no new dependency.
 
 ---
 
-## 4. Hook point C — ai-status.json `gate_layer` field
+## 4. Candidate evidence in ai-status.json
 
-Workers move through layers: `merge → publish → release → main`. Adding a
-`gate_layer` field per task lets the dashboard and any consumers see at a
-glance which integration layer a given task is currently in.
+The candidate lifecycle already exposes the integration facts required by the
+dashboard. Do not add a second `gate_layer` state machine.
 
-**Where:** wherever task status is written into `ai-status.json` (search
-`scripts/ai_status.py` and `.orchestrator/runtime_state.py`).
+**Where:** `scripts/ai_status.py`, written by the candidate transaction and the
+GitHub bus reconciliation path.
 
-**What to add:** an optional `gate_layer` string per task entry:
+**Fields:**
 
 ```jsonc
 {
   "tasks": {
     "BE-APR-NOTIFY-001": {
-      "status": "review_approved",
+      "status": "integrating",
       "owner": "Codex",
-      "gate_layer": "merge", // <-- new
-      "track": "backend", // <-- new
-      "base_branch": "backend-dev",
+      "candidate_sha": "<immutable reviewed SHA>",
+      "candidate_branch": "codex/be-apr-notify-001",
+      "reviewed_sha": "<same SHA>",
+      "ci_sha": "<same SHA>",
+      "ci_status": "running",
+      "pr_url": "https://github.com/org/repo/pull/123",
       // ...
     },
   },
 }
 ```
 
-Suggested state machine for `gate_layer`:
+The only transition sequence is `review -> integrating -> acceptance -> done`.
+Any new PR head returns the task to `in_progress`; CI or merge evidence from a
+different SHA is never reused.
 
-| When                                  | Set to       |
-| ------------------------------------- | ------------ |
-| Worker dispatched, PR not yet open    | `feat`       |
-| PR open against `merge/*`             | `merge`      |
-| Squashed into `merge/*`               | `integrated` |
-| Promotion PR open against `*-publish` | `publish-pr` |
-| Merged into `*-publish`               | `publish`    |
-| Pulled into a `release/*` branch      | `release`    |
-| Merged to `main`                      | `main`       |
-
-The orchestrator already polls PR state via the GitHub bus; extending it to
-update this field is a small additive change.
+At the start of reconciliation, the supervisor migrates only task records that
+do not yet carry `candidate_lifecycle_version=1`. The migration uses the same
+status transaction, reopens unbound legacy approvals, and does not run again
+for already migrated or newly created tasks.
 
 ---
 

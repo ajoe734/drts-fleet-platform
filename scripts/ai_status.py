@@ -114,7 +114,8 @@ STATUS_LABELS = {
     "todo": "todo",
     "in_progress": "in_progress",
     "review": "review",
-    "review_approved": "review_approved",
+    "integrating": "integrating",
+    "acceptance": "acceptance",
     "blocked": "blocked",
     "done": "done",
 }
@@ -360,7 +361,7 @@ def build_onboarding_prompt(state: dict[str, Any]) -> str:
         )
         parts.append("Do not create supervisor tasks until the consensus packet is accepted by the human.")
     else:
-        parts.append("Follow the canonical lifecycle backlog/todo -> in_progress -> review -> review_approved -> done.")
+        parts.append("Follow the canonical lifecycle backlog/todo -> in_progress -> review -> integrating -> acceptance -> done.")
         parts.append("Use scripts/ai-status.sh for every state change.")
     return " ".join(parts)
 
@@ -454,18 +455,6 @@ def build_doc_sync_audit_report(state: dict[str, Any]) -> tuple[bool, list[str]]
     return success, lines
 
 
-def task_requires_commit(task: dict[str, Any]) -> bool:
-    if task.get("release_gate"):
-        return True
-    if required_integration_status(task):
-        return True
-    if task.get("task_class") == "sidecar":
-        return False
-    if task.get("mutates_canonical") is False:
-        return False
-    return True
-
-
 def git_commit_exists(commit_hash: str) -> bool:
     if not commit_hash.strip():
         return False
@@ -478,210 +467,77 @@ def git_commit_exists(commit_hash: str) -> bool:
     return result.returncode == 0
 
 
-INTEGRATION_STATUS_VALUES = {
-    "not_applicable",
-    "branch_pushed",
-    "pr_open",
-    "ci_pending",
-    "ci_failed",
-    "merged_to_dev",
-    "deploy_blocked",
-    "dev_deployed",
-}
-
-REQUIRED_INTEGRATION_STATUS_ALLOWED: dict[str, set[str]] = {
-    "branch_pushed": {
-        "branch_pushed",
-        "pr_open",
-        "ci_pending",
-        "ci_failed",
-        "merged_to_dev",
-        "deploy_blocked",
-        "dev_deployed",
-    },
-    "merged_to_dev": {"merged_to_dev", "deploy_blocked", "dev_deployed"},
-    "dev_deployed": {"dev_deployed"},
-    "not_applicable": {"not_applicable"},
+CANDIDATE_CI_STATUSES = {"queued", "running", "success", "failure", "merge_conflict", "closed"}
+LEGACY_INTEGRATION_FIELDS = {
+    "integration_status",
+    "integration_recorded_at",
+    "required_integration_status",
+    "required_evidence_fields",
+    "merged_ref",
+    "commit_hash",
+    "commit_subject",
+    "commit_agent",
+    "commit_reviewer",
+    "commit_recorded_at",
+    "push_remote",
+    "push_branch",
+    "push_ref",
+    "push_commit",
+    "push_recorded_at",
+    "dev_deploy_run_url",
+    "dev_deploy_sha",
+    "dev_deploy_source_ref",
 }
 
 
-def integration_metadata_from_env(commit_required: bool, timestamp: str) -> dict[str, Any]:
-    integration_status = os.environ.get("INTEGRATION_STATUS", "").strip().lower()
-    if not integration_status:
-        integration_status = "branch_pushed" if commit_required else "not_applicable"
-    if integration_status not in INTEGRATION_STATUS_VALUES:
-        allowed = ", ".join(sorted(INTEGRATION_STATUS_VALUES))
-        raise SystemExit(f"INTEGRATION_STATUS must be one of: {allowed}")
-
-    pr_url = os.environ.get("PR_URL", "").strip()
-    ci_status = os.environ.get("CI_STATUS", "").strip()
-    ci_run_url = os.environ.get("CI_RUN_URL", "").strip()
-    merged_ref = os.environ.get("MERGED_REF", "").strip()
-    merge_commit = os.environ.get("MERGE_COMMIT", "").strip()
-    dev_deploy_run_url = os.environ.get("DEV_DEPLOY_RUN_URL", "").strip()
-    dev_deploy_sha = os.environ.get("DEV_DEPLOY_SHA", "").strip()
-    dev_deploy_source_ref = os.environ.get("DEV_DEPLOY_SOURCE_REF", "").strip()
-
-    if integration_status == "merged_to_dev" and not (merged_ref or merge_commit):
-        raise SystemExit("INTEGRATION_STATUS=merged_to_dev requires MERGED_REF or MERGE_COMMIT")
-    if integration_status == "dev_deployed":
-        if not (merged_ref or merge_commit):
-            raise SystemExit("INTEGRATION_STATUS=dev_deployed requires MERGED_REF or MERGE_COMMIT")
-        if not dev_deploy_run_url or not dev_deploy_sha:
-            raise SystemExit("INTEGRATION_STATUS=dev_deployed requires DEV_DEPLOY_RUN_URL and DEV_DEPLOY_SHA")
-    if integration_status == "ci_failed" and not (ci_status or ci_run_url):
-        raise SystemExit("INTEGRATION_STATUS=ci_failed requires CI_STATUS or CI_RUN_URL")
-    if integration_status == "deploy_blocked" and not (dev_deploy_run_url or dev_deploy_source_ref or merged_ref):
-        raise SystemExit("INTEGRATION_STATUS=deploy_blocked requires deploy or merge evidence")
-
-    metadata: dict[str, Any] = {
-        "integration_status": integration_status,
-        "integration_recorded_at": timestamp,
-    }
-    optional_fields = {
-        "pr_url": pr_url,
-        "ci_status": ci_status,
-        "ci_run_url": ci_run_url,
-        "merged_ref": merged_ref,
-        "merge_commit": merge_commit,
-        "dev_deploy_run_url": dev_deploy_run_url,
-        "dev_deploy_sha": dev_deploy_sha,
-        "dev_deploy_source_ref": dev_deploy_source_ref,
-    }
-    metadata.update({key: value for key, value in optional_fields.items() if value})
-    return metadata
+def candidate_required(task: dict[str, Any]) -> bool:
+    return not (task.get("task_class") == "sidecar" or task.get("mutates_canonical") is False)
 
 
-def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, Any]:
-    commit_required = task_requires_commit(task)
-    no_commit_required = os.environ.get("NO_COMMIT_REQUIRED", "").strip().lower() in {"1", "true", "yes"}
-    commit_hash = os.environ.get("COMMIT_HASH", "").strip()
-    commit_subject = os.environ.get("COMMIT_SUBJECT", "").strip()
-    commit_agent = os.environ.get("COMMIT_AGENT", "").strip() or actor
-    push_remote = os.environ.get("PUSH_REMOTE", "").strip()
-    push_branch = os.environ.get("PUSH_BRANCH", "").strip()
-    push_ref = os.environ.get("PUSH_REF", "").strip()
-    push_commit = os.environ.get("PUSH_COMMIT", "").strip() or commit_hash
-    reviewer = canonical_agent_name(task.get("reviewer"))
-    timestamp = iso_now()
-    integration_metadata = integration_metadata_from_env(commit_required, timestamp)
-
-    if commit_required:
-        if no_commit_required:
-            raise SystemExit("NO_COMMIT_REQUIRED is only allowed for sidecar or non-canonical tasks")
-        if not commit_hash:
-            raise SystemExit("done requires COMMIT_HASH for canonical tasks")
-        if not git_commit_exists(commit_hash):
-            raise SystemExit(f"COMMIT_HASH does not resolve to a local commit: {commit_hash}")
-        if not commit_subject:
-            raise SystemExit("done requires COMMIT_SUBJECT for canonical tasks")
-        if not push_remote or not push_branch:
-            raise SystemExit("done requires PUSH_REMOTE and PUSH_BRANCH for canonical tasks after a normal non-force push")
-        if any(ch.isspace() for ch in push_remote) or any(ch.isspace() for ch in push_branch):
-            raise SystemExit("PUSH_REMOTE and PUSH_BRANCH must not contain whitespace")
-        if push_commit != commit_hash:
-            raise SystemExit("PUSH_COMMIT must match COMMIT_HASH for canonical tasks")
-        return {
-            "commit_hash": commit_hash,
-            "commit_subject": commit_subject,
-            "commit_agent": canonical_agent_name(commit_agent),
-            "commit_reviewer": reviewer,
-            "commit_recorded_at": timestamp,
-            "push_remote": push_remote,
-            "push_branch": push_branch,
-            "push_ref": push_ref or f"{push_remote}/{push_branch}",
-            "push_commit": push_commit,
-            "push_recorded_at": timestamp,
-            **integration_metadata,
-        }
-
-    if no_commit_required or not commit_hash:
-        return {
-            "commit_hash": "-",
-            "commit_subject": "no-commit closeout",
-            "commit_agent": canonical_agent_name(commit_agent),
-            "commit_reviewer": reviewer,
-            "commit_recorded_at": timestamp,
-            **integration_metadata,
-        }
-
-    if not commit_subject:
-        raise SystemExit("done requires COMMIT_SUBJECT when COMMIT_HASH is provided")
-
-    return {
-        "commit_hash": commit_hash,
-        "commit_subject": commit_subject,
-        "commit_agent": canonical_agent_name(commit_agent),
-        "commit_reviewer": reviewer,
-        "commit_recorded_at": timestamp,
-        "push_remote": push_remote or "-",
-        "push_branch": push_branch or "-",
-        "push_ref": push_ref or (f"{push_remote}/{push_branch}" if push_remote and push_branch else "-"),
-        "push_commit": push_commit,
-        "push_recorded_at": timestamp,
-        **integration_metadata,
-    }
+def required_acceptance(task: dict[str, Any]) -> list[str]:
+    values = task.get("required_acceptance") or []
+    if not isinstance(values, list):
+        return []
+    return [str(value).strip() for value in values if str(value).strip()]
 
 
-def required_integration_status(task: dict[str, Any] | None) -> str | None:
-    required = str((task or {}).get("required_integration_status") or "").strip().lower()
-    if not required:
-        return None
-    if required not in INTEGRATION_STATUS_VALUES:
-        return None
-    return required
+def acceptance_complete(task: dict[str, Any]) -> bool:
+    evidence = task.get("acceptance_evidence") or {}
+    if not isinstance(evidence, dict):
+        return False
+    return all(str(evidence.get(name) or "").strip() for name in required_acceptance(task))
 
 
-def enforce_required_integration_closeout(
-    task: dict[str, Any],
-    completion_metadata: dict[str, Any],
-) -> None:
-    required_fields = task.get("required_evidence_fields") or []
-    if isinstance(required_fields, list) and required_fields:
-        missing_fields: list[str] = []
-        for field in required_fields:
-            val = str(completion_metadata.get(field) or task.get(field) or "").strip()
-            if not val:
-                missing_fields.append(str(field))
-        if missing_fields:
-            raise SystemExit(
-                f"{task.get('id') or 'task'} requires evidence fields: {', '.join(missing_fields)}"
-            )
+def candidate_is_locked(task: dict[str, Any]) -> bool:
+    candidate_sha = str(task.get("candidate_sha") or "").strip()
+    return bool(candidate_sha and (candidate_sha == "not_applicable" or git_commit_exists(candidate_sha)))
 
-    required_status = required_integration_status(task)
-    if not required_status:
+
+def clear_candidate_evidence(task: dict[str, Any], *, preserve_failed_sha: bool = False) -> None:
+    candidate_sha = task.get("candidate_sha") if preserve_failed_sha else None
+    for key in ("candidate_sha", "candidate_branch", "reviewed_sha", "ci_sha", "ci_status", "ci_run_url", "pr_url", "merge_sha"):
+        task.pop(key, None)
+    if candidate_sha:
+        task["candidate_sha"] = candidate_sha
+
+
+def transition_after_merge(state: dict[str, Any], task: dict[str, Any], *, message: str, timestamp: str) -> None:
+    task["last_update"] = timestamp
+    task["next"] = message
+    task.pop("waiting_for", None)
+    mark_blockers_resolved(state, str(task.get("id") or ""))
+    mark_handoffs_done(state, str(task.get("id") or ""))
+    if required_acceptance(task) and not acceptance_complete(task):
+        task["status"] = "acceptance"
         return
-
-    actual_status = str(completion_metadata.get("integration_status") or "").strip().lower()
-    allowed_statuses = REQUIRED_INTEGRATION_STATUS_ALLOWED.get(required_status, {required_status})
-    if actual_status not in allowed_statuses:
-        raise SystemExit(
-            f"{task.get('id') or 'task'} requires INTEGRATION_STATUS>={required_status}; "
-            f"received {actual_status or 'unset'}. "
-            "Support-only/not_applicable closeout is reserved for explicit sidecar or non-canonical tasks."
-        )
-
-    if required_status != "dev_deployed":
-        return
-
-    missing: list[str] = []
-    for key in (
-        "pr_url",
-        "ci_status",
-        "ci_run_url",
-        "merged_ref",
-        "merge_commit",
-        "dev_deploy_run_url",
-        "dev_deploy_sha",
-        "dev_deploy_source_ref",
-    ):
-        if not str(completion_metadata.get(key) or "").strip():
-            missing.append(key.upper())
-    if missing:
-        raise SystemExit(
-            f"{task.get('id') or 'task'} requires dev-deploy closeout evidence; "
-            f"missing {', '.join(missing)}."
-        )
+    task["status"] = "done"
+    apply_unblock_parent_resolution(
+        state,
+        task,
+        actor=current_actor("Supervisor"),
+        timestamp=timestamp,
+        message=message,
+    )
 
 
 def iso_now() -> str:
@@ -840,14 +696,13 @@ def atomic_write_text(path: Path, content: str) -> None:
 def _retention_keeps() -> dict[str, int]:
     """Resolve status-file retention keep counts from orchestrator config.
 
-    ai_status.py is the dominant writer of ai-status.json (the worker
-    ``ai-status.sh`` CLI runs it on every status mutation), so the same prune
-    that ``supervisor.write_status_with_prune`` applies MUST also live here —
-    otherwise handoffs/tasks regrow unbounded (17.8k handoffs / 8.7 MB by the
-    2026-05-31 incident) and the file blows past the 256 KB cap the
-    chair/coordination worker Read tool enforces, re-breaking machine-truth
-    reads. Keeps are read from the orchestrator config (config.local.json
-    overrides config.json), matching the supervisor. See
+    ai_status.py owns every ai-status.json mutation (the worker
+    ``ai-status.sh`` CLI invokes it for each transition), so retention is part
+    of this canonical transaction. Without it, handoffs/tasks regrow unbounded
+    (17.8k handoffs / 8.7 MB by the 2026-05-31 incident) and the file blows
+    past the 256 KB cap the chair/coordination worker Read tool enforces,
+    re-breaking machine-truth reads. Keeps are read from the orchestrator
+    config (config.local.json overrides config.json). See
     feedback_ai_status_handoff_bloat.
     """
     supervisor_cfg: dict[str, Any] = {}
@@ -895,10 +750,10 @@ def archive_task_bodies(dropped: list[dict[str, Any]]) -> None:
 
 def prune_state_for_size(state: dict[str, Any]) -> None:
     """Bound the unbounded audit tails (done handoffs, done tasks, resolved
-    blockers) in place. Mirrors supervisor.{prune_done_handoffs,prune_done_tasks,
-    prune_blockers}; pending handoffs and open blockers are never trimmed, and
-    dropped done-task ids are recorded in ``archived_task_ids`` (dependency-safe
-    because ``dependencies_satisfied`` treats a missing dep as archived/done).
+    blockers) in place as part of the canonical status transaction. Pending
+    handoffs and open blockers are never trimmed, and dropped done-task ids are
+    recorded in ``archived_task_ids`` (dependency-safe because
+    ``dependencies_satisfied`` treats a missing dep as archived/done).
     Dropped done-task bodies are appended to ``ai-task-archive.jsonl`` first so
     their detail stays auditable (see ``archive_task_bodies``)."""
     keeps = _retention_keeps()
@@ -1043,6 +898,10 @@ def task_metadata_from_env() -> dict[str, Any]:
         if parsed is not None:
             metadata[field_name] = parsed
 
+    acceptance = parse_csv_env("TASK_REQUIRED_ACCEPTANCE")
+    if acceptance:
+        metadata["required_acceptance"] = acceptance
+
     return metadata
 
 
@@ -1051,47 +910,6 @@ def dependency_is_satisfied(task_map: dict[str, dict[str, Any]], dep_id: str) ->
     if dependency is None:
         return True
     return dependency.get("status") in DEPENDENCY_DONE_STATUSES
-
-
-def ensure_review_finalize_handoff(
-    state: dict[str, Any],
-    task: dict[str, Any],
-    *,
-    from_agent: str,
-    timestamp: str,
-    message: str | None = None,
-) -> None:
-    owner = canonical_agent_name(task.get("owner"))
-    if not owner:
-        return
-    from_name = canonical_agent_name(from_agent)
-    if from_name == owner:
-        return
-    pending_owner_handoff = next(
-        (
-            handoff
-            for handoff in state.get("handoffs", [])
-            if handoff.get("task_id") == task.get("id")
-            and handoff.get("to") == owner
-            and handoff.get("status") != "done"
-        ),
-        None,
-    )
-    if pending_owner_handoff:
-        if message:
-            pending_owner_handoff["message"] = message
-        return
-
-    state.setdefault("handoffs", []).append(
-        {
-            "task_id": task.get("id"),
-            "from": canonical_agent_name(from_agent),
-            "to": owner,
-            "message": message or "Review approved. Owner must finalize this task to move it from review_approved to done.",
-            "status": "pending",
-            "created_at": timestamp,
-        }
-    )
 
 
 def ensure_owner_resume_handoff(
@@ -1213,155 +1031,6 @@ def apply_unblock_parent_resolution(
     )
 
 
-# Closeout commit subject pattern: `<TASK-ID>: <summary>`. Deliberately
-# excludes `wip(<TASK-ID>):` anchor commits — they carry the trailer but are
-# not closeouts. Mirrors scripts/git/check_commit_trailers.py SUBJECT_RE,
-# minus the optional `wip(...)` prefix.
-CLOSEOUT_SUBJECT_RE = re.compile(r"^([A-Z][A-Z0-9-]*[A-Z0-9]):\s+\S")
-GIT_LOG_RECORD_SEP = "\x1e"
-GIT_LOG_FIELD_SEP = "\x1f"
-
-
-def _git_log_closeouts(ref: str) -> dict[str, dict[str, str]]:
-    """Return {task_id: {sha, subject, body, commit_date}} for the most recent
-    closeout commit reachable from `ref` for each task ID. A commit is a
-    closeout if its subject matches CLOSEOUT_SUBJECT_RE and the captured
-    task_id is also present as a `Task-ID:` trailer.
-    """
-    fmt = GIT_LOG_FIELD_SEP.join(
-        ["%H", "%cI", "%s", "%(trailers:key=Task-ID,valueonly,separator=%x1d)"]
-    ) + GIT_LOG_RECORD_SEP
-    try:
-        result = subprocess.run(
-            ["git", "log", ref, f"--format={fmt}"],
-            cwd=str(ROOT),
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError:
-        return {}
-    if result.returncode != 0:
-        return {}
-    closeouts: dict[str, dict[str, str]] = {}
-    for record in result.stdout.split(GIT_LOG_RECORD_SEP):
-        record = record.strip("\n")
-        if not record:
-            continue
-        parts = record.split(GIT_LOG_FIELD_SEP)
-        if len(parts) < 4:
-            continue
-        sha, commit_date, subject, trailers_raw = parts[0], parts[1], parts[2], parts[3]
-        match = CLOSEOUT_SUBJECT_RE.match(subject)
-        if not match:
-            continue
-        subject_task_id = match.group(1)
-        # Strip the trailing `(#NNN)` PR suffix GitHub adds on squash merges
-        # before checking trailer consistency.
-        trailer_task_ids = {
-            value.strip() for value in trailers_raw.split("\x1d") if value.strip()
-        }
-        if trailer_task_ids and subject_task_id not in trailer_task_ids:
-            continue
-        existing = closeouts.get(subject_task_id)
-        if existing is None or commit_date > existing.get("commit_date", ""):
-            closeouts[subject_task_id] = {
-                "sha": sha,
-                "subject": subject,
-                "commit_date": commit_date,
-            }
-    return closeouts
-
-
-def _git_remote_branch_for_ref(ref: str) -> tuple[str, str]:
-    """Split `origin/dev` → (`origin`, `dev`). Falls back to (`origin`, ref)."""
-    if "/" in ref:
-        remote, _, branch = ref.partition("/")
-        return remote, branch
-    return "origin", ref
-
-
-def apply_git_merge_reconciliation(
-    state: dict[str, Any], *, ref: str | None = None
-) -> list[dict[str, str]]:
-    """Bridge artifact-merged → state-machine-done drift.
-
-    Workers that ship via PR + merge but skip `ai-status.sh done` leave the
-    state machine stuck in `in_progress`/`review`/`backlog` even though the
-    closeout commit is on the integration trunk. This walks `ref` (default
-    origin/dev), finds closeout commits keyed by Task-ID, and finalizes any
-    task whose closeout has merged but whose state machine never advanced.
-
-    Returns a list of `{task_id, sha, prior_status}` dicts for everything it
-    moved.
-    """
-    target_ref = (ref or os.environ.get("RECONCILE_REF") or "origin/dev").strip() or "origin/dev"
-    closeouts = _git_log_closeouts(target_ref)
-    if not closeouts:
-        return []
-    remote, branch = _git_remote_branch_for_ref(target_ref)
-    timestamp = iso_now()
-    reconciled: list[dict[str, str]] = []
-    for task in state.get("tasks", []):
-        if task.get("status") == "done":
-            continue
-        task_id = str(task.get("id") or "")
-        closeout = closeouts.get(task_id)
-        if not closeout:
-            continue
-        required_status = required_integration_status(task)
-        if required_status:
-            continue
-        prior_status = str(task.get("status") or "")
-        actor = canonical_agent_name(task.get("owner")) or current_actor()
-        task["status"] = "done"
-        task["last_update"] = timestamp
-        task["next"] = f"reconciled from {remote}/{branch}@{closeout['sha'][:12]}"
-        task["commit_hash"] = closeout["sha"]
-        task["commit_subject"] = closeout["subject"]
-        task["commit_agent"] = actor
-        task["commit_reviewer"] = canonical_agent_name(task.get("reviewer"))
-        task["commit_recorded_at"] = timestamp
-        task["push_remote"] = remote
-        task["push_branch"] = branch
-        task["push_ref"] = target_ref
-        task["push_commit"] = closeout["sha"]
-        task["push_recorded_at"] = timestamp
-        task["integration_status"] = "merged_to_dev"
-        task["integration_recorded_at"] = timestamp
-        task["merged_ref"] = target_ref
-        task["merge_commit"] = closeout["sha"]
-        task["reconciled_from_git_at"] = timestamp
-        task["reconciled_from_git_ref"] = target_ref
-        task["reconciled_from_git_prior_status"] = prior_status
-        task.pop("waiting_for", None)
-        mark_blockers_resolved(state, task_id)
-        mark_handoffs_done(state, task_id)
-        # Unblock parents are not auto-resumed here: parent resume needs
-        # PARENT_STATUS/PARENT_NEXT input that the human flow supplies. We
-        # only resolve their open blocker/handoff via the calls above.
-        append_log(
-            {
-                "ts": timestamp,
-                "agent": actor,
-                "type": "reconciled_from_git",
-                "task_id": task_id,
-                "message": task["next"],
-                "commit_hash": closeout["sha"],
-                "prior_status": prior_status,
-                "ref": target_ref,
-            }
-        )
-        reconciled.append(
-            {
-                "task_id": task_id,
-                "sha": closeout["sha"],
-                "prior_status": prior_status,
-            }
-        )
-    return reconciled
-
-
 def validate_state(state: dict[str, Any]) -> None:
     sync_canonical_document_metadata(state)
     normalize_state_agents(state)
@@ -1427,7 +1096,7 @@ def recompute_agents(state: dict[str, Any]) -> None:
         agent = get_agent(state, name)
         owned = by_owner.get(name, [])
         active = [task for task in owned if task["status"] in {"in_progress", "review", "blocked"}]
-        approved = [task for task in owned if task["status"] == "review_approved"]
+        integrating = [task for task in owned if task["status"] in {"integrating", "acceptance"}]
         queued = [task for task in owned if task["status"] in {"todo", "backlog"}]
         ready = [
             task
@@ -1445,9 +1114,9 @@ def recompute_agents(state: dict[str, Any]) -> None:
         elif any(task["status"] == "review" for task in active):
             agent["status"] = "reviewing"
             agent["current_task_ids"] = [task["id"] for task in active]
-        elif approved:
-            agent["status"] = "finalize"
-            agent["current_task_ids"] = [task["id"] for task in approved]
+        elif integrating:
+            agent["status"] = "integrating"
+            agent["current_task_ids"] = [task["id"] for task in integrating]
         elif ready:
             agent["status"] = "ready"
             agent["current_task_ids"] = [task["id"] for task in ready]
@@ -1469,9 +1138,9 @@ def recompute_agents(state: dict[str, Any]) -> None:
             )[0]
             agent["next"] = latest.get("next", "")
             agent["last_update"] = latest.get("last_update")
-        elif approved:
-            agent["next"] = approved[0].get("next", "")
-            agent["last_update"] = approved[0].get("last_update")
+        elif integrating:
+            agent["next"] = integrating[0].get("next", "")
+            agent["last_update"] = integrating[0].get("last_update")
         elif ready:
             agent["next"] = ready[0].get("next", "")
             agent["last_update"] = ready[0].get("last_update")
@@ -1587,7 +1256,8 @@ def recompute_workload(state: dict[str, Any]) -> None:
             "done": 0,
             "backlog": 0,
             "review": 0,
-            "review_approved": 0,
+            "integrating": 0,
+            "acceptance": 0,
             "todo": 0,
         }
 
@@ -1922,56 +1592,15 @@ def normalize_handoffs(state: dict[str, Any]) -> None:
         task = task_map.get(task_id)
         if task:
             task_status = task.get("status")
-            if task_status in {"in_progress", "blocked", "done"}:
+            if task_status in {"in_progress", "integrating", "acceptance", "blocked", "done"}:
                 for handoff in pending:
                     handoff["status"] = "done"
                     handoff["resolved_at"] = iso_now()
-                continue
-            if task_status == "review_approved":
-                owner = canonical_agent_name(task.get("owner"))
-                owner_handoffs = [handoff for handoff in pending if handoff.get("to") == owner]
-                for handoff in pending:
-                    if handoff not in owner_handoffs:
-                        handoff["status"] = "done"
-                        handoff["resolved_at"] = iso_now()
-                if not owner_handoffs:
-                    ensure_review_finalize_handoff(
-                        state,
-                        task,
-                        from_agent=canonical_agent_name(task.get("reviewer")),
-                        timestamp=iso_now(),
-                        message=task.get("next"),
-                    )
                 continue
 
         for handoff in pending[:-1]:
             handoff["status"] = "done"
             handoff["resolved_at"] = iso_now()
-
-    for task in state.get("tasks", []):
-        if task.get("status") != "review_approved":
-            continue
-        task_id = task.get("id")
-        owner = canonical_agent_name(task.get("owner"))
-        pending = [
-            handoff
-            for handoff in state.get("handoffs", [])
-            if handoff.get("task_id") == task_id and handoff.get("status") != "done"
-        ]
-        owner_handoffs = [handoff for handoff in pending if handoff.get("to") == owner]
-        for handoff in pending:
-            if handoff not in owner_handoffs:
-                handoff["status"] = "done"
-                handoff["resolved_at"] = iso_now()
-        if not owner_handoffs:
-            ensure_review_finalize_handoff(
-                state,
-                task,
-                from_agent=canonical_agent_name(task.get("reviewer")),
-                timestamp=iso_now(),
-                message=task.get("next"),
-            )
-
 
 def command_assign(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 3:
@@ -2001,6 +1630,7 @@ def command_assign(state: dict[str, Any], args: list[str]) -> None:
             "acceptance": parse_csv_env("TASK_ACCEPTANCE"),
             "next": "Assignment created",
             "last_update": timestamp,
+            "candidate_lifecycle_version": 1,
         }
         task.update(metadata)
         state["tasks"].append(task)
@@ -2015,6 +1645,7 @@ def command_assign(state: dict[str, Any], args: list[str]) -> None:
             task.update(metadata)
         task["last_update"] = timestamp
         task["next"] = "Ownership updated"
+        task.setdefault("candidate_lifecycle_version", 1)
 
     agent = get_agent(state, owner)
     if os.environ.get("TASK_BRANCH"):
@@ -2027,6 +1658,126 @@ def command_assign(state: dict[str, Any], args: list[str]) -> None:
             "type": "assign",
             "task_id": task_id,
             "message": f"Assigned {task_id} to {owner} with reviewer {reviewer}",
+        }
+    )
+
+
+def command_reassign(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 4:
+        raise SystemExit("Usage: reassign <task-id> <owner> <reviewer> <message>")
+    task_id = args[0]
+    owner = canonical_agent_name(args[1])
+    reviewer = canonical_agent_name(args[2])
+    message = args[3]
+    actor = current_actor()
+    if actor != "Supervisor":
+        raise SystemExit("Only Supervisor can reassign a task")
+    ensure_agent(owner)
+    ensure_agent(reviewer)
+    if owner == reviewer:
+        raise SystemExit("Reviewer cannot equal owner")
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+
+    old_owner = canonical_agent_name(task.get("owner"))
+    old_reviewer = canonical_agent_name(task.get("reviewer"))
+    expected_owner = canonical_agent_name(os.environ.get("TASK_EXPECTED_OWNER"))
+    expected_reviewer = canonical_agent_name(os.environ.get("TASK_EXPECTED_REVIEWER"))
+    if expected_owner and expected_owner != old_owner:
+        raise SystemExit(f"{task_id} owner changed before reassignment")
+    if expected_reviewer and expected_reviewer != old_reviewer:
+        raise SystemExit(f"{task_id} reviewer changed before reassignment")
+
+    owner_changed = owner != old_owner
+    reviewer_changed = reviewer != old_reviewer
+    status = str(task.get("status") or "").lower()
+    if owner_changed and status not in {"backlog", "todo", "in_progress"}:
+        raise SystemExit(f"Owner reassignment is not allowed while {task_id} is {status}")
+    if reviewer_changed and status not in {"todo", "in_progress", "review"}:
+        raise SystemExit(f"Reviewer reassignment is not allowed while {task_id} is {status}")
+
+    timestamp = iso_now()
+    task["owner"] = owner
+    task["reviewer"] = reviewer
+    if owner_changed and os.environ.get("TASK_REASSIGN_REOPEN") == "1":
+        task["status"] = "todo"
+        clear_candidate_evidence(task)
+    task["last_update"] = timestamp
+    task["next"] = message
+    task.setdefault("candidate_lifecycle_version", 1)
+
+    evidence_ref = os.environ.get("TASK_EVIDENCE_REF", "").strip()
+    if evidence_ref:
+        refs = list(task.get("evidence_refs", []) or [])
+        if evidence_ref not in refs:
+            refs.append(evidence_ref)
+        task["evidence_refs"] = refs
+
+    for handoff in state.get("handoffs", []) or []:
+        if handoff.get("task_id") != task_id or handoff.get("status") == "done":
+            continue
+        target = canonical_agent_name(handoff.get("to"))
+        if target in {old_owner, old_reviewer} and target not in {owner, reviewer}:
+            handoff["status"] = "done"
+            handoff["resolved_at"] = timestamp
+
+    handoff_to = canonical_agent_name(os.environ.get("TASK_HANDOFF_TO"))
+    if handoff_to:
+        ensure_agent(handoff_to)
+        state.setdefault("handoffs", []).append(
+            {
+                "task_id": task_id,
+                "from": canonical_agent_name(os.environ.get("TASK_HANDOFF_FROM")) or old_owner or old_reviewer,
+                "to": handoff_to,
+                "message": message,
+                "status": "pending",
+                "created_at": timestamp,
+            }
+        )
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": actor,
+            "type": "reassign",
+            "task_id": task_id,
+            "message": message,
+            "owner": owner,
+            "reviewer": reviewer,
+        }
+    )
+
+
+def command_resume_blocked(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 3:
+        raise SystemExit("Usage: resume-blocked <task-id> <status> <message>")
+    task_id, resume_status, message = args[0], str(args[1]).strip().lower(), args[2]
+    actor = current_actor()
+    if actor != "Supervisor":
+        raise SystemExit("Only Supervisor can resume a blocked task")
+    if resume_status not in {"backlog", "todo", "in_progress"}:
+        raise SystemExit(f"Unsupported resume status: {resume_status}")
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    if task.get("status") != "blocked":
+        raise SystemExit(f"{task_id} is not blocked")
+    timestamp = iso_now()
+    task["status"] = resume_status
+    task["last_update"] = timestamp
+    task["next"] = message
+    task.pop("waiting_for", None)
+    task.setdefault("candidate_lifecycle_version", 1)
+    mark_blockers_resolved(state, task_id)
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": actor,
+            "type": "blocked_task_resumed",
+            "task_id": task_id,
+            "message": message,
+            "resume_status": resume_status,
+            "helper_task_id": os.environ.get("TASK_RESUME_HELPER_ID", "").strip() or None,
         }
     )
 
@@ -2062,8 +1813,9 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
     if task.get("owner") != actor:
         raise SystemExit(f"Only the owner ({task.get('owner')}) can progress {task_id}")
     timestamp = iso_now()
-    if task["status"] in {"backlog", "todo", "review_approved"}:
+    if task["status"] in {"backlog", "todo", "integrating", "acceptance"}:
         task["status"] = "in_progress"
+        clear_candidate_evidence(task)
     task["last_update"] = timestamp
     task["next"] = message
     mark_handoffs_done_for_actor(state, task_id, actor)
@@ -2099,6 +1851,7 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Only the owner ({owner}) or reviewer ({reviewer}) can reopen {task_id}")
     timestamp = iso_now()
     task["status"] = "in_progress"
+    clear_candidate_evidence(task)
     task["last_update"] = timestamp
     task["next"] = message
     task.pop("waiting_for", None)
@@ -2134,7 +1887,23 @@ def command_handoff(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(
             f"{task_id} handoff target must match the assigned reviewer ({task.get('reviewer')}); reassign reviewer first if needed"
         )
+    candidate_sha = os.environ.get("CANDIDATE_SHA", "").strip()
+    candidate_branch = os.environ.get("CANDIDATE_BRANCH", "").strip()
+    if candidate_required(task):
+        if not candidate_sha:
+            raise SystemExit("handoff requires CANDIDATE_SHA for canonical tasks")
+        if not git_commit_exists(candidate_sha):
+            raise SystemExit(f"CANDIDATE_SHA does not resolve to a local commit: {candidate_sha}")
+        if not candidate_branch:
+            raise SystemExit("handoff requires CANDIDATE_BRANCH for canonical tasks")
+    else:
+        candidate_sha = "not_applicable"
+        candidate_branch = "not_applicable"
+
     timestamp = iso_now()
+    clear_candidate_evidence(task)
+    task["candidate_sha"] = candidate_sha
+    task["candidate_branch"] = candidate_branch
     task["status"] = "review"
     task["last_update"] = timestamp
     task["next"] = message
@@ -2150,7 +1919,16 @@ def command_handoff(state: dict[str, Any], args: list[str]) -> None:
             "created_at": timestamp,
         }
     )
-    append_log({"ts": timestamp, "agent": actor, "type": "handoff", "task_id": task_id, "message": f"Handoff to {to_agent}: {message}"})
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": actor,
+            "type": "candidate_handoff",
+            "task_id": task_id,
+            "candidate_sha": candidate_sha,
+            "message": f"Candidate {candidate_sha[:12]} handed to {to_agent}: {message}",
+        }
+    )
 
 
 def command_blocker(state: dict[str, Any], args: list[str]) -> None:
@@ -2184,88 +1962,12 @@ def command_blocker(state: dict[str, Any], args: list[str]) -> None:
     append_log({"ts": timestamp, "agent": actor, "type": "blocker", "task_id": task_id, "message": f"Blocked on {waiting_for}: {message}"})
 
 
-def _load_orchestrator_config() -> dict[str, Any]:
-    """Best-effort load of the orchestrator config for guard flags.
-
-    Reads ``.orchestrator/config.json`` then shallow-overlays
-    ``config.local.json`` (operator override), matching the retention reader.
-    Returns ``{}`` on any failure so guards fail open and never break closeout.
-    """
-    config: dict[str, Any] = {}
-    orchestrator_dir = ROOT / ".orchestrator"
-    try:
-        if str(orchestrator_dir) not in sys.path:
-            sys.path.insert(0, str(orchestrator_dir))
-        from common import load_config  # type: ignore
-
-        config = dict(load_config(orchestrator_dir / "config.json") or {})
-    except Exception:
-        config = {}
-    local = orchestrator_dir / "config.local.json"
-    if local.exists():
-        try:
-            config.update(json.loads(local.read_text(encoding="utf-8")) or {})
-        except Exception:
-            pass
-    return config
-
-
-def _enforce_integration_gate(task: dict[str, Any], completion_metadata: dict[str, Any]) -> None:
-    """Refuse a branch-only ``done`` when the integration gate is enabled.
-
-    Opt-in via ``branch_strategy.integration_gate.enabled``; ``log_only`` logs
-    the would-block and allows the close. Fails open on any import/config error.
-    """
-    try:
-        orchestrator_dir = ROOT / ".orchestrator"
-        if str(orchestrator_dir) not in sys.path:
-            sys.path.insert(0, str(orchestrator_dir))
-        from integration_gate import check_integration_gate, integration_gate_settings  # type: ignore
-    except Exception:
-        return
-    config = _load_orchestrator_config()
-    integration_status = completion_metadata.get("integration_status", "")
-    block = check_integration_gate(task, integration_status, config)
-    if not block:
-        return
-    if integration_gate_settings(config).get("log_only"):
-        print(f"[integration-gate canary] would refuse done: {block}", file=sys.stderr)
-        return
-    raise SystemExit(block)
-
-
 def command_done(state: dict[str, Any], args: list[str]) -> None:
-    if len(args) < 2:
-        raise SystemExit("Usage: done <task-id> <message>")
-    task_id, message = args[0], args[1]
-    actor = current_actor()
-    ensure_agent(actor)
-    task = get_task(state, task_id)
-    if task is None:
-        raise SystemExit(f"Unknown task: {task_id}")
-    if task.get("owner") != actor:
-        raise SystemExit(f"Only the owner ({task.get('owner')}) can finalize {task_id} to done")
-    if task.get("status") != "review_approved":
-        raise SystemExit(f"{task_id} must be review_approved before it can move to done")
-    completion_metadata = completion_metadata_from_env(task, actor)
-    enforce_required_integration_closeout(task, completion_metadata)
-    _enforce_integration_gate(task, completion_metadata)
-    timestamp = iso_now()
-    task["status"] = "done"
-    task["last_update"] = timestamp
-    task["next"] = message
-    task.update(completion_metadata)
-    task.pop("waiting_for", None)
-    mark_blockers_resolved(state, task_id)
-    mark_handoffs_done(state, task_id)
-    apply_unblock_parent_resolution(
-        state,
-        task,
-        actor=actor,
-        timestamp=timestamp,
-        message=message,
+    raise SystemExit(
+        "done is derived by the candidate lifecycle. Owners hand off a locked candidate; "
+        "reviewers approve it; the GitHub bus records same-SHA CI and merge; "
+        "record-acceptance supplies any remaining external evidence."
     )
-    append_log({"ts": timestamp, "agent": actor, "type": "done", "task_id": task_id, "message": message})
 
 
 def command_approve(state: dict[str, Any], args: list[str]) -> None:
@@ -2280,10 +1982,16 @@ def command_approve(state: dict[str, Any], args: list[str]) -> None:
     if task.get("reviewer") != actor:
         raise SystemExit(f"Only the reviewer ({task.get('reviewer')}) can approve {task_id}")
     if task.get("status") != "review":
-        raise SystemExit(f"{task_id} must be in review before it can move to review_approved")
+        raise SystemExit(f"{task_id} must be in review before it can move to integrating")
+    if not candidate_is_locked(task):
+        raise SystemExit(f"{task_id} has no locked candidate to approve")
+
+    reviewed_sha = os.environ.get("REVIEWED_SHA", "").strip() or str(task.get("candidate_sha") or "")
+    if reviewed_sha != task.get("candidate_sha"):
+        raise SystemExit("REVIEWED_SHA must exactly match CANDIDATE_SHA")
 
     timestamp = iso_now()
-    task["status"] = "review_approved"
+    task["reviewed_sha"] = reviewed_sha
     task["last_update"] = timestamp
     task["next"] = message
     task.pop("waiting_for", None)
@@ -2297,15 +2005,198 @@ def command_approve(state: dict[str, Any], args: list[str]) -> None:
         task["review_file"] = review_file
 
     mark_blockers_resolved(state, task_id)
-    mark_handoffs_done_for_actor(state, task_id, actor)
-    ensure_review_finalize_handoff(
-        state,
-        task,
-        from_agent=actor,
-        timestamp=timestamp,
-        message=message,
+    mark_handoffs_done(state, task_id)
+    if candidate_required(task):
+        task["status"] = "integrating"
+    else:
+        task["merge_sha"] = "not_applicable"
+        transition_after_merge(state, task, message=message, timestamp=timestamp)
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": actor,
+            "type": "candidate_approved",
+            "task_id": task_id,
+            "candidate_sha": reviewed_sha,
+            "message": message,
+        }
     )
-    append_log({"ts": timestamp, "agent": actor, "type": "review_approved", "task_id": task_id, "message": message})
+
+
+def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
+    if not args:
+        raise SystemExit("Usage: reconcile-candidate <task-id> [message]")
+    task_id = args[0]
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    if task.get("status") == "done":
+        return
+
+    candidate_sha = str(task.get("candidate_sha") or "").strip()
+    if not candidate_sha or candidate_sha == "not_applicable":
+        return
+    head_sha = os.environ.get("CANDIDATE_HEAD_SHA", "").strip()
+    ci_status = os.environ.get("CANDIDATE_CI_STATUS", "").strip().lower()
+    merge_sha = os.environ.get("MERGE_SHA", "").strip()
+    timestamp = iso_now()
+
+    if ci_status and ci_status not in CANDIDATE_CI_STATUSES:
+        raise SystemExit(f"CANDIDATE_CI_STATUS must be one of: {', '.join(sorted(CANDIDATE_CI_STATUSES))}")
+    if head_sha and head_sha != candidate_sha:
+        task["status"] = "in_progress"
+        clear_candidate_evidence(task)
+        task["last_update"] = timestamp
+        task["next"] = "Candidate changed after review; previous review and CI evidence were invalidated."
+        mark_handoffs_done(state, task_id)
+        append_log(
+            {
+                "ts": timestamp,
+                "agent": current_actor("Supervisor"),
+                "type": "candidate_invalidated",
+                "task_id": task_id,
+                "candidate_sha": candidate_sha,
+                "head_sha": head_sha,
+                "message": task["next"],
+            }
+        )
+        return
+
+    for env_name, key in (("PR_URL", "pr_url"), ("CANDIDATE_BRANCH", "candidate_branch"), ("CI_RUN_URL", "ci_run_url")):
+        value = os.environ.get(env_name, "").strip()
+        if value:
+            task[key] = value
+    if ci_status:
+        task["ci_status"] = ci_status
+        task["ci_sha"] = candidate_sha
+
+    if task.get("status") == "review" and ci_status not in {"failure", "merge_conflict", "closed"}:
+        task["last_update"] = timestamp
+        task["next"] = args[1] if len(args) > 1 else f"Candidate {candidate_sha[:12]} is ready for reviewer evidence."
+    elif ci_status in {"failure", "merge_conflict", "closed"}:
+        task["status"] = "in_progress"
+        task["last_update"] = timestamp
+        task["next"] = args[1] if len(args) > 1 else f"Candidate CI {ci_status}; owner must repair and hand off a new candidate."
+        mark_handoffs_done(state, task_id)
+    elif merge_sha:
+        if task.get("reviewed_sha") != candidate_sha:
+            raise SystemExit("Cannot record merge without reviewer approval for the same candidate SHA")
+        if task.get("ci_sha") != candidate_sha or task.get("ci_status") != "success":
+            raise SystemExit("Cannot record merge without successful CI for the same candidate SHA")
+        task["merge_sha"] = merge_sha
+        transition_after_merge(
+            state,
+            task,
+            message=args[1] if len(args) > 1 else f"Candidate {candidate_sha[:12]} merged as {merge_sha[:12]}.",
+            timestamp=timestamp,
+        )
+    else:
+        task["status"] = "integrating"
+        task["last_update"] = timestamp
+        task["next"] = args[1] if len(args) > 1 else f"Candidate {candidate_sha[:12]} is awaiting same-SHA CI/merge evidence."
+
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": current_actor("Supervisor"),
+            "type": "candidate_reconciled",
+            "task_id": task_id,
+            "candidate_sha": candidate_sha,
+            "ci_status": ci_status,
+            "merge_sha": merge_sha,
+            "message": task.get("next"),
+        }
+    )
+
+
+def command_record_acceptance(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 2:
+        raise SystemExit("Usage: record-acceptance <task-id> <message>")
+    task_id, message = args[0], args[1]
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    actor = current_actor()
+    allowed = {canonical_agent_name(task.get("owner")), canonical_agent_name(task.get("reviewer")), "Supervisor"}
+    if actor not in allowed:
+        raise SystemExit(f"Only the owner, reviewer, or Supervisor can record acceptance for {task_id}")
+    if task.get("status") != "acceptance":
+        raise SystemExit(f"{task_id} is not awaiting acceptance evidence")
+
+    evidence = parse_json_env("ACCEPTANCE_EVIDENCE_JSON")
+    allowed_keys = set(required_acceptance(task))
+    unexpected = sorted(set(evidence) - allowed_keys)
+    if unexpected:
+        raise SystemExit(f"Acceptance evidence is not required for {task_id}: {', '.join(unexpected)}")
+    if not evidence:
+        raise SystemExit("ACCEPTANCE_EVIDENCE_JSON must include at least one required evidence key")
+    task.setdefault("acceptance_evidence", {}).update(evidence)
+    timestamp = iso_now()
+    transition_after_merge(state, task, message=message, timestamp=timestamp)
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": actor,
+            "type": "acceptance_recorded",
+            "task_id": task_id,
+            "message": message,
+        }
+    )
+
+
+def command_migrate_candidate_lifecycle(state: dict[str, Any], _args: list[str]) -> None:
+    """One-way conversion of pre-candidate state. It never trusts old approvals."""
+    timestamp = iso_now()
+    migrated = 0
+    for task in state.get("tasks", []):
+        if not isinstance(task, dict):
+            continue
+        if task.get("candidate_lifecycle_version") == 1:
+            continue
+        legacy_status = str(task.get("status") or "")
+        legacy_required = str(task.get("required_integration_status") or "").strip().lower()
+        required = required_acceptance(task)
+        if legacy_required == "dev_deployed" and "dev_deployed" not in required:
+            required.append("dev_deployed")
+        for field in task.get("required_evidence_fields") or []:
+            name = str(field).strip()
+            if name and name not in required:
+                required.append(name)
+        if required:
+            task["required_acceptance"] = required
+
+        legacy_evidence = {
+            key: task.get(key)
+            for key in required
+            if str(task.get(key) or "").strip()
+        }
+        if legacy_required == "dev_deployed" and all(
+            str(task.get(key) or "").strip()
+            for key in ("dev_deploy_run_url", "dev_deploy_sha", "dev_deploy_source_ref")
+        ):
+            legacy_evidence["dev_deployed"] = task.get("dev_deploy_run_url")
+        if legacy_evidence:
+            task.setdefault("acceptance_evidence", {}).update(legacy_evidence)
+
+        if legacy_status == "review_approved":
+            task["status"] = "in_progress"
+            task["next"] = "Legacy review approval was not bound to a candidate SHA; owner must hand off a new candidate."
+            mark_handoffs_done(state, str(task.get("id") or ""))
+        if legacy_status != "done":
+            for key in LEGACY_INTEGRATION_FIELDS:
+                task.pop(key, None)
+        task["candidate_lifecycle_version"] = 1
+        task["candidate_lifecycle_migrated_at"] = timestamp
+        migrated += 1
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": current_actor("Supervisor"),
+            "type": "candidate_lifecycle_migrated",
+            "message": f"Migrated {migrated} task records to candidate lifecycle v1.",
+        }
+    )
+    print(f"migrate-candidate-lifecycle: migrated {migrated} task record(s)")
 
 
 def command_mode(state: dict[str, Any], args: list[str]) -> None:
@@ -2334,26 +2225,9 @@ def command_mode(state: dict[str, Any], args: list[str]) -> None:
 
 
 def command_sync(state: dict[str, Any], _args: list[str]) -> None:
-    # Bridge git-merged closeouts → state-machine `done` for tasks whose
-    # workers shipped via PR + merge but skipped `ai-status.sh done`. The
-    # supervisor calls `ai-status.sh sync` on every reassignment cycle, so
-    # this catches drift soon after a merge lands on origin/dev.
-    apply_git_merge_reconciliation(state)
+    # Kept as a no-op entrypoint for the periodic supervisor call. Git history
+    # is deliberately not a source of truth for task completion.
     return None
-
-
-def command_reconcile_from_git(state: dict[str, Any], args: list[str]) -> None:
-    ref = args[0].strip() if args else os.environ.get("RECONCILE_REF", "").strip() or "origin/dev"
-    reconciled = apply_git_merge_reconciliation(state, ref=ref)
-    if not reconciled:
-        print(f"reconcile-from-git: no drift found against {ref}")
-        return
-    print(f"reconcile-from-git: finalized {len(reconciled)} task(s) against {ref}")
-    for entry in reconciled:
-        print(
-            f"  {entry['task_id']}: {entry['prior_status']} -> done "
-            f"(commit {entry['sha'][:12]})"
-        )
 
 
 def command_prompt(state: dict[str, Any], _args: list[str]) -> None:
@@ -2439,6 +2313,8 @@ def main(argv: list[str]) -> int:
 
     commands = {
         "assign": command_assign,
+        "reassign": command_reassign,
+        "resume-blocked": command_resume_blocked,
         "start": command_start,
         "progress": command_progress,
         "note": command_note,
@@ -2447,9 +2323,11 @@ def main(argv: list[str]) -> int:
         "blocker": command_blocker,
         "done": command_done,
         "approve": command_approve,
+        "reconcile-candidate": command_reconcile_candidate,
+        "record-acceptance": command_record_acceptance,
+        "migrate-candidate-lifecycle": command_migrate_candidate_lifecycle,
         "mode": command_mode,
         "sync": command_sync,
-        "reconcile-from-git": command_reconcile_from_git,
     }
 
     if command in read_only_commands:

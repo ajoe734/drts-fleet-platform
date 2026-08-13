@@ -40,11 +40,9 @@ DEFAULT_WORKER_TREE_GUARD_BLOCKING_GLOBS = [
     ".husky/**",
 ]
 
-# Dispatch reasons that intentionally permit a dirty tree because the worker
-# is about to convert it into a commit/push. The dispatch guard skips these.
-WORKER_TREE_GUARD_SKIP_REASONS = {
-    "owned_finalize_dispatch",
-}
+# A worker always starts from a clean worktree. Candidate commits are made
+# during owner work, never through a special dirty-tree closeout dispatch.
+WORKER_TREE_GUARD_SKIP_REASONS: set[str] = set()
 
 # Tools that the chatbox guard treats as "writing to the tree". Other tools
 # (Bash, Read, Grep, ...) are out of scope — supervisor dispatch doesn't gate
@@ -178,9 +176,7 @@ def check_worker_tree_guard(
 
     Returns None when:
       - guard disabled (`enabled: false`)
-      - dispatch `reason` is in WORKER_TREE_GUARD_SKIP_REASONS
-        (e.g. `owned_finalize_dispatch` — closeout legitimately starts
-        with a dirty tree)
+      - dispatch `reason` is explicitly exempted by configuration
       - `git status --porcelain` cannot run (fail-open on diagnostics)
       - no dirty path matches any blocking glob
     """
