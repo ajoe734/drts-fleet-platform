@@ -1512,12 +1512,12 @@ export function SupplySubmissionDetailView({
               busy={busy === "submit"}
               disabled={!editable}
               onClick={() => runAction("submit", submitSubmission)}
-              data-drt-operation={
-                detail.submission.status === "needs_revision" ||
-                detail.submission.status === "withdrawn"
-                  ? "fleet-resubmit"
-                  : "fleet-submit"
-              }
+                data-drt-operation={
+                  detail.submission.status === "needs_revision" ||
+                  detail.submission.status === "withdrawn"
+                    ? "fleet-resubmit"
+                    : "fleet-submit"
+                }
             />
             <ActionButton
               theme={theme}
