@@ -5,6 +5,18 @@ if (!/^\d+$/.test(apiPort)) {
   throw new Error(`ROUTE_SUITE_API_PORT must be numeric; received ${apiPort}`);
 }
 const apiOrigin = `http://127.0.0.1:${apiPort}`;
+// The config starts this API process itself, so its test-only auth contract
+// belongs here rather than in a particular CI job's inherited environment.
+const apiTestEnvironment = [
+  `API_PORT=${apiPort}`,
+  "AUTH_MODE=test",
+  "JWT_SECRET=ci-e2e-secret",
+  "JWT_ISSUER=drts-local",
+  "JWT_AUDIENCE=drts-api",
+  "CONTROLLED_DOWNLOAD_SIGNING_SECRET=ci-e2e-controlled-download-secret",
+  "PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT=ci-e2e-alpha-ingress-key",
+  "PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT=ci-e2e-beta-ingress-key",
+].join(" ");
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -41,7 +53,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `API_PORT=${apiPort} CONTROLLED_DOWNLOAD_SIGNING_SECRET=ci-e2e-controlled-download-secret pnpm --filter @drts/api start`,
+      command: `${apiTestEnvironment} pnpm --filter @drts/api start`,
       url: `${apiOrigin}/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,
