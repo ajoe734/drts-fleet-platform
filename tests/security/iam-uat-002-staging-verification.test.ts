@@ -15,21 +15,21 @@ describe('IAM-UAT-002 Staging Journeys & Sign-Off Verification (Plan §19.5 Comp
       // Privileged role update requires step-up policy
       const policy = resolveStepUpActionPolicy('platform:users:role:update');
       expect(policy).toBeDefined();
-      expect(policy.actionId).toBe('platform:users:role:update');
+      expect(policy!.actionId).toBe('platform:users:role:update');
     });
 
     it('J2: Tenant OIDC PKCE, Invitation & Read-Only Viewer Restriction', () => {
       // Tenant user creation requires step-up policy
       const tenantUserPolicy = resolveStepUpActionPolicy('tenant:users:create');
       expect(tenantUserPolicy).toBeDefined();
-      expect(tenantUserPolicy.actionId).toBe('tenant:users:create');
+      expect(tenantUserPolicy!.actionId).toBe('tenant:users:create');
     });
 
     it('J3: Tenant Admin Role Elevation Step-Up & Session Invalidation', () => {
       // Step-up policy mapping for API key rotation / credential mutation
       const apiKeyRotatePolicy = resolveStepUpActionPolicy('tenant:api-keys:rotate');
       expect(apiKeyRotatePolicy).toBeDefined();
-      expect(apiKeyRotatePolicy.actionId).toBe('tenant:api-keys:rotate');
+      expect(apiKeyRotatePolicy!.actionId).toBe('tenant:api-keys:rotate');
     });
 
     it('J4: Driver Mobile Device Binding & Refresh Reuse Family Revocation', () => {
@@ -41,13 +41,13 @@ describe('IAM-UAT-002 Staging Journeys & Sign-Off Verification (Plan §19.5 Comp
     it('J5: Partner Key Rotation & Expired Key Fail-Closed Rejection', () => {
       const partnerCredPolicy = resolveStepUpActionPolicy('platform:partner-credentials:issue');
       expect(partnerCredPolicy).toBeDefined();
-      expect(partnerCredPolicy.actionId).toBe('platform:partner-credentials:issue');
+      expect(partnerCredPolicy!.actionId).toBe('platform:partner-credentials:issue');
     });
 
     it('J6: User Offboarding Revocation & Resource Transfer', () => {
       const suspendPolicy = resolveStepUpActionPolicy('platform:tenants:suspend');
       expect(suspendPolicy).toBeDefined();
-      expect(suspendPolicy.actionId).toBe('platform:tenants:suspend');
+      expect(suspendPolicy!.actionId).toBe('platform:tenants:suspend');
     });
 
     it('J7: Break-Glass Escalation, Approval & TTL Enforcement', () => {
@@ -55,8 +55,8 @@ describe('IAM-UAT-002 Staging Journeys & Sign-Off Verification (Plan §19.5 Comp
       const breakGlassApprovePolicy = resolveStepUpActionPolicy('platform:break-glass:approve');
       expect(breakGlassReqPolicy).toBeDefined();
       expect(breakGlassApprovePolicy).toBeDefined();
-      expect(breakGlassReqPolicy.actionId).toBe('platform:break-glass:request');
-      expect(breakGlassApprovePolicy.actionId).toBe('platform:break-glass:approve');
+      expect(breakGlassReqPolicy!.actionId).toBe('platform:break-glass:request');
+      expect(breakGlassApprovePolicy!.actionId).toBe('platform:break-glass:approve');
     });
 
     it('J8: Service Account WIF & Key Exception Governance', () => {
