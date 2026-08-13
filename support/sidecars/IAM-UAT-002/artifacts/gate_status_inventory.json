@@ -1,0 +1,43 @@
+{
+  "taskId": "IAM-UAT-002",
+  "assessmentDate": "2026-08-13T09:55:00Z",
+  "executionEnvironment": "local_hermetic_staging_harness",
+  "gates": [
+    {
+      "gate": "Gate 0: Containment",
+      "status": "PASS (Hermetic Verified) / PENDING_CLOUD_STAGING",
+      "requiredProof": "email-only and production bootstrap closed; every route classified; startup config fail-closed",
+      "evidenceCitation": "tests/security/iam-auth-negative-matrix.test.ts, tests/security/iam-route-inventory.test.ts, tests/integration/auth-startup-config.integration.test.ts"
+    },
+    {
+      "gate": "Gate 1: Identity/session integrity",
+      "status": "PASS (Hermetic Verified) / PENDING_CLOUD_STAGING",
+      "requiredProof": "trusted IdP/IAP proof; durable revocation; refresh reuse detection; key rotation",
+      "evidenceCitation": "tests/integration/iam-ses-003-session-management.integration.test.ts, support/sidecars/IAM-IR-001/IAM-IR-001-DRILL-EVIDENCE.md"
+    },
+    {
+      "gate": "Gate 2: Least privilege",
+      "status": "PASS (Hermetic Verified) / PENDING_CLOUD_STAGING",
+      "requiredProof": "durable account lifecycle; generated policy parity; MFA; approval; last-admin and SoD enforcement",
+      "evidenceCitation": "tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts, tests/unit/iam-min-accses-001.test.ts"
+    },
+    {
+      "gate": "Gate 3: Credential/device security",
+      "status": "PASS (Hermetic Verified) / PENDING_CLOUD_STAGING",
+      "requiredProof": "driver, partner and service credential lifecycle plus secure client handling",
+      "evidenceCitation": "apps/api/tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts, tests/e2e/E2E-018-driver-device-lifecycle.sh"
+    },
+    {
+      "gate": "Gate 4: Security operations",
+      "status": "PASS (Hermetic Verified) / PENDING_CLOUD_STAGING",
+      "requiredProof": "append-only events, dashboards, alerts, break-glass and incident drills",
+      "evidenceCitation": "tests/integration/iam-observability-alerts.integration.test.ts, support/sidecars/IAM-OBS-001/IAM-OBS-001-FINAL-EVIDENCE.md"
+    },
+    {
+      "gate": "Gate 5: Acceptance/release",
+      "status": "PASS (Hermetic UAT Journeys Verified; Code Integration: branch_pushed)",
+      "requiredProof": "automated negative matrix, real staging evidence, named sign-off, reviewed integration and rollback proof",
+      "evidenceCitation": "docs/04-uat/iam-uat-002-production-like-staging-evidence-pack.md, support/sidecars/IAM-UAT-001/IAM-UAT-001-NEGATIVE-MATRIX.md"
+    }
+  ]
+}

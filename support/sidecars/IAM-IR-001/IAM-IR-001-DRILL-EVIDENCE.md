@@ -2,17 +2,17 @@
 
 Task: `IAM-IR-001`  
 Phase: `stage1.5-identity-access-account-security-20260801`  
-Execution Date: `2026-08-13T01:43:54.858704+00:00`  
+Execution Date: `2026-08-13T11:07:16.697794+00:00`  
 Execution Mode: `tabletop_harness / rotate-auth-keys tool integrated`
 
 ---
 
 ## 1. Drill Execution Summary
 
-| Drill Scenario | Target Principal / Credential | Session / Key Revocation SLA | Total Drill Time | Legal Hold Evidence Checksum | Status |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Account Takeover (ATO)** | `usr_tenant_admin_001` | `0.5594s` (<60s) | `0.5599s` | `4b5c077ef41f5a89...` | **PASS** |
-| **Credential Compromise** | `cred_partner_booking_001` | `0.3570s` (<60s) | `0.3574s` | `b71e9d7359e19483...` | **PASS** |
+| Drill Scenario             | Target Principal / Credential | Session / Key Revocation SLA | Total Drill Time | Legal Hold Evidence Checksum | Status   |
+| :------------------------- | :---------------------------- | :--------------------------- | :--------------- | :--------------------------- | :------- |
+| **Account Takeover (ATO)** | `usr_tenant_admin_001`        | `0.4615s` (<60s)             | `0.4620s`        | `a237581a409f5e5e...`        | **PASS** |
+| **Credential Compromise**  | `cred_partner_booking_001`    | `0.6794s` (<60s)             | `0.6796s`        | `ba0bb7835928ba7a...`        | **PASS** |
 
 ---
 
@@ -33,6 +33,6 @@ Execution Mode: `tabletop_harness / rotate-auth-keys tool integrated`
 
 ## 3. Sidecar Artifact Inventory
 
-- Manifest: [`evidence_preservation_manifest.json`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-ir-001/support/sidecars/IAM-IR-001/evidence_preservation_manifest.json)
-- ATO Log: [`account_takeover_drill_log.json`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-ir-001/support/sidecars/IAM-IR-001/account_takeover_drill_log.json)
-- Credential Compromise Log: [`credential_compromise_drill_log.json`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-ir-001/support/sidecars/IAM-IR-001/credential_compromise_drill_log.json)
+- Manifest: [`evidence_preservation_manifest.json`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-uat-002/support/sidecars/IAM-IR-001/evidence_preservation_manifest.json)
+- ATO Log: [`account_takeover_drill_log.json`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-uat-002/support/sidecars/IAM-IR-001/account_takeover_drill_log.json)
+- Credential Compromise Log: [`credential_compromise_drill_log.json`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-uat-002/support/sidecars/IAM-IR-001/credential_compromise_drill_log.json)
