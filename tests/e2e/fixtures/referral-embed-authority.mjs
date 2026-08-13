@@ -148,7 +148,9 @@ const server = createServer(async (request, response) => {
 
   const entryPrefix = "/api/partner/entries/";
   if (request.method === "GET" && url.pathname.startsWith(entryPrefix)) {
-    const entrySlug = decodeURIComponent(url.pathname.slice(entryPrefix.length));
+    const entrySlug = decodeURIComponent(
+      url.pathname.slice(entryPrefix.length),
+    );
     if (entrySlug === "missing-entry") {
       writeJson(response, 404, {
         error: {
@@ -309,7 +311,9 @@ const server = createServer(async (request, response) => {
   );
   if (request.method === "GET" && receiptMatch) {
     const orderId = decodeURIComponent(receiptMatch[1]);
-    const order = getPassengerOrders(request).find((item) => item.orderId === orderId);
+    const order = getPassengerOrders(request).find(
+      (item) => item.orderId === orderId,
+    );
     if (!order) {
       writeJson(response, 404, {
         error: {
