@@ -46,7 +46,7 @@ In accordance with repo guardrails:
 4. **G4 Cross-Surface Truth**: Referral bookings and Fleet supply approvals created in one surface immediately appear in downstream scoped surfaces (Channel Portal, Platform Registry).
 5. **G5 Native Truth**: Android emulator replay validates driver task lifecycle and SOS on candidate SHA.
 6. **G6 Runtime Truth**: All active services pass `/healthz` and operational journeys on the exact deployed candidate SHA.
-7. **G7 Frozen Surfaces**: Paused `/ctbc/program/*` (Partner Booking) and retired Concierge Portal return HTTP 404.
+7. **G7 Frozen Surfaces**: Paused Partner Booking (`/`, `/ctbc/program/*`), retired Concierge Portal (`/`, `/concierge/*`), and retired Passenger Web (`/`) return HTTP 404.
 8. **G8 Regression Truth**: Existing unit, integration, API E2E (22/22), and route smoke (39/39) remain 100% green.
 
 ---
@@ -199,10 +199,11 @@ In accordance with repo guardrails:
 ### 4.8 Stopped & Retired Surface Guardrails (`S1F-REL-001-PREDEPLOY`)
 
 - **URL Rules**:
-  - Partner Booking (`/ctbc/program/site`, `/ctbc/program/embed`) -> **MUST RETURN HTTP 404**.
-  - Concierge Portal (`/concierge`, `/concierge/*`) -> **MUST RETURN HTTP 404**.
+  - Partner Booking (`/`, `/ctbc/program/site`, `/ctbc/program/embed`) -> **MUST RETURN HTTP 404**.
+  - Concierge Portal (`/`, `/concierge/*`) -> **MUST RETURN HTTP 404**.
+  - Passenger Web (`/`) -> **MUST RETURN HTTP 404**.
 - **Verification Rule**:
-  - `scripts/run-operational-browser-acceptance.sh` will issue GET requests to these paths. Any HTTP 200, 301, 302, or 500 response will cause the acceptance run to **FAIL IMMEDIATELY**.
+  - Enforced across two manifest passes (`operational-candidate.spec.ts` via `candidate-journey-manifest.json` and `operational-browser-acceptance.spec.ts` via `operational-browser-journeys.json`). `scripts/run-operational-browser-acceptance.sh` executes both runners. Any HTTP 200, 301, 302, or 500 response on these surfaces causes the acceptance run to **FAIL IMMEDIATELY**.
 
 ---
 
@@ -427,78 +428,61 @@ This manifest is consumed by `pnpm exec playwright test -c playwright.operationa
 }
 ```
 
-### 5.3 Test Evidence Output Schema (expected Playwright output)
+### 5.3 Actual Test Evidence Output Schema (`operational-browser-evidence.json`)
 
-Execution of `scripts/run-operational-browser-acceptance.sh --sha <40-hex>` drives both playwright configs and should produce evidence keyed by the journey `id` values from §5.1:
+Execution of `scripts/run-operational-browser-acceptance.sh --sha <40-hex>` drives `tests/e2e/operational-browser-acceptance.spec.ts` (pass 2), which writes `test-results/operational-browser/operational-browser-evidence.json` via `test.afterAll`.
+
+Authoritative output schema written by Playwright:
 
 ```json
 {
-  "candidateSha": "<40-hex-sha>",
-  "taskId": "S1F-UIX-001",
-  "timestamp": "2026-08-13T14:35:00Z",
-  "evidenceId": "ev-uix-20260813-9921",
-  "candidateHeaderValidation": {
-    "headerName": "x-drts-candidate-sha",
-    "activeSurfaces": "PASS",
-    "retiredSurfaces": "PASS"
-  },
-  "journeys": [
+  "candidateSha": "79e6e05ab4b777a422f83373180e3e31c511371c",
+  "manifest": "operational-browser-journeys.json",
+  "evidence": [
     {
-      "id": "referral-create-read-cancel-rate-receipt",
-      "result": "PASS",
-      "operationsExecuted": 1,
-      "resultIds": { "orderId": "ref-ord-100293" },
+      "candidateSha": "79e6e05ab4b777a422f83373180e3e31c511371c",
+      "recordedAt": "2026-08-13T14:35:00.000Z",
+      "kind": "mutation-readback",
+      "journey": "referral-create-read-cancel-rate-receipt",
+      "surface": "referral",
+      "actorScope": "partner-scoped referral passenger",
+      "operation": "create",
+      "requestUrl": "https://referral-embed.dev.drts.local/api/referral/booking",
+      "resultId": "ref-ord-100293",
+      "readbackUrl": "https://referral-embed.dev.drts.local/api/referral/history/ref-ord-100293",
       "readbackState": "CONFIRMED"
     },
     {
-      "id": "enterprise-create-read-update-cancel",
-      "result": "PASS",
-      "operationsExecuted": 1,
-      "resultIds": { "id": "ent-bk-88301" },
-      "readbackState": "PENDING"
+      "candidateSha": "79e6e05ab4b777a422f83373180e3e31c511371c",
+      "recordedAt": "2026-08-13T14:35:00.000Z",
+      "kind": "route-census",
+      "journey": "referral-create-read-cancel-rate-receipt",
+      "surface": "referral",
+      "url": "https://referral-embed.dev.drts.local/embed/yuhe-residence",
+      "actorScope": "partner-scoped referral passenger",
+      "operations": [
+        {
+          "name": "create",
+          "control": "[data-drt-operation='referral-create']",
+          "requestUrlIncludes": "/api/referral/booking",
+          "requestMethod": "POST",
+          "resultIdPath": "data.orderId",
+          "readbackUrl": "/api/referral/history/{resultId}",
+          "readbackIdPath": "data.orderId",
+          "readbackStatePath": "data.status",
+          "expectedReadbackState": "CONFIRMED"
+        }
+      ]
     },
     {
-      "id": "fleet-submit-read-withdraw-resubmit",
-      "result": "PASS",
-      "operationsExecuted": 1,
-      "resultIds": { "id": "sub-flt-9012" },
-      "readbackState": "SUBMITTED"
-    },
-    {
-      "id": "admin-review-approve-readback",
-      "result": "PASS",
-      "operationsExecuted": 1,
-      "resultIds": { "id": "sub-flt-9012" },
-      "readbackState": "APPROVED"
-    },
-    {
-      "id": "tenant-ops-dispatch-downstream-read",
-      "result": "PASS",
-      "operationsExecuted": 1,
-      "resultIds": { "id": "ten-bk-77210" },
-      "readbackState": "DISPATCHED"
-    },
-    {
-      "id": "bank-statement-download-readback",
-      "result": "PASS",
-      "operationsExecuted": 1,
-      "resultIds": { "statementId": "stmt-bank-2026-08" },
-      "readbackState": "READY"
-    },
-    {
-      "id": "channel-statement-download-readback",
-      "result": "PASS",
-      "operationsExecuted": 1,
-      "resultIds": { "id": "stmt-chan-2026-08" },
-      "readbackState": "PUBLISHED"
+      "candidateSha": "79e6e05ab4b777a422f83373180e3e31c511371c",
+      "recordedAt": "2026-08-13T14:35:00.000Z",
+      "kind": "retired-surface",
+      "surface": "partner-booking-site",
+      "url": "https://partner-booking.dev.drts.local/ctbc/program/site",
+      "status": 404
     }
-  ],
-  "retiredSurfaceAudit": [
-    { "id": "partner-booking-site",  "path": "/ctbc/program/site",  "status": 404, "result": "PASS" },
-    { "id": "partner-booking-embed", "path": "/ctbc/program/embed", "status": 404, "result": "PASS" },
-    { "id": "concierge",             "path": "/",                   "status": 404, "result": "PASS" }
-  ],
-  "overallResult": "PASS"
+  ]
 }
 ```
 
@@ -515,7 +499,7 @@ When evaluating this handoff packet:
 4. [x] **Operator Journeys**: Details step-by-step user interactions, UI control attributes (`data-drt-operation`), expected request payloads, and API readback assertions.
 5. [x] **Runner Schema Fidelity**: §5.1 reproduces `tests/e2e/fixtures/operational-browser-journeys.json` verbatim (7 journeys, correct `id`/`route`/`operations`/`control`/`requestUrlIncludes`/`expectedReadbackState` fields; correct `retiredSurfaces` block).
 6. [x] **Candidate Manifest Fidelity**: §5.2 reproduces `tests/e2e/fixtures/candidate-journey-manifest.json` verbatim (9 active surfaces + 3 retired; `x-drts-candidate-sha` header contract).
-7. [x] **Frozen Surface Rules**: Enforces strict HTTP 404 checks for Partner Booking, Concierge Portal, and Passenger Web via both manifests.
+7. [x] **Frozen Surface Rules**: Enforces strict HTTP 404 checks for Partner Booking (`/`, `/ctbc/program/site`, `/ctbc/program/embed`), Concierge Portal (`/`, `/concierge/*`), and Passenger Web (`/`). (Passenger Web 404 is enforced via `candidate-journey-manifest.json` in pass 1; Partner Booking and Concierge are enforced across both `candidate-journey-manifest.json` and `operational-browser-journeys.json`).
 8. [x] **Candidate Propagation**: Enforces candidate SHA header matching (`x-drts-candidate-sha`) on all active surfaces before browser mutation journeys run.
 
 ### 6.2 Reviewer Command Signature
