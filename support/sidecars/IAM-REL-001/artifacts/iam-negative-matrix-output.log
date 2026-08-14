@@ -1,0 +1,27 @@
+===============================================================================
+DRTS Fleet Platform — Stage 1.5 IAM Hardening Negative Matrix & Hermetic E2E Log
+Executed: 2026-08-13T12:10:30Z
+Target Tree: dev @ 28634c24dc0bab21ad9daffd7d4b0ad440705e27
+===============================================================================
+
+Command: DATABASE_URL="postgresql://postgres:postgres@localhost:5432/drts_fleet_platform" ./tests/security/run-iam-negative-matrix.sh
+
+Result:
+[IAM-UAT-001 Vitest Suite]
+Test Files  7 passed (7)
+Tests       37 passed (37)
+Duration    2.52s
+
+[IAM-UAT-001 API Integration Suite]
+Test Files  2 passed (2)
+Tests       13 passed (13)
+Duration    3.58s
+
+[Hermetic Playwright Suite]
+[hermetic] PASS (2): 004 018
+[hermetic] FAIL (0): none
+
+Summary:
+- All negative matrix security assertions (invalid PKCE, wrong tenant, spoofed headers, dormant credentials, expired tokens, self-escalation) passed.
+- All hermetic E2E tests (004, 018) passed against real local API instance.
+- Clean exit code 0.

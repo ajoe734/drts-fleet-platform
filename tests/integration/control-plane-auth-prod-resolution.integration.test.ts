@@ -8,6 +8,17 @@ describe("control-plane-auth production resolution regression", () => {
   const pkgPath = join(rootDir, "packages/control-plane-auth/package.json");
 
   beforeAll(() => {
+    const contractsDistJsPath = join(
+      rootDir,
+      "packages/contracts/dist/index.js",
+    );
+    if (!existsSync(contractsDistJsPath)) {
+      execSync("pnpm --filter @drts/contracts build", {
+        cwd: rootDir,
+        stdio: "ignore",
+      });
+    }
+
     const distJsPath = join(
       rootDir,
       "packages/control-plane-auth/dist/index.js",

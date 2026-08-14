@@ -661,6 +661,9 @@ importers:
 
   packages/control-plane-auth:
     dependencies:
+      "@drts/contracts":
+        specifier: workspace:*
+        version: link:../contracts
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3

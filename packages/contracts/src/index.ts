@@ -6980,6 +6980,7 @@ export interface ActionIntent {
 
 export * from "./platform-codes";
 export * from "./platform-adapter-registry";
+export * from "./iam-policy-catalog";
 export * from "./ui-runtime";
 export * from "./phase1-delta-supply-eligibility";
 export * from "./phase2-tesla-fsd-sandbox";
