@@ -1091,11 +1091,13 @@ def poll_pr_reviews(config: dict[str, Any], bus_state: dict[str, Any], status: d
 def sync_outbound(config: dict[str, Any], bus_state: dict[str, Any], status: dict[str, Any], runtime_state: dict[str, Any], repo: str) -> bool:
     changed = False
     blocked_tasks = {task.get("id"): task for task in status.get("tasks", []) if task.get("status") == "blocked"}
-    review_tasks = [task for task in status.get("tasks", []) if task.get("status") == "review"]
+    candidate_tasks = [
+        task for task in status.get("tasks", []) if task.get("status") in {"review", "integrating"}
+    ]
 
     blocker_by_task = {item.get("task_id"): item for item in status.get("blockers", []) if item.get("status") == "open"}
 
-    for task in review_tasks:
+    for task in candidate_tasks:
         try:
             changed = upsert_review_pr(config, bus_state, status, repo, task) or changed
         except GitHubBusError as exc:

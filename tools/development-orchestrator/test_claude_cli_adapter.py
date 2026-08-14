@@ -39,7 +39,11 @@ class ClaudeCLIAdapterTests(unittest.TestCase):
                 "providers": {
                     "claude2": {
                         "delivery_mode": "claude_cli",
-                        "runtime": {"cli": "claude", "output_format": "stream-json"},
+                        "runtime": {
+                            "cli": "claude",
+                            "model": "claude-sonnet-5",
+                            "output_format": "stream-json",
+                        },
                     }
                 },
             }
@@ -63,7 +67,9 @@ class ClaudeCLIAdapterTests(unittest.TestCase):
 
         self.assertTrue(result.ok)
         self.assertEqual(result.mode, "claude_cli")
-        self.assertEqual(spawn.call_args.args[0][0], str(local_cli))
+        command = spawn.call_args.args[0]
+        self.assertEqual(command[0], str(local_cli))
+        self.assertEqual(command[command.index("--model") + 1], "claude-sonnet-5")
 
 
 if __name__ == "__main__":

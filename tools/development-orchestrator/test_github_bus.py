@@ -195,6 +195,33 @@ class GitHubBusCommandTests(unittest.TestCase):
         run_gh.assert_not_called()
         self.assertEqual(self.bus_state["tasks"][task["id"]]["review_pr"]["state"], "skipped_no_candidate")
 
+    def test_sync_outbound_opens_pr_after_fast_review_reaches_integrating(self) -> None:
+        task = {
+            "id": "LIN-001",
+            "status": "integrating",
+            "candidate_sha": "abc123",
+            "candidate_branch": "feature/lin-001",
+        }
+        status = {"tasks": [task], "blockers": []}
+
+        with mock.patch.object(github_bus, "upsert_review_pr", return_value=True) as upsert:
+            changed = github_bus.sync_outbound(
+                self.config,
+                self.bus_state,
+                status,
+                {},
+                "ajoe734/pantheon",
+            )
+
+        self.assertTrue(changed)
+        upsert.assert_called_once_with(
+            self.config,
+            self.bus_state,
+            status,
+            "ajoe734/pantheon",
+            task,
+        )
+
     def test_candidate_ci_status_requires_all_checks_to_complete(self) -> None:
         running, _ = github_bus.candidate_ci_status(
             {

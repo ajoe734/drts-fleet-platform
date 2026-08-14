@@ -13,6 +13,6 @@ fi
 
 export ORCH_STATUS_ROOT="$STATUS_ROOT"
 export AI_STATUS_ROOT="$STATUS_ROOT"
-export PATH="$STATUS_ROOT/.orchestrator/bin/node_modules/.bin:$STATUS_ROOT/.orchestrator/bin:$PATH"
+export PATH="$STATUS_ROOT/.orchestrator/bin/node_modules/.bin:$STATUS_ROOT/.orchestrator/bin:$HOME/.local/bin:$PATH"
 cd "$STATUS_ROOT"
 exec python3 "$SOURCE_ROOT/tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py" "$@"
