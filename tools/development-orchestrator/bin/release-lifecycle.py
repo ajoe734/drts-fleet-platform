@@ -7,7 +7,6 @@ import argparse
 import fcntl
 import json
 import os
-import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -96,11 +95,31 @@ def prune(args: argparse.Namespace) -> int:
     candidates = []
     for release in release_dirs(args.releases_dir):
         reason = None
+        cleanup_action = "none"
+        age_seconds = max(0, datetime.now(timezone.utc).timestamp() - release.stat().st_mtime)
         if release.name in protected:
             reason = "retained_by_policy"
-        elif any(path == release.resolve() or release.resolve() in path.parents for path in worktrees):
-            reason = "registered_git_worktree"
-        candidates.append({"release": release.name, "path": str(release), "eligible": reason is None, "reason": reason})
+        elif age_seconds < args.min_age_hours * 3600:
+            reason = "grace_period"
+        else:
+            release_path = release.resolve()
+            nested_worktrees = [path for path in worktrees if release_path in path.parents]
+            is_worktree = release_path in worktrees
+            status = subprocess.run(
+                ["git", "-C", str(release), "status", "--porcelain"],
+                check=False, capture_output=True, text=True,
+            )
+            if nested_worktrees:
+                reason = "nested_git_worktree"
+            elif status.returncode != 0:
+                reason = "unreadable_git_worktree"
+            elif status.stdout.strip():
+                reason = "dirty_git_worktree"
+            elif is_worktree:
+                cleanup_action = "git_worktree_remove"
+            else:
+                reason = "unregistered_directory"
+        candidates.append({"release": release.name, "path": str(release), "age_seconds": int(age_seconds), "eligible": reason is None, "reason": reason, "cleanup_action": cleanup_action})
 
     payload = {"ts": now(), "mode": "apply" if args.apply else "dry_run", "protected": sorted(protected), "releases": candidates}
     args.audit_log.parent.mkdir(parents=True, exist_ok=True)
@@ -111,7 +130,13 @@ def prune(args: argparse.Namespace) -> int:
     if args.apply:
         for candidate in candidates:
             if candidate["eligible"]:
-                shutil.rmtree(candidate["path"])
+                result = subprocess.run(
+                    ["git", "-C", str(args.repo_root), "worktree", "remove", candidate["path"]],
+                    check=False, capture_output=True, text=True,
+                )
+                if result.returncode != 0:
+                    print(f"ERROR: failed to remove {candidate['release']}: {result.stderr.strip()}", file=sys.stderr)
+                    return result.returncode
     return 0
 
 
@@ -120,6 +145,7 @@ def main() -> int:
     parser.add_argument("--repo-root", type=Path, default=SOURCE_ROOT)
     parser.add_argument("--artifact-root", type=Path)
     parser.add_argument("--keep", type=int, default=3, help="active/rollback releases retained by recency")
+    parser.add_argument("--min-age-hours", type=float, default=24, help="never remove a release newer than this grace period")
     parser.add_argument("--apply", action="store_true", help="delete eligible releases; default is dry-run")
     subparsers = parser.add_subparsers(dest="command", required=True)
     activate_parser = subparsers.add_parser("activate", help="atomically select an existing release")
@@ -133,6 +159,8 @@ def main() -> int:
     args.audit_log = args.artifact_root / ".orchestrator" / "release-lifecycle.jsonl"
     if args.keep < 1:
         parser.error("--keep must be at least 1")
+    if args.min_age_hours < 0:
+        parser.error("--min-age-hours cannot be negative")
     return activate(args) if args.command == "activate" else prune(args)
 
 

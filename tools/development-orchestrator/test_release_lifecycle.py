@@ -34,6 +34,28 @@ class ReleaseLifecycleTests(unittest.TestCase):
             self.assertTrue((root / "releases" / "orchestrator-old").exists())
             self.assertEqual(json.loads(result.stdout)["mode"], "dry_run")
 
+    def test_registered_worktree_is_reported_as_safe_removal_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "repo"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / "README").write_text("release test\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "README"], check=True)
+            subprocess.run(["git", "-C", str(repo), "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial"], check=True)
+            artifact_root = repo / ".artifacts"
+            release = artifact_root / "releases" / "orchestrator-old"
+            active_release = artifact_root / "releases" / "orchestrator-new"
+            release.parent.mkdir(parents=True)
+            subprocess.run(["git", "-C", str(repo), "worktree", "add", "--detach", str(release), "HEAD"], check=True)
+            subprocess.run(["git", "-C", str(repo), "worktree", "add", "--detach", str(active_release), "HEAD"], check=True)
+            old_timestamp = release.stat().st_mtime - 2 * 86400
+            os.utime(release, (old_timestamp, old_timestamp))
+            subprocess.run([str(SCRIPT), "--repo-root", str(repo), "--artifact-root", str(artifact_root), "activate", "orchestrator-new"], check=True)
+            result = subprocess.run([str(SCRIPT), "--repo-root", str(repo), "--artifact-root", str(artifact_root), "--keep", "1", "prune"], capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            entry = next(item for item in json.loads(result.stdout)["releases"] if item["release"] == "orchestrator-old")
+            self.assertTrue(entry["eligible"])
+            self.assertEqual(entry["cleanup_action"], "git_worktree_remove")
+
 
 if __name__ == "__main__":
     unittest.main()
