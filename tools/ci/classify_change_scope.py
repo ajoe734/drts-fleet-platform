@@ -12,6 +12,7 @@ NON_PRODUCT_PREFIXES = (
     ".orchestrator/",
     "docs/",
     "tools/development-orchestrator/",
+    "tools/task-dispatch/",
 )
 
 
@@ -24,7 +25,9 @@ def is_non_product_path(path: str) -> bool:
 
 def is_orchestrator_path(path: str) -> bool:
     normalized = path.strip().removeprefix("./")
-    return normalized.startswith((".orchestrator/", "tools/development-orchestrator/"))
+    return normalized.startswith(
+        (".orchestrator/", "tools/development-orchestrator/", "tools/task-dispatch/")
+    )
 
 
 def classify_paths(paths: Iterable[str], *, force_full: bool = False) -> dict[str, str]:

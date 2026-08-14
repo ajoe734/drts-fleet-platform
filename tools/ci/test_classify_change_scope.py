@@ -19,6 +19,7 @@ class ChangeScopeTest(unittest.TestCase):
             [
                 "tools/development-orchestrator/github_bus.py",
                 "tools/development-orchestrator/test_github_bus.py",
+                "tools/task-dispatch/dispatch-stage1-functional-completion-20260808.py",
                 ".orchestrator/config.json",
             ]
         )

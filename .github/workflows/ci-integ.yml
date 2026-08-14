@@ -313,8 +313,9 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: Run orchestrator unit tests
-        working-directory: tools/development-orchestrator
-        run: python3 -m unittest discover -s . -p 'test_*.py' -v
+        run: python3 -m unittest discover -s tools/development-orchestrator -p 'test_*.py' -v
+      - name: Validate task materializer contract
+        run: python3 tools/task-dispatch/dispatch-stage1-functional-completion-20260808.py --dry-run
 
   # Cross-surface E2E suite (tests/e2e/E2E-0*.sh) against a real Postgres-backed
   # API runtime. This is the gate that proves the named business-line workflows

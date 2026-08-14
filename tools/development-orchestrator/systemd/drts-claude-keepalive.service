@@ -10,6 +10,7 @@ Documentation=file:@REPO_ROOT@/tools/development-orchestrator/systemd/README-oau
 [Service]
 Type=oneshot
 WorkingDirectory=@REPO_ROOT@
+EnvironmentFile=-%h/.config/drts/claude-lanes.env
 
 # Keepalive first (warms the refresh tokens), then health check (records
 # remaining TTL per lane to lane-health.jsonl). They run sequentially so

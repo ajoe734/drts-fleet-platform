@@ -33,12 +33,21 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-CLAUDE_BIN="${ROOT_DIR}/.orchestrator/bin/claude"
-LOG_FILE="${ROOT_DIR}/.orchestrator/logs/claude-lane-keepalive.log"
+SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+GIT_COMMON_DIR="$(git -C "$SOURCE_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+if [[ -n "${ORCH_STATUS_ROOT:-}" ]]; then
+  STATUS_ROOT="$ORCH_STATUS_ROOT"
+elif [[ "$GIT_COMMON_DIR" == */.git ]]; then
+  STATUS_ROOT="${GIT_COMMON_DIR%/.git}"
+else
+  STATUS_ROOT="$SOURCE_ROOT"
+fi
+LOG_FILE="${CLAUDE_KEEPALIVE_LOG_FILE:-${STATUS_ROOT}/.orchestrator/logs/claude-lane-keepalive.log}"
 
-# Default lane list when invoked with no args.
-DEFAULT_LANES=(claude claude2)
+# The second OAuth identity is opt-in. Keeping a nonexistent historical lane
+# in the default list made every timer run fail after an account migration.
+DEFAULT_LANES_TEXT="${ORCH_CLAUDE_LANES:-claude}"
+IFS=',' read -r -a DEFAULT_LANES <<< "$DEFAULT_LANES_TEXT"
 
 if [[ $# -gt 0 ]]; then
   LANES=("$@")
@@ -50,8 +59,17 @@ mkdir -p "$(dirname "$LOG_FILE")"
 
 timestamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
+resolve_claude_bin() {
+  if [[ -n "${CLAUDE_BIN:-}" ]]; then
+    printf '%s\n' "$CLAUDE_BIN"
+    return 0
+  fi
+  command -v claude 2>/dev/null || true
+}
+
+CLAUDE_BIN="$(resolve_claude_bin)"
 if [[ ! -x "$CLAUDE_BIN" ]]; then
-  echo "$(timestamp) ERROR claude wrapper missing: $CLAUDE_BIN" >> "$LOG_FILE"
+  echo "$(timestamp) ERROR claude executable unavailable; set CLAUDE_BIN or add claude to PATH" >> "$LOG_FILE"
   exit 127
 fi
 
@@ -65,16 +83,16 @@ run_lane() {
   local env_kind env_val
   case "$lane" in
     claude)
-      # Main lane: CLAUDE_CONFIG_DIR isolation so the keepalive does not
-      # pollute the developer's IDE session sidebar.
+      # Defaults are owned by the current account. Deployments with isolated
+      # lanes set these through ~/.config/drts/claude-lanes.env.
       env_kind=CLAUDE_CONFIG_DIR
-      env_val=/home/edna/.claude-autoworker
+      env_val="${ORCH_CLAUDE_CONFIG_DIR:-$HOME/.claude}"
       ;;
     claude2)
-      # Isolated personal-OAuth lane on a different account; uses HOME=
-      # so the CLI's config-dir resolution looks under ~/.claude2-home/.
+      # A second identity remains explicitly configurable and is never tied
+      # to a former machine user's home directory.
       env_kind=HOME
-      env_val=/home/edna/.claude2-home
+      env_val="${ORCH_CLAUDE2_HOME:-$HOME/.claude2-home}"
       ;;
     *)
       echo "$(timestamp) ERROR unknown lane=$lane" >> "$LOG_FILE"
