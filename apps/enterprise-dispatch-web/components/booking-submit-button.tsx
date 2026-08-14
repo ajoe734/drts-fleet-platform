@@ -46,7 +46,9 @@ export function BookingSubmitButton({
         return;
       }
 
-      const result = await client.createBooking(buildEnterpriseBookingCommand(draft));
+      const result = await client.createBooking(
+        buildEnterpriseBookingCommand(draft),
+      );
 
       if (!result.bookingId || !result.orderId) {
         throw new Error("Enterprise dispatch API did not return booking proof");
@@ -78,6 +80,9 @@ export function BookingSubmitButton({
       <button
         type="button"
         data-testid="enterprise-booking-submit"
+        data-drt-operation={
+          bookingId ? "enterprise-update" : "enterprise-create"
+        }
         data-ready={isHydrated ? "true" : "false"}
         disabled={isDisabled}
         onClick={submitBooking}

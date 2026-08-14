@@ -874,6 +874,11 @@ function renderBookingActionLinks(booking: BookingListRecord, locale: Locale) {
             <Link
               key={action.action}
               href={target}
+              data-drt-operation={
+                action.action === "open_ops_dispatch"
+                  ? "tenant-dispatch"
+                  : undefined
+              }
               style={actionLinkStyle(
                 action.action === "open_detail" ? "primary" : "secondary",
               )}
@@ -883,11 +888,22 @@ function renderBookingActionLinks(booking: BookingListRecord, locale: Locale) {
           );
         }
 
-        return renderActionLink({
-          href: buildCrossAppHref(target),
-          label,
-          external: target.openMode === "new_tab",
-        });
+        return (
+          <a
+            key={action.action}
+            href={buildCrossAppHref(target)}
+            data-drt-operation={
+              action.action === "open_ops_dispatch"
+                ? "tenant-dispatch"
+                : undefined
+            }
+            style={actionLinkStyle("secondary")}
+            target={target.openMode === "new_tab" ? "_blank" : undefined}
+            rel={target.openMode === "new_tab" ? "noreferrer" : undefined}
+          >
+            {label}
+          </a>
+        );
       })}
     </div>
   );

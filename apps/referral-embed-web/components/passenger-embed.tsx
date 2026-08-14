@@ -592,7 +592,15 @@ function EditableField({
   value: string;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
   type?: "text" | "tel";
-  inputMode?: "text" | "tel" | "search" | "email" | "url" | "numeric" | "decimal" | "none";
+  inputMode?:
+    | "text"
+    | "tel"
+    | "search"
+    | "email"
+    | "url"
+    | "numeric"
+    | "decimal"
+    | "none";
   autoComplete?: string;
 }) {
   return (
@@ -1294,7 +1302,9 @@ async function bootstrapDemoSession(context: EmbedContext) {
   const payload = await response.json().catch(() => null);
   if (!response.ok || !payload?.ok) {
     throw new Error(
-      payload?.message || payload?.error?.message || "Demo session bootstrap failed",
+      payload?.message ||
+        payload?.error?.message ||
+        "Demo session bootstrap failed",
     );
   }
 }
@@ -1724,13 +1734,16 @@ function TripScreen({
     startTransition(async () => {
       try {
         setError(null);
-        const response = await fetch(`/api/referral/cancel/${encodeURIComponent(trip.orderId)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            idempotencyKey: createIdempotencyKey("referral-cancel"),
-          }),
-        });
+        const response = await fetch(
+          `/api/referral/cancel/${encodeURIComponent(trip.orderId)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              idempotencyKey: createIdempotencyKey("referral-cancel"),
+            }),
+          },
+        );
         const payload = await response.json().catch(() => null);
         if (!response.ok || !payload?.ok) {
           throw new Error(payload?.error?.message || "取消行程失敗");
@@ -1769,11 +1782,16 @@ function TripScreen({
             icon="phone"
           />
           <ActionButton
-            label={isPending ? "取消中…" : `取消行程 · 剩 ${trip.cancelWindowMin} 分鐘可免費取消`}
+            label={
+              isPending
+                ? "取消中…"
+                : `取消行程 · 剩 ${trip.cancelWindowMin} 分鐘可免費取消`
+            }
             theme={theme}
             variant="danger"
             onClick={handleCancel}
             disabled={isPending}
+            dataDrtOperation="referral-cancel"
           />
         </>
       }
@@ -1861,7 +1879,11 @@ function TripScreen({
         </div>
       </Card>
 
-      {error ? <Banner theme={theme} tone="danger" icon="alert">{error}</Banner> : null}
+      {error ? (
+        <Banner theme={theme} tone="danger" icon="alert">
+          {error}
+        </Banner>
+      ) : null}
 
       <Card theme={theme}>
         <div style={{ display: "flex", gap: 11 }}>
@@ -1945,15 +1967,16 @@ function TripsScreen({
   liveData: PassengerEmbedLiveData;
 }) {
   const theme = buildEmbedTheme(context.accent);
-  const historyItems = liveData?.history?.items.map((trip) => ({
-          id: trip.orderNo,
-          orderId: trip.orderId,
-          date: formatShortDateTime(trip.completedAt || trip.createdAt),
-          from: trip.pickupAddress,
-          to: trip.dropoffAddress,
-          state: normalizeTripState(trip.status),
-          fare: trip.formattedFare || formatFare(trip.fareTotal),
-        })) ?? [];
+  const historyItems =
+    liveData?.history?.items.map((trip) => ({
+      id: trip.orderNo,
+      orderId: trip.orderId,
+      date: formatShortDateTime(trip.completedAt || trip.createdAt),
+      from: trip.pickupAddress,
+      to: trip.dropoffAddress,
+      state: normalizeTripState(trip.status),
+      fare: trip.formattedFare || formatFare(trip.fareTotal),
+    })) ?? [];
   return (
     <AppShell context={context} badgeTone="live">
       <div
@@ -2009,73 +2032,73 @@ function TripsScreen({
             key={trip.id}
             style={{ textDecoration: "none", color: "inherit" }}
           >
-          <Card theme={theme}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 10,
-                  background: theme.surfaceLo,
-                  color: theme.muted,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <Icon
-                  name={
-                    trip.state === "cancelled"
-                      ? "x"
-                      : trip.state === "completed"
-                        ? "check"
-                        : "car"
-                  }
-                  size={18}
-                />
-              </span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
+            <Card theme={theme}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span
                   style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {trip.from} → {trip.to}
-                </div>
-                <div
-                  style={{
-                    fontSize: 11,
+                    width: 38,
+                    height: 38,
+                    borderRadius: 10,
+                    background: theme.surfaceLo,
                     color: theme.muted,
-                    fontFamily: theme.mono,
-                    marginTop: 2,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
                   }}
                 >
-                  {trip.date} · {trip.id}
+                  <Icon
+                    name={
+                      trip.state === "cancelled"
+                        ? "x"
+                        : trip.state === "completed"
+                          ? "check"
+                          : "car"
+                    }
+                    size={18}
+                  />
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {trip.from} → {trip.to}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: theme.muted,
+                      fontFamily: theme.mono,
+                      marginTop: 2,
+                    }}
+                  >
+                    {trip.date} · {trip.id}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <Pill theme={theme} tone={tone} dot>
+                    {tripState.zh}
+                  </Pill>
+                  <div
+                    style={{
+                      fontSize: 12.5,
+                      fontFamily: theme.mono,
+                      color: theme.ink,
+                      marginTop: 5,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {trip.fare}
+                  </div>
                 </div>
               </div>
-              <div style={{ textAlign: "right", flexShrink: 0 }}>
-                <Pill theme={theme} tone={tone} dot>
-                  {tripState.zh}
-                </Pill>
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    fontFamily: theme.mono,
-                    color: theme.ink,
-                    marginTop: 5,
-                    fontWeight: 600,
-                  }}
-                >
-                  {trip.fare}
-                </div>
-              </div>
-            </div>
-          </Card>
+            </Card>
           </Link>
         );
       })}
@@ -2123,7 +2146,10 @@ function ReceiptScreen({
       badgeTone="live"
       footer={
         <ActionButton
-          href={receipt.downloadUrl || buildHref(context, { screen: "receipt", state: "handoff" })}
+          href={
+            receipt.downloadUrl ||
+            buildHref(context, { screen: "receipt", state: "handoff" })
+          }
           label="下載收據"
           theme={theme}
           icon="download"
@@ -2182,9 +2208,7 @@ function ReceiptScreen({
             <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 14 }}>
               {receipt.from}
             </div>
-            <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-              {receipt.to}
-            </div>
+            <div style={{ fontSize: 12.5, fontWeight: 600 }}>{receipt.to}</div>
           </div>
         </div>
       </Card>
@@ -2201,32 +2225,17 @@ function ReceiptScreen({
           label="司機 / 車牌"
           value={`${receipt.driver} · ${receipt.plate}`}
         />
-        <DetailRow
-          theme={theme}
-          label="車種"
-          value={receipt.vehicle}
-          last
-        />
+        <DetailRow theme={theme} label="車種" value={receipt.vehicle} last />
       </Card>
       <Card theme={theme} title="費用明細" subtitle="fare breakdown">
-        <DetailRow
-          theme={theme}
-          label="起步價"
-          value={receipt.fareBase}
-          mono
-        />
+        <DetailRow theme={theme} label="起步價" value={receipt.fareBase} mono />
         <DetailRow
           theme={theme}
           label="里程"
           value={receipt.fareDistance}
           mono
         />
-        <DetailRow
-          theme={theme}
-          label="時間"
-          value={receipt.fareTime}
-          mono
-        />
+        <DetailRow theme={theme} label="時間" value={receipt.fareTime} mono />
         <DetailRow
           theme={theme}
           label="合計"
@@ -2260,25 +2269,33 @@ function OutcomeScreen({
   const [ratingMessage, setRatingMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const trip = liveData?.history?.items.find(
-    (item) =>
-      (!liveData.selectedOrderId || item.orderId === liveData.selectedOrderId) &&
-      (completed ? item.status === "completed" : item.status === "cancelled"),
-  );
+  const trip =
+    liveData?.history?.items.find(
+      (item) =>
+        (!liveData.selectedOrderId ||
+          item.orderId === liveData.selectedOrderId) &&
+        (completed ? item.status === "completed" : item.status === "cancelled"),
+    ) ??
+    (liveData?.selectedOrderId
+      ? ({ orderId: liveData.selectedOrderId } as any)
+      : undefined);
 
   function submitRating(nextScore: number) {
     if (!trip) return;
     startTransition(async () => {
       try {
         setError(null);
-        const response = await fetch(`/api/referral/rating/${encodeURIComponent(trip.orderId)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            score: nextScore,
-            idempotencyKey: createIdempotencyKey("referral-rating"),
-          }),
-        });
+        const response = await fetch(
+          `/api/referral/rating/${encodeURIComponent(trip.orderId)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              score: nextScore,
+              idempotencyKey: createIdempotencyKey("referral-rating"),
+            }),
+          },
+        );
         const payload = await response.json().catch(() => null);
         if (!response.ok || !payload?.ok) {
           throw new Error(payload?.error?.message || "送出評分失敗");
@@ -2295,33 +2312,25 @@ function OutcomeScreen({
       context={context}
       badgeTone={completed ? "live" : "neutral"}
       footer={
-        completed ? (
-          <>
-            <ActionButton
-              href={buildHref(context, {
-                screen: "receipt",
-                state: "handoff",
-                ...(trip ? { orderId: trip.orderId } : {}),
-              })}
-              label="查看收據"
-              theme={theme}
-              icon="receipt"
-            />
-            <ActionButton
-              href={buildHref(context, { screen: "book", state: "handoff" })}
-              label="再叫一次"
-              theme={theme}
-              variant="ghost"
-            />
-          </>
-        ) : (
+        <>
+          <ActionButton
+            href={buildHref(context, {
+              screen: "receipt",
+              state: "handoff",
+              ...(trip ? { orderId: trip.orderId } : {}),
+            })}
+            label="查看收據"
+            theme={theme}
+            icon="receipt"
+            dataDrtOperation="referral-receipt"
+          />
           <ActionButton
             href={buildHref(context, { screen: "book", state: "handoff" })}
-            label="重新叫車"
+            label={completed ? "再叫一次" : "重新叫車"}
             theme={theme}
-            iconRight="arrow"
+            variant="ghost"
           />
-        )
+        </>
       }
     >
       <StateHero
@@ -2331,33 +2340,66 @@ function OutcomeScreen({
         title={completed ? "行程已完成" : "行程已取消"}
         posture={completed ? "completed" : "cancelled"}
       />
-      {completed ? (
-        <>
-          <Card theme={theme}>
-            <DetailRow theme={theme} label="行程" value={trip ? `${trip.pickupAddress} → ${trip.dropoffAddress}` : "行程資料讀取中"} />
-            <DetailRow theme={theme} label="車資" value={trip?.formattedFare ?? "—"} strong />
-            <DetailRow theme={theme} label="付款" value="社區月結" last />
-          </Card>
-          <Card theme={theme} title="為這趟行程評分">
-            <div
+      <Card theme={theme}>
+        <DetailRow
+          theme={theme}
+          label="行程"
+          value={
+            trip
+              ? `${trip.pickupAddress ?? "約定地點"} → ${trip.dropoffAddress ?? "目的地"}`
+              : "行程資料讀取中"
+          }
+        />
+        <DetailRow
+          theme={theme}
+          label="車資"
+          value={trip?.formattedFare ?? "—"}
+          strong
+        />
+        <DetailRow theme={theme} label="付款" value="社區月結" last />
+      </Card>
+      <Card theme={theme} title="為這趟行程評分">
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: 9,
+            padding: "4px 0",
+          }}
+        >
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button
+              key={n}
+              type="button"
+              data-drt-operation="referral-rate"
+              onClick={() => submitRating(n)}
+              disabled={!trip || isPending || score !== null}
+              aria-label={`評分 ${n} 星`}
               style={{
-                display: "flex",
-                justifyContent: "center",
-                gap: 9,
-                padding: "4px 0",
+                border: 0,
+                padding: 0,
+                background: "transparent",
+                color: score !== null && n > score ? theme.line : theme.warnFg,
+                cursor:
+                  !trip || isPending || score !== null ? "default" : "pointer",
               }}
             >
-              {[1, 2, 3, 4, 5].map((n) => (
-                <button key={n} type="button" onClick={() => submitRating(n)} disabled={!trip || isPending || score !== null} aria-label={`評分 ${n} 星`} style={{ border: 0, padding: 0, background: "transparent", color: score !== null && n > score ? theme.line : theme.warnFg, cursor: !trip || isPending || score !== null ? "default" : "pointer" }}>
-                  <Icon name="spark" size={30} />
-                </button>
-              ))}
-            </div>
-            {ratingMessage ? <Banner theme={theme} tone="success" icon="check">{ratingMessage}</Banner> : null}
-            {error ? <Banner theme={theme} tone="danger" icon="alert">{error}</Banner> : null}
-          </Card>
-        </>
-      ) : (
+              <Icon name="spark" size={30} />
+            </button>
+          ))}
+        </div>
+        {ratingMessage ? (
+          <Banner theme={theme} tone="success" icon="check">
+            {ratingMessage}
+          </Banner>
+        ) : null}
+        {error ? (
+          <Banner theme={theme} tone="danger" icon="alert">
+            {error}
+          </Banner>
+        ) : null}
+      </Card>
+      {!completed ? (
         <Card theme={theme}>
           <div
             style={{
@@ -2369,10 +2411,21 @@ function OutcomeScreen({
           >
             此行程已取消，未產生車資。若於司機抵達後取消可能酌收費用，詳見社區叫車條款。
           </div>
-          <DetailRow theme={theme} label="取消時間" value={formatShortDateTime(trip?.completedAt || trip?.createdAt)} mono />
-          <DetailRow theme={theme} label="費用" value={trip?.formattedFare ?? "—"} strong last />
+          <DetailRow
+            theme={theme}
+            label="取消時間"
+            value={formatShortDateTime(trip?.completedAt || trip?.createdAt)}
+            mono
+          />
+          <DetailRow
+            theme={theme}
+            label="費用"
+            value={trip?.formattedFare ?? "—"}
+            strong
+            last
+          />
         </Card>
-      )}
+      ) : null}
     </AppShell>
   );
 }
@@ -2760,9 +2813,13 @@ export function PassengerEmbed({
     case "receipt":
       return <ReceiptScreen context={context} liveData={liveData} />;
     case "completed":
-      return <OutcomeScreen context={context} kind="completed" liveData={liveData} />;
+      return (
+        <OutcomeScreen context={context} kind="completed" liveData={liveData} />
+      );
     case "cancelled":
-      return <OutcomeScreen context={context} kind="cancelled" liveData={liveData} />;
+      return (
+        <OutcomeScreen context={context} kind="cancelled" liveData={liveData} />
+      );
     case "nosupply":
     case "ineligible":
     case "denied":

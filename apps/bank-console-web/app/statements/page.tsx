@@ -86,12 +86,11 @@ export default async function StatementsPage({
   }
   const roleParam = one(resolvedSearchParams.role);
   const sessionRole = resolveServerSessionRole(cookieRole, roleParam).role;
-  const session = getBankConsoleSession(
-    tenant,
-    locale,
-    sessionRole,
+  const session = getBankConsoleSession(tenant, locale, sessionRole);
+  const statementData = await loadBankStatementsData(
+    tenant.tenantId,
+    session.role,
   );
-  const statementData = await loadBankStatementsData(tenant.tenantId, session.role);
   const issuerBrand = tenant.template;
   const baseQuery = {
     bank: tenant.code,
@@ -253,7 +252,11 @@ export default async function StatementsPage({
           {session.role === "bank_ops_viewer" ? (
             <span
               className="filters-reset is-disabled"
-              style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+              style={{
+                opacity: 0.5,
+                pointerEvents: "none",
+                cursor: "not-allowed",
+              }}
             >
               {t("statements.actions.exportAll", locale)}
             </span>
@@ -309,13 +312,18 @@ export default async function StatementsPage({
                 {session.role === "bank_ops_viewer" ? (
                   <span
                     className="statement-link is-disabled"
-                    style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+                    style={{
+                      opacity: 0.5,
+                      pointerEvents: "none",
+                      cursor: "not-allowed",
+                    }}
                   >
                     {t("statements.actions.download", locale)}
                   </span>
                 ) : (
                   <a
                     className="statement-link"
+                    data-drt-operation="bank-statement-download"
                     href={`${statement.signedArtifactHref}?bank=${tenant.code}&locale=${locale}&role=${session.role}`}
                   >
                     {t("statements.actions.download", locale)}
