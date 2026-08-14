@@ -251,6 +251,7 @@ export function EnterpriseBookingDetail({ bookingId }: { bookingId: string }) {
             <button
               type="button"
               data-testid="enterprise-booking-cancel"
+              data-drt-operation="enterprise-cancel"
               disabled={!canCancel || isCancelling}
               onClick={cancel}
               style={entBtnStyle(t, {

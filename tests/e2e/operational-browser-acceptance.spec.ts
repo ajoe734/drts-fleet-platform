@@ -138,7 +138,29 @@ test("executes declared browser mutations and API readbacks", async ({
       waitUntil: "domcontentloaded",
     });
 
+    let lastResultId: unknown = null;
+
     for (const operation of journey.operations) {
+      if (journey.surface === "enterprise") {
+        if (operation.name === "update" && lastResultId) {
+          await page.goto(
+            new URL(
+              `/bookings/new?bookingId=${encodeURIComponent(String(lastResultId))}`,
+              origin,
+            ).toString(),
+            { waitUntil: "domcontentloaded" },
+          );
+        } else if (operation.name === "cancel" && lastResultId) {
+          await page.goto(
+            new URL(
+              `/bookings/${encodeURIComponent(String(lastResultId))}`,
+              origin,
+            ).toString(),
+            { waitUntil: "domcontentloaded" },
+          );
+        }
+      }
+
       const responsePromise = page.waitForResponse(
         (response) =>
           response.request().method() === operation.requestMethod &&
@@ -160,6 +182,7 @@ test("executes declared browser mutations and API readbacks", async ({
         resultId,
         `${journey.id}/${operation.name} result ID`,
       ).toBeTruthy();
+      lastResultId = resultId;
 
       const readbackPath = operation.readbackUrl.replace(
         "{resultId}",
