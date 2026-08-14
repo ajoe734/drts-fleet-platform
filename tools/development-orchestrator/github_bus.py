@@ -328,15 +328,53 @@ def find_existing_issue(repo: str, task_id: str) -> dict[str, Any] | None:
     return None
 
 
-def find_existing_pr(repo: str, task_id: str, branch: str | None) -> dict[str, Any] | None:
-    search = f'"[ReviewBus] {task_id}" in:title'
-    args = ["pr", "list", "--repo", repo, "--state", "open", "--search", search, "--json", "number,title,url,headRefName,state"]
-    if branch:
-        args.extend(["--head", branch])
+def find_existing_pr(repo: str, branch: str, base: str) -> dict[str, Any] | None:
+    args = [
+        "pr",
+        "list",
+        "--repo",
+        repo,
+        "--state",
+        "open",
+        "--head",
+        branch,
+        "--base",
+        base,
+        "--json",
+        "number,title,url,headRefName,state",
+    ]
     data = gh_json(args)
     if isinstance(data, list) and data:
         return data[0]
     return None
+
+
+def sync_optional_pr_metadata(
+    config: dict[str, Any],
+    repo: str,
+    task: dict[str, Any],
+    number: int,
+    labels: list[str],
+) -> None:
+    args = ["pr", "edit", str(number), "--repo", repo]
+    args.extend(edit_label_args(labels))
+    if (config.get("github_bus", {}) or {}).get("auto_request_reviewers", True):
+        for handle in reviewer_handles(config, task):
+            args.extend(["--add-reviewer", handle])
+    if len(args) == 5:
+        return
+    try:
+        run_gh(args)
+    except GitHubBusError as exc:
+        write_activity_log(
+            config,
+            {
+                "type": "github_review_pr_metadata_failed",
+                "task_id": task["id"],
+                "message": str(exc),
+                "github_pr": number,
+            },
+        )
 
 
 def upsert_ops_issue(config: dict[str, Any], bus_state: dict[str, Any], repo: str, task: dict[str, Any], reason: str, details: str) -> bool:
@@ -522,21 +560,16 @@ def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: 
     try:
         if pr_ref and pr_ref.get("number"):
             number = int(pr_ref["number"])
-            run_gh(["pr", "edit", str(number), "--repo", repo, "--title", title, "--body-file", str(body_file), *edit_label_args(labels)])
+            run_gh(["pr", "edit", str(number), "--repo", repo, "--title", title, "--body-file", str(body_file)])
             pr = dict(pr_ref)
         else:
-            found = find_existing_pr(repo, task["id"], branch)
+            found = find_existing_pr(repo, branch, base)
             if found:
                 number = int(found["number"])
-                run_gh(["pr", "edit", str(number), "--repo", repo, "--title", title, "--body-file", str(body_file), *edit_label_args(labels)])
+                run_gh(["pr", "edit", str(number), "--repo", repo, "--title", title, "--body-file", str(body_file)])
                 pr = {"number": number, "url": found.get("url"), "title": title, "headRefName": branch}
             else:
                 create_args = ["pr", "create", "--repo", repo, "--draft", "--title", title, "--body-file", str(body_file), "--base", base, "--head", branch]
-                if labels:
-                    create_args.extend(create_label_args(labels))
-                if (config.get("github_bus", {}) or {}).get("auto_request_reviewers", True):
-                    for handle in reviewer_handles(config, task):
-                        create_args.extend(["--reviewer", handle])
                 proc = run_gh(create_args)
                 url = (proc.stdout or "").strip().splitlines()[-1]
                 pr = {"number": parse_number_from_url(url), "url": url, "title": title, "headRefName": branch}
@@ -546,6 +579,7 @@ def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: 
     # A PR only becomes ready once `handoff` locked the candidate SHA. Previous
     # owner checkpoints are never candidates, so they cannot start full CI.
     if pr.get("number"):
+        sync_optional_pr_metadata(config, repo, task, int(pr["number"]), labels)
         observation = candidate_pr_observation(repo, int(pr["number"]))
         if observation.get("isDraft"):
             run_gh(["pr", "ready", str(pr["number"]), "--repo", repo])
@@ -651,7 +685,7 @@ def candidate_pr_for_task(
     branch = str(task.get("candidate_branch") or "").strip()
     if not branch or branch == "not_applicable":
         return None
-    found = find_existing_pr(repo, str(task.get("id") or ""), branch)
+    found = find_existing_pr(repo, branch, default_branch(config))
     if not found or not found.get("number"):
         return None
     entry["review_pr"] = {"number": found["number"], "url": found.get("url"), "branch": branch, "state": "open"}
