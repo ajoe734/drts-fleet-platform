@@ -854,6 +854,38 @@ describe("S1F-BANK-002 Statement Artifacts and Role Authorization", () => {
     expect(resSpoofDev.headers.get("set-cookie")).toBeNull();
   });
 
+  it("allows a privileged demo persona only when the explicit Dev login switch is enabled", async () => {
+    const previousEnvironment = process.env.DRTS_ENV;
+    const previousSwitch = process.env.BANK_CONSOLE_DEMO_LOGIN;
+    process.env.DRTS_ENV = "development";
+    process.env.BANK_CONSOLE_DEMO_LOGIN = "true";
+
+    try {
+      const response = await loginUser(
+        new NextRequest("http://localhost:3000/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            bank: "ctbc",
+            locale: "zh",
+            role: "bank_program_admin",
+          }),
+        }),
+      );
+
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe(
+        "http://localhost:3000/?bank=ctbc&locale=zh&role=bank_program_admin",
+      );
+    } finally {
+      if (previousEnvironment === undefined) delete process.env.DRTS_ENV;
+      else process.env.DRTS_ENV = previousEnvironment;
+      if (previousSwitch === undefined)
+        delete process.env.BANK_CONSOLE_DEMO_LOGIN;
+      else process.env.BANK_CONSOLE_DEMO_LOGIN = previousSwitch;
+    }
+  });
+
   it("END-TO-END NEGATIVE TEST: rejects cross-bank body claim in POST /api/auth/login (403 Forbidden)", async () => {
     const reqCrossBank = new NextRequest(
       "http://localhost:3000/api/auth/login",
