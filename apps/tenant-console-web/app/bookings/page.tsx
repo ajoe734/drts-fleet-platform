@@ -422,7 +422,8 @@ function buildBookingCrossAppLinks(
   ) {
     links.push({
       targetApp: "ops-console",
-      route: `/dispatch?bookingId=${encodeURIComponent(booking.bookingId)}`,
+      // Dispatch work belongs to the Ops detail workspace, not its read-only board.
+      route: `/dispatch/${encodeURIComponent(booking.bookingId)}`,
       resourceType: "dispatch_queue_item",
       resourceId: booking.bookingId,
       openMode: "new_tab",
@@ -874,9 +875,9 @@ function renderBookingActionLinks(booking: BookingListRecord, locale: Locale) {
             <Link
               key={action.action}
               href={target}
-              data-drt-operation={
+              data-drt-intent={
                 action.action === "open_ops_dispatch"
-                  ? "tenant-dispatch"
+                  ? "tenant-open-dispatch"
                   : undefined
               }
               style={actionLinkStyle(
@@ -892,9 +893,9 @@ function renderBookingActionLinks(booking: BookingListRecord, locale: Locale) {
           <a
             key={action.action}
             href={buildCrossAppHref(target)}
-            data-drt-operation={
+            data-drt-intent={
               action.action === "open_ops_dispatch"
-                ? "tenant-dispatch"
+                ? "tenant-open-dispatch"
                 : undefined
             }
             style={actionLinkStyle("secondary")}

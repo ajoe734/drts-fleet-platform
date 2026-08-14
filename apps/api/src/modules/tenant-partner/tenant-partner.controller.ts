@@ -9,6 +9,7 @@ import {
   Put,
   Query,
   Req,
+  StreamableFile,
   Optional,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
@@ -136,7 +137,8 @@ export class TenantPartnerController {
     private readonly ownedMobilityService: OwnedMobilityService,
     private readonly jwtAuthService: JwtAuthService,
     @Optional() private readonly identityRepository?: IdentityRepository,
-    @Optional() private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 
   private requireTenantId(tenantId?: string) {
@@ -171,13 +173,28 @@ export class TenantPartnerController {
 
   private requireTenantSessionAdmin(identity: IdentityContext | null) {
     const role = identity?.roles?.map((value) => value.toLowerCase()) ?? [];
-    if (!role.some((value) => ["tenant_admin", "tc_admin", "tenant_integration_mgr", "tc_integration_mgr"].includes(value))) {
-      throw new ApiRequestError(403, "TENANT_SESSION_ADMIN_REQUIRED", "Tenant session administration is required.");
+    if (
+      !role.some((value) =>
+        [
+          "tenant_admin",
+          "tc_admin",
+          "tenant_integration_mgr",
+          "tc_integration_mgr",
+        ].includes(value),
+      )
+    ) {
+      throw new ApiRequestError(
+        403,
+        "TENANT_SESSION_ADMIN_REQUIRED",
+        "Tenant session administration is required.",
+      );
     }
   }
 
   private toTenantSessionInventory(
-    session: Awaited<ReturnType<IdentityRepository["listSessionsByTenant"]>>[number],
+    session: Awaited<
+      ReturnType<IdentityRepository["listSessionsByTenant"]>
+    >[number],
     tenantId: string,
   ): TenantSessionInventoryRecord {
     return {
@@ -616,6 +633,30 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
+  @Get("partner/referral/statements/:period/artifact")
+  @RequireRealms("partner")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getPartnerReferralStatementArtifact(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Param("period") period: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const statement = this.tenantPartnerService.getPartnerReferralStatement(
+      identity,
+      this.billingSettlementService,
+      period,
+      requestId,
+    );
+
+    return new StreamableFile(
+      Buffer.from(this.renderReferralStatementArtifact(statement), "utf8"),
+      {
+        type: "text/csv; charset=utf-8",
+        disposition: `attachment; filename="${statement.artifactRef.artifactId}.csv"`,
+      },
+    );
+  }
+
   @Get("partner/referral/statements/:period")
   @RequireRealms("partner")
   @Throttle(READ_HEAVY_RATE_LIMIT)
@@ -633,6 +674,46 @@ export class TenantPartnerController {
       ),
       requestId,
     );
+  }
+
+  private renderReferralStatementArtifact(statement: ReferralStatementRecord) {
+    const cell = (value: string | number) => {
+      const text = String(value);
+      // Prevent spreadsheet formula interpretation in partner-delivered CSVs.
+      const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
+      return `"${safeText.replaceAll('"', '""')}"`;
+    };
+    const amount = (value: { amountMinor: number; currency: string }) =>
+      `${value.currency} ${(value.amountMinor / 100).toFixed(2)}`;
+
+    const rows = [
+      [
+        "Statement ID",
+        "Period",
+        "Trip ID",
+        "Completed at",
+        "Partner entry",
+        "Fare",
+        "Share rate type",
+        "Share rate value",
+        "Share amount",
+        "Manifest SHA-256",
+      ],
+      ...statement.lines.map((line) => [
+        statement.statementId,
+        statement.period,
+        line.tripId,
+        line.completedAt,
+        line.partnerEntrySlug,
+        amount(line.fare),
+        line.rateType,
+        line.rateValue,
+        amount(line.shareAmount),
+        statement.artifactRef.manifestHash,
+      ]),
+    ];
+
+    return rows.map((row) => row.map(cell).join(",")).join("\r\n");
   }
 
   @Get("platform-admin/partner-entries")
@@ -1447,18 +1528,18 @@ export class TenantPartnerController {
   ) {
     this.requireTenantSessionAdmin(identity);
     const normalizedTenantId = this.requireTenantId(tenantId);
-    return this.identityRepository!
-      .listSessionsByTenant(normalizedTenantId)
-      .then((sessions) =>
-        toApiSuccessEnvelope(
-          toApiListData(
-            sessions.map((session) =>
-              this.toTenantSessionInventory(session, normalizedTenantId),
-            ),
+    return this.identityRepository!.listSessionsByTenant(
+      normalizedTenantId,
+    ).then((sessions) =>
+      toApiSuccessEnvelope(
+        toApiListData(
+          sessions.map((session) =>
+            this.toTenantSessionInventory(session, normalizedTenantId),
           ),
-          requestId,
         ),
-      );
+        requestId,
+      ),
+    );
   }
 
   @Post("tenant/sessions/:sessionId/revoke")
@@ -1477,7 +1558,11 @@ export class TenantPartnerController {
       session.tenantId !== normalizedTenantId ||
       session.realm !== "tenant"
     ) {
-      throw new ApiRequestError(404, "TENANT_SESSION_NOT_FOUND", "Tenant session was not found.");
+      throw new ApiRequestError(
+        404,
+        "TENANT_SESSION_NOT_FOUND",
+        "Tenant session was not found.",
+      );
     }
     const revoked = await this.identityRepository!.revokeSession(
       sessionId,
@@ -1490,7 +1575,7 @@ export class TenantPartnerController {
         actorType:
           identity?.actorType === "driver_user"
             ? "system"
-            : identity?.actorType ?? "system",
+            : (identity?.actorType ?? "system"),
         tenantId: normalizedTenantId,
         moduleName: "tenant-partner",
         actionName: "tenant_session.revoke",
@@ -1504,7 +1589,9 @@ export class TenantPartnerController {
       });
     }
     return toApiSuccessEnvelope(
-      revoked ? this.toTenantSessionInventory(revoked, normalizedTenantId) : null,
+      revoked
+        ? this.toTenantSessionInventory(revoked, normalizedTenantId)
+        : null,
       requestId,
     );
   }

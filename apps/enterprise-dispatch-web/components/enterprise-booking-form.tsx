@@ -437,7 +437,9 @@ export function EnterpriseBookingForm({
         <ECard
           t={t}
           title={
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+            >
               {tr("new.field.airport")}
               <EPill t={t} tone="neutral">
                 {tr("new.airport.optional")}
@@ -567,7 +569,11 @@ export function EnterpriseBookingForm({
           gap: 14,
         }}
       >
-        <ECard t={t} title={tr("new.check.title")} sub={tr("card.sub.helperReads")}>
+        <ECard
+          t={t}
+          title={tr("new.check.title")}
+          sub={tr("card.sub.helperReads")}
+        >
           <ERow
             t={t}
             k={tr("new.field.costCenter")}
@@ -589,16 +595,16 @@ export function EnterpriseBookingForm({
             v={preview.estimatedFareLabel}
             mono
           />
-          <ERow
-            t={t}
-            k={tr("new.check.impact")}
-            v={preview.quotaImpactLabel}
-          />
+          <ERow t={t} k={tr("new.check.impact")} v={preview.quotaImpactLabel} />
           <ERow
             t={t}
             k={tr("new.policy.approval")}
             v={
-              <EPill t={t} tone={preview.approvalRequired ? "warn" : "success"} dot>
+              <EPill
+                t={t}
+                tone={preview.approvalRequired ? "warn" : "success"}
+                dot
+              >
                 {preview.approvalLabel}
               </EPill>
             }
@@ -615,6 +621,7 @@ export function EnterpriseBookingForm({
         </ECard>
         <Link
           href={reviewHref}
+          data-drt-intent="enterprise-review"
           aria-disabled={!canContinue}
           style={entBtnStyle(t, {
             variant: "primary",
@@ -632,7 +639,10 @@ export function EnterpriseBookingForm({
             {tr("new.next.review")}
           </EBtnContent>
         </Link>
-        <Link href="/" style={entBtnStyle(t, { variant: "ghost", block: true })}>
+        <Link
+          href="/"
+          style={entBtnStyle(t, { variant: "ghost", block: true })}
+        >
           <EBtnContent>{tr("new.next.cancel")}</EBtnContent>
         </Link>
       </div>

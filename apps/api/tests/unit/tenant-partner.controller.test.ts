@@ -4,6 +4,7 @@ import { ApiRequestError } from "../../src/common/api-envelope";
 import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import type { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
+import type { ReferralStatementRecord } from "../../src/modules/billing-settlement/referral-statement.types";
 import type { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { TenantPartnerController } from "../../src/modules/tenant-partner/tenant-partner.controller";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
@@ -338,5 +339,65 @@ describe("tenant partner ingress handoff controller", () => {
         "req-referral-handoff-replay",
       ),
     ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_REPLAYED" });
+  });
+
+  it("renders the authorised referral statement as a safe downloadable artifact", async () => {
+    const statement: ReferralStatementRecord = {
+      statementId: "referral-statement-demo-2026-06",
+      partnerEntrySlug: "referral-demo-community",
+      period: "2026-06",
+      periodStart: "2026-06-01T00:00:00.000Z",
+      periodEnd: "2026-06-30T23:59:59.999Z",
+      channelKey: "partner_referral",
+      direction: "drts_pays_partner",
+      currency: "TWD",
+      status: "due",
+      lines: [
+        {
+          tripId: "=formula-not-executed",
+          completedAt: "2026-06-15T10:00:00.000Z",
+          partnerEntrySlug: "referral-demo-community",
+          fare: { amountMinor: 150000, currency: "TWD" },
+          rateType: "percent",
+          rateValue: 15,
+          shareAmount: { amountMinor: 22500, currency: "TWD" },
+        },
+      ],
+      totals: {
+        tripCount: 1,
+        activeRiderCount: 1,
+        gmv: { amountMinor: 150000, currency: "TWD" },
+        shareTotal: { amountMinor: 22500, currency: "TWD" },
+      },
+      artifactRef: {
+        artifactId: "referral-statement-demo-2026-06",
+        kind: "referral_settlement_statement",
+        manifestHash: "manifest-hash-001",
+      },
+      generatedAt: "2026-07-01T00:00:00.000Z",
+    };
+    const tenantPartnerService = {
+      getPartnerReferralStatement: () => statement,
+    } as unknown as TenantPartnerService;
+    const controller = new TenantPartnerController(
+      tenantPartnerService,
+      {} as BillingSettlementService,
+      {} as OwnedMobilityService,
+      new JwtAuthService(),
+    );
+
+    const artifact = controller.getPartnerReferralStatementArtifact(
+      null,
+      statement.period,
+      "req-referral-statement-artifact",
+    );
+    const chunks: Buffer[] = [];
+    for await (const chunk of artifact.getStream()) {
+      chunks.push(Buffer.from(chunk));
+    }
+
+    expect(Buffer.concat(chunks).toString("utf8")).toContain(
+      "'=formula-not-executed",
+    );
   });
 });
