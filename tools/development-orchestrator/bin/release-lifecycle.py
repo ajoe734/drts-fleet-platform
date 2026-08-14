@@ -28,7 +28,9 @@ def load_manifest(path: Path) -> dict:
 
 def release_dirs(releases_dir: Path) -> list[Path]:
     return sorted(
-        (entry for entry in releases_dir.iterdir() if entry.is_dir() and entry.name != "current"),
+        # Pointers such as `current` and `active` resolve as directories, but
+        # are selectors rather than releasable worktrees.
+        (entry for entry in releases_dir.iterdir() if entry.is_dir() and not entry.is_symlink()),
         key=lambda entry: entry.stat().st_mtime,
         reverse=True,
     ) if releases_dir.exists() else []
@@ -47,9 +49,13 @@ def registered_worktree_paths(repo_root: Path) -> set[Path]:
 
 def protected_names(manifest: dict, releases_dir: Path, keep: int) -> set[str]:
     names = {name for name in [manifest.get("active"), *manifest.get("previous", [])] if name}
-    current = releases_dir / "current"
-    if current.is_symlink():
-        names.add(current.resolve().name)
+    # Multiple pointers can coexist during the migration from the legacy
+    # `current` selector. Preserve every pointed-to release, not just the one
+    # named in the mutable manifest.
+    if releases_dir.exists():
+        for pointer in releases_dir.iterdir():
+            if pointer.is_symlink():
+                names.add(pointer.resolve().name)
     names.update(entry.name for entry in release_dirs(releases_dir)[:keep])
     return names
 
@@ -77,12 +83,12 @@ def activate(args: argparse.Namespace) -> int:
         old_active = manifest.get("active")
         previous = [name for name in [old_active, *manifest.get("previous", [])] if name and name != target.name]
         manifest.update({"schema_version": 1, "active": target.name, "previous": previous[:2], "activated_at": now()})
-        current = args.releases_dir / "current"
-        temporary = args.releases_dir / ".current.tmp"
+        pointer = args.releases_dir / args.pointer_name
+        temporary = args.releases_dir / f".{args.pointer_name}.tmp"
         if temporary.exists() or temporary.is_symlink():
             temporary.unlink()
         temporary.symlink_to(target.name)
-        temporary.replace(current)
+        temporary.replace(pointer)
         write_manifest(args.manifest, manifest)
     print(json.dumps(manifest, indent=2, sort_keys=True))
     return 0
@@ -149,6 +155,12 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="delete eligible releases; default is dry-run")
     subparsers = parser.add_subparsers(dest="command", required=True)
     activate_parser = subparsers.add_parser("activate", help="atomically select an existing release")
+    activate_parser.add_argument(
+        "--pointer-name",
+        default="current",
+        choices=("active", "current"),
+        help="release selector to update; `active` is reserved for the live systemd service",
+    )
     activate_parser.add_argument("release")
     subparsers.add_parser("prune", help="list or remove releases no longer protected")
     args = parser.parse_args()

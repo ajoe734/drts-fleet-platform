@@ -54,9 +54,10 @@ class CliPathScriptTests(unittest.TestCase):
         self.assertIn("release-lifecycle.py", installer)
         self.assertIn("10-release-pointer.conf", installer)
         self.assertNotIn("@REPO_ROOT@/tools/development-orchestrator/bin/run-supervisor.sh", service)
-        self.assertIn(".artifacts/releases/current/tools/development-orchestrator/bin/run-supervisor.sh", service)
+        self.assertIn("activate --pointer-name active", installer)
+        self.assertIn(".artifacts/releases/active/tools/development-orchestrator/bin/run-supervisor.sh", service)
         self.assertIn("ExecStart=", pointer)
-        self.assertIn(".artifacts/releases/current/tools/development-orchestrator/bin/run-supervisor.sh", pointer)
+        self.assertIn(".artifacts/releases/active/tools/development-orchestrator/bin/run-supervisor.sh", pointer)
 
 
 if __name__ == "__main__":

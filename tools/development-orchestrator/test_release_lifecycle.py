@@ -23,6 +23,24 @@ class ReleaseLifecycleTests(unittest.TestCase):
             self.assertEqual((root / "releases" / "current").resolve().name, "orchestrator-one")
             self.assertEqual(json.loads((root / "orchestrator-release.json").read_text())["active"], "orchestrator-one")
 
+    def test_active_pointer_is_isolated_from_legacy_current_pointer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            for name in ("orchestrator-current", "orchestrator-active"):
+                (root / "releases" / name).mkdir(parents=True)
+            legacy = self.run_script(root, "activate", "orchestrator-current")
+            active = self.run_script(root, "activate", "--pointer-name", "active", "orchestrator-active")
+            self.assertEqual(legacy.returncode, 0, legacy.stderr)
+            self.assertEqual(active.returncode, 0, active.stderr)
+            self.assertEqual((root / "releases" / "current").resolve().name, "orchestrator-current")
+            self.assertEqual((root / "releases" / "active").resolve().name, "orchestrator-active")
+
+            result = self.run_script(root, "--keep", "1", "prune")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            protected = json.loads(result.stdout)["protected"]
+            self.assertIn("orchestrator-current", protected)
+            self.assertIn("orchestrator-active", protected)
+
     def test_prune_defaults_to_dry_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
