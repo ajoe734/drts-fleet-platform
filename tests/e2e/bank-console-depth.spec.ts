@@ -8,7 +8,6 @@ const managementRoutes = [
   "/bookings",
   "/bookings/ord_ctbc_240611_01",
   "/contracts",
-  "/contracts/ctr_ctbc_world_elite_2026",
   "/statements",
   "/statements/2026-06",
   "/programs",
