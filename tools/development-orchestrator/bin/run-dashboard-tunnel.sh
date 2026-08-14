@@ -6,7 +6,9 @@ cd "$ROOT_DIR"
 
 PORT="${PORT:-4174}"
 LOCAL_HOST="${LOCAL_HOST:-127.0.0.1}"
-BIN_DIR="${CLOUDFLARED_BIN_DIR:-$ROOT_DIR/.orchestrator/bin}"
+# Third-party tools are user-local dependencies, not orchestrator runtime
+# state. Keeping them out of .orchestrator makes state cleanup safe.
+BIN_DIR="${CLOUDFLARED_BIN_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/drts-tools}"
 LOG_DIR="${DASHBOARD_TUNNEL_LOG_DIR:-$ROOT_DIR/.orchestrator/logs}"
 DASHBOARD_LOG="$LOG_DIR/dashboard-${PORT}.log"
 TUNNEL_LOG="$LOG_DIR/dashboard-tunnel.log"
@@ -44,6 +46,15 @@ pick_cloudflared_asset() {
 }
 
 ensure_cloudflared() {
+  if [[ -n "${CLOUDFLARED_BIN:-}" ]]; then
+    if [[ -x "$CLOUDFLARED_BIN" ]]; then
+      printf '%s\n' "$CLOUDFLARED_BIN"
+      return 0
+    fi
+    echo "CLOUDFLARED_BIN is not executable: $CLOUDFLARED_BIN" >&2
+    return 1
+  fi
+
   if command -v cloudflared >/dev/null 2>&1; then
     command -v cloudflared
     return 0
@@ -126,7 +137,7 @@ wait_for_tunnel_url() {
 
 trap cleanup EXIT INT TERM
 
-CLOUDFLARED_BIN="${CLOUDFLARED_BIN:-$(ensure_cloudflared)}"
+CLOUDFLARED_BIN="$(ensure_cloudflared)"
 
 ensure_dashboard
 
