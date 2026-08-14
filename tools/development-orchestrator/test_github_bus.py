@@ -282,6 +282,62 @@ class GitHubBusCommandTests(unittest.TestCase):
 
         write_activity_log.assert_called_once()
 
+    def test_upsert_ops_issue_creates_core_issue_before_optional_labels(self) -> None:
+        config = {
+            "github_bus": {
+                "labels": {"ops": ["pantheon-bus", "pantheon-blocked"]},
+                "templates": {
+                    "ops_issue": "tools/development-orchestrator/templates/github_ops_issue.md"
+                },
+            }
+        }
+        bus_state = {"tasks": {}}
+        task = {
+            "id": "LIN-001",
+            "title": "Blocked lineage task",
+            "status": "blocked",
+            "owner": "Codex",
+            "reviewer": "Claude",
+        }
+
+        def run_gh(args: list[str]) -> subprocess.CompletedProcess[str]:
+            if args[:2] == ["issue", "create"]:
+                return subprocess.CompletedProcess(
+                    ["gh"],
+                    0,
+                    "https://github.com/ajoe734/pantheon/issues/44\n",
+                    "",
+                )
+            raise github_bus.GitHubBusError("label missing")
+
+        with (
+            mock.patch.object(github_bus, "find_existing_issue", return_value=None),
+            mock.patch.object(github_bus, "build_template_body", return_value="body\n"),
+            mock.patch.object(github_bus, "run_gh", side_effect=run_gh) as run_gh_mock,
+            mock.patch.object(github_bus, "write_activity_log") as write_activity_log,
+        ):
+            changed = github_bus.upsert_ops_issue(
+                config,
+                bus_state,
+                "ajoe734/pantheon",
+                task,
+                "blocked",
+                "details",
+            )
+
+        self.assertTrue(changed)
+        self.assertEqual(run_gh_mock.call_count, 2)
+        create_args = run_gh_mock.call_args_list[0].args[0]
+        self.assertNotIn("--label", create_args)
+        self.assertNotIn("--add-label", create_args)
+        metadata_args = run_gh_mock.call_args_list[1].args[0]
+        self.assertIn("--add-label", metadata_args)
+        self.assertEqual(bus_state["tasks"]["LIN-001"]["ops_issue"]["number"], 44)
+        self.assertEqual(
+            [call.args[1]["type"] for call in write_activity_log.call_args_list],
+            ["github_ops_issue_metadata_failed", "github_ops_issue_synced"],
+        )
+
     def test_upsert_review_pr_skips_support_only_task(self) -> None:
         task = {
             "id": "LIN-001-SIDECAR-REVIEW",
