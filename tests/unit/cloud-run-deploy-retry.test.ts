@@ -212,16 +212,52 @@ describe("Cloud Run deploy quota retry", () => {
   });
 
   it("mounts a stable Bank Console session secret in every Dev deploy entrypoint", () => {
-    const workflows = [
-      ".github/workflows/deploy-dev.yml",
-      ".github/workflows/deploy-bank-console.yml",
-      ".github/workflows/deploy-web-app.yml",
-    ];
+    const devWorkflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+    const deploymentBlock = (service: string) => {
+      const start = devWorkflow.indexOf(`- name: Deploy — ${service}`);
+      const end = devWorkflow.indexOf("\n      - name:", start + 1);
 
-    for (const workflowPath of workflows) {
-      const workflow = readFileSync(path.join(repoRoot, workflowPath), "utf8");
-      expect(workflow, workflowPath).toContain("BANK_SESSION_SECRET=");
+      expect(start, `${service} deploy step`).toBeGreaterThan(-1);
+      return devWorkflow.slice(start, end);
+    };
+
+    expect(deploymentBlock("bank-console-web")).toContain(
+      "BANK_SESSION_SECRET=",
+    );
+    expect(devWorkflow.match(/BANK_SESSION_SECRET=/g)).toHaveLength(1);
+    expect(devWorkflow).not.toContain("DRTS_PARTNER_SESSION_SECRET=");
+
+    for (const service of [
+      "platform-admin-web",
+      "ops-console-web",
+      "fleet-partner-portal-web",
+      "tenant-console-web",
+      "referral-embed-web",
+      "enterprise-dispatch-web",
+      "channel-partner-portal-web",
+    ]) {
+      expect(deploymentBlock(service), service).not.toContain(
+        "BANK_SESSION_SECRET=",
+      );
     }
+
+    const bankWorkflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-bank-console.yml"),
+      "utf8",
+    );
+    expect(bankWorkflow).toContain("BANK_SESSION_SECRET=");
+
+    const genericWorkflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-web-app.yml"),
+      "utf8",
+    );
+    expect(genericWorkflow).toContain(
+      'inputs.app_dir }}" == "apps/bank-console-web"',
+    );
+    expect(genericWorkflow).toContain("BANK_SESSION_SECRET=");
   });
 
   it("keeps every dev web revision usable within the low-quota profile", () => {
