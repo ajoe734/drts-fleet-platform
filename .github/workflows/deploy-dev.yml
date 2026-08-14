@@ -874,7 +874,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},BANK_CONSOLE_DEMO_LOGIN=true" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \

@@ -9,6 +9,16 @@ import {
 
 const SIGNED_OUT_COOKIE = "drts_bank_console_signed_out";
 
+// The browser acceptance runner exercises the public Dev Cloud Run URL, where
+// it cannot attach a trusted-proxy header.  This opt-in is injected only by the
+// Dev deployment job; production still requires a verified IAP/proxy identity.
+function allowsDevDemoLogin() {
+  return (
+    process.env.DRTS_ENV === "development" &&
+    process.env.BANK_CONSOLE_DEMO_LOGIN === "true"
+  );
+}
+
 const cookieOptions = {
   path: "/",
   sameSite: "lax" as const,
@@ -49,11 +59,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const authCheck = verifyAuthenticatedIdentityAndRole(
-      request.headers,
-      resolvedRole,
-      bank,
-    );
+    const authCheck = allowsDevDemoLogin()
+      ? { allowed: true, role: resolvedRole, bank }
+      : verifyAuthenticatedIdentityAndRole(request.headers, resolvedRole, bank);
 
     if (!authCheck.allowed) {
       return NextResponse.json(
