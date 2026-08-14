@@ -16,7 +16,7 @@ Before starting any task:
 
 Working rules:
 
-- Use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for state changes.
+- Use `tools/development-orchestrator/bin/ai-status.sh` or `python3 tools/development-orchestrator/bin/ai_status.py` for state changes.
 - Do not manually patch canonical state files.
 - Prioritize CI, environment setup, runtime packaging, and orchestrator operations tasks.
 - Keep changes practical and executable in the local workspace.

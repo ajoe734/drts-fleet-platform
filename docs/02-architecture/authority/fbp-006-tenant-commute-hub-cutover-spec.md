@@ -77,7 +77,7 @@ Operational addendum on `2026-04-29`:
 
 - `OPX-GV-001` adds a formal contract-sync lifecycle, a compatibility-note
   requirement for breaking consumer changes, and a core-owned smoke command
-  (`scripts/tenant-hub-contract-sync-smoke.sh`) so the fallback snapshot stays
+  (`tools/ci/tenant-hub-contract-sync-smoke.sh`) so the fallback snapshot stays
   governed instead of becoming an unmanaged second truth
 
 Stage 1.5 identity-hardening addendum on `2026-08-01` (superseding the

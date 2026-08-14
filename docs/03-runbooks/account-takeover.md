@@ -13,6 +13,7 @@ Security Classification: `Confidential - Internal Security Operations`
 This runbook specifies the mandatory procedures for identifying, containing, investigating, preserving evidence for, recovering from, and post-analyzing **Account Takeover (ATO)** incidents within the `drts-fleet-platform`.
 
 ### Core Operational Principles
+
 1. **Durable Session Revocation SLA (< 60 Seconds)**: Upon detection or confirmation of account compromise, all active sessions (`sid`), refresh token families, and cached tokens belonging to the target principal MUST be revoked within 60 seconds across all nodes.
 2. **Fail-Closed Account Containment**: Suspended accounts (`status="suspended"`) MUST fail closed immediately on all API gateways, BFFs, and microservices. No fallback to unauthenticated or invited states is permitted.
 3. **Immutable Evidence & Legal Hold Integrity**: Audit evidence MUST be preserved in append-only storage before account recovery begins. Evidence collection must never alter operational state without recording the actor, timestamp, reason, and cryptographic checksum.
@@ -22,13 +23,13 @@ This runbook specifies the mandatory procedures for identifying, containing, inv
 
 ## 2. Roles, Ownership & Contact Matrix
 
-| Role | Responsible Party | Responsibilities |
-| :--- | :--- | :--- |
-| **Incident Commander (IC)** | Security Lead / On-Call Lead | Overall incident command, escalation, regulatory reporting authorization, incident closure sign-off. |
-| **Security Ops Handler** | SecOps On-Call Engineer | Executes identification queries, containment scripts, blast radius analysis, and session revocation. |
-| **Platform / SRE Ops** | SRE Lead / Platform Engineer | Infrastructure isolation, key rotation assistance, database audit snapshotting, gateway configuration. |
-| **Tenant / Ops Specialist** | Tenant Support / Fleet Ops | Customer communication, driver account status confirmation, non-technical verification. |
-| **Legal & Compliance Officer** | Data Protection Officer (DPO) | Legal hold approval, data breach notification assessment (GDPR / PDPA / local privacy laws). |
+| Role                           | Responsible Party             | Responsibilities                                                                                       |
+| :----------------------------- | :---------------------------- | :----------------------------------------------------------------------------------------------------- |
+| **Incident Commander (IC)**    | Security Lead / On-Call Lead  | Overall incident command, escalation, regulatory reporting authorization, incident closure sign-off.   |
+| **Security Ops Handler**       | SecOps On-Call Engineer       | Executes identification queries, containment scripts, blast radius analysis, and session revocation.   |
+| **Platform / SRE Ops**         | SRE Lead / Platform Engineer  | Infrastructure isolation, key rotation assistance, database audit snapshotting, gateway configuration. |
+| **Tenant / Ops Specialist**    | Tenant Support / Fleet Ops    | Customer communication, driver account status confirmation, non-technical verification.                |
+| **Legal & Compliance Officer** | Data Protection Officer (DPO) | Legal hold approval, data breach notification assessment (GDPR / PDPA / local privacy laws).           |
 
 ---
 
@@ -36,14 +37,14 @@ This runbook specifies the mandatory procedures for identifying, containing, inv
 
 An Account Takeover incident is suspected or confirmed when any of the following telemetry signals trigger:
 
-| Alert Signal / Trigger | Severity | Primary Detection Surface | Initial Triage Action |
-| :--- | :--- | :--- | :--- |
-| `IAMRefreshTokenReuseDetected` | `P1 Critical` | `drts_iam_refresh_token_reuse_total` | Immediate revocation of session family; inspect source IP/UA hash. |
-| `IAMCrossTenantAbuseSpike` | `P2 High` | `drts_iam_cross_tenant_attempts_total` | Isolate offending session; verify zero tenant data leaked. |
-| `IAMUnapprovedPrivilegedChange` | `P2 High` | `drts_iam_privileged_changes_total` | Immediately revert unapproved role grant / suspend modified account. |
-| **Concurrent Geographic Impossible Travel** | `P2 High` | `admin.security_events` (GeoIP mismatch) | Verify actor location; prompt step-up MFA or trigger soft lockout. |
-| **High-Volume Failed Login / MFA Failure** | `P3 Warning` | `drts_iam_auth_abuse_total` | Apply IP prefix throttling; check anti-enumeration guards. |
-| **User/Helpdesk Compromise Escalation** | `P2 High` | Support Ticket / Phone Escalation | Validate reporter identity; initiate manual containment workflow. |
+| Alert Signal / Trigger                      | Severity      | Primary Detection Surface                | Initial Triage Action                                                |
+| :------------------------------------------ | :------------ | :--------------------------------------- | :------------------------------------------------------------------- |
+| `IAMRefreshTokenReuseDetected`              | `P1 Critical` | `drts_iam_refresh_token_reuse_total`     | Immediate revocation of session family; inspect source IP/UA hash.   |
+| `IAMCrossTenantAbuseSpike`                  | `P2 High`     | `drts_iam_cross_tenant_attempts_total`   | Isolate offending session; verify zero tenant data leaked.           |
+| `IAMUnapprovedPrivilegedChange`             | `P2 High`     | `drts_iam_privileged_changes_total`      | Immediately revert unapproved role grant / suspend modified account. |
+| **Concurrent Geographic Impossible Travel** | `P2 High`     | `admin.security_events` (GeoIP mismatch) | Verify actor location; prompt step-up MFA or trigger soft lockout.   |
+| **High-Volume Failed Login / MFA Failure**  | `P3 Warning`  | `drts_iam_auth_abuse_total`              | Apply IP prefix throttling; check anti-enumeration guards.           |
+| **User/Helpdesk Compromise Escalation**     | `P2 High`     | Support Ticket / Phone Escalation        | Validate reporter identity; initiate manual containment workflow.    |
 
 ---
 
@@ -74,7 +75,7 @@ pnpm --filter api exec ts-node -e '
 '
 
 # 2. Automated incident response drill / query CLI
-python3 scripts/iam-incident-response-drill.py account-takeover \
+python3 operations/security/iam-incident-response-drill.py account-takeover \
   --principal-id "usr_tenant_admin_001" \
   --mode query
 ```
@@ -93,7 +94,7 @@ curl -X POST "https://api.staging.drts.internal/api/auth/sessions/logout-all" \
   -d '{"reason": "ATO incident containment - remote logout-all"}'
 
 # Command B: CLI Script Revocation (Direct Repository Emergency Containment)
-python3 scripts/iam-incident-response-drill.py account-takeover \
+python3 operations/security/iam-incident-response-drill.py account-takeover \
   --principal-id "usr_tenant_admin_001" \
   --mode contain
 ```
@@ -134,17 +135,18 @@ Inspect all actions taken by the compromised account during the compromise windo
 
 ```sql
 -- PostgreSQL Query: Forensic investigation on admin.security_events
-SELECT 
-  event_id, event_type, actor_id, realm, tenant_id, 
-  ip_address_hash, user_agent_hash, request_id, 
-  created_at, payload_summary 
-FROM iam.security_events 
+SELECT
+  event_id, event_type, actor_id, realm, tenant_id,
+  ip_address_hash, user_agent_hash, request_id,
+  created_at, payload_summary
+FROM iam.security_events
 WHERE actor_id = 'usr_tenant_admin_001'
   AND created_at >= NOW() - INTERVAL '24 hours'
 ORDER BY created_at ASC;
 ```
 
 **Blast Radius Checklist**:
+
 - [ ] Were any new user accounts invited or created?
 - [ ] Were any role bindings or scopes escalated (`identity:roles:assign`)?
 - [ ] Were any tenant API keys or webhook secrets issued or rotated?
@@ -159,7 +161,7 @@ Preserve all forensic evidence into tamper-evident, append-only sidecar storage 
 
 ```bash
 # 1. Execute Evidence Preservation Packaging
-python3 scripts/iam-incident-response-drill.py account-takeover \
+python3 operations/security/iam-incident-response-drill.py account-takeover \
   --principal-id "usr_tenant_admin_001" \
   --mode preserve-evidence \
   --output-dir "support/sidecars/IAM-IR-001/"
@@ -169,6 +171,7 @@ sha256sum support/sidecars/IAM-IR-001/evidence_preservation_manifest.json
 ```
 
 **Legal Hold Policy**:
+
 - Preserved audit records MUST NOT be deleted or purged before the mandatory retention period (2,555 days / 7 years).
 - Raw session records and security event snapshots MUST be stored in `support/sidecars/IAM-IR-001/` with cryptographic signature verification.
 
@@ -180,7 +183,7 @@ If the attacker gained access to signing keys, secret tokens, or private workloa
 
 ```bash
 # Rotate Auth Signing Key Ring
-python3 scripts/rotate-auth-keys.py rotate --new-kid "key-2026-ir-v1" --alg RS256
+python3 operations/security/rotate-auth-keys.py rotate --new-kid "key-2026-ir-v1" --alg RS256
 ```
 
 ---
@@ -228,13 +231,14 @@ graph LR
 To execute a full technical drill for Account Takeover response in staging:
 
 ```bash
-# Run automated ATO response drill script (directly invokes scripts/rotate-auth-keys.py & probes staging endpoints)
-python3 scripts/iam-incident-response-drill.py run-ato-drill
+# Run automated ATO response drill script (directly invokes operations/security/rotate-auth-keys.py & probes staging endpoints)
+python3 operations/security/iam-incident-response-drill.py run-ato-drill
 ```
 
 The script automatically executes and verifies:
+
 1. Active session inventory lookup & snapshotting.
-2. Remote session revocation & key ring emergency rotation using `scripts/rotate-auth-keys.py` (< 60s SLA validation).
+2. Remote session revocation & key ring emergency rotation using `operations/security/rotate-auth-keys.py` (< 60s SLA validation).
 3. Account suspension & API gate fail-closed state enforcement.
 4. Blast radius audit query on `iam.security_events`.
 5. Forensic evidence packaging with on-disk byte-level SHA-256 manifest verification.
@@ -248,18 +252,18 @@ Evidence report and verified logs are stored under `support/sidecars/IAM-IR-001/
 
 ### Measured Response SLAs
 
-| Metric / Action | Targeted SLA | Staging Drill & Tool Execution SLA | Compliance Status |
-| :--- | :--- | :--- | :--- |
-| **Session Revocation & Key Rotation (`rotate-auth-keys.py`)** | `< 60 seconds` | `0.7970 seconds` | PASS |
-| **Account Suspension Propagation** | `< 5 minutes` | `0.12 seconds` | PASS |
-| **Key Ring Emergency Rotation Subprocess** | `< 15 minutes` | `0.58 seconds` | PASS |
-| **Blast Radius Audit Query** | `< 10 minutes` | `2.15 seconds` | PASS |
-| **Legal Hold Evidence Preservation Manifest (SHA-256)**| `< 30 minutes` | `0.85 seconds` | PASS |
+| Metric / Action                                               | Targeted SLA   | Staging Drill & Tool Execution SLA | Compliance Status |
+| :------------------------------------------------------------ | :------------- | :--------------------------------- | :---------------- |
+| **Session Revocation & Key Rotation (`rotate-auth-keys.py`)** | `< 60 seconds` | `0.7970 seconds`                   | PASS              |
+| **Account Suspension Propagation**                            | `< 5 minutes`  | `0.12 seconds`                     | PASS              |
+| **Key Ring Emergency Rotation Subprocess**                    | `< 15 minutes` | `0.58 seconds`                     | PASS              |
+| **Blast Radius Audit Query**                                  | `< 10 minutes` | `2.15 seconds`                     | PASS              |
+| **Legal Hold Evidence Preservation Manifest (SHA-256)**       | `< 30 minutes` | `0.85 seconds`                     | PASS              |
 
 ### Residual Risk Register
 
-| Risk ID | Residual Risk Description | Impact | Mitigation / Guardrail |
-| :--- | :--- | :--- | :--- |
-| `RR-ATO-001` | **Offline Mobile App Cached Tokens**: Driver mobile app may retain local trip state before sync after remote session revocation. | Low | Offline trips are cryptographically queued and validated against server session state upon re-connection. Invalid session rejects sync. |
-| `RR-ATO-002` | **IdP Propagation Delay**: Managed OIDC provider group revocation may lag up to 5 minutes. | Medium | DRTS authoritative session check validates local `tokenVersion` and `identity_sessions` state on every request, neutralizing IdP lag. |
-| `RR-ATO-003` | **Cached JWT Public Key**: Gateways caching public key ring for up to 60 seconds. | Low | Emergency key retirement (`retired`) via `rotate-auth-keys.py` forces immediate cache invalidation across gateways. |
+| Risk ID      | Residual Risk Description                                                                                                        | Impact | Mitigation / Guardrail                                                                                                                  |
+| :----------- | :------------------------------------------------------------------------------------------------------------------------------- | :----- | :-------------------------------------------------------------------------------------------------------------------------------------- |
+| `RR-ATO-001` | **Offline Mobile App Cached Tokens**: Driver mobile app may retain local trip state before sync after remote session revocation. | Low    | Offline trips are cryptographically queued and validated against server session state upon re-connection. Invalid session rejects sync. |
+| `RR-ATO-002` | **IdP Propagation Delay**: Managed OIDC provider group revocation may lag up to 5 minutes.                                       | Medium | DRTS authoritative session check validates local `tokenVersion` and `identity_sessions` state on every request, neutralizing IdP lag.   |
+| `RR-ATO-003` | **Cached JWT Public Key**: Gateways caching public key ring for up to 60 seconds.                                                | Low    | Emergency key retirement (`retired`) via `rotate-auth-keys.py` forces immediate cache invalidation across gateways.                     |

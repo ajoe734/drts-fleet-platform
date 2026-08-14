@@ -1,0 +1,17 @@
+[Unit]
+Description=DRTS orchestrator health probe (one-shot)
+Documentation=file:@REPO_ROOT@/tools/development-orchestrator/systemd/README-velocity-health.md
+# Driven by the companion .timer. Running standalone (`systemctl --user
+# start drts-health.service`) is the recommended way to take a manual
+# snapshot — exit code propagates to systemctl status.
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO_ROOT@
+ExecStart=@REPO_ROOT@/tools/development-orchestrator/bin/health.sh --quiet
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=drts-health
+
+NoNewPrivileges=true

@@ -23,14 +23,14 @@ A bank (card issuer, e.g. 中信銀行 / CTBC) offers its cardholders a benefit:
 
 ### 1.1 The four surfaces
 
-| # | Surface | Audience | Repo home | Status |
-|---|---|---|---|---|
-| S1 | Cardholder booking website | 卡友 (external consumer) | `apps/partner-booking-web` `card` program | **[built]** flow, **[gap]** not deployed |
-| S2 | Online-banking app embedded booking | 卡友 inside the bank's app (webview/SDK) | new embed of S1 / host-resolved entry | **[gap]** |
-| S3 | Bank / issuer back-office console | 銀行內部人員 | **`apps/bank-console-web` (NEW app)** — bank is an issuer *tenant* in data only | **[new]** |
-| S4 | Dispatch / fulfilment / settlement | DRTS ops + platform | `apps/ops-console-web`, `billing-settlement` | **[built]** mostly |
+| #   | Surface                             | Audience                                 | Repo home                                                                       | Status                                   |
+| --- | ----------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------- |
+| S1  | Cardholder booking website          | 卡友 (external consumer)                 | `apps/partner-booking-web` `card` program                                       | **[built]** flow, **[gap]** not deployed |
+| S2  | Online-banking app embedded booking | 卡友 inside the bank's app (webview/SDK) | new embed of S1 / host-resolved entry                                           | **[gap]**                                |
+| S3  | Bank / issuer back-office console   | 銀行內部人員                             | **`apps/bank-console-web` (NEW app)** — bank is an issuer _tenant_ in data only | **[new]**                                |
+| S4  | Dispatch / fulfilment / settlement  | DRTS ops + platform                      | `apps/ops-console-web`, `billing-settlement`                                    | **[built]** mostly                       |
 
-> **S3 is a SEPARATE new app, not `tenant-console-web`** (decision revised 2026-06-10 — see SD §1 D1). `tenant-console-web` is the *corporate-commute* tenant back-office (programType `enterprise_dispatch`); `SD-DP-20260508-004` forbids non-corporate flows from reusing it. The bank rides the same issuer-tenant data/billing plane but gets its own card-benefit UI. Adding this app requires cross-app adjustments in Platform Admin / Ops / Fleet Partner / contracts / deploy — see SD §6.5.
+> **S3 is a SEPARATE new app, not `tenant-console-web`** (decision revised 2026-06-10 — see SD §1 D1). `tenant-console-web` is the _corporate-commute_ tenant back-office (programType `enterprise_dispatch`); `SD-DP-20260508-004` forbids non-corporate flows from reusing it. The bank rides the same issuer-tenant data/billing plane but gets its own card-benefit UI. Adding this app requires cross-app adjustments in Platform Admin / Ops / Fleet Partner / contracts / deploy — see SD §6.5.
 
 ### 1.2 Out of scope
 
@@ -40,14 +40,14 @@ A bank (card issuer, e.g. 中信銀行 / CTBC) offers its cardholders a benefit:
 
 ## 2. Personas
 
-| Code | Persona | Surface | Goal |
-|---|---|---|---|
-| `cardholder` | 卡友（持卡人） | S1, S2 | Book a benefit airport transfer; see quota left; track the ride; get a receipt |
-| `bank_program_admin` | 銀行方案管理員 | S3 | Configure the program, see usage, manage eligibility policy |
-| `bank_ops_viewer` | 銀行客服/營運 | S3 | Look up which cardholder booked, dispatch + completion status, contract posture |
-| `bank_finance` | 銀行財務 | S3 | Pull the periodic settlement statement; reconcile and settle with DRTS |
-| `drts_dispatcher` | DRTS 派遣 | S4 | Dispatch/assign/redispatch the airport ride |
-| `drts_settlement` | DRTS 結算 | S4 | Close settlement; produce sponsor reconciliation + reimbursement batches |
+| Code                 | Persona        | Surface | Goal                                                                            |
+| -------------------- | -------------- | ------- | ------------------------------------------------------------------------------- |
+| `cardholder`         | 卡友（持卡人） | S1, S2  | Book a benefit airport transfer; see quota left; track the ride; get a receipt  |
+| `bank_program_admin` | 銀行方案管理員 | S3      | Configure the program, see usage, manage eligibility policy                     |
+| `bank_ops_viewer`    | 銀行客服/營運  | S3      | Look up which cardholder booked, dispatch + completion status, contract posture |
+| `bank_finance`       | 銀行財務       | S3      | Pull the periodic settlement statement; reconcile and settle with DRTS          |
+| `drts_dispatcher`    | DRTS 派遣      | S4      | Dispatch/assign/redispatch the airport ride                                     |
+| `drts_settlement`    | DRTS 結算      | S4      | Close settlement; produce sponsor reconciliation + reimbursement batches        |
 
 ## 3. Functional requirements
 
@@ -104,7 +104,7 @@ A bank (card issuer, e.g. 中信銀行 / CTBC) offers its cardholders a benefit:
 2. A `bank_ops_viewer` looks up that cardholder's booking and sees dispatch + completion + contract posture, read-only. **[S3]**
 3. A `bank_finance` pulls the period statement, sees the trip itemised with benefit reference + subsidised/paid split, and downloads the signed artifact. **[S3]**
 4. Settlement closes: driver payout whole, sponsor (issuer) reconciliation produced with benefit references intact. **[S4]**
-5. `python3 scripts/check_ui_realm_tokens.py` passes for every touched web app; all new copy is bilingual via `t()`.
+5. `python3 tools/ci/check_ui_realm_tokens.py` passes for every touched web app; all new copy is bilingual via `t()`.
 
 ## 6. Open product questions
 

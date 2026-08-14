@@ -31,7 +31,7 @@ ENV DRTS_CANDIDATE_SHA=$DRTS_CANDIDATE_SHA
 ARG NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE
 ENV NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE=$NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE
 COPY apps/ops-console-web/ apps/ops-console-web/
-COPY scripts/control-plane-web-proxy.mjs scripts/
+COPY runtime/web/control-plane-web-proxy.mjs runtime/web/
 COPY tsconfig.base.json .
 
 RUN pnpm --filter @drts/contracts build && \
@@ -48,7 +48,7 @@ WORKDIR /app
 COPY --from=build /workspace/apps/ops-console-web/.next/standalone ./
 COPY --from=build /workspace/apps/ops-console-web/.next/static ./apps/ops-console-web/.next/static
 COPY --from=build /workspace/apps/ops-console-web/public ./apps/ops-console-web/public
-COPY --from=build /workspace/scripts/control-plane-web-proxy.mjs ./scripts/control-plane-web-proxy.mjs
+COPY --from=build /workspace/runtime/web/control-plane-web-proxy.mjs ./runtime/web/control-plane-web-proxy.mjs
 
 EXPOSE 3003
-CMD ["node", "scripts/control-plane-web-proxy.mjs", "apps/ops-console-web/server.js", "3103"]
+CMD ["node", "runtime/web/control-plane-web-proxy.mjs", "apps/ops-console-web/server.js", "3103"]

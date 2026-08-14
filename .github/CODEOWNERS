@@ -41,7 +41,7 @@ docs/ops/branch-strategy.md                             @ajoe734
 docs/ops/orchestrator-integration-guide.md              @ajoe734
 scripts/branch-strategy/                                @ajoe734
 .orchestrator/branch_routing.py                         @ajoe734
-.orchestrator/supervisor.py                             @ajoe734
-.orchestrator/provider_permissions.py                   @ajoe734
+tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py                             @ajoe734
+tools/development-orchestrator/provider_permissions.py                   @ajoe734
 .orchestrator/config.json                               @ajoe734
 infra/                                                  @ajoe734

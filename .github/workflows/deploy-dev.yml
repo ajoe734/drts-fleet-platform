@@ -768,7 +768,7 @@ jobs:
           echo "::add-mask::${GOOGLE_MAPS_GEOCODING_API_KEY}"
           echo "::add-mask::${GOOGLE_MAPS_ROUTES_API_KEY}"
           echo "::add-mask::${GOOGLE_MAPS_BROWSER_KEY}"
-          node scripts/verify-google-map-provider-live.mjs
+          node operations/verification/verify-google-map-provider-live.mjs
 
       - name: Build API env vars
         id: api_env
@@ -798,7 +798,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/api:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3001 \
@@ -846,7 +846,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/platform-admin-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.platform_admin_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.platform_admin_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3002 \
@@ -867,7 +867,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/ops-console-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.ops_console_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.ops_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3003 \
@@ -888,7 +888,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3007 \
@@ -909,7 +909,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/tenant-console-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.tenant_console_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.tenant_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3004 \
@@ -930,7 +930,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/bank-console-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.bank_console_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.bank_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3008 \
@@ -951,7 +951,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/referral-embed-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.referral_embed_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.referral_embed_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3014 \
@@ -972,7 +972,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3010 \
@@ -993,7 +993,7 @@ jobs:
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:${{ needs.build-push.outputs.image_tag }}"
 
-          scripts/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
             --port 3013 \
@@ -1036,7 +1036,7 @@ jobs:
 
       - name: Remove paused Partner Booking Cloud Run service
         run: |
-          ./scripts/cleanup-paused-partner-booking-service.sh \
+          ./operations/deployment/cleanup-paused-partner-booking-service.sh \
             "${{ needs.prepare.outputs.project_id }}" \
             "${{ needs.prepare.outputs.region }}"
 
@@ -1368,7 +1368,7 @@ jobs:
         env:
           RETIRED_SERVICE_CLEANUP: ${{ inputs.retired_service_cleanup || 'none' }}
         run: |
-          ./scripts/cleanup-retired-dev-service.sh \
+          ./operations/deployment/cleanup-retired-dev-service.sh \
             "${RETIRED_SERVICE_CLEANUP}" \
             "${{ needs.prepare.outputs.project_id }}" \
             "${{ needs.prepare.outputs.region }}"
@@ -1412,7 +1412,7 @@ jobs:
           export DRTS_DEV_PARTNER_BOOKING_BASE_URL="https://drts-dev-partner-booking-web-${cloud_run_suffix}"
           export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"
           export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"
-          scripts/run-operational-browser-acceptance.sh \
+          operations/verification/run-operational-browser-acceptance.sh \
             --sha "${{ needs.build-push.outputs.candidate_sha }}"
       - name: Upload operational evidence
         if: always()

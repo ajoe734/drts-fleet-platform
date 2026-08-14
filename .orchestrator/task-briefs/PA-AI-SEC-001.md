@@ -29,10 +29,10 @@ Owner closeout complete. Reviewed commit 94bc2704 remains accepted; added metada
 - `apps/api/src/modules/platform-admin-assistant/platform-admin-assistant.redaction.ts`
 - `apps/api/src/modules/platform-admin-assistant/`
 - `apps/api/src/common/llm-gateway/`
-- `.orchestrator/permission_broker.py`
+- `tools/development-orchestrator/permission_broker.py`
 - `.orchestrator/worker_tree_guard.py`
 
 ## Guardrails
 
-- Use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for state changes.
+- Use `tools/development-orchestrator/bin/ai-status.sh` or `python3 tools/development-orchestrator/bin/ai_status.py` for state changes.
 - Treat `current-work.md` as a human summary, not canonical machine context.

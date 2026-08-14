@@ -16,7 +16,7 @@ acceptance` successfully before this record may be completed.
 
 The workflow materializes
 `tests/e2e/fixtures/candidate-journey-manifest.json` with the full checked-out
-SHA, then `scripts/run-operational-browser-acceptance.sh` executes browser and
+SHA, then `operations/verification/run-operational-browser-acceptance.sh` executes browser and
 HTTP assertions against the deployed URLs. Every active API/BFF surface must
 return that SHA in `x-drts-candidate-sha`; Partner Booking, Concierge, and the
 retired Passenger service must return `404`.

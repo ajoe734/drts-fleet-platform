@@ -50,7 +50,7 @@ external platform badge
 - `03_cross_team_handoff_matrix_20260720.md`
 - `source_manifest.json`
 
-三份原稿均為完整 UTF-8，具有 SHA-256；由 `scripts/check_spec_source_archive.py` 檢查。
+三份原稿均為完整 UTF-8，具有 SHA-256；由 `tools/ci/check_spec_source_archive.py` 檢查。
 
 ### 2. Derived navigation
 

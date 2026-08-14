@@ -81,7 +81,7 @@ describe("dev active surface contract", () => {
       'DEV_PAUSED_PARTNER_BOOKING_SERVICE: "drts-dev-partner-booking-web"',
     );
     expect(source).toContain(
-      "./scripts/cleanup-paused-partner-booking-service.sh",
+      "./operations/deployment/cleanup-paused-partner-booking-service.sh",
     );
     expect(source).not.toContain("DEV_GCP_PARTNER_BOOKING_SERVICE");
     expect(source).not.toContain("Deploy — partner-booking-web");
@@ -111,7 +111,9 @@ describe("dev active surface contract", () => {
 
   it("keeps domain mapping defaults and fail-closed wording aligned", () => {
     const source = readRepoFile(".github/workflows/domain-mappings-dev.yml");
-    const helperSource = readRepoFile("scripts/map-domain-service.sh");
+    const helperSource = readRepoFile(
+      "operations/deployment/map-domain-service.sh",
+    );
 
     expectServiceDefaults(source, {
       api: "DEV_GCP_API_SERVICE",
@@ -126,7 +128,7 @@ describe("dev active surface contract", () => {
     });
 
     expect(source).toContain("uses: actions/checkout@v4");
-    expect(source).toContain("./scripts/map-domain-service.sh");
+    expect(source).toContain("./operations/deployment/map-domain-service.sh");
     expect(helperSource).toContain(
       "fail closed and hand off to the single deploy cleanup task.",
     );
@@ -139,7 +141,7 @@ describe("dev active surface contract", () => {
     expect(source).not.toContain("ride.smarttransport.tw");
     expect(source).toContain('DEV_PARTNER_BOOKING_STATE: "paused"');
     expect(source).not.toContain(
-      "./scripts/map-domain-service.sh book.smarttransport.tw",
+      "./operations/deployment/map-domain-service.sh book.smarttransport.tw",
     );
     expect(source).not.toContain("DEV_GCP_PARTNER_BOOKING_SERVICE");
   });
@@ -187,7 +189,7 @@ describe("dev active surface contract", () => {
     expect(runbook).toContain("us-central1");
     expect(runbook).toContain("Partner Booking — PAUSED");
     expect(runbook).not.toContain(
-      "./scripts/map-domain-service.sh book.smarttransport.tw",
+      "./operations/deployment/map-domain-service.sh book.smarttransport.tw",
     );
     expect(runbook).not.toContain("drts-referral-embed-web");
   });

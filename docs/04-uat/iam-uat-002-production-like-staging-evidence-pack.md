@@ -48,7 +48,7 @@ Execution Summary (`2026-08-13T10:06:26Z`):
 - **Step 2: Core Auth & Policy Unit Suite**: `tests/unit/auth-oidc-pkce.test.ts`, `tests/unit/break-glass.service.test.ts`, `tests/unit/driver-device-session.test.ts`, `tests/unit/internal-key-exception-registry.test.ts`, `tests/unit/step-up-iap-path.test.ts`, `tests/unit/step-up-policy-catalog.test.ts` (59/59 passed in 2.00s)
 - **Step 3: Staging Integration & Governance Suite**: `tests/integration/iap-subject-adapter.integration.test.ts`, `tests/integ/oidc-pkce-bff.test.ts`, `tests/integ/tenant-governance-negative.test.ts`, `tests/integration/iam-rbac-002-privileged-role-governance.integration.test.ts`, `tests/integration/driver-device-session.integration.test.ts`, `tests/integration/access-review.integration.test.ts`, `tests/integration/iam-observability-alerts.integration.test.ts` (97 passed, 2 skipped, 99 total in 3.15s; 2 skipped tests in `iam-rbac-002-privileged-role-governance.integration.test.ts` under section 11 require a live PostgreSQL `DATABASE_URL`)
 - **Step 4: Partner Credentials & Workload Identity Suite**: `tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts`, `tests/integration/service-workload-identity.integration.test.ts` (25/25 passed in 9.69s)
-- **Step 5: Internal Key Exceptions & Incident Response Drills**: `scripts/verify-internal-key-exceptions.py` (Passed: `INTERNAL_KEY_EXCP_001`, `002`, `003` active), `scripts/iam-incident-response-drill.py run-all-drills` (ATO session revocation SLA: 0.8253s [<60s]; Credential compromise SLA: 0.6690s [<60s])
+- **Step 5: Internal Key Exceptions & Incident Response Drills**: `operations/security/verify-internal-key-exceptions.py` (Passed: `INTERNAL_KEY_EXCP_001`, `002`, `003` active), `operations/security/iam-incident-response-drill.py run-all-drills` (ATO session revocation SLA: 0.8253s [<60s]; Credential compromise SLA: 0.6690s [<60s])
 - **Step 6: Security Negative Matrix & Secret Leakage Audits**: `tests/security/iam-auth-negative-matrix.test.ts`, `tests/security/iam-credential-expiry.test.ts`, `tests/security/iam-route-inventory.test.ts`, `tests/security/iam-browser-storage-and-secret-leakage.test.ts` (9/9 passed in 4.25s)
 
 Total Execution Outcome: **6/6 Steps Passed (100% Pass Rate)**
@@ -128,7 +128,7 @@ Total Execution Outcome: **6/6 Steps Passed (100% Pass Rate)**
 
 - **Objective**: Exercise GCP WIF identity exchange, unregistered key drift rejection, Account Takeover (ATO) drill, Credential Compromise drill, and Audit Pipeline Fail-Closed mechanisms.
 - **Verified Services**: `ServiceWorkloadIdentityAdapter`, `INTERNAL_KEY_EXCEPTION_REGISTRY`, `IamObservabilityService`
-- **Executed Tests**: `apps/api/tests/integration/service-workload-identity.integration.test.ts`, `tests/unit/internal-key-exception-registry.test.ts`, `scripts/verify-internal-key-exceptions.py`, `scripts/iam-incident-response-drill.py`, `tests/integration/iam-observability-alerts.integration.test.ts`
+- **Executed Tests**: `apps/api/tests/integration/service-workload-identity.integration.test.ts`, `tests/unit/internal-key-exception-registry.test.ts`, `operations/security/verify-internal-key-exceptions.py`, `operations/security/iam-incident-response-drill.py`, `tests/integration/iam-observability-alerts.integration.test.ts`
 - **Empirical Findings**:
   1. `ServiceWorkloadIdentityAdapter` validates WIF token exchange over HTTP.
   2. Internal key exceptions validated (`INTERNAL_KEY_EXCP_001`, `002`, `003` active).

@@ -88,7 +88,7 @@ jobs:
           echo "$changed"
           # Paths e2e demonstrably cannot exercise. Keep this list short and
           # obvious; when in doubt leave a path off it and run the suite.
-          irrelevant='^(\.orchestrator/|docs/|docs-site/|\.artifacts/|[^/]*\.md$|docs?/.*\.md$)'
+          irrelevant='^(\.orchestrator/|docs/|tools/development-orchestrator/dashboard/|\.artifacts/|[^/]*\.md$|docs?/.*\.md$)'
           if echo "$changed" | grep -qvE "$irrelevant"; then
             echo "at least one changed path is not provably irrelevant; running e2e"
             echo "e2e=true" >> "$GITHUB_OUTPUT"
@@ -328,7 +328,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: Run orchestrator unit tests
-        working-directory: .orchestrator
+        working-directory: tools/development-orchestrator
         run: python3 -m unittest discover -s . -p 'test_*.py' -v
 
   # Cross-surface E2E suite (tests/e2e/E2E-0*.sh) against a real Postgres-backed

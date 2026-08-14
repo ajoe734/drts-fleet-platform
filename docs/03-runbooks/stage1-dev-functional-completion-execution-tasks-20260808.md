@@ -6,12 +6,12 @@ Version: `2026-08-08.v1`
 
 GAP authority: `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`
 
-Machine registration: `scripts/dispatch-stage1-functional-completion-20260808.py`
+Machine registration: `tools/task-dispatch/dispatch-stage1-functional-completion-20260808.py`
 
 ## 1. Operating rule
 
 Run the registration script from the canonical checkout. It writes task state
-only through `scripts/ai-status.sh`; the supervisor then dispatches dependency-
+only through `tools/development-orchestrator/bin/ai-status.sh`; the supervisor then dispatches dependency-
 ready work to isolated auto-worker branches. Do not create ad-hoc agents for this
 wave.
 
@@ -369,9 +369,9 @@ reassignment is allowed as long as owner and reviewer remain different.
 ## 6. Supervisor registration and verification
 
 ```bash
-AI_NAME=Codex python3 scripts/dispatch-stage1-functional-completion-20260808.py --dry-run
-AI_NAME=Codex python3 scripts/dispatch-stage1-functional-completion-20260808.py
-bash scripts/ai-status.sh list --phase stage1-functional-completion-20260808
+AI_NAME=Codex python3 tools/task-dispatch/dispatch-stage1-functional-completion-20260808.py --dry-run
+AI_NAME=Codex python3 tools/task-dispatch/dispatch-stage1-functional-completion-20260808.py
+bash tools/development-orchestrator/bin/ai-status.sh list --phase stage1-functional-completion-20260808
 ```
 
 If a partial registration must be resumed, inspect each existing task and then

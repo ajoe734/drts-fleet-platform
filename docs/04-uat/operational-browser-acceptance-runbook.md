@@ -1,6 +1,6 @@
 # Stage 1 operational browser acceptance
 
-`scripts/run-operational-browser-acceptance.sh` is the release-blocking browser
+`operations/verification/run-operational-browser-acceptance.sh` is the release-blocking browser
 gate for S1F-UIX-001. It does not start local servers and it refuses to run
 without `DRTS_CANDIDATE_SHA` plus deployed URLs for every active/retired surface.
 
@@ -40,5 +40,5 @@ DRTS_DEV_BANK_CONSOLE_BASE_URL=https://... \
 DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL=https://... \
 DRTS_DEV_PARTNER_BOOKING_BASE_URL=https://... \
 DRTS_DEV_CONCIERGE_BASE_URL=https://... \
-scripts/run-operational-browser-acceptance.sh
+operations/verification/run-operational-browser-acceptance.sh
 ```

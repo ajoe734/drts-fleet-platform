@@ -222,7 +222,7 @@ jobs:
           fi
           # These labels drive the Commit trailers bypass in ci.yml. Provision
           # them here so missing repo metadata does not silently break promote PRs.
-          scripts/branch-strategy/ensure-github-labels.sh --apply --repo "$GITHUB_REPOSITORY"
+          tools/local-development/ensure-github-labels.sh --apply --repo "$GITHUB_REPOSITORY"
           gh pr edit "$pr_number" --add-label "automated" --add-label "auto-publish"
 
           echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
@@ -342,7 +342,7 @@ jobs:
           run_check \
             "Runtime mirror guard" \
             "Checking the promote diff for generated runtime mirror files." \
-            python3 scripts/git/check_staged_generated_files.py --range origin/main HEAD
+            python3 tools/ci/git/check_staged_generated_files.py --range origin/main HEAD
 
           docker compose \
             --project-name "$compose_project" \

@@ -36,7 +36,7 @@ Audit objective: compare current implementation state against canonical Phase 1 
 - Machine-truth synchronization is currently healthy:
   - `ai-status.json`
   - `current-work.md`
-  - `docs-site/current-work.md`
+  - `tools/development-orchestrator/dashboard/current-work.md`
     are in sync for the already-recorded board.
 
 ### 2. Partial alignments

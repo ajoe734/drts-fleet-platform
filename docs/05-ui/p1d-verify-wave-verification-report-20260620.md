@@ -46,15 +46,15 @@ Environment note: this isolated task worktree required `CI=true pnpm install
 --frozen-lockfile` to hydrate `node_modules` before the toolchain resolved
 (`@types/node`, `react`, JSX lib). After install, all gates were re-run.
 
-| Gate                        | Command                                                  | Result                                                                 |
-| --------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------- |
-| api typecheck               | `pnpm --filter @drts/api typecheck`                      | **PASS** (exit 0, 0 `error TS`)                                        |
-| ops-console typecheck       | `pnpm --filter @drts/ops-console-web typecheck`          | **PASS** (exit 0, 0 `error TS`)                                        |
-| driver-app typecheck        | `pnpm --filter @drts/driver-app typecheck`               | **PASS** (exit 0, 0 `error TS`)                                        |
-| api build                   | `pnpm --filter @drts/api build`                          | **PASS** (`@drts/contracts` build + `tsc -p tsconfig.json`, exit 0)    |
-| ops-console build           | `pnpm --filter @drts/ops-console-web build`              | **PASS** (`next build --webpack` → "✓ Compiled successfully in 15.5s") |
-| driver-app build            | `pnpm --filter @drts/driver-app build`                   | **PASS** (`tsc --noEmit`, exit 0)                                      |
-| i18n-guard (empty baseline) | `node scripts/i18n-guard.mjs --baseline /tmp/empty.json` | **PASS** — `OK (376 files scanned across 10 apps, 0 exemption(s))`     |
+| Gate                        | Command                                                   | Result                                                                 |
+| --------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------- |
+| api typecheck               | `pnpm --filter @drts/api typecheck`                       | **PASS** (exit 0, 0 `error TS`)                                        |
+| ops-console typecheck       | `pnpm --filter @drts/ops-console-web typecheck`           | **PASS** (exit 0, 0 `error TS`)                                        |
+| driver-app typecheck        | `pnpm --filter @drts/driver-app typecheck`                | **PASS** (exit 0, 0 `error TS`)                                        |
+| api build                   | `pnpm --filter @drts/api build`                           | **PASS** (`@drts/contracts` build + `tsc -p tsconfig.json`, exit 0)    |
+| ops-console build           | `pnpm --filter @drts/ops-console-web build`               | **PASS** (`next build --webpack` → "✓ Compiled successfully in 15.5s") |
+| driver-app build            | `pnpm --filter @drts/driver-app build`                    | **PASS** (`tsc --noEmit`, exit 0)                                      |
+| i18n-guard (empty baseline) | `node tools/ci/i18n-guard.mjs --baseline /tmp/empty.json` | **PASS** — `OK (376 files scanned across 10 apps, 0 exemption(s))`     |
 
 The i18n-guard run used `{"version":1,"exemptions":[]}` as the baseline, so the
 0-violation result reflects a genuine fix surface, not baseline suppression.

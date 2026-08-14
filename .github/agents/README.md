@@ -7,9 +7,7 @@ Available chatbox agents:
 - `Claude`
 - `Gemini`
 - `Codex`
-- `Qwen`
 - `Copilot`
-- `Grok` (legacy alias for the Copilot lane)
 
 How to use them:
 

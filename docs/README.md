@@ -16,7 +16,7 @@ points so the team can answer three different questions quickly:
   protected shared `stage`.
   Machine-specific VM notes belong in `docs/03-runbooks/local-development.local.md`
   and broader local scratch belongs in `.local/`, both initialized by
-  `./scripts/init-local-workspace.sh`.
+  `./tools/local-development/init-local-workspace.sh`.
 - `docs/03-runbooks/master-system-closeout-checklist.md`
   Current closeout definition for the whole system.
 - `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`

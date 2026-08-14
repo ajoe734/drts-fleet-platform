@@ -79,7 +79,7 @@ Practical rule:
 
 ## Live Runtime Routing
 
-The canonical supervisor process is still `.orchestrator/supervisor.py`, but its routing now differs by live focus:
+The canonical supervisor process is `tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`, launched through `tools/development-orchestrator/bin/run-supervisor.sh`. Its routing differs by live focus:
 
 - in `discussion_planning`
   - the supervisor reads `ai-status.json`

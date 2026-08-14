@@ -52,8 +52,8 @@ Execution and status:
 
 - `ai-status.json`
 - `current-work.md`
-- `docs-site/ai-status.json`
-- `docs-site/current-work.md`
+- `tools/development-orchestrator/dashboard/ai-status.json`
+- `tools/development-orchestrator/dashboard/current-work.md`
 - `docs/03-runbooks/master-system-closeout-checklist.md`
 - `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`
 - `docs/04-uat/phase1-uat-checklist.md`
@@ -97,12 +97,12 @@ from `review_approved` to `done`.
 The stale ORX and dashboard drift identified by the initial audit is closed by
 `SYNC-001`, `SYNC-002`, and `SYNC-003`:
 
-| File / family                                            | Closeout result                                                               |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `ai-status.json` / `current-work.md`                     | Root and generated human summary now track the closeout wave, not stale ORX.  |
-| `docs-site/ai-status.json` / `docs-site/current-work.md` | Docs-site dashboard mirrors root status after status commits.                 |
-| Workflow release gates                                   | No `PENDING (ORX-GV-001 rows)` language remains; current reads are explicit.  |
-| UAT checklist                                            | Rows are classified as static, repo-local, live, external-gated, or deferred. |
+| File / family                                                                                                          | Closeout result                                                               |
+| ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `ai-status.json` / `current-work.md`                                                                                   | Root and generated human summary now track the closeout wave, not stale ORX.  |
+| `tools/development-orchestrator/dashboard/ai-status.json` / `tools/development-orchestrator/dashboard/current-work.md` | Docs-site dashboard mirrors root status after status commits.                 |
+| Workflow release gates                                                                                                 | No `PENDING (ORX-GV-001 rows)` language remains; current reads are explicit.  |
+| UAT checklist                                                                                                          | Rows are classified as static, repo-local, live, external-gated, or deferred. |
 
 ### 3.3 `tenant-commute-hub`
 

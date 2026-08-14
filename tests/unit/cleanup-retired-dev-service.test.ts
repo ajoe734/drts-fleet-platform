@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const repoRoot = path.resolve(__dirname, "../..");
 const cleanupScript = path.join(
   repoRoot,
-  "scripts/cleanup-retired-dev-service.sh",
+  "operations/deployment/cleanup-retired-dev-service.sh",
 );
 const deployWorkflow = path.join(repoRoot, ".github/workflows/deploy-dev.yml");
 const temporaryDirectories: string[] = [];
@@ -98,7 +98,9 @@ describe("retired Cloud Run service cleanup", () => {
     expect(source).toMatch(
       /retired_service_cleanup:\n[\s\S]*?default: "none"[\s\S]*?options:\n\s+- "none"\n\s+- "delete-drts-passenger-web"/,
     );
-    expect(source).toContain("./scripts/cleanup-retired-dev-service.sh");
+    expect(source).toContain(
+      "./operations/deployment/cleanup-retired-dev-service.sh",
+    );
     expect(source).toContain(
       "RETIRED_SERVICE_CLEANUP: ${{ inputs.retired_service_cleanup || 'none' }}",
     );

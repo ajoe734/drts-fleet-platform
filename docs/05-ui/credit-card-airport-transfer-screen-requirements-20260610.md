@@ -160,7 +160,7 @@ This is a new app, so **every screen needs a canvas** — there is no corporate 
 
 ## 7. Purely-visual open questions (for design)
 
-- VQ-1 **Realm vs issuer brand:** S3 chrome should use the `tenant` realm tokens (teal `#0F766E`) from `@drts/ui-tokens`; the issuer (中信/CTBC blue-gold) appears as tenant identity/branding within that chrome. Confirm the balance — do not hand-pick a new palette (a raw-hex palette fails `scripts/check_ui_realm_tokens.py`).
+- VQ-1 **Realm vs issuer brand:** S3 chrome should use the `tenant` realm tokens (teal `#0F766E`) from `@drts/ui-tokens`; the issuer (中信/CTBC blue-gold) appears as tenant identity/branding within that chrome. Confirm the balance — do not hand-pick a new palette (a raw-hex palette fails `tools/ci/check_ui_realm_tokens.py`).
 - VQ-2 How to represent **direction (去程/回程)** and **flight/terminal** compactly in a dense list row.
 - VQ-3 SLA attainment visualisation (gauge vs bar vs delta-to-target) for the contract screen.
 - VQ-4 Settlement statement: per-trip table density + masked-reference treatment + subsidised/paid split visual.

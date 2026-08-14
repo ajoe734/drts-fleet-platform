@@ -20,7 +20,7 @@ Status: pending
 
 ## Evidence
 
-- `Copilot` confirms `ai-status.json`, `current-work.md`, and `docs-site/current-work.md` are synchronized.
+- `Copilot` confirms `ai-status.json`, `current-work.md`, and `tools/development-orchestrator/dashboard/current-work.md` are synchronized.
 - `Codex`, `Qwen`, and `Gemini` independently confirm that canonical target-state gaps still exist beyond persistence/auth/runtime hardening, especially for wire-contract conformance and incomplete domain scope.
 
 ## Impact on consensus

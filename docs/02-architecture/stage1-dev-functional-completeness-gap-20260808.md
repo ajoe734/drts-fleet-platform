@@ -8,7 +8,7 @@ Code baseline: `origin/dev@7e5a29d5a19a51eae01bcdfd44ab80a82a8b02cf`
 
 Execution packet: `docs/03-runbooks/stage1-dev-functional-completion-execution-tasks-20260808.md`
 
-Registration script: `scripts/dispatch-stage1-functional-completion-20260808.py`
+Registration script: `tools/task-dispatch/dispatch-stage1-functional-completion-20260808.py`
 
 ## 1. Decision
 

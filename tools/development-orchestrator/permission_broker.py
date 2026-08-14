@@ -1,0 +1,1916 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import hashlib
+import json
+import os
+import re
+import shlex
+import sys
+from pathlib import Path
+from typing import Any
+
+THIS_DIR = Path(__file__).resolve().parent
+if str(THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(THIS_DIR))
+
+from approval_queue import consume_resume_override, create_approval, find_resume_override
+from common import (
+    ROOT,
+    canonical_workspace_root,
+    load_config,
+    load_json,
+    utc_now,
+    write_activity_log,
+    write_json,
+)
+from provider_permissions import CLAUDE_LOCAL_SETTINGS_PATH, _verified_claude_policy
+from control_plane.infra.approval_repo import load_approval_state
+from worker_tree_guard import check_chatbox_tree_guard
+
+
+_WORKSPACE_ROOTS_CACHE: list[Path] | None = None
+
+
+def workspace_roots() -> list[Path]:
+    """Roots a worker may legitimately touch.
+
+    `ROOT` is the directory holding this file. The supervisor runs from a
+    reviewed runtime bundle that is not the canonical checkout, so a boundary
+    derived from `ROOT` points every path check at the bundle — while machine
+    truth, task worktrees, and the repository workers are told to edit all live
+    under the canonical workspace.
+
+    Every adapter stamps ORCH_CANONICAL_ROOT and ORCH_WORKSPACE_ROOT into the
+    worker environment (see common.apply_orchestrator_runtime_env), and this
+    broker runs as a hook inside that worker, so the environment is the
+    authoritative answer here. `load_config()` is not: it reads the config file
+    sitting next to the code, which in the bundle is not the config the
+    supervisor was started with.
+    """
+    global _WORKSPACE_ROOTS_CACHE
+    if _WORKSPACE_ROOTS_CACHE is not None:
+        return _WORKSPACE_ROOTS_CACHE
+
+    roots: list[Path] = []
+    for name in ("ORCH_CANONICAL_ROOT", "ORCH_WORKSPACE_ROOT"):
+        raw = (os.environ.get(name) or "").strip()
+        if raw:
+            roots.append(Path(raw).expanduser().resolve(strict=False))
+    if not roots:
+        try:
+            roots.append(
+                canonical_workspace_root(load_config()).resolve(strict=False)
+            )
+        except Exception:  # noqa: BLE001 - a hook must not die on config problems
+            roots.append(ROOT.resolve(strict=False))
+
+    _WORKSPACE_ROOTS_CACHE = []
+    for root in roots:
+        if root not in _WORKSPACE_ROOTS_CACHE:
+            _WORKSPACE_ROOTS_CACHE.append(root)
+    return _WORKSPACE_ROOTS_CACHE
+
+
+def workspace_root() -> Path:
+    """The primary workspace root — the canonical checkout when one is known."""
+    return workspace_roots()[0]
+
+
+SAFE_BASH_PATTERNS = [
+    re.compile(r"^pwd$"),
+    re.compile(r"^echo(\s|$)"),
+    re.compile(r"^printf(\s|$)"),
+    re.compile(r"^ls(\s|$)"),
+    re.compile(r"^find(\s|$)"),
+    re.compile(r"^grep(\s|$)"),
+    re.compile(r"^rg(\s|$)"),
+    re.compile(r"^cat(\s|$)"),
+    re.compile(r"^sed(\s|$)"),
+    re.compile(r"^head(\s|$)"),
+    re.compile(r"^tail(\s|$)"),
+    re.compile(r"^wc(\s|$)"),
+    re.compile(r"^sort(\s|$)"),
+    re.compile(r"^uniq(\s|$)"),
+    re.compile(r"^awk(\s|$)"),
+    re.compile(r"^jq(\s|$)"),
+    re.compile(r"^ps(\s|$)"),
+    re.compile(r"^pgrep(\s|$)"),
+    re.compile(r"^which(\s|$)"),
+    re.compile(r"^type(\s|$)"),
+    re.compile(r"^date(\s|$)"),
+    re.compile(r"^sleep(\s|$)"),
+    re.compile(r"^git status(\s|$)"),
+    re.compile(r"^git diff(\s|$)"),
+    re.compile(r"^git show(\s|$)"),
+    re.compile(r"^git log(\s|$)"),
+    re.compile(r"^git branch(\s|$)"),
+    # Read-only git queries. Kept separate from the mutating subcommands
+    # below so the read set can grow without widening write access.
+    re.compile(r"^git worktree list(\s|$)"),
+    re.compile(r"^git rev-parse(\s|$)"),
+    re.compile(r"^git ls-tree(\s|$)"),
+    re.compile(r"^git ls-files(\s|$)"),
+    re.compile(r"^git for-each-ref(\s|$)"),
+    re.compile(r"^git describe(\s|$)"),
+    re.compile(r"^git rev-list(\s|$)"),
+    re.compile(r"^git shortlog(\s|$)"),
+    re.compile(r"^git blame(\s|$)"),
+    re.compile(r"^git tag -l(\s|$)"),
+    re.compile(r"^git config --get(\s|$)"),
+    re.compile(r"^git push(\s|$)"),
+    # Read-only observability. A worker that operates a service and a cloud
+    # project cannot see either of them: every `systemctl show`, `journalctl`
+    # and `gcloud … list/describe` became an approval request and a chairman
+    # review, for commands that change nothing. Only the query verbs are listed;
+    # `systemctl start/stop/restart`, `gcloud … create/update/deploy/delete` and
+    # `journalctl --vacuum*`/`--rotate` are not, and still need review.
+    re.compile(
+        r"^systemctl( --user)? (list-units|list-unit-files|list-timers|list-sockets"
+        r"|status|show|show-environment|cat|is-active|is-enabled|is-failed)(\s|$)"
+    ),
+    re.compile(r"^journalctl(\s|$)(?!.*--(vacuum|rotate|flush|relinquish))"),
+    re.compile(
+        r"^gcloud\s+(?!.*\s(create|update|delete|deploy|add|remove|set|apply|import|replace)(\s|$))"
+        r"[a-z0-9-]+(\s+[a-z0-9-]+)*\s+(list|describe|get-iam-policy|get-value|versions list)(\s|$)"
+    ),
+    # Rebasing is ordinary work here — every branch is expected to land on a
+    # current `dev` — and it stays inside the repository. Deferring it turned a
+    # routine step into a chairman review, which approved it every time.
+    #
+    # This does not widen what git can destroy. `reset --hard` is denied
+    # elsewhere, and `push --force` is already allowed by the `^git push` entry
+    # above, including to shared branches — a separate gap, not one this entry
+    # opens.
+    #
+    # `-i` is allowed too. Without an editor configured it blocks rather than
+    # damages anything, which is a worker-liveness matter, not a permission one.
+    re.compile(r"^git rebase(\s|$)"),
+    re.compile(r"^git -C .+ rebase(\s|$)"),
+    re.compile(r"^git -C .+ (status|diff|show|log|remote -v|submodule status)(\s|$)"),
+    re.compile(r"^gh issue comment(\s|$)"),
+    re.compile(r"^gh pr create(\s|$)"),
+    re.compile(r"^git remote -v$"),
+    re.compile(r"^git -C .+ (add|commit|push|remote set-url|submodule|rm)"),
+    re.compile(r"^git rm(\s|$)"),
+    re.compile(r"^python3 tools/development-orchestrator/bin/ai_status\.py(\s|$)"),
+    re.compile(r"^python3 -m unittest(\s|$)"),
+    re.compile(r"^cd .+ && python3 -m unittest(\s|$)"),
+    re.compile(r"^python3 -m unittest discover(\s|$)"),
+    re.compile(r"^cd .+ && python3 -m unittest discover(\s|$)"),
+    re.compile(r"^python3 -m pytest(\s|$)"),
+    re.compile(r"^cd .+ && python3 -m pytest(\s|$)"),
+    re.compile(r"^pytest(\s|$)"),
+    re.compile(r"^cd .+ && pytest(\s|$)"),
+    re.compile(r"^apt(?:-get)? install(?:\s+-\S+)*\s+python3-pytest(?=\s|$)"),
+    re.compile(r"^npm test(\s|$)"),
+    re.compile(r"^cd .+ && npm test(\s|$)"),
+    re.compile(r"^npm run test(\s|$)"),
+    re.compile(r"^cd .+ && npm run test(\s|$)"),
+    re.compile(r"^cargo test(\s|$)"),
+    re.compile(r"^cd .+ && cargo test(\s|$)"),
+    re.compile(r"^go test(\s|$)"),
+    re.compile(r"^cd .+ && go test(\s|$)"),
+    re.compile(r"^python3 -m py_compile(\s|$)"),
+    re.compile(r"^cd .+ && python3 -m py_compile(\s|$)"),
+    re.compile(r"^python3 (?:[A-Za-z0-9_./-]+/)?smoke_test\.py(?:\s|$)"),
+    re.compile(r"^python3 (?:[A-Za-z0-9_./-]*/)?smoke_test[A-Za-z0-9_./-]*\.py(?:\s|$)"),
+    re.compile(r"^cd .+ && python3 smoke_test\.py(?:\s|$)"),
+    re.compile(r"^cd .+ && python3 (?:[A-Za-z0-9_./-]*/)?smoke_test[A-Za-z0-9_./-]*\.py(?:\s|$)"),
+    re.compile(r"^python3 tools/development-orchestrator/approval_queue\.py(\s|$)"),
+    re.compile(r"^python3 tools/development-orchestrator/control_plane/runtime/supervisor_runtime\.py(\s|$)"),
+    re.compile(r"^nohup python3 tools/development-orchestrator/control_plane/runtime/supervisor_runtime\.py"),
+    re.compile(r"^nohup python3 -m http\.server"),
+    re.compile(r"^fuser \d+"),
+    re.compile(r"^lsof -i\s*:"),
+    re.compile(r"^kill \d+"),
+    re.compile(r"^pkill -f supervisor_runtime\.py"),
+    re.compile(r"^pkill -f [\"']dashboard_server\.py[\"']"),
+    re.compile(r"^python3 .+/tools/development-orchestrator/bin/dashboard_server\.py(\s|$)"),
+    re.compile(r"^nohup python3 .+/tools/development-orchestrator/bin/dashboard_server\.py"),
+    re.compile(r"^curl(?:\s+-[A-Za-z0-9-]+)*\s+http://127\.0\.0\.1:\d+"),
+    re.compile(r"^curl(?:\s+-[A-Za-z0-9-]+)*\s+http://localhost:\d+"),
+    # file operations
+    re.compile(r"^cp(\s|$)"),
+    re.compile(r"^mv(\s|$)"),
+    re.compile(r"^mkdir(\s|$)"),
+    re.compile(r"^touch(\s|$)"),
+    # node / pnpm / npx development commands
+    re.compile(r"^node(\s|$)"),
+    re.compile(r"^pnpm(\s|$)"),
+    re.compile(r"^npx(\s|$)"),
+    re.compile(r"^tsc(\s|$)"),
+    re.compile(r"^vitest(\s|$)"),
+    re.compile(r"^jest(\s|$)"),
+    re.compile(r"^cd .+ && pnpm(\s|$)"),
+    re.compile(r"^cd .+ && npx(\s|$)"),
+    re.compile(r"^cd .+ && node(\s|$)"),
+    re.compile(r"^git (add|commit|checkout|fetch|pull|stash|clone|ls-remote)(\s|$)"),
+    re.compile(r"^curl(\s|$)"),
+    re.compile(r"^gh(\s|$)"),
+    re.compile(r"^bash(\s|$)"),
+    # general python3 — consistent with node/bash being broadly allowed
+    re.compile(r"^python3(\s|$)"),
+    # tmux — needed for supervisor / dashboard session management
+    re.compile(r"^tmux(\s|$)"),
+    re.compile(r"^TERM=\S+ tmux(\s|$)"),
+    # multi-line for loops reading package.json — safe read-only pattern
+    re.compile(r"^for app in .+; do\s*$", re.MULTILINE),
+    re.compile(r"^for \w+ in .+; do"),
+]
+DEFER_BASH_PATTERNS = [
+    re.compile(r"^git (add|commit|remote set-url|submodule)(\s|$)"),
+    re.compile(r"^(curl|wget)(\s|$)"),  # kept for deferred approval by default; override by adding to SAFE above if needed
+    re.compile(r"^(apt|apt-get)(\s|$)"),
+    re.compile(r"^npm install(\s|$)"),
+    re.compile(r"^pip install(\s|$)"),
+    re.compile(r"^docker(\s|$)"),
+]
+DENY_BASH_PATTERNS = [
+    re.compile(r"^git reset --hard"),
+    re.compile(r"^git checkout --(\s|$)"),
+    re.compile(r"^sudo(\s|$)"),
+    re.compile(r"^rm -rf /\*?$"),
+    re.compile(r"^chmod 777(\s|$)"),
+]
+
+SAFE_TOOLS = {"Read", "Grep", "Glob", "LS", "Task", "TodoRead", "TodoWrite", "ReadNotebook", "ToolSearch",
+              "ExitPlanMode", "EnterPlanMode", "AskUserQuestion", "ExitWorktree", "EnterWorktree"}
+EDIT_TOOLS = {"Edit", "MultiEdit", "Write"}
+NETWORK_TOOLS = {"WebFetch", "WebSearch"}
+
+SAFE_PYTHON_ONE_LINER_MARKERS = (
+    "print(",
+    "with open(",
+)
+SAFE_PYTHON_JSON_LOAD_MARKERS = (
+    "json.load",
+    "json.loads",
+)
+UNSAFE_PYTHON_ONE_LINER_MARKERS = (
+    ".write(",
+    "write_text(",
+    "write_bytes(",
+    "append(",
+    "unlink(",
+    "rmdir(",
+    "mkdir(",
+    "rename(",
+    "replace(",
+    "chmod(",
+    "chown(",
+    "subprocess",
+    "os.system",
+    "requests.",
+    "urllib.",
+    "socket.",
+)
+
+STATUS_SYNC_BASH_PATTERNS = (
+    re.compile(r"^(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*(?:bash\s+)?tools/development-orchestrator/bin/ai-status\.sh(?:\s|$)"),
+    re.compile(r"^(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*python3\s+tools/development-orchestrator/bin/ai_status\.py(?:\s|$)"),
+    re.compile(r"^cd\s+.+\s+&&\s+(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*python3\s+tools/development-orchestrator/bin/ai_status\.py(?:\s|$)"),
+    re.compile(r"^cd\s+.+\s+&&\s+(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*(?:bash\s+)?tools/development-orchestrator/bin/ai-status\.sh(?:\s|$)"),
+)
+
+SAFE_PYTEST_VERIFY_PATTERNS = (
+    re.compile(r"^python3 -m pytest(\s|$)"),
+    re.compile(r"^pytest(\s|$)"),
+    re.compile(r"^pip3? show pytest(\s|$)"),
+)
+
+SAFE_JS_TEST_PACKAGE_PATTERNS = (
+    re.compile(r"^vitest(?:[@=<>!~].+)?$"),
+    re.compile(r"^@vitest/[A-Za-z0-9._-]+(?:[@=<>!~].+)?$"),
+    re.compile(r"^jest(?:[@=<>!~].+)?$"),
+    re.compile(r"^@types/jest(?:[@=<>!~].+)?$"),
+    re.compile(r"^ts-jest(?:[@=<>!~].+)?$"),
+    re.compile(r"^jest-environment-jsdom(?:[@=<>!~].+)?$"),
+    re.compile(r"^@testing-library/[A-Za-z0-9._-]+(?:[@=<>!~].+)?$"),
+    re.compile(r"^@playwright/test(?:[@=<>!~].+)?$"),
+    re.compile(r"^playwright(?:[@=<>!~].+)?$"),
+    re.compile(r"^cypress(?:[@=<>!~].+)?$"),
+    re.compile(r"^mocha(?:[@=<>!~].+)?$"),
+    re.compile(r"^chai(?:[@=<>!~].+)?$"),
+    re.compile(r"^ava(?:[@=<>!~].+)?$"),
+    re.compile(r"^tap(?:[@=<>!~].+)?$"),
+    re.compile(r"^nyc(?:[@=<>!~].+)?$"),
+    re.compile(r"^supertest(?:[@=<>!~].+)?$"),
+    re.compile(r"^jsdom(?:[@=<>!~].+)?$"),
+)
+
+SAFE_DIRECT_TEST_RUNNERS = {"vitest", "jest"}
+PNPM_OPTION_TAKES_VALUE = {"--filter", "-F", "--dir", "-C"}
+PNPM_STANDALONE_FLAGS = {"-r", "--recursive", "--stream", "--parallel", "--aggregate-output", "-w", "--workspace-root"}
+
+
+def _normalize_shell_command(shell_command: str) -> str:
+    lines = []
+    for line in shell_command.replace("\r\n", "\n").split("\n"):
+        if line.strip().startswith("#"):
+            continue
+        lines.append(line)
+    command = "\n".join(lines).replace("\\\n", " ")
+    command = re.sub(r"\s*\n\s*", " ", command)
+    return command.strip()
+
+
+def _matches_workspace_script(path_token: str, relative_path: str) -> bool:
+    candidate = Path(path_token)
+    root = workspace_root()
+    expected = root / relative_path
+    try:
+        resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (root / candidate).resolve(strict=False)
+    except OSError:
+        return False
+    return resolved == expected.resolve(strict=False)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Deterministic permission broker for Claude hooks and local approval broker flows.")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    classify = subparsers.add_parser("classify", help="Classify a shell command as allow/defer/deny.")
+    classify.add_argument("shell_command")
+
+    evaluate = subparsers.add_parser("evaluate", help="Evaluate a Claude tool request.")
+    evaluate.add_argument("tool_name")
+    evaluate.add_argument("tool_input_json")
+
+    hook = subparsers.add_parser("hook", help="Handle a Claude hook event.")
+    hook.add_argument("event_name")
+
+    log_hook = subparsers.add_parser("log-hook", help="Backward-compatible logging-only hook entrypoint.")
+    log_hook.add_argument("event_name")
+
+    remember = subparsers.add_parser("remember", help="Persist a suggested allow/deny rule into .claude/settings.local.json.")
+    remember.add_argument("decision", choices=["allow", "deny", "ask"])
+    remember.add_argument("rule")
+
+    subparsers.add_parser("print-policy", help="Print the deterministic Claude permission policy as JSON.")
+    return parser.parse_args()
+
+
+def hook_payload() -> dict[str, Any]:
+    raw = sys.stdin.read().strip()
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"raw": raw}
+
+
+# `&&`, `||`, `;`, `|` and a trailing `&` all start a new command. Splitting on
+# them is what keeps an unreviewed tail from riding along behind a safe prefix:
+# SAFE_BASH_PATTERNS are anchored with ^ but not $ and are applied with
+# .search(), and `rm`/`bash`/`curl` are themselves in the safe set.
+_REDIRECT_TARGET_RE = re.compile(r"(?<![0-9<>])>{1,2}\s*(?!&\s*[0-9])([^\s;|&]+)")
+
+
+def _writes_outside_workspace(segment: str) -> bool:
+    """True when the segment redirects into a path we would not let it edit.
+
+    Writing under the workspace or /tmp is ordinary; writing to a home dotfile
+    or a system path is not, and used to pass because only the leading token
+    was ever inspected.
+    """
+    for target in _REDIRECT_TARGET_RE.findall(segment):
+        cleaned = target.strip("\"'")
+        if not cleaned or cleaned == "/dev/null":
+            continue
+        candidate = Path(cleaned).expanduser()
+        try:
+            resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (workspace_root() / candidate).resolve(strict=False)
+        except OSError:
+            return True
+        if resolved.is_relative_to(Path("/tmp")):
+            continue
+        if _paths_within_workspace([resolved]):
+            continue
+        return True
+    return False
+
+
+def _split_shell_segments(
+    shell_command: str, *, opaque_substitution: bool = False
+) -> list[str] | None:
+    """Split a command on shell separators, honouring quotes.
+
+    Returns None when the command contains a construct whose real behaviour is
+    not visible to static inspection, so the caller must not treat it as safe.
+
+    `opaque_substitution` keeps `$(...)` in the segment text instead of
+    refusing the whole command. Callers that use it must inspect the
+    substitution bodies themselves — see `substitution_bodies`.
+    """
+    command = _normalize_shell_command(shell_command)
+    if not command:
+        return []
+
+    segments: list[str] = []
+    buffer: list[str] = []
+    quote: str | None = None
+    index = 0
+    length = len(command)
+
+    while index < length:
+        char = command[index]
+        if quote:
+            buffer.append(char)
+            if char == "\\" and quote == '"' and index + 1 < length:
+                buffer.append(command[index + 1])
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            buffer.append(char)
+            index += 1
+            continue
+        if char == "\\" and index + 1 < length:
+            buffer.append(char)
+            buffer.append(command[index + 1])
+            index += 2
+            continue
+        if char == "`":
+            return None
+        if char == "$" and command[index + 1 : index + 2] == "(":
+            if not opaque_substitution:
+                return None
+            end = _matching_paren(command, index + 1)
+            if end is None:
+                return None
+            buffer.append(command[index:end + 1])
+            index = end + 1
+            continue
+        if char in ("<", ">") and command[index + 1 : index + 2] == "(":
+            return None
+        if command[index : index + 2] in ("&&", "||"):
+            segments.append("".join(buffer))
+            buffer = []
+            index += 2
+            continue
+        if char in (";", "|", "\n"):
+            segments.append("".join(buffer))
+            buffer = []
+            index += 1
+            continue
+        if char == "&":
+            # `2>&1` duplicates a descriptor; a bare `&` backgrounds the command.
+            previous = "".join(buffer).rstrip()
+            if previous.endswith(">"):
+                buffer.append(char)
+                index += 1
+                continue
+            segments.append("".join(buffer))
+            buffer = []
+            index += 1
+            continue
+        buffer.append(char)
+        index += 1
+
+    if quote:
+        return None
+    segments.append("".join(buffer))
+    return [segment.strip() for segment in segments if segment.strip()]
+
+
+def _segment_is_safe(segment: str) -> bool:
+    """A single separator-free command that needs no human review."""
+    if _writes_outside_workspace(segment):
+        return False
+    if _cd_target_is_within_workspace(segment):
+        return True
+    return any(pattern.search(segment) for pattern in SAFE_BASH_PATTERNS)
+
+
+def _cd_target_is_within_workspace(segment: str) -> bool:
+    try:
+        tokens = shlex.split(segment)
+    except ValueError:
+        return False
+    if len(tokens) != 2 or tokens[0] != "cd":
+        return False
+    return _paths_within_workspace([Path(tokens[1])])
+
+
+# An interpreter reading its program from a pipe is exactly as opaque as
+# `$(...)`, which this module already refuses: nothing on the command line says
+# what will actually run. `curl https://x | bash` splits into two segments that
+# are each individually safe — a fetch and a shell — and was allowed on that
+# basis, which is the standard way to run somebody else's code on this machine.
+_STDIN_PROGRAM_INTERPRETERS = frozenset(
+    {
+        "bash",
+        "sh",
+        "zsh",
+        "dash",
+        "ksh",
+        "fish",
+        "python",
+        "python2",
+        "python3",
+        "node",
+        "perl",
+        "ruby",
+        "php",
+        "Rscript",
+    }
+)
+
+# Flags that move the program out of stdin and onto the command line, where it
+# is visible to inspection like any other argument.
+_INTERPRETER_INLINE_PROGRAM_FLAGS = frozenset({"-c", "-e", "-m"})
+
+
+def _reads_its_program_from_stdin(segment: str) -> bool:
+    """True when this segment is an interpreter whose program arrives on stdin."""
+    try:
+        tokens = shlex.split(segment)
+    except ValueError:
+        return True
+    if not tokens:
+        return False
+    if Path(tokens[0]).name not in _STDIN_PROGRAM_INTERPRETERS:
+        return False
+    for token in tokens[1:]:
+        if token in _INTERPRETER_INLINE_PROGRAM_FLAGS:
+            return False
+        if token == "-":
+            return True
+        if token.startswith("-"):
+            # `-s`, `-u`, `-x` and friends leave stdin as the program source.
+            continue
+        # A script path: the program is a file, not whatever the pipe carries.
+        return False
+    return True
+
+
+def _pipes_program_into_interpreter(shell_command: str) -> bool:
+    """True when any stage of a pipeline feeds a program into an interpreter."""
+    command = _normalize_shell_command(shell_command)
+    stages: list[str] = []
+    buffer: list[str] = []
+    quote: str | None = None
+    index = 0
+    length = len(command)
+    while index < length:
+        char = command[index]
+        if quote:
+            if char == "\\" and quote == '"' and index + 1 < length:
+                buffer.append(command[index : index + 2])
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            buffer.append(char)
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            buffer.append(char)
+            index += 1
+            continue
+        if char == "\\" and index + 1 < length:
+            buffer.append(command[index : index + 2])
+            index += 2
+            continue
+        if command[index : index + 2] == "||":
+            # A fallback, not a pipe: it ends the pipeline without feeding it.
+            stages.append("".join(buffer))
+            buffer = []
+            stages.append("")
+            index += 2
+            continue
+        if char == "|":
+            stages.append("".join(buffer))
+            buffer = []
+            index += 1
+            continue
+        if char in (";", "&", "\n") or command[index : index + 2] == "&&":
+            stages.append("".join(buffer))
+            buffer = []
+            stages.append("")
+            index += 2 if command[index : index + 2] == "&&" else 1
+            continue
+        buffer.append(char)
+        index += 1
+    stages.append("".join(buffer))
+
+    # Only a stage that something was piped *into* can read a program from the
+    # pipe. An empty marker resets that, so `bash` after `;` is not a sink.
+    for position, stage in enumerate(stages):
+        if position == 0 or not stages[position - 1].strip():
+            continue
+        if _reads_its_program_from_stdin(stage.strip()):
+            return True
+    return False
+
+
+def _matching_paren(command: str, open_index: int) -> int | None:
+    """Index of the `)` closing the `(` at open_index, or None when unbalanced."""
+    depth = 0
+    index = open_index
+    quote: str | None = None
+    while index < len(command):
+        char = command[index]
+        if quote:
+            if char == "\\" and quote == '"' and index + 1 < len(command):
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None
+
+
+def substitution_bodies(shell_command: str) -> list[str] | None:
+    """The commands inside `$(...)`, or None when they cannot be delimited."""
+    command = _normalize_shell_command(shell_command)
+    bodies: list[str] = []
+    index = 0
+    quote: str | None = None
+    while index < len(command):
+        char = command[index]
+        if quote:
+            if char == "\\" and quote == '"' and index + 1 < len(command):
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+            index += 1
+            continue
+        if char == "$" and command[index + 1 : index + 2] == "(":
+            end = _matching_paren(command, index + 1)
+            if end is None:
+                return None
+            bodies.append(command[index + 2 : end])
+            index = end + 1
+            continue
+        index += 1
+    return bodies
+
+
+def command_hard_boundary_reason(shell_command: str) -> str | None:
+    """Why no reviewer may wave this command through, or None if it is theirs to judge.
+
+    `classify_command` answers "can this run with nobody looking". This answers
+    the narrower question an approval gate needs: is this beyond what a reviewer
+    is allowed to permit at all.
+
+    The gap between them matters. A command the classifier does not recognise is
+    `defer` — meaning "I cannot tell, ask someone" — and that is precisely the
+    case a reviewer exists to decide. Treating `defer` as forbidden makes the
+    reviewer able to approve only what would already have run unreviewed, so an
+    unrecognised-but-harmless command deadlocks instead of being waved through.
+
+    `$(...)` is judged the same way as `$VAR`. Neither value exists until the
+    command runs, so neither is something a static check can rule on: `git -C
+    "$WT" status` is already permitted here, and refusing `WT=$(pwd)` alongside
+    it drew the line by syntax rather than by risk. What stays refusable is what
+    is statically visible — a denied pattern or a write outside the workspace —
+    and that is checked inside substitution bodies too, since `^`-anchored
+    patterns would otherwise skip over them.
+    """
+    normalized = _normalize_shell_command(shell_command)
+    if not normalized:
+        return "the command is empty"
+    bodies = substitution_bodies(normalized)
+    if bodies is None:
+        return "an unbalanced command substitution cannot be read"
+    segments = _split_shell_segments(normalized, opaque_substitution=True)
+    if segments is None:
+        return "a backtick or process substitution hides what would actually run"
+    for segment in [*segments, *bodies]:
+        for pattern in DENY_BASH_PATTERNS:
+            if pattern.search(segment):
+                return f"a denied pattern matches: {segment[:100]}"
+        if _writes_outside_workspace(segment):
+            return f"it writes outside the workspace: {segment[:100]}"
+    return None
+
+
+# Branches other people's work is built on. `dev` and `main` are additionally
+# protected on the remote (`allow_force_pushes: false`), so a force push there
+# is already refused by the server; `publish/*` and `release/*` are not, and a
+# publish snapshot is exactly what `deploy-dev.yml` deploys.
+_SHARED_BRANCH_NAMES = frozenset({"dev", "main", "master", "design"})
+_SHARED_BRANCH_PREFIXES = ("publish/", "release/")
+_FORCE_PUSH_FLAGS = ("--force", "-f", "--force-with-lease")
+
+
+def _push_destination_branch(tokens: list[str]) -> str | None:
+    """The branch a `git push` writes to, or None when it cannot be read."""
+    positional = [
+        token
+        for token in tokens[2:]
+        if not token.startswith("-")
+    ]
+    if len(positional) < 2:
+        # No refspec: git pushes the current branch, which is not visible here.
+        return None
+    refspec = positional[1]
+    destination = refspec.rsplit(":", 1)[-1]
+    for prefix in ("refs/heads/", "refs/remotes/origin/"):
+        if destination.startswith(prefix):
+            destination = destination[len(prefix) :]
+    return destination or None
+
+
+def _force_pushes_a_shared_branch(shell_command: str) -> bool:
+    """True when this rewrites history on a branch other people build on."""
+    for segment in _split_shell_segments(shell_command, opaque_substitution=True) or []:
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            continue
+        if len(tokens) < 2 or tokens[0] != "git" or tokens[1] != "push":
+            continue
+        forced = any(
+            token == flag or token.startswith(f"{flag}=")
+            for token in tokens
+            for flag in _FORCE_PUSH_FLAGS
+        )
+        if not forced:
+            continue
+        destination = _push_destination_branch(tokens)
+        if destination is None:
+            # Cannot tell which branch this lands on, and a forced push is not
+            # something to guess about.
+            return True
+        if destination in _SHARED_BRANCH_NAMES or destination.startswith(
+            _SHARED_BRANCH_PREFIXES
+        ):
+            return True
+    return False
+
+
+def classify_command(shell_command: str) -> str:
+    # Checked before the allow-list: `^git push` covers every push, including a
+    # forced one onto a shared branch. Rewriting a worker's own branch is
+    # routine and stays allowed; rewriting the branch everyone else builds on
+    # is a person's decision.
+    if _force_pushes_a_shared_branch(shell_command):
+        return "defer"
+    # Checked before every allow-list below: whatever the rest of the line looks
+    # like, if a program arrives through a pipe then nothing here has seen it.
+    if _pipes_program_into_interpreter(shell_command):
+        return "defer"
+    if _is_safe_status_sync_command(shell_command):
+        return "allow"
+    if _is_safe_python_one_liner(shell_command):
+        return "allow"
+    if _is_safe_test_dependency_install_command(shell_command):
+        return "allow"
+    if _requires_review_dependency_command(shell_command):
+        return "defer"
+    if _is_safe_python_command(shell_command):
+        return "allow"
+    if _is_safe_test_run_command(shell_command):
+        return "allow"
+    if _is_safe_workspace_mkdir_command(shell_command):
+        return "allow"
+    if _is_canonical_root_pnpm_install_command(shell_command):
+        return "defer"
+    normalized = _normalize_shell_command(shell_command)
+    segments = _split_shell_segments(normalized)
+    if segments is None:
+        # Command/process substitution hides what actually runs.
+        return "defer"
+    for segment in segments:
+        for pattern in DENY_BASH_PATTERNS:
+            if pattern.search(segment):
+                return "deny"
+    if len(segments) > 1:
+        # Every part has to stand on its own, otherwise a safe prefix would
+        # carry the rest of the line past the gate.
+        return "allow" if all(_segment_is_safe(segment) for segment in segments) else "defer"
+    single = segments[0] if segments else normalized
+    if _writes_outside_workspace(single):
+        return "defer"
+    for pattern in SAFE_BASH_PATTERNS:
+        if pattern.search(single):
+            return "allow"
+    for pattern in DEFER_BASH_PATTERNS:
+        if pattern.search(single):
+            return "defer"
+    return "defer"
+
+
+def _is_safe_python_one_liner(shell_command: str) -> bool:
+    command = _normalize_shell_command(shell_command)
+    if not (command.startswith('python3 -c "') or command.startswith("python3 -c '")):
+        return False
+    if any(marker in command for marker in UNSAFE_PYTHON_ONE_LINER_MARKERS):
+        return False
+    return True
+
+
+def _is_safe_python_command(shell_command: str) -> bool:
+    segments = _command_segments(shell_command)
+    if not segments:
+        return False
+    for segment in segments:
+        fragment = _primary_shell_fragment(segment)
+        if not fragment:
+            return False
+        try:
+            tokens = shlex.split(fragment)
+        except ValueError:
+            return False
+        index = 0
+        while index < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", tokens[index]):
+            index += 1
+        if index >= len(tokens) or tokens[index] != "python3":
+            return False
+    return True
+
+
+def _requires_review_dependency_command(shell_command: str) -> bool:
+    segments = _command_segments(shell_command)
+    if not segments:
+        return False
+    for segment in segments:
+        fragment = _primary_shell_fragment(segment)
+        if not fragment:
+            continue
+        try:
+            tokens = shlex.split(fragment)
+        except ValueError:
+            continue
+        index = 0
+        while index < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", tokens[index]):
+            index += 1
+        remaining = tokens[index:]
+        if remaining[:4] == ["python3", "-m", "pip", "install"]:
+            return True
+        if remaining[:2] in (["pip", "install"], ["pip3", "install"]):
+            return True
+        if len(remaining) >= 2 and remaining[0] == "pnpm" and remaining[1] == "add":
+            return True
+    return False
+
+
+def _is_safe_status_sync_command(shell_command: str) -> bool:
+    command = _normalize_shell_command(shell_command)
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return any(pattern.search(command) for pattern in STATUS_SYNC_BASH_PATTERNS)
+    if "&&" in parts:
+        try:
+            amp_index = parts.index("&&")
+        except ValueError:
+            amp_index = -1
+        if amp_index == 2 and parts[0] == "cd":
+            cd_target = parts[1]
+            if not _paths_within_workspace([Path(cd_target)]):
+                return False
+            parts = parts[amp_index + 1 :]
+    index = 0
+    while index < len(parts) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", parts[index]):
+        index += 1
+    if index >= len(parts):
+        return False
+    remaining = parts[index:]
+    if len(remaining) >= 2 and remaining[0] == "python3" and (
+        remaining[1] == "tools/development-orchestrator/bin/ai_status.py" or _matches_workspace_script(remaining[1], "tools/development-orchestrator/bin/ai_status.py")
+    ):
+        return True
+    if len(remaining) >= 2 and remaining[0] == "bash" and (
+        remaining[1] == "tools/development-orchestrator/bin/ai-status.sh" or _matches_workspace_script(remaining[1], "tools/development-orchestrator/bin/ai-status.sh")
+    ):
+        return True
+    if remaining[0] == "tools/development-orchestrator/bin/ai-status.sh" or _matches_workspace_script(remaining[0], "tools/development-orchestrator/bin/ai-status.sh"):
+        return True
+    return any(pattern.search(command) for pattern in STATUS_SYNC_BASH_PATTERNS)
+
+
+def _is_safe_workspace_mkdir_command(shell_command: str) -> bool:
+    command = _normalize_shell_command(shell_command)
+    if not command.startswith("mkdir -p "):
+        return False
+    raw_paths = [item for item in command[len("mkdir -p ") :].split() if item]
+    if not raw_paths:
+        return False
+    return _paths_within_workspace([Path(item) for item in raw_paths])
+
+
+def _is_pytest_package_spec(token: str) -> bool:
+    return bool(re.match(r"^pytest(?:[-_.A-Za-z0-9]*)(?:[=<>!~].+)?$", token))
+
+
+def _strip_workspace_cd_prefix(shell_command: str) -> str:
+    command = _normalize_shell_command(shell_command)
+    if not command:
+        return command
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return command
+    if "&&" not in parts:
+        return command
+    amp_index = parts.index("&&")
+    if amp_index != 2 or parts[0] != "cd":
+        return command
+    if not _paths_within_workspace([Path(parts[1])]):
+        return command
+    return " ".join(parts[amp_index + 1 :])
+
+
+def _command_segments(shell_command: str) -> list[str]:
+    command = _strip_workspace_cd_prefix(shell_command)
+    return [segment.strip() for segment in command.split("&&") if segment.strip()]
+
+
+def _resolve_workspace_path(base: Path, raw_path: str) -> Path:
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        return candidate.resolve(strict=False)
+    return (base / candidate).resolve(strict=False)
+
+
+def _command_tokens_and_cwd(shell_command: str) -> tuple[list[str], Path]:
+    command = _normalize_shell_command(shell_command)
+    root = workspace_root()
+    if not command:
+        return [], root
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return [], root
+    cwd = root
+    if "&&" in tokens:
+        amp_index = tokens.index("&&")
+        if amp_index == 2 and tokens[0] == "cd":
+            cd_target = Path(tokens[1])
+            if _paths_within_workspace([cd_target]):
+                cwd = _resolve_workspace_path(root, tokens[1])
+                tokens = tokens[amp_index + 1 :]
+    index = 0
+    while index < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", tokens[index]):
+        index += 1
+    return tokens[index:], cwd
+
+
+def _primary_shell_fragment(segment: str) -> str:
+    return segment.split("|", 1)[0].strip()
+
+
+def _pnpm_command_index(tokens: list[str]) -> int:
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in PNPM_OPTION_TAKES_VALUE and index + 1 < len(tokens):
+            index += 2
+            continue
+        if any(token.startswith(f"{prefix}=") for prefix in PNPM_OPTION_TAKES_VALUE):
+            index += 1
+            continue
+        if token in PNPM_STANDALONE_FLAGS:
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        break
+    return index
+
+
+def _is_canonical_root_pnpm_install_command(shell_command: str) -> bool:
+    tokens, cwd = _command_tokens_and_cwd(shell_command)
+    if not tokens or tokens[0] != "pnpm":
+        return False
+
+    effective_cwd = cwd
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {"--dir", "-C"} and index + 1 < len(tokens):
+            effective_cwd = _resolve_workspace_path(cwd, tokens[index + 1])
+            index += 2
+            continue
+        if token.startswith("--dir="):
+            effective_cwd = _resolve_workspace_path(cwd, token.split("=", 1)[1])
+            index += 1
+            continue
+        if token.startswith("-C="):
+            effective_cwd = _resolve_workspace_path(cwd, token.split("=", 1)[1])
+            index += 1
+            continue
+        if token in PNPM_STANDALONE_FLAGS or token.startswith("-"):
+            index += 1
+            continue
+        break
+
+    if index >= len(tokens) or tokens[index] not in {"install", "i"}:
+        return False
+    return effective_cwd == workspace_root()
+
+
+def _extract_package_specs(tokens: list[str], start_index: int) -> list[str]:
+    return [
+        token
+        for token in tokens[start_index:]
+        if token and not token.startswith("-") and not re.match(r"^\d?>&\d+$", token)
+    ]
+
+
+def _is_safe_test_package_spec(token: str) -> bool:
+    if _is_pytest_package_spec(token):
+        return True
+    return any(pattern.match(token) for pattern in SAFE_JS_TEST_PACKAGE_PATTERNS)
+
+
+def _is_safe_test_run_segment(segment: str) -> bool:
+    fragment = _primary_shell_fragment(segment)
+    if not fragment:
+        return False
+    try:
+        tokens = shlex.split(fragment)
+    except ValueError:
+        return False
+    if not tokens:
+        return False
+
+    if tokens[0] in SAFE_DIRECT_TEST_RUNNERS:
+        return True
+    if tokens[:2] in (["npx", "vitest"], ["npx", "jest"]):
+        return True
+
+    if tokens[0] == "npm":
+        if len(tokens) >= 2 and tokens[1] == "test":
+            return True
+        if len(tokens) >= 3 and tokens[1] == "run" and tokens[2].startswith("test"):
+            return True
+        if len(tokens) >= 3 and tokens[1] == "exec" and tokens[2] in SAFE_DIRECT_TEST_RUNNERS:
+            return True
+
+    if tokens[0] == "yarn":
+        if len(tokens) >= 2 and (tokens[1].startswith("test") or tokens[1] in SAFE_DIRECT_TEST_RUNNERS):
+            return True
+        if len(tokens) >= 3 and tokens[1] == "run" and (tokens[2].startswith("test") or tokens[2] in SAFE_DIRECT_TEST_RUNNERS):
+            return True
+
+    if tokens[0] == "pnpm":
+        index = _pnpm_command_index(tokens)
+        if index >= len(tokens):
+            return False
+        subcommand = tokens[index]
+        if subcommand.startswith("test"):
+            return True
+        if subcommand == "run" and index + 1 < len(tokens) and tokens[index + 1].startswith("test"):
+            return True
+        if subcommand in SAFE_DIRECT_TEST_RUNNERS:
+            return True
+        if subcommand == "exec" and index + 1 < len(tokens) and tokens[index + 1] in SAFE_DIRECT_TEST_RUNNERS:
+            return True
+
+    return False
+
+
+def _is_safe_test_run_command(shell_command: str) -> bool:
+    segments = _command_segments(shell_command)
+    if not segments:
+        return False
+    return all(_is_safe_test_run_segment(segment) for segment in segments)
+
+
+def _is_safe_test_dependency_install_command(shell_command: str) -> bool:
+    command = shell_command.strip()
+    if not command:
+        return False
+
+    segments = _command_segments(command)
+    if not segments:
+        return False
+
+    install_fragment = _primary_shell_fragment(segments[0])
+    try:
+        tokens = shlex.split(install_fragment)
+    except ValueError:
+        return False
+
+    package_tokens: list[str]
+    if tokens[:4] == ["python3", "-m", "pip", "install"]:
+        package_tokens = tokens[4:]
+    elif tokens[:2] in (["pip", "install"], ["pip3", "install"]):
+        package_tokens = tokens[2:]
+    elif tokens[:3] == ["apt-get", "install", "-y"] or tokens[:2] == ["apt-get", "install"] or tokens[:3] == ["apt", "install", "-y"] or tokens[:2] == ["apt", "install"]:
+        package_tokens = tokens[2:] if tokens[1] == "install" else tokens[3:]
+    elif tokens[:2] == ["npm", "install"]:
+        package_tokens = tokens[2:]
+    elif tokens[:2] == ["npm", "add"]:
+        package_tokens = tokens[2:]
+    elif tokens[:2] == ["yarn", "add"]:
+        package_tokens = tokens[2:]
+    elif tokens[:1] == ["pnpm"]:
+        index = _pnpm_command_index(tokens)
+        if index >= len(tokens) or tokens[index] not in {"add", "install"}:
+            return False
+        package_tokens = tokens[index + 1 :]
+    else:
+        return False
+
+    package_specs = _extract_package_specs(package_tokens, 0)
+    if not package_specs or not all(_is_safe_test_package_spec(token) for token in package_specs):
+        return False
+
+    for remainder in segments[1:]:
+        remainder = remainder.strip()
+        if not remainder:
+            continue
+        if any(pattern.search(remainder) for pattern in SAFE_PYTEST_VERIFY_PATTERNS):
+            continue
+        if _is_safe_test_run_command(remainder):
+            continue
+        return False
+
+    return True
+
+
+def _collect_paths(tool_input: dict[str, Any]) -> list[Path]:
+    candidates: list[Path] = []
+    for key, value in tool_input.items():
+        if key not in {"path", "file_path", "old_path", "new_path", "paths", "files"}:
+            continue
+        if isinstance(value, str):
+            candidates.append(Path(value))
+        elif isinstance(value, list):
+            candidates.extend(Path(item) for item in value if isinstance(item, str))
+    return candidates
+
+
+def _paths_within_workspace(paths: list[Path]) -> bool:
+    if not paths:
+        return True
+    root = workspace_root()
+    # Task worktrees usually live under the canonical root, but a worker may be
+    # dispatched into one elsewhere, so honour every root we were handed.
+    allowed_roots = [*workspace_roots(), root.parent / "pantheon", root.parent / "tenant-commute-hub", Path.home() / ".claude", Path.home() / ".codex"]
+    for path in paths:
+        resolved = path if path.is_absolute() else root / path
+        if not any(
+            _is_relative_to(resolved, root) for root in allowed_roots
+        ):
+            return False
+    return True
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _check_claude_allow_rules(tool_name: str, tool_input: dict[str, Any]) -> bool:
+    """Return True if a Claude settings allow rule matches this tool call."""
+    try:
+        settings_path = Path.home() / ".claude" / "projects" / "-home-edna-workspace-drts-fleet-platform" / "settings.json"
+        local_settings_path = workspace_root() / ".claude" / "settings.local.json"
+        for path in (local_settings_path, settings_path):
+            if not path.exists():
+                continue
+            data = json.loads(path.read_text())
+            allow_rules = data.get("permissions", {}).get("allow", [])
+            for rule in allow_rules:
+                rule = str(rule)
+                if rule == f"{tool_name}(*)":
+                    return True
+                if rule.startswith(f"{tool_name}(") and rule.endswith(")"):
+                    pattern = rule[len(tool_name) + 1:-1]
+                    if tool_name == "Bash":
+                        cmd = tool_input.get("command") or ""
+                        if fnmatch.fnmatch(cmd, pattern) or pattern == "*":
+                            return True
+    except Exception:
+        pass
+    return False
+
+
+def evaluate_tool_request(tool_name: str, tool_input: dict[str, Any] | None, config: dict[str, Any]) -> dict[str, Any]:
+    tool_input = tool_input or {}
+    decision = "defer"
+    reason = f"Deferred by default for {tool_name}."
+    risk_class = "unknown"
+    suggested_rule = None
+
+    if _check_claude_allow_rules(tool_name, tool_input):
+        return {"decision": "allow", "reason": "Matched Claude settings allow rule.", "risk_class": "settings_allowed", "suggested_rule": None}
+
+    if tool_name in SAFE_TOOLS:
+        decision = "allow"
+        reason = f"{tool_name} is read-only."
+        risk_class = "safe_read"
+    elif tool_name in EDIT_TOOLS:
+        if _paths_within_workspace(_collect_paths(tool_input)):
+            decision = "allow"
+            reason = f"{tool_name} stays within the repository workspace."
+            risk_class = "repo_write"
+        else:
+            decision = "deny"
+            reason = f"{tool_name} targets a path outside {workspace_root()}."
+            risk_class = "out_of_workspace"
+    elif tool_name == "Bash":
+        shell_command = tool_input.get("command") or tool_input.get("cmd") or tool_input.get("raw_command") or ""
+        decision = classify_command(str(shell_command))
+        risk_class = {
+            "allow": "safe_bash",
+            "deny": "destructive_bash",
+            "defer": "needs_review",
+        }[decision]
+        reason = f"Bash command classified as {decision}: {shell_command}"
+        suggested_rule = f"Bash({shell_command})" if shell_command else None
+    elif tool_name in NETWORK_TOOLS:
+        decision = "defer"
+        reason = f"{tool_name} requires network approval."
+        risk_class = "network"
+
+    return {
+        "decision": decision,
+        "reason": reason,
+        "risk_class": risk_class,
+        "suggested_rule": suggested_rule,
+        "tool_name": tool_name,
+        "tool_input": tool_input,
+        "evaluated_at": utc_now(),
+        "policy_default_mode": config.get("providers", {}).get("claude", {}).get("approval", {}).get("rule_default_mode", "acceptEdits"),
+    }
+
+
+def remember_rule(config: dict[str, Any], *, decision: str, rule: str) -> dict[str, Any]:
+    settings = load_json(CLAUDE_LOCAL_SETTINGS_PATH, default={}) or {}
+    permissions = settings.get("permissions", {})
+    bucket = permissions.get(decision, []) or []
+    if rule not in bucket:
+        bucket.append(rule)
+    permissions[decision] = bucket
+    settings["permissions"] = permissions
+    write_json(CLAUDE_LOCAL_SETTINGS_PATH, settings)
+    write_activity_log(
+        config,
+        {
+            "type": "permission_rule_remembered",
+            "provider": "claude",
+            "message": f"Remembered Claude rule in {decision}: {rule}",
+            "decision": decision,
+            "rule": rule,
+        },
+    )
+    return settings
+
+
+def _parse_permission_rule(rule: str) -> tuple[str | None, str | None]:
+    match = re.match(r"^([A-Za-z0-9_]+)\((.*)\)$", rule)
+    if match:
+        return match.group(1), match.group(2)
+    if rule:
+        return rule, None
+    return None, None
+
+
+def _bash_rule_matches(rule_content: str, shell_command: str) -> bool:
+    if "*" in rule_content:
+        return fnmatch.fnmatchcase(shell_command, rule_content)
+    return shell_command == rule_content
+
+
+def _permission_rule_matches(rule: str, *, tool_name: str, tool_input: dict[str, Any]) -> bool:
+    parsed_tool_name, rule_content = _parse_permission_rule(rule)
+    if not parsed_tool_name or parsed_tool_name != tool_name:
+        return False
+    if rule_content is None:
+        return True
+    if tool_name == "Bash":
+        shell_command = str(tool_input.get("command") or tool_input.get("cmd") or tool_input.get("raw_command") or "")
+        return _bash_rule_matches(rule_content, shell_command)
+    return False
+
+
+def suspend_matching_rules(
+    config: dict[str, Any],
+    *,
+    bucket: str,
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> list[str]:
+    settings = load_json(CLAUDE_LOCAL_SETTINGS_PATH, default={}) or {}
+    permissions = settings.get("permissions", {})
+    existing_rules = list(permissions.get(bucket, []) or [])
+    removed_rules = [rule for rule in existing_rules if _permission_rule_matches(rule, tool_name=tool_name, tool_input=tool_input)]
+    if not removed_rules:
+        return []
+    permissions[bucket] = [rule for rule in existing_rules if rule not in removed_rules]
+    settings["permissions"] = permissions
+    write_json(CLAUDE_LOCAL_SETTINGS_PATH, settings)
+    write_activity_log(
+        config,
+        {
+            "type": "permission_rule_temporary_removed",
+            "provider": "claude",
+            "message": f"Temporarily removed Claude {bucket} rule(s): {', '.join(removed_rules)}",
+            "bucket": bucket,
+            "rules": removed_rules,
+        },
+    )
+    return removed_rules
+
+
+def restore_rules(config: dict[str, Any], *, bucket: str, rules: list[str]) -> list[str]:
+    if not rules:
+        return []
+    settings = load_json(CLAUDE_LOCAL_SETTINGS_PATH, default={}) or {}
+    permissions = settings.get("permissions", {})
+    existing_rules = list(permissions.get(bucket, []) or [])
+    restored: list[str] = []
+    for rule in rules:
+        if rule not in existing_rules:
+            existing_rules.append(rule)
+            restored.append(rule)
+    if not restored:
+        return []
+    permissions[bucket] = existing_rules
+    settings["permissions"] = permissions
+    write_json(CLAUDE_LOCAL_SETTINGS_PATH, settings)
+    write_activity_log(
+        config,
+        {
+            "type": "permission_rule_temporary_restored",
+            "provider": "claude",
+            "message": f"Restored Claude {bucket} rule(s): {', '.join(restored)}",
+            "bucket": bucket,
+            "rules": restored,
+        },
+    )
+    return restored
+
+
+def add_temporary_allow_rule(config: dict[str, Any], *, rule: str | None) -> bool:
+    if not rule:
+        return False
+    settings = load_json(CLAUDE_LOCAL_SETTINGS_PATH, default={}) or {}
+    permissions = settings.get("permissions", {})
+    allow_rules = list(permissions.get("allow", []) or [])
+    if rule in allow_rules:
+        return False
+    allow_rules.append(rule)
+    permissions["allow"] = allow_rules
+    settings["permissions"] = permissions
+    write_json(CLAUDE_LOCAL_SETTINGS_PATH, settings)
+    write_activity_log(
+        config,
+        {
+            "type": "permission_rule_temporary_added",
+            "provider": "claude",
+            "message": f"Temporarily added Claude allow rule: {rule}",
+            "rule": rule,
+        },
+    )
+    return True
+
+
+def remove_temporary_allow_rule(config: dict[str, Any], *, rule: str | None) -> bool:
+    if not rule:
+        return False
+    settings = load_json(CLAUDE_LOCAL_SETTINGS_PATH, default={}) or {}
+    permissions = settings.get("permissions", {})
+    allow_rules = list(permissions.get("allow", []) or [])
+    if rule not in allow_rules:
+        return False
+    permissions["allow"] = [entry for entry in allow_rules if entry != rule]
+    settings["permissions"] = permissions
+    write_json(CLAUDE_LOCAL_SETTINGS_PATH, settings)
+    write_activity_log(
+        config,
+        {
+            "type": "permission_rule_temporary_removed",
+            "provider": "claude",
+            "message": f"Removed temporary Claude allow rule: {rule}",
+            "rule": rule,
+        },
+    )
+    return True
+
+
+def emit_hook_response(payload: dict[str, Any]) -> None:
+    print(json.dumps(payload, ensure_ascii=False))
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _truncate_preview(value: str, limit: int = 240) -> str:
+    preview = value[:limit]
+    return preview + ("..." if len(value) > limit else "")
+
+
+def _sanitize_hook_value(value: Any, *, key: str = "", depth: int = 0) -> Any:
+    if depth > 4:
+        return {"type": type(value).__name__}
+    if isinstance(value, str):
+        if value and (key in {"content", "stdout", "stderr", "old_string", "new_string", "structuredPatch", "raw"} or len(value) > 240):
+            return {
+                "preview": _truncate_preview(value),
+                "chars": len(value),
+                "sha256": _sha256_text(value),
+                "truncated": len(value) > 240 or key in {"content", "stdout", "stderr", "old_string", "new_string", "structuredPatch", "raw"},
+            }
+        return value
+    if isinstance(value, list):
+        if len(value) > 12:
+            serialized = json.dumps(value, ensure_ascii=False, sort_keys=True)
+            return {
+                "items": len(value),
+                "sha256": _sha256_text(serialized),
+                "preview": [_sanitize_hook_value(item, depth=depth + 1) for item in value[:4]],
+                "truncated": True,
+            }
+        return [_sanitize_hook_value(item, depth=depth + 1) for item in value]
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for subkey, subvalue in value.items():
+            sanitized[subkey] = _sanitize_hook_value(subvalue, key=str(subkey), depth=depth + 1)
+        return sanitized
+    return value
+
+
+def sanitize_hook_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return _sanitize_hook_value(payload, depth=0)
+
+
+def hook_log_message(event_name: str, payload: dict[str, Any]) -> str:
+    message = payload.get("tool_name") or payload.get("toolName")
+    if message:
+        return str(message)
+    raw = payload.get("raw")
+    if isinstance(raw, str) and raw:
+        return f"raw:{_truncate_preview(raw)} sha256={_sha256_text(raw)} chars={len(raw)}"
+    return event_name
+
+
+def log_event(config: dict[str, Any], event_name: str, payload: dict[str, Any]) -> None:
+    message = hook_log_message(event_name, payload)
+    write_activity_log(
+        config,
+        {
+            "type": "permission_hook",
+            "provider": "claude",
+            "message": f"{event_name}: {message}",
+            "hook_event": event_name,
+            "hook_payload": sanitize_hook_payload(payload),
+            "ts_local": utc_now(),
+        },
+    )
+
+
+def _approval_timeout_seconds(config: dict[str, Any]) -> float:
+    return float(
+        config.get("providers", {})
+        .get("claude", {})
+        .get("broker", {})
+        .get("approval_wait_seconds", 3600)
+    )
+
+
+def _approval_context(payload: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "provider": "claude",
+        "task_id": os.environ.get("ORCH_TASK_ID") or payload.get("task_id") or payload.get("taskId"),
+        "worker_run_id": os.environ.get("ORCH_RUN_ID"),
+        "session_id": payload.get("session_id") or payload.get("sessionId") or os.environ.get("ORCH_SESSION_ID"),
+        "tool_use_id": payload.get("tool_use_id") or payload.get("toolUseId"),
+        "expires_at": None,
+    }
+
+
+def _decision_response(event_name: str, permission_decision: str, reason: str) -> dict[str, Any]:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": event_name,
+            "permissionDecision": permission_decision,
+            "permissionDecisionReason": reason,
+        }
+    }
+
+
+def _permission_request_response(
+    behavior: str,
+    *,
+    message: str | None = None,
+    updated_input: dict[str, Any] | None = None,
+    updated_permissions: list[dict[str, Any]] | None = None,
+    interrupt: bool | None = None,
+) -> dict[str, Any]:
+    decision: dict[str, Any] = {"behavior": behavior}
+    if behavior == "allow":
+        if updated_input is not None:
+            decision["updatedInput"] = updated_input
+        if updated_permissions:
+            decision["updatedPermissions"] = updated_permissions
+    elif behavior == "deny":
+        if message:
+            decision["message"] = message
+        if interrupt is not None:
+            decision["interrupt"] = interrupt
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": decision,
+        }
+    }
+
+
+def _approval_signature(session_id: str | None, tool_name: str, tool_input: dict[str, Any]) -> tuple[str | None, str, str]:
+    return (
+        session_id,
+        tool_name,
+        json.dumps(tool_input, sort_keys=True, ensure_ascii=False),
+    )
+
+
+def _permission_rule(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any] | None:
+    if not tool_name:
+        return None
+    if tool_name == "Bash":
+        shell_command = tool_input.get("command") or tool_input.get("cmd") or tool_input.get("raw_command")
+        if shell_command:
+            return {"toolName": "Bash", "ruleContent": str(shell_command)}
+    return {"toolName": tool_name}
+
+
+def _session_allow_updates(tool_name: str, tool_input: dict[str, Any]) -> list[dict[str, Any]]:
+    rule = _permission_rule(tool_name, tool_input)
+    if not rule:
+        return []
+    return [
+        {
+            "type": "addRules",
+            "rules": [rule],
+            "behavior": "allow",
+            "destination": "session",
+        }
+    ]
+
+
+def _chatbox_tree_guard_reason(block: dict[str, Any]) -> str:
+    """Build the human-readable deny reason for a chatbox guard hit."""
+    paths = list(block.get("dirty_paths") or [])
+    head = paths[:5]
+    extra = ""
+    if len(paths) > 5:
+        extra = f" (+{len(paths) - 5} more)"
+    sample = ", ".join(head) if head else "(no paths)"
+    return (
+        "Working tree has uncommitted edits on fragile surfaces — "
+        f"{sample}{extra}. "
+        "Anchor-commit them on a task branch (branch from origin/dev) before "
+        "adding more edits. See docs/ops/branch-strategy.md §11 and the "
+        "anchor-commit protocol (OPS-GIT-WORKFLOW-004)."
+    )
+
+
+def _maybe_apply_chatbox_tree_guard(
+    config: dict[str, Any],
+    payload: dict[str, Any],
+    tool_name: str,
+) -> bool:
+    """Run the chatbox tree guard and emit a deny if it fires.
+
+    Returns True when the caller should stop processing the event (the
+    hook response has been emitted). Returns False when the caller should
+    fall through to the normal PreToolUse flow — either the guard is off,
+    not applicable to this tool, in log_only canary mode, or the tree is
+    clean.
+
+    Fails open on any unexpected exception: the guard is a safety net, it
+    must never break Claude Code's hook pipeline if its own logic crashes.
+    """
+    try:
+        block = check_chatbox_tree_guard(config, tool_name=tool_name)
+    except Exception as exc:  # noqa: BLE001 — fail open
+        log_event(
+            config,
+            "PreToolUse",
+            {
+                **payload,
+                "broker_decision": {
+                    "decision": "fail_open",
+                    "reason": f"chatbox_tree_guard_error: {exc.__class__.__name__}",
+                },
+                "effective_decision": "fail_open",
+                "effective_reason": "chatbox_tree_guard_error",
+            },
+        )
+        return False
+    if block is None:
+        return False
+    log_payload = {
+        **payload,
+        "broker_decision": {
+            "decision": "deny",
+            "reason": "chatbox_tree_guard_blocked",
+        },
+        "effective_decision": "log_only" if block["log_only"] else "deny",
+        "effective_reason": "chatbox_tree_guard_blocked",
+        "tree_guard": {
+            "dirty_paths": list(block.get("dirty_paths") or [])[:5],
+            "matched_globs": list(block.get("matched_globs") or []),
+            "total_dirty": len(block.get("dirty_paths") or []),
+            "log_only": bool(block.get("log_only")),
+        },
+    }
+    log_event(config, "PreToolUse", log_payload)
+    if block["log_only"]:
+        return False
+    emit_hook_response(
+        _decision_response("PreToolUse", "deny", _chatbox_tree_guard_reason(block))
+    )
+    return True
+
+
+def _matching_approval(
+    config: dict[str, Any],
+    *,
+    session_id: str | None,
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    state = load_approval_state(config)
+    signature = _approval_signature(session_id, tool_name, tool_input)
+    pending_match = None
+    history_match = None
+    for item in state.get("pending", []):
+        item_signature = _approval_signature(item.get("session_id"), item.get("tool_name") or "", item.get("tool_input") or {})
+        if item_signature == signature:
+            pending_match = item
+    for item in reversed(state.get("history", [])):
+        item_signature = _approval_signature(item.get("session_id"), item.get("tool_name") or "", item.get("tool_input") or {})
+        if item_signature == signature:
+            history_match = item
+            break
+    return pending_match, history_match
+
+
+def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) -> int:
+    if event_name in {"PostToolUse", "PostToolUseFailure"}:
+        tool_name = payload.get("tool_name") or payload.get("toolName") or ""
+        tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+        session_id = payload.get("session_id") or payload.get("sessionId")
+        active_override = find_resume_override(
+            config,
+            session_id=session_id,
+            tool_name=tool_name,
+            tool_input=tool_input,
+        )
+        if active_override:
+            consumed = consume_resume_override(
+                config,
+                approval_id=active_override["approval_id"],
+                reason=f"{event_name}:{tool_name}",
+            )
+            log_event(
+                config,
+                event_name,
+                {
+                    **payload,
+                    "resume_override": {
+                        "approval_id": active_override.get("approval_id"),
+                        "consumed_at": consumed.get("resume_override_consumed_at") if consumed else None,
+                        "reason": consumed.get("resume_override_consumed_reason") if consumed else None,
+                    },
+                },
+            )
+            return 0
+        log_event(config, event_name, payload)
+        return 0
+
+    if event_name in {"PreToolUse", "PermissionRequest"}:
+        tool_name = payload.get("tool_name") or payload.get("toolName") or ""
+        tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+        session_id = payload.get("session_id") or payload.get("sessionId")
+        # Chatbox tree guard fires before override/approval lookups so a
+        # dirty fragile working tree can't be auto-allowed by a prior
+        # session approval. Only PreToolUse; PermissionRequest is the
+        # user-facing prompt path and the guard already blocked at
+        # PreToolUse if applicable.
+        if event_name == "PreToolUse" and _maybe_apply_chatbox_tree_guard(
+            config, payload, tool_name
+        ):
+            return 0
+        active_override = find_resume_override(
+            config,
+            session_id=session_id,
+            tool_name=tool_name,
+            tool_input=tool_input,
+        )
+        pending_match, history_match = _matching_approval(
+            config,
+            session_id=session_id,
+            tool_name=tool_name,
+            tool_input=tool_input,
+        )
+        decision = evaluate_tool_request(
+            tool_name,
+            tool_input,
+            config,
+        )
+        effective_decision = decision["decision"]
+        effective_reason = decision["reason"]
+        matched_approval_id = None
+
+        if event_name == "PermissionRequest":
+            if active_override:
+                effective_decision = "allow"
+                effective_reason = active_override.get("note") or f"Resuming approved {tool_name} request."
+                matched_approval_id = active_override.get("approval_id")
+                log_event(
+                    config,
+                    event_name,
+                    {
+                        **payload,
+                        "broker_decision": decision,
+                        "effective_decision": effective_decision,
+                        "effective_reason": effective_reason,
+                        "matched_approval_id": matched_approval_id,
+                        "updated_permissions": _session_allow_updates(tool_name, tool_input),
+                    },
+                )
+                emit_hook_response(
+                    _permission_request_response(
+                        "allow",
+                        updated_input=tool_input,
+                        updated_permissions=_session_allow_updates(tool_name, tool_input),
+                    )
+                )
+                return 0
+            if history_match:
+                behavior = "allow" if history_match.get("decision") == "allow" else "deny"
+                message = history_match.get("note") or decision["reason"]
+                effective_decision = behavior
+                effective_reason = message
+                matched_approval_id = history_match.get("approval_id")
+                log_event(
+                    config,
+                    event_name,
+                    {
+                        **payload,
+                        "broker_decision": decision,
+                        "effective_decision": effective_decision,
+                        "effective_reason": effective_reason,
+                        "matched_approval_id": matched_approval_id,
+                    },
+                )
+                emit_hook_response(_permission_request_response(behavior, message=message))
+                return 0
+            if decision["decision"] in {"allow", "deny"}:
+                behavior = "allow" if decision["decision"] == "allow" else "deny"
+                effective_decision = behavior
+                effective_reason = decision["reason"]
+                log_event(
+                    config,
+                    event_name,
+                    {
+                        **payload,
+                        "broker_decision": decision,
+                        "effective_decision": effective_decision,
+                        "effective_reason": effective_reason,
+                    },
+                )
+                emit_hook_response(_permission_request_response(behavior, message=decision["reason"]))
+            else:
+                # Defer: log it but don't emit a hook response.
+                # This lets Claude Code's native approval UI ask the user,
+                # instead of silently denying.
+                effective_decision = "defer"
+                effective_reason = decision["reason"]
+                log_event(
+                    config,
+                    event_name,
+                    {
+                        **payload,
+                        "broker_decision": decision,
+                        "effective_decision": effective_decision,
+                        "effective_reason": effective_reason,
+                    },
+                )
+                # No emit_hook_response → Claude Code falls through to its own prompt
+            return 0
+
+        if active_override:
+            effective_decision = "allow"
+            effective_reason = active_override.get("note") or f"Resuming approved {tool_name} request."
+            matched_approval_id = active_override.get("approval_id")
+            log_event(
+                config,
+                event_name,
+                {
+                    **payload,
+                    "broker_decision": decision,
+                    "effective_decision": effective_decision,
+                    "effective_reason": effective_reason,
+                    "matched_approval_id": matched_approval_id,
+                },
+            )
+            emit_hook_response(_decision_response(event_name, "allow", effective_reason))
+            return 0
+
+        if decision["decision"] in {"allow", "deny"}:
+            effective_decision = decision["decision"]
+            effective_reason = decision["reason"]
+            log_event(
+                config,
+                event_name,
+                {
+                    **payload,
+                    "broker_decision": decision,
+                    "effective_decision": effective_decision,
+                    "effective_reason": effective_reason,
+                },
+            )
+            emit_hook_response(_decision_response(event_name, decision["decision"], decision["reason"]))
+            return 0
+
+        if pending_match is None:
+            create_approval(
+                config,
+                {
+                    **_approval_context(payload, config),
+                    "tool_name": decision["tool_name"],
+                    "tool_input": decision["tool_input"],
+                    "risk_class": decision["risk_class"],
+                    "suggested_rule": decision.get("suggested_rule"),
+                },
+            )
+        effective_decision = "defer"
+        effective_reason = decision["reason"]
+        log_event(
+            config,
+            event_name,
+            {
+                **payload,
+                "broker_decision": decision,
+                "effective_decision": effective_decision,
+                "effective_reason": effective_reason,
+            },
+        )
+        emit_hook_response(_decision_response(event_name, "defer", decision["reason"]))
+        return 0
+
+    log_event(config, event_name, payload)
+    return 0
+
+
+def main() -> int:
+    args = parse_args()
+    config = load_config()
+
+    if args.command == "classify":
+        print(classify_command(args.shell_command))
+        return 0
+
+    if args.command == "evaluate":
+        tool_input = json.loads(args.tool_input_json)
+        print(json.dumps(evaluate_tool_request(args.tool_name, tool_input, config), indent=2, ensure_ascii=False))
+        return 0
+
+    if args.command == "print-policy":
+        print(json.dumps(_verified_claude_policy(config), indent=2, ensure_ascii=False))
+        return 0
+
+    if args.command == "remember":
+        remember_rule(config, decision=args.decision, rule=args.rule)
+        print(json.dumps({"ok": True, "decision": args.decision, "rule": args.rule}, ensure_ascii=False))
+        return 0
+
+    payload = hook_payload()
+    if args.command == "log-hook":
+        log_event(config, args.event_name, payload)
+        return 0
+    return hook_mode(config, args.event_name, payload)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

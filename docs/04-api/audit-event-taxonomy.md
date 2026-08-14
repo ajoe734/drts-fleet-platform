@@ -5,7 +5,7 @@ cost-center, quota, approval-rule, and approval-request slices.
 
 - Auto-generated source section: `apps/api/src/modules/tenant-partner/tenant-partner.service.ts`
 - Related lifecycle source outside the generator: `apps/api/src/modules/owned-mobility/owned-mobility.service.ts`
-- Regenerate with: `node scripts/generate-tenant-governance-audit-taxonomy.mjs`
+- Regenerate with: `node tools/local-development/generate-tenant-governance-audit-taxonomy.mjs`
 - Comparison baseline: `docs/03-runbooks/tenant-governance-wave-execution-packet-20260513.md` §5
 
 ## Generated Service Events

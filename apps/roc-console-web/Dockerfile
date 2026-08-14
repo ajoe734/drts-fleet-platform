@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 
 FROM deps AS build
 COPY apps/roc-console-web/ apps/roc-console-web/
-COPY scripts/control-plane-web-proxy.mjs scripts/
+COPY runtime/web/control-plane-web-proxy.mjs runtime/web/
 COPY tsconfig.base.json .
 
 RUN pnpm --filter @drts/contracts build && \
@@ -44,7 +44,7 @@ WORKDIR /app
 COPY --from=build /workspace/apps/roc-console-web/.next/standalone ./
 COPY --from=build /workspace/apps/roc-console-web/.next/static ./apps/roc-console-web/.next/static
 COPY --from=build /workspace/apps/roc-console-web/public ./apps/roc-console-web/public
-COPY --from=build /workspace/scripts/control-plane-web-proxy.mjs ./scripts/control-plane-web-proxy.mjs
+COPY --from=build /workspace/runtime/web/control-plane-web-proxy.mjs ./runtime/web/control-plane-web-proxy.mjs
 
 EXPOSE 3010
-CMD ["node", "scripts/control-plane-web-proxy.mjs", "apps/roc-console-web/server.js", "3110"]
+CMD ["node", "runtime/web/control-plane-web-proxy.mjs", "apps/roc-console-web/server.js", "3110"]

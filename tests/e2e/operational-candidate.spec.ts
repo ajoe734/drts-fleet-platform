@@ -27,7 +27,7 @@ type Manifest = {
 const manifestPath = process.env.DRTS_OPERATIONAL_MANIFEST;
 if (!manifestPath)
   throw new Error(
-    "DRTS_OPERATIONAL_MANIFEST is required; use scripts/run-operational-browser-acceptance.sh.",
+    "DRTS_OPERATIONAL_MANIFEST is required; use operations/verification/run-operational-browser-acceptance.sh.",
   );
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
 

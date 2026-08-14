@@ -2,7 +2,7 @@
 
 > 歸檔說明：本批文件由使用者於 2026-06-04 提供之 Phase 1 最終 SA/SD 正式文件，
 > 重新以正確 UTF-8（zh-TW）編碼歸檔；結構、表格、型別定義、API 路徑、任務代號、
-> 驗收條件均忠實保留。對應執行波次見 `scripts/dispatch-phase1-svc-fleet-tenantops.py`。
+> 驗收條件均忠實保留。對應執行波次見 `tools/task-dispatch/dispatch-phase1-svc-fleet-tenantops.py`。
 
 本批文件分成兩份：
 
