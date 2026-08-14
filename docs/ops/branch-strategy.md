@@ -95,8 +95,8 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 
 | Workflow                                | Trigger                                                   | What it does                                                                                                  |
 | --------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `ci.yml` (3 named gates)                | PR to main / dev; push main                               | Commit trailers + Runtime mirror guard + Smoke acceptance                                                     |
-| `ci-integ.yml`                          | push to dev; workflow_dispatch                            | heavier integration suite (build, integration tests, orchestrator-tests) — prerequisite for `nightly-publish` |
+| `ci.yml` (3 named gates)                | PR to main / dev; push main                               | Commit trailers + Runtime mirror guard + scoped Smoke acceptance                                              |
+| `ci-integ.yml`                          | PR to dev; push dev; workflow_dispatch                    | scope-aware PR checks; full integration on dev push — prerequisite for `nightly-publish`                       |
 | `nightly-publish.yml`                   | cron `0 3 * * *`; workflow_dispatch                       | cut `publish/v<date>` + tag `release/v<date>` from dev HEAD                                                   |
 | `deploy-dev.yml`                        | push to `publish/v*`; workflow_dispatch                   | deploy to dev GCP (this is what makes dev VM roll)                                                            |
 | `hourly-promote.yml` (promote job)      | cron `15 * * * *`; workflow_dispatch                      | open auto-PR `publish/v<date> → main`, auto-merge                                                             |
@@ -110,7 +110,8 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 
 ### Gate 1: feat → dev (every PR)
 
-- 3 named CI checks: `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance`
+- 4 named CI checks: `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance`, `ci-integ`
+- internal-tool-only PRs run orchestrator tests without product build/E2E; product and mixed PRs run product gates
 - 0 reviewers required
 - `auto-merge` enabled per PR
 
@@ -165,17 +166,23 @@ This was learned the hard way twice: #265 `PROMOTE-RESCUE-254` (2026-05-24) and
 
 ## 6. Branch protection
 
-Identical settings on `main` and `dev`:
+`main` and `dev` deliberately have different gates:
 
-| Setting                       | Value                                                         |
-| ----------------------------- | ------------------------------------------------------------- |
-| Required reviewers            | 0                                                             |
-| Required status checks        | `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance` |
-| Strict (up-to-date with base) | yes                                                           |
-| Linear history                | yes                                                           |
-| Force-push                    | no                                                            |
-| Delete                        | no                                                            |
-| Enforce admins                | no                                                            |
+| Setting                       | `main`                                                        | `dev`                                                                     |
+| ----------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Required reviewers            | 0                                                             | 0                                                                         |
+| Required status checks        | `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance` | the same three checks plus `ci-integ`                                      |
+| Strict (up-to-date with base) | yes                                                           | no                                                                        |
+| Linear history                | yes                                                           | yes                                                                       |
+| Force-push                    | no                                                            | no                                                                        |
+| Delete                        | no                                                            | no                                                                        |
+| Enforce admins                | no                                                            | no                                                                        |
+
+The `dev` protection rule requires only the two policy checks and the two
+aggregates. Product implementation jobs such as `build`, `typecheck`, and
+`unit` remain mandatory through `ci-integ` when the shared scope classifier
+identifies a product or mixed diff; they are not duplicated as branch-level
+required contexts. `main` never uses the tool-only fast path.
 
 `publish/v*` branches are **not** protected by branch protection. They are protected by convention (immutable) and by the fact that nothing in the workflows writes to them after the initial nightly cut.
 

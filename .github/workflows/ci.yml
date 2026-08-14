@@ -4,7 +4,7 @@ name: CI
 # Branch protection on main + dev requires:
 #   ① Commit trailers       — commit messages have <TASK-ID>: subject + Task-ID/LLM-Agent/Reviewer trailers
 #   ② Runtime mirror guard  — no tools/development-orchestrator/dashboard/ / *-bg.pid / runtime-logs/ etc. in the diff
-#   ③ Smoke acceptance      — lint + typecheck + unit tests pass
+#   ③ Smoke acceptance      — product smoke for product diffs; scoped pass for internal-tool diffs
 #
 # See docs/ops/branch-strategy.md §6 for the model.
 
@@ -29,6 +29,35 @@ env:
   CI: true
 
 jobs:
+  scope:
+    name: Change scope
+    runs-on: ubuntu-latest
+    outputs:
+      scope: ${{ steps.classify.outputs.scope }}
+      product: ${{ steps.classify.outputs.product }}
+      orchestrator: ${{ steps.classify.outputs.orchestrator }}
+      e2e: ${{ steps.classify.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify scope classifier contract
+        run: python3 -m unittest tools/ci/test_classify_change_scope.py
+      - id: classify
+        name: Classify product and internal-tool changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 tools/ci/classify_change_scope.py \
+            --event-name "$EVENT_NAME" \
+            --base-ref "$BASE_REF" \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --github-output "$GITHUB_OUTPUT"
+
   commit-trailers:
     name: Commit trailers
     runs-on: ubuntu-latest
@@ -111,6 +140,8 @@ jobs:
 
   i18n-guard:
     name: i18n guard
+    needs: scope
+    if: needs.scope.outputs.product == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -128,8 +159,10 @@ jobs:
       - name: Run i18n guard
         run: pnpm run i18n:guard
 
-  smoke-acceptance:
-    name: Smoke acceptance
+  product_smoke_acceptance:
+    name: Product smoke acceptance
+    needs: scope
+    if: needs.scope.outputs.product == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -175,3 +208,24 @@ jobs:
         # also owns package-local tests, including DB-backed regressions that
         # must run against the migrated schema to match ci-integ coverage.
         run: pnpm --filter @drts/api test
+
+  smoke-acceptance:
+    name: Smoke acceptance
+    needs: [scope, product_smoke_acceptance]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate scoped smoke gate
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          PRODUCT_REQUIRED: ${{ needs.scope.outputs.product }}
+          PRODUCT_SMOKE_RESULT: ${{ needs.product_smoke_acceptance.result }}
+        run: |
+          [ "$SCOPE_RESULT" = "success" ] || { echo "Change scope classification failed"; exit 1; }
+          if [ "$PRODUCT_REQUIRED" = "true" ]; then
+            [ "$PRODUCT_SMOKE_RESULT" = "success" ] || { echo "Product smoke failed: $PRODUCT_SMOKE_RESULT"; exit 1; }
+            echo "Product smoke acceptance passed."
+          else
+            [ "$PRODUCT_SMOKE_RESULT" = "skipped" ] || { echo "Unexpected product smoke result: $PRODUCT_SMOKE_RESULT"; exit 1; }
+            echo "Product smoke is not applicable to scope '${{ needs.scope.outputs.scope }}'."
+          fi
