@@ -1,6 +1,6 @@
 [Unit]
 Description=DRTS Fleet Platform supervisor (orchestrator)
-Documentation=file:@REPO_ROOT@/tools/development-orchestrator/systemd/README.md
+Documentation=file:@STATUS_ROOT@/.artifacts/releases/current/tools/development-orchestrator/systemd/README.md
 # Tied to user session bus so journald log labelling and resource accounting
 # stay scoped to the developer account that owns the workspace.
 After=default.target network-online.target
@@ -12,15 +12,13 @@ StartLimitBurst=5
 [Service]
 Type=simple
 
-# WorkingDirectory + ExecStart are placeholders templated by
-# tools/development-orchestrator/bin/install-supervisor-systemd.sh at install time. The installed unit
-# under ~/.config/systemd/user/ has the literal paths substituted; this
-# tracked copy keeps the variables for readability and so checks in CI can
-# diff against the canonical version.
+# The release pointer is atomically updated by release-lifecycle.py. Never
+# embed a versioned artifact path here: a stale installer must not be able to
+# replace a newer runtime by rewriting this unit.
 WorkingDirectory=@STATUS_ROOT@
 Environment=ORCH_STATUS_ROOT=@STATUS_ROOT@
 Environment=AI_STATUS_ROOT=@STATUS_ROOT@
-ExecStart=/usr/bin/env bash @REPO_ROOT@/tools/development-orchestrator/bin/run-supervisor.sh --config @STATUS_ROOT@/.orchestrator/config.json --verbose
+ExecStart=/usr/bin/env bash @STATUS_ROOT@/.artifacts/releases/current/tools/development-orchestrator/bin/run-supervisor.sh --config @STATUS_ROOT@/.orchestrator/config.json --verbose
 
 # Restart policy: any non-zero exit, SIGKILL, OOM kill, or watchdog timeout
 # triggers a restart after RestartSec. The cap (StartLimitBurst+IntervalSec)

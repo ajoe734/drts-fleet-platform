@@ -20,8 +20,16 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-LOG_FILE="${LANE_HEALTH_LOG_FILE:-${ROOT_DIR}/.orchestrator/logs/lane-health.jsonl}"
+SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+GIT_COMMON_DIR="$(git -C "$SOURCE_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+if [[ -n "${ORCH_STATUS_ROOT:-}" ]]; then
+  STATUS_ROOT="$ORCH_STATUS_ROOT"
+elif [[ "$GIT_COMMON_DIR" == */.git ]]; then
+  STATUS_ROOT="${GIT_COMMON_DIR%/.git}"
+else
+  STATUS_ROOT="$SOURCE_ROOT"
+fi
+LOG_FILE="${LANE_HEALTH_LOG_FILE:-${STATUS_ROOT}/.orchestrator/logs/lane-health.jsonl}"
 WARN_THRESHOLD_SECONDS="${LANE_HEALTH_WARN_SECONDS:-1800}"
 WARN_EXIT_CODE="${LANE_HEALTH_WARN_EXIT_CODE:-1}"
 
@@ -36,14 +44,20 @@ fi
 
 # (lane, credentials_path) pairs. Override via
 # LANE_HEALTH_LANES="lane=/path;lane2=/path2" when testing or probing a
-# subset of lanes.
+# subset of lanes. The defaults follow the active account and the same
+# opt-in lane selection as claude-lane-keepalive.sh.
 if [[ -n "${LANE_HEALTH_LANES:-}" ]]; then
   IFS=';' read -r -a LANES <<< "$LANE_HEALTH_LANES"
 else
-  LANES=(
-    "claude=/home/edna/.claude-autoworker/.credentials.json"
-    "claude2=/home/edna/.claude2-home/.claude/.credentials.json"
-  )
+  IFS=',' read -r -a lane_names <<< "${ORCH_CLAUDE_LANES:-claude}"
+  LANES=()
+  for lane_name in "${lane_names[@]}"; do
+    case "$lane_name" in
+      claude) LANES+=("claude=${ORCH_CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json") ;;
+      claude2) LANES+=("claude2=${ORCH_CLAUDE2_HOME:-$HOME/.claude2-home}/.claude/.credentials.json") ;;
+      *) echo "ERROR: unknown ORCH_CLAUDE_LANES entry '$lane_name'" >&2; exit 64 ;;
+    esac
+  done
 fi
 
 # Truncate jsonl log past ~512 KB.

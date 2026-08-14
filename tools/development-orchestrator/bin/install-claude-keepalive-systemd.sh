@@ -23,7 +23,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TEMPLATE_DIR="$ROOT_DIR/tools/development-orchestrator/systemd"
 USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+ENV_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/drts"
+ENV_FILE="$ENV_DIR/claude-lanes.env"
 mkdir -p "$USER_UNIT_DIR"
+mkdir -p "$ENV_DIR"
 
 for unit in drts-claude-keepalive.service drts-claude-keepalive.timer; do
   src="$TEMPLATE_DIR/$unit"
@@ -36,6 +39,20 @@ for unit in drts-claude-keepalive.service drts-claude-keepalive.timer; do
   chmod 0644 "$dst"
   echo "Installed: $dst"
 done
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  cat > "$ENV_FILE" <<EOF
+# OAuth lanes exercised by drts-claude-keepalive. Comma-separated.
+ORCH_CLAUDE_LANES=claude
+# Override these only when an isolated account is intentionally configured.
+# ORCH_CLAUDE_CONFIG_DIR=$HOME/.claude
+# ORCH_CLAUDE2_HOME=$HOME/.claude2-home
+EOF
+  chmod 0600 "$ENV_FILE"
+  echo "Seeded: $ENV_FILE"
+else
+  echo "Env file already exists: $ENV_FILE (not touched)"
+fi
 
 # Remove legacy cron entry referencing the old single-lane script.
 if crontab -l 2>/dev/null | grep -q 'claude2-keepalive\.sh\|claude-lane-keepalive\.sh'; then
