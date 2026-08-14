@@ -82,12 +82,17 @@ export async function POST(request: NextRequest) {
     const signedBank = authCheck.bank || bank;
     const signedToken = signSessionRole(signedRole, signedBank);
 
-    const redirectUrl = new URL("/", request.url);
-    redirectUrl.searchParams.set("bank", signedBank);
-    redirectUrl.searchParams.set("locale", locale);
-    redirectUrl.searchParams.set("role", signedRole);
-
-    const response = NextResponse.redirect(redirectUrl, { status: 303 });
+    const redirectParams = new URLSearchParams({
+      bank: signedBank,
+      locale,
+      role: signedRole,
+    });
+    // A relative Location keeps the browser on its public origin. Cloud Run
+    // otherwise exposes Next's internal listener address in an absolute URL.
+    const response = new NextResponse(null, {
+      status: 303,
+      headers: { location: `/?${redirectParams.toString()}` },
+    });
     response.cookies.set(BANK_CONSOLE_ROLE_COOKIE, signedToken, cookieOptions);
     response.cookies.set(
       BANK_CONSOLE_SESSION_COOKIE,

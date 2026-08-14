@@ -247,42 +247,34 @@ describe("Cloud Run deploy quota retry", () => {
     expect(workflow.slice(apiStart, apiEnd)).not.toContain("--concurrency 80");
   });
 
-  it("runs focused business-flow smoke before the high-volume matrix", () => {
+  it("uses candidate-bound operational acceptance as the sole deployed browser gate", () => {
     const workflow = readFileSync(
       path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
       "utf8",
     );
-    const uiSmokeStart = workflow.indexOf(
-      "- name: Run UI smoke against deployed dev",
+    const retiredCleanupStart = workflow.indexOf("  retired-service-cleanup:");
+    const candidateAcceptanceStart = workflow.indexOf(
+      "  operational-candidate-acceptance:",
     );
-    const uiSmokeEnd = workflow.indexOf(
-      "- name: Upload Playwright report on failure",
-      uiSmokeStart,
-    );
-    const uiSmoke = workflow.slice(uiSmokeStart, uiSmokeEnd);
-    const matrixIndex = uiSmoke.indexOf(
-      "playwright.dev-runtime-matrix.config.ts",
-    );
-    const googleMapIndex = uiSmoke.indexOf(
-      "playwright.google-map-live.config.ts",
-    );
+    const candidateAcceptance = workflow.slice(candidateAcceptanceStart);
 
-    expect(googleMapIndex).toBeGreaterThan(-1);
-    expect(matrixIndex).toBeGreaterThan(
-      uiSmoke.indexOf("playwright.ops-console-parity.config.ts"),
+    expect(workflow).not.toContain("  ui-smoke:");
+    expect(workflow).not.toContain("Run UI smoke against deployed dev");
+    expect(workflow).not.toContain("playwright.dev-runtime-matrix.config.ts");
+    expect(retiredCleanupStart).toBeGreaterThan(-1);
+    expect(candidateAcceptanceStart).toBeGreaterThan(retiredCleanupStart);
+    expect(
+      workflow.slice(retiredCleanupStart, candidateAcceptanceStart),
+    ).toContain("needs: [prepare, health-check]");
+    expect(candidateAcceptance).toContain(
+      "needs: [prepare, build-push, health-check, retired-service-cleanup]",
     );
-    expect(matrixIndex).toBeGreaterThan(googleMapIndex);
-    expect(uiSmoke).not.toContain(
-      "playwright.partner-booking-surfaces.config.ts",
+    expect(candidateAcceptance).toContain(
+      "needs.retired-service-cleanup.result == 'success'",
     );
-    expect(uiSmoke).toContain("smoke_status=0");
-    expect(uiSmoke).toContain(
-      'PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report/${suite}"',
+    expect(candidateAcceptance).toContain(
+      "operations/verification/run-operational-browser-acceptance.sh",
     );
-    expect(uiSmoke).toContain("--reporter=list,html");
-    expect(uiSmoke).toContain('--output "test-results/${suite}"');
-    expect(uiSmoke).toContain('exit "${smoke_status}"');
-    expect(uiSmoke.match(/run_suite playwright\./g)).toHaveLength(11);
     expect(workflow).not.toContain(
       "Authenticate to GCP for failure diagnostics",
     );

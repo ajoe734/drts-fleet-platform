@@ -70,6 +70,32 @@ for (const surface of manifest.activeSurfaces) {
   });
 }
 
+test("bank console demo login remains on the deployed public origin", async ({
+  page,
+}) => {
+  const baseUrl = process.env.DRTS_OPERATIONAL_BANK_CONSOLE_URL;
+  if (!baseUrl)
+    throw new Error(
+      "DRTS_OPERATIONAL_BANK_CONSOLE_URL is required for Bank Console acceptance.",
+    );
+  const expectedOrigin = new URL(baseUrl).origin;
+
+  await page.goto(`${expectedOrigin}/login?bank=ctbc&locale=zh&signedOut=1`, {
+    waitUntil: "domcontentloaded",
+  });
+  await Promise.all([
+    page.waitForURL((url) => {
+      return (
+        url.origin === expectedOrigin &&
+        url.pathname === "/" &&
+        url.searchParams.get("bank") === "ctbc" &&
+        url.searchParams.get("role") === "bank_program_admin"
+      );
+    }),
+    page.getByRole("button", { name: "方案管理員" }).click(),
+  ]);
+});
+
 for (const surface of manifest.retiredSurfaces) {
   test(`${surface.id} remains ${surface.state}`, async ({ request }) => {
     const response = await request.get(target(surface), {
