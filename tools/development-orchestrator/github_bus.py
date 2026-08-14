@@ -280,13 +280,6 @@ def reviewer_handles(config: dict[str, Any], task: dict[str, Any]) -> list[str]:
     return list(mapping.get(task.get("reviewer"), []) or [])
 
 
-def create_label_args(labels: list[str]) -> list[str]:
-    args: list[str] = []
-    for label in labels:
-        args.extend(["--label", label])
-    return args
-
-
 def edit_label_args(labels: list[str]) -> list[str]:
     args: list[str] = []
     for label in labels:
@@ -379,6 +372,30 @@ def sync_optional_pr_metadata(
         )
 
 
+def sync_optional_issue_metadata(
+    config: dict[str, Any],
+    repo: str,
+    task: dict[str, Any],
+    number: int,
+    labels: list[str],
+) -> None:
+    args = ["issue", "edit", str(number), "--repo", repo, *edit_label_args(labels)]
+    if len(args) == 5:
+        return
+    try:
+        run_gh(args)
+    except GitHubBusError as exc:
+        write_activity_log(
+            config,
+            {
+                "type": "github_ops_issue_metadata_failed",
+                "task_id": task["id"],
+                "message": str(exc),
+                "github_issue": number,
+            },
+        )
+
+
 def upsert_ops_issue(config: dict[str, Any], bus_state: dict[str, Any], repo: str, task: dict[str, Any], reason: str, details: str) -> bool:
     entry = task_bus_entry(bus_state, task["id"])
     issue_ref = entry.get("ops_issue")
@@ -406,18 +423,20 @@ def upsert_ops_issue(config: dict[str, Any], bus_state: dict[str, Any], repo: st
     try:
         if issue_ref and issue_ref.get("number"):
             number = int(issue_ref["number"])
-            run_gh(["issue", "edit", str(number), "--repo", repo, "--title", title, "--body-file", str(body_file), *edit_label_args(labels)])
+            run_gh(["issue", "edit", str(number), "--repo", repo, "--title", title, "--body-file", str(body_file)])
             issue = dict(issue_ref)
         else:
             found = find_existing_issue(repo, task["id"])
             if found:
                 number = int(found["number"])
-                run_gh(["issue", "edit", str(number), "--repo", repo, "--title", title, "--body-file", str(body_file), *edit_label_args(labels)])
+                run_gh(["issue", "edit", str(number), "--repo", repo, "--title", title, "--body-file", str(body_file)])
                 issue = {"number": number, "url": found.get("url"), "title": title}
             else:
-                proc = run_gh(["issue", "create", "--repo", repo, "--title", title, "--body-file", str(body_file), *create_label_args(labels)])
+                proc = run_gh(["issue", "create", "--repo", repo, "--title", title, "--body-file", str(body_file)])
                 url = (proc.stdout or "").strip().splitlines()[-1]
                 issue = {"number": parse_number_from_url(url), "url": url, "title": title}
+        if issue.get("number"):
+            sync_optional_issue_metadata(config, repo, task, int(issue["number"]), labels)
     finally:
         body_file.unlink(missing_ok=True)
 
