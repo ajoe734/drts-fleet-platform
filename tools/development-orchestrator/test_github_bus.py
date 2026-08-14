@@ -114,7 +114,7 @@ class GitHubBusCommandTests(unittest.TestCase):
         self.assertEqual(bus_state["processed_review_ids"], ["review:999"])
         write_activity_log.assert_called_once()
 
-    def test_upsert_review_pr_create_uses_create_label_flags(self) -> None:
+    def test_upsert_review_pr_creates_core_pr_before_optional_metadata(self) -> None:
         config = {
             "github_bus": {
                 "default_branch": "dev",
@@ -165,12 +165,99 @@ class GitHubBusCommandTests(unittest.TestCase):
             changed = github_bus.upsert_review_pr(config, bus_state, status, "ajoe734/pantheon", task)
 
         self.assertTrue(changed)
-        self.assertEqual(run_gh.call_count, 2)
+        self.assertEqual(run_gh.call_count, 3)
         args = run_gh.call_args_list[0].args[0]
-        self.assertIn("--label", args)
+        self.assertNotIn("--label", args)
         self.assertNotIn("--add-label", args)
+        self.assertNotIn("--reviewer", args)
         self.assertIn("--draft", args)
-        self.assertEqual(run_gh.call_args_list[1].args[0][:3], ["pr", "ready", "12"])
+        metadata_args = run_gh.call_args_list[1].args[0]
+        self.assertIn("--add-label", metadata_args)
+        self.assertIn("--add-reviewer", metadata_args)
+        self.assertEqual(run_gh.call_args_list[2].args[0][:3], ["pr", "ready", "12"])
+
+    def test_find_existing_pr_uses_exact_head_and_base(self) -> None:
+        with mock.patch.object(github_bus, "gh_json", return_value=[]) as gh_json:
+            found = github_bus.find_existing_pr(
+                "ajoe734/pantheon", "feature/lin-001", "dev"
+            )
+
+        self.assertIsNone(found)
+        args = gh_json.call_args.args[0]
+        self.assertEqual(args[args.index("--head") + 1], "feature/lin-001")
+        self.assertEqual(args[args.index("--base") + 1], "dev")
+        self.assertNotIn("--search", args)
+
+    def test_upsert_review_pr_adopts_existing_branch_pr_with_any_title(self) -> None:
+        config = {
+            "github_bus": {
+                "default_branch": "dev",
+                "auto_request_reviewers": False,
+                "templates": {
+                    "review_pr": "tools/development-orchestrator/templates/github_review_pr.md"
+                },
+            }
+        }
+        task = {
+            "id": "LIN-001",
+            "title": "Lineage task",
+            "status": "integrating",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "candidate_sha": "abc123",
+            "candidate_branch": "feature/lin-001",
+        }
+        bus_state = {"tasks": {}}
+        with (
+            mock.patch.object(github_bus, "branch_has_diff", return_value=True),
+            mock.patch.object(github_bus, "build_template_body", return_value="body\n"),
+            mock.patch.object(
+                github_bus,
+                "find_existing_pr",
+                return_value={
+                    "number": 1393,
+                    "url": "https://github.com/ajoe734/pantheon/pull/1393",
+                    "title": "Release candidate",
+                },
+            ) as find_existing,
+            mock.patch.object(github_bus, "run_gh") as run_gh,
+            mock.patch.object(
+                github_bus, "candidate_pr_observation", return_value={"isDraft": False}
+            ),
+            mock.patch.object(github_bus, "write_activity_log"),
+        ):
+            changed = github_bus.upsert_review_pr(
+                config, bus_state, {"tasks": [task]}, "ajoe734/pantheon", task
+            )
+
+        self.assertTrue(changed)
+        find_existing.assert_called_once_with(
+            "ajoe734/pantheon", "feature/lin-001", "dev"
+        )
+        self.assertEqual(bus_state["tasks"]["LIN-001"]["review_pr"]["number"], 1393)
+        self.assertEqual(run_gh.call_count, 1)
+
+    def test_optional_pr_metadata_failure_does_not_fail_lifecycle(self) -> None:
+        config = {
+            "github_bus": {
+                "auto_request_reviewers": False,
+            }
+        }
+        with (
+            mock.patch.object(
+                github_bus, "run_gh", side_effect=github_bus.GitHubBusError("label missing")
+            ),
+            mock.patch.object(github_bus, "write_activity_log") as write_activity_log,
+        ):
+            github_bus.sync_optional_pr_metadata(
+                config,
+                "ajoe734/pantheon",
+                {"id": "LIN-001"},
+                12,
+                ["pantheon-bus"],
+            )
+
+        write_activity_log.assert_called_once()
 
     def test_upsert_review_pr_skips_support_only_task(self) -> None:
         task = {
