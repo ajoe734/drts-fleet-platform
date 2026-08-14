@@ -37,8 +37,8 @@ pnpm --filter @drts/api exec vitest run \
   tests/integration/service-workload-identity.integration.test.ts
 
 echo "--> Step 5: Verifying Internal Key Exceptions & Incident Response Drills..."
-python3 scripts/verify-internal-key-exceptions.py
-python3 scripts/iam-incident-response-drill.py run-all-drills
+python3 operations/security/verify-internal-key-exceptions.py
+python3 operations/security/iam-incident-response-drill.py run-all-drills
 
 echo "--> Step 6: Running Security Negative Matrix & Secret Leakage Audits..."
 pnpm exec vitest run \

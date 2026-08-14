@@ -29,8 +29,8 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
-# shellcheck source=../../scripts/db-common.sh
-source "$ROOT_DIR/scripts/db-common.sh"
+# shellcheck source=../../operations/database/db-common.sh
+source "$ROOT_DIR/operations/database/db-common.sh"
 
 export API_PORT="${API_PORT:-3810}"
 export E2E_API_URL="${E2E_API_URL:-http://localhost:${API_PORT}}"
@@ -57,7 +57,7 @@ HERMETIC_DB_SEED_TIMEOUT_SECONDS="${HERMETIC_DB_SEED_TIMEOUT_SECONDS:-180}"
 HERMETIC_API_BUILD_TIMEOUT_SECONDS="${HERMETIC_API_BUILD_TIMEOUT_SECONDS:-600}"
 HERMETIC_SUITE_TIMEOUT_SECONDS="${HERMETIC_SUITE_TIMEOUT_SECONDS:-300}"
 HERMETIC_AUTO_REPAIR_NODE_MODULES="${HERMETIC_AUTO_REPAIR_NODE_MODULES:-1}"
-HERMETIC_NODE_MODULES_HELPER="${HERMETIC_NODE_MODULES_HELPER:-$ROOT_DIR/scripts/ensure-local-node-modules.py}"
+HERMETIC_NODE_MODULES_HELPER="${HERMETIC_NODE_MODULES_HELPER:-$ROOT_DIR/tools/development-orchestrator/bin/ensure-local-node-modules.py}"
 
 mkdir -p "$HERMETIC_LOG_DIR"
 

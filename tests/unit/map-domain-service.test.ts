@@ -12,7 +12,10 @@ import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(__dirname, "../..");
-const mapScript = path.join(repoRoot, "scripts/map-domain-service.sh");
+const mapScript = path.join(
+  repoRoot,
+  "operations/deployment/map-domain-service.sh",
+);
 const temporaryDirectories: string[] = [];
 
 function runMapDomain(options: {

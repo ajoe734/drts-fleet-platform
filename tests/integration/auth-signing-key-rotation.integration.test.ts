@@ -339,7 +339,7 @@ describe("IAM-KEY-001 Managed Asymmetric Signing Key Rotation Integration", () =
 
     // Test inspect command (redacts private key)
     const inspectOutput = execSync(
-      `python3 scripts/rotate-auth-keys.py inspect --json-ring '${initialRing}'`,
+      `python3 operations/security/rotate-auth-keys.py inspect --json-ring '${initialRing}'`,
       { encoding: "utf-8" },
     );
     expect(inspectOutput).toContain("key-initial-1");
@@ -347,7 +347,7 @@ describe("IAM-KEY-001 Managed Asymmetric Signing Key Rotation Integration", () =
 
     // Test retire command
     const retireOutput = execSync(
-      `python3 scripts/rotate-auth-keys.py retire --target-kid key-initial-1 --json-ring '${initialRing}'`,
+      `python3 operations/security/rotate-auth-keys.py retire --target-kid key-initial-1 --json-ring '${initialRing}'`,
       { encoding: "utf-8" },
     );
     expect(retireOutput).toContain("Retired key 'key-initial-1' successfully.");
@@ -369,7 +369,7 @@ describe("IAM-KEY-001 Managed Asymmetric Signing Key Rotation Integration", () =
       },
     ]);
     const rollbackOutput = execSync(
-      `python3 scripts/rotate-auth-keys.py rollback --target-kid key-initial-1 --json-ring '${twoKeyRing}'`,
+      `python3 operations/security/rotate-auth-keys.py rollback --target-kid key-initial-1 --json-ring '${twoKeyRing}'`,
       { encoding: "utf-8" },
     );
     expect(rollbackOutput).toContain("Key 'key-initial-1' is now ACTIVE");

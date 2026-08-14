@@ -380,7 +380,7 @@ TASKS = (
         (
             "tests/e2e/",
             "tests/smoke/",
-            "scripts/",
+            "operations/verification/",
             "docs/04-uat/",
         ),
         (
@@ -398,7 +398,7 @@ TASKS = (
         ("S1F-UIX-001", "S1F-DRV-001"),
         (
             ".github/workflows/",
-            "scripts/",
+            "operations/verification/",
             "tests/e2e/",
             "tests/smoke/",
             "docs/04-uat/",

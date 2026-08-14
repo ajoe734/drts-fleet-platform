@@ -31,7 +31,7 @@ OpenAI account.
 
 ## The fix
 
-### `scripts/codex-wrapper.sh` — per-CODEX_HOME lock
+### `tools/development-orchestrator/bin/codex-wrapper.sh` — per-CODEX_HOME lock
 
 The refresh race only exists _within_ one account's auth file. Two different
 accounts can't race each other. The wrapper now derives its flock lockfile
@@ -48,7 +48,7 @@ in parallel, while the interactive chatbox can continue using `~/.codex`.
 An explicit
 `CODEX_REFRESH_LOCK` still overrides (back-compat / tests).
 
-### `scripts/repair-codex-symlinks.sh` — `CODEX_LANE_ISOLATION` modes
+### `tools/development-orchestrator/bin/repair-codex-symlinks.sh` — `CODEX_LANE_ISOLATION` modes
 
 | `CODEX_LANE_ISOLATION` | Behaviour                                                                                                                                                                                                                                                                                                        |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

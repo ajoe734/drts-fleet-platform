@@ -11,8 +11,8 @@
 
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WRAPPER="$ROOT/scripts/codex-wrapper.sh"
-REPAIR="$ROOT/scripts/repair-codex-symlinks.sh"
+WRAPPER="$ROOT/tools/development-orchestrator/bin/codex-wrapper.sh"
+REPAIR="$ROOT/tools/development-orchestrator/bin/repair-codex-symlinks.sh"
 fail=0
 pass=0
 check() { if eval "$2"; then echo "  PASS: $1"; pass=$((pass+1)); else echo "  FAIL: $1"; fail=$((fail+1)); fi; }

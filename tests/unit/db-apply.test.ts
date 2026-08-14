@@ -1,6 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -160,7 +166,7 @@ describe("db-apply legacy migration canonicalization", () => {
       ].join("\n"),
     );
 
-    bash("./scripts/db-apply.sh", {
+    bash("./operations/database/db-apply.sh", {
       DATABASE_URL: databaseUrl,
     });
 
@@ -183,7 +189,7 @@ DROP TABLE IF EXISTS ops.service_area_boundaries;
       ),
     );
 
-    bash("./scripts/db-apply.sh", {
+    bash("./operations/database/db-apply.sh", {
       DATABASE_URL: databaseUrl,
     });
 
@@ -270,7 +276,7 @@ WHERE table_schema = 'ops'
       ].join("\n"),
     );
 
-    bash("./scripts/db-apply.sh", {
+    bash("./operations/database/db-apply.sh", {
       DATABASE_URL: databaseUrl,
     });
 
@@ -371,7 +377,7 @@ WHERE schemaname = 'ops'
       ].join("\n"),
     );
 
-    bash("./scripts/db-apply.sh", {
+    bash("./operations/database/db-apply.sh", {
       DATABASE_URL: databaseUrl,
     });
 

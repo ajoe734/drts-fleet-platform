@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const repoRoot = path.resolve(__dirname, "../..");
 const cleanupScript = path.join(
   repoRoot,
-  "scripts/cleanup-paused-partner-booking-service.sh",
+  "operations/deployment/cleanup-paused-partner-booking-service.sh",
 );
 const deployWorkflow = path.join(repoRoot, ".github/workflows/deploy-dev.yml");
 const genericWebDeployWorkflow = path.join(
@@ -117,7 +117,7 @@ describe("paused Partner Booking Cloud Run cleanup", () => {
 
     expect(source).toContain('DEV_PARTNER_BOOKING_STATE: "paused"');
     expect(source).toContain(
-      "./scripts/cleanup-paused-partner-booking-service.sh",
+      "./operations/deployment/cleanup-paused-partner-booking-service.sh",
     );
     expect(exactActiveTargets).toEqual([
       "api|drts-dev-api",

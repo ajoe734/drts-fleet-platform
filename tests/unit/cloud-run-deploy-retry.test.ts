@@ -12,7 +12,10 @@ import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(__dirname, "../..");
-const deployScript = path.join(repoRoot, "scripts/deploy-cloud-run-service.sh");
+const deployScript = path.join(
+  repoRoot,
+  "operations/deployment/deploy-cloud-run-service.sh",
+);
 const temporaryDirectories: string[] = [];
 
 function runDeploy(options: {
@@ -125,7 +128,9 @@ describe("Cloud Run deploy quota retry", () => {
     );
 
     expect(
-      workflow.match(/scripts\/deploy-cloud-run-service\.sh/g),
+      workflow.match(
+        /operations\/deployment\/deploy-cloud-run-service\.sh/g,
+      ),
     ).toHaveLength(9);
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
     // Retired surfaces must never be built or deployed. The candidate-bound
@@ -155,9 +160,11 @@ describe("Cloud Run deploy quota retry", () => {
     expect(domainWorkflow).not.toContain("concierge.smarttransport.tw");
     expect(domainWorkflow).not.toContain("ride.smarttransport.tw");
     expect(domainWorkflow).toContain("uses: actions/checkout@v4");
-    expect(domainWorkflow).toContain("./scripts/map-domain-service.sh");
+    expect(domainWorkflow).toContain(
+      "./operations/deployment/map-domain-service.sh",
+    );
     expect(domainWorkflow).not.toContain(
-      "./scripts/map-domain-service.sh book.smarttransport.tw",
+      "./operations/deployment/map-domain-service.sh book.smarttransport.tw",
     );
   });
 

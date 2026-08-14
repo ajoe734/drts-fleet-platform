@@ -29,7 +29,7 @@ FROM deps AS build
 ARG DRTS_CANDIDATE_SHA
 ENV DRTS_CANDIDATE_SHA=$DRTS_CANDIDATE_SHA
 COPY apps/platform-admin-web/ apps/platform-admin-web/
-COPY scripts/control-plane-web-proxy.mjs scripts/
+COPY runtime/web/control-plane-web-proxy.mjs runtime/web/
 COPY tsconfig.base.json .
 
 RUN pnpm --filter @drts/contracts build && \
@@ -48,7 +48,7 @@ WORKDIR /app
 COPY --from=build /workspace/apps/platform-admin-web/.next/standalone ./
 COPY --from=build /workspace/apps/platform-admin-web/.next/static ./apps/platform-admin-web/.next/static
 COPY --from=build /workspace/apps/platform-admin-web/public ./apps/platform-admin-web/public
-COPY --from=build /workspace/scripts/control-plane-web-proxy.mjs ./scripts/control-plane-web-proxy.mjs
+COPY --from=build /workspace/runtime/web/control-plane-web-proxy.mjs ./runtime/web/control-plane-web-proxy.mjs
 
 EXPOSE 3002
-CMD ["node", "scripts/control-plane-web-proxy.mjs", "apps/platform-admin-web/server.js", "3102"]
+CMD ["node", "runtime/web/control-plane-web-proxy.mjs", "apps/platform-admin-web/server.js", "3102"]
