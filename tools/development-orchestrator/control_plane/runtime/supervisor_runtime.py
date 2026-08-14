@@ -118,6 +118,7 @@ from common import (
     shell_quote,
     snapshot_task,
     spawn_background_process,
+    task_board_cli_path,
     utc_now,
     write_json,
     write_activity_log,
@@ -1535,6 +1536,7 @@ def attach_workspace_metadata(
 
     mode = str(request.metadata.get("mode") or "").strip().lower()
     if request.task_id and branch:
+        status_cli = task_board_cli_path()
         if workspace_root == canonical_root:
             workspace_line = (
                 f"- Worker cwd: `{workspace_root}` (canonical workspace fallback; avoid switching it to another task branch)."
@@ -1546,8 +1548,8 @@ def attach_workspace_metadata(
             f"{workspace_line}\n"
             f"- Task branch: `{branch}` from base `{base_branch or 'dev'}`.\n"
             f"- Canonical machine-truth root: `{canonical_root}`.\n"
-            "- This process inherits `ORCH_STATUS_ROOT` / `AI_STATUS_ROOT`, so `tools/development-orchestrator/bin/ai-status.sh` "
-            "writes status back to canonical machine truth even from the task worktree.\n"
+            f"- Use `{status_cli}` for state changes; it runs current release code and writes through "
+            "`ORCH_STATUS_ROOT` / `AI_STATUS_ROOT` to canonical machine truth.\n"
             "- Do not `git switch` the canonical root for task code; use the assigned cwd/branch.\n"
         )
     elif mode == "coordination" and workspace_root != canonical_root:

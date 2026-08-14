@@ -13,6 +13,7 @@ from typing import Any
 
 from common import (
     ROOT,
+    SOURCE_ROOT,
     agent_config_for,
     command_exists,
     config_path,
@@ -30,6 +31,7 @@ from common import (
 )
 from github_command_parser import GitHubCommand, parse_command
 from control_plane.infra.queue_repo import enqueue_event
+from control_plane.usecases.task_board_commands import run_task_board_command
 from watch_events import render_wakeup_message
 
 COMMENT_MARKER = "<!-- pantheon-bus -->"
@@ -269,7 +271,7 @@ def build_template_body(config: dict[str, Any], template_key: str, variables: di
     template_rel = config.get("github_bus", {}).get("templates", {}).get(template_key)
     if not template_rel:
         raise GitHubBusError(f"Missing github_bus template config for {template_key}")
-    template_path = ROOT / template_rel
+    template_path = SOURCE_ROOT / template_rel
     return render_template(template_path, variables).strip() + "\n"
 
 
@@ -605,6 +607,7 @@ def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: 
 
 
 def run_ai_status(
+    config: dict[str, Any],
     command: str,
     target: str,
     message: str,
@@ -612,19 +615,18 @@ def run_ai_status(
     actor: str | None = None,
     extra_env: dict[str, str] | None = None,
 ) -> None:
-    env = os.environ.copy()
+    env: dict[str, str] = {}
     if actor:
         env["AI_NAME"] = actor
     env.update({key: value for key, value in (extra_env or {}).items() if value})
-    proc = subprocess.run(
-        ["python3", "tools/development-orchestrator/bin/ai_status.py", command, target, message],
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
-        env=env,
+    result = run_task_board_command(
+        config,
+        command,
+        [target, message],
+        environ=env,
     )
-    if proc.returncode != 0:
-        raise GitHubBusError(trim_text((proc.stderr or proc.stdout or "ai_status failed"), 600))
+    if not result.ok:
+        raise GitHubBusError(trim_text(result.error, 600))
 
 
 def candidate_pr_observation(repo: str, number: int) -> dict[str, Any]:
@@ -741,6 +743,7 @@ def reconcile_candidate_lifecycle(
         ):
             continue
         run_ai_status(
+            config,
             "reconcile-candidate",
             str(task["id"]),
             f"GitHub reconciled candidate {candidate_sha[:12]} from PR #{number}.",
@@ -869,6 +872,7 @@ def apply_bus_command(
     if command.verb == "approve" and target_task:
         if target_task.get("status") == "review":
             run_ai_status(
+                config,
                 "approve",
                 task_id,
                 f"GitHub approval bus approved via {'issue #' + str(issue_number) if issue_number else 'relay/webhook'} by @{actor}.",
@@ -877,6 +881,7 @@ def apply_bus_command(
             )
         else:
             run_ai_status(
+                config,
                 "reopen",
                 task_id,
                 f"GitHub approval bus approved via {'issue #' + str(issue_number) if issue_number else 'relay/webhook'} by @{actor}; resuming work.",
@@ -887,6 +892,7 @@ def apply_bus_command(
     elif command.verb == "deny" and target_task:
         if target_task.get("status") == "review":
             run_ai_status(
+                config,
                 "reopen",
                 task_id,
                 f"GitHub approval bus denied via {'issue #' + str(issue_number) if issue_number else 'relay/webhook'} by @{actor}; returning to implementation.",
@@ -894,6 +900,7 @@ def apply_bus_command(
             )
         else:
             run_ai_status(
+                config,
                 "note",
                 task_id,
                 f"GitHub approval bus denial noted via {'issue #' + str(issue_number) if issue_number else 'relay/webhook'} by @{actor}.",
@@ -903,6 +910,7 @@ def apply_bus_command(
         changed = True
     elif command.verb == "retry" and target_task:
         run_ai_status(
+            config,
             "reopen",
             task_id,
             f"GitHub retry requested via {'issue #' + str(issue_number) if issue_number else 'relay/webhook'} by @{actor}.",
@@ -1096,6 +1104,7 @@ def poll_pr_reviews(config: dict[str, Any], bus_state: dict[str, Any], status: d
             body = trim_text(review.get("body"), 240)
             if state_value == "APPROVED":
                 run_ai_status(
+                    config,
                     "approve",
                     task["id"],
                     f"GitHub PR approved via PR #{number} by @{actor}.",
@@ -1108,14 +1117,26 @@ def poll_pr_reviews(config: dict[str, Any], bus_state: dict[str, Any], status: d
                 detail = f"GitHub PR requested changes via PR #{number} by @{actor}."
                 if body:
                     detail += f" {body}"
-                run_ai_status("reopen", task["id"], detail, actor=str(task.get("reviewer") or task.get("owner") or "").strip() or None)
+                run_ai_status(
+                    config,
+                    "reopen",
+                    task["id"],
+                    detail,
+                    actor=str(task.get("reviewer") or task.get("owner") or "").strip() or None,
+                )
                 write_activity_log(config, {"type": "github_review_changes_requested", "task_id": task["id"], "message": detail, "github_pr": number})
                 changed = True
             elif state_value == "COMMENTED":
                 note = f"GitHub PR comment via PR #{number} by @{actor}."
                 if body:
                     note += f" {body}"
-                run_ai_status("note", task["id"], note, actor=str(task.get("reviewer") or task.get("owner") or "").strip() or None)
+                run_ai_status(
+                    config,
+                    "note",
+                    task["id"],
+                    note,
+                    actor=str(task.get("reviewer") or task.get("owner") or "").strip() or None,
+                )
                 changed = True
             seen.add(key)
     bus_state["processed_review_ids"] = list(seen)

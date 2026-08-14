@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
+import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -15,6 +17,55 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC is not None and SPEC.loader is not None
 ai_status = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ai_status)
+
+
+class StatusCliBoundaryTest(unittest.TestCase):
+    def test_release_wrapper_does_not_delegate_to_status_root_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            status_root = Path(temp)
+            status_root.joinpath("ai-status.json").write_text(
+                '{"tasks": [], "blockers": [], "handoffs": []}', encoding="utf-8"
+            )
+            stale_script = (
+                status_root
+                / "tools"
+                / "development-orchestrator"
+                / "bin"
+                / "ai_status.py"
+            )
+            stale_script.parent.mkdir(parents=True)
+            stale_script.write_text("raise SystemExit(47)\n", encoding="utf-8")
+            env = os.environ.copy()
+            env.pop("ORCH_STATUS_ROOT", None)
+            env["AI_STATUS_ROOT"] = str(status_root)
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(
+                        ROOT
+                        / "tools"
+                        / "development-orchestrator"
+                        / "bin"
+                        / "ai-status.sh"
+                    ),
+                    "list",
+                ],
+                cwd=status_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("(no matches)", result.stdout)
+
+    def test_dashboard_projection_targets_status_root(self) -> None:
+        self.assertEqual(
+            ai_status.DASHBOARD_DIR,
+            ai_status.ROOT / "tools" / "development-orchestrator" / "dashboard",
+        )
 
 
 class CandidateLifecycleTest(unittest.TestCase):
