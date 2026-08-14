@@ -5,6 +5,7 @@ import {
 } from "./lib/session";
 
 const LOGIN_PATH = "/login";
+const LOGIN_API_PATH = "/api/auth/login";
 const SIGNED_OUT_COOKIE = "drts_bank_console_signed_out";
 
 const signedOutCookieOptions = {
@@ -78,6 +79,8 @@ function redirectToSignedOutLogin(
 export function proxy(request: NextRequest) {
   const { nextUrl } = request;
   const isLoginPath = nextUrl.pathname === LOGIN_PATH;
+  const isLoginApiRequest =
+    nextUrl.pathname === LOGIN_API_PATH && request.method === "POST";
   const isSignedOutRequest = nextUrl.searchParams.get("signedOut") === "1";
   const isPrefetch = isPrefetchRequest(request);
   const isSignedOutCookie =
@@ -86,6 +89,12 @@ export function proxy(request: NextRequest) {
   const hasSessionCookie =
     Boolean(request.cookies.get(BANK_CONSOLE_SESSION_COOKIE)?.value) ||
     Boolean(request.cookies.get(BANK_CONSOLE_ROLE_COOKIE)?.value);
+
+  // A signed-out browser must still be able to submit the login form. The
+  // handler clears the signed-out marker and issues the new session cookies.
+  if (isLoginApiRequest) {
+    return withNoStore(NextResponse.next());
+  }
 
   if (isSignedOutRequest) {
     if (isLoginPath) {

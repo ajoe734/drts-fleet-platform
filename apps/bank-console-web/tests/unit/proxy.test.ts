@@ -6,8 +6,10 @@ function requestFor(
   path: string,
   cookie?: string,
   headers?: Record<string, string>,
+  method = "GET",
 ) {
   return new NextRequest(`https://bank-console.test${path}`, {
+    method,
     headers: { ...headers, ...(cookie ? { cookie } : {}) },
   });
 }
@@ -43,6 +45,22 @@ describe("bank-console proxy auth boundary", () => {
     const response = proxy(requestFor("/programs?bank=fubon&locale=zh"));
 
     expect(response.status).toBe(200);
+  });
+
+  it("allows the login form POST to clear an existing signed-out marker", () => {
+    const response = proxy(
+      requestFor(
+        "/api/auth/login",
+        "drts_bank_console_signed_out=1",
+        undefined,
+        "POST",
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
   });
 
   it("keeps deep links blocked after sign-out even when the query param is gone", () => {
