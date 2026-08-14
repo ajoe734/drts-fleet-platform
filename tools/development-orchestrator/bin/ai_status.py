@@ -1648,6 +1648,13 @@ def command_assign(state: dict[str, Any], args: list[str]) -> None:
             task["title"] = title
         if summary_zh:
             task["summary_zh"] = summary_zh
+        for env_name, field_name in (
+            ("TASK_DEPENDS_ON", "depends_on"),
+            ("TASK_ARTIFACTS", "artifacts"),
+            ("TASK_ACCEPTANCE", "acceptance"),
+        ):
+            if env_name in os.environ:
+                task[field_name] = parse_csv_env(env_name)
         if metadata:
             task.update(metadata)
         task["last_update"] = timestamp

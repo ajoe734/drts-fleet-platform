@@ -107,6 +107,33 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertEqual(state["handoffs"][0]["to"], "Claude")
 
     @mock.patch.object(ai_status, "append_log")
+    def test_assign_refreshes_explicit_materialized_fields(self, _log: mock.Mock) -> None:
+        state = self.state()
+        state["agents"] = []
+        task = self.task(state)
+        task.update(
+            {
+                "depends_on": ["LEGACY-PREDEPLOY"],
+                "artifacts": ["scripts/"],
+                "acceptance": ["Legacy ancestry requirement"],
+            }
+        )
+        env = {
+            "AI_NAME": "Supervisor",
+            "TASK_DEPENDS_ON": "UIX-001,DRV-001",
+            "TASK_ARTIFACTS": "operations/verification/,tests/e2e/",
+            "TASK_ACCEPTANCE": "Reviewed content is traceable through PR and CI",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True):
+            ai_status.command_assign(state, ["TASK-001", "Codex", "Claude", "Refreshed task"])
+
+        self.assertEqual(task["depends_on"], ["UIX-001", "DRV-001"])
+        self.assertEqual(task["artifacts"], ["operations/verification/", "tests/e2e/"])
+        self.assertEqual(task["acceptance"], ["Reviewed content is traceable through PR and CI"])
+        self.assertEqual(task["status"], "in_progress")
+
+    @mock.patch.object(ai_status, "append_log")
     @mock.patch.object(ai_status, "git_commit_exists", return_value=True)
     def test_handoff_rejects_canonical_work_without_candidate_evidence(self, _exists: mock.Mock, _log: mock.Mock) -> None:
         with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True):

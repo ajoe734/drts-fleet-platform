@@ -407,7 +407,7 @@ TASKS = (
             "docs/04-uat/",
         ),
         (
-            "All reviewed dependency commits are reachable from candidate dev",
+            "All reviewed dependency changes are present in the candidate and traceable through reviewed PR and CI evidence",
             "CI API route native and operational suites pass",
             "Deployed revisions and evidence identify the exact candidate SHA",
             "All GAP completion gates G1 through G8 pass",
