@@ -93,5 +93,7 @@ export function formatSupplySubject(
 }
 
 export function isEditableStatus(status: SupplySubmissionStatus) {
-  return status === "draft" || status === "needs_revision";
+  return (
+    status === "draft" || status === "needs_revision" || status === "withdrawn"
+  );
 }

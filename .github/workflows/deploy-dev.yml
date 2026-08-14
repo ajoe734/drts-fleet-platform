@@ -937,7 +937,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},BANK_CONSOLE_DEMO_LOGIN=true" \
             ${{ needs.prepare.outputs.bank_console_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \

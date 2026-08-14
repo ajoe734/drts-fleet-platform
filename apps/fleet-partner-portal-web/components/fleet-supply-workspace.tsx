@@ -39,7 +39,10 @@ import {
   isEditableStatus,
 } from "@/lib/fleet-portal-supply";
 
-type ApiEnvelope<T> = { data: T; meta: { requestId: string; timestamp: string } };
+type ApiEnvelope<T> = {
+  data: T;
+  meta: { requestId: string; timestamp: string };
+};
 
 type DriverDraftInput = Omit<DriverSupplyDraft, "submissionId">;
 type VehicleDraftInput = Omit<VehicleSupplyDraft, "submissionId">;
@@ -162,10 +165,7 @@ function camelizeDeep<T>(value: unknown): T {
   return value as T;
 }
 
-async function apiRequest<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
+async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/control-plane-proxy/${path}`, {
     ...init,
     headers: {
@@ -202,9 +202,19 @@ function FieldInput(
     fontFamily: theme.fontFamily,
   };
   if (props.multiline) {
-    return <textarea {...(props as TextareaHTMLAttributes<HTMLTextAreaElement>)} style={{ ...baseStyle, minHeight: 92 }} />;
+    return (
+      <textarea
+        {...(props as TextareaHTMLAttributes<HTMLTextAreaElement>)}
+        style={{ ...baseStyle, minHeight: 92 }}
+      />
+    );
   }
-  return <input {...(props as InputHTMLAttributes<HTMLInputElement>)} style={baseStyle} />;
+  return (
+    <input
+      {...(props as InputHTMLAttributes<HTMLInputElement>)}
+      style={baseStyle}
+    />
+  );
 }
 
 function FieldSelect(
@@ -316,7 +326,14 @@ export function SupplyDashboard({ data }: { data: SupplyDashboardView }) {
           </>
         }
       />
-      <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+      <div
+        style={{
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
         {data.source === "fallback" ? (
           <CanvasBanner
             theme={theme}
@@ -332,8 +349,14 @@ export function SupplyDashboard({ data }: { data: SupplyDashboardView }) {
               <CanvasCard
                 key={key}
                 theme={theme}
-                    title={
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                title={
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
                     {label}
                     <CanvasPill theme={theme} tone="neutral">
                       {items.length}
@@ -348,7 +371,13 @@ export function SupplyDashboard({ data }: { data: SupplyDashboardView }) {
                     body={t("supply.dashboard.empty")}
                   />
                 ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}
+                  >
                     {items.map((item) => (
                       <div
                         key={item.id}
@@ -359,21 +388,49 @@ export function SupplyDashboard({ data }: { data: SupplyDashboardView }) {
                           background: theme.surfaceLo,
                         }}
                       >
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            justifyContent: "space-between",
+                          }}
+                        >
                           <div style={{ fontWeight: 600 }}>{item.title}</div>
                           {item.status ? (
-                            <CanvasPill theme={theme} tone={statusTone(item.status)} dot>
+                            <CanvasPill
+                              theme={theme}
+                              tone={statusTone(item.status)}
+                              dot
+                            >
                               {formatStatus(item.status)}
                             </CanvasPill>
                           ) : null}
                         </div>
-                        <div style={{ fontSize: 11.5, color: theme.textMuted, marginTop: 4 }}>
+                        <div
+                          style={{
+                            fontSize: 11.5,
+                            color: theme.textMuted,
+                            marginTop: 4,
+                          }}
+                        >
                           {item.subtitle}
                         </div>
                         {item.reasons?.length ? (
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              gap: 6,
+                              marginTop: 8,
+                            }}
+                          >
                             {item.reasons.map((reason) => (
-                              <CanvasPill key={reason} theme={theme} tone="warn">
+                              <CanvasPill
+                                key={reason}
+                                theme={theme}
+                                tone="warn"
+                              >
                                 {t(REASON_LABEL_KEYS[reason])}
                               </CanvasPill>
                             ))}
@@ -420,18 +477,37 @@ export function SupplySubmissionList({
       />
       <div style={{ padding: 24 }}>
         {source === "fallback" ? (
-          <CanvasBanner theme={theme} tone="info" icon="info" body={t("supply.submissions.fallback")} />
+          <CanvasBanner
+            theme={theme}
+            tone="info"
+            icon="info"
+            body={t("supply.submissions.fallback")}
+          />
         ) : null}
         <CanvasCard theme={theme} title={t("supply.submissions.all")}>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 12.5,
+              }}
+            >
               <thead>
                 <tr style={{ textAlign: "left", color: theme.textMuted }}>
-                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.subject")}</th>
-                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.type")}</th>
+                  <th style={{ padding: "0 0 10px" }}>
+                    {t("supply.table.subject")}
+                  </th>
+                  <th style={{ padding: "0 0 10px" }}>
+                    {t("supply.table.type")}
+                  </th>
                   <th style={{ padding: "0 0 10px" }}>{t("table.status")}</th>
-                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.revision")}</th>
-                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.reviewerNote")}</th>
+                  <th style={{ padding: "0 0 10px" }}>
+                    {t("supply.table.revision")}
+                  </th>
+                  <th style={{ padding: "0 0 10px" }}>
+                    {t("supply.table.reviewerNote")}
+                  </th>
                   <th style={{ padding: "0 0 10px" }}>{t("table.actions")}</th>
                 </tr>
               </thead>
@@ -439,21 +515,37 @@ export function SupplySubmissionList({
                 {rows.map((detail) => {
                   const subject = formatSupplySubject(detail);
                   return (
-                    <tr key={detail.submission.submissionId} style={{ borderTop: `1px solid ${theme.border}` }}>
+                    <tr
+                      key={detail.submission.submissionId}
+                      style={{ borderTop: `1px solid ${theme.border}` }}
+                    >
                       <td style={{ padding: "12px 0" }}>
                         <div style={{ fontWeight: 600 }}>{subject.title}</div>
                         <div style={{ fontSize: 11, color: theme.textMuted }}>
                           {subject.subtitle}
                         </div>
                       </td>
-                      <td style={{ padding: "12px 0" }}>{detail.submission.submissionType}</td>
                       <td style={{ padding: "12px 0" }}>
-                        <CanvasPill theme={theme} tone={statusTone(detail.submission.status)} dot>
+                        {detail.submission.submissionType}
+                      </td>
+                      <td style={{ padding: "12px 0" }}>
+                        <CanvasPill
+                          theme={theme}
+                          tone={statusTone(detail.submission.status)}
+                          dot
+                        >
                           {formatStatus(detail.submission.status)}
                         </CanvasPill>
                       </td>
-                      <td style={{ padding: "12px 0", fontFamily: theme.monoFamily }}>
-                        {t("supply.revision", { value: detail.submission.revisionNo })}
+                      <td
+                        style={{
+                          padding: "12px 0",
+                          fontFamily: theme.monoFamily,
+                        }}
+                      >
+                        {t("supply.revision", {
+                          value: detail.submission.revisionNo,
+                        })}
                       </td>
                       <td style={{ padding: "12px 0" }}>
                         {detail.submission.reviewComment || "—"}
@@ -488,7 +580,14 @@ export function SupplyDocumentsBoard({ data }: { data: SupplyDocumentsView }) {
         title={t("documents.title")}
         subtitle={t("supply.documents.subtitle")}
       />
-      <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+      <div
+        style={{
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
         <CanvasBanner
           theme={theme}
           tone="info"
@@ -497,42 +596,87 @@ export function SupplyDocumentsBoard({ data }: { data: SupplyDocumentsView }) {
           body={t("supply.documents.uploadFlowBody")}
         />
         {data.source === "fallback" ? (
-          <CanvasBanner theme={theme} tone="warn" icon="warn" body={t("supply.documents.fallback")} />
+          <CanvasBanner
+            theme={theme}
+            tone="warn"
+            icon="warn"
+            body={t("supply.documents.fallback")}
+          />
         ) : null}
         <CanvasCard theme={theme} title={t("supply.documents.list")}>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 12.5,
+              }}
+            >
               <thead>
                 <tr style={{ textAlign: "left", color: theme.textMuted }}>
-                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.documentType")}</th>
-                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.fileName")}</th>
-                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.subject")}</th>
-                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.effectiveWindow")}</th>
-                  <th style={{ padding: "0 0 10px" }}>{t("supply.table.reviewStatus")}</th>
-                  <th style={{ padding: "0 0 10px" }}>{t("nav.supplySubmissions")}</th>
+                  <th style={{ padding: "0 0 10px" }}>
+                    {t("supply.table.documentType")}
+                  </th>
+                  <th style={{ padding: "0 0 10px" }}>
+                    {t("supply.table.fileName")}
+                  </th>
+                  <th style={{ padding: "0 0 10px" }}>
+                    {t("supply.table.subject")}
+                  </th>
+                  <th style={{ padding: "0 0 10px" }}>
+                    {t("supply.table.effectiveWindow")}
+                  </th>
+                  <th style={{ padding: "0 0 10px" }}>
+                    {t("supply.table.reviewStatus")}
+                  </th>
+                  <th style={{ padding: "0 0 10px" }}>
+                    {t("nav.supplySubmissions")}
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {data.rows.map((row) => (
-                  <tr key={row.documentId} style={{ borderTop: `1px solid ${theme.border}` }}>
-                    <td style={{ padding: "12px 0" }}>{t(DOCUMENT_LABEL_KEYS[row.documentType] ?? row.documentType)}</td>
-                    <td style={{ padding: "12px 0", fontFamily: theme.monoFamily }}>
+                  <tr
+                    key={row.documentId}
+                    style={{ borderTop: `1px solid ${theme.border}` }}
+                  >
+                    <td style={{ padding: "12px 0" }}>
+                      {t(
+                        DOCUMENT_LABEL_KEYS[row.documentType] ??
+                          row.documentType,
+                      )}
+                    </td>
+                    <td
+                      style={{
+                        padding: "12px 0",
+                        fontFamily: theme.monoFamily,
+                      }}
+                    >
                       {row.originalFileName}
                     </td>
                     <td style={{ padding: "12px 0" }}>
                       <div style={{ fontWeight: 600 }}>{row.subject.title}</div>
-                      <div style={{ fontSize: 11, color: theme.textMuted }}>{row.subject.subtitle}</div>
+                      <div style={{ fontSize: 11, color: theme.textMuted }}>
+                        {row.subject.subtitle}
+                      </div>
                     </td>
                     <td style={{ padding: "12px 0" }}>
                       {row.effectiveFrom || "—"} → {row.effectiveUntil || "—"}
                     </td>
                     <td style={{ padding: "12px 0" }}>
-                      <CanvasPill theme={theme} tone={documentTone(row.reviewStatus)} dot>
+                      <CanvasPill
+                        theme={theme}
+                        tone={documentTone(row.reviewStatus)}
+                        dot
+                      >
                         {row.reviewStatus}
                       </CanvasPill>
                     </td>
                     <td style={{ padding: "12px 0" }}>
-                      <Link href={`/supply/submissions/${row.submissionId}`} style={cardLinkStyle(theme)}>
+                      <Link
+                        href={`/supply/submissions/${row.submissionId}`}
+                        style={cardLinkStyle(theme)}
+                      >
                         {t("supply.action.openSubmission")}
                       </Link>
                     </td>
@@ -584,7 +728,11 @@ export function NewDriverSubmissionForm() {
 
   return (
     <>
-      <CanvasPageHeader theme={theme} title={t("supply.driverNew.title")} subtitle={t("supply.driverNew.subtitle")} />
+      <CanvasPageHeader
+        theme={theme}
+        title={t("supply.driverNew.title")}
+        subtitle={t("supply.driverNew.subtitle")}
+      />
       <div style={{ padding: 24 }}>
         <DraftFormFrame
           title={t("supply.driverNew.cardTitle")}
@@ -642,7 +790,11 @@ export function NewVehicleSubmissionForm() {
 
   return (
     <>
-      <CanvasPageHeader theme={theme} title={t("supply.vehicleNew.title")} subtitle={t("supply.vehicleNew.subtitle")} />
+      <CanvasPageHeader
+        theme={theme}
+        title={t("supply.vehicleNew.title")}
+        subtitle={t("supply.vehicleNew.subtitle")}
+      />
       <div style={{ padding: 24 }}>
         <DraftFormFrame
           title={t("supply.vehicleNew.cardTitle")}
@@ -676,13 +828,21 @@ function DraftFormFrame({
   const theme = buildFleetTheme();
   const { t } = useTranslation();
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) 320px", gap: 16 }}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1.4fr) 320px",
+        gap: 16,
+      }}
+    >
       <CanvasCard theme={theme} title={title}>
         {children}
       </CanvasCard>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <CanvasCard theme={theme} title={t("supply.draft.tipTitle")}>
-          <div style={{ fontSize: 12, lineHeight: 1.5, color: theme.textMuted }}>
+          <div
+            style={{ fontSize: 12, lineHeight: 1.5, color: theme.textMuted }}
+          >
             {t("supply.draft.tipBody")}
           </div>
         </CanvasCard>
@@ -714,34 +874,110 @@ function DriverDraftFields({
     <>
       <div style={sectionGrid()}>
         <CanvasField label={t("supply.driverField.name")} required>
-          <FieldInput value={form.name} onChange={(e) => setForm((current) => ({ ...current, name: e.currentTarget.value }))} />
+          <FieldInput
+            value={form.name}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                name: e.currentTarget.value,
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.driverField.mobile")} required>
-          <FieldInput value={form.mobile} onChange={(e) => setForm((current) => ({ ...current, mobile: e.currentTarget.value }))} />
+          <FieldInput
+            value={form.mobile}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                mobile: e.currentTarget.value,
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.driverField.licenseNo")} required>
-          <FieldInput value={form.professionalDriverLicenseNo} onChange={(e) => setForm((current) => ({ ...current, professionalDriverLicenseNo: e.currentTarget.value }))} />
+          <FieldInput
+            value={form.professionalDriverLicenseNo}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                professionalDriverLicenseNo: e.currentTarget.value,
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.driverField.licenseExpiry")} required>
-          <FieldInput type="date" value={form.professionalDriverLicenseExpiry} onChange={(e) => setForm((current) => ({ ...current, professionalDriverLicenseExpiry: e.currentTarget.value }))} />
+          <FieldInput
+            type="date"
+            value={form.professionalDriverLicenseExpiry}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                professionalDriverLicenseExpiry: e.currentTarget.value,
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.driverField.registrationNo")} required>
-          <FieldInput value={form.taxiDriverRegistrationNo} onChange={(e) => setForm((current) => ({ ...current, taxiDriverRegistrationNo: e.currentTarget.value }))} />
+          <FieldInput
+            value={form.taxiDriverRegistrationNo}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                taxiDriverRegistrationNo: e.currentTarget.value,
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.driverField.registrationArea")} required>
-          <FieldInput value={form.taxiDriverRegistrationArea} onChange={(e) => setForm((current) => ({ ...current, taxiDriverRegistrationArea: e.currentTarget.value }))} />
+          <FieldInput
+            value={form.taxiDriverRegistrationArea}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                taxiDriverRegistrationArea: e.currentTarget.value,
+              }))
+            }
+          />
         </CanvasField>
-        <CanvasField label={t("supply.driverField.registrationExpiry")} required>
-          <FieldInput type="date" value={form.taxiDriverRegistrationExpiry} onChange={(e) => setForm((current) => ({ ...current, taxiDriverRegistrationExpiry: e.currentTarget.value }))} />
+        <CanvasField
+          label={t("supply.driverField.registrationExpiry")}
+          required
+        >
+          <FieldInput
+            type="date"
+            value={form.taxiDriverRegistrationExpiry}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                taxiDriverRegistrationExpiry: e.currentTarget.value,
+              }))
+            }
+          />
         </CanvasField>
-        <CanvasField label={t("supply.driverField.preferredVehicleSubmissionId")}>
-          <FieldInput value={form.preferredVehicleSubmissionId ?? ""} onChange={(e) => setForm((current) => ({ ...current, preferredVehicleSubmissionId: e.currentTarget.value || null }))} />
+        <CanvasField
+          label={t("supply.driverField.preferredVehicleSubmissionId")}
+        >
+          <FieldInput
+            value={form.preferredVehicleSubmissionId ?? ""}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                preferredVehicleSubmissionId: e.currentTarget.value || null,
+              }))
+            }
+          />
         </CanvasField>
       </div>
       <CanvasField label={t("supply.field.supportedProducts")} required>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
-          onChange={(value) => setForm((current) => ({ ...current, supportedServiceProductCodes: value }))}
+          onChange={(value) =>
+            setForm((current) => ({
+              ...current,
+              supportedServiceProductCodes: value,
+            }))
+          }
         />
       </CanvasField>
     </>
@@ -760,58 +996,182 @@ function VehicleDraftFields({
     <>
       <div style={sectionGrid()}>
         <CanvasField label={t("supply.vehicleField.plateNo")} required>
-          <FieldInput value={form.plateNo} onChange={(e) => setForm((current) => ({ ...current, plateNo: e.currentTarget.value }))} />
+          <FieldInput
+            value={form.plateNo}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                plateNo: e.currentTarget.value,
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.vehicleField.licenseType")} required>
           <FieldSelect
             value={form.licenseType}
-            onChange={(e) => setForm((current) => ({ ...current, licenseType: e.currentTarget.value }))}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                licenseType: e.currentTarget.value,
+              }))
+            }
             options={[
-              { value: "taxi", label: t("supply.vehicleField.licenseTypeTaxi") },
-              { value: "rental", label: t("supply.vehicleField.licenseTypeRental") },
+              {
+                value: "taxi",
+                label: t("supply.vehicleField.licenseTypeTaxi"),
+              },
+              {
+                value: "rental",
+                label: t("supply.vehicleField.licenseTypeRental"),
+              },
             ]}
           />
         </CanvasField>
         <CanvasField label={t("supply.vehicleField.brand")}>
-          <FieldInput value={form.brand ?? ""} onChange={(e) => setForm((current) => ({ ...current, brand: e.currentTarget.value }))} />
+          <FieldInput
+            value={form.brand ?? ""}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                brand: e.currentTarget.value,
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.vehicleField.model")}>
-          <FieldInput value={form.model ?? ""} onChange={(e) => setForm((current) => ({ ...current, model: e.currentTarget.value }))} />
+          <FieldInput
+            value={form.model ?? ""}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                model: e.currentTarget.value,
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.vehicleField.modelYear")}>
-          <FieldInput type="number" value={String(form.modelYear ?? "")} onChange={(e) => setForm((current) => ({ ...current, modelYear: e.currentTarget.value ? Number(e.currentTarget.value) : null }))} />
+          <FieldInput
+            type="number"
+            value={String(form.modelYear ?? "")}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                modelYear: e.currentTarget.value
+                  ? Number(e.currentTarget.value)
+                  : null,
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.vehicleField.seatCount")} required>
-          <FieldInput type="number" value={String(form.seatCount)} onChange={(e) => setForm((current) => ({ ...current, seatCount: Number(e.currentTarget.value) }))} />
+          <FieldInput
+            type="number"
+            value={String(form.seatCount)}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                seatCount: Number(e.currentTarget.value),
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.vehicleField.luggageCapacity")} required>
-          <FieldInput type="number" value={String(form.luggageCapacity)} onChange={(e) => setForm((current) => ({ ...current, luggageCapacity: Number(e.currentTarget.value) }))} />
+          <FieldInput
+            type="number"
+            value={String(form.luggageCapacity)}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                luggageCapacity: Number(e.currentTarget.value),
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.vehicleField.businessArea")} required>
-          <FieldInput value={form.businessArea} onChange={(e) => setForm((current) => ({ ...current, businessArea: e.currentTarget.value }))} />
+          <FieldInput
+            value={form.businessArea}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                businessArea: e.currentTarget.value,
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.vehicleField.currentDriverSubmissionId")}>
-          <FieldInput value={form.currentDriverSubmissionId ?? ""} onChange={(e) => setForm((current) => ({ ...current, currentDriverSubmissionId: e.currentTarget.value || null }))} />
+          <FieldInput
+            value={form.currentDriverSubmissionId ?? ""}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                currentDriverSubmissionId: e.currentTarget.value || null,
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.vehicleField.doorCount")}>
-          <FieldInput type="number" value={String(form.doorCount ?? "")} onChange={(e) => setForm((current) => ({ ...current, doorCount: e.currentTarget.value ? Number(e.currentTarget.value) : null }))} />
+          <FieldInput
+            type="number"
+            value={String(form.doorCount ?? "")}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                doorCount: e.currentTarget.value
+                  ? Number(e.currentTarget.value)
+                  : null,
+              }))
+            }
+          />
         </CanvasField>
         <CanvasField label={t("supply.vehicleField.color")}>
-          <FieldInput value={form.color ?? ""} onChange={(e) => setForm((current) => ({ ...current, color: e.currentTarget.value }))} />
+          <FieldInput
+            value={form.color ?? ""}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                color: e.currentTarget.value,
+              }))
+            }
+          />
         </CanvasField>
       </div>
       <CanvasField label={t("supply.field.supportedProducts")} required>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
-          onChange={(value) => setForm((current) => ({ ...current, supportedServiceProductCodes: value }))}
+          onChange={(value) =>
+            setForm((current) => ({
+              ...current,
+              supportedServiceProductCodes: value,
+            }))
+          }
         />
       </CanvasField>
       <div style={{ display: "flex", gap: 24 }}>
         <label>
-          <input type="checkbox" checked={form.airportTransferEligible} onChange={(e) => setForm((current) => ({ ...current, airportTransferEligible: e.currentTarget.checked }))} /> {t("supply.vehicleField.airportTransferEligible")}
+          <input
+            type="checkbox"
+            checked={form.airportTransferEligible}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                airportTransferEligible: e.currentTarget.checked,
+              }))
+            }
+          />{" "}
+          {t("supply.vehicleField.airportTransferEligible")}
         </label>
         <label>
-          <input type="checkbox" checked={form.fixedFareAllowed} onChange={(e) => setForm((current) => ({ ...current, fixedFareAllowed: e.currentTarget.checked }))} /> {t("supply.vehicleField.fixedFareAllowed")}
+          <input
+            type="checkbox"
+            checked={form.fixedFareAllowed}
+            onChange={(e) =>
+              setForm((current) => ({
+                ...current,
+                fixedFareAllowed: e.currentTarget.checked,
+              }))
+            }
+          />{" "}
+          {t("supply.vehicleField.fixedFareAllowed")}
         </label>
       </div>
     </>
@@ -833,12 +1193,20 @@ export function SupplySubmissionDetailView({
   const [error, setError] = useState<string | null>(null);
   const [driverForm, setDriverForm] = useState<DriverDraftInput | null>(
     initialDetail.driverDraft
-      ? { ...initialDetail.driverDraft, preferredVehicleSubmissionId: initialDetail.driverDraft.preferredVehicleSubmissionId ?? null }
+      ? {
+          ...initialDetail.driverDraft,
+          preferredVehicleSubmissionId:
+            initialDetail.driverDraft.preferredVehicleSubmissionId ?? null,
+        }
       : null,
   );
   const [vehicleForm, setVehicleForm] = useState<VehicleDraftInput | null>(
     initialDetail.vehicleDraft
-      ? { ...initialDetail.vehicleDraft, currentDriverSubmissionId: initialDetail.vehicleDraft.currentDriverSubmissionId ?? null }
+      ? {
+          ...initialDetail.vehicleDraft,
+          currentDriverSubmissionId:
+            initialDetail.vehicleDraft.currentDriverSubmissionId ?? null,
+        }
       : null,
   );
   const [docType, setDocType] = useState<string>(
@@ -849,7 +1217,9 @@ export function SupplySubmissionDetailView({
   const [docFile, setDocFile] = useState<File | null>(null);
 
   const editable = isEditableStatus(detail.submission.status);
-  const documentOptions = detail.driverDraft ? DRIVER_DOC_TYPES : VEHICLE_DOC_TYPES;
+  const documentOptions = detail.driverDraft
+    ? DRIVER_DOC_TYPES
+    : VEHICLE_DOC_TYPES;
   const subject = useMemo(() => formatSupplySubject(detail), [detail]);
   const setDriverDraftSafe: Dispatch<SetStateAction<DriverDraftInput>> = (
     next,
@@ -1018,7 +1388,11 @@ export function SupplySubmissionDetailView({
         subtitle={`${detail.submission.submissionType} · ${detail.submission.submissionId}`}
         actions={
           <>
-            <CanvasPill theme={theme} tone={statusTone(detail.submission.status)} dot>
+            <CanvasPill
+              theme={theme}
+              tone={statusTone(detail.submission.status)}
+              dot
+            >
               {formatStatus(detail.submission.status)}
             </CanvasPill>
             <Link href="/supply/submissions" style={cardLinkStyle(theme)}>
@@ -1027,33 +1401,90 @@ export function SupplySubmissionDetailView({
           </>
         }
       />
-      <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+      <div
+        style={{
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
         {source === "fallback" ? (
-          <CanvasBanner theme={theme} tone="warn" icon="warn" body={t("supply.detail.fallback")} />
+          <CanvasBanner
+            theme={theme}
+            tone="warn"
+            icon="warn"
+            body={t("supply.detail.fallback")}
+          />
         ) : null}
-        {error ? <CanvasBanner theme={theme} tone="danger" icon="warn" body={error} /> : null}
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) 340px", gap: 16 }}>
+        {error ? (
+          <CanvasBanner theme={theme} tone="danger" icon="warn" body={error} />
+        ) : null}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.4fr) 340px",
+            gap: 16,
+          }}
+        >
           <CanvasCard theme={theme} title={t("supply.detail.draftFields")}>
             {driverForm ? (
-              <DriverDraftFields form={driverForm} setForm={setDriverDraftSafe} />
+              <DriverDraftFields
+                form={driverForm}
+                setForm={setDriverDraftSafe}
+              />
             ) : vehicleForm ? (
-              <VehicleDraftFields form={vehicleForm} setForm={setVehicleDraftSafe} />
+              <VehicleDraftFields
+                form={vehicleForm}
+                setForm={setVehicleDraftSafe}
+              />
             ) : (
-              <CanvasEmptyState theme={theme} title={t("supply.detail.noDraftTitle")} body={t("supply.detail.noDraftBody")} />
+              <CanvasEmptyState
+                theme={theme}
+                title={t("supply.detail.noDraftTitle")}
+                body={t("supply.detail.noDraftBody")}
+              />
             )}
           </CanvasCard>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <CanvasCard theme={theme} title={t("supply.detail.stateTitle")}>
-              <dl style={{ display: "grid", gridTemplateColumns: "120px 1fr", rowGap: 8, fontSize: 12.5, margin: 0 }}>
-                <dt style={{ color: theme.textMuted }}>{t("supply.table.revision")}</dt>
-                <dd style={{ margin: 0, fontFamily: theme.monoFamily }}>{detail.submission.revisionNo}</dd>
-                <dt style={{ color: theme.textMuted }}>{t("supply.detail.submittedAt")}</dt>
-                <dd style={{ margin: 0 }}>{detail.submission.submittedAt || "—"}</dd>
-                <dt style={{ color: theme.textMuted }}>{t("supply.table.reviewerNote")}</dt>
-                <dd style={{ margin: 0 }}>{detail.submission.reviewComment || "—"}</dd>
-                <dt style={{ color: theme.textMuted }}>{t("supply.detail.canonicalIds")}</dt>
+              <dl
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "120px 1fr",
+                  rowGap: 8,
+                  fontSize: 12.5,
+                  margin: 0,
+                }}
+              >
+                <dt style={{ color: theme.textMuted }}>
+                  {t("supply.table.revision")}
+                </dt>
+                <dd style={{ margin: 0, fontFamily: theme.monoFamily }}>
+                  {detail.submission.revisionNo}
+                </dd>
+                <dt style={{ color: theme.textMuted }}>
+                  {t("supply.detail.submittedAt")}
+                </dt>
                 <dd style={{ margin: 0 }}>
-                  {[detail.submission.canonicalDriverId, detail.submission.canonicalVehicleId, detail.submission.canonicalContractId, detail.submission.canonicalPolicyId]
+                  {detail.submission.submittedAt || "—"}
+                </dd>
+                <dt style={{ color: theme.textMuted }}>
+                  {t("supply.table.reviewerNote")}
+                </dt>
+                <dd style={{ margin: 0 }}>
+                  {detail.submission.reviewComment || "—"}
+                </dd>
+                <dt style={{ color: theme.textMuted }}>
+                  {t("supply.detail.canonicalIds")}
+                </dt>
+                <dd style={{ margin: 0 }}>
+                  {[
+                    detail.submission.canonicalDriverId,
+                    detail.submission.canonicalVehicleId,
+                    detail.submission.canonicalContractId,
+                    detail.submission.canonicalPolicyId,
+                  ]
                     .filter(Boolean)
                     .join(" · ") || t("supply.detail.preApproval")}
                 </dd>
@@ -1070,12 +1501,23 @@ export function SupplySubmissionDetailView({
             />
             <ActionButton
               theme={theme}
-              label={detail.submission.status === "needs_revision" ? t("supply.action.resubmit") : t("supply.action.submit")}
+              label={
+                detail.submission.status === "needs_revision" ||
+                detail.submission.status === "withdrawn"
+                  ? t("supply.action.resubmit")
+                  : t("supply.action.submit")
+              }
               helper={t("supply.detail.submitHelper")}
               variant="primary"
               busy={busy === "submit"}
               disabled={!editable}
               onClick={() => runAction("submit", submitSubmission)}
+              data-drt-operation={
+                detail.submission.status === "needs_revision" ||
+                detail.submission.status === "withdrawn"
+                  ? "fleet-resubmit"
+                  : "fleet-submit"
+              }
             />
             <ActionButton
               theme={theme}
@@ -1085,10 +1527,17 @@ export function SupplySubmissionDetailView({
               busy={busy === "withdraw"}
               disabled={detail.submission.status !== "submitted"}
               onClick={() => runAction("withdraw", withdrawSubmission)}
+              data-drt-operation="fleet-withdraw"
             />
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) 340px", gap: 16 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.4fr) 340px",
+            gap: 16,
+          }}
+        >
           <CanvasCard theme={theme} title={t("supply.detail.attachments")}>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {detail.documents.map((document) => (
@@ -1101,17 +1550,39 @@ export function SupplySubmissionDetailView({
                     background: theme.surfaceLo,
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                    }}
+                  >
                     <div>
-                      <div style={{ fontWeight: 600 }}>{t(DOCUMENT_LABEL_KEYS[document.documentType] ?? document.documentType)}</div>
-                      <div style={{ fontSize: 11, color: theme.textMuted, fontFamily: theme.monoFamily }}>
+                      <div style={{ fontWeight: 600 }}>
+                        {t(
+                          DOCUMENT_LABEL_KEYS[document.documentType] ??
+                            document.documentType,
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: theme.textMuted,
+                          fontFamily: theme.monoFamily,
+                        }}
+                      >
                         {document.originalFileName}
                       </div>
                       <div style={{ fontSize: 11, color: theme.textMuted }}>
-                        {document.effectiveFrom || "—"} → {document.effectiveUntil || "—"}
+                        {document.effectiveFrom || "—"} →{" "}
+                        {document.effectiveUntil || "—"}
                       </div>
                     </div>
-                    <CanvasPill theme={theme} tone={documentTone(document.reviewStatus)} dot>
+                    <CanvasPill
+                      theme={theme}
+                      tone={documentTone(document.reviewStatus)}
+                      dot
+                    >
                       {document.reviewStatus}
                     </CanvasPill>
                   </div>
@@ -1119,7 +1590,11 @@ export function SupplySubmissionDetailView({
                     <div style={{ marginTop: 10 }}>
                       <button
                         type="button"
-                        onClick={() => runAction(`delete-${document.documentId}`, () => deleteDocument(document.documentId))}
+                        onClick={() =>
+                          runAction(`delete-${document.documentId}`, () =>
+                            deleteDocument(document.documentId),
+                          )
+                        }
                         style={{
                           border: "none",
                           background: "transparent",
@@ -1136,7 +1611,11 @@ export function SupplySubmissionDetailView({
                 </div>
               ))}
               {detail.documents.length === 0 ? (
-                <CanvasEmptyState theme={theme} title={t("supply.detail.noDocumentsTitle")} body={t("supply.detail.noDocumentsBody")} />
+                <CanvasEmptyState
+                  theme={theme}
+                  title={t("supply.detail.noDocumentsTitle")}
+                  body={t("supply.detail.noDocumentsBody")}
+                />
               ) : null}
             </div>
           </CanvasCard>
@@ -1152,13 +1631,24 @@ export function SupplySubmissionDetailView({
               />
             </CanvasField>
             <CanvasField label={t("supply.table.fileName")} required>
-              <input type="file" onChange={(e) => setDocFile(e.currentTarget.files?.[0] ?? null)} />
+              <input
+                type="file"
+                onChange={(e) => setDocFile(e.currentTarget.files?.[0] ?? null)}
+              />
             </CanvasField>
             <CanvasField label={t("supply.detail.effectiveFrom")}>
-              <FieldInput type="date" value={docFrom} onChange={(e) => setDocFrom(e.currentTarget.value)} />
+              <FieldInput
+                type="date"
+                value={docFrom}
+                onChange={(e) => setDocFrom(e.currentTarget.value)}
+              />
             </CanvasField>
             <CanvasField label={t("supply.detail.effectiveUntil")}>
-              <FieldInput type="date" value={docUntil} onChange={(e) => setDocUntil(e.currentTarget.value)} />
+              <FieldInput
+                type="date"
+                value={docUntil}
+                onChange={(e) => setDocUntil(e.currentTarget.value)}
+              />
             </CanvasField>
             <ActionButton
               theme={theme}
@@ -1174,10 +1664,20 @@ export function SupplySubmissionDetailView({
         <CanvasCard theme={theme} title={t("supply.detail.revisionHistory")}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {detail.reviewEvents.map((event) => (
-              <div key={event.eventId} style={{ borderLeft: `2px solid ${theme.border}`, paddingLeft: 12 }}>
+              <div
+                key={event.eventId}
+                style={{
+                  borderLeft: `2px solid ${theme.border}`,
+                  paddingLeft: 12,
+                }}
+              >
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <CanvasPill theme={theme} tone="neutral">{event.eventType}</CanvasPill>
-                  <span style={{ fontSize: 11.5, color: theme.textMuted }}>{event.createdAt}</span>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {event.eventType}
+                  </CanvasPill>
+                  <span style={{ fontSize: 11.5, color: theme.textMuted }}>
+                    {event.createdAt}
+                  </span>
                 </div>
                 <div style={{ fontSize: 12, marginTop: 4 }}>
                   {event.reasonCode ? `${event.reasonCode} · ` : ""}
