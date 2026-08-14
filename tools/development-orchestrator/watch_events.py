@@ -25,10 +25,11 @@ from common import (
     new_runtime_id,
     relpath,
     render_template,
-    resolve_path,
+    resolve_source_path,
     selected_shared_files,
     serialize_shared_files,
     snapshot_task,
+    task_board_cli_path,
     utc_now,
     write_activity_log,
 )
@@ -303,7 +304,10 @@ def render_wakeup_message(
     status: dict[str, Any] | None = None,
 ) -> str:
     agent = agent_config_for(config, target_agent)
-    template_path = resolve_path(agent.get("wake_template") or "tools/development-orchestrator/templates/wakeup.txt")
+    template_path = resolve_source_path(
+        agent.get("wake_template")
+        or "tools/development-orchestrator/templates/wakeup.txt"
+    )
     if template_path is None:
         raise RuntimeError("Unable to resolve wake-up template path")
     raw_task_id = str(event.get("task_id") or "").strip()
@@ -350,6 +354,7 @@ def render_wakeup_message(
             f"(repo-external artifacts omitted: {skipped_external_targets}; do not stage paths outside this repository)"
         )
     is_reviewer_dispatch = str(event.get("reason") or "") == "review_ready_dispatch"
+    status_cli = str(task_board_cli_path())
     review_guardrails = ""
     if is_reviewer_dispatch:
         candidate_sha = str(task_payload.get("candidate_sha") or "").strip()
@@ -357,7 +362,7 @@ def render_wakeup_message(
             "\n這是 candidate review，不是實作工作。\n"
             f"- 只能檢查鎖定 candidate `{candidate_sha or '(missing)'}`；先確認 `git rev-parse HEAD` 或 PR head 與它完全一致。\n"
             "- 不要修改檔案、commit、push、amend、rebase 或切換 task branch。發現問題時用 `reopen`，不要直接修。\n"
-            "- 通過時用 `REVIEWED_SHA=<candidate sha> ... ai-status.sh approve`；之後由 GitHub bus 對同一 SHA 記錄 CI 與 merge。\n"
+            f"- 通過時用 `REVIEWED_SHA=<candidate sha> {status_cli} approve`；之後由 GitHub bus 對同一 SHA 記錄 CI 與 merge。\n"
         )
     lane = str(agent.get("id") or target_agent or "").strip()
     task_id_kebab = raw_task_id.lower() if raw_task_id else ""
@@ -398,6 +403,7 @@ def render_wakeup_message(
         "branch_protocol": branch_protocol.rstrip(),
         "task_commit_guardrails": task_commit_guardrails.rstrip(),
         "task_brief_inline": task_brief_inline.rstrip(),
+        "status_cli": status_cli,
     }
     return render_template(template_path, variables).strip() + "\n"
 

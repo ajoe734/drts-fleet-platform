@@ -54,6 +54,7 @@ class GitHubBusCommandTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(reply, "Applied `/approve` to `LIN-001`.")
         run_ai_status.assert_called_once_with(
+            self.config,
             "approve",
             "LIN-001",
             "GitHub approval bus approved via issue #4 by @ajoe734.",
@@ -105,6 +106,7 @@ class GitHubBusCommandTests(unittest.TestCase):
 
         self.assertTrue(changed)
         run_ai_status.assert_called_once_with(
+            self.config,
             "approve",
             "LIN-001",
             "GitHub PR approved via PR #12 by @ajoe734.",
@@ -113,6 +115,27 @@ class GitHubBusCommandTests(unittest.TestCase):
         )
         self.assertEqual(bus_state["processed_review_ids"], ["review:999"])
         write_activity_log.assert_called_once()
+
+    def test_run_ai_status_uses_in_process_task_board_gateway(self) -> None:
+        result = mock.Mock(ok=True, error="")
+        with mock.patch.object(
+            github_bus, "run_task_board_command", return_value=result
+        ) as gateway:
+            github_bus.run_ai_status(
+                self.config,
+                "reconcile-candidate",
+                "LIN-001",
+                "Reconciled",
+                actor="Supervisor",
+                extra_env={"CANDIDATE_HEAD_SHA": "abc123"},
+            )
+
+        gateway.assert_called_once_with(
+            self.config,
+            "reconcile-candidate",
+            ["LIN-001", "Reconciled"],
+            environ={"AI_NAME": "Supervisor", "CANDIDATE_HEAD_SHA": "abc123"},
+        )
 
     def test_upsert_review_pr_creates_core_pr_before_optional_metadata(self) -> None:
         config = {

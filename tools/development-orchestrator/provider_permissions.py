@@ -12,6 +12,7 @@ from control_plane.domain.lane_health import identity_fingerprint, quota_pool_ke
 
 from common import (
     ROOT,
+    SOURCE_ROOT,
     command_exists,
     config_path,
     load_config,
@@ -398,7 +399,7 @@ def _verified_claude_policy(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _verified_claude_hooks() -> dict[str, Any]:
-    broker_path = ROOT / "tools" / "development-orchestrator" / "permission_broker.py"
+    broker_path = SOURCE_ROOT / "tools" / "development-orchestrator" / "permission_broker.py"
     command = f"python3 {broker_path} hook"
     hook = lambda event: [{"hooks": [{"type": "command", "command": f"{command} {event}", "shell": "bash"}]}]
     return {

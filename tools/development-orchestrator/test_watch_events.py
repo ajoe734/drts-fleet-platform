@@ -228,6 +228,7 @@ class RenderWakeupMessageTests(unittest.TestCase):
         self.assertIn("git show-ref --verify --quiet refs/heads/claude/be-apr-notify-001", rendered)
         self.assertIn('LLM-Agent: claude', rendered)
         self.assertIn("Task-ID: BE-APR-NOTIFY-001", rendered)
+        self.assertIn(str(watch_events.task_board_cli_path()), rendered)
         self.assertIn("tools/development-orchestrator/skills/worker-anchor-commit.md", rendered)
         self.assertNotIn("{{branch_protocol}}", rendered)
 

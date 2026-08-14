@@ -208,6 +208,19 @@ def resolve_path(value: str | Path | None) -> Path | None:
     return path
 
 
+def resolve_source_path(value: str | Path | None) -> Path | None:
+    if value is None:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        path = SOURCE_ROOT / path
+    return path
+
+
+def task_board_cli_path() -> Path:
+    return TOOL_ROOT / "bin" / "ai-status.sh"
+
+
 def relpath(path: Path) -> str:
     try:
         return str(path.relative_to(ROOT))
@@ -956,7 +969,7 @@ def build_task_brief(
             "",
             "## Guardrails",
             "",
-            "- Use `tools/development-orchestrator/bin/ai-status.sh` or `python3 tools/development-orchestrator/bin/ai_status.py` for state changes.",
+            f"- Use `{task_board_cli_path()}` for state changes.",
             "- Treat `current-work.md` as a human summary, not canonical machine context.",
         ]
     )
