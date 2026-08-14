@@ -90,7 +90,12 @@ class CandidateLifecycleTest(unittest.TestCase):
     @mock.patch.object(ai_status, "git_commit_exists", return_value=True)
     def test_canonical_handoff_locks_sha_and_branch(self, _exists: mock.Mock, _log: mock.Mock) -> None:
         state = self.state()
-        env = {"AI_NAME": "Codex", "CANDIDATE_SHA": "abc123", "CANDIDATE_BRANCH": "codex/task-001"}
+        env = {
+            "AI_NAME": "Codex",
+            "CANDIDATE_SHA": "abc123",
+            "CANDIDATE_BRANCH": "codex/task-001",
+            "PR_URL": "https://github.com/example/repo/pull/42",
+        }
         with mock.patch.dict(os.environ, env, clear=True):
             ai_status.command_handoff(state, ["TASK-001", "Claude", "Ready for review"])
 
@@ -98,6 +103,7 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertEqual(task["status"], "review")
         self.assertEqual(task["candidate_sha"], "abc123")
         self.assertEqual(task["candidate_branch"], "codex/task-001")
+        self.assertEqual(task["pr_url"], "https://github.com/example/repo/pull/42")
         self.assertEqual(state["handoffs"][0]["to"], "Claude")
 
     @mock.patch.object(ai_status, "append_log")

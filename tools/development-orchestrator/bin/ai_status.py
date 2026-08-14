@@ -1912,6 +1912,9 @@ def command_handoff(state: dict[str, Any], args: list[str]) -> None:
     clear_candidate_evidence(task)
     task["candidate_sha"] = candidate_sha
     task["candidate_branch"] = candidate_branch
+    pr_url = os.environ.get("PR_URL", "").strip()
+    if pr_url:
+        task["pr_url"] = pr_url
     task["status"] = "review"
     task["last_update"] = timestamp
     task["next"] = message

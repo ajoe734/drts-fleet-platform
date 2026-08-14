@@ -241,6 +241,7 @@ class GitHubBusCommandTests(unittest.TestCase):
                     "number": 1393,
                     "url": "https://github.com/ajoe734/pantheon/pull/1393",
                     "title": "Release candidate",
+                    "headRefOid": "abc123",
                 },
             ) as find_existing,
             mock.patch.object(github_bus, "run_gh") as run_gh,
@@ -454,17 +455,141 @@ class GitHubBusCommandTests(unittest.TestCase):
         self.assertFalse(changed)
         run_ai_status.assert_not_called()
 
+    def test_candidate_pr_prefers_handoff_bound_pr_over_stale_cache(self) -> None:
+        task = {
+            "id": "LIN-001",
+            "candidate_sha": "new-sha",
+            "candidate_branch": "codex/lin-001-clean",
+            "pr_url": "https://github.com/ajoe734/pantheon/pull/1419",
+        }
+        bus_state = {
+            "tasks": {
+                "LIN-001": {
+                    "review_pr": {
+                        "number": 1404,
+                        "branch": "codex/lin-001",
+                        "head_sha": "old-sha",
+                    }
+                }
+            }
+        }
+
+        number = github_bus.candidate_pr_for_task(self.config, bus_state, "ajoe734/pantheon", task)
+
+        self.assertEqual(number, 1419)
+        self.assertEqual(bus_state["tasks"]["LIN-001"]["review_pr"]["head_sha"], "new-sha")
+
+    def test_candidate_pr_discards_unbound_stale_cache_before_branch_lookup(self) -> None:
+        task = {
+            "id": "LIN-001",
+            "candidate_sha": "new-sha",
+            "candidate_branch": "codex/lin-001-clean",
+        }
+        bus_state = {
+            "tasks": {
+                "LIN-001": {
+                    "review_pr": {
+                        "number": 1404,
+                        "branch": "codex/lin-001",
+                        "head_sha": "old-sha",
+                    }
+                }
+            }
+        }
+        found = {
+            "number": 1419,
+            "url": "https://github.com/ajoe734/pantheon/pull/1419",
+            "headRefName": "codex/lin-001-clean",
+            "headRefOid": "new-sha",
+            "state": "OPEN",
+        }
+
+        with mock.patch.object(github_bus, "find_existing_pr", return_value=found) as find_existing:
+            number = github_bus.candidate_pr_for_task(self.config, bus_state, "ajoe734/pantheon", task)
+
+        self.assertEqual(number, 1419)
+        find_existing.assert_called_once_with("ajoe734/pantheon", "codex/lin-001-clean", "main")
+        self.assertEqual(bus_state["tasks"]["LIN-001"]["review_pr"]["head_sha"], "new-sha")
+
+    def test_upsert_review_pr_does_not_edit_stale_candidate_pr(self) -> None:
+        config = {
+            "github_bus": {
+                "default_branch": "dev",
+                "auto_request_reviewers": False,
+                "templates": {
+                    "review_pr": "tools/development-orchestrator/templates/github_review_pr.md"
+                },
+            }
+        }
+        task = {
+            "id": "LIN-001",
+            "title": "Lineage task",
+            "summary_zh": "review me",
+            "status": "review",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "depends_on": [],
+            "artifacts": ["foo.md"],
+            "next": "ready for review",
+            "candidate_sha": "new-sha",
+            "candidate_branch": "codex/lin-001-clean",
+        }
+        bus_state = {
+            "tasks": {
+                "LIN-001": {
+                    "review_pr": {
+                        "number": 1404,
+                        "branch": "codex/lin-001",
+                        "head_sha": "old-sha",
+                    }
+                }
+            }
+        }
+        found = {
+            "number": 1419,
+            "url": "https://github.com/ajoe734/pantheon/pull/1419",
+            "headRefName": "codex/lin-001-clean",
+            "headRefOid": "new-sha",
+        }
+
+        with (
+            mock.patch.object(github_bus, "branch_has_diff", return_value=True),
+            mock.patch.object(github_bus, "build_template_body", return_value="body\n"),
+            mock.patch.object(github_bus, "find_existing_pr", return_value=found),
+            mock.patch.object(github_bus, "run_gh") as run_gh,
+            mock.patch.object(github_bus, "candidate_pr_observation", return_value={"isDraft": False}),
+            mock.patch.object(github_bus, "write_activity_log"),
+        ):
+            changed = github_bus.upsert_review_pr(
+                config, bus_state, {"tasks": [task]}, "ajoe734/pantheon", task
+            )
+
+        self.assertTrue(changed)
+        self.assertTrue(all("1404" not in call.args[0] for call in run_gh.call_args_list))
+        self.assertEqual(bus_state["tasks"]["LIN-001"]["review_pr"]["number"], 1419)
+
     def test_auto_merge_is_requested_once_for_a_same_sha_candidate(self) -> None:
         task = {
             "id": "LIN-001",
             "status": "integrating",
             "candidate_sha": "abc123",
+            "candidate_branch": "codex/lin-001",
             "reviewed_sha": "abc123",
             "ci_sha": "abc123",
             "ci_status": "success",
         }
         config = {"github_bus": {"auto_merge": {"enabled": True}}}
-        bus_state = {"tasks": {"LIN-001": {"review_pr": {"number": 12}}}}
+        bus_state = {
+            "tasks": {
+                "LIN-001": {
+                    "review_pr": {
+                        "number": 12,
+                        "branch": "codex/lin-001",
+                        "head_sha": "abc123",
+                    }
+                }
+            }
+        }
         with (
             mock.patch.object(github_bus, "run_gh") as run_gh,
             mock.patch.object(github_bus, "write_activity_log"),
