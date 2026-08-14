@@ -211,6 +211,19 @@ describe("Cloud Run deploy quota retry", () => {
     }
   });
 
+  it("mounts a stable Bank Console session secret in every Dev deploy entrypoint", () => {
+    const workflows = [
+      ".github/workflows/deploy-dev.yml",
+      ".github/workflows/deploy-bank-console.yml",
+      ".github/workflows/deploy-web-app.yml",
+    ];
+
+    for (const workflowPath of workflows) {
+      const workflow = readFileSync(path.join(repoRoot, workflowPath), "utf8");
+      expect(workflow, workflowPath).toContain("BANK_SESSION_SECRET=");
+    }
+  });
+
   it("keeps every dev web revision usable within the low-quota profile", () => {
     const workflow = readFileSync(
       path.join(repoRoot, ".github/workflows/deploy-dev.yml"),

@@ -894,7 +894,7 @@ jobs:
             --port 3007 \
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest,BANK_SESSION_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.fleet_partner_portal_exposure_flag }} \
             --cpu 1 \
@@ -1342,5 +1342,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: operational-browser-evidence-${{ needs.build-push.outputs.candidate_sha }}
-          path: test-results/operational-browser/
+          path: test-results/
           if-no-files-found: error
