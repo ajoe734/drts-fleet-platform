@@ -336,12 +336,36 @@ def find_existing_pr(repo: str, branch: str, base: str) -> dict[str, Any] | None
         "--base",
         base,
         "--json",
-        "number,title,url,headRefName,state",
+        "number,title,url,headRefName,headRefOid,state",
     ]
     data = gh_json(args)
     if isinstance(data, list) and data:
         return data[0]
     return None
+
+
+def bound_task_pr(task: dict[str, Any], branch: str, candidate_sha: str) -> dict[str, Any] | None:
+    """Return the immutable PR reference recorded with a candidate handoff."""
+    url = str(task.get("pr_url") or "").strip()
+    number = parse_number_from_url(url)
+    if not number:
+        return None
+    return {
+        "number": number,
+        "url": url,
+        "branch": branch,
+        "head_sha": candidate_sha,
+        "state": "bound",
+    }
+
+
+def cached_pr_matches_candidate(review_pr: Any, branch: str, candidate_sha: str) -> bool:
+    if not isinstance(review_pr, dict) or not review_pr.get("number"):
+        return False
+    return (
+        str(review_pr.get("branch") or "") == branch
+        and str(review_pr.get("head_sha") or "") == candidate_sha
+    )
 
 
 def sync_optional_pr_metadata(
@@ -537,6 +561,15 @@ def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: 
     base = default_branch(config)
     title = f"[ReviewBus] {task['id']} {task['title']}"
     head_sha = candidate_sha
+    task_pr = bound_task_pr(task, branch, candidate_sha)
+    if task_pr:
+        if entry.get("review_pr") == task_pr:
+            return False
+        entry["review_pr"] = task_pr
+        return True
+    if not cached_pr_matches_candidate(pr_ref, branch, candidate_sha):
+        pr_ref = None
+        entry["review_pr"] = None
     variables = {
         "marker": COMMENT_MARKER,
         "task_id": task["id"],
@@ -587,6 +620,8 @@ def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: 
             found = find_existing_pr(repo, branch, base)
             if found:
                 number = int(found["number"])
+                if str(found.get("headRefOid") or "") != candidate_sha:
+                    return False
                 run_gh(["pr", "edit", str(number), "--repo", repo, "--title", title, "--body-file", str(body_file)])
                 pr = {"number": number, "url": found.get("url"), "title": title, "headRefName": branch}
             else:
@@ -610,6 +645,7 @@ def upsert_review_pr(config: dict[str, Any], bus_state: dict[str, Any], status: 
         "url": pr.get("url"),
         "title": title,
         "branch": branch,
+        "head_sha": candidate_sha,
         "state": "open",
     }
     entry["last_review_hash"] = pr_hash
@@ -699,17 +735,33 @@ def candidate_pr_for_task(
     task: dict[str, Any],
 ) -> int | None:
     entry = task_bus_entry(bus_state, str(task.get("id") or ""))
-    review_pr = entry.get("review_pr") or {}
-    number = review_pr.get("number")
-    if number:
-        return int(number)
     branch = str(task.get("candidate_branch") or "").strip()
+    candidate_sha = str(task.get("candidate_sha") or "").strip()
+    task_pr = bound_task_pr(task, branch, candidate_sha)
+    if task_pr:
+        entry["review_pr"] = task_pr
+        return int(task_pr["number"])
+
+    review_pr = entry.get("review_pr")
+    if cached_pr_matches_candidate(review_pr, branch, candidate_sha):
+        return int(review_pr["number"])
+    if review_pr:
+        # A task can be re-handed-off with a new candidate. Never let the
+        # previous PR's head invalidate the replacement candidate.
+        entry["review_pr"] = None
+
     if not branch or branch == "not_applicable":
         return None
     found = find_existing_pr(repo, branch, default_branch(config))
-    if not found or not found.get("number"):
+    if not found or not found.get("number") or str(found.get("headRefOid") or "") != candidate_sha:
         return None
-    entry["review_pr"] = {"number": found["number"], "url": found.get("url"), "branch": branch, "state": "open"}
+    entry["review_pr"] = {
+        "number": found["number"],
+        "url": found.get("url"),
+        "branch": branch,
+        "head_sha": candidate_sha,
+        "state": "open",
+    }
     return int(found["number"])
 
 
