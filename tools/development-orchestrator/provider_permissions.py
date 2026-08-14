@@ -413,6 +413,16 @@ def _verified_claude_hooks() -> dict[str, Any]:
     }
 
 
+def _is_managed_permission_broker_hook(entry: Any) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    return any(
+        isinstance(hook, dict)
+        and "permission_broker.py" in str(hook.get("command", ""))
+        for hook in entry.get("hooks", [])
+    )
+
+
 def desired_workspace_settings(config: dict[str, Any]) -> dict[str, Any]:
     claude_approval = config.get("providers", {}).get("claude", {}).get("approval", {})
     gemini_approval = config.get("providers", {}).get("gemini", {}).get("approval", {})
@@ -453,15 +463,11 @@ def desired_claude_local_settings(config: dict[str, Any], current: dict[str, Any
         next_permissions["disableBypassPermissionsMode"] = verified_policy["disableBypassPermissionsMode"]
     hooks = existing.get("hooks", {})
     merged_hooks = {**hooks}
-    legacy_hook_snippets = (
-        "python3 tools/development-orchestrator/permission_broker.py hook",
-        "permission_broker.py log-hook",
-    )
     for event, hook_entries in _verified_claude_hooks().items():
         existing_entries = [
             entry
             for entry in hooks.get(event, [])
-            if not any(snippet in json.dumps(entry, sort_keys=True) for snippet in legacy_hook_snippets)
+            if not _is_managed_permission_broker_hook(entry)
         ]
         serialized_existing = {json.dumps(entry, sort_keys=True) for entry in existing_entries}
         merged = list(existing_entries)
