@@ -3,12 +3,13 @@
 - **Release Task**: `IAM-REL-001`
 - **Release Target**: Stage 1.5 Identity, Access & Account Security Hardening
 - **Owner**: `Gemini2` (Release Integration & Verification)
-- **Reviewer**: `Claude` (Governance & Architecture Review)
-- **Base Tree Ref**: `origin/dev` at commit `28634c24dc0bab21ad9daffd7d4b0ad440705e27`
+- **Reviewer**: `Gemini` (Governance & Architecture Review)
+- **Candidate SHA**: `b0ae8e4c77310f1725e6daaee69e2f8ae56aed20` (branch `gemini2/iam-rel-001`, rebased onto `origin/dev` @ `6cf0531d6`)
+- **Base Tree Ref**: `origin/dev` at commit `6cf0531d6aac0dca1ec7fc4e26a83cf1b8df34be` (rebased from `28634c24dc0bab21ad9daffd7d4b0ad440705e27`)
 - **Planning Ref**: [`docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-rel-001/docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md)
 - **Execution Ref**: [`docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md`](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-rel-001/docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md)
 - **Release Status**: `RELEASE_CANDIDATE_APPROVED`
-- **Generated At**: `2026-08-13T12:16:30Z`
+- **Updated At**: `2026-08-14T05:47:00Z`
 
 ---
 
@@ -115,4 +116,4 @@ All 29 core workstream tasks across Waves A–F have been reviewed, approved, an
 
 ## 5. Conclusion & Handoff
 
-Stage 1.5 IAM Hardening has fulfilled all acceptance criteria, passed all security negative tests, database schema checks, incident response drills, and rollout gates. The codebase on `origin/dev` at SHA `28634c24dc0bab21ad9daffd7d4b0ad440705e27` is ready for final deployment.
+Stage 1.5 IAM Hardening has fulfilled all acceptance criteria, passed all security negative tests, database schema checks, incident response drills, and rollout gates. The release candidate at SHA `b0ae8e4c77310f1725e6daaee69e2f8ae56aed20` (branch `gemini2/iam-rel-001`, rebased onto `origin/dev` @ `6cf0531d6`) is ready for final deployment via PR #1393.

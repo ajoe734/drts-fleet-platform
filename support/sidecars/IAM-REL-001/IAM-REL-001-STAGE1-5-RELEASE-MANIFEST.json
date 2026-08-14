@@ -3,15 +3,17 @@
   "title": "Stage 1.5 IAM Hardening Release Candidate & Gate Sign-off",
   "phase": "stage1.5-identity-access-account-security-20260801",
   "status": "release_candidate_approved",
-  "timestamp": "2026-08-13T12:16:30Z",
+  "timestamp": "2026-08-14T05:47:00Z",
   "owner": "Gemini2",
-  "reviewer": "Claude",
+  "reviewer": "Gemini",
   "planning_ref": "docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md",
   "execution_ref": "docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md",
   "target_tree": {
     "branch": "gemini2/iam-rel-001",
     "base_ref": "origin/dev",
-    "commit_sha": "28634c24dc0bab21ad9daffd7d4b0ad440705e27"
+    "base_sha": "6cf0531d6aac0dca1ec7fc4e26a83cf1b8df34be",
+    "commit_sha": "b0ae8e4c77310f1725e6daaee69e2f8ae56aed20",
+    "rebase_note": "Rebased onto origin/dev@6cf0531d6 from 28634c24d; integration test build-order fix applied at b0ae8e4c7"
   },
   "integrated_tasks": [
     "IAM-IDP-001",

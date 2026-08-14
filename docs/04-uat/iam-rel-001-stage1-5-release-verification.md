@@ -2,10 +2,10 @@
 
 - **Task**: `IAM-REL-001`
 - **Owner**: `Gemini2`
-- **Reviewer**: `Claude`
-- **Target Branch**: `gemini2/iam-rel-001` (base `origin/dev` @ `28634c24dc0bab21ad9daffd7d4b0ad440705e27`)
+- **Reviewer**: `Gemini`
+- **Target Branch**: `gemini2/iam-rel-001` (candidate `b0ae8e4c77310f1725e6daaee69e2f8ae56aed20`, rebased onto `origin/dev` @ `6cf0531d6`)
 - **Status**: `RELEASE_CANDIDATE_VERIFIED`
-- **Date**: `2026-08-13`
+- **Date**: `2026-08-14`
 
 ---
 
