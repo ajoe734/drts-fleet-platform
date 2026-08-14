@@ -1,6 +1,6 @@
 [Unit]
 Description=DRTS Fleet Platform supervisor (orchestrator)
-Documentation=file:@STATUS_ROOT@/.artifacts/releases/current/tools/development-orchestrator/systemd/README.md
+Documentation=file:@STATUS_ROOT@/.artifacts/releases/active/tools/development-orchestrator/systemd/README.md
 # Tied to user session bus so journald log labelling and resource accounting
 # stay scoped to the developer account that owns the workspace.
 After=default.target network-online.target
@@ -12,13 +12,13 @@ StartLimitBurst=5
 [Service]
 Type=simple
 
-# The release pointer is atomically updated by release-lifecycle.py. Never
-# embed a versioned artifact path here: a stale installer must not be able to
-# replace a newer runtime by rewriting this unit.
+# The `active` pointer is atomically updated by the current lifecycle tool.
+# Legacy installers only know `current`, so they cannot replace this runtime
+# by rewriting their old selector or this main unit.
 WorkingDirectory=@STATUS_ROOT@
 Environment=ORCH_STATUS_ROOT=@STATUS_ROOT@
 Environment=AI_STATUS_ROOT=@STATUS_ROOT@
-ExecStart=/usr/bin/env bash @STATUS_ROOT@/.artifacts/releases/current/tools/development-orchestrator/bin/run-supervisor.sh --config @STATUS_ROOT@/.orchestrator/config.json --verbose
+ExecStart=/usr/bin/env bash @STATUS_ROOT@/.artifacts/releases/active/tools/development-orchestrator/bin/run-supervisor.sh --config @STATUS_ROOT@/.orchestrator/config.json --verbose
 
 # Restart policy: any non-zero exit, SIGKILL, OOM kill, or watchdog timeout
 # triggers a restart after RestartSec. The cap (StartLimitBurst+IntervalSec)
