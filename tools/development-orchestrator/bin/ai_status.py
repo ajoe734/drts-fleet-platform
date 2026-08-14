@@ -1000,7 +1000,7 @@ def apply_unblock_parent_resolution(
         ensure_owner_resume_handoff(
             state,
             parent,
-            from_agent=actor,
+            from_agent=canonical_agent_name(task.get("owner")),
             timestamp=timestamp,
             message=parent_message,
         )

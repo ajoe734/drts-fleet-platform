@@ -177,6 +177,54 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertEqual(task["acceptance_evidence"]["staging_signoff"], "run-42")
 
     @mock.patch.object(ai_status, "append_log")
+    def test_unblock_merge_resumes_parent_without_supervisor_handoff(self, _log: mock.Mock) -> None:
+        state = self.state(task_class="unblock")
+        helper = self.task(state)
+        helper.update(
+            {
+                "helper_parent": "PARENT-001",
+                "status": "integrating",
+                "candidate_sha": "abc123",
+                "candidate_branch": "codex/task-001",
+                "reviewed_sha": "abc123",
+            }
+        )
+        state["tasks"].append(
+            {
+                "id": "PARENT-001",
+                "owner": "Gemini",
+                "reviewer": "Claude",
+                "status": "blocked",
+                "waiting_for": "Codex",
+                "next": "Waiting for repair",
+            }
+        )
+        state["blockers"].append(
+            {
+                "task_id": "PARENT-001",
+                "owner": "Gemini",
+                "waiting_for": "Codex",
+                "status": "open",
+            }
+        )
+        env = {
+            "AI_NAME": "Supervisor",
+            "CANDIDATE_HEAD_SHA": "abc123",
+            "CANDIDATE_CI_STATUS": "success",
+            "MERGE_SHA": "fedcba",
+        }
+
+        with mock.patch.dict(os.environ, env, clear=True):
+            ai_status.command_reconcile_candidate(state, ["TASK-001", "Repair merged"])
+        ai_status.validate_state(state)
+
+        parent = state["tasks"][1]
+        self.assertEqual(helper["status"], "done")
+        self.assertEqual(parent["status"], "todo")
+        self.assertEqual(state["handoffs"][0]["from"], "Codex")
+        self.assertEqual(state["handoffs"][0]["to"], "Gemini")
+
+    @mock.patch.object(ai_status, "append_log")
     def test_supervisor_reassigns_through_candidate_writer(self, _log: mock.Mock) -> None:
         state = self.state()
         task = self.task(state)
