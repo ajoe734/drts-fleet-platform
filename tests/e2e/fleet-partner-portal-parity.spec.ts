@@ -67,10 +67,9 @@ const routeSpecs: RouteSpec[] = [
       /應付金額|Payable/i,
       /分潤規則|Revenue share rules/i,
       /當期對帳單待確認|pending confirmation/i,
-      /確認對帳單|Confirm statement/i,
+      /目前沒有可操作的當期對帳單|No current statement is available/i,
     ],
     screenshot: "fleet-revenue.png",
-    requiresReason: true,
   },
   {
     key: "statements",

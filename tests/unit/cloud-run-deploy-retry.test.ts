@@ -128,9 +128,7 @@ describe("Cloud Run deploy quota retry", () => {
     );
 
     expect(
-      workflow.match(
-        /operations\/deployment\/deploy-cloud-run-service\.sh/g,
-      ),
+      workflow.match(/operations\/deployment\/deploy-cloud-run-service\.sh/g),
     ).toHaveLength(9);
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
     // Retired surfaces must never be built or deployed. The candidate-bound
@@ -180,6 +178,37 @@ describe("Cloud Run deploy quota retry", () => {
 
     expect(apiEnv).toContain("DRTS_ENV=development");
     expect(apiEnv).toContain("AUTH_MODE=explicit");
+  });
+
+  it("enables public demo login only on the Bank Console deployment", () => {
+    const workflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+    const deploymentBlock = (service: string) => {
+      const start = workflow.indexOf(`- name: Deploy — ${service}`);
+      const end = workflow.indexOf("\n      - name:", start + 1);
+
+      expect(start, `${service} deploy step`).toBeGreaterThan(-1);
+      return workflow.slice(start, end);
+    };
+
+    expect(deploymentBlock("bank-console-web")).toContain(
+      "BANK_CONSOLE_DEMO_LOGIN=true",
+    );
+    for (const service of [
+      "platform-admin-web",
+      "ops-console-web",
+      "fleet-partner-portal-web",
+      "tenant-console-web",
+      "referral-embed-web",
+      "enterprise-dispatch-web",
+      "channel-partner-portal-web",
+    ]) {
+      expect(deploymentBlock(service), service).not.toContain(
+        "BANK_CONSOLE_DEMO_LOGIN",
+      );
+    }
   });
 
   it("keeps every dev web revision usable within the low-quota profile", () => {
