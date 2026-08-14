@@ -176,6 +176,42 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertEqual(task["status"], "done")
         self.assertEqual(task["acceptance_evidence"]["staging_signoff"], "run-42")
 
+    def test_release_task_requires_same_sha_acceptance_contract(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "same-SHA acceptance evidence"):
+            ai_status.validate_task_spec(
+                {
+                    "id": "REL-001",
+                    "task_class": "release",
+                    "required_acceptance": ["dev_deploy_run_url"],
+                }
+            )
+
+    def test_acceptance_sha_must_match_merge_sha(self) -> None:
+        task = self.task(self.state())
+        task["merge_sha"] = "merge-123"
+        with self.assertRaisesRegex(SystemExit, "exactly match merge SHA"):
+            ai_status.validate_acceptance_evidence(task, {"dev_deploy_sha": "candidate-123"})
+        ai_status.validate_acceptance_evidence(
+            task,
+            {"dev_deploy_sha": "merge-123", "operational_acceptance_sha": "merge-123"},
+        )
+        task["acceptance_evidence"] = {"dev_deploy_sha": "candidate-123"}
+        with self.assertRaisesRegex(SystemExit, "exactly match merge SHA"):
+            ai_status.validate_acceptance_evidence(
+                task,
+                {"operational_acceptance_sha": "merge-123"},
+            )
+
+    def test_documentation_task_cannot_bypass_candidate_lifecycle(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "cannot set mutates_canonical=false"):
+            ai_status.validate_task_spec(
+                {
+                    "id": "DOC-001",
+                    "task_class": "documentation",
+                    "mutates_canonical": False,
+                }
+            )
+
     @mock.patch.object(ai_status, "append_log")
     def test_unblock_merge_resumes_parent_without_supervisor_handoff(self, _log: mock.Mock) -> None:
         state = self.state(task_class="unblock")

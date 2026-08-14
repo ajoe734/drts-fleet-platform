@@ -12,6 +12,7 @@ class DispatchReason(str, Enum):
     REVIEW_READY = "review_ready_dispatch"
     OWNED_IN_PROGRESS = "owned_in_progress_dispatch"
     OWNED_READY = "owned_ready_dispatch"
+    ACCEPTANCE_READY = "acceptance_ready_dispatch"
 
 
 @dataclass(frozen=True)
@@ -25,13 +26,15 @@ class DispatchDecision:
 class ReadyDispatchPolicy:
     """The only worker-dispatch policy for a candidate lifecycle.
 
-    Candidate review is the last worker-owned transition. Integration and
-    external acceptance are reconciled evidence states, so dispatching another
-    worker there would create a competing candidate and invalidate the evidence
-    that the state machine is waiting for.
+    Candidate review is the last code-authoring transition. Acceptance is a
+    distinct evidence-collection transition owned by the task owner: it must
+    verify and record the exact merged SHA without creating a new candidate.
+    Integrating remains evidence-only because a review worker has already
+    produced the candidate that is waiting to be merged.
     """
 
     review_statuses: frozenset[str] = frozenset({"review"})
+    acceptance_statuses: frozenset[str] = frozenset({"acceptance"})
     in_progress_statuses: frozenset[str] = frozenset({"in_progress"})
     owned_statuses: frozenset[str] = frozenset({"todo", "backlog"})
     dependency_done_statuses: frozenset[str] = frozenset({"done"})
@@ -53,6 +56,7 @@ class ReadyDispatchPolicy:
         defaults = cls()
         return cls(
             review_statuses=values("review_statuses", defaults.review_statuses),
+            acceptance_statuses=values("acceptance_statuses", defaults.acceptance_statuses),
             in_progress_statuses=values("in_progress_statuses", defaults.in_progress_statuses),
             owned_statuses=values("owned_statuses", defaults.owned_statuses),
             dependency_done_statuses=values("dependency_done_statuses", defaults.dependency_done_statuses),
@@ -61,6 +65,7 @@ class ReadyDispatchPolicy:
     def as_mapping(self) -> dict[str, list[str]]:
         return {
             "review_statuses": sorted(self.review_statuses),
+            "acceptance_statuses": sorted(self.acceptance_statuses),
             "in_progress_statuses": sorted(self.in_progress_statuses),
             "owned_statuses": sorted(self.owned_statuses),
             "dependency_done_statuses": sorted(self.dependency_done_statuses),
@@ -117,6 +122,8 @@ def resolve_dispatch_target(
         return DispatchDecision(record.id, record.reviewer, DispatchReason.REVIEW_READY)
     if not dependencies_satisfied(record, tasks_by_id, policy.dependency_done_statuses):
         return None
+    if record.status in policy.acceptance_statuses and record.owner:
+        return DispatchDecision(record.id, record.owner, DispatchReason.ACCEPTANCE_READY)
     if record.status in policy.in_progress_statuses and record.owner:
         return DispatchDecision(record.id, record.owner, DispatchReason.OWNED_IN_PROGRESS)
     if record.status in policy.owned_statuses and record.owner:

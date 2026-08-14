@@ -41,8 +41,16 @@ class CandidateDispatchPolicyTest(unittest.TestCase):
         self.assertEqual(decision.target_agent, "Claude")
         self.assertEqual(decision.reason, DispatchReason.REVIEW_READY)
 
-    def test_integrating_and_acceptance_never_dispatch_workers(self) -> None:
-        for status in ("integrating", "acceptance", "done", "blocked"):
+    def test_acceptance_dispatches_to_owner_without_reopening_candidate_work(self) -> None:
+        task = self.task("acceptance", merge_sha="abc123")
+        decision = resolve_dispatch_target(task, {task["id"]: task}, self.policy)
+        self.assertIsNotNone(decision)
+        assert decision is not None
+        self.assertEqual(decision.target_agent, "Codex")
+        self.assertEqual(decision.reason, DispatchReason.ACCEPTANCE_READY)
+
+    def test_integrating_done_and_blocked_never_dispatch_workers(self) -> None:
+        for status in ("integrating", "done", "blocked"):
             with self.subTest(status=status):
                 task = self.task(status)
                 self.assertIsNone(resolve_dispatch_target(task, {task["id"]: task}, self.policy))

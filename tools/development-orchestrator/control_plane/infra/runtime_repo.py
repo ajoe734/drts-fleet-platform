@@ -6,12 +6,28 @@ from datetime import datetime, timezone
 from typing import Any
 
 from common import config_path, load_json, utc_now, write_json
+from control_plane.domain.worker_lifecycle import (
+    ACTIVE_WORKER_STATUSES,
+    TERMINAL_WORKER_STATUSES,
+    is_active_worker,
+)
 from control_plane.infra.queue_repo import enqueue_event, load_event_queue
+
+
+def _parse_iso_utc(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def default_state() -> dict[str, Any]:
     return {
-        "version": 5,
+        "version": 6,
         "initialized_at": None,
         "last_scan_at": None,
         "watcher": {
@@ -23,7 +39,6 @@ def default_state() -> dict[str, Any]:
             "events": {},
         },
         "workers": {},
-        "worker_yields": {},
         "approvals": {
             "last_reconciled_at": None,
         },
@@ -68,6 +83,7 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state = deepcopy(default_state())
     if not raw:
         return state
+    legacy_yields = raw.get("worker_yields") if isinstance(raw.get("worker_yields"), dict) else {}
     state.update(
         {
             k: v
@@ -96,7 +112,6 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state.setdefault("queue", {})
     state["queue"].setdefault("events", {})
     state.setdefault("workers", {})
-    state.setdefault("worker_yields", {})
     state.setdefault("approvals", {})
     state["approvals"].setdefault("last_reconciled_at", None)
     state.setdefault("maintenance", {})
@@ -135,13 +150,32 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
             pause.setdefault("schema", 3)
             pause.setdefault("scope", "lane")
             pause.setdefault("lane_id", key)
+    # Version 5 stored a cooldown separately from the worker that produced it.
+    # Convert that split representation into one terminal worker attempt.
+    for run_id, worker in state.get("workers", {}).items():
+        if not isinstance(worker, dict) or str(worker.get("status") or "").lower() != "yielded":
+            continue
+        task_id = str(worker.get("task_id") or "").strip()
+        agent_id = str(worker.get("agent_id") or "").strip().lower()
+        legacy = legacy_yields.get(f"{task_id}:{agent_id}", {})
+        worker["status"] = "completed"
+        worker["terminal_outcome"] = "progress"
+        worker["terminal_summary"] = str(legacy.get("summary") or worker.get("notes") or "Worker reported progress.")
+        worker["completed_at"] = str(legacy.get("yielded_at") or worker.get("last_event_at") or utc_now())
+        worker["last_event_at"] = worker["completed_at"]
+        worker["consumed_result_id"] = f"legacy-yield:{run_id}"
+        worker["consumed_result_at"] = worker["completed_at"]
+        resume_at = str(legacy.get("resume_at") or "").strip()
+        if resume_at:
+            worker["redispatch_after"] = resume_at
+    state.pop("worker_yields", None)
     state.pop("quota_paused_agents", None)
     state.pop("tasks", None)
-    state["version"] = 5
+    state["version"] = 6
     return state
 
 
-ACTIVE_QUEUE_STATUSES = {"running", "waiting_approval", "suspended_approval", "retry_backoff", "manual_pending", "stalled", "started", "fallback"}
+ACTIVE_QUEUE_STATUSES = ACTIVE_WORKER_STATUSES
 
 
 def _rebuild_queue_records(state: dict[str, Any], queued_events: list[dict[str, Any]]) -> None:
@@ -159,7 +193,7 @@ def _rebuild_queue_records(state: dict[str, Any], queued_events: list[dict[str, 
         if not related:
             continue
         latest = sorted(related, key=lambda item: item.get("last_event_at") or "", reverse=True)[0]
-        if any(worker.get("status") in ACTIVE_QUEUE_STATUSES for worker in related):
+        if any(is_active_worker(worker) for worker in related):
             record["status"] = "manual_pending" if any(worker.get("status") in {"manual_pending", "waiting_approval"} for worker in related) else "started"
             continue
         if any(worker.get("status") == "failed" for worker in related):
@@ -174,8 +208,7 @@ def _rebuild_queue_records(state: dict[str, Any], queued_events: list[dict[str, 
 
 
 
-def prune_worker_records(state: dict[str, Any], tasks_by_id: dict[str, str] | None = None) -> None:
-    tasks_by_id = tasks_by_id or {}
+def prune_worker_records(state: dict[str, Any]) -> None:
     queue_events = state.setdefault("queue", {}).setdefault("events", {})
     workers = state.setdefault("workers", {})
     keep: dict[str, Any] = {}
@@ -183,18 +216,19 @@ def prune_worker_records(state: dict[str, Any], tasks_by_id: dict[str, str] | No
         status = str(worker.get("status") or "")
         task_id = str(worker.get("task_id") or "")
         event_id = worker.get("queue_event_id")
-        task_status = str(tasks_by_id.get(task_id) or "")
-        if status in {"running", "started", "waiting_approval", "suspended_approval", "manual_pending", "retry_backoff", "fallback", "stalled"}:
+        if is_active_worker(worker):
             keep[run_id] = worker
             continue
+        if status == "completed" and str(worker.get("redispatch_after") or "").strip():
+            resume_at = _parse_iso_utc(worker.get("redispatch_after"))
+            if resume_at is not None and resume_at > datetime.now(timezone.utc):
+                keep[run_id] = worker
+                continue
         if event_id and event_id in queue_events and queue_events[event_id].get("status") not in {"completed", "failed", "done"}:
             keep[run_id] = worker
             continue
-        if task_status and task_status != "done" and status == "completed":
-            keep[run_id] = worker
-            continue
         # Drop terminal workers once the queue event is settled, or the task itself is already terminal.
-        if status in {"failed", "completed", "interrupted", "superseded", "reassigned", "rotated"}:
+        if status in TERMINAL_WORKER_STATUSES:
             continue
         keep[run_id] = worker
     state["workers"] = keep
