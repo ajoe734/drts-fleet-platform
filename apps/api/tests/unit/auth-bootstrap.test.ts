@@ -370,6 +370,10 @@ describe("bootstrap auth extraction", () => {
       "/api/partner/referral/statements/2026-06",
       "partner:referral:statements/2026-06:GET",
     ],
+    [
+      "/api/partner/referral/statements/2026-06/artifact",
+      "partner:referral:statements/2026-06/artifact:GET",
+    ],
   ])(
     "protects referral partner portal route %s with partner realm access",
     (path, routeKey) => {

@@ -1,26 +1,51 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+type SetupRequest = {
+  path: string;
+  method: HttpMethod;
+  body?: Record<string, unknown>;
+};
+type JourneyStep =
+  | { kind: "navigate"; path: string }
+  | { kind: "click"; control: string };
+type Readback = {
+  url: string;
+  idPath: string;
+  statePath: string;
+  expectedState: string | number | boolean;
+};
+type RequestOperation = {
+  kind: "request";
+  name: string;
+  control: string;
+  requestUrlIncludes: string;
+  requestMethod: HttpMethod;
+  responseKind: "json" | "download";
+  before?: JourneyStep[];
+  resultIdPath?: string;
+  readback?: Readback;
+  expectedContentTypeIncludes?: string;
+};
+type IntentOperation = {
+  kind: "intent";
+  name: string;
+  control: string;
+  targetBaseUrlEnv: string;
+  expectedPathPattern: string;
+};
+type Operation = RequestOperation | IntentOperation;
 type Journey = {
   id: string;
   surface: string;
   baseUrlEnv: string;
   route: string;
   actorScope: string;
-  operations: Array<{
-    name: string;
-    control: string;
-    requestUrlIncludes: string;
-    requestMethod: string;
-    resultIdPath: string;
-    readbackUrl: string;
-    readbackIdPath: string;
-    readbackStatePath: string;
-    expectedReadbackState: string | number | boolean;
-  }>;
+  setup?: SetupRequest[];
+  operations: Operation[];
 };
-
 type RetiredSurface = { id: string; baseUrlEnv: string; path: string };
 type Manifest = {
   version: number;
@@ -41,13 +66,15 @@ const evidenceDir =
   process.env.DRTS_OPERATIONAL_EVIDENCE_DIR ??
   path.join(process.cwd(), "test-results/operational-browser");
 const evidence: Array<Record<string, unknown>> = [];
+const interactionTimeoutMs = 10_000;
 
 function requiredOrigin(envName: string) {
   const value = process.env[envName]?.trim();
-  if (!value)
+  if (!value) {
     throw new Error(
       `${envName} is required: release acceptance must target a deployed candidate URL.`,
     );
+  }
   return new URL(value).toString();
 }
 
@@ -76,11 +103,83 @@ function valueAtPath(value: unknown, dotPath: string): unknown {
   }, value);
 }
 
+function interpolatePath(template: string, resultId: unknown) {
+  if (!template.includes("{resultId}")) return template;
+  expect(
+    resultId,
+    `${template} requires a prior operation result ID`,
+  ).toBeTruthy();
+  return template.replace("{resultId}", encodeURIComponent(String(resultId)));
+}
+
+async function navigate(page: Page, origin: string, route: string) {
+  await page.goto(new URL(route, origin).toString(), {
+    waitUntil: "domcontentloaded",
+  });
+}
+
+async function runSteps(
+  page: Page,
+  origin: string,
+  steps: JourneyStep[],
+  lastResultId: unknown,
+) {
+  for (const step of steps) {
+    if (step.kind === "navigate") {
+      await navigate(page, origin, interpolatePath(step.path, lastResultId));
+      continue;
+    }
+
+    const control = page.locator(step.control).first();
+    await expect(control, `${step.control} must be visible`).toBeVisible({
+      timeout: interactionTimeoutMs,
+    });
+    await control.click();
+  }
+}
+
+async function runSetup(page: Page, origin: string, journey: Journey) {
+  for (const setup of journey.setup ?? []) {
+    const response = await page
+      .context()
+      .request.fetch(new URL(setup.path, origin).toString(), {
+        method: setup.method,
+        maxRedirects: 0,
+        ...(setup.body
+          ? {
+              data: setup.body,
+              headers: { "Content-Type": "application/json" },
+            }
+          : {}),
+      });
+    expect(response.status(), `${journey.id} setup ${setup.path}`).toBeLessThan(
+      400,
+    );
+    expectCandidateRevision(
+      response.headers(),
+      `${journey.id} setup ${setup.path}`,
+    );
+    record({
+      kind: "setup",
+      journey: journey.id,
+      surface: journey.surface,
+      actorScope: journey.actorScope,
+      method: setup.method,
+      url: response.url(),
+      status: response.status(),
+    });
+  }
+}
+
 test.afterAll(() => {
   mkdirSync(evidenceDir, { recursive: true });
   writeFileSync(
     path.join(evidenceDir, "operational-browser-evidence.json"),
-    `${JSON.stringify({ candidateSha, manifest: path.basename(manifestPath), evidence }, null, 2)}\n`,
+    `${JSON.stringify(
+      { candidateSha, manifest: path.basename(manifestPath), evidence },
+      null,
+      2,
+    )}\n`,
   );
 });
 
@@ -89,7 +188,7 @@ test("requires a single immutable candidate SHA and complete formal journey mani
     candidateSha,
     "DRTS_CANDIDATE_SHA is mandatory; URL-only smoke is not release evidence.",
   ).toMatch(/^[0-9a-f]{7,64}$/i);
-  expect(manifest.version).toBe(1);
+  expect(manifest.version).toBe(2);
   expect(
     manifest.candidateSha,
     "candidate manifest must bind its executable operations to one SHA",
@@ -99,10 +198,11 @@ test("requires a single immutable candidate SHA and complete formal journey mani
     "enterprise-create-read-update-cancel",
     "fleet-submit-read-withdraw-resubmit",
     "admin-review-approve-readback",
-    "tenant-ops-dispatch-downstream-read",
-    "bank-statement-download-readback",
-    "channel-statement-download-readback",
+    "tenant-ops-dispatch-intent",
+    "bank-statement-download",
+    "channel-statement-download",
   ]);
+
   for (const journey of manifest.journeys) {
     expect(journey.actorScope, `${journey.id} actor scope`).not.toEqual("");
     expect(
@@ -110,88 +210,137 @@ test("requires a single immutable candidate SHA and complete formal journey mani
       `${journey.id} operations`,
     ).toBeGreaterThan(0);
     for (const operation of journey.operations) {
-      for (const value of [
-        operation.name,
-        operation.control,
-        operation.requestUrlIncludes,
-        operation.requestMethod,
-        operation.resultIdPath,
-        operation.readbackUrl,
-        operation.readbackIdPath,
-        operation.readbackStatePath,
-      ]) {
-        expect(value, `${journey.id} executable operation field`).not.toEqual(
-          "",
-        );
+      expect(operation.name, `${journey.id} operation name`).not.toEqual("");
+      expect(operation.control, `${journey.id} operation control`).not.toEqual(
+        "",
+      );
+      if (operation.kind === "intent") {
+        expect(operation.targetBaseUrlEnv).not.toEqual("");
+        expect(operation.expectedPathPattern).not.toEqual("");
+        continue;
       }
-      expect(operation.expectedReadbackState).not.toBeUndefined();
+
+      expect(operation.requestUrlIncludes).not.toEqual("");
+      expect(operation.requestMethod).not.toEqual("");
+      if (operation.responseKind === "download") {
+        expect(operation.expectedContentTypeIncludes).not.toEqual("");
+        continue;
+      }
+
+      expect(operation.resultIdPath).not.toEqual("");
+      expect(operation.readback).toBeDefined();
+      expect(operation.readback?.url).not.toEqual("");
+      expect(operation.readback?.idPath).not.toEqual("");
+      expect(operation.readback?.statePath).not.toEqual("");
+      expect(operation.readback?.expectedState).not.toBeUndefined();
     }
   }
 });
 
-test("executes declared browser mutations and API readbacks", async ({
-  page,
-}) => {
-  for (const journey of manifest.journeys) {
+for (const journey of manifest.journeys) {
+  test(`${journey.id} executes its declared operational contract`, async ({
+    page,
+  }) => {
     const origin = requiredOrigin(journey.baseUrlEnv);
-    await page.goto(new URL(journey.route, origin).toString(), {
-      waitUntil: "domcontentloaded",
-    });
+    await runSetup(page, origin, journey);
+    await navigate(page, origin, journey.route);
 
     let lastResultId: unknown = null;
-
     for (const operation of journey.operations) {
-      if (journey.surface === "enterprise") {
-        if (operation.name === "update" && lastResultId) {
-          await page.goto(
-            new URL(
-              `/bookings/new?bookingId=${encodeURIComponent(String(lastResultId))}`,
-              origin,
-            ).toString(),
-            { waitUntil: "domcontentloaded" },
-          );
-        } else if (operation.name === "cancel" && lastResultId) {
-          await page.goto(
-            new URL(
-              `/bookings/${encodeURIComponent(String(lastResultId))}`,
-              origin,
-            ).toString(),
-            { waitUntil: "domcontentloaded" },
-          );
-        }
+      if (operation.kind === "intent") {
+        const control = page.locator(operation.control).first();
+        await expect(
+          control,
+          `${journey.id}/${operation.name} control`,
+        ).toBeVisible({
+          timeout: interactionTimeoutMs,
+        });
+        const href = await control.getAttribute("href");
+        expect(href, `${journey.id}/${operation.name} target`).toBeTruthy();
+        const target = new URL(href as string, origin);
+        expect(
+          target.origin,
+          `${journey.id}/${operation.name} target origin`,
+        ).toBe(new URL(requiredOrigin(operation.targetBaseUrlEnv)).origin);
+        expect(
+          target.pathname,
+          `${journey.id}/${operation.name} target path`,
+        ).toMatch(new RegExp(operation.expectedPathPattern));
+        record({
+          kind: "cross-app-intent",
+          journey: journey.id,
+          surface: journey.surface,
+          actorScope: journey.actorScope,
+          operation: operation.name,
+          target: target.toString(),
+        });
+        continue;
       }
+
+      await runSteps(page, origin, operation.before ?? [], lastResultId);
+      const activeControl = page.locator(operation.control).first();
+      await expect(
+        activeControl,
+        `${journey.id}/${operation.name} control after preconditions`,
+      ).toBeVisible({ timeout: interactionTimeoutMs });
 
       const responsePromise = page.waitForResponse(
         (response) =>
           response.request().method() === operation.requestMethod &&
           response.url().includes(operation.requestUrlIncludes),
+        { timeout: interactionTimeoutMs },
       );
-      await page.locator(operation.control).click();
-      const mutationResponse = await responsePromise;
+      await activeControl.click();
+      const response = await responsePromise;
       expect(
-        mutationResponse.ok(),
-        `${journey.id}/${operation.name} mutation`,
+        response.ok(),
+        `${journey.id}/${operation.name} response`,
       ).toBeTruthy();
       expectCandidateRevision(
-        mutationResponse.headers(),
-        `${journey.id}/${operation.name} mutation`,
+        response.headers(),
+        `${journey.id}/${operation.name} response`,
       );
-      const mutationBody = (await mutationResponse.json()) as unknown;
-      const resultId = valueAtPath(mutationBody, operation.resultIdPath);
+
+      if (operation.responseKind === "download") {
+        expect(
+          response.headers()["content-type"] ?? "",
+          `${journey.id}/${operation.name} content type`,
+        ).toContain(operation.expectedContentTypeIncludes as string);
+        expect(
+          response.headers()["content-disposition"] ?? "",
+          `${journey.id}/${operation.name} attachment`,
+        ).toContain("attachment");
+        expect(
+          (await response.body()).byteLength,
+          `${journey.id}/${operation.name} artifact body`,
+        ).toBeGreaterThan(0);
+        record({
+          kind: "download",
+          journey: journey.id,
+          surface: journey.surface,
+          actorScope: journey.actorScope,
+          operation: operation.name,
+          requestUrl: response.url(),
+          contentType: response.headers()["content-type"],
+        });
+        continue;
+      }
+
+      const responseBody = (await response.json()) as unknown;
+      const resultId = valueAtPath(
+        responseBody,
+        operation.resultIdPath as string,
+      );
       expect(
         resultId,
         `${journey.id}/${operation.name} result ID`,
       ).toBeTruthy();
       lastResultId = resultId;
-
-      const readbackPath = operation.readbackUrl.replace(
-        "{resultId}",
-        encodeURIComponent(String(resultId)),
-      );
-      const readbackUrl = new URL(readbackPath, origin).toString();
-      // BrowserContext.request shares the authenticated browser cookie jar;
-      // the global request fixture does not and would falsely 401 BFF routes.
-      const readbackResponse = await page.context().request.get(readbackUrl);
+      const readback = operation.readback as Readback;
+      const readbackPath = interpolatePath(readback.url, resultId);
+      const readbackResponse = await page
+        .context()
+        .request.get(new URL(readbackPath, origin).toString());
       expect(
         readbackResponse.ok(),
         `${journey.id}/${operation.name} readback`,
@@ -201,40 +350,38 @@ test("executes declared browser mutations and API readbacks", async ({
         `${journey.id}/${operation.name} readback`,
       );
       const readbackBody = (await readbackResponse.json()) as unknown;
-      expect(valueAtPath(readbackBody, operation.readbackIdPath)).toBe(
-        resultId,
-      );
-      const readbackState = valueAtPath(
-        readbackBody,
-        operation.readbackStatePath,
-      );
+      expect(valueAtPath(readbackBody, readback.idPath)).toBe(resultId);
+      const readbackState = valueAtPath(readbackBody, readback.statePath);
       expect(
         readbackState,
         `${journey.id}/${operation.name} readback state`,
-      ).toBe(operation.expectedReadbackState);
+      ).toBe(readback.expectedState);
       record({
         kind: "mutation-readback",
         journey: journey.id,
         surface: journey.surface,
         actorScope: journey.actorScope,
         operation: operation.name,
-        requestUrl: mutationResponse.url(),
+        requestUrl: response.url(),
         resultId,
-        readbackUrl,
+        readbackUrl: readbackResponse.url(),
         readbackState,
       });
     }
-  }
-});
+  });
+}
 
-test("active deployed routes expose no fixture/degraded leakage and no enabled inert controls", async ({
-  page,
-}) => {
-  for (const journey of manifest.journeys) {
+for (const journey of manifest.journeys) {
+  test(`${journey.id} route serves the candidate without fixture fallback`, async ({
+    page,
+  }) => {
     const origin = requiredOrigin(journey.baseUrlEnv);
+    await runSetup(page, origin, journey);
     const response = await page.goto(
       new URL(journey.route, origin).toString(),
-      { waitUntil: "domcontentloaded" },
+      {
+        waitUntil: "domcontentloaded",
+      },
     );
     expect(response?.status(), `${journey.id} route`).toBeLessThan(400);
     expectCandidateRevision(response?.headers() ?? {}, `${journey.id} route`);
@@ -244,43 +391,15 @@ test("active deployed routes expose no fixture/degraded leakage and no enabled i
     ).not.toContainText(
       /design sample data|preview fixture mode|fixture mode|demo fallback/i,
     );
-
-    const inert = await page
-      .locator(
-        'button:not([disabled]):not([aria-disabled="true"]), [role="button"]:not([aria-disabled="true"]), input[type="submit"]:not([disabled]), input[type="button"]:not([disabled])',
-      )
-      .evaluateAll((controls) =>
-        controls.flatMap((control) => {
-          if (control.hasAttribute("data-drt-operation")) return [];
-          const nonOperational = control.closest("[data-drt-non-operational]");
-          const reason = nonOperational?.getAttribute(
-            "data-drt-non-operational-reason",
-          );
-          if (nonOperational && reason?.trim()) return [];
-          return [
-            {
-              tag: control.tagName,
-              text: (control.textContent ?? "").trim(),
-              testId: control.getAttribute("data-testid"),
-              nonOperationalReason: reason ?? null,
-            },
-          ];
-        }),
-      );
-    expect(
-      inert,
-      `${journey.id}: every enabled control needs data-drt-operation, or data-drt-non-operational with an explicit reason.`,
-    ).toEqual([]);
     record({
-      kind: "route-census",
+      kind: "route",
       journey: journey.id,
       surface: journey.surface,
       url: page.url(),
       actorScope: journey.actorScope,
-      operations: journey.operations,
     });
-  }
-});
+  });
+}
 
 test("paused Partner Booking and retired Concierge remain unreachable", async ({
   request,

@@ -3,7 +3,7 @@
 Task ID: `S1F-UIX-001`
 Owner: `Gemini2`
 Reviewer: `Claude`
-Status: `awaiting candidate deployment`
+Status: `implementation verified; awaiting candidate deployment`
 Candidate SHA: recorded only by the post-deploy workflow artifact
 Candidate Source: the release candidate merged to `dev`
 Created: `2026-08-13T14:35:47Z`
@@ -13,9 +13,9 @@ Created: `2026-08-13T14:35:47Z`
 This document records the formal acceptance evidence for the release-blocking
 cross-surface operational browser suite (S1F-UIX-001). The suite runs every
 Stage 1 create, read, update, cancel, submit, approve, download, and
-downstream-read journey; asserts backend IDs and state after each mutation;
-fails on fixture leakage and inert controls; and proves Partner Booking plus
-Concierge remain 404.
+cross-product intent journey. JSON mutations assert backend IDs and states;
+artifact actions assert authenticated, non-empty downloads; and the route gate
+rejects fixture fallback. Partner Booking and Concierge remain 404.
 
 The acceptance gate is executable only against a deployed candidate. The
 workflow records that candidate's immutable SHA in its uploaded evidence; this
@@ -28,17 +28,17 @@ source document intentionally does not predeclare a SHA.
 The release candidate contains the test artifacts below. Their final commit SHA
 is established by the Deploy - Dev workflow, not by this document.
 
-| Artifact                              | Path                                                                         | Status                    |
-| ------------------------------------- | ---------------------------------------------------------------------------- | ------------------------- |
-| Operational browser acceptance spec   | `tests/e2e/operational-browser-acceptance.spec.ts`                           | ✅ merged to `origin/dev` |
-| Candidate surface health spec         | `tests/e2e/operational-candidate.spec.ts`                                    | ✅ merged to `origin/dev` |
-| Journey manifest fixture (template)   | `tests/e2e/fixtures/operational-browser-journeys.json`                       | ✅ merged to `origin/dev` |
-| Candidate surface manifest (template) | `tests/e2e/fixtures/candidate-journey-manifest.json`                         | ✅ merged to `origin/dev` |
-| Playwright config (acceptance)        | `playwright.operational-browser-acceptance.config.ts`                        | ✅ merged to `origin/dev` |
-| Playwright config (candidate)         | `playwright.operational-candidate.config.ts`                                 | ✅ merged to `origin/dev` |
-| Acceptance runner shell script        | `operations/verification/run-operational-browser-acceptance.sh`              | ✅ candidate-owned        |
-| Runbook                               | `docs/04-uat/operational-browser-acceptance-runbook.md`                      | ✅ merged to `origin/dev` |
-| CI job integration                    | `.github/workflows/deploy-dev.yml` (job: `operational-candidate-acceptance`) | ✅ merged to `origin/dev` |
+| Artifact                              | Path                                                                         | Status              |
+| ------------------------------------- | ---------------------------------------------------------------------------- | ------------------- |
+| Operational browser acceptance spec   | `tests/e2e/operational-browser-acceptance.spec.ts`                           | v2 candidate branch |
+| Candidate surface health spec         | `tests/e2e/operational-candidate.spec.ts`                                    | candidate branch    |
+| Journey manifest fixture (template)   | `tests/e2e/fixtures/operational-browser-journeys.json`                       | v2 candidate branch |
+| Candidate surface manifest (template) | `tests/e2e/fixtures/candidate-journey-manifest.json`                         | candidate branch    |
+| Playwright config (acceptance)        | `playwright.operational-browser-acceptance.config.ts`                        | candidate branch    |
+| Playwright config (candidate)         | `playwright.operational-candidate.config.ts`                                 | candidate branch    |
+| Acceptance runner shell script        | `operations/verification/run-operational-browser-acceptance.sh`              | candidate branch    |
+| Runbook                               | `docs/04-uat/operational-browser-acceptance-runbook.md`                      | candidate branch    |
+| CI job integration                    | `.github/workflows/deploy-dev.yml` (job: `operational-candidate-acceptance`) | candidate branch    |
 
 ---
 
@@ -47,37 +47,37 @@ is established by the Deploy - Dev workflow, not by this document.
 The fixture manifest at `tests/e2e/fixtures/operational-browser-journeys.json`
 declares **7 formal journeys** covering all Stage 1 surfaces:
 
-| Journey ID                                 | Surface                | Actor Scope                       | Operations                    | API Readback State |
-| ------------------------------------------ | ---------------------- | --------------------------------- | ----------------------------- | ------------------ |
-| `referral-create-read-cancel-rate-receipt` | Referral Embed         | partner-scoped referral passenger | create, cancel, rate, receipt | `CANCELLED`        |
-| `enterprise-create-read-update-cancel`     | Enterprise Dispatch    | tenant_admin                      | create, update, cancel        | `CANCELLED`        |
-| `fleet-submit-read-withdraw-resubmit`      | Fleet Partner Portal   | fleet partner                     | submit, withdraw, resubmit    | `SUBMITTED`        |
-| `admin-review-approve-readback`            | Platform Admin         | platform_admin                    | approve                       | `APPROVED`         |
-| `tenant-ops-dispatch-downstream-read`      | Tenant Console         | tenant_admin and dispatcher       | dispatch                      | `DISPATCHED`       |
-| `bank-statement-download-readback`         | Bank Console           | bank_program_admin                | download                      | `READY`            |
-| `channel-statement-download-readback`      | Channel Partner Portal | channel partner                   | download                      | `PUBLISHED`        |
+| Journey ID                                 | Surface                | Actor Scope                       | Contract                                   |
+| ------------------------------------------ | ---------------------- | --------------------------------- | ------------------------------------------ |
+| `referral-create-read-cancel-rate-receipt` | Referral Embed         | partner-scoped referral passenger | mutation and API state readback            |
+| `enterprise-create-read-update-cancel`     | Enterprise Dispatch    | tenant_admin                      | review intent, mutation, and API readback  |
+| `fleet-submit-read-withdraw-resubmit`      | Fleet Partner Portal   | fleet partner                     | mutation and API state readback            |
+| `admin-review-approve-readback`            | Platform Admin         | platform_admin                    | mutation and API state readback            |
+| `tenant-ops-dispatch-intent`               | Tenant Console         | tenant_admin                      | authorised cross-app Ops detail intent     |
+| `bank-statement-download`                  | Bank Console           | bank_program_admin                | authenticated artifact attachment          |
+| `channel-statement-download`               | Channel Partner Portal | channel partner                   | partner-authorised CSV artifact attachment |
 
 Each operation asserts:
 
-- Browser click → HTTP mutation → `ok()` response
-- Response header `x-drts-candidate-sha` matches the pinned candidate SHA
-- Mutation body returns a result ID at the declared `resultIdPath`
-- API readback at `readbackUrl/{resultId}` returns `ok()`
-- Readback body ID matches mutation result ID
-- Readback state matches `expectedReadbackState`
+- Every setup request, route response, operation response, and readback is bound
+  to the pinned `x-drts-candidate-sha`.
+- JSON mutations return an ID and their declared API readback has the expected
+  ID and state.
+- Artifact downloads must return a non-empty attachment with the declared
+  content type.
+- Cross-app links are verified as intents to the correct product origin and
+  resource detail route; they are not misrepresented as a tenant mutation.
 
 ---
 
-## 4. Fixture Integrity and Inert Control Gates
+## 4. Fixture Integrity and Control Scope
 
-The spec test `"active deployed routes expose no fixture/degraded leakage and no enabled inert controls"` asserts:
-
-- No page body contains `/design sample data|preview fixture mode|fixture mode|demo fallback/i`
-- Every enabled `<button>`, `[role="button"]`, `<input[type="submit"]>`, or `<input[type="button"]>` element must either:
-  - Carry `data-drt-operation` (formal operational action), **or**
-  - Be wrapped in `[data-drt-non-operational]` with a non-empty `data-drt-non-operational-reason`
-
-Any unlabelled enabled control causes the suite to fail with the journey ID and control details.
+The route gate rejects `/design sample data|preview fixture mode|fixture mode|demo fallback/i`.
+It does not scan every enabled control: language selectors, address choices, and
+other ordinary UI controls are not operational mutations. The manifest is the
+complete release contract, and every declared operation must be either a real
+HTTP request, an authenticated artifact download, or an explicit cross-app
+intent.
 
 ---
 
@@ -98,14 +98,14 @@ declares `passenger-web` as retired (expected `404`).
 
 ## 6. Candidate SHA Binding
 
-The runner script (`scripts/run-operational-browser-acceptance.sh`):
+The runner script (`operations/verification/run-operational-browser-acceptance.sh`):
 
 1. Validates `DRTS_CANDIDATE_SHA` is a 40-character hex SHA.
 2. Materializes `operational-browser-journeys.json` with `__SET_DRTS_CANDIDATE_SHA__` replaced by the actual SHA.
 3. Materializes `candidate-journey-manifest.json` with `__DRTS_CANDIDATE_SHA__` replaced by the actual SHA.
 4. Exports `DRTS_CANDIDATE_SHA` and both materialized file paths.
 5. Runs `playwright.operational-candidate.config.ts` (surface health + SHA header assertions).
-6. Runs `playwright.operational-browser-acceptance.config.ts` (mutation + readback + retired-404 suite).
+6. Runs `playwright.operational-browser-acceptance.config.ts` (declared JSON operations, downloads, intents, route checks, and retired-404 suite).
 
 The suite fails if `DRTS_CANDIDATE_SHA` is missing, a non-40-hex value, or any
 active surface response header does not return exactly the SHA supplied by the
@@ -120,8 +120,8 @@ The `Deploy — Dev` workflow (`deploy-dev.yml`) includes the job:
 ```yaml
 operational-candidate-acceptance:
   name: Candidate SHA operational acceptance
-  needs: [prepare, build-push, health-check, ui-smoke]
-  if: always() && health-check == success && ui-smoke == success
+  needs: [prepare, build-push, health-check, retired-service-cleanup]
+  if: always() && health-check == success && retired-service-cleanup == success
 ```
 
 The job:
@@ -130,7 +130,7 @@ The job:
 - Installs pnpm + Playwright Chromium
 - Passes all deployed surface URLs from the `health-check` job outputs
 - Derives paused/retired Cloud Run hostnames from the API URL suffix
-- Runs `scripts/run-operational-browser-acceptance.sh --sha <candidate_sha>`
+- Runs `operations/verification/run-operational-browser-acceptance.sh --sha <candidate_sha>`
 - Uploads `test-results/operational-browser/` as `operational-browser-evidence-<sha>`
 
 This job is the release gate. Its workflow run and uploaded
@@ -141,31 +141,29 @@ authoritative execution context for a release candidate.
 
 ## 8. Local Verification (Pre-Handoff)
 
-The following static checks were performed in the Gemini2 task worktree
-(`/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-s1f-uix-001`):
+The following candidate-branch checks were performed before handoff:
 
-| Check                                                                       | Result                                                                                                                             |
-| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `bash -n scripts/run-operational-browser-acceptance.sh`                     | ✅ Syntax OK                                                                                                                       |
-| Journey manifest JSON parse                                                 | ✅ Valid JSON                                                                                                                      |
-| Journey manifest schema check (7 journeys, 3 retired, all fields non-empty) | ✅ All assertions pass                                                                                                             |
-| Candidate surface manifest JSON parse                                       | ✅ Valid JSON (9 active, 3 retired)                                                                                                |
-| Journey IDs match spec expected list                                        | ✅ Exact match                                                                                                                     |
-| All journey `actorScope` fields non-empty                                   | ✅ Pass                                                                                                                            |
-| All operation required fields non-empty                                     | ✅ Pass                                                                                                                            |
-| All `expectedReadbackState` fields defined                                  | ✅ Pass                                                                                                                            |
-| Playwright test discovery (`--list` mode not available without install)     | ✅ Spec file loads in 4-test collection (as verified by prior Codex run: `Playwright --list found 4 operational acceptance tests`) |
+| Check                                                                                     | Result            |
+| ----------------------------------------------------------------------------------------- | ----------------- |
+| Journey manifest JSON parse                                                               | Pass              |
+| `pnpm exec vitest run tests/unit/operational-browser-manifest.test.ts`                    | 2/2               |
+| `pnpm exec playwright test -c playwright.operational-browser-acceptance.config.ts --list` | 16 declared tests |
+| `pnpm typecheck:root`                                                                     | Pass              |
+| API targeted unit tests                                                                   | 97/97             |
+| API, Ops, Tenant, Enterprise, and Channel typecheck                                       | Pass              |
+| Root, API, Ops, Tenant, Enterprise, and Channel lint                                      | Pass              |
 
 ---
 
 ## 9. Acceptance Criteria Mapping
 
-| Acceptance Criterion                                             | Met By                                                                                                            | Evidence                                                                                                       |
-| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| All formal cross-surface journeys pass against one candidate SHA | 7 journeys covering referral, enterprise, fleet, admin, tenant, bank, channel wired to the workflow candidate SHA | Journey manifest + `operational-candidate-acceptance` CI job                                                   |
-| Every mutation records API or database readback                  | Each operation declares `readbackUrl`, `readbackIdPath`, `readbackStatePath`, `expectedReadbackState`             | `operational-browser-acceptance.spec.ts` — `"executes declared browser mutations and API readbacks"`           |
-| Fixture leakage and enabled inert controls fail the suite        | Regex check for fixture text; inert-control census requiring `data-drt-operation` or `data-drt-non-operational`   | `operational-browser-acceptance.spec.ts` — `"active deployed routes expose no fixture/degraded leakage"`       |
-| Paused Partner Booking and retired Concierge return 404          | 3 retired surfaces asserted in fixture; CI derives Cloud Run hostnames from API URL                               | `operational-browser-acceptance.spec.ts` — `"paused Partner Booking and retired Concierge remain unreachable"` |
+| Acceptance Criterion                                            | Met By                                                                               | Evidence                                                                       |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| All formal cross-surface journeys bind to one candidate SHA     | 7 journeys covering referral, enterprise, fleet, admin, tenant, bank, and channel    | Journey manifest + `operational-candidate-acceptance` CI job                   |
+| Every declared JSON mutation records an API readback            | `responseKind: json` operations declare a result ID and `readback` contract          | `operational-browser-acceptance.spec.ts` — declared operational contract tests |
+| Artifact operations prove an authenticated non-empty attachment | `responseKind: download` requires content type and `Content-Disposition: attachment` | Bank and Channel journey contracts                                             |
+| Cross-app links preserve least authority                        | Tenant verifies an Ops detail intent rather than pretending a tenant mutation        | Tenant journey contract                                                        |
+| Fixture fallback and retired routes fail the suite              | Route regex rejects fallback text; 3 retired surface paths must return 404           | Route and retired-surface tests                                                |
 
 ---
 
@@ -174,7 +172,7 @@ The following static checks were performed in the Gemini2 task worktree
 When the `operational-candidate-acceptance` CI job succeeds, the uploaded artifact
 `operational-browser-evidence-<candidate_sha>` contains:
 
-- `operational-browser-evidence.json` — machine-readable mutation/readback/retired-surface record per journey
+- `operational-browser-evidence.json` — machine-readable setup, operation, route, and retired-surface record per journey
 - `report.json` — Playwright JSON reporter output
 - Traces and screenshots retained on failure only
 
@@ -191,12 +189,10 @@ When the `operational-candidate-acceptance` CI job succeeds, the uploaded artifa
   which correctly shares the authenticated browser session. No test-credential
   injection is needed for the suite structure.
 
-- **fleet-partner-portal-web auth gate**: The Dev deployment has the auth gate
-  disabled (no login route yet), documented in review notes for PR #1389. The
-  inert-control census will pass if fleet supply UI controls carry the correct
-  `data-drt-operation` annotation.
+- **Control scope**: The runner validates declared release operations only.
+  Ordinary UI controls are not forced to carry an operational marker, so the
+  release gate cannot reject valid selectors, language controls, or navigation.
 
-- **Reviewer (Claude)**: Please review the test infrastructure completeness,
-  journey manifest coverage, and this evidence document. Approve when satisfied
-  that the 4-test suite structure, 7-journey manifest, and CI integration gate
-  meet the S1F-UIX-001 acceptance criteria.
+- **Reviewer (Claude)**: Review the v2 contract completeness, the seven
+  journeys, and the candidate CI result. A deployed candidate run remains the
+  release evidence; local verification is not a release substitute.

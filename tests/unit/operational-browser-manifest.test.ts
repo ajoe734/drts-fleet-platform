@@ -17,7 +17,7 @@ describe("operational browser journeys manifest guard", () => {
     expect(evidence).not.toMatch(/operational-browser-evidence-[0-9a-f]{40}/);
   });
 
-  it("conforms to supply submission API envelope and status contract", () => {
+  it("conforms to the declared operation contract", () => {
     const manifestPath = path.join(
       process.cwd(),
       "tests/e2e/fixtures/operational-browser-journeys.json",
@@ -30,13 +30,15 @@ describe("operational browser journeys manifest guard", () => {
     expect(fleetJourney).toBeDefined();
 
     for (const op of fleetJourney.operations) {
+      expect(op.kind).toBe("request");
+      expect(op.responseKind).toBe("json");
       expect(op.resultIdPath).toBe("data.submission.submissionId");
-      expect(op.readbackUrl).toBe(
+      expect(op.readback.url).toBe(
         "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
       );
-      expect(op.readbackIdPath).toBe("data.submission.submissionId");
-      expect(op.readbackStatePath).toBe("data.submission.status");
-      expect(["submitted", "withdrawn"]).toContain(op.expectedReadbackState);
+      expect(op.readback.idPath).toBe("data.submission.submissionId");
+      expect(op.readback.statePath).toBe("data.submission.status");
+      expect(["submitted", "withdrawn"]).toContain(op.readback.expectedState);
     }
 
     const adminJourney = manifest.journeys.find(
@@ -44,12 +46,39 @@ describe("operational browser journeys manifest guard", () => {
     );
     expect(adminJourney).toBeDefined();
     const approveOp = adminJourney.operations[0];
+    expect(approveOp.kind).toBe("request");
+    expect(approveOp.responseKind).toBe("json");
     expect(approveOp.resultIdPath).toBe("data.submissionId");
-    expect(approveOp.readbackUrl).toBe(
+    expect(approveOp.readback.url).toBe(
       "/control-plane-proxy/admin/supply-review/submissions/{resultId}",
     );
-    expect(approveOp.readbackIdPath).toBe("data.submission.submissionId");
-    expect(approveOp.readbackStatePath).toBe("data.submission.status");
-    expect(approveOp.expectedReadbackState).toBe("approved");
+    expect(approveOp.readback.idPath).toBe("data.submission.submissionId");
+    expect(approveOp.readback.statePath).toBe("data.submission.status");
+    expect(approveOp.readback.expectedState).toBe("approved");
+
+    const tenantJourney = manifest.journeys.find(
+      (j: { id: string }) => j.id === "tenant-ops-dispatch-intent",
+    );
+    expect(tenantJourney?.operations).toEqual([
+      expect.objectContaining({
+        kind: "intent",
+        control: "[data-drt-intent='tenant-open-dispatch']",
+        targetBaseUrlEnv: "DRTS_DEV_OPS_CONSOLE_BASE_URL",
+        expectedPathPattern: "^/dispatch/[^/?#]+$",
+      }),
+    ]);
+
+    for (const id of [
+      "bank-statement-download",
+      "channel-statement-download",
+    ]) {
+      const operation = manifest.journeys.find(
+        (journey: { id: string }) => journey.id === id,
+      )?.operations[0];
+      expect(operation).toEqual(
+        expect.objectContaining({ kind: "request", responseKind: "download" }),
+      );
+      expect(operation.expectedContentTypeIncludes).toBeTruthy();
+    }
   });
 });

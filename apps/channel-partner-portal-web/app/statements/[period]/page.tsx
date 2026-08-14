@@ -1,6 +1,5 @@
 import {
   CanvasBanner,
-  CanvasBtn,
   CanvasCard,
   CanvasDL,
   CanvasPageHeader,
@@ -40,14 +39,25 @@ export default async function ReferralStatementDetailPage({
         subtitle={t("referral.statements.detailSubtitle", locale)}
         actions={
           statement ? (
-            <>
-              <CanvasBtn theme={theme}>
-                {t("referral.statements.downloadArtifact", locale)}
-              </CanvasBtn>
-              <CanvasBtn theme={theme} variant="primary" icon="check">
-                {t("referral.statements.confirmReceipt", locale)}
-              </CanvasBtn>
-            </>
+            <a
+              href={`/control-plane-proxy/partner/referral/statements/${encodeURIComponent(period)}/artifact`}
+              data-drt-operation="channel-statement-download"
+              style={{
+                alignItems: "center",
+                background: theme.accent,
+                border: `1px solid ${theme.accent}`,
+                borderRadius: 6,
+                color: "#fff",
+                display: "inline-flex",
+                fontSize: 12,
+                fontWeight: 600,
+                height: 28,
+                padding: "5px 10px",
+                textDecoration: "none",
+              }}
+            >
+              {t("referral.statements.downloadArtifact", locale)}
+            </a>
           ) : undefined
         }
       />

@@ -1,58 +1,85 @@
 {
-  "$schema": "https://drts.local/schemas/operational-browser-journeys.v1.json",
-  "version": 1,
+  "$schema": "https://drts.local/schemas/operational-browser-journeys.v2.json",
+  "version": 2,
   "candidateSha": "__SET_DRTS_CANDIDATE_SHA__",
   "journeys": [
     {
       "id": "referral-create-read-cancel-rate-receipt",
       "surface": "referral",
       "baseUrlEnv": "DRTS_DEV_REFERRAL_EMBED_BASE_URL",
-      "route": "/embed/yuhe-residence",
+      "route": "/embed/yuhe-residence?screen=book",
       "actorScope": "partner-scoped referral passenger",
+      "setup": [
+        {
+          "path": "/api/referral/session",
+          "method": "POST",
+          "body": {
+            "action": "demo-bootstrap",
+            "entrySlug": "yuhe-residence",
+            "entryHost": "app.yuhe-living.com.tw"
+          }
+        }
+      ],
       "operations": [
         {
+          "kind": "request",
           "name": "create",
           "control": "[data-drt-operation='referral-create']",
           "requestUrlIncludes": "/api/referral/booking",
           "requestMethod": "POST",
+          "responseKind": "json",
           "resultIdPath": "data.orderId",
-          "readbackUrl": "/api/referral/history/{resultId}",
-          "readbackIdPath": "data.orderId",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "CONFIRMED"
+          "readback": {
+            "url": "/api/referral/history/{resultId}",
+            "idPath": "data.orderId",
+            "statePath": "data.status",
+            "expectedState": "CONFIRMED"
+          }
         },
         {
+          "kind": "request",
           "name": "cancel",
           "control": "[data-drt-operation='referral-cancel']",
           "requestUrlIncludes": "/api/referral/cancel",
           "requestMethod": "POST",
+          "responseKind": "json",
           "resultIdPath": "data.orderId",
-          "readbackUrl": "/api/referral/history/{resultId}",
-          "readbackIdPath": "data.orderId",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "CANCELLED"
+          "readback": {
+            "url": "/api/referral/history/{resultId}",
+            "idPath": "data.orderId",
+            "statePath": "data.status",
+            "expectedState": "CANCELLED"
+          }
         },
         {
+          "kind": "request",
           "name": "rate",
           "control": "[data-drt-operation='referral-rate']",
           "requestUrlIncludes": "/api/referral/rating",
           "requestMethod": "POST",
+          "responseKind": "json",
           "resultIdPath": "data.orderId",
-          "readbackUrl": "/api/referral/history/{resultId}",
-          "readbackIdPath": "data.orderId",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "CANCELLED"
+          "readback": {
+            "url": "/api/referral/history/{resultId}",
+            "idPath": "data.orderId",
+            "statePath": "data.status",
+            "expectedState": "CANCELLED"
+          }
         },
         {
+          "kind": "request",
           "name": "receipt",
           "control": "[data-drt-operation='referral-receipt']",
           "requestUrlIncludes": "/api/referral/receipt",
           "requestMethod": "GET",
+          "responseKind": "json",
           "resultIdPath": "data.orderId",
-          "readbackUrl": "/api/referral/receipt/{resultId}",
-          "readbackIdPath": "data.orderId",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "CANCELLED"
+          "readback": {
+            "url": "/api/referral/receipt/{resultId}",
+            "idPath": "data.orderId",
+            "statePath": "data.status",
+            "expectedState": "CANCELLED"
+          }
         }
       ]
     },
@@ -64,37 +91,66 @@
       "actorScope": "tenant_admin",
       "operations": [
         {
+          "kind": "request",
           "name": "create",
           "control": "[data-drt-operation='enterprise-create']",
+          "before": [
+            {
+              "kind": "click",
+              "control": "[data-drt-intent='enterprise-review']"
+            }
+          ],
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
+          "responseKind": "json",
           "resultIdPath": "data.id",
-          "readbackUrl": "/control-plane-proxy/bookings/{resultId}",
-          "readbackIdPath": "data.id",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "PENDING"
+          "readback": {
+            "url": "/control-plane-proxy/bookings/{resultId}",
+            "idPath": "data.id",
+            "statePath": "data.status",
+            "expectedState": "PENDING"
+          }
         },
         {
+          "kind": "request",
           "name": "update",
           "control": "[data-drt-operation='enterprise-update']",
+          "before": [
+            {
+              "kind": "navigate",
+              "path": "/bookings/new?bookingId={resultId}"
+            },
+            {
+              "kind": "click",
+              "control": "[data-drt-intent='enterprise-review']"
+            }
+          ],
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "PUT",
+          "responseKind": "json",
           "resultIdPath": "data.id",
-          "readbackUrl": "/control-plane-proxy/bookings/{resultId}",
-          "readbackIdPath": "data.id",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "PENDING"
+          "readback": {
+            "url": "/control-plane-proxy/bookings/{resultId}",
+            "idPath": "data.id",
+            "statePath": "data.status",
+            "expectedState": "PENDING"
+          }
         },
         {
+          "kind": "request",
           "name": "cancel",
           "control": "[data-drt-operation='enterprise-cancel']",
+          "before": [{ "kind": "navigate", "path": "/bookings/{resultId}" }],
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
+          "responseKind": "json",
           "resultIdPath": "data.id",
-          "readbackUrl": "/control-plane-proxy/bookings/{resultId}",
-          "readbackIdPath": "data.id",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "CANCELLED"
+          "readback": {
+            "url": "/control-plane-proxy/bookings/{resultId}",
+            "idPath": "data.id",
+            "statePath": "data.status",
+            "expectedState": "CANCELLED"
+          }
         }
       ]
     },
@@ -106,37 +162,49 @@
       "actorScope": "fleet partner",
       "operations": [
         {
+          "kind": "request",
           "name": "submit",
           "control": "[data-drt-operation='fleet-submit']",
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
+          "responseKind": "json",
           "resultIdPath": "data.submission.submissionId",
-          "readbackUrl": "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
-          "readbackIdPath": "data.submission.submissionId",
-          "readbackStatePath": "data.submission.status",
-          "expectedReadbackState": "submitted"
+          "readback": {
+            "url": "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
+            "idPath": "data.submission.submissionId",
+            "statePath": "data.submission.status",
+            "expectedState": "submitted"
+          }
         },
         {
+          "kind": "request",
           "name": "withdraw",
           "control": "[data-drt-operation='fleet-withdraw']",
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
+          "responseKind": "json",
           "resultIdPath": "data.submission.submissionId",
-          "readbackUrl": "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
-          "readbackIdPath": "data.submission.submissionId",
-          "readbackStatePath": "data.submission.status",
-          "expectedReadbackState": "withdrawn"
+          "readback": {
+            "url": "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
+            "idPath": "data.submission.submissionId",
+            "statePath": "data.submission.status",
+            "expectedState": "withdrawn"
+          }
         },
         {
+          "kind": "request",
           "name": "resubmit",
           "control": "[data-drt-operation='fleet-resubmit']",
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
+          "responseKind": "json",
           "resultIdPath": "data.submission.submissionId",
-          "readbackUrl": "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
-          "readbackIdPath": "data.submission.submissionId",
-          "readbackStatePath": "data.submission.status",
-          "expectedReadbackState": "submitted"
+          "readback": {
+            "url": "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
+            "idPath": "data.submission.submissionId",
+            "statePath": "data.submission.status",
+            "expectedState": "submitted"
+          }
         }
       ]
     },
@@ -148,75 +216,88 @@
       "actorScope": "platform_admin",
       "operations": [
         {
+          "kind": "request",
           "name": "approve",
           "control": "[data-drt-operation='admin-approve']",
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
+          "responseKind": "json",
           "resultIdPath": "data.submissionId",
-          "readbackUrl": "/control-plane-proxy/admin/supply-review/submissions/{resultId}",
-          "readbackIdPath": "data.submission.submissionId",
-          "readbackStatePath": "data.submission.status",
-          "expectedReadbackState": "approved"
+          "readback": {
+            "url": "/control-plane-proxy/admin/supply-review/submissions/{resultId}",
+            "idPath": "data.submission.submissionId",
+            "statePath": "data.submission.status",
+            "expectedState": "approved"
+          }
         }
       ]
     },
     {
-      "id": "tenant-ops-dispatch-downstream-read",
+      "id": "tenant-ops-dispatch-intent",
       "surface": "tenant-ops",
       "baseUrlEnv": "DRTS_DEV_TENANT_CONSOLE_BASE_URL",
       "route": "/bookings",
-      "actorScope": "tenant_admin and dispatcher",
+      "actorScope": "tenant_admin",
       "operations": [
         {
-          "name": "dispatch",
-          "control": "[data-drt-operation='tenant-dispatch']",
-          "requestUrlIncludes": "/control-plane-proxy/",
-          "requestMethod": "POST",
-          "resultIdPath": "data.id",
-          "readbackUrl": "/control-plane-proxy/bookings/{resultId}",
-          "readbackIdPath": "data.id",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "DISPATCHED"
+          "kind": "intent",
+          "name": "open-ops-dispatch",
+          "control": "[data-drt-intent='tenant-open-dispatch']",
+          "targetBaseUrlEnv": "DRTS_DEV_OPS_CONSOLE_BASE_URL",
+          "expectedPathPattern": "^/dispatch/[^/?#]+$"
         }
       ]
     },
     {
-      "id": "bank-statement-download-readback",
+      "id": "bank-statement-download",
       "surface": "bank",
       "baseUrlEnv": "DRTS_DEV_BANK_CONSOLE_BASE_URL",
-      "route": "/statements",
+      "route": "/statements?bank=ctbc&locale=zh&role=bank_program_admin",
       "actorScope": "bank_program_admin",
+      "setup": [
+        {
+          "path": "/api/auth/login",
+          "method": "POST",
+          "body": {
+            "bank": "ctbc",
+            "locale": "zh",
+            "role": "bank_program_admin"
+          }
+        }
+      ],
       "operations": [
         {
+          "kind": "request",
           "name": "download",
           "control": "[data-drt-operation='bank-statement-download']",
-          "requestUrlIncludes": "/api/statements/",
+          "requestUrlIncludes": "/artifacts/statements/",
           "requestMethod": "GET",
-          "resultIdPath": "statementId",
-          "readbackUrl": "/artifacts/statements/{resultId}",
-          "readbackIdPath": "id",
-          "readbackStatePath": "status",
-          "expectedReadbackState": "READY"
+          "responseKind": "download",
+          "expectedContentTypeIncludes": "text/plain"
         }
       ]
     },
     {
-      "id": "channel-statement-download-readback",
+      "id": "channel-statement-download",
       "surface": "channel",
       "baseUrlEnv": "DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL",
       "route": "/statements",
       "actorScope": "channel partner",
       "operations": [
         {
+          "kind": "request",
           "name": "download",
           "control": "[data-drt-operation='channel-statement-download']",
-          "requestUrlIncludes": "/control-plane-proxy/",
+          "before": [
+            {
+              "kind": "click",
+              "control": "[data-drt-intent='channel-statement-detail']"
+            }
+          ],
+          "requestUrlIncludes": "/control-plane-proxy/partner/referral/statements/",
           "requestMethod": "GET",
-          "resultIdPath": "data.id",
-          "readbackUrl": "/control-plane-proxy/statements/{resultId}",
-          "readbackIdPath": "data.id",
-          "readbackStatePath": "data.status",
-          "expectedReadbackState": "PUBLISHED"
+          "responseKind": "download",
+          "expectedContentTypeIncludes": "text/csv"
         }
       ]
     }
