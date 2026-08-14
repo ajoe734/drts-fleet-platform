@@ -139,7 +139,7 @@ jobs:
           MAP_PROVIDER_SECRET_SOURCE=secret_manager \
           MAP_PROVIDER_PROJECT_ID="$PROJECT_ID" \
           MAP_PROVIDER_SECRET_PREFIX="$SECRET_PREFIX" \
-          ./scripts/check-map-provider-config.sh
+          ./operations/verification/check-map-provider-config.sh
 
       - name: Check production secrets
         run: |
@@ -535,7 +535,7 @@ jobs:
           echo "::add-mask::${GOOGLE_MAPS_GEOCODING_API_KEY}"
           echo "::add-mask::${GOOGLE_MAPS_ROUTES_API_KEY}"
           echo "::add-mask::${GOOGLE_MAPS_BROWSER_KEY}"
-          node scripts/verify-google-map-provider-live.mjs
+          node operations/verification/verify-google-map-provider-live.mjs
 
       - name: Deploy — api
         run: |

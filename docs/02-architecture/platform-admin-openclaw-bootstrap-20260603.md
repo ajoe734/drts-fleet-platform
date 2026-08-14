@@ -24,7 +24,7 @@ The integration is intentionally bounded:
 
 ## 2. Pinned Fetch Strategy
 
-Pinned metadata lives in `.orchestrator/openclaw/pin.json`.
+Pinned metadata lives in `tools/development-orchestrator/openclaw/pin.json`.
 
 Current pin:
 
@@ -37,7 +37,7 @@ Current pin:
 
 Bootstrap script:
 
-- `.orchestrator/bin/openclaw-bootstrap.sh`
+- `tools/development-orchestrator/bin/openclaw-bootstrap.sh`
 
 Behavior:
 
@@ -65,11 +65,11 @@ artifact deterministic from committed metadata.
 
 Launcher:
 
-- `.orchestrator/bin/openclaw-launch.sh`
+- `tools/development-orchestrator/bin/openclaw-launch.sh`
 
 Committed template:
 
-- `.orchestrator/openclaw/runtime-profile.template.json`
+- `tools/development-orchestrator/openclaw/runtime-profile.template.json`
 
 Generated runtime files:
 
@@ -96,8 +96,8 @@ so local drift in `openclaw.json` does not silently become machine truth.
 
 Adapter:
 
-- `.orchestrator/adapters/openclaw_drts_mcp.py`
-- `.orchestrator/bin/openclaw-prepare-auth-bridge.sh`
+- `tools/development-orchestrator/adapters/openclaw_drts_mcp.py`
+- `tools/development-orchestrator/bin/openclaw-prepare-auth-bridge.sh`
 
 Bounded tools exposed to OpenClaw:
 
@@ -107,7 +107,7 @@ Bounded tools exposed to OpenClaw:
 
 These tools are deliberately narrow:
 
-- `drts_task_slice` shells only to `scripts/ai-status.sh show <id>`
+- `drts_task_slice` shells only to `tools/development-orchestrator/bin/ai-status.sh show <id>`
   with a task-id regex guard.
 - `drts_runtime_profile` returns booleans about injected credentials but never
   reveals token contents.
@@ -141,19 +141,19 @@ long-lived repo-local credentials.
 Bootstrap only:
 
 ```bash
-.orchestrator/bin/openclaw-bootstrap.sh
+tools/development-orchestrator/bin/openclaw-bootstrap.sh
 ```
 
 Validate the generated isolated profile:
 
 ```bash
-.orchestrator/bin/openclaw-launch.sh config validate
+tools/development-orchestrator/bin/openclaw-launch.sh config validate
 ```
 
 Run a one-shot local agent turn:
 
 ```bash
-.orchestrator/bin/openclaw-launch.sh agent --local --agent main \
+tools/development-orchestrator/bin/openclaw-launch.sh agent --local --agent main \
   --session-key drts-smoke --thinking minimal \
   --message "Call drts_runtime_profile and summarize it."
 ```
@@ -161,7 +161,7 @@ Run a one-shot local agent turn:
 Run the repo smoke helper:
 
 ```bash
-.orchestrator/bin/openclaw-smoke.sh
+tools/development-orchestrator/bin/openclaw-smoke.sh
 ```
 
 The smoke helper writes:
@@ -173,11 +173,11 @@ The smoke helper writes:
 
 Upgrade steps:
 
-1. Update `.orchestrator/openclaw/pin.json` with the new stable release tag,
+1. Update `tools/development-orchestrator/openclaw/pin.json` with the new stable release tag,
    tarball URL, integrity, and release commit.
-2. Re-run `.orchestrator/bin/openclaw-bootstrap.sh`.
-3. Re-run `.orchestrator/bin/openclaw-launch.sh config validate`.
-4. Re-run `.orchestrator/bin/openclaw-smoke.sh`.
+2. Re-run `tools/development-orchestrator/bin/openclaw-bootstrap.sh`.
+3. Re-run `tools/development-orchestrator/bin/openclaw-launch.sh config validate`.
+4. Re-run `tools/development-orchestrator/bin/openclaw-smoke.sh`.
 5. Review OpenClaw release notes for new tool defaults, MCP behavior, auth
    behavior, and runtime-policy changes before widening access.
 

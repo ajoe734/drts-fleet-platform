@@ -12,7 +12,7 @@ Editor: Claude synthesis over Codex, Qwen, Gemini, and Copilot lane readouts
   - complaint, audit, notification, and incident are still treated as distinct concepts.
   - forwarder mirror flow does not overwrite owned dispatch truth.
 - Waves 1 through 6 baseline slices are present and executable.
-- Machine truth is synchronized across `ai-status.json`, `current-work.md`, and `docs-site/current-work.md`.
+- Machine truth is synchronized across `ai-status.json`, `current-work.md`, and `tools/development-orchestrator/dashboard/current-work.md`.
 
 ## 2. Partial alignments
 

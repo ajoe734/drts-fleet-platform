@@ -1,0 +1,26 @@
+[Unit]
+Description=DRTS Claude OAuth lane keepalive (one-shot)
+Documentation=file:@REPO_ROOT@/tools/development-orchestrator/systemd/README-oauth-hardening.md
+# This service is intentionally a Type=oneshot. The companion .timer unit
+# is what schedules it. Running it standalone (`systemctl --user start
+# drts-claude-keepalive.service`) is a perfectly valid "exercise the
+# lanes now" command and is the recommended way to verify the unit by
+# hand after install.
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO_ROOT@
+
+# Keepalive first (warms the refresh tokens), then health check (records
+# remaining TTL per lane to lane-health.jsonl). They run sequentially so
+# the health snapshot reflects any token refresh the keepalive just
+# triggered. A warn-level TTL snapshot should not mark the keepalive
+# itself failed; only refresh failure or unreadable credentials should.
+ExecStart=@REPO_ROOT@/tools/development-orchestrator/bin/claude-lane-keepalive.sh
+ExecStart=/usr/bin/env LANE_HEALTH_WARN_EXIT_CODE=0 @REPO_ROOT@/tools/development-orchestrator/bin/lane-health.sh
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=drts-claude-keepalive
+
+NoNewPrivileges=true

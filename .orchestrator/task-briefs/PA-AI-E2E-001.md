@@ -14,7 +14,7 @@ Platform Admin agentic assistant live dev E2E and OpenClaw eval pack
 
 ## Short Summary
 
-Owner finalized review-approved PA-AI-E2E-001 with formal closeout commit and normal push to origin/codex/pa-ai-e2e-001. Scoped verification remains environment-blocked in this isolated worktree: @drts/api vitest cannot resolve @nestjs/* and reflect-metadata, and Playwright…
+Owner finalized review-approved PA-AI-E2E-001 with formal closeout commit and normal push to origin/codex/pa-ai-e2e-001. Scoped verification remains environment-blocked in this isolated worktree: @drts/api vitest cannot resolve @nestjs/\* and reflect-metadata, and Playwright…
 
 ## Dependencies
 
@@ -48,5 +48,5 @@ Owner finalized review-approved PA-AI-E2E-001 with formal closeout commit and no
 
 ## Guardrails
 
-- Use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for state changes.
+- Use `tools/development-orchestrator/bin/ai-status.sh` or `python3 tools/development-orchestrator/bin/ai_status.py` for state changes.
 - Treat `current-work.md` as a human summary, not canonical machine context.

@@ -50,7 +50,7 @@ Do not approve a related core contract change until:
 
 - the compatibility note exists or is explicitly updated
 - the tenant-hub snapshot refresh path is documented
-- `scripts/tenant-hub-contract-sync-smoke.sh` has been re-run on a clean target
+- `tools/ci/tenant-hub-contract-sync-smoke.sh` has been re-run on a clean target
 
 For `OPX-GV-001` guardrail-only review, a clean-target smoke result may still be
 accepted with non-zero drift when the purpose is to prove stale consumer

@@ -29,9 +29,9 @@ Pure function. No I/O. Safe to call from any code path.
 
 ## 2. Hook point A — worker dispatch (supervisor)
 
-**Where:** `.orchestrator/supervisor.py`, wherever a worker is created and its
+**Where:** `tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`, wherever a worker is created and its
 `base_branch` is set. (Search for `base_branch` — currently only
-`.orchestrator/adapters/copilot_cloud.py` honours it; other adapters default
+`tools/development-orchestrator/adapters/copilot_cloud.py` honours it; other adapters default
 to `main`.)
 
 **What to add:**
@@ -56,11 +56,11 @@ change the checkout to use this value.
 
 **Where:**
 
-- `.orchestrator/adapters/copilot_cloud.py` — already accepts `base_branch`
+- `tools/development-orchestrator/adapters/copilot_cloud.py` — already accepts `base_branch`
   via `cloud.get("base_branch")`. Make sure the supervisor populates the
   cloud config block with the routed value (or override at call site).
-- `.orchestrator/adapters/codex.py`, `.orchestrator/adapters/gemini.py`,
-  `.orchestrator/adapters/claude*.py` — when invoking `gh pr create`, add
+- `tools/development-orchestrator/adapters/codex.py`, `tools/development-orchestrator/adapters/gemini.py`,
+  `tools/development-orchestrator/adapters/claude*.py` — when invoking `gh pr create`, add
   `--base "$BASE_BRANCH"` from the worker record.
 
 The orchestrator already shells out for PR creation; no new dependency.
@@ -72,7 +72,7 @@ The orchestrator already shells out for PR creation; no new dependency.
 The candidate lifecycle already exposes the integration facts required by the
 dashboard. Do not add a second `gate_layer` state machine.
 
-**Where:** `scripts/ai_status.py`, written by the candidate transaction and the
+**Where:** `tools/development-orchestrator/bin/ai_status.py`, written by the candidate transaction and the
 GitHub bus reconciliation path.
 
 **Fields:**
@@ -186,4 +186,4 @@ with `matched_rule_index: -1` — a signal to add a rule or rename the task.
   routed branch.
 - The legacy `merge/W1a..W3f` wave branches are not in the routing table.
   Any worker still pointing at them must be manually migrated using
-  `scripts/branch-strategy/triage-branches.sh` as the source of truth.
+  `tools/local-development/triage-branches.sh` as the source of truth.

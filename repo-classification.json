@@ -1,0 +1,317 @@
+{
+  "schemaVersion": 1,
+  "description": "Machine-readable ownership and deployment boundary for DRTS product code and development tooling.",
+  "unmatchedPolicy": "error",
+  "lifecyclePolicy": {
+    "developmentSidecar": {
+      "removableAfter": "development_complete",
+      "classifications": [
+        "development_tool",
+        "development_record",
+        "test_only"
+      ],
+      "removalPaths": [
+        "tools",
+        ".orchestrator",
+        ".github/agents",
+        "support",
+        ".artifacts",
+        ".ai-loop-incoming",
+        ".ai-loop-outgoing"
+      ],
+      "requireProductIndependence": true,
+      "description": "These classifications must remain removable without changing or rebuilding product business logic."
+    }
+  },
+  "classifications": {
+    "product_runtime": {
+      "description": "Code shipped to a DRTS user-facing or business API runtime.",
+      "productionAllowed": true
+    },
+    "product_operations": {
+      "description": "Deployment, database, security, observability, and environment operations for DRTS.",
+      "productionAllowed": false
+    },
+    "development_tool": {
+      "description": "Agent orchestration, task dispatch, local development, and repository automation.",
+      "productionAllowed": false
+    },
+    "test_only": {
+      "description": "Tests, fixtures, mocks, static checks, and CI-only code.",
+      "productionAllowed": false
+    },
+    "product_non_active": {
+      "description": "Paused, retired, sunset, or not-yet-active product source.",
+      "productionAllowed": false
+    },
+    "documentation": {
+      "description": "Product and engineering documentation that is not executable runtime code.",
+      "productionAllowed": false
+    },
+    "development_record": {
+      "description": "Task evidence, handoffs, archives, and generated development records.",
+      "productionAllowed": false
+    },
+    "repository_governance": {
+      "description": "Repository-level configuration and boundary policy.",
+      "productionAllowed": false
+    }
+  },
+  "rules": [
+    {
+      "id": "app-documentation",
+      "pattern": "^apps/[^/]+/(?:README|AGENTS|CLAUDE)\\.md$",
+      "classification": "documentation",
+      "status": "active"
+    },
+    {
+      "id": "app-test-and-lint-config",
+      "pattern": "^apps/[^/]+/(?:eslint\\.config\\.[^/]+|vitest\\.config\\.[^/]+|playwright(?:\\.[^/]+)?\\.config\\.[^/]+)$",
+      "classification": "test_only",
+      "status": "active"
+    },
+    {
+      "id": "app-build-and-deploy-config",
+      "pattern": "^apps/(?:api|bank-console-web|channel-partner-portal-web|driver-app|enterprise-dispatch-web|fleet-partner-portal-web|ops-console-web|platform-admin-web|referral-embed-web|tenant-console-web)/(?:Dockerfile|next\\.config\\.[^/]+|tsconfig(?:\\.[^/]+)?\\.json|eas\\.json|app(?:\\.config\\.ts|\\.json))$",
+      "classification": "product_operations",
+      "status": "active"
+    },
+    {
+      "id": "app-tests",
+      "pattern": "^apps/[^/]+/(?:tests?|__tests__)/|^apps/[^/]+/.*\\.(?:test|spec)\\.(?:ts|tsx|js|jsx|mjs|cjs)$",
+      "classification": "test_only",
+      "status": "active"
+    },
+    {
+      "id": "active-product-apps",
+      "pattern": "^apps/(?:api|bank-console-web|channel-partner-portal-web|driver-app|enterprise-dispatch-web|fleet-partner-portal-web|ops-console-web|platform-admin-web|referral-embed-web|tenant-console-web)/",
+      "classification": "product_runtime",
+      "status": "active"
+    },
+    {
+      "id": "paused-partner-booking",
+      "pattern": "^apps/partner-booking-web/",
+      "classification": "product_non_active",
+      "status": "paused"
+    },
+    {
+      "id": "retired-product-apps",
+      "pattern": "^apps/(?:assisted-entry-web|concierge-portal-web|passenger-web|tenant-portal-web)/",
+      "classification": "product_non_active",
+      "status": "retired"
+    },
+    {
+      "id": "candidate-product-apps",
+      "pattern": "^apps/roc-console-web/",
+      "classification": "product_non_active",
+      "status": "candidate"
+    },
+    {
+      "id": "package-documentation",
+      "pattern": "^packages/[^/]+/README\\.md$",
+      "classification": "documentation",
+      "status": "active"
+    },
+    {
+      "id": "package-test-and-lint-config",
+      "pattern": "^packages/[^/]+/(?:eslint\\.config\\.[^/]+|vitest\\.config\\.[^/]+)$",
+      "classification": "test_only",
+      "status": "active"
+    },
+    {
+      "id": "package-build-config",
+      "pattern": "^packages/(?:api-client|contracts|control-plane-auth|shared-types|ui-tokens|ui-web)/tsconfig(?:\\.[^/]+)?\\.json$",
+      "classification": "product_operations",
+      "status": "active"
+    },
+    {
+      "id": "package-tests",
+      "pattern": "^packages/[^/]+/(?:tests?|__tests__)/|^packages/[^/]+/.*\\.(?:test|spec)\\.(?:ts|tsx|js|jsx|mjs|cjs)$",
+      "classification": "test_only",
+      "status": "active"
+    },
+    {
+      "id": "runtime-packages",
+      "pattern": "^packages/(?:api-client|contracts|control-plane-auth|shared-types|ui-tokens|ui-web)/",
+      "classification": "product_runtime",
+      "status": "active"
+    },
+    {
+      "id": "test-packages",
+      "pattern": "^packages/shared-test-fixtures/",
+      "classification": "test_only",
+      "status": "active"
+    },
+    {
+      "id": "tooling-packages",
+      "pattern": "^packages/(?:eslint-config|tsconfig)/",
+      "classification": "development_tool",
+      "status": "active"
+    },
+    {
+      "id": "product-infrastructure",
+      "pattern": "^infra/",
+      "classification": "product_operations",
+      "status": "active"
+    },
+    {
+      "id": "product-runtime-support",
+      "pattern": "^runtime/",
+      "classification": "product_runtime",
+      "status": "active"
+    },
+    {
+      "id": "product-operations",
+      "pattern": "^operations/",
+      "classification": "product_operations",
+      "status": "active"
+    },
+    {
+      "id": "ci-tools",
+      "pattern": "^tools/ci/",
+      "classification": "test_only",
+      "status": "active"
+    },
+    {
+      "id": "development-tools",
+      "pattern": "^tools/(?:development-orchestrator|local-development|task-dispatch)/",
+      "classification": "development_tool",
+      "status": "active"
+    },
+    {
+      "id": "orchestrator-runtime-state",
+      "pattern": "^\\.orchestrator/",
+      "classification": "development_record",
+      "status": "active"
+    },
+    {
+      "id": "cross-system-tests",
+      "pattern": "^tests/|^playwright(?:\\.[^/]+)?\\.config\\.ts$|^vitest\\.config\\.ts$|^i18n-guard-baseline\\.json$",
+      "classification": "test_only",
+      "status": "active"
+    },
+    {
+      "id": "product-deploy-workflows",
+      "pattern": "^\\.github/workflows/(?:deploy-[^/]+|domain-mappings-dev|hourly-promote|nightly-publish)\\.yml$",
+      "classification": "product_operations",
+      "status": "active"
+    },
+    {
+      "id": "ci-workflows",
+      "pattern": "^\\.github/workflows/(?:build-driver-ios|ci|ci-integ)\\.yml$",
+      "classification": "test_only",
+      "status": "active"
+    },
+    {
+      "id": "development-workflows",
+      "pattern": "^\\.github/workflows/(?:push-delivery-note|receive-frontend-feedback)\\.yml$|^\\.github/agents/",
+      "classification": "development_tool",
+      "status": "active"
+    },
+    {
+      "id": "development-records",
+      "pattern": "^support/|^\\.artifacts/|^\\.ai-loop-(?:incoming|outgoing)/|^ai-task-archive\\.json$",
+      "classification": "development_record",
+      "status": "active"
+    },
+    {
+      "id": "documentation-trees",
+      "pattern": "^docs/|^openapi/|^phase1_(?:db_migration_extracted|llm_dev_pack_extracted)/",
+      "classification": "documentation",
+      "status": "active"
+    },
+    {
+      "id": "orchestration-root-docs",
+      "pattern": "^(?:AI_COLLABORATION_GUIDE|BOOTSTRAP_REPORT|CANONICAL_DOCUMENT_MAP|DEVELOPMENT_WORKBREAKDOWN|FOR_[A-Z0-9_]+|LLM_[A-Z0-9_]+|MULTI_LLM_CONSENSUS_WORKFLOW|ORCHESTRATOR_QUICKSTART|PHASE1_CONSENSUS_PACKET_TEMPLATE|PHASE1_DISCUSSION_ASSIGNMENTS|SUPERVISOR_OPERATING_MODEL)\\.md$",
+      "classification": "development_tool",
+      "status": "active"
+    },
+    {
+      "id": "root-product-docs-and-archives",
+      "pattern": "^(?:README|ROADMAP|TARGET_ARCHITECTURE|PHASE1_DECISION_LEDGER|PHASE1_OPEN_QUESTIONS|phase1_[^/]+|phase1_dual_repo_[^/]+)\\.(?:md|yaml|zip)$",
+      "classification": "documentation",
+      "status": "active"
+    },
+    {
+      "id": "product-operation-root-config",
+      "pattern": "^(?:Dockerfile\\.migrate|docker-compose\\.prod\\.yml|\\.env\\.example)$",
+      "classification": "product_operations",
+      "status": "active"
+    },
+    {
+      "id": "repository-policy",
+      "pattern": "^(?:repo-classification\\.json|\\.dockerignore|\\.editorconfig|\\.gitattributes|\\.gitignore|\\.npmrc|\\.nvmrc|\\.prettierrc\\.json|Makefile|docker-compose\\.dev\\.yml|drts-fleet-platform\\.code-workspace|eslint\\.config\\.mjs|package\\.json|pnpm-lock\\.yaml|pnpm-workspace\\.yaml|tsconfig(?:\\.base)?\\.json|turbo\\.json)$|^\\.(?:codex|husky|vscode)/|^\\.github/CODEOWNERS$",
+      "classification": "repository_governance",
+      "status": "active"
+    }
+  ],
+  "activeDeployables": [
+    {
+      "path": "apps/api",
+      "name": "drts-api",
+      "kind": "cloud_run"
+    },
+    {
+      "path": "apps/platform-admin-web",
+      "name": "drts-platform-admin-web",
+      "kind": "cloud_run"
+    },
+    {
+      "path": "apps/ops-console-web",
+      "name": "drts-ops-console-web",
+      "kind": "cloud_run"
+    },
+    {
+      "path": "apps/fleet-partner-portal-web",
+      "name": "drts-fleet-partner-portal-web",
+      "kind": "cloud_run"
+    },
+    {
+      "path": "apps/tenant-console-web",
+      "name": "drts-tenant-console-web",
+      "kind": "cloud_run"
+    },
+    {
+      "path": "apps/bank-console-web",
+      "name": "drts-bank-console-web",
+      "kind": "cloud_run"
+    },
+    {
+      "path": "apps/referral-embed-web",
+      "name": "drts-referral-embed-web",
+      "kind": "cloud_run"
+    },
+    {
+      "path": "apps/enterprise-dispatch-web",
+      "name": "drts-enterprise-dispatch-web",
+      "kind": "cloud_run"
+    },
+    {
+      "path": "apps/channel-partner-portal-web",
+      "name": "drts-channel-partner-portal-web",
+      "kind": "cloud_run"
+    },
+    {
+      "path": "apps/driver-app",
+      "name": "drts-driver-app",
+      "kind": "mobile"
+    }
+  ],
+  "dependencyPolicy": {
+    "runtimeMayDependOn": ["product_runtime"],
+    "forbiddenRuntimePackages": [
+      "@drts/eslint-config",
+      "@drts/shared-test-fixtures",
+      "@drts/tsconfig"
+    ]
+  },
+  "dockerPolicy": {
+    "forbiddenCopyPrefixes": [
+      ".orchestrator",
+      "docs-site",
+      "support",
+      "tests",
+      "tools"
+    ]
+  }
+}

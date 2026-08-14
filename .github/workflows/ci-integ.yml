@@ -88,7 +88,7 @@ jobs:
           echo "$changed"
           # Paths e2e demonstrably cannot exercise. Keep this list short and
           # obvious; when in doubt leave a path off it and run the suite.
-          irrelevant='^(\.orchestrator/|docs/|docs-site/|\.artifacts/|[^/]*\.md$|docs?/.*\.md$)'
+          irrelevant='^(\.orchestrator/|docs/|tools/development-orchestrator/dashboard/|\.artifacts/|[^/]*\.md$|docs?/.*\.md$)'
           if echo "$changed" | grep -qvE "$irrelevant"; then
             echo "at least one changed path is not provably irrelevant; running e2e"
             echo "e2e=true" >> "$GITHUB_OUTPUT"

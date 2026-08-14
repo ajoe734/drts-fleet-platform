@@ -69,7 +69,7 @@ Direct adoption is allowed only with all of these outer controls:
    secrets in OpenClaw config, plugin config, workspace files, or persistent
    runtime homes.
 3. OpenClaw cannot write canonical task truth directly; status changes must
-   continue through `scripts/ai-status.sh` or `python3 scripts/ai_status.py`.
+   continue through `tools/development-orchestrator/bin/ai-status.sh` or `python3 tools/development-orchestrator/bin/ai_status.py`.
 4. OpenClaw filesystem access must stay inside the assigned task worktree plus
    explicit output paths approved by the bridge.
 5. OpenClaw exec access must remain subordinate to `.orchestrator`

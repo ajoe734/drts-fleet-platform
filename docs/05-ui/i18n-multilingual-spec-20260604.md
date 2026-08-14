@@ -43,6 +43,7 @@
 **理由**：盤點顯示去中心化是所有問題的根，集中化一次解決 QA、術語一致、lint、未來第三語系擴充。
 
 ### 過渡規則
+
 - 既有頁面改寫時，**整檔**移除內聯機制；不允許新增內聯、只改一半。
 - 新增鍵一律加進**兩個**字典（`en` 與 `zh`），靠 TS `Record<keyof typeof en, string>` parity 保證不漏鍵。
 
@@ -64,41 +65,41 @@
 
 修正中英夾雜時，**MUST** 採用下表「正規 zh-TW」。標記 `KEEP` 者維持英文（業界通用縮寫/產品詞），但前後仍須是中文語境。
 
-| 英文 | 正規 zh-TW | 規則 | 盤點到的錯誤譯法（須修正） |
-|---|---|---|---|
-| dispatch | 派遣 | 譯 | 派車、派送 |
-| forwarded (order/mirror) | 轉派（單／鏡像） | 譯 | forwarded、轉接 |
-| adapter | 轉接器 | 譯 | adapter（「載入 adapter registry 中」） |
-| adapter registry | 轉接器登錄 | 譯 | adapter registry |
-| reconciliation | 對帳 | 譯 | reconciliation |
-| override (fare) | 車資覆寫 | 譯 | override、fare override |
-| override (exception) | 例外覆核 | 譯 | override |
-| manual fallback | 人工備援 | 譯 | 人工 fallback、人工轉派 |
-| session (call) | 通話工作階段（簡：工作階段） | 譯 | session、call session（「開新 call session」） |
-| callback | 回撥 | 譯 | callback（「Callback 佇列」「建立 callback」） |
-| queue | 佇列 | 譯 | queue |
-| gate | 資格關卡（簡：關卡） | 譯 | gate |
-| scope | 權限範圍 | 譯 | scope |
-| credential | 憑證 | 譯 | credential |
-| secret | 密鑰 | 譯 | secret |
-| token | 權杖 | 譯（縮寫情境可 KEEP） | token |
-| rollout | 推行 | 譯 | rollout（「進行中 rollout」） |
-| workspace | 工作區 | 譯 | workspace（「Workspace 訊號」） |
-| snapshot | 快照 | 譯 | snapshot |
-| provision | 開通 | 譯 | provision（「尚未 provision」） |
-| banner | 橫幅 | 譯 | banner |
-| audit receipt | 稽核收據 | 譯 | audit receipt |
-| readiness | 上線準備度 | 譯 | readiness |
-| posture | 態勢（traffic posture＝流量態勢） | 譯 | 姿態、posture |
-| backlog | 待辦積壓 | 譯 | backlog |
-| stepper | 步驟列 | 譯 | stepper |
-| placard | 牌貼 | 譯（已一致） | — |
-| tenant | 租戶 | 譯 | — |
-| partner entry | 合作夥伴入口 | 譯 | partner entry |
-| complaint | 客訴 | 譯 | — |
-| incident | 事故 | 譯 | — |
-| maintenance (work order) | 維修（工單） | 譯（現用「保修」，統一改「維修」） | 保修 |
-| ETA / SLA / API / RBAC / TTL / CSV / PDF / ZIP / URL / ID / KPI | （同左） | KEEP | — |
+| 英文                                                            | 正規 zh-TW                        | 規則                               | 盤點到的錯誤譯法（須修正）                     |
+| --------------------------------------------------------------- | --------------------------------- | ---------------------------------- | ---------------------------------------------- |
+| dispatch                                                        | 派遣                              | 譯                                 | 派車、派送                                     |
+| forwarded (order/mirror)                                        | 轉派（單／鏡像）                  | 譯                                 | forwarded、轉接                                |
+| adapter                                                         | 轉接器                            | 譯                                 | adapter（「載入 adapter registry 中」）        |
+| adapter registry                                                | 轉接器登錄                        | 譯                                 | adapter registry                               |
+| reconciliation                                                  | 對帳                              | 譯                                 | reconciliation                                 |
+| override (fare)                                                 | 車資覆寫                          | 譯                                 | override、fare override                        |
+| override (exception)                                            | 例外覆核                          | 譯                                 | override                                       |
+| manual fallback                                                 | 人工備援                          | 譯                                 | 人工 fallback、人工轉派                        |
+| session (call)                                                  | 通話工作階段（簡：工作階段）      | 譯                                 | session、call session（「開新 call session」） |
+| callback                                                        | 回撥                              | 譯                                 | callback（「Callback 佇列」「建立 callback」） |
+| queue                                                           | 佇列                              | 譯                                 | queue                                          |
+| gate                                                            | 資格關卡（簡：關卡）              | 譯                                 | gate                                           |
+| scope                                                           | 權限範圍                          | 譯                                 | scope                                          |
+| credential                                                      | 憑證                              | 譯                                 | credential                                     |
+| secret                                                          | 密鑰                              | 譯                                 | secret                                         |
+| token                                                           | 權杖                              | 譯（縮寫情境可 KEEP）              | token                                          |
+| rollout                                                         | 推行                              | 譯                                 | rollout（「進行中 rollout」）                  |
+| workspace                                                       | 工作區                            | 譯                                 | workspace（「Workspace 訊號」）                |
+| snapshot                                                        | 快照                              | 譯                                 | snapshot                                       |
+| provision                                                       | 開通                              | 譯                                 | provision（「尚未 provision」）                |
+| banner                                                          | 橫幅                              | 譯                                 | banner                                         |
+| audit receipt                                                   | 稽核收據                          | 譯                                 | audit receipt                                  |
+| readiness                                                       | 上線準備度                        | 譯                                 | readiness                                      |
+| posture                                                         | 態勢（traffic posture＝流量態勢） | 譯                                 | 姿態、posture                                  |
+| backlog                                                         | 待辦積壓                          | 譯                                 | backlog                                        |
+| stepper                                                         | 步驟列                            | 譯                                 | stepper                                        |
+| placard                                                         | 牌貼                              | 譯（已一致）                       | —                                              |
+| tenant                                                          | 租戶                              | 譯                                 | —                                              |
+| partner entry                                                   | 合作夥伴入口                      | 譯                                 | partner entry                                  |
+| complaint                                                       | 客訴                              | 譯                                 | —                                              |
+| incident                                                        | 事故                              | 譯                                 | —                                              |
+| maintenance (work order)                                        | 維修（工單）                      | 譯（現用「保修」，統一改「維修」） | 保修                                           |
+| ETA / SLA / API / RBAC / TTL / CSV / PDF / ZIP / URL / ID / KPI | （同左）                          | KEEP                               | —                                              |
 
 > 完整 code-switch 清單見 appendix；上表為高頻必修項。新增術語請先在此表登記再使用。
 
@@ -123,7 +124,7 @@
 
 ## 6. 防回歸：Lint / CI Guard
 
-新增一支 i18n guard（建議 `scripts/i18n-guard.mjs`，掛 CI 與 pre-commit），對 `apps/*/app/**` 與 `apps/*/components/**` 的 `.tsx`/`.ts`（排除 `translations.ts`）檢查並**fail**：
+新增一支 i18n guard（建議 `tools/ci/i18n-guard.mjs`，掛 CI 與 pre-commit），對 `apps/*/app/**` 與 `apps/*/components/**` 的 `.tsx`/`.ts`（排除 `translations.ts`）檢查並**fail**：
 
 1. **無內聯雙語 helper**：禁止出現 `function copy(`/`function tx(`/`function copyText(`、`const copy = locale === `、`locale === "en" ?`、`locale === "zh" ?`、`zh ? "`、內聯 `{ en: "…", zh: "…" }`。
 2. **無硬編碼 CJK**：`.tsx`/`.ts`（非註解、非 `translations.ts`）不得出現 `[一-鿿]`。

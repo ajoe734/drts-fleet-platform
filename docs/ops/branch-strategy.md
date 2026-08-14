@@ -146,7 +146,7 @@ only stays conflict-free while **`main`'s content is an ancestor-state of
 `dev`**. Therefore:
 
 - **Any** commit that lands directly on `main` — a `hotfix/*`, an admin-bypass
-  fix, *or* a promote-rescue commit — **must be cherry-picked back into `dev`**
+  fix, _or_ a promote-rescue commit — **must be cherry-picked back into `dev`**
   as part of the same change. A direct-to-main commit that is not back-ported
   makes the next `publish → main` PR `CONFLICTING`, which silently deadlocks the
   whole promote rail (the required `pull_request` gates can never register on an
@@ -179,10 +179,10 @@ Identical settings on `main` and `dev`:
 
 `publish/v*` branches are **not** protected by branch protection. They are protected by convention (immutable) and by the fact that nothing in the workflows writes to them after the initial nightly cut.
 
-Applied via `scripts/branch-strategy/apply-branch-protection.sh --apply`.
+Applied via `tools/local-development/apply-branch-protection.sh --apply`.
 
 Static GitHub labels used by the branch-strategy workflows are managed via
-`scripts/branch-strategy/ensure-github-labels.sh --apply`. `hourly-promote.yml`
+`tools/local-development/ensure-github-labels.sh --apply`. `hourly-promote.yml`
 also runs that script immediately before applying the `automated` and
 `auto-publish` labels to a promote PR, so missing repo metadata does not
 silently break the `Commit trailers` bypass path in `ci.yml`.
@@ -298,7 +298,7 @@ In a multi-worker repo, the working tree is a fragile asset. Supervisor reassign
 
 Anchor commit at the first describable middle state — do not wait for completion — when **any** of the following hold:
 
-- The change touches a **fragile surface**: `.orchestrator/supervisor.py` (esp. routing/dispatch), `.orchestrator/skills/*.md`, `.orchestrator/templates/*`, `.orchestrator/config*.json`, `.orchestrator/branch_routing.py`, `docs/ops/branch-strategy.md`, `docs/**`, `.github/workflows/**`, `.husky/*`.
+- The change touches a **fragile surface**: `tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py` (esp. routing/dispatch), `tools/development-orchestrator/skills/*.md`, `tools/development-orchestrator/templates/*`, `.orchestrator/config*.json`, `.orchestrator/branch_routing.py`, `docs/ops/branch-strategy.md`, `docs/**`, `.github/workflows/**`, `.husky/*`.
 - The change spans **more than one file** with shared design intent.
 - The change is expected to take **more than one supervisor cycle** to land.
 - The worker is **about to yield** to another task (planned reassignment, blocker, end-of-shift).
@@ -358,11 +358,11 @@ Do **not** rely on `git stash pop` to recover paused work; the stash blob has no
 
 The three surface classes most often overwritten by parallel lanes are:
 
-| Surface class                              | Examples                                                          | Why fragile                                      |
-| ------------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------ |
-| `docs/**`                                  | `docs/ops/branch-strategy.md`, `docs/03-runbooks/**`              | chair-review and supervisor lanes both edit them |
-| `.orchestrator/skills/**`                  | `candidate-lifecycle.md`, `chairman-operational-review.md`        | supervisor/chair changes touch these             |
-| `.orchestrator/config*.json`, schema files | `config.example.json`, provider/capability schema                 | enabled-flag toggles by many lanes               |
+| Surface class                              | Examples                                                   | Why fragile                                      |
+| ------------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------ |
+| `docs/**`                                  | `docs/ops/branch-strategy.md`, `docs/03-runbooks/**`       | chair-review and supervisor lanes both edit them |
+| `tools/development-orchestrator/skills/**` | `candidate-lifecycle.md`, `chairman-operational-review.md` | supervisor/chair changes touch these             |
+| `.orchestrator/config*.json`, schema files | `config.example.json`, provider/capability schema          | enabled-flag toggles by many lanes               |
 
 For these, **never** keep edits in the working tree across more than one supervisor cycle. The required flow:
 
@@ -414,12 +414,12 @@ git switch -c <lane>/<task-id-kebab> origin/dev
 
 ### 11.8 Related artifacts
 
-- [`.orchestrator/skills/worker-anchor-commit.md`](../../.orchestrator/skills/worker-anchor-commit.md) — owner-only operational skill for recoverable checkpoints
-- [`.orchestrator/skills/candidate-lifecycle.md`](../../.orchestrator/skills/candidate-lifecycle.md) — locked SHA review, CI, merge, and acceptance protocol
-- [`.orchestrator/templates/wakeup.txt`](../../.orchestrator/templates/wakeup.txt) — supervisor wakeup template that injects branch context (target of OPS-GIT-WORKFLOW-005)
+- [`tools/development-orchestrator/skills/worker-anchor-commit.md`](../../tools/development-orchestrator/skills/worker-anchor-commit.md) — owner-only operational skill for recoverable checkpoints
+- [`tools/development-orchestrator/skills/candidate-lifecycle.md`](../../tools/development-orchestrator/skills/candidate-lifecycle.md) — locked SHA review, CI, merge, and acceptance protocol
+- [`tools/development-orchestrator/templates/wakeup.txt`](../../tools/development-orchestrator/templates/wakeup.txt) — supervisor wakeup template that injects branch context (target of OPS-GIT-WORKFLOW-005)
 - [`.orchestrator/worker_tree_guard.py`](../../.orchestrator/worker_tree_guard.py) — shared tree-guard primitives (extracted by OPS-GIT-WORKFLOW-007). Backs both surfaces:
   - `check_worker_tree_guard` — supervisor dispatch guard, gated by `branch_strategy.worker_tree_guard.enabled` (OPS-GIT-WORKFLOW-006, opt-in)
-  - `check_chatbox_tree_guard` — Claude-Code PreToolUse hook (via `.orchestrator/permission_broker.py`) for chatbox-driven `Edit`/`Write`/`MultiEdit`/`NotebookEdit`, gated by `branch_strategy.worker_tree_guard.chatbox_enabled` (OPS-GIT-WORKFLOW-007, opt-in)
+  - `check_chatbox_tree_guard` — Claude-Code PreToolUse hook (via `tools/development-orchestrator/permission_broker.py`) for chatbox-driven `Edit`/`Write`/`MultiEdit`/`NotebookEdit`, gated by `branch_strategy.worker_tree_guard.chatbox_enabled` (OPS-GIT-WORKFLOW-007, opt-in)
 
 ---
 
@@ -432,8 +432,8 @@ git switch -c <lane>/<task-id-kebab> origin/dev
 - `.github/workflows/deploy-dev.yml` — push-to-publish auto deploy
 - `.github/workflows/deploy-staging.yml` — operator manual
 - `.github/workflows/deploy-prod.yml` — operator manual, requires `prod/v<date>` tag
-- `scripts/git/check_commit_trailers.py` + `check_staged_generated_files.py` — shared by husky + CI
-- `scripts/branch-strategy/bootstrap-branches.sh` + `apply-branch-protection.sh` + `triage-branches.sh`
+- `tools/ci/git/check_commit_trailers.py` + `check_staged_generated_files.py` — shared by husky + CI
+- `tools/local-development/bootstrap-branches.sh` + `apply-branch-protection.sh` + `triage-branches.sh`
 - `.orchestrator/branch_routing.py` — single track now; both backend + frontend → `dev`
 - `.husky/pre-commit` + `commit-msg` — local gates mirroring CI
 - `docs/03-runbooks/promote-rail-rescue-runbook.md` — how to unblock a stuck `publish → main` promote

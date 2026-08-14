@@ -71,10 +71,10 @@ For single-key legacy deployments, the system synthesizes an `active` key ring e
 
 ### Step 1: Generate New Key Pair
 
-Use `scripts/rotate-auth-keys.py` to generate a new signing key pair:
+Use `operations/security/rotate-auth-keys.py` to generate a new signing key pair:
 
 ```bash
-python3 scripts/rotate-auth-keys.py generate --kid key-2026-v3 --alg RS256
+python3 operations/security/rotate-auth-keys.py generate --kid key-2026-v3 --alg RS256
 ```
 
 ### Step 2: Promote New Key to `active` and Demote Current to `previous`
@@ -82,7 +82,7 @@ python3 scripts/rotate-auth-keys.py generate --kid key-2026-v3 --alg RS256
 Run the rotation command to update the key ring structure:
 
 ```bash
-python3 scripts/rotate-auth-keys.py rotate --new-kid key-2026-v3 --alg RS256
+python3 operations/security/rotate-auth-keys.py rotate --new-kid key-2026-v3 --alg RS256
 ```
 
 This sets `key-2026-v3` as `active` and changes `key-2026-v2` to `previous`.
@@ -99,7 +99,7 @@ Update `JWT_KEY_RING_JSON` in secret manager / GCP Secret Manager / Kubernetes S
 After the overlap window (e.g., maximum token lifetime of 8-24 hours) has passed, mark `key-2026-v2` as `retired`:
 
 ```bash
-python3 scripts/rotate-auth-keys.py retire --target-kid key-2026-v2
+python3 operations/security/rotate-auth-keys.py retire --target-kid key-2026-v2
 ```
 
 ---
@@ -114,10 +114,10 @@ Run the CLI tool to set target fallback key as `active` or mark compromised key 
 
 ```bash
 # Emergency rollback to previous valid key (e.g. key-2026-v1)
-python3 scripts/rotate-auth-keys.py rollback --target-kid key-2026-v1
+python3 operations/security/rotate-auth-keys.py rollback --target-kid key-2026-v1
 
 # Mark compromised key as retired
-python3 scripts/rotate-auth-keys.py retire --target-kid key-2026-v2
+python3 operations/security/rotate-auth-keys.py retire --target-kid key-2026-v2
 ```
 
 ### Emergency Step 2: Invalidate Impacted Sessions

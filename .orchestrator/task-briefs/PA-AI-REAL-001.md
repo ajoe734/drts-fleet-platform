@@ -33,5 +33,5 @@ Scope clarified for direct OpenClaw adoption: the real provider gateway must ser
 
 ## Guardrails
 
-- Use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for state changes.
+- Use `tools/development-orchestrator/bin/ai-status.sh` or `python3 tools/development-orchestrator/bin/ai_status.py` for state changes.
 - Treat `current-work.md` as a human summary, not canonical machine context.

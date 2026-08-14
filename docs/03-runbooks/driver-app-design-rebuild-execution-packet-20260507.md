@@ -546,6 +546,6 @@ Acceptance:
 - Do not edit unrelated active work outside assigned scope.
 - Do not revert current multi-platform API/admin worker changes.
 - If a worker cannot run shell, it must still edit files and record verification blocker honestly.
-- Machine truth must be updated through `scripts/ai-status.sh` or `scripts/ai_status.py`.
+- Machine truth must be updated through `tools/development-orchestrator/bin/ai-status.sh` or `tools/development-orchestrator/bin/ai_status.py`.
 - Design source files under `docs/05-ui/driver-app-design-20260507/` are reference artifacts; do not rewrite them during implementation.
 - The existing Expo/React Native app is the target; do not replace it with web-only preview output.

@@ -18,7 +18,7 @@
 #   $3 — flag: 1 if branch checkout, 0 if file checkout
 #
 # Auto-revert is intentionally NOT in scope here — see
-# scripts/canonical-root-watchdog.py which can recover from drift with
+# tools/development-orchestrator/bin/canonical-root-watchdog.py can recover drift with
 # safety checks for uncommitted work.
 
 set -e

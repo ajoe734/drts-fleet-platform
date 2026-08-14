@@ -85,10 +85,10 @@ Make the generated status surfaces agree with root `ai-status.json`.
 
 - `ai-status.json`
 - `current-work.md`
-- `docs-site/ai-status.json`
-- `docs-site/current-work.md`
-- `docs-site/*.js`
-- `docs-site/index.html`
+- `tools/development-orchestrator/dashboard/ai-status.json`
+- `tools/development-orchestrator/dashboard/current-work.md`
+- `tools/development-orchestrator/dashboard/*.js`
+- `tools/development-orchestrator/dashboard/index.html`
 - `docs/02-architecture/phase1-implementation-blueprint-delta-audit-20260501.md`
 
 ### Acceptance
@@ -101,7 +101,7 @@ Make the generated status surfaces agree with root `ai-status.json`.
 
 ### Verification
 
-- `python3 scripts/ai_status.py sync`
+- `python3 tools/development-orchestrator/bin/ai_status.py sync`
 - `git diff --check`
 - `git status --short --branch`
 
@@ -365,7 +365,7 @@ deployment, and external-gate tasks are resolved or blocked with explicit owner.
 
 ### Verification
 
-- `python3 scripts/ai_status.py audit doc-sync`
+- `python3 tools/development-orchestrator/bin/ai_status.py audit doc-sync`
 - `git status --short --branch`
 - `git rev-list --count origin/main..HEAD`
 - `git rev-list --count HEAD..origin/main`

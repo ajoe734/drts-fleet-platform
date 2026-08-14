@@ -2,13 +2,14 @@
 
 Task: `IAM-OBS-001`  
 Planning Reference: `docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`  
-Execution Reference: `docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md`  
+Execution Reference: `docs/03-runbooks/stage1-5-identity-access-account-security-execution-tasks-20260801.md`
 
 ## 1. Overview & Operational Principles
 
 This runbook defines the triage, containment, escalation, and post-incident recovery procedures for all IAM security alerts and telemetry signals emitted by the `drts-fleet-platform`.
 
 ### Core Principles
+
 1. **Machine Truth & Audit Integrity First**: Never bypass or silence an alert without logging machine-truth audit evidence. If the audit logging pipeline fails on a privileged write, the system fails closed (blocks write).
 2. **Zero PII in Metric Labels**: Metric labels contain only low-cardinality, safe labels (`event_type`, `outcome`, `severity`, `realm`, `change_type`, `action`). PII (emails, IPs, tokens) is scrubbed or hashed before logging.
 3. **Automated Containment & Incident Response SLAs**:
@@ -50,7 +51,7 @@ This runbook defines the triage, containment, escalation, and post-incident reco
   1. Confirm that fail-closed protection successfully blocked the privileged mutation (`AuditPipelineException` thrown).
   2. Inspect API & PostgreSQL database health logs:
      ```bash
-     scripts/ai-status.sh show IAM-OBS-001
+     tools/development-orchestrator/bin/ai-status.sh show IAM-OBS-001
      docker logs drts-postgres-audit --tail 100
      ```
   3. Check disk space, database connection pool, and table lock status on `admin.security_events`.
