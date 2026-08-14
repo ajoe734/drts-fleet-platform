@@ -1117,20 +1117,17 @@ describe("S1F-BANK-002 Statement Artifacts and Role Authorization", () => {
     expect(res.headers.get("set-cookie")).toBeNull();
   });
 
-  it("uses ephemeral random secret when NODE_ENV is not test and secret env vars are omitted", () => {
-    const origEnv = process.env.NODE_ENV;
+  it("requires a stable session secret in production", () => {
+    const originalEnv = process.env;
     try {
-      (process.env as Record<string, string | undefined>).NODE_ENV =
-        "production";
+      process.env = { ...originalEnv, NODE_ENV: "production" };
       delete process.env.BANK_SESSION_SECRET;
       delete process.env.SESSION_SECRET;
-      const token = signSessionRole("bank_finance", "ctbc");
-      expect(token).toBeDefined();
-      expect(token).not.toContain(
-        "drts_bank_console_server_session_secret_2026_key",
+      expect(() => signSessionRole("bank_finance", "ctbc")).toThrow(
+        "BANK_SESSION_SECRET or SESSION_SECRET must be configured in production",
       );
     } finally {
-      (process.env as Record<string, string | undefined>).NODE_ENV = origEnv;
+      process.env = originalEnv;
     }
   });
 

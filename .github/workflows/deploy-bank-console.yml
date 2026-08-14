@@ -212,7 +212,7 @@ jobs:
             --port 3008 \
             --ingress all \
             --service-account "${{ steps.config.outputs.runtime_sa }}" \
-            --set-secrets "JWT_SECRET=${{ steps.config.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "JWT_SECRET=${{ steps.config.outputs.secret_prefix }}-jwt-secret:latest,BANK_SESSION_SECRET=${{ steps.config.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ steps.config.outputs.exposure }} \
             --min-instances 0 \

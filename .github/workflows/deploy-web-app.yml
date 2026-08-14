@@ -232,13 +232,18 @@ jobs:
 
       - name: Deploy — ${{ inputs.image_name }}
         run: |
+          secret_args="JWT_SECRET=${{ steps.config.outputs.secret_prefix }}-jwt-secret:latest"
+          if [[ "${{ inputs.app_dir }}" == "apps/bank-console-web" ]]; then
+            secret_args="${secret_args},BANK_SESSION_SECRET=${{ steps.config.outputs.secret_prefix }}-jwt-secret:latest"
+          fi
+
           gcloud run deploy "${{ steps.config.outputs.target_service }}" \
             --region "${{ steps.config.outputs.region }}" \
             --image "${{ steps.config.outputs.image }}" \
             --port ${{ inputs.port }} \
             --ingress all \
             --service-account "${{ steps.config.outputs.runtime_sa }}" \
-            --set-secrets "JWT_SECRET=${{ steps.config.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-secrets "$secret_args" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ steps.config.outputs.exposure }} \
             --min-instances 0 \

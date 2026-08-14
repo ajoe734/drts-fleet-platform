@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 import {
   verifyIapJwtAssertion,
   type IapJwtPayload,
@@ -22,8 +22,6 @@ export const BANK_CONSOLE_SESSION_COOKIE = "drts_bank_console_session";
 export const TRUSTED_PROXY_HEADER = "x-trusted-proxy-secret";
 export const DEFAULT_TEST_PROXY_SECRET = "drts_bank_trusted_proxy_secret_2026";
 
-let ephemeralSessionSecret: string | null = null;
-
 function getSessionSecret(): string {
   const envSecret =
     process.env.BANK_SESSION_SECRET || process.env.SESSION_SECRET;
@@ -33,10 +31,12 @@ function getSessionSecret(): string {
   if (process.env.NODE_ENV !== "production") {
     return "drts_bank_console_test_session_secret_2026_key";
   }
-  if (!ephemeralSessionSecret) {
-    ephemeralSessionSecret = randomBytes(32).toString("hex");
-  }
-  return ephemeralSessionSecret;
+
+  // Per-instance keys invalidate valid cookies as soon as Cloud Run routes a
+  // request to another instance, so production must always use a stable secret.
+  throw new Error(
+    "BANK_SESSION_SECRET or SESSION_SECRET must be configured in production",
+  );
 }
 
 export function signSessionRole(
@@ -172,7 +172,10 @@ export function resolveServerSessionRole(
 
   let isTampered = false;
   if (queryRoleValue) {
-    if (!queryRole || (cookieRole && cookieRole !== queryRoleValue && cookieRole !== queryRole)) {
+    if (
+      !queryRole ||
+      (cookieRole && cookieRole !== queryRoleValue && cookieRole !== queryRole)
+    ) {
       isTampered = true;
     }
   }
