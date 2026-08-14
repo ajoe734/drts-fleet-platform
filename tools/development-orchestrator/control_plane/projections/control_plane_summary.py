@@ -10,20 +10,9 @@ from control_plane.domain.dispatch_policy import (
     dispatch_preview,
     task_index,
 )
+from control_plane.domain.worker_lifecycle import is_active_worker
 from control_plane.infra.approval_repo import load_approval_state
 from control_plane.infra.queue_repo import load_event_queue
-
-
-ACTIVE_WORKER_STATUSES = {
-    "running",
-    "started",
-    "waiting_approval",
-    "suspended_approval",
-    "manual_pending",
-    "retry_backoff",
-    "stalled",
-    "fallback",
-}
 
 
 def control_plane_summary_path(config: dict[str, Any]) -> Path:
@@ -67,8 +56,7 @@ def build_control_plane_summary(
             "last_event_at": worker.get("last_event_at"),
         }
         for run_id, worker in workers.items()
-        if isinstance(worker, dict)
-        and str(worker.get("status") or "") in ACTIVE_WORKER_STATUSES
+        if isinstance(worker, dict) and is_active_worker(worker)
     ]
     queue_records = (runtime.get("queue") or {}).get("events") or {}
     queue_status_counts = Counter(

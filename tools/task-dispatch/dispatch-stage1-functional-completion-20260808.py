@@ -53,7 +53,8 @@ class Task:
     wave: str
     workstream: str
     task_class: str = "implementation"
-    mutates_canonical: bool = False
+    mutates_canonical: bool = True
+    required_acceptance: tuple[str, ...] = ()
 
 
 def task(
@@ -70,7 +71,8 @@ def task(
     workstream: str,
     *,
     task_class: str = "implementation",
-    mutates_canonical: bool = False,
+    mutates_canonical: bool = True,
+    required_acceptance: tuple[str, ...] = (),
 ) -> Task:
     return Task(
         task_id=task_id,
@@ -86,6 +88,7 @@ def task(
         workstream=workstream,
         task_class=task_class,
         mutates_canonical=mutates_canonical,
+        required_acceptance=required_acceptance,
     )
 
 
@@ -394,7 +397,7 @@ TASKS = (
     task(
         "S1F-REL-001", "Gemini", "Claude",
         "Integrate and deploy one verified Stage 1 functional candidate",
-        "Integrate only independently reviewed S1F commits in dependency order. Run the existing CI 22 API E2E 39-route suite Driver evidence and the operational browser suite. Deploy exactly that candidate SHA once through the normal Dev workflow and rerun the functional journeys plus paused-surface checks against deployed URLs.",
+        "Integrate only independently reviewed S1F commits in dependency order. Run the existing CI 22 API E2E 39-route suite Driver evidence and the operational browser suite. Deploy the exact merge SHA once through the normal Dev workflow, then record that same SHA in both deploy and operational acceptance evidence before closing the task.",
         ("S1F-UIX-001", "S1F-DRV-001"),
         (
             ".github/workflows/",
@@ -410,6 +413,13 @@ TASKS = (
             "All GAP completion gates G1 through G8 pass",
         ),
         "P0", "E", "release", task_class="release", mutates_canonical=True,
+        required_acceptance=(
+            "dev_deploy_run_url",
+            "dev_deploy_sha",
+            "operational_acceptance_run_url",
+            "operational_acceptance_sha",
+            "gap_g1_g8_evidence",
+        ),
     ),
     task(
         "S1F-DOC-001", "Codex2", "Claude",
@@ -492,6 +502,7 @@ def metadata_for(item: Task) -> dict[str, object]:
         "minimal_security_scope": True,
         "release_gate": item.priority == "P0" or item.task_id.startswith("S1F-REL"),
         "mutates_canonical": item.mutates_canonical,
+        "required_acceptance": list(item.required_acceptance),
         "registered_by": "dispatch-stage1-functional-completion-20260808.py",
     }
 
@@ -511,6 +522,7 @@ def register(item: Task) -> None:
             "TASK_DEPENDS_ON": ",".join(item.depends_on),
             "TASK_ARTIFACTS": ",".join(item.artifacts),
             "TASK_ACCEPTANCE": ",".join(item.acceptance),
+            "TASK_REQUIRED_ACCEPTANCE": ",".join(item.required_acceptance),
             "TASK_METADATA_JSON": json.dumps(metadata_for(item), ensure_ascii=False),
             "TASK_MUTATES_CANONICAL": "true" if item.mutates_canonical else "false",
         }
@@ -551,6 +563,8 @@ def verify_materialized(expected_ids: set[str]) -> None:
             (tuple(current.get("depends_on") or ()), expected.depends_on, "dependencies"),
             (current.get("priority"), expected.priority, "priority"),
             (current.get("phase"), PHASE, "phase"),
+            (tuple(current.get("required_acceptance") or ()), expected.required_acceptance, "required acceptance"),
+            (bool(current.get("mutates_canonical") is not False), expected.mutates_canonical, "canonical mutation"),
         )
         for actual_value, expected_value, field in checks:
             if actual_value != expected_value:

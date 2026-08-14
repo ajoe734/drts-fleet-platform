@@ -66,12 +66,40 @@ class RuntimeStateMigrationTests(unittest.TestCase):
             {"version": 3, "tasks": {"TASK-1": {"status": "review"}}}
         )
 
-        self.assertEqual(migrated["version"], 5)
+        self.assertEqual(migrated["version"], 6)
         self.assertNotIn("tasks", migrated)
         self.assertEqual(
             migrated["watcher"]["task_snapshots"]["TASK-1"]["status"],
             "review",
         )
+
+    def test_migrate_state_absorbs_legacy_yield_into_terminal_attempt(self) -> None:
+        migrated = runtime_state.migrate_state(
+            {
+                "version": 5,
+                "worker_yields": {
+                    "TASK-1:codex": {
+                        "summary": "CI is still running",
+                        "yielded_at": "2026-08-14T12:00:00Z",
+                        "resume_at": "2026-08-14T12:02:00Z",
+                    }
+                },
+                "workers": {
+                    "codex-1": {
+                        "run_id": "codex-1",
+                        "task_id": "TASK-1",
+                        "agent_id": "codex",
+                        "status": "yielded",
+                    }
+                },
+            }
+        )
+
+        worker = migrated["workers"]["codex-1"]
+        self.assertEqual(worker["status"], "completed")
+        self.assertEqual(worker["terminal_outcome"], "progress")
+        self.assertEqual(worker["redispatch_after"], "2026-08-14T12:02:00Z")
+        self.assertNotIn("worker_yields", migrated)
 
     def test_upsert_and_clear_dispatch_pause(self) -> None:
         state = runtime_state.default_state()

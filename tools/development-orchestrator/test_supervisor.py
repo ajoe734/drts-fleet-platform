@@ -1157,8 +1157,6 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
                 "availability_first": True,
                 "allow_any_idle_lane": True,
             },
-            review_statuses={"review"},
-            dependency_done_statuses={"done"},
         )
 
         self.assertIsNone(plan)
@@ -6545,8 +6543,6 @@ class ChairmanFlowTests(unittest.TestCase):
                 "require_assigned_agent_busy": True,
                 "require_owner_higher_priority_load": False,
             },
-            review_statuses={"review"},
-            dependency_done_statuses={"done"},
             state=state,
         )
 
@@ -6606,8 +6602,6 @@ class ChairmanFlowTests(unittest.TestCase):
                 "require_owner_higher_priority_load": False,
                 "respect_explicit_owner_when_paused": True,
             },
-            review_statuses={"review"},
-            dependency_done_statuses={"done"},
             state=state,
         )
 
@@ -6663,8 +6657,6 @@ class ChairmanFlowTests(unittest.TestCase):
                 "require_owner_higher_priority_load": True,
                 "respect_explicit_owner_when_paused": True,
             },
-            review_statuses={"review"},
-            dependency_done_statuses={"done"},
             state={"provider_pauses": {}},
         )
 
@@ -6713,8 +6705,6 @@ class ChairmanFlowTests(unittest.TestCase):
                 "require_owner_higher_priority_load": False,
                 "respect_explicit_owner_when_paused": True,
             },
-            review_statuses={"review"},
-            dependency_done_statuses={"done"},
             state=state,
         )
 
@@ -7118,8 +7108,8 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
 
 
 
-class WorkerYieldCooldownTests(unittest.TestCase):
-    def test_ready_dispatch_skips_active_worker_yield(self) -> None:
+class WorkerAttemptCooldownTests(unittest.TestCase):
+    def test_ready_dispatch_skips_terminal_progress_attempt_before_redispatch(self) -> None:
         config = {
             "schema": {
                 "tasks_path": "tasks",
@@ -7127,19 +7117,22 @@ class WorkerYieldCooldownTests(unittest.TestCase):
                 "assignee_field": "owner",
                 "reviewer_field": "reviewer",
             },
-            "ready_dispatcher": {"enabled": True, "active_worker_statuses": []},
+            "ready_dispatcher": {"enabled": True},
             "agents": {
                 "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
             },
         }
         state = {
             "queue": {"events": {}},
-            "workers": {},
-            "worker_yields": {
-                "YIELD-001:codex": {
+            "workers": {
+                "codex-yield-001": {
+                    "run_id": "codex-yield-001",
                     "task_id": "YIELD-001",
                     "agent_id": "codex",
-                    "resume_at": "2999-01-01T00:00:00Z",
+                    "status": "completed",
+                    "terminal_outcome": "progress",
+                    "completed_at": "2026-08-14T12:00:00Z",
+                    "redispatch_after": "2999-01-01T00:00:00Z",
                 }
             },
         }
@@ -7165,19 +7158,20 @@ class WorkerYieldCooldownTests(unittest.TestCase):
         self.assertFalse(changed)
         queue_delivery_event.assert_not_called()
 
-    def test_expired_worker_yield_is_removed(self) -> None:
-        state = {
-            "worker_yields": {
-                "YIELD-002:codex": {
-                    "task_id": "YIELD-002",
-                    "agent_id": "codex",
-                    "resume_at": "2020-01-01T00:00:00Z",
-                }
+    def test_expired_progress_attempt_does_not_block_redispatch(self) -> None:
+        workers = {
+            "codex-yield-002": {
+                "run_id": "codex-yield-002",
+                "task_id": "YIELD-002",
+                "agent_id": "codex",
+                "status": "completed",
+                "terminal_outcome": "progress",
+                "completed_at": "2020-01-01T00:00:00Z",
+                "redispatch_after": "2020-01-01T00:00:00Z",
             }
         }
 
-        self.assertFalse(supervisor.worker_yield_is_active(state, "YIELD-002", "Codex"))
-        self.assertEqual(state["worker_yields"], {})
+        self.assertFalse(supervisor.redispatch_is_deferred(workers, "YIELD-002", "Codex"))
 
 
 class DispatchCooldownTests(unittest.TestCase):
@@ -7759,8 +7753,6 @@ class ProactiveReassignmentAntiFlapTests(unittest.TestCase):
                 "allow_any_idle_lane": True,
                 "require_assigned_agent_busy": True,
             },
-            review_statuses={"review"},
-            dependency_done_statuses={"done"},
             state=state,
         )
         self.assertIsNone(plan)

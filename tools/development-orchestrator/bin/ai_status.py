@@ -474,6 +474,15 @@ LEGACY_INTEGRATION_FIELDS = {
     "dev_deploy_sha",
     "dev_deploy_source_ref",
 }
+RELEASE_ACCEPTANCE_FIELDS = frozenset(
+    {
+        "dev_deploy_run_url",
+        "dev_deploy_sha",
+        "operational_acceptance_run_url",
+        "operational_acceptance_sha",
+        "gap_g1_g8_evidence",
+    }
+)
 
 
 def candidate_required(task: dict[str, Any]) -> bool:
@@ -492,6 +501,40 @@ def acceptance_complete(task: dict[str, Any]) -> bool:
     if not isinstance(evidence, dict):
         return False
     return all(str(evidence.get(name) or "").strip() for name in required_acceptance(task))
+
+
+def validate_task_spec(task: dict[str, Any]) -> None:
+    """Reject task records that cannot safely enter the candidate lifecycle."""
+    task_id = str(task.get("id") or "<unknown>")
+    task_class = str(task.get("task_class") or "implementation").strip().lower()
+    acceptance = set(required_acceptance(task))
+    if task_class == "release":
+        missing = sorted(RELEASE_ACCEPTANCE_FIELDS - acceptance)
+        if missing:
+            raise SystemExit(
+                f"Release task {task_id} must require same-SHA acceptance evidence: {', '.join(missing)}"
+            )
+    if task_class == "documentation" and task.get("mutates_canonical") is False:
+        raise SystemExit(
+            f"Documentation task {task_id} edits canonical artifacts and cannot set mutates_canonical=false"
+        )
+
+
+def validate_acceptance_evidence(task: dict[str, Any], evidence: dict[str, Any]) -> None:
+    """Ensure deployment and operational evidence describe the merged commit."""
+    merge_sha = str(task.get("merge_sha") or "").strip()
+    if not merge_sha or merge_sha == "not_applicable":
+        return
+    combined_evidence = dict(task.get("acceptance_evidence") or {})
+    combined_evidence.update(evidence)
+    for key in ("dev_deploy_sha", "operational_acceptance_sha"):
+        if key not in combined_evidence:
+            continue
+        evidence_sha = str(combined_evidence[key] or "").strip()
+        if evidence_sha != merge_sha:
+            raise SystemExit(
+                f"Acceptance evidence {key} must exactly match merge SHA {merge_sha} for {task.get('id')}"
+            )
 
 
 def candidate_is_locked(task: dict[str, Any]) -> bool:
@@ -1596,6 +1639,7 @@ def command_assign(state: dict[str, Any], args: list[str]) -> None:
             "candidate_lifecycle_version": 1,
         }
         task.update(metadata)
+        validate_task_spec(task)
         state["tasks"].append(task)
     else:
         task["owner"] = owner
@@ -1609,6 +1653,7 @@ def command_assign(state: dict[str, Any], args: list[str]) -> None:
         task["last_update"] = timestamp
         task["next"] = "Ownership updated"
         task.setdefault("candidate_lifecycle_version", 1)
+        validate_task_spec(task)
 
     agent = get_agent(state, owner)
     if os.environ.get("TASK_BRANCH"):
@@ -2121,6 +2166,7 @@ def command_record_acceptance(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Acceptance evidence is not required for {task_id}: {', '.join(unexpected)}")
     if not evidence:
         raise SystemExit("ACCEPTANCE_EVIDENCE_JSON must include at least one required evidence key")
+    validate_acceptance_evidence(task, evidence)
     task.setdefault("acceptance_evidence", {}).update(evidence)
     timestamp = iso_now()
     transition_after_merge(state, task, message=message, timestamp=timestamp)

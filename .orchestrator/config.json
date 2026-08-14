@@ -462,17 +462,9 @@
   "ready_dispatcher": {
     "enabled": true,
     "review_statuses": ["review"],
+    "acceptance_statuses": ["acceptance"],
     "owned_statuses": ["in_progress", "todo", "backlog"],
     "dependency_done_statuses": ["done"],
-    "worker_terminal_statuses": ["done"],
-    "active_worker_statuses": [
-      "running",
-      "waiting_approval",
-      "suspended_approval",
-      "retry_backoff",
-      "manual_pending",
-      "stalled"
-    ],
     "helper_claim": {
       "enabled": true,
       "task_statuses": ["backlog", "todo", "in_progress", "review"],
