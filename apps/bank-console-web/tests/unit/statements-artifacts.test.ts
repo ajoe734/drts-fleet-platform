@@ -486,7 +486,7 @@ describe("S1F-BANK-002 Statement Artifacts and Role Authorization", () => {
     const resLogin = await loginUser(reqLogin);
     expect(resLogin.status).toBe(303);
     expect(resLogin.headers.get("location")).toBe(
-      "http://localhost:3000/?bank=ctbc&locale=zh&role=bank_finance",
+      "/?bank=ctbc&locale=zh&role=bank_finance",
     );
     const cookies = resLogin.headers.get("set-cookie");
     expect(cookies).toContain("drts_bank_console_session=");
@@ -720,7 +720,7 @@ describe("S1F-BANK-002 Statement Artifacts and Role Authorization", () => {
     const res = await loginUser(req);
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(
-      "http://localhost:3000/?bank=ctbc&locale=zh&role=bank_finance",
+      "/?bank=ctbc&locale=zh&role=bank_finance",
     );
     const cookies = res.headers.get("set-cookie");
     expect(cookies).toContain("drts_bank_console_session=");
@@ -820,7 +820,7 @@ describe("S1F-BANK-002 Statement Artifacts and Role Authorization", () => {
     const res = await loginUser(req);
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(
-      "http://localhost:3000/?bank=cathay&locale=zh&role=bank_finance",
+      "/?bank=cathay&locale=zh&role=bank_finance",
     );
     const cookies = res.headers.get("set-cookie");
     expect(cookies).toContain("drts_bank_console_session=");
@@ -875,7 +875,7 @@ describe("S1F-BANK-002 Statement Artifacts and Role Authorization", () => {
 
       expect(response.status).toBe(303);
       expect(response.headers.get("location")).toBe(
-        "http://localhost:3000/?bank=ctbc&locale=zh&role=bank_program_admin",
+        "/?bank=ctbc&locale=zh&role=bank_program_admin",
       );
     } finally {
       if (previousEnvironment === undefined) delete process.env.DRTS_ENV;

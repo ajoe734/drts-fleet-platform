@@ -104,18 +104,22 @@ describe("retired Cloud Run service cleanup", () => {
     expect(source).toContain(
       "RETIRED_SERVICE_CLEANUP: ${{ inputs.retired_service_cleanup || 'none' }}",
     );
-    const uiSmokeJob = source.indexOf("\n  ui-smoke:");
     const cleanupJob = source.indexOf("\n  retired-service-cleanup:");
-    expect(uiSmokeJob).toBeGreaterThan(-1);
-    expect(cleanupJob).toBeGreaterThan(uiSmokeJob);
-    expect(source.slice(uiSmokeJob, cleanupJob)).toContain(
+    const candidateAcceptanceJob = source.indexOf(
+      "\n  operational-candidate-acceptance:",
+    );
+    expect(source).not.toContain("\n  ui-smoke:");
+    expect(cleanupJob).toBeGreaterThan(-1);
+    expect(candidateAcceptanceJob).toBeGreaterThan(cleanupJob);
+    expect(source.slice(cleanupJob, candidateAcceptanceJob)).toContain(
       "needs: [prepare, health-check]",
     );
-    expect(source.slice(cleanupJob)).toContain(
-      "needs: [prepare, health-check, ui-smoke]",
+    const candidateAcceptance = source.slice(candidateAcceptanceJob);
+    expect(candidateAcceptance).toContain(
+      "needs: [prepare, build-push, health-check, retired-service-cleanup]",
     );
-    expect(source.slice(cleanupJob)).toContain(
-      "needs.ui-smoke.result == 'success'",
+    expect(candidateAcceptance).toContain(
+      "needs.retired-service-cleanup.result == 'success'",
     );
     expect(
       source
