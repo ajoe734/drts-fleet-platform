@@ -19,6 +19,7 @@ from provider_permissions import (
     _codex_auth_ready,
     _copilot_auth_ready,
     _copilot_plaintext_token,
+    desired_claude_local_settings,
     _verified_claude_hooks,
     _verified_claude_policy,
     provider_capabilities,
@@ -38,6 +39,53 @@ class ProviderPermissionsTest(unittest.TestCase):
             command = entries[0]["hooks"][0]["command"]
             self.assertIn(expected, command)
             self.assertTrue(command.startswith("python3 /"))
+
+    def test_claude_hook_sync_replaces_managed_hooks_and_is_idempotent(self) -> None:
+        custom_hook = {
+            "hooks": [{"type": "command", "command": "printf custom", "shell": "bash"}]
+        }
+        current = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    "python3 /home/demo/project/.orchestrator/permission_broker.py "
+                                    "--config /home/demo/project/.orchestrator/config.json hook PreToolUse"
+                                ),
+                                "shell": "bash",
+                            }
+                        ]
+                    },
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": (
+                                    "python3 /home/demo/project/.artifacts/releases/orchestrator-old/"
+                                    "tools/development-orchestrator/permission_broker.py hook PreToolUse"
+                                ),
+                                "shell": "bash",
+                            }
+                        ]
+                    },
+                    custom_hook,
+                ]
+            }
+        }
+
+        first = desired_claude_local_settings({}, current=current)
+        second = desired_claude_local_settings({}, current=first)
+        entries = second["hooks"]["PreToolUse"]
+
+        self.assertEqual(second, first)
+        self.assertEqual(entries[0], custom_hook)
+        self.assertEqual(len(entries), 2)
+        command = entries[1]["hooks"][0]["command"]
+        self.assertIn(str(SOURCE_ROOT), command)
+        self.assertEqual(command.count("permission_broker.py"), 1)
 
     def test_toolsearch_is_auto_allowed(self) -> None:
         evaluation = permission_broker.evaluate_tool_request("ToolSearch", {}, {})
