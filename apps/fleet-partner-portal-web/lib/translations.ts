@@ -160,6 +160,10 @@ const en: Dict = {
   "supply.reason.insurance_expired": "Insurance expired",
   "supply.reason.contract_missing": "Missing contract",
   "supply.reason.contract_inactive": "Contract inactive",
+  "supply.reason.driver_registry_missing":
+    "Driver record missing from registry",
+  "supply.reason.vehicle_registry_missing":
+    "Vehicle record missing from registry",
   "supply.reason.driver_affiliation_missing": "Driver affiliation missing",
   "supply.reason.vehicle_affiliation_missing": "Vehicle affiliation missing",
   "supply.reason.service_product_not_supported":
@@ -674,6 +678,8 @@ const zh: Dict = {
   "supply.reason.insurance_expired": "保險過期",
   "supply.reason.contract_missing": "缺契約",
   "supply.reason.contract_inactive": "契約未生效",
+  "supply.reason.driver_registry_missing": "司機主檔遺失",
+  "supply.reason.vehicle_registry_missing": "車輛主檔遺失",
   "supply.reason.driver_affiliation_missing": "司機未掛靠",
   "supply.reason.vehicle_affiliation_missing": "車輛未掛靠",
   "supply.reason.service_product_not_supported": "服務產品不支援",

@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
+import { getIamTenantRoleScopes } from "../../packages/contracts/src/iam-policy-catalog";
 
 const repoRoot = path.resolve(__dirname, "../..");
 const deployScript = path.join(
@@ -178,6 +179,23 @@ describe("Cloud Run deploy quota retry", () => {
 
     expect(apiEnv).toContain("DRTS_ENV=development");
     expect(apiEnv).toContain("AUTH_MODE=explicit");
+  });
+
+  it("issues the candidate Tenant session with the canonical tenant_admin scopes", () => {
+    const workflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+    const sessionStart = workflow.indexOf(
+      "- name: Issue deployment-machine Tenant acceptance session",
+    );
+    const sessionEnd = workflow.indexOf("\n      - uses:", sessionStart);
+    const sessionStep = workflow.slice(sessionStart, sessionEnd);
+    const scopes = getIamTenantRoleScopes("tenant_admin");
+
+    expect(scopes).not.toBeNull();
+    expect(sessionStep).toContain("x-actor-id: tenant-user-demo-001");
+    expect(sessionStep).toContain(`x-scopes: ${scopes?.join(" ")}`);
   });
 
   it("enables public demo login only on the Bank Console deployment", () => {

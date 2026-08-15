@@ -88,6 +88,8 @@ const REASON_LABEL_KEYS: Record<SupplyReadinessReasonCode, string> = {
   INSURANCE_EXPIRED: "supply.reason.insurance_expired",
   CONTRACT_MISSING: "supply.reason.contract_missing",
   CONTRACT_INACTIVE: "supply.reason.contract_inactive",
+  DRIVER_REGISTRY_MISSING: "supply.reason.driver_registry_missing",
+  VEHICLE_REGISTRY_MISSING: "supply.reason.vehicle_registry_missing",
   DRIVER_AFFILIATION_MISSING: "supply.reason.driver_affiliation_missing",
   VEHICLE_AFFILIATION_MISSING: "supply.reason.vehicle_affiliation_missing",
   SERVICE_PRODUCT_NOT_SUPPORTED: "supply.reason.service_product_not_supported",
