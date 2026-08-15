@@ -4,10 +4,8 @@ import { NextRequest } from "next/server";
 
 import {
   GET as tenantAuthGet,
-  POST as tenantAuthPost,
 } from "../../apps/tenant-console-web/app/api/auth/[...auth]/route";
 import {
-  GET as proxyGet,
   POST as proxyPost,
 } from "../../apps/tenant-console-web/app/control-plane-proxy/[...path]/route";
 import {
@@ -17,7 +15,6 @@ import {
   TENANT_CSRF_HEADER_NAME,
 } from "../../apps/tenant-console-web/lib/auth/constants";
 import {
-  encodeStateEnvelope,
   generateCsrfToken,
 } from "../../apps/tenant-console-web/lib/auth/session";
 
@@ -27,7 +24,6 @@ import { IdentityRepository } from "../../apps/api/src/modules/identity/identity
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
-import { TenantPartnerController } from "../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
 import { getTenantRoleScopes } from "../../apps/api/src/common/auth/auth.constants";
 
 class MockOidcServer {
@@ -47,8 +43,8 @@ class MockOidcServer {
       email: string;
       emailVerified: boolean;
       amr: string[];
-      tenantId?: string;
-      customIdTokenProps?: Record<string, unknown>;
+      tenantId?: string | undefined;
+      customIdTokenProps?: Record<string, unknown> | undefined;
     }
   >();
 
@@ -71,8 +67,8 @@ class MockOidcServer {
     email: string;
     emailVerified?: boolean;
     amr?: string[];
-    tenantId?: string;
-    customIdTokenProps?: Record<string, unknown>;
+    tenantId?: string | undefined;
+    customIdTokenProps?: Record<string, unknown> | undefined;
   }): string {
     const code = `auth_code_${randomBytes(16).toString("hex")}`;
     this.issuedCodes.set(code, {
@@ -89,9 +85,18 @@ class MockOidcServer {
   }
 
   public handleTokenExchange(body: Record<string, string>): Response {
-    const { code, code_verifier, grant_type } = body;
+    const code = body["code"] || "";
+    const code_verifier = body["code_verifier"] || "";
+    const grant_type = body["grant_type"];
     if (grant_type !== "authorization_code") {
       return new Response(JSON.stringify({ error: "unsupported_grant_type" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!code || !code_verifier) {
+      return new Response(JSON.stringify({ error: "invalid_request", message: "Missing code or verifier" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
@@ -171,7 +176,6 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
   let jwtAuthService: JwtAuthService;
   let oidcService: OidcPkceService;
   let authController: AuthController;
-  let tenantPartnerController: TenantPartnerController;
 
   let seededAdminUser: { userId: string; email: string };
 
@@ -209,15 +213,6 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
       undefined,
       identityRepository,
       oidcService,
-    );
-
-    tenantPartnerController = new TenantPartnerController(
-      tenantPartnerService,
-      {} as never,
-      {} as never,
-      jwtAuthService,
-      identityRepository,
-      auditService,
     );
 
     // Seed primary tenant admin and secondary admin in tenant-security-001
@@ -452,6 +447,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
           roles: ["tenant_admin"],
           scopes: ["tenant:write"],
           authMode: "jwt_bearer",
+          supportedExecutionModes: ["supervisor_managed_execution"],
         },
       );
     }).toThrow();

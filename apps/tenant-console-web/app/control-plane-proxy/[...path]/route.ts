@@ -3,11 +3,11 @@ import {
   TENANT_SESSION_COOKIE_NAME,
   TENANT_CSRF_COOKIE_NAME,
   TENANT_CSRF_HEADER_NAME,
-} from "@/lib/auth/constants";
+} from "../../../lib/auth/constants";
 import {
   verifyCsrfToken,
   verifySameOrigin,
-} from "@/lib/auth/session";
+} from "../../../lib/auth/session";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const METADATA_IDENTITY_TOKEN_URL =

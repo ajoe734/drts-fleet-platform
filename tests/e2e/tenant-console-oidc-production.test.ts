@@ -17,7 +17,6 @@ import {
   TENANT_CSRF_HEADER_NAME,
 } from "../../apps/tenant-console-web/lib/auth/constants";
 import {
-  encodeStateEnvelope,
   generateCsrfToken,
 } from "../../apps/tenant-console-web/lib/auth/session";
 
@@ -47,7 +46,8 @@ class DeterministicOidcServer {
       email: string;
       emailVerified: boolean;
       amr: string[];
-      tenantId?: string;
+      tenantId?: string | undefined;
+      customIdTokenProps?: Record<string, unknown> | undefined;
     }
   >();
 
@@ -70,7 +70,8 @@ class DeterministicOidcServer {
     email: string;
     emailVerified?: boolean;
     amr?: string[];
-    tenantId?: string;
+    tenantId?: string | undefined;
+    customIdTokenProps?: Record<string, unknown> | undefined;
   }): string {
     const code = `auth_code_${randomBytes(16).toString("hex")}`;
     this.issuedCodes.set(code, {
@@ -81,14 +82,24 @@ class DeterministicOidcServer {
       emailVerified: params.emailVerified ?? true,
       amr: params.amr ?? ["pwd", "mfa"],
       tenantId: params.tenantId,
+      customIdTokenProps: params.customIdTokenProps,
     });
     return code;
   }
 
   public handleTokenExchange(body: Record<string, string>): Response {
-    const { code, code_verifier, client_id, client_secret, grant_type } = body;
+    const code = body["code"] || "";
+    const code_verifier = body["code_verifier"] || "";
+    const grant_type = body["grant_type"];
     if (grant_type !== "authorization_code") {
       return new Response(JSON.stringify({ error: "unsupported_grant_type" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!code || !code_verifier) {
+      return new Response(JSON.stringify({ error: "invalid_request", message: "Missing code or verifier" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });

@@ -4,7 +4,7 @@ import {
   TENANT_OIDC_STATE_COOKIE_NAME,
   TENANT_CSRF_COOKIE_NAME,
   TENANT_CSRF_HEADER_NAME,
-} from "@/lib/auth/constants";
+} from "../../../../lib/auth/constants";
 import {
   isSecureEnvironment,
   sanitizeReturnPath,
@@ -16,8 +16,18 @@ import {
   getSessionCookieOptions,
   getOidcStateCookieOptions,
   getCsrfCookieOptions,
-} from "@/lib/auth/session";
-import { API_URL } from "@/lib/api-client";
+} from "../../../../lib/auth/session";
+
+const DEFAULT_API_BASE_URL = "http://localhost:3001";
+
+function resolveApiUrl(): string {
+  return (
+    process.env.DRTS_API_URL?.trim() ||
+    process.env.API_URL?.trim() ||
+    process.env.NEXT_PUBLIC_API_URL?.trim() ||
+    DEFAULT_API_BASE_URL
+  );
+}
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +75,7 @@ export async function GET(
     const returnUrl = sanitizeReturnPath(rawReturnUrl, request.nextUrl.origin);
 
     const callbackUrl = `${request.nextUrl.origin}/api/auth/tenant/callback`;
-    const backendUrl = new URL(`${API_URL}/api/auth/tenant/login`);
+    const backendUrl = new URL(`${resolveApiUrl()}/api/auth/tenant/login`);
     backendUrl.searchParams.set("redirect_uri", callbackUrl);
     if (tenantId) {
       backendUrl.searchParams.set("tenant_id", tenantId);
@@ -188,7 +198,7 @@ export async function GET(
 
     try {
       const exchangeRes = await fetch(
-        `${API_URL}/api/auth/tenant/callback-session`,
+        `${resolveApiUrl()}/api/auth/tenant/callback-session`,
         {
           method: "POST",
           headers: {
@@ -272,7 +282,7 @@ export async function GET(
     }
 
     try {
-      const sessionRes = await fetch(`${API_URL}/api/auth/session`, {
+      const sessionRes = await fetch(`${resolveApiUrl()}/api/auth/session`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       });
@@ -336,7 +346,7 @@ export async function POST(
 
     if (token) {
       try {
-        await fetch(`${API_URL}/api/auth/logout`, {
+        await fetch(`${resolveApiUrl()}/api/auth/logout`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -383,7 +393,7 @@ export async function POST(
 
     if (token) {
       try {
-        await fetch(`${API_URL}/api/auth/logout-all`, {
+        await fetch(`${resolveApiUrl()}/api/auth/logout-all`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,

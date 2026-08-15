@@ -31,6 +31,7 @@ import type {
 export interface JwtIdentityPayload {
   sub: string | null;
   actorType: AuthActorType;
+  actorId?: string | null;
   realm: AuthRealm;
   tenantId: string | null;
   principalId?: string | null;
@@ -76,36 +77,41 @@ export interface IssuedJwtSessionToken {
 type JwtExpiresIn = Extract<NonNullable<jwt.SignOptions["expiresIn"]>, string>;
 
 type JwtSignIdentityBase =
-  | Pick<
-      BootstrapRequestIdentity,
-      | "authMode"
-      | "actorType"
-      | "actorId"
-      | "principalId"
-      | "membershipId"
-      | "subject"
-      | "realm"
-      | "tenantId"
-      | "partnerId"
-      | "partnerProgramId"
-      | "partnerEntrySlug"
-      | "sessionId"
-      | "tokenId"
-      | "tokenVersion"
-      | "authTime"
-      | "amr"
-      | "acr"
-      | "policyVersion"
-      | "issuer"
-      | "audience"
-      | "issuedAt"
-      | "expiresAt"
-      | "roleFamilies"
-      | "roles"
-      | "scopes"
-      | "requestId"
-      | "breakGlassGrantId"
-    >
+  | (Omit<
+      Pick<
+        BootstrapRequestIdentity,
+        | "authMode"
+        | "actorType"
+        | "actorId"
+        | "principalId"
+        | "membershipId"
+        | "subject"
+        | "realm"
+        | "tenantId"
+        | "partnerId"
+        | "partnerProgramId"
+        | "partnerEntrySlug"
+        | "sessionId"
+        | "tokenId"
+        | "tokenVersion"
+        | "authTime"
+        | "amr"
+        | "acr"
+        | "policyVersion"
+        | "issuer"
+        | "audience"
+        | "issuedAt"
+        | "expiresAt"
+        | "roleFamilies"
+        | "roles"
+        | "scopes"
+        | "requestId"
+        | "breakGlassGrantId"
+      >,
+      "requestId"
+    > & {
+      requestId?: string | null;
+    })
   | IdentityContext;
 
 type JwtSignIdentity = JwtSignIdentityBase & {

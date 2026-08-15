@@ -10,10 +10,10 @@ import {
 
 export interface OidcStatePayload {
   stateToken: string;
-  state?: string;
+  state?: string | undefined;
   returnUrl: string;
-  codeVerifier?: string;
-  issuedAt?: number;
+  codeVerifier?: string | undefined;
+  issuedAt?: number | undefined;
 }
 
 function getStateSecret(): string {
