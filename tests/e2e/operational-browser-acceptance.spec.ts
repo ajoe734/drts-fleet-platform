@@ -442,19 +442,13 @@ for (const journey of manifest.journeys) {
           response.url().includes(operation.requestUrlIncludes),
         { timeout: interactionTimeoutMs },
       );
-      // A successful mutation can navigate immediately. Begin consuming the
-      // response before navigation disposes its CDP request body.
-      const responseBodyPromise =
-        operation.responseKind === "json"
-          ? responsePromise.then(
-              (response) => response.json() as Promise<unknown>,
-            )
-          : null;
       const downloadPromise =
         operation.responseKind === "download"
           ? page.waitForEvent("download", { timeout: interactionTimeoutMs })
           : null;
-      await activeControl.click();
+      // Mutations can navigate the page. Do not wait for that navigation before
+      // reading JSON, otherwise Chromium may discard the response body.
+      await activeControl.click({ noWaitAfter: true });
       const response = await responsePromise;
       expect(
         response.ok(),
@@ -495,7 +489,7 @@ for (const journey of manifest.journeys) {
         continue;
       }
 
-      const responseBody = await responseBodyPromise!;
+      const responseBody = (await response.json()) as unknown;
       const resultId = valueAtPath(
         responseBody,
         operation.resultIdPath as string,
