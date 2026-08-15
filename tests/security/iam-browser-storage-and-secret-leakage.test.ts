@@ -55,6 +55,28 @@ describe("IAM browser-storage and secret-leakage scan", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("enforces HttpOnly flags on session and state cookie configurations to block browser script access", async () => {
+    const { getSessionCookieOptions, getOidcStateCookieOptions, getCsrfCookieOptions } = await import(
+      "../../apps/tenant-console-web/lib/auth/session"
+    );
+
+    const prodSessionOpts = getSessionCookieOptions(true);
+    expect(prodSessionOpts.httpOnly).toBe(true);
+    expect(prodSessionOpts.secure).toBe(true);
+    expect(prodSessionOpts.sameSite).toBe("lax");
+    expect(prodSessionOpts.path).toBe("/");
+
+    const prodStateOpts = getOidcStateCookieOptions(true);
+    expect(prodStateOpts.httpOnly).toBe(true);
+    expect(prodStateOpts.secure).toBe(true);
+    expect(prodStateOpts.sameSite).toBe("lax");
+    expect(prodStateOpts.path).toBe("/api/auth");
+
+    const prodCsrfOpts = getCsrfCookieOptions(true);
+    expect(prodCsrfOpts.secure).toBe(true);
+    expect(prodCsrfOpts.sameSite).toBe("lax");
+  });
+
   it("keeps IAM-UAT-001 evidence free of raw secret literals", () => {
     const evidenceDir = path.join(ROOT_DIR, "support/sidecars/IAM-UAT-001");
     const offenders: string[] = [];

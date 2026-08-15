@@ -442,6 +442,28 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
       return new Response(JSON.stringify({ error: "NOT_FOUND" }), { status: 404 });
     });
 
+    // Helper to scan responses for raw secret, bearer token, or internal header leakage
+    function assertResponseSecretsScan(res: Response | NextResponse, body?: any) {
+      const forbiddenHeaders = [
+        "x-drts-internal-key",
+        "x-serverless-authorization",
+        "x-actor-id",
+        "x-realm",
+        "authorization",
+      ];
+      for (const h of forbiddenHeaders) {
+        expect(res.headers.get(h)).toBeNull();
+      }
+
+      if (body !== undefined && body !== null) {
+        const text = typeof body === "string" ? body : JSON.stringify(body);
+        expect(text).not.toContain("drts-tenant-console-secret-12345");
+        expect(text).not.toContain("test_jwt_secret_key");
+        expect(text).not.toContain("test_bff_state_secret");
+        expect(text).not.toContain("idp_access_token_");
+      }
+    }
+
     // ── STEP 1: BFF Login Initiation ──────────────────────────────────────────
     const loginReq = new NextRequest(
       "https://tenant.drts.internal/api/auth/tenant/login?redirect_uri=/bookings",
@@ -451,6 +473,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     });
 
     expect(loginRes.status).toBe(307);
+    assertResponseSecretsScan(loginRes);
     const authRedirectUrl = loginRes.headers.get("location");
     expect(authRedirectUrl).toBeDefined();
     expect(authRedirectUrl).toContain(oidcServer.issuer);
@@ -494,6 +517,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     });
 
     expect(callbackRes.status).toBe(307);
+    assertResponseSecretsScan(callbackRes);
     expect(callbackRes.headers.get("location")).toBe("https://tenant.drts.internal/bookings");
 
     const sessionCookie = callbackRes.cookies.get(TENANT_SESSION_COOKIE_NAME);
@@ -524,10 +548,16 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
 
     expect(sessionRes.status).toBe(200);
     const sessionData = await sessionRes.json();
+    assertResponseSecretsScan(sessionRes, sessionData);
     expect(sessionData.data.active).toBe(true);
     expect(sessionData.data.identity.realm).toBe("tenant");
     expect(sessionData.data.identity.tenantId).toBe(tenantId);
     expect(sessionData.data.identity.roles).toContain("tenant_admin");
+    // Ensure raw bearer token or IdP tokens are never returned in session payload
+    expect(sessionData.data.token).toBeUndefined();
+    expect(sessionData.data.sessionToken).toBeUndefined();
+    expect(sessionData.data.accessToken).toBeUndefined();
+    expect(sessionData.data.idToken).toBeUndefined();
 
     // ── STEP 5: Authorized Read via Control Plane Proxy ────────────────────────
     const proxyReadReq = new NextRequest(
@@ -547,6 +577,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
 
     expect(proxyReadRes.status).toBe(200);
     const proxyReadData = await proxyReadRes.json();
+    assertResponseSecretsScan(proxyReadRes, proxyReadData);
     expect(proxyReadData.data).toBeDefined();
 
     // ── STEP 6: Authorized Write via Control Plane Proxy with CSRF ─────────────
@@ -575,6 +606,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
 
     expect(proxyWriteRes.status).toBe(200);
     const proxyWriteData = await proxyWriteRes.json();
+    assertResponseSecretsScan(proxyWriteRes, proxyWriteData);
     expect(proxyWriteData.data.code).toBe("CC-E2E-001");
 
     // ── STEP 7: Logout via BFF ────────────────────────────────────────────────
@@ -593,6 +625,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
 
     expect(logoutRes.status).toBe(200);
     const logoutData = await logoutRes.json();
+    assertResponseSecretsScan(logoutRes, logoutData);
     expect(logoutData.success).toBe(true);
 
     const expiredSessionCookie = logoutRes.cookies.get(TENANT_SESSION_COOKIE_NAME);
@@ -608,6 +641,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
       params: Promise.resolve({ auth: ["session"] }),
     });
     expect(postLogoutSessionRes.status).toBe(401);
+    assertResponseSecretsScan(postLogoutSessionRes);
 
     const postLogoutProxyReq = new NextRequest(
       "https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers",
@@ -621,6 +655,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
       params: Promise.resolve({ path: ["tenant", "cost-centers"] }),
     });
     expect(postLogoutProxyRes.status).toBe(401);
+    assertResponseSecretsScan(postLogoutProxyRes);
   });
 
   it("executes logout-all and invalidates all active sessions for the principal", async () => {
@@ -701,6 +736,11 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     });
 
     expect(logoutAllRes.status).toBe(200);
+    const logoutAllData = await logoutAllRes.json();
+    expect(logoutAllData.success).toBe(true);
+    expect(logoutAllRes.headers.get("authorization")).toBeNull();
+    expect(logoutAllRes.headers.get("x-drts-internal-key")).toBeNull();
+    expect(logoutAllRes.cookies.get(TENANT_SESSION_COOKIE_NAME)?.value === "" || logoutAllRes.cookies.get(TENANT_SESSION_COOKIE_NAME)?.maxAge === 0).toBe(true);
 
     // Both session 1 and session 2 must now be invalidated
     expect(await jwtAuthService.verifyAccessToken(session1.token)).toBeNull();
