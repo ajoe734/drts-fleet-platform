@@ -314,6 +314,10 @@ TASKS = (
         "iam-release",
         task_class="release",
         required_acceptance=(
+            "dev_deploy_run_url",
+            "dev_deploy_sha",
+            "operational_acceptance_run_url",
+            "operational_acceptance_sha",
             "staging_deploy_run_url",
             "staging_deploy_sha",
             "strict_oidc_login_evidence",
