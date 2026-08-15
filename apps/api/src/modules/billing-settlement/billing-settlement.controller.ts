@@ -248,13 +248,26 @@ export class BillingSettlementController {
   }
 
   @Get("settlement/invoices")
-  listPlatformInvoices(@Headers("x-request-id") requestId?: string) {
-    const items = this.billingSettlementService.listPlatformInvoices();
+  @RequireRealms("system", "platform", "tenant", "ops", "partner")
+  @RequireScopes("billing:read")
+  listPlatformInvoices(
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    let items = this.billingSettlementService.listPlatformInvoices();
+    if (identity?.realm === "tenant" && identity.tenantId) {
+      items = items.filter((invoice) => invoice.tenantId === identity.tenantId);
+    }
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("settlement/matrix")
-  listSettlementMatrix(@Headers("x-request-id") requestId?: string) {
+  @RequireRealms("system", "platform", "tenant", "ops", "partner")
+  @RequireScopes("billing:read")
+  listSettlementMatrix(
+    @CurrentIdentity() _identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
     const items = this.billingSettlementService.listSettlementMatrix();
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
@@ -269,8 +282,11 @@ export class BillingSettlementController {
   }
 
   @Post("driver-fee-plans/publish")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   publishDriverFeePlan(
     @Body() command: PublishDriverFeePlanCommand,
+    @CurrentIdentity() _identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
@@ -336,26 +352,45 @@ export class BillingSettlementController {
   }
 
   @Get("settlement/reconciliation-issues")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:read")
   listReconciliationIssues(
     @Query("status") status?: "open" | "assigned" | "resolved" | "reopened",
     @Query("issueType")
     issueType?: "forwarder_status_mismatch" | "partner_sponsor_mismatch",
     @Query("channelKey") channelKey?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items = this.billingSettlementService.listReconciliationIssues({
+    let items = this.billingSettlementService.listReconciliationIssues({
       ...(status ? { status } : {}),
       ...(issueType ? { issueType } : {}),
       ...(channelKey ? { channelKey } : {}),
     });
+    if (identity?.realm === "tenant" && identity.tenantId) {
+      items = items.filter((issue) => issue.tenantId === identity.tenantId);
+    }
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("settlement/reconciliation-issues")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   createReconciliationIssue(
     @Body() command: CreateReconciliationIssueCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (identity?.realm === "tenant" && identity.tenantId) {
+      if (command.tenantId && command.tenantId !== identity.tenantId) {
+        throw new ApiRequestError(
+          403,
+          "TENANT_BOUNDARY_VIOLATION",
+          "Tenant caller cannot create reconciliation issues for another tenant.",
+        );
+      }
+      command.tenantId = identity.tenantId;
+    }
     return toApiSuccessEnvelope(
       this.billingSettlementService.createReconciliationIssue(
         command,
@@ -366,11 +401,26 @@ export class BillingSettlementController {
   }
 
   @Post("settlement/reconciliation-issues/:issueId/assign")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   assignReconciliationIssue(
     @Param("issueId") issueId: string,
     @Body() command: AssignReconciliationIssueCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (identity?.realm === "tenant" && identity.tenantId) {
+      const issue = this.billingSettlementService
+        .listReconciliationIssues()
+        .find((item) => item.issueId === issueId);
+      if (!issue || (issue.tenantId && issue.tenantId !== identity.tenantId)) {
+        throw new ApiRequestError(
+          404,
+          "NOT_FOUND",
+          "Reconciliation issue not found.",
+        );
+      }
+    }
     return toApiSuccessEnvelope(
       this.billingSettlementService.assignReconciliationIssue(
         issueId,
@@ -382,11 +432,26 @@ export class BillingSettlementController {
   }
 
   @Post("settlement/reconciliation-issues/:issueId/comment")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   addReconciliationIssueComment(
     @Param("issueId") issueId: string,
     @Body() command: AddReconciliationIssueCommentCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (identity?.realm === "tenant" && identity.tenantId) {
+      const issue = this.billingSettlementService
+        .listReconciliationIssues()
+        .find((item) => item.issueId === issueId);
+      if (!issue || (issue.tenantId && issue.tenantId !== identity.tenantId)) {
+        throw new ApiRequestError(
+          404,
+          "NOT_FOUND",
+          "Reconciliation issue not found.",
+        );
+      }
+    }
     return toApiSuccessEnvelope(
       this.billingSettlementService.addReconciliationIssueComment(
         issueId,
@@ -398,11 +463,26 @@ export class BillingSettlementController {
   }
 
   @Post("settlement/reconciliation-issues/:issueId/resolve")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   resolveReconciliationIssue(
     @Param("issueId") issueId: string,
     @Body() command: ResolveReconciliationIssueCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (identity?.realm === "tenant" && identity.tenantId) {
+      const issue = this.billingSettlementService
+        .listReconciliationIssues()
+        .find((item) => item.issueId === issueId);
+      if (!issue || (issue.tenantId && issue.tenantId !== identity.tenantId)) {
+        throw new ApiRequestError(
+          404,
+          "NOT_FOUND",
+          "Reconciliation issue not found.",
+        );
+      }
+    }
     return toApiSuccessEnvelope(
       this.billingSettlementService.resolveReconciliationIssue(
         issueId,
@@ -414,11 +494,26 @@ export class BillingSettlementController {
   }
 
   @Post("settlement/reconciliation-issues/:issueId/reopen")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   reopenReconciliationIssue(
     @Param("issueId") issueId: string,
     @Body() command: ReopenReconciliationIssueCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (identity?.realm === "tenant" && identity.tenantId) {
+      const issue = this.billingSettlementService
+        .listReconciliationIssues()
+        .find((item) => item.issueId === issueId);
+      if (!issue || (issue.tenantId && issue.tenantId !== identity.tenantId)) {
+        throw new ApiRequestError(
+          404,
+          "NOT_FOUND",
+          "Reconciliation issue not found.",
+        );
+      }
+    }
     return toApiSuccessEnvelope(
       this.billingSettlementService.reopenReconciliationIssue(
         issueId,

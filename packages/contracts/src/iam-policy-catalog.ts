@@ -200,7 +200,7 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
   },
   {
     scope: "notifications:write",
-    allowedRealms: ["system", "platform", "ops"],
+    allowedRealms: ["system", "platform", "ops", "driver"],
     description: "Mutate notification inbox data.",
     resourceConstraints: [ACTOR_CONSTRAINT, OBJECT_CONSTRAINT],
   },
@@ -641,6 +641,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         "driver:write",
         "dispatch:read",
         "incident:write",
+        "notifications:write",
       ],
     },
     {

@@ -12,12 +12,16 @@ import { FeatureFlagsService } from "./feature-flags.service";
 import type { FeatureFlagSummary } from "@drts/contracts";
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { ApiRequestError } from "../../common/api-envelope";
+import { RequireRealms, RequireScopes } from "../../common/auth";
 
 @Controller("admin")
+@RequireRealms("system", "platform")
 export class FeatureFlagsController {
   constructor(private readonly service: FeatureFlagsService) {}
 
   @Get("flags")
+  @RequireRealms("system", "platform")
+  @RequireScopes("foundation:read")
   async getAllFlags(
     @Headers("x-request-id") requestId?: string,
     @Headers("x-tenant-id") tenantId?: string,
@@ -35,6 +39,8 @@ export class FeatureFlagsController {
   }
 
   @Get("flags/:key")
+  @RequireRealms("system", "platform")
+  @RequireScopes("foundation:read")
   async getFlag(
     @Param("key") key: string,
     @Headers("x-request-id") requestId?: string,
@@ -45,6 +51,8 @@ export class FeatureFlagsController {
   }
 
   @Patch("flags/:key")
+  @RequireRealms("system", "platform")
+  @RequireScopes("foundation:write")
   async updateFlag(
     @Param("key") key: string,
     @Body() body: { enabled: boolean },
@@ -55,6 +63,8 @@ export class FeatureFlagsController {
   }
 
   @Post("flags/:key/tenant-overrides")
+  @RequireRealms("system", "platform")
+  @RequireScopes("foundation:write")
   async upsertTenantOverride(
     @Param("key") key: string,
     @Query("tenantId") tenantId: string,
@@ -78,6 +88,8 @@ export class FeatureFlagsController {
   }
 
   @Get("flags/:key/enabled")
+  @RequireRealms("system", "platform")
+  @RequireScopes("foundation:read")
   async checkFlagEnabled(
     @Param("key") key: string,
     @Headers("x-request-id") requestId?: string,
