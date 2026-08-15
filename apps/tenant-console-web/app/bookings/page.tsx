@@ -1,9 +1,7 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import type {
-  ApiErrorEnvelope,
   ApiListData,
-  ApiSuccessEnvelope,
   BookingRecord,
   CrossAppResourceLink,
   EmptyReason,

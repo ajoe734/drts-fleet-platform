@@ -62,6 +62,27 @@ describe("Control Plane Proxy Invariants", () => {
       const data = await response.json();
       expect(data.error).toBe("CSRF_TOKEN_INVALID");
     });
+
+    it("rejects DELETE when CSRF token is mismatched", async () => {
+      const request = new NextRequest(
+        "http://localhost:3004/control-plane-proxy/tenant/api-keys/k1",
+        {
+          method: "DELETE",
+          headers: {
+            origin: "http://localhost:3004",
+            cookie: `${TENANT_SESSION_COOKIE_NAME}=sess123; ${TENANT_CSRF_COOKIE_NAME}=csrf123`,
+          },
+        },
+      );
+
+      const response = await proxyDelete(request, {
+        params: Promise.resolve({ path: ["tenant", "api-keys", "k1"] }),
+      });
+
+      expect(response.status).toBe(403);
+      const data = await response.json();
+      expect(data.error).toBe("CSRF_TOKEN_INVALID");
+    });
   });
 
   describe("Header Stripping and Bearer Forwarding", () => {

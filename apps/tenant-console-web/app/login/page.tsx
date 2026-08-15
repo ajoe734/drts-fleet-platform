@@ -8,6 +8,8 @@ import {
 import { REALM_COLORS } from "@drts/ui-tokens";
 import { getTenantSession } from "@/lib/api-client";
 import { sanitizeReturnPath } from "@/lib/auth/session";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +38,7 @@ export default async function LoginPage({
     redirect(sanitizedRedirect);
   }
 
+  const locale = await getServerLocale();
   const tenantColors = REALM_COLORS.tenant.dark;
 
   return (
@@ -63,14 +66,14 @@ export default async function LoginPage({
                 fontWeight: 700,
               }}
             >
-              TENANT REALM
+              {t("login.realm.tenant", locale)}
             </CanvasPill>
           </div>
 
           <CanvasPageHeader
             theme={th}
-            title="Tenant Console Sign-In"
-            subtitle="Sign in with your organization's managed OIDC identity to access tenant operations, billing, and fulfillment controls."
+            title={t("login.title", locale)}
+            subtitle={t("login.subtitle", locale)}
           />
 
           {params.error ? (
@@ -86,7 +89,7 @@ export default async function LoginPage({
                 lineHeight: 1.5,
               }}
             >
-              <strong>Authentication Error:</strong> {params.error}
+              <strong>{t("login.error.title", locale)}</strong> {params.error}
               {params.message ? <p style={{ marginTop: 4 }}>{params.message}</p> : null}
             </div>
           ) : null}
@@ -113,13 +116,13 @@ export default async function LoginPage({
                   letterSpacing: "0.05em",
                 }}
               >
-                Tenant ID / Hint (Optional)
+                {t("login.tenantIdLabel", locale)}
               </label>
               <input
                 id="tenant_id"
                 name="tenant_id"
                 type="text"
-                placeholder="e.g. tenant-acme-001"
+                placeholder={t("login.tenantIdPlaceholder", locale)}
                 style={{
                   background: th.surfaceLo,
                   border: `1px solid ${th.border}`,
@@ -151,7 +154,7 @@ export default async function LoginPage({
                 transition: "opacity 0.15s ease",
               }}
             >
-              Sign in with OIDC · 透過 OIDC 登入
+              {t("login.submit", locale)}
             </button>
           </form>
 
@@ -166,8 +169,7 @@ export default async function LoginPage({
             }}
           >
             <p>
-              Managed HttpOnly session cookies and same-origin CSRF protection
-              are enforced. Browser clients never receive readable bearer tokens.
+              {t("login.securityNote", locale)}
             </p>
           </div>
         </CanvasCard>

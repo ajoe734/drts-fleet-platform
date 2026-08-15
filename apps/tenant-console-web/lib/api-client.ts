@@ -4,8 +4,6 @@ import { ApiClient, createBearerClient } from "@drts/api-client";
 import { getServerApiBaseUrl } from "./runtime-config";
 import {
   TENANT_SESSION_COOKIE_NAME,
-  TENANT_CSRF_COOKIE_NAME,
-  TENANT_CSRF_HEADER_NAME,
   TENANT_LOGIN_PATH,
 } from "./auth/constants";
 
