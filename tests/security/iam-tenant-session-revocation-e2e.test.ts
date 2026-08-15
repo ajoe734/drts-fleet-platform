@@ -279,8 +279,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
       {
         code: "CC-SEC-001",
         name: "Security Cost Center 1",
-        department: "Security",
-        monthlyBudget: 10000,
+        description: "Security Cost Center",
       },
       tenantId,
       "req-seed-cc-001",
@@ -313,8 +312,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
       {
         code: "CC-SEC-OTHER-001",
         name: "Other Tenant Cost Center",
-        department: "Finance",
-        monthlyBudget: 50000,
+        description: "Other Tenant Cost Center",
       },
       otherTenantId,
       "req-seed-other-cc-001",

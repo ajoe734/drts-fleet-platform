@@ -443,7 +443,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     });
 
     // Helper to scan responses for raw secret, bearer token, or internal header leakage
-    function assertResponseSecretsScan(res: Response | NextResponse, body?: any) {
+    function assertResponseSecretsScan(res: Response, body?: any) {
       const forbiddenHeaders = [
         "x-drts-internal-key",
         "x-serverless-authorization",
