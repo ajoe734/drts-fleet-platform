@@ -81,18 +81,27 @@ export async function GET(
       const authorizationUrl = payload?.authorizationUrl;
       const stateToken = payload?.stateToken ?? payload?.state;
 
-      if (!res.ok || !authorizationUrl) {
+      if (
+        !res.ok ||
+        !authorizationUrl ||
+        typeof authorizationUrl !== "string" ||
+        !stateToken ||
+        typeof stateToken !== "string" ||
+        stateToken.trim().length === 0
+      ) {
         return NextResponse.json(
           {
             error: data?.error?.code || "AUTH_LOGIN_FAILED",
-            message: data?.error?.message || "Could not generate tenant login URL",
+            message:
+              data?.error?.message ||
+              "Could not generate tenant login URL or missing API-issued state token",
           },
-          { status: res.status || 500 },
+          { status: res.status && res.status >= 400 ? res.status : 500 },
         );
       }
 
       const stateEnvelope = encodeStateEnvelope({
-        stateToken: stateToken || "state",
+        stateToken: stateToken.trim(),
         returnUrl,
       });
 
@@ -117,9 +126,29 @@ export async function GET(
 
   // 2. /api/auth/tenant/callback or /api/auth/callback
   if (actionPath === "tenant/callback" || actionPath === "callback") {
-    const code = request.nextUrl.searchParams.get("code") || "";
-    const state = request.nextUrl.searchParams.get("state") || "";
+    const code = request.nextUrl.searchParams.get("code")?.trim() || "";
+    const state = request.nextUrl.searchParams.get("state")?.trim() || "";
     const stateCookie = request.cookies.get(TENANT_OIDC_STATE_COOKIE_NAME)?.value;
+
+    if (!code) {
+      return NextResponse.json(
+        {
+          error: "AUTH_SESSION_EXCHANGE_DENIED",
+          message: "Authorization code is required in callback query parameters.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (!state) {
+      return NextResponse.json(
+        {
+          error: "AUTH_SESSION_EXCHANGE_DENIED",
+          message: "Authorization state is required in callback query parameters.",
+        },
+        { status: 400 },
+      );
+    }
 
     if (!stateCookie) {
       return NextResponse.json(
@@ -145,7 +174,7 @@ export async function GET(
 
     const { stateToken, returnUrl, codeVerifier } = statePayload;
 
-    if (state && stateToken && state !== stateToken) {
+    if (state !== stateToken) {
       const loginUrl = new URL("/login", request.nextUrl.origin);
       loginUrl.searchParams.set("error", "AUTH_STATE_MISMATCH");
       loginUrl.searchParams.set("message", "State token does not match authorization state");

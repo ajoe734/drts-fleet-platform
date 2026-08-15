@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach } from "vitest";
 import {
   decodeStateEnvelope,
   encodeStateEnvelope,
@@ -9,6 +9,10 @@ import {
 } from "@/lib/auth/session";
 
 describe("Tenant Auth Session Utilities", () => {
+  beforeEach(() => {
+    process.env.BFF_STATE_SECRET = "test-bff-state-secret-32-chars-long-123456";
+  });
+
   describe("encodeStateEnvelope and decodeStateEnvelope", () => {
     it("encodes and decodes signed state envelope", () => {
       const payload = {
@@ -26,6 +30,16 @@ describe("Tenant Auth Session Utilities", () => {
       expect(decoded?.returnUrl).toBe("/bookings?view=urgent");
       expect(decoded?.codeVerifier).toBe("verifier-xyz");
       expect(typeof decoded?.issuedAt).toBe("number");
+    });
+
+    it("rejects unsigned raw JSON state envelopes (no unsigned fallback)", () => {
+      const rawJson = JSON.stringify({
+        stateToken: "untrusted-state-token",
+        returnUrl: "/settings",
+      });
+
+      // An unsigned raw JSON must be rejected immediately with null
+      expect(decodeStateEnvelope(rawJson)).toBeNull();
     });
 
     it("rejects tampered state envelope", () => {
@@ -56,6 +70,48 @@ describe("Tenant Auth Session Utilities", () => {
       expect(decodeStateEnvelope("")).toBeNull();
       expect(decodeStateEnvelope(undefined)).toBeNull();
       expect(decodeStateEnvelope("not-a-valid-envelope")).toBeNull();
+      expect(decodeStateEnvelope("a.b.c")).toBeNull();
+    });
+
+    it("fails closed when no secret is configured", () => {
+      const originalSecret = process.env.BFF_STATE_SECRET;
+      const originalAuthSecret = process.env.AUTH_COOKIE_SECRET;
+      const originalInternalKey = process.env.DRTS_INTERNAL_KEY;
+
+      delete process.env.BFF_STATE_SECRET;
+      delete process.env.AUTH_COOKIE_SECRET;
+      delete process.env.DRTS_INTERNAL_KEY;
+
+      try {
+        expect(() =>
+          encodeStateEnvelope({
+            stateToken: "token-1",
+            returnUrl: "/",
+          }),
+        ).toThrow("BFF state secret is not configured");
+
+        expect(decodeStateEnvelope("some.envelope")).toBeNull();
+      } finally {
+        if (originalSecret) process.env.BFF_STATE_SECRET = originalSecret;
+        if (originalAuthSecret) process.env.AUTH_COOKIE_SECRET = originalAuthSecret;
+        if (originalInternalKey) process.env.DRTS_INTERNAL_KEY = originalInternalKey;
+      }
+    });
+
+    it("throws error when encoding with empty or missing stateToken", () => {
+      expect(() =>
+        encodeStateEnvelope({
+          stateToken: "",
+          returnUrl: "/",
+        }),
+      ).toThrow("OIDC state payload requires a valid non-empty stateToken");
+
+      expect(() =>
+        encodeStateEnvelope({
+          stateToken: "   ",
+          returnUrl: "/",
+        }),
+      ).toThrow("OIDC state payload requires a valid non-empty stateToken");
     });
   });
 

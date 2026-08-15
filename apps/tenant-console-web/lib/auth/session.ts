@@ -16,12 +16,18 @@ export interface OidcStatePayload {
 }
 
 function getStateSecret(): string {
-  return (
+  const secret =
     process.env.BFF_STATE_SECRET?.trim() ||
     process.env.AUTH_COOKIE_SECRET?.trim() ||
-    process.env.DRTS_INTERNAL_KEY?.trim() ||
-    "drts-tenant-console-bff-state-secret-2026"
-  );
+    process.env.DRTS_INTERNAL_KEY?.trim();
+
+  if (!secret) {
+    throw new Error(
+      "BFF state secret is not configured. Set BFF_STATE_SECRET or AUTH_COOKIE_SECRET.",
+    );
+  }
+
+  return secret;
 }
 
 export function isSecureEnvironment(
@@ -75,12 +81,22 @@ export function sanitizeReturnPath(
 }
 
 export function encodeStateEnvelope(payload: OidcStatePayload): string {
+  if (
+    !payload ||
+    typeof payload.stateToken !== "string" ||
+    payload.stateToken.trim().length === 0
+  ) {
+    throw new Error("OIDC state payload requires a valid non-empty stateToken.");
+  }
+
+  const secret = getStateSecret();
   const data = JSON.stringify({
     ...payload,
+    stateToken: payload.stateToken.trim(),
     issuedAt: payload.issuedAt ?? Date.now(),
   });
   const dataB64 = Buffer.from(data, "utf8").toString("base64url");
-  const hmac = createHmac("sha256", getStateSecret())
+  const hmac = createHmac("sha256", secret)
     .update(dataB64)
     .digest("base64url");
   return `${dataB64}.${hmac}`;
@@ -92,14 +108,18 @@ export function decodeStateEnvelope(value?: string | null): OidcStatePayload | n
   }
 
   const parts = value.split(".");
-  if (parts.length === 2) {
-    const dataB64 = parts[0];
-    const hmac = parts[1];
-    if (!dataB64 || !hmac) {
-      return null;
-    }
+  if (parts.length !== 2) {
+    return null;
+  }
 
-    const expectedHmac = createHmac("sha256", getStateSecret())
+  const [dataB64, hmac] = parts;
+  if (!dataB64 || !hmac) {
+    return null;
+  }
+
+  try {
+    const secret = getStateSecret();
+    const expectedHmac = createHmac("sha256", secret)
       .update(dataB64)
       .digest("base64url");
 
@@ -110,50 +130,31 @@ export function decodeStateEnvelope(value?: string | null): OidcStatePayload | n
       return null;
     }
 
-    try {
-      const parsed = JSON.parse(
-        Buffer.from(dataB64, "base64url").toString("utf8"),
-      ) as Partial<OidcStatePayload>;
+    const parsed = JSON.parse(
+      Buffer.from(dataB64, "base64url").toString("utf8"),
+    ) as Partial<OidcStatePayload>;
 
-      if (!parsed.stateToken || typeof parsed.stateToken !== "string") {
-        return null;
-      }
-
-      // 10 minutes expiry check
-      if (
-        typeof parsed.issuedAt === "number" &&
-        Date.now() - parsed.issuedAt > TENANT_OIDC_STATE_MAX_AGE_SECONDS * 1000
-      ) {
-        return null;
-      }
-
-      return {
-        stateToken: parsed.stateToken,
-        returnUrl: parsed.returnUrl ?? "/",
-        ...(parsed.codeVerifier ? { codeVerifier: parsed.codeVerifier } : {}),
-        ...(typeof parsed.issuedAt === "number" ? { issuedAt: parsed.issuedAt } : {}),
-      };
-    } catch {
+    if (!parsed.stateToken || typeof parsed.stateToken !== "string" || parsed.stateToken.trim().length === 0) {
       return null;
     }
-  }
 
-  // Fallback for raw JSON if unsigned (legacy test compatibility)
-  try {
-    const parsed = JSON.parse(value) as Partial<OidcStatePayload>;
-    if (parsed.stateToken && typeof parsed.stateToken === "string") {
-      return {
-        stateToken: parsed.stateToken,
-        returnUrl: parsed.returnUrl ?? "/",
-        ...(parsed.codeVerifier ? { codeVerifier: parsed.codeVerifier } : {}),
-        ...(typeof parsed.issuedAt === "number" ? { issuedAt: parsed.issuedAt } : {}),
-      };
+    // 10 minutes expiry check
+    if (
+      typeof parsed.issuedAt === "number" &&
+      Date.now() - parsed.issuedAt > TENANT_OIDC_STATE_MAX_AGE_SECONDS * 1000
+    ) {
+      return null;
     }
-  } catch {
-    // ignore
-  }
 
-  return null;
+    return {
+      stateToken: parsed.stateToken.trim(),
+      returnUrl: parsed.returnUrl ?? "/",
+      ...(parsed.codeVerifier ? { codeVerifier: parsed.codeVerifier } : {}),
+      ...(typeof parsed.issuedAt === "number" ? { issuedAt: parsed.issuedAt } : {}),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function generateCsrfToken(): string {
