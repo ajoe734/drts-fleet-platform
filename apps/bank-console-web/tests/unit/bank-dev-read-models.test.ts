@@ -10,6 +10,7 @@ import type {
 import {
   loadBankBookingsData,
   loadBankHomeSnapshot,
+  loadBankStatementsData,
 } from "../../lib/bank-dev-read-models";
 
 vi.mock("server-only", () => ({}));
@@ -65,7 +66,12 @@ const orders: OwnedOrderRecord[] = [
     businessDispatchSubtype: "airport_transfer",
     status: "submitted",
     pickup: { address: "台北", maskedAddress: "台北", lat: null, lng: null },
-    dropoff: { address: "桃機 T2", maskedAddress: "桃機 T2", lat: null, lng: null },
+    dropoff: {
+      address: "桃機 T2",
+      maskedAddress: "桃機 T2",
+      lat: null,
+      lng: null,
+    },
     passenger: { name: "Cardholder One", phone: "0912000111" },
     bookingId: null,
     bookingType: null,
@@ -128,7 +134,12 @@ const orders: OwnedOrderRecord[] = [
     dispatchSemantics: "reserved",
     businessDispatchSubtype: "airport_transfer",
     status: "on_trip",
-    pickup: { address: "桃機 T1", maskedAddress: "桃機 T1", lat: null, lng: null },
+    pickup: {
+      address: "桃機 T1",
+      maskedAddress: "桃機 T1",
+      lat: null,
+      lng: null,
+    },
     dropoff: { address: "新竹", maskedAddress: "新竹", lat: null, lng: null },
     passenger: { name: "Cardholder Two", phone: "0912000222" },
     bookingId: null,
@@ -193,7 +204,12 @@ const orders: OwnedOrderRecord[] = [
     businessDispatchSubtype: "airport_transfer",
     status: "completed",
     pickup: { address: "台北", maskedAddress: "台北", lat: null, lng: null },
-    dropoff: { address: "桃機 T2", maskedAddress: "桃機 T2", lat: null, lng: null },
+    dropoff: {
+      address: "桃機 T2",
+      maskedAddress: "桃機 T2",
+      lat: null,
+      lng: null,
+    },
     passenger: { name: "Cardholder Three", phone: "0912000333" },
     bookingId: null,
     bookingType: null,
@@ -256,7 +272,12 @@ const orders: OwnedOrderRecord[] = [
     dispatchSemantics: "reserved",
     businessDispatchSubtype: "airport_transfer",
     status: "cancelled",
-    pickup: { address: "桃機 T1", maskedAddress: "桃機 T1", lat: null, lng: null },
+    pickup: {
+      address: "桃機 T1",
+      maskedAddress: "桃機 T1",
+      lat: null,
+      lng: null,
+    },
     dropoff: { address: "台北", maskedAddress: "台北", lat: null, lng: null },
     passenger: { name: "Cardholder Four", phone: "0912000444" },
     bookingId: null,
@@ -378,35 +399,35 @@ const auditLogs: AuditLogRecord[] = [];
 
 const statements = [
   {
-    statementId: "stmt_2026_08",
-    tenantId: "tenant_ctbc",
+    statement_id: "stmt_2026_08",
+    tenant_id: "tenant_ctbc",
     period: "2026-08",
     status: "due",
     lines: [
       {
-        tripId: "trip_1",
-        completedAt: "2026-08-05T03:00:00Z",
-        fare: { amountMinor: 120000, currency: "TWD" },
-        subsidisedAmount: { amountMinor: 100000, currency: "TWD" },
-        paidAmount: { amountMinor: 20000, currency: "TWD" },
-        benefitReference: "BEN-CTBC-0003",
-        issuerAuthorizationRef: "AUTH-CTBC-003",
-        cardholderRefMasked: "CH••••33",
+        trip_id: "trip_1",
+        completed_at: "2026-08-05T03:00:00Z",
+        fare: { amount_minor: 120000, currency: "TWD" },
+        subsidised_amount: { amount_minor: 100000, currency: "TWD" },
+        paid_amount: { amount_minor: 20000, currency: "TWD" },
+        benefit_reference: "BEN-CTBC-0003",
+        issuer_authorization_ref: "AUTH-CTBC-003",
+        cardholder_ref_masked: "CH••••33",
       },
     ],
     totals: {
-      tripCount: 1,
-      fareTotal: { amountMinor: 120000, currency: "TWD" },
-      subsidisedTotal: { amountMinor: 100000, currency: "TWD" },
-      paidTotal: { amountMinor: 20000, currency: "TWD" },
-      issuerPayable: { amountMinor: 100000, currency: "TWD" },
+      trip_count: 1,
+      fare_total: { amount_minor: 120000, currency: "TWD" },
+      subsidised_total: { amount_minor: 100000, currency: "TWD" },
+      paid_total: { amount_minor: 20000, currency: "TWD" },
+      issuer_payable: { amount_minor: 100000, currency: "TWD" },
     },
-    artifactRef: {
-      artifactId: "artifact_stmt_2026_08",
+    artifact_ref: {
+      artifact_id: "artifact_stmt_2026_08",
       kind: "settlement_statement",
-      manifestHash: "hash",
+      manifest_hash: "hash",
     },
-    generatedAt: "2026-08-06T00:00:00Z",
+    generated_at: "2026-08-06T00:00:00Z",
   },
 ];
 
@@ -491,5 +512,25 @@ describe("bank dev read models", () => {
       cancelled: 1,
     });
     expect(result.data.statements[0]?.totalIssuerPayableAmount).toBe(1000);
+  });
+
+  it("maps canonical snake-case settlement responses into bank statements", async () => {
+    const result = await loadBankStatementsData(
+      "tenant_ctbc",
+      "bank_program_admin",
+    );
+
+    expect(result.degradedMessage).toBeNull();
+    expect(result.data.statements[0]).toMatchObject({
+      statementNo: "stmt_2026_08",
+      totalTrips: 1,
+      signedArtifactHref: "/artifacts/statements/artifact_stmt_2026_08.pdf",
+      trips: [
+        expect.objectContaining({
+          tripId: "trip_1",
+          fareAmount: 1200,
+        }),
+      ],
+    });
   });
 });

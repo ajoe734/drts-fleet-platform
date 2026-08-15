@@ -8,6 +8,16 @@ import {
 } from "@/lib/enterprise-booking-draft";
 
 describe("enterprise booking draft", () => {
+  it("starts new bookings in a future editable window", () => {
+    const draft = createEnterpriseBookingDraft(
+      "zh",
+      new Date("2026-08-15T00:00:00.000Z"),
+    );
+
+    expect(draft.reservationDate).toBe("2026-08-17");
+    expect(draft.reservationTime).toBe("10:00");
+  });
+
   it("round-trips editable draft values through review query params", () => {
     const initial = {
       ...createEnterpriseBookingDraft("zh"),

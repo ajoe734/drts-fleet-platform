@@ -389,6 +389,10 @@ for (const journey of manifest.journeys) {
           response.url().includes(operation.requestUrlIncludes),
         { timeout: interactionTimeoutMs },
       );
+      const downloadPromise =
+        operation.responseKind === "download"
+          ? page.waitForEvent("download", { timeout: interactionTimeoutMs })
+          : null;
       await activeControl.click();
       const response = await responsePromise;
       expect(
@@ -401,6 +405,7 @@ for (const journey of manifest.journeys) {
       );
 
       if (operation.responseKind === "download") {
+        const download = await downloadPromise!;
         expect(
           response.headers()["content-type"] ?? "",
           `${journey.id}/${operation.name} content type`,
@@ -410,9 +415,13 @@ for (const journey of manifest.journeys) {
           `${journey.id}/${operation.name} attachment`,
         ).toContain("attachment");
         expect(
-          (await response.body()).byteLength,
-          `${journey.id}/${operation.name} artifact body`,
-        ).toBeGreaterThan(0);
+          await download.failure(),
+          `${journey.id}/${operation.name} download failure`,
+        ).toBeNull();
+        expect(
+          (await download.createReadStream()) !== null,
+          `${journey.id}/${operation.name} artifact stream`,
+        ).toBeTruthy();
         record({
           kind: "download",
           journey: journey.id,
