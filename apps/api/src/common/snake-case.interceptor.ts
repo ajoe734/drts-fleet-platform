@@ -3,6 +3,7 @@ import {
   ExecutionContext,
   Injectable,
   NestInterceptor,
+  StreamableFile,
 } from "@nestjs/common";
 import { Observable } from "rxjs";
 import { map } from "rxjs/operators";
@@ -60,6 +61,12 @@ export class SnakeCaseInterceptor implements NestInterceptor {
     _context: ExecutionContext,
     next: CallHandler,
   ): Observable<unknown> {
-    return next.handle().pipe(map(deepToSnakeCase));
+    return next.handle().pipe(
+      // A StreamableFile is a response transport, not a JSON payload. Recursing
+      // into it turns its stream into a plain object and corrupts downloads.
+      map((value) =>
+        value instanceof StreamableFile ? value : deepToSnakeCase(value),
+      ),
+    );
   }
 }

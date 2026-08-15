@@ -499,6 +499,7 @@ export default function SupplyReviewDetailPage() {
                 variant="primary"
                 icon="check"
                 disabled={submitting}
+                data-drt-operation="admin-start-review"
                 onClick={handleStartReview}
               >
                 {t("supplyReview.detail.startReview")}

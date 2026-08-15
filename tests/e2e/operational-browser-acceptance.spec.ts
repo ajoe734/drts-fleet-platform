@@ -3,14 +3,19 @@ import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+type TemplateVariables = Record<string, unknown>;
 type SetupRequest = {
+  baseUrlEnv?: string;
   path: string;
   method: HttpMethod;
-  body?: Record<string, unknown>;
+  body?: unknown;
+  headers?: Record<string, string>;
+  capture?: Record<string, string>;
 };
 type JourneyStep =
   | { kind: "navigate"; path: string }
-  | { kind: "click"; control: string };
+  | { kind: "click"; control: string }
+  | { kind: "fill"; control: string; value: string };
 type Readback = {
   url: string;
   idPath: string;
@@ -103,13 +108,57 @@ function valueAtPath(value: unknown, dotPath: string): unknown {
   }, value);
 }
 
-function interpolatePath(template: string, resultId: unknown) {
-  if (!template.includes("{resultId}")) return template;
+function variableValue(name: string, variables: TemplateVariables) {
+  const value = variables[name];
+  expect(value, `template variable ${name}`).not.toBeUndefined();
+  return value;
+}
+
+function materializeString(template: string, variables: TemplateVariables) {
+  return template.replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g, (_, name) =>
+    String(variableValue(name, variables)),
+  );
+}
+
+function materializeValue(
+  value: unknown,
+  variables: TemplateVariables,
+): unknown {
+  if (typeof value === "string") {
+    const wholeVariable = value.match(/^\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}$/);
+    return wholeVariable
+      ? variableValue(wholeVariable[1]!, variables)
+      : materializeString(value, variables);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => materializeValue(item, variables));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        materializeValue(item, variables),
+      ]),
+    );
+  }
+  return value;
+}
+
+function interpolatePath(
+  template: string,
+  resultId: unknown,
+  variables: TemplateVariables,
+) {
+  const materialized = materializeString(template, variables);
+  if (!materialized.includes("{resultId}")) return materialized;
   expect(
     resultId,
-    `${template} requires a prior operation result ID`,
+    `${materialized} requires a prior operation result ID`,
   ).toBeTruthy();
-  return template.replace("{resultId}", encodeURIComponent(String(resultId)));
+  return materialized.replaceAll(
+    "{resultId}",
+    encodeURIComponent(String(resultId)),
+  );
 }
 
 async function navigate(page: Page, origin: string, route: string) {
@@ -123,10 +172,15 @@ async function runSteps(
   origin: string,
   steps: JourneyStep[],
   lastResultId: unknown,
+  variables: TemplateVariables,
 ) {
   for (const step of steps) {
     if (step.kind === "navigate") {
-      await navigate(page, origin, interpolatePath(step.path, lastResultId));
+      await navigate(
+        page,
+        origin,
+        interpolatePath(step.path, lastResultId, variables),
+      );
       continue;
     }
 
@@ -134,24 +188,44 @@ async function runSteps(
     await expect(control, `${step.control} must be visible`).toBeVisible({
       timeout: interactionTimeoutMs,
     });
-    await control.click();
+    if (step.kind === "fill") {
+      await control.fill(materializeString(step.value, variables));
+    } else {
+      await control.click();
+    }
   }
 }
 
-async function runSetup(page: Page, origin: string, journey: Journey) {
+async function runSetup(
+  page: Page,
+  journey: Journey,
+  variables: TemplateVariables,
+) {
   for (const setup of journey.setup ?? []) {
+    const origin = requiredOrigin(setup.baseUrlEnv ?? journey.baseUrlEnv);
+    const body = setup.body
+      ? materializeValue(setup.body, variables)
+      : undefined;
+    const headers = setup.headers
+      ? (materializeValue(setup.headers, variables) as Record<string, string>)
+      : undefined;
     const response = await page
       .context()
-      .request.fetch(new URL(setup.path, origin).toString(), {
-        method: setup.method,
-        maxRedirects: 0,
-        ...(setup.body
-          ? {
-              data: setup.body,
-              headers: { "Content-Type": "application/json" },
-            }
-          : {}),
-      });
+      .request.fetch(
+        new URL(materializeString(setup.path, variables), origin).toString(),
+        {
+          method: setup.method,
+          maxRedirects: 0,
+          ...(body
+            ? {
+                data: body,
+                headers: { "Content-Type": "application/json", ...headers },
+              }
+            : headers
+              ? { headers }
+              : {}),
+        },
+      );
     expect(response.status(), `${journey.id} setup ${setup.path}`).toBeLessThan(
       400,
     );
@@ -159,6 +233,17 @@ async function runSetup(page: Page, origin: string, journey: Journey) {
       response.headers(),
       `${journey.id} setup ${setup.path}`,
     );
+    if (setup.capture) {
+      const responseBody = (await response.json()) as unknown;
+      for (const [name, valuePath] of Object.entries(setup.capture)) {
+        const value = valueAtPath(responseBody, valuePath);
+        expect(
+          value,
+          `${journey.id} setup ${setup.path} capture ${name}`,
+        ).toBeTruthy();
+        variables[name] = value;
+      }
+    }
     record({
       kind: "setup",
       journey: journey.id,
@@ -167,6 +252,7 @@ async function runSetup(page: Page, origin: string, journey: Journey) {
       method: setup.method,
       url: response.url(),
       status: response.status(),
+      captures: setup.capture ? Object.keys(setup.capture) : [],
     });
   }
 }
@@ -242,8 +328,15 @@ for (const journey of manifest.journeys) {
     page,
   }) => {
     const origin = requiredOrigin(journey.baseUrlEnv);
-    await runSetup(page, origin, journey);
-    await navigate(page, origin, journey.route);
+    const variables: TemplateVariables = {
+      runId: `${journey.id}-${Date.now().toString(36)}`,
+    };
+    await runSetup(page, journey, variables);
+    await navigate(
+      page,
+      origin,
+      interpolatePath(journey.route, null, variables),
+    );
 
     let lastResultId: unknown = null;
     for (const operation of journey.operations) {
@@ -277,7 +370,13 @@ for (const journey of manifest.journeys) {
         continue;
       }
 
-      await runSteps(page, origin, operation.before ?? [], lastResultId);
+      await runSteps(
+        page,
+        origin,
+        operation.before ?? [],
+        lastResultId,
+        variables,
+      );
       const activeControl = page.locator(operation.control).first();
       await expect(
         activeControl,
@@ -337,7 +436,7 @@ for (const journey of manifest.journeys) {
       ).toBeTruthy();
       lastResultId = resultId;
       const readback = operation.readback as Readback;
-      const readbackPath = interpolatePath(readback.url, resultId);
+      const readbackPath = interpolatePath(readback.url, resultId, variables);
       const readbackResponse = await page
         .context()
         .request.get(new URL(readbackPath, origin).toString());
@@ -376,9 +475,15 @@ for (const journey of manifest.journeys) {
     page,
   }) => {
     const origin = requiredOrigin(journey.baseUrlEnv);
-    await runSetup(page, origin, journey);
+    const variables: TemplateVariables = {
+      runId: `${journey.id}-route-${Date.now().toString(36)}`,
+    };
+    await runSetup(page, journey, variables);
     const response = await page.goto(
-      new URL(journey.route, origin).toString(),
+      new URL(
+        interpolatePath(journey.route, null, variables),
+        origin,
+      ).toString(),
       {
         waitUntil: "domcontentloaded",
       },

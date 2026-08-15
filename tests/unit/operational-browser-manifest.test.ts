@@ -28,6 +28,23 @@ describe("operational browser journeys manifest guard", () => {
       (j: { id: string }) => j.id === "fleet-submit-read-withdraw-resubmit",
     );
     expect(fleetJourney).toBeDefined();
+    expect(fleetJourney.route).toBe(
+      "/supply/submissions/{{fleetSubmissionId}}",
+    );
+    expect(fleetJourney.setup).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
+          capture: expect.objectContaining({
+            fleetSubmissionId: "data.submission.submission_id",
+          }),
+        }),
+        expect.objectContaining({
+          path: expect.stringContaining("documents/confirm"),
+          method: "POST",
+        }),
+      ]),
+    );
 
     for (const op of fleetJourney.operations) {
       expect(op.kind).toBe("request");
@@ -45,10 +62,17 @@ describe("operational browser journeys manifest guard", () => {
       (j: { id: string }) => j.id === "admin-review-approve-readback",
     );
     expect(adminJourney).toBeDefined();
+    expect(adminJourney.route).toBe("/supply-review/{{adminSubmissionId}}");
     const approveOp = adminJourney.operations[0];
     expect(approveOp.kind).toBe("request");
     expect(approveOp.responseKind).toBe("json");
-    expect(approveOp.resultIdPath).toBe("data.submissionId");
+    expect(approveOp.resultIdPath).toBe("data.submission_id");
+    expect(approveOp.before).toEqual([
+      {
+        kind: "click",
+        control: "[data-drt-operation='admin-start-review']",
+      },
+    ]);
     expect(approveOp.readback.url).toBe(
       "/control-plane-proxy/admin/supply-review/submissions/{resultId}",
     );
@@ -58,6 +82,19 @@ describe("operational browser journeys manifest guard", () => {
 
     const tenantJourney = manifest.journeys.find(
       (j: { id: string }) => j.id === "tenant-ops-dispatch-intent",
+    );
+    expect(tenantJourney?.route).toBe("/bookings?q={{tenantBookingId}}");
+    expect(tenantJourney?.setup).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "/api/bookings/create",
+          capture: { tenantBookingId: "booking.bookingId" },
+        }),
+        expect.objectContaining({
+          baseUrlEnv: "DRTS_DEV_API_BASE_URL",
+          path: expect.stringContaining("dispatch-timeout"),
+        }),
+      ]),
     );
     expect(tenantJourney?.operations).toEqual([
       expect.objectContaining({

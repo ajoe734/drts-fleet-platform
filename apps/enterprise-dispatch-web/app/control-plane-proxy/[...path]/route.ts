@@ -69,15 +69,19 @@ function isAllowedEnterprisePath(path: string[], method: string) {
     return true;
   }
 
-  if (isTenantBookingPath(path) && path.length === 2 && method === "POST") {
-    return true;
+  if (!isTenantBookingPath(path)) {
+    return false;
   }
 
-  if (isTenantBookingPath(path) && path.length === 3 && method === "GET") {
-    return true;
+  // The client exposes exactly this tenant-booking lifecycle. Keep the BFF
+  // narrow while allowing every operation it deliberately publishes.
+  if (path.length === 2) {
+    return method === "GET" || method === "POST";
   }
-
-  return false;
+  if (path.length === 3) {
+    return method === "GET" || method === "PUT" || method === "PATCH";
+  }
+  return path.length === 4 && path[3] === "cancel" && method === "POST";
 }
 
 function buildTargetUrl(request: NextRequest, path: string[]) {
@@ -246,6 +250,13 @@ export async function GET(
 }
 
 export async function POST(
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return forward(request, context);
+}
+
+export async function PUT(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {

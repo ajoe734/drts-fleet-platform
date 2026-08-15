@@ -35,7 +35,9 @@ export const BANK_DEMO_TENANTS: Record<BankDemoTenantCode, BankDemoTenant> = {
     avatar: "周",
     actorEmail: "cw.chou@ctbcbank.com",
     roleCode: "bank_program_admin",
-    tenantId: "tenant-ctbc-001",
+    // This is the canonical CTBC issuer ledger configured by the Dev API.
+    // The former display-only identifier returned an empty, valid response.
+    tenantId: "tenant-demo-001",
     template: BRAND_TEMPLATES.CTBC,
     programSeedKeys: {
       premium: "tenant.program.ctbc.premium",
