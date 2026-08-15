@@ -1,4 +1,11 @@
-import { createCipheriv, createDecipheriv, createHash, createPublicKey, type KeyObject, randomBytes } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createPublicKey,
+  type KeyObject,
+  randomBytes,
+} from "node:crypto";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 import type {
@@ -96,12 +103,18 @@ export class OidcPkceService {
    * Helper: encrypt OIDC state record to create an opaque, tamper-proof state token
    */
   public createSignedStateToken(record: OidcStateRecord): string {
-    const secret = process.env.COOKIE_SECRET || process.env.JWT_SECRET || "drts_oidc_state_secret_key_32bytes_min";
+    const secret =
+      process.env.COOKIE_SECRET ||
+      process.env.JWT_SECRET ||
+      "drts_oidc_state_secret_key_32bytes_min";
     const key = createHash("sha256").update(secret).digest();
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", key, iv);
     const payloadStr = JSON.stringify(record);
-    const encrypted = Buffer.concat([cipher.update(payloadStr, "utf8"), cipher.final()]);
+    const encrypted = Buffer.concat([
+      cipher.update(payloadStr, "utf8"),
+      cipher.final(),
+    ]);
     const authTag = cipher.getAuthTag();
     return `${this.base64UrlEncode(iv)}.${this.base64UrlEncode(encrypted)}.${this.base64UrlEncode(authTag)}`;
   }
@@ -111,7 +124,10 @@ export class OidcPkceService {
    */
   public verifyStateToken(stateToken: string): OidcStateRecord | null {
     try {
-      const secret = process.env.COOKIE_SECRET || process.env.JWT_SECRET || "drts_oidc_state_secret_key_32bytes_min";
+      const secret =
+        process.env.COOKIE_SECRET ||
+        process.env.JWT_SECRET ||
+        "drts_oidc_state_secret_key_32bytes_min";
       const key = createHash("sha256").update(secret).digest();
       const parts = stateToken.split(".");
       if (parts.length !== 3) return null;
@@ -123,7 +139,10 @@ export class OidcPkceService {
 
       const decipher = createDecipheriv("aes-256-gcm", key, iv);
       decipher.setAuthTag(authTag);
-      const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+      const decrypted = Buffer.concat([
+        decipher.update(encrypted),
+        decipher.final(),
+      ]);
       const jsonStr = decrypted.toString("utf8");
       const record = JSON.parse(jsonStr) as OidcStateRecord;
       if (Date.now() > record.expiresAt) {
@@ -138,7 +157,9 @@ export class OidcPkceService {
   /**
    * Validate redirect URI against allowed origins
    */
-  public validateRedirectUri(redirectUri: string | null | undefined): string | null {
+  public validateRedirectUri(
+    redirectUri: string | null | undefined,
+  ): string | null {
     if (!redirectUri || redirectUri.trim().length === 0) {
       return null;
     }
@@ -243,7 +264,8 @@ export class OidcPkceService {
       "https://auth.staging.drts.internal";
     const clientId = process.env.OIDC_CLIENT_ID ?? "drts-bff-client";
     const authEndpoint =
-      process.env.OIDC_AUTHORIZATION_ENDPOINT ?? `${issuerUrl}/oauth2/v1/authorize`;
+      process.env.OIDC_AUTHORIZATION_ENDPOINT ??
+      `${issuerUrl}/oauth2/v1/authorize`;
 
     const authUrl = new URL(authEndpoint);
     authUrl.searchParams.set("response_type", "code");
@@ -277,7 +299,11 @@ export class OidcPkceService {
       stateToken?: string;
     },
   ): Promise<TenantBootstrapSession> {
-    const { claims } = await this.validateAndExchangeCode(command, "tenant", meta);
+    const { claims } = await this.validateAndExchangeCode(
+      command,
+      "tenant",
+      meta,
+    );
 
     // Enforce email_verified === true for tenant session exchange
     if (claims.email_verified !== true) {
@@ -309,7 +335,8 @@ export class OidcPkceService {
     // Resolve tenant user identity strictly by immutable subject binding primary key
     const subjectId = claims.sub.trim();
     const normalizedEmail = claims.email.trim().toLowerCase();
-    const requestedTenantId = command.tenantId?.trim() || claims.tenant_id?.trim();
+    const requestedTenantId =
+      command.tenantId?.trim() || claims.tenant_id?.trim();
 
     // 1. Immutable subject binding resolution ONLY (no email lookup or auto-binding)
     let existingUser = requestedTenantId
@@ -323,7 +350,8 @@ export class OidcPkceService {
       : null;
 
     if (!existingUser) {
-      existingUser = this.tenantPartnerService.findTenantUserBySubject(subjectId);
+      existingUser =
+        this.tenantPartnerService.findTenantUserBySubject(subjectId);
     }
 
     const targetTenantId =
@@ -425,7 +453,9 @@ export class OidcPkceService {
     const acr = claims.acr ?? "urn:mace:incommon:iap:silver";
     const authTime = claims.auth_time ?? Math.floor(Date.now() / 1000);
     const mfaVerified = amr.some((m) =>
-      ["mfa", "otp", "totp", "hwk", "sms", "swk", "pin"].includes(m.toLowerCase()),
+      ["mfa", "otp", "totp", "hwk", "sms", "swk", "pin"].includes(
+        m.toLowerCase(),
+      ),
     );
 
     if (!mfaVerified) {
@@ -552,7 +582,8 @@ export class OidcPkceService {
       );
     }
 
-    const partnerEntries = this.tenantPartnerService.listPartnerEntries(entrySlug);
+    const partnerEntries =
+      this.tenantPartnerService.listPartnerEntries(entrySlug);
     const matchedEntry = partnerEntries.find(
       (e) => e.entrySlug === entrySlug || e.partnerId === entrySlug,
     );
@@ -643,7 +674,9 @@ export class OidcPkceService {
     // Extract & enforce MFA claims
     const amr = claims.amr ?? [];
     const mfaVerified = amr.some((m) =>
-      ["mfa", "otp", "totp", "hwk", "sms", "swk", "pin"].includes(m.toLowerCase()),
+      ["mfa", "otp", "totp", "hwk", "sms", "swk", "pin"].includes(
+        m.toLowerCase(),
+      ),
     );
 
     if (!mfaVerified) {
@@ -670,7 +703,8 @@ export class OidcPkceService {
       actorType: "partner_user",
       actorId: linkRecord.drtsPassengerId ?? `partner_user_${claims.sub}`,
       realm: "partner",
-      tenantId: matchedEntry.tenantId ?? this.tenantPartnerService.getDefaultTenantId(),
+      tenantId:
+        matchedEntry.tenantId ?? this.tenantPartnerService.getDefaultTenantId(),
       partnerId: matchedEntry.entrySlug,
       partnerEntrySlug: matchedEntry.entrySlug,
       roleFamilies: ["partner"],
@@ -801,7 +835,11 @@ export class OidcPkceService {
     }
 
     // PKCE Verifier Resolution (command verifier or stored in stateRecord)
-    const verifier = (command.pkceVerifier?.trim() || stateRecord.codeVerifier || "").trim();
+    const verifier = (
+      command.pkceVerifier?.trim() ||
+      stateRecord.codeVerifier ||
+      ""
+    ).trim();
     if (!verifier) {
       throw new ApiRequestError(
         400,
@@ -904,15 +942,34 @@ export class OidcPkceService {
     // In real provider mode, EVERY code must be exchanged with the real IdP token endpoint via HTTP POST.
     const tokenEndpoint =
       process.env.OIDC_TOKEN_ENDPOINT ??
-      (process.env.OIDC_ISSUER ? `${process.env.OIDC_ISSUER}/oauth2/v1/token` : null);
+      (process.env.OIDC_ISSUER
+        ? `${process.env.OIDC_ISSUER}/oauth2/v1/token`
+        : null);
 
     const isMockMode = process.env.OIDC_MOCK_MODE === "true";
+    const environment = detectAuthEnvironment();
+    const syntheticExchangeAllowed =
+      isMockMode && (environment === "local" || environment === "test");
 
     if (tokenEndpoint && !isMockMode) {
-      return await this.exchangeRealOidcTokenEndpoint(command, stateRecord, tokenEndpoint);
+      return await this.exchangeRealOidcTokenEndpoint(
+        command,
+        stateRecord,
+        tokenEndpoint,
+      );
     }
 
-    // 2. Offline synthetic test codes (active when OIDC_MOCK_MODE=true or tokenEndpoint is null)
+    if (!syntheticExchangeAllowed) {
+      throw new ApiRequestError(
+        400,
+        "AUTH_SESSION_EXCHANGE_DENIED",
+        isMockMode
+          ? "OIDC mock mode is not available in this environment."
+          : "OIDC provider token endpoint is not configured.",
+      );
+    }
+
+    // 2. Offline synthetic test codes require an explicit local/test mock mode.
     if (code.includes("invalid_code") || code === "invalid") {
       throw new ApiRequestError(
         400,
@@ -1004,7 +1061,10 @@ export class OidcPkceService {
       };
     }
 
-    if (code.includes("unverified_email") || code.includes("email_not_verified")) {
+    if (
+      code.includes("unverified_email") ||
+      code.includes("email_not_verified")
+    ) {
       return {
         sub: "sub_unverified_email",
         iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
@@ -1018,7 +1078,10 @@ export class OidcPkceService {
       };
     }
 
-    if (code.includes("unbound_tenant_subject") || code.includes("unbound_email")) {
+    if (
+      code.includes("unbound_tenant_subject") ||
+      code.includes("unbound_email")
+    ) {
       return {
         sub: "sub_unbound_tenant_user_9999",
         iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
@@ -1032,7 +1095,10 @@ export class OidcPkceService {
       };
     }
 
-    if (code.includes("brand_new_partner_subject") || code.includes("unbound")) {
+    if (
+      code.includes("brand_new_partner_subject") ||
+      code.includes("unbound")
+    ) {
       return {
         sub: "brand_new_partner_subject",
         iss: process.env.OIDC_ISSUER ?? "https://auth.staging.drts.internal",
@@ -1084,7 +1150,11 @@ export class OidcPkceService {
     if (clientSecret) {
       params.set("client_secret", clientSecret);
     }
-    const verifier = (command.pkceVerifier?.trim() || stateRecord?.codeVerifier || "").trim();
+    const verifier = (
+      command.pkceVerifier?.trim() ||
+      stateRecord?.codeVerifier ||
+      ""
+    ).trim();
     params.set("code_verifier", verifier);
 
     try {
@@ -1098,8 +1168,11 @@ export class OidcPkceService {
       });
 
       if (!response.ok) {
-        const errText = await response.text();
-        this.logger.error(`OIDC Token Exchange HTTP ${response.status}: ${errText}`);
+        // Provider error bodies can echo authorization codes, client details, or
+        // token material. Keep the diagnostic stable and secret-free.
+        this.logger.error(
+          `OIDC token exchange failed with HTTP status ${response.status}.`,
+        );
         throw new ApiRequestError(
           400,
           "AUTH_SESSION_EXCHANGE_DENIED",
@@ -1114,7 +1187,11 @@ export class OidcPkceService {
         expires_in?: number;
       };
 
-      if (!tokenData.id_token || typeof tokenData.id_token !== "string" || !tokenData.id_token.trim()) {
+      if (
+        !tokenData.id_token ||
+        typeof tokenData.id_token !== "string" ||
+        !tokenData.id_token.trim()
+      ) {
         throw new ApiRequestError(
           400,
           "AUTH_SESSION_EXCHANGE_DENIED",
@@ -1122,7 +1199,10 @@ export class OidcPkceService {
         );
       }
 
-      const claimsFromToken = await this.verifyAndDecodeIdToken(tokenData.id_token, stateRecord);
+      const claimsFromToken = await this.verifyAndDecodeIdToken(
+        tokenData.id_token,
+        stateRecord,
+      );
 
       if (!claimsFromToken.sub) {
         throw new ApiRequestError(
@@ -1134,7 +1214,9 @@ export class OidcPkceService {
 
       const userinfoEndpoint =
         process.env.OIDC_USERINFO_ENDPOINT ??
-        (process.env.OIDC_ISSUER ? `${process.env.OIDC_ISSUER}/oauth2/v1/userinfo` : null);
+        (process.env.OIDC_ISSUER
+          ? `${process.env.OIDC_ISSUER}/oauth2/v1/userinfo`
+          : null);
 
       let userinfoClaims: Partial<OidcClaims> = {};
       if (userinfoEndpoint && tokenData.access_token) {
@@ -1145,8 +1227,9 @@ export class OidcPkceService {
           if (userinfoRes.ok) {
             userinfoClaims = (await userinfoRes.json()) as Partial<OidcClaims>;
           }
-        } catch (err) {
-          this.logger.warn(`Failed to fetch userinfo from ${userinfoEndpoint}: ${err}`);
+        } catch {
+          // Do not log endpoint/error details; either can contain sensitive data.
+          this.logger.warn("OIDC userinfo request failed.");
         }
       }
 
@@ -1160,12 +1243,21 @@ export class OidcPkceService {
 
       const mergedClaims: OidcClaims = {
         sub: claimsFromToken.sub,
-        iss: claimsFromToken.iss || process.env.OIDC_ISSUER || "https://auth.staging.drts.internal",
+        iss:
+          claimsFromToken.iss ||
+          process.env.OIDC_ISSUER ||
+          "https://auth.staging.drts.internal",
         aud: claimsFromToken.aud || clientId,
         email: userinfoClaims.email || claimsFromToken.email || "",
-        email_verified: userinfoClaims.email_verified ?? claimsFromToken.email_verified ?? false,
+        email_verified:
+          userinfoClaims.email_verified ??
+          claimsFromToken.email_verified ??
+          false,
         amr: claimsFromToken.amr || userinfoClaims.amr || ["pwd", "mfa"],
-        acr: claimsFromToken.acr || userinfoClaims.acr || "urn:mace:incommon:iap:silver",
+        acr:
+          claimsFromToken.acr ||
+          userinfoClaims.acr ||
+          "urn:mace:incommon:iap:silver",
         auth_time: claimsFromToken.auth_time || Math.floor(Date.now() / 1000),
         nonce: claimsFromToken.nonce,
         tenant_id: claimsFromToken.tenant_id || userinfoClaims.tenant_id,
@@ -1186,7 +1278,7 @@ export class OidcPkceService {
       throw new ApiRequestError(
         400,
         "AUTH_SESSION_EXCHANGE_DENIED",
-        `OIDC token exchange request failed: ${(error as Error).message}`,
+        "OIDC token exchange request failed.",
       );
     }
   }
@@ -1208,7 +1300,9 @@ export class OidcPkceService {
       const [headerB64] = parts;
       let header: { alg?: string; kid?: string; typ?: string };
       try {
-        const headerJsonStr = Buffer.from(headerB64!, "base64url").toString("utf8");
+        const headerJsonStr = Buffer.from(headerB64!, "base64url").toString(
+          "utf8",
+        );
         header = JSON.parse(headerJsonStr);
       } catch {
         throw new ApiRequestError(
@@ -1241,7 +1335,8 @@ export class OidcPkceService {
       }
 
       if (!secretOrKey) {
-        secretOrKey = process.env.JWT_SECRET || process.env.OIDC_CLIENT_SECRET || null;
+        secretOrKey =
+          process.env.JWT_SECRET || process.env.OIDC_CLIENT_SECRET || null;
       }
 
       if (!secretOrKey) {
@@ -1268,7 +1363,10 @@ export class OidcPkceService {
       }) as jwt.JwtPayload;
 
       if (stateRecord && stateRecord.nonce) {
-        if (!verifiedPayload.nonce || verifiedPayload.nonce !== stateRecord.nonce) {
+        if (
+          !verifiedPayload.nonce ||
+          verifiedPayload.nonce !== stateRecord.nonce
+        ) {
           throw new ApiRequestError(
             400,
             "AUTH_SESSION_EXCHANGE_DENIED",
@@ -1283,19 +1381,18 @@ export class OidcPkceService {
       throw new ApiRequestError(
         400,
         "AUTH_SESSION_EXCHANGE_DENIED",
-        `OIDC ID token signature/JWKS verification failed: ${(error as Error).message}`,
+        "OIDC ID token signature/JWKS verification failed.",
       );
     }
   }
 
-  private async resolveJwksPublicKey(
-    kid?: string,
-  ): Promise<KeyObject | null> {
+  private async resolveJwksPublicKey(kid?: string): Promise<KeyObject | null> {
     try {
       if (process.env.OIDC_JWKS_JSON) {
         const parsed = JSON.parse(process.env.OIDC_JWKS_JSON);
         const keys = parsed.keys || [];
-        const matching = keys.find((k: any) => !kid || k.kid === kid) || keys[0];
+        const matching =
+          keys.find((k: any) => !kid || k.kid === kid) || keys[0];
         if (matching) {
           return createPublicKey({ key: matching, format: "jwk" });
         }
@@ -1303,7 +1400,9 @@ export class OidcPkceService {
 
       const jwksUri =
         process.env.OIDC_JWKS_URI ??
-        (process.env.OIDC_ISSUER ? `${process.env.OIDC_ISSUER}/.well-known/jwks.json` : null);
+        (process.env.OIDC_ISSUER
+          ? `${process.env.OIDC_ISSUER}/.well-known/jwks.json`
+          : null);
 
       if (!jwksUri) return null;
 
@@ -1318,13 +1417,14 @@ export class OidcPkceService {
 
       if (this.jwksCache?.keys?.length) {
         const matching =
-          this.jwksCache.keys.find((k: any) => !kid || k.kid === kid) || this.jwksCache.keys[0];
+          this.jwksCache.keys.find((k: any) => !kid || k.kid === kid) ||
+          this.jwksCache.keys[0];
         if (matching) {
           return createPublicKey({ key: matching, format: "jwk" });
         }
       }
-    } catch (err) {
-      this.logger.warn(`JWKS key resolution failed: ${err}`);
+    } catch {
+      this.logger.warn("OIDC JWKS key resolution failed.");
     }
     return null;
   }

@@ -64,6 +64,13 @@ export interface AuthStartupConfig {
     passengerSubjectConfigured: boolean;
     passengerRideTokenConfigured: boolean;
   };
+  oidc: {
+    issuerConfigured: boolean;
+    clientIdConfigured: boolean;
+    tokenEndpointConfigured: boolean;
+    authorizationEndpointConfigured: boolean;
+    mockModeEnabled: boolean;
+  };
 }
 
 export interface AuthStartupConfigReport {
@@ -259,6 +266,32 @@ function parseAlgorithmList(
   return parsed.length > 0 ? parsed : [defaultAlgorithm];
 }
 
+function isStrictOidcUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    const isPlaceholderHost =
+      hostname === "example.com" ||
+      hostname.endsWith(".example.com") ||
+      hostname.includes("placeholder") ||
+      hostname.includes("changeme");
+
+    return (
+      url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      hostname !== "localhost" &&
+      hostname !== "127.0.0.1" &&
+      hostname !== "::1" &&
+      !isPlaceholderHost
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function isWeakSecret(value: string | undefined): boolean {
   if (!value) return true;
   const normalized = value.trim().toLowerCase();
@@ -383,6 +416,58 @@ export function buildAuthStartupConfigReport(
     }
   } else {
     audience = audience ?? "https://api.local.drts.internal";
+  }
+
+  // The generic PKCE callback-session flow is the active browser login path.
+  // Its provider settings must be independently complete in strict deployments;
+  // JWT or legacy TENANT_OIDC settings must not mask a broken generic flow.
+  const oidcIssuer = normalizeString(env.OIDC_ISSUER);
+  const oidcClientId = normalizeString(env.OIDC_CLIENT_ID);
+  const oidcTokenEndpoint = normalizeString(env.OIDC_TOKEN_ENDPOINT);
+  const oidcAuthorizationEndpoint = normalizeString(
+    env.OIDC_AUTHORIZATION_ENDPOINT,
+  );
+  const oidcMockMode = normalizeString(env.OIDC_MOCK_MODE);
+
+  if (isStrictEnvironment) {
+    const requiredOidcUrls: Array<[string, string | undefined]> = [
+      ["OIDC_ISSUER", oidcIssuer],
+      ["OIDC_TOKEN_ENDPOINT", oidcTokenEndpoint],
+      ["OIDC_AUTHORIZATION_ENDPOINT", oidcAuthorizationEndpoint],
+    ];
+    for (const [control, value] of requiredOidcUrls) {
+      if (!value) {
+        issues.push({
+          control,
+          issue: `Missing required control: ${control} must be configured for generic PKCE in staging/production`,
+          code: "MISSING_CONTROL",
+        });
+      } else if (!isStrictOidcUrl(value)) {
+        issues.push({
+          control,
+          issue: `Unsafe control value: ${control} must be an absolute HTTPS provider URL without localhost, placeholders, credentials, query, or fragment in staging/production`,
+          code: "UNSAFE_VALUE",
+        });
+      }
+    }
+
+    if (!oidcClientId) {
+      issues.push({
+        control: "OIDC_CLIENT_ID",
+        issue:
+          "Missing required control: OIDC_CLIENT_ID must be configured for generic PKCE in staging/production",
+        code: "MISSING_CONTROL",
+      });
+    }
+
+    if (oidcMockMode !== undefined && oidcMockMode !== "false") {
+      issues.push({
+        control: "OIDC_MOCK_MODE",
+        issue:
+          "Forbidden mode: OIDC_MOCK_MODE must be absent or exactly false in staging/production",
+        code: "FORBIDDEN_MODE",
+      });
+    }
   }
 
   // Tenant workforce sessions are exchanged from an external OIDC ID token.
@@ -1073,6 +1158,13 @@ export function buildAuthStartupConfigReport(
       peppers: {
         passengerSubjectConfigured: Boolean(passengerSubjectPepper),
         passengerRideTokenConfigured: Boolean(passengerRideTokenPepper),
+      },
+      oidc: {
+        issuerConfigured: Boolean(oidcIssuer),
+        clientIdConfigured: Boolean(oidcClientId),
+        tokenEndpointConfigured: Boolean(oidcTokenEndpoint),
+        authorizationEndpointConfigured: Boolean(oidcAuthorizationEndpoint),
+        mockModeEnabled: oidcMockMode === "true",
       },
     },
   };

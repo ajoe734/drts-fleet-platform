@@ -15,6 +15,11 @@ function getValidProdEnv(): Record<string, string> {
     CI: "false",
     JWT_ISSUER: "https://auth.drts.internal",
     JWT_AUDIENCE: "https://api.drts.internal",
+    OIDC_ISSUER: "https://oidc.drts.internal",
+    OIDC_CLIENT_ID: "drts-bff-client",
+    OIDC_TOKEN_ENDPOINT: "https://oidc.drts.internal/oauth2/token",
+    OIDC_AUTHORIZATION_ENDPOINT: "https://oidc.drts.internal/oauth2/authorize",
+    OIDC_MOCK_MODE: "false",
     JWT_ALGORITHMS: "HS256",
     JWT_SECRET: VALID_PROD_SECRET,
     TENANT_OIDC_ISSUER: "https://tenant-idp.drts.internal",
@@ -38,7 +43,8 @@ function getValidProdWorkloadIdentityEnv(): Record<string, string> {
   return {
     ...env,
     WORKLOAD_IDENTITY_ISSUER: "https://workload.prod.drts.internal",
-    WORKLOAD_IDENTITY_AUDIENCE: "https://auth.prod.drts.internal/token-exchange",
+    WORKLOAD_IDENTITY_AUDIENCE:
+      "https://auth.prod.drts.internal/token-exchange",
     WORKLOAD_IDENTITY_JWT_SECRET_OR_PUBLIC_KEY: VALID_PROD_SECRET,
     WORKLOAD_IDENTITY_SERVICE_PRINCIPALS: JSON.stringify([
       {
