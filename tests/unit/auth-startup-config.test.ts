@@ -18,6 +18,11 @@ function buildValidProductionEnv(): Record<string, string> {
     CI: "false",
     JWT_ISSUER: "https://auth.drts.internal",
     JWT_AUDIENCE: "https://api.drts.internal",
+    OIDC_ISSUER: "https://oidc.drts.internal",
+    OIDC_CLIENT_ID: "drts-bff-client",
+    OIDC_TOKEN_ENDPOINT: "https://oidc.drts.internal/oauth2/token",
+    OIDC_AUTHORIZATION_ENDPOINT: "https://oidc.drts.internal/oauth2/authorize",
+    OIDC_MOCK_MODE: "false",
     JWT_ALGORITHMS: "HS256",
     JWT_SECRET: VALID_STRONG_SECRET,
     TENANT_OIDC_ISSUER: "https://tenant-idp.drts.internal",
@@ -252,6 +257,62 @@ describe("validateAuthStartupConfig in staging & production (Strict Mode)", () =
     ).toBe(true);
   });
 
+  it("fails strict startup when the generic PKCE provider is incomplete", () => {
+    const env = buildValidProductionEnv();
+    delete env.OIDC_TOKEN_ENDPOINT;
+    delete env.OIDC_AUTHORIZATION_ENDPOINT;
+    delete env.OIDC_CLIENT_ID;
+
+    const report = buildAuthStartupConfigReport(env);
+
+    expect(report.valid).toBe(false);
+    expect(report.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          control: "OIDC_TOKEN_ENDPOINT",
+          code: "MISSING_CONTROL",
+        }),
+        expect.objectContaining({
+          control: "OIDC_AUTHORIZATION_ENDPOINT",
+          code: "MISSING_CONTROL",
+        }),
+        expect.objectContaining({
+          control: "OIDC_CLIENT_ID",
+          code: "MISSING_CONTROL",
+        }),
+      ]),
+    );
+  });
+
+  it("fails strict startup for mock mode and insecure or placeholder generic OIDC URLs", () => {
+    const env = {
+      ...buildValidProductionEnv(),
+      OIDC_MOCK_MODE: "true",
+      OIDC_ISSUER: "http://localhost:4444",
+      OIDC_TOKEN_ENDPOINT: "https://placeholder.example.com/token",
+    };
+
+    const report = buildAuthStartupConfigReport(env);
+
+    expect(report.valid).toBe(false);
+    expect(report.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          control: "OIDC_MOCK_MODE",
+          code: "FORBIDDEN_MODE",
+        }),
+        expect.objectContaining({
+          control: "OIDC_ISSUER",
+          code: "UNSAFE_VALUE",
+        }),
+        expect.objectContaining({
+          control: "OIDC_TOKEN_ENDPOINT",
+          code: "UNSAFE_VALUE",
+        }),
+      ]),
+    );
+  });
+
   it("fails when ALLOW_INSECURE_DEV_AUTH=true is supplied in production", () => {
     const env = {
       ...buildValidProductionEnv(),
@@ -269,6 +330,7 @@ describe("validateAuthStartupConfig in staging & production (Strict Mode)", () =
   it("fails when mandatory control JWT_ISSUER is missing", () => {
     const env = buildValidProductionEnv();
     delete env.JWT_ISSUER;
+    delete env.OIDC_ISSUER;
 
     expect(() => validateAuthStartupConfig(env)).toThrowError(
       AuthConfigurationError,

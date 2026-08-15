@@ -16,9 +16,14 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    process.env.APP_ENV = "local";
+    process.env.AUTH_MODE = "local";
+    process.env.OIDC_MOCK_MODE = "true";
     process.env.JWT_SECRET = "test_jwt_secret_key_32_characters_long_min!";
     jwtAuthService = new JwtAuthService();
-    tenantPartnerService = new TenantPartnerService(new AuditNotificationService());
+    tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
     oidcService = new OidcPkceService(jwtAuthService, tenantPartnerService);
   });
 
@@ -30,16 +35,24 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       });
 
       expect(loginParams.authorizationUrl).toContain("response_type=code");
-      expect(loginParams.authorizationUrl).toContain("code_challenge_method=S256");
-      expect(loginParams.authorizationUrl).toContain(`state=${loginParams.state}`);
+      expect(loginParams.authorizationUrl).toContain(
+        "code_challenge_method=S256",
+      );
+      expect(loginParams.authorizationUrl).toContain(
+        `state=${loginParams.state}`,
+      );
 
       const stateRecord = oidcService.verifyStateToken(loginParams.stateToken)!;
       expect(stateRecord).toBeDefined();
-      expect(loginParams.authorizationUrl).toContain(`nonce=${stateRecord.nonce}`);
+      expect(loginParams.authorizationUrl).toContain(
+        `nonce=${stateRecord.nonce}`,
+      );
       expect(stateRecord.codeVerifier.length).toBeGreaterThanOrEqual(43);
       expect(stateRecord.codeVerifier.length).toBeLessThanOrEqual(128);
 
-      const expectedChallenge = oidcService.computeCodeChallenge(stateRecord.codeVerifier);
+      const expectedChallenge = oidcService.computeCodeChallenge(
+        stateRecord.codeVerifier,
+      );
       expect(stateRecord.codeChallenge).toBe(expectedChallenge);
     });
 
@@ -48,9 +61,13 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       expect(loginParams.stateToken).toBeDefined();
 
       const firstPart = loginParams.stateToken.split(".")[0]!;
-      expect(() => JSON.parse(Buffer.from(firstPart, "base64url").toString("utf8"))).toThrow();
+      expect(() =>
+        JSON.parse(Buffer.from(firstPart, "base64url").toString("utf8")),
+      ).toThrow();
 
-      const verifiedRecord = oidcService.verifyStateToken(loginParams.stateToken);
+      const verifiedRecord = oidcService.verifyStateToken(
+        loginParams.stateToken,
+      );
       expect(verifiedRecord).not.toBeNull();
       expect(verifiedRecord?.state).toBe(loginParams.state);
       expect(verifiedRecord?.nonce).toBeDefined();
@@ -368,7 +385,8 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
   describe("5. Partner OIDC PKCE Flow & Identity Link", () => {
     it("exchanges valid authorization code for active partner entry session", async () => {
       const code = "e2e_valid_partner_code_001";
-      const partnerUserIdentityLinkRepo = (oidcService as any).partnerUserIdentityLinkRepo;
+      const partnerUserIdentityLinkRepo = (oidcService as any)
+        .partnerUserIdentityLinkRepo;
       const sub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
       await partnerUserIdentityLinkRepo.resolveOrCreate({
         entrySlug: "yuhe-residence",
@@ -516,8 +534,10 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       try {
         process.env.OIDC_ISSUER = "https://auth.staging.drts.internal";
         process.env.OIDC_CLIENT_ID = "drts-bff-client";
-        process.env.OIDC_TOKEN_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/token";
-        process.env.OIDC_USERINFO_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/userinfo";
+        process.env.OIDC_TOKEN_ENDPOINT =
+          "https://auth.staging.drts.internal/oauth2/v1/token";
+        process.env.OIDC_USERINFO_ENDPOINT =
+          "https://auth.staging.drts.internal/oauth2/v1/userinfo";
         process.env.OIDC_MOCK_MODE = "false";
 
         const claims = await oidcService.exchangeRealOidcTokenEndpoint(
@@ -602,8 +622,10 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       try {
         process.env.OIDC_ISSUER = "https://auth.staging.drts.internal";
         process.env.OIDC_CLIENT_ID = "drts-bff-client";
-        process.env.OIDC_TOKEN_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/token";
-        process.env.OIDC_USERINFO_ENDPOINT = "https://auth.staging.drts.internal/oauth2/v1/userinfo";
+        process.env.OIDC_TOKEN_ENDPOINT =
+          "https://auth.staging.drts.internal/oauth2/v1/token";
+        process.env.OIDC_USERINFO_ENDPOINT =
+          "https://auth.staging.drts.internal/oauth2/v1/userinfo";
         process.env.OIDC_MOCK_MODE = "false";
 
         const claims = await oidcService.exchangeRealOidcTokenEndpoint(
