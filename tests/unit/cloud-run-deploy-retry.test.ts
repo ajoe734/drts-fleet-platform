@@ -331,6 +331,13 @@ describe("Cloud Run deploy quota retry", () => {
       "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
     );
     expect(candidateAcceptance).toContain("x-actor-id: tenant-user-demo-001");
+    const lineContinuation = "\\";
+    expect(candidateAcceptance).toContain(
+      [
+        `--header 'x-actor-type: tenant_admin' ${lineContinuation}`,
+        `--header 'x-actor-id: tenant-user-demo-001' ${lineContinuation}`,
+      ].join("\n            "),
+    );
     expect(workflow).toContain("DRTS_INTERNAL_KEY_ENFORCED=false");
     expect(workflow).toContain("AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}");
     expect(workflow).not.toContain(
