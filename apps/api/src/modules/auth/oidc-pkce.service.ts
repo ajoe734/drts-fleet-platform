@@ -476,20 +476,45 @@ export class OidcPkceService {
       );
     }
 
-    const token = this.jwtAuthService.sign(
-      {
-        authMode: "jwt_bearer",
-        actorType: "tenant_admin",
-        actorId: existingUser.userId,
-        realm: "tenant",
-        tenantId: targetTenantId,
-        roleFamilies: ["tenant"],
-        roles: [existingUser.roleCode],
-        scopes: scopesList,
-        requestId: meta?.requestId ?? null,
-      },
-      { expiresIn: "8h" },
-    );
+    const sessionTokenOptions = {
+      authMode: "jwt_bearer" as const,
+      actorType: "tenant_admin" as const,
+      actorId: existingUser.userId,
+      principalId: existingUser.userId,
+      realm: "tenant" as const,
+      tenantId: targetTenantId,
+      roleFamilies: ["tenant" as const],
+      roles: [existingUser.roleCode],
+      scopes: scopesList,
+      tokenVersion: Date.parse(existingUser.updatedAt),
+      authTime: new Date(authTime * 1000).toISOString(),
+      amr,
+      acr,
+      policyVersion: "v1",
+      requestId: meta?.requestId ?? null,
+    };
+
+    let token: string;
+    let issuedSessionId: string | undefined;
+    let issuedTokenId: string | undefined;
+    if (typeof (this.jwtAuthService as any).issueSessionToken === "function") {
+      const issued = await this.jwtAuthService.issueSessionToken(
+        sessionTokenOptions,
+        { expiresIn: "8h" },
+      );
+      token = issued.token;
+      issuedSessionId = issued.sessionId;
+      issuedTokenId = issued.tokenId;
+      (identity as any).sessionId = issuedSessionId;
+      (identity as any).tokenId = issuedTokenId;
+      (identity as any).tokenVersion = sessionTokenOptions.tokenVersion;
+      (identity as any).authTime = sessionTokenOptions.authTime;
+      (identity as any).amr = amr;
+      (identity as any).acr = acr;
+      (identity as any).policyVersion = "v1";
+    } else {
+      token = this.jwtAuthService.sign(sessionTokenOptions, { expiresIn: "8h" });
+    }
 
     const session: TenantBootstrapSession = {
       accessToken: token,

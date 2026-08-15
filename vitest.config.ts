@@ -12,6 +12,7 @@ export default defineConfig({
         __dirname,
         "packages/control-plane-auth/src/index.ts",
       ),
+      "@": path.resolve(__dirname, "apps/tenant-console-web"),
     },
   },
   test: {
@@ -24,6 +25,7 @@ export default defineConfig({
       "tests/integration/**/*.test.ts",
       "tests/security/**/*.test.ts",
       "tests/load/**/*.test.ts",
+      "tests/e2e/**/*.test.ts",
     ],
   },
 });

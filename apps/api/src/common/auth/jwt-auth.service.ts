@@ -970,13 +970,24 @@ export class JwtAuthService {
     }
 
     if (payload.realm === "tenant") {
-      if (!this.tenantPartnerService || !payload.tenantId || !payload.sub) {
+      if (!this.tenantPartnerService || !payload.tenantId) {
         return true;
+      }
+
+      const tenantUserId =
+        payload.principalId ??
+        payload.actorId ??
+        (payload.sub?.includes(":")
+          ? payload.sub.split(":").pop()
+          : payload.sub);
+
+      if (!tenantUserId) {
+        return false;
       }
 
       const user = this.tenantPartnerService.findTenantUser(
         payload.tenantId,
-        payload.sub,
+        tenantUserId,
       );
       if (!user || user.status !== "active") {
         return false;

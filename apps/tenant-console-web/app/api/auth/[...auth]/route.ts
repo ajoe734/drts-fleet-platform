@@ -80,6 +80,7 @@ export async function GET(
 
       const authorizationUrl = payload?.authorizationUrl;
       const stateToken = payload?.stateToken ?? payload?.state;
+      const oauthState = payload?.state;
 
       if (
         !res.ok ||
@@ -102,6 +103,7 @@ export async function GET(
 
       const stateEnvelope = encodeStateEnvelope({
         stateToken: stateToken.trim(),
+        state: typeof oauthState === "string" ? oauthState.trim() : undefined,
         returnUrl,
       });
 
@@ -173,8 +175,9 @@ export async function GET(
     }
 
     const { stateToken, returnUrl, codeVerifier } = statePayload;
+    const expectedState = statePayload.state || stateToken;
 
-    if (state !== stateToken) {
+    if (state !== expectedState && state !== stateToken) {
       const loginUrl = new URL("/login", request.nextUrl.origin);
       loginUrl.searchParams.set("error", "AUTH_STATE_MISMATCH");
       loginUrl.searchParams.set("message", "State token does not match authorization state");
