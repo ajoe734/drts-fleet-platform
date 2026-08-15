@@ -31,6 +31,7 @@ import type {
 export interface JwtIdentityPayload {
   sub: string | null;
   actorType: AuthActorType;
+  actorId?: string | null;
   realm: AuthRealm;
   tenantId: string | null;
   principalId?: string | null;
@@ -76,36 +77,41 @@ export interface IssuedJwtSessionToken {
 type JwtExpiresIn = Extract<NonNullable<jwt.SignOptions["expiresIn"]>, string>;
 
 type JwtSignIdentityBase =
-  | Pick<
-      BootstrapRequestIdentity,
-      | "authMode"
-      | "actorType"
-      | "actorId"
-      | "principalId"
-      | "membershipId"
-      | "subject"
-      | "realm"
-      | "tenantId"
-      | "partnerId"
-      | "partnerProgramId"
-      | "partnerEntrySlug"
-      | "sessionId"
-      | "tokenId"
-      | "tokenVersion"
-      | "authTime"
-      | "amr"
-      | "acr"
-      | "policyVersion"
-      | "issuer"
-      | "audience"
-      | "issuedAt"
-      | "expiresAt"
-      | "roleFamilies"
-      | "roles"
-      | "scopes"
-      | "requestId"
-      | "breakGlassGrantId"
-    >
+  | (Omit<
+      Pick<
+        BootstrapRequestIdentity,
+        | "authMode"
+        | "actorType"
+        | "actorId"
+        | "principalId"
+        | "membershipId"
+        | "subject"
+        | "realm"
+        | "tenantId"
+        | "partnerId"
+        | "partnerProgramId"
+        | "partnerEntrySlug"
+        | "sessionId"
+        | "tokenId"
+        | "tokenVersion"
+        | "authTime"
+        | "amr"
+        | "acr"
+        | "policyVersion"
+        | "issuer"
+        | "audience"
+        | "issuedAt"
+        | "expiresAt"
+        | "roleFamilies"
+        | "roles"
+        | "scopes"
+        | "requestId"
+        | "breakGlassGrantId"
+      >,
+      "requestId"
+    > & {
+      requestId?: string | null;
+    })
   | IdentityContext;
 
 type JwtSignIdentity = JwtSignIdentityBase & {
@@ -970,14 +976,31 @@ export class JwtAuthService {
     }
 
     if (payload.realm === "tenant") {
-      if (!this.tenantPartnerService || !payload.tenantId || !payload.sub) {
+      if (!this.tenantPartnerService || !payload.tenantId) {
         return true;
       }
 
-      const user = this.tenantPartnerService.findTenantUser(
+      const tenantUserId =
+        payload.actorId ??
+        (payload.sub?.includes(":")
+          ? payload.sub.split(":").pop()
+          : payload.sub) ??
+        payload.principalId;
+
+      if (!tenantUserId) {
+        return false;
+      }
+
+      let user = this.tenantPartnerService.findTenantUser(
         payload.tenantId,
-        payload.sub,
+        tenantUserId,
       );
+      if (!user && payload.sub) {
+        const bySubject = this.tenantPartnerService.findTenantUserBySubject(payload.sub);
+        if (bySubject && bySubject.tenantId === payload.tenantId) {
+          user = bySubject;
+        }
+      }
       if (!user || user.status !== "active") {
         return false;
       }

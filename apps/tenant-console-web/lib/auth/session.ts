@@ -10,9 +10,10 @@ import {
 
 export interface OidcStatePayload {
   stateToken: string;
+  state?: string | undefined;
   returnUrl: string;
-  codeVerifier?: string;
-  issuedAt?: number;
+  codeVerifier?: string | undefined;
+  issuedAt?: number | undefined;
 }
 
 function getStateSecret(): string {
@@ -149,6 +150,7 @@ export function decodeStateEnvelope(value?: string | null): OidcStatePayload | n
     return {
       stateToken: parsed.stateToken.trim(),
       returnUrl: parsed.returnUrl ?? "/",
+      ...(parsed.state ? { state: parsed.state } : {}),
       ...(parsed.codeVerifier ? { codeVerifier: parsed.codeVerifier } : {}),
       ...(typeof parsed.issuedAt === "number" ? { issuedAt: parsed.issuedAt } : {}),
     };
