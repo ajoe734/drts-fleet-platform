@@ -455,7 +455,8 @@ export async function upsertApprovalRuleAction(
       formData,
       translate,
     );
-    const saved = await getTenantClient().upsertApprovalRule(command, ruleId);
+    const client = await getTenantClient();
+    const saved = await client.upsertApprovalRule(command, ruleId);
 
     payload = {
       tone: "default",
@@ -502,7 +503,8 @@ export async function disableApprovalRuleAction(
       throw new Error(translate("rules.action.error.disabledReasonRequired"));
     }
 
-    await getTenantClient().disableApprovalRule(ruleId);
+    const client = await getTenantClient();
+    await client.disableApprovalRule(ruleId);
     payload = {
       tone: "default",
       title: translate("rules.action.success.ruleDisabledTitle"),
@@ -543,7 +545,8 @@ export async function reorderApprovalRulesAction(
       throw new Error(translate("rules.action.error.orderedRuleIdsRequired"));
     }
 
-    await getTenantClient().reorderApprovalRules({
+    const client = await getTenantClient();
+    await client.reorderApprovalRules({
       orderedRuleIds,
     });
 
@@ -603,7 +606,8 @@ export async function upsertTenantQuotaPolicyAction(
       },
     };
 
-    const saved = await getTenantClient().upsertTenantQuotaPolicy(command);
+    const client = await getTenantClient();
+    const saved = await client.upsertTenantQuotaPolicy(command);
     payload = {
       tone: "default",
       title: translate("rules.action.success.quotaPolicyUpdatedTitle"),
@@ -650,7 +654,7 @@ export async function previewAndEvaluateApprovalRulesAction(
       readOptionalInteger(formData, "amountMinor", translate) ?? null;
     const costCenterCode = readTrimmedString(formData, "costCenterCode");
     const currency = readTrimmedString(formData, "currency") ?? "TWD";
-    const client = getTenantClient();
+    const client = await getTenantClient();
 
     const preview = await client.previewTenantBookingQuotaImpact({
       reservationWindowStart,

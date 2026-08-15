@@ -4026,6 +4026,18 @@ const en = {
   "tenantMessageCode.sandbox_fulfillment.default":
     "Service status was updated for this booking. Use the tenant-safe fulfillment and ETA details shown on this page.",
 
+  // ── login page ──
+  "login.realm.tenant": "TENANT REALM",
+  "login.title": "Tenant Console Sign-In",
+  "login.subtitle":
+    "Sign in with your organization's managed OIDC identity to access tenant operations, billing, and fulfillment controls.",
+  "login.error.title": "Authentication Error:",
+  "login.tenantIdLabel": "Tenant ID / Hint (Optional)",
+  "login.tenantIdPlaceholder": "e.g. tenant-acme-001",
+  "login.submit": "Sign in with OIDC",
+  "login.securityNote":
+    "Managed HttpOnly session cookies and same-origin CSRF protection are enforced. Browser clients never receive readable bearer tokens.",
+
   // ── formatters (i18n-fullsweep 20260614 finish) ──
   "formatters.notAvailable": "Not available",
 } as const;
@@ -7791,6 +7803,18 @@ const zh: Record<keyof typeof en, string> = {
     "本趟已取消，booking、計費與稽核歸屬仍維持在原始訂單紀錄上。",
   "tenantMessageCode.sandbox_fulfillment.default":
     "此 booking 的服務狀態已更新。請以本頁顯示的租戶可見履約資訊與 ETA 為準。",
+
+  // ── login page ──
+  "login.realm.tenant": "租戶領域",
+  "login.title": "租戶後台登入",
+  "login.subtitle":
+    "使用貴組織的受控 OIDC 身分登入，以存取租戶營運、帳單與履約控制。",
+  "login.error.title": "驗證錯誤：",
+  "login.tenantIdLabel": "租戶 ID / 提示（選填）",
+  "login.tenantIdPlaceholder": "例如 tenant-acme-001",
+  "login.submit": "透過 OIDC 登入",
+  "login.securityNote":
+    "強制使用受控 HttpOnly session cookie 與同源 CSRF 保護。瀏覽器端永不接收可讀的 Bearer Token。",
 
   // ── formatters (i18n-fullsweep 20260614 finish) ──
   "formatters.notAvailable": "無資料",

@@ -10,7 +10,8 @@ export async function revokeTenantSessionAction(formData: FormData) {
     throw new Error("sessionId is required");
   }
 
-  await getTenantClient().revokeTenantSession(sessionId, {
+  const client = await getTenantClient();
+  await client.revokeTenantSession(sessionId, {
     reason: reason || "tenant_admin_revocation",
   });
   revalidatePath("/sessions");

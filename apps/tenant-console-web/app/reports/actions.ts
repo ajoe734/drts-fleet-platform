@@ -112,7 +112,7 @@ async function submitReportJob(
   flash: "created" | "rerun",
 ) {
   try {
-    const client = getTenantClient();
+    const client = await getTenantClient();
     const accepted = await client.createTenantReportJob(command);
     revalidatePath(REPORTS_PATH);
     redirectWithFlash(returnTo, {

@@ -25,7 +25,8 @@ export default async function SessionsPage() {
   let sessions: TenantSessionInventoryRecord[] = [];
   let loadError = "";
   try {
-    sessions = await getTenantClient().listTenantSessions();
+    const client = await getTenantClient();
+    sessions = await client.listTenantSessions();
   } catch (error) {
     loadError = error instanceof Error ? error.message : t("sessions.error.loadFailed", locale);
   }

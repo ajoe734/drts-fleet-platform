@@ -334,7 +334,7 @@ async function loadFeatureFlagsData(
   scope: "all" | TenantFeatureFlagScope,
   emptyReasonOverride: EmptyReason | null,
 ): Promise<FeatureFlagsPageData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const errors: string[] = [];
   let rawFlags: TenantFeatureFlagRecord[] = [];
   let fetchErrorReason: EmptyReason | null = null;

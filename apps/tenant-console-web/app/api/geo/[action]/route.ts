@@ -15,7 +15,7 @@ import type {
   ReverseGeocodeCommand,
   SearchGeoQuery,
 } from "@drts/contracts";
-import { getTenantClient } from "@/lib/api-client";
+import { getTenantClientForRouteHandler } from "@/lib/api-client";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +34,13 @@ export async function GET(
   { params }: { params: Promise<{ action: string }> },
 ) {
   const { action } = await params;
-  const client = getTenantClient();
+  const client = await getTenantClientForRouteHandler();
+  if (!client) {
+    return NextResponse.json(
+      { error: "AUTHENTICATION_REQUIRED", message: "Active tenant session required." },
+      { status: 401 },
+    );
+  }
 
   try {
     if (action === "health") {
@@ -74,7 +80,13 @@ export async function POST(
   { params }: { params: Promise<{ action: string }> },
 ) {
   const { action } = await params;
-  const client = getTenantClient();
+  const client = await getTenantClientForRouteHandler();
+  if (!client) {
+    return NextResponse.json(
+      { error: "AUTHENTICATION_REQUIRED", message: "Active tenant session required." },
+      { status: 401 },
+    );
+  }
 
   try {
     const body = await request.json();

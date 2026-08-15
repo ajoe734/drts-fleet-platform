@@ -134,7 +134,7 @@ function deriveInitialEmptyReason(input: {
 }
 
 async function loadApiKeyPageData(): Promise<ApiKeyPageData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const errors: ApiKeyPageErrorCode[] = [];
 
   const [apiKeysResult, governanceResult, identityResult] =

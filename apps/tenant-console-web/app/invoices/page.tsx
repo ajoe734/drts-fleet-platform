@@ -480,7 +480,7 @@ function normalizeInvoice(
 }
 
 async function loadInvoicesData(locale: Locale): Promise<InvoicesPageData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const [billingResult, invoicesResult] = await Promise.allSettled([
     client.getBillingProfile() as Promise<TenantBillingProfile>,
     client.listInvoicesRuntime() as Promise<TenantInvoiceListData>,

@@ -1,15 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  TENANT_SESSION_COOKIE_NAME,
+  TENANT_CSRF_COOKIE_NAME,
+  TENANT_CSRF_HEADER_NAME,
+} from "@/lib/auth/constants";
+import {
+  verifyCsrfToken,
+  verifySameOrigin,
+} from "@/lib/auth/session";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const METADATA_IDENTITY_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
 const RUN_APP_HOST_SUFFIX = ".a.run.app";
+
 const REQUEST_HEADER_BLOCKLIST = new Set([
+  "authorization",
   "connection",
   "content-length",
   "cookie",
   "host",
   "transfer-encoding",
+  "x-csrf-token",
+  "x-drts-csrf",
   "x-drts-internal-key",
   "x-actor-id",
   "x-actor-type",
@@ -22,6 +35,8 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "x-role-families",
   "x-roles",
   "x-scopes",
+  "x-tenant-id",
+  "x-fleet-partner-id",
   "x-serverless-authorization",
 ]);
 
@@ -117,7 +132,11 @@ function copyRequestHeaders(request: NextRequest) {
     headers.set(key, value);
   });
 
-  headers.set("x-realm", "tenant");
+  const sessionToken = request.cookies.get(TENANT_SESSION_COOKIE_NAME)?.value?.trim();
+  if (sessionToken) {
+    headers.set("authorization", `Bearer ${sessionToken}`);
+  }
+
   return headers;
 }
 
@@ -196,6 +215,32 @@ async function forward(
       { error: "TENANT_CONSOLE_PROXY_PATH_NOT_ALLOWED" },
       { status: 404 },
     );
+  }
+
+  // Enforce same-origin & CSRF for state-mutating requests
+  if (method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE") {
+    if (!verifySameOrigin(request)) {
+      return NextResponse.json(
+        {
+          error: "CSRF_ORIGIN_INVALID",
+          message: "Origin validation failed for mutation request.",
+        },
+        { status: 403 },
+      );
+    }
+
+    const csrfCookie = request.cookies.get(TENANT_CSRF_COOKIE_NAME)?.value;
+    const csrfHeader = request.headers.get(TENANT_CSRF_HEADER_NAME);
+
+    if (!verifyCsrfToken(csrfCookie, csrfHeader)) {
+      return NextResponse.json(
+        {
+          error: "CSRF_TOKEN_INVALID",
+          message: "CSRF verification failed for mutation request.",
+        },
+        { status: 403 },
+      );
+    }
   }
 
   const targetUrl = buildTargetUrl(request, path);

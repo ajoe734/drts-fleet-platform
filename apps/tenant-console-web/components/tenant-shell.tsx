@@ -883,7 +883,7 @@ export function TenantShell({ children }: { children: ReactNode }) {
   const activeItem = findNavItem(pathname, navEntries);
   const activeKey = activeItem?.key;
 
-  if (pathname.startsWith("/partner")) {
+  if (pathname.startsWith("/partner") || pathname.startsWith("/login")) {
     return <>{children}</>;
   }
 

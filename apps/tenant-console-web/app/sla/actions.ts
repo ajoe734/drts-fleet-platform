@@ -43,7 +43,7 @@ function assertActionReceipt(
 export async function updateTenantSlaProfileAction(
   payload: UpdateSlaPayload,
 ): Promise<ActionReceipt> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
 
   const receipt = assertActionReceipt(
     await client.updateSlaProfile({
@@ -75,7 +75,7 @@ export async function updateTenantSlaProfileAction(
 export async function recalculateTenantSlaBookingsAction(
   reason: string,
 ): Promise<ActionReceipt> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
 
   const receipt = assertActionReceipt(
     await client.recalculateSlaBookings({

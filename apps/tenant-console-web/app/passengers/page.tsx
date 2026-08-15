@@ -716,7 +716,7 @@ function matchesFilters(
 }
 
 async function loadPassengersData(locale: Locale): Promise<PassengerPageData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const errors: string[] = [];
   const fetchedAt = new Date().toISOString();
   const [passengersResult] = await Promise.allSettled([

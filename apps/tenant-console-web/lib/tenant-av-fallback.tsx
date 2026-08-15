@@ -75,7 +75,8 @@ export function resolveTenantMessageCode(
 async function getTenantSandboxFulfillment(
   bookingId: string,
 ): Promise<SandboxFulfillmentProjectionView> {
-  return getTenantClient().get<SandboxFulfillmentProjectionView>(
+  const client = await getTenantClient();
+  return client.get<SandboxFulfillmentProjectionView>(
     `/api/tenant/bookings/${encodeURIComponent(bookingId)}/sandbox-fulfillment`,
   );
 }
@@ -141,7 +142,7 @@ export async function loadTenantAvFallbackListItems(
 export async function loadTenantAvFallbackDetailItem(
   bookingId: string,
 ): Promise<TenantAvFallbackListItem | null> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const [bookingResult, projectionResult] = await Promise.allSettled([
     client.getTenantBooking(bookingId) as Promise<BookingRecord>,
     getTenantSandboxFulfillment(bookingId),
