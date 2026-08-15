@@ -60,8 +60,10 @@ describe("IAM-OP-OIDC-001 strict OIDC negative controls", () => {
     await expect(
       oidcService.exchangeRealOidcTokenEndpoint(
         {
+          provider: "oidc",
           code: "authorization-code",
           callbackUrl: "https://app.drts.internal/callback",
+          state: "test-state",
         },
         null,
         "https://oidc.drts.internal/token",
