@@ -117,6 +117,27 @@ describe("operational browser journeys manifest guard", () => {
       }),
     ]);
 
+    const referralJourney = manifest.journeys.find(
+      (journey: { id: string }) =>
+        journey.id === "referral-create-read-cancel-rate-receipt",
+    );
+    expect(referralJourney).toBeDefined();
+    expect(referralJourney.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "request",
+          name: "create",
+          resultIdQueryParam: "orderId",
+        }),
+        expect.objectContaining({
+          kind: "navigation",
+          name: "receipt",
+          expectedPath: "/embed/yuhe-residence",
+          expectedQuery: { screen: "receipt", orderId: "{resultId}" },
+        }),
+      ]),
+    );
+
     for (const id of [
       "bank-statement-download",
       "channel-statement-download",

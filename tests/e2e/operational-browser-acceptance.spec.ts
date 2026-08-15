@@ -36,8 +36,18 @@ type RequestOperation = {
   responseKind: "json" | "download";
   before?: JourneyStep[];
   resultIdPath?: string;
+  resultIdQueryParam?: string;
   readback?: Readback;
   expectedContentTypeIncludes?: string;
+};
+type NavigationOperation = {
+  kind: "navigation";
+  name: string;
+  control: string;
+  before?: JourneyStep[];
+  expectedPath: string;
+  expectedQuery: Record<string, string>;
+  readback?: Readback;
 };
 type IntentOperation = {
   kind: "intent";
@@ -46,7 +56,7 @@ type IntentOperation = {
   targetBaseUrlEnv: string;
   expectedPathPattern: string;
 };
-type Operation = RequestOperation | IntentOperation;
+type Operation = RequestOperation | NavigationOperation | IntentOperation;
 type Journey = {
   id: string;
   surface: string;
@@ -179,7 +189,64 @@ function interpolatePath(
 
 async function navigate(page: Page, origin: string, route: string) {
   await page.goto(new URL(route, origin).toString(), {
-    waitUntil: "domcontentloaded",
+    // An SSR control is visible before React wires its click handler. Wait for
+    // the page to become interactive so acceptance exercises the real action.
+    waitUntil: "networkidle",
+  });
+}
+
+function interpolateOperationValue(
+  value: string,
+  resultId: unknown,
+  variables: TemplateVariables,
+) {
+  const materialized = materializeString(value, variables);
+  if (!materialized.includes("{resultId}")) return materialized;
+  expect(
+    resultId,
+    `${value} requires a prior operation result ID`,
+  ).toBeTruthy();
+  return materialized.replaceAll("{resultId}", String(resultId));
+}
+
+async function assertReadback(
+  page: Page,
+  origin: string,
+  journey: Journey,
+  operationName: string,
+  requestUrl: string,
+  resultId: unknown,
+  readback: Readback,
+  variables: TemplateVariables,
+) {
+  const readbackPath = interpolatePath(readback.url, resultId, variables);
+  const readbackResponse = await page
+    .context()
+    .request.get(new URL(readbackPath, origin).toString());
+  expect(
+    readbackResponse.ok(),
+    `${journey.id}/${operationName} readback`,
+  ).toBeTruthy();
+  expectCandidateRevision(
+    readbackResponse.headers(),
+    `${journey.id}/${operationName} readback`,
+  );
+  const readbackBody = (await readbackResponse.json()) as unknown;
+  expect(valueAtPath(readbackBody, readback.idPath)).toBe(resultId);
+  const readbackState = valueAtPath(readbackBody, readback.statePath);
+  expect(readbackState, `${journey.id}/${operationName} readback state`).toBe(
+    readback.expectedState,
+  );
+  record({
+    kind: "mutation-readback",
+    journey: journey.id,
+    surface: journey.surface,
+    actorScope: journey.actorScope,
+    operation: operationName,
+    requestUrl,
+    resultId,
+    readbackUrl: readbackResponse.url(),
+    readbackState,
   });
 }
 
@@ -358,6 +425,18 @@ test("requires a single immutable candidate SHA and complete formal journey mani
         continue;
       }
 
+      if (operation.kind === "navigation") {
+        expect(operation.expectedPath).not.toEqual("");
+        expect(Object.keys(operation.expectedQuery).length).toBeGreaterThan(0);
+        if (operation.readback) {
+          expect(operation.readback.url).not.toEqual("");
+          expect(operation.readback.idPath).not.toEqual("");
+          expect(operation.readback.statePath).not.toEqual("");
+          expect(operation.readback.expectedState).not.toBeUndefined();
+        }
+        continue;
+      }
+
       expect(operation.requestUrlIncludes).not.toEqual("");
       expect(operation.requestMethod).not.toEqual("");
       if (operation.responseKind === "download") {
@@ -365,7 +444,9 @@ test("requires a single immutable candidate SHA and complete formal journey mani
         continue;
       }
 
-      expect(operation.resultIdPath).not.toEqual("");
+      expect(
+        operation.resultIdPath || operation.resultIdQueryParam,
+      ).not.toEqual("");
       expect(operation.readback).toBeDefined();
       expect(operation.readback?.url).not.toEqual("");
       expect(operation.readback?.idPath).not.toEqual("");
@@ -436,6 +517,62 @@ for (const journey of manifest.journeys) {
         `${journey.id}/${operation.name} control after preconditions`,
       ).toBeVisible({ timeout: interactionTimeoutMs });
 
+      if (operation.kind === "navigation") {
+        const expectedQuery = Object.fromEntries(
+          Object.entries(operation.expectedQuery).map(([key, value]) => [
+            key,
+            interpolateOperationValue(value, lastResultId, variables),
+          ]),
+        );
+        const navigation = page.waitForURL(
+          (url) => {
+            if (
+              url.origin !== new URL(origin).origin ||
+              url.pathname !== operation.expectedPath
+            ) {
+              return false;
+            }
+            return Object.entries(expectedQuery).every(
+              ([key, value]) => url.searchParams.get(key) === value,
+            );
+          },
+          { timeout: interactionTimeoutMs },
+        );
+        await activeControl.click({ noWaitAfter: true });
+        await navigation;
+        await page.waitForLoadState("networkidle", {
+          timeout: interactionTimeoutMs,
+        });
+        const target = page.url();
+        if (operation.readback) {
+          await assertReadback(
+            page,
+            origin,
+            journey,
+            operation.name,
+            target,
+            lastResultId,
+            operation.readback,
+            variables,
+          );
+        }
+        record({
+          kind: "navigation",
+          journey: journey.id,
+          surface: journey.surface,
+          actorScope: journey.actorScope,
+          operation: operation.name,
+          target,
+        });
+        continue;
+      }
+
+      const resultIdLocationPromise = operation.resultIdQueryParam
+        ? page.waitForURL(
+            (url) => url.searchParams.has(operation.resultIdQueryParam!),
+            { timeout: interactionTimeoutMs },
+          )
+        : null;
       const responsePromise = page.waitForResponse(
         (response) =>
           response.request().method() === operation.requestMethod &&
@@ -449,7 +586,7 @@ for (const journey of manifest.journeys) {
       // Begin reading before a mutation-triggered navigation can detach the
       // Chromium response body from its request identifier.
       const responseBodyPromise =
-        operation.responseKind === "json"
+        operation.responseKind === "json" && !operation.resultIdQueryParam
           ? responsePromise.then(
               (response) => response.json() as Promise<unknown>,
             )
@@ -497,47 +634,34 @@ for (const journey of manifest.journeys) {
         continue;
       }
 
-      const responseBody = await responseBodyPromise!;
-      const resultId = valueAtPath(
-        responseBody,
-        operation.resultIdPath as string,
-      );
+      const resultId = operation.resultIdQueryParam
+        ? await resultIdLocationPromise!.then(() =>
+            new URL(page.url()).searchParams.get(operation.resultIdQueryParam!),
+          )
+        : valueAtPath(
+            await responseBodyPromise!,
+            operation.resultIdPath as string,
+          );
       expect(
         resultId,
         `${journey.id}/${operation.name} result ID`,
       ).toBeTruthy();
       lastResultId = resultId;
-      const readback = operation.readback as Readback;
-      const readbackPath = interpolatePath(readback.url, resultId, variables);
-      const readbackResponse = await page
-        .context()
-        .request.get(new URL(readbackPath, origin).toString());
-      expect(
-        readbackResponse.ok(),
-        `${journey.id}/${operation.name} readback`,
-      ).toBeTruthy();
-      expectCandidateRevision(
-        readbackResponse.headers(),
-        `${journey.id}/${operation.name} readback`,
-      );
-      const readbackBody = (await readbackResponse.json()) as unknown;
-      expect(valueAtPath(readbackBody, readback.idPath)).toBe(resultId);
-      const readbackState = valueAtPath(readbackBody, readback.statePath);
-      expect(
-        readbackState,
-        `${journey.id}/${operation.name} readback state`,
-      ).toBe(readback.expectedState);
-      record({
-        kind: "mutation-readback",
-        journey: journey.id,
-        surface: journey.surface,
-        actorScope: journey.actorScope,
-        operation: operation.name,
-        requestUrl: response.url(),
+      await assertReadback(
+        page,
+        origin,
+        journey,
+        operation.name,
+        response.url(),
         resultId,
-        readbackUrl: readbackResponse.url(),
-        readbackState,
-      });
+        operation.readback as Readback,
+        variables,
+      );
+      if (operation.resultIdQueryParam) {
+        await page.waitForLoadState("networkidle", {
+          timeout: interactionTimeoutMs,
+        });
+      }
     }
   });
 }

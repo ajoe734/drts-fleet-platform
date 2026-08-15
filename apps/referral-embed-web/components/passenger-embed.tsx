@@ -1377,7 +1377,11 @@ function BookScreen({ context }: { context: EmbedContext }) {
         }
 
         window.location.assign(
-          buildHref(context, { screen: "trip", state: "handoff" }),
+          buildHref(context, {
+            screen: "trip",
+            state: "handoff",
+            orderId: payload.data.orderId,
+          }),
         );
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "建立叫車失敗");

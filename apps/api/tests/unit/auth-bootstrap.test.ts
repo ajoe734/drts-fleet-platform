@@ -390,6 +390,53 @@ describe("bootstrap auth extraction", () => {
 });
 
 describe("auth token issuance", () => {
+  it("derives durable tenant claims for internal-key bootstrap sessions", async () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+    process.env.DRTS_INTERNAL_KEY = "test-internal-secret";
+    process.env.AUTH_MODE = "explicit";
+
+    const { controller, jwtAuthService, tenantPartnerService } =
+      createAuthFixture();
+    const tenantUser = tenantPartnerService.findTenantUser(
+      "tenant-demo-001",
+      "tenant-user-demo-001",
+    );
+    expect(tenantUser).not.toBeNull();
+
+    const issued = await controller.issueToken({
+      headers: {
+        "x-drts-internal-key": "test-internal-secret",
+        "x-actor-type": "tenant_admin",
+        "x-actor-id": "tenant-user-demo-001",
+        "x-realm": "tenant",
+        "x-tenant-id": "tenant-demo-001",
+        "x-roles": "tenant_viewer",
+        "x-scopes": "tenant:read",
+      },
+      method: "POST",
+      originalUrl: "/api/auth/token",
+      url: "/api/auth/token",
+    });
+
+    const payload = jwtAuthService.verify(issued.token);
+    expect(payload).toMatchObject({
+      sub: "tenant-user-demo-001",
+      roles: [tenantUser!.roleCode],
+      tokenVersion: Date.parse(tenantUser!.updatedAt),
+    });
+    expect(await jwtAuthService.verifyAccessToken(issued.token)).toMatchObject({
+      sub: "tenant-user-demo-001",
+    });
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+    delete process.env.DRTS_INTERNAL_KEY;
+    delete process.env.AUTH_MODE;
+  });
+
   it("issues trusted workforce MFA claims for internal-key bootstrap platform tokens", async () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
