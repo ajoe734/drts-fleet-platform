@@ -18,6 +18,8 @@ import type {
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import {
   CurrentIdentity,
+  RequireRealms,
+  RequireScopes,
   type BootstrapRequestIdentity,
 } from "../../common/auth";
 import { ServiceAreaService } from "./service-area.service";
@@ -27,6 +29,7 @@ export class ServiceAreaController {
   constructor(private readonly serviceAreaService: ServiceAreaService) {}
 
   @Get("definitions")
+  @RequireRealms("system", "platform", "tenant", "ops", "driver")
   listDefinitions(@Headers("x-request-id") requestId?: string) {
     const definitions: ServiceAreaDefinitionsResponse = {
       serviceAreas: this.serviceAreaService.listServiceAreas(),
@@ -37,6 +40,8 @@ export class ServiceAreaController {
   }
 
   @Get("admin/geojson")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("foundation:read")
   exportAdminGeoJson(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       this.serviceAreaService.exportGeoJson(),
@@ -45,6 +50,7 @@ export class ServiceAreaController {
   }
 
   @Get("geojson")
+  @RequireRealms("system", "platform", "tenant", "ops", "driver")
   exportOperationalGeoJson(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       this.serviceAreaService.exportOperationalGeoJson(),
@@ -53,6 +59,7 @@ export class ServiceAreaController {
   }
 
   @Post("evaluate")
+  @RequireRealms("system", "platform", "tenant", "ops", "driver")
   evaluateServiceArea(
     @Body() command: EvaluateServiceAreaCommand,
     @Headers("x-request-id") requestId?: string,
@@ -64,6 +71,8 @@ export class ServiceAreaController {
   }
 
   @Post("admin/service-areas")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("foundation:write")
   async createServiceArea(
     @Body() command: CreateServiceAreaBoundaryCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
@@ -83,6 +92,8 @@ export class ServiceAreaController {
   }
 
   @Post("admin/service-areas/:serviceAreaId/update")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("foundation:write")
   async updateServiceArea(
     @Param("serviceAreaId") serviceAreaId: string,
     @Body() command: UpdateServiceAreaBoundaryCommand,
@@ -104,6 +115,8 @@ export class ServiceAreaController {
   }
 
   @Post("admin/service-areas/:serviceAreaId/submit-review")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("foundation:write")
   async submitServiceAreaForReview(
     @Param("serviceAreaId") serviceAreaId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
@@ -123,6 +136,8 @@ export class ServiceAreaController {
   }
 
   @Post("admin/service-areas/:serviceAreaId/publish")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("foundation:write")
   async publishServiceArea(
     @Param("serviceAreaId") serviceAreaId: string,
     @Body() command: PublishServiceAreaBoundaryCommand,
@@ -144,6 +159,8 @@ export class ServiceAreaController {
   }
 
   @Post("admin/service-areas/:serviceAreaId/retire")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("foundation:write")
   async retireServiceArea(
     @Param("serviceAreaId") serviceAreaId: string,
     @Body() command: RetireServiceAreaBoundaryCommand,
@@ -165,6 +182,8 @@ export class ServiceAreaController {
   }
 
   @Post("admin/stop-policies")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("foundation:write")
   async createStopPolicy(
     @Body() command: CreateStopPolicyCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
@@ -184,6 +203,8 @@ export class ServiceAreaController {
   }
 
   @Post("admin/stop-policies/:stopPolicyId/update")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("foundation:write")
   async updateStopPolicy(
     @Param("stopPolicyId") stopPolicyId: string,
     @Body() command: UpdateStopPolicyCommand,
@@ -205,6 +226,8 @@ export class ServiceAreaController {
   }
 
   @Post("admin/stop-policies/:stopPolicyId/submit-review")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("foundation:write")
   async submitStopPolicyForReview(
     @Param("stopPolicyId") stopPolicyId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
@@ -224,6 +247,8 @@ export class ServiceAreaController {
   }
 
   @Post("admin/stop-policies/:stopPolicyId/publish")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("foundation:write")
   async publishStopPolicy(
     @Param("stopPolicyId") stopPolicyId: string,
     @Body() command: PublishStopPolicyCommand,
@@ -245,6 +270,8 @@ export class ServiceAreaController {
   }
 
   @Post("admin/stop-policies/:stopPolicyId/retire")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("foundation:write")
   async retireStopPolicy(
     @Param("stopPolicyId") stopPolicyId: string,
     @Body() command: RetireStopPolicyCommand,
