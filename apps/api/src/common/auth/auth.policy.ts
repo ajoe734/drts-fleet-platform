@@ -173,6 +173,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "notifications/read" && upperMethod === "POST") {
+    return {
+      routeKey: "notifications:read:post",
+      requiredScopes: ["notifications:write"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Notification read acknowledgment",
+    };
+  }
+
   if (routePath === "tenant-partner/summary") {
     return {
       routeKey: "tenant-partner:summary",

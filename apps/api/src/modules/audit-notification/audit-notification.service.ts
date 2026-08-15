@@ -23,6 +23,7 @@ import {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
 import {
   assertEvidenceAccess,
   buildEvidenceAccessAuditSummary,
@@ -745,14 +746,54 @@ export class AuditNotificationService implements OnModuleInit {
 
   markNotificationsRead(
     command: MarkNotificationsReadCommand,
-    requestId?: string,
+    identityOrRequestId?: BootstrapRequestIdentity | string | null,
+    maybeRequestId?: string,
   ) {
+    const identity =
+      typeof identityOrRequestId === "object" ? identityOrRequestId : null;
+    const requestId =
+      typeof identityOrRequestId === "string"
+        ? identityOrRequestId
+        : maybeRequestId;
+
     const notificationIds = new Set(command.notificationIds);
     const readAt = new Date().toISOString();
+
+    if (identity?.realm === "driver" && identity.actorId) {
+      for (const notifId of notificationIds) {
+        const notif = this.notifications.find(
+          (n) => n.notificationId === notifId,
+        );
+        if (
+          notif &&
+          notif.recipientUserId &&
+          notif.recipientUserId !== identity.actorId
+        ) {
+          throw new ApiRequestError(
+            403,
+            "NOTIFICATION_ACTOR_FORBIDDEN",
+            "Drivers can only acknowledge notifications assigned to their actor ID.",
+            {
+              notificationId: notifId,
+              actorId: identity.actorId,
+            },
+          );
+        }
+      }
+    }
+
     let updated = 0;
 
     this.notifications = this.notifications.map((notification) => {
       if (!notificationIds.has(notification.notificationId)) {
+        return notification;
+      }
+      if (
+        identity?.realm === "driver" &&
+        identity.actorId &&
+        notification.recipientUserId &&
+        notification.recipientUserId !== identity.actorId
+      ) {
         return notification;
       }
       if (notification.readAt !== null) {
@@ -773,9 +814,12 @@ export class AuditNotificationService implements OnModuleInit {
       > & {
         requestId?: string;
       } = {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "driver_user"
+            : (identity?.actorType as AuditLogRecord["actorType"]) ?? "system",
+        tenantId: identity?.tenantId ?? null,
         moduleName: "audit-notification",
         actionName: "mark_notifications_read",
         resourceType: "notification_batch",

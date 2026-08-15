@@ -248,14 +248,24 @@ export class BillingSettlementController {
   }
 
   @Get("settlement/invoices")
-  listPlatformInvoices(@Headers("x-request-id") requestId?: string) {
-    const items = this.billingSettlementService.listPlatformInvoices();
+  @RequireRealms("system", "platform", "tenant", "ops", "partner")
+  @RequireScopes("billing:read")
+  listPlatformInvoices(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.billingSettlementService.listPlatformInvoices(identity);
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("settlement/matrix")
-  listSettlementMatrix(@Headers("x-request-id") requestId?: string) {
-    const items = this.billingSettlementService.listSettlementMatrix();
+  @RequireRealms("system", "platform", "tenant", "ops", "partner")
+  @RequireScopes("billing:read")
+  listSettlementMatrix(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.billingSettlementService.listSettlementMatrix(identity);
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
@@ -269,12 +279,19 @@ export class BillingSettlementController {
   }
 
   @Post("driver-fee-plans/publish")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   publishDriverFeePlan(
     @Body() command: PublishDriverFeePlanCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.billingSettlementService.publishDriverFeePlan(command, requestId),
+      this.billingSettlementService.publishDriverFeePlan(
+        command,
+        identity,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -336,29 +353,39 @@ export class BillingSettlementController {
   }
 
   @Get("settlement/reconciliation-issues")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:read")
   listReconciliationIssues(
     @Query("status") status?: "open" | "assigned" | "resolved" | "reopened",
     @Query("issueType")
     issueType?: "forwarder_status_mismatch" | "partner_sponsor_mismatch",
     @Query("channelKey") channelKey?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items = this.billingSettlementService.listReconciliationIssues({
-      ...(status ? { status } : {}),
-      ...(issueType ? { issueType } : {}),
-      ...(channelKey ? { channelKey } : {}),
-    });
+    const items = this.billingSettlementService.listReconciliationIssues(
+      {
+        ...(status ? { status } : {}),
+        ...(issueType ? { issueType } : {}),
+        ...(channelKey ? { channelKey } : {}),
+      },
+      identity,
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("settlement/reconciliation-issues")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   createReconciliationIssue(
     @Body() command: CreateReconciliationIssueCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.billingSettlementService.createReconciliationIssue(
         command,
+        identity,
         requestId,
       ),
       requestId,
@@ -366,15 +393,19 @@ export class BillingSettlementController {
   }
 
   @Post("settlement/reconciliation-issues/:issueId/assign")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   assignReconciliationIssue(
     @Param("issueId") issueId: string,
     @Body() command: AssignReconciliationIssueCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.billingSettlementService.assignReconciliationIssue(
         issueId,
         command,
+        identity,
         requestId,
       ),
       requestId,
@@ -382,15 +413,19 @@ export class BillingSettlementController {
   }
 
   @Post("settlement/reconciliation-issues/:issueId/comment")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   addReconciliationIssueComment(
     @Param("issueId") issueId: string,
     @Body() command: AddReconciliationIssueCommentCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.billingSettlementService.addReconciliationIssueComment(
         issueId,
         command,
+        identity,
         requestId,
       ),
       requestId,
@@ -398,15 +433,19 @@ export class BillingSettlementController {
   }
 
   @Post("settlement/reconciliation-issues/:issueId/resolve")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   resolveReconciliationIssue(
     @Param("issueId") issueId: string,
     @Body() command: ResolveReconciliationIssueCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.billingSettlementService.resolveReconciliationIssue(
         issueId,
         command,
+        identity,
         requestId,
       ),
       requestId,
@@ -414,15 +453,19 @@ export class BillingSettlementController {
   }
 
   @Post("settlement/reconciliation-issues/:issueId/reopen")
+  @RequireRealms("system", "platform", "tenant", "ops")
+  @RequireScopes("billing:write")
   reopenReconciliationIssue(
     @Param("issueId") issueId: string,
     @Body() command: ReopenReconciliationIssueCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.billingSettlementService.reopenReconciliationIssue(
         issueId,
         command,
+        identity,
         requestId,
       ),
       requestId,

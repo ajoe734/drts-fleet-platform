@@ -1322,6 +1322,7 @@ export interface AuditLogRecord {
     | "platform_admin"
     | "tenant_admin"
     | "ops_user"
+    | "driver_user"
     | "partner_api_key"
     | "partner_user"
     | "referral_passenger";

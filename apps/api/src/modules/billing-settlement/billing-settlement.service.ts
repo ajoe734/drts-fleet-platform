@@ -1559,11 +1559,18 @@ export class BillingSettlementService implements OnModuleInit {
       .map((statement) => this.cloneStatement(statement));
   }
 
-  listPlatformInvoices() {
+  listPlatformInvoices(identity?: BootstrapRequestIdentity | null) {
+    if (identity?.realm === "tenant" && identity.tenantId) {
+      return this.tenantInvoices
+        .filter((invoice) => invoice.tenantId === identity.tenantId)
+        .map((invoice) => this.cloneInvoice(invoice));
+    }
     return this.tenantInvoices.map((invoice) => this.cloneInvoice(invoice));
   }
 
-  listSettlementMatrix(): SettlementMatrixRecord[] {
+  listSettlementMatrix(
+    _identity?: BootstrapRequestIdentity | null,
+  ): SettlementMatrixRecord[] {
     return buildSettlementMatrix();
   }
 
@@ -1587,8 +1594,16 @@ export class BillingSettlementService implements OnModuleInit {
 
   async publishDriverFeePlan(
     command: PublishDriverFeePlanCommand,
-    requestId?: string,
+    identityOrRequestId?: BootstrapRequestIdentity | string | null,
+    maybeRequestId?: string,
   ) {
+    const identity =
+      typeof identityOrRequestId === "object" ? identityOrRequestId : null;
+    const requestId =
+      typeof identityOrRequestId === "string"
+        ? identityOrRequestId
+        : maybeRequestId;
+
     this.assertNonBlank(command.planName, "planName");
     this.assertNonBlank(command.version, "version");
 
@@ -1627,9 +1642,13 @@ export class BillingSettlementService implements OnModuleInit {
     );
     this.recordAudit(
       {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: null,
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType === "driver_user"
+            ? "driver_user"
+            : (identity?.actorType as AuditLogRecord["actorType"]) ??
+              "platform_admin",
+        tenantId: identity?.tenantId ?? null,
         moduleName: "billing-settlement",
         actionName: "publish_driver_fee_plan",
         resourceType: "driver_fee_plan",
@@ -1921,10 +1940,21 @@ export class BillingSettlementService implements OnModuleInit {
       .map((treatment) => this.cloneSandboxBillingTreatment(treatment));
   }
 
-  listReconciliationIssues(filters: ReconciliationIssueFilters = {}) {
+  listReconciliationIssues(
+    filters: ReconciliationIssueFilters = {},
+    identity?: BootstrapRequestIdentity | null,
+  ) {
     this.syncDerivedForwarderIssues();
     return this.reconciliationIssues
       .filter((issue) => {
+        if (
+          identity?.realm === "tenant" &&
+          identity.tenantId &&
+          issue.tenantId &&
+          issue.tenantId !== identity.tenantId
+        ) {
+          return false;
+        }
         if (filters.status && issue.status !== filters.status) {
           return false;
         }
@@ -1942,10 +1972,34 @@ export class BillingSettlementService implements OnModuleInit {
 
   async createReconciliationIssue(
     command: CreateReconciliationIssueCommand,
-    requestId?: string,
+    identityOrRequestId?: BootstrapRequestIdentity | string | null,
+    maybeRequestId?: string,
   ) {
+    const identity =
+      typeof identityOrRequestId === "object" ? identityOrRequestId : null;
+    const requestId =
+      typeof identityOrRequestId === "string"
+        ? identityOrRequestId
+        : maybeRequestId;
+
     this.assertNonBlank(command.summary, "summary");
     this.assertNonBlank(command.openedBy, "openedBy");
+
+    if (identity?.realm === "tenant" && identity.tenantId) {
+      if (command.tenantId && command.tenantId !== identity.tenantId) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "TENANT_SCOPE_FORBIDDEN",
+          "Tenant actors cannot create reconciliation issues for another tenant.",
+          { tenantId: command.tenantId, callerTenantId: identity.tenantId },
+        );
+      }
+    }
+
+    const resolvedTenantId =
+      identity?.realm === "tenant" && identity.tenantId
+        ? identity.tenantId
+        : (command.tenantId?.trim() || null);
 
     const now = new Date().toISOString();
     const ownerId = command.assigneeId?.trim() || null;
@@ -1960,7 +2014,7 @@ export class BillingSettlementService implements OnModuleInit {
       ownerId,
       openedBy: command.openedBy.trim(),
       orderId: command.orderId?.trim() || null,
-      tenantId: command.tenantId?.trim() || null,
+      tenantId: resolvedTenantId,
       partnerId: command.partnerId?.trim() || null,
       partnerProgramId: command.partnerProgramId?.trim() || null,
       sponsorReference: command.sponsorReference?.trim() || null,
@@ -2002,8 +2056,10 @@ export class BillingSettlementService implements OnModuleInit {
     );
     this.recordAudit(
       {
-        actorId: command.openedBy.trim(),
-        actorType: "platform_admin",
+        actorId: identity?.actorId ?? command.openedBy.trim(),
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"]) ??
+          "platform_admin",
         tenantId: issue.tenantId,
         moduleName: "billing-settlement",
         actionName: "create_reconciliation_issue",
@@ -2025,12 +2081,37 @@ export class BillingSettlementService implements OnModuleInit {
   async assignReconciliationIssue(
     issueId: string,
     command: AssignReconciliationIssueCommand,
-    requestId?: string,
+    identityOrRequestId?: BootstrapRequestIdentity | string | null,
+    maybeRequestId?: string,
   ) {
+    const identity =
+      typeof identityOrRequestId === "object" ? identityOrRequestId : null;
+    const requestId =
+      typeof identityOrRequestId === "string"
+        ? identityOrRequestId
+        : maybeRequestId;
+
     this.assertNonBlank(command.assigneeId, "assigneeId");
     this.assertNonBlank(command.actorId, "actorId");
 
     const issue = this.requireReconciliationIssue(issueId);
+    if (
+      identity?.realm === "tenant" &&
+      identity.tenantId &&
+      issue.tenantId &&
+      issue.tenantId !== identity.tenantId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SCOPE_FORBIDDEN",
+        "Tenant actors cannot assign reconciliation issues belonging to another tenant.",
+        {
+          issueId,
+          tenantId: issue.tenantId,
+          callerTenantId: identity.tenantId,
+        },
+      );
+    }
     if (issue.status === "resolved") {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -2060,8 +2141,10 @@ export class BillingSettlementService implements OnModuleInit {
     );
     this.recordAudit(
       {
-        actorId: command.actorId.trim(),
-        actorType: "platform_admin",
+        actorId: identity?.actorId ?? command.actorId.trim(),
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"]) ??
+          "platform_admin",
         tenantId: issue.tenantId,
         moduleName: "billing-settlement",
         actionName: "assign_reconciliation_issue",
@@ -2081,12 +2164,37 @@ export class BillingSettlementService implements OnModuleInit {
   async addReconciliationIssueComment(
     issueId: string,
     command: AddReconciliationIssueCommentCommand,
-    requestId?: string,
+    identityOrRequestId?: BootstrapRequestIdentity | string | null,
+    maybeRequestId?: string,
   ) {
+    const identity =
+      typeof identityOrRequestId === "object" ? identityOrRequestId : null;
+    const requestId =
+      typeof identityOrRequestId === "string"
+        ? identityOrRequestId
+        : maybeRequestId;
+
     this.assertNonBlank(command.actorId, "actorId");
     this.assertNonBlank(command.message, "message");
 
     const issue = this.requireReconciliationIssue(issueId);
+    if (
+      identity?.realm === "tenant" &&
+      identity.tenantId &&
+      issue.tenantId &&
+      issue.tenantId !== identity.tenantId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SCOPE_FORBIDDEN",
+        "Tenant actors cannot comment on reconciliation issues belonging to another tenant.",
+        {
+          issueId,
+          tenantId: issue.tenantId,
+          callerTenantId: identity.tenantId,
+        },
+      );
+    }
     const now = new Date().toISOString();
     issue.comments.push(
       this.createIssueComment(
@@ -2110,8 +2218,10 @@ export class BillingSettlementService implements OnModuleInit {
     );
     this.recordAudit(
       {
-        actorId: command.actorId.trim(),
-        actorType: "platform_admin",
+        actorId: identity?.actorId ?? command.actorId.trim(),
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"]) ??
+          "platform_admin",
         tenantId: issue.tenantId,
         moduleName: "billing-settlement",
         actionName: "add_reconciliation_issue_comment",
@@ -2131,12 +2241,37 @@ export class BillingSettlementService implements OnModuleInit {
   async resolveReconciliationIssue(
     issueId: string,
     command: ResolveReconciliationIssueCommand,
-    requestId?: string,
+    identityOrRequestId?: BootstrapRequestIdentity | string | null,
+    maybeRequestId?: string,
   ) {
+    const identity =
+      typeof identityOrRequestId === "object" ? identityOrRequestId : null;
+    const requestId =
+      typeof identityOrRequestId === "string"
+        ? identityOrRequestId
+        : maybeRequestId;
+
     this.assertNonBlank(command.actorId, "actorId");
     this.assertNonBlank(command.resolutionSummary, "resolutionSummary");
 
     const issue = this.requireReconciliationIssue(issueId);
+    if (
+      identity?.realm === "tenant" &&
+      identity.tenantId &&
+      issue.tenantId &&
+      issue.tenantId !== identity.tenantId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SCOPE_FORBIDDEN",
+        "Tenant actors cannot resolve reconciliation issues belonging to another tenant.",
+        {
+          issueId,
+          tenantId: issue.tenantId,
+          callerTenantId: identity.tenantId,
+        },
+      );
+    }
     const now = new Date().toISOString();
     issue.status = "resolved";
     issue.resolutionCode = command.resolutionCode;
@@ -2164,8 +2299,10 @@ export class BillingSettlementService implements OnModuleInit {
     );
     this.recordAudit(
       {
-        actorId: command.actorId.trim(),
-        actorType: "platform_admin",
+        actorId: identity?.actorId ?? command.actorId.trim(),
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"]) ??
+          "platform_admin",
         tenantId: issue.tenantId,
         moduleName: "billing-settlement",
         actionName: "resolve_reconciliation_issue",
@@ -2186,12 +2323,37 @@ export class BillingSettlementService implements OnModuleInit {
   async reopenReconciliationIssue(
     issueId: string,
     command: ReopenReconciliationIssueCommand,
-    requestId?: string,
+    identityOrRequestId?: BootstrapRequestIdentity | string | null,
+    maybeRequestId?: string,
   ) {
+    const identity =
+      typeof identityOrRequestId === "object" ? identityOrRequestId : null;
+    const requestId =
+      typeof identityOrRequestId === "string"
+        ? identityOrRequestId
+        : maybeRequestId;
+
     this.assertNonBlank(command.actorId, "actorId");
     this.assertNonBlank(command.reason, "reason");
 
     const issue = this.requireReconciliationIssue(issueId);
+    if (
+      identity?.realm === "tenant" &&
+      identity.tenantId &&
+      issue.tenantId &&
+      issue.tenantId !== identity.tenantId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_SCOPE_FORBIDDEN",
+        "Tenant actors cannot reopen reconciliation issues belonging to another tenant.",
+        {
+          issueId,
+          tenantId: issue.tenantId,
+          callerTenantId: identity.tenantId,
+        },
+      );
+    }
     if (issue.status !== "resolved") {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -2229,8 +2391,10 @@ export class BillingSettlementService implements OnModuleInit {
     );
     this.recordAudit(
       {
-        actorId: command.actorId.trim(),
-        actorType: "platform_admin",
+        actorId: identity?.actorId ?? command.actorId.trim(),
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"]) ??
+          "platform_admin",
         tenantId: issue.tenantId,
         moduleName: "billing-settlement",
         actionName: "reopen_reconciliation_issue",
