@@ -130,7 +130,9 @@ async function applyUpstreamAuth(
   headers.set("x-realm", "partner");
   headers.set("x-roles", "partner");
   headers.set("x-role-families", "partner");
-  headers.set("x-scopes", "billing:read");
+  // The portal manages partner supply submissions as well as statements.
+  // Do not reduce every request to the read-only billing scope.
+  headers.set("x-scopes", "partner:read partner:write");
   headers.set(FLEET_PARTNER_ID_HEADER, fleetPartnerId);
 
   const iapEmail = request.headers.get(CONTROL_PLANE_IAP_EMAIL_HEADER);

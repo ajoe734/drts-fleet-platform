@@ -136,9 +136,7 @@ function estimateFare(draft: EnterpriseBookingDraftForm) {
 }
 
 function getReservationStart(date: string, time: string, now = new Date()) {
-  const normalizedDate = /^\d{4}-\d{2}-\d{2}$/.test(date)
-    ? date
-    : "2026-06-13";
+  const normalizedDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "2026-06-13";
   const normalizedTime = /^\d{2}:\d{2}$/.test(time) ? time : "15:20";
   const parsed = new Date(
     `${normalizedDate}T${normalizedTime}:00${DEFAULT_TIMEZONE_OFFSET}`,
@@ -168,7 +166,10 @@ function getReservationWallClockFields(reservationWindowStart: string) {
 }
 
 export function formatReservationWindowLabel(
-  draft: Pick<EnterpriseBookingDraftForm, "reservationDate" | "reservationTime">,
+  draft: Pick<
+    EnterpriseBookingDraftForm,
+    "reservationDate" | "reservationTime"
+  >,
 ) {
   const date = draft.reservationDate;
   const time = draft.reservationTime;
@@ -182,9 +183,15 @@ export function formatReservationWindowLabel(
 
 export function createEnterpriseBookingDraft(
   locale: Locale,
+  now = new Date(),
 ): EnterpriseBookingDraftForm {
   const seed = getEnterpriseBookingDraft(locale);
   const vehicle = normalizeVehicle(enterpriseBookingDraft.vehicle, "business");
+  const defaultReservation = new Date(
+    now.getTime() + 2 * 24 * 60 * 60 * 1000 + DEFAULT_TIMEZONE_OFFSET_MS,
+  )
+    .toISOString()
+    .slice(0, 10);
 
   return {
     passengerMode: "other",
@@ -192,8 +199,10 @@ export function createEnterpriseBookingDraft(
     bookedBy: seed.bookedBy,
     pickup: seed.pickup,
     dropoff: seed.dropoff,
-    reservationDate: "2026-06-13",
-    reservationTime: "15:20",
+    // A new booking must begin inside its editable window; the former demo
+    // date made every post-release create/update journey immediately stale.
+    reservationDate: defaultReservation,
+    reservationTime: "10:00",
     onsiteContactPhone: seed.onsiteContact,
     costCenterCode: enterpriseBookingDraft.costCenterCode,
     costCenterLabel: seed.costCenter,
@@ -425,7 +434,10 @@ export function createEnterpriseBookingDraftFromRecord(
     onsiteContactPhone: record.onsiteContact?.phone ?? record.passenger.phone,
     costCenterCode: record.costCenter ?? "",
     costCenterLabel: record.costCenter ?? "",
-    vehicle: normalizeVehicle(record.vehiclePreference ?? undefined, "business"),
+    vehicle: normalizeVehicle(
+      record.vehiclePreference ?? undefined,
+      "business",
+    ),
     notes: record.notes ?? "",
     airportDirection: record.direction === "dropoff" ? "dropoff" : "pickup",
     terminal: record.terminal ?? "",

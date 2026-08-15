@@ -25,34 +25,34 @@ import type { BankRole } from "@/lib/home-data";
 import type { StatementStatus } from "@/lib/statements";
 import type { BankConsoleRole } from "@/lib/session";
 
-type SettlementStatementRecord = {
-  statementId: string;
-  tenantId: string;
+type ApiSettlementStatementRecord = {
+  statement_id: string;
+  tenant_id: string;
   period: string;
   status: StatementStatus;
   lines: Array<{
-    tripId: string;
-    completedAt: string;
-    fare: { amountMinor: number; currency: string };
-    subsidisedAmount: { amountMinor: number; currency: string };
-    paidAmount: { amountMinor: number; currency: string };
-    benefitReference: string;
-    issuerAuthorizationRef: string;
-    cardholderRefMasked: string;
+    trip_id: string;
+    completed_at: string;
+    fare: { amount_minor: number; currency: string };
+    subsidised_amount: { amount_minor: number; currency: string };
+    paid_amount: { amount_minor: number; currency: string };
+    benefit_reference: string;
+    issuer_authorization_ref: string;
+    cardholder_ref_masked: string;
   }>;
   totals: {
-    tripCount: number;
-    fareTotal: { amountMinor: number; currency: string };
-    subsidisedTotal: { amountMinor: number; currency: string };
-    paidTotal: { amountMinor: number; currency: string };
-    issuerPayable: { amountMinor: number; currency: string };
+    trip_count: number;
+    fare_total: { amount_minor: number; currency: string };
+    subsidised_total: { amount_minor: number; currency: string };
+    paid_total: { amount_minor: number; currency: string };
+    issuer_payable: { amount_minor: number; currency: string };
   };
-  artifactRef: {
-    artifactId: string;
+  artifact_ref: {
+    artifact_id: string;
     kind: "settlement_statement";
-    manifestHash: string;
+    manifest_hash: string;
   };
-  generatedAt: string;
+  generated_at: string;
 };
 
 export type BankLoadState<T> = {
@@ -134,8 +134,8 @@ export type BankHomeOrderTallies = {
   cancelled: number;
 };
 
-function moneyToNumber(value?: { amountMinor: number } | null) {
-  return (value?.amountMinor ?? 0) / 100;
+function apiMoneyToNumber(value?: { amount_minor: number } | null) {
+  return (value?.amount_minor ?? 0) / 100;
 }
 
 function maskCompact(value: string | null | undefined) {
@@ -422,7 +422,7 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
         tenantId,
         actorId,
       ),
-      bankApiGetList<SettlementStatementRecord>(
+      bankApiGetList<ApiSettlementStatementRecord>(
         "api/tenant/settlement-statements",
         tenantId,
         actorId,
@@ -546,35 +546,35 @@ export async function loadBankStatementsData(
       data: {
         statements: statements.map((statement) => ({
           period: statement.period,
-          statementNo: statement.statementId,
+          statementNo: statement.statement_id,
           programLabel: defaultProgramLabel,
-          issuedAt: statement.generatedAt,
+          issuedAt: statement.generated_at,
           dueAt: formatPeriodDate(statement.period, true),
           status: statement.status,
-          totalFareAmount: moneyToNumber(statement.totals.fareTotal),
-          totalSubsidisedAmount: moneyToNumber(
-            statement.totals.subsidisedTotal,
+          totalFareAmount: apiMoneyToNumber(statement.totals.fare_total),
+          totalSubsidisedAmount: apiMoneyToNumber(
+            statement.totals.subsidised_total,
           ),
-          totalPaidAmount: moneyToNumber(statement.totals.paidTotal),
-          totalIssuerPayableAmount: moneyToNumber(
-            statement.totals.issuerPayable,
+          totalPaidAmount: apiMoneyToNumber(statement.totals.paid_total),
+          totalIssuerPayableAmount: apiMoneyToNumber(
+            statement.totals.issuer_payable,
           ),
-          totalTrips: statement.totals.tripCount,
-          signedArtifactHref: `/artifacts/statements/${statement.artifactRef.artifactId}.pdf`,
+          totalTrips: statement.totals.trip_count,
+          signedArtifactHref: `/artifacts/statements/${statement.artifact_ref.artifact_id}.pdf`,
           artifactExpired: statement.status === "due",
           trips: statement.lines.map((line) => ({
-            tripId: line.tripId,
-            tripDate: line.completedAt,
-            orderNo: line.tripId,
+            tripId: line.trip_id,
+            tripDate: line.completed_at,
+            orderNo: line.trip_id,
             routeLabel: "依 API trip readback",
-            fareAmount: moneyToNumber(line.fare),
-            subsidisedAmount: moneyToNumber(line.subsidisedAmount),
-            paidAmount: moneyToNumber(line.paidAmount),
-            benefitReferenceMasked: maskSegmented(line.benefitReference),
-            cardholderReferenceMasked: maskCompact(line.cardholderRefMasked),
+            fareAmount: apiMoneyToNumber(line.fare),
+            subsidisedAmount: apiMoneyToNumber(line.subsidised_amount),
+            paidAmount: apiMoneyToNumber(line.paid_amount),
+            benefitReferenceMasked: maskSegmented(line.benefit_reference),
+            cardholderReferenceMasked: maskCompact(line.cardholder_ref_masked),
             cardReferenceMasked: "••••",
-            artifactDownloadHref: `/artifacts/trips/${line.tripId}.pdf`,
-            disputeHref: `/statements/${statement.period}?dispute=${line.tripId}`,
+            artifactDownloadHref: `/artifacts/trips/${line.trip_id}.pdf`,
+            disputeHref: `/statements/${statement.period}?dispute=${line.trip_id}`,
             disputed: false,
           })),
         })),
