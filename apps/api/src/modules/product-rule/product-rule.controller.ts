@@ -4,6 +4,7 @@ import { Throttle } from "@nestjs/throttler";
 import type { ProductRuleCatalog } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { RequireRealms } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import {
   BUSINESS_DISPATCH_SUBTYPE_VALUES,
@@ -18,8 +19,10 @@ import {
 // 5-min block) so a burst can never lock the pricing page out for minutes.
 @Throttle(READ_HEAVY_RATE_LIMIT)
 @Controller("product-rule")
+@RequireRealms("system", "platform", "tenant", "ops")
 export class ProductRuleController {
   @Get("catalog")
+  @RequireRealms("system", "platform", "tenant", "ops")
   getCatalog(@Headers("x-request-id") requestId?: string) {
     const catalog: ProductRuleCatalog = {
       phase1ServiceBuckets: [...PHASE1_SERVICE_BUCKET_VALUES],
