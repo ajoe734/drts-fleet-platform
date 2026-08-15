@@ -1363,8 +1363,6 @@ jobs:
             --header 'content-type: application/json' \
             --header "x-drts-internal-key: ${internal_key}" \
             --header 'x-actor-type: tenant_admin' \
-            # The issued bearer token is validated against the tenant directory.
-            # Use the seeded active administrator, not a synthetic CI-only actor.
             --header 'x-actor-id: tenant-user-demo-001' \
             --header 'x-realm: tenant' \
             --header 'x-tenant-id: 10000000-0000-0000-0000-000000000201' \
