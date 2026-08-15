@@ -87,12 +87,21 @@ describe("operational browser journeys manifest guard", () => {
     expect(tenantJourney?.setup).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: "/api/bookings/create",
-          capture: { tenantBookingId: "booking.bookingId" },
+          baseUrlEnv: "DRTS_DEV_API_BASE_URL",
+          path: "/api/tenant/bookings",
+          headers: expect.objectContaining({
+            "x-actor-type": "tenant_admin",
+            "x-scopes": "tenant:write",
+          }),
+          capture: { tenantBookingId: "data.booking_id" },
         }),
         expect.objectContaining({
           baseUrlEnv: "DRTS_DEV_API_BASE_URL",
           path: expect.stringContaining("dispatch-timeout"),
+          headers: expect.objectContaining({
+            "x-actor-type": "tenant_admin",
+            "x-scopes": "owned:write",
+          }),
         }),
       ]),
     );
