@@ -181,4 +181,31 @@ describe("validateInternalKey strict environment behavior", () => {
     ).not.toThrow();
     expect(next).toHaveBeenCalledOnce();
   });
+
+  it("enforces the mounted key in development when the deployment enables it", () => {
+    process.env.NODE_ENV = "production";
+    process.env.DRTS_ENV = "development";
+    process.env.DRTS_INTERNAL_KEY_ENFORCED = "true";
+    process.env.DRTS_INTERNAL_KEY = "12345678901234567890123456789012";
+
+    const middleware = new InternalKeyMiddleware();
+    const next = vi.fn();
+
+    expect(() =>
+      middleware.use(
+        {
+          method: "POST",
+          originalUrl: "/api/auth/token",
+          headers: {
+            "x-actor-type": "tenant_admin",
+            "x-actor-id": "release-acceptance",
+            "x-realm": "tenant",
+          },
+        },
+        {},
+        next,
+      ),
+    ).toThrowError(ApiRequestError);
+    expect(next).not.toHaveBeenCalled();
+  });
 });

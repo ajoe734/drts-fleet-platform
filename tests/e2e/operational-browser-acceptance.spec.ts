@@ -16,6 +16,11 @@ type JourneyStep =
   | { kind: "navigate"; path: string }
   | { kind: "click"; control: string }
   | { kind: "fill"; control: string; value: string };
+type BrowserSession = {
+  cookieName: string;
+  tokenEnv: string;
+  templateVariable: string;
+};
 type Readback = {
   url: string;
   idPath: string;
@@ -48,6 +53,7 @@ type Journey = {
   baseUrlEnv: string;
   route: string;
   actorScope: string;
+  browserSession?: BrowserSession;
   setup?: SetupRequest[];
   operations: Operation[];
 };
@@ -81,6 +87,16 @@ function requiredOrigin(envName: string) {
     );
   }
   return new URL(value).toString();
+}
+
+function requiredEnvironmentValue(envName: string) {
+  const value = process.env[envName]?.trim();
+  if (!value) {
+    throw new Error(
+      `${envName} is required for this browser session's deployed candidate evidence.`,
+    );
+  }
+  return value;
 }
 
 function record(entry: Record<string, unknown>) {
@@ -257,6 +273,37 @@ async function runSetup(
   }
 }
 
+async function installBrowserSession(
+  page: Page,
+  journey: Journey,
+  origin: string,
+  variables: TemplateVariables,
+) {
+  const session = journey.browserSession;
+  if (!session) {
+    return;
+  }
+
+  const token = requiredEnvironmentValue(session.tokenEnv);
+  variables[session.templateVariable] = token;
+  await page.context().addCookies([
+    {
+      name: session.cookieName,
+      value: token,
+      url: origin,
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+  record({
+    kind: "browser-session",
+    journey: journey.id,
+    surface: journey.surface,
+    actorScope: journey.actorScope,
+    tokenSource: session.tokenEnv,
+  });
+}
+
 test.afterAll(() => {
   mkdirSync(evidenceDir, { recursive: true });
   writeFileSync(
@@ -291,6 +338,11 @@ test("requires a single immutable candidate SHA and complete formal journey mani
 
   for (const journey of manifest.journeys) {
     expect(journey.actorScope, `${journey.id} actor scope`).not.toEqual("");
+    if (journey.browserSession) {
+      expect(journey.browserSession.cookieName).not.toEqual("");
+      expect(journey.browserSession.tokenEnv).not.toEqual("");
+      expect(journey.browserSession.templateVariable).not.toEqual("");
+    }
     expect(
       journey.operations.length,
       `${journey.id} operations`,
@@ -331,6 +383,7 @@ for (const journey of manifest.journeys) {
     const variables: TemplateVariables = {
       runId: `${journey.id}-${Date.now().toString(36)}`,
     };
+    await installBrowserSession(page, journey, origin, variables);
     await runSetup(page, journey, variables);
     await navigate(
       page,
@@ -389,6 +442,14 @@ for (const journey of manifest.journeys) {
           response.url().includes(operation.requestUrlIncludes),
         { timeout: interactionTimeoutMs },
       );
+      // A successful mutation can navigate immediately. Begin consuming the
+      // response before navigation disposes its CDP request body.
+      const responseBodyPromise =
+        operation.responseKind === "json"
+          ? responsePromise.then(
+              (response) => response.json() as Promise<unknown>,
+            )
+          : null;
       const downloadPromise =
         operation.responseKind === "download"
           ? page.waitForEvent("download", { timeout: interactionTimeoutMs })
@@ -434,7 +495,7 @@ for (const journey of manifest.journeys) {
         continue;
       }
 
-      const responseBody = (await response.json()) as unknown;
+      const responseBody = await responseBodyPromise!;
       const resultId = valueAtPath(
         responseBody,
         operation.resultIdPath as string,
@@ -487,6 +548,7 @@ for (const journey of manifest.journeys) {
     const variables: TemplateVariables = {
       runId: `${journey.id}-route-${Date.now().toString(36)}`,
     };
+    await installBrowserSession(page, journey, origin, variables);
     await runSetup(page, journey, variables);
     const response = await page.goto(
       new URL(

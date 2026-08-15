@@ -324,6 +324,14 @@ describe("Cloud Run deploy quota retry", () => {
     expect(candidateAcceptance).toContain(
       "operations/verification/run-operational-browser-acceptance.sh",
     );
+    expect(candidateAcceptance).toContain(
+      "Issue deployment-machine Tenant acceptance session",
+    );
+    expect(candidateAcceptance).toContain(
+      "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
+    );
+    expect(workflow).toContain("DRTS_INTERNAL_KEY_ENFORCED=true");
+    expect(workflow).toContain("AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}");
     expect(workflow).not.toContain(
       "Authenticate to GCP for failure diagnostics",
     );

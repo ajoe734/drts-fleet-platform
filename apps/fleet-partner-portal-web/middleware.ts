@@ -20,8 +20,14 @@ export function middleware(request: NextRequest) {
     "max-age=31536000; includeSubDomains",
   );
 
-  // 2. CSRF Token Check for State-Mutating Requests
-  if (["POST", "PUT", "DELETE", "PATCH"].includes(request.method)) {
+  // CSRF protects browser cookie sessions. The Dev portal deliberately runs
+  // stateless until its complete login surface is enabled, so it must not
+  // reject a BFF mutation that carries no session cookie to forge.
+  const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  if (
+    sessionCookie &&
+    ["POST", "PUT", "DELETE", "PATCH"].includes(request.method)
+  ) {
     const csrfCookie = request.cookies.get(CSRF_COOKIE_NAME)?.value;
     const csrfHeader = request.headers.get("x-csrf-token");
 
@@ -46,7 +52,6 @@ export function middleware(request: NextRequest) {
   // required operational dashboard.  Auth remains opt-in until that flow is
   // deployed as one complete surface.
   if (!isPublic && process.env.DRTS_FLEET_PORTAL_AUTH_REQUIRED === "true") {
-    const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
     if (!sessionCookie) {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("redirect_uri", pathname);
