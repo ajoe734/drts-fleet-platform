@@ -1,26 +1,31 @@
 import type {
   CancelReferralPassengerTripCommand,
   CreateReferralPassengerBookingCommand,
+  OwnedOrderRecord,
   ReferralPassengerActiveTripResult,
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
   SubmitReferralPassengerRatingCommand,
 } from "@drts/contracts";
 import { getReferralEmbedSession } from "./embed-partner-session";
+import { deepCamelize } from "./embed-api";
 import { getServerApiBaseUrl } from "./embed-runtime";
 
 const API_URL = getServerApiBaseUrl();
 
-function readSuccessfulEnvelopeData<T>(
-  payload: unknown,
-  message: string,
-): T | null {
-  if (payload === null || typeof payload !== "object" || !("data" in payload)) {
-    throw new Error(message);
-  }
+type ReferralBookingResult = {
+  orderId: string;
+  bookingId?: string;
+  status: string;
+};
 
-  return (payload as { data: T | null }).data;
-}
+type ReferralPassengerRatingResult = {
+  orderId: string;
+  score: number;
+  comment: string | null;
+  tags: string[];
+  submittedAt: string;
+};
 
 function buildIdentityHeaders(
   session: NonNullable<Awaited<ReturnType<typeof getReferralEmbedSession>>>,
@@ -43,14 +48,14 @@ function buildIdentityHeaders(
 
 export async function createReferralBookingServer(
   command: CreateReferralPassengerBookingCommand,
-) {
+): Promise<ReferralBookingResult> {
   const session = await getReferralEmbedSession();
   if (!session || !session.identityActive) {
     throw new Error("UNAUTHORIZED: Active referral session required");
   }
 
   const response = await fetch(
-    `${API_URL}/partner/referral/passenger/bookings`,
+    `${API_URL}/api/partner/referral/passenger/bookings`,
     {
       method: "POST",
       headers: {
@@ -68,7 +73,7 @@ export async function createReferralBookingServer(
       payload?.error?.message || `Booking failed with ${response.status}`,
     );
   }
-  return payload.data;
+  return deepCamelize(payload.data) as ReferralBookingResult;
 }
 
 export async function getReferralActiveTripServer(): Promise<ReferralPassengerActiveTripResult | null> {
@@ -77,14 +82,17 @@ export async function getReferralActiveTripServer(): Promise<ReferralPassengerAc
     throw new Error("UNAUTHORIZED: Active referral session required");
   }
 
-  const response = await fetch(`${API_URL}/partner/referral/passenger/active`, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...buildIdentityHeaders(session),
+  const response = await fetch(
+    `${API_URL}/api/partner/referral/passenger/active`,
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...buildIdentityHeaders(session),
+      },
+      cache: "no-store",
     },
-    cache: "no-store",
-  });
+  );
 
   const payload = await response.json();
   if (!response.ok) {
@@ -93,10 +101,7 @@ export async function getReferralActiveTripServer(): Promise<ReferralPassengerAc
         `Active trip lookup failed with ${response.status}`,
     );
   }
-  return readSuccessfulEnvelopeData<ReferralPassengerActiveTripResult>(
-    payload,
-    "Active trip lookup returned an invalid response",
-  );
+  return deepCamelize(payload.data) as ReferralPassengerActiveTripResult | null;
 }
 
 export async function getReferralTripHistoryServer(): Promise<{
@@ -108,7 +113,7 @@ export async function getReferralTripHistoryServer(): Promise<{
   }
 
   const response = await fetch(
-    `${API_URL}/partner/referral/passenger/history`,
+    `${API_URL}/api/partner/referral/passenger/history`,
     {
       method: "GET",
       headers: {
@@ -126,7 +131,9 @@ export async function getReferralTripHistoryServer(): Promise<{
         `Trip history lookup failed with ${response.status}`,
     );
   }
-  return payload.data;
+  return deepCamelize(payload.data) as {
+    items: ReferralPassengerHistoryItem[];
+  };
 }
 
 export async function getReferralTripReceiptServer(
@@ -138,7 +145,7 @@ export async function getReferralTripReceiptServer(
   }
 
   const response = await fetch(
-    `${API_URL}/partner/referral/passenger/orders/${encodeURIComponent(orderId)}/receipt`,
+    `${API_URL}/api/partner/referral/passenger/orders/${encodeURIComponent(orderId)}/receipt`,
     {
       method: "GET",
       headers: {
@@ -156,20 +163,20 @@ export async function getReferralTripReceiptServer(
         `Receipt lookup failed with ${response.status}`,
     );
   }
-  return payload.data;
+  return deepCamelize(payload.data) as ReferralPassengerReceipt;
 }
 
 export async function cancelReferralTripServer(
   orderId: string,
   command: CancelReferralPassengerTripCommand,
-) {
+): Promise<OwnedOrderRecord> {
   const session = await getReferralEmbedSession();
   if (!session || !session.identityActive) {
     throw new Error("UNAUTHORIZED: Active referral session required");
   }
 
   const response = await fetch(
-    `${API_URL}/partner/referral/passenger/orders/${encodeURIComponent(orderId)}/cancel`,
+    `${API_URL}/api/partner/referral/passenger/orders/${encodeURIComponent(orderId)}/cancel`,
     {
       method: "POST",
       headers: {
@@ -188,20 +195,20 @@ export async function cancelReferralTripServer(
         `Trip cancellation failed with ${response.status}`,
     );
   }
-  return payload.data;
+  return deepCamelize(payload.data) as OwnedOrderRecord;
 }
 
 export async function submitReferralTripRatingServer(
   orderId: string,
   command: SubmitReferralPassengerRatingCommand,
-) {
+): Promise<ReferralPassengerRatingResult> {
   const session = await getReferralEmbedSession();
   if (!session || !session.identityActive) {
     throw new Error("UNAUTHORIZED: Active referral session required");
   }
 
   const response = await fetch(
-    `${API_URL}/partner/referral/passenger/orders/${encodeURIComponent(orderId)}/rating`,
+    `${API_URL}/api/partner/referral/passenger/orders/${encodeURIComponent(orderId)}/rating`,
     {
       method: "POST",
       headers: {
@@ -220,5 +227,5 @@ export async function submitReferralTripRatingServer(
         `Rating submission failed with ${response.status}`,
     );
   }
-  return payload.data;
+  return deepCamelize(payload.data) as ReferralPassengerRatingResult;
 }

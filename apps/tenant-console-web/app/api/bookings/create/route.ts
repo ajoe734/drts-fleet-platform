@@ -10,8 +10,8 @@ import { createTenantClient } from "@drts/api-client";
 import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
 
 type TenantBookingCommandResponse = {
-  bookingId: string;
-  orderId: string;
+  booking_id: string;
+  order_id: string;
   status: string;
   businessDispatchSubtype: string;
   dispatchSemantics: string;
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
       },
     );
 
-    if (!booking?.bookingId) {
+    if (!booking?.booking_id) {
       return NextResponse.json(
         { error: "Backend did not return a booking identifier." },
         { status: 502 },
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
           (entry) =>
             entry.requestId === requestId &&
             entry.resourceType === "booking" &&
-            entry.resourceId === booking.bookingId,
+            entry.resourceId === booking.booking_id,
         ) ?? null;
     } catch {
       auditEntry = null;
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
       actionId: requestId,
       auditId: auditEntry?.auditId ?? requestId,
       resourceType: "booking",
-      resourceId: booking.bookingId,
+      resourceId: booking.booking_id,
       status: receiptStatus,
       message:
         receiptStatus === "accepted"
@@ -103,14 +103,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       booking: {
-        bookingId: booking.bookingId,
+        bookingId: booking.booking_id,
         status: booking.status,
       },
       receipt,
       auditHref: auditEntry
         ? `/audit?auditId=${encodeURIComponent(auditEntry.auditId)}`
         : null,
-      crossAppLinks: buildCrossAppLinks(booking.bookingId, requestId),
+      crossAppLinks: buildCrossAppLinks(booking.booking_id, requestId),
     });
   } catch (error) {
     return NextResponse.json(
