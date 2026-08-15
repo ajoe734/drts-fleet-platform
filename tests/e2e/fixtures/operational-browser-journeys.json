@@ -260,10 +260,10 @@
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
           "responseKind": "json",
-          "resultIdPath": "data.submission.submissionId",
+          "resultIdPath": "data.submission.submission_id",
           "readback": {
             "url": "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
-            "idPath": "data.submission.submissionId",
+            "idPath": "data.submission.submission_id",
             "statePath": "data.submission.status",
             "expectedState": "submitted"
           }
@@ -275,10 +275,10 @@
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
           "responseKind": "json",
-          "resultIdPath": "data.submission.submissionId",
+          "resultIdPath": "data.submission.submission_id",
           "readback": {
             "url": "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
-            "idPath": "data.submission.submissionId",
+            "idPath": "data.submission.submission_id",
             "statePath": "data.submission.status",
             "expectedState": "withdrawn"
           }
@@ -290,10 +290,10 @@
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
           "responseKind": "json",
-          "resultIdPath": "data.submission.submissionId",
+          "resultIdPath": "data.submission.submission_id",
           "readback": {
             "url": "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
-            "idPath": "data.submission.submissionId",
+            "idPath": "data.submission.submission_id",
             "statePath": "data.submission.status",
             "expectedState": "submitted"
           }
@@ -425,7 +425,7 @@
           "resultIdPath": "data.submission_id",
           "readback": {
             "url": "/control-plane-proxy/admin/supply-review/submissions/{resultId}",
-            "idPath": "data.submission.submissionId",
+            "idPath": "data.submission.submission_id",
             "statePath": "data.submission.status",
             "expectedState": "approved"
           }

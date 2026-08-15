@@ -330,6 +330,7 @@ describe("Cloud Run deploy quota retry", () => {
     expect(candidateAcceptance).toContain(
       "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
     );
+    expect(candidateAcceptance).toContain("x-actor-id: tenant-user-demo-001");
     expect(workflow).toContain("DRTS_INTERNAL_KEY_ENFORCED=false");
     expect(workflow).toContain("AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}");
     expect(workflow).not.toContain(

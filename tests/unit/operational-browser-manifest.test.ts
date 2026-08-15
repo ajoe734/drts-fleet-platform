@@ -49,11 +49,11 @@ describe("operational browser journeys manifest guard", () => {
     for (const op of fleetJourney.operations) {
       expect(op.kind).toBe("request");
       expect(op.responseKind).toBe("json");
-      expect(op.resultIdPath).toBe("data.submission.submissionId");
+      expect(op.resultIdPath).toBe("data.submission.submission_id");
       expect(op.readback.url).toBe(
         "/control-plane-proxy/fleet-partner/supply-submissions/{resultId}",
       );
-      expect(op.readback.idPath).toBe("data.submission.submissionId");
+      expect(op.readback.idPath).toBe("data.submission.submission_id");
       expect(op.readback.statePath).toBe("data.submission.status");
       expect(["submitted", "withdrawn"]).toContain(op.readback.expectedState);
     }
@@ -76,7 +76,7 @@ describe("operational browser journeys manifest guard", () => {
     expect(approveOp.readback.url).toBe(
       "/control-plane-proxy/admin/supply-review/submissions/{resultId}",
     );
-    expect(approveOp.readback.idPath).toBe("data.submission.submissionId");
+    expect(approveOp.readback.idPath).toBe("data.submission.submission_id");
     expect(approveOp.readback.statePath).toBe("data.submission.status");
     expect(approveOp.readback.expectedState).toBe("approved");
 
