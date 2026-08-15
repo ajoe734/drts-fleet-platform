@@ -6562,6 +6562,41 @@ describe("OwnedMobilityService referral attribution (CRC-BE-003)", () => {
     const order2 = service.createPassengerOrder(baseCommand as any, null);
     expect(order2.partnerEntrySlug).toBeNull();
   });
+
+  it("derives referral booking subtype from the verified partner entry", async () => {
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const { service } = createOwnedMobilityService({
+      tenantPartnerService,
+    });
+
+    const booking = await service.createReferralPassengerBooking(
+      {
+        entrySlug: "yuhe-residence",
+        pickupAddress: "Taipei Main Station",
+        dropoffAddress: "Taoyuan Airport T2",
+        // This is the UI's vehicle label and must never be treated as a
+        // backend service-product identifier.
+        vehicleType: "comfort",
+      },
+      {
+        actorType: "referral_passenger",
+        actorId: "referral-passenger-001",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+        partnerProgramId: "program-referral-community",
+        partnerEntrySlug: "yuhe-residence",
+        drtsPassengerId: "referral-passenger-001",
+      } as never,
+    );
+
+    expect(booking.businessDispatchSubtype).toBe("enterprise_dispatch");
+    expect(service.getOrder(booking.orderId).businessDispatchSubtype).toBe(
+      "enterprise_dispatch",
+    );
+  });
 });
 
 // P5-RATE-001 (Fleet D) acceptance. Three criteria had no test at any level

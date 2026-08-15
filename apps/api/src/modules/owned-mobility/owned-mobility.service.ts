@@ -103,7 +103,6 @@ import type {
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
   SubmitReferralPassengerRatingCommand,
-  BusinessDispatchSubtype,
 } from "@drts/contracts";
 
 import {
@@ -10108,19 +10107,26 @@ export class OwnedMobilityService
     const passengerId =
       identity.drtsPassengerId ?? identity.actorId ?? "pax-ref-anon";
 
-    if (this.tenantPartnerService) {
-      try {
-        this.tenantPartnerService.getPassengerMasterRecord(
-          tenantId,
-          passengerId,
-        );
-      } catch {
-        this.tenantPartnerService.upsertPassenger(tenantId, {
-          passengerId,
-          fullName: command.passengerName || "Referral Passenger",
-          mobile: command.passengerPhone || "0912345678",
-        });
-      }
+    if (!this.tenantPartnerService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PARTNER_ENTRY_UNAVAILABLE",
+        "Partner entry services are unavailable for this booking flow.",
+        { tenantId, entrySlug: command.entrySlug },
+      );
+    }
+    const partnerEntry = this.tenantPartnerService.getPartnerEntry(
+      command.entrySlug,
+    );
+
+    try {
+      this.tenantPartnerService.getPassengerMasterRecord(tenantId, passengerId);
+    } catch {
+      this.tenantPartnerService.upsertPassenger(tenantId, {
+        passengerId,
+        fullName: command.passengerName || "Referral Passenger",
+        mobile: command.passengerPhone || "0912345678",
+      });
     }
 
     if (command.idempotencyKey) {
@@ -10148,9 +10154,9 @@ export class OwnedMobilityService
 
     const nowIso = new Date().toISOString();
     const tenantBookingCommand: CreateTenantBookingCommand = {
-      businessDispatchSubtype:
-        (command.vehicleType as BusinessDispatchSubtype) ??
-        "enterprise_dispatch",
+      // The partner entry owns the service product. VehicleType is a passenger
+      // display preference, not an authorization to select a product.
+      businessDispatchSubtype: partnerEntry.businessDispatchSubtype,
       direction: "pickup",
       pickup: {
         address: command.pickupAddress,

@@ -440,8 +440,16 @@
       "actorScope": "tenant_admin",
       "setup": [
         {
-          "path": "/api/bookings/create",
+          "baseUrlEnv": "DRTS_DEV_API_BASE_URL",
+          "path": "/api/tenant/bookings",
           "method": "POST",
+          "headers": {
+            "x-actor-type": "tenant_admin",
+            "x-actor-id": "release-acceptance",
+            "x-realm": "tenant",
+            "x-tenant-id": "10000000-0000-0000-0000-000000000201",
+            "x-scopes": "tenant:write"
+          },
           "body": {
             "businessDispatchSubtype": "enterprise_dispatch",
             "pickup": {
@@ -462,13 +470,16 @@
             }
           },
           "capture": {
-            "tenantBookingId": "booking.bookingId"
+            "tenantBookingId": "data.booking_id"
           }
         },
         {
           "path": "/control-plane-proxy/tenant/bookings/{{tenantBookingId}}",
           "method": "GET",
           "headers": {
+            "x-actor-type": "tenant_admin",
+            "x-actor-id": "release-acceptance",
+            "x-realm": "tenant",
             "x-tenant-id": "10000000-0000-0000-0000-000000000201"
           },
           "capture": {
@@ -479,6 +490,13 @@
           "baseUrlEnv": "DRTS_DEV_API_BASE_URL",
           "path": "/api/orders/{{tenantOrderId}}/dispatch-timeout",
           "method": "POST",
+          "headers": {
+            "x-actor-type": "tenant_admin",
+            "x-actor-id": "release-acceptance",
+            "x-realm": "tenant",
+            "x-tenant-id": "10000000-0000-0000-0000-000000000201",
+            "x-scopes": "owned:write"
+          },
           "body": {
             "timeoutReasonCode": "acceptance_timeout"
           }
