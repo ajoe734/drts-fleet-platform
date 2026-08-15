@@ -353,6 +353,10 @@ cloud readiness. Do not use non-strict Dev or a local harness as cloud proof.
 
 **Required acceptance evidence**
 
+- `dev_deploy_run_url` (orchestrator compatibility field; value must be the strict staging deploy run)
+- `dev_deploy_sha` (orchestrator compatibility field; same strict staging candidate SHA)
+- `operational_acceptance_run_url` (orchestrator compatibility field; value must be the strict IAM acceptance run)
+- `operational_acceptance_sha` (orchestrator compatibility field; same strict staging candidate SHA)
 - `staging_deploy_run_url`
 - `staging_deploy_sha`
 - `strict_oidc_login_evidence`
