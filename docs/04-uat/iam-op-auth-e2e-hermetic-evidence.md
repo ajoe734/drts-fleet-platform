@@ -4,8 +4,8 @@
 - **Task Title**: Prove active tenant login and revocation end to end
 - **Status**: `completed`
 - **Owner**: `Gemini2`
-- **Reviewer**: `Codex`
-- **Execution Date**: `2026-08-15T08:45:25Z`
+- **Reviewer**: `Claude`
+- **Execution Date**: `2026-08-15T12:40:00Z`
 - **Execution Environment**: `local_hermetic_production_mode_harness` *(Hermetic local production-mode harness with deterministic RS256 OIDC provider; not live GCP cloud staging)*
 - **Architecture Reference**: [`docs/02-architecture/iam-minimum-operational-readiness-gap-20260815.md`](../02-architecture/iam-minimum-operational-readiness-gap-20260815.md)
 - **System Design Reference**: [`docs/02-architecture/iam-minimum-operational-closure-system-design-20260815.md`](../02-architecture/iam-minimum-operational-closure-system-design-20260815.md)
@@ -30,12 +30,12 @@ This operational closure task integrates and proves the complete tenant authenti
 
 | # | Acceptance Criterion | Test File | Result |
 | :- | :--- | :--- | :--- |
-| **AC-1** | Active tenant-console login, PKCE callback, session exchange, authenticated read, proxy mutation, and logout pass in strict production mode (`DRTS_ENV=production`) | `tests/e2e/tenant-console-oidc-production.test.ts` | **PASS** (140ms) |
-| **AC-2** | State replay, wrong nonce, PKCE verifier mismatch, tampered state cookie, missing CSRF token, cross-origin mutation, and unauthenticated negative cases fail closed | `tests/security/iam-tenant-session-revocation-e2e.test.ts` | **PASS** (576ms) |
-| **AC-3** | Role downgrade (`tenant_admin` -> `tenant_viewer`), user suspension (`status: 'suspended'`), and explicit backend session revocation invalidate issued session tokens immediately | `tests/security/iam-tenant-session-revocation-e2e.test.ts` | **PASS** (576ms) |
-| **AC-4** | Cross-tenant access and mutation attempts fail closed without leaking tenant or resource existence | `tests/security/iam-tenant-session-revocation-e2e.test.ts` | **PASS** (576ms) |
-| **AC-5** | Browser storage contains no bearer token, IdP token, code verifier, or raw secret | `tests/security/iam-browser-storage-and-secret-leakage.test.ts` | **PASS** (170ms) |
-| **AC-6** | Global `logout-all` invalidates all active sessions for the principal | `tests/e2e/tenant-console-oidc-production.test.ts` | **PASS** (140ms) |
+| **AC-1** | Active tenant-console login, PKCE callback, session exchange, authenticated read, proxy mutation, and logout pass in strict production mode (`DRTS_ENV=production`) | `tests/e2e/tenant-console-oidc-production.test.ts` | **PASS** (409ms) |
+| **AC-2** | State replay, wrong nonce, missing nonce, PKCE verifier mismatch, PKCE challenge mismatch, tampered state cookie, state parameter mismatch, missing CSRF token, cross-origin mutation, and unauthenticated negative cases fail closed | `tests/security/iam-tenant-session-revocation-e2e.test.ts`<br>`tests/unit/auth-oidc-pkce.test.ts` | **PASS** (401ms / 129ms) |
+| **AC-3** | Role downgrade (`tenant_admin` -> `tenant_viewer`), user suspension (`status: 'suspended'`), and explicit backend session revocation invalidate issued session tokens immediately | `tests/security/iam-tenant-session-revocation-e2e.test.ts` | **PASS** (401ms) |
+| **AC-4** | Cross-tenant access and mutation attempts fail closed without leaking tenant or resource existence | `tests/security/iam-tenant-session-revocation-e2e.test.ts` | **PASS** (401ms) |
+| **AC-5** | Browser storage contains no bearer token, IdP token, code verifier, or raw secret | `tests/security/iam-browser-storage-and-secret-leakage.test.ts` | **PASS** (167ms) |
+| **AC-6** | Global `logout-all` invalidates all active sessions for the principal | `tests/e2e/tenant-console-oidc-production.test.ts` | **PASS** (409ms) |
 
 ---
 
@@ -72,47 +72,47 @@ Running IAM-OP-AUTH-E2E-001 Tenant Auth & Session Revocation Verification
 
  RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-op-auth-e2e-001
 
- ✓ tests/e2e/tenant-console-oidc-production.test.ts (2 tests) 140ms
+ ✓ tests/e2e/tenant-console-oidc-production.test.ts (2 tests) 409ms
    ✓ IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Acceptance Suite (2)
-     ✓ proves end-to-end active tenant login, callback exchange, session read, proxy write, and logout in strict production mode 98ms
-     ✓ executes logout-all and invalidates all active sessions for the principal 40ms
+     ✓ proves end-to-end active tenant login, callback exchange, session read, proxy write, and logout in strict production mode 136ms
+     ✓ executes logout-all and invalidates all active sessions for the principal 271ms
 
  Test Files  1 passed (1)
       Tests  2 passed (2)
-   Start at  08:45:15
-   Duration  3.79s (transform 2.48s, setup 0ms, import 3.44s, tests 140ms, environment 0ms)
+   Start at  12:39:45
+   Duration  3.92s (transform 2.33s, setup 0ms, import 3.26s, tests 409ms, environment 0ms)
 
 [2/3] Running Session Revocation, Downgrade, Suspension & Isolation Matrix...
 
  RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-op-auth-e2e-001
 
- ✓ tests/security/iam-tenant-session-revocation-e2e.test.ts (6 tests) 576ms
+ ✓ tests/security/iam-tenant-session-revocation-e2e.test.ts (6 tests) 401ms
    ✓ IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isolation Matrix (6)
-     ✓ invalidates issued session token immediately upon user role downgrade 94ms
-     ✓ invalidates issued session token immediately upon user suspension 55ms
-     ✓ invalidates issued session token upon explicit backend session revocation 146ms
-     ✓ enforces tenant isolation and rejects cross-tenant mutations without leaking existence 37ms
-     ✓ enforces CSRF and same-origin validation on mutating proxy requests 68ms
-     ✓ rejects state replay, tampered state cookie, PKCE verifier mismatch, and nonce mismatch 174ms
+     ✓ invalidates issued session token immediately upon user role downgrade 114ms
+     ✓ invalidates issued session token immediately upon user suspension 81ms
+     ✓ invalidates issued session token upon explicit backend session revocation 42ms
+     ✓ enforces tenant isolation and rejects cross-tenant mutations without leaking existence 22ms
+     ✓ enforces CSRF and same-origin validation on mutating proxy requests 37ms
+     ✓ rejects state replay, tampered state cookie, PKCE verifier mismatch, and nonce mismatch 104ms
 
  Test Files  1 passed (1)
       Tests  6 passed (6)
-   Start at  08:45:19
-   Duration  4.16s (transform 2.39s, setup 0ms, import 3.36s, tests 576ms, environment 0ms)
+   Start at  12:39:50
+   Duration  2.69s (transform 1.37s, setup 0ms, import 2.08s, tests 401ms, environment 0ms)
 
 [3/3] Verifying Browser Storage and Secret Leakage Bounds...
 
  RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-op-auth-e2e-001
 
- ✓ tests/security/iam-browser-storage-and-secret-leakage.test.ts (2 tests) 170ms
+ ✓ tests/security/iam-browser-storage-and-secret-leakage.test.ts (2 tests) 167ms
    ✓ IAM browser-storage and secret-leakage scan (2)
-     ✓ does not persist auth secrets in browser storage or cookies 167ms
+     ✓ does not persist auth secrets in browser storage or cookies 164ms
      ✓ keeps IAM-UAT-001 evidence free of raw secret literals 1ms
 
  Test Files  1 passed (1)
       Tests  2 passed (2)
-   Start at  08:45:25
-   Duration  434ms (transform 39ms, setup 0ms, import 60ms, tests 170ms, environment 0ms)
+   Start at  12:39:54
+   Duration  441ms (transform 40ms, setup 0ms, import 61ms, tests 167ms, environment 0ms)
 
 ==============================================================================
 IAM-OP-AUTH-E2E-001 Verification COMPLETE: ALL TESTS PASSED (Hermetic Production Mode)
@@ -133,6 +133,19 @@ IAM-OP-AUTH-E2E-001 Verification COMPLETE: ALL TESTS PASSED (Hermetic Production
 3. **Tenant Principal Resolution & Durable State Verification**:
    - Updated `validateDurableState` in [apps/api/src/common/auth/jwt-auth.service.ts](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-op-auth-e2e-001/apps/api/src/common/auth/jwt-auth.service.ts) to resolve tenant user ID from `payload.principalId`, `payload.actorId`, or `payload.sub`, ensuring role code and `updatedAt` version checks match persisted user state across demotions and suspensions.
 
-4. **Hermetic Local Production-Mode OIDC Test Suite**:
+4. **Hermetic Local Production-Mode OIDC Test Suite & Negative Matrix Verification**:
    - Built [tests/e2e/tenant-console-oidc-production.test.ts](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-op-auth-e2e-001/tests/e2e/tenant-console-oidc-production.test.ts) featuring a deterministic RSA 2048-bit RS256 local provider verifying S256 PKCE, JWKS key publishing, ID token issuance, cookie handling, proxy routing, and logout-all.
-   - Built [tests/security/iam-tenant-session-revocation-e2e.test.ts](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-op-auth-e2e-001/tests/security/iam-tenant-session-revocation-e2e.test.ts) verifying role downgrade invalidation, user suspension invalidation, backend session revocation, cross-tenant isolation, CSRF protection, and replay rejection.
+   - Built [tests/security/iam-tenant-session-revocation-e2e.test.ts](file:///home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-iam-op-auth-e2e-001/tests/security/iam-tenant-session-revocation-e2e.test.ts) verifying:
+     - Tampered state cookie rejection (400)
+     - State parameter mismatch redirection (`/login?error=AUTH_STATE_MISMATCH`)
+     - PKCE verifier mismatch (tampered codeVerifier in state envelope -> 403 `AUTH_SESSION_EXCHANGE_DENIED`)
+     - PKCE challenge mismatch (auth code issued for mismatched challenge -> 403 `AUTH_SESSION_EXCHANGE_DENIED`)
+     - Nonce mismatch (IdP ID token nonce mismatch -> 403 `AUTH_SESSION_EXCHANGE_DENIED`)
+     - Missing nonce (IdP ID token lacking nonce claim -> 403 `AUTH_SESSION_EXCHANGE_DENIED`)
+     - Successful first exchange (307 redirect with session and CSRF cookies)
+     - State replay rejection (consumed state -> 403 `AUTH_SESSION_EXCHANGE_DENIED`)
+     - User role downgrade token invalidation
+     - User suspension token invalidation
+     - Backend session revocation invalidation
+     - Cross-tenant isolation without existence leakage
+     - CSRF and same-origin validation on mutating proxy requests

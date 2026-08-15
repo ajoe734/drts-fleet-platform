@@ -862,6 +862,7 @@ export class OidcPkceService {
     // PKCE Verifier Resolution (command verifier or stored in stateRecord)
     const verifier = (
       command.pkceVerifier?.trim() ||
+      (command as any).codeVerifier?.trim() ||
       stateRecord.codeVerifier ||
       ""
     ).trim();
@@ -1177,6 +1178,7 @@ export class OidcPkceService {
     }
     const verifier = (
       command.pkceVerifier?.trim() ||
+      (command as any).codeVerifier?.trim() ||
       stateRecord?.codeVerifier ||
       ""
     ).trim();

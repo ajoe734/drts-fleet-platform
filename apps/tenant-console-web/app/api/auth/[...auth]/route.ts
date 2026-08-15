@@ -210,7 +210,7 @@ export async function GET(
             callbackUrl,
             code,
             state,
-            ...(codeVerifier ? { codeVerifier } : {}),
+            ...(codeVerifier ? { pkceVerifier: codeVerifier, codeVerifier } : {}),
           }),
           cache: "no-store",
         },

@@ -16,6 +16,8 @@ import {
 } from "../../apps/tenant-console-web/lib/auth/constants";
 import {
   generateCsrfToken,
+  encodeStateEnvelope,
+  decodeStateEnvelope,
 } from "../../apps/tenant-console-web/lib/auth/session";
 
 import { OidcPkceService } from "../../apps/api/src/modules/auth/oidc-pkce.service";
@@ -126,7 +128,7 @@ class MockOidcServer {
     }
 
     const now = Math.floor(Date.now() / 1000);
-    const idTokenPayload = {
+    const idTokenPayload: Record<string, unknown> = {
       sub: session.sub,
       iss: this.issuer,
       aud: this.clientId,
@@ -141,6 +143,10 @@ class MockOidcServer {
       ...(session.tenantId ? { tenant_id: session.tenantId } : {}),
       ...session.customIdTokenProps,
     };
+    if (session.customIdTokenProps && "omitNonce" in session.customIdTokenProps) {
+      delete idTokenPayload["nonce"];
+      delete idTokenPayload["omitNonce"];
+    }
 
     const header = { alg: "RS256", typ: "JWT", kid: this.keyId };
     const headerB64 = Buffer.from(JSON.stringify(header)).toString("base64url");
@@ -501,69 +507,236 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
   });
 
   it("rejects state replay, tampered state cookie, PKCE verifier mismatch, and nonce mismatch", async () => {
-    // 1. Initiate login to get valid state & PKCE challenge
-    const loginReq = new NextRequest(
-      "https://tenant.drts.internal/api/auth/tenant/login?redirect_uri=/dashboard",
-    );
-    const loginRes = await tenantAuthGet(loginReq, {
-      params: Promise.resolve({ auth: ["tenant", "login"] }),
-    });
-    expect(loginRes.status).toBe(307);
+    // 1. Helper to initiate login and get valid login parameters + state cookie
+    async function startLogin() {
+      const loginReq = new NextRequest(
+        "https://tenant.drts.internal/api/auth/tenant/login?redirect_uri=/dashboard",
+      );
+      const loginRes = await tenantAuthGet(loginReq, {
+        params: Promise.resolve({ auth: ["tenant", "login"] }),
+      });
+      expect(loginRes.status).toBe(307);
 
-    const locationUrl = new URL(loginRes.headers.get("location")!);
-    const authState = locationUrl.searchParams.get("state")!;
-    const codeChallenge = locationUrl.searchParams.get("code_challenge")!;
-    const nonce = locationUrl.searchParams.get("nonce")!;
-    const stateCookie = loginRes.cookies.get(TENANT_OIDC_STATE_COOKIE_NAME)!.value;
+      const locationUrl = new URL(loginRes.headers.get("location")!);
+      const authState = locationUrl.searchParams.get("state")!;
+      const codeChallenge = locationUrl.searchParams.get("code_challenge")!;
+      const nonce = locationUrl.searchParams.get("nonce")!;
+      const stateCookie = loginRes.cookies.get(TENANT_OIDC_STATE_COOKIE_NAME)!.value;
 
-    const authCode = oidcServer.issueAuthorizationCode({
-      codeChallenge,
-      nonce,
-      sub: "sub_oidc_admin_sec",
-      email: "admin@sec.example",
-      tenantId,
-    });
+      return { authState, codeChallenge, nonce, stateCookie };
+    }
 
-    // 2. Tampered State Cookie -> 400
-    const tamperedCookieReq = new NextRequest(
-      `https://tenant.drts.internal/api/auth/tenant/callback?code=${authCode}&state=${authState}`,
-      {
-        headers: {
-          cookie: `${TENANT_OIDC_STATE_COOKIE_NAME}=${stateCookie.slice(0, -5)}XXXXX`,
+    // ── Negative Case 1: Tampered State Cookie -> 400 ─────────────────────────
+    {
+      const { authState, codeChallenge, nonce, stateCookie } = await startLogin();
+      const authCode = oidcServer.issueAuthorizationCode({
+        codeChallenge,
+        nonce,
+        sub: "sub_oidc_admin_sec",
+        email: "admin@sec.example",
+        tenantId,
+      });
+
+      const tamperedCookieReq = new NextRequest(
+        `https://tenant.drts.internal/api/auth/tenant/callback?code=${authCode}&state=${authState}`,
+        {
+          headers: {
+            cookie: `${TENANT_OIDC_STATE_COOKIE_NAME}=${stateCookie.slice(0, -5)}XXXXX`,
+          },
         },
-      },
-    );
-    const tamperedCookieRes = await tenantAuthGet(tamperedCookieReq, {
-      params: Promise.resolve({ auth: ["tenant", "callback"] }),
-    });
-    expect(tamperedCookieRes.status).toBe(400);
+      );
+      const tamperedCookieRes = await tenantAuthGet(tamperedCookieReq, {
+        params: Promise.resolve({ auth: ["tenant", "callback"] }),
+      });
+      expect(tamperedCookieRes.status).toBe(400);
+      const err = await tamperedCookieRes.json();
+      expect(err.error).toBe("AUTH_SESSION_EXCHANGE_DENIED");
+    }
 
-    // 3. Successful First Exchange
-    const validCallbackReq = new NextRequest(
-      `https://tenant.drts.internal/api/auth/tenant/callback?code=${authCode}&state=${authState}`,
-      {
-        headers: {
-          cookie: `${TENANT_OIDC_STATE_COOKIE_NAME}=${stateCookie}`,
-        },
-      },
-    );
-    const validCallbackRes = await tenantAuthGet(validCallbackReq, {
-      params: Promise.resolve({ auth: ["tenant", "callback"] }),
-    });
-    expect(validCallbackRes.status).toBe(307);
+    // ── Negative Case 2: State Parameter Mismatch -> Redirect /login ──────────
+    {
+      const { codeChallenge, nonce, stateCookie } = await startLogin();
+      const authCode = oidcServer.issueAuthorizationCode({
+        codeChallenge,
+        nonce,
+        sub: "sub_oidc_admin_sec",
+        email: "admin@sec.example",
+        tenantId,
+      });
 
-    // 4. State Replay -> Already consumed -> 403 AUTH_SESSION_EXCHANGE_DENIED
-    const replayCallbackReq = new NextRequest(
-      `https://tenant.drts.internal/api/auth/tenant/callback?code=${authCode}&state=${authState}`,
-      {
-        headers: {
-          cookie: `${TENANT_OIDC_STATE_COOKIE_NAME}=${stateCookie}`,
+      const stateMismatchReq = new NextRequest(
+        `https://tenant.drts.internal/api/auth/tenant/callback?code=${authCode}&state=wrong_mismatched_oauth_state`,
+        {
+          headers: {
+            cookie: `${TENANT_OIDC_STATE_COOKIE_NAME}=${stateCookie}`,
+          },
         },
-      },
-    );
-    const replayCallbackRes = await tenantAuthGet(replayCallbackReq, {
-      params: Promise.resolve({ auth: ["tenant", "callback"] }),
-    });
-    expect(replayCallbackRes.status).toBe(403);
+      );
+      const stateMismatchRes = await tenantAuthGet(stateMismatchReq, {
+        params: Promise.resolve({ auth: ["tenant", "callback"] }),
+      });
+      expect(stateMismatchRes.status).toBe(307);
+      const redirectLoc = stateMismatchRes.headers.get("location");
+      expect(redirectLoc).toContain("error=AUTH_STATE_MISMATCH");
+    }
+
+    // ── Negative Case 3: PKCE Verifier Mismatch (Tampered in State Envelope) ──
+    {
+      const { authState, codeChallenge, nonce, stateCookie } = await startLogin();
+      const authCode = oidcServer.issueAuthorizationCode({
+        codeChallenge,
+        nonce,
+        sub: "sub_oidc_admin_sec",
+        email: "admin@sec.example",
+        tenantId,
+      });
+
+      const decoded = decodeStateEnvelope(stateCookie)!;
+      expect(decoded).toBeDefined();
+      const tamperedVerifierCookie = encodeStateEnvelope({
+        ...decoded,
+        codeVerifier: "tampered_wrong_pkce_verifier_value_43_chars_long_123",
+      });
+
+      const pkceMismatchReq = new NextRequest(
+        `https://tenant.drts.internal/api/auth/tenant/callback?code=${authCode}&state=${authState}`,
+        {
+          headers: {
+            cookie: `${TENANT_OIDC_STATE_COOKIE_NAME}=${tamperedVerifierCookie}`,
+          },
+        },
+      );
+      const pkceMismatchRes = await tenantAuthGet(pkceMismatchReq, {
+        params: Promise.resolve({ auth: ["tenant", "callback"] }),
+      });
+      expect(pkceMismatchRes.status).toBe(403);
+      const err = await pkceMismatchRes.json();
+      expect(err.error).toBe("AUTH_SESSION_EXCHANGE_DENIED");
+    }
+
+    // ── Negative Case 4: PKCE Challenge Mismatch (Auth code issued for wrong challenge)
+    {
+      const { authState, nonce, stateCookie } = await startLogin();
+      const authCodeWrongChallenge = oidcServer.issueAuthorizationCode({
+        codeChallenge: "mismatched_challenge_hash_1234567890123456789012345",
+        nonce,
+        sub: "sub_oidc_admin_sec",
+        email: "admin@sec.example",
+        tenantId,
+      });
+
+      const wrongChallengeReq = new NextRequest(
+        `https://tenant.drts.internal/api/auth/tenant/callback?code=${authCodeWrongChallenge}&state=${authState}`,
+        {
+          headers: {
+            cookie: `${TENANT_OIDC_STATE_COOKIE_NAME}=${stateCookie}`,
+          },
+        },
+      );
+      const wrongChallengeRes = await tenantAuthGet(wrongChallengeReq, {
+        params: Promise.resolve({ auth: ["tenant", "callback"] }),
+      });
+      expect(wrongChallengeRes.status).toBe(403);
+      const err = await wrongChallengeRes.json();
+      expect(err.error).toBe("AUTH_SESSION_EXCHANGE_DENIED");
+    }
+
+    // ── Negative Case 5: Nonce Mismatch (IdP ID token nonce mismatch) ─────────
+    {
+      const { authState, codeChallenge, stateCookie } = await startLogin();
+      const authCodeWrongNonce = oidcServer.issueAuthorizationCode({
+        codeChallenge,
+        nonce: "mismatched_tampered_nonce_value_9999",
+        sub: "sub_oidc_admin_sec",
+        email: "admin@sec.example",
+        tenantId,
+      });
+
+      const wrongNonceReq = new NextRequest(
+        `https://tenant.drts.internal/api/auth/tenant/callback?code=${authCodeWrongNonce}&state=${authState}`,
+        {
+          headers: {
+            cookie: `${TENANT_OIDC_STATE_COOKIE_NAME}=${stateCookie}`,
+          },
+        },
+      );
+      const wrongNonceRes = await tenantAuthGet(wrongNonceReq, {
+        params: Promise.resolve({ auth: ["tenant", "callback"] }),
+      });
+      expect(wrongNonceRes.status).toBe(403);
+      const err = await wrongNonceRes.json();
+      expect(err.error).toBe("AUTH_SESSION_EXCHANGE_DENIED");
+    }
+
+    // ── Negative Case 6: Missing Nonce (IdP ID token lacks nonce claim) ───────
+    {
+      const { authState, codeChallenge, nonce, stateCookie } = await startLogin();
+      const authCodeMissingNonce = oidcServer.issueAuthorizationCode({
+        codeChallenge,
+        nonce,
+        sub: "sub_oidc_admin_sec",
+        email: "admin@sec.example",
+        tenantId,
+        customIdTokenProps: { omitNonce: true },
+      });
+
+      const missingNonceReq = new NextRequest(
+        `https://tenant.drts.internal/api/auth/tenant/callback?code=${authCodeMissingNonce}&state=${authState}`,
+        {
+          headers: {
+            cookie: `${TENANT_OIDC_STATE_COOKIE_NAME}=${stateCookie}`,
+          },
+        },
+      );
+      const missingNonceRes = await tenantAuthGet(missingNonceReq, {
+        params: Promise.resolve({ auth: ["tenant", "callback"] }),
+      });
+      expect(missingNonceRes.status).toBe(403);
+      const err = await missingNonceRes.json();
+      expect(err.error).toBe("AUTH_SESSION_EXCHANGE_DENIED");
+    }
+
+    // ── Happy Path: Successful First Exchange & State Replay ──────────────────
+    {
+      const { authState, codeChallenge, nonce, stateCookie } = await startLogin();
+      const authCode = oidcServer.issueAuthorizationCode({
+        codeChallenge,
+        nonce,
+        sub: "sub_oidc_admin_sec",
+        email: "admin@sec.example",
+        tenantId,
+      });
+
+      // Successful first exchange
+      const validCallbackReq = new NextRequest(
+        `https://tenant.drts.internal/api/auth/tenant/callback?code=${authCode}&state=${authState}`,
+        {
+          headers: {
+            cookie: `${TENANT_OIDC_STATE_COOKIE_NAME}=${stateCookie}`,
+          },
+        },
+      );
+      const validCallbackRes = await tenantAuthGet(validCallbackReq, {
+        params: Promise.resolve({ auth: ["tenant", "callback"] }),
+      });
+      expect(validCallbackRes.status).toBe(307);
+      expect(validCallbackRes.headers.get("location")).toBe("https://tenant.drts.internal/dashboard");
+
+      // State Replay -> Already consumed -> 403 AUTH_SESSION_EXCHANGE_DENIED
+      const replayCallbackReq = new NextRequest(
+        `https://tenant.drts.internal/api/auth/tenant/callback?code=${authCode}&state=${authState}`,
+        {
+          headers: {
+            cookie: `${TENANT_OIDC_STATE_COOKIE_NAME}=${stateCookie}`,
+          },
+        },
+      );
+      const replayCallbackRes = await tenantAuthGet(replayCallbackReq, {
+        params: Promise.resolve({ auth: ["tenant", "callback"] }),
+      });
+      expect(replayCallbackRes.status).toBe(403);
+      const replayErr = await replayCallbackRes.json();
+      expect(replayErr.error).toBe("AUTH_SESSION_EXCHANGE_DENIED");
+    }
   });
 });
