@@ -25,6 +25,18 @@
           "kind": "request",
           "name": "create",
           "control": "[data-drt-operation='referral-create']",
+          "before": [
+            {
+              "kind": "fill",
+              "control": "input[name='pickupAddress']",
+              "value": "台北車站"
+            },
+            {
+              "kind": "fill",
+              "control": "input[name='dropoffAddress']",
+              "value": "桃園國際機場 T2"
+            }
+          ],
           "requestUrlIncludes": "/api/referral/booking",
           "requestMethod": "POST",
           "responseKind": "json",
@@ -103,12 +115,12 @@
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
           "responseKind": "json",
-          "resultIdPath": "data.id",
+          "resultIdPath": "data.booking_id",
           "readback": {
-            "url": "/control-plane-proxy/bookings/{resultId}",
-            "idPath": "data.id",
-            "statePath": "data.status",
-            "expectedState": "PENDING"
+            "url": "/control-plane-proxy/tenant/bookings/{resultId}",
+            "idPath": "data.booking_id",
+            "statePath": "data.order_status",
+            "expectedState": "created"
           }
         },
         {
@@ -128,12 +140,12 @@
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "PUT",
           "responseKind": "json",
-          "resultIdPath": "data.id",
+          "resultIdPath": "data.booking_id",
           "readback": {
-            "url": "/control-plane-proxy/bookings/{resultId}",
-            "idPath": "data.id",
-            "statePath": "data.status",
-            "expectedState": "PENDING"
+            "url": "/control-plane-proxy/tenant/bookings/{resultId}",
+            "idPath": "data.booking_id",
+            "statePath": "data.order_status",
+            "expectedState": "created"
           }
         },
         {
@@ -144,12 +156,12 @@
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
           "responseKind": "json",
-          "resultIdPath": "data.id",
+          "resultIdPath": "data.booking_id",
           "readback": {
-            "url": "/control-plane-proxy/bookings/{resultId}",
-            "idPath": "data.id",
-            "statePath": "data.status",
-            "expectedState": "CANCELLED"
+            "url": "/control-plane-proxy/tenant/bookings/{resultId}",
+            "idPath": "data.booking_id",
+            "statePath": "data.order_status",
+            "expectedState": "cancelled"
           }
         }
       ]
@@ -158,8 +170,88 @@
       "id": "fleet-submit-read-withdraw-resubmit",
       "surface": "fleet",
       "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
-      "route": "/supply/submissions/sub_d41",
+      "route": "/supply/submissions/{{fleetSubmissionId}}",
       "actorScope": "fleet partner",
+      "setup": [
+        {
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
+          "method": "POST",
+          "body": {
+            "name": "Release acceptance driver",
+            "mobile": "0912345678",
+            "professionalDriverLicenseNo": "ACC-PDL-{{runId}}",
+            "professionalDriverLicenseExpiry": "2029-12-31",
+            "taxiDriverRegistrationNo": "ACC-TAXI-{{runId}}",
+            "taxiDriverRegistrationArea": "taipei",
+            "taxiDriverRegistrationExpiry": "2029-12-31",
+            "supportedServiceProductCodes": ["enterprise_dispatch"],
+            "preferredVehicleSubmissionId": null
+          },
+          "capture": {
+            "fleetSubmissionId": "data.submission.submission_id",
+            "fleetRevision": "data.submission.revision_no"
+          }
+        },
+        {
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          "method": "POST",
+          "body": {
+            "expectedRevisionNo": "{{fleetRevision}}",
+            "documentType": "professional_driver_license",
+            "originalFileName": "professional-driver-license.txt",
+            "contentType": "text/plain"
+          },
+          "capture": {
+            "fleetLicenseObjectKey": "data.object_key"
+          }
+        },
+        {
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
+          "method": "POST",
+          "body": {
+            "expectedRevisionNo": "{{fleetRevision}}",
+            "documentType": "professional_driver_license",
+            "objectKey": "{{fleetLicenseObjectKey}}",
+            "originalFileName": "professional-driver-license.txt",
+            "contentType": "text/plain",
+            "fileSize": 1,
+            "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}",
+          "method": "GET",
+          "capture": {
+            "fleetRevision": "data.submission.revision_no"
+          }
+        },
+        {
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          "method": "POST",
+          "body": {
+            "expectedRevisionNo": "{{fleetRevision}}",
+            "documentType": "taxi_driver_registration",
+            "originalFileName": "taxi-driver-registration.txt",
+            "contentType": "text/plain"
+          },
+          "capture": {
+            "fleetRegistrationObjectKey": "data.object_key"
+          }
+        },
+        {
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
+          "method": "POST",
+          "body": {
+            "expectedRevisionNo": "{{fleetRevision}}",
+            "documentType": "taxi_driver_registration",
+            "objectKey": "{{fleetRegistrationObjectKey}}",
+            "originalFileName": "taxi-driver-registration.txt",
+            "contentType": "text/plain",
+            "fileSize": 1,
+            "checksumSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        }
+      ],
       "operations": [
         {
           "kind": "request",
@@ -212,17 +304,125 @@
       "id": "admin-review-approve-readback",
       "surface": "platform-admin",
       "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
-      "route": "/supply-review/sub_s38",
+      "route": "/supply-review/{{adminSubmissionId}}",
       "actorScope": "platform_admin",
+      "setup": [
+        {
+          "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
+          "method": "POST",
+          "body": {
+            "name": "Release admin review driver",
+            "mobile": "0912345678",
+            "professionalDriverLicenseNo": "ACC-ADMIN-PDL-{{runId}}",
+            "professionalDriverLicenseExpiry": "2029-12-31",
+            "taxiDriverRegistrationNo": "ACC-ADMIN-TAXI-{{runId}}",
+            "taxiDriverRegistrationArea": "taipei",
+            "taxiDriverRegistrationExpiry": "2029-12-31",
+            "supportedServiceProductCodes": ["enterprise_dispatch"],
+            "preferredVehicleSubmissionId": null
+          },
+          "capture": {
+            "adminSubmissionId": "data.submission.submission_id",
+            "adminRevision": "data.submission.revision_no"
+          }
+        },
+        {
+          "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          "method": "POST",
+          "body": {
+            "expectedRevisionNo": "{{adminRevision}}",
+            "documentType": "professional_driver_license",
+            "originalFileName": "admin-professional-driver-license.txt",
+            "contentType": "text/plain"
+          },
+          "capture": {
+            "adminLicenseObjectKey": "data.object_key"
+          }
+        },
+        {
+          "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+          "method": "POST",
+          "body": {
+            "expectedRevisionNo": "{{adminRevision}}",
+            "documentType": "professional_driver_license",
+            "objectKey": "{{adminLicenseObjectKey}}",
+            "originalFileName": "admin-professional-driver-license.txt",
+            "contentType": "text/plain",
+            "fileSize": 1,
+            "checksumSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        },
+        {
+          "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}",
+          "method": "GET",
+          "capture": {
+            "adminRevision": "data.submission.revision_no"
+          }
+        },
+        {
+          "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          "method": "POST",
+          "body": {
+            "expectedRevisionNo": "{{adminRevision}}",
+            "documentType": "taxi_driver_registration",
+            "originalFileName": "admin-taxi-driver-registration.txt",
+            "contentType": "text/plain"
+          },
+          "capture": {
+            "adminRegistrationObjectKey": "data.object_key"
+          }
+        },
+        {
+          "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+          "method": "POST",
+          "body": {
+            "expectedRevisionNo": "{{adminRevision}}",
+            "documentType": "taxi_driver_registration",
+            "objectKey": "{{adminRegistrationObjectKey}}",
+            "originalFileName": "admin-taxi-driver-registration.txt",
+            "contentType": "text/plain",
+            "fileSize": 1,
+            "checksumSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          }
+        },
+        {
+          "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}",
+          "method": "GET",
+          "capture": {
+            "adminRevision": "data.submission.revision_no"
+          }
+        },
+        {
+          "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/submit",
+          "method": "POST",
+          "body": {
+            "expectedRevisionNo": "{{adminRevision}}"
+          }
+        }
+      ],
       "operations": [
         {
           "kind": "request",
           "name": "approve",
           "control": "[data-drt-operation='admin-approve']",
+          "before": [
+            {
+              "kind": "click",
+              "control": "[data-drt-operation='admin-start-review']"
+            }
+          ],
           "requestUrlIncludes": "/control-plane-proxy/",
           "requestMethod": "POST",
           "responseKind": "json",
-          "resultIdPath": "data.submissionId",
+          "resultIdPath": "data.submission_id",
           "readback": {
             "url": "/control-plane-proxy/admin/supply-review/submissions/{resultId}",
             "idPath": "data.submission.submissionId",
@@ -236,8 +436,54 @@
       "id": "tenant-ops-dispatch-intent",
       "surface": "tenant-ops",
       "baseUrlEnv": "DRTS_DEV_TENANT_CONSOLE_BASE_URL",
-      "route": "/bookings",
+      "route": "/bookings?q={{tenantBookingId}}",
       "actorScope": "tenant_admin",
+      "setup": [
+        {
+          "path": "/api/bookings/create",
+          "method": "POST",
+          "body": {
+            "businessDispatchSubtype": "enterprise_dispatch",
+            "pickup": {
+              "address": "台北車站",
+              "lat": 25.0478,
+              "lng": 121.517
+            },
+            "dropoff": {
+              "address": "桃園國際機場 T2",
+              "lat": 25.0797,
+              "lng": 121.2342
+            },
+            "reservationWindowStart": "2026-12-15T10:00:00.000Z",
+            "reservationWindowEnd": "2026-12-15T11:00:00.000Z",
+            "passenger": {
+              "name": "Release acceptance passenger",
+              "phone": "0912345678"
+            }
+          },
+          "capture": {
+            "tenantBookingId": "booking.bookingId"
+          }
+        },
+        {
+          "path": "/control-plane-proxy/tenant/bookings/{{tenantBookingId}}",
+          "method": "GET",
+          "headers": {
+            "x-tenant-id": "10000000-0000-0000-0000-000000000201"
+          },
+          "capture": {
+            "tenantOrderId": "data.order_id"
+          }
+        },
+        {
+          "baseUrlEnv": "DRTS_DEV_API_BASE_URL",
+          "path": "/api/orders/{{tenantOrderId}}/dispatch-timeout",
+          "method": "POST",
+          "body": {
+            "timeoutReasonCode": "acceptance_timeout"
+          }
+        }
+      ],
       "operations": [
         {
           "kind": "intent",

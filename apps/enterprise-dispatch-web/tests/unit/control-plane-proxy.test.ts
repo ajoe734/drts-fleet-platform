@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { GET, POST } from "@/app/control-plane-proxy/[...path]/route";
+import { GET, POST, PUT } from "@/app/control-plane-proxy/[...path]/route";
 
 function contextFor(path: string[]) {
   return {
@@ -10,7 +10,7 @@ function contextFor(path: string[]) {
 }
 
 function requestFor(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PUT",
   path: string[],
   init?: RequestInit,
 ) {
@@ -138,20 +138,53 @@ describe("enterprise-dispatch control-plane proxy", () => {
     expect(headers.get("x-tenant-id")).toBe("tenant-e2e-001");
   });
 
-  it("blocks silent mutation seams before they reach the API", async () => {
+  it("forwards the declared booking update and cancellation lifecycle", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ data: { bookingId: "booking-001" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const updateResponse = await PUT(
+      requestFor("PUT", ["tenant", "bookings", "booking-001"], {
+        body: JSON.stringify({ notes: "Updated pickup instructions" }),
+      }),
+      contextFor(["tenant", "bookings", "booking-001"]),
+    );
+    const cancelResponse = await POST(
+      requestFor("POST", ["tenant", "bookings", "booking-001", "cancel"], {
+        body: JSON.stringify({ reason: "Cancelled from Enterprise Dispatch" }),
+      }),
+      contextFor(["tenant", "bookings", "booking-001", "cancel"]),
+    );
+
+    expect(updateResponse.status).toBe(200);
+    expect(cancelResponse.status).toBe(200);
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "http://localhost:3001/api/tenant/bookings/booking-001",
+      "http://localhost:3001/api/tenant/bookings/booking-001/cancel",
+    ]);
+    expect(
+      fetchMock.mock.calls.map(([, init]) => (init as RequestInit).method),
+    ).toEqual(["PUT", "POST"]);
+  });
+
+  it("blocks paths outside the declared booking lifecycle before they reach the API", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const cancelResponse = await POST(
-      requestFor("POST", ["tenant", "bookings", "booking-001", "cancel"]),
-      contextFor(["tenant", "bookings", "booking-001", "cancel"]),
+    const invalidActionResponse = await POST(
+      requestFor("POST", ["tenant", "bookings", "booking-001", "escalate"]),
+      contextFor(["tenant", "bookings", "booking-001", "escalate"]),
     );
     const traversalResponse = await GET(
       requestFor("GET", ["api", "tenant", "bookings", "..", "ops"]),
       contextFor(["api", "tenant", "bookings", "..", "ops"]),
     );
 
-    expect(cancelResponse.status).toBe(404);
+    expect(invalidActionResponse.status).toBe(404);
     expect(traversalResponse.status).toBe(404);
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -22,7 +22,7 @@ import {
   type BookingTimelineEvent,
 } from "@/lib/bookings";
 import type { BankRole } from "@/lib/home-data";
-import { settlementStatements, type StatementStatus } from "@/lib/statements";
+import type { StatementStatus } from "@/lib/statements";
 import type { BankConsoleRole } from "@/lib/session";
 
 type SettlementStatementRecord = {
@@ -279,7 +279,10 @@ function buildTimeline(order: OwnedOrderRecord): BookingTimelineEvent[] {
     },
   ];
 
-  if (order.approvalState === "approved" || order.approvalState === "not_required") {
+  if (
+    order.approvalState === "approved" ||
+    order.approvalState === "not_required"
+  ) {
     events.push({
       occurredAt: order.updatedAt,
       title: "資格審批通過",
@@ -343,7 +346,10 @@ function mapUserRole(roleCode: string): BankConsoleRole {
 function mapAuditType(record: AuditLogRecord): BankAuditRow["type"] {
   if (record.moduleName.includes("settlement")) return "settlement_close";
   if (record.moduleName.includes("dispatch")) return "dispatch_assignment";
-  if (record.moduleName.includes("tenant") || record.moduleName.includes("eligibility")) {
+  if (
+    record.moduleName.includes("tenant") ||
+    record.moduleName.includes("eligibility")
+  ) {
     return "eligibility_decision";
   }
   return "access";
@@ -454,7 +460,9 @@ export async function loadBankBookingsData(
   try {
     const { programs, usage, orders } = await loadCoreBankData(tenantId, role);
     const programNameMap = buildProgramNameMap(programs, usage);
-    const bookings = orders.map((order) => mapBookingListItem(order, programNameMap));
+    const bookings = orders.map((order) =>
+      mapBookingListItem(order, programNameMap),
+    );
     const detailById = new Map(
       orders.map((order) => [
         order.orderId,
@@ -544,9 +552,13 @@ export async function loadBankStatementsData(
           dueAt: formatPeriodDate(statement.period, true),
           status: statement.status,
           totalFareAmount: moneyToNumber(statement.totals.fareTotal),
-          totalSubsidisedAmount: moneyToNumber(statement.totals.subsidisedTotal),
+          totalSubsidisedAmount: moneyToNumber(
+            statement.totals.subsidisedTotal,
+          ),
           totalPaidAmount: moneyToNumber(statement.totals.paidTotal),
-          totalIssuerPayableAmount: moneyToNumber(statement.totals.issuerPayable),
+          totalIssuerPayableAmount: moneyToNumber(
+            statement.totals.issuerPayable,
+          ),
           totalTrips: statement.totals.tripCount,
           signedArtifactHref: `/artifacts/statements/${statement.artifactRef.artifactId}.pdf`,
           artifactExpired: statement.status === "due",
@@ -571,7 +583,7 @@ export async function loadBankStatementsData(
     };
   } catch (error) {
     return {
-      data: { statements: settlementStatements },
+      data: { statements: [] },
       degradedMessage:
         error instanceof Error ? error.message : "Failed to load statements.",
     };
@@ -597,12 +609,19 @@ export async function loadBankProgramsData(
   }>
 > {
   try {
-    const { programs, usage, contracts } = await loadCoreBankData(tenantId, role);
+    const { programs, usage, contracts } = await loadCoreBankData(
+      tenantId,
+      role,
+    );
     const exceptionCount = contracts.reduce(
-      (sum, contract) => sum + contract.exceptions.filter((item) => item.status === "open").length,
+      (sum, contract) =>
+        sum +
+        contract.exceptions.filter((item) => item.status === "open").length,
       0,
     );
-    const byId = new Map(programs.map((program) => [program.programId, program]));
+    const byId = new Map(
+      programs.map((program) => [program.programId, program]),
+    );
     return {
       data: {
         programs: usage.map((record) => ({
@@ -702,13 +721,17 @@ export async function loadBankHomeSnapshot(
   }>
 > {
   try {
-    const [{ data: bookingData }, { data: statementData }, { data: contractData }, core] =
-      await Promise.all([
-        loadBankBookingsData(tenantId, role),
-        loadBankStatementsData(tenantId, role),
-        loadBankContractsData(tenantId, role),
-        loadCoreBankData(tenantId, role),
-      ]);
+    const [
+      { data: bookingData },
+      { data: statementData },
+      { data: contractData },
+      core,
+    ] = await Promise.all([
+      loadBankBookingsData(tenantId, role),
+      loadBankStatementsData(tenantId, role),
+      loadBankContractsData(tenantId, role),
+      loadCoreBankData(tenantId, role),
+    ]);
     const now = new Date();
     return {
       data: {
