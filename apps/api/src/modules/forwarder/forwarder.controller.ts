@@ -133,7 +133,7 @@ export class ForwarderController {
 
   @Post("driver/forwarded-orders/:taskId/accept")
   @RequireRealms("system", "driver")
-  @RequireScopes("dispatch:write")
+  @RequireScopes("driver:write")
   async acceptForwardedOrder(
     @Param("taskId") taskId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
@@ -153,7 +153,7 @@ export class ForwarderController {
 
   @Post("driver/forwarded-orders/:taskId/reject")
   @RequireRealms("system", "driver")
-  @RequireScopes("dispatch:write")
+  @RequireScopes("driver:write")
   rejectForwardedOrder(
     @Param("taskId") taskId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,

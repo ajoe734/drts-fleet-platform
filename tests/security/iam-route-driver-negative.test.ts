@@ -415,26 +415,26 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
       expect(patchError?.getStatus()).toBe(403);
       expect(patchError?.code).toBe("AUTH_SCOPE_DENIED");
 
-      // Driver missing dispatch:write scope on forwarded order accept
-      const driverNoDispatchWrite: BootstrapRequestIdentity = {
+      // Driver missing driver:write scope on forwarded order accept
+      const driverNoWriteForAccept: BootstrapRequestIdentity = {
         authMode: "bootstrap_headers",
         actorType: "driver_user",
         actorId: "drv-001",
         realm: "driver",
         tenantId: null,
         roles: ["driver_user"],
-        scopes: ["driver:read", "dispatch:read"], // missing dispatch:write
+        scopes: ["driver:read", "dispatch:read"], // missing driver:write
         roleFamilies: ["driver"],
         requestId: "req-004",
       };
 
       const acceptReq: any = {
         headers: {
-          "x-actor-type": driverNoDispatchWrite.actorType,
-          "x-actor-id": driverNoDispatchWrite.actorId,
-          "x-realm": driverNoDispatchWrite.realm,
-          "x-roles": driverNoDispatchWrite.roles.join(","),
-          "x-scopes": driverNoDispatchWrite.scopes.join(","),
+          "x-actor-type": driverNoWriteForAccept.actorType,
+          "x-actor-id": driverNoWriteForAccept.actorId,
+          "x-realm": driverNoWriteForAccept.realm,
+          "x-roles": driverNoWriteForAccept.roles.join(","),
+          "x-scopes": driverNoWriteForAccept.scopes.join(","),
         },
         method: "POST",
         url: "/api/driver/forwarded-orders/FWD-001/accept",
@@ -581,7 +581,7 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
         realm: "driver",
         tenantId: null,
         roles: ["driver_user"],
-        scopes: ["dispatch:read", "dispatch:write"],
+        scopes: ["dispatch:read", "driver:write"],
         roleFamilies: ["driver"],
         requestId: null,
       };
