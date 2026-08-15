@@ -182,17 +182,14 @@ describe("validateInternalKey strict environment behavior", () => {
     expect(next).toHaveBeenCalledOnce();
   });
 
-  it("enforces the mounted key in development when the deployment enables it", () => {
+  it("still requires an internal key for token exchange when Dev middleware enforcement is disabled", () => {
     process.env.NODE_ENV = "production";
     process.env.DRTS_ENV = "development";
-    process.env.DRTS_INTERNAL_KEY_ENFORCED = "true";
+    process.env.DRTS_INTERNAL_KEY_ENFORCED = "false";
     process.env.DRTS_INTERNAL_KEY = "12345678901234567890123456789012";
 
-    const middleware = new InternalKeyMiddleware();
-    const next = vi.fn();
-
     expect(() =>
-      middleware.use(
+      validateInternalKey(
         {
           method: "POST",
           originalUrl: "/api/auth/token",
@@ -202,10 +199,8 @@ describe("validateInternalKey strict environment behavior", () => {
             "x-realm": "tenant",
           },
         },
-        {},
-        next,
+        process.env.DRTS_INTERNAL_KEY,
       ),
     ).toThrowError(ApiRequestError);
-    expect(next).not.toHaveBeenCalled();
   });
 });
