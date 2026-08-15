@@ -446,6 +446,14 @@ for (const journey of manifest.journeys) {
         operation.responseKind === "download"
           ? page.waitForEvent("download", { timeout: interactionTimeoutMs })
           : null;
+      // Begin reading before a mutation-triggered navigation can detach the
+      // Chromium response body from its request identifier.
+      const responseBodyPromise =
+        operation.responseKind === "json"
+          ? responsePromise.then(
+              (response) => response.json() as Promise<unknown>,
+            )
+          : null;
       // Mutations can navigate the page. Do not wait for that navigation before
       // reading JSON, otherwise Chromium may discard the response body.
       await activeControl.click({ noWaitAfter: true });
@@ -489,7 +497,7 @@ for (const journey of manifest.journeys) {
         continue;
       }
 
-      const responseBody = (await response.json()) as unknown;
+      const responseBody = await responseBodyPromise!;
       const resultId = valueAtPath(
         responseBody,
         operation.resultIdPath as string,

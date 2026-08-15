@@ -289,11 +289,11 @@ export class SupplyReadinessService {
   ): SupplyReadinessRecord {
     const driver = context.driversById.get(driverId);
     if (!driver) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "READINESS_SUBJECT_NOT_FOUND",
-        "Canonical driver was not found.",
-        { driverId },
+      return this.buildRecord(
+        "driver",
+        driverId,
+        ["DRIVER_REGISTRY_MISSING"],
+        context.evaluatedAt,
       );
     }
 
@@ -326,11 +326,11 @@ export class SupplyReadinessService {
   ): SupplyReadinessRecord {
     const vehicle = context.vehiclesById.get(vehicleId);
     if (!vehicle) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "READINESS_SUBJECT_NOT_FOUND",
-        "Canonical vehicle was not found.",
-        { vehicleId },
+      return this.buildRecord(
+        "vehicle",
+        vehicleId,
+        ["VEHICLE_REGISTRY_MISSING"],
+        context.evaluatedAt,
       );
     }
 
