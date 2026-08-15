@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const enterpriseTenantId =
   process.env.DRTS_ENTERPRISE_DISPATCH_TENANT_ID ??
-  "10000000-0000-0000-0000-000000000201";
+  "tenant-demo-001";
 const enterpriseCostCenterCode = "CC-PRD-07";
 const tenantConsoleBaseURL =
   process.env.DRTS_DEV_TENANT_CONSOLE_BASE_URL ??
