@@ -981,20 +981,26 @@ export class JwtAuthService {
       }
 
       const tenantUserId =
-        payload.principalId ??
         payload.actorId ??
         (payload.sub?.includes(":")
           ? payload.sub.split(":").pop()
-          : payload.sub);
+          : payload.sub) ??
+        payload.principalId;
 
       if (!tenantUserId) {
         return false;
       }
 
-      const user = this.tenantPartnerService.findTenantUser(
+      let user = this.tenantPartnerService.findTenantUser(
         payload.tenantId,
         tenantUserId,
       );
+      if (!user && payload.sub) {
+        const bySubject = this.tenantPartnerService.findTenantUserBySubject(payload.sub);
+        if (bySubject && bySubject.tenantId === payload.tenantId) {
+          user = bySubject;
+        }
+      }
       if (!user || user.status !== "active") {
         return false;
       }
