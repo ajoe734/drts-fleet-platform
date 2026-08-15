@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
   Param,
   Post,
   Query,
@@ -10,7 +11,16 @@ import {
 
 import type { ClockInCommand, ClockOutCommand } from "@drts/contracts";
 
-import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
+import {
+  CurrentIdentity,
+  RequireRealms,
+  RequireScopes,
+  type BootstrapRequestIdentity,
+} from "../../common/auth";
 import { ShiftAttendanceService } from "./shift-attendance.service";
 
 @Controller("shift-attendance")
@@ -20,55 +30,151 @@ export class ShiftAttendanceController {
   ) {}
 
   @Post("clock-in")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   clockIn(
     @Body() command: ClockInCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (
+      identity?.realm === "driver" &&
+      identity.actorId &&
+      command.driverId &&
+      command.driverId !== identity.actorId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "DRIVER_NOT_FOUND",
+        "Driver not found.",
+        { driverId: command.driverId },
+      );
+    }
+
+    const effectiveDriverId =
+      identity?.realm === "driver" && identity.actorId
+        ? identity.actorId
+        : command.driverId;
+
+    const effectiveCommand: ClockInCommand = {
+      ...command,
+      driverId: effectiveDriverId,
+    };
+
     return toApiSuccessEnvelope(
-      this.shiftAttendanceService.clockIn(command, requestId),
+      this.shiftAttendanceService.clockIn(effectiveCommand, requestId),
       requestId,
     );
   }
 
   @Post("clock-out")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   clockOut(
     @Body() command: ClockOutCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (
+      identity?.realm === "driver" &&
+      identity.actorId &&
+      command.driverId &&
+      command.driverId !== identity.actorId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "DRIVER_NOT_FOUND",
+        "Driver not found.",
+        { driverId: command.driverId },
+      );
+    }
+
+    const effectiveDriverId =
+      identity?.realm === "driver" && identity.actorId
+        ? identity.actorId
+        : command.driverId;
+
+    const effectiveCommand: ClockOutCommand = {
+      ...command,
+      driverId: effectiveDriverId,
+    };
+
     return toApiSuccessEnvelope(
-      this.shiftAttendanceService.clockOut(command, requestId),
+      this.shiftAttendanceService.clockOut(effectiveCommand, requestId),
       requestId,
     );
   }
 
   @Get("shifts")
+  @RequireRealms("system", "platform", "ops", "driver")
+  @RequireScopes("driver:read")
   listShifts(
-    @Query("driverId") driverId?: string,
+    @Query("driverId") requestedDriverId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    let targetDriverId = requestedDriverId;
+    if (identity?.realm === "driver") {
+      if (requestedDriverId && requestedDriverId !== identity.actorId) {
+        return toApiSuccessEnvelope({ items: [] }, requestId);
+      }
+      targetDriverId = identity.actorId ?? undefined;
+    }
+
     return toApiSuccessEnvelope(
-      { items: this.shiftAttendanceService.listShifts(driverId) },
+      { items: this.shiftAttendanceService.listShifts(targetDriverId) },
       requestId,
     );
   }
 
   @Get("shifts/:shiftId")
+  @RequireRealms("system", "platform", "ops", "driver")
+  @RequireScopes("driver:read")
   getShift(
     @Param("shiftId") shiftId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.shiftAttendanceService.getShift(shiftId),
-      requestId,
-    );
+    const shift = this.shiftAttendanceService.getShift(shiftId);
+    if (
+      identity?.realm === "driver" &&
+      identity.actorId &&
+      shift.driverId !== identity.actorId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "NOT_FOUND",
+        "Shift not found.",
+        { shiftId },
+      );
+    }
+
+    return toApiSuccessEnvelope(shift, requestId);
   }
 
   @Post("shifts/:shiftId/abandon")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   abandonShift(
     @Param("shiftId") shiftId: string,
     @Body() body: { reason: string },
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const shift = this.shiftAttendanceService.getShift(shiftId);
+    if (
+      identity?.realm === "driver" &&
+      identity.actorId &&
+      shift.driverId !== identity.actorId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "NOT_FOUND",
+        "Shift not found.",
+        { shiftId },
+      );
+    }
+
     return toApiSuccessEnvelope(
       this.shiftAttendanceService.abandonShift(shiftId, body.reason, requestId),
       requestId,
@@ -76,12 +182,23 @@ export class ShiftAttendanceController {
   }
 
   @Get("attendance")
+  @RequireRealms("system", "platform", "ops", "driver")
+  @RequireScopes("driver:read")
   listAttendance(
-    @Query("driverId") driverId?: string,
+    @Query("driverId") requestedDriverId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    let targetDriverId = requestedDriverId;
+    if (identity?.realm === "driver") {
+      if (requestedDriverId && requestedDriverId !== identity.actorId) {
+        return toApiSuccessEnvelope({ items: [] }, requestId);
+      }
+      targetDriverId = identity.actorId ?? undefined;
+    }
+
     return toApiSuccessEnvelope(
-      { items: this.shiftAttendanceService.listAttendance(driverId) },
+      { items: this.shiftAttendanceService.listAttendance(targetDriverId) },
       requestId,
     );
   }
