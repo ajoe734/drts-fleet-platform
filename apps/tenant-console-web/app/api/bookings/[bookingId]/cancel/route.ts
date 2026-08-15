@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createTenantClient } from "@drts/api-client";
-import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
+import { getTenantClientForRouteHandler } from "@/lib/api-client";
 
 export async function POST(
   request: NextRequest,
@@ -9,8 +8,18 @@ export async function POST(
   const { bookingId } = await params;
 
   try {
+    const client = await getTenantClientForRouteHandler();
+    if (!client) {
+      return NextResponse.json(
+        {
+          error: "AUTHENTICATION_REQUIRED",
+          message: "Active tenant session required.",
+        },
+        { status: 401 },
+      );
+    }
+
     const body = (await request.json()) as { reason?: string };
-    const client = createTenantClient(API_URL, DEMO_TENANT_ID, DEMO_ACTOR_ID);
     const receipt = await client.cancelTenantBooking(
       bookingId,
       body.reason ? { reason: body.reason } : {},

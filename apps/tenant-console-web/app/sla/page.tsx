@@ -21,7 +21,7 @@ async function loadSlaPageData(): Promise<{
   view: TenantSlaProfileView | null;
   transportErrorMessage: string | null;
 }> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
 
   try {
     const view = await client.getSlaProfileView();

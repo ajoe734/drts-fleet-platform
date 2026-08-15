@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import type {
   EmptyReason,
   ReportJobRecord,
@@ -28,7 +28,7 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { getTenantClient } from "@/lib/api-client";
+import { createBrowserApiClient } from "@/lib/browser-api-client";
 import { useTranslation } from "@/lib/i18n";
 
 type Translate = (
@@ -472,7 +472,7 @@ export function ReportsManager({
 }: ReportsManagerProps) {
   const router = useRouter();
   const { t } = useTranslation();
-  const client = getTenantClient();
+  const client = useMemo(() => createBrowserApiClient(), []);
   const [pending, startTransition] = useTransition();
   const [flash, setFlash] = useState<ReportsFlash | null>(null);
   const [statusFilter, setStatusFilter] = useState<ReportStatusFilter>("all");

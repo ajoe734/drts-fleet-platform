@@ -176,7 +176,7 @@ export default async function NewBookingPage({
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const resolvedSearchParams = (await searchParams) ?? {};
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const locale = await getServerLocale();
   const translate = (key: string, params?: Record<string, string | number>) =>
     t(key, locale, params);

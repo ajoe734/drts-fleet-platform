@@ -29,12 +29,7 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import {
-  API_URL,
-  DEMO_ACTOR_ID,
-  DEMO_TENANT_ID,
-  getTenantClient,
-} from "@/lib/api-client";
+import { getTenantClient } from "@/lib/api-client";
 import { getServerLocale } from "@/lib/server-locale";
 import { type Locale, t } from "@/lib/translations";
 import { SecretRevealCard } from "./secret-reveal-card";
@@ -1106,7 +1101,7 @@ function buildExternalLink(
 }
 
 async function loadWebhooksPageData(locale: Locale): Promise<WebhooksPageData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const [
     identityResult,
     governanceResult,
@@ -1283,34 +1278,22 @@ async function rotateWebhookSecretRequest(
     rotationReason?: string;
   },
 ): Promise<RotateWebhookSecretResponse> {
-  const response = await fetch(
-    `${API_URL}/api/tenant/webhooks/${encodeURIComponent(webhookId)}/rotate-secret`,
+  const client = await getTenantClient();
+  const data = await client.post<RotateWebhookSecretResponse["data"]>(
+    `/api/tenant/webhooks/${encodeURIComponent(webhookId)}/rotate-secret`,
     {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-actor-type": "tenant_admin",
-        "x-actor-id": DEMO_ACTOR_ID,
-        "x-realm": "tenant",
-        "x-tenant-id": DEMO_TENANT_ID,
-      },
-      body: JSON.stringify(body),
-      cache: "no-store",
+      body,
     },
   );
 
-  if (!response.ok) {
-    throw new Error(`API error ${response.status}: ${await response.text()}`);
-  }
-
-  return response.json() as Promise<RotateWebhookSecretResponse>;
+  return { data };
 }
 
 async function createWebhookAction(formData: FormData) {
   "use server";
 
   const locale = await getServerLocale();
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const events = parseEvents(formData);
   try {
     if (events.length === 0) {
@@ -1345,7 +1328,7 @@ async function updateWebhookAction(formData: FormData) {
   "use server";
 
   const locale = await getServerLocale();
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "");
   const disableReason = String(formData.get("disableReason") ?? "").trim();
   const events = parseEvents(formData);
@@ -1424,7 +1407,7 @@ async function deleteWebhookAction(formData: FormData) {
   "use server";
 
   const locale = await getServerLocale();
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "");
   const deleteReason = String(formData.get("deleteReason") ?? "").trim();
   try {
@@ -1514,7 +1497,7 @@ async function retryFailedDeliveryAction(formData: FormData) {
   "use server";
 
   const locale = await getServerLocale();
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "").trim();
   const deliveryId = String(formData.get("deliveryId") ?? "").trim();
 

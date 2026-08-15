@@ -288,7 +288,7 @@ function getRiskPattern(locale: Locale) {
 async function loadNotificationsData(
   locale: Locale,
 ): Promise<NotificationsPageData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const [preferencesResult, governanceResult, webhooksResult] =
     await Promise.allSettled([
       client.getNotificationPreferences() as Promise<TenantNotificationPreferences>,

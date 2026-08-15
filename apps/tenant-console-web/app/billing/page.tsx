@@ -200,7 +200,7 @@ async function loadBillingData(
   emptyReasonOverride: EmptyReason | null,
   locale: "en" | "zh",
 ): Promise<BillingData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const errors: string[] = [];
 
   const [profileResult, invoicesResult, statementsResult, quotaResult] =

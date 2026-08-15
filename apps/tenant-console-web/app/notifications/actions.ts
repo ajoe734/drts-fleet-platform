@@ -26,7 +26,7 @@ function collectSubscriptions(formData: FormData) {
 }
 
 export async function updateNotificationPreferencesAction(formData: FormData) {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   await client.updateNotifications({
     subscriptions: collectSubscriptions(formData),
   });

@@ -231,7 +231,7 @@ function buildRows(items: TenantAvFallbackListItem[], locale: Locale) {
 
 export default async function BookingAvFallbackListPage() {
   const locale = await getServerLocale();
-  const client = getTenantClient();
+  const client = await getTenantClient();
 
   let items: TenantAvFallbackListItem[] = [];
   let degraded = false;

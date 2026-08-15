@@ -87,7 +87,7 @@ function toErrorMessage(error: unknown) {
 async function loadReportsPageData(
   emptyReasonOverride: EmptyReason | null,
 ): Promise<ReportsPageData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const jobsResult = await client
     .listTenantReportJobs()
     .then((jobs) => ({ ok: true as const, jobs }))

@@ -45,7 +45,7 @@ const baseDraft: TenantBookingDraftValues = {
 
 const passenger: TenantPassengerRecord = {
   passengerId: "passenger-1",
-  tenantId: "tenant-demo-001",
+  tenantId: "tenant-acme-001",
   fullName: "林士群",
   employeeNo: "Y2103",
   departmentName: "Finance",

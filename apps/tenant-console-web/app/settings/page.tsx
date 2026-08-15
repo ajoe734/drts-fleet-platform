@@ -31,7 +31,7 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
-import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
+import { getTenantClient } from "@/lib/api-client";
 import { TENANT_CONSOLE_ENV } from "@/lib/navigation";
 import { getRefreshTierDefinition } from "@/lib/ui-runtime";
 import { getServerLocale } from "@/lib/server-locale";
@@ -511,21 +511,15 @@ function getChannelRank(channel: TenantNotificationSubscription["channel"]) {
 async function fetchTenantRuntime<T>(
   path: string,
 ): Promise<ApiSuccessEnvelope<T>> {
-  const response = await fetch(`${API_URL}${path}`, {
-    cache: "no-store",
-    headers: {
-      "x-actor-type": "tenant_admin",
-      "x-actor-id": DEMO_ACTOR_ID,
-      "x-realm": "tenant",
-      "x-tenant-id": DEMO_TENANT_ID,
+  const client = await getTenantClient();
+  const data = await client.get<T>(path);
+  return {
+    data,
+    meta: {
+      timestamp: new Date().toISOString(),
+      requestId: "tenant-settings-read",
     },
-  });
-
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-
-  return (await response.json()) as ApiSuccessEnvelope<T>;
+  };
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -1298,8 +1292,8 @@ export default async function SettingsPage() {
   const locale = await getServerLocale();
   const data = await loadSettingsData(locale);
 
-  const tenantCode = data.identity.item?.tenantId ?? DEMO_TENANT_ID;
   const notSet = t("settings.value.notSet", locale);
+  const tenantCode = data.identity.item?.tenantId ?? notSet;
   const displayName = data.billingProfile.item?.invoiceTitle ?? notSet;
   const taxId = data.billingProfile.item?.taxId ?? notSet;
   const billingContact = data.billingProfile.item

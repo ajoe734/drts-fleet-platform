@@ -72,7 +72,8 @@ export async function upsertCostCenterAction(
       command.ownerName = ownerName;
     }
 
-    const saved = await getTenantClient().upsertCostCenter(command);
+    const client = await getTenantClient();
+    const saved = await client.upsertCostCenter(command);
     payload = {
       tone: "default",
       title:
@@ -120,7 +121,8 @@ export async function disableCostCenterAction(
       throw new Error(translate("costCenters.flash.validation.reasonRequired"));
     }
 
-    const saved = await getTenantClient().disableCostCenter({
+    const client = await getTenantClient();
+    const saved = await client.disableCostCenter({
       code,
       reason,
     });

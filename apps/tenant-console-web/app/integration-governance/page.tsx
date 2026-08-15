@@ -268,7 +268,7 @@ function toErrorMessage(error: unknown, locale: Locale) {
 }
 
 async function loadPageData(locale: Locale): Promise<PageData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
 
   try {
     return {

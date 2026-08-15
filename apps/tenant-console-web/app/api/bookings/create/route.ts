@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import type {
   ActionReceipt,
@@ -6,8 +6,7 @@ import type {
   CreateTenantBookingCommand,
   CrossAppResourceLink,
 } from "@drts/contracts";
-import { createTenantClient } from "@drts/api-client";
-import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
+import { getTenantClientForRouteHandler } from "@/lib/api-client";
 
 type TenantBookingCommandResponse = {
   bookingId: string;
@@ -44,8 +43,18 @@ function buildCrossAppLinks(
 
 export async function POST(request: NextRequest) {
   try {
+    const client = await getTenantClientForRouteHandler();
+    if (!client) {
+      return NextResponse.json(
+        {
+          error: "AUTHENTICATION_REQUIRED",
+          message: "Active tenant session required.",
+        },
+        { status: 401 },
+      );
+    }
+
     const body = (await request.json()) as CreateTenantBookingCommand;
-    const client = createTenantClient(API_URL, DEMO_TENANT_ID, DEMO_ACTOR_ID);
     const requestId = randomUUID();
     const booking = await client.post<TenantBookingCommandResponse>(
       "/api/tenant/bookings",

@@ -110,7 +110,7 @@ async function loadRulesPageData(
   emptyReasonOverride: EmptyReason | null,
 ): Promise<RulesPageData> {
   const locale = await getServerLocale();
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const errors: string[] = [];
 
   const [
