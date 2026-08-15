@@ -775,20 +775,43 @@ jobs:
         run: |
           set -euo pipefail
 
-          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},AUTH_MODE=explicit,API_PORT=3001,JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_INTERNAL_KEY_ENFORCED=false,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER},WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE},LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }},MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          tenant_console_cloud_run_origin="$(gcloud run services describe "${{ needs.prepare.outputs.tenant_console_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
+          tenant_console_origin="${{ needs.prepare.outputs.tenant_console_origin }}"
+          if [[ -z "$tenant_console_origin" ]]; then
+            tenant_console_origin="$tenant_console_cloud_run_origin"
+          fi
+          for origin in "$tenant_console_origin" "$tenant_console_cloud_run_origin"; do
+            case "$origin" in
+              https://*) ;;
+              *)
+                echo "::error::Tenant Console origin must be an HTTPS origin: $origin"
+                exit 1
+                ;;
+            esac
+          done
+          auth_allowed_origins="$tenant_console_origin"
+          if [[ "$tenant_console_cloud_run_origin" != "$tenant_console_origin" ]]; then
+            auth_allowed_origins="${auth_allowed_origins},${tenant_console_cloud_run_origin}"
+          fi
+
+          # Use @ as the gcloud list delimiter because the allowlist itself is CSV.
+          env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=true@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
-            env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+            env_vars="${env_vars}@MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi
           if [[ -n "${{ steps.api_secrets.outputs.llm_base_url }}" ]]; then
-            env_vars="${env_vars},LLM_GATEWAY_BASE_URL=${{ steps.api_secrets.outputs.llm_base_url }}"
+            env_vars="${env_vars}@LLM_GATEWAY_BASE_URL=${{ steps.api_secrets.outputs.llm_base_url }}"
           fi
           if [[ "${{ steps.api_secrets.outputs.llm_provider }}" == "openclaw" ]]; then
-            env_vars="${env_vars},OPENCLAW_AGENT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}"
+            env_vars="${env_vars}@OPENCLAW_AGENT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}"
             if [[ -n "${{ steps.api_secrets.outputs.openclaw_auth_provider }}" ]]; then
-              env_vars="${env_vars},OPENCLAW_AUTH_PROVIDER=${{ steps.api_secrets.outputs.openclaw_auth_provider }}"
+              env_vars="${env_vars}@OPENCLAW_AUTH_PROVIDER=${{ steps.api_secrets.outputs.openclaw_auth_provider }}"
             fi
             if [[ -n "${{ steps.api_secrets.outputs.openclaw_home }}" ]]; then
-              env_vars="${env_vars},OPENCLAW_HOME=${{ steps.api_secrets.outputs.openclaw_home }}"
+              env_vars="${env_vars}@OPENCLAW_HOME=${{ steps.api_secrets.outputs.openclaw_home }}"
             fi
           fi
 
@@ -1313,6 +1336,41 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.build-push.outputs.candidate_sha }}
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ needs.prepare.outputs.project_id }}
+      - name: Issue deployment-machine Tenant acceptance session
+        env:
+          API_URL: ${{ needs.health-check.outputs.api }}
+          PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
+          SECRET_PREFIX: ${{ needs.prepare.outputs.secret_prefix }}
+        run: |
+          set -euo pipefail
+
+          internal_key="$(gcloud secrets versions access latest \
+            --secret="${SECRET_PREFIX}-jwt-secret" \
+            --project="$PROJECT_ID")"
+          echo "::add-mask::$internal_key"
+          session_response="$(curl --fail --silent --show-error \
+            --request POST "${API_URL}/api/auth/token" \
+            --header 'content-type: application/json' \
+            --header "x-drts-internal-key: ${internal_key}" \
+            --header 'x-actor-type: tenant_admin' \
+            --header 'x-actor-id: release-acceptance' \
+            --header 'x-realm: tenant' \
+            --header 'x-tenant-id: 10000000-0000-0000-0000-000000000201' \
+            --header 'x-scopes: tenant:read tenant:write owned:write' \
+            --data '{}')"
+          tenant_session="$(jq --exit-status --raw-output '.token' <<<"$session_response")"
+          echo "::add-mask::$tenant_session"
+          printf 'DRTS_OPERATIONAL_TENANT_SESSION_TOKEN=%s\n' "$tenant_session" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4
         with: { version: 10.33.0, run_install: false }
       - uses: actions/setup-node@v4

@@ -1,7 +1,11 @@
-import { Injectable, Logger, Optional, type NestMiddleware } from "@nestjs/common";
+import {
+  Injectable,
+  Logger,
+  Optional,
+  type NestMiddleware,
+} from "@nestjs/common";
 
 import { ApiRequestError } from "../api-envelope";
-import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import {
   evaluateInternalKey,
@@ -31,13 +35,6 @@ const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "POST auth/tenant/oidc-session",
   "POST auth/tenant/bootstrap-session",
   "POST auth/partner/bootstrap-session",
-]);
-const PUBLIC_BOOTSTRAP_REALMS = new Set([
-  "platform",
-  "tenant",
-  "ops",
-  "driver",
-  "partner",
 ]);
 
 const logger = new Logger("InternalKeyMiddleware");
@@ -85,21 +82,6 @@ function isExplicitPublicRequest(
   );
 }
 
-function hasPublicBootstrapRealm(request: RequestLike): boolean {
-  const identity = extractBootstrapRequestIdentity(request.headers ?? {}, {
-    allowAnonymous: false,
-    method: request.method,
-    requestUrl: request.originalUrl ?? request.url,
-  });
-
-  return Boolean(
-    identity &&
-    identity.actorType !== "system" &&
-    identity.actorId &&
-    PUBLIC_BOOTSTRAP_REALMS.has(identity.realm),
-  );
-}
-
 function hasBearerAuthorization(request: RequestLike): boolean {
   const headerValues = [
     normalizeHeaderValue(request.headers?.[AUTHORIZATION_HEADER]),
@@ -138,10 +120,7 @@ export function validateInternalKey(
     return;
   }
 
-  if (
-    !strictEnvironment &&
-    (!expectedKey || hasPublicBootstrapRealm(request))
-  ) {
+  if (!strictEnvironment && !expectedKey) {
     return;
   }
 
@@ -174,7 +153,8 @@ export function validateInternalKey(
   }
 
   const previousKey = process.env.DRTS_INTERNAL_KEY_PREVIOUS?.trim();
-  const previousKeyExpiresAt = process.env.DRTS_INTERNAL_KEY_PREVIOUS_EXPIRES_AT?.trim();
+  const previousKeyExpiresAt =
+    process.env.DRTS_INTERNAL_KEY_PREVIOUS_EXPIRES_AT?.trim();
   const revokedKeys = parseCsvKeys(process.env.DRTS_INTERNAL_KEY_REVOKED_KEYS);
 
   const evalResult = evaluateInternalKey(providedKey, expectedKey, {
@@ -288,8 +268,11 @@ export function requireScopedInternalKey(
   }
 
   const previousKey = process.env[`${options.requiredEnv}_PREVIOUS`]?.trim();
-  const previousKeyExpiresAt = process.env[`${options.requiredEnv}_PREVIOUS_EXPIRES_AT`]?.trim();
-  const revokedKeys = parseCsvKeys(process.env[`${options.requiredEnv}_REVOKED_KEYS`]);
+  const previousKeyExpiresAt =
+    process.env[`${options.requiredEnv}_PREVIOUS_EXPIRES_AT`]?.trim();
+  const revokedKeys = parseCsvKeys(
+    process.env[`${options.requiredEnv}_REVOKED_KEYS`],
+  );
 
   const evalResult = evaluateInternalKey(providedKey, configuredKey, {
     headerName: options.header,

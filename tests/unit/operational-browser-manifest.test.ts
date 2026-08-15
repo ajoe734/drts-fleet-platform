@@ -84,14 +84,18 @@ describe("operational browser journeys manifest guard", () => {
       (j: { id: string }) => j.id === "tenant-ops-dispatch-intent",
     );
     expect(tenantJourney?.route).toBe("/bookings?q={{tenantBookingId}}");
+    expect(tenantJourney?.browserSession).toEqual({
+      cookieName: "drts_tenant_session",
+      tokenEnv: "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
+      templateVariable: "tenantSessionToken",
+    });
     expect(tenantJourney?.setup).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           baseUrlEnv: "DRTS_DEV_API_BASE_URL",
           path: "/api/tenant/bookings",
           headers: expect.objectContaining({
-            "x-actor-type": "tenant_admin",
-            "x-scopes": "tenant:write",
+            authorization: "Bearer {{tenantSessionToken}}",
           }),
           capture: { tenantBookingId: "data.booking_id" },
         }),
@@ -99,8 +103,7 @@ describe("operational browser journeys manifest guard", () => {
           baseUrlEnv: "DRTS_DEV_API_BASE_URL",
           path: expect.stringContaining("dispatch-timeout"),
           headers: expect.objectContaining({
-            "x-actor-type": "tenant_admin",
-            "x-scopes": "owned:write",
+            authorization: "Bearer {{tenantSessionToken}}",
           }),
         }),
       ]),

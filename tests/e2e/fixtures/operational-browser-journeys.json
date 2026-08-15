@@ -438,29 +438,30 @@
       "baseUrlEnv": "DRTS_DEV_TENANT_CONSOLE_BASE_URL",
       "route": "/bookings?q={{tenantBookingId}}",
       "actorScope": "tenant_admin",
+      "browserSession": {
+        "cookieName": "drts_tenant_session",
+        "tokenEnv": "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
+        "templateVariable": "tenantSessionToken"
+      },
       "setup": [
         {
           "baseUrlEnv": "DRTS_DEV_API_BASE_URL",
           "path": "/api/tenant/bookings",
           "method": "POST",
           "headers": {
-            "x-actor-type": "tenant_admin",
-            "x-actor-id": "release-acceptance",
-            "x-realm": "tenant",
-            "x-tenant-id": "10000000-0000-0000-0000-000000000201",
-            "x-scopes": "tenant:write"
+            "authorization": "Bearer {{tenantSessionToken}}"
           },
           "body": {
             "businessDispatchSubtype": "enterprise_dispatch",
             "pickup": {
-              "address": "台北車站",
-              "lat": 25.0478,
-              "lng": 121.517
+              "address": "台北信義區松仁路",
+              "lat": 25.033879,
+              "lng": 121.568743
             },
             "dropoff": {
-              "address": "桃園國際機場 T2",
-              "lat": 25.0797,
-              "lng": 121.2342
+              "address": "台北市政府",
+              "lat": 25.03746,
+              "lng": 121.564558
             },
             "reservationWindowStart": "2026-12-15T10:00:00.000Z",
             "reservationWindowEnd": "2026-12-15T11:00:00.000Z",
@@ -476,12 +477,6 @@
         {
           "path": "/control-plane-proxy/tenant/bookings/{{tenantBookingId}}",
           "method": "GET",
-          "headers": {
-            "x-actor-type": "tenant_admin",
-            "x-actor-id": "release-acceptance",
-            "x-realm": "tenant",
-            "x-tenant-id": "10000000-0000-0000-0000-000000000201"
-          },
           "capture": {
             "tenantOrderId": "data.order_id"
           }
@@ -491,11 +486,7 @@
           "path": "/api/orders/{{tenantOrderId}}/dispatch-timeout",
           "method": "POST",
           "headers": {
-            "x-actor-type": "tenant_admin",
-            "x-actor-id": "release-acceptance",
-            "x-realm": "tenant",
-            "x-tenant-id": "10000000-0000-0000-0000-000000000201",
-            "x-scopes": "owned:write"
+            "authorization": "Bearer {{tenantSessionToken}}"
           },
           "body": {
             "timeoutReasonCode": "acceptance_timeout"
