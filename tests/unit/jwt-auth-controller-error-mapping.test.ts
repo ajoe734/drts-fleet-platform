@@ -39,7 +39,13 @@ describe("JWT controller error mapping", () => {
 
     const controller = new AuthController(
       new JwtAuthService(),
-      {} as never,
+      {
+        findTenantUser: vi.fn(() => ({
+          roleCode: "tenant_admin",
+          status: "active",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        })),
+      } as never,
       {} as never,
     );
 

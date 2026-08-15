@@ -41,6 +41,7 @@
           "requestMethod": "POST",
           "responseKind": "json",
           "resultIdPath": "data.orderId",
+          "resultIdQueryParam": "orderId",
           "readback": {
             "url": "/api/referral/history/{resultId}",
             "idPath": "data.orderId",
@@ -56,6 +57,7 @@
           "requestMethod": "POST",
           "responseKind": "json",
           "resultIdPath": "data.orderId",
+          "resultIdQueryParam": "orderId",
           "readback": {
             "url": "/api/referral/history/{resultId}",
             "idPath": "data.orderId",
@@ -79,13 +81,14 @@
           }
         },
         {
-          "kind": "request",
+          "kind": "navigation",
           "name": "receipt",
           "control": "[data-drt-operation='referral-receipt']",
-          "requestUrlIncludes": "/api/referral/receipt",
-          "requestMethod": "GET",
-          "responseKind": "json",
-          "resultIdPath": "data.orderId",
+          "expectedPath": "/embed/yuhe-residence",
+          "expectedQuery": {
+            "screen": "receipt",
+            "orderId": "{resultId}"
+          },
           "readback": {
             "url": "/api/referral/receipt/{resultId}",
             "idPath": "data.orderId",

@@ -453,20 +453,60 @@ export class AuthController {
       );
     }
 
+    const tenantUser =
+      identity.realm === "tenant" && identity.tenantId && identity.actorId
+        ? this.tenantPartnerService.findTenantUser(
+            identity.tenantId,
+            identity.actorId,
+          )
+        : null;
+    if (
+      identity.realm === "tenant" &&
+      (!tenantUser || tenantUser.status !== "active")
+    ) {
+      throw new ApiRequestError(
+        401,
+        "TENANT_SESSION_SUBJECT_INVALID",
+        "The requested tenant session subject is not active.",
+      );
+    }
+
+    const durableTenantScopes = tenantUser
+      ? getTenantRoleScopes(tenantUser.roleCode)
+      : undefined;
+    if (tenantUser && !durableTenantScopes) {
+      throw new ApiRequestError(
+        403,
+        "TENANT_ROLE_INVALID",
+        "The requested tenant session role is not configured.",
+      );
+    }
+
+    // Tenant session claims come from the durable user record, rather than
+    // caller-controlled bootstrap headers, so later JWT verification agrees.
+    const durableIdentity = tenantUser && durableTenantScopes
+      ? {
+          ...identity,
+          roles: [tenantUser.roleCode],
+          scopes: [...durableTenantScopes],
+        }
+      : identity;
     const expiresIn: JwtExpiresIn =
-      identity.actorType === "system" ? "15m" : "8h";
+      durableIdentity.actorType === "system" ? "15m" : "8h";
     const issuedAt = new Date().toISOString();
-    const assurance = resolveBootstrapTokenAssurance(identity);
-    const issued = await this.issueJwtSession(identity, {
+    const assurance = resolveBootstrapTokenAssurance(durableIdentity);
+    const issued = await this.issueJwtSession(durableIdentity, {
       expiresIn,
-      principalId: identity.principalId ?? identity.actorId,
-      membershipId: identity.membershipId ?? null,
-      subject: identity.subject ?? identity.actorId,
+      principalId: durableIdentity.principalId ?? durableIdentity.actorId,
+      membershipId: durableIdentity.membershipId ?? null,
+      subject: durableIdentity.subject ?? durableIdentity.actorId,
       ensurePrincipal: true,
       authTime: issuedAt,
       ...(assurance.amr ? { amr: assurance.amr } : {}),
       ...(assurance.acr ? { acr: assurance.acr } : {}),
-      tokenVersion: Date.parse(issuedAt),
+      tokenVersion: tenantUser
+        ? Date.parse(tenantUser.updatedAt)
+        : Date.parse(issuedAt),
     });
     return { token: issued.token, expiresIn };
   }
