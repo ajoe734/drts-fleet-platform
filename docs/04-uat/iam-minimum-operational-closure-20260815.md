@@ -74,24 +74,24 @@ Captured Execution Output:
 ```text
 ==============================================================================
 DRTS IAM Minimum Operational Closure Candidate Verification (IAM-OP-REL-001)
-Candidate SHA: 1e81487ab05316a01f098ef7782618760bef7427
-Execution Time: 2026-08-16T05:56:00Z
+Candidate SHA: 751853c313f89c405e542bed8ba6b7713c994891
+Execution Time: 2026-08-16T06:05:22Z
 ==============================================================================
 
 [Info] Live staging origins not configured or --skip-live set; executing comprehensive hermetic & security matrix gates.
 
 [1/6] Running Strict Startup Negative & Fail-Closed Generic OIDC Suite (G7)...
- ✓ tests/unit/auth-startup-config.test.ts (35 tests) 160ms
- ✓ tests/integration/auth-startup-config.integration.test.ts (10 tests) 42ms
+ ✓ tests/unit/auth-startup-config.test.ts (35 tests) 153ms
+ ✓ tests/integration/auth-startup-config.integration.test.ts (10 tests) 41ms
  ✓ tests/security/iam-oidc-strict-negative.test.ts (3 tests) 54ms
 
 [2/6] Running Active Tenant Console OIDC E2E Suite in Production Mode (G1, G2, G3)...
- ✓ tests/e2e/tenant-console-oidc-production.test.ts (2 tests) 205ms
+ ✓ tests/e2e/tenant-console-oidc-production.test.ts (2 tests) 208ms
    ✓ proves end-to-end active tenant login, callback exchange, session read, proxy write, and logout in strict production mode
    ✓ executes logout-all and invalidates all active sessions for the principal
 
 [3/6] Running Session Invalidation, Downgrade & Tenant Isolation Matrix (G4, G6)...
- ✓ tests/security/iam-tenant-session-revocation-e2e.test.ts (6 tests) 360ms
+ ✓ tests/security/iam-tenant-session-revocation-e2e.test.ts (6 tests) 519ms
    ✓ invalidates issued session token immediately upon user role downgrade
    ✓ invalidates issued session token immediately upon user suspension
    ✓ invalidates issued session token upon explicit backend session revocation
@@ -100,7 +100,7 @@ Execution Time: 2026-08-16T05:56:00Z
    ✓ rejects state replay, tampered state cookie, PKCE verifier mismatch, and nonce mismatch
 
 [4/6] Running Full Dynamic Route Inventory Scan (G5)...
- ✓ tests/security/iam-route-inventory.test.ts (7 tests) 531ms
+ ✓ tests/security/iam-route-inventory.test.ts (7 tests) 509ms
    ✓ discovers every controller recursively without an allowlist
    ✓ reports zero unclassified routes across all discovered controllers
    ✓ validates that all declared scopes exist in the IAM catalogue
@@ -110,21 +110,21 @@ Execution Time: 2026-08-16T05:56:00Z
    ✓ fails with realm mismatch details when an incompatible realm is declared for a scope
 
 [5/6] Verifying Browser Storage, HttpOnly Boundaries & Zero Secret Leakage (G2, G8)...
- ✓ tests/security/iam-browser-storage-and-secret-leakage.test.ts (3 tests) 211ms
+ ✓ tests/security/iam-browser-storage-and-secret-leakage.test.ts (3 tests) 204ms
    ✓ does not persist auth secrets in browser storage or cookies
    ✓ enforces HttpOnly flags on session and state cookie configurations to block browser script access
    ✓ keeps IAM-UAT-001 evidence free of raw secret literals
 
 [6/6] Running Route Family Negative & Boundary Security Matrix (G6)...
- ✓ tests/security/iam-route-integrations-negative.test.ts (3 tests) 14ms
- ✓ tests/security/iam-auth-negative-matrix.test.ts (4 tests) 49ms
- ✓ tests/security/iam-route-map-negative.test.ts (10 tests) 91ms
- ✓ tests/security/iam-route-driver-negative.test.ts (10 tests) 63ms
- ✓ tests/security/iam-route-admin-negative.test.ts (34 tests) 122ms
+ ✓ tests/security/iam-route-integrations-negative.test.ts (3 tests) 13ms
+ ✓ tests/security/iam-auth-negative-matrix.test.ts (4 tests) 59ms
+ ✓ tests/security/iam-route-map-negative.test.ts (10 tests) 108ms
+ ✓ tests/security/iam-route-driver-negative.test.ts (10 tests) 72ms
+ ✓ tests/security/iam-route-admin-negative.test.ts (34 tests) 129ms
 
 ==============================================================================
 IAM-OP-REL-001 Candidate Verification SUMMARY
-Candidate SHA: 1e81487ab05316a01f098ef7782618760bef7427
+Candidate SHA: 751853c313f89c405e542bed8ba6b7713c994891
 ------------------------------------------------------------------------------
   [PASS] Gate G1: Active tenant console real OIDC login, callback & session read
   [PASS] Gate G2: Zero demo actor / bootstrap identity headers in active console
@@ -135,7 +135,7 @@ Candidate SHA: 1e81487ab05316a01f098ef7782618760bef7427
   [PASS] Gate G7: Strict startup fail-closed validation rejecting mock mode & missing config
   [PASS] Gate G8: Exact-SHA strict staging verification & audit non-leakage proven
 ==============================================================================
-ALL G1-G8 GATES PASSED for candidate.
+ALL G1-G8 GATES PASSED for candidate 751853c313f89c405e542bed8ba6b7713c994891.
 ```
 
 ### 4.2 Hardened Live Staging Verification Runner: `operations/verification/verify-iam-staging-live.mjs`
