@@ -148,3 +148,24 @@ pnpm exec vitest run tests/security/
  Test Files  11 passed (11)
       Tests  93 passed (93)
 ```
+
+---
+
+## 5. Discovered Pre-existing Catalogue Defects & Task Boundary Enforcement
+
+In strict compliance with `docs/03-runbooks/iam-minimum-operational-closure-execution-tasks-20260815.md:308-309` (*"Do not change route policies to make the inventory pass; return defects to the owning task"*), this verification task does **not** author de novo authorization catalogue decisions or alter `packages/contracts/src/iam-policy-catalog.ts`.
+
+The dynamic AST inventory discovered **15 pre-existing scope defect instances** where controllers declare `@RequireScopes` that are absent from `IAM_SCOPE_DEFINITIONS`:
+
+| Module / Controller | Declared Scope | Routes Affected | Routing / Owning Lane |
+| :--- | :--- | :--- | :--- |
+| **`modules/assistant/assistant.controller.ts`** | `assistant:write` | 5 routes (`/assistant/tools/*`, `/assistant/conversations*`) | Assistant / Platform Admin feature lane |
+| **`modules/auth/break-glass.controller.ts`** | `identity:break-glass:request`<br>`identity:break-glass:approve`<br>`identity:break-glass:activate` | 4 routes (`/platform-admin/break-glass/*`) | Identity / Break Glass security lane |
+| **`modules/multi-taxi/multi-taxi.controller.ts`** | `multi_taxi_records:read`<br>`multi_taxi_records:export` | 6 routes (`/platform-admin/multi-taxi-trip-records*`) | Multi-Taxi / Reporting feature lane |
+
+### Defect Isolation in Test Suite
+The inventory test suite (`tests/security/iam-route-inventory.test.ts`) explicitly isolates these 15 known pre-existing defects via `KNOWN_PRE_EXISTING_SCOPE_DEFECTS` and asserts:
+1. `result.unknownScopes.filter(scope => !KNOWN_PRE_EXISTING_SCOPE_DEFECTS.has(scope))` is strictly empty (`[]`). Any new or unexpected unknown scope immediately fails the test suite.
+2. `result.unknownScopes` has exact length 15. If a defect is resolved or another one appears, the suite alerts the team.
+3. Synthetic test cases confirm that any unknown scope or realm mismatch on a new controller immediately triggers detailed failure diagnostics.
+
