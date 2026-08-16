@@ -57,7 +57,7 @@ All 8 upstream task dependencies across Waves A and B are fully integrated and v
 | **G5** | Full dynamic controller inventory reports 56/56 controllers scanned and zero unclassified routes. | `tests/security/iam-route-inventory.test.ts`<br>Recursive scan of all 56 controller files in `apps/api/src/**/*.controller.ts` identifies 0 unclassified methods and validates scope catalogue compatibility. | **PASS** |
 | **G6** | Representative realm, scope, object-boundary, cross-tenant, and unauthenticated negative tests pass. | `tests/security/iam-auth-negative-matrix.test.ts`, `tests/security/iam-route-admin-negative.test.ts`, `tests/security/iam-route-driver-negative.test.ts`, `tests/security/iam-route-map-negative.test.ts`, `tests/security/iam-route-integrations-negative.test.ts` & `operations/verification/verify-iam-staging-live.mjs`<br>All 61 route boundary negative tests pass without existence leakage. | **PASS** |
 | **G7** | Strict startup rejects mock/missing OIDC provider configuration. | `tests/unit/auth-startup-config.test.ts`, `tests/integration/auth-startup-config.integration.test.ts`, `tests/security/iam-oidc-strict-negative.test.ts`<br>Strict startup rejects missing `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_TOKEN_ENDPOINT`, `OIDC_AUTHORIZATION_ENDPOINT`, and `OIDC_MOCK_MODE=true`. | **PASS** |
-| **G8** | Exact-SHA strict staging login, authorization, revocation, and live HTTP proof is recorded. | `.github/workflows/deploy-staging.yml`, `operations/verification/verify-iam-strict-staging-candidate.sh`, `operations/verification/verify-iam-staging-live.mjs`<br>Unified candidate verification harness and hardened live staging runner integrated with exact candidate SHA binding. | **VERIFIED_CANDIDATE** |
+| **G8** | Exact-SHA strict staging login, authorization, revocation, and live HTTP proof is recorded. | `.github/workflows/deploy-staging.yml`, `operations/verification/verify-iam-strict-staging-candidate.sh`, `operations/verification/verify-iam-staging-live.mjs`<br>Unified candidate verification harness and hardened live staging runner integrated with exact candidate SHA binding. Live staging verification pending Cloud Run staging deployment. | **PENDING_CLOUD_DEPLOY** |
 
 ---
 
@@ -177,5 +177,5 @@ The staging deployment workflow (`.github/workflows/deploy-staging.yml`) configu
 
 | Role | Sign-Off Entity | Status | Date | Conclusion |
 | :--- | :--- | :--- | :--- | :--- |
-| **Execution Owner** | `Gemini` (Worker-Ops / Release) | **VERIFIED_CANDIDATE** | 2026-08-16 | All 8 upstream tasks integrated; G1–G7 gates empirically verified; G8 staging deployment workflow, hardened live staging runner, and candidate verification script added. |
+| **Execution Owner** | `Gemini` (Worker-Ops / Release) | **PENDING_CLOUD_DEPLOY** | 2026-08-16 | All 8 upstream tasks integrated; G1–G7 gates empirically verified; G8 staging deployment workflow, hardened live staging runner, and candidate verification script added; awaiting cloud staging deployment. |
 | **Governance Reviewer** | `Claude` (Architecture / Governance) | **READY_FOR_REVIEW** | 2026-08-16 | Candidate handoff ready for review. |
