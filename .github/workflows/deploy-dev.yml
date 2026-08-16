@@ -1386,11 +1386,16 @@ jobs:
             fi
 
             token="$(jq --exit-status --raw-output '.token' "${response_file}")"
-            rm -f "${response_file}"
             if [[ -z "${token}" || "${token}" == "null" ]]; then
+              token_error="$(jq --exit-status --raw-output '.error.code // empty' "${response_file}" 2>/dev/null || true)"
+              rm -f "${response_file}"
+              if [[ -n "${token_error}" ]]; then
+                echo "::error::deployment-machine tenant token error for actor ${actor_id}: ${token_error}"
+              fi
               echo "::error::deployment-machine tenant token response missing token for actor ${actor_id}."
               return 1
             fi
+            rm -f "${response_file}"
 
             printf '%s' "$token"
           }
