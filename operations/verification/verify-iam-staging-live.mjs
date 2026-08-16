@@ -76,11 +76,17 @@ function assert(condition, message) {
   if (!condition) {
     console.error(`  [FAIL] ${message}`);
     failures++;
-    throw new Error(message);
+    return false;
   } else {
     console.log(`  [PASS] ${message}`);
     passes++;
+    return true;
   }
+}
+
+function recordFailure(message, err) {
+  console.error(`  [FAIL] ${message}: ${err?.message || err}`);
+  failures++;
 }
 
 async function request(url, init = {}) {
@@ -106,7 +112,7 @@ async function runLiveChecks() {
     const healthRes = await request(`${apiOrigin}/health`);
     assert(healthRes.status === 200 || healthRes.status === 401, `API /health returns HTTP ${healthRes.status}`);
   } catch (err) {
-    console.warn(`  [WARN] Health check warning: ${err.message} (may require internal network / IAP token)`);
+    recordFailure(`Health check against ${apiOrigin}/health failed`, err);
   }
 
   // Check 2: Strict Unauthenticated Denial on Protected Routes
@@ -133,7 +139,7 @@ async function runLiveChecks() {
         `Live route ${route} rejects unauthenticated request with HTTP ${res.status} (strict mode active, zero mock bypass)`,
       );
     } catch (err) {
-      console.warn(`  [WARN] Unauthenticated check against ${route}: ${err.message}`);
+      recordFailure(`Unauthenticated check against ${route} failed`, err);
     }
   }
 
@@ -158,7 +164,7 @@ async function runLiveChecks() {
       );
     }
   } catch (err) {
-    console.warn(`  [WARN] Tenant session check: ${err.message}`);
+    recordFailure(`Tenant session check against ${tenantOrigin}/api/auth/session failed`, err);
   }
 
   // Check 4: Live Tenant Console OIDC Initiation
@@ -171,11 +177,10 @@ async function runLiveChecks() {
     });
 
     assert(
-      loginRes.status === 302 || loginRes.status === 307 || loginRes.status === 503 || loginRes.status === 200,
+      loginRes.status === 302 || loginRes.status === 307 || loginRes.status === 200,
       `Tenant console /api/auth/login initiates OIDC flow with HTTP ${loginRes.status}`,
     );
 
-    const setCookie = loginRes.headers.get("set-cookie") || "";
     if (loginRes.status === 302 || loginRes.status === 307) {
       const location = loginRes.headers.get("location") || "";
       assert(location.length > 0, "OIDC redirect location header is present");
@@ -185,7 +190,7 @@ async function runLiveChecks() {
       );
     }
   } catch (err) {
-    console.warn(`  [WARN] Tenant OIDC login check: ${err.message}`);
+    recordFailure(`Tenant OIDC login check against ${tenantOrigin}/api/auth/login failed`, err);
   }
 
   // Check 5: Live Tenant Console Mutating CSRF Protection
@@ -206,7 +211,7 @@ async function runLiveChecks() {
       `Mutating proxy request without CSRF token is rejected with HTTP ${mutatingRes.status} (CSRF protected)`,
     );
   } catch (err) {
-    console.warn(`  [WARN] CSRF proxy check: ${err.message}`);
+    recordFailure(`CSRF proxy check against ${tenantOrigin}/control-plane-proxy/tenant/notifications/read failed`, err);
   }
 
   // Check 6: Live Control Plane Workforce IAP Gateway
@@ -222,7 +227,7 @@ async function runLiveChecks() {
       `Platform Admin proxy enforces gateway identity with HTTP ${adminRes.status}`,
     );
   } catch (err) {
-    console.warn(`  [WARN] Platform admin gateway check: ${err.message}`);
+    recordFailure(`Platform admin gateway check against ${platformOrigin} failed`, err);
   }
 
   // Check 7: Zero Secret / Token Leakage Audit
@@ -242,14 +247,15 @@ async function runLiveChecks() {
       "Cookies do not leak server secrets",
     );
   } catch (err) {
-    console.warn(`  [WARN] Secret leakage check: ${err.message}`);
+    recordFailure(`Secret leakage check against ${tenantOrigin}/ failed`, err);
   }
 
   console.log("\n==============================================================================");
   console.log(`Live Staging Verification Complete: ${passes} assertions passed, ${failures} failures.`);
   console.log("==============================================================================");
 
-  if (failures > 0) {
+  if (passes === 0 || failures > 0) {
+    console.error(`\nLive staging verification failed: ${passes} passed, ${failures} failures.`);
     process.exit(1);
   }
 }

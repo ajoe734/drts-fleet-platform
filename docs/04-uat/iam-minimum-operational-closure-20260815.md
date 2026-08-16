@@ -50,14 +50,14 @@ All 8 upstream task dependencies across Waves A and B are fully integrated and v
 
 | Gate | Requirement | Test Suite & Verification Layer | Result |
 | :--- | :--- | :--- | :--- |
-| **G1** | Active tenant console completes real OIDC login and session read. | `tests/e2e/tenant-console-oidc-production.test.ts` & `operations/verification/verify-iam-staging-live.mjs`<br>Proves authorization URL redirect (307), S256 PKCE code exchange, HttpOnly session cookie issuance, and `/api/auth/session` read. | **PASS** |
+| **G1** | Active tenant console completes real OIDC login and session read. | `tests/e2e/tenant-console-oidc-production.test.ts` & `operations/verification/verify-iam-staging-live.mjs`<br>Proves authorization URL redirect (307), S256 PKCE code exchange, HttpOnly session cookie issuance, and `/api/auth/session` read in strict production-mode harness. | **PASS (Hermetic)** |
 | **G2** | No active tenant-console path sends demo actor/bootstrap identity headers. | `tests/security/iam-browser-storage-and-secret-leakage.test.ts`<br>Confirms zero occurrences of `DEMO_ACTOR_ID`, `demo-tenant-user`, or `createTenantClient` in active `tenant-console-web` operational paths. | **PASS** |
 | **G3** | Browser mutations pass same-origin/CSRF checks; cross-site or missing-token mutations fail. | `tests/security/iam-tenant-session-revocation-e2e.test.ts` & `operations/verification/verify-iam-staging-live.mjs`<br>Mutating proxy requests require matching `x-csrf-token` and same-origin headers; missing or invalid tokens return 403 `CSRF_TOKEN_INVALID`. | **PASS** |
 | **G4** | Logout revokes backend session; role downgrade and suspension invalidate prior sessions. | `tests/security/iam-tenant-session-revocation-e2e.test.ts`<br>Explicit logout revokes session in DB; user role downgrade and suspension immediately invalidate previously issued bearer tokens at both API and BFF proxy layers. | **PASS** |
 | **G5** | Full dynamic controller inventory reports 56/56 controllers scanned and zero unclassified routes. | `tests/security/iam-route-inventory.test.ts`<br>Recursive scan of all 56 controller files in `apps/api/src/**/*.controller.ts` identifies 0 unclassified methods and validates scope catalogue compatibility. | **PASS** |
 | **G6** | Representative realm, scope, object-boundary, cross-tenant, and unauthenticated negative tests pass. | `tests/security/iam-auth-negative-matrix.test.ts`, `tests/security/iam-route-admin-negative.test.ts`, `tests/security/iam-route-driver-negative.test.ts`, `tests/security/iam-route-map-negative.test.ts`, `tests/security/iam-route-integrations-negative.test.ts` & `operations/verification/verify-iam-staging-live.mjs`<br>All 61 route boundary negative tests pass without existence leakage. | **PASS** |
 | **G7** | Strict startup rejects mock/missing OIDC provider configuration. | `tests/unit/auth-startup-config.test.ts`, `tests/integration/auth-startup-config.integration.test.ts`, `tests/security/iam-oidc-strict-negative.test.ts`<br>Strict startup rejects missing `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_TOKEN_ENDPOINT`, `OIDC_AUTHORIZATION_ENDPOINT`, and `OIDC_MOCK_MODE=true`. | **PASS** |
-| **G8** | Exact-SHA strict staging login, authorization, revocation, and live HTTP proof is recorded. | `.github/workflows/deploy-staging.yml`, `operations/verification/verify-iam-strict-staging-candidate.sh`, `operations/verification/verify-iam-staging-live.mjs`<br>Exact candidate SHA verified across CI, deployment, and live cloud endpoints with zero token/secret leakage. | **PASS** |
+| **G8** | Exact-SHA strict staging login, authorization, revocation, and live HTTP proof is recorded. | `.github/workflows/deploy-staging.yml`, `operations/verification/verify-iam-strict-staging-candidate.sh`, `operations/verification/verify-iam-staging-live.mjs`<br>Unified candidate verification harness and hardened live staging runner integrated with exact candidate SHA binding. | **VERIFIED_CANDIDATE** |
 
 ---
 
@@ -65,31 +65,33 @@ All 8 upstream task dependencies across Waves A and B are fully integrated and v
 
 ### 4.1 Candidate Verification Script: `operations/verification/verify-iam-strict-staging-candidate.sh`
 
+Command:
 ```bash
-./operations/verification/verify-iam-strict-staging-candidate.sh
+./operations/verification/verify-iam-strict-staging-candidate.sh --skip-live
 ```
 
-### Execution Output:
-
+Captured Execution Output:
 ```text
 ==============================================================================
 DRTS IAM Minimum Operational Closure Candidate Verification (IAM-OP-REL-001)
-Candidate SHA: $(git rev-parse HEAD)
-Execution Time: 2026-08-16T05:48:00Z
+Candidate SHA: 1e81487ab05316a01f098ef7782618760bef7427
+Execution Time: 2026-08-16T05:56:00Z
 ==============================================================================
 
+[Info] Live staging origins not configured or --skip-live set; executing comprehensive hermetic & security matrix gates.
+
 [1/6] Running Strict Startup Negative & Fail-Closed Generic OIDC Suite (G7)...
- ✓ tests/unit/auth-startup-config.test.ts (35 tests) 161ms
- ✓ tests/integration/auth-startup-config.integration.test.ts (10 tests) 44ms
- ✓ tests/security/iam-oidc-strict-negative.test.ts (3 tests) 55ms
+ ✓ tests/unit/auth-startup-config.test.ts (35 tests) 160ms
+ ✓ tests/integration/auth-startup-config.integration.test.ts (10 tests) 42ms
+ ✓ tests/security/iam-oidc-strict-negative.test.ts (3 tests) 54ms
 
 [2/6] Running Active Tenant Console OIDC E2E Suite in Production Mode (G1, G2, G3)...
- ✓ tests/e2e/tenant-console-oidc-production.test.ts (2 tests) 263ms
+ ✓ tests/e2e/tenant-console-oidc-production.test.ts (2 tests) 205ms
    ✓ proves end-to-end active tenant login, callback exchange, session read, proxy write, and logout in strict production mode
    ✓ executes logout-all and invalidates all active sessions for the principal
 
 [3/6] Running Session Invalidation, Downgrade & Tenant Isolation Matrix (G4, G6)...
- ✓ tests/security/iam-tenant-session-revocation-e2e.test.ts (6 tests) 681ms
+ ✓ tests/security/iam-tenant-session-revocation-e2e.test.ts (6 tests) 360ms
    ✓ invalidates issued session token immediately upon user role downgrade
    ✓ invalidates issued session token immediately upon user suspension
    ✓ invalidates issued session token upon explicit backend session revocation
@@ -98,7 +100,7 @@ Execution Time: 2026-08-16T05:48:00Z
    ✓ rejects state replay, tampered state cookie, PKCE verifier mismatch, and nonce mismatch
 
 [4/6] Running Full Dynamic Route Inventory Scan (G5)...
- ✓ tests/security/iam-route-inventory.test.ts (7 tests) 546ms
+ ✓ tests/security/iam-route-inventory.test.ts (7 tests) 531ms
    ✓ discovers every controller recursively without an allowlist
    ✓ reports zero unclassified routes across all discovered controllers
    ✓ validates that all declared scopes exist in the IAM catalogue
@@ -108,20 +110,21 @@ Execution Time: 2026-08-16T05:48:00Z
    ✓ fails with realm mismatch details when an incompatible realm is declared for a scope
 
 [5/6] Verifying Browser Storage, HttpOnly Boundaries & Zero Secret Leakage (G2, G8)...
- ✓ tests/security/iam-browser-storage-and-secret-leakage.test.ts (3 tests) 213ms
+ ✓ tests/security/iam-browser-storage-and-secret-leakage.test.ts (3 tests) 211ms
    ✓ does not persist auth secrets in browser storage or cookies
    ✓ enforces HttpOnly flags on session and state cookie configurations to block browser script access
    ✓ keeps IAM-UAT-001 evidence free of raw secret literals
 
 [6/6] Running Route Family Negative & Boundary Security Matrix (G6)...
- ✓ tests/security/iam-auth-negative-matrix.test.ts (4 tests) 42ms
+ ✓ tests/security/iam-route-integrations-negative.test.ts (3 tests) 14ms
+ ✓ tests/security/iam-auth-negative-matrix.test.ts (4 tests) 49ms
+ ✓ tests/security/iam-route-map-negative.test.ts (10 tests) 91ms
+ ✓ tests/security/iam-route-driver-negative.test.ts (10 tests) 63ms
  ✓ tests/security/iam-route-admin-negative.test.ts (34 tests) 122ms
- ✓ tests/security/iam-route-driver-negative.test.ts (10 tests) 61ms
- ✓ tests/security/iam-route-map-negative.test.ts (10 tests) 111ms
- ✓ tests/security/iam-route-integrations-negative.test.ts (3 tests) 10ms
 
 ==============================================================================
 IAM-OP-REL-001 Candidate Verification SUMMARY
+Candidate SHA: 1e81487ab05316a01f098ef7782618760bef7427
 ------------------------------------------------------------------------------
   [PASS] Gate G1: Active tenant console real OIDC login, callback & session read
   [PASS] Gate G2: Zero demo actor / bootstrap identity headers in active console
@@ -135,21 +138,24 @@ IAM-OP-REL-001 Candidate Verification SUMMARY
 ALL G1-G8 GATES PASSED for candidate.
 ```
 
-### 4.2 Live Cloud Staging Verification Runner: `operations/verification/verify-iam-staging-live.mjs`
+### 4.2 Hardened Live Staging Verification Runner: `operations/verification/verify-iam-staging-live.mjs`
 
-```bash
-node operations/verification/verify-iam-staging-live.mjs \
-  --api-origin https://api.staging.drts-fleet.cctech-support.com \
-  --tenant-origin https://tenant.staging.drts-fleet.cctech-support.com \
-  --platform-origin https://staging.drts-fleet.cctech-support.com \
-  --ops-origin https://ops.staging.drts-fleet.cctech-support.com
-```
+The live staging runner executes 7 critical operational checks against deployed Cloud Run endpoints:
+1. Live Cloud API health and readiness (`/health`).
+2. Live strict unauthenticated rejection on protected API routes (`/notifications/read`, `/settlement/invoices`, `/driver-settings`, `/admin/flags`, `/system/foundation/manifest`).
+3. Live Tenant Console session boundary without demo credentials (`/api/auth/session`).
+4. Live Tenant Console OIDC initiation (HTTP 302/307 redirect, rejects 503 error, verifies location header without mock tokens).
+5. Live Tenant Console mutating CSRF protection (`/control-plane-proxy/tenant/notifications/read` rejects requests without CSRF token).
+6. Live Platform Admin & Ops Console workforce identity gateway enforcement.
+7. Zero secret / token leakage audit across response headers and cookies.
+
+All network errors, timeouts, and unexpected response statuses are recorded as hard failures (`failures++`), and the runner strictly exits with non-zero exit code if any check fails or if zero assertions pass.
 
 ---
 
 ## 5. Strict Staging Deployment Topology & Configuration
 
-The staging deployment workflow (`.github/workflows/deploy-staging.yml`) deploys the unified candidate SHA across Cloud Run services in strict mode:
+The staging deployment workflow (`.github/workflows/deploy-staging.yml`) configures the candidate release for Cloud Run staging:
 
 1. **`drts-api` (Port 3001)**:
    - `NODE_ENV=production,APP_ENV=staging,DRTS_ENV=staging,AUTH_MODE=strict,DRTS_INTERNAL_KEY_ENFORCED=true`
@@ -171,5 +177,5 @@ The staging deployment workflow (`.github/workflows/deploy-staging.yml`) deploys
 
 | Role | Sign-Off Entity | Status | Date | Conclusion |
 | :--- | :--- | :--- | :--- | :--- |
-| **Execution Owner** | `Gemini` (Worker-Ops / Release) | **VERIFIED_CANDIDATE** | 2026-08-16 | All 8 upstream tasks integrated; G1–G8 gates empirically verified; staging deployment workflow, live staging runner, and candidate verification script added. |
-| **Governance Reviewer** | `Claude` (Architecture / Governance) | **READY_FOR_REVIEW** | 2026-08-16 | Candidate handoff ready for review and lifecycle promotion. |
+| **Execution Owner** | `Gemini` (Worker-Ops / Release) | **VERIFIED_CANDIDATE** | 2026-08-16 | All 8 upstream tasks integrated; G1–G7 gates empirically verified; G8 staging deployment workflow, hardened live staging runner, and candidate verification script added. |
+| **Governance Reviewer** | `Claude` (Architecture / Governance) | **READY_FOR_REVIEW** | 2026-08-16 | Candidate handoff ready for review. |
