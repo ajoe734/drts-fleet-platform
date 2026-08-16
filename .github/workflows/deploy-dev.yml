@@ -1352,7 +1352,7 @@ jobs:
           PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
           SECRET_PREFIX: ${{ needs.prepare.outputs.secret_prefix }}
           TENANT_ID: tenant-demo-001
-          TENANT_ACTOR_ID: tenant-user-demo-001
+          TENANT_ACTOR_IDS: ${{ vars.DRTS_TENANT_ACCEPTANCE_ACTOR_IDS || 'tenant-user-demo-001,tenant-user-demo-002,tenant-user-demo-003' }}
         run: |
           set -euo pipefail
 
@@ -1396,8 +1396,23 @@ jobs:
           }
 
           tenant_session=""
-          tenant_actors="${TENANT_ACTOR_ID},tenant-user-demo-002,tenant-user-demo-003"
-          IFS=',' read -r -a tenant_actor_list <<<"${tenant_actors}"
+          tenant_actors="${TENANT_ACTOR_IDS}"
+          IFS=',' read -r -a tenant_actor_candidates <<<"${tenant_actors}"
+          tenant_actor_list=()
+
+          for actor_id in "${tenant_actor_candidates[@]}"; do
+            actor_id="$(echo "${actor_id}" | sed 's/^ *//; s/ *$//')"
+            if [[ -n "${actor_id}" ]]; then
+              tenant_actor_list+=("${actor_id}")
+            fi
+          done
+
+          if [[ "${#tenant_actor_list[@]}" -eq 0 ]]; then
+            echo "::error::TENANT_ACTOR_IDS is empty; configure DRTS_TENANT_ACCEPTANCE_ACTOR_IDS in repository variables."
+            exit 1
+          fi
+
+          echo "deployment-machine tenant actor candidates: ${tenant_actor_list[*]}"
           for actor_id in "${tenant_actor_list[@]}"; do
             if tenant_session="$(request_tenant_session "$actor_id")"; then
               break
