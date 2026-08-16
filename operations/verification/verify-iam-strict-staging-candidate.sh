@@ -83,6 +83,7 @@ echo "==========================================================================
 # ------------------------------------------------------------------------------
 # Gate G8: Live Cloud Staging HTTP Verification (when origins provided)
 # ------------------------------------------------------------------------------
+LIVE_RAN="false"
 if [[ "$SKIP_LIVE" != "true" && (-n "$API_ORIGIN" || -n "$TENANT_ORIGIN") ]]; then
   echo ""
   echo "[Live Staging] Running Live Cloud Staging HTTP Verification Suite (G1-G8)..."
@@ -94,6 +95,7 @@ if [[ "$SKIP_LIVE" != "true" && (-n "$API_ORIGIN" || -n "$TENANT_ORIGIN") ]]; th
   [[ -n "$IAP_TOKEN" ]] && LIVE_ARGS+=("--iap-token" "$IAP_TOKEN")
 
   node operations/verification/verify-iam-staging-live.mjs "${LIVE_ARGS[@]}"
+  LIVE_RAN="true"
 else
   echo ""
   echo "[Info] Live staging origins not configured or --skip-live set; executing comprehensive hermetic & security matrix gates."
@@ -161,6 +163,12 @@ echo "  [PASS] Gate G4: Backend session revocation, role downgrade & suspension 
 echo "  [PASS] Gate G5: Dynamic route inventory: 56 controllers scanned, 0 unclassified routes"
 echo "  [PASS] Gate G6: Representative realm, scope, object boundary & tenant isolation negatives"
 echo "  [PASS] Gate G7: Strict startup fail-closed validation rejecting mock mode & missing config"
-echo "  [PASS] Gate G8: Exact-SHA strict staging verification & audit non-leakage proven"
-echo "=============================================================================="
-echo "ALL G1-G8 GATES PASSED for candidate ${CANDIDATE_SHA}."
+if [[ "$LIVE_RAN" == "true" ]]; then
+  echo "  [PASS] Gate G8: Exact-SHA strict staging verification & audit non-leakage proven"
+  echo "=============================================================================="
+  echo "ALL G1-G8 GATES PASSED for candidate ${CANDIDATE_SHA}."
+else
+  echo "  [SKIP] Gate G8: Live staging HTTP verification skipped (--skip-live or origins unset; pending cloud deploy)"
+  echo "=============================================================================="
+  echo "GATES G1-G7 PASSED (Gate G8 pending live cloud staging deploy) for candidate ${CANDIDATE_SHA}."
+fi

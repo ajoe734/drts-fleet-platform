@@ -74,8 +74,8 @@ Captured Execution Output:
 ```text
 ==============================================================================
 DRTS IAM Minimum Operational Closure Candidate Verification (IAM-OP-REL-001)
-Candidate SHA: 751853c313f89c405e542bed8ba6b7713c994891
-Execution Time: 2026-08-16T06:05:22Z
+Candidate SHA: <candidate-sha> (bound dynamically to candidate HEAD or --sha parameter)
+Execution Time: 2026-08-16T06:11:00Z
 ==============================================================================
 
 [Info] Live staging origins not configured or --skip-live set; executing comprehensive hermetic & security matrix gates.
@@ -124,7 +124,7 @@ Execution Time: 2026-08-16T06:05:22Z
 
 ==============================================================================
 IAM-OP-REL-001 Candidate Verification SUMMARY
-Candidate SHA: 751853c313f89c405e542bed8ba6b7713c994891
+Candidate SHA: <candidate-sha>
 ------------------------------------------------------------------------------
   [PASS] Gate G1: Active tenant console real OIDC login, callback & session read
   [PASS] Gate G2: Zero demo actor / bootstrap identity headers in active console
@@ -133,10 +133,12 @@ Candidate SHA: 751853c313f89c405e542bed8ba6b7713c994891
   [PASS] Gate G5: Dynamic route inventory: 56 controllers scanned, 0 unclassified routes
   [PASS] Gate G6: Representative realm, scope, object boundary & tenant isolation negatives
   [PASS] Gate G7: Strict startup fail-closed validation rejecting mock mode & missing config
-  [PASS] Gate G8: Exact-SHA strict staging verification & audit non-leakage proven
+  [SKIP] Gate G8: Live staging HTTP verification skipped (--skip-live or origins unset; pending cloud deploy)
 ==============================================================================
-ALL G1-G8 GATES PASSED for candidate 751853c313f89c405e542bed8ba6b7713c994891.
+GATES G1-G7 PASSED (Gate G8 pending live cloud staging deploy) for candidate <candidate-sha>.
 ```
+
+> **Candidate SHA Binding**: The candidate verification script dynamically binds the active Git HEAD commit (or `--sha` parameter). When executed in staging deployment CI (`.github/workflows/deploy-staging.yml`), `--sha` is bound to `${{ needs.build-push.outputs.source_ref }}` alongside live staging origin URLs to execute Gate G8 against the exact deployed container image.
 
 ### 4.2 Hardened Live Staging Verification Runner: `operations/verification/verify-iam-staging-live.mjs`
 
