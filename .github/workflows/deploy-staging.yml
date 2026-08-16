@@ -39,10 +39,10 @@ env:
   ARTIFACT_REPOSITORY: ${{ vars.STAGING_ARTIFACT_REPOSITORY || 'drts' }}
   REGISTRY: ${{ (vars.STAGING_ARTIFACT_REGION || vars.STAGING_GCP_REGION || vars.GCP_REGION) }}-docker.pkg.dev/${{ vars.STAGING_ARTIFACT_PROJECT_ID || vars.STAGING_GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}/${{ vars.STAGING_ARTIFACT_REPOSITORY || 'drts' }}
   CLOUDSQL: ${{ vars.STAGING_GCP_CLOUDSQL_INSTANCE || vars.GCP_CLOUDSQL_INSTANCE }}
-  DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.STAGING_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
-  RUNTIME_SERVICE_ACCOUNT: ${{ vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT || vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
-  RUNTIME_SERVICE_ACCOUNT_FALLBACK: ${{ secrets.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT || secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}
-  WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER }}
+  DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.STAGING_WIF_SERVICE_ACCOUNT || secrets.DEV_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
+  RUNTIME_SERVICE_ACCOUNT: ${{ vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT || vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT || vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+  RUNTIME_SERVICE_ACCOUNT_FALLBACK: ${{ secrets.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT || secrets.DEV_GCP_RUNTIME_SERVICE_ACCOUNT || secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}
+  WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.DEV_WIF_PROVIDER || secrets.WIF_PROVIDER }}
   SECRET_PREFIX: ${{ vars.STAGING_SECRET_PREFIX || 'drts-staging' }}
   MAP_PROVIDER_BACKEND: ${{ vars.STAGING_MAP_PROVIDER_BACKEND || 'mock' }}
   NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE: ${{ vars.STAGING_MAP_TILE_URL_TEMPLATE }}
@@ -51,10 +51,17 @@ env:
   MAP_PROVIDER_BUDGET_ALERT_PCT: ${{ vars.STAGING_MAP_PROVIDER_BUDGET_ALERT_PCT || vars.MAP_PROVIDER_BUDGET_ALERT_PCT || '50;80;95' }}
   PLATFORM_ADMIN_ORIGIN: ${{ vars.STAGING_PLATFORM_ADMIN_ORIGIN || 'https://staging.drts-fleet.cctech-support.com' }}
   OPS_CONSOLE_ORIGIN: ${{ vars.STAGING_OPS_CONSOLE_ORIGIN || 'https://ops.staging.drts-fleet.cctech-support.com' }}
+  TENANT_CONSOLE_ORIGIN: ${{ vars.STAGING_TENANT_CONSOLE_ORIGIN || 'https://tenant.staging.drts-fleet.cctech-support.com' }}
   CONTROL_PLANE_API_ORIGIN_ENV: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN || 'https://api.staging.drts-fleet.cctech-support.com' }}
   IAP_CLIENT_ID_ENV: ${{ vars.STAGING_IAP_CLIENT_ID || '1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com' }}
-  WORKLOAD_IDENTITY_ISSUER_ENV: ${{ vars.STAGING_WORKLOAD_IDENTITY_ISSUER || vars.WORKLOAD_IDENTITY_ISSUER }}
-  WORKLOAD_IDENTITY_AUDIENCE_ENV: ${{ vars.STAGING_WORKLOAD_IDENTITY_AUDIENCE || vars.WORKLOAD_IDENTITY_AUDIENCE }}
+  WORKLOAD_IDENTITY_ISSUER_ENV: ${{ vars.STAGING_WORKLOAD_IDENTITY_ISSUER || vars.DEV_WORKLOAD_IDENTITY_ISSUER || vars.WORKLOAD_IDENTITY_ISSUER }}
+  WORKLOAD_IDENTITY_AUDIENCE_ENV: ${{ vars.STAGING_WORKLOAD_IDENTITY_AUDIENCE || vars.DEV_WORKLOAD_IDENTITY_AUDIENCE || vars.WORKLOAD_IDENTITY_AUDIENCE }}
+  OIDC_ISSUER_ENV: ${{ vars.STAGING_OIDC_ISSUER || 'https://auth.staging.drts-fleet.cctech-support.com' }}
+  OIDC_CLIENT_ID_ENV: ${{ vars.STAGING_OIDC_CLIENT_ID || 'drts-tenant-console-staging' }}
+  OIDC_TOKEN_ENDPOINT_ENV: ${{ vars.STAGING_OIDC_TOKEN_ENDPOINT || 'https://auth.staging.drts-fleet.cctech-support.com/oauth2/token' }}
+  OIDC_AUTHORIZATION_ENDPOINT_ENV: ${{ vars.STAGING_OIDC_AUTHORIZATION_ENDPOINT || 'https://auth.staging.drts-fleet.cctech-support.com/oauth2/authorize' }}
+  TENANT_OIDC_ISSUER_ENV: ${{ vars.STAGING_TENANT_OIDC_ISSUER || 'https://auth.staging.drts-fleet.cctech-support.com' }}
+  TENANT_OIDC_AUDIENCE_ENV: ${{ vars.STAGING_TENANT_OIDC_AUDIENCE || 'drts-tenant-workforce-staging' }}
 
 jobs:
   # ──────────────────────────────────────────────────────────────
@@ -90,12 +97,12 @@ jobs:
           [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.STAGING_GCP_PROJECT_ID or vars.GCP_PROJECT_ID")
           [[ -n "${REGION:-}" ]] || missing+=("vars.STAGING_GCP_REGION or vars.GCP_REGION")
           [[ -n "${CLOUDSQL:-}" ]] || missing+=("vars.STAGING_GCP_CLOUDSQL_INSTANCE or vars.GCP_CLOUDSQL_INSTANCE")
-          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.STAGING_WIF_PROVIDER or secrets.WIF_PROVIDER")
-          [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.STAGING_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
-          [[ -n "${WORKLOAD_IDENTITY_ISSUER_ENV:-}" ]] || missing+=("vars.STAGING_WORKLOAD_IDENTITY_ISSUER or vars.WORKLOAD_IDENTITY_ISSUER")
-          [[ -n "${WORKLOAD_IDENTITY_AUDIENCE_ENV:-}" ]] || missing+=("vars.STAGING_WORKLOAD_IDENTITY_AUDIENCE or vars.WORKLOAD_IDENTITY_AUDIENCE")
+          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.STAGING_WIF_PROVIDER or secrets.DEV_WIF_PROVIDER or secrets.WIF_PROVIDER")
+          [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.STAGING_WIF_SERVICE_ACCOUNT or secrets.DEV_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
+          [[ -n "${WORKLOAD_IDENTITY_ISSUER_ENV:-}" ]] || missing+=("vars.STAGING_WORKLOAD_IDENTITY_ISSUER or vars.DEV_WORKLOAD_IDENTITY_ISSUER or vars.WORKLOAD_IDENTITY_ISSUER")
+          [[ -n "${WORKLOAD_IDENTITY_AUDIENCE_ENV:-}" ]] || missing+=("vars.STAGING_WORKLOAD_IDENTITY_AUDIENCE or vars.DEV_WORKLOAD_IDENTITY_AUDIENCE or vars.WORKLOAD_IDENTITY_AUDIENCE")
           if [[ -z "${RUNTIME_SERVICE_ACCOUNT:-${RUNTIME_SERVICE_ACCOUNT_FALLBACK:-}}" ]]; then
-            missing+=("vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT or secrets.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT or vars.GCP_RUNTIME_SERVICE_ACCOUNT or secrets.GCP_RUNTIME_SERVICE_ACCOUNT")
+            missing+=("vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT or secrets.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT or vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT or secrets.DEV_GCP_RUNTIME_SERVICE_ACCOUNT or vars.GCP_RUNTIME_SERVICE_ACCOUNT or secrets.GCP_RUNTIME_SERVICE_ACCOUNT")
           fi
 
           if (( ${#missing[@]} > 0 )); then
@@ -185,6 +192,46 @@ jobs:
             ${{ env.REGISTRY }}/ops-console-web:latest
           cache-from: type=registry,ref=${{ env.REGISTRY }}/ops-console-web:cache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/ops-console-web:cache,mode=max
+
+      # ── Active Tenant Console ────────────────────────────────
+      - name: Build & push — tenant-console-web
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/tenant-console-web/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/tenant-console-web:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/tenant-console-web:latest
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/tenant-console-web:cache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/tenant-console-web:cache,mode=max
+
+  # ──────────────────────────────────────────────────────────────
+  # Strict Startup Negative Gate — verifies fail-closed security
+  # ──────────────────────────────────────────────────────────────
+  strict-startup-negative-gate:
+    name: Strict startup negative gate
+    runs-on: ubuntu-latest
+    needs: build-push
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-push.outputs.source_ref }}
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Verify strict startup-negative controls (rejects missing provider & mock mode)
+        run: |
+          pnpm exec vitest run \
+            tests/unit/auth-startup-config.test.ts \
+            tests/integration/auth-startup-config.integration.test.ts \
+            tests/security/iam-oidc-strict-negative.test.ts
 
   # ──────────────────────────────────────────────────────────────
   # 2. Run DB migrations via Cloud Run Job
@@ -322,9 +369,9 @@ jobs:
   deploy:
     name: Deploy services
     runs-on: ubuntu-latest
-    needs: [build-push, migrate]
+    needs: [build-push, migrate, strict-startup-negative-gate]
     # Run deploy even when migration is skipped (migrate job is skipped, not failed)
-    if: ${{ always() && needs.build-push.result == 'success' && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') }}
+    if: ${{ always() && needs.build-push.result == 'success' && needs.strict-startup-negative-gate.result == 'success' && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') }}
 
     steps:
       - name: Checkout
@@ -372,6 +419,7 @@ jobs:
           API_ALLOW_UNAUTHENTICATED: ${{ vars.STAGING_API_ALLOW_UNAUTHENTICATED }}
           PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED: ${{ vars.STAGING_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED }}
           OPS_CONSOLE_ALLOW_UNAUTHENTICATED: ${{ vars.STAGING_OPS_CONSOLE_ALLOW_UNAUTHENTICATED }}
+          TENANT_CONSOLE_ALLOW_UNAUTHENTICATED: ${{ vars.STAGING_TENANT_CONSOLE_ALLOW_UNAUTHENTICATED }}
         run: |
           set -euo pipefail
 
@@ -393,6 +441,7 @@ jobs:
           echo "api=$(resolve_flag "${API_ALLOW_UNAUTHENTICATED:-}" true)" >> "$GITHUB_OUTPUT"
           echo "platform_admin=$(resolve_flag "${PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" true)" >> "$GITHUB_OUTPUT"
           echo "ops_console=$(resolve_flag "${OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)" >> "$GITHUB_OUTPUT"
+          echo "tenant_console=$(resolve_flag "${TENANT_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)" >> "$GITHUB_OUTPUT"
 
       - name: Resolve control-plane staging endpoints
         id: control_plane
@@ -437,6 +486,7 @@ jobs:
 
           secret_args="DATABASE_URL=${SECRET_PREFIX}-db-url:latest,API_KEY_SALT=${SECRET_PREFIX}-api-key-salt:latest,JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest"
           ops_secret_args="JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest"
+          tenant_secret_args="JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest"
           controlled_download_secret="${SECRET_PREFIX}-controlled-download-signing-secret"
           workload_key_secret="${SECRET_PREFIX}-workload-identity-jwt-public-key"
           workload_registry_secret="${SECRET_PREFIX}-workload-identity-service-principals"
@@ -487,6 +537,7 @@ jobs:
 
           printf 'api=%s\n' "$secret_args" >> "$GITHUB_OUTPUT"
           printf 'ops=%s\n' "$ops_secret_args" >> "$GITHUB_OUTPUT"
+          printf 'tenant=%s\n' "$tenant_secret_args" >> "$GITHUB_OUTPUT"
 
       - name: Verify live Google Maps provider
         if: ${{ env.MAP_PROVIDER_BACKEND == 'google' }}
@@ -515,7 +566,7 @@ jobs:
             --set-cloudsql-instances "$CLOUDSQL" \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-secrets "${{ steps.api_secrets.outputs.api }}" \
-            --set-env-vars "NODE_ENV=production,APP_ENV=staging,DRTS_ENV=staging,API_PORT=3001,WORKLOAD_IDENTITY_ISSUER=${WORKLOAD_IDENTITY_ISSUER_ENV},WORKLOAD_IDENTITY_AUDIENCE=${WORKLOAD_IDENTITY_AUDIENCE_ENV},MAP_PROVIDER_MODE=${map_provider_mode},MAP_PROVIDER_NAME=google,MAP_PROVIDER_BACKEND=${MAP_PROVIDER_BACKEND},MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS},MAP_PROVIDER_MONTHLY_BUDGET_USD=${MAP_PROVIDER_MONTHLY_BUDGET_USD},MAP_PROVIDER_BUDGET_ALERT_PCT=${MAP_PROVIDER_BUDGET_ALERT_PCT}" \
+            --set-env-vars "NODE_ENV=production,APP_ENV=staging,DRTS_ENV=staging,API_PORT=3001,AUTH_MODE=strict,DRTS_INTERNAL_KEY_ENFORCED=true,WORKLOAD_IDENTITY_ISSUER=${WORKLOAD_IDENTITY_ISSUER_ENV},WORKLOAD_IDENTITY_AUDIENCE=${WORKLOAD_IDENTITY_AUDIENCE_ENV},OIDC_ISSUER=${OIDC_ISSUER_ENV},OIDC_CLIENT_ID=${OIDC_CLIENT_ID_ENV},OIDC_TOKEN_ENDPOINT=${OIDC_TOKEN_ENDPOINT_ENV},OIDC_AUTHORIZATION_ENDPOINT=${OIDC_AUTHORIZATION_ENDPOINT_ENV},OIDC_MOCK_MODE=false,TENANT_OIDC_ISSUER=${TENANT_OIDC_ISSUER_ENV},TENANT_OIDC_AUDIENCE=${TENANT_OIDC_AUDIENCE_ENV},AUTH_ALLOWED_ORIGINS=${PLATFORM_ADMIN_ORIGIN},${OPS_CONSOLE_ORIGIN},${TENANT_CONSOLE_ORIGIN},MAP_PROVIDER_MODE=${map_provider_mode},MAP_PROVIDER_NAME=google,MAP_PROVIDER_BACKEND=${MAP_PROVIDER_BACKEND},MAP_PROVIDER_ALLOWED_ORIGINS=${MAP_PROVIDER_ALLOWED_ORIGINS},MAP_PROVIDER_MONTHLY_BUDGET_USD=${MAP_PROVIDER_MONTHLY_BUDGET_USD},MAP_PROVIDER_BUDGET_ALERT_PCT=${MAP_PROVIDER_BUDGET_ALERT_PCT}" \
             ${{ steps.exposure.outputs.api }} \
             --min-instances 0 \
             --max-instances 3 \
@@ -529,8 +580,6 @@ jobs:
             --project "$PROJECT_ID" \
             --format "value(status.url)")
           echo "url=$URL" >> "$GITHUB_OUTPUT"
-
-      # tenant-portal-web deploy step removed — RETIRED (SUNSET-001-tenant-portal-web, FBP-007).
 
       - name: Deploy — platform-admin-web
         run: |
@@ -565,11 +614,27 @@ jobs:
             --max-instances 2 \
             --project "$PROJECT_ID"
 
+      - name: Deploy — tenant-console-web
+        run: |
+          IMAGE="${{ env.REGISTRY }}/tenant-console-web:${{ needs.build-push.outputs.image_tag }}"
+          gcloud run deploy drts-tenant-console-web \
+            --region "$REGION" \
+            --image  "$IMAGE" \
+            --port   3004 \
+            --ingress internal-and-cloud-load-balancing \
+            --service-account "${{ steps.runtime_sa.outputs.email }}" \
+            --set-secrets "${{ steps.api_secrets.outputs.tenant }}" \
+            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
+            ${{ steps.exposure.outputs.tenant_console }} \
+            --min-instances 0 \
+            --max-instances 2 \
+            --project "$PROJECT_ID"
+
   # ──────────────────────────────────────────────────────────────
-  # 4. Health check — verify Cloud Run service reaches Ready state
+  # 4. Health check — verify Cloud Run services reach Ready state
   # ──────────────────────────────────────────────────────────────
   health-check:
-    name: API health check
+    name: Staging health check
     runs-on: ubuntu-latest
     needs: deploy
     if: ${{ always() && needs.deploy.result == 'success' }}
@@ -657,7 +722,7 @@ jobs:
       - name: Print staging URLs
         run: |
           echo "=== Staging deployment complete ==="
-          for SVC in drts-api drts-platform-admin-web drts-ops-console-web; do
+          for SVC in drts-api drts-platform-admin-web drts-ops-console-web drts-tenant-console-web; do
             URL=$(gcloud run services describe "$SVC" \
               --region "$REGION" \
               --project "$PROJECT_ID" \
@@ -665,3 +730,64 @@ jobs:
             echo "  $SVC: $URL"
           done
           echo "  protected-api-host: ${{ steps.control_plane.outputs.api_origin }}"
+
+  # ──────────────────────────────────────────────────────────────
+  # 5. Staging Acceptance — exact-SHA IAM operational proof
+  # ──────────────────────────────────────────────────────────────
+  staging-acceptance:
+    name: Staging IAM acceptance proof
+    runs-on: ubuntu-latest
+    needs: [build-push, deploy, health-check]
+    if: ${{ always() && needs.deploy.result == 'success' && needs.health-check.result == 'success' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-push.outputs.source_ref }}
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        continue-on-error: true
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Resolve protected staging auth endpoints
+        id: control_plane
+        run: |
+          set -euo pipefail
+
+          api_origin="${CONTROL_PLANE_API_ORIGIN_ENV:-https://api.staging.drts-fleet.cctech-support.com}"
+          iap_client_id="${IAP_CLIENT_ID_ENV:-1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com}"
+
+          echo "api_origin=${api_origin}" >> "$GITHUB_OUTPUT"
+          echo "iap_client_id=${iap_client_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint IAP verification token
+        id: iap_token
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ steps.control_plane.outputs.iap_client_id }}
+          id_token_include_email: true
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Run exact-SHA IAM operational acceptance suite
+        run: |
+          ./operations/verification/verify-iam-strict-staging-candidate.sh \
+            --sha "${{ needs.build-push.outputs.source_ref }}" \
+            --api-origin "${{ steps.control_plane.outputs.api_origin }}" \
+            --tenant-origin "${{ env.TENANT_CONSOLE_ORIGIN }}" \
+            --platform-origin "${{ env.PLATFORM_ADMIN_ORIGIN }}" \
+            --ops-origin "${{ env.OPS_CONSOLE_ORIGIN }}" \
+            --iap-token "${{ steps.iap_token.outputs.id_token || '' }}"
