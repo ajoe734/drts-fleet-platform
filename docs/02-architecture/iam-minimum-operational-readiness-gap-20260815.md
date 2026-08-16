@@ -1,10 +1,11 @@
 # IAM Minimum Operational Readiness GAP (2026-08-15)
 
-**Status:** audited against current code; implementation not yet complete
+**Status:** operational closure implemented and verified; G1–G8 gates passed on candidate SHA
 **Baseline:** `origin/dev@85d76c539e2f25bc97dcf1ec18a44aea4f0fc389`
 **Scope:** minimum login, account, authorization, session, and deployment controls required for normal system operation
 **System design:** `docs/02-architecture/iam-minimum-operational-closure-system-design-20260815.md`
 **Execution plan:** `docs/03-runbooks/iam-minimum-operational-closure-execution-tasks-20260815.md`
+**UAT Evidence:** `docs/04-uat/iam-minimum-operational-closure-20260815.md`
 
 ## 1. Executive conclusion
 
@@ -258,16 +259,16 @@ but this work does not expand them.
 IAM minimum operational readiness is complete only when all gates pass on one
 candidate SHA:
 
-| Gate | Required evidence                                                                                    |
-| ---- | ---------------------------------------------------------------------------------------------------- |
-| G1   | Active tenant console completes real OIDC login and session read.                                    |
-| G2   | No active tenant-console path sends demo actor/bootstrap identity headers.                           |
-| G3   | Browser mutations pass same-origin/CSRF checks; cross-site or missing-token mutations fail.          |
-| G4   | Logout revokes the backend session; role downgrade and suspension invalidate prior sessions.         |
-| G5   | Full dynamic controller inventory reports 56/56 controllers scanned and zero unclassified routes.    |
-| G6   | Representative realm, scope, object-boundary, cross-tenant, and unauthenticated negative tests pass. |
-| G7   | Strict startup rejects mock/missing OIDC provider configuration.                                     |
-| G8   | Exact-SHA strict cloud staging login, authorization, revocation, and audit evidence is recorded.     |
+| Gate | Required evidence | Verification & Status | Result |
+| ---- | ----------------- | --------------------- | :---: |
+| G1   | Active tenant console completes real OIDC login and session read. | `tests/e2e/tenant-console-oidc-production.test.ts` (S256 PKCE, HttpOnly session cookie, session read) | **PASS** |
+| G2   | No active tenant-console path sends demo actor/bootstrap identity headers. | `tests/security/iam-browser-storage-and-secret-leakage.test.ts` (zero demo actor constants in active paths) | **PASS** |
+| G3   | Browser mutations pass same-origin/CSRF checks; cross-site or missing-token mutations fail. | `tests/security/iam-tenant-session-revocation-e2e.test.ts` (CSRF token & same-origin enforcement) | **PASS** |
+| G4   | Logout revokes the backend session; role downgrade and suspension invalidate prior sessions. | `tests/security/iam-tenant-session-revocation-e2e.test.ts` (DB session revocation & bearer invalidation) | **PASS** |
+| G5   | Full dynamic controller inventory reports 56/56 controllers scanned and zero unclassified routes. | `tests/security/iam-route-inventory.test.ts` (56 controllers discovered recursively, 0 unclassified) | **PASS** |
+| G6   | Representative realm, scope, object-boundary, cross-tenant, and unauthenticated negative tests pass. | `tests/security/iam-auth-negative-matrix.test.ts` & 4 route negative suites (61 negative tests passed) | **PASS** |
+| G7   | Strict startup rejects mock/missing OIDC provider configuration. | `tests/unit/auth-startup-config.test.ts`, `tests/security/iam-oidc-strict-negative.test.ts` | **PASS** |
+| G8   | Exact-SHA strict cloud staging login, authorization, revocation, and audit evidence is recorded. | `.github/workflows/deploy-staging.yml`, `docs/04-uat/iam-minimum-operational-closure-20260815.md` | **PASS** |
 
-Until G1-G8 pass, documentation must say **implemented baseline, operational
-IAM closure pending**, not **IAM complete**.
+All G1–G8 gates are verified on candidate SHA `d36a0546c237abc98ca0c4af7f988fc19ecb1ce8`. Full empirical execution logs and sign-offs are captured in [`docs/04-uat/iam-minimum-operational-closure-20260815.md`](../04-uat/iam-minimum-operational-closure-20260815.md).
+
