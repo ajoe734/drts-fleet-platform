@@ -54,6 +54,11 @@ def default_state() -> dict[str, Any]:
             "active_review": None,
             "rotation_index": 0,
             "cooldown_until": None,
+            # Backoff for a chair mechanism that is failing, kept separate from
+            # cooldown_until because urgent work may bypass the cadence but must
+            # never bypass a failure backoff.
+            "failure_backoff_until": None,
+            "failure_streak": 0,
             "last_review_at": None,
             "last_reviewer": None,
             "last_reason": None,
@@ -124,6 +129,8 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state["chair_review"].setdefault("active_review", None)
     state["chair_review"].setdefault("rotation_index", 0)
     state["chair_review"].setdefault("cooldown_until", None)
+    state["chair_review"].setdefault("failure_backoff_until", None)
+    state["chair_review"].setdefault("failure_streak", 0)
     state["chair_review"].setdefault("last_review_at", None)
     state["chair_review"].setdefault("last_reviewer", None)
     state["chair_review"].setdefault("last_reason", None)

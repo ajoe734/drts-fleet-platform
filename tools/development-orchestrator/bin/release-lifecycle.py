@@ -72,11 +72,46 @@ def activation_lock(releases_dir: Path):
     return (releases_dir / ".activation.lock").open("a+", encoding="utf-8")
 
 
+def verify_release(target: Path) -> tuple[bool, str]:
+    """Run the candidate release's own orchestrator tests before it goes live.
+
+    Activation used to be a pure symlink flip, so a release was only ever as
+    good as whatever ran before the worktree was built. That is how a refactor
+    that deleted a load-bearing dispatch guard reached production: it was pinned
+    from a local branch, and the first thing to exercise the chair-review path
+    afterwards was the live control plane, which then spun on it for three days.
+    The tests live inside the release tree, so this checks the artifact being
+    activated rather than the developer's checkout.
+    """
+    tests_dir = target / "tools" / "development-orchestrator"
+    if not tests_dir.is_dir():
+        return False, f"release has no orchestrator tree at {tests_dir}"
+    proc = subprocess.run(
+        [sys.executable, "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py"],
+        cwd=tests_dir, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        tail = "\n".join((proc.stderr or proc.stdout or "").strip().splitlines()[-15:])
+        return False, f"orchestrator tests failed in the candidate release:\n{tail}"
+    summary = [ln for ln in (proc.stderr or "").splitlines() if ln.startswith("Ran ")]
+    return True, summary[0] if summary else "tests passed"
+
+
 def activate(args: argparse.Namespace) -> int:
     target = args.releases_dir / args.release
     if not target.is_dir() or not target.name.startswith("orchestrator-"):
         print(f"ERROR: release does not exist: {target}", file=sys.stderr)
         return 2
+    if args.skip_verify:
+        # Kept for emergency rollback: reverting to a known-good release must
+        # never be blocked by its test suite failing to run.
+        print("WARNING: skipping release verification (--skip-verify)", file=sys.stderr)
+    else:
+        ok, detail = verify_release(target)
+        if not ok:
+            print(f"ERROR: refusing to activate {target.name}: {detail}", file=sys.stderr)
+            return 3
+        print(f"verified {target.name}: {detail}")
     with activation_lock(args.releases_dir) as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         manifest = load_manifest(args.manifest)
@@ -160,6 +195,11 @@ def main() -> int:
         default="current",
         choices=("active", "current"),
         help="release selector to update; `active` is reserved for the live systemd service",
+    )
+    activate_parser.add_argument(
+        "--skip-verify",
+        action="store_true",
+        help="activate without running the candidate release's tests (emergency rollback only)",
     )
     activate_parser.add_argument("release")
     subparsers.add_parser("prune", help="list or remove releases no longer protected")

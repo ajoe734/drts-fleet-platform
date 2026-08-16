@@ -5323,8 +5323,23 @@ def worker_matches_current_assignment(
     return decision is not None and normalize_agent_id(decision.target_agent) in agent_ids
 
 
+# Staleness is only defined for task-bound dispatch events: the check asks
+# whether a task's current dispatch decision still matches the one that was
+# queued. Coordination events (chair review, and anything else enqueued with
+# task_id=None) have no such decision, so they must never be judged here —
+# current_dispatch_event_key would return None for every one of them and mark
+# them stale forever. Derive the set from the domain enum rather than repeating
+# the literals: the hand-maintained set this replaces had already silently lost
+# acceptance_ready_dispatch, and when it was dropped entirely every chair review
+# event became "stale" and the control plane spun on chair_review_lost_queue_event.
+TASK_DISPATCH_REASONS = frozenset(reason.value for reason in DomainDispatchReason)
+
+
 def stale_dispatch_skip_message(config: dict[str, Any], event: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> str | None:
     reason = str(event.get("reason") or "")
+    if reason not in TASK_DISPATCH_REASONS:
+        return None
+
     expected_key = current_dispatch_event_key(config, event, task_map)
     task_id = str(event.get("task_id") or "unknown task")
     if expected_key is None:
@@ -5816,8 +5831,16 @@ def queue_chair_review(
     # therefore raises urgency for reviewer-lane selection but must not bypass
     # the cooldown, or every tick re-queues the same blocked_task_triage.
     bypass_cooldown = bool(pending_approval_items(approval_state) or needs_immediate_attention)
-    cooldown_until = parse_runtime_timestamp(chair_state.get("cooldown_until"))
     now = datetime.now(timezone.utc)
+    # Honoured even when bypass_cooldown is true. Urgency justifies preempting the
+    # routine cadence; it never justifies retrying a mechanism that just failed.
+    # last_review_at only advances on success, so a review that keeps failing
+    # leaves every pause looking like unseen "new information" forever — which
+    # makes the bypass below permanent unless this gate sits in front of it.
+    failure_backoff_until = parse_runtime_timestamp(chair_state.get("failure_backoff_until"))
+    if failure_backoff_until is not None and failure_backoff_until > now:
+        return False
+    cooldown_until = parse_runtime_timestamp(chair_state.get("cooldown_until"))
     if not bypass_cooldown and cooldown_until is not None and cooldown_until > now:
         return False
     chosen = choose_chair_reviewer(
@@ -7116,8 +7139,22 @@ def refresh_chair_review_state(
         return True
 
     def invalidate(reason: str, *, event_type: str = "chair_review_invalid_schema") -> bool:
+        settings = chair_review_settings(config)
+        streak = int(chair_state.get("failure_streak") or 0) + 1
+        chair_state["failure_streak"] = streak
         chair_state["active_review"] = None
         chair_state["cooldown_until"] = None
+        # A failed review means the chair mechanism itself did not work, which is
+        # a different thing from the routine review cadence. The cadence
+        # (cooldown_until) is deliberately bypassable by urgent new information;
+        # this backoff must not be, or a broken mechanism retries forever at tick
+        # speed. Keeping it in its own field is what stops the two from being
+        # confused again.
+        backoff_seconds = float(settings.get("cooldown_seconds", 900)) * min(2 ** (streak - 1), 8)
+        retry_after = (
+            datetime.now(timezone.utc) + timedelta(seconds=backoff_seconds)
+        ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        chair_state["failure_backoff_until"] = retry_after
         write_activity_log(
             config,
             {
@@ -7125,8 +7162,27 @@ def refresh_chair_review_state(
                 "message": reason,
                 "target_agent": active.get("agent"),
                 "queue_event_id": queue_event_id or None,
+                "failure_streak": streak,
+                "retry_after": retry_after,
             },
         )
+        if streak >= int(settings.get("failure_streak_threshold", 2)):
+            # Escalation signal. Nothing consumed the per-failure events, so a
+            # chair stuck in a retry loop was indistinguishable from an idle one
+            # in every dashboard and probe that watches this control plane.
+            write_activity_log(
+                config,
+                {
+                    "type": "chair_review_failure_streak",
+                    "message": (
+                        f"Chair review has failed {streak} consecutive times ({event_type}); "
+                        f"backing off until {retry_after}."
+                    ),
+                    "target_agent": active.get("agent"),
+                    "failure_streak": streak,
+                    "retry_after": retry_after,
+                },
+            )
         return True
 
     if json_path.exists():
@@ -7202,6 +7258,8 @@ def refresh_chair_review_state(
         chair_state["last_reviewer"] = active.get("agent")
         chair_state["last_reason"] = active.get("reason")
         chair_state["last_decision"] = payload
+        chair_state["failure_streak"] = 0
+        chair_state["failure_backoff_until"] = None
         chair_state["cooldown_until"] = (
             datetime.now(timezone.utc) + timedelta(seconds=float(chair_review_settings(config).get("cooldown_seconds", 900)))
         ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
