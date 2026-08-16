@@ -128,6 +128,8 @@ const SANDBOX_COMPLIANCE_SCOPES = [
 const MULTI_TAXI_RATING_GOVERNANCE_SCOPES = [
   "multi_taxi_ratings:read",
   "multi_taxi_ratings:moderate",
+  "multi_taxi_records:read",
+  "multi_taxi_records:export",
 ] as const;
 
 export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
@@ -146,6 +148,30 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
       "identity:roles:read",
       "identity:sessions:read",
     ],
+  },
+  {
+    scope: "identity:break-glass:request",
+    allowedRealms: ["system", "platform", "ops"],
+    description: "Request temporary break-glass elevated access.",
+    resourceConstraints: [OBJECT_CONSTRAINT],
+  },
+  {
+    scope: "identity:break-glass:approve",
+    allowedRealms: ["system", "platform", "ops"],
+    description: "Approve temporary break-glass elevated access.",
+    resourceConstraints: [OBJECT_CONSTRAINT],
+  },
+  {
+    scope: "identity:break-glass:activate",
+    allowedRealms: ["system", "platform", "ops"],
+    description: "Activate or close approved break-glass elevated access.",
+    resourceConstraints: [OBJECT_CONSTRAINT],
+  },
+  {
+    scope: "assistant:write",
+    allowedRealms: ["system", "platform", "ops", "tenant"],
+    description: "Assistant conversational actions and tool proposals.",
+    resourceConstraints: [TENANT_CONSTRAINT, OBJECT_CONSTRAINT],
   },
   {
     scope: "identity:users:read",
@@ -498,6 +524,10 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
       defaultRoles: [],
       scopes: [
         "identity:read",
+        "identity:break-glass:request",
+        "identity:break-glass:approve",
+        "identity:break-glass:activate",
+        "assistant:write",
         "foundation:read",
         "foundation:write",
         "audit:read",
@@ -544,6 +574,10 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
       defaultRoles: ["platform_admin"],
       scopes: [
         "identity:read",
+        "identity:break-glass:request",
+        "identity:break-glass:approve",
+        "identity:break-glass:activate",
+        "assistant:write",
         "foundation:read",
         "foundation:write",
         "audit:read",
@@ -579,6 +613,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
       defaultRoles: ["tenant_admin"],
       scopes: [
         "identity:read",
+        "assistant:write",
         "audit:read",
         "tenant:read",
         "tenant:write",
@@ -601,6 +636,10 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
       defaultRoles: ["ops_user"],
       scopes: [
         "identity:read",
+        "identity:break-glass:request",
+        "identity:break-glass:approve",
+        "identity:break-glass:activate",
+        "assistant:write",
         "audit:read",
         "notifications:read",
         "notifications:write",
