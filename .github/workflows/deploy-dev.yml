@@ -862,7 +862,7 @@ jobs:
               --format='value(status.url)')"
           fi
 
-          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},NEXT_PUBLIC_DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,NEXT_PUBLIC_OPS_CONSOLE_ORIGIN=${ops_console_origin},DRTS_FLEET_PARTNER_ID=fleet-demo-001,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,DRTS_TENANT_CONSOLE_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},NEXT_PUBLIC_DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,NEXT_PUBLIC_OPS_CONSOLE_ORIGIN=${ops_console_origin},DRTS_FLEET_PARTNER_ID=fleet-demo-001,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=tenant-demo-001,DRTS_TENANT_CONSOLE_TENANT_ID=tenant-demo-001,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
             env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi
@@ -1351,6 +1351,8 @@ jobs:
           API_URL: ${{ needs.health-check.outputs.api }}
           PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
           SECRET_PREFIX: ${{ needs.prepare.outputs.secret_prefix }}
+          TENANT_ID: tenant-demo-001
+          TENANT_ACTOR_ID: tenant-user-demo-001
         run: |
           set -euo pipefail
 
@@ -1358,17 +1360,54 @@ jobs:
             --secret="${SECRET_PREFIX}-jwt-secret" \
             --project="$PROJECT_ID")"
           echo "::add-mask::$internal_key"
-          session_response="$(curl --fail --silent --show-error \
-            --request POST "${API_URL}/api/auth/token" \
-            --header 'content-type: application/json' \
-            --header "x-drts-internal-key: ${internal_key}" \
-            --header 'x-actor-type: tenant_admin' \
-            --header 'x-actor-id: tenant-user-demo-001' \
-            --header 'x-realm: tenant' \
-            --header 'x-tenant-id: 10000000-0000-0000-0000-000000000201' \
-            --header 'x-scopes: identity:read audit:read tenant:read tenant:write tenant:webhooks:read tenant:webhooks:write tenant:sla:read tenant:sla:write tenant:billing:read tenant:billing:write reports:read reports:write' \
-            --data '{}')"
-          tenant_session="$(jq --exit-status --raw-output '.token' <<<"$session_response")"
+          request_tenant_session() {
+            local actor_id="$1"
+            local response_file
+            local status
+            local token
+
+            response_file="$(mktemp)"
+            status="$(curl --silent --show-error --request POST "${API_URL}/api/auth/token" \
+              --header 'content-type: application/json' \
+              --header "x-drts-internal-key: ${internal_key}" \
+              --header 'x-actor-type: tenant_admin' \
+              --header "x-actor-id: ${actor_id}" \
+              --header 'x-realm: tenant' \
+              --header "x-tenant-id: ${TENANT_ID}" \
+              --header 'x-scopes: identity:read audit:read tenant:read tenant:write tenant:webhooks:read tenant:webhooks:write tenant:sla:read tenant:sla:write tenant:billing:read tenant:billing:write reports:read reports:write' \
+              --data '{}' \
+              --output "${response_file}" \
+              --write-out '%{http_code}')"
+            if [[ "${status:0:1}" != "2" ]]; then
+              echo "::error::deployment-machine tenant token request failed for actor ${actor_id} (HTTP ${status})."
+              sed 's/^/  /' "${response_file}" | sed 's/^/  response: /' >&2
+              rm -f "${response_file}"
+              return 1
+            fi
+
+            token="$(jq --exit-status --raw-output '.token' "${response_file}")"
+            rm -f "${response_file}"
+            if [[ -z "${token}" || "${token}" == "null" ]]; then
+              echo "::error::deployment-machine tenant token response missing token for actor ${actor_id}."
+              return 1
+            fi
+
+            printf '%s' "$token"
+          }
+
+          tenant_session=""
+          tenant_actors="${TENANT_ACTOR_ID},tenant-user-demo-002,tenant-user-demo-003"
+          IFS=',' read -r -a tenant_actor_list <<<"${tenant_actors}"
+          for actor_id in "${tenant_actor_list[@]}"; do
+            if tenant_session="$(request_tenant_session "$actor_id")"; then
+              break
+            fi
+            tenant_session=""
+          done
+          if [[ -z "${tenant_session}" ]]; then
+            echo "::error::deployment-machine tenant token request failed for all configured actors."
+            exit 1
+          fi
           echo "::add-mask::$tenant_session"
           printf 'DRTS_OPERATIONAL_TENANT_SESSION_TOKEN=%s\n' "$tenant_session" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4
