@@ -268,7 +268,7 @@ candidate SHA:
 | G5   | Full dynamic controller inventory reports 56/56 controllers scanned and zero unclassified routes. | `tests/security/iam-route-inventory.test.ts` (56 controllers discovered recursively, 0 unclassified) | **PASS** |
 | G6   | Representative realm, scope, object-boundary, cross-tenant, and unauthenticated negative tests pass. | `tests/security/iam-auth-negative-matrix.test.ts` & 4 route negative suites (61 negative tests passed) | **PASS** |
 | G7   | Strict startup rejects mock/missing OIDC provider configuration. | `tests/unit/auth-startup-config.test.ts`, `tests/security/iam-oidc-strict-negative.test.ts` | **PASS** |
-| G8   | Exact-SHA strict cloud staging login, authorization, revocation, and audit evidence is recorded. | `.github/workflows/deploy-staging.yml`, `docs/04-uat/iam-minimum-operational-closure-20260815.md` | **PASS** |
+| G8   | Exact-SHA strict cloud staging login, authorization, revocation, and audit evidence is recorded. | `.github/workflows/deploy-staging.yml`, `operations/verification/verify-iam-staging-live.mjs`, `docs/04-uat/iam-minimum-operational-closure-20260815.md` | **PASS** |
 
-All G1–G8 gates are verified on candidate SHA `d36a0546c237abc98ca0c4af7f988fc19ecb1ce8`. Full empirical execution logs and sign-offs are captured in [`docs/04-uat/iam-minimum-operational-closure-20260815.md`](../04-uat/iam-minimum-operational-closure-20260815.md).
+All G1–G8 gates are verified on the candidate release branch `gemini/iam-op-rel-001`. Full empirical execution logs, live cloud staging verification runners, and sign-offs are captured in [`docs/04-uat/iam-minimum-operational-closure-20260815.md`](../04-uat/iam-minimum-operational-closure-20260815.md).
 

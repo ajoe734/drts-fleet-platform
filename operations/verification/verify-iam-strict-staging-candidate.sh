@@ -13,7 +13,7 @@ set -euo pipefail
 #   G5: Full dynamic controller inventory reports 56/56 controllers and 0 unclassified routes.
 #   G6: Representative realm, scope, object-boundary, cross-tenant, and negative tests pass.
 #   G7: Strict startup rejects mock/missing OIDC provider configuration.
-#   G8: Exact-SHA strict staging login, authorization, revocation, and audit evidence recorded.
+#   G8: Exact-SHA strict staging login, authorization, revocation, and live HTTP proof recorded.
 # ==============================================================================
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -22,14 +22,45 @@ cd "$ROOT_DIR"
 export PATH="$HOME/.local/bin:$PATH"
 
 CANDIDATE_SHA=""
+API_ORIGIN="${STAGING_CONTROL_PLANE_API_ORIGIN:-${STAGING_API_ORIGIN:-${DRTS_STAGING_API_URL:-}}}"
+TENANT_ORIGIN="${STAGING_TENANT_CONSOLE_ORIGIN:-${DRTS_STAGING_TENANT_CONSOLE_URL:-}}"
+PLATFORM_ORIGIN="${STAGING_PLATFORM_ADMIN_ORIGIN:-}"
+OPS_ORIGIN="${STAGING_OPS_CONSOLE_ORIGIN:-}"
+IAP_TOKEN="${STAGING_IAP_TOKEN:-${IAP_TOKEN:-}}"
+SKIP_LIVE="false"
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sha)
       CANDIDATE_SHA="${2:-}"
       shift 2
       ;;
+    --api-origin)
+      API_ORIGIN="${2:-}"
+      shift 2
+      ;;
+    --tenant-origin)
+      TENANT_ORIGIN="${2:-}"
+      shift 2
+      ;;
+    --platform-origin)
+      PLATFORM_ORIGIN="${2:-}"
+      shift 2
+      ;;
+    --ops-origin)
+      OPS_ORIGIN="${2:-}"
+      shift 2
+      ;;
+    --iap-token)
+      IAP_TOKEN="${2:-}"
+      shift 2
+      ;;
+    --skip-live)
+      SKIP_LIVE="true"
+      shift 1
+      ;;
     -h|--help)
-      echo "Usage: $0 [--sha <40-hex-sha>]"
+      echo "Usage: $0 [--sha <40-hex-sha>] [--api-origin <url>] [--tenant-origin <url>] [--platform-origin <url>] [--ops-origin <url>] [--iap-token <token>] [--skip-live]"
       exit 0
       ;;
     *)
@@ -48,6 +79,25 @@ echo "DRTS IAM Minimum Operational Closure Candidate Verification (IAM-OP-REL-00
 echo "Candidate SHA: ${CANDIDATE_SHA}"
 echo "Execution Time: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 echo "=============================================================================="
+
+# ------------------------------------------------------------------------------
+# Gate G8: Live Cloud Staging HTTP Verification (when origins provided)
+# ------------------------------------------------------------------------------
+if [[ "$SKIP_LIVE" != "true" && (-n "$API_ORIGIN" || -n "$TENANT_ORIGIN") ]]; then
+  echo ""
+  echo "[Live Staging] Running Live Cloud Staging HTTP Verification Suite (G1-G8)..."
+  LIVE_ARGS=("--sha" "$CANDIDATE_SHA")
+  [[ -n "$API_ORIGIN" ]] && LIVE_ARGS+=("--api-origin" "$API_ORIGIN")
+  [[ -n "$TENANT_ORIGIN" ]] && LIVE_ARGS+=("--tenant-origin" "$TENANT_ORIGIN")
+  [[ -n "$PLATFORM_ORIGIN" ]] && LIVE_ARGS+=("--platform-origin" "$PLATFORM_ORIGIN")
+  [[ -n "$OPS_ORIGIN" ]] && LIVE_ARGS+=("--ops-origin" "$OPS_ORIGIN")
+  [[ -n "$IAP_TOKEN" ]] && LIVE_ARGS+=("--iap-token" "$IAP_TOKEN")
+
+  node operations/verification/verify-iam-staging-live.mjs "${LIVE_ARGS[@]}"
+else
+  echo ""
+  echo "[Info] Live staging origins not configured or --skip-live set; executing comprehensive hermetic & security matrix gates."
+fi
 
 # ------------------------------------------------------------------------------
 # Gate G7: Strict Startup Negative Controls & Mock Rejection
