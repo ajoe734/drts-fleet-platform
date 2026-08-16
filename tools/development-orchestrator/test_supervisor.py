@@ -5644,6 +5644,168 @@ class ChairmanFlowTests(unittest.TestCase):
             ]
             self.assertEqual(records[-1]["type"], "chair_review_lost_queue_event")
 
+    def test_queued_chair_review_survives_process_queue(self) -> None:
+        """The seam between queue_chair_review and process_queue.
+
+        Both stages had thorough tests of their own, and the defect lived
+        precisely between them: chair events carry task_id=None, so the
+        task-bound staleness check silently skipped every one of them, and the
+        supervisor re-queued and re-lost the same review ~3000 times an hour.
+        Asserting on a hand-built event would reproduce the same blind spot, so
+        this drives the real queue_chair_review event through the real queue.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "chair-reviews").mkdir(parents=True, exist_ok=True)
+            (root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "agents": {"claude": {"display_name": "Claude", "provider": "claude"}},
+                "chair_review": {"enabled": True, "review_dir": str(root / "chair-reviews")},
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                    "chair_review_dir": str(root / "chair-reviews"),
+                },
+            }
+            state = {"queue": {"events": {}}, "workers": {}, "chair_review": {}}
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+                mock.patch.object(supervisor, "choose_chair_reviewer", return_value=("claude", "Claude")),
+            ):
+                queued = supervisor.queue_chair_review(config, state, {"tasks": []}, provider_report={})
+            self.assertTrue(queued)
+            event_id = state["chair_review"]["active_review"]["queue_event_id"]
+
+            with mock.patch.object(
+                supervisor, "start_worker_for_request", return_value=(True, "run-1", {})
+            ) as start_worker:
+                supervisor.process_queue(config, state, provider_report={})
+
+            record = state["queue"]["events"][event_id]
+            self.assertNotEqual(record.get("skip_reason"), "stale_dispatch_event")
+            self.assertEqual(record["status"], "started")
+            start_worker.assert_called_once()
+            records = [
+                json.loads(line)
+                for line in (root / "activity-log.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual([r for r in records if r["type"] == "wake_skipped"], [])
+
+    def test_stale_dispatch_skip_message_ignores_events_without_a_dispatch_reason(self) -> None:
+        event = {"event_id": "evt-chair", "task_id": None, "reason": "chair_review:blocked_task_triage"}
+        self.assertIsNone(supervisor.stale_dispatch_skip_message({}, event, {}))
+
+    def test_task_dispatch_reasons_track_the_domain_enum(self) -> None:
+        """Guards the drift that caused the outage.
+
+        The literal set this replaced had already lost acceptance_ready_dispatch
+        (exempting those events from a staleness check they needed) before it was
+        deleted outright (subjecting every coordination event to one they must
+        never get). Binding it to the enum removes the hand-maintained copy.
+        """
+        self.assertEqual(
+            supervisor.TASK_DISPATCH_REASONS,
+            frozenset(reason.value for reason in supervisor.DomainDispatchReason),
+        )
+
+    def test_chair_review_failure_backoff_is_not_bypassable_by_urgency(self) -> None:
+        """A failure backoff outranks every urgency bypass.
+
+        last_review_at only advances on success, so while reviews keep failing
+        an unseen pause stays "new information" forever and bypass_cooldown is
+        permanently true. A backoff that the bypass can override is therefore no
+        backoff at all — which is why it lives in its own field.
+        """
+        state = {
+            "provider_pauses": {
+                "codex2": {
+                    "schema": 3,
+                    "scope": "lane",
+                    "lane_id": "codex2",
+                    "kind": "auth",
+                    "reason": "status: 401,",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                    "resume_at": None,
+                }
+            },
+            "dispatch_pauses": [],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:00:00Z",
+                "cooldown_until": None,
+                "failure_backoff_until": "2099-01-01T00:00:00Z",
+                "failure_streak": 3,
+            },
+        }
+        config = {"chair_review": {"enabled": True}}
+
+        with (
+            mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+            mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
+        ):
+            queued = supervisor.queue_chair_review(config, state, {"tasks": []}, provider_report={})
+
+        self.assertFalse(queued)
+        choose_chair_reviewer.assert_not_called()
+
+    def test_invalidated_chair_review_records_streak_and_backoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            config = {
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900, "failure_streak_threshold": 2},
+            }
+            (root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+
+            def run_once() -> None:
+                state["chair_review"]["active_review"] = {
+                    "agent_id": "gemini",
+                    "agent": "Gemini",
+                    "reason": "provider_health_triage",
+                    "queue_event_id": "evt-missing",
+                    "markdown_path": str(review_dir / "missing.md"),
+                    "json_path": str(review_dir / "missing.json"),
+                }
+                with mock.patch.object(
+                    supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}
+                ):
+                    supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            state = {"queue": {"events": {}}, "workers": {}, "chair_review": {}}
+            run_once()
+            self.assertEqual(state["chair_review"]["failure_streak"], 1)
+            first_backoff = state["chair_review"]["failure_backoff_until"]
+            self.assertIsNotNone(first_backoff)
+
+            run_once()
+            self.assertEqual(state["chair_review"]["failure_streak"], 2)
+            self.assertGreater(state["chair_review"]["failure_backoff_until"], first_backoff)
+
+            records = [
+                json.loads(line)
+                for line in (root / "activity-log.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(records[-1]["type"], "chair_review_failure_streak")
+            self.assertEqual(records[-1]["failure_streak"], 2)
+
     def test_refresh_chair_review_state_applies_canonical_reassignments_and_preserves_separation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

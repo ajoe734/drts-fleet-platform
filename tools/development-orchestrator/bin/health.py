@@ -146,10 +146,54 @@ def collect() -> dict:
                      "last_done_at": None, "last_done_id": None,
                      "seconds_since_last_done": None},
         "failures": {"supersedes_last_1h": 0, "dispatch_pauses": 0,
-                     "blockers": 0, "provider_pauses": []},
+                     "blockers": 0, "provider_pauses": [],
+                     "chair_review_failure_streak": 0},
         "lanes": [],
+        "watchdogs": [],
         "issues": [],
     }
+
+    # Watch the watchers. Every other check in this file assumes something runs
+    # it; on 2026-08-16 nothing did. All three DRTS timers sat
+    # ActiveState=active and UnitFileState=enabled with an empty next elapse,
+    # so they looked healthy in `list-units` while firing nothing for eight
+    # hours. A disarmed probe reports no issues, which reads exactly like a
+    # healthy system.
+    for unit in ("drts-health.timer", "drts-canonical-root-watch.timer",
+                 "drts-claude-keepalive.timer"):
+        entry = {"unit": unit, "active_state": None, "next_elapse": None, "armed": None}
+        try:
+            out = subprocess.check_output(
+                ["systemctl", "--user", "show", unit,
+                 "-p", "ActiveState", "-p", "UnitFileState", "-p", "NextElapseUSecRealtime",
+                 "-p", "NextElapseUSecMonotonic"],
+                text=True, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.CalledProcessError):
+            result["watchdogs"].append(entry)
+            continue
+        props = dict(
+            line.split("=", 1) for line in out.splitlines() if "=" in line)
+        entry["active_state"] = props.get("ActiveState")
+        entry["unit_file_state"] = props.get("UnitFileState")
+        # systemd reports "no scheduled elapse" as an empty realtime value and
+        # the literal "infinity" for the monotonic one. Treating either as a
+        # timestamp is how a disarmed timer reports itself as armed — the exact
+        # failure this check exists to catch.
+        never = {"", "0", "infinity", "n/a"}
+        next_elapse = next(
+            (v for v in (str(props.get("NextElapseUSecRealtime") or "").strip(),
+                         str(props.get("NextElapseUSecMonotonic") or "").strip())
+             if v.lower() not in never),
+            None)
+        entry["next_elapse"] = next_elapse
+        # "enabled and active but with nothing scheduled" is the silent-death
+        # state; an intentionally stopped timer is not an issue.
+        entry["armed"] = next_elapse is not None
+        result["watchdogs"].append(entry)
+        if (props.get("UnitFileState") == "enabled"
+                and props.get("ActiveState") == "active" and not entry["armed"]):
+            result["issues"].append(
+                f"WARN: {unit} is enabled and active but has no next elapse (disarmed)")
 
     # supervisor presence
     try:
@@ -257,6 +301,19 @@ def collect() -> dict:
                 {"lane": lane, "kind": kind})
             if kind == "auth":
                 result["issues"].append(f"WARN: provider {lane} auth paused")
+
+        # A chair review that keeps failing is not the same as an idle one, but
+        # until the runtime started counting the streak the two were
+        # indistinguishable here: the supervisor heartbeat stayed green, the
+        # queue read empty every tick, and the retry loop was visible only as
+        # repeated lines in the activity log that nothing consumed.
+        chair = s.get("chair_review", {}) or {}
+        streak = int(chair.get("failure_streak") or 0)
+        result["failures"]["chair_review_failure_streak"] = streak
+        if streak > 0:
+            retry_after = chair.get("failure_backoff_until") or "unknown"
+            result["issues"].append(
+                f"WARN: chair review failing ({streak} consecutive), backing off until {retry_after}")
 
         # heartbeat from supervisor field, else fall back to state.json mtime
         sup_state = s.get("supervisor", {}) or {}
@@ -469,6 +526,15 @@ def render_human(s: dict) -> None:
                 keepalive_color = GREEN if keepalive_status == "OK" else RED
                 keepalive = f" keepalive={c(keepalive_color, keepalive_status.lower())}"
             print(f"  {ln.get('lane', '?'):10s} {sc:20s} ttl={ttl}{keepalive}")
+
+    watchdogs = s.get("watchdogs") or []
+    if watchdogs:
+        print(f"\n{c(BOLD, 'watchdogs')}:")
+        for wd in watchdogs:
+            armed = wd.get("armed")
+            state = "armed" if armed else "DISARMED" if armed is False else "unknown"
+            print(f"  {wd.get('unit', '?'):32s} {c(GREEN if armed else RED, state)}"
+                  f"  ({wd.get('active_state') or '?'})")
 
     issues = s.get("issues") or []
     if issues:
