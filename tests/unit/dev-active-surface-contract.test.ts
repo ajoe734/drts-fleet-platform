@@ -172,7 +172,14 @@ describe("dev active surface contract", () => {
     expect(appEntryIndex).toContain(
       "https://drts-channel-partner-portal-web-4t7rg6fmeq-uc.a.run.app",
     );
-    expect(appEntryIndex).toContain("Partner Booking — PAUSED");
+    // The contract is that the frozen surface is declared paused and its URL is
+    // not advertised (GAP gate G7), not that a particular heading is worded a
+    // particular way. S1F-DOC-001 replaced the free-text "Partner Booking —
+    // PAUSED" section with a structured Paused Surfaces table carrying the same
+    // status, and this assertion failed on the wording while the substance was
+    // intact — turning a documentation improvement into a red trunk.
+    expect(appEntryIndex).toMatch(/##\s*\d*\.?\s*Paused Surfaces/i);
+    expect(appEntryIndex).toMatch(/partner-booking-web[\s\S]{0,600}?PAUSED/);
     expect(appEntryIndex).not.toContain(
       "https://drts-dev-partner-booking-web-4t7rg6fmeq-uc.a.run.app",
     );
