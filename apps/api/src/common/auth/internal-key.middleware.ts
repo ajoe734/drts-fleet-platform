@@ -111,6 +111,8 @@ export function validateInternalKey(
   const requestMethod = request.method ?? "GET";
   const strictEnvironment = isStrictAuthEnvironment();
 
+  const configuredKey = expectedKey?.trim();
+
   if (
     isHealthRequest(rawPath) ||
     isOptionsRequest(requestMethod) ||
@@ -120,11 +122,11 @@ export function validateInternalKey(
     return;
   }
 
-  if (!strictEnvironment && !expectedKey) {
+  if (!strictEnvironment && !configuredKey) {
     return;
   }
 
-  if (!expectedKey) {
+  if (!configuredKey) {
     throw new ApiRequestError(
       503,
       "INTERNAL_KEY_NOT_CONFIGURED",
@@ -157,7 +159,7 @@ export function validateInternalKey(
     process.env.DRTS_INTERNAL_KEY_PREVIOUS_EXPIRES_AT?.trim();
   const revokedKeys = parseCsvKeys(process.env.DRTS_INTERNAL_KEY_REVOKED_KEYS);
 
-  const evalResult = evaluateInternalKey(providedKey, expectedKey, {
+  const evalResult = evaluateInternalKey(providedKey, configuredKey, {
     headerName: INTERNAL_KEY_HEADER,
     requestPath,
     requestMethod,
