@@ -1356,9 +1356,9 @@ jobs:
 
           internal_key="$(gcloud secrets versions access latest \
             --secret="${SECRET_PREFIX}-jwt-secret" \
-            --project="$PROJECT_ID")"
+            --project="$PROJECT_ID" | tr -d '\r\n')"
           echo "::add-mask::$internal_key"
-          session_response="$(curl --fail --silent --show-error \
+          session_response="$(curl --silent --show-error --write-out '\n%{http_code}' \
             --request POST "${API_URL}/api/auth/token" \
             --header 'content-type: application/json' \
             --header "x-drts-internal-key: ${internal_key}" \
@@ -1368,7 +1368,13 @@ jobs:
             --header 'x-tenant-id: tenant-demo-001' \
             --header 'x-scopes: identity:read audit:read tenant:read tenant:write tenant:webhooks:read tenant:webhooks:write tenant:sla:read tenant:sla:write tenant:billing:read tenant:billing:write reports:read reports:write' \
             --data '{}')"
-          tenant_session="$(jq --exit-status --raw-output '.token' <<<"$session_response")"
+          http_status="$(echo "$session_response" | tail -n 1)"
+          response_body="$(echo "$session_response" | sed '$d')"
+          if [[ "$http_status" -lt 200 || "$http_status" -ge 300 ]]; then
+            echo "::error::Tenant session issuance failed with HTTP ${http_status}: ${response_body}" >&2
+            exit 1
+          fi
+          tenant_session="$(jq --exit-status --raw-output '.token' <<<"$response_body")"
           echo "::add-mask::$tenant_session"
           printf 'DRTS_OPERATIONAL_TENANT_SESSION_TOKEN=%s\n' "$tenant_session" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4

@@ -6,10 +6,8 @@ export type NetworkBoundary =
   | "staging-break-glass-only"
   | (string & {});
 
-export const PRODUCTION_ALLOWED_NETWORK_BOUNDARIES: ReadonlySet<string> = new Set([
-  "internal-vpc-to-api-ingress",
-  "control-plane-proxy-to-api",
-]);
+export const PRODUCTION_ALLOWED_NETWORK_BOUNDARIES: ReadonlySet<string> =
+  new Set(["internal-vpc-to-api-ingress", "control-plane-proxy-to-api"]);
 
 export function isProductionAllowedBoundary(boundary: string): boolean {
   return PRODUCTION_ALLOWED_NETWORK_BOUNDARIES.has(boundary);
@@ -63,10 +61,7 @@ export const INTERNAL_KEY_EXCEPTION_REGISTRY: InternalKeyExceptionMetadata[] = [
     exceptionId: "INTERNAL_KEY_EXCP_003",
     owner: "sre-ops",
     purpose: "Staging emergency break-glass local operations key",
-    scope: [
-      "GET health",
-      "POST ops/*",
-    ],
+    scope: ["GET health", "POST ops/*"],
     ttl: "2026-08-31T23:59:59Z",
     expiresAt: "2026-08-31T23:59:59Z",
     networkBoundary: "staging-break-glass-only",
@@ -86,11 +81,7 @@ export const INTERNAL_KEY_EXCEPTION_REGISTRY: InternalKeyExceptionMetadata[] = [
     owner: "control-plane-ops",
     purpose:
       "Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent in transitional environment",
-    scope: [
-      "* *",
-      "POST partner/ingress/handoff",
-      "POST auth/token",
-    ],
+    scope: ["* *", "POST partner/ingress/handoff", "POST auth/token"],
     ttl: "2026-09-15T23:59:59Z",
     expiresAt: "2026-09-15T23:59:59Z",
     networkBoundary: "control-plane-proxy-to-api",
@@ -228,7 +219,13 @@ export function matchesScope(
   }
 
   if (patternPath.includes("*")) {
-    const regexStr = "^" + patternPath.split("*").map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$";
+    const regexStr =
+      "^" +
+      patternPath
+        .split("*")
+        .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join(".*") +
+      "$";
     const regex = new RegExp(regexStr);
     return regex.test(normReqPath);
   }
@@ -280,7 +277,12 @@ export function findMatchingException(
   requestMethod?: string,
   registry: InternalKeyExceptionMetadata[] = INTERNAL_KEY_EXCEPTION_REGISTRY,
 ): InternalKeyExceptionMetadata | null {
-  const candidates = findMatchingExceptions(headerName, requestPath, requestMethod, registry);
+  const candidates = findMatchingExceptions(
+    headerName,
+    requestPath,
+    requestMethod,
+    registry,
+  );
   return candidates[0] ?? null;
 }
 
@@ -297,7 +299,13 @@ export interface KeyEvaluationResult {
   code?: string;
   reason?: string;
   exception?: InternalKeyExceptionMetadata;
-  keyState?: "active" | "rotated_previous" | "expired" | "revoked" | "undocumented" | "invalid";
+  keyState?:
+    | "active"
+    | "rotated_previous"
+    | "expired"
+    | "revoked"
+    | "undocumented"
+    | "invalid";
 }
 
 export interface EvaluateInternalKeyOptions {
@@ -335,8 +343,15 @@ export function evaluateInternalKey(
     };
   }
 
-  const rawEnv = options.environment ?? process.env.DRTS_ENV ?? process.env.APP_ENV ?? process.env.NODE_ENV ?? "local";
-  const isProduction = ["prod", "production"].includes(rawEnv.trim().toLowerCase());
+  const rawEnv =
+    options.environment ??
+    process.env.DRTS_ENV ??
+    process.env.APP_ENV ??
+    process.env.NODE_ENV ??
+    "local";
+  const isProduction = ["prod", "production"].includes(
+    rawEnv.trim().toLowerCase(),
+  );
 
   let boundaryViolationCandidate: InternalKeyExceptionMetadata | null = null;
   let expiredCandidate: InternalKeyExceptionMetadata | null = null;
@@ -351,7 +366,10 @@ export function evaluateInternalKey(
     }
 
     // Check network boundary
-    if (isProduction && !isProductionAllowedBoundary(exception.networkBoundary)) {
+    if (
+      isProduction &&
+      !isProductionAllowedBoundary(exception.networkBoundary)
+    ) {
       boundaryViolationCandidate = boundaryViolationCandidate ?? exception;
       continue;
     }
@@ -363,8 +381,11 @@ export function evaluateInternalKey(
     }
 
     // Check revocation
-    const revokedSet = new Set(options.revokedKeys ?? []);
-    if (revokedSet.has(providedKey)) {
+    const normalizedProvidedKey = providedKey.trim();
+    const revokedSet = new Set(
+      (options.revokedKeys ?? []).map((k) => k.trim()),
+    );
+    if (revokedSet.has(normalizedProvidedKey)) {
       return {
         valid: false,
         code: "INTERNAL_KEY_REVOKED",
@@ -375,7 +396,11 @@ export function evaluateInternalKey(
     }
 
     // Check primary key match
-    if (expectedKey && timingSafeMatch(providedKey, expectedKey)) {
+    const normalizedExpectedKey = expectedKey?.trim();
+    if (
+      normalizedExpectedKey &&
+      timingSafeMatch(normalizedProvidedKey, normalizedExpectedKey)
+    ) {
       return {
         valid: true,
         exception,
@@ -384,7 +409,11 @@ export function evaluateInternalKey(
     }
 
     // Check rotation previous key match and check rotation overlap key expiry
-    if (options.previousKey && timingSafeMatch(providedKey, options.previousKey)) {
+    const normalizedPreviousKey = options.previousKey?.trim();
+    if (
+      normalizedPreviousKey &&
+      timingSafeMatch(normalizedProvidedKey, normalizedPreviousKey)
+    ) {
       if (options.previousKeyExpiresAt) {
         const prevExpiresTime =
           typeof options.previousKeyExpiresAt === "string"
