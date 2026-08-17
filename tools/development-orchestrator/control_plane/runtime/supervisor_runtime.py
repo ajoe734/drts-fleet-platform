@@ -3553,25 +3553,53 @@ def actionable_dispatch_pause_records(
     return records[:limit]
 
 
+def chair_attention_watermark(state: dict[str, Any]) -> datetime | None:
+    """When the chair last looked at the fleet's urgent signals.
+
+    Novelty used to be measured against last_review_at alone, which advances
+    only when a review succeeds. A chair that kept failing therefore saw the
+    same pause as unseen information on every tick, bypassed its own cooldown
+    forever, and left the cadence with no brake at all. An attempt is a look:
+    the chair was dispatched with that information in its briefing whether or
+    not it managed to produce a verdict.
+    """
+    chair_state = state.get("chair_review") or {}
+    seen = [
+        stamp
+        for stamp in (
+            _parse_iso_utc(chair_state.get("last_review_at")),
+            _parse_iso_utc(chair_state.get("last_attempt_at")),
+        )
+        if stamp is not None
+    ]
+    return max(seen) if seen else None
+
+
 def chair_review_needs_immediate_attention(
     state: dict[str, Any],
     status: dict[str, Any] | None = None,
+    approval_state: dict[str, Any] | None = None,
 ) -> bool:
     # Failure streaks carry an awaiting_chair flag that the chair clears, so a
     # streak that is still awaiting review is always new information.
     if repeated_failure_records(state, status):
         return True
-    # Dispatch and provider pauses persist until the underlying lane recovers.
-    # Only a pause recorded since the last review is new information; one the
-    # chair has already seen must fall back to the normal review cooldown
-    # instead of re-triggering a review on every tick.
-    last_review_at = _parse_iso_utc((state.get("chair_review") or {}).get("last_review_at"))
+    # Approvals and pauses both persist until something else resolves them, so
+    # both are judged against the same watermark: only a signal recorded since
+    # the chair last looked is new information. Pending approvals previously had
+    # no watermark at all, which made their bypass permanent while one sat in
+    # the queue.
+    watermark = chair_attention_watermark(state)
+    for item in pending_approval_items(approval_state or {}):
+        created_at = _parse_iso_utc(str(item.get("created_at") or ""))
+        if watermark is None or created_at is None or created_at > watermark:
+            return True
     for pause in (
         *actionable_dispatch_pause_records(state, status, limit=1),
         *active_provider_pause_records(state),
     ):
         paused_at = _parse_iso_utc(str(pause.get("paused_at") or ""))
-        if last_review_at is None or paused_at is None or paused_at > last_review_at:
+        if watermark is None or paused_at is None or paused_at > watermark:
             return True
     return False
 
@@ -4485,6 +4513,27 @@ def maybe_trigger_retry_or_fallback(
                 )
                 return True, True
     return False, False
+
+
+def undelivered_declared_outputs(worker: dict[str, Any]) -> list[str]:
+    """Outputs the dispatch event declared that the run never produced.
+
+    Workers are launched detached and observed through /proc, so no exit status
+    is ever captured. Completion was therefore inferred from two negatives --
+    the process is gone, and no line in its log matched one of the known failure
+    patterns -- which makes success the default for every failure mode nobody
+    has written a pattern for yet. An antigravity run whose entire log read
+    "Error: Agent execution terminated due to error." was recorded as having
+    exited cleanly, and the lane failure was never attributed to anyone.
+
+    The dispatch already states what the run must produce, so that contract is
+    the positive evidence the runtime has been throwing away. Enforcing it here
+    is what stops the pattern list from being the only line of defence; the list
+    goes back to its real job, deciding whether a fault belongs to the provider.
+    An empty declaration stays a no-op -- only a stated contract can be checked.
+    """
+    declared = (worker.get("request_snapshot") or {}).get("target_files") or []
+    return [str(path) for path in declared if not Path(str(path)).exists()]
 
 
 def finalize_terminal_worker_outcome(
@@ -5466,6 +5515,17 @@ def poll_workers(
 
         if not is_terminal_worker(worker) and worker.get("status") != "manual_pending":
             if current_mode in {"planning", "coordination"}:
+                undelivered = undelivered_declared_outputs(worker)
+                if undelivered:
+                    finalize_terminal_worker_outcome(
+                        config,
+                        state,
+                        worker,
+                        "Worker exited without producing its declared output: "
+                        + ", ".join(undelivered[:3]),
+                    )
+                    changed = True
+                    continue
                 worker["status"] = "completed"
                 worker["last_event_at"] = utc_now()
                 write_activity_log(
@@ -5917,11 +5977,33 @@ def save_event_queue(config: dict[str, Any], events: list[dict[str, Any]]) -> No
     replace_event_queue(config, events)
 
 
+def outstanding_queue_event_references(state: dict[str, Any]) -> set[str]:
+    """Queue events a consumer other than a live worker has not finished with.
+
+    Pruning asked only whether a worker was still active, but a worker is not
+    the sole holder of an event: the chair keeps its own reference through
+    active_review.queue_event_id and reads the settled record back to tell a run
+    that produced nothing apart from an event that disappeared. Dropping the
+    record first made the accurate branch unreachable -- across 148,208 logged
+    events chair_review_missing_output never fired once, while its fallback
+    fired 45,923 times. The reference is released as soon as the review settles,
+    so nothing accumulates.
+    """
+    references: set[str] = set()
+    active_review = (state.get("chair_review") or {}).get("active_review")
+    if isinstance(active_review, dict):
+        event_id = str(active_review.get("queue_event_id") or "").strip()
+        if event_id:
+            references.add(event_id)
+    return references
+
+
 def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
     task_map = task_index_from_status(config, load_status(config))
     active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
     redispatch_statuses = redispatch_candidate_statuses(config)
     queue_events = state.setdefault("queue", {}).setdefault("events", {})
+    referenced_event_ids = outstanding_queue_event_references(state)
 
     def prune_loaded_queue(
         events: list[dict[str, Any]],
@@ -5948,9 +6030,11 @@ def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
                 worker.get("status") in active_statuses
                 for worker in related_workers
             )
+            # "Still needed" is not the same as "a worker is still running".
+            still_needed = has_active_worker or event_id in referenced_event_ids
             skip_message = stale_dispatch_skip_message(config, event, task_map)
 
-            if skip_message and not has_active_worker:
+            if skip_message and not still_needed:
                 completed = queue_status(state, event_id)
                 completed["status"] = "completed"
                 completed["processed_at"] = completed.get("processed_at") or utc_now()
@@ -5981,7 +6065,7 @@ def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
 
             if (
                 record.get("status") == "failed"
-                and not has_active_worker
+                and not still_needed
                 and current_status in redispatch_statuses
             ):
                 changed = True
@@ -5989,7 +6073,7 @@ def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
 
             if (
                 record.get("status") in {"completed", "failed"}
-                and not has_active_worker
+                and not still_needed
             ):
                 changed = True
                 continue
@@ -6798,22 +6882,17 @@ def queue_chair_review(
     reason = chair_review_reason(state, approval_state, status=status, config=config)
     if reason is None:
         return False
-    needs_immediate_attention = chair_review_needs_immediate_attention(state, status)
+    needs_immediate_attention = chair_review_needs_immediate_attention(state, status, approval_state)
     immediate_attention = bool(needs_immediate_attention or ready_blocked_tasks)
     # A dependency-ready blocked task stays listed until the parent is actually
     # unblocked, which the chair's own repair action cannot do on its own. It
     # therefore raises urgency for reviewer-lane selection but must not bypass
     # the cooldown, or every tick re-queues the same blocked_task_triage.
-    bypass_cooldown = bool(pending_approval_items(approval_state) or needs_immediate_attention)
+    # One gate. Urgency is already defined as "information the chair has not
+    # looked at yet", so a failing chair stops manufacturing its own bypass and
+    # the ordinary cooldown governs retries without a parallel backoff field.
+    bypass_cooldown = needs_immediate_attention
     now = datetime.now(timezone.utc)
-    # Honoured even when bypass_cooldown is true. Urgency justifies preempting the
-    # routine cadence; it never justifies retrying a mechanism that just failed.
-    # last_review_at only advances on success, so a review that keeps failing
-    # leaves every pause looking like unseen "new information" forever — which
-    # makes the bypass below permanent unless this gate sits in front of it.
-    failure_backoff_until = _parse_iso_utc(chair_state.get("failure_backoff_until"))
-    if failure_backoff_until is not None and failure_backoff_until > now:
-        return False
     cooldown_until = _parse_iso_utc(chair_state.get("cooldown_until"))
     if not bypass_cooldown and cooldown_until is not None and cooldown_until > now:
         return False
@@ -6899,6 +6978,9 @@ def queue_chair_review(
     record["status"] = "queued"
     record["attempt_count"] = 0
     record["mode"] = "coordination"
+    # An attempt is a look, whatever its outcome: this is the watermark that
+    # keeps already-seen pauses and approvals from re-triggering forever.
+    chair_state["last_attempt_at"] = utc_now()
     chair_state["active_review"] = {
         "agent_id": agent_id,
         "agent": display_name,
@@ -8151,18 +8233,16 @@ def refresh_chair_review_state(
         streak = int(chair_state.get("failure_streak") or 0) + 1
         chair_state["failure_streak"] = streak
         chair_state["active_review"] = None
-        chair_state["cooldown_until"] = None
-        # A failed review means the chair mechanism itself did not work, which is
-        # a different thing from the routine review cadence. The cadence
-        # (cooldown_until) is deliberately bypassable by urgent new information;
-        # this backoff must not be, or a broken mechanism retries forever at tick
-        # speed. Keeping it in its own field is what stops the two from being
-        # confused again.
-        backoff_seconds = float(settings.get("cooldown_seconds", 900)) * min(2 ** (streak - 1), 8)
+        # A failed review still consumed a cadence slot, and the watermark set at
+        # dispatch already records that the chair looked. Setting the ordinary
+        # cooldown here rather than clearing it is what governs retries: the
+        # parallel backoff field this replaces existed only to compensate for an
+        # urgency rule that could never be satisfied.
         retry_after = (
-            datetime.now(timezone.utc) + timedelta(seconds=backoff_seconds)
+            datetime.now(timezone.utc)
+            + timedelta(seconds=float(settings.get("cooldown_seconds", 900)))
         ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        chair_state["failure_backoff_until"] = retry_after
+        chair_state["cooldown_until"] = retry_after
         write_activity_log(
             config,
             {
@@ -8267,7 +8347,6 @@ def refresh_chair_review_state(
         chair_state["last_reason"] = active.get("reason")
         chair_state["last_decision"] = payload
         chair_state["failure_streak"] = 0
-        chair_state["failure_backoff_until"] = None
         chair_state["cooldown_until"] = (
             datetime.now(timezone.utc) + timedelta(seconds=float(chair_review_settings(config).get("cooldown_seconds", 900)))
         ).replace(microsecond=0).isoformat().replace("+00:00", "Z")

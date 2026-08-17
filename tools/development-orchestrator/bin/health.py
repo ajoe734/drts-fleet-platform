@@ -311,7 +311,7 @@ def collect() -> dict:
         streak = int(chair.get("failure_streak") or 0)
         result["failures"]["chair_review_failure_streak"] = streak
         if streak > 0:
-            retry_after = chair.get("failure_backoff_until") or "unknown"
+            retry_after = chair.get("cooldown_until") or "unknown"
             result["issues"].append(
                 f"WARN: chair review failing ({streak} consecutive), backing off until {retry_after}")
 
