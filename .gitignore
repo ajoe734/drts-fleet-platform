@@ -39,6 +39,13 @@ ai-task-archive.jsonl
 .husky/_/
 
 # orchestrator runtime
+# config.json is per-machine runtime state, derived from
+# tools/development-orchestrator/config/config.example.json. It was tracked, so
+# which branch the canonical root sat on silently changed the live fleet's
+# configuration -- and switching to a branch that lacked it deleted the running
+# supervisor's config outright. Runtime state does not belong in git; the
+# example file is what gets shared.
+.orchestrator/config.json
 .llm-inbox/
 .orchestrator/bin/
 .orchestrator/logs/
