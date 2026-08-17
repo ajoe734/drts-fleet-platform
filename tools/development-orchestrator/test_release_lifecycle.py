@@ -74,48 +74,107 @@ class ReleaseLifecycleTests(unittest.TestCase):
             self.assertTrue(entry["eligible"])
             self.assertEqual(entry["cleanup_action"], "git_worktree_remove")
 
-    def _stub_release(self, releases_dir: Path, name: str, *, passing: bool) -> Path:
-        """A release tree carrying one orchestrator test with a known outcome."""
-        tests_dir = releases_dir / name / "tools" / "development-orchestrator"
-        tests_dir.mkdir(parents=True)
-        body = "self.assertTrue(True)" if passing else "self.assertTrue(False)"
+    def _repo_with_release(self, tmpdir: str, name: str, *, on_integration_branch: bool = True,
+                           tests_pass: bool = True) -> tuple[Path, Path]:
+        """A real repo whose release worktree is on, or off, the integration branch."""
+        repo = Path(tmpdir) / "repo"
+        git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        subprocess.run(["git", "init", "-q", "-b", "dev", str(repo)], check=True)
+        (repo / "README").write_text("base\n", encoding="utf-8")
+        subprocess.run([*git, "add", "README"], check=True)
+        subprocess.run([*git, "commit", "-qm", "base"], check=True)
+        if not on_integration_branch:
+            # The production shape: a local refactor branch that was pinned as a
+            # release and never merged back.
+            subprocess.run([*git, "checkout", "-q", "-b", "chore/local-refactor"], check=True)
+            (repo / "README").write_text("diverged\n", encoding="utf-8")
+            subprocess.run([*git, "commit", "-qam", "local refactor"], check=True)
+            subprocess.run([*git, "checkout", "-q", "dev"], check=True)
+            target_ref = "chore/local-refactor"
+        else:
+            target_ref = "dev"
+        artifact_root = repo / ".artifacts"
+        release = artifact_root / "releases" / name
+        release.parent.mkdir(parents=True)
+        subprocess.run([*git, "worktree", "add", "-q", "--detach", str(release), target_ref], check=True)
+        tests_dir = release / "tools" / "development-orchestrator"
+        tests_dir.mkdir(parents=True, exist_ok=True)
+        body = "self.assertTrue(True)" if tests_pass else "self.assertTrue(False)"
         (tests_dir / "test_stub.py").write_text(
-            "import unittest\n\n\n"
-            "class StubTests(unittest.TestCase):\n"
+            "import unittest\n\n\nclass StubTests(unittest.TestCase):\n"
             f"    def test_stub(self) -> None:\n        {body}\n",
-            encoding="utf-8",
-        )
-        return releases_dir / name
+            encoding="utf-8")
+        return repo, artifact_root
+
+    def test_activate_refuses_a_release_that_is_not_on_the_integration_branch(self) -> None:
+        """The release pointer walked off dev and nobody could see it.
+
+        On 2026-08-15 the pointer moved through a local refactor series and
+        stopped on a commit reachable only from a branch named
+        chore/backup-before-dev-sync. For two days what ran in production and
+        what was reviewed were different code, every fix had to be written
+        twice, and one port was silently mis-merged. Nothing checked.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, artifact_root = self._repo_with_release(tmpdir, "orchestrator-offdev", on_integration_branch=False)
+            result = subprocess.run(
+                [str(SCRIPT), "--repo-root", str(repo), "--artifact-root", str(artifact_root),
+                 "activate", "--integration-ref", "dev", "orchestrator-offdev"],
+                capture_output=True, text=True, check=False)
+
+            self.assertEqual(result.returncode, 3, result.stdout)
+            self.assertIn("not reachable from", result.stderr)
+            self.assertFalse((artifact_root / "releases" / "current").exists())
+
+    def test_activate_accepts_a_release_on_the_integration_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, artifact_root = self._repo_with_release(tmpdir, "orchestrator-ondev", on_integration_branch=True)
+            result = subprocess.run(
+                [str(SCRIPT), "--repo-root", str(repo), "--artifact-root", str(artifact_root),
+                 "activate", "--integration-ref", "dev", "orchestrator-ondev"],
+                capture_output=True, text=True, check=False)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((artifact_root / "releases" / "current").resolve().name, "orchestrator-ondev")
+
+    def test_skip_verify_still_allows_an_off_branch_rollback(self) -> None:
+        """One gate, one bypass: emergency rollback to an older pinned release
+        must not be blocked by either check."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, artifact_root = self._repo_with_release(tmpdir, "orchestrator-offdev", on_integration_branch=False)
+            result = subprocess.run(
+                [str(SCRIPT), "--repo-root", str(repo), "--artifact-root", str(artifact_root),
+                 "activate", "--skip-verify", "orchestrator-offdev"],
+                capture_output=True, text=True, check=False)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_activate_refuses_a_release_whose_tests_fail(self) -> None:
         """Activation was a pure symlink flip, so nothing stood between a broken
         refactor and the live control plane. Verification is the gate that the
         chair-review spin outage went through unimpeded."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._stub_release(root / "releases", "orchestrator-broken", passing=False)
-            result = self.run_script(root, "activate", "orchestrator-broken")
-            self.assertEqual(result.returncode, 3, result.stdout)
-            self.assertIn("refusing to activate", result.stderr)
-            self.assertFalse((root / "releases" / "current").exists())
-            self.assertFalse((root / "orchestrator-release.json").exists())
+            repo, artifact_root = self._repo_with_release(tmpdir, "orchestrator-broken", tests_pass=False)
+            result = subprocess.run(
+                [str(SCRIPT), "--repo-root", str(repo), "--artifact-root", str(artifact_root),
+                 "activate", "--integration-ref", "dev", "orchestrator-broken"],
+                capture_output=True, text=True, check=False)
 
-    def test_activate_accepts_a_release_whose_tests_pass(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._stub_release(root / "releases", "orchestrator-good", passing=True)
-            result = self.run_script(root, "activate", "orchestrator-good")
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual((root / "releases" / "current").resolve().name, "orchestrator-good")
+            self.assertEqual(result.returncode, 3, result.stdout)
+            self.assertIn("orchestrator tests failed", result.stderr)
+            self.assertFalse((artifact_root / "releases" / "current").exists())
 
     def test_skip_verify_allows_rollback_to_a_release_that_cannot_be_verified(self) -> None:
         """Emergency rollback must never be blocked by a failing test suite."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._stub_release(root / "releases", "orchestrator-broken", passing=False)
-            result = self.run_script(root, "activate", "--skip-verify", "orchestrator-broken")
+            repo, artifact_root = self._repo_with_release(tmpdir, "orchestrator-broken", tests_pass=False)
+            result = subprocess.run(
+                [str(SCRIPT), "--repo-root", str(repo), "--artifact-root", str(artifact_root),
+                 "activate", "--skip-verify", "orchestrator-broken"],
+                capture_output=True, text=True, check=False)
+
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual((root / "releases" / "current").resolve().name, "orchestrator-broken")
+            self.assertEqual((artifact_root / "releases" / "current").resolve().name, "orchestrator-broken")
 
 
 if __name__ == "__main__":

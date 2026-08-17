@@ -72,8 +72,47 @@ def activation_lock(releases_dir: Path):
     return (releases_dir / ".activation.lock").open("a+", encoding="utf-8")
 
 
-def verify_release(target: Path) -> tuple[bool, str]:
-    """Run the candidate release's own orchestrator tests before it goes live.
+def release_is_on_integration_branch(target: Path, repo_root: Path, integration_ref: str) -> tuple[bool, str]:
+    """Is the commit this release runs reachable from the branch we review?
+
+    A release is a git worktree pinned at a SHA, and nothing required that SHA
+    to be on the integration branch. On 2026-08-15 the pointer walked through a
+    local refactor series and stopped on a commit reachable only from a branch
+    named chore/backup-before-dev-sync. For two days what ran in production and
+    what got reviewed were different code: every control-plane fix had to be
+    written twice against structurally different trees, and one port was
+    silently mis-merged into the wrong function while git reported success.
+
+    "What runs" and "what is reviewed" have to be one answer, so this asks the
+    question at the only moment it can still be cheap -- before activation.
+    """
+    head = subprocess.run(
+        ["git", "-C", str(target), "rev-parse", "HEAD"],
+        check=False, capture_output=True, text=True,
+    )
+    if head.returncode != 0:
+        return False, f"release is not a git worktree: {(head.stderr or '').strip()}"
+    sha = head.stdout.strip()
+    resolved = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--verify", "--quiet", integration_ref],
+        check=False, capture_output=True, text=True,
+    )
+    if resolved.returncode != 0:
+        return False, f"integration ref {integration_ref} could not be resolved"
+    reachable = subprocess.run(
+        ["git", "-C", str(repo_root), "merge-base", "--is-ancestor", sha, integration_ref],
+        check=False, capture_output=True, text=True,
+    )
+    if reachable.returncode != 0:
+        return False, (
+            f"release commit {sha[:12]} is not reachable from {integration_ref}; "
+            "merge it there first, or pass --skip-verify for an emergency rollback"
+        )
+    return True, f"{sha[:12]} is on {integration_ref}"
+
+
+def verify_release(target: Path, repo_root: Path, integration_ref: str) -> tuple[bool, str]:
+    """Check a candidate release is fit to activate, before it goes live.
 
     Activation used to be a pure symlink flip, so a release was only ever as
     good as whatever ran before the worktree was built. That is how a refactor
@@ -94,7 +133,10 @@ def verify_release(target: Path) -> tuple[bool, str]:
         tail = "\n".join((proc.stderr or proc.stdout or "").strip().splitlines()[-15:])
         return False, f"orchestrator tests failed in the candidate release:\n{tail}"
     summary = [ln for ln in (proc.stderr or "").splitlines() if ln.startswith("Ran ")]
-    return True, summary[0] if summary else "tests passed"
+    on_branch, branch_detail = release_is_on_integration_branch(target, repo_root, integration_ref)
+    if not on_branch:
+        return False, branch_detail
+    return True, f"{summary[0] if summary else 'tests passed'}; {branch_detail}"
 
 
 def activate(args: argparse.Namespace) -> int:
@@ -107,7 +149,7 @@ def activate(args: argparse.Namespace) -> int:
         # never be blocked by its test suite failing to run.
         print("WARNING: skipping release verification (--skip-verify)", file=sys.stderr)
     else:
-        ok, detail = verify_release(target)
+        ok, detail = verify_release(target, args.repo_root, args.integration_ref)
         if not ok:
             print(f"ERROR: refusing to activate {target.name}: {detail}", file=sys.stderr)
             return 3
@@ -195,6 +237,11 @@ def main() -> int:
         default="current",
         choices=("active", "current"),
         help="release selector to update; `active` is reserved for the live systemd service",
+    )
+    activate_parser.add_argument(
+        "--integration-ref",
+        default="origin/dev",
+        help="branch the release must be reachable from; keeps what runs and what is reviewed identical",
     )
     activate_parser.add_argument(
         "--skip-verify",
