@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Optional,
   Param,
   Post,
   Query,
@@ -38,6 +39,10 @@ import {
   RequireScopes,
   type BootstrapRequestIdentity,
 } from "../../common/auth";
+import {
+  IdempotencyRepository,
+  IdempotencyService,
+} from "../../common/idempotency";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { BillingSettlementService } from "./billing-settlement.service";
 
@@ -45,6 +50,10 @@ import { BillingSettlementService } from "./billing-settlement.service";
 export class BillingSettlementController {
   constructor(
     private readonly billingSettlementService: BillingSettlementService,
+    @Optional()
+    private readonly idempotencyService: IdempotencyService = new IdempotencyService(
+      new IdempotencyRepository(),
+    ),
   ) {}
 
   @Get("payment-exceptions/:orderId")
@@ -298,15 +307,30 @@ export class BillingSettlementController {
   @Post("driver-statements/generate")
   async generateDriverStatements(
     @Body() command: GenerateDriverStatementCommand,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      await this.billingSettlementService.generateDriverStatements(
-        command,
-        requestId,
-      ),
-      requestId,
-    );
+    const scope = `billing:payout:driver:${command.driverId?.trim() || "all"}`;
+
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: command,
+      execute: async () => {
+        const data =
+          await this.billingSettlementService.generateDriverStatements(
+            command,
+            requestId,
+          );
+        return {
+          data,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Get("driver-statements")
@@ -525,19 +549,33 @@ export class BillingSettlementController {
   }
 
   @Post("reimbursements/:batchId/approve")
-  approveReimbursementBatch(
+  async approveReimbursementBatch(
     @Param("batchId") batchId: string,
     @Body() command: ApproveReimbursementBatchCommand,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.billingSettlementService.approveReimbursementBatch(
-        batchId,
-        command,
-        requestId,
-      ),
-      requestId,
-    );
+    const scope = `billing:reimbursement_batch:${batchId}:approve`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: { batchId, statementId: command.statementId },
+      execute: async () => {
+        const data =
+          await this.billingSettlementService.approveReimbursementBatch(
+            batchId,
+            command,
+            requestId,
+          );
+        return {
+          data,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Post("reimbursements/:batchId/pay")
