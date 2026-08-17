@@ -387,7 +387,7 @@ aligned in one pass rather than debated per endpoint.
 | `AREA_NOT_SERVICEABLE`                   | `SERVICE_AREA_NOT_SERVICEABLE`, plus `PICKUP_*` / `DROPOFF_*` variants | equivalent, finer                     |
 | `AUTH_FORBIDDEN`                         | `AUTH_SCOPE_DENIED` / `AUTH_REALM_DENIED`                              | equivalent, finer                     |
 | `DUPLICATE_IDEMPOTENCY_KEY`              | `IDEMPOTENCY_KEY_REUSED`                                               | equivalent                            |
-| `TOO_SOON_TO_BOOK`                       | `SCHEDULED_PICKUP_MUST_BE_FUTURE`                                      | **not equivalent — see GAP-CONF-06**  |
+| `TOO_SOON_TO_BOOK`                       | `TOO_SOON_TO_BOOK` (configurable lead time)                            | resolved under `CONF-CODE-001` (GAP-CONF-06) |
 | contracts 5.2 `tenant.invoice.generated` | webhook `invoice.issued`                                               | resolve with the GAP-CONF-02 decision |
 | contracts 2.1 `call_point_id`            | database column only, no contract type                                 | `packages/contracts` not synchronised |
 
@@ -432,7 +432,7 @@ These are recorded to prevent them from being rediscovered as defects.
 | Contracts 8.3 Payment / Invoice provider      | Externally gated (`EXT-001`)                                                                                                                                                                                                                                                       |
 | Contracts 8.4 External forwarder platforms    | Adapter framework present; real Grab adapter externally gated (`EXT-002`)                                                                                                                                                                                                          |
 
-**Status reconciliation (reconciled under CONF-DOC-001 / Gate C10):**
+**Status reconciliation (reconciled under CONF-DOC-001 / Gate C10, and CONF-CODE-001 / Gate C9):**
 
 - **Q-006 and Q-008 reconciled**: `PHASE1_OPEN_QUESTIONS.md` Open Items previously listed Q-006 (passenger surface) and Q-008 (concierge workflow). Both have been moved to **Resolved Items** citing `MSC-P1-001` (`support/sidecars/MSC-P1-001/MSC-P1-001-SURFACE-DECISION-PACKET.md` and `docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md`).
 - **Contracts section 10 decision routing**: The five contract-review questions in `phase1_service_contracts_v1.md` §10 (mapped to Q-001 through Q-005 in `PHASE1_OPEN_QUESTIONS.md`) now have explicit named owners, decision routes, and interim defaults:
@@ -442,6 +442,10 @@ These are recorded to prevent them from being rediscovered as defects.
   4. forwarded order local `trip completed` projection (Q-004) → Owner: `Codex2`, Decision Route: Forwarder lifecycle & state machine RFC (aligned with `CONF-STATE-001` / GAP-CONF-04).
   5. report artifact storage-level object lock (Q-005) → Owner: `Gemini`, Decision Route: Regulatory storage architecture & compliance RFC.
 - **`call_point_id` contract-type gap**: Recorded in `PHASE1_OPEN_QUESTIONS.md` under Contract & Schema Synchronisation Backlog, owned by `CONF-CODE-001` / `packages/contracts` sync backlog.
+- **GAP-CONF-06, GAP-CONF-08 & Section 4.1 Error Register resolved (Gate C9 / CONF-CODE-001)**:
+  1. **Minimum lead time (GAP-CONF-06)**: Configurable minimum lead time (default 15 minutes, configurable via `SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES` / `setMinLeadTimeMinutes`) enforced in `OwnedMobilityService.createMultiTaxiRide` with error code `TOO_SOON_TO_BOOK`.
+  2. **Clock-in vehicle check (GAP-CONF-08)**: `ShiftAttendanceService.clockIn` now verifies vehicle dispatchability via `RegulatoryRegistryService.getVehicleDispatchability(vehicleId)`, rejecting undispatchable vehicles with `VEHICLE_NOT_DISPATCHABLE` while keeping the assignment-time check unweakened.
+  3. **Section 4.1 Naming Register**: Updated `phase1_service_contracts_v1.md` §4.1 to document implemented error codes (`ADDRESS_UNRESOLVABLE`, `SERVICE_AREA_NOT_SERVICEABLE`, `TOO_SOON_TO_BOOK`, `AUTH_SCOPE_DENIED` / `AUTH_REALM_DENIED`, `IDEMPOTENCY_KEY_REUSED`) mapped from specified names.
 
 
 ---

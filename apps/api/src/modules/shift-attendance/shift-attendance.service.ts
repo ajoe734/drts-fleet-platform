@@ -10,6 +10,7 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { ShiftAttendanceRepository } from "./shift-attendance.repository";
 
 @Injectable()
@@ -22,6 +23,8 @@ export class ShiftAttendanceService implements OnModuleInit {
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly repository?: ShiftAttendanceRepository,
+    @Optional()
+    private readonly regulatoryRegistryService?: RegulatoryRegistryService,
   ) {}
 
   async onModuleInit() {
@@ -54,6 +57,23 @@ export class ShiftAttendanceService implements OnModuleInit {
         "Driver already has an active shift.",
         { shiftId: activeShift.shiftId },
       );
+    }
+
+    if (command.vehicleId?.trim()) {
+      if (this.regulatoryRegistryService) {
+        const isDispatchable =
+          this.regulatoryRegistryService.getVehicleDispatchability(
+            command.vehicleId.trim(),
+          );
+        if (!isDispatchable) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "VEHICLE_NOT_DISPATCHABLE",
+            "Vehicle is not eligible for dispatch.",
+            { vehicleId: command.vehicleId },
+          );
+        }
+      }
     }
 
     const now = new Date().toISOString();
