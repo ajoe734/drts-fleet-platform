@@ -356,10 +356,6 @@ def queue_event_record(state: dict[str, Any], event_id: str) -> dict[str, Any]:
     return record
 
 
-def dispatch_pauses_for_task(state: dict[str, Any], task_id: str) -> list[dict[str, Any]]:
-    return [pause for pause in state.setdefault("dispatch_pauses", []) if str(pause.get("task_id") or "") == str(task_id)]
-
-
 def upsert_dispatch_pause(state: dict[str, Any], pause: dict[str, Any]) -> None:
     task_id = str(pause.get("task_id") or "").strip()
     worker_run_id = str(pause.get("worker_run_id") or "").strip()

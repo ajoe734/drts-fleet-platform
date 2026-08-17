@@ -117,7 +117,7 @@ class RuntimeStateMigrationTests(unittest.TestCase):
 
         runtime_state.upsert_dispatch_pause(state, pause)
         self.assertEqual(len(state["dispatch_pauses"]), 1)
-        self.assertEqual(runtime_state.dispatch_pauses_for_task(state, "P3-002")[0]["raw_ref"], pause["raw_ref"])
+        self.assertEqual(state["dispatch_pauses"][0]["raw_ref"], pause["raw_ref"])
 
         updated = dict(pause)
         updated["summary"] = "provider failure: retry scheduled"

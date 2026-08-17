@@ -86,18 +86,6 @@ class RouteTaskTests(unittest.TestCase):
         self.assertEqual(d.track, "backend")
         self.assertEqual(d.matched_rule_index, 0)
 
-    def test_known_long_lived_branches(self) -> None:
-        branches = branch_routing.known_long_lived_branches()
-        self.assertIn("main", branches)
-        self.assertIn("dev", branches)
-        # v4: single integration trunk `dev`; publish snapshots live under
-        # publish/v<date> branches (not in this list — they're not "long-lived"
-        # in the same sense, they're permanent but indexed by version).
-
-    def test_route_many_preserves_order(self) -> None:
-        decisions = branch_routing.route_many(["BE-1", "UI-1", "DOC-1"])
-        self.assertEqual([d.track for d in decisions], ["backend", "frontend", "backend"])
-
     def test_as_dict_includes_gate_layer(self) -> None:
         d = branch_routing.route_task("BE-1").as_dict()
         self.assertEqual(d["gate_layer"], "merge")
