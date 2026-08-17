@@ -66,8 +66,8 @@ function createHarness() {
 
   const controller = new OwnedMobilityController(
     ownedMobilityService,
-    tenantPartnerService,
     idempotencyService,
+    tenantPartnerService,
   );
 
   return {

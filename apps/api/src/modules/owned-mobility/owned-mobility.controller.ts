@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
   Optional,
   Param,
   Post,
@@ -64,8 +65,6 @@ export class OwnedMobilityController {
     private readonly idempotencyService: IdempotencyService,
     @Optional()
     private readonly tenantPartnerService?: TenantPartnerService,
-    @Optional()
-    private readonly idempotencyService?: IdempotencyService,
   ) {}
 
   private resolveDriverTaskStreamDriverId(
