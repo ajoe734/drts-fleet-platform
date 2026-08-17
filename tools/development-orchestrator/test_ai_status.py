@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import subprocess
+import pathlib
 import tempfile
 import unittest
 from unittest import mock
@@ -411,3 +412,56 @@ class CandidateLifecycleTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DashboardMirrorRemovalTests(unittest.TestCase):
+    """sync_dashboard must stop writing copies nobody serves."""
+
+    def test_sync_does_not_copy_the_activity_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = pathlib.Path(tmpdir)
+            dashboard = root / "dashboard"
+            dashboard.mkdir()
+            log = root / "ai-activity-log.jsonl"
+            log.write_text('{"ts":"x"}\n', encoding="utf-8")
+
+            with mock.patch.object(ai_status, "ROOT", root), \
+                    mock.patch.object(ai_status, "DASHBOARD_DIR", dashboard), \
+                    mock.patch.object(ai_status, "LOG_FILE", log):
+                ai_status.sync_dashboard()
+
+            self.assertFalse(
+                (dashboard / "ai-activity-log.jsonl").exists(),
+                "the activity log was mirrored again; the server reads the live file",
+            )
+
+    def test_sync_clears_a_mirror_left_by_an_older_build(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = pathlib.Path(tmpdir)
+            dashboard = root / "dashboard"
+            dashboard.mkdir()
+            stale = dashboard / "ai-activity-log.jsonl"
+            stale.write_text("stale snapshot\n", encoding="utf-8")
+
+            with mock.patch.object(ai_status, "ROOT", root), \
+                    mock.patch.object(ai_status, "DASHBOARD_DIR", dashboard):
+                ai_status.sync_dashboard()
+
+            self.assertFalse(
+                stale.exists(),
+                "a stale mirror survived; a static server here would serve a frozen snapshot",
+            )
+
+    def test_sync_leaves_the_dashboard_assets_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = pathlib.Path(tmpdir)
+            dashboard = root / "dashboard"
+            dashboard.mkdir()
+            asset = dashboard / "index.html"
+            asset.write_text("<html></html>", encoding="utf-8")
+
+            with mock.patch.object(ai_status, "ROOT", root), \
+                    mock.patch.object(ai_status, "DASHBOARD_DIR", dashboard):
+                ai_status.sync_dashboard()
+
+            self.assertTrue(asset.exists(), "sync removed a dashboard asset")
