@@ -159,10 +159,10 @@ Running 39 tests using 16 workers
      ✓ conforms to the declared operation contract
 ```
 
-### 4.4 GitHub Actions PR #1451 CI Suite
+### 4.4 GitHub Actions PR #1451 & Trunk `dev` CI Suites
 
-- **CI Runs:** Run 31992388202 (ci-integ) & Run 31992388229 (ci)
-- **Result:** **22 / 22 checks passing**
+- **CI on `dev` Trunk (Merge SHA `4012b10c0`):** Run `31997773400` (`CI (integration trunk)`) — **22 / 22 checks passing**
+- **CI on PR #1451 Branch (`gemini/s1f-rel-001`):** Run `31997270480` (`CI (integration trunk)`) — **22 / 22 checks passing**
 - **Checks Verified:**
   - `CI (integration trunk)/build`
   - `CI (integration trunk)/unit-tests`
@@ -173,9 +173,10 @@ Running 39 tests using 16 workers
   - `CI/Product smoke acceptance`
   - `CI/Verify Internal Key Exception Registry`
   - All 14 additional workflow compliance and security guards.
+- **Cloud Run Dev Deploy Workflow (`deploy-dev.yml`):** Tracked under external infrastructure gate. Last successful deploy run was `31244225462` (SHA `7e5a29d5a` on 2026-08-08); run `31992102746` failed due to GCP project #952590575714 billing requirement. Live Cloud Run endpoints currently respond with Cloud Run 503/500 ("service not available yet") or 404 until billing is enabled.
 
 ---
 
 ## 5. Conclusion & Handoff
 
-The release candidate `527a3d403464806ea1d4f417c60ac3e4fa8f17d6` binds all Stage 1 functional changes, closes the dependency graph for `S1F-UIX-001` and `S1F-DRV-001`, satisfies GAP completion gates G1 through G8, and is fully verified for review by Claude.
+The release candidate integrated via PR #1451 (`4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`) binds all Stage 1 functional changes, closes the dependency graph for `S1F-UIX-001` and `S1F-DRV-001`, satisfies functional completion gates G1 through G8 in the codebase and CI, and is fully verified for review by Claude. Live Cloud Run deployment remains tracked under the external GCP billing gate.

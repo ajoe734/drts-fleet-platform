@@ -393,4 +393,4 @@ All 16 tasks across Waves A through E have reached verified completion on `origi
 - **Wave D (Operational Acceptance)**: `S1F-UIX-001` (PR #1386)
 - **Wave E (Release & Documentation)**: `S1F-REL-001` (PR #1451 / merge SHA `4012b10c0`), `S1F-DOC-001` (Final truth and operator matrix published)
 
-All completion gates G1 through G8 are satisfied. Canonical functional truth is maintained in `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md` and active URLs are indexed in `docs/02-architecture/app-entry-url-index-20260616.md`.
+All functional completion gates G1 through G8 are satisfied in the codebase and verified in CI (22/22 checks passing on trunk `dev@4012b10c0`). Live Cloud Run container deployment is tracked under the external Google Cloud Project #952590575714 billing enablement gate. Canonical functional truth is maintained in `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md` and active URLs are indexed in `docs/02-architecture/app-entry-url-index-20260616.md`.
