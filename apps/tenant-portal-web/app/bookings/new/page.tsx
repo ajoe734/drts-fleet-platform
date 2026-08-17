@@ -10,6 +10,7 @@ import {
   type TenantAddressRecord,
   type TenantPassengerRecord,
 } from "@drts/contracts";
+import { createIdempotencyKey } from "@drts/api-client";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
@@ -371,6 +372,9 @@ export default async function NewBookingPage({
       "Tenant write authority required to create bookings.",
     );
     const client = await getTenantClient();
+    const idempotencyKey =
+      trimFormValue(formData.get("idempotencyKey")) ||
+      createIdempotencyKey("tenant-booking");
     const businessDispatchSubtype = trimFormValue(
       formData.get("businessDispatchSubtype"),
     ) as BusinessDispatchSubtype;
@@ -521,7 +525,7 @@ export default async function NewBookingPage({
     };
 
     try {
-      await client.createTenantBooking(command);
+      await client.createTenantBooking(command, { idempotencyKey });
       revalidatePath("/booking-list");
       redirect("/booking-list");
     } catch (error) {
@@ -610,6 +614,11 @@ export default async function NewBookingPage({
         </div>
 
         <form action={createBooking} style={formStyle}>
+          <input
+            type="hidden"
+            name="idempotencyKey"
+            value={createIdempotencyKey("tenant-booking")}
+          />
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>
               <h2 style={sectionTitleStyle}>Service And Schedule</h2>

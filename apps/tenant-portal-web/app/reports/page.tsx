@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReportJobRecord } from "@drts/contracts";
+import { createIdempotencyKey } from "@drts/api-client";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { createReportJob, refreshReports } from "./actions";
@@ -47,6 +48,11 @@ export default async function ReportsPage() {
           className="form-inline"
           style={{ marginBottom: 16 }}
         >
+          <input
+            type="hidden"
+            name="idempotencyKey"
+            value={createIdempotencyKey("tenant-report-job")}
+          />
           <label htmlFor="jobType" style={{ marginRight: 8 }}>
             Job Type
           </label>

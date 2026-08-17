@@ -456,5 +456,117 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
       expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(rerunKey);
       expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(rerunKey);
     });
+
+    it("tenant-portal-web booking intent preserves identical idempotencyKey across retry attempts", async () => {
+      let callCount = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = typeof input === "string" ? input : input.toString();
+          const headers = new Headers(init?.headers);
+          capturedRequests.push({ url, method: init?.method, headers });
+
+          callCount++;
+          if (callCount === 1) {
+            return new Response(JSON.stringify({ error: "Temporary gateway timeout" }), {
+              status: 504,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return new Response(
+            JSON.stringify({ data: { bookingId: "bk-tenant-portal-1", orderId: "ord-tenant-portal-1" } }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }),
+      );
+
+      const portalBookingKey = createIdempotencyKey("tenant-booking");
+
+      // Attempt 1 (fails due to 504)
+      await expect(
+        client.createTenantBooking(
+          {
+            businessDispatchSubtype: "enterprise_dispatch",
+            pickup: { address: "101 Tower Rd" },
+            dropoff: { address: "202 Tech Park" },
+            reservationWindowStart: "2026-08-18T10:00:00Z",
+            reservationWindowEnd: "2026-08-18T12:00:00Z",
+            passenger: { name: "Bob", phone: "0912345678" },
+            signoffRequired: false,
+            expenseProofRequired: false,
+          } as never,
+          { idempotencyKey: portalBookingKey },
+        ),
+      ).rejects.toThrow();
+
+      // Attempt 2 (retry with identical form submission / idempotency key)
+      const booking = await client.createTenantBooking(
+        {
+          businessDispatchSubtype: "enterprise_dispatch",
+          pickup: { address: "101 Tower Rd" },
+          dropoff: { address: "202 Tech Park" },
+          reservationWindowStart: "2026-08-18T10:00:00Z",
+          reservationWindowEnd: "2026-08-18T12:00:00Z",
+          passenger: { name: "Bob", phone: "0912345678" },
+          signoffRequired: false,
+          expenseProofRequired: false,
+        } as never,
+        { idempotencyKey: portalBookingKey },
+      );
+      expect(booking).toBeDefined();
+
+      expect(capturedRequests).toHaveLength(2);
+      expect(capturedRequests[0]!.url).toContain("/api/tenant/bookings");
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(portalBookingKey);
+      expect(capturedRequests[1]!.url).toContain("/api/tenant/bookings");
+      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(portalBookingKey);
+    });
+
+    it("tenant-portal-web report job creation preserves identical idempotencyKey across retry attempts", async () => {
+      let callCount = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = typeof input === "string" ? input : input.toString();
+          const headers = new Headers(init?.headers);
+          capturedRequests.push({ url, method: init?.method, headers });
+
+          callCount++;
+          if (callCount === 1) {
+            return new Response(JSON.stringify({ error: "Service unavailable" }), {
+              status: 503,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return new Response(
+            JSON.stringify({ data: { jobId: "job-tenant-portal-99", status: "queued" } }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }),
+      );
+
+      const portalReportKey = createIdempotencyKey("tenant-report-job");
+
+      // Attempt 1 (fails due to 503)
+      await expect(
+        client.createTenantReportJob(
+          { jobType: "dispatch_recording_index", format: "csv" } as never,
+          { idempotencyKey: portalReportKey },
+        ),
+      ).rejects.toThrow();
+
+      // Attempt 2 (retry with identical form submission / idempotency key)
+      const jobResult = await client.createTenantReportJob(
+        { jobType: "dispatch_recording_index", format: "csv" } as never,
+        { idempotencyKey: portalReportKey },
+      );
+      expect(jobResult).toBeDefined();
+
+      expect(capturedRequests).toHaveLength(2);
+      expect(capturedRequests[0]!.url).toContain("/api/tenant/reports/jobs");
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(portalReportKey);
+      expect(capturedRequests[1]!.url).toContain("/api/tenant/reports/jobs");
+      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(portalReportKey);
+    });
   });
 });
