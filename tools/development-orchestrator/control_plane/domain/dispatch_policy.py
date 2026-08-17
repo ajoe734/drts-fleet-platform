@@ -76,10 +76,6 @@ def _task(value: TaskRecord | Mapping[str, Any]) -> TaskRecord:
     return value if isinstance(value, TaskRecord) else TaskRecord.from_mapping(value)
 
 
-def _tasks(values: Mapping[str, TaskRecord | Mapping[str, Any]]) -> dict[str, TaskRecord]:
-    return {task_id: _task(value) for task_id, value in values.items()}
-
-
 def task_index(tasks: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...]) -> dict[str, TaskRecord]:
     """Create the shared read model used by dispatch and summary projections."""
     records = (_task(task) for task in tasks)
@@ -92,12 +88,29 @@ def dependencies_satisfied(
     done_statuses: set[str] | frozenset[str],
 ) -> bool:
     record = _task(task)
-    index = _tasks(tasks_by_id)
+    if not record.depends_on:
+        return True
     completed = {str(value).strip().lower() for value in done_statuses}
+    # Look up only the dependencies this task names. Converting the whole map
+    # first cost a TaskRecord per task in the board on every call, and the
+    # dispatcher asks once per (task, agent) pair: 125 tasks x 7 lanes x 125
+    # conversions was 110k object constructions per tick, for a board where
+    # every task was already done. That was 21% of a core, continuously.
     return all(
-        dependency_id not in index or index[dependency_id].status in completed
+        _dependency_status(tasks_by_id, dependency_id) in (None, *completed)
         for dependency_id in record.depends_on
     )
+
+
+def _dependency_status(
+    tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
+    dependency_id: str,
+) -> str | None:
+    """Status of one dependency, or None when it is no longer on the board."""
+    entry = tasks_by_id.get(dependency_id)
+    if entry is None:
+        return None
+    return _task(entry).status
 
 
 def dependency_signature(
@@ -105,9 +118,10 @@ def dependency_signature(
     tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
 ) -> str:
     record = _task(task)
-    index = _tasks(tasks_by_id)
+    # Same shape as dependencies_satisfied: resolve the named dependencies
+    # rather than converting the entire board to find a handful of them.
     return "|".join(
-        f"{dependency_id}:{index[dependency_id].status if dependency_id in index else 'archived'}"
+        f"{dependency_id}:{_dependency_status(tasks_by_id, dependency_id) or 'archived'}"
         for dependency_id in record.depends_on
     )
 
