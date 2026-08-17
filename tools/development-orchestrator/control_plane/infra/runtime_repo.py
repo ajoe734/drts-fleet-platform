@@ -166,6 +166,10 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state.pop("worker_yields", None)
     state.pop("quota_paused_agents", None)
     state.pop("tasks", None)
+    # Retired: a parallel chair backoff that duplicated cooldown_until. Nothing
+    # reads it any more, and leaving it in machine truth would invite a future
+    # reader to believe it still governs anything.
+    state.get("chair_review", {}).pop("failure_backoff_until", None)
     state["version"] = 6
     return state
 
