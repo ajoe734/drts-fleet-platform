@@ -222,8 +222,36 @@ def load_json(path: Path, default: Any | None = None) -> Any:
     return deepcopy(default)
 
 
+def _json_text(payload: Any) -> str:
+    return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+
 def write_json(path: Path, payload: Any) -> None:
-    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    atomic_write_text(path, _json_text(payload))
+
+
+def write_json_if_changed(path: Path, payload: Any) -> bool:
+    """Write `payload` only when it differs from what is already on disk.
+
+    Returns whether a write happened.
+
+    For documents that are re-saved on a timer rather than on a change --
+    runtime state is rewritten every tick -- an unconditional atomic write
+    means a full-size temp file plus a rename for every no-op. Reading the
+    existing bytes first costs one page-cache hit and skips all of it.
+
+    Deliberately compares serialized text, not objects: the on-disk bytes are
+    what the next reader gets, and equal objects that serialize differently
+    still need writing.
+    """
+    text = _json_text(payload)
+    try:
+        if path.read_text(encoding="utf-8") == text:
+            return False
+    except (OSError, UnicodeDecodeError):
+        pass  # missing, unreadable, or not text: fall through and write it
+    atomic_write_text(path, text)
+    return True
 
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:

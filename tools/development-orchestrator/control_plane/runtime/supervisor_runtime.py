@@ -302,6 +302,22 @@ def maintain_disk_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
         return resource_changed
 
     record = state.setdefault("disk_guard", {})
+    # Sampling cadence, not policy cadence. Unthrottled, this stamped a fresh
+    # last_check_at and a fresh used/free byte count into the runtime state on
+    # every 2s tick, which dirtied the whole 274 KB document for readings that
+    # nothing acts on until they cross an 80/85% threshold -- 14 GB/day of
+    # rewrites on a completely idle fleet. maintain_resource_guard, right above,
+    # has had exactly this throttle all along.
+    #
+    # Cleanup scheduling is unaffected: _disk_guard_should_cleanup keys off
+    # last_cleanup_at against cleanup_interval_seconds (3600s by default), so a
+    # coarser check just evaluates that condition on a coarser grid.
+    now = datetime.now(timezone.utc)
+    last_check = parse_runtime_timestamp(str(record.get("last_check_at") or ""))
+    check_interval = float(settings.get("check_interval_seconds", 30.0))
+    if last_check is not None and (now - last_check).total_seconds() < max(1.0, check_interval):
+        return resource_changed
+
     path = _disk_guard_path(config, settings)
     snapshot = disk_usage_snapshot(path)
     if snapshot is None:
