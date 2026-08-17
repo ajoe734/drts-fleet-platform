@@ -1,4 +1,4 @@
-import { createTenantClient, type ApiClient } from "@drts/api-client";
+import { createTenantClient, type ApiClient, type RequestOptions } from "@drts/api-client";
 import type {
   BookingRecord,
   CancelOwnedOrderCommand,
@@ -31,9 +31,11 @@ export class EnterpriseDispatchTenantClient {
 
   async createBooking(
     command: CreateTenantBookingCommand,
+    options?: RequestOptions,
   ): Promise<EnterpriseDispatchBookingSubmitResult> {
     return this.client.createTenantBooking(
       command,
+      options,
     ) as Promise<EnterpriseDispatchBookingSubmitResult>;
   }
 

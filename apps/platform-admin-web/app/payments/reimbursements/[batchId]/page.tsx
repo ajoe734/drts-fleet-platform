@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import React, { useEffect, useState } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import { createIdempotencyKey } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
 import type {
   ReimbursementBatchRecord,
@@ -394,6 +395,9 @@ export default function ReimbursementDetailPage() {
   const [savingAction, setSavingAction] = useState<"approve" | "paid" | null>(
     null,
   );
+  const [approvalKey, setApprovalKey] = useState(() =>
+    createIdempotencyKey("reimbursement-approve"),
+  );
 
   useEffect(() => {
     let active = true;
@@ -458,14 +462,21 @@ export default function ReimbursementDetailPage() {
     setApprovalError(null);
 
     try {
-      const nextBatch = await client.approveReimbursementBatch(batch.batchId, {
-        statementId: batch.statementId,
-      });
+      const nextBatch = await client.approveReimbursementBatch(
+        batch.batchId,
+        {
+          statementId: batch.statementId,
+        },
+        {
+          idempotencyKey: approvalKey,
+        },
+      );
       setBatch(nextBatch);
       setApprovalReceipt(
         t("payments.reimbursements.detail.approvalRecorded", { reason }),
       );
       setApproveReason("");
+      setApprovalKey(createIdempotencyKey("reimbursement-approve"));
     } catch (nextError: any) {
       setApprovalError(nextError?.message ?? String(nextError));
     } finally {

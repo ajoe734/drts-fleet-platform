@@ -55,6 +55,7 @@ import type {
   UiRefreshMetadata,
 } from "@drts/contracts";
 import { CALL_TYPES, COMPLAINT_CATEGORIES } from "@drts/contracts";
+import { createIdempotencyKey } from "@drts/api-client";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, formatOpsCodeList } from "@/lib/localized-labels";
@@ -1108,6 +1109,9 @@ export default function CallcenterPage() {
     INITIAL_COMPLAINT_TRANSFER_FORM,
   );
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [orderIntentKey, setOrderIntentKey] = useState(() =>
+    createIdempotencyKey("callcenter-order"),
+  );
   const mapBookingProvider = useMemo<AddressMapPickerProvider>(
     () => ({
       async search(query) {
@@ -1328,6 +1332,7 @@ export default function CallcenterPage() {
     setDropoffProviderState(INITIAL_ADDRESS_PROVIDER_STATE);
     setServiceabilityPreview(null);
     setServiceabilityPreviewStatus("idle");
+    setOrderIntentKey(createIdempotencyKey("callcenter-order"));
   }, [selectedSession?.callId]);
 
   useEffect(() => {
@@ -2587,7 +2592,13 @@ export default function CallcenterPage() {
                       createBookingAction,
                       async () => {
                         const created =
-                          await getOpsClient().createCallCenterOrder(command);
+                          await getOpsClient().createCallCenterOrder(
+                            command,
+                            {
+                              idempotencyKey: orderIntentKey,
+                            },
+                          );
+                        setOrderIntentKey(createIdempotencyKey("callcenter-order"));
                         setOrderForm(INITIAL_ORDER_FORM);
                         setPickupAddress(null);
                         setDropoffAddress(null);

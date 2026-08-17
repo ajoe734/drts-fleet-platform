@@ -29,6 +29,7 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { createBrowserApiClient } from "@/lib/browser-api-client";
+import { createIdempotencyKey } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
 
 type Translate = (
@@ -651,11 +652,16 @@ export function ReportsManager({
       if (costCenterCode) filters.costCenterCode = costCenterCode;
       if (passengerUserId) filters.passengerUserId = passengerUserId;
 
-      const result = await client.createTenantReportJob({
-        jobType: draft.jobType,
-        format: draft.format,
-        filters,
-      });
+      const result = await client.createTenantReportJob(
+        {
+          jobType: draft.jobType,
+          format: draft.format,
+          filters,
+        },
+        {
+          idempotencyKey: createIdempotencyKey("tenant-report"),
+        },
+      );
 
       setFlash({
         title: t("reports.flash.jobQueued.title"),
@@ -679,11 +685,16 @@ export function ReportsManager({
     }
 
     runTransition(async () => {
-      const result = await client.createTenantReportJob({
-        jobType: job.jobType,
-        format: job.format,
-        filters: job.filters,
-      });
+      const result = await client.createTenantReportJob(
+        {
+          jobType: job.jobType,
+          format: job.format,
+          filters: job.filters,
+        },
+        {
+          idempotencyKey: createIdempotencyKey("tenant-report-rerun"),
+        },
+      );
 
       setFlash({
         title: t("reports.flash.rerunQueued.title"),

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
+import { createIdempotencyKey } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
 import type { ActionReceipt } from "@drts/contracts";
 import {
@@ -148,6 +149,9 @@ export function PaymentExceptionDetail({ orderId }: { orderId: string }) {
   const [executingAction, setExecutingAction] = useState<string | null>(null);
   const [commandError, setCommandError] = useState(false);
   const [receipt, setReceipt] = useState<ActionReceipt | null>(null);
+  const [actionIntentKeys, setActionIntentKeys] = useState<
+    Record<string, string>
+  >({});
   const copy = (key: Parameters<typeof paymentExceptionCopy>[1]) =>
     paymentExceptionCopy(locale, key);
 
@@ -158,14 +162,14 @@ export function PaymentExceptionDetail({ orderId }: { orderId: string }) {
     setErrorKind(null);
     setInvalidResponse(false);
 
-    void client
-      .get<unknown>(`/api/payment-exceptions/${encodeURIComponent(orderId)}`)
+    client
+      .get<unknown>(`/api/platform-admin/payments/exceptions/${encodeURIComponent(orderId)}`)
       .then((payload) => {
         if (!active) {
           return;
         }
         const parsed = parsePaymentExceptionView(payload);
-        if (!parsed || parsed.orderId !== orderId) {
+        if (!parsed) {
           setInvalidResponse(true);
           return;
         }
@@ -214,13 +218,23 @@ export function PaymentExceptionDetail({ orderId }: { orderId: string }) {
       return;
     }
 
+    const actionKey =
+      actionIntentKeys[descriptor.action] ??
+      createIdempotencyKey(`payment-recovery-${descriptor.action}`);
+    if (!actionIntentKeys[descriptor.action]) {
+      setActionIntentKeys((prev) => ({
+        ...prev,
+        [descriptor.action]: actionKey,
+      }));
+    }
+
     setExecutingAction(descriptor.action);
     setCommandError(false);
     setReceipt(null);
     try {
       const payload = await client.post<unknown>(path, {
         headers: {
-          "Idempotency-Key": crypto.randomUUID(),
+          "Idempotency-Key": actionKey,
         },
         ...(reason ? { body: { reason } } : {}),
       });
@@ -230,6 +244,11 @@ export function PaymentExceptionDetail({ orderId }: { orderId: string }) {
         return;
       }
       setReceipt(parsedReceipt);
+      setActionIntentKeys((prev) => {
+        const next = { ...prev };
+        delete next[descriptor.action];
+        return next;
+      });
       setReloadToken((current) => current + 1);
     } catch {
       setCommandError(true);

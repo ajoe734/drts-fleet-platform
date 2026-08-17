@@ -11,6 +11,7 @@ import {
 
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
+import { createIdempotencyKey } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
 import {
   CanvasBanner,
@@ -346,6 +347,9 @@ export function CertificateSupportDetailScreen({
   const [regenerationAuditId, setRegenerationAuditId] = useState<string | null>(
     null,
   );
+  const [regenerationKey, setRegenerationKey] = useState(() =>
+    createIdempotencyKey("cert-regen"),
+  );
 
   useEffect(() => {
     if (!canRead) {
@@ -404,7 +408,7 @@ export function CertificateSupportDetailScreen({
           )}/actions/regenerate`,
           {
             headers: {
-              "Idempotency-Key": globalThis.crypto.randomUUID(),
+              "Idempotency-Key": regenerationKey,
             },
             body: { reason: regenerationReason.trim() },
           },
@@ -412,6 +416,7 @@ export function CertificateSupportDetailScreen({
       );
       setView(result.certificate);
       setRegenerationReason("");
+      setRegenerationKey(createIdempotencyKey("cert-regen"));
       setRegenerationAuditId(result.actionReceipt.auditId);
       globalThis.history.replaceState(
         null,

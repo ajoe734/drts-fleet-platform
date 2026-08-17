@@ -61,6 +61,9 @@ export async function createReferralBookingServer(
       headers: {
         "Content-Type": "application/json",
         ...buildIdentityHeaders(session),
+        ...(command.idempotencyKey
+          ? { "Idempotency-Key": command.idempotencyKey }
+          : {}),
       },
       body: JSON.stringify(command),
       cache: "no-store",

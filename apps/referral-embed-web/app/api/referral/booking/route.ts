@@ -4,7 +4,15 @@ import { createReferralBookingServer } from "@/lib/embed-booking-api";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const result = await createReferralBookingServer(body);
+    const idempotencyKey =
+      request.headers.get("idempotency-key") ||
+      body.idempotencyKey ||
+      undefined;
+    const command = {
+      ...body,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    };
+    const result = await createReferralBookingServer(command);
     return NextResponse.json({ ok: true, data: result });
   } catch (error) {
     const message =
