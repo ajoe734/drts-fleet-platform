@@ -240,7 +240,7 @@
     },
     {
       "id": "repository-policy",
-      "pattern": "^(?:repo-classification\\.json|\\.dockerignore|\\.editorconfig|\\.gitattributes|\\.gitignore|\\.npmrc|\\.nvmrc|\\.prettierrc\\.json|Makefile|docker-compose\\.dev\\.yml|drts-fleet-platform\\.code-workspace|eslint\\.config\\.mjs|package\\.json|pnpm-lock\\.yaml|pnpm-workspace\\.yaml|tsconfig(?:\\.base)?\\.json|turbo\\.json)$|^\\.(?:codex|husky|vscode)/|^\\.github/CODEOWNERS$",
+      "pattern": "^(?:repo-classification\\.json|\\.dockerignore|\\.editorconfig|\\.gitattributes|\\.gitignore|\\.npmrc|\\.nvmrc|\\.prettierignore|\\.prettierrc\\.json|Makefile|docker-compose\\.dev\\.yml|drts-fleet-platform\\.code-workspace|eslint\\.config\\.mjs|package\\.json|pnpm-lock\\.yaml|pnpm-workspace\\.yaml|tsconfig(?:\\.base)?\\.json|turbo\\.json)$|^\\.(?:codex|husky|vscode)/|^\\.github/CODEOWNERS$",
       "classification": "repository_governance",
       "status": "active"
     }
