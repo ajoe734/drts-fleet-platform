@@ -85,3 +85,10 @@ docs/03-runbooks/local-development.local.md
 .orchestrator/.event-queue.jsonl
 .orchestrator/.event-queue.jsonl.*
 .orchestrator/*.lock
+
+# Canonical-root runtime state and local development artifacts are not source.
+.orchestrator/*
+.artifacts/
+workspace/
+tmp_iam_acc3_fix/
+.ai-task-archive.jsonl.lock
