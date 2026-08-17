@@ -1090,6 +1090,17 @@ Reporting Service
 
 ## 5.2 Core Event Topics
 
+**Status: target contract, not implemented in Phase 1.** Decision:
+`docs/01-decisions/SD-DP-20260817-009-domain-event-contract-and-write-authority.md` (`GAP-CONF-02`).
+The topics below describe the correct design for an architecture of thirteen independently deployed
+services communicating by domain event. Order, Dispatch, and Driver Task are implemented inside one
+process (`owned-mobility.service.ts`), where a direct typed call inside one database transaction is
+used instead. No event bus, outbox table, or publish/subscribe mechanism exists anywhere in Phase 1.
+Do not treat this list as delivered, and do not add a partial implementation of it — see the
+decision record for why a subset is explicitly rejected. Treat "Phase 1 Implemented Mechanisms"
+below as the live contract. The per-service `發布事件` lists in section 3 (3.5, 3.6, 3.8, etc.)
+describe the same unimplemented target and carry the same status.
+
 ### Order Domain
 
 - order.created
@@ -1141,7 +1152,8 @@ Reporting Service
 ### Billing Domain
 
 - receipt.issued
-- tenant.invoice.generated
+- invoice.issued (renamed from `tenant.invoice.generated`; aligned to the implemented Phase 1
+  webhook name, see "Phase 1 Implemented Mechanisms" below)
 - driver.statement.generated
 - driver.reimbursement.approved
 
@@ -1159,14 +1171,41 @@ Reporting Service
 
 ---
 
+### Phase 1 Implemented Mechanisms（Phase 1 實際契約）
+
+Three narrower mechanisms exist in place of the target topic list above. They are Phase 1's real
+asynchronous/notification contract:
+
+| Mechanism | 實際 topic 名稱 | 對象 | 實作位置 |
+| --- | --- | --- | --- |
+| Tenant webhook | `booking.created`, `booking.updated`, `dispatch.assigned`, `invoice.issued` | tenant 系統 | `tenant-partner.service.ts:526-530` |
+| Dispatch trace log | `dispatch.assigned`（trace label，非 pub/sub topic） | audit、監理單位 | `owned-mobility.service.ts:7138` |
+| Audit log | 各模組 action name | audit | `audit-notification` 模組 |
+
+### 強制規則（Phase 1 實際機制）
+
+- 上述三個機制彼此獨立，沒有共用的 event envelope、event bus 或 outbox；不得假設任一機制的訊息可被
+  另一機制的消費者讀到。
+- 新增一個 topic 進任何一個機制的清單，等同於擴大該機制的契約，必須回到
+  `SD-DP-20260817-009` 或後續同等決策記錄，不得逕行在程式碼中新增。
+
+---
+
 ## 6. 故障邊界與補償設計
+
+**機制模型：** 依據 `SD-DP-20260817-009`，Phase 1 沒有 event bus 或 outbox，以下補償設計一律以
+「同步呼叫 + 資料庫狀態欄位 + 排程 reconciliation job」表達，不描述任何被消費的事件或訊息佇列。
+Order、Dispatch、Driver Task 三者在同一個 `owned-mobility` 模組、同一個 process 內，彼此的呼叫是
+直接的 in-process typed call；Callcenter、Complaint、Billing、Forwarder 是各自獨立的模組，彼此與
+`owned-mobility` 之間仍是同步 API 呼叫加上應用層重試，不是事件消費。
 
 ## 6.1 Order created 但 dispatch request 失敗
 
 ### 結果
 
 - order 保持 `ready_for_dispatch`
-- dispatch job 建立重試
+- dispatch request 是 `owned-mobility` 模組內的直接呼叫（非跨程序事件）；失敗後由應用層重試，
+  不經過任何訊息佇列
 - 告警 Ops console
 - 不回滾 order
 
@@ -1177,24 +1216,25 @@ Reporting Service
 - call_session 保持 closed
 - linked_order 可以成立
 - 標記 `recording_missing=true`
-- 開立後補對帳 / 告警，不阻斷訂單流程
+- 由排程 reconciliation job 直接呼叫 recording index 服務補做索引 / 告警，不阻斷訂單流程；job 本身
+  不是任何 topic 的消費者
 
 ## 6.3 dispatch assigned 後 driver app 未收到
 
 ### 補償
 
-- task delivery retry
-- push + polling fallback
-- 超過門檻則 re-offer / redispatch
+- task delivery 由 driver app 對後端做 push + polling，兩者皆為同步請求，不是事件訂閱
+- 超過門檻則後端直接呼叫 re-offer / redispatch（同一個 `owned-mobility` 模組內的呼叫）
 
 ## 6.4 complaint resolved 但 reimbursement posting 失敗
 
 ### 補償
 
 - complaint 狀態可 resolved
-- finance action 保持 pending
-- 透過補償佇列重試
-- case timeline 加入 finance pending note
+- finance action 在 `billing-settlement` 模組內保持 `pending` 狀態欄位
+- 由排程 reconciliation job 直接呼叫 `billing-settlement` 的 finance action API 重試，不透過任何
+  補償佇列或事件消費者
+- case timeline 加入 finance pending note（`complaint` 模組呼叫 timeline API 寫入，非事件訂閱）
 
 ## 6.5 external forwarder sync failed
 
@@ -1202,7 +1242,7 @@ Reporting Service
 
 - 標記 sync error
 - 不覆蓋外部 authoritative status
-- 啟動 reconciliation job
+- 由排程 reconciliation job 直接呼叫 forwarder adapter 重試同步，非事件消費
 
 ---
 
@@ -1210,23 +1250,31 @@ Reporting Service
 
 ## 7.1 寫入權威矩陣（摘要）
 
-| 實體                                         | 寫入權威                 |
-| -------------------------------------------- | ------------------------ |
-| tenant / partner / site                      | Tenant & Partner Service |
-| vehicle / contract / insurance / exclusivity | Regulatory Registry      |
-| owned order / booking                        | Order Service            |
-| dispatch_job / attempt / assignment          | Dispatch Service         |
-| forwarded order mirror                       | Forwarder Service        |
-| call_session / recording index               | Callcenter Service       |
-| complaint_case                               | Complaint Service        |
-| invoice / statement / reimbursement          | Billing Service          |
-| report_job / filing_package                  | Reporting Service        |
-| audit_log                                    | Audit Service            |
+**Status:** 本表已依 `SD-DP-20260817-009`（`GAP-CONF-07`）對齊實際程式碼模組邊界，取代原先假設
+Order / Dispatch / Driver Task 為三個獨立部署服務的版本。契約原文的服務名稱在下表以「原契約服務」
+欄位保留，供閱讀 section 3 的服務清單時對照。
+
+| 實體                                         | 寫入權威（實際模組）                                                              | 原契約服務                                       |
+| -------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------- |
+| tenant / partner / site                      | `tenant-partner` 模組                                                              | Tenant & Partner Service（一致）                   |
+| vehicle / contract / insurance / exclusivity | `regulatory-registry` 模組                                                         | Regulatory Registry（一致）                        |
+| owned order / booking                        | `owned-mobility` 模組                                                              | Order Service（合併，見下方關鍵原則）              |
+| dispatch_job / attempt / assignment          | `owned-mobility` 模組（未建立獨立 dispatch 模組）                                  | Dispatch Service（合併，見下方關鍵原則）           |
+| driver task state                            | `owned-mobility` 模組（核心狀態機）+ `driver-settings` / `shift-attendance` / `driver-profile` / `driver-sos`（各自關注點） | Driver Task Service（分散於 5 個模組）             |
+| forwarded order mirror                       | `forwarder` 模組                                                                   | Forwarder Service（一致）                          |
+| call_session / recording index               | `callcenter` 模組                                                                  | Callcenter Service（一致）                         |
+| complaint_case                               | `complaint` 模組                                                                   | Complaint Service（一致）                          |
+| invoice / statement / reimbursement          | `billing-settlement` 模組                                                          | Billing Service（一致）                            |
+| report_job / filing_package                  | `reporting-filing` + `reporting` + `regulatory-reporting` 模組群                   | Reporting Service（一致，多模組）                  |
+| audit_log                                    | `audit-notification` 模組                                                          | Audit Service（一致）                              |
 
 ### 關鍵原則
 
 - UI 不直接跨域寫資料庫
-- service 之間只透過 API / event 寫入
+- 模組 / process 邊界之間只透過 API / event 寫入。`owned-mobility` 模組內部（owned order/booking、
+  dispatch_job/attempt/assignment、driver task 核心狀態）彼此不是跨 process 邊界，寫入是同一個資料
+  庫交易內的直接呼叫，不經過 API 或 event；此例外僅適用於這三者共享同一模組的期間，若未來拆成獨立
+  部署服務，則回到本原則並依 `SD-DP-20260817-009` 的 Option 2 設計 outbox。
 - read model 可被多服務消費，但不可反寫 source of truth
 
 ---

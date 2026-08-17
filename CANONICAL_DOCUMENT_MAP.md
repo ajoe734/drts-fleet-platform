@@ -39,6 +39,7 @@ the canonical PRD / SA files in the same wave.
 - `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`
 - `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`
 - `docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md`
+- `docs/01-decisions/SD-DP-20260817-009-domain-event-contract-and-write-authority.md`
 
 Optional future addition beyond the accepted packets above:
 
