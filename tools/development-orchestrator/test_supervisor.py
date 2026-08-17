@@ -925,7 +925,7 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
                 },
             }
 
-            with mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate:
+            with mock.patch.object(supervisor, "terminate_worker_pids", return_value={4242: True}) as terminate:
                 changed = supervisor.mark_supervisor_stopped(
                     config,
                     reason="signal:SIGTERM",
@@ -934,7 +934,9 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
                 )
 
             self.assertTrue(changed)
-            terminate.assert_called_once_with(4242)
+            # Workers are signalled in one overlapped sweep, not one serial
+            # grace period each, so the stop stays inside systemd's budget.
+            terminate.assert_called_once_with([4242])
             saved = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertIsNone(saved["supervisor"]["pid"])
             self.assertEqual(saved["supervisor"]["last_pid"], 4241)
