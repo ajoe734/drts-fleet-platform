@@ -16,6 +16,7 @@ from unittest import mock
 
 import common
 from control_plane.infra import worker_evidence
+from control_plane.infra import worktree_maintenance
 from control_plane.runtime import supervisor_runtime as supervisor
 
 
@@ -911,7 +912,7 @@ class DiskGuardTests(unittest.TestCase):
         }
 
         with mock.patch.object(
-            supervisor, "release_inactive_worker_worktrees", return_value=result
+            worktree_maintenance, "release_inactive_worker_worktrees", return_value=result
         ) as release:
             self.assertTrue(supervisor.cleanup_inactive_worker_worktrees(config, state))
             self.assertFalse(supervisor.cleanup_inactive_worker_worktrees(config, state))
