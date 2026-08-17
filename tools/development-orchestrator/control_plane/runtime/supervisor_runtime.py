@@ -58,7 +58,6 @@ from control_plane.domain.resource_admission import decide as resource_admission
 from control_plane.domain.lane_health import pause_matches_lane
 from control_plane.domain.chair_policy import (
     normalize_review_defaults as normalize_domain_review_defaults,
-    validate_review_payload as validate_domain_review_payload,
 )
 from control_plane.infra.approval_repo import load_approval_state
 from control_plane.infra.queue_repo import (
@@ -126,6 +125,13 @@ from control_plane.usecases.dispatch_runtime import (
     ready_dispatch_settings,
     redispatch_candidate_statuses,
     task_phase_priority,
+)
+from control_plane.usecases.chair_review_policy import (
+    blocked_task_triage_kind,
+    chair_provider_pause_reason_is_actionable,
+    chair_task_action_index,
+    pending_approval_items,
+    validate_chair_review_payload,
 )
 from common import (
     AI_GUIDE_PATH,
@@ -5436,56 +5442,6 @@ def chair_review_output_paths(config: dict[str, Any], agent_name: str) -> tuple[
     return review_dir / f"{stamp}-{slug}.md", review_dir / f"{stamp}-{slug}.json"
 
 
-def pending_approval_items(approval_state: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        item
-        for item in approval_state.get("pending", []) or []
-        if str(item.get("status") or "pending") == "pending" and not item.get("decision")
-    ]
-
-
-def blocked_task_triage_kind(task: dict[str, Any]) -> str:
-    text = " ".join(
-        str(value or "")
-        for value in (
-            task.get("id"),
-            task.get("title"),
-            task.get("summary_zh"),
-            task.get("next"),
-            " ".join(str(item or "") for item in (task.get("artifacts") or [])),
-        )
-    ).lower()
-    if any(
-        marker in text
-        for marker in (
-            "commit",
-            "branch",
-            "worktree",
-            "task-scoped",
-            "history",
-            "head moved",
-            "pre-commit",
-            "push",
-        )
-    ):
-        return "history_repair"
-    if any(
-        marker in text
-        for marker in (
-            "contract",
-            "discussion_planning",
-            "canonical",
-            "scope decision",
-            "cost-center",
-            "approval-rule",
-            "quota contract",
-            "product",
-        )
-    ):
-        return "planning_decision"
-    return "manual_unblock"
-
-
 def dependency_ready_blocked_task_records(
     config: dict[str, Any],
     status: dict[str, Any] | None,
@@ -5523,19 +5479,6 @@ def dependency_ready_blocked_task_records(
         )
     records.sort(key=lambda item: task_phase_priority(item["task"], task_map, dependency_done_statuses))
     return records[:limit]
-
-
-def chair_task_action_index(payload: dict[str, Any]) -> dict[str, set[str]]:
-    action_index: dict[str, set[str]] = {}
-    for action in payload.get("task_actions", []) or []:
-        if not isinstance(action, dict):
-            continue
-        task_id = str(action.get("task_id") or "").strip()
-        action_name = str(action.get("action") or "").strip()
-        if not task_id or not action_name:
-            continue
-        action_index.setdefault(task_id, set()).add(action_name)
-    return action_index
 
 
 def reassignment_followup_task_records(
@@ -6074,10 +6017,6 @@ def normalize_chair_review_payload_for_reason(
         if synthesized:
             normalized["task_actions"] = [*task_actions, *synthesized]
     return normalized
-
-
-def validate_chair_review_payload(payload: Any) -> str | None:
-    return validate_domain_review_payload(payload)
 
 
 def validate_chair_review_context(
@@ -7175,36 +7114,6 @@ def apply_chair_provider_action(
         )
         return True
     return False
-
-
-def chair_provider_pause_reason_is_actionable(kind: str, reason: str) -> bool:
-    if kind != "auth":
-        return True
-    lowered = reason.lower()
-    non_actionable_markers = (
-        "investigate",
-        "verify ",
-        "garbled",
-        "erroneous",
-        "propagat",
-        "cross-lane",
-        "not a real",
-        "mentioned",
-        "citing",
-    )
-    if any(marker in lowered for marker in non_actionable_markers):
-        return False
-    concrete_auth_markers = (
-        "failed to authenticate",
-        "authentication_error",
-        "invalid authentication credentials",
-        "status: 401",
-        "api error: 401",
-        "error authenticating:",
-        "ineligibletiererror:",
-        "restricted_dasher_user",
-    )
-    return any(marker in lowered for marker in concrete_auth_markers)
 
 
 def apply_chair_provider_actions(
