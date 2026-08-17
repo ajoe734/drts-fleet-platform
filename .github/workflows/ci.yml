@@ -42,7 +42,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Verify scope classifier contract
-        run: python3 -m unittest tools/ci/test_classify_change_scope.py
+        run: |
+          python3 -m unittest tools/ci/test_classify_change_scope.py
+          python3 -m unittest tools/ci/test_check_commit_trailers.py
       - id: classify
         name: Classify product and internal-tool changes
         env:

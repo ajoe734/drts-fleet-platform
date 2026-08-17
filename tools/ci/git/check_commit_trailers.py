@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Commit-message trailers gate (used by husky commit-msg AND by CI).
 
-Each commit between `--base` and `--head` (default origin/main..HEAD) must:
+Each non-merge commit between `--base` and `--head` (default
+origin/main..HEAD) must:
 - Have a subject matching one of:
   * `<TASK-ID>: <summary>`  (canonical closeout pattern)
   * `wip(<TASK-ID>): <summary>`  (anchor commit pattern; see
@@ -44,7 +45,14 @@ def parse_args() -> argparse.Namespace:
 
 def commits_in_range(base: str, head: str) -> list[str]:
     out = subprocess.run(
-        ["git", "rev-list", f"{base}..{head}"],
+        # A merge commit authors nothing: its content arrives through its
+        # parents, and each parent is validated on its own when it is in range.
+        # Checking merges anyway made keeping a branch current a policy
+        # violation -- `git merge origin/dev` writes a subject no author chose,
+        # carrying no trailers and reachable by no commit-msg hook, so a branch
+        # that merged its base went red on a required check with no way back to
+        # green. dev already carries such commits.
+        ["git", "rev-list", "--no-merges", f"{base}..{head}"],
         check=False,
         capture_output=True,
         text=True,
