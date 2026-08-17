@@ -5,9 +5,108 @@ import io
 import json
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest import mock
 
 import permission_broker
+
+
+class PreToolUseDecisionVocabularyTests(unittest.TestCase):
+    """A deferral has to be spelled in a way the harness can act on.
+
+    PreToolUse accepts allow, deny or ask. The broker emitted its own internal
+    word, "defer", which the harness cannot read: instead of prompting, the
+    tool call stalls until it is torn down as an internal error -- taking the
+    worker with it. Every deferred command dies that way, which is precisely
+    what queueing an approval was supposed to prevent.
+
+    The sibling path in this same file already knew the shape of the answer: it
+    handles a deferral by emitting nothing and letting Claude Code's own prompt
+    ask. Emitting "ask" keeps that behaviour and carries the reason with it.
+    """
+
+    VALID = {"allow", "deny", "ask"}
+
+    def _run_pretooluse(self, command: str) -> dict:
+        config = permission_broker.load_config()
+        buffer = io.StringIO()
+        with mock.patch.object(permission_broker, "create_approval"), \
+                mock.patch.object(permission_broker, "log_event"), \
+                mock.patch.object(permission_broker, "find_resume_override", return_value=None), \
+                mock.patch.object(permission_broker, "_matching_approval", return_value=(None, None)), \
+                redirect_stdout(buffer):
+            permission_broker.hook_mode(
+                config,
+                "PreToolUse",
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": command},
+                    "session_id": "session-under-test",
+                },
+            )
+        return json.loads(buffer.getvalue() or "{}")
+
+    def test_a_deferred_command_is_asked_not_deferred(self) -> None:
+        response = self._run_pretooluse("docker ps")
+        decision = response.get("hookSpecificOutput", {}).get("permissionDecision")
+        self.assertIn(decision, self.VALID, f"{decision!r} is not a PreToolUse decision")
+        self.assertEqual(decision, "ask")
+
+    def test_the_reason_survives_the_deferral(self) -> None:
+        response = self._run_pretooluse("docker ps")
+        self.assertTrue(response.get("hookSpecificOutput", {}).get("permissionDecisionReason"))
+
+    def test_every_emitted_decision_is_one_the_harness_accepts(self) -> None:
+        for command in ("docker ps", "git status", "rm -rf /"):
+            with self.subTest(command=command):
+                response = self._run_pretooluse(command)
+                emitted = response.get("hookSpecificOutput", {}).get("permissionDecision")
+                if emitted is not None:
+                    self.assertIn(emitted, self.VALID, f"{emitted!r} is not a PreToolUse decision")
+
+
+class WorkspaceBoundaryTests(unittest.TestCase):
+    """The boundary is what a shell would reach, not what a string looks like.
+
+    `_paths_within_workspace` joined a relative path onto the workspace root
+    without expanding or normalising it, and `_is_relative_to` compares
+    lexically. `~/.ssh/id_rsa` therefore became `<root>/~/.ssh/id_rsa`, which
+    starts with the root and was judged inside the workspace -- while the shell
+    that eventually runs the command expands `~` to the real home and reads the
+    key. `../../etc/passwd` passed the same way, because `<root>/../..` is still
+    textually under `<root>`.
+    """
+
+    ESCAPES = [
+        "~/.ssh/id_rsa",
+        "~/.aws/credentials",
+        "../../etc/passwd",
+        "$HOME/.ssh/config",
+        "${HOME}/.ssh/config",
+    ]
+
+    def test_paths_that_leave_the_workspace_are_refused(self) -> None:
+        for candidate in self.ESCAPES:
+            with self.subTest(path=candidate):
+                self.assertFalse(
+                    permission_broker._paths_within_workspace([Path(candidate)]),
+                    f"{candidate} was judged inside the workspace",
+                )
+
+    def test_absolute_paths_outside_the_workspace_are_still_refused(self) -> None:
+        self.assertFalse(permission_broker._paths_within_workspace([Path("/etc/passwd")]))
+
+    def test_ordinary_workspace_paths_are_still_allowed(self) -> None:
+        for candidate in ("apps/api/src/main.ts", "tools/development-orchestrator/common.py", "."):
+            with self.subTest(path=candidate):
+                self.assertTrue(permission_broker._paths_within_workspace([Path(candidate)]))
+
+    def test_an_absolute_path_inside_the_workspace_is_allowed(self) -> None:
+        inside = permission_broker.workspace_root() / "apps" / "api"
+        self.assertTrue(permission_broker._paths_within_workspace([inside]))
+
+    def test_no_paths_is_not_an_escape(self) -> None:
+        self.assertTrue(permission_broker._paths_within_workspace([]))
 
 
 class PermissionBrokerLoggingTests(unittest.TestCase):

@@ -1166,6 +1166,30 @@ def _collect_paths(tool_input: dict[str, Any]) -> list[Path]:
     return candidates
 
 
+def _resolve_candidate_path(path: Path, root: Path) -> Path | None:
+    """Absolute, normalised form of `path`, or None when it cannot be judged.
+
+    `~/.ssh` and `../../etc` are not absolute, so joining them onto the root
+    without expanding or normalising produced `<root>/~/.ssh` and
+    `<root>/../../etc` -- both inside the workspace by inspection and outside it
+    in fact, because `_is_relative_to` compares lexically while the shell that
+    runs the command expands and normalises. Every escape hatch read as safe.
+
+    A path still carrying a shell variable cannot be judged by static
+    inspection at all, so it is never treated as inside.
+    """
+    text = str(path)
+    if "$" in text:
+        return None
+    expanded = Path(text).expanduser()
+    if not expanded.is_absolute():
+        expanded = root / expanded
+    try:
+        return expanded.resolve(strict=False)
+    except OSError:
+        return None
+
+
 def _paths_within_workspace(paths: list[Path]) -> bool:
     if not paths:
         return True
@@ -1173,10 +1197,15 @@ def _paths_within_workspace(paths: list[Path]) -> bool:
     # Task worktrees usually live under the canonical root, but a worker may be
     # dispatched into one elsewhere, so honour every root we were handed.
     allowed_roots = [*workspace_roots(), root.parent / "pantheon", root.parent / "tenant-commute-hub", Path.home() / ".claude", Path.home() / ".codex"]
+    # Normalise the boundary too: an allowed root carrying `~` or a symlink
+    # would otherwise never match a resolved candidate.
+    allowed_roots = [candidate.expanduser().resolve(strict=False) for candidate in allowed_roots]
     for path in paths:
-        resolved = path if path.is_absolute() else root / path
+        resolved = _resolve_candidate_path(path, root)
+        if resolved is None:
+            return False
         if not any(
-            _is_relative_to(resolved, root) for root in allowed_roots
+            _is_relative_to(resolved, allowed) for allowed in allowed_roots
         ):
             return False
     return True
@@ -1864,7 +1893,13 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
                 "effective_reason": effective_reason,
             },
         )
-        emit_hook_response(_decision_response(event_name, "defer", decision["reason"]))
+        # PreToolUse accepts allow, deny or ask. "defer" is the broker's own
+        # word for "a person must decide", and the harness cannot read it: the
+        # tool call stalls until it is torn down as an internal error instead
+        # of prompting, taking the worker with it. The sibling path above
+        # already defers correctly by letting Claude Code's own prompt ask;
+        # "ask" does the same here and carries the reason with it.
+        emit_hook_response(_decision_response(event_name, "ask", decision["reason"]))
         return 0
 
     log_event(config, event_name, payload)
