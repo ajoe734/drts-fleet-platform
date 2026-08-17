@@ -65,6 +65,215 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertIn("Dispatch pauses requiring chair attention", message)
         self.assertIn("OPX-DP-003-SIDECAR-ACCEPTANCE", message)
 
+    def _identity_paused_fleet(self) -> tuple[dict, dict, dict]:
+        """codex and codex2 are one account, and that account is 401-paused."""
+        fingerprint = "7dd7f7fd9f792c596f59a98e"
+        config = {
+            "paths": {},
+            "agents": {
+                "claude": {"display_name": "Claude", "provider": "claude"},
+                "codex": {"display_name": "Codex", "provider": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            },
+        }
+        state = {
+            "provider_pauses": {
+                f"identity:codex2:{fingerprint}": {
+                    "kind": "auth",
+                    "reason": "status: 401,",
+                    "paused_at": "2026-08-15T04:51:02Z",
+                    "resume_at": None,
+                    "schema": 3,
+                    "lane_id": "codex2",
+                    "scope": "identity",
+                    "identity_fingerprint": fingerprint,
+                }
+            },
+            "dispatch_pauses": [],
+            "failure_streaks": {},
+        }
+        report = {
+            "providers": {
+                "claude": {"auth_ready": True, "local_cli_worker_supported": True},
+                "codex": {"auth_ready": True, "local_cli_worker_supported": True,
+                          "identity": {"fingerprint": fingerprint}},
+                "codex2": {"auth_ready": True, "local_cli_worker_supported": True,
+                           "identity": {"fingerprint": fingerprint}},
+            }
+        }
+        return config, state, report
+
+    def test_briefing_never_offers_a_lane_the_dispatcher_would_refuse(self) -> None:
+        """The dispatch-capable list looked pauses up by lane name, which cannot
+        see an identity-scoped pause. codex2's 401 correctly stopped both codex
+        and codex2 -- one account -- but the same briefing listed codex2 as
+        auth-paused and then offered codex AND codex2 as dispatch-capable a few
+        lines below. The chair reassigned work onto Codex believing it healthy,
+        the dispatcher silently refused, and the task sat in todo forever.
+        """
+        config, state, report = self._identity_paused_fleet()
+        message = supervisor.build_chair_review_message(
+            config,
+            reason="provider_health_triage",
+            markdown_path=Path(".orchestrator/chair-reviews/test.md"),
+            json_path=Path(".orchestrator/chair-reviews/test.json"),
+            approval_state={"pending": []},
+            state=state,
+            provider_report=report,
+        )
+
+        self.assertIn("claude (Claude): not_paused=true", message)
+        self.assertNotIn("codex (Codex): not_paused=true", message)
+        self.assertNotIn("codex2 (Codex2): not_paused=true", message)
+
+    def test_briefing_names_every_lane_a_pause_covers(self) -> None:
+        """codex never appeared in any pause section, so the chair had no way to
+        learn the account it shares with codex2 was the thing that was down."""
+        config, state, report = self._identity_paused_fleet()
+        message = supervisor.build_chair_review_message(
+            config,
+            reason="provider_health_triage",
+            markdown_path=Path(".orchestrator/chair-reviews/test.md"),
+            json_path=Path(".orchestrator/chair-reviews/test.json"),
+            approval_state={"pending": []},
+            state=state,
+            provider_report=report,
+        )
+
+        pause_line = next(
+            line for line in message.splitlines()
+            if line.startswith("- ") and "status: 401" in line
+        )
+        # Substring checks would pass vacuously ("codex" is inside "codex2"),
+        # so assert on the explicit list of lanes the pause takes out.
+        self.assertIn("affects=", pause_line)
+        affected = pause_line.split("affects=", 1)[1].split()[0]
+        self.assertEqual(sorted(affected.split(",")), ["codex", "codex2"])
+
+    def test_chair_review_message_requires_approval_actions_for_approval_triage(self) -> None:
+        message = supervisor.build_chair_review_message(
+            {"paths": {}},
+            reason="approval_triage",
+            markdown_path=Path(".orchestrator/chair-reviews/test.md"),
+            json_path=Path(".orchestrator/chair-reviews/test.json"),
+            approval_state={
+                "pending": [
+                    {
+                        "approval_id": "apr-1",
+                        "task_id": "ORX-FN-001",
+                        "tool_name": "Agent",
+                        "risk_class": "unknown",
+                        "tool_input": {"description": "Review settlement matrix code"},
+                    }
+                ]
+            },
+            state={"failure_streaks": {}, "provider_pauses": {}, "dispatch_pauses": []},
+        )
+
+        self.assertIn("每一個 pending approval 都必須在 `approval_actions` 中明確", message)
+        self.assertIn("description=Review settlement matrix code", message)
+
+    def test_validate_chair_review_context_requires_pending_approval_resolution(self) -> None:
+        payload = {
+            "version": 1,
+            "decision": "deny",
+            "approval_ttl_minutes": 45,
+            "reason": "approval remains unsafe",
+            "blocked_by": [],
+            "approval_actions": [],
+            "reassignment_actions": [],
+            "task_actions": [],
+            "provider_actions": [],
+            "recommended_focus": [],
+        }
+        approval_state = {
+            "pending": [
+                {
+                    "approval_id": "apr-1",
+                    "status": "pending",
+                    "decision": None,
+                }
+            ]
+        }
+
+        self.assertIn(
+            "approval_triage must resolve pending approvals",
+            supervisor.validate_chair_review_context(payload, reason="approval_triage", approval_state=approval_state),
+        )
+        payload["approval_actions"] = [{"approval_id": "apr-1", "decision": "deny", "reason": "not safe"}]
+        self.assertIsNone(
+            supervisor.validate_chair_review_context(payload, reason="approval_triage", approval_state=approval_state)
+        )
+        payload["provider_actions"] = [
+            {"agent": "Claude2", "action": "pause", "kind": "capacity", "reason": "stale prompt"}
+        ]
+        self.assertEqual(
+            supervisor.validate_chair_review_context(payload, reason="approval_triage", approval_state=approval_state),
+            "approval_triage must not emit provider_actions",
+        )
+
+    def test_agent_read_only_approval_is_routine_safe(self) -> None:
+        approval = {
+            "tool_name": "Agent",
+            "risk_class": "unknown",
+            "tool_input": {
+                "description": "Review settlement matrix code",
+                "prompt": "Read these files thoroughly and report any issues. Do not edit files.",
+                "subagent_type": "Explore",
+            },
+        }
+
+        self.assertTrue(supervisor._approval_is_routine_safe(approval))
+
+    def test_chair_review_reason_prioritizes_provider_health_triage(self) -> None:
+        reason = supervisor.chair_review_reason(
+            {
+                "provider_pauses": {
+                    "claude": {
+                        "kind": "auth",
+                        "reason": "Invalid authentication credentials",
+                        "paused_at": "2026-04-30T12:51:53Z",
+                    }
+                }
+            },
+            {"pending": []},
+        )
+
+        self.assertEqual(reason, "provider_health_triage")
+
+    def test_repeated_failure_records_ignore_tasks_covered_by_workspace_baseline_task(self) -> None:
+        state = {
+            "failure_streaks": {
+                "UI-FE-ADM-FLT:owner": {
+                    "task_id": "UI-FE-ADM-FLT",
+                    "role": "owner",
+                    "agent": "Codex",
+                    "awaiting_chair": True,
+                },
+                "UI-FE-TEN-PSG:owner": {
+                    "task_id": "UI-FE-TEN-PSG",
+                    "role": "owner",
+                    "agent": "Codex",
+                    "awaiting_chair": True,
+                },
+            }
+        }
+        status = {
+            "tasks": [
+                {
+                    "id": supervisor.WORKSPACE_BASELINE_TASK_ID,
+                    "status": "in_progress",
+                    "helper_kind": supervisor.WORKSPACE_BASELINE_HELPER_KIND,
+                    "covers_task_ids": ["UI-FE-ADM-FLT"],
+                }
+            ]
+        }
+
+        records = supervisor.repeated_failure_records(state, status)
+
+        self.assertEqual([item["task_id"] for item in records], ["UI-FE-TEN-PSG"])
+
+
     def test_chair_review_message_requires_approval_actions_for_approval_triage(self) -> None:
         message = supervisor.build_chair_review_message(
             {"paths": {}},
