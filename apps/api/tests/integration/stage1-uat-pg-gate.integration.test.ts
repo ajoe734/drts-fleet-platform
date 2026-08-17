@@ -507,9 +507,20 @@ async function cleanup(seed: Seed) {
       "DELETE FROM admin.phase1_tenant_webhook_endpoints WHERE webhook_id = $1",
       [seed.webhookEndpoint.webhookId],
     );
-    await database.query("DELETE FROM admin.audit_logs WHERE request_id = $1", [
-      seed.requestId,
-    ]);
+    const client = await database.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL audit.allow_retention_archival = 'on'");
+      await client.query(
+        "DELETE FROM admin.audit_logs WHERE request_id = $1",
+        [seed.requestId],
+      );
+      await client.query("COMMIT");
+    } catch {
+      await client.query("ROLLBACK").catch(() => {});
+    } finally {
+      client.release();
+    }
     await database.query(
       "DELETE FROM ops.driver_completion_outbox WHERE task_id = $1",
       [seed.task.taskId],
