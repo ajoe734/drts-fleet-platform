@@ -3457,8 +3457,14 @@ def prune_completed_dispatch_pauses(
     tasks = status.get("tasks", [])
     if not isinstance(tasks, list):
         return False
-    config = config or load_config()
-    provider_report = provider_report or load_provider_report(config)
+    # Both call sites in control_plane/usecases/supervisor_tick.py pass config
+    # and provider_report, so reaching for load_config() only ever covered for a
+    # caller that did not -- and it covered badly: on the `{}` that a missing
+    # config used to load as, `auto_refresh_provider_capabilities` defaults on,
+    # so load_provider_report would probe every provider from a function whose
+    # job is to prune a list. Without a config there is simply no report.
+    if provider_report is None:
+        provider_report = load_provider_report(config) if config else {}
     task_by_id = {
         str(task.get("id") or ""): task
         for task in tasks
