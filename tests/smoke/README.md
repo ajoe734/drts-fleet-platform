@@ -47,23 +47,23 @@ Interpret smoke results through
 ```bash
 # Against protected staging — IAP bearer token + direct API fallback identity
 export SMOKE_API_URL=https://api.staging.drts-fleet.cctech-support.com   # bare origin, no /api suffix
-export SMOKE_AUTH_BEARER_TOKEN="$(./scripts/print-staging-iap-token.sh)"
+export SMOKE_AUTH_BEARER_TOKEN="$(./operations/security/print-staging-iap-token.sh)"
 export SMOKE_ACTOR_TYPE=system
 export SMOKE_ACTOR_ID=smoke-system-001
 export SMOKE_TENANT_ID=10000000-0000-0000-0000-000000000201   # TEN_ACME from S0002 seed
-./scripts/run-smoke-tests.sh
+for suite in tests/smoke/0*.sh; do "$suite"; done
 
-# Against local dev
-./scripts/run-smoke-tests.sh
+# Against local dev — same command, without the SMOKE_* exports above
+for suite in tests/smoke/0*.sh; do "$suite"; done
 
 # Run a single test
-./scripts/run-smoke-tests.sh --suite "02"
-
-# Verbose output on failure
-./scripts/run-smoke-tests.sh --verbose
+./tests/smoke/02-booking-create.sh
 ```
 
-See `scripts/run-smoke-tests.sh --help` for the full option reference.
+Each suite sources `tests/smoke/lib/helpers.sh` and runs standalone; there is no
+aggregate runner in the tree. This section previously documented a
+`run-smoke-tests.sh` wrapper, with `--suite` and `--verbose` options, that does
+not exist anywhere in the repository, so those flags are not available.
 
 ## Auth model
 
@@ -130,7 +130,7 @@ Confirm the correct base URL from the Cloud Run service URL in the `WE-003` depl
 The repo includes a helper for the current staging IAP client:
 
 ```bash
-./scripts/print-staging-iap-token.sh
+./operations/security/print-staging-iap-token.sh
 ```
 
 Defaults:
@@ -154,7 +154,7 @@ Override with:
 DRTS_GCP_PROJECT_ID=drts-staging-bobo-20260502 \
 DRTS_STAGING_IAP_CLIENT_ID=...apps.googleusercontent.com \
 DRTS_STAGING_TOKEN_SERVICE_ACCOUNT=github-actions-deployer@drts-staging-bobo-20260502.iam.gserviceaccount.com \
-./scripts/print-staging-iap-token.sh
+./operations/security/print-staging-iap-token.sh
 ```
 
 ## Environment variables
