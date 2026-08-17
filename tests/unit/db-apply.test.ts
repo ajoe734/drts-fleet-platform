@@ -509,6 +509,17 @@ WHERE audit_id = '${auditLogId}';
       ),
     ).toThrow();
 
+    expect(() =>
+      bash(
+        psqlCommand(
+          databaseUrl,
+          `
+TRUNCATE admin.audit_logs;
+          `,
+        ),
+      ),
+    ).toThrow();
+
     const auditPersisted = bash(
       psqlCommand(
         databaseUrl,

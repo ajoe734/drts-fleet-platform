@@ -99,7 +99,7 @@ not re-open them without cause.
 | 4   | suspended driver still able to go online                     | `jwt-auth.service.ts:968` calls `assertDriverAuthEligible` on **every** token verification, raising `DRIVER_AUTH_SUSPENDED` / `DRIVER_CERT_INVALID` (`regulatory-registry.service.ts:1971`) |     PASS — see 4.4 for the ownership note      |
 | 5   | complaint and incident share one lifecycle                   | separate modules, separate state machines                                                                                                                                                   |                      PASS                      |
 | 6   | historical pricing version overwritten in place              | `billing-settlement.service.ts:1603` — "Published driver fee plan versions are immutable."                                                                                                  |                      PASS                      |
-| 7   | audit log can be modified or deleted                         | database trigger `trg_audit_logs_append_only` (V0080) + REVOKE + privileged retention archival path                                                                                         | PASS (closed via GAP-CONF-03 / CONF-AUDIT-001) |
+| 7   | audit log can be modified or deleted                         | database triggers `trg_audit_logs_append_only` and `trg_audit_logs_prevent_truncate` (V0080) + REVOKE + role-gated privileged retention archival path | PASS (closed via GAP-CONF-03 / CONF-AUDIT-001) |
 
 ### 3.3 Contracts and product surfaces
 
@@ -240,13 +240,9 @@ explicitly absent.
 **Severity:** P1 (Closed under `CONF-AUDIT-001` / Gate C1)
 **Spec:** PRD 13.3 ("audit cannot be edited or deleted"); PRD 14.2.7 lists mutable audit as a product error that must not occur; contracts section 3.13 ("audit log append-only")
 
-**Resolution.** Closed via forward migration `V0080__audit_log_immutability.sql`. A database trigger `trg_audit_logs_append_only` calling `admin.raise_audit_logs_append_only()` rejects direct `UPDATE` and `DELETE` on `admin.audit_logs` with exception `admin.audit_logs is append-only`. `REVOKE UPDATE, DELETE ON admin.audit_logs FROM PUBLIC` is applied as defence in depth. A privileged archival path via `operations/database/audit-log-retention-archival.sh` supports lawful retention deletion within transaction-scoped `SET LOCAL audit.allow_retention_archival = 'on'` without requiring deactivation or removal of the trigger protection. Documented in `operations/database/AUDIT_LOG_RETENTION_ARCHIVAL.md` and verified by automated negative test suite `tests/security/audit-log-immutability-negative.test.ts` and `tests/unit/db-apply.test.ts`.
+**Resolution.** Closed via forward migration `V0080__audit_log_immutability.sql`. Engine-level triggers `trg_audit_logs_append_only` (BEFORE UPDATE OR DELETE row-level) and `trg_audit_logs_prevent_truncate` (BEFORE TRUNCATE statement-level) calling `admin.raise_audit_logs_append_only()` reject direct `UPDATE`, `DELETE`, and `TRUNCATE` on `admin.audit_logs` with exception `admin.audit_logs is append-only`. `REVOKE UPDATE, DELETE, TRUNCATE ON admin.audit_logs FROM PUBLIC` is applied as defence in depth. A privileged archival path via `operations/database/audit-log-retention-archival.sh` supports lawful retention deletion within transaction-scoped `SET LOCAL audit.allow_retention_archival = 'on'` gated on `session_user` or `audit_retention_operator` role membership without requiring deactivation or removal of trigger protection. Documented in `operations/database/AUDIT_LOG_RETENTION_ARCHIVAL.md` and verified by automated negative test suite `tests/security/audit-log-immutability-negative.test.ts` and `tests/unit/db-apply.test.ts`.
 
-**Historical behaviour.** Prior to V0080, `admin.audit_logs` (`V0009:75`) carried no
-immutability constraint or trigger. The invariant held solely by application repository
-convention. Because `DATABASE_URL` connects as `postgres` / table owner, `REVOKE` alone
-is inert for owner connections; the trigger was required as the primary control to bind
-the table owner and superuser roles.
+**Security Note & Accepted Residual Risk.** Prior to V0080, `admin.audit_logs` (`V0009:75`) carried no immutability constraint or trigger, holding solely by repository convention. Because Phase 1 environments connect as `postgres` / table owner via `DATABASE_URL`, `REVOKE` alone is inert against table-owner connections; the database triggers are the required primary controls. `UPDATE` and `TRUNCATE` are unconditionally blocked with no bypass. For lawful retention purges, `DELETE` requires both `audit.allow_retention_archival = 'on'` and operator privilege (`postgres` / `audit_retention_operator`). In Phase 1, where the application runtime and operations share the `postgres` role, the residual risk of an attacker executing the multi-step bypass command is accepted pending dedicated application role provisioning in Phase 2.
 
 ---
 
@@ -435,7 +431,7 @@ These are recorded to prevent them from being rediscovered as defects.
 
 | Gate    | Requirement                                                                                                                                                                             | Owning task                      |
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| **C1**  | `admin.audit_logs` rejects `UPDATE` and `DELETE` at the database level, proven by a negative test that attempts both                                                                    | `CONF-AUDIT-001` (CLOSED / PASS) |
+| **C1**  | `admin.audit_logs` rejects `UPDATE`, `DELETE`, and `TRUNCATE` at the database level, proven by a negative test that attempts all three                                                   | `CONF-AUDIT-001` (CLOSED / PASS) |
 | **C2**  | Idempotency semantics (replay versus conflict) are decided and recorded before any schema change                                                                                        | `CONF-IDEM-001`                  |
 | **C3**  | All nine specified commands reject a missing key, replay the stored response for a repeated key with an identical payload, and return `409` for a repeated key with a differing payload | `CONF-IDEM-002/003/004`          |
 | **C4**  | Concurrent duplicate submission of one key creates exactly one record, proven under parallel execution rather than sequential calls                                                     | `CONF-VERIFY-001`                |
