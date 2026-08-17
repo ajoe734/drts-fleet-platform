@@ -52,6 +52,7 @@ def recording_ports(calls: list[str], *, focus_mode: str) -> SupervisorTickPorts
         reconcile_queue_records=record("reconcile_queue", False),
         prune_event_queue=record("prune_queue", False),
         prune_completed_dispatch_pauses=record("prune_dispatch_pauses", False),
+        prune_unmatched_provider_pauses=record("prune_provider_pauses", False),
         prune_failure_streaks=record("prune_failure_streaks", False),
         refresh_chair_review_state=record("refresh_chair", False),
         reconcile_optional_automation=record("reconcile_optional", False),

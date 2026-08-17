@@ -64,6 +64,7 @@ class SupervisorTickPorts:
     reconcile_queue_records: Callable[[dict[str, Any], dict[str, Any]], bool]
     prune_event_queue: Callable[[dict[str, Any], dict[str, Any]], bool]
     prune_completed_dispatch_pauses: Callable[..., bool]
+    prune_unmatched_provider_pauses: Callable[..., bool]
     prune_failure_streaks: Callable[[dict[str, Any], dict[str, Any]], bool]
     refresh_chair_review_state: Callable[..., bool]
     reconcile_optional_automation: Callable[..., bool]
@@ -253,6 +254,9 @@ class SupervisorTickRunner:
         changed = self.ports.prune_completed_dispatch_pauses(
             state, status, config=config, provider_report=provider_report
         ) or changed
+        changed = self.ports.prune_unmatched_provider_pauses(
+            config, config, state, provider_report
+        ) or changed
         changed = self.ports.prune_failure_streaks(state, status) or changed
         changed = self.ports.refresh_chair_review_state(
             config, state, provider_report
@@ -302,6 +306,9 @@ class SupervisorTickRunner:
         changed = self.ports.prune_event_queue(config, state) or changed
         changed = self.ports.prune_completed_dispatch_pauses(
             state, status, config=config, provider_report=provider_report
+        ) or changed
+        changed = self.ports.prune_unmatched_provider_pauses(
+            config, config, state, provider_report
         ) or changed
         changed = self.ports.prune_failure_streaks(state, status) or changed
         changed = self.ports.sync_github_bus(config, state) or changed
