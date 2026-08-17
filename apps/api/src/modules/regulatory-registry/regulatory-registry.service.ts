@@ -1947,17 +1947,20 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
   getVehicleDispatchability(
     vehicleId: string,
-    serviceBucket: Phase1ServiceBucket,
+    serviceBucket?: Phase1ServiceBucket,
   ) {
     this.reconcileSupplyLifecycleForAll({
       emitEvent: false,
       persistContext: null,
     });
     const vehicle = this.requireVehicle(vehicleId);
-    return (
-      vehicle.supplyLifecycle.dispatch.eligible &&
-      vehicle.supportedServiceBuckets.includes(serviceBucket)
-    );
+    if (!vehicle.supplyLifecycle.dispatch.eligible) {
+      return false;
+    }
+    if (serviceBucket) {
+      return vehicle.supportedServiceBuckets.includes(serviceBucket);
+    }
+    return vehicle.supportedServiceBuckets.length > 0;
   }
 
   getDriverAvailability(driverId: string, serviceBucket: Phase1ServiceBucket) {

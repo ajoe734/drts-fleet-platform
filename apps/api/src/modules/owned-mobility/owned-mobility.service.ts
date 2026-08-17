@@ -444,6 +444,25 @@ export class OwnedMobilityService
   private driverCompletionOutboxDrainRequested = false;
   private driverCompletionOutboxStopping = false;
 
+  private minLeadTimeMinutes = 15;
+
+  getMinLeadTimeMinutes(): number {
+    const envVal =
+      process.env.SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES ??
+      process.env.MULTI_TAXI_MIN_LEAD_TIME_MINUTES;
+    if (envVal !== undefined && envVal !== "") {
+      const parsed = Number(envVal);
+      if (!Number.isNaN(parsed) && parsed >= 0) {
+        return parsed;
+      }
+    }
+    return this.minLeadTimeMinutes;
+  }
+
+  setMinLeadTimeMinutes(minutes: number) {
+    this.minLeadTimeMinutes = Math.max(0, minutes);
+  }
+
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     private readonly auditNotificationService: AuditNotificationService,
@@ -741,15 +760,22 @@ export class OwnedMobilityService
         "timingMode must be on_demand or scheduled.",
       );
     }
-    if (
-      command.timingMode === "scheduled" &&
-      Date.parse(requestedPickupAt) <= Date.now()
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "SCHEDULED_PICKUP_MUST_BE_FUTURE",
-        "A scheduled multi-taxi ride must use a future pickup time.",
-      );
+    if (command.timingMode === "scheduled") {
+      const minLeadTimeMinutes = this.getMinLeadTimeMinutes();
+      const minAllowedPickupMs = Date.now() + minLeadTimeMinutes * 60 * 1000;
+      const requestedPickupMs = Date.parse(requestedPickupAt);
+      if (requestedPickupMs < minAllowedPickupMs) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "TOO_SOON_TO_BOOK",
+          `A scheduled multi-taxi ride requires at least ${minLeadTimeMinutes} minutes advance notice.`,
+          {
+            requestedPickupAt,
+            minLeadTimeMinutes,
+            minimumAllowedPickupAt: new Date(minAllowedPickupMs).toISOString(),
+          },
+        );
+      }
     }
     if (callContext && !callContext.callId?.trim()) {
       throw new ApiRequestError(

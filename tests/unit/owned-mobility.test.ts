@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 
+import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import type { BootstrapRequestIdentity } from "../../apps/api/src/common/auth";
+import type { MultiTaxiOperatingAuthorizationRecord } from "@drts/contracts";
 import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
 import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
@@ -2195,6 +2197,204 @@ describe("owned mobility service", () => {
           identity,
         );
       expect(replayedRating).toEqual(firstRating);
+    });
+  });
+
+  describe("GAP-CONF-06 minimum lead time validation and configuration", () => {
+    const dummyAuth: MultiTaxiOperatingAuthorizationRecord = {
+      authorizationId: "auth-leadtime-001",
+      operatorId: "operator-001",
+      authorityCode: "TPE-MTX-001",
+      businessPlanVersion: "1.0",
+      status: "approved",
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "fare-ver-001",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    it("rejects scheduled booking inside default 15-minute lead time with TOO_SOON_TO_BOOK", () => {
+      const { ownedMobilityService } = createService();
+      const fiveMinutesFromNow = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+      try {
+        ownedMobilityService.createMultiTaxiRide(
+          {
+            pickup: { address: "台北車站" },
+            dropoff: { address: "松山機場" },
+            passenger: { name: "測試乘客", phone: "0911222333" },
+            requestedPickupAt: fiveMinutesFromNow,
+            timingMode: "scheduled",
+            paymentMethodTokenRef: null,
+          },
+          dummyAuth,
+        );
+        expect.unreachable("should have thrown ApiRequestError");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApiRequestError);
+        const apiError = error as ApiRequestError;
+        expect(apiError.code).toBe("TOO_SOON_TO_BOOK");
+        expect(apiError.getStatus()).toBe(400);
+        const response = apiError.getResponse() as { error: { details?: Record<string, unknown> } };
+        expect(response.error.details).toMatchObject({
+          requestedPickupAt: fiveMinutesFromNow,
+          minLeadTimeMinutes: 15,
+        });
+      }
+    });
+
+    it("rejects scheduled booking with pickup in the past with TOO_SOON_TO_BOOK", () => {
+      const { ownedMobilityService } = createService();
+      const pastTime = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+      try {
+        ownedMobilityService.createMultiTaxiRide(
+          {
+            pickup: { address: "台北車站" },
+            dropoff: { address: "松山機場" },
+            passenger: { name: "測試乘客", phone: "0911222333" },
+            requestedPickupAt: pastTime,
+            timingMode: "scheduled",
+            paymentMethodTokenRef: null,
+          },
+          dummyAuth,
+        );
+        expect.unreachable("should have thrown ApiRequestError");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApiRequestError);
+        const apiError = error as ApiRequestError;
+        expect(apiError.code).toBe("TOO_SOON_TO_BOOK");
+        expect(apiError.getStatus()).toBe(400);
+      }
+    });
+
+    it("accepts scheduled booking with pickup beyond minimum lead time", () => {
+      const { ownedMobilityService } = createService();
+      const thirtyMinutesFromNow = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+
+      const order = ownedMobilityService.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: thirtyMinutesFromNow,
+          timingMode: "scheduled",
+          paymentMethodTokenRef: null,
+        },
+        dummyAuth,
+      );
+
+      expect(order).toBeDefined();
+      expect(order.timingMode).toBe("scheduled");
+      expect(order.dispatchSemantics).toBe("reservation");
+      expect(order.reservationWindowStart).toBe(thirtyMinutesFromNow);
+    });
+
+    it("allows dynamically reconfiguring lead time via setMinLeadTimeMinutes", () => {
+      const { ownedMobilityService } = createService();
+      ownedMobilityService.setMinLeadTimeMinutes(60); // 60 minutes minimum
+
+      const fortyMinutesFromNow = new Date(Date.now() + 40 * 60 * 1000).toISOString();
+
+      // 40 minutes is now inside 60-minute lead time -> rejected
+      expect(() =>
+        ownedMobilityService.createMultiTaxiRide(
+          {
+            pickup: { address: "台北車站" },
+            dropoff: { address: "松山機場" },
+            passenger: { name: "測試乘客", phone: "0911222333" },
+            requestedPickupAt: fortyMinutesFromNow,
+            timingMode: "scheduled",
+            paymentMethodTokenRef: null,
+          },
+          dummyAuth,
+        ),
+      ).toThrowError();
+
+      // 70 minutes is beyond 60-minute lead time -> accepted
+      const seventyMinutesFromNow = new Date(Date.now() + 70 * 60 * 1000).toISOString();
+      const order = ownedMobilityService.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: seventyMinutesFromNow,
+          timingMode: "scheduled",
+          paymentMethodTokenRef: null,
+        },
+        dummyAuth,
+      );
+      expect(order.timingMode).toBe("scheduled");
+    });
+
+    it("allows immediate future scheduled booking when minLeadTimeMinutes is 0", () => {
+      const { ownedMobilityService } = createService();
+      ownedMobilityService.setMinLeadTimeMinutes(0);
+
+      const oneMinuteFromNow = new Date(Date.now() + 60 * 1000).toISOString();
+      const order = ownedMobilityService.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: oneMinuteFromNow,
+          timingMode: "scheduled",
+          paymentMethodTokenRef: null,
+        },
+        dummyAuth,
+      );
+      expect(order.timingMode).toBe("scheduled");
+    });
+
+    it("allows on-demand rides with immediate pickup time without lead time restriction", () => {
+      const { ownedMobilityService } = createService();
+      const nowIso = new Date().toISOString();
+
+      const order = ownedMobilityService.createMultiTaxiRide(
+        {
+          pickup: { address: "台北車站" },
+          dropoff: { address: "松山機場" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          requestedPickupAt: nowIso,
+          timingMode: "on_demand",
+          paymentMethodTokenRef: null,
+        },
+        dummyAuth,
+      );
+      expect(order.timingMode).toBe("on_demand");
+      expect(order.dispatchSemantics).toBe("realtime");
+    });
+
+    it("respects SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES environment variable", () => {
+      const originalEnv = process.env.SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES;
+      try {
+        process.env.SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES = "45";
+        const { ownedMobilityService } = createService();
+        expect(ownedMobilityService.getMinLeadTimeMinutes()).toBe(45);
+
+        const thirtyMinutesFromNow = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+        expect(() =>
+          ownedMobilityService.createMultiTaxiRide(
+            {
+              pickup: { address: "台北車站" },
+              dropoff: { address: "松山機場" },
+              passenger: { name: "測試乘客", phone: "0911222333" },
+              requestedPickupAt: thirtyMinutesFromNow,
+              timingMode: "scheduled",
+              paymentMethodTokenRef: null,
+            },
+            dummyAuth,
+          ),
+        ).toThrowError();
+      } finally {
+        if (originalEnv === undefined) {
+          delete process.env.SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES;
+        } else {
+          process.env.SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES = originalEnv;
+        }
+      }
     });
   });
 });

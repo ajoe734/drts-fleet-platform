@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { ShiftAttendanceRepository } from "../../apps/api/src/modules/shift-attendance/shift-attendance.repository";
 import { ShiftAttendanceService } from "../../apps/api/src/modules/shift-attendance/shift-attendance.service";
+import type { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 
 function createService() {
   const auditService = new AuditNotificationService();
@@ -129,5 +131,86 @@ describe("shift attendance service", () => {
     const { service } = createService();
 
     expect(() => service.getShift("SFT-999999")).toThrow("Api Request Error");
+  });
+
+  describe("GAP-CONF-08 vehicle dispatchability check on clock-in", () => {
+    it("rejects clock-in when vehicle is undispatchable (VEHICLE_NOT_DISPATCHABLE)", () => {
+      const auditService = new AuditNotificationService();
+      const repository = new ShiftAttendanceRepository();
+      const mockRegulatoryService = {
+        getVehicleDispatchability: vi.fn((vehicleId: string) => {
+          if (vehicleId === "VEH-BLOCKED-001") return false;
+          return true;
+        }),
+      } as unknown as RegulatoryRegistryService;
+
+      const service = new ShiftAttendanceService(
+        auditService,
+        repository,
+        mockRegulatoryService,
+      );
+
+      try {
+        service.clockIn({
+          driverId: "driver-dispatch-001",
+          vehicleId: "VEH-BLOCKED-001",
+        });
+        expect.unreachable("should have thrown ApiRequestError");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApiRequestError);
+        const apiError = error as ApiRequestError;
+        expect(apiError.code).toBe("VEHICLE_NOT_DISPATCHABLE");
+        expect(apiError.getStatus()).toBe(400);
+        const response = apiError.getResponse() as { error: { details?: Record<string, unknown> } };
+        expect(response.error.details).toEqual({ vehicleId: "VEH-BLOCKED-001" });
+      }
+      expect(mockRegulatoryService.getVehicleDispatchability).toHaveBeenCalledWith("VEH-BLOCKED-001");
+    });
+
+    it("accepts clock-in when vehicle is dispatchable", () => {
+      const auditService = new AuditNotificationService();
+      const repository = new ShiftAttendanceRepository();
+      const mockRegulatoryService = {
+        getVehicleDispatchability: vi.fn().mockReturnValue(true),
+      } as unknown as RegulatoryRegistryService;
+
+      const service = new ShiftAttendanceService(
+        auditService,
+        repository,
+        mockRegulatoryService,
+      );
+
+      const shift = service.clockIn({
+        driverId: "driver-dispatch-002",
+        vehicleId: "VEH-OK-001",
+        location: "Depot Main",
+      });
+
+      expect(shift.status).toBe("active");
+      expect(shift.vehicleId).toBe("VEH-OK-001");
+      expect(mockRegulatoryService.getVehicleDispatchability).toHaveBeenCalledWith("VEH-OK-001");
+    });
+
+    it("allows clock-in without a vehicle even when regulatory service is configured", () => {
+      const auditService = new AuditNotificationService();
+      const repository = new ShiftAttendanceRepository();
+      const mockRegulatoryService = {
+        getVehicleDispatchability: vi.fn(),
+      } as unknown as RegulatoryRegistryService;
+
+      const service = new ShiftAttendanceService(
+        auditService,
+        repository,
+        mockRegulatoryService,
+      );
+
+      const shift = service.clockIn({
+        driverId: "driver-dispatch-003",
+      });
+
+      expect(shift.status).toBe("active");
+      expect(shift.vehicleId).toBeNull();
+      expect(mockRegulatoryService.getVehicleDispatchability).not.toHaveBeenCalled();
+    });
   });
 });
