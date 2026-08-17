@@ -219,6 +219,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
       {} as never,
       {} as never,
       jwtAuthService,
+      {} as never,
       identityRepository,
       auditService,
     );

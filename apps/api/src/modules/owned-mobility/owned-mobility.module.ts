@@ -1,6 +1,7 @@
 import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
+import { IdempotencyModule } from "../../common/idempotency";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { CallcenterModule } from "../callcenter/callcenter.module";
@@ -21,6 +22,7 @@ import { OwnedMobilityService } from "./owned-mobility.service";
 @Module({
   imports: [
     DatabaseModule,
+    IdempotencyModule,
     RegulatoryRegistryModule,
     ServiceAreaModule,
     ServiceProductModule,

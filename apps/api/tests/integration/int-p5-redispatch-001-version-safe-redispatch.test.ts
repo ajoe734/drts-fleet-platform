@@ -109,7 +109,10 @@ async function createHarness() {
     fareAnomalyService,
   );
 
-  return { service, controller: new OwnedMobilityController(service) };
+  return {
+    service,
+    controller: new OwnedMobilityController(service, {} as never),
+  };
 }
 
 function createRide(service: OwnedMobilityService) {
