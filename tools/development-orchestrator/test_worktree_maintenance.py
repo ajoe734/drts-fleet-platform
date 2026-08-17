@@ -166,7 +166,17 @@ class DiskGuardTests(unittest.TestCase):
             self.assertFalse(completed.exists())
             self.assertTrue(running.exists())
 
-    def test_release_skips_locked_initializing_worktree_without_archiving(self) -> None:
+    def _locked_marker(self, root: Path, worktree: Path) -> Path:
+        gitdir = (worktree / ".git").read_text(encoding="utf-8").strip()
+        return Path(gitdir[len("gitdir:"):].strip()) / "locked"
+
+    def _age_the_lock(self, root: Path, worktree: Path, seconds: float) -> None:
+        marker = self._locked_marker(root, worktree)
+        old = time.time() - seconds
+        os.utime(marker, (old, old))
+
+    def test_release_skips_worktree_whose_add_is_still_in_progress(self) -> None:
+        """A live `git worktree add` holds `initializing`; do not race it."""
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "repo"
             archive_root = Path(tmpdir) / "archive"
@@ -186,9 +196,63 @@ class DiskGuardTests(unittest.TestCase):
             self.assertEqual(result["removed"], 0)
             self.assertEqual(result["archived"], 0)
             self.assertEqual(result["skipped"], 1)
+            self.assertEqual(result["unlocked"], 0)
             self.assertTrue(locked.exists())
             self.assertFalse(archive_root.exists())
             self.assertIn("initializing", " ".join(result["warnings"]))
+
+    def test_release_reclaims_worktree_stranded_by_an_interrupted_add(self) -> None:
+        """The leak this used to assert as correct behaviour.
+
+        `git worktree add` sets `locked: initializing` and clears it when the
+        add finishes. A supervisor SIGKILLed mid-add never clears it, and the
+        old unconditional skip meant the worktree was pinned forever: 21 of
+        them held 13 GB, the oldest stranded since 2026-08-05, while the disk
+        guard reported `{"checked": 23, "removed": 0, "skipped": 23}`.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            archive_root = Path(tmpdir) / "archive"
+            root.mkdir()
+            self._init_repo(root)
+            stranded = root / ".artifacts/worktrees/auto/claude-stranded"
+            _git(root, "worktree", "add", "--detach", str(stranded), "dev")
+            _git(root, "worktree", "lock", "--reason", "initializing", str(stranded))
+            self._age_the_lock(root, stranded, seconds=48 * 3600)
+
+            result = worktree_maintenance.release_inactive_worker_worktrees(
+                self._repo_config(root),
+                {"workers": {}},
+                {"archive_root": str(archive_root)},
+            )
+
+            self.assertEqual(result["unlocked"], 1)
+            self.assertEqual(result["removed"], 1)
+            self.assertFalse(stranded.exists())
+            self.assertIn("dead initializing lock", " ".join(result["warnings"]))
+
+    def test_release_respects_a_deliberate_lock_however_old(self) -> None:
+        """Only git's own transient reason expires; `lock --reason` means hands off."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            archive_root = Path(tmpdir) / "archive"
+            root.mkdir()
+            self._init_repo(root)
+            held = root / ".artifacts/worktrees/auto/claude-held"
+            _git(root, "worktree", "add", "--detach", str(held), "dev")
+            _git(root, "worktree", "lock", "--reason", "keeping for postmortem", str(held))
+            self._age_the_lock(root, held, seconds=90 * 24 * 3600)
+
+            result = worktree_maintenance.release_inactive_worker_worktrees(
+                self._repo_config(root),
+                {"workers": {}},
+                {"archive_root": str(archive_root)},
+            )
+
+            self.assertEqual(result["unlocked"], 0)
+            self.assertEqual(result["removed"], 0)
+            self.assertEqual(result["skipped"], 1)
+            self.assertTrue(held.exists())
 
     def test_inactive_worktree_cleanup_is_throttled_between_ticks(self) -> None:
         state: dict = {}
