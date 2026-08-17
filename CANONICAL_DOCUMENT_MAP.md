@@ -40,6 +40,7 @@ the canonical PRD / SA files in the same wave.
 - `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`
 - `docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md`
 - `docs/01-decisions/SD-DP-20260817-009-domain-event-contract-and-write-authority.md`
+- `docs/01-decisions/SD-DP-20260817-010-state-models-conformance-resolution.md`
 
 Optional future addition beyond the accepted packets above:
 

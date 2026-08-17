@@ -1526,19 +1526,23 @@ Phase 1 不依賴 Phase 2 才能上線。
 
 ## 11.2 forwarded 訂單狀態
 
-- RECEIVED
-- MAPPED
-- ELIGIBLE
-- BROADCASTED
-- ACCEPT_PENDING
-- CONFIRMED_BY_PLATFORM
-- NATIVE_IN_PROGRESS
-- COMPLETED_SYNCED
-- REJECTED
-- LOST_RACE
-- EXPIRED
-- CANCELLED_BY_PLATFORM
-- SYNC_ERROR
+依 SD-DP-20260817-010 與 Service Contracts 3.7，轉派訂單（forwarded order）為第三方平台鏡像，採用 8 狀態生命週期：
+
+- RECEIVED (`received`): 外部平台訂單已接收並寫入 DRTS 鏡像。
+- BROADCASTED (`broadcasted`): 經即時資格與車型過濾後，已向合格司機群廣播。
+- ACCEPT_PENDING (`accept_pending`): 本地司機發起搶單，正向外部平台 relay 搶單請求並等待外部確認。
+- CONFIRMED_BY_PLATFORM (`confirmed_by_platform`): 外部平台確認搶單成功，司機端生成可履約任務（外部狀態為 authoritative，由 `authoritativeSnapshot.nativeStatus` 同步）。
+- COMPLETED_SYNCED (`completed_synced`): 外部平台行程完工並同步至 DRTS 鏡像。
+- LOST_RACE (`lost_race`): 搶單失敗（由其他司機搶得或外部平台逾期未確認）。
+- CANCELLED_BY_PLATFORM (`cancelled_by_platform`): 外部平台取消訂單。
+- SYNC_FAILED (`sync_failed`): 外部同步異常或 relay 失敗，需進入對帳與人工備援（`reconciliationJob` / `manualFallback`）。
+
+> **狀態模型審計說明 (GAP-CONF-04)**：
+> 1. 原草案 `MAPPED` 與 `ELIGIBLE` 屬 `ingestExternalOrder` / `broadcastOrder` 之記憶體管線同步運算階段，非持久化頂層生命週期狀態。
+> 2. `NATIVE_IN_PROGRESS` 由 `confirmed_by_platform` 狀態配合 `authoritativeSnapshot.nativeStatus` 與統一司機任務視圖之 `driverActionState: "in_progress"` 完整表達，無須在鏡像頂層拆分冗餘狀態。
+> 3. `REJECTED` 為單一司機拒絕廣播之動作結果（將該司機自 `candidateDriverIds` 移除），訂單本體維持 `broadcasted` 供其他候選司機搶單，非訂單終態。
+> 4. `EXPIRED` 由外部取消 (`cancelled_by_platform`) 或搶單未中 (`lost_race`) 涵蓋。
+> 5. `SYNC_ERROR` 統一標準化為 `sync_failed`。
 
 ## 11.3 派單執行狀態
 
@@ -1553,17 +1557,30 @@ Phase 1 不依賴 Phase 2 才能上線。
 
 ## 11.4 司機狀態
 
-- LOGGED_OUT
-- READY_OFFLINE
-- AVAILABLE_STANDARD
-- AVAILABLE_BUSINESS
-- AVAILABLE_HYBRID
-- RESERVED
-- ENROUTE
-- ON_TRIP
-- PAUSED
-- INCIDENT_HOLD
-- SUSPENDED
+依 SD-DP-20260817-010，司機狀態解耦為四個正交維度與動態資格引擎，取代單一 11 狀態列舉：
+
+1. **監管帳號狀態 (Regulatory Profile Status)** (`reg.driver_status_t`):
+   - `ACTIVE`: 帳號正常
+   - `INACTIVE`: 未開通/非活躍
+   - `SUSPENDED`: 停權（硬性阻擋 JWT 驗證 `assertDriverAuthEligible` 與派單）
+   - `TERMINATED`: 解約/除名
+2. **班表與出勤上線狀態 (Shift & Platform Presence)**:
+   - 班表狀態 (`ShiftRecord.status`): `ACTIVE`（當班中）/ `COMPLETED`（已下班）
+   - 上線狀態 (`PlatformPresenceStatus`): `ONLINE`（上線接單）/ `OFFLINE`（離線）
+   - 規則：車輛不可用或司機停權時不得切為 `ONLINE`。
+3. **任務履約生命週期 (Driver Task Lifecycle)** (`DriverTaskStatus`):
+   - `PENDING_ACCEPTANCE`: 待接受任務
+   - `ACCEPTED`: 已接單
+   - `ENROUTE_PICKUP`: 前往上車點（對應舊 `ENROUTE`）
+   - `ARRIVED_PICKUP`: 抵達上車點
+   - `ON_TRIP`: 行程中（對應舊 `ON_TRIP`）
+   - `PROOF_PENDING`: 待提交憑證
+   - `COMPLETED`: 任務完成
+   - `REJECTED` / `CANCELLED`: 拒絕或取消
+4. **即時供給資格與分桶判定引擎 (Dynamic Qualification Engine)** (`getDriverAvailability` / `VehicleEligibilityService`):
+   - 司機無需手動切換 `AVAILABLE_STANDARD` / `AVAILABLE_BUSINESS` / `AVAILABLE_HYBRID`。系統於派單時依司機有效執照（計程車/多元）、車輛審查（車型/能源/排他審核）、上線狀態及當前任務佔用動態計算各 Service Bucket (`standard_taxi`, `business_dispatch`) 之可派單資格。
+5. **預約與排隊鎖定 (Reservation & Queue Locks)**:
+   - 商務預約鎖車/鎖司機（對應舊 `RESERVED`）由 `ReservationHoldStatus` (`requested`, `released`, `redispatch_queue`, `exception_hold`) 與訂單狀態 `PREASSIGNED` 承載；臨時暫停與事件調查（對應舊 `PAUSED`, `INCIDENT_HOLD`）由出席/合規閘門管理。
 
 ## 11.5 申訴案件狀態
 
