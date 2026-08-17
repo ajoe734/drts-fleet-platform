@@ -114,6 +114,7 @@ import {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { IdempotencyRepository, IdempotencyService } from "../../common/idempotency";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { resolvePassengerSubjectRef } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
@@ -494,7 +495,31 @@ export class OwnedMobilityService
     private readonly serviceAreaService?: ServiceAreaService,
     @Optional()
     private readonly fareAnomalyService?: FareAnomalyService,
+    @Optional()
+    private readonly idempotencyService?: IdempotencyService,
   ) {}
+
+  private _fallbackIdempotencyService?: IdempotencyService;
+
+  getIdempotencyService(): IdempotencyService {
+    if (this.idempotencyService) {
+      return this.idempotencyService;
+    }
+    if (!this._fallbackIdempotencyService) {
+      this._fallbackIdempotencyService = new IdempotencyService(
+        new IdempotencyRepository(),
+      );
+    }
+    return this._fallbackIdempotencyService;
+  }
+
+  getDispatchJob(dispatchJobId: string): DispatchJobRecord | null {
+    return (
+      this.dispatchJobs.find(
+        (candidateJob) => candidateJob.dispatchJobId === dispatchJobId,
+      ) ?? null
+    );
+  }
 
   private callRecordingListenersRegistered = false;
 
@@ -598,6 +623,99 @@ export class OwnedMobilityService
   }
 
   createPassengerOrder(
+    command: CreateOwnedOrderCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+  ): OwnedOrderRecord;
+  createPassengerOrder(
+    command: CreateOwnedOrderCommand,
+    identity: BootstrapRequestIdentity | null | undefined,
+    requestId: string | undefined,
+    runtimeProfileCodeHeader: string | undefined,
+    idempotencyKeyHeader: string | undefined,
+    options?: { required?: boolean },
+  ): Promise<OwnedOrderRecord>;
+  createPassengerOrder(
+    command: CreateOwnedOrderCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
+  ): MaybePromise<OwnedOrderRecord>;
+  createPassengerOrder(
+    command: CreateOwnedOrderCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
+  ): MaybePromise<OwnedOrderRecord> {
+    const resolvedKey =
+      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+
+    if (resolvedKey || options?.required) {
+      return this._executePassengerOrderIdempotent(
+        command,
+        resolvedKey,
+        identity,
+        requestId,
+        runtimeProfileCodeHeader,
+        options,
+      );
+    }
+
+    return this._executeCreatePassengerOrder(
+      command,
+      identity,
+      requestId,
+      runtimeProfileCodeHeader,
+    );
+  }
+
+  private async _executePassengerOrderIdempotent(
+    command: CreateOwnedOrderCommand,
+    resolvedKey?: string,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+    options?: { required?: boolean },
+  ): Promise<OwnedOrderRecord> {
+    const scope = "orders:passenger_create";
+    const idempotencyService = this.getIdempotencyService();
+
+    const result = await idempotencyService.execute<OwnedOrderRecord>({
+      scope,
+      idempotencyKey: resolvedKey,
+      tenantId: null,
+      actorId: identity?.actorId ?? command.passenger?.passengerId ?? null,
+      requestPath: "/owned-mobility/orders",
+      required: options?.required ?? false,
+      payload: {
+        ...command,
+        ...(command.idempotencyKey
+          ? { idempotencyKey: resolvedKey }
+          : {}),
+      },
+      execute: async () => {
+        const order = this._executeCreatePassengerOrder(
+          command,
+          identity,
+          requestId,
+          runtimeProfileCodeHeader,
+        );
+        return {
+          data: order,
+          statusCode: 201,
+        };
+      },
+    });
+
+    return result.data;
+  }
+
+  private _executeCreatePassengerOrder(
     command: CreateOwnedOrderCommand,
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
@@ -1112,6 +1230,88 @@ export class OwnedMobilityService
   }
 
   createTenantBooking(
+    command: CreateTenantBookingCommand,
+    tenantId: string,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
+  ): MaybePromise<TenantBookingResult> {
+    const resolvedKey =
+      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+
+    if (resolvedKey || options?.required) {
+      return this._executeTenantBookingIdempotent(
+        command,
+        tenantId,
+        resolvedKey,
+        identity,
+        requestId,
+        runtimeProfileCodeHeader,
+        options,
+      );
+    }
+
+    return this._executeCreateTenantBooking(
+      command,
+      tenantId,
+      identity,
+      requestId,
+      runtimeProfileCodeHeader,
+    );
+  }
+
+  private async _executeTenantBookingIdempotent(
+    command: CreateTenantBookingCommand,
+    tenantId: string,
+    resolvedKey?: string,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+    options?: { required?: boolean },
+  ): Promise<TenantBookingResult> {
+    const scope = `tenant:${tenantId}:booking_create`;
+    const idempotencyService = this.getIdempotencyService();
+
+    const result = await idempotencyService.execute<TenantBookingResult>({
+      scope,
+      idempotencyKey: resolvedKey,
+      tenantId,
+      actorId: identity?.actorId ?? command.passengerId ?? command.passenger?.passengerId ?? null,
+      requestPath: "/owned-mobility/tenant/bookings",
+      required: options?.required ?? false,
+      payload: {
+        ...command,
+        ...(command.idempotencyKey
+          ? { idempotencyKey: resolvedKey }
+          : {}),
+      },
+      execute: async () => {
+        const bookingResult = await this._executeCreateTenantBooking(
+          command,
+          tenantId,
+          identity,
+          requestId,
+          runtimeProfileCodeHeader,
+        );
+        return {
+          data: {
+            ...bookingResult,
+            replayed: false,
+          },
+          statusCode: 201,
+        };
+      },
+    });
+
+    return {
+      ...result.data,
+      replayed: result.isReplay,
+    };
+  }
+
+  private _executeCreateTenantBooking(
     command: CreateTenantBookingCommand,
     tenantId: string,
     identity?: BootstrapRequestIdentity | null,
@@ -2271,6 +2471,65 @@ export class OwnedMobilityService
     orderId: string,
     command: DispatchOrderCommand,
     requestId?: string,
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
+  ): MaybePromise<any> {
+    const resolvedKey =
+      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+
+    if (resolvedKey || options?.required) {
+      return this._executeDispatchOrderIdempotent(
+        orderId,
+        command,
+        resolvedKey,
+        requestId,
+        options,
+      );
+    }
+
+    return this._executeDispatchOrder(orderId, command, requestId);
+  }
+
+  private async _executeDispatchOrderIdempotent(
+    orderId: string,
+    command: DispatchOrderCommand,
+    resolvedKey?: string,
+    requestId?: string,
+    options?: { required?: boolean },
+  ): Promise<any> {
+    const order = this.requireOrder(orderId);
+    const scope = `dispatch:order:${orderId}:assign`;
+    const idempotencyService = this.getIdempotencyService();
+
+    const result = await idempotencyService.execute<any>({
+      scope,
+      idempotencyKey: resolvedKey,
+      tenantId: order.tenantId,
+      actorId: null,
+      requestPath: `/owned-mobility/orders/${orderId}/dispatch`,
+      required: options?.required ?? false,
+      payload: {
+        ...command,
+        ...(command.idempotencyKey
+          ? { idempotencyKey: resolvedKey }
+          : {}),
+      },
+      execute: async () => {
+        const res = this._executeDispatchOrder(orderId, command, requestId);
+        return {
+          data: res,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return result.data;
+  }
+
+  private _executeDispatchOrder(
+    orderId: string,
+    command: DispatchOrderCommand,
+    requestId?: string,
   ) {
     const order = this.requireOrder(orderId);
     if (
@@ -2529,6 +2788,65 @@ export class OwnedMobilityService
   }
 
   redispatchOrder(
+    orderId: string,
+    command: RedispatchOrderCommand,
+    requestId?: string,
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
+  ): MaybePromise<any> {
+    const resolvedKey =
+      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+
+    if (resolvedKey || options?.required) {
+      return this._executeRedispatchOrderIdempotent(
+        orderId,
+        command,
+        resolvedKey,
+        requestId,
+        options,
+      );
+    }
+
+    return this._executeRedispatchOrder(orderId, command, requestId);
+  }
+
+  private async _executeRedispatchOrderIdempotent(
+    orderId: string,
+    command: RedispatchOrderCommand,
+    resolvedKey?: string,
+    requestId?: string,
+    options?: { required?: boolean },
+  ): Promise<any> {
+    const order = this.requireOrder(orderId);
+    const scope = `dispatch:order:${orderId}:assign`;
+    const idempotencyService = this.getIdempotencyService();
+
+    const result = await idempotencyService.execute<any>({
+      scope,
+      idempotencyKey: resolvedKey,
+      tenantId: order.tenantId,
+      actorId: null,
+      requestPath: `/owned-mobility/orders/${orderId}/redispatch`,
+      required: options?.required ?? false,
+      payload: {
+        ...command,
+        ...(command.idempotencyKey
+          ? { idempotencyKey: resolvedKey }
+          : {}),
+      },
+      execute: async () => {
+        const res = this._executeRedispatchOrder(orderId, command, requestId);
+        return {
+          data: res,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return result.data;
+  }
+
+  private _executeRedispatchOrder(
     orderId: string,
     command: RedispatchOrderCommand,
     requestId?: string,
@@ -3238,7 +3556,21 @@ export class OwnedMobilityService
   assignDispatch(
     command: AssignDispatchCommand,
     requestId?: string,
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
   ): MaybePromise<DispatchAssignmentResult> {
+    const resolvedKey =
+      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+
+    if (resolvedKey || options?.required) {
+      return this._executeAssignDispatchIdempotent(
+        command,
+        resolvedKey,
+        requestId,
+        options,
+      );
+    }
+
     const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
 
@@ -3252,7 +3584,122 @@ export class OwnedMobilityService
     );
   }
 
+  private async _executeAssignDispatchIdempotent(
+    command: AssignDispatchCommand,
+    resolvedKey?: string,
+    requestId?: string,
+    options?: { required?: boolean },
+  ): Promise<DispatchAssignmentResult> {
+    const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
+    const order = this.requireOrder(dispatchJob.orderId);
+    const scope = `dispatch:order:${order.orderId}:assign`;
+    const idempotencyService = this.getIdempotencyService();
+
+    const result = await idempotencyService.execute<DispatchAssignmentResult>({
+      scope,
+      idempotencyKey: resolvedKey,
+      tenantId: order.tenantId,
+      actorId: null,
+      requestPath: "/owned-mobility/dispatch/assign",
+      required: options?.required ?? false,
+      payload: {
+        ...command,
+        ...(command.idempotencyKey
+          ? { idempotencyKey: resolvedKey }
+          : {}),
+      },
+      execute: async () => {
+        const res = await this.createDispatchAssignment(
+          dispatchJob,
+          order,
+          command.vehicleId,
+          command.driverId,
+          command.sandboxDispatchSnapshot ?? null,
+          requestId,
+        );
+        return {
+          data: res,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return result.data;
+  }
+
   reassignDispatch(
+    command: ReassignDispatchCommand,
+    requestId?: string,
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
+  ): MaybePromise<DispatchAssignmentResult> {
+    const resolvedKey =
+      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+
+    if (resolvedKey || options?.required) {
+      return this._executeReassignDispatchIdempotent(
+        command,
+        resolvedKey,
+        requestId,
+        options,
+      );
+    }
+
+    const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
+    const order = this.requireOrder(dispatchJob.orderId);
+
+    return this._executeReassignDispatch(
+      dispatchJob,
+      order,
+      command,
+      requestId,
+    );
+  }
+
+  private async _executeReassignDispatchIdempotent(
+    command: ReassignDispatchCommand,
+    resolvedKey?: string,
+    requestId?: string,
+    options?: { required?: boolean },
+  ): Promise<DispatchAssignmentResult> {
+    const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
+    const order = this.requireOrder(dispatchJob.orderId);
+    const scope = `dispatch:order:${order.orderId}:assign`;
+    const idempotencyService = this.getIdempotencyService();
+
+    const result = await idempotencyService.execute<DispatchAssignmentResult>({
+      scope,
+      idempotencyKey: resolvedKey,
+      tenantId: order.tenantId,
+      actorId: null,
+      requestPath: "/owned-mobility/dispatch/reassign",
+      required: options?.required ?? false,
+      payload: {
+        ...command,
+        ...(command.idempotencyKey
+          ? { idempotencyKey: resolvedKey }
+          : {}),
+      },
+      execute: async () => {
+        const res = await this._executeReassignDispatch(
+          dispatchJob,
+          order,
+          command,
+          requestId,
+        );
+        return {
+          data: res,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return result.data;
+  }
+
+  private _executeReassignDispatch(
+    dispatchJob: DispatchJobRecord,
+    order: OwnedOrderRecord,
     command: ReassignDispatchCommand,
     requestId?: string,
   ): MaybePromise<DispatchAssignmentResult> {
@@ -3263,9 +3710,6 @@ export class OwnedMobilityService
         "Reassign reason is required.",
       );
     }
-
-    const dispatchJob = this.requireDispatchJob(command.dispatchJobId);
-    const order = this.requireOrder(dispatchJob.orderId);
 
     const activeAssignment = this.dispatchAssignments.find(
       (assignment) =>
@@ -10100,6 +10544,7 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
+    idempotencyKeyHeader?: string,
   ): Promise<TenantBookingResult> {
     if (
       !identity ||
@@ -10155,14 +10600,19 @@ export class OwnedMobilityService
       });
     }
 
-    if (command.idempotencyKey) {
+    // Reconcile header and body idempotency key with documented precedence:
+    // HTTP Header `Idempotency-Key` takes precedence over body field `idempotencyKey`.
+    const resolvedIdempotencyKey =
+      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+
+    if (resolvedIdempotencyKey) {
       const existing = Array.from(this.orders.values()).find(
         (o) =>
           o.tenantId === tenantId &&
           o.partnerEntrySlug === identity.partnerEntrySlug &&
           o.passenger?.passengerId === passengerId &&
           this.getReferralLifecycle(o)?.bookingIdempotencyKey ===
-            command.idempotencyKey,
+            resolvedIdempotencyKey,
       );
       if (existing) {
         return {
@@ -10176,6 +10626,92 @@ export class OwnedMobilityService
           replayed: true,
         };
       }
+
+      const scope = `tenant:${tenantId}:booking_create`;
+      const idempotencyService = this.getIdempotencyService();
+
+      const result = await idempotencyService.execute<TenantBookingResult>({
+        scope,
+        idempotencyKey: resolvedIdempotencyKey,
+        tenantId,
+        actorId: passengerId,
+        requestPath: "/partner/referral/passenger/bookings",
+        required: false,
+        payload: {
+          ...command,
+          ...(command.idempotencyKey
+            ? { idempotencyKey: resolvedIdempotencyKey }
+            : {}),
+        },
+        execute: async () => {
+          const nowIso = new Date().toISOString();
+          const tenantBookingCommand: CreateTenantBookingCommand = {
+            businessDispatchSubtype: partnerEntry.businessDispatchSubtype,
+            direction: "pickup",
+            pickup: {
+              address: command.pickupAddress,
+              lat: 25.033,
+              lng: 121.565,
+            },
+            dropoff: {
+              address: command.dropoffAddress,
+              lat: 25.048,
+              lng: 121.517,
+            },
+            reservationWindowStart: nowIso,
+            reservationWindowEnd: new Date(Date.now() + 3600000).toISOString(),
+            passengerId,
+            passenger: {
+              passengerId,
+              name: command.passengerName || "Referral Passenger",
+              phone: command.passengerPhone || "0912345678",
+            },
+            ...(identity.partnerEntrySlug
+              ? { partnerEntrySlug: identity.partnerEntrySlug }
+              : {}),
+          };
+
+          const bookingResult = await this.createTenantBooking(
+            tenantBookingCommand,
+            tenantId,
+            identity,
+            requestId,
+            runtimeProfileCodeHeader,
+          );
+
+          if (
+            typeof bookingResult === "object" &&
+            bookingResult &&
+            "orderId" in bookingResult
+          ) {
+            const order = this.orders.find(
+              (o) => o.orderId === bookingResult.orderId,
+            );
+            if (order) {
+              const nextOrder = this.updateReferralLifecycle(order, {
+                bookingIdempotencyKey: resolvedIdempotencyKey,
+              });
+              await this.persistChangesRequired(
+                { orders: [nextOrder] },
+                "referral.booking.idempotency",
+              );
+            }
+          }
+
+          return {
+            data: {
+              ...bookingResult,
+              replayed: false,
+            },
+            statusCode: 201,
+          };
+        },
+      });
+
+      return {
+        ...result.data,
+        replayed: result.isReplay,
+      };
     }
 
     const nowIso = new Date().toISOString();
@@ -10202,7 +10738,9 @@ export class OwnedMobilityService
         name: command.passengerName || "Referral Passenger",
         phone: command.passengerPhone || "0912345678",
       },
-      partnerEntrySlug: identity.partnerEntrySlug,
+      ...(identity.partnerEntrySlug
+        ? { partnerEntrySlug: identity.partnerEntrySlug }
+        : {}),
     };
 
     const result = await this.createTenantBooking(
@@ -10212,24 +10750,6 @@ export class OwnedMobilityService
       requestId,
       runtimeProfileCodeHeader,
     );
-
-    if (
-      command.idempotencyKey &&
-      typeof result === "object" &&
-      result &&
-      "orderId" in result
-    ) {
-      const order = this.orders.find((o) => o.orderId === result.orderId);
-      if (order) {
-        const nextOrder = this.updateReferralLifecycle(order, {
-          bookingIdempotencyKey: command.idempotencyKey,
-        });
-        await this.persistChangesRequired(
-          { orders: [nextOrder] },
-          "referral.booking.idempotency",
-        );
-      }
-    }
 
     return result;
   }

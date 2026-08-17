@@ -142,10 +142,11 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
       "req-fleets-closeout-004-api-create",
     );
     const orderId = createResponse.data.orderId;
-    const dispatchResponse = controller.dispatchOrder(
+    const dispatchResponse = await controller.dispatchOrder(
       orderId,
       { mode: "auto" },
       "req-fleets-closeout-004-api-dispatch",
+      "idem-fleets-closeout-004-api-dispatch",
     );
     const orderResponse = controller.getOrder(
       orderId,

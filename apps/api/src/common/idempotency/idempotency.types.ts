@@ -28,14 +28,14 @@ export interface CreateProcessingResult {
   inserted: boolean;
 }
 
-export interface ExecuteIdempotentOptions<TBody, TResponse> {
+export interface ExecuteIdempotentOptions<TResponse = unknown> {
   scope: string;
   idempotencyKey?: string | null | undefined;
   tenantId?: string | null | undefined;
   actorId?: string | null | undefined;
   requestPath?: string | null | undefined;
   required?: boolean | undefined;
-  payload: TBody;
+  payload: unknown;
   execute: () => Promise<
     | {
         data: TResponse;

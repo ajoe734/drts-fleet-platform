@@ -115,17 +115,20 @@ export class OwnedMobilityController {
   }
 
   @Post("orders")
-  createOwnedOrder(
+  async createOwnedOrder(
     @Body() command: CreateOwnedOrderCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    const order = this.ownedMobilityService.createPassengerOrder(
+    const order = await this.ownedMobilityService.createPassengerOrder(
       command,
       identity,
       requestId,
       runtimeProfileCode,
+      idempotencyKey,
+      { required: true },
     );
     return toApiSuccessEnvelope(
       {
@@ -221,6 +224,7 @@ export class OwnedMobilityController {
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const result = await this.ownedMobilityService.createTenantBooking(
       command,
@@ -228,6 +232,8 @@ export class OwnedMobilityController {
       identity,
       requestId,
       runtimeProfileCode,
+      idempotencyKey,
+      { required: true },
     );
     return toApiSuccessEnvelope(result, requestId);
   }
@@ -239,6 +245,7 @@ export class OwnedMobilityController {
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const resolvedTenantId = this.requireTenantId(tenantId);
     if (command.eligibilityVerificationId && this.tenantPartnerService) {
@@ -253,6 +260,8 @@ export class OwnedMobilityController {
       identity,
       requestId,
       runtimeProfileCode,
+      idempotencyKey,
+      { required: true },
     );
     return toApiSuccessEnvelope(
       {
@@ -305,6 +314,7 @@ export class OwnedMobilityController {
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const result =
       await this.ownedMobilityService.createReferralPassengerBooking(
@@ -312,6 +322,7 @@ export class OwnedMobilityController {
         identity,
         requestId,
         runtimeProfileCode,
+        idempotencyKey,
       );
     return toApiSuccessEnvelope(result, requestId);
   }
@@ -499,25 +510,39 @@ export class OwnedMobilityController {
   }
 
   @Post("orders/:orderId/dispatch")
-  dispatchOrder(
+  async dispatchOrder(
     @Param("orderId") orderId: string,
     @Body() command: DispatchOrderCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.dispatchOrder(orderId, command, requestId),
+      await this.ownedMobilityService.dispatchOrder(
+        orderId,
+        command,
+        requestId,
+        idempotencyKey,
+        { required: true },
+      ),
       requestId,
     );
   }
 
   @Post("orders/:orderId/redispatch")
-  redispatchOrder(
+  async redispatchOrder(
     @Param("orderId") orderId: string,
     @Body() command: RedispatchOrderCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.redispatchOrder(orderId, command, requestId),
+      await this.ownedMobilityService.redispatchOrder(
+        orderId,
+        command,
+        requestId,
+        idempotencyKey,
+        { required: true },
+      ),
       requestId,
     );
   }
@@ -666,9 +691,15 @@ export class OwnedMobilityController {
   async assignDispatch(
     @Body() command: AssignDispatchCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.assignDispatch(command, requestId),
+      await this.ownedMobilityService.assignDispatch(
+        command,
+        requestId,
+        idempotencyKey,
+        { required: true },
+      ),
       requestId,
     );
   }
@@ -677,9 +708,15 @@ export class OwnedMobilityController {
   async reassignDispatch(
     @Body() command: ReassignDispatchCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.reassignDispatch(command, requestId),
+      await this.ownedMobilityService.reassignDispatch(
+        command,
+        requestId,
+        idempotencyKey,
+        { required: true },
+      ),
       requestId,
     );
   }
