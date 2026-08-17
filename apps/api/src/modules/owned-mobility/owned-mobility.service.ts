@@ -10668,7 +10668,9 @@ export class OwnedMobilityService
               name: command.passengerName || "Referral Passenger",
               phone: command.passengerPhone || "0912345678",
             },
-            partnerEntrySlug: identity.partnerEntrySlug,
+            ...(identity.partnerEntrySlug
+              ? { partnerEntrySlug: identity.partnerEntrySlug }
+              : {}),
           };
 
           const bookingResult = await this.createTenantBooking(
@@ -10738,7 +10740,9 @@ export class OwnedMobilityService
         name: command.passengerName || "Referral Passenger",
         phone: command.passengerPhone || "0912345678",
       },
-      partnerEntrySlug: identity.partnerEntrySlug,
+      ...(identity.partnerEntrySlug
+        ? { partnerEntrySlug: identity.partnerEntrySlug }
+        : {}),
     };
 
     const result = await this.createTenantBooking(

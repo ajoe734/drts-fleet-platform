@@ -36,6 +36,8 @@ describe("OwnedMobilityController tenant booking routes", () => {
       null,
       "req-e2e-create",
       undefined,
+      undefined,
+      { required: true },
     );
   });
 
@@ -112,6 +114,8 @@ describe("OwnedMobilityController tenant booking routes", () => {
       identity,
       "req-e2e-partner",
       undefined,
+      undefined,
+      { required: true },
     );
     expect(
       tenantPartnerService.hydratePartnerEligibilityVerification,
@@ -225,7 +229,12 @@ describe("OwnedMobilityController tenant booking routes", () => {
       status: "assigned",
       taskId: "task-e2e-001",
     });
-    expect(service.assignDispatch).toHaveBeenCalledWith({}, "req-e2e-assign");
+    expect(service.assignDispatch).toHaveBeenCalledWith(
+      {},
+      "req-e2e-assign",
+      undefined,
+      { required: true },
+    );
   });
 
   it("awaits dispatch reassignment before wrapping the API envelope", async () => {
@@ -251,6 +260,8 @@ describe("OwnedMobilityController tenant booking routes", () => {
     expect(service.reassignDispatch).toHaveBeenCalledWith(
       {},
       "req-e2e-reassign",
+      undefined,
+      { required: true },
     );
   });
 

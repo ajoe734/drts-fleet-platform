@@ -55,6 +55,12 @@ function createHarness() {
     tenantPartnerService,
     undefined,
     undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
     idempotencyService,
   );
 
@@ -62,8 +68,8 @@ function createHarness() {
 
   const controller = new OwnedMobilityController(
     ownedMobilityService,
-    idempotencyService,
     tenantPartnerService,
+    idempotencyService,
   );
 
   return {
@@ -115,8 +121,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
         controller.createOwnedOrder(
           orderCommand,
           passengerIdentity,
-          undefined, // missing header
           "req-1",
+          undefined,
+          undefined, // missing header
         ),
       ).rejects.toMatchObject({
         status: 400,
@@ -136,8 +143,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
         controller.createOwnedOrder(
           orderCommand,
           passengerIdentity,
-          longKey,
           "req-1",
+          undefined,
+          longKey,
         ),
       ).rejects.toMatchObject({
         status: 400,
@@ -156,8 +164,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const firstResponse = await controller.createOwnedOrder(
         orderCommand,
         passengerIdentity,
-        idempotencyKey,
         "req-1",
+        undefined,
+        idempotencyKey,
       );
 
       expect(firstResponse.data.orderId).toBeDefined();
@@ -168,8 +177,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const replayResponse = await controller.createOwnedOrder(
         orderCommand,
         passengerIdentity,
-        idempotencyKey,
         "req-2",
+        undefined,
+        idempotencyKey,
       );
 
       expect(replayResponse.data.orderId).toBe(firstResponse.data.orderId);
@@ -185,8 +195,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       await controller.createOwnedOrder(
         orderCommand,
         passengerIdentity,
-        idempotencyKey,
         "req-1",
+        undefined,
+        idempotencyKey,
       );
 
       const differingCommand: CreateOwnedOrderCommand = {
@@ -202,8 +213,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
         controller.createOwnedOrder(
           differingCommand,
           passengerIdentity,
-          idempotencyKey,
           "req-2",
+          undefined,
+          idempotencyKey,
         ),
       ).rejects.toMatchObject({
         status: 409,
@@ -231,8 +243,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const res = await controller.createOwnedOrder(
         commandWithBodyKey,
         passengerIdentity,
-        headerKey, // Header provided
         "req-1",
+        undefined,
+        headerKey, // Header provided
       );
 
       expect(res.data.orderId).toBeDefined();
@@ -241,8 +254,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const replayHeader = await controller.createOwnedOrder(
         commandWithBodyKey,
         passengerIdentity,
-        headerKey,
         "req-2",
+        undefined,
+        headerKey,
       );
       expect(replayHeader.data.orderId).toBe(res.data.orderId);
       expect(ownedMobilityService.listOrders()).toHaveLength(1);
@@ -289,9 +303,10 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
         controller.createTenantBooking(
           bookingCommand,
           tenantAdminIdentity,
-          undefined, // missing header
           "tenant-acme-001",
           "req-1",
+          undefined,
+          undefined, // missing header
         ),
       ).rejects.toMatchObject({
         status: 400,
@@ -310,9 +325,10 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const firstResponse = await controller.createTenantBooking(
         bookingCommand,
         tenantAdminIdentity,
-        idempotencyKey,
         "tenant-acme-001",
         "req-1",
+        undefined,
+        idempotencyKey,
       );
 
       expect(firstResponse.data.bookingId).toBeDefined();
@@ -324,9 +340,10 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const replayResponse = await controller.createTenantBooking(
         bookingCommand,
         tenantAdminIdentity,
-        idempotencyKey,
         "tenant-acme-001",
         "req-2",
+        undefined,
+        idempotencyKey,
       );
 
       expect(replayResponse.data.bookingId).toBe(firstResponse.data.bookingId);
@@ -343,9 +360,10 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       await controller.createTenantBooking(
         bookingCommand,
         tenantAdminIdentity,
-        idempotencyKey,
         "tenant-acme-001",
         "req-1",
+        undefined,
+        idempotencyKey,
       );
 
       const modifiedCommand: CreateTenantBookingCommand = {
@@ -357,9 +375,10 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
         controller.createTenantBooking(
           modifiedCommand,
           tenantAdminIdentity,
-          idempotencyKey,
           "tenant-acme-001",
           "req-2",
+          undefined,
+          idempotencyKey,
         ),
       ).rejects.toMatchObject({
         status: 409,
@@ -386,18 +405,20 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const resAlpha = await controller.createTenantBooking(
         bookingCommand,
         tenantAdminIdentity,
-        sharedKey,
         "tenant-acme-001",
         "req-alpha",
+        undefined,
+        sharedKey,
       );
 
       // Tenant Beta creation with identical key name
       const resBeta = await controller.createTenantBooking(
         bookingCommand,
         tenantBetaAdminIdentity,
-        sharedKey,
         "tenant-newco-001",
         "req-beta",
+        undefined,
+        sharedKey,
       );
 
       expect(resAlpha.data.bookingId).not.toBe(resBeta.data.bookingId);
@@ -434,8 +455,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const firstRes = await controller.createReferralPassengerBooking(
         referralCommand,
         referralPassengerIdentity,
-        undefined,
         "req-1",
+        undefined,
+        undefined,
       );
 
       expect(firstRes.data.orderId).toBeDefined();
@@ -445,8 +467,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const replayRes = await controller.createReferralPassengerBooking(
         referralCommand,
         referralPassengerIdentity,
-        undefined,
         "req-2",
+        undefined,
+        undefined,
       );
 
       expect(replayRes.data.orderId).toBe(firstRes.data.orderId);
@@ -458,8 +481,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const headerRes = await controller.createReferralPassengerBooking(
         referralCommand,
         referralPassengerIdentity,
-        headerPrecedenceKey,
         "req-3",
+        undefined,
+        headerPrecedenceKey,
       );
 
       expect(headerRes.data.orderId).not.toBe(firstRes.data.orderId);
@@ -523,8 +547,8 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       await expect(
         controller.assignDispatch(
           assignCommand,
-          undefined, // missing header
           "req-assign",
+          undefined, // missing header
         ),
       ).rejects.toMatchObject({
         status: 400,
@@ -581,8 +605,8 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
 
       const firstAssign = await controller.assignDispatch(
         assignCommand,
-        assignKey,
         "req-assign-1",
+        assignKey,
       );
 
       expect(firstAssign.data.assignmentId).toBeDefined();
@@ -594,8 +618,8 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       // Replay assignment with matching key
       const replayAssign = await controller.assignDispatch(
         assignCommand,
-        assignKey,
         "req-assign-2",
+        assignKey,
       );
 
       expect(replayAssign.data.assignmentId).toBe(
@@ -653,7 +677,7 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
 
       const assignKey = `dispatch-assign-${order.orderId}-002`;
 
-      await controller.assignDispatch(assignCommand, assignKey, "req-assign-1");
+      await controller.assignDispatch(assignCommand, "req-assign-1", assignKey);
 
       const allVehicles = regulatoryRegistryService.listVehicles();
       const altVehicle =
@@ -669,8 +693,8 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       await expect(
         controller.assignDispatch(
           differingAssignCommand,
-          assignKey,
           "req-assign-2",
+          assignKey,
         ),
       ).rejects.toMatchObject({
         status: 409,
@@ -701,8 +725,8 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
         controller.dispatchOrder(
           order.orderId,
           dispatchCmd,
-          undefined,
           "req-disp-1",
+          undefined,
         ),
       ).rejects.toMatchObject({
         status: 400,
@@ -717,8 +741,8 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const dispatchRes = await controller.dispatchOrder(
         order.orderId,
         dispatchCmd,
-        dispatchKey,
         "req-disp-2",
+        dispatchKey,
       );
       expect(dispatchRes.data.dispatchJobId).toBeDefined();
 
@@ -726,8 +750,8 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const replayDispatchRes = await controller.dispatchOrder(
         order.orderId,
         dispatchCmd,
-        dispatchKey,
         "req-disp-3",
+        dispatchKey,
       );
       expect(replayDispatchRes.data.dispatchJobId).toBe(
         dispatchRes.data.dispatchJobId,
@@ -742,8 +766,8 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
         controller.redispatchOrder(
           order.orderId,
           redispatchCmd,
-          undefined,
           "req-redisp-1",
+          undefined,
         ),
       ).rejects.toMatchObject({
         status: 400,
@@ -759,8 +783,8 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const redispatchRes = await controller.redispatchOrder(
         order.orderId,
         redispatchCmd,
-        redispatchKey,
         "req-redisp-2",
+        redispatchKey,
       );
       expect(redispatchRes.data.dispatchJobId).toBeDefined();
 
@@ -768,8 +792,8 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const replayRedispatch = await controller.redispatchOrder(
         order.orderId,
         redispatchCmd,
-        redispatchKey,
         "req-redisp-3",
+        redispatchKey,
       );
       expect(replayRedispatch.data.dispatchJobId).toBe(
         redispatchRes.data.dispatchJobId,
@@ -816,8 +840,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const winnerResult = await controller.createOwnedOrder(
         orderCommand,
         passengerIdentity,
-        key,
         "req-thread-1",
+        undefined,
+        key,
       );
 
       expect(winnerResult.data.orderId).toBeDefined();
@@ -840,8 +865,9 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const loserResult = await controller.createOwnedOrder(
         orderCommand,
         passengerIdentity,
-        key,
         "req-thread-2",
+        undefined,
+        key,
       );
 
       expect(loserResult.data.orderId).toBe(winnerResult.data.orderId);

@@ -65,9 +65,9 @@ export class OwnedMobilityController {
     private readonly ownedMobilityService: OwnedMobilityService,
     private readonly idempotencyService: IdempotencyService,
     @Optional()
-    private readonly idempotencyService?: IdempotencyService,
-    @Optional()
     private readonly tenantPartnerService?: TenantPartnerService,
+    @Optional()
+    private readonly idempotencyService?: IdempotencyService,
   ) {}
 
   private resolveDriverTaskStreamDriverId(
@@ -121,9 +121,9 @@ export class OwnedMobilityController {
   async createOwnedOrder(
     @Body() command: CreateOwnedOrderCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const order = await this.ownedMobilityService.createPassengerOrder(
       command,
@@ -224,10 +224,10 @@ export class OwnedMobilityController {
   async createTenantBooking(
     @Body() command: CreateTenantBookingCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const result = await this.ownedMobilityService.createTenantBooking(
       command,
@@ -245,10 +245,10 @@ export class OwnedMobilityController {
   async createPartnerBooking(
     @Body() command: CreateTenantBookingCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const resolvedTenantId = this.requireTenantId(tenantId);
     if (command.eligibilityVerificationId && this.tenantPartnerService) {
@@ -315,9 +315,9 @@ export class OwnedMobilityController {
   async createReferralPassengerBooking(
     @Body() command: CreateReferralPassengerBookingCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const result =
       await this.ownedMobilityService.createReferralPassengerBooking(
@@ -516,8 +516,8 @@ export class OwnedMobilityController {
   async dispatchOrder(
     @Param("orderId") orderId: string,
     @Body() command: DispatchOrderCommand,
-    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
       await this.ownedMobilityService.dispatchOrder(
@@ -535,8 +535,8 @@ export class OwnedMobilityController {
   async redispatchOrder(
     @Param("orderId") orderId: string,
     @Body() command: RedispatchOrderCommand,
-    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
       await this.ownedMobilityService.redispatchOrder(
@@ -693,8 +693,8 @@ export class OwnedMobilityController {
   @Post("dispatch/assign")
   async assignDispatch(
     @Body() command: AssignDispatchCommand,
-    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
       await this.ownedMobilityService.assignDispatch(
@@ -710,8 +710,8 @@ export class OwnedMobilityController {
   @Post("dispatch/reassign")
   async reassignDispatch(
     @Body() command: ReassignDispatchCommand,
-    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
       await this.ownedMobilityService.reassignDispatch(

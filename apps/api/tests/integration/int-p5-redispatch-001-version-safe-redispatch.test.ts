@@ -148,10 +148,11 @@ describe("P5-RATE-001 version-safe redispatch over the dispatch API", () => {
     const { service, controller } = await createHarness();
     const order = createRide(service);
 
-    const dispatched = controller.dispatchOrder(
+    const dispatched = await controller.dispatchOrder(
       order.orderId,
       { mode: "auto" } as never,
       "req-redispatch-dispatch-1",
+      "idem-redispatch-disp-1",
     );
     await controller.assignDispatch(
       {
@@ -160,6 +161,7 @@ describe("P5-RATE-001 version-safe redispatch over the dispatch API", () => {
         driverId: "drv-demo-001",
       },
       "req-redispatch-assign-1",
+      "idem-redispatch-assign-1",
     );
 
     // The version a client can actually observe is the one on the passenger
@@ -170,15 +172,17 @@ describe("P5-RATE-001 version-safe redispatch over the dispatch API", () => {
     expect(observedVersion).toBe(1);
 
     // Supersede it: redispatch, then assign again.
-    controller.redispatchOrder(
+    await controller.redispatchOrder(
       order.orderId,
       { reasonCode: "driver_unreachable" } as never,
       "req-redispatch-1",
+      "idem-redispatch-redisp-1",
     );
-    const redispatched = controller.dispatchOrder(
+    const redispatched = await controller.dispatchOrder(
       order.orderId,
       { mode: "auto" } as never,
       "req-redispatch-dispatch-2",
+      "idem-redispatch-disp-2",
     );
     await controller.assignDispatch(
       {
@@ -187,6 +191,7 @@ describe("P5-RATE-001 version-safe redispatch over the dispatch API", () => {
         driverId: "drv-demo-001",
       },
       "req-redispatch-assign-2",
+      "idem-redispatch-assign-2",
     );
     expect(
       service.findPassengerAssignmentDisclosure(order.orderId)!
@@ -208,13 +213,14 @@ describe("P5-RATE-001 version-safe redispatch over the dispatch API", () => {
     // silently cancel the v2 assignment.
     let caught: unknown;
     try {
-      controller.redispatchOrder(
+      await controller.redispatchOrder(
         order.orderId,
         {
           reasonCode: "driver_unreachable",
           expectedAssignmentVersion: observedVersion,
         } as never,
         "req-redispatch-stale",
+        "idem-redispatch-stale",
       );
     } catch (error) {
       caught = error;

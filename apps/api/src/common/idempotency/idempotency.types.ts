@@ -35,7 +35,7 @@ export interface ExecuteIdempotentOptions<TBody, TResponse> {
   actorId?: string | null | undefined;
   requestPath?: string | null | undefined;
   required?: boolean | undefined;
-  payload: TBody;
+  payload: unknown;
   execute: () => Promise<
     | {
         data: TResponse;
