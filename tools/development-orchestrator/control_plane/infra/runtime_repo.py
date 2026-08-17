@@ -5,7 +5,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
-from common import config_path, load_json, parse_iso_utc, utc_now, write_json
+from common import config_path, load_json, parse_iso_utc, utc_now, write_json_if_changed
 from control_plane.domain.worker_lifecycle import (
     ACTIVE_WORKER_STATUSES,
     TERMINAL_WORKER_STATUSES,
@@ -338,13 +338,15 @@ def build_state_digest(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def write_state_digest(config: dict[str, Any], state: dict[str, Any]) -> None:
-    write_json(state_digest_path(config), build_state_digest(state))
+    write_json_if_changed(state_digest_path(config), build_state_digest(state))
 
 
 def save_runtime_state(config: dict[str, Any], state: dict[str, Any]) -> None:
     prune_expired_reassignment_guards(state)
     migrated = migrate_state(state)
-    write_json(config_path(config, "state_file"), migrated)
+    # Called unconditionally on every tick, not only when something changed, so
+    # an unchanged document must cost nothing. See write_json_if_changed.
+    write_json_if_changed(config_path(config, "state_file"), migrated)
     write_state_digest(config, migrated)
 
 
