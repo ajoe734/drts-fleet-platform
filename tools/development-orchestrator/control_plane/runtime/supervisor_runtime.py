@@ -79,6 +79,10 @@ from control_plane.infra.worker_evidence import (
     record_worker_evidence,
     summarize_worker_failure,
 )
+from control_plane.infra.artifact_retention import (
+    prune_runtime_artifacts,
+    prune_stale_releases,
+)
 from control_plane.infra.worktree_maintenance import (
     _disk_guard_path,
     _disk_guard_should_cleanup,
@@ -338,6 +342,28 @@ def maintain_disk_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
         archive_prune = _prune_worktree_archive(worktree_cleanup_settings(config))
         if int(archive_prune.get("removed") or 0) > 0:
             record["last_archive_prune"] = archive_prune
+        # Worktrees were the only thing this sweep reclaimed, so everything else
+        # the fleet writes per run grew without a ceiling: 491 MB of worker logs,
+        # 7099 chair-review files, 895 worker results, none of it referenced once
+        # its run ended. Same cadence, same disk, same sweep.
+        retention_result = prune_runtime_artifacts(config, state)
+        if int(retention_result.get("removed") or 0) > 0:
+            record["last_artifact_retention"] = retention_result
+            write_activity_log(
+                config,
+                {
+                    "type": "runtime_artifact_retention",
+                    "message": (
+                        f"Aged out {retention_result['removed']} run artifact(s), "
+                        f"freeing {retention_result['bytes'] / (1024 * 1024):.1f} MB"
+                    ),
+                    "directories": retention_result.get("directories"),
+                    "errors": retention_result.get("errors"),
+                },
+            )
+        release_prune = prune_stale_releases(config, disk_guard_settings(config))
+        if int(release_prune.get("removed") or 0) > 0 or release_prune.get("ok") is False:
+            record["last_release_prune"] = release_prune
         record["last_cleanup_at"] = utc_now()
         record["last_cleanup"] = cleanup_result
         changed = True
