@@ -32,7 +32,7 @@ This repo supports a continuous two-mode supervisor:
 Print the repo-aware prompt with:
 
 ```bash
-python3 scripts/ai_status.py prompt
+python3 tools/development-orchestrator/bin/ai_status.py prompt
 ```
 
 Use that output as the first prompt in Claude Code, Codex CLI, Gemini CLI, Copilot, Qwen, or any other connected coding LLM.
@@ -78,15 +78,15 @@ Every LLM should follow this order:
 Prepare the local environment:
 
 ```bash
-bash scripts/setup-llm-cli.sh
+bash tools/development-orchestrator/bin/setup-llm-cli.sh
 ```
 
 Run the local collaboration control plane from the repo root:
 
 ```bash
-bash scripts/run-supervisor.sh --verbose
-bash scripts/run-dashboard.sh
-bash scripts/run-dashboard-tunnel.sh
+bash tools/development-orchestrator/bin/run-supervisor.sh --verbose
+bash tools/development-orchestrator/bin/run-dashboard.sh
+bash tools/development-orchestrator/bin/run-dashboard-tunnel.sh
 ```
 
 You may start the runtime before consensus for dashboard visibility, but do not seed development tasks until the repo leaves `discussion_planning`.

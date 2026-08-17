@@ -6,7 +6,7 @@ Current status:
 
 - `S0001__reference_seed.sql` and `S0002__demo_operational_seed.sql` are copied from the reviewed DB bundle
 - `templates/` contains the CSV bootstrap templates used by the same seed/migration lineage
-- `./scripts/db-seed.sh` loads these files and records seed runs
+- `./operations/database/db-seed.sh` loads these files and records seed runs
 
 Rules:
 

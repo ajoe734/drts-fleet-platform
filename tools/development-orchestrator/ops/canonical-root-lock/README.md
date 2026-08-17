@@ -39,7 +39,7 @@ process responsible for the switch sees in its captured output.
 This layer cannot block the switch — git has no pre-checkout hook —
 but it makes the drift impossible to miss after the fact.
 
-### Layer 2 — periodic watchdog (`scripts/canonical-root-watchdog.py`)
+### Layer 2 — periodic watchdog (`tools/development-orchestrator/bin/canonical-root-watchdog.py`)
 
 systemd `--user` timer fires every 60 seconds, runs the watchdog. The
 watchdog:
@@ -64,7 +64,7 @@ list is correctly maintained.
 ## Install
 
 ```
-scripts/install-canonical-root-watch-systemd.sh
+tools/development-orchestrator/bin/install-canonical-root-watch-systemd.sh
 ```
 
 Idempotent. Seeds `~/.config/drts/canonical-root.env` with the current
