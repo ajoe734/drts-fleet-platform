@@ -198,5 +198,14 @@ class StateDigestTests(unittest.TestCase):
         self.assertLess(len(_json.dumps(digest)), 4096)
 
 
+    def test_migration_drops_the_retired_chair_backoff_field(self) -> None:
+        """A retired field left in machine truth reads as if it still governs
+        something; the migration retires it the same way earlier ones were."""
+        migrated = runtime_state.migrate_state(
+            {"chair_review": {"cooldown_until": "2026-01-01T00:00:00Z", "failure_backoff_until": "2026-01-01T00:15:00Z"}}
+        )
+        self.assertNotIn("failure_backoff_until", migrated["chair_review"])
+        self.assertEqual(migrated["chair_review"]["cooldown_until"], "2026-01-01T00:00:00Z")
+
 if __name__ == "__main__":
     unittest.main()
