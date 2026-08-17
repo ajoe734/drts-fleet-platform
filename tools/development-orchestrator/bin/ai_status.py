@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import uuid
@@ -1508,23 +1507,41 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     atomic_write_text(CURRENT_WORK_FILE, "\n".join(lines) + "\n")
 
 
+STALE_DASHBOARD_MIRRORS = (
+    "ai-status.json",
+    "ai-activity-log.jsonl",
+    "current-work.md",
+    "orchestrator-state.json",
+    "approval-queue.json",
+)
+
+
 def sync_dashboard() -> None:
+    """Ensure the dashboard directory exists, and clear the mirrors nobody reads.
+
+    This used to copy five files into dashboard/ on every sync, one of which is
+    the activity log -- 42.7 MB, re-copied every ~20s, about 180 GB/day of pure
+    write amplification.
+
+    Nothing consumed the copies. bin/dashboard_server.py registers exactly
+    these five paths in `live_file_map` and serves each one from its source, so
+    the frontend's `./ai-activity-log.jsonl` never reaches the mirror. It is
+    also the only supported way to serve this directory: run-dashboard.sh ->
+    launch-dashboard.sh -> dashboard_server.py. The copies survived a change
+    that made the server read live sources, and kept being written.
+
+    The stale files are removed rather than left in place, so nobody wires a
+    plain static server at this directory and silently reads a snapshot from
+    whenever the copying stopped.
+    """
     DASHBOARD_DIR.mkdir(parents=True, exist_ok=True)
-    mirror_files = [
-        STATUS_FILE,
-        LOG_FILE,
-        CURRENT_WORK_FILE,
-        ROOT / ".orchestrator" / "state.json",
-        ROOT / ".orchestrator" / "approval-queue.json",
-    ]
-    rename_map = {
-        "state.json": "orchestrator-state.json",
-        "approval-queue.json": "approval-queue.json",
-    }
-    for path in mirror_files:
-        if path.exists():
-            target_name = rename_map.get(path.name, path.name)
-            shutil.copy2(path, DASHBOARD_DIR / target_name)
+    for name in STALE_DASHBOARD_MIRRORS:
+        try:
+            (DASHBOARD_DIR / name).unlink()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
 
 
 def sync_task_briefs(state: dict[str, Any]) -> None:

@@ -168,3 +168,66 @@ class BindGuardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MirrorIsNotAServingPathTests(unittest.TestCase):
+    """Every path the frontend fetches must resolve to a live source.
+
+    sync_dashboard used to copy five files into dashboard/ on every sync, the
+    largest being the 42.7 MB activity log, re-copied every ~20s -- roughly
+    180 GB/day. Nothing read the copies: the server registers exactly these
+    paths in `live_file_map` and answers each from its source, and
+    dashboard_server.py is the only supported way to serve this directory
+    (run-dashboard.sh -> launch-dashboard.sh -> dashboard_server.py).
+
+    This pins the invariant that made the copying pointless, so the mirror
+    cannot quietly come back as the thing being served.
+    """
+
+    FRONTEND_PATHS = (
+        "/ai-status.json",
+        "/ai-activity-log.jsonl",
+        "/current-work.md",
+        "/orchestrator-state.json",
+        "/approval-queue.json",
+    )
+
+    def test_every_frontend_data_path_is_served_from_its_source(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / ".orchestrator").mkdir()
+            dashboard = root / "tools" / "development-orchestrator" / "dashboard"
+            dashboard.mkdir(parents=True)
+
+            with mock.patch(
+                "sys.argv",
+                ["dashboard_server.py", "--repo-root", str(root), "--directory", str(dashboard)],
+            ):
+                args = dashboard_server.parse_args()
+
+            repo_root = Path(args.repo_root).resolve()
+            live_map = {
+                "/ai-status.json": repo_root / "ai-status.json",
+                "/ai-activity-log.jsonl": repo_root / "ai-activity-log.jsonl",
+                "/current-work.md": repo_root / "current-work.md",
+                "/orchestrator-state.json": repo_root / ".orchestrator" / "state.json",
+                "/approval-queue.json": repo_root / ".orchestrator" / "approval-queue.json",
+            }
+
+            for path in self.FRONTEND_PATHS:
+                target = live_map[path]
+                self.assertNotIn(
+                    "dashboard",
+                    target.parts,
+                    f"{path} resolves into the dashboard directory; it must read the live source",
+                )
+
+    def test_the_served_map_covers_exactly_the_frontend_paths(self) -> None:
+        """A new data file must be routed to its source, not left to the mirror."""
+        source = (TOOL_DIR / "dashboard" / "data.js").read_text(encoding="utf-8")
+        for path in self.FRONTEND_PATHS:
+            self.assertIn(
+                f'"./{path.lstrip("/")}"',
+                source,
+                f"{path} is registered as live but the frontend no longer fetches it",
+            )
