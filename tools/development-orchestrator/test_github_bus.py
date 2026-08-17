@@ -630,5 +630,106 @@ class GitHubBusProcessTests(unittest.TestCase):
         self.assertEqual(fake_process.wait_calls, [1.0, 0.2])
 
 
+class GitHubBusLabelTests(unittest.TestCase):
+    REPO = "ajoe734/pantheon"
+    CONFIG = {"github_bus": {"auto_request_reviewers": False}}
+
+    def setUp(self) -> None:
+        github_bus._LABELS_UNAVAILABLE.clear()
+
+    def test_happy_path_adds_no_extra_gh_call(self) -> None:
+        """The label repair must not cost anything when the label exists."""
+        with (
+            mock.patch.object(github_bus, "run_gh") as run_gh,
+            mock.patch.object(github_bus, "write_activity_log") as write_activity_log,
+        ):
+            github_bus.sync_optional_pr_metadata(
+                self.CONFIG, self.REPO, {"id": "LIN-001"}, 12, ["pantheon-bus"]
+            )
+
+        run_gh.assert_called_once()
+        self.assertIn("--add-label", run_gh.call_args.args[0])
+        write_activity_log.assert_not_called()
+
+    def test_missing_label_is_created_then_the_edit_is_retried(self) -> None:
+        calls: list[list[str]] = []
+
+        def run_gh(args: list[str]) -> None:
+            calls.append(args)
+            if args[:2] == ["pr", "edit"] and len(calls) == 1:
+                raise github_bus.GitHubBusError("'pantheon-bus' not found")
+
+        with (
+            mock.patch.object(github_bus, "run_gh", side_effect=run_gh),
+            mock.patch.object(github_bus, "write_activity_log") as write_activity_log,
+        ):
+            github_bus.sync_optional_pr_metadata(
+                self.CONFIG, self.REPO, {"id": "LIN-001"}, 12, ["pantheon-bus"]
+            )
+
+        self.assertEqual(
+            calls[1], ["label", "create", "pantheon-bus", "--repo", self.REPO]
+        )
+        self.assertEqual(calls[2][:2], ["pr", "edit"])
+        logged = [call.args[1]["type"] for call in write_activity_log.call_args_list]
+        self.assertEqual(logged, ["github_bus_label_created"])
+
+    def test_uncreatable_label_is_reported_once_then_dropped(self) -> None:
+        """The regression: one bad label, one failure event, every cycle, forever."""
+
+        def run_gh(args: list[str]) -> None:
+            if args[:2] == ["label", "create"]:
+                raise github_bus.GitHubBusError("permission denied")
+            raise github_bus.GitHubBusError("'pantheon-bus' not found")
+
+        with (
+            mock.patch.object(github_bus, "run_gh", side_effect=run_gh) as run_gh_mock,
+            mock.patch.object(github_bus, "write_activity_log") as write_activity_log,
+        ):
+            for _ in range(3):
+                github_bus.sync_optional_pr_metadata(
+                    self.CONFIG, self.REPO, {"id": "LIN-001"}, 12, ["pantheon-bus"]
+                )
+
+        logged = [call.args[1]["type"] for call in write_activity_log.call_args_list]
+        # First cycle: the edit fails, creation fails, both are recorded. Cycles
+        # two and three send no label at all, so `pr edit` has nothing to do and
+        # is never called -- no repeat of either event.
+        self.assertEqual(
+            logged, ["github_bus_label_unavailable", "github_review_pr_metadata_failed"]
+        )
+        self.assertEqual(
+            [args.args[0][:2] for args in run_gh_mock.call_args_list],
+            [["pr", "edit"], ["label", "create"]],
+        )
+
+    def test_unrelated_failure_is_not_treated_as_a_missing_label(self) -> None:
+        with (
+            mock.patch.object(
+                github_bus,
+                "run_gh",
+                side_effect=github_bus.GitHubBusError("HTTP 502 upstream"),
+            ) as run_gh,
+            mock.patch.object(github_bus, "write_activity_log") as write_activity_log,
+        ):
+            github_bus.sync_optional_pr_metadata(
+                self.CONFIG, self.REPO, {"id": "LIN-001"}, 12, ["pantheon-bus"]
+            )
+
+        run_gh.assert_called_once()
+        logged = [call.args[1]["type"] for call in write_activity_log.call_args_list]
+        self.assertEqual(logged, ["github_review_pr_metadata_failed"])
+        self.assertEqual(github_bus._LABELS_UNAVAILABLE, {})
+
+    def test_repair_ignores_a_label_the_caller_did_not_send(self) -> None:
+        repaired = github_bus.repair_missing_label(
+            self.CONFIG,
+            self.REPO,
+            ["pantheon-bus"],
+            github_bus.GitHubBusError("'some-other-label' not found"),
+        )
+        self.assertFalse(repaired)
+
+
 if __name__ == "__main__":
     unittest.main()
