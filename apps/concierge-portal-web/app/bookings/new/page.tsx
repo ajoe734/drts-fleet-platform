@@ -21,6 +21,7 @@ import {
 } from "@drts/ui-web";
 import { SessionGuard } from "@/components/session-guard";
 import { createConciergeClient } from "@/lib/api-client";
+import { createIdempotencyKey } from "@drts/api-client";
 import {
   evaluateDeskProductEligibility,
   evaluateDeskTextServiceAreaEligibility,
@@ -107,6 +108,9 @@ export default function ConciergeBookingCreatePage() {
   const [currentSession, setCurrentSession] =
     useState<CallSessionRecord | null>(null);
   const [submission, setSubmission] = useState<SubmissionSummary | null>(null);
+  const [bookingIntentKey, setBookingIntentKey] = useState(() =>
+    createIdempotencyKey("concierge-order"),
+  );
   const [mapSelection, setMapSelection] = useState<AddressMapPairChange>({
     pickup: null,
     dropoff: null,
@@ -436,25 +440,31 @@ export default function ConciergeBookingCreatePage() {
                   recordCall(workingSession.callId);
                 }
 
-                const accepted = await client.createCallCenterOrder({
-                  callId: workingSession.callId,
-                  agentId: session.operatorId,
-                  pickup: buildFallbackAddress(
-                    pickupAddress,
-                    mapSelection.pickup,
-                  ),
-                  dropoff: buildFallbackAddress(
-                    dropoffAddress,
-                    mapSelection.dropoff,
-                  ),
-                  passenger: {
-                    name: passengerName,
-                    phone: passengerPhone,
+                const accepted = await client.createCallCenterOrder(
+                  {
+                    callId: workingSession.callId,
+                    agentId: session.operatorId,
+                    pickup: buildFallbackAddress(
+                      pickupAddress,
+                      mapSelection.pickup,
+                    ),
+                    dropoff: buildFallbackAddress(
+                      dropoffAddress,
+                      mapSelection.dropoff,
+                    ),
+                    passenger: {
+                      name: passengerName,
+                      phone: passengerPhone,
+                    },
+                    notes,
+                    mapFallbackReview,
                   },
-                  notes,
-                  mapFallbackReview,
-                });
+                  {
+                    idempotencyKey: bookingIntentKey,
+                  },
+                );
 
+                setBookingIntentKey(createIdempotencyKey("concierge-order"));
                 recordOrder(accepted.orderId);
 
                 const etaMinutes = Number.parseInt(quotedEtaMinutes, 10);

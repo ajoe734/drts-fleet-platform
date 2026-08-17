@@ -579,19 +579,36 @@ export class BillingSettlementController {
   }
 
   @Post("reimbursements/:batchId/pay")
-  markReimbursementPaid(
+  async markReimbursementPaid(
     @Param("batchId") batchId: string,
     @Body() command: MarkReimbursementPaidCommand,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.billingSettlementService.markReimbursementPaid(
+    const scope = `billing:reimbursement_batch:${batchId}:pay`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: {
         batchId,
-        command,
-        requestId,
-      ),
-      requestId,
-    );
+        paidAt: command.paidAt,
+        remittanceProofId: command.remittanceProofId,
+      },
+      execute: async () => {
+        const data = await this.billingSettlementService.markReimbursementPaid(
+          batchId,
+          command,
+          requestId,
+        );
+        return {
+          data,
+          statusCode: 200,
+        };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Get("reimbursements/:batchId")

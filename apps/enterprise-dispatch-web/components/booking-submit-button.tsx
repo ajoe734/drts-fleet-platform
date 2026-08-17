@@ -11,6 +11,7 @@ import {
 import { enterpriseTenant } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as theme } from "@/lib/enterprise-theme";
 import { getEnterpriseDispatchTenantClient } from "@/lib/api-client";
+import { createIdempotencyKey } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
 
 export function BookingSubmitButton({
@@ -25,6 +26,9 @@ export function BookingSubmitButton({
   const [isHydrated, setIsHydrated] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [idempotencyKey] = useState(() =>
+    createIdempotencyKey("enterprise-booking"),
+  );
 
   async function submitBooking() {
     if (!isHydrated || isSubmitting) {
@@ -48,6 +52,7 @@ export function BookingSubmitButton({
 
       const result = await client.createBooking(
         buildEnterpriseBookingCommand(draft),
+        { idempotencyKey },
       );
 
       if (!result.bookingId || !result.orderId) {

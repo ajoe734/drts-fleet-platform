@@ -38,7 +38,8 @@ const en = {
   "nav.users": "People & roles",
   "nav.sessions": "Sessions",
   "sessions.header.title": "Tenant sessions",
-  "sessions.header.subtitle": "Review active tenant sessions and revoke access immediately when required. Tokens and credentials are never displayed.",
+  "sessions.header.subtitle":
+    "Review active tenant sessions and revoke access immediately when required. Tokens and credentials are never displayed.",
   "sessions.empty": "No tenant sessions are currently available.",
   "sessions.noAction": "No action",
   "sessions.error.loadFailed": "Unable to load tenant sessions.",
@@ -1722,7 +1723,10 @@ const en = {
   "webhooks.action.rotateSecret": "rotate secret",
   "webhooks.action.viewDeliveryLog": "delivery log",
   "webhooks.action.retryFailed": "retry failed",
+  "webhooks.action.sendTest": "send test",
   "webhooks.action.disabled": "Disabled",
+  "webhooks.success.testSubmitted":
+    "Test webhook delivery queued successfully.",
   "webhooks.tabLabel.replay": "Replay",
   "webhooks.tabLabel.deliveries": "Deliveries",
   "webhooks.tabLabel.endpoints": "Endpoints",
@@ -4004,7 +4008,8 @@ const en = {
   "avFallback.billing.rebooking": "Rebooking",
   "avFallback.billing.noneBoolean": "No · false",
   "avFallback.billing.sameBooking": "No · same booking",
-  "avFallback.billing.slaUpdatedEta": "On-time performance uses the updated ETA",
+  "avFallback.billing.slaUpdatedEta":
+    "On-time performance uses the updated ETA",
   "avFallback.billing.note":
     "Billing differentiates AV and human fallback fulfillment internally, but the tenant is not charged extra and SLA uses the revised ETA.",
   "avFallback.billing.noSurcharge": "No",
@@ -4080,7 +4085,8 @@ const zh: Record<keyof typeof en, string> = {
   "nav.users": "人員與角色",
   "nav.sessions": "工作階段",
   "sessions.header.title": "租戶工作階段",
-  "sessions.header.subtitle": "檢視租戶工作階段，必要時立即撤銷存取權限。系統不會顯示 token 或 credential。",
+  "sessions.header.subtitle":
+    "檢視租戶工作階段，必要時立即撤銷存取權限。系統不會顯示 token 或 credential。",
   "sessions.empty": "目前沒有可用的租戶工作階段。",
   "sessions.noAction": "無可用操作",
   "sessions.error.loadFailed": "無法載入租戶工作階段。",
@@ -5648,7 +5654,9 @@ const zh: Record<keyof typeof en, string> = {
   "webhooks.action.rotateSecret": "輪替密鑰",
   "webhooks.action.viewDeliveryLog": "檢視投遞紀錄",
   "webhooks.action.retryFailed": "重試失敗投遞",
+  "webhooks.action.sendTest": "發送測試事件",
   "webhooks.action.disabled": "已停用",
+  "webhooks.success.testSubmitted": "測試 Webhook 已成功排入發送佇列。",
   "webhooks.tabLabel.replay": "重播",
   "webhooks.tabLabel.deliveries": "投遞",
   "webhooks.tabLabel.endpoints": "端點",
@@ -7752,7 +7760,8 @@ const zh: Record<keyof typeof en, string> = {
     "行程已在同一筆 booking 上繼續，請以更新後的履約模式與 ETA 為準。",
   "avFallback.value.etaMinutes": "{count} 分",
   "avFallback.value.etaPending": "ETA 待更新",
-  "avFallback.message.note": "文案由後端 messageCode 渲染，且僅顯示租戶可見內容。",
+  "avFallback.message.note":
+    "文案由後端 messageCode 渲染，且僅顯示租戶可見內容。",
   "avFallback.detail.title": "AV -> 人駕 fallback",
   "avFallback.detail.subtitle": "同一 booking 鏈 · 更新 ETA · 計費與 SLA 處理",
   "avFallback.detail.passenger": "乘客",

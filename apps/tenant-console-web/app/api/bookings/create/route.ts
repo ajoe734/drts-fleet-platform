@@ -54,15 +54,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = (await request.json()) as CreateTenantBookingCommand;
+    const body = (await request.json()) as CreateTenantBookingCommand & {
+      idempotencyKey?: string;
+    };
     const requestId = randomUUID();
+    const idempotencyKey =
+      request.headers.get("idempotency-key") || body.idempotencyKey || undefined;
+
     const booking = await client.post<TenantBookingCommandResponse>(
       "/api/tenant/bookings",
       {
         body,
         headers: {
           "X-Request-Id": requestId,
-          "Idempotency-Key": randomUUID(),
+          ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
         },
       },
     );

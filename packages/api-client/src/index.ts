@@ -74,8 +74,11 @@ import type {
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
   DeleteTenantWebhookEndpointCommand,
+  SendTestWebhookCommand,
   DispatchCandidate,
   DispatchJobRecord,
+  DispatchOrderCommand,
+  RedispatchOrderCommand,
   DispatchQueueEntryReadRecord,
   DispatchTraceLogRecord,
   DisableTenantCostCenterCommand,
@@ -367,9 +370,10 @@ export interface ApiClientConfig {
 }
 
 export interface RequestOptions {
-  headers?: Record<string, string>;
+  headers?: Record<string, string> | undefined;
   body?: unknown;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
+  idempotencyKey?: string | undefined;
 }
 
 export class ApiClientError extends Error {
@@ -502,7 +506,17 @@ function deepToCamelCase(value: unknown): unknown {
   return value;
 }
 
-function createRequestToken(): string {
+export function createIdempotencyKey(prefix?: string): string {
+  const token =
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `key-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  return prefix ? `${prefix}-${token}` : token;
+}
+
+export function createRequestToken(): string {
   if (
     typeof globalThis.crypto !== "undefined" &&
     typeof globalThis.crypto.randomUUID === "function"
@@ -658,11 +672,8 @@ export class ApiClient {
       if (!hasHeader(headers, "x-request-id")) {
         headers["X-Request-Id"] = createRequestToken();
       }
-      if (
-        method.toUpperCase() === "POST" &&
-        !hasHeader(headers, "idempotency-key")
-      ) {
-        headers["Idempotency-Key"] = createRequestToken();
+      if (options?.idempotencyKey && !hasHeader(headers, "idempotency-key")) {
+        headers["Idempotency-Key"] = options.idempotencyKey;
       }
 
       const init: RequestInit = {
@@ -1080,8 +1091,14 @@ export class ApiClient {
 
   // ── Owned Mobility: Orders ──
 
-  async createOrder(command: CreateOwnedOrderCommand) {
-    return this.post("/api/orders", { body: command });
+  async createOrder(
+    command: CreateOwnedOrderCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/orders", {
+      ...options,
+      body: command,
+    });
   }
 
   async listOrders(): Promise<OwnedOrderRecord[]> {
@@ -1100,21 +1117,37 @@ export class ApiClient {
     );
   }
 
-  async cancelOrder(id: string, command: CancelOwnedOrderCommand) {
-    return this.post(`/api/orders/${id}/cancel`, { body: command });
+  async cancelOrder(
+    id: string,
+    command: CancelOwnedOrderCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post(`/api/orders/${id}/cancel`, {
+      ...options,
+      body: command,
+    });
   }
 
-  async updateOrder(id: string, command: UpdateTenantBookingCommand) {
-    return this.patch(`/api/orders/${id}`, { body: command });
+  async updateOrder(
+    id: string,
+    command: UpdateTenantBookingCommand,
+    options?: RequestOptions,
+  ) {
+    return this.patch(`/api/orders/${id}`, {
+      ...options,
+      body: command,
+    });
   }
 
   async applyManualFareOverride(
     orderId: string,
     command: ApplyManualFareOverrideCommand,
+    options?: RequestOptions,
   ) {
     return this.post<OwnedOrderRecord>(
       `/api/orders/${encodeURIComponent(orderId)}/manual-fare-override`,
       {
+        ...options,
         body: command,
       },
     );
@@ -1122,20 +1155,32 @@ export class ApiClient {
 
   // ── Owned Mobility: Call Center ──
 
-  async createCallCenterOrder(command: CreateCallCenterOrderCommand) {
+  async createCallCenterOrder(
+    command: CreateCallCenterOrderCommand,
+    options?: RequestOptions,
+  ) {
     return this.post<{
       orderId: string;
       orderSource: string;
       callId: string;
       recordingId: string | null;
       status: string;
-    }>("/api/call-center/orders", { body: command });
+    }>("/api/call-center/orders", {
+      ...options,
+      body: command,
+    });
   }
 
   // ── Owned Mobility: Tenant Bookings ──
 
-  async createTenantBooking(command: CreateTenantBookingCommand) {
-    return this.post("/api/tenant/bookings", { body: command });
+  async createTenantBooking(
+    command: CreateTenantBookingCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/tenant/bookings", {
+      ...options,
+      body: command,
+    });
   }
 
   async listTenantBookings(): Promise<BookingRecord[]> {
@@ -1149,21 +1194,29 @@ export class ApiClient {
   async updateTenantBooking(
     bookingId: string,
     command: UpdateTenantBookingCommand,
+    options?: RequestOptions,
   ) {
     return this.request(
       "PUT",
       `/api/tenant/bookings/${encodeURIComponent(bookingId)}`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
   async cancelTenantBooking(
     bookingId: string,
     command: CancelOwnedOrderCommand,
+    options?: RequestOptions,
   ) {
     return this.post(
       `/api/tenant/bookings/${encodeURIComponent(bookingId)}/cancel`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
@@ -1267,8 +1320,15 @@ export class ApiClient {
 
   // ── Owned Mobility: Dispatch ──
 
-  async dispatchOrder(orderId: string) {
-    return this.post(`/api/orders/${orderId}/dispatch`);
+  async dispatchOrder(
+    orderId: string,
+    command?: DispatchOrderCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post(`/api/orders/${encodeURIComponent(orderId)}/dispatch`, {
+      ...options,
+      body: command ?? { mode: "auto" },
+    });
   }
 
   async redispatchOrder(
@@ -1282,9 +1342,15 @@ export class ApiClient {
       // STALE_REDISPATCH_EVENT when the order has already advanced past this
       // assignment version. Omit to redispatch unconditionally.
       expectedAssignmentVersion?: number | null;
+      idempotencyKey?: string;
+      headers?: Record<string, string>;
+      signal?: AbortSignal;
     },
   ) {
-    return this.post(`/api/orders/${orderId}/redispatch`, {
+    return this.post(`/api/orders/${encodeURIComponent(orderId)}/redispatch`, {
+      headers: options?.headers,
+      signal: options?.signal,
+      idempotencyKey: options?.idempotencyKey,
       body: {
         reasonCode,
         reasonNote: options?.reasonNote,
@@ -1374,12 +1440,18 @@ export class ApiClient {
     return res.items ?? [];
   }
 
-  async assignDispatch(command: AssignDispatchCommand) {
-    return this.post("/api/dispatch/assign", { body: command });
+  async assignDispatch(
+    command: AssignDispatchCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/dispatch/assign", { ...options, body: command });
   }
 
-  async reassignDispatch(command: ReassignDispatchCommand) {
-    return this.post("/api/dispatch/reassign", { body: command });
+  async reassignDispatch(
+    command: ReassignDispatchCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/dispatch/reassign", { ...options, body: command });
   }
 
   async listDispatchQueueEntries(): Promise<DispatchQueueEntryReadRecord[]> {
@@ -1795,8 +1867,14 @@ export class ApiClient {
     return this.getList<ComplaintCaseRecord>("/api/complaints");
   }
 
-  async createComplaint(command: CreateComplaintCaseCommand) {
-    return this.post<ComplaintCaseRecord>("/api/complaints", { body: command });
+  async createComplaint(
+    command: CreateComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post<ComplaintCaseRecord>("/api/complaints", {
+      ...options,
+      body: command,
+    });
   }
 
   async getComplaint(caseNo: string) {
@@ -1813,17 +1891,31 @@ export class ApiClient {
     );
   }
 
-  async assignComplaint(caseNo: string, command: AssignComplaintCaseCommand) {
+  async assignComplaint(
+    caseNo: string,
+    command: AssignComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
     return this.post<ComplaintCaseRecord>(
       `/api/complaints/${encodeURIComponent(caseNo)}/assign`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
-  async addComplaintNote(caseNo: string, command: AddComplaintCaseNoteCommand) {
+  async addComplaintNote(
+    caseNo: string,
+    command: AddComplaintCaseNoteCommand,
+    options?: RequestOptions,
+  ) {
     return this.post<ComplaintCaseRecord>(
       `/api/complaints/${encodeURIComponent(caseNo)}/notes`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
@@ -1835,17 +1927,31 @@ export class ApiClient {
     );
   }
 
-  async reopenComplaint(caseNo: string, command: ReopenComplaintCaseCommand) {
+  async reopenComplaint(
+    caseNo: string,
+    command: ReopenComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
     return this.post<ComplaintCaseRecord>(
       `/api/complaints/${encodeURIComponent(caseNo)}/reopen`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
-  async resolveComplaint(caseNo: string, command: ResolveComplaintCaseCommand) {
+  async resolveComplaint(
+    caseNo: string,
+    command: ResolveComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
     return this.post<ComplaintCaseRecord>(
       `/api/complaints/${encodeURIComponent(caseNo)}/resolve`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
@@ -1969,12 +2075,24 @@ export class ApiClient {
     return this.getList<DriverFeePlanRecord>("/api/driver-fee-plans");
   }
 
-  async publishDriverFeePlan(command: PublishDriverFeePlanCommand) {
-    return this.post("/api/driver-fee-plans/publish", { body: command });
+  async publishDriverFeePlan(
+    command: PublishDriverFeePlanCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/driver-fee-plans/publish", {
+      ...options,
+      body: command,
+    });
   }
 
-  async generateDriverStatements(command: GenerateDriverStatementCommand) {
-    return this.post("/api/driver-statements/generate", { body: command });
+  async generateDriverStatements(
+    command: GenerateDriverStatementCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/driver-statements/generate", {
+      ...options,
+      body: command,
+    });
   }
 
   async listFleetPartnerStatements(
@@ -2190,20 +2308,28 @@ export class ApiClient {
   async approveReimbursementBatch(
     batchId: string,
     command: ApproveReimbursementBatchCommand,
+    options?: RequestOptions,
   ): Promise<ReimbursementBatchRecord> {
     return this.post<ReimbursementBatchRecord>(
       `/api/reimbursements/${encodeURIComponent(batchId)}/approve`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
   async markReimbursementPaid(
     batchId: string,
     command: MarkReimbursementPaidCommand,
+    options?: RequestOptions,
   ): Promise<ReimbursementBatchRecord> {
     return this.post<ReimbursementBatchRecord>(
       `/api/reimbursements/${encodeURIComponent(batchId)}/pay`,
-      { body: command },
+      {
+        ...options,
+        body: command,
+      },
     );
   }
 
@@ -2335,8 +2461,12 @@ export class ApiClient {
 
   async createReportJob(
     command: CreateReportJobCommand,
+    options?: RequestOptions,
   ): Promise<ReportJobAccepted> {
-    return this.post<ReportJobAccepted>("/api/reports/jobs", { body: command });
+    return this.post<ReportJobAccepted>("/api/reports/jobs", {
+      ...options,
+      body: command,
+    });
   }
 
   async listReportJobs(): Promise<ReportJobRecord[]> {
@@ -2349,8 +2479,10 @@ export class ApiClient {
 
   async createTenantReportJob(
     command: CreateReportJobCommand,
+    options?: RequestOptions,
   ): Promise<ReportJobAccepted> {
     return this.post<ReportJobAccepted>("/api/tenant/reports/jobs", {
+      ...options,
       body: command,
     });
   }
@@ -2367,8 +2499,10 @@ export class ApiClient {
 
   async createRegulatoryReportJob(
     command: CreateRegulatoryReportJobCommand,
+    options?: RequestOptions,
   ): Promise<ReportJobAccepted> {
     return this.post<ReportJobAccepted>("/api/regulatory/reports/jobs", {
+      ...options,
       body: command,
     });
   }
@@ -2389,8 +2523,10 @@ export class ApiClient {
 
   async generateFilingPackage(
     command: GenerateFilingPackageCommand,
+    options?: RequestOptions,
   ): Promise<FilingPackageAccepted> {
     return this.post<FilingPackageAccepted>("/api/filing-packages/generate", {
+      ...options,
       body: command,
     });
   }
@@ -2736,15 +2872,23 @@ export class ApiClient {
     return this.getList<TenantWebhookEndpoint>("/api/tenant/webhooks");
   }
 
-  async createWebhookEndpoint(command: CreateTenantWebhookEndpointCommand) {
-    return this.post("/api/tenant/webhooks", { body: command });
+  async createWebhookEndpoint(
+    command: CreateTenantWebhookEndpointCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/tenant/webhooks", {
+      ...options,
+      body: command,
+    });
   }
 
   async updateWebhookEndpoint(
     webhookId: string,
     command: UpdateTenantWebhookEndpointCommand,
+    options?: RequestOptions,
   ): Promise<TenantWebhookEndpoint> {
     return this.post(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`, {
+      ...options,
       body: command,
     });
   }
@@ -2754,12 +2898,14 @@ export class ApiClient {
     command?: {
       reason?: string;
     },
+    options?: RequestOptions,
   ): Promise<TenantWebhookEndpoint> {
     const body: UpdateTenantWebhookEndpointCommand = {
       status: "disabled",
       ...(command?.reason ? { disableReason: command.reason } : {}),
     };
     return this.post(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`, {
+      ...options,
       body,
     });
   }
@@ -2767,10 +2913,25 @@ export class ApiClient {
   async deleteWebhookEndpoint(
     webhookId: string,
     command: DeleteTenantWebhookEndpointCommand,
+    options?: RequestOptions,
   ) {
     return this.delete(
       `/api/tenant/webhooks/${encodeURIComponent(webhookId)}`,
       {
+        ...options,
+        body: command,
+      },
+    );
+  }
+
+  async sendTestWebhook(
+    command: SendTestWebhookCommand,
+    options?: RequestOptions,
+  ): Promise<{ deliveryId: string | null; httpStatus: number }> {
+    return this.post<{ deliveryId: string | null; httpStatus: number }>(
+      "/api/tenant/webhooks/test",
+      {
+        ...options,
         body: command,
       },
     );
@@ -2787,9 +2948,13 @@ export class ApiClient {
   async retryWebhookDelivery(
     webhookId: string,
     deliveryId: string,
+    options?: RequestOptions,
   ): Promise<WebhookDeliveryRecord> {
     return this.post<WebhookDeliveryRecord>(
       `/api/tenant/webhooks/${encodeURIComponent(webhookId)}/deliveries/${encodeURIComponent(deliveryId)}/retry`,
+      {
+        ...options,
+      },
     );
   }
 

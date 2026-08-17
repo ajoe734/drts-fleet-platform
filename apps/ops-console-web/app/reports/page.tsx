@@ -31,9 +31,10 @@ import {
   REPORT_JOB_TYPES,
   REPORT_OUTPUT_FORMATS,
 } from "@drts/contracts";
-import type {
-  DailyDispatchRecordQuery,
-  OperationsSummaryPreviewQuery,
+import {
+  createIdempotencyKey,
+  type DailyDispatchRecordQuery,
+  type OperationsSummaryPreviewQuery,
 } from "@drts/api-client";
 import {
   CanvasBanner,
@@ -746,6 +747,9 @@ function OperationalReportsPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [exportIntentKey, setExportIntentKey] = useState(() =>
+    createIdempotencyKey("ops-report"),
+  );
   const [pending, startTransition] = useTransition();
 
   const isDaily = reportType === "daily_dispatch_record";
@@ -878,11 +882,19 @@ function OperationalReportsPanel() {
           }
 
           const filters = buildExportFilters();
-          const accepted = await getOpsClient().createReportJob({
-            jobType: reportType,
-            format: format as ReportOutputFormat,
-            ...(filters && Object.keys(filters).length > 0 ? { filters } : {}),
-          });
+          const accepted = await getOpsClient().createReportJob(
+            {
+              jobType: reportType,
+              format: format as ReportOutputFormat,
+              ...(filters && Object.keys(filters).length > 0
+                ? { filters }
+                : {}),
+            },
+            {
+              idempotencyKey: exportIntentKey,
+            },
+          );
+          setExportIntentKey(createIdempotencyKey("ops-report"));
           setNotice(
             t("reports.ops.export.accepted", { jobId: accepted.jobId }),
           );
@@ -1571,6 +1583,15 @@ export default function ReportsPage() {
   const [pending, startTransition] = useTransition();
   const [showJobComposer, setShowJobComposer] = useState(false);
   const [showPackageComposer, setShowPackageComposer] = useState(false);
+  const [jobIntentKey, setJobIntentKey] = useState(() =>
+    createIdempotencyKey("ops-report-job"),
+  );
+  const [packageIntentKey, setPackageIntentKey] = useState(() =>
+    createIdempotencyKey("ops-filing-package"),
+  );
+  const [jobRetryIntentKeys, setJobRetryIntentKeys] = useState<
+    Record<string, string>
+  >({});
   const [jobType, setJobType] = useState<ReportJobType>(REPORT_JOB_TYPES[0]!);
   const [format, setFormat] = useState<ReportOutputFormat>("xlsx");
   const [periodLabel, setPeriodLabel] = useState("");
@@ -1672,11 +1693,17 @@ export default function ReportsPage() {
           if (vehicleId.trim()) {
             filters.vehicleId = vehicleId.trim();
           }
-          const accepted = await client.createReportJob({
-            jobType,
-            format,
-            ...(Object.keys(filters).length > 0 ? { filters } : {}),
-          });
+          const accepted = await client.createReportJob(
+            {
+              jobType,
+              format,
+              ...(Object.keys(filters).length > 0 ? { filters } : {}),
+            },
+            {
+              idempotencyKey: jobIntentKey,
+            },
+          );
+          setJobIntentKey(createIdempotencyKey("ops-report-job"));
           setShowJobComposer(false);
           await loadData();
           await inspectReportJob(accepted.jobId);
@@ -1692,11 +1719,17 @@ export default function ReportsPage() {
       void (async () => {
         try {
           const client = getOpsClient();
-          const accepted = await client.generateFilingPackage({
-            packageType,
-            period: packageMonth.trim() ? { month: packageMonth.trim() } : {},
-            scope: packageScope.trim() ? { channel: packageScope.trim() } : {},
-          });
+          const accepted = await client.generateFilingPackage(
+            {
+              packageType,
+              period: packageMonth.trim() ? { month: packageMonth.trim() } : {},
+              scope: packageScope.trim() ? { channel: packageScope.trim() } : {},
+            },
+            {
+              idempotencyKey: packageIntentKey,
+            },
+          );
+          setPackageIntentKey(createIdempotencyKey("ops-filing-package"));
           setShowPackageComposer(false);
           await loadData();
           await inspectFilingPackage(accepted.packageId);
@@ -1708,13 +1741,32 @@ export default function ReportsPage() {
   }
 
   function retryReportJob(job: ReportJobRecord) {
+    const retryKey =
+      jobRetryIntentKeys[job.jobId] ??
+      createIdempotencyKey("ops-report-retry");
+    if (!jobRetryIntentKeys[job.jobId]) {
+      setJobRetryIntentKeys((prev) => ({
+        ...prev,
+        [job.jobId]: retryKey,
+      }));
+    }
     startTransition(() => {
       void (async () => {
         try {
-          const accepted = await getOpsClient().createReportJob({
-            jobType: job.jobType as ReportJobType,
-            format: job.format,
-            filters: job.filters,
+          const accepted = await getOpsClient().createReportJob(
+            {
+              jobType: job.jobType as ReportJobType,
+              format: job.format,
+              filters: job.filters,
+            },
+            {
+              idempotencyKey: retryKey,
+            },
+          );
+          setJobRetryIntentKeys((prev) => {
+            const next = { ...prev };
+            delete next[job.jobId];
+            return next;
           });
           await loadData();
           await inspectReportJob(accepted.jobId);

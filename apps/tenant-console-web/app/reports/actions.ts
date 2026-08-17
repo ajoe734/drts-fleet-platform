@@ -110,10 +110,13 @@ async function submitReportJob(
   command: CreateReportJobCommand,
   returnTo: string,
   flash: "created" | "rerun",
+  idempotencyKey?: string,
 ) {
   try {
     const client = await getTenantClient();
-    const accepted = await client.createTenantReportJob(command);
+    const accepted = await client.createTenantReportJob(command, {
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+    });
     revalidatePath(REPORTS_PATH);
     redirectWithFlash(returnTo, {
       flash,
@@ -122,6 +125,7 @@ async function submitReportJob(
   } catch (error) {
     redirectWithFlash(returnTo, {
       flash: "error",
+      flashJobId: undefined,
       flashMessage: toErrorMessage(error),
     });
   }
@@ -132,6 +136,7 @@ export async function createReportJobAction(formData: FormData) {
   const jobType = getFieldValue(formData, "jobType") || "monthly_trip_report";
   const format = normalizeOutputFormat(getFieldValue(formData, "format"));
   const filters = buildCreateFilters(formData);
+  const idempotencyKey = getFieldValue(formData, "idempotencyKey") || undefined;
 
   await submitReportJob(
     {
@@ -141,6 +146,7 @@ export async function createReportJobAction(formData: FormData) {
     },
     returnTo,
     "created",
+    idempotencyKey,
   );
 }
 
@@ -149,6 +155,7 @@ export async function rerunReportJobAction(formData: FormData) {
   const jobType = getFieldValue(formData, "jobType") || "monthly_trip_report";
   const format = normalizeOutputFormat(getFieldValue(formData, "format"));
   const filters = parseFiltersJson(getFieldValue(formData, "filtersJson"));
+  const idempotencyKey = getFieldValue(formData, "idempotencyKey") || undefined;
 
   await submitReportJob(
     {
@@ -158,6 +165,7 @@ export async function rerunReportJobAction(formData: FormData) {
     },
     returnTo,
     "rerun",
+    idempotencyKey,
   );
 }
 

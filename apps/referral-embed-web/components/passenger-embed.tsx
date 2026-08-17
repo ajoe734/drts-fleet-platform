@@ -89,6 +89,7 @@ function parseScheduledAt(value: string) {
 function buildBookingCommand(
   context: EmbedContext,
   form: BookingFormState,
+  bookingIntentKey?: string,
 ): CreateReferralPassengerBookingCommand {
   const sanitizedPhone = form.passengerPhone.replace(/[^\d+]/g, "");
   const command: CreateReferralPassengerBookingCommand = {
@@ -97,8 +98,7 @@ function buildBookingCommand(
     dropoffAddress: form.dropoffAddress.trim(),
     vehicleType: form.vehicleType,
     idempotencyKey:
-      globalThis.crypto?.randomUUID?.() ??
-      `referral-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      bookingIntentKey ?? createIdempotencyKey("referral-booking"),
   };
   const passengerName = form.passengerName.trim();
   const scheduledAt = parseScheduledAt(form.scheduledAt);
@@ -1315,6 +1315,9 @@ function BookScreen({ context }: { context: EmbedContext }) {
   const [error, setError] = useState<string | null>(null);
   const [bootstrapped, setBootstrapped] = useState(Boolean(context.session));
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [bookingIntentKey] = useState(() =>
+    createIdempotencyKey("referral-booking"),
+  );
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -1364,10 +1367,16 @@ function BookScreen({ context }: { context: EmbedContext }) {
           setBootstrapped(true);
         }
 
+        const command = buildBookingCommand(context, form, bookingIntentKey);
         const response = await fetch("/api/referral/booking", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildBookingCommand(context, form)),
+          headers: {
+            "Content-Type": "application/json",
+            ...(command.idempotencyKey
+              ? { "Idempotency-Key": command.idempotencyKey }
+              : {}),
+          },
+          body: JSON.stringify(command),
         });
         const payload = await response.json().catch(() => null);
         if (!response.ok || !payload?.ok) {

@@ -29,6 +29,7 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { createBrowserApiClient } from "@/lib/browser-api-client";
+import { createIdempotencyKey } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
 
 type Translate = (
@@ -478,6 +479,12 @@ export function ReportsManager({
   const [statusFilter, setStatusFilter] = useState<ReportStatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [periodFilter, setPeriodFilter] = useState("");
+  const [createJobIntentKey, setCreateJobIntentKey] = useState(() =>
+    createIdempotencyKey("tenant-report"),
+  );
+  const [rerunIntentKeys, setRerunIntentKeys] = useState<
+    Record<string, string>
+  >({});
   const [draft, setDraft] = useState<ReportDraft>({
     jobType: "monthly_trip_report",
     format: "xlsx",
@@ -651,12 +658,18 @@ export function ReportsManager({
       if (costCenterCode) filters.costCenterCode = costCenterCode;
       if (passengerUserId) filters.passengerUserId = passengerUserId;
 
-      const result = await client.createTenantReportJob({
-        jobType: draft.jobType,
-        format: draft.format,
-        filters,
-      });
+      const result = await client.createTenantReportJob(
+        {
+          jobType: draft.jobType,
+          format: draft.format,
+          filters,
+        },
+        {
+          idempotencyKey: createJobIntentKey,
+        },
+      );
 
+      setCreateJobIntentKey(createIdempotencyKey("tenant-report"));
       setFlash({
         title: t("reports.flash.jobQueued.title"),
         description: t("reports.flash.jobQueued.description", {
@@ -678,11 +691,32 @@ export function ReportsManager({
       return;
     }
 
+    const rerunKey =
+      rerunIntentKeys[job.jobId] ??
+      createIdempotencyKey("tenant-report-rerun");
+    if (!rerunIntentKeys[job.jobId]) {
+      setRerunIntentKeys((prev) => ({
+        ...prev,
+        [job.jobId]: rerunKey,
+      }));
+    }
+
     runTransition(async () => {
-      const result = await client.createTenantReportJob({
-        jobType: job.jobType,
-        format: job.format,
-        filters: job.filters,
+      const result = await client.createTenantReportJob(
+        {
+          jobType: job.jobType,
+          format: job.format,
+          filters: job.filters,
+        },
+        {
+          idempotencyKey: rerunKey,
+        },
+      );
+
+      setRerunIntentKeys((prev) => {
+        const next = { ...prev };
+        delete next[job.jobId];
+        return next;
       });
 
       setFlash({
