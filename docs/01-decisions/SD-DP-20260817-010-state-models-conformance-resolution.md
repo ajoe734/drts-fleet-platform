@@ -7,7 +7,14 @@
 - `owner`: `Gemini2 / CONF-STATE-001`
 - `reviewer`: `Gemini`
 - `date`: `2026-08-17`
-- `status`: `accepted-for-execution`
+- `status`: `pending-human-acceptance`
+- `status_note`:
+  - authored and reviewed by agent lanes only; `SD-DP-20260422-003` requires a human/system-design
+    answer before a packet supersedes L1 wording
+  - the PRD amendments are already applied and left in place because they are accurate;
+    `docs/01-decisions/l1-amendment-acceptance-request-20260817.md` asks for the missing answer
+  - this packet closes `GAP-CONF-04` and `GAP-CONF-05` by amending the standard rather than changing
+    the system, which is the class of change that most needs a human to confirm it
 - `task_id`: `CONF-STATE-001`
 - `gaps_resolved`:
   - `GAP-CONF-04` (Forwarded order lifecycle states: PRD 11.2 13 states vs Contracts/Codebase 8 states)

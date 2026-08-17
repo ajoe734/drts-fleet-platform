@@ -39,6 +39,10 @@ the canonical PRD / SA files in the same wave.
 - `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`
 - `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`
 - `docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md`
+
+Pending human acceptance -- their L1 amendments are applied but not yet ratified, and they enter this
+layer only once accepted. See `docs/01-decisions/l1-amendment-acceptance-request-20260817.md`:
+
 - `docs/01-decisions/SD-DP-20260817-009-domain-event-contract-and-write-authority.md`
 - `docs/01-decisions/SD-DP-20260817-010-state-models-conformance-resolution.md`
 
@@ -162,6 +166,10 @@ Working rule:
 - execution packets materialize that change into concrete task IDs and acceptance
 - `ai-status.json` is the machine truth once tasks are opened
 - code-backed audits are where implementation reality is written back for drift checks
+- **execution tasks must not edit the L1 files in section 2.** `SD-DP-20260422-003` reserves L1
+  rewrites for a controlled revision a human has accepted, so execution packets must not list an L1
+  file under a task's owned artifacts. A wave that measures the distance between specification and
+  implementation must not be able to close it by moving the specification
 
 ## 7. Working Rule
 

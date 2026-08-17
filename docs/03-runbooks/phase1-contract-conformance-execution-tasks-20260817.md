@@ -15,15 +15,20 @@
    supervisor without changing task scope.
 4. Workers edit only listed artifacts. Shared-file expansion requires a supervisor note
    before editing.
-5. Each implementation task produces a normal PR and candidate SHA. Task status becomes
+5. **No task may edit an L1 product-truth file** (`CANONICAL_DOCUMENT_MAP.md` section 2, which
+   includes `phase1_prd_detailed_v1.md` and `phase1_service_contracts_v1.md`). Record the proposed
+   wording in the task's own artifacts and raise it for acceptance. The phrase "under controlled
+   sync" beside a filename does not authorise the edit -- this wave listed L1 files that way and
+   four unratified amendments landed in one day.
+6. Each implementation task produces a normal PR and candidate SHA. Task status becomes
    done only after independent review, same-SHA CI, merge, and the listed acceptance
    evidence.
-6. **`CONF-IDEM-001` must merge before any of `CONF-IDEM-002/003/004` starts.** It
+7. **`CONF-IDEM-001` must merge before any of `CONF-IDEM-002/003/004` starts.** It
    settles replay-versus-conflict semantics and the shared helper; three workers
    inventing three different answers is the specific failure this ordering prevents.
-7. **`CONF-EVENT-001` produces a decision document and no production code.** A worker
+8. **`CONF-EVENT-001` produces a decision document and no production code.** A worker
    that finds itself adding event topics has misread the task and must stop.
-8. No task may claim conformance from a sequential test where the specification
+9. No task may claim conformance from a sequential test where the specification
    requires a concurrency guarantee. See `CONF-VERIFY-001`.
 
 ## 2. Dependency graph
