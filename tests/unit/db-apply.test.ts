@@ -451,5 +451,86 @@ WHERE event_id = '${eventId}';
     ).trim();
 
     expect(persisted).toBe("1|success");
+
+    const auditLogId = "55555555-5555-4555-8555-555555555555";
+    bash(
+      psqlCommand(
+        databaseUrl,
+        `
+INSERT INTO admin.audit_logs (
+  audit_id,
+  actor_id,
+  actor_type,
+  module_name,
+  action_name,
+  resource_type,
+  resource_id,
+  request_id,
+  created_at,
+  new_value
+) VALUES (
+  '${auditLogId}',
+  gen_random_uuid(),
+  'ops_user',
+  'db-apply-test',
+  'create_record',
+  'audit_record',
+  'rec-001',
+  'req-apply-001',
+  now(),
+  '{"status":"active"}'::jsonb
+);
+        `,
+      ),
+    );
+
+    expect(() =>
+      bash(
+        psqlCommand(
+          databaseUrl,
+          `
+UPDATE admin.audit_logs
+SET action_name = 'tampered'
+WHERE audit_id = '${auditLogId}';
+          `,
+        ),
+      ),
+    ).toThrow();
+
+    expect(() =>
+      bash(
+        psqlCommand(
+          databaseUrl,
+          `
+DELETE FROM admin.audit_logs
+WHERE audit_id = '${auditLogId}';
+          `,
+        ),
+      ),
+    ).toThrow();
+
+    expect(() =>
+      bash(
+        psqlCommand(
+          databaseUrl,
+          `
+TRUNCATE admin.audit_logs;
+          `,
+        ),
+      ),
+    ).toThrow();
+
+    const auditPersisted = bash(
+      psqlCommand(
+        databaseUrl,
+        `
+SELECT count(*)::text || '|' || min(action_name)
+FROM admin.audit_logs
+WHERE audit_id = '${auditLogId}';
+        `,
+      ),
+    ).trim();
+
+    expect(auditPersisted).toBe("1|create_record");
   }, 180_000);
 });
