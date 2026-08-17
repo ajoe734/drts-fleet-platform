@@ -1893,7 +1893,13 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
                 "effective_reason": effective_reason,
             },
         )
-        emit_hook_response(_decision_response(event_name, "defer", decision["reason"]))
+        # PreToolUse accepts allow, deny or ask. "defer" is the broker's own
+        # word for "a person must decide", and the harness cannot read it: the
+        # tool call stalls until it is torn down as an internal error instead
+        # of prompting, taking the worker with it. The sibling path above
+        # already defers correctly by letting Claude Code's own prompt ask;
+        # "ask" does the same here and carries the reason with it.
+        emit_hook_response(_decision_response(event_name, "ask", decision["reason"]))
         return 0
 
     log_event(config, event_name, payload)
