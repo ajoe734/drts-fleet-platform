@@ -39,8 +39,8 @@ export class IdempotencyService {
    *    - stores completed response body and status code
    *    - returns fresh execution result (isReplay: false)
    */
-  async execute<TBody, TResponse>(
-    options: ExecuteIdempotentOptions<TBody, TResponse>,
+  async execute<TResponse = unknown>(
+    options: ExecuteIdempotentOptions<TResponse>,
   ): Promise<IdempotencyExecutionResult<TResponse>> {
     const rawKey = options.idempotencyKey;
     const isRequired = options.required ?? true;
@@ -250,9 +250,9 @@ export class IdempotencyService {
 /**
  * Functional convenience helper to execute with idempotency without NestJS DI.
  */
-export async function executeWithIdempotency<TBody, TResponse>(
+export async function executeWithIdempotency<TResponse = unknown>(
   repository: IdempotencyRepository,
-  options: ExecuteIdempotentOptions<TBody, TResponse>,
+  options: ExecuteIdempotentOptions<TResponse>,
 ): Promise<IdempotencyExecutionResult<TResponse>> {
   const service = new IdempotencyService(repository);
   return service.execute(options);

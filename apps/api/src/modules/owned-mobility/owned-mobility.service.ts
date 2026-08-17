@@ -103,9 +103,6 @@ import type {
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
   SubmitReferralPassengerRatingCommand,
-  IDEMPOTENCY_KEY_REQUIRED,
-  IDEMPOTENCY_KEY_REUSED,
-  IDEMPOTENCY_KEY_TOO_LONG,
 } from "@drts/contracts";
 
 import {
@@ -630,6 +627,28 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
+  ): OwnedOrderRecord;
+  createPassengerOrder(
+    command: CreateOwnedOrderCommand,
+    identity: BootstrapRequestIdentity | null | undefined,
+    requestId: string | undefined,
+    runtimeProfileCodeHeader: string | undefined,
+    idempotencyKeyHeader: string | undefined,
+    options?: { required?: boolean },
+  ): Promise<OwnedOrderRecord>;
+  createPassengerOrder(
+    command: CreateOwnedOrderCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
+    idempotencyKeyHeader?: string,
+    options?: { required?: boolean },
+  ): MaybePromise<OwnedOrderRecord>;
+  createPassengerOrder(
+    command: CreateOwnedOrderCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    runtimeProfileCodeHeader?: string,
     idempotencyKeyHeader?: string,
     options?: { required?: boolean },
   ): MaybePromise<OwnedOrderRecord> {
@@ -666,10 +685,7 @@ export class OwnedMobilityService
     const scope = "orders:passenger_create";
     const idempotencyService = this.getIdempotencyService();
 
-    const result = await idempotencyService.execute<
-      CreateOwnedOrderCommand,
-      OwnedOrderRecord
-    >({
+    const result = await idempotencyService.execute<OwnedOrderRecord>({
       scope,
       idempotencyKey: resolvedKey,
       tenantId: null,
@@ -1258,10 +1274,7 @@ export class OwnedMobilityService
     const scope = `tenant:${tenantId}:booking_create`;
     const idempotencyService = this.getIdempotencyService();
 
-    const result = await idempotencyService.execute<
-      CreateTenantBookingCommand,
-      TenantBookingResult
-    >({
+    const result = await idempotencyService.execute<TenantBookingResult>({
       scope,
       idempotencyKey: resolvedKey,
       tenantId,
@@ -2488,10 +2501,7 @@ export class OwnedMobilityService
     const scope = `dispatch:order:${orderId}:assign`;
     const idempotencyService = this.getIdempotencyService();
 
-    const result = await idempotencyService.execute<
-      DispatchOrderCommand,
-      any
-    >({
+    const result = await idempotencyService.execute<any>({
       scope,
       idempotencyKey: resolvedKey,
       tenantId: order.tenantId,
@@ -2811,10 +2821,7 @@ export class OwnedMobilityService
     const scope = `dispatch:order:${orderId}:assign`;
     const idempotencyService = this.getIdempotencyService();
 
-    const result = await idempotencyService.execute<
-      RedispatchOrderCommand,
-      any
-    >({
+    const result = await idempotencyService.execute<any>({
       scope,
       idempotencyKey: resolvedKey,
       tenantId: order.tenantId,
@@ -3588,10 +3595,7 @@ export class OwnedMobilityService
     const scope = `dispatch:order:${order.orderId}:assign`;
     const idempotencyService = this.getIdempotencyService();
 
-    const result = await idempotencyService.execute<
-      AssignDispatchCommand,
-      DispatchAssignmentResult
-    >({
+    const result = await idempotencyService.execute<DispatchAssignmentResult>({
       scope,
       idempotencyKey: resolvedKey,
       tenantId: order.tenantId,
@@ -3663,10 +3667,7 @@ export class OwnedMobilityService
     const scope = `dispatch:order:${order.orderId}:assign`;
     const idempotencyService = this.getIdempotencyService();
 
-    const result = await idempotencyService.execute<
-      ReassignDispatchCommand,
-      DispatchAssignmentResult
-    >({
+    const result = await idempotencyService.execute<DispatchAssignmentResult>({
       scope,
       idempotencyKey: resolvedKey,
       tenantId: order.tenantId,
@@ -10629,10 +10630,7 @@ export class OwnedMobilityService
       const scope = `tenant:${tenantId}:booking_create`;
       const idempotencyService = this.getIdempotencyService();
 
-      const result = await idempotencyService.execute<
-        CreateReferralPassengerBookingCommand,
-        TenantBookingResult
-      >({
+      const result = await idempotencyService.execute<TenantBookingResult>({
         scope,
         idempotencyKey: resolvedIdempotencyKey,
         tenantId,

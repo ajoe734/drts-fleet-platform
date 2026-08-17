@@ -3,7 +3,6 @@ import {
   Controller,
   Get,
   Headers,
-  HttpStatus,
   Optional,
   Param,
   Post,
@@ -43,7 +42,6 @@ import type {
   CreateReferralPassengerBookingCommand,
   SubmitReferralPassengerRatingCommand,
 } from "@drts/contracts";
-import { IDEMPOTENCY_KEY_REQUIRED } from "@drts/contracts";
 
 import {
   ApiRequestError,

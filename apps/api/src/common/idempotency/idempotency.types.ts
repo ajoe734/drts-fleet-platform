@@ -28,7 +28,7 @@ export interface CreateProcessingResult {
   inserted: boolean;
 }
 
-export interface ExecuteIdempotentOptions<TBody, TResponse> {
+export interface ExecuteIdempotentOptions<TResponse = unknown> {
   scope: string;
   idempotencyKey?: string | null | undefined;
   tenantId?: string | null | undefined;

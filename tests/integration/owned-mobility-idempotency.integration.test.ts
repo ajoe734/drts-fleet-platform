@@ -12,11 +12,9 @@ import type {
   CreateReferralPassengerBookingCommand,
   CreateTenantBookingCommand,
   DispatchOrderCommand,
-  ReassignDispatchCommand,
   RedispatchOrderCommand,
 } from "@drts/contracts";
 
-import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../apps/api/src/common/auth";
 import {
   IdempotencyRepository,
@@ -87,13 +85,15 @@ function createHarness() {
 describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
   describe("Command 1: Passenger Order Creation (createPassengerOrder / POST orders)", () => {
     const passengerIdentity: BootstrapRequestIdentity = {
-      realm: "passenger",
-      actorType: "passenger_user",
+      authMode: "jwt_bearer",
+      realm: "partner",
+      actorType: "referral_passenger",
       actorId: "passenger-101",
-      userId: "user-101",
-      email: "passenger@example.com",
-      roles: ["passenger"],
-      claims: {},
+      tenantId: null,
+      roleFamilies: ["partner"],
+      roles: ["referral_passenger"],
+      scopes: [],
+      requestId: "req-pax-001",
     };
 
     const orderCommand: CreateOwnedOrderCommand = {
@@ -265,13 +265,15 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
 
   describe("Command 2: Tenant & Referral Booking Creation (createTenantBooking / POST tenant/bookings)", () => {
     const tenantAdminIdentity: BootstrapRequestIdentity = {
+      authMode: "jwt_bearer",
       realm: "tenant",
       actorType: "tenant_admin",
       actorId: "admin-alpha",
-      userId: "user-admin-1",
       tenantId: "tenant-acme-001",
+      roleFamilies: ["tenant"],
       roles: ["tenant_admin"],
-      claims: {},
+      scopes: [],
+      requestId: "req-tenant-admin-001",
     };
 
     const bookingCommand: CreateTenantBookingCommand = {
@@ -438,8 +440,10 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
         partnerProgramId: "program-referral-community",
         partnerEntrySlug: "yuhe-residence",
         drtsPassengerId: "pax-ref-001",
-        roles: ["passenger"],
-        claims: {},
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-ref-001",
       };
 
       const referralCommand: CreateReferralPassengerBookingCommand = {
@@ -493,13 +497,15 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
 
   describe("Command 3: Dispatch Assign and Redispatch (POST dispatch/assign, POST orders/:id/dispatch)", () => {
     const passengerIdentity: BootstrapRequestIdentity = {
-      realm: "passenger",
-      actorType: "passenger_user",
+      authMode: "jwt_bearer",
+      realm: "partner",
+      actorType: "referral_passenger",
       actorId: "passenger-101",
-      userId: "user-101",
-      email: "passenger@example.com",
-      roles: ["passenger"],
-      claims: {},
+      tenantId: null,
+      roleFamilies: ["partner"],
+      roles: ["referral_passenger"],
+      scopes: [],
+      requestId: "req-pax-001",
     };
 
     const orderCommand: CreateOwnedOrderCommand = {
@@ -803,17 +809,19 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
 
   describe("Database Constraint & Concurrency Safety", () => {
     it("handles concurrent insert collision via UNIQUE constraint and safely replays winner response", async () => {
-      const { idempotencyRepository, idempotencyService, controller } =
+      const { idempotencyRepository, controller } =
         createHarness();
 
       const passengerIdentity: BootstrapRequestIdentity = {
-        realm: "passenger",
-        actorType: "passenger_user",
+        authMode: "jwt_bearer",
+        realm: "partner",
+        actorType: "referral_passenger",
         actorId: "passenger-concurrent",
-        userId: "user-concurrent",
-        email: "concurrent@example.com",
-        roles: ["passenger"],
-        claims: {},
+        tenantId: null,
+        roleFamilies: ["partner"],
+        roles: ["referral_passenger"],
+        scopes: [],
+        requestId: "req-pax-concurrent",
       };
 
       const orderCommand: CreateOwnedOrderCommand = {
