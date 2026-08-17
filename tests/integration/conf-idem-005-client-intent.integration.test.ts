@@ -32,6 +32,10 @@ import { ReportingFilingController } from "../../apps/api/src/modules/reporting-
 import { ReportingFilingService } from "../../apps/api/src/modules/reporting-filing/reporting-filing.service";
 import { TenantPartnerController } from "../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+import { FareAnomalyController } from "../../apps/api/src/modules/product-rule/fare-anomaly.controller";
+import { FareAnomalyRepository } from "../../apps/api/src/modules/product-rule/fare-anomaly.repository";
+import { FareAnomalyService } from "../../apps/api/src/modules/product-rule/fare-anomaly.service";
+import type { FareQuoteRecoveryPort } from "../../apps/api/src/modules/product-rule/fare-quote-recovery.port";
 
 function fakeResponse() {
   const headers: Record<string, string> = {};
@@ -450,4 +454,146 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
       expect(headers2()[IDEMPOTENCY_REPLAY_HEADER]).toBe("true");
     });
   });
+
+  describe("Fare quote anomaly retry intent", () => {
+    let repository: FareAnomalyRepository;
+    let auditService: AuditNotificationService;
+    let recoveryPort: FareQuoteRecoveryPort;
+    let fareAnomalyService: FareAnomalyService;
+    let controller: FareAnomalyController;
+
+    beforeEach(async () => {
+      repository = new FareAnomalyRepository();
+      auditService = new AuditNotificationService();
+      recoveryPort = {
+        isAvailable: vi.fn(() => true),
+        recover: vi.fn(async () => ({
+          status: "accepted" as const,
+          action: "retry_quote" as const,
+          message: "Quote recalculation scheduled",
+        })),
+      };
+      fareAnomalyService = new FareAnomalyService(
+        repository,
+        auditService,
+        recoveryPort,
+      );
+      await fareAnomalyService.onModuleInit();
+      controller = new FareAnomalyController(fareAnomalyService);
+    });
+
+    it("rejects retry quote request without Idempotency-Key", async () => {
+      await fareAnomalyService.recordQuoteAnomaly({
+        reason: "quote_provider_unavailable",
+        snapshot: {
+          routeSnapshotId: "route-001",
+          quoteSnapshotId: "quote-001",
+          orderId: "order-001",
+          pickup: {
+            address: "A",
+            lat: 25.033,
+            lng: 121.568,
+            coordinateSource: "provider_candidate",
+            geocodeConfidence: "exact",
+            resolvedAt: "2026-07-24T08:00:00.000Z",
+          },
+          dropoff: {
+            address: "B",
+            lat: 25.056,
+            lng: 121.618,
+            coordinateSource: "provider_candidate",
+            geocodeConfidence: "exact",
+            resolvedAt: "2026-07-24T08:01:00.000Z",
+          },
+          estimatedDistanceMeters: 8200,
+          estimatedDurationSeconds: 1400,
+          encodedPolyline: null,
+          chargingMode: "fixed_quote",
+          estimatedFareMinor: null,
+          payableFareMinor: null,
+          currency: "NTD",
+          farePolicyId: "fare-policy-001",
+          farePolicyVersion: "FARE-MTX-2026-07",
+          fareChangeRuleId: "fare-change-001",
+          fareChangeRuleVersion: "1",
+          fareChangeRuleDisplayText: "Fare changes require passenger confirmation.",
+          passengerConfirmedAt: null,
+          generatedAt: "2026-07-24T08:02:00.000Z",
+        },
+      });
+
+      const error = await expectThrows(() =>
+        controller.retryQuote(
+          "quote-001",
+          { actorId: "admin-1", realm: "platform", roles: [], permissions: [] } as never,
+          undefined,
+          "req-1",
+        ),
+      );
+      expect(getErrorCode(error)).toBe("IDEMPOTENCY_KEY_REQUIRED");
+    });
+
+    it("retrying quote retry with same intent key replays receipt and recovers only once", async () => {
+      await fareAnomalyService.recordQuoteAnomaly({
+        reason: "quote_provider_unavailable",
+        snapshot: {
+          routeSnapshotId: "route-001",
+          quoteSnapshotId: "quote-001",
+          orderId: "order-001",
+          pickup: {
+            address: "A",
+            lat: 25.033,
+            lng: 121.568,
+            coordinateSource: "provider_candidate",
+            geocodeConfidence: "exact",
+            resolvedAt: "2026-07-24T08:00:00.000Z",
+          },
+          dropoff: {
+            address: "B",
+            lat: 25.056,
+            lng: 121.618,
+            coordinateSource: "provider_candidate",
+            geocodeConfidence: "exact",
+            resolvedAt: "2026-07-24T08:01:00.000Z",
+          },
+          estimatedDistanceMeters: 8200,
+          estimatedDurationSeconds: 1400,
+          encodedPolyline: null,
+          chargingMode: "fixed_quote",
+          estimatedFareMinor: null,
+          payableFareMinor: null,
+          currency: "NTD",
+          farePolicyId: "fare-policy-001",
+          farePolicyVersion: "FARE-MTX-2026-07",
+          fareChangeRuleId: "fare-change-001",
+          fareChangeRuleVersion: "1",
+          fareChangeRuleDisplayText: "Fare changes require passenger confirmation.",
+          passengerConfirmedAt: null,
+          generatedAt: "2026-07-24T08:02:00.000Z",
+        },
+      });
+
+      const intentKey = createIdempotencyKey("fare-anomaly-retry");
+      const identity = { actorId: "admin-1", realm: "platform", roles: [], permissions: [] } as never;
+
+      const first = await controller.retryQuote(
+        "quote-001",
+        identity,
+        intentKey,
+        "req-1",
+      );
+
+      const second = await controller.retryQuote(
+        "quote-001",
+        identity,
+        intentKey,
+        "req-2",
+      );
+
+      expect(first.data.auditId).toBe(second.data.auditId);
+      expect(first.data.status).toBe("accepted");
+      expect(recoveryPort.recover).toHaveBeenCalledTimes(1);
+    });
+  });
 });
+

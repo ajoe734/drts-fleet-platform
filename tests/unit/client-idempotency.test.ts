@@ -568,5 +568,64 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
       expect(capturedRequests[1]!.url).toContain("/api/tenant/reports/jobs");
       expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(portalReportKey);
     });
+
+    it("fare-anomaly retry quote preserves identical idempotencyKey across retry attempts and resets on success", async () => {
+      let callCount = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = typeof input === "string" ? input : input.toString();
+          const headers = new Headers(init?.headers);
+          capturedRequests.push({ url, method: init?.method, headers });
+
+          callCount++;
+          if (callCount === 1) {
+            return new Response(JSON.stringify({ error: "Service unavailable" }), {
+              status: 503,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return new Response(
+            JSON.stringify({ data: { auditId: "aud-001", status: "completed", message: "Quote recalculated" } }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }),
+      );
+
+      const quoteSnapshotId = "quote-snap-101";
+      let intentKey = createIdempotencyKey("fare-anomaly-retry");
+      const initialKey = intentKey;
+
+      // Attempt 1 (fails due to 503)
+      await expect(
+        client.post(`/api/product-rule/fare-anomalies/${quoteSnapshotId}/actions/retry-quote`, {
+          headers: {
+            "Idempotency-Key": intentKey,
+          },
+        }),
+      ).rejects.toThrow();
+
+      // Attempt 2 (retry on error - uses identical intentKey)
+      const receipt = await client.post<{ data: { auditId: string } }>(
+        `/api/product-rule/fare-anomalies/${quoteSnapshotId}/actions/retry-quote`,
+        {
+          headers: {
+            "Idempotency-Key": intentKey,
+          },
+        },
+      );
+      expect(receipt).toBeDefined();
+
+      // On success, a new intent key is generated for future actions
+      intentKey = createIdempotencyKey("fare-anomaly-retry");
+      expect(intentKey).not.toBe(initialKey);
+
+      expect(capturedRequests).toHaveLength(2);
+      expect(capturedRequests[0]!.url).toContain(`/api/product-rule/fare-anomalies/${quoteSnapshotId}/actions/retry-quote`);
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(initialKey);
+      expect(capturedRequests[1]!.url).toContain(`/api/product-rule/fare-anomalies/${quoteSnapshotId}/actions/retry-quote`);
+      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(initialKey);
+    });
   });
 });
+
