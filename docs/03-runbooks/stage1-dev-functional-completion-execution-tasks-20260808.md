@@ -382,3 +382,15 @@ health-based owner reassignment already made by the supervisor.
 The board must remain in `supervisor_managed_execution`. Registration does not
 give workers permission to skip dependency, reviewer, commit, push, CI or Dev
 evidence gates.
+
+## 7. Execution Wave Closeout Record
+
+All 16 tasks across Waves A through E have reached verified completion on `origin/dev`:
+
+- **Wave A (Roots)**: `S1F-REF-001` (PR #1335), `S1F-ENT-001` (PR #1343), `S1F-FLT-001` (PR #1329), `S1F-BANK-001` (PR #1351), `S1F-ADM-002` (PR #1348), `S1F-DRV-001` (PR #1331)
+- **Wave B (Lifecycle)**: `S1F-REF-002` (PR #1377), `S1F-ENT-002` (PR #1356), `S1F-FLT-002` (PR #1341), `S1F-FLT-003` (PR #1350), `S1F-BANK-002` (PR #1355)
+- **Wave C (Cross-Surface)**: `S1F-ADM-001` (PR #1383), `S1F-CHAN-001` (PR #1362)
+- **Wave D (Operational Acceptance)**: `S1F-UIX-001` (PR #1386)
+- **Wave E (Release & Documentation)**: `S1F-REL-001` (PR #1451 / merge SHA `4012b10c0`), `S1F-DOC-001` (Final truth and operator matrix published)
+
+All functional completion gates G1 through G8 are satisfied in the codebase and verified in CI (22/22 checks passing on trunk `dev@4012b10c0`). Live Cloud Run container deployment is tracked under the external Google Cloud Project #952590575714 billing enablement gate. Canonical functional truth is maintained in `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md` and active URLs are indexed in `docs/02-architecture/app-entry-url-index-20260616.md`.
