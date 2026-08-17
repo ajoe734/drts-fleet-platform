@@ -5,9 +5,54 @@ import io
 import json
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest import mock
 
 import permission_broker
+
+
+class WorkspaceBoundaryTests(unittest.TestCase):
+    """The boundary is what a shell would reach, not what a string looks like.
+
+    `_paths_within_workspace` joined a relative path onto the workspace root
+    without expanding or normalising it, and `_is_relative_to` compares
+    lexically. `~/.ssh/id_rsa` therefore became `<root>/~/.ssh/id_rsa`, which
+    starts with the root and was judged inside the workspace -- while the shell
+    that eventually runs the command expands `~` to the real home and reads the
+    key. `../../etc/passwd` passed the same way, because `<root>/../..` is still
+    textually under `<root>`.
+    """
+
+    ESCAPES = [
+        "~/.ssh/id_rsa",
+        "~/.aws/credentials",
+        "../../etc/passwd",
+        "$HOME/.ssh/config",
+        "${HOME}/.ssh/config",
+    ]
+
+    def test_paths_that_leave_the_workspace_are_refused(self) -> None:
+        for candidate in self.ESCAPES:
+            with self.subTest(path=candidate):
+                self.assertFalse(
+                    permission_broker._paths_within_workspace([Path(candidate)]),
+                    f"{candidate} was judged inside the workspace",
+                )
+
+    def test_absolute_paths_outside_the_workspace_are_still_refused(self) -> None:
+        self.assertFalse(permission_broker._paths_within_workspace([Path("/etc/passwd")]))
+
+    def test_ordinary_workspace_paths_are_still_allowed(self) -> None:
+        for candidate in ("apps/api/src/main.ts", "tools/development-orchestrator/common.py", "."):
+            with self.subTest(path=candidate):
+                self.assertTrue(permission_broker._paths_within_workspace([Path(candidate)]))
+
+    def test_an_absolute_path_inside_the_workspace_is_allowed(self) -> None:
+        inside = permission_broker.workspace_root() / "apps" / "api"
+        self.assertTrue(permission_broker._paths_within_workspace([inside]))
+
+    def test_no_paths_is_not_an_escape(self) -> None:
+        self.assertTrue(permission_broker._paths_within_workspace([]))
 
 
 class PermissionBrokerLoggingTests(unittest.TestCase):
