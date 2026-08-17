@@ -32,6 +32,18 @@ except ImportError:
     ZoneInfo = None
 from pathlib import Path
 
+_TOOL_ROOT = Path(__file__).resolve().parent.parent
+if str(_TOOL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOL_ROOT))
+
+# The probe answers questions the control plane also answers, so it has to ask
+# them the same way. Reading machine truth from files rather than the runtime
+# cache is deliberate; redefining what the words mean was not. Counting only
+# status == "running" made a fleet stalled on approvals or retries report as
+# `workers: 0 running`, which is the same lie the supervisor's own
+# `queue: empty` told while it span.
+from control_plane.domain.worker_lifecycle import ACTIVE_WORKER_STATUSES  # noqa: E402
+
 # --- config / tunables ---
 RUNTIME_ROOT = Path(__file__).resolve().parents[3]
 
@@ -65,6 +77,7 @@ def canonical_root(runtime_root: Path = RUNTIME_ROOT) -> Path:
 
 
 ROOT_DIR = canonical_root()
+CONFIG_FILE = ROOT_DIR / ".orchestrator/config.json"
 STATE_FILE = ROOT_DIR / ".orchestrator/state.json"
 STATUS_FILE = ROOT_DIR / "ai-status.json"
 CONTROL_PLANE_SUMMARY = ROOT_DIR / ".orchestrator/projections/control-plane-summary.json"
@@ -120,14 +133,30 @@ def latest_keepalive_status(log_path: Path) -> dict[str, dict]:
 
 
 def canonical_task_map() -> dict[str, dict]:
-    """Load task truth from ai-status, never from the runtime cache."""
+    """Load task truth from ai-status, never from the runtime cache.
+
+    Where the tasks live is configurable (`schema.tasks_path` /
+    `schema.task_id_field`) and the supervisor honours it. Hardcoding "tasks"
+    and "id" here meant a schema change would leave the probe silently reading
+    an empty board while reporting no issue at all.
+    """
+    try:
+        schema = json.loads(CONFIG_FILE.read_text(encoding="utf-8")).get("schema", {}) or {}
+    except (OSError, json.JSONDecodeError):
+        schema = {}
+    tasks_path = schema.get("tasks_path", "tasks")
+    task_id_field = schema.get("task_id_field", "id")
     try:
         payload = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    tasks = payload.get("tasks") if isinstance(payload, dict) else []
+    tasks = payload.get(tasks_path) if isinstance(payload, dict) else []
     if isinstance(tasks, list):
-        return {str(task.get("id")): task for task in tasks if isinstance(task, dict) and task.get("id")}
+        return {
+            str(task.get(task_id_field)): task
+            for task in tasks
+            if isinstance(task, dict) and task.get(task_id_field)
+        }
     if isinstance(tasks, dict):
         return {str(task_id): task for task_id, task in tasks.items() if isinstance(task, dict)}
     return {}
@@ -207,7 +236,7 @@ def collect_supervisor_process(result: dict) -> None:
 
 def collect_running_workers(result: dict, state: dict, now_dt: datetime) -> None:
     for worker_id, worker in (state.get("workers", {}) or {}).items():
-        if worker.get("status") != "running":
+        if worker.get("status") not in ACTIVE_WORKER_STATUSES:
             continue
         started = (
             worker.get("started_at")
@@ -226,6 +255,7 @@ def collect_running_workers(result: dict, state: dict, now_dt: datetime) -> None
         result["workers"]["running"].append(
             {
                 "id": worker_id,
+                "status": worker.get("status"),
                 "provider": worker.get("provider"),
                 "task_id": worker.get("task_id"),
                 "age_seconds": age,

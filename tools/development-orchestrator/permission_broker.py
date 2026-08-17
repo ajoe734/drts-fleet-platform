@@ -16,7 +16,12 @@ THIS_DIR = Path(__file__).resolve().parent
 if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
-from approval_queue import consume_resume_override, create_approval, find_resume_override
+from approval_queue import (
+    _approval_signature,
+    consume_resume_override,
+    create_approval,
+    find_resume_override,
+)
 from common import (
     ROOT,
     canonical_workspace_root,
@@ -1532,14 +1537,6 @@ def _permission_request_response(
             "decision": decision,
         }
     }
-
-
-def _approval_signature(session_id: str | None, tool_name: str, tool_input: dict[str, Any]) -> tuple[str | None, str, str]:
-    return (
-        session_id,
-        tool_name,
-        json.dumps(tool_input, sort_keys=True, ensure_ascii=False),
-    )
 
 
 def _permission_rule(tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any] | None:

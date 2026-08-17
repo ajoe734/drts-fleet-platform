@@ -3886,6 +3886,18 @@ def maybe_trigger_retry_or_fallback(
     return False, False
 
 
+def missing_declared_outputs(paths: Any) -> list[str]:
+    """Which of the declared output paths do not exist.
+
+    One implementation, because two layers ask it: the worker lifecycle checks
+    the contract the dispatch event declared, and the chair checks the same
+    contract before trusting a decision packet. The chair used to hand-roll its
+    own `markdown_path.exists()` test, which is the same question asked a second
+    way -- and a second way is how the two drift apart.
+    """
+    return [str(path) for path in (paths or []) if not Path(str(path)).exists()]
+
+
 def undelivered_declared_outputs(worker: dict[str, Any]) -> list[str]:
     """Outputs the dispatch event declared that the run never produced.
 
@@ -3903,8 +3915,7 @@ def undelivered_declared_outputs(worker: dict[str, Any]) -> list[str]:
     goes back to its real job, deciding whether a fault belongs to the provider.
     An empty declaration stays a no-op -- only a stated contract can be checked.
     """
-    declared = (worker.get("request_snapshot") or {}).get("target_files") or []
-    return [str(path) for path in declared if not Path(str(path)).exists()]
+    return missing_declared_outputs((worker.get("request_snapshot") or {}).get("target_files"))
 
 
 def finalize_terminal_worker_outcome(
@@ -6051,6 +6062,7 @@ def queue_chair_review(
         "queue_event_id": queue_payload["event_id"],
         "markdown_path": str(markdown_path),
         "json_path": str(json_path),
+        "target_files": list(queue_payload["target_files"]),
     }
     write_activity_log(
         config,
@@ -7331,8 +7343,9 @@ def refresh_chair_review_state(
                 config=config,
                 status=load_status(config),
             )
-        if not markdown_path.exists():
-            error = error or "markdown report missing"
+        missing_outputs = missing_declared_outputs(active.get("target_files") or [markdown_path, json_path])
+        if missing_outputs:
+            error = error or "declared output missing: " + ", ".join(missing_outputs)
         if error:
             if active_worker is not None:
                 try:

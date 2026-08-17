@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from common import parse_iso_utc as _parse_iso
 from typing import Any
 
 from common import (
@@ -47,12 +48,6 @@ class GitHubBusOffline(GitHubBusError):
 
 def _iso_now_dt() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
-
-
-def _parse_iso(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def default_bus_state() -> dict[str, Any]:

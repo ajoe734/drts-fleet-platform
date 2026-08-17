@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,58 @@ SPEC.loader.exec_module(health)
 
 
 class HealthScriptTests(unittest.TestCase):
+    def _probe(self, root: Path, state: dict, status: dict) -> dict:
+        """Run collect() against a temporary machine-truth root."""
+        (root / ".orchestrator").mkdir(parents=True, exist_ok=True)
+        (root / ".orchestrator" / "state.json").write_text(json.dumps(state), encoding="utf-8")
+        (root / "ai-status.json").write_text(json.dumps(status), encoding="utf-8")
+        with mock.patch.object(health, "STATE_FILE", root / ".orchestrator" / "state.json"), \
+             mock.patch.object(health, "STATUS_FILE", root / "ai-status.json"), \
+             mock.patch.object(health, "CONTROL_PLANE_SUMMARY", root / "missing.json"), \
+             mock.patch.object(health, "SUPERVISOR_LOG", root / "missing.log"), \
+             mock.patch.object(health, "CLAUDE_KEEPALIVE_LOG", root / "missing.log"), \
+             mock.patch.object(health, "LANE_HEALTH_LOG", root / "missing.jsonl"):
+            return health.collect()
+
+    def test_probe_counts_every_active_worker_not_only_running_ones(self) -> None:
+        """A worker waiting on approval is in flight, not idle.
+
+        health reported only status == "running" while the control plane treats
+        eight statuses as active, so a fleet stalled on approvals or retries read
+        as `workers: 0 running` -- the same way the supervisor's own log read
+        `queue: empty` while it span. The first number a reader sees has to mean
+        what the rest of the system means by it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            workers = {
+                f"run-{index}": {"status": status, "provider": "codex", "task_id": "T-1"}
+                for index, status in enumerate(sorted(health.ACTIVE_WORKER_STATUSES))
+            }
+            workers["run-done"] = {"status": "completed", "provider": "codex", "task_id": "T-2"}
+            result = self._probe(root, {"workers": workers}, {"tasks": [{"id": "T-1", "status": "todo"}]})
+
+        self.assertEqual(result["workers"]["count"], len(health.ACTIVE_WORKER_STATUSES))
+        reported = {entry["status"] for entry in result["workers"]["running"]}
+        self.assertNotIn("completed", reported)
+
+    def test_task_map_follows_the_configured_schema(self) -> None:
+        """The supervisor reads tasks through schema.tasks_path / task_id_field;
+        health hardcoded "tasks" and "id", so a schema change would leave it
+        silently reading nothing while reporting no issue."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / ".orchestrator").mkdir(parents=True)
+            (root / ".orchestrator" / "config.json").write_text(
+                json.dumps({"schema": {"tasks_path": "work_items", "task_id_field": "key"}}), encoding="utf-8")
+            (root / "ai-status.json").write_text(
+                json.dumps({"work_items": [{"key": "T-9", "status": "done"}]}), encoding="utf-8")
+            with mock.patch.object(health, "STATUS_FILE", root / "ai-status.json"), \
+                 mock.patch.object(health, "CONFIG_FILE", root / ".orchestrator" / "config.json"):
+                tasks = health.canonical_task_map()
+
+        self.assertEqual(list(tasks), ["T-9"])
+
     def setUp(self) -> None:
         self.now = datetime(2026, 8, 15, 8, 0, tzinfo=timezone.utc)
 
