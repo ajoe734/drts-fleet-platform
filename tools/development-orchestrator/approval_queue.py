@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from common import parse_iso_utc as _parse_utc
 from typing import Any
 from urllib.parse import urlparse
 
@@ -18,10 +19,9 @@ THIS_DIR = Path(__file__).resolve().parent
 if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
-from common import config_path, load_config, new_runtime_id, utc_now, write_activity_log, write_json
+from common import load_config, new_runtime_id, utc_now, write_activity_log
 from control_plane.infra.approval_repo import (
     approval_transaction,
-    default_approval_state,
     load_approval_state,
     save_approval_state,
 )
@@ -40,15 +40,6 @@ def list_pending(config: dict[str, Any], include_history: bool = False) -> dict[
     if include_history:
         payload["history"] = state.get("history", [])
     return payload
-
-
-def _parse_utc(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def _stale_pending_seconds(config: dict[str, Any]) -> float:

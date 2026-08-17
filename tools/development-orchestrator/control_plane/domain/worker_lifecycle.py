@@ -11,6 +11,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
+from common import parse_iso_utc
+
 
 ACTIVE_WORKER_STATUSES = frozenset(
     {
@@ -53,11 +55,6 @@ def outcome_id(run_id: str, payload: Mapping[str, Any]) -> str:
     return f"outcome:{run_id}:{digest}"
 
 
-def result_already_consumed(worker: Mapping[str, Any], payload: Mapping[str, Any]) -> bool:
-    run_id = str(worker.get("run_id") or "").strip()
-    return bool(run_id) and worker.get("consumed_result_id") == outcome_id(run_id, payload)
-
-
 def consume_result(
     worker: dict[str, Any],
     payload: Mapping[str, Any],
@@ -86,17 +83,6 @@ def consume_result(
     return True
 
 
-def _parse_iso_utc(value: object) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-
-
 def redispatch_is_deferred(
     workers: Mapping[str, Mapping[str, Any]],
     task_id: str,
@@ -107,7 +93,7 @@ def redispatch_is_deferred(
     """Whether the latest matching progress attempt still owns a cooldown."""
     target_task = str(task_id or "").strip()
     target_agent = str(agent_id or "").strip().lower()
-    current = _parse_iso_utc(now) if isinstance(now, str) else now
+    current = parse_iso_utc(now) if isinstance(now, str) else now
     current = current or datetime.now(timezone.utc)
     matching = [
         worker
@@ -122,5 +108,5 @@ def redispatch_is_deferred(
         matching,
         key=lambda worker: str(worker.get("completed_at") or worker.get("last_event_at") or ""),
     )
-    resume_at = _parse_iso_utc(latest.get("redispatch_after"))
+    resume_at = parse_iso_utc(latest.get("redispatch_after"))
     return resume_at is not None and resume_at > current

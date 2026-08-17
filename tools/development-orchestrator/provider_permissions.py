@@ -23,6 +23,11 @@ from common import (
     utc_now,
     write_json,
 )
+from provider_credentials import (
+    copilot_plaintext_token as _copilot_plaintext_token,
+    gemini_settings as _gemini_settings,
+    truthy_env as _truthy_env,
+)
 
 WORKSPACE_SETTINGS_PATH = ROOT / ".vscode" / "settings.json"
 CLAUDE_LOCAL_SETTINGS_PATH = ROOT / ".claude" / "settings.local.json"
@@ -37,18 +42,6 @@ def _workspace_settings() -> dict[str, Any]:
 
 def _claude_local_settings() -> dict[str, Any]:
     return load_json(CLAUDE_LOCAL_SETTINGS_PATH, default={}) or {}
-
-
-def _gemini_paths(runtime: dict[str, Any] | None = None) -> tuple[Path, Path]:
-    overrides = runtime_env_overrides(runtime)
-    home = Path(overrides.get("HOME") or str(Path.home()))
-    base = home / ".gemini"
-    return base / "settings.json", base / "oauth_creds.json"
-
-
-def _gemini_settings(runtime: dict[str, Any] | None = None) -> dict[str, Any]:
-    settings_path, _ = _gemini_paths(runtime)
-    return load_json(settings_path, default={}) or {}
 
 
 def _codex_home(runtime: dict[str, Any] | None = None) -> Path:
@@ -111,11 +104,6 @@ def _claude_identity(binary: str | None, runtime: dict[str, Any]) -> dict[str, A
         "quota_pool": quota_pool_key("claude", fingerprint, quota_scope),
         "provider_family": "claude",
     }
-
-
-def _truthy_env(name: str, env: dict[str, str] | None = None) -> bool:
-    source = env or os.environ
-    return source.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _gemini_env_auth_type(env: dict[str, str] | None = None) -> str | None:
@@ -261,23 +249,6 @@ def _gh_auth_token(binary: str | None) -> str | None:
     result = run_command([binary, "auth", "token"])
     token = (result.stdout or "").strip()
     return token or None
-
-
-def _copilot_plaintext_token() -> str | None:
-    config_dir = Path(os.environ.get("COPILOT_CONFIG_DIR") or (Path.home() / ".copilot"))
-    config_path = config_dir / "config.json"
-    try:
-        payload = json.loads(config_path.read_text())
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return None
-    for key in ("copilot_tokens", "copilotTokens"):
-        tokens = payload.get(key)
-        if not isinstance(tokens, dict):
-            continue
-        for value in tokens.values():
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return None
 
 
 def _copilot_auth_ready(gh_binary: str | None) -> bool:

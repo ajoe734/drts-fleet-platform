@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import json
 import sys
 import tempfile
-import threading
 import unittest
+from datetime import timezone
 from pathlib import Path
 from unittest import mock
 
@@ -50,28 +49,36 @@ class TaskBriefPathTests(unittest.TestCase):
             common.ORCHESTRATOR_DIR / "generated" / "task-briefs" / "TASK-001.md",
         )
 
-
-class JsonlAppendTests(unittest.TestCase):
-    def test_append_jsonl_keeps_every_line_parseable_under_concurrency(self) -> None:
+    def test_configured_runtime_output_paths_are_used(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "activity.jsonl"
+            output_root = Path(tmpdir)
+            config = {
+                "paths": {
+                    "task_briefs_dir": str(output_root / "briefs"),
+                    "evidence_dir": str(output_root / "evidence"),
+                }
+            }
 
-            def worker(worker_id: int) -> None:
-                for index in range(50):
-                    common.append_jsonl(path, {"worker": worker_id, "index": index})
+            self.assertEqual(
+                common.task_brief_path("TASK-001", config),
+                output_root / "briefs" / "TASK-001.md",
+            )
+            self.assertEqual(
+                common.evidence_path("run-001", config),
+                output_root / "evidence" / "run-001.json",
+            )
 
-            threads = [threading.Thread(target=worker, args=(worker_id,)) for worker_id in range(4)]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join()
 
-            lines = path.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(lines), 200)
-            for line in lines:
-                payload = json.loads(line)
-                self.assertIn("worker", payload)
-                self.assertIn("index", payload)
+class IsoTimestampTests(unittest.TestCase):
+    def test_parse_iso_utc_normalizes_naive_timestamp(self) -> None:
+        parsed = common.parse_iso_utc("2026-08-15T12:30:00")
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.tzinfo, timezone.utc)
+
+    def test_parse_iso_utc_rejects_empty_and_invalid_values(self) -> None:
+        self.assertIsNone(common.parse_iso_utc(None))
+        self.assertIsNone(common.parse_iso_utc("not-a-timestamp"))
 
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@ from enum import Enum
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
+from common import parse_iso_utc
+
 
 class FailureKind(str, Enum):
     AUTH = "auth"
@@ -246,15 +248,6 @@ def classify_failure(
     return FailureDecision(FailureKind.TERMINAL, False, "terminal")
 
 
-def _parse_iso_utc(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
 def _parse_month(value: str) -> int | None:
     for fmt in ("%b", "%B"):
         try:
@@ -273,7 +266,7 @@ def infer_pause_resume_at(
 
     iso_match = ISO_RESET_HINT_PATTERN.search(text)
     if iso_match:
-        parsed = _parse_iso_utc(iso_match.group("iso"))
+        parsed = parse_iso_utc(iso_match.group("iso"))
         if parsed is not None:
             return parsed.timestamp()
 

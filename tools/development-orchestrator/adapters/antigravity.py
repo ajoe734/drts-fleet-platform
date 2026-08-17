@@ -19,6 +19,7 @@ from common import (
     runtime_log_path,
     select_rotation_model,
     spawn_background_process,
+    to_bool,
 )
 
 
@@ -32,29 +33,6 @@ DEFAULT_APP_DATA_DIR = Path.home() / ".gemini" / "antigravity-cli"
 # Candidate token filenames written after sign-in (file-based token storage). The
 # exact name is locked in after the first real sign-in; `token_path` overrides.
 TOKEN_CANDIDATES = ("antigravity-oauth-token", "auth.json", "credentials.json", "token.json", "oauth_creds.json")
-
-
-def _string_list(value: object) -> list[str]:
-    if value is None:
-        return []
-    values = value if isinstance(value, list) else [value]
-    result: list[str] = []
-    seen: set[str] = set()
-    for item in values:
-        for part in str(item).split(","):
-            text = part.strip()
-            if text and text not in seen:
-                seen.add(text)
-                result.append(text)
-    return result
-
-
-def _truthy(value: object, *, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _provider_for_agent(config: dict, agent_id: str) -> tuple[str, dict, dict]:
@@ -92,7 +70,7 @@ def _app_data_dir(settings: dict) -> Path:
 
 
 def _auth_ready(settings: dict) -> bool:
-    if _truthy(settings.get("assume_authed"), default=False):
+    if to_bool(settings.get("assume_authed")):
         return True
     explicit = settings.get("token_path")
     if explicit:
@@ -203,9 +181,9 @@ class AntigravityAdapter(BaseAdapter):
             return _fallback_to_inbox(self, request, note, hard_error=True)
 
         command = [cli]
-        if _truthy(settings.get("skip_permissions"), default=True):
+        if to_bool(settings.get("skip_permissions"), default=True):
             command.append("--dangerously-skip-permissions")
-        if _truthy(settings.get("sandbox"), default=False):
+        if to_bool(settings.get("sandbox")):
             command.append("--sandbox")
         # Model rotation: when enabled, the shared cooldown file (written by the
         # supervisor on quota/capacity walls) decides which model this dispatch

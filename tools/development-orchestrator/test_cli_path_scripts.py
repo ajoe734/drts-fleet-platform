@@ -54,8 +54,13 @@ class CliPathScriptTests(unittest.TestCase):
         self.assertIn("release-lifecycle.py", installer)
         self.assertIn("10-release-pointer.conf", installer)
         self.assertNotIn("@REPO_ROOT@/tools/development-orchestrator/bin/run-supervisor.sh", service)
+        # The supervisor moved to the `active` pointer so it is isolated from the
+        # legacy `current` selector; the KillMode assertions came from the other
+        # lineage. Both changes are real and both belong here.
         self.assertIn("activate --pointer-name active", installer)
         self.assertIn(".artifacts/releases/active/tools/development-orchestrator/bin/run-supervisor.sh", service)
+        self.assertIn("KillMode=control-group", service)
+        self.assertNotIn("\nKillMode=mixed\n", service)
         self.assertIn("ExecStart=", pointer)
         self.assertIn(".artifacts/releases/active/tools/development-orchestrator/bin/run-supervisor.sh", pointer)
 

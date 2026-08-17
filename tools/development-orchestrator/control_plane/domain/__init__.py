@@ -9,7 +9,7 @@ from .dispatch_policy import (
     dependency_signature,
     resolve_dispatch_target,
 )
-from .models import ControlPlaneSnapshot, TaskRecord, WorkerRecord
+from .models import TaskRecord
 from .worker_lifecycle import (
     ACTIVE_WORKER_STATUSES,
     TERMINAL_WORKER_STATUSES,
@@ -17,18 +17,15 @@ from .worker_lifecycle import (
     is_active_worker,
     is_terminal_worker,
     redispatch_is_deferred,
-    result_already_consumed,
 )
 
 __all__ = [
-    "ControlPlaneSnapshot",
     "ACTIVE_WORKER_STATUSES",
     "DispatchDecision",
     "DispatchReason",
     "ReadyDispatchPolicy",
     "TaskRecord",
     "TERMINAL_WORKER_STATUSES",
-    "WorkerRecord",
     "build_dispatch_event",
     "consume_result",
     "dependencies_satisfied",
@@ -36,6 +33,5 @@ __all__ = [
     "is_active_worker",
     "is_terminal_worker",
     "redispatch_is_deferred",
-    "result_already_consumed",
     "resolve_dispatch_target",
 ]

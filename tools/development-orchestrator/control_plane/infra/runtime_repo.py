@@ -5,24 +5,13 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
-from common import config_path, load_json, utc_now, write_json
+from common import config_path, load_json, parse_iso_utc, utc_now, write_json
 from control_plane.domain.worker_lifecycle import (
     ACTIVE_WORKER_STATUSES,
     TERMINAL_WORKER_STATUSES,
     is_active_worker,
 )
-from control_plane.infra.queue_repo import enqueue_event, load_event_queue
-
-
-def _parse_iso_utc(value: object) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+from control_plane.infra.queue_repo import load_event_queue
 
 
 def default_state() -> dict[str, Any]:
@@ -65,6 +54,10 @@ def default_state() -> dict[str, Any]:
             "active_review": None,
             "rotation_index": 0,
             "cooldown_until": None,
+            # When the chair last looked, successfully or not. Urgency is judged
+            # against this, so an already-seen signal cannot re-trigger forever.
+            "last_attempt_at": None,
+            "failure_streak": 0,
             "last_review_at": None,
             "last_reviewer": None,
             "last_reason": None,
@@ -135,6 +128,8 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state["chair_review"].setdefault("active_review", None)
     state["chair_review"].setdefault("rotation_index", 0)
     state["chair_review"].setdefault("cooldown_until", None)
+    state["chair_review"].setdefault("last_attempt_at", None)
+    state["chair_review"].setdefault("failure_streak", 0)
     state["chair_review"].setdefault("last_review_at", None)
     state["chair_review"].setdefault("last_reviewer", None)
     state["chair_review"].setdefault("last_reason", None)
@@ -171,6 +166,10 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state.pop("worker_yields", None)
     state.pop("quota_paused_agents", None)
     state.pop("tasks", None)
+    # Retired: a parallel chair backoff that duplicated cooldown_until. Nothing
+    # reads it any more, and leaving it in machine truth would invite a future
+    # reader to believe it still governs anything.
+    state.get("chair_review", {}).pop("failure_backoff_until", None)
     state["version"] = 6
     return state
 
@@ -220,7 +219,7 @@ def prune_worker_records(state: dict[str, Any]) -> None:
             keep[run_id] = worker
             continue
         if status == "completed" and str(worker.get("redispatch_after") or "").strip():
-            resume_at = _parse_iso_utc(worker.get("redispatch_after"))
+            resume_at = parse_iso_utc(worker.get("redispatch_after"))
             if resume_at is not None and resume_at > datetime.now(timezone.utc):
                 keep[run_id] = worker
                 continue
@@ -354,10 +353,6 @@ def queue_event_record(state: dict[str, Any], event_id: str) -> dict[str, Any]:
     events = queue.setdefault("events", {})
     record = events.setdefault(event_id, {"attempt_count": 0, "status": "queued"})
     return record
-
-
-def dispatch_pauses_for_task(state: dict[str, Any], task_id: str) -> list[dict[str, Any]]:
-    return [pause for pause in state.setdefault("dispatch_pauses", []) if str(pause.get("task_id") or "") == str(task_id)]
 
 
 def upsert_dispatch_pause(state: dict[str, Any], pause: dict[str, Any]) -> None:

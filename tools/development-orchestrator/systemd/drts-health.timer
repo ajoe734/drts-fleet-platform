@@ -3,10 +3,24 @@ Description=DRTS orchestrator health probe — every 5 min
 Documentation=file:@REPO_ROOT@/tools/development-orchestrator/systemd/README-velocity-health.md
 
 [Timer]
-# Run health probe 30s after boot then every 5 min. Persistent=true so a
-# missed run after host wake catches up.
+# Run health probe 30s after boot, then on a wall-clock 5-min cadence.
+#
+# OnCalendar= rather than OnUnitActiveSec=, because a monotonic-only timer can
+# come up permanently disarmed. Measured on 2026-08-16: the host booted at
+# 11:38:51 and this lingering user manager started at 11:48:03, so OnBootSec=30s
+# had already lapsed when the timer was started. systemd does not schedule an
+# elapse point in the past, OnUnitActiveSec= had no prior activation to anchor
+# to, and the unit sat ActiveState=active/UnitFileState=enabled with
+# NextElapseUSecMonotonic=infinity — looking healthy in list-units while firing
+# nothing. All three DRTS watchdogs died that way for eight hours while the
+# control plane spun on a chair-review retry loop. Any boot where the user
+# session starts more than OnBootSec after the host would repeat it.
+#
+# OnCalendar= always has a next elapse, and it also makes Persistent= real: per
+# systemd.timer(5) that setting only has an effect on OnCalendar= timers, so the
+# catch-up behaviour this file used to promise in a comment was never in force.
 OnBootSec=30s
-OnUnitActiveSec=5min
+OnCalendar=*:0/5
 Persistent=true
 AccuracySec=15s
 
