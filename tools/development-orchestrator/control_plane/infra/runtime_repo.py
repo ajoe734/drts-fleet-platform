@@ -12,17 +12,7 @@ from control_plane.domain.worker_lifecycle import (
     is_active_worker,
 )
 from control_plane.infra.queue_repo import enqueue_event, load_event_queue
-
-
-def _parse_iso_utc(value: object) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+from control_plane.domain.timestamps import parse_utc_timestamp as _parse_iso_utc
 
 
 def default_state() -> dict[str, Any]:

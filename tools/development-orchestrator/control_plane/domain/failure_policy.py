@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Mapping
+
+from .timestamps import parse_utc_timestamp as _parse_iso_utc
 from zoneinfo import ZoneInfo
 
 
@@ -244,15 +246,6 @@ def classify_failure(
             FailureKind.UNKNOWN_CRITICAL, False, "unknown critical error"
         )
     return FailureDecision(FailureKind.TERMINAL, False, "terminal")
-
-
-def _parse_iso_utc(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def _parse_month(value: str) -> int | None:

@@ -5,6 +5,10 @@ from pathlib import Path
 
 from adapters.base import BaseAdapter, DeliveryCapability, DeliveryRequest, DeliveryResult
 from adapters.file_inbox import FileInboxAdapter
+from common import gemini_credential_paths as _gemini_paths  # noqa: E402
+from common import gemini_settings as _gemini_settings  # noqa: E402
+from common import truthy_env as _truthy_env  # noqa: E402
+from common import truthy_setting as _truthy_setting  # noqa: E402
 from common import (
     agent_config_for,
     apply_orchestrator_runtime_env,
@@ -25,18 +29,6 @@ GEMINI_SETTINGS_PATH = Path.home() / ".gemini" / "settings.json"
 GEMINI_OAUTH_CREDS_PATH = Path.home() / ".gemini" / "oauth_creds.json"
 
 
-def _truthy_env(name: str, env: dict[str, str] | None = None) -> bool:
-    source = env or os.environ
-    return source.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _gemini_paths(runtime: dict | None = None) -> tuple[Path, Path]:
-    overrides = runtime_env_overrides(runtime)
-    home = Path(overrides.get("HOME") or str(Path.home()))
-    base = home / ".gemini"
-    return base / "settings.json", base / "oauth_creds.json"
-
-
 def _gemini_runtime_env(runtime: dict | None = None, *, ensure_dirs: bool = False) -> dict[str, str]:
     overrides = runtime_env_overrides(runtime)
     if ensure_dirs:
@@ -48,11 +40,6 @@ def _gemini_runtime_env(runtime: dict | None = None, *, ensure_dirs: bool = Fals
     env = os.environ.copy()
     env.update(overrides)
     return env
-
-
-def _gemini_settings(runtime: dict | None = None) -> dict:
-    settings_path, _ = _gemini_paths(runtime)
-    return load_json(settings_path, default={}) or {}
 
 
 def _gemini_provider_for_agent(config: dict, agent_id: str) -> tuple[str, dict, dict]:
@@ -107,14 +94,6 @@ def _string_list(value: object) -> list[str]:
             seen.add(text)
             result.append(text)
     return result
-
-
-def _truthy_setting(value: object, *, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _gemini_allowed_tools(gemini_settings: dict) -> list[str]:

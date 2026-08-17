@@ -5,6 +5,7 @@ from pathlib import Path
 
 from adapters.base import BaseAdapter, DeliveryCapability, DeliveryRequest, DeliveryResult
 from adapters.file_inbox import FileInboxAdapter
+from common import truthy_setting as _truthy  # noqa: E402
 from common import (
     agent_config_for,
     antigravity_rotation_config,
@@ -47,14 +48,6 @@ def _string_list(value: object) -> list[str]:
                 seen.add(text)
                 result.append(text)
     return result
-
-
-def _truthy(value: object, *, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _provider_for_agent(config: dict, agent_id: str) -> tuple[str, dict, dict]:

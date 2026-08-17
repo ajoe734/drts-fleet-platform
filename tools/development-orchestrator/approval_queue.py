@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+from control_plane.domain.timestamps import parse_utc_timestamp as _parse_utc
 from typing import Any
 from urllib.parse import urlparse
 
@@ -40,15 +42,6 @@ def list_pending(config: dict[str, Any], include_history: bool = False) -> dict[
     if include_history:
         payload["history"] = state.get("history", [])
     return payload
-
-
-def _parse_utc(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def _stale_pending_seconds(config: dict[str, Any]) -> float:

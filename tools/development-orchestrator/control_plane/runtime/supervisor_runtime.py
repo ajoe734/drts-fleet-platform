@@ -56,6 +56,12 @@ from control_plane.domain.failure_policy import (
     retry_settings as domain_retry_settings,
 )
 from control_plane.domain.resource_admission import decide as resource_admission_decision
+from control_plane.domain.timestamps import parse_utc_timestamp as parse_runtime_timestamp
+from common import truncate_summary as _truncate_summary
+
+
+def brief_reason_text(text: str | None, max_length: int = 240) -> str:
+    return _truncate_summary(text, max_length)
 from control_plane.domain.lane_health import pause_matches_lane
 from control_plane.domain.chair_policy import (
     normalize_review_defaults as normalize_domain_review_defaults,
@@ -749,7 +755,7 @@ def cleanup_inactive_worker_worktrees(
         "worker_workspace_cleanup", {}
     )
     now = datetime.now(timezone.utc)
-    last_attempt = _parse_iso_utc(maintenance.get("last_attempt_at"))
+    last_attempt = parse_runtime_timestamp(maintenance.get("last_attempt_at"))
     if last_attempt is not None and (now - last_attempt).total_seconds() < interval:
         return False
 
@@ -784,7 +790,7 @@ def cleanup_inactive_worker_worktrees(
 def _disk_guard_should_cleanup(record: dict[str, Any], settings: dict[str, Any], snapshot: dict[str, Any]) -> bool:
     if float(snapshot.get("usage_percent") or 0.0) >= float(settings.get("cleanup_usage_percent", 85.0)):
         return True
-    last_cleanup = _parse_iso_utc(record.get("last_cleanup_at"))
+    last_cleanup = parse_runtime_timestamp(record.get("last_cleanup_at"))
     if last_cleanup is None:
         return True
     return (datetime.now(timezone.utc) - last_cleanup).total_seconds() >= float(
@@ -925,7 +931,7 @@ def _host_available_memory_bytes() -> int | None:
 def maintain_resource_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
     record = state.setdefault("resource_guard", {})
     now = datetime.now(timezone.utc)
-    last = _parse_iso_utc(str(record.get("last_check_at") or ""))
+    last = parse_runtime_timestamp(str(record.get("last_check_at") or ""))
     settings = ((config.get("supervisor") or {}).get("resource_guard") or {})
     interval = float(settings.get("check_interval_seconds", 5.0))
     if last is not None and (now - last).total_seconds() < max(1.0, interval):
@@ -1000,7 +1006,7 @@ def note_dispatch_blocked_by_disk_guard(config: dict[str, Any], state: dict[str,
     guard = state.setdefault("disk_guard", {})
     reason = str(guard.get("reason") or "disk guard blocked dispatch")
     now = utc_now()
-    last_at = _parse_iso_utc(guard.get("last_dispatch_block_log_at"))
+    last_at = parse_runtime_timestamp(guard.get("last_dispatch_block_log_at"))
     cooldown_seconds = 300.0
     if (
         guard.get("last_dispatch_block_source") == source
@@ -1194,15 +1200,6 @@ def console_log(message: str, *, quiet: bool = False) -> None:
         return
     timestamp = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}", flush=True)
-
-
-def parse_runtime_timestamp(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def heartbeat_lag_seconds(previous_heartbeat: str | None, current_heartbeat: str | None) -> float | None:
@@ -2011,7 +2008,7 @@ def provider_report_age_seconds(
 ) -> float:
     """Age of a cached capability report; infinite when it cannot be dated."""
     now = now or datetime.now(timezone.utc)
-    generated_at = _parse_iso_utc(str((report or {}).get("generated_at") or ""))
+    generated_at = parse_runtime_timestamp(str((report or {}).get("generated_at") or ""))
     if generated_at is not None:
         return max(0.0, (now - generated_at).total_seconds())
     try:
@@ -2379,7 +2376,7 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
         if record.get("status") in {"started", "manual_pending", "completed", "failed"}:
             continue
         if record.get("status") == "waiting_capacity":
-            next_retry = _parse_iso_utc(record.get("next_retry_at"))
+            next_retry = parse_runtime_timestamp(record.get("next_retry_at"))
             if next_retry is not None and next_retry > datetime.now(timezone.utc):
                 continue
         active_worker = next(
@@ -2788,15 +2785,6 @@ def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reas
     return classify_domain_failure(config, worker, reason).as_mapping()
 
 
-def _parse_iso_utc(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
 def infer_pause_resume_at(reason: str | None, *, paused_at: datetime | None = None) -> float | None:
     return infer_domain_pause_resume_at(reason, paused_at=paused_at)
 
@@ -2866,7 +2854,7 @@ def _hydrate_reason_hint_resume_at(state: dict[str, Any], agent_id: str, entry: 
             return None
     hinted = infer_pause_resume_at(
         str(entry.get("reason") or ""),
-        paused_at=_parse_iso_utc(str(entry.get("paused_at") or "")),
+        paused_at=parse_runtime_timestamp(str(entry.get("paused_at") or "")),
     )
     if hinted is None:
         return None
@@ -3444,7 +3432,7 @@ def chair_reassignment_guard_active(state: dict[str, Any] | None, task_id: str, 
     guard = chair_reassignment_guard_registry(state).get(chair_reassignment_guard_key(task_id, role))
     if not isinstance(guard, dict):
         return False
-    expires_at = _parse_iso_utc(guard.get("expires_at"))
+    expires_at = parse_runtime_timestamp(guard.get("expires_at"))
     if expires_at is not None and expires_at <= datetime.now(timezone.utc):
         chair_reassignment_guard_registry(state).pop(chair_reassignment_guard_key(task_id, role), None)
         return False
@@ -3604,8 +3592,8 @@ def chair_attention_watermark(state: dict[str, Any]) -> datetime | None:
     seen = [
         stamp
         for stamp in (
-            _parse_iso_utc(chair_state.get("last_review_at")),
-            _parse_iso_utc(chair_state.get("last_attempt_at")),
+            parse_runtime_timestamp(chair_state.get("last_review_at")),
+            parse_runtime_timestamp(chair_state.get("last_attempt_at")),
         )
         if stamp is not None
     ]
@@ -3628,14 +3616,14 @@ def chair_review_needs_immediate_attention(
     # the queue.
     watermark = chair_attention_watermark(state)
     for item in pending_approval_items(approval_state or {}):
-        created_at = _parse_iso_utc(str(item.get("created_at") or ""))
+        created_at = parse_runtime_timestamp(str(item.get("created_at") or ""))
         if watermark is None or created_at is None or created_at > watermark:
             return True
     for pause in (
         *actionable_dispatch_pause_records(state, status, limit=1),
         *active_provider_pause_records(state),
     ):
-        paused_at = _parse_iso_utc(str(pause.get("paused_at") or ""))
+        paused_at = parse_runtime_timestamp(str(pause.get("paused_at") or ""))
         if watermark is None or paused_at is None or paused_at > watermark:
             return True
     return False
@@ -4075,32 +4063,6 @@ def proactive_claim_plan_for_idle_agent(
     }
 
 
-def proactive_claim_plan_for_task(
-    config: dict[str, Any],
-    *,
-    task: dict[str, Any],
-    task_map: dict[str, dict[str, Any]],
-    idle_agent_names: list[str],
-    agent_loads: dict[str, list[int]],
-    helper_settings: dict[str, Any],
-    state: dict[str, Any] | None = None,
-) -> dict[str, str] | None:
-    for idle_agent_name in ordered_idle_agent_names(idle_agent_names, agent_loads):
-        plan = proactive_claim_plan_for_idle_agent(
-            config,
-            task=task,
-            task_map=task_map,
-            idle_agent_name=idle_agent_name,
-            idle_agent_names=idle_agent_names,
-            agent_loads=agent_loads,
-            helper_settings=helper_settings,
-            state=state,
-        )
-        if plan:
-            return plan
-    return None
-
-
 def ensure_candidate_lifecycle_migration(
     config: dict[str, Any], status: dict[str, Any]
 ) -> bool:
@@ -4121,16 +4083,6 @@ def ensure_candidate_lifecycle_migration(
         },
     )
     return False
-
-
-def brief_reason_text(text: str | None, max_length: int = 240) -> str:
-    raw = re.sub(r"\s+", " ", str(text or "")).strip()
-    if len(raw) <= max_length:
-        return raw
-    clipped = raw[: max_length - 1].rstrip()
-    if " " in clipped:
-        clipped = clipped.rsplit(" ", 1)[0]
-    return clipped + "…"
 
 
 def summarize_worker_failure(config: dict[str, Any], worker: dict[str, Any], reason: str) -> tuple[str, str]:
@@ -4184,14 +4136,6 @@ def upsert_worker_dispatch_pause(
             "raw_ref": raw_ref,
             "mode_bucket": "execution",
         },
-    )
-
-
-def clear_worker_dispatch_pause(state: dict[str, Any], worker: dict[str, Any]) -> None:
-    clear_dispatch_pause(
-        state,
-        task_id=str(worker.get("task_id") or "") or None,
-        worker_run_id=str(worker.get("run_id") or "") or None,
     )
 
 
@@ -4481,7 +4425,7 @@ def maybe_trigger_retry_or_fallback(
         schedule_worker_retry(config, worker, failure_summary)
         if failure.get("kind") == "capacity" and allow_provider_pause:
             agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-            next_retry_at = _parse_iso_utc(worker.get("next_retry_at"))
+            next_retry_at = parse_runtime_timestamp(worker.get("next_retry_at"))
             reset_seconds = None
             if next_retry_at is not None:
                 reset_seconds = max(1, int((next_retry_at - datetime.now(timezone.utc)).total_seconds()))
@@ -4552,6 +4496,18 @@ def maybe_trigger_retry_or_fallback(
     return False, False
 
 
+def missing_declared_outputs(paths: Any) -> list[str]:
+    """Which of the declared output paths do not exist.
+
+    One implementation, because two layers ask it: the worker lifecycle checks
+    the contract the dispatch event declared, and the chair checks the same
+    contract before trusting a decision packet. The chair used to hand-roll its
+    own `markdown_path.exists()` test, which is the same question asked a second
+    way -- and a second way is how the two drift apart.
+    """
+    return [str(path) for path in (paths or []) if not Path(str(path)).exists()]
+
+
 def undelivered_declared_outputs(worker: dict[str, Any]) -> list[str]:
     """Outputs the dispatch event declared that the run never produced.
 
@@ -4569,8 +4525,7 @@ def undelivered_declared_outputs(worker: dict[str, Any]) -> list[str]:
     goes back to its real job, deciding whether a fault belongs to the provider.
     An empty declaration stays a no-op -- only a stated contract can be checked.
     """
-    declared = (worker.get("request_snapshot") or {}).get("target_files") or []
-    return [str(path) for path in declared if not Path(str(path)).exists()]
+    return missing_declared_outputs((worker.get("request_snapshot") or {}).get("target_files"))
 
 
 def finalize_terminal_worker_outcome(
@@ -4763,7 +4718,7 @@ def retry_due_workers(
     for worker in list(state.get("workers", {}).values()):
         if worker.get("status") != "retry_backoff":
             continue
-        next_retry_at = _parse_iso_utc(worker.get("next_retry_at"))
+        next_retry_at = parse_runtime_timestamp(worker.get("next_retry_at"))
         if next_retry_at is None or next_retry_at > now:
             continue
         queue_event_id = worker.get("queue_event_id")
@@ -5901,10 +5856,6 @@ def dependencies_satisfied(task: dict[str, Any], task_map: dict[str, dict[str, A
     return domain_dependencies_satisfied(task, task_map, done_statuses)
 
 
-def task_dependency_signature(task: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> str:
-    return domain_dependency_signature(task, task_map)
-
-
 def active_worker_indexes(state: dict[str, Any], active_statuses: set[str]) -> tuple[set[str], set[tuple[str, str]]]:
     agents: set[str] = set()
     task_agents: set[tuple[str, str]] = set()
@@ -6008,10 +5959,6 @@ def finalize_queue_event_record(config: dict[str, Any], state: dict[str, Any], w
     else:
         record.pop("error", None)
 
-
-
-def save_event_queue(config: dict[str, Any], events: list[dict[str, Any]]) -> None:
-    replace_event_queue(config, events)
 
 
 def outstanding_queue_event_references(state: dict[str, Any]) -> set[str]:
@@ -6129,10 +6076,6 @@ def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
     return queue_repository(config).update(prune_loaded_queue)
 
 
-def task_status_map(status: dict[str, Any]) -> dict[str, str]:
-    return {str(task.get("id")): str(task.get("status") or "") for task in status.get("tasks", []) if task.get("id")}
-
-
 def task_index_from_status(config: dict[str, Any], status: dict[str, Any]) -> dict[str, dict[str, Any]]:
     schema = config.get("schema", {})
     tasks_path = schema.get("tasks_path", "tasks")
@@ -6166,39 +6109,6 @@ def dispatch_reason_priority(reason: str | None) -> int | None:
         "owned_ready_dispatch": 2,
     }
     return priorities.get(normalized)
-
-
-def dispatch_priority_for_task(
-    config: dict[str, Any],
-    task: dict[str, Any],
-    agent_name: str,
-    *,
-    dependencies_done_statuses: set[str] | None = None,
-) -> int | None:
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    dependency_done_statuses = dependencies_done_statuses or {
-        str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])
-    }
-    schema = config.get("schema", {})
-    owner_field = schema.get("assignee_field", "owner")
-    reviewer_field = schema.get("reviewer_field", "reviewer")
-    task_status = str(task.get("status") or "").lower()
-    if task_status in review_statuses and task.get(reviewer_field) == agent_name:
-        return 0
-    if (
-        task_status == "in_progress"
-        and task.get(owner_field) == agent_name
-        and dependencies_satisfied(task, {str(task.get("id") or ""): task}, dependency_done_statuses)
-    ):
-        return 1
-    if (
-        task_status in {"todo", "backlog"}
-        and task.get(owner_field) == agent_name
-        and dependencies_satisfied(task, {str(task.get("id") or ""): task}, dependency_done_statuses)
-    ):
-        return 2
-    return None
 
 
 def agent_dispatch_loads(
@@ -6241,32 +6151,6 @@ def agent_dispatch_loads(
         loads.setdefault(agent_name, []).append(priority)
 
     return loads
-
-
-def choose_helper_claim_agent(
-    config: dict[str, Any],
-    *,
-    task: dict[str, Any],
-    owner_name: str,
-    reviewer_name: str,
-    idle_agent_name: str,
-    agent_loads: dict[str, list[int]],
-    helper_settings: dict[str, Any],
-    state: dict[str, Any] | None = None,
-) -> bool:
-    if not helper_settings.get("enabled", True):
-        return False
-    plan = proactive_claim_plan_for_idle_agent(
-        config,
-        task=task,
-        task_map={str(task.get("id") or ""): task},
-        idle_agent_name=idle_agent_name,
-        idle_agent_names=[idle_agent_name],
-        agent_loads=agent_loads,
-        helper_settings=helper_settings,
-        state=state,
-    )
-    return plan is not None
 
 
 def higher_priority_ready_task_exists(
@@ -6930,7 +6814,7 @@ def queue_chair_review(
     # the ordinary cooldown governs retries without a parallel backoff field.
     bypass_cooldown = needs_immediate_attention
     now = datetime.now(timezone.utc)
-    cooldown_until = _parse_iso_utc(chair_state.get("cooldown_until"))
+    cooldown_until = parse_runtime_timestamp(chair_state.get("cooldown_until"))
     if not bypass_cooldown and cooldown_until is not None and cooldown_until > now:
         return False
     chosen = choose_chair_reviewer(
@@ -7026,6 +6910,7 @@ def queue_chair_review(
         "queue_event_id": queue_payload["event_id"],
         "markdown_path": str(markdown_path),
         "json_path": str(json_path),
+        "target_files": list(queue_payload["target_files"]),
     }
     write_activity_log(
         config,
@@ -8340,8 +8225,9 @@ def refresh_chair_review_state(
                 config=config,
                 status=load_status(config),
             )
-        if not markdown_path.exists():
-            error = error or "markdown report missing"
+        missing_outputs = missing_declared_outputs(active.get("target_files") or [markdown_path, json_path])
+        if missing_outputs:
+            error = error or "declared output missing: " + ", ".join(missing_outputs)
         if error:
             if active_worker is not None:
                 try:
@@ -8725,7 +8611,7 @@ def break_full_deadlock(
         return False
     rec = state.setdefault("deadlock_recovery", {})
     cooldown = float(settings.get("deadlock_breaker_cooldown_seconds", 1800))
-    last_attempt = _parse_iso_utc(rec.get("last_attempt_at"))
+    last_attempt = parse_runtime_timestamp(rec.get("last_attempt_at"))
     now = datetime.now(timezone.utc)
     if last_attempt is not None and (now - last_attempt).total_seconds() < cooldown:
         return False

@@ -813,7 +813,12 @@ def _merge_task_payload(
     return merged
 
 
-def _normalize_summary(text: Any, max_length: int = 280) -> str:
+def truncate_summary(text: Any, max_length: int = 280) -> str:
+    """Collapse whitespace and clip to max_length on a word boundary.
+
+    Three byte-identical copies of this lived in common, the supervisor runtime
+    and the status CLI, differing only in their default length.
+    """
     raw = re.sub(r"\s+", " ", str(text or "")).strip()
     if len(raw) <= max_length:
         return raw
@@ -868,8 +873,8 @@ def build_task_brief(
     status_value = str(task.get("status") or "").strip() or "-"
     owner = str(task.get("owner") or "").strip() or "-"
     reviewer = str(task.get("reviewer") or "").strip() or "-"
-    next_text = _normalize_summary(task.get("next") or "No short handoff yet.")
-    summary_zh = _normalize_summary(task.get("summary_zh") or "")
+    next_text = truncate_summary(task.get("next") or "No short handoff yet.")
+    summary_zh = truncate_summary(task.get("summary_zh") or "")
     planning_ref = str(task.get("planning_ref") or "").strip()
     artifacts = [str(item) for item in task.get("artifacts", []) if str(item).strip()]
     display_artifacts: list[str] = []
@@ -936,7 +941,7 @@ def build_task_brief(
     if pauses:
         lines.extend(["", "## Runtime Pauses", ""])
         for pause in pauses[:5]:
-            summary = _normalize_summary(pause.get("summary") or pause.get("failure_kind") or "Paused")
+            summary = truncate_summary(pause.get("summary") or pause.get("failure_kind") or "Paused")
             raw_ref = str(pause.get("raw_ref") or "").strip()
             suffix = f" (`{raw_ref}`)" if raw_ref else ""
             lines.append(f"- {summary}{suffix}")
@@ -1055,3 +1060,53 @@ def to_bool(value: Any) -> bool:
 if __name__ == "__main__":
     print("This module is shared by the orchestrator scripts and is not meant to be run directly.", file=sys.stderr)
     raise SystemExit(1)
+
+
+# --- provider credential locations -----------------------------------------
+# These answer "where do this provider's credentials live" and "is this switch
+# on". Both the adapters and the permission sync need the answers, and they had
+# byte-identical private copies of each: the layer that launches a worker and
+# the layer that decides whether its lane is authorised could drift apart
+# silently, which is precisely the seam a lane-auth fault hides in.
+
+
+def truthy_env(name: str, env: dict[str, str] | None = None) -> bool:
+    source = env or os.environ
+    return source.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def truthy_setting(value: object, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def gemini_credential_paths(runtime: dict[str, Any] | None = None) -> tuple[Path, Path]:
+    overrides = runtime_env_overrides(runtime)
+    home = Path(overrides.get("HOME") or str(Path.home()))
+    base = home / ".gemini"
+    return base / "settings.json", base / "oauth_creds.json"
+
+
+def gemini_settings(runtime: dict[str, Any] | None = None) -> dict[str, Any]:
+    settings_path, _ = gemini_credential_paths(runtime)
+    return load_json(settings_path, default={}) or {}
+
+
+def copilot_plaintext_token() -> str | None:
+    config_dir = Path(os.environ.get("COPILOT_CONFIG_DIR") or (Path.home() / ".copilot"))
+    config_path = config_dir / "config.json"
+    try:
+        payload = json.loads(config_path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    for key in ("copilot_tokens", "copilotTokens"):
+        tokens = payload.get(key)
+        if not isinstance(tokens, dict):
+            continue
+        for value in tokens.values():
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None

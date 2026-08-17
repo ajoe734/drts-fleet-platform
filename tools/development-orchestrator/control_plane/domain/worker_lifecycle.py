@@ -11,6 +11,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
+from .timestamps import parse_utc_timestamp as _parse_iso_utc
+
 
 ACTIVE_WORKER_STATUSES = frozenset(
     {
@@ -84,17 +86,6 @@ def consume_result(
     else:
         worker.pop("redispatch_after", None)
     return True
-
-
-def _parse_iso_utc(value: object) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def redispatch_is_deferred(

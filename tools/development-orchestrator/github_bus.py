@@ -9,6 +9,8 @@ import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from control_plane.domain.timestamps import parse_utc_timestamp as _parse_iso
 from typing import Any
 
 from common import (
@@ -48,12 +50,6 @@ class GitHubBusOffline(GitHubBusError):
 
 def _iso_now_dt() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
-
-
-def _parse_iso(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def default_bus_state() -> dict[str, Any]:
@@ -260,11 +256,6 @@ def task_bus_entry(bus_state: dict[str, Any], task_id: str) -> dict[str, Any]:
             "last_issue_hash": None,
         },
     )
-
-
-def task_signature(task: dict[str, Any], fields: list[str]) -> str:
-    payload = {field: task.get(field) for field in fields}
-    return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
 
 def build_template_body(config: dict[str, Any], template_key: str, variables: dict[str, Any]) -> str:

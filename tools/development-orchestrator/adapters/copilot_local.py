@@ -6,6 +6,7 @@ from pathlib import Path
 
 from adapters.base import BaseAdapter, DeliveryCapability, DeliveryRequest, DeliveryResult
 from adapters.file_inbox import FileInboxAdapter
+from common import copilot_plaintext_token as _copilot_plaintext_token  # noqa: E402
 from common import (
     apply_orchestrator_runtime_env,
     apply_worker_unit_env,
@@ -27,23 +28,6 @@ def _gh_auth_token() -> str | None:
     result = run_command([gh, "auth", "token"])
     token = (result.stdout or "").strip()
     return token or None
-
-
-def _copilot_plaintext_token() -> str | None:
-    config_dir = Path(os.environ.get("COPILOT_CONFIG_DIR") or (Path.home() / ".copilot"))
-    config_path = config_dir / "config.json"
-    try:
-        payload = json.loads(config_path.read_text())
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return None
-    for key in ("copilot_tokens", "copilotTokens"):
-        tokens = payload.get(key)
-        if not isinstance(tokens, dict):
-            continue
-        for value in tokens.values():
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return None
 
 
 def _copilot_auth_ready() -> bool:
