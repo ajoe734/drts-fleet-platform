@@ -31,6 +31,51 @@ class HealthScriptTests(unittest.TestCase):
              mock.patch.object(health, "LANE_HEALTH_LOG", root / "missing.jsonl"):
             return health.collect()
 
+    def _show(self, unit_props: dict, service_state: str = "inactive"):
+        """Stand in for systemctl show, per unit."""
+        def fake(cmd, *a, **kw):
+            unit = cmd[3]
+            if unit.endswith(".timer"):
+                body = "\n".join(f"{k}={v}" for k, v in unit_props.items())
+            else:
+                body = f"ActiveState={service_state}"
+            return body + "\n"
+        return fake
+
+    def test_a_timer_mid_fire_is_not_reported_disarmed(self) -> None:
+        """systemd reports no next elapse while a timer's own unit is running.
+
+        For a 60s watchdog whose service takes a fraction of a second, that
+        window comes round every minute, so a probe that only looks at the next
+        elapse cries wolf on a perfectly healthy timer -- and a probe nobody
+        trusts is the same failure as a probe that stays silent.
+        """
+        props = {"ActiveState": "active", "UnitFileState": "enabled",
+                 "NextElapseUSecRealtime": "", "NextElapseUSecMonotonic": "infinity",
+                 "Unit": "drts-health.service"}
+        result = {"watchdogs": [], "issues": []}
+        with mock.patch.object(health.subprocess, "check_output",
+                               side_effect=self._show(props, service_state="activating")):
+            health.collect_watchdog_timers(result)
+
+        entry = next(e for e in result["watchdogs"] if e["unit"] == "drts-health.timer")
+        self.assertTrue(entry["armed"])
+        self.assertEqual(result["issues"], [])
+
+    def test_a_timer_with_no_next_elapse_and_an_idle_unit_is_disarmed(self) -> None:
+        """The real 2026-08-16 state: enabled, active, nothing scheduled, nothing running."""
+        props = {"ActiveState": "active", "UnitFileState": "enabled",
+                 "NextElapseUSecRealtime": "", "NextElapseUSecMonotonic": "infinity",
+                 "Unit": "drts-health.service"}
+        result = {"watchdogs": [], "issues": []}
+        with mock.patch.object(health.subprocess, "check_output",
+                               side_effect=self._show(props, service_state="inactive")):
+            health.collect_watchdog_timers(result)
+
+        entry = next(e for e in result["watchdogs"] if e["unit"] == "drts-health.timer")
+        self.assertFalse(entry["armed"])
+        self.assertTrue([i for i in result["issues"] if "disarmed" in i])
+
     def test_probe_counts_every_active_worker_not_only_running_ones(self) -> None:
         """A worker waiting on approval is in flight, not idle.
 

@@ -327,6 +327,22 @@ def collect_state_failures(result: dict, state: dict, tasks: dict[str, dict]) ->
             f"WARN: chair review failing ({streak} consecutive), backing off until {retry_after}")
 
 
+def _unit_is_running(unit: str | None) -> bool:
+    """Is the unit a timer triggers currently mid-run."""
+    if not unit:
+        return False
+    try:
+        out = subprocess.check_output(
+            ["systemctl", "--user", "show", unit, "-p", "ActiveState"],
+            text=True, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    state = dict(
+        line.split("=", 1) for line in out.splitlines() if "=" in line
+    ).get("ActiveState", "")
+    return state in {"activating", "active", "reloading", "deactivating"}
+
+
 def collect_watchdog_timers(result: dict) -> None:
     """Watch the watchers.
 
@@ -341,7 +357,7 @@ def collect_watchdog_timers(result: dict) -> None:
         try:
             out = subprocess.check_output(
                 ["systemctl", "--user", "show", unit,
-                 "-p", "ActiveState", "-p", "UnitFileState",
+                 "-p", "ActiveState", "-p", "UnitFileState", "-p", "Unit",
                  "-p", "NextElapseUSecRealtime", "-p", "NextElapseUSecMonotonic"],
                 text=True, stderr=subprocess.DEVNULL)
         except (OSError, subprocess.CalledProcessError):
@@ -361,9 +377,14 @@ def collect_watchdog_timers(result: dict) -> None:
              if value.lower() not in never),
             None)
         entry["next_elapse"] = next_elapse
-        # "enabled and active but with nothing scheduled" is the silent-death
-        # state; an intentionally stopped timer is not an issue.
-        entry["armed"] = next_elapse is not None
+        # systemd reports no next elapse while the timer's own unit is running,
+        # so a 60s watchdog has that window every minute. Judging on the elapse
+        # alone made this cry wolf on a healthy timer, and a probe nobody trusts
+        # fails the same way as one that stays silent.
+        entry["firing"] = _unit_is_running(props.get("Unit"))
+        # "enabled and active, nothing scheduled, and nothing running" is the
+        # silent-death state; an intentionally stopped timer is not an issue.
+        entry["armed"] = next_elapse is not None or entry["firing"]
         result["watchdogs"].append(entry)
         if (props.get("UnitFileState") == "enabled"
                 and props.get("ActiveState") == "active" and not entry["armed"]):
