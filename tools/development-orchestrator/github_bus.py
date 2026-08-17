@@ -268,6 +268,72 @@ def edit_label_args(labels: list[str]) -> list[str]:
     return args
 
 
+# repo -> labels this process gave up on, so it stops sending them
+_LABELS_UNAVAILABLE: dict[str, set[str]] = {}
+_MISSING_LABEL_RE = re.compile(r"'([^']+)' not found")
+
+
+def usable_labels(repo: str, labels: list[str]) -> list[str]:
+    """Drop labels this process already failed to create on `repo`.
+
+    Pure filter, no API calls: the happy path must stay at one `gh` call, which
+    is the ordering the bus tests pin -- create the PR or issue first, attach
+    optional metadata second.
+    """
+    blocked = _LABELS_UNAVAILABLE.get(repo, set())
+    return [label for label in labels if label not in blocked]
+
+
+def repair_missing_label(
+    config: dict[str, Any], repo: str, labels: list[str], exc: Exception
+) -> bool:
+    """Create the label `exc` complained about. True if the caller should retry.
+
+    Every configured label was absent from this repository, so each sync failed
+    the whole `gh pr edit` call and logged `'pantheon-bus' not found` -- twenty
+    times in one hour, while every PR synced fine immediately afterwards without
+    its labels. The noise mattered more than the labels did: it was twenty of the
+    twenty-one failure events in that window, which is enough to bury a real one.
+
+    So: create the label and retry once. If creation is impossible -- no
+    permission, read-only token -- record that once and stop sending the label,
+    which degrades to unlabelled PRs instead of a permanent error stream.
+    """
+    match = _MISSING_LABEL_RE.search(str(exc))
+    if not match:
+        return False
+    label = match.group(1)
+    if label not in labels:
+        return False
+
+    try:
+        run_gh(["label", "create", label, "--repo", repo])
+    except GitHubBusError as create_exc:
+        _LABELS_UNAVAILABLE.setdefault(repo, set()).add(label)
+        write_activity_log(
+            config,
+            {
+                "type": "github_bus_label_unavailable",
+                "message": (
+                    f"label {label!r} is missing and could not be created; "
+                    f"continuing without it: {create_exc}"
+                ),
+                "github_repo": repo,
+            },
+        )
+        return False
+
+    write_activity_log(
+        config,
+        {
+            "type": "github_bus_label_created",
+            "message": f"created missing bus label {label!r}",
+            "github_repo": repo,
+        },
+    )
+    return True
+
+
 def review_branch_for_task(config: dict[str, Any], status: dict[str, Any], task: dict[str, Any]) -> str | None:
     candidate_branch = str(task.get("candidate_branch") or "").strip()
     if candidate_branch and candidate_branch != "not_applicable":
@@ -356,8 +422,9 @@ def sync_optional_pr_metadata(
     number: int,
     labels: list[str],
 ) -> None:
+    effective_labels = usable_labels(repo, labels)
     args = ["pr", "edit", str(number), "--repo", repo]
-    args.extend(edit_label_args(labels))
+    args.extend(edit_label_args(effective_labels))
     if (config.get("github_bus", {}) or {}).get("auto_request_reviewers", True):
         for handle in reviewer_handles(config, task):
             args.extend(["--add-reviewer", handle])
@@ -366,6 +433,12 @@ def sync_optional_pr_metadata(
     try:
         run_gh(args)
     except GitHubBusError as exc:
+        if repair_missing_label(config, repo, effective_labels, exc):
+            try:
+                run_gh(args)
+                return
+            except GitHubBusError as retry_exc:
+                exc = retry_exc
         write_activity_log(
             config,
             {
@@ -384,12 +457,26 @@ def sync_optional_issue_metadata(
     number: int,
     labels: list[str],
 ) -> None:
-    args = ["issue", "edit", str(number), "--repo", repo, *edit_label_args(labels)]
+    effective_labels = usable_labels(repo, labels)
+    args = [
+        "issue",
+        "edit",
+        str(number),
+        "--repo",
+        repo,
+        *edit_label_args(effective_labels),
+    ]
     if len(args) == 5:
         return
     try:
         run_gh(args)
     except GitHubBusError as exc:
+        if repair_missing_label(config, repo, effective_labels, exc):
+            try:
+                run_gh(args)
+                return
+            except GitHubBusError as retry_exc:
+                exc = retry_exc
         write_activity_log(
             config,
             {
