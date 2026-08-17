@@ -32,7 +32,7 @@ The completion criteria are satisfied in code across all active product surfaces
 
 > **External Deployment Gate Notice**:  
 > Live container rollout to GCP Cloud Run dev environment (`Deploy — Dev` workflow) is currently blocked pending Google Cloud Project #952590575714 billing enablement (image export/push fails authorization on Google Artifact Registry).  
-> In the live 2026-08-17 curl audit, active Cloud Run services return Cloud Run `503` / `500` ("The service you requested is not available yet") or `404` pending billing resolution and container deployment. Paused Partner Booking and retired Concierge return HTTP `404`.
+> In the live 2026-08-17 curl audit, all 9 active Cloud Run services return Cloud Run `503` ("The service you requested is not available yet") pending billing resolution and container deployment. Paused Partner Booking and retired Concierge return HTTP `404`.
 
 Current Release Statement:  
 **Stage 1 functional implementation is complete and verified in the codebase and CI (Candidate PR #1451 / merge SHA `4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`); live Cloud Run deployment is tracked under the external GCP billing gate.**
@@ -80,7 +80,7 @@ Current Release Statement:
 | **Operational browser acceptance suite** (`operational-browser-acceptance.spec.ts`) | `7/7 journeys passed` | Cross-surface user mutations, artifact downloads, intent routing, and 404 checks pass against candidate. |
 | **Android driver journey replay** (`s1f-drv-001-android-driver-journey-replay-evidence.md`) | `5/5 E2E legs + 26 unit suites passed` | Driver auth, task inbox, accept, trip flow, photo proof, offline replay, and SOS pass with API readback. |
 | **Cloud Run Dev Deploy (`deploy-dev.yml`)** | `BLOCKED (GCP billing gate)` | Last passing deploy run was `31244225462` (SHA `7e5a29d5a` on 2026-08-08); run `31992102746` on `publish/v2026.08.17.0` failed due to GCP project #952590575714 billing requirement. |
-| **Live Endpoint Status (2026-08-17 audit)** | `503 / 404` (Deploy Blocked) | Active Cloud Run dev URLs return Cloud Run 503/500 ("service not available yet") or 404 pending GCP billing enablement; paused Partner Booking and retired Concierge return HTTP 404. |
+| **Live Endpoint Status (2026-08-17 audit)** | `503` (Deploy Blocked) | All 9 active Cloud Run dev URLs return Cloud Run 503 ("service not available yet") pending GCP billing enablement; paused Partner Booking and retired Concierge return HTTP 404. |
 
 ---
 
@@ -96,7 +96,7 @@ Current Release Statement:
 | **Referral Embed** | `PASS` | `503` (Deploy Blocked) | Formal `/embed/yuhe-residence` controlled form, booking creation, active resume, cancel, rating, and receipts operational (S1F-REF-001..002). | **CLOSED** (Code & CI Complete; Deploy Blocked on GCP Billing Gate) |
 | **Enterprise Dispatch** | `PASS` | `503` (Deploy Blocked) | Semantic inputs, live passenger/address/cost-center binding, create-read-update-cancel lifecycle operational (S1F-ENT-001..002). | **CLOSED** (Code & CI Complete; Deploy Blocked on GCP Billing Gate) |
 | **Bank Console** | `PASS` | `503` (Deploy Blocked) | Scoped live Dev read models for bookings, programs, contracts, and authenticated statement downloads operational (S1F-BANK-001..002). | **CLOSED** (Code & CI Complete; Deploy Blocked on GCP Billing Gate) |
-| **Channel Partner Portal** | `PASS` | `404` (Deploy Blocked) | Formal Yuhe residence identity bound (`yuhe-residence`) and referral statement downloads operational (S1F-CHAN-001). | **CLOSED** (Code & CI Complete; Deploy Blocked on GCP Billing Gate) |
+| **Channel Partner Portal** | `PASS` | `503` (Deploy Blocked) | Formal Yuhe residence identity bound (`yuhe-residence`) and referral statement downloads operational (S1F-CHAN-001). | **CLOSED** (Code & CI Complete; Deploy Blocked on GCP Billing Gate) |
 | **Driver App** | `PASS` | `native` | Android emulator replay of auth, inbox, accept, start, complete with proof, offline replay, and SOS operational (S1F-DRV-001). | **CLOSED** (Code & Test Complete) |
 | **Partner Booking** | `PASS` | `404` (Enforced) | Intentionally paused on `/ctbc/program/site` and `/ctbc/program/embed`. | **FROZEN** (HTTP 404 verified) |
 | **Concierge Portal** | `PASS` | `404` (Enforced) | Decommissioned and retired. | **FROZEN** (HTTP 404 verified) |
