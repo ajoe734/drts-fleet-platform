@@ -91,15 +91,15 @@ not re-open them without cause.
 
 ### 3.2 PRD 14.2 — errors that must not occur
 
-| #   | Invariant                                                    | Enforcement site                                                                                                                                                                            |                Result                 |
-| --- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-----------------------------------: |
-| 1   | forwarded order written as owned assignment                  | `ForwardedOrderStatus` and `DriverTaskStatus` are disjoint type unions                                                                                                                      |                 PASS                  |
-| 2   | phone order without recording cannot be traced               | callcenter recording index plus `recording_missing` marker                                                                                                                                  |                 PASS                  |
-| 3   | vehicle with lapsed contract or insurance still dispatchable | `owned-mobility.service.ts:6871` raises `VEHICLE_NOT_DISPATCHABLE`                                                                                                                          |                 PASS                  |
-| 4   | suspended driver still able to go online                     | `jwt-auth.service.ts:968` calls `assertDriverAuthEligible` on **every** token verification, raising `DRIVER_AUTH_SUSPENDED` / `DRIVER_CERT_INVALID` (`regulatory-registry.service.ts:1971`) | PASS — see 4.4 for the ownership note |
-| 5   | complaint and incident share one lifecycle                   | separate modules, separate state machines                                                                                                                                                   |                 PASS                  |
-| 6   | historical pricing version overwritten in place              | `billing-settlement.service.ts:1603` — "Published driver fee plan versions are immutable."                                                                                                  |                 PASS                  |
-| 7   | audit log can be modified or deleted                         | application-level only                                                                                                                                                                      |          **See GAP-CONF-03**          |
+| #   | Invariant                                                    | Enforcement site                                                                                                                                                                            |                     Result                     |
+| --- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------: |
+| 1   | forwarded order written as owned assignment                  | `ForwardedOrderStatus` and `DriverTaskStatus` are disjoint type unions                                                                                                                      |                      PASS                      |
+| 2   | phone order without recording cannot be traced               | callcenter recording index plus `recording_missing` marker                                                                                                                                  |                      PASS                      |
+| 3   | vehicle with lapsed contract or insurance still dispatchable | `owned-mobility.service.ts:6871` raises `VEHICLE_NOT_DISPATCHABLE`                                                                                                                          |                      PASS                      |
+| 4   | suspended driver still able to go online                     | `jwt-auth.service.ts:968` calls `assertDriverAuthEligible` on **every** token verification, raising `DRIVER_AUTH_SUSPENDED` / `DRIVER_CERT_INVALID` (`regulatory-registry.service.ts:1971`) |     PASS — see 4.4 for the ownership note      |
+| 5   | complaint and incident share one lifecycle                   | separate modules, separate state machines                                                                                                                                                   |                      PASS                      |
+| 6   | historical pricing version overwritten in place              | `billing-settlement.service.ts:1603` — "Published driver fee plan versions are immutable."                                                                                                  |                      PASS                      |
+| 7   | audit log can be modified or deleted                         | database trigger `trg_audit_logs_append_only` (V0080) + REVOKE + privileged retention archival path                                                                                         | PASS (closed via GAP-CONF-03 / CONF-AUDIT-001) |
 
 ### 3.3 Contracts and product surfaces
 
@@ -237,34 +237,16 @@ explicitly absent.
 
 ### GAP-CONF-03 — audit-log immutability is convention, not enforcement
 
-**Severity:** P1
+**Severity:** P1 (Closed under `CONF-AUDIT-001` / Gate C1)
 **Spec:** PRD 13.3 ("audit cannot be edited or deleted"); PRD 14.2.7 lists mutable audit as a product error that must not occur; contracts section 3.13 ("audit log append-only")
 
-**Current behaviour.** `admin.audit_logs` (`V0009:75`) carries no `REVOKE`, no
-immutability constraint, and no trigger. The `BEFORE UPDATE` triggers in
-`V0010__views_triggers_and_guardrails.sql` are `updated_at` touch triggers on other
-tables, not immutability guards. The invariant holds solely because
-`audit-log.repository.ts` exposes only `append()`, `loadRecent()`, and
-`loadEvidenceGovernanceTrail()`, with no update or delete method.
+**Resolution.** Closed via forward migration `V0080__audit_log_immutability.sql`. A database trigger `trg_audit_logs_append_only` calling `admin.raise_audit_logs_append_only()` rejects direct `UPDATE` and `DELETE` on `admin.audit_logs` with exception `admin.audit_logs is append-only`. `REVOKE UPDATE, DELETE ON admin.audit_logs FROM PUBLIC` is applied as defence in depth. A privileged archival path via `operations/database/audit-log-retention-archival.sh` supports lawful retention deletion within transaction-scoped `SET LOCAL audit.allow_retention_archival = 'on'` without requiring deactivation or removal of the trigger protection. Documented in `operations/database/AUDIT_LOG_RETENTION_ARCHIVAL.md` and verified by automated negative test suite `tests/security/audit-log-immutability-negative.test.ts` and `tests/unit/db-apply.test.ts`.
 
-**Why convention is insufficient here specifically.** The threat model for an audit
-log is an authorised insider concealing their own actions after the fact. The people
-capable of adding a second write path, running direct SQL, mutating rows from a
-migration script, or connecting to the database as an operator are precisely the
-population that model addresses. A guarantee implemented as a code convention does
-not constrain those with the ability to change code.
-
-**Environment note that changes the fix.** `operations/database/db-common.sh:9`
-defaults the connection role to `postgres`. Table owners and superusers are not
-bound by `REVOKE`, so a `REVOKE`-only fix may be inert. The production role behind
-`DATABASE_URL` must be confirmed before choosing. A `BEFORE UPDATE OR DELETE` trigger
-raising an exception binds the owner as well and is therefore the reliable primary
-control.
-
-**Minimum closure.** A trigger as the primary control, `REVOKE` as defence in depth
-once the production role is confirmed, and an explicit privileged archival path so
-that any lawful retention deletion is a deliberate, recorded, privileged operation
-rather than something any code path can perform incidentally.
+**Historical behaviour.** Prior to V0080, `admin.audit_logs` (`V0009:75`) carried no
+immutability constraint or trigger. The invariant held solely by application repository
+convention. Because `DATABASE_URL` connects as `postgres` / table owner, `REVOKE` alone
+is inert for owner connections; the trigger was required as the primary control to bind
+the table owner and superuser roles.
 
 ---
 
@@ -443,35 +425,34 @@ These are recorded to prevent them from being rediscovered as defects.
   5. report artifact storage-level object lock (Q-005) → Owner: `Gemini`, Decision Route: Regulatory storage architecture & compliance RFC.
 - **`call_point_id` contract-type gap**: Recorded in `PHASE1_OPEN_QUESTIONS.md` under Contract & Schema Synchronisation Backlog, owned by `CONF-CODE-001` / `packages/contracts` sync backlog.
 
-
 ---
 
 ## 8. Completion gates
 
-| Gate    | Requirement                                                                                                                                                                             | Owning task             |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| **C1**  | `admin.audit_logs` rejects `UPDATE` and `DELETE` at the database level, proven by a negative test that attempts both                                                                    | `CONF-AUDIT-001`        |
-| **C2**  | Idempotency semantics (replay versus conflict) are decided and recorded before any schema change                                                                                        | `CONF-IDEM-001`         |
-| **C3**  | All nine specified commands reject a missing key, replay the stored response for a repeated key with an identical payload, and return `409` for a repeated key with a differing payload | `CONF-IDEM-002/003/004` |
-| **C4**  | Concurrent duplicate submission of one key creates exactly one record, proven under parallel execution rather than sequential calls                                                     | `CONF-VERIFY-001`       |
-| **C5**  | The client SDK binds one key per user intent across retries, and no longer injects a fresh key per POST                                                                                 | `CONF-IDEM-005`         |
-| **C6**  | A regression guard fails when a new create-type command is added without idempotency                                                                                                    | `CONF-VERIFY-001`       |
-| **C7**  | The event-contract decision is recorded, and contracts section 5.2 plus section 6 are consistent with the chosen option                                                                 | `CONF-EVENT-001`        |
-| **C8**  | GAP-CONF-04 and GAP-CONF-05 are resolved as either a specification amendment or an implementation task, with the product rationale recorded                                             | `CONF-STATE-001`        |
-| **C9**  | Minimum lead time is enforced, and the naming register in section 5 is applied to the specification                                                                                     | `CONF-CODE-001`         |
-| **C10** | Q-006 and Q-008 are moved out of Open Items; contracts section 10's five questions have owners                                                                                          | `CONF-DOC-001`          |
+| Gate    | Requirement                                                                                                                                                                             | Owning task                      |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| **C1**  | `admin.audit_logs` rejects `UPDATE` and `DELETE` at the database level, proven by a negative test that attempts both                                                                    | `CONF-AUDIT-001` (CLOSED / PASS) |
+| **C2**  | Idempotency semantics (replay versus conflict) are decided and recorded before any schema change                                                                                        | `CONF-IDEM-001`                  |
+| **C3**  | All nine specified commands reject a missing key, replay the stored response for a repeated key with an identical payload, and return `409` for a repeated key with a differing payload | `CONF-IDEM-002/003/004`          |
+| **C4**  | Concurrent duplicate submission of one key creates exactly one record, proven under parallel execution rather than sequential calls                                                     | `CONF-VERIFY-001`                |
+| **C5**  | The client SDK binds one key per user intent across retries, and no longer injects a fresh key per POST                                                                                 | `CONF-IDEM-005`                  |
+| **C6**  | A regression guard fails when a new create-type command is added without idempotency                                                                                                    | `CONF-VERIFY-001`                |
+| **C7**  | The event-contract decision is recorded, and contracts section 5.2 plus section 6 are consistent with the chosen option                                                                 | `CONF-EVENT-001`                 |
+| **C8**  | GAP-CONF-04 and GAP-CONF-05 are resolved as either a specification amendment or an implementation task, with the product rationale recorded                                             | `CONF-STATE-001`                 |
+| **C9**  | Minimum lead time is enforced, and the naming register in section 5 is applied to the specification                                                                                     | `CONF-CODE-001`                  |
+| **C10** | Q-006 and Q-008 are moved out of Open Items; contracts section 10's five questions have owners                                                                                          | `CONF-DOC-001`                   |
 
 ---
 
 ## 9. Traceability
 
-| GAP                                | Severity | Nature                         | Task                         |
-| ---------------------------------- | :------: | ------------------------------ | ---------------------------- |
-| GAP-CONF-01 idempotency            |    P0    | writes incorrect data          | `CONF-IDEM-001` .. `005`     |
-| GAP-CONF-02 domain events          |    P0    | architecture decision          | `CONF-EVENT-001`             |
-| GAP-CONF-03 audit immutability     |    P1    | unenforced invariant           | `CONF-AUDIT-001`             |
-| GAP-CONF-04 forwarded states       |    P2    | model gap, needs product input | `CONF-STATE-001`             |
-| GAP-CONF-05 driver states          |    P2    | model gap, needs product input | `CONF-STATE-001`             |
-| GAP-CONF-06 lead time              |    P2    | weakened product rule          | `CONF-CODE-001`              |
-| GAP-CONF-07 service boundary       |    P2    | informational                  | folded into `CONF-EVENT-001` |
-| GAP-CONF-08 clock-in vehicle check |    P3    | missing defence layer          | `CONF-CODE-001`              |
+| GAP                                | Severity | Nature                         | Task                             |
+| ---------------------------------- | :------: | ------------------------------ | -------------------------------- |
+| GAP-CONF-01 idempotency            |    P0    | writes incorrect data          | `CONF-IDEM-001` .. `005`         |
+| GAP-CONF-02 domain events          |    P0    | architecture decision          | `CONF-EVENT-001`                 |
+| GAP-CONF-03 audit immutability     |    P1    | unenforced invariant           | `CONF-AUDIT-001` (CLOSED / PASS) |
+| GAP-CONF-04 forwarded states       |    P2    | model gap, needs product input | `CONF-STATE-001`                 |
+| GAP-CONF-05 driver states          |    P2    | model gap, needs product input | `CONF-STATE-001`                 |
+| GAP-CONF-06 lead time              |    P2    | weakened product rule          | `CONF-CODE-001`                  |
+| GAP-CONF-07 service boundary       |    P2    | informational                  | folded into `CONF-EVENT-001`     |
+| GAP-CONF-08 clock-in vehicle check |    P3    | missing defence layer          | `CONF-CODE-001`                  |
