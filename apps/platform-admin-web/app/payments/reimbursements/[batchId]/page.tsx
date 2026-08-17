@@ -398,6 +398,9 @@ export default function ReimbursementDetailPage() {
   const [approvalKey, setApprovalKey] = useState(() =>
     createIdempotencyKey("reimbursement-approve"),
   );
+  const [markPaidKey, setMarkPaidKey] = useState(() =>
+    createIdempotencyKey("reimbursement-mark-paid"),
+  );
 
   useEffect(() => {
     let active = true;
@@ -494,13 +497,20 @@ export default function ReimbursementDetailPage() {
 
     try {
       const proofId = remittanceProofId.trim();
-      const nextBatch = await client.markReimbursementPaid(batch.batchId, {
-        ...(proofId ? { remittanceProofId: proofId } : {}),
-        paidAt: new Date().toISOString(),
-      });
+      const nextBatch = await client.markReimbursementPaid(
+        batch.batchId,
+        {
+          ...(proofId ? { remittanceProofId: proofId } : {}),
+          paidAt: new Date().toISOString(),
+        },
+        {
+          idempotencyKey: markPaidKey,
+        },
+      );
       setBatch(nextBatch);
       setRemittanceProofId(nextBatch.remittanceProofId ?? remittanceProofId);
       setApprovalReceipt(t("payments.reimbursements.detail.markedPaid"));
+      setMarkPaidKey(createIdempotencyKey("reimbursement-mark-paid"));
     } catch (nextError: any) {
       setApprovalError(nextError?.message ?? String(nextError));
     } finally {
@@ -852,7 +862,9 @@ export default function ReimbursementDetailPage() {
           <Card
             theme={theme}
             title={t("payments.reimbursements.detail.batchSummaryTitle")}
-            subtitle={t("payments.reimbursements.detail.batchSummarySubtitle.live")}
+            subtitle={t(
+              "payments.reimbursements.detail.batchSummarySubtitle.live",
+            )}
           >
             <div style={{ display: "grid", gap: 10, fontSize: 12.5 }}>
               <div>

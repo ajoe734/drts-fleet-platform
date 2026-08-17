@@ -7,7 +7,11 @@ import {
 } from "../../packages/api-client/src/index";
 
 describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
-  let capturedRequests: Array<{ url: string; method?: string | undefined; headers: Headers }>;
+  let capturedRequests: Array<{
+    url: string;
+    method?: string | undefined;
+    headers: Headers;
+  }>;
 
   beforeEach(() => {
     capturedRequests = [];
@@ -70,7 +74,9 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
       });
 
       expect(capturedRequests).toHaveLength(1);
-      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(intentKey);
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(
+        intentKey,
+      );
     });
 
     it("sends Idempotency-Key when provided in options.headers", async () => {
@@ -83,7 +89,9 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
       });
 
       expect(capturedRequests).toHaveLength(1);
-      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(customKey);
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(
+        customKey,
+      );
     });
   });
 
@@ -150,7 +158,11 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
         } as never,
         { idempotencyKey: key1 },
       );
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key1);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key1);
 
       const key2 = createIdempotencyKey("tenant-booking");
       await client.createTenantBooking(
@@ -160,7 +172,11 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
         } as never,
         { idempotencyKey: key2 },
       );
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key2);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key2);
 
       const key3 = createIdempotencyKey("order");
       await client.createOrder(
@@ -170,27 +186,63 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
         } as never,
         { idempotencyKey: key3 },
       );
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key3);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key3);
     });
 
     it("2. cancelOrder / cancelTenantBooking accepts and forwards idempotencyKey", async () => {
       const key1 = createIdempotencyKey("cancel-order");
-      await client.cancelOrder("ord-123", { reason: "User cancelled" }, { idempotencyKey: key1 });
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key1);
+      await client.cancelOrder(
+        "ord-123",
+        { reason: "User cancelled" },
+        { idempotencyKey: key1 },
+      );
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key1);
 
       const key2 = createIdempotencyKey("cancel-tenant-booking");
-      await client.cancelTenantBooking("bk-123", { reason: "User cancelled" }, { idempotencyKey: key2 });
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key2);
+      await client.cancelTenantBooking(
+        "bk-123",
+        { reason: "User cancelled" },
+        { idempotencyKey: key2 },
+      );
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key2);
     });
 
     it("3. updateOrder / updateTenantBooking accepts and forwards idempotencyKey", async () => {
       const key1 = createIdempotencyKey("update-order");
-      await client.updateOrder("ord-123", { notes: "Updated note" }, { idempotencyKey: key1 });
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key1);
+      await client.updateOrder(
+        "ord-123",
+        { notes: "Updated note" },
+        { idempotencyKey: key1 },
+      );
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key1);
 
       const key2 = createIdempotencyKey("update-tenant-booking");
-      await client.updateTenantBooking("bk-123", { notes: "Updated note" }, { idempotencyKey: key2 });
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key2);
+      await client.updateTenantBooking(
+        "bk-123",
+        { notes: "Updated note" },
+        { idempotencyKey: key2 },
+      );
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key2);
     });
 
     it("4. applyManualFareOverride accepts and forwards idempotencyKey", async () => {
@@ -200,17 +252,59 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
         { amount: 500, reason: "Adjustment" } as never,
         { idempotencyKey: key },
       );
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key);
     });
 
-    it("5. dispatchOrder / redispatchOrder accepts and forwards idempotencyKey", async () => {
+    it("5. dispatchOrder / redispatchOrder / assignDispatch / reassignDispatch accepts and forwards idempotencyKey", async () => {
       const key1 = createIdempotencyKey("dispatch");
-      await client.dispatchOrder("ord-123", { driverId: "drv-1" } as never, { idempotencyKey: key1 });
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key1);
+      await client.dispatchOrder("ord-123", { driverId: "drv-1" } as never, {
+        idempotencyKey: key1,
+      });
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key1);
 
       const key2 = createIdempotencyKey("redispatch");
-      await client.redispatchOrder("ord-123", { reason: "Driver delayed" } as never, { idempotencyKey: key2 });
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key2);
+      await client.redispatchOrder("ord-123", "operator_redispatch", {
+        idempotencyKey: key2,
+      });
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key2);
+
+      const key3 = createIdempotencyKey("assign-dispatch");
+      await client.assignDispatch(
+        { dispatchJobId: "job-1", driverId: "drv-1" } as never,
+        { idempotencyKey: key3 },
+      );
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key3);
+
+      const key4 = createIdempotencyKey("reassign-dispatch");
+      await client.reassignDispatch(
+        {
+          dispatchJobId: "job-1",
+          targetDriverId: "drv-2",
+          reason: "shift_end",
+        } as never,
+        { idempotencyKey: key4 },
+      );
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key4);
     });
 
     it("6. createComplaint / assignComplaint / reopenComplaint / resolveComplaint accepts and forwards idempotencyKey", async () => {
@@ -224,7 +318,11 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
         } as never,
         { idempotencyKey: key1 },
       );
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key1);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key1);
 
       const key2 = createIdempotencyKey("complaint-resolve");
       await client.resolveComplaint(
@@ -232,21 +330,57 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
         { resolutionCode: "resolved_refund", closingNote: "Refunded" } as never,
         { idempotencyKey: key2 },
       );
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key2);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key2);
     });
 
     it("7. publishDriverFeePlan / generateDriverStatements / approveReimbursementBatch accepts and forwards idempotencyKey", async () => {
       const key1 = createIdempotencyKey("fee-plan");
-      await client.publishDriverFeePlan({ planName: "Standard" } as never, { idempotencyKey: key1 });
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key1);
+      await client.publishDriverFeePlan({ planName: "Standard" } as never, {
+        idempotencyKey: key1,
+      });
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key1);
 
       const key2 = createIdempotencyKey("statements");
-      await client.generateDriverStatements({ month: "2026-08" } as never, { idempotencyKey: key2 });
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key2);
+      await client.generateDriverStatements({ month: "2026-08" } as never, {
+        idempotencyKey: key2,
+      });
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key2);
 
       const key3 = createIdempotencyKey("reimburse-approve");
-      await client.approveReimbursementBatch("batch-1", { statementId: "stmt-1" }, { idempotencyKey: key3 });
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key3);
+      await client.approveReimbursementBatch(
+        "batch-1",
+        { statementId: "stmt-1" },
+        { idempotencyKey: key3 },
+      );
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key3);
+
+      const key4 = createIdempotencyKey("reimburse-mark-paid");
+      await client.markReimbursementPaid(
+        "batch-1",
+        { paidAt: "2026-08-17T12:00:00Z" },
+        { idempotencyKey: key4 },
+      );
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key4);
     });
 
     it("8. createReportJob / createTenantReportJob / generateFilingPackage accepts and forwards idempotencyKey", async () => {
@@ -255,21 +389,33 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
         { jobType: "daily_dispatch_records", format: "csv" } as never,
         { idempotencyKey: key1 },
       );
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key1);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key1);
 
       const key2 = createIdempotencyKey("tenant-report-job");
       await client.createTenantReportJob(
         { jobType: "tenant_usage_summary", format: "csv" } as never,
         { idempotencyKey: key2 },
       );
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key2);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key2);
 
       const key3 = createIdempotencyKey("filing-pkg");
       await client.generateFilingPackage(
         { packageType: "monthly_operations" } as never,
         { idempotencyKey: key3 },
       );
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key3);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key3);
     });
 
     it("9. sendTestWebhook / createWebhookEndpoint accepts and forwards idempotencyKey", async () => {
@@ -278,25 +424,55 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
         { endpointId: "ep-1", eventType: "order.created" } as never,
         { idempotencyKey: key1 },
       );
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key1);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key1);
 
       const key2 = createIdempotencyKey("webhook-ep");
       await client.createWebhookEndpoint(
-        { url: "https://hook.example/drts", eventTypes: ["order.created"] } as never,
+        {
+          url: "https://hook.example/drts",
+          eventTypes: ["order.created"],
+        } as never,
         { idempotencyKey: key2 },
       );
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.get("Idempotency-Key")).toBe(key2);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.get(
+          "Idempotency-Key",
+        ),
+      ).toBe(key2);
     });
 
     it("omits Idempotency-Key when options is not provided (Acceptance Criteria 4)", async () => {
-      await client.createOrder({ pickupAddress: "A", dropoffAddress: "B" } as never);
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.has("Idempotency-Key")).toBe(false);
+      await client.createOrder({
+        pickupAddress: "A",
+        dropoffAddress: "B",
+      } as never);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.has(
+          "Idempotency-Key",
+        ),
+      ).toBe(false);
 
-      await client.createComplaint({ caseSource: "web", category: "other", description: "test" } as never);
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.has("Idempotency-Key")).toBe(false);
+      await client.createComplaint({
+        caseSource: "web",
+        category: "other",
+        description: "test",
+      } as never);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.has(
+          "Idempotency-Key",
+        ),
+      ).toBe(false);
 
       await client.createReportJob({ jobType: "test", format: "csv" } as never);
-      expect(capturedRequests[capturedRequests.length - 1]!.headers.has("Idempotency-Key")).toBe(false);
+      expect(
+        capturedRequests[capturedRequests.length - 1]!.headers.has(
+          "Idempotency-Key",
+        ),
+      ).toBe(false);
     });
   });
 
@@ -362,9 +538,15 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
 
       // Verify all 3 attempts sent the identical key
       expect(capturedRequests).toHaveLength(3);
-      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(initialKey);
-      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(initialKey);
-      expect(capturedRequests[2]!.headers.get("Idempotency-Key")).toBe(initialKey);
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(
+        initialKey,
+      );
+      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(
+        initialKey,
+      );
+      expect(capturedRequests[2]!.headers.get("Idempotency-Key")).toBe(
+        initialKey,
+      );
     });
 
     it("maintains the same key across retries on failure for generateFilingPackage, preventing duplicate immutable manifests", async () => {
@@ -384,7 +566,9 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
             });
           }
           return new Response(
-            JSON.stringify({ data: { packageId: "pkg-456", status: "queued" } }),
+            JSON.stringify({
+              data: { packageId: "pkg-456", status: "queued" },
+            }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }),
@@ -408,8 +592,12 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
       expect(pkg).toBeDefined();
 
       expect(capturedRequests).toHaveLength(2);
-      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(intentKey);
-      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(intentKey);
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(
+        intentKey,
+      );
+      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(
+        intentKey,
+      );
     });
 
     it("maintains the same key across retries on failure for createTenantReportJob / handleRerun", async () => {
@@ -429,7 +617,9 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
             });
           }
           return new Response(
-            JSON.stringify({ data: { jobId: "tenant-job-789", status: "queued" } }),
+            JSON.stringify({
+              data: { jobId: "tenant-job-789", status: "queued" },
+            }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }),
@@ -453,8 +643,12 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
       expect(result).toBeDefined();
 
       expect(capturedRequests).toHaveLength(2);
-      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(rerunKey);
-      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(rerunKey);
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(
+        rerunKey,
+      );
+      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(
+        rerunKey,
+      );
     });
 
     it("tenant-portal-web booking intent preserves identical idempotencyKey across retry attempts", async () => {
@@ -468,13 +662,21 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
 
           callCount++;
           if (callCount === 1) {
-            return new Response(JSON.stringify({ error: "Temporary gateway timeout" }), {
-              status: 504,
-              headers: { "Content-Type": "application/json" },
-            });
+            return new Response(
+              JSON.stringify({ error: "Temporary gateway timeout" }),
+              {
+                status: 504,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
           }
           return new Response(
-            JSON.stringify({ data: { bookingId: "bk-tenant-portal-1", orderId: "ord-tenant-portal-1" } }),
+            JSON.stringify({
+              data: {
+                bookingId: "bk-tenant-portal-1",
+                orderId: "ord-tenant-portal-1",
+              },
+            }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }),
@@ -517,9 +719,13 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
 
       expect(capturedRequests).toHaveLength(2);
       expect(capturedRequests[0]!.url).toContain("/api/tenant/bookings");
-      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(portalBookingKey);
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(
+        portalBookingKey,
+      );
       expect(capturedRequests[1]!.url).toContain("/api/tenant/bookings");
-      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(portalBookingKey);
+      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(
+        portalBookingKey,
+      );
     });
 
     it("tenant-portal-web report job creation preserves identical idempotencyKey across retry attempts", async () => {
@@ -533,13 +739,18 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
 
           callCount++;
           if (callCount === 1) {
-            return new Response(JSON.stringify({ error: "Service unavailable" }), {
-              status: 503,
-              headers: { "Content-Type": "application/json" },
-            });
+            return new Response(
+              JSON.stringify({ error: "Service unavailable" }),
+              {
+                status: 503,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
           }
           return new Response(
-            JSON.stringify({ data: { jobId: "job-tenant-portal-99", status: "queued" } }),
+            JSON.stringify({
+              data: { jobId: "job-tenant-portal-99", status: "queued" },
+            }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }),
@@ -564,9 +775,13 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
 
       expect(capturedRequests).toHaveLength(2);
       expect(capturedRequests[0]!.url).toContain("/api/tenant/reports/jobs");
-      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(portalReportKey);
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(
+        portalReportKey,
+      );
       expect(capturedRequests[1]!.url).toContain("/api/tenant/reports/jobs");
-      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(portalReportKey);
+      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(
+        portalReportKey,
+      );
     });
 
     it("fare-anomaly retry quote preserves identical idempotencyKey across retry attempts and resets on success", async () => {
@@ -580,13 +795,22 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
 
           callCount++;
           if (callCount === 1) {
-            return new Response(JSON.stringify({ error: "Service unavailable" }), {
-              status: 503,
-              headers: { "Content-Type": "application/json" },
-            });
+            return new Response(
+              JSON.stringify({ error: "Service unavailable" }),
+              {
+                status: 503,
+                headers: { "Content-Type": "application/json" },
+              },
+            );
           }
           return new Response(
-            JSON.stringify({ data: { auditId: "aud-001", status: "completed", message: "Quote recalculated" } }),
+            JSON.stringify({
+              data: {
+                auditId: "aud-001",
+                status: "completed",
+                message: "Quote recalculated",
+              },
+            }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }),
@@ -598,11 +822,14 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
 
       // Attempt 1 (fails due to 503)
       await expect(
-        client.post(`/api/product-rule/fare-anomalies/${quoteSnapshotId}/actions/retry-quote`, {
-          headers: {
-            "Idempotency-Key": intentKey,
+        client.post(
+          `/api/product-rule/fare-anomalies/${quoteSnapshotId}/actions/retry-quote`,
+          {
+            headers: {
+              "Idempotency-Key": intentKey,
+            },
           },
-        }),
+        ),
       ).rejects.toThrow();
 
       // Attempt 2 (retry on error - uses identical intentKey)
@@ -621,11 +848,18 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
       expect(intentKey).not.toBe(initialKey);
 
       expect(capturedRequests).toHaveLength(2);
-      expect(capturedRequests[0]!.url).toContain(`/api/product-rule/fare-anomalies/${quoteSnapshotId}/actions/retry-quote`);
-      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(initialKey);
-      expect(capturedRequests[1]!.url).toContain(`/api/product-rule/fare-anomalies/${quoteSnapshotId}/actions/retry-quote`);
-      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(initialKey);
+      expect(capturedRequests[0]!.url).toContain(
+        `/api/product-rule/fare-anomalies/${quoteSnapshotId}/actions/retry-quote`,
+      );
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(
+        initialKey,
+      );
+      expect(capturedRequests[1]!.url).toContain(
+        `/api/product-rule/fare-anomalies/${quoteSnapshotId}/actions/retry-quote`,
+      );
+      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(
+        initialKey,
+      );
     });
   });
 });
-

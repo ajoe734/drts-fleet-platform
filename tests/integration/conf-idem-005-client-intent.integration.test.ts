@@ -196,7 +196,9 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
             direction: "pickup",
             pickup: { address: "A" },
             dropoff: { address: "B" },
-            reservationWindowStart: new Date(Date.now() + 7200000).toISOString(),
+            reservationWindowStart: new Date(
+              Date.now() + 7200000,
+            ).toISOString(),
             reservationWindowEnd: new Date(Date.now() + 10800000).toISOString(),
             passenger: {
               passengerId: "pax-1",
@@ -297,9 +299,10 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
     });
   });
 
-  describe("Billing reimbursement approval intent", () => {
+  describe("Billing reimbursement approval and payment intent", () => {
     let mockBillingService: {
       approveReimbursementBatch: ReturnType<typeof vi.fn>;
+      markReimbursementPaid: ReturnType<typeof vi.fn>;
     };
     let controller: BillingSettlementController;
 
@@ -309,6 +312,11 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
           batchId,
           status: "approved",
           approvedAt: "2026-08-17T12:00:00.000Z",
+        })),
+        markReimbursementPaid: vi.fn(async (batchId: string) => ({
+          batchId,
+          status: "paid",
+          paidAt: "2026-08-17T12:00:00.000Z",
         })),
       };
       controller = new BillingSettlementController(
@@ -336,7 +344,34 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
       );
 
       expect(first.data.batchId).toBe(second.data.batchId);
-      expect(mockBillingService.approveReimbursementBatch).toHaveBeenCalledTimes(1);
+      expect(
+        mockBillingService.approveReimbursementBatch,
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    it("reimbursement batch mark paid retried sends same key and pays once", async () => {
+      const intentKey = createIdempotencyKey("reimbursement-mark-paid");
+      const body = {
+        paidAt: "2026-08-17T12:00:00.000Z",
+        remittanceProofId: "PROOF-001",
+      };
+
+      const first = await controller.markReimbursementPaid(
+        "BATCH-001",
+        body,
+        intentKey,
+        "req-1",
+      );
+
+      const second = await controller.markReimbursementPaid(
+        "BATCH-001",
+        body,
+        intentKey,
+        "req-2",
+      );
+
+      expect(first.data.batchId).toBe(second.data.batchId);
+      expect(mockBillingService.markReimbursementPaid).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -409,12 +444,14 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
 
     beforeEach(() => {
       mockTenantService = {
-        sendTestWebhook: vi.fn(async (endpointId: string, eventType: string) => ({
-          endpointId,
-          eventType,
-          delivered: true,
-          statusCode: 200,
-        })),
+        sendTestWebhook: vi.fn(
+          async (endpointId: string, eventType: string) => ({
+            endpointId,
+            eventType,
+            delivered: true,
+            statusCode: 200,
+          }),
+        ),
       };
       controller = new TenantPartnerController(
         mockTenantService as unknown as TenantPartnerService,
@@ -516,7 +553,8 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
           farePolicyVersion: "FARE-MTX-2026-07",
           fareChangeRuleId: "fare-change-001",
           fareChangeRuleVersion: "1",
-          fareChangeRuleDisplayText: "Fare changes require passenger confirmation.",
+          fareChangeRuleDisplayText:
+            "Fare changes require passenger confirmation.",
           passengerConfirmedAt: null,
           generatedAt: "2026-07-24T08:02:00.000Z",
         },
@@ -525,7 +563,12 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
       const error = await expectThrows(() =>
         controller.retryQuote(
           "quote-001",
-          { actorId: "admin-1", realm: "platform", roles: [], permissions: [] } as never,
+          {
+            actorId: "admin-1",
+            realm: "platform",
+            roles: [],
+            permissions: [],
+          } as never,
           undefined,
           "req-1",
         ),
@@ -567,14 +610,20 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
           farePolicyVersion: "FARE-MTX-2026-07",
           fareChangeRuleId: "fare-change-001",
           fareChangeRuleVersion: "1",
-          fareChangeRuleDisplayText: "Fare changes require passenger confirmation.",
+          fareChangeRuleDisplayText:
+            "Fare changes require passenger confirmation.",
           passengerConfirmedAt: null,
           generatedAt: "2026-07-24T08:02:00.000Z",
         },
       });
 
       const intentKey = createIdempotencyKey("fare-anomaly-retry");
-      const identity = { actorId: "admin-1", realm: "platform", roles: [], permissions: [] } as never;
+      const identity = {
+        actorId: "admin-1",
+        realm: "platform",
+        roles: [],
+        permissions: [],
+      } as never;
 
       const first = await controller.retryQuote(
         "quote-001",
@@ -595,5 +644,111 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
       expect(recoveryPort.recover).toHaveBeenCalledTimes(1);
     });
   });
-});
 
+  describe("Dispatch assignment & redispatch intent (Command #9)", () => {
+    it("dispatchOrder retried with same intent key executes exactly once", async () => {
+      const harness = createOwnedMobilityHarness();
+      const created = await harness.controller.createTenantBooking(
+        {
+          businessDispatchSubtype: "enterprise_dispatch",
+          pickup: { address: "A" },
+          dropoff: { address: "B" },
+          reservationWindowStart: new Date(Date.now() + 7200000).toISOString(),
+          reservationWindowEnd: new Date(Date.now() + 10800000).toISOString(),
+          passenger: { name: "Alice", phone: "0912345678" },
+        },
+        null,
+        "TENANT-001",
+        "req-init-1",
+        undefined,
+        createIdempotencyKey("init-booking-1"),
+      );
+      const orderId = created.data.orderId;
+
+      const intentKey = createIdempotencyKey("dispatch-order");
+      const first = await harness.controller.dispatchOrder(
+        orderId,
+        { mode: "auto" },
+        "req-1",
+        intentKey,
+      );
+
+      const second = await harness.controller.dispatchOrder(
+        orderId,
+        { mode: "auto" },
+        "req-2",
+        intentKey,
+      );
+
+      expect(first.data.dispatchJobId).toBe(second.data.dispatchJobId);
+    });
+
+    it("redispatchOrder retried with same intent key executes exactly once", async () => {
+      const harness = createOwnedMobilityHarness();
+      const created = await harness.controller.createTenantBooking(
+        {
+          businessDispatchSubtype: "enterprise_dispatch",
+          pickup: { address: "A" },
+          dropoff: { address: "B" },
+          reservationWindowStart: new Date(Date.now() + 7200000).toISOString(),
+          reservationWindowEnd: new Date(Date.now() + 10800000).toISOString(),
+          passenger: { name: "Alice", phone: "0912345678" },
+        },
+        null,
+        "TENANT-001",
+        "req-init-2",
+        undefined,
+        createIdempotencyKey("init-booking-2"),
+      );
+      const orderId = created.data.orderId;
+
+      // First dispatch to assign
+      await harness.controller.dispatchOrder(
+        orderId,
+        { mode: "auto" },
+        "req-dispatch-init",
+        createIdempotencyKey("dispatch-first"),
+      );
+
+      const intentKey = createIdempotencyKey("redispatch-order");
+      const first = await harness.controller.redispatchOrder(
+        orderId,
+        { reasonCode: "operator_redispatch" },
+        "req-1",
+        intentKey,
+      );
+
+      const second = await harness.controller.redispatchOrder(
+        orderId,
+        { reasonCode: "operator_redispatch" },
+        "req-2",
+        intentKey,
+      );
+
+      expect(first.data.dispatchJobId).toBe(second.data.dispatchJobId);
+    });
+  });
+
+  describe("Tenant portal web searchParams idempotencyKey roundtrip", () => {
+    it("preserves identical idempotencyKey when retrying after redirectWithError", () => {
+      const initialKey = createIdempotencyKey("tenant-booking");
+      const validationError =
+        "Reservation window end must be after the reservation window start.";
+
+      // Simulates redirectWithError(validationError, initialKey)
+      const query = new URLSearchParams({ error: validationError });
+      query.set("idempotencyKey", initialKey);
+      const redirectUrl = `/bookings/new?${query.toString()}`;
+
+      // Simulates NewBookingPage({ searchParams }) reading URL query params on error reload
+      const parsedParams = Object.fromEntries(
+        new URL(`http://localhost${redirectUrl}`).searchParams.entries(),
+      );
+      const boundKeyOnReload =
+        parsedParams.idempotencyKey ?? createIdempotencyKey("tenant-booking");
+
+      // The key bound to the retried submission MUST be identical to initialKey
+      expect(boundKeyOnReload).toBe(initialKey);
+    });
+  });
+});

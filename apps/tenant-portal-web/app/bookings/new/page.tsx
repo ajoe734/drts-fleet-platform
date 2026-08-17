@@ -77,8 +77,12 @@ function parseOptionalInteger(value: FormDataEntryValue | null) {
   return Number.isNaN(parsed) ? Number.NaN : parsed;
 }
 
-function redirectWithError(message: string) {
-  redirect(`/bookings/new?error=${encodeURIComponent(message)}`);
+function redirectWithError(message: string, idempotencyKey?: string) {
+  const query = new URLSearchParams({ error: message });
+  if (idempotencyKey) {
+    query.set("idempotencyKey", idempotencyKey);
+  }
+  redirect(`/bookings/new?${query.toString()}`);
 }
 
 function getSubtypeLabel(subtype: BusinessDispatchSubtype) {
@@ -299,12 +303,14 @@ const mutedNoteStyle: React.CSSProperties = {
 export default async function NewBookingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; idempotencyKey?: string }>;
 }) {
   const client = await getTenantClient();
   const roleSnapshot = await getTenantRoleSnapshot();
   const params = await searchParams;
   const formError = params.error ?? null;
+  const boundIdempotencyKey =
+    params.idempotencyKey ?? createIdempotencyKey("tenant-booking");
 
   const [identityResult, passengersResult, addressesResult, catalogResult] =
     await Promise.allSettled([
@@ -488,7 +494,7 @@ export default async function NewBookingPage({
     }
 
     if (validationErrors.length > 0) {
-      redirectWithError(validationErrors.join(" "));
+      redirectWithError(validationErrors.join(" "), idempotencyKey);
     }
 
     const command: CreateTenantBookingCommand = {
@@ -531,7 +537,7 @@ export default async function NewBookingPage({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown booking error";
-      redirectWithError(message);
+      redirectWithError(message, idempotencyKey);
     }
   }
 
@@ -617,7 +623,7 @@ export default async function NewBookingPage({
           <input
             type="hidden"
             name="idempotencyKey"
-            value={createIdempotencyKey("tenant-booking")}
+            value={boundIdempotencyKey}
           />
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>

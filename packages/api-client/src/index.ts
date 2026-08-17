@@ -1440,12 +1440,18 @@ export class ApiClient {
     return res.items ?? [];
   }
 
-  async assignDispatch(command: AssignDispatchCommand) {
-    return this.post("/api/dispatch/assign", { body: command });
+  async assignDispatch(
+    command: AssignDispatchCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/dispatch/assign", { ...options, body: command });
   }
 
-  async reassignDispatch(command: ReassignDispatchCommand) {
-    return this.post("/api/dispatch/reassign", { body: command });
+  async reassignDispatch(
+    command: ReassignDispatchCommand,
+    options?: RequestOptions,
+  ) {
+    return this.post("/api/dispatch/reassign", { ...options, body: command });
   }
 
   async listDispatchQueueEntries(): Promise<DispatchQueueEntryReadRecord[]> {

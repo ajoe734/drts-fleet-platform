@@ -1,9 +1,16 @@
-import { createTenantClient, type ApiClient, type RequestOptions } from "@drts/api-client";
+import {
+  createTenantClient,
+  type ApiClient,
+  type RequestOptions,
+} from "@drts/api-client";
 import type {
+  AssignDispatchCommand,
   BookingRecord,
   CancelOwnedOrderCommand,
   CreateTenantBookingCommand,
   CrossAppResourceLink,
+  DispatchOrderCommand,
+  ReassignDispatchCommand,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 import {
@@ -76,6 +83,44 @@ export class EnterpriseDispatchTenantClient {
   async getBookingGateSnapshot(bookingId: string) {
     const booking = await this.getBooking(bookingId);
     return summarizeBookingGates(booking);
+  }
+
+  async dispatchOrder(
+    orderId: string,
+    command?: DispatchOrderCommand,
+    options?: RequestOptions,
+  ) {
+    return this.client.dispatchOrder(orderId, command, options);
+  }
+
+  async redispatchOrder(
+    orderId: string,
+    reasonCode = "operator_redispatch",
+    options?: {
+      reasonNote?: string;
+      operatorId?: string;
+      escalationTarget?: "ops_supervisor" | "dispatch_manager" | null;
+      expectedAssignmentVersion?: number | null;
+      idempotencyKey?: string;
+      headers?: Record<string, string>;
+      signal?: AbortSignal;
+    },
+  ) {
+    return this.client.redispatchOrder(orderId, reasonCode, options);
+  }
+
+  async assignDispatch(
+    command: AssignDispatchCommand,
+    options?: RequestOptions,
+  ) {
+    return this.client.assignDispatch(command, options);
+  }
+
+  async reassignDispatch(
+    command: ReassignDispatchCommand,
+    options?: RequestOptions,
+  ) {
+    return this.client.reassignDispatch(command, options);
   }
 
   getEmbedDisposition(link?: CrossAppResourceLink | null) {
