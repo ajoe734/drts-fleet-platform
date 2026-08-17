@@ -53,11 +53,6 @@ def outcome_id(run_id: str, payload: Mapping[str, Any]) -> str:
     return f"outcome:{run_id}:{digest}"
 
 
-def result_already_consumed(worker: Mapping[str, Any], payload: Mapping[str, Any]) -> bool:
-    run_id = str(worker.get("run_id") or "").strip()
-    return bool(run_id) and worker.get("consumed_result_id") == outcome_id(run_id, payload)
-
-
 def consume_result(
     worker: dict[str, Any],
     payload: Mapping[str, Any],

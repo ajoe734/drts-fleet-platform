@@ -157,14 +157,6 @@ def branch_exists(branch: str) -> bool:
     return proc.returncode == 0
 
 
-def branch_head_sha(branch: str) -> str | None:
-    proc = run_command(["git", "rev-parse", branch], cwd=ROOT)
-    if proc.returncode != 0:
-        return None
-    sha = (proc.stdout or '').strip()
-    return sha or None
-
-
 def branch_has_diff(base: str, branch: str) -> bool:
     proc = run_command(["git", "rev-list", "--count", f"{base}..{branch}"], cwd=ROOT)
     if proc.returncode != 0:
@@ -260,11 +252,6 @@ def task_bus_entry(bus_state: dict[str, Any], task_id: str) -> dict[str, Any]:
             "last_issue_hash": None,
         },
     )
-
-
-def task_signature(task: dict[str, Any], fields: list[str]) -> str:
-    payload = {field: task.get(field) for field in fields}
-    return json.dumps(payload, sort_keys=True, ensure_ascii=False)
 
 
 def build_template_body(config: dict[str, Any], template_key: str, variables: dict[str, Any]) -> str:

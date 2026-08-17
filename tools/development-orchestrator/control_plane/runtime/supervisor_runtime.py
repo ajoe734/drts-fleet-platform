@@ -39,7 +39,6 @@ from control_plane.domain.dispatch_policy import (
     ReadyDispatchPolicy,
     build_dispatch_event as build_domain_dispatch_event,
     dependencies_satisfied as domain_dependencies_satisfied,
-    dependency_signature as domain_dependency_signature,
     ready_dispatch_signature as domain_ready_dispatch_signature,
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
@@ -66,7 +65,6 @@ from control_plane.infra.queue_repo import (
     enqueue_event,
     load_event_queue,
     queue_repository,
-    replace_event_queue,
 )
 from control_plane.infra.runtime_repo import (
     clear_dispatch_pause,
@@ -79,7 +77,6 @@ from control_plane.infra.runtime_repo import (
 from control_plane.infra.worker_failure_detector import (
     WorkerFailureSignal,
     _captured_tool_log_line_indexes as infra_captured_tool_log_line_indexes,
-    _detect_json_worker_failure as infra_detect_json_worker_failure,
     _detect_json_worker_failure_signal as infra_detect_json_worker_failure_signal,
     _extract_failure_candidate as infra_extract_failure_candidate,
     _ignore_embedded_failure_line as infra_ignore_embedded_failure_line,
@@ -87,6 +84,11 @@ from control_plane.infra.worker_failure_detector import (
     _iter_json_string_values as infra_iter_json_string_values,
     detect_worker_failure as infra_detect_worker_failure,
     detect_worker_failure_signal as infra_detect_worker_failure_signal,
+)
+from control_plane.infra.worker_evidence import (
+    brief_reason_text,
+    record_worker_evidence,
+    summarize_worker_failure,
 )
 from control_plane.projections.control_plane_summary import (
     refresh_control_plane_summary,
@@ -112,7 +114,6 @@ from common import (
     load_rotation_cooldowns,
     record_rotation_cooldown,
     display_name_for,
-    evidence_path,
     ensure_task_brief,
     load_config,
     load_json,
@@ -127,7 +128,6 @@ from common import (
     spawn_background_process,
     task_board_cli_path,
     utc_now,
-    write_json,
     write_activity_log,
 )
 from github_bus import sync_github_bus
@@ -2761,10 +2761,6 @@ def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
     return infra_detect_json_worker_failure_signal(line)
 
 
-def _detect_json_worker_failure(line: str) -> str | None:
-    return infra_detect_json_worker_failure(line)
-
-
 def _is_result_level_provider_blocker(candidate: str) -> bool:
     return infra_is_result_level_provider_blocker(candidate)
 
@@ -4010,32 +4006,6 @@ def proactive_claim_plan_for_idle_agent(
     }
 
 
-def proactive_claim_plan_for_task(
-    config: dict[str, Any],
-    *,
-    task: dict[str, Any],
-    task_map: dict[str, dict[str, Any]],
-    idle_agent_names: list[str],
-    agent_loads: dict[str, list[int]],
-    helper_settings: dict[str, Any],
-    state: dict[str, Any] | None = None,
-) -> dict[str, str] | None:
-    for idle_agent_name in ordered_idle_agent_names(idle_agent_names, agent_loads):
-        plan = proactive_claim_plan_for_idle_agent(
-            config,
-            task=task,
-            task_map=task_map,
-            idle_agent_name=idle_agent_name,
-            idle_agent_names=idle_agent_names,
-            agent_loads=agent_loads,
-            helper_settings=helper_settings,
-            state=state,
-        )
-        if plan:
-            return plan
-    return None
-
-
 def ensure_candidate_lifecycle_migration(
     config: dict[str, Any], status: dict[str, Any]
 ) -> bool:
@@ -4056,45 +4026,6 @@ def ensure_candidate_lifecycle_migration(
         },
     )
     return False
-
-
-def brief_reason_text(text: str | None, max_length: int = 240) -> str:
-    raw = re.sub(r"\s+", " ", str(text or "")).strip()
-    if len(raw) <= max_length:
-        return raw
-    clipped = raw[: max_length - 1].rstrip()
-    if " " in clipped:
-        clipped = clipped.rsplit(" ", 1)[0]
-    return clipped + "…"
-
-
-def summarize_worker_failure(config: dict[str, Any], worker: dict[str, Any], reason: str) -> tuple[str, str]:
-    failure = classify_worker_failure(config, worker, reason)
-    label = str(failure.get("label") or "worker failure").strip()
-    summary = brief_reason_text(reason, max_length=220)
-    if label and label.lower() not in summary.lower():
-        summary = f"{label}: {summary}"
-    return label or "worker failure", summary
-
-
-def record_worker_evidence(config: dict[str, Any], worker: dict[str, Any], reason: str) -> str:
-    run_id = str(worker.get("run_id") or new_runtime_id("worker")).strip()
-    path = evidence_path(run_id)
-    label, summary = summarize_worker_failure(config, worker, reason)
-    payload = {
-        "created_at": utc_now(),
-        "provider": worker.get("provider"),
-        "task_id": worker.get("task_id"),
-        "worker_run_id": run_id,
-        "queue_event_id": worker.get("queue_event_id"),
-        "kind": label,
-        "summary": summary,
-        "log_path": worker.get("log_path"),
-        "payload_path": worker.get("payload_path"),
-        "raw_message": reason,
-    }
-    write_json(path, payload)
-    return relpath(path)
 
 
 def upsert_worker_dispatch_pause(
@@ -4119,14 +4050,6 @@ def upsert_worker_dispatch_pause(
             "raw_ref": raw_ref,
             "mode_bucket": "execution",
         },
-    )
-
-
-def clear_worker_dispatch_pause(state: dict[str, Any], worker: dict[str, Any]) -> None:
-    clear_dispatch_pause(
-        state,
-        task_id=str(worker.get("task_id") or "") or None,
-        worker_run_id=str(worker.get("run_id") or "") or None,
     )
 
 
@@ -5804,10 +5727,6 @@ def dependencies_satisfied(task: dict[str, Any], task_map: dict[str, dict[str, A
     return domain_dependencies_satisfied(task, task_map, done_statuses)
 
 
-def task_dependency_signature(task: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> str:
-    return domain_dependency_signature(task, task_map)
-
-
 def active_worker_indexes(state: dict[str, Any], active_statuses: set[str]) -> tuple[set[str], set[tuple[str, str]]]:
     agents: set[str] = set()
     task_agents: set[tuple[str, str]] = set()
@@ -5913,10 +5832,6 @@ def finalize_queue_event_record(config: dict[str, Any], state: dict[str, Any], w
 
 
 
-def save_event_queue(config: dict[str, Any], events: list[dict[str, Any]]) -> None:
-    replace_event_queue(config, events)
-
-
 def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
     task_map = task_index_from_status(config, load_status(config))
     active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
@@ -6008,10 +5923,6 @@ def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
     return queue_repository(config).update(prune_loaded_queue)
 
 
-def task_status_map(status: dict[str, Any]) -> dict[str, str]:
-    return {str(task.get("id")): str(task.get("status") or "") for task in status.get("tasks", []) if task.get("id")}
-
-
 def task_index_from_status(config: dict[str, Any], status: dict[str, Any]) -> dict[str, dict[str, Any]]:
     schema = config.get("schema", {})
     tasks_path = schema.get("tasks_path", "tasks")
@@ -6045,39 +5956,6 @@ def dispatch_reason_priority(reason: str | None) -> int | None:
         "owned_ready_dispatch": 2,
     }
     return priorities.get(normalized)
-
-
-def dispatch_priority_for_task(
-    config: dict[str, Any],
-    task: dict[str, Any],
-    agent_name: str,
-    *,
-    dependencies_done_statuses: set[str] | None = None,
-) -> int | None:
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    dependency_done_statuses = dependencies_done_statuses or {
-        str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])
-    }
-    schema = config.get("schema", {})
-    owner_field = schema.get("assignee_field", "owner")
-    reviewer_field = schema.get("reviewer_field", "reviewer")
-    task_status = str(task.get("status") or "").lower()
-    if task_status in review_statuses and task.get(reviewer_field) == agent_name:
-        return 0
-    if (
-        task_status == "in_progress"
-        and task.get(owner_field) == agent_name
-        and dependencies_satisfied(task, {str(task.get("id") or ""): task}, dependency_done_statuses)
-    ):
-        return 1
-    if (
-        task_status in {"todo", "backlog"}
-        and task.get(owner_field) == agent_name
-        and dependencies_satisfied(task, {str(task.get("id") or ""): task}, dependency_done_statuses)
-    ):
-        return 2
-    return None
 
 
 def agent_dispatch_loads(
@@ -6120,32 +5998,6 @@ def agent_dispatch_loads(
         loads.setdefault(agent_name, []).append(priority)
 
     return loads
-
-
-def choose_helper_claim_agent(
-    config: dict[str, Any],
-    *,
-    task: dict[str, Any],
-    owner_name: str,
-    reviewer_name: str,
-    idle_agent_name: str,
-    agent_loads: dict[str, list[int]],
-    helper_settings: dict[str, Any],
-    state: dict[str, Any] | None = None,
-) -> bool:
-    if not helper_settings.get("enabled", True):
-        return False
-    plan = proactive_claim_plan_for_idle_agent(
-        config,
-        task=task,
-        task_map={str(task.get("id") or ""): task},
-        idle_agent_name=idle_agent_name,
-        idle_agent_names=[idle_agent_name],
-        agent_loads=agent_loads,
-        helper_settings=helper_settings,
-        state=state,
-    )
-    return plan is not None
 
 
 def higher_priority_ready_task_exists(

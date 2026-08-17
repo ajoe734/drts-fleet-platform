@@ -849,11 +849,17 @@ def _discussion_artifact_paths(status: dict[str, Any]) -> list[Path]:
     return _unique_paths(result)
 
 
-def task_brief_path(task_id: str) -> Path:
+def task_brief_path(task_id: str, config: dict[str, Any] | None = None) -> Path:
+    """Return the generated brief location, with an optional isolated runtime root."""
+    if config and config.get("paths", {}).get("task_briefs_dir"):
+        return config_path(config, "task_briefs_dir") / f"{task_id}.md"
     return TASK_BRIEFS_DIR / f"{task_id}.md"
 
 
-def evidence_path(run_id: str) -> Path:
+def evidence_path(run_id: str, config: dict[str, Any] | None = None) -> Path:
+    """Return the evidence location, with an optional isolated runtime root."""
+    if config and config.get("paths", {}).get("evidence_dir"):
+        return config_path(config, "evidence_dir") / f"{run_id}.json"
     return EVIDENCE_DIR / f"{run_id}.json"
 
 
@@ -990,7 +996,7 @@ def ensure_task_brief(
     task_id_value = str(merged_task.get("id") or "").strip()
     if not task_id_value:
         return None
-    path = task_brief_path(task_id_value)
+    path = task_brief_path(task_id_value, config)
     ensure_parent(path)
     path.write_text(build_task_brief(config, merged_task, runtime_state=runtime_state), encoding="utf-8")
     return path

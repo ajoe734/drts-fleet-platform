@@ -290,23 +290,6 @@ class ProviderPermissionsTest(unittest.TestCase):
         self.assertIn("Bash(nohup python3 */tools/development-orchestrator/bin/dashboard_server.py *)", policy["allow"])
         self.assertIn("Bash(pkill -f *dashboard_server.py*)", policy["allow"])
 
-    def test_copilot_plaintext_token_reads_camel_case_token_key(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            config_path = Path(tmp) / "config.json"
-            config_path.write_text(
-                json.dumps(
-                    {
-                        "storeTokenPlaintext": True,
-                        "copilotTokens": {
-                            "https://github.com:demo": "gho_demo_token"
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            with patch.dict(os.environ, {"COPILOT_CONFIG_DIR": tmp}, clear=False):
-                self.assertEqual(_copilot_plaintext_token(), "gho_demo_token")
-
     def test_copilot_auth_ready_accepts_camel_case_plaintext_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "config.json"

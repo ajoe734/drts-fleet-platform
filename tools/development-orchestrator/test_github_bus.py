@@ -168,7 +168,6 @@ class GitHubBusCommandTests(unittest.TestCase):
 
         with (
             mock.patch.object(github_bus, "branch_exists", return_value=True),
-            mock.patch.object(github_bus, "branch_head_sha", return_value="abc123"),
             mock.patch.object(github_bus, "branch_has_diff", return_value=True),
             mock.patch.object(github_bus, "find_existing_pr", return_value=None),
             mock.patch.object(github_bus, "build_template_body", return_value="body\n"),

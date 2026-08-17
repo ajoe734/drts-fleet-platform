@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 from unittest import mock
 
+import common
+from control_plane.infra import worker_evidence
 from control_plane.runtime import supervisor_runtime as supervisor
 
 
@@ -921,8 +923,25 @@ class DiskGuardTests(unittest.TestCase):
         )
 
 
-class ProcessQueueDispatchGuardTests(unittest.TestCase):
+class EvidenceOutputIsolation:
+    """Keep worker-failure evidence out of the canonical runtime during tests."""
+
     def setUp(self) -> None:
+        super().setUp()
+        self._evidence_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._evidence_dir.cleanup)
+        self._evidence_path_patch = mock.patch.object(
+            worker_evidence,
+            "evidence_path",
+            side_effect=lambda run_id, config=None: Path(self._evidence_dir.name) / f"{run_id}.json",
+        )
+        self._evidence_path_patch.start()
+        self.addCleanup(self._evidence_path_patch.stop)
+
+
+class ProcessQueueDispatchGuardTests(EvidenceOutputIsolation, unittest.TestCase):
+    def setUp(self) -> None:
+        super().setUp()
         self.config = {
             "schema": {
                 "tasks_path": "tasks",
@@ -1185,7 +1204,10 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
                 encoding="utf-8",
             )
             config = {
-                "paths": {"status_file": str(status_path)},
+                "paths": {
+                    "status_file": str(status_path),
+                    "task_briefs_dir": str(tmp / "task-briefs"),
+                },
                 "schema": {
                     "tasks_path": "tasks",
                     "task_id_field": "id",
@@ -1223,7 +1245,7 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
                 },
             )
 
-            self.assertIn(".orchestrator/generated/task-briefs/BUS-VAL-002.md", request.context_files)
+            self.assertIn(str(tmp / "task-briefs" / "BUS-VAL-002.md"), request.context_files)
             self.assertNotIn("current-work.md", request.context_files)
             self.assertNotIn("ai-activity-log.jsonl", request.context_files)
             self.assertNotIn("tools/development-orchestrator/dashboard/index.html", request.context_files)
@@ -2707,7 +2729,7 @@ class WorkerProcessActivityTests(unittest.TestCase):
         self.assertEqual(parsed, (7, 24))
 
 
-class PollWorkersRecoveryTests(unittest.TestCase):
+class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
     def test_lower_priority_worker_is_superseded_when_review_backlog_exists(self) -> None:
         config = {
             "schema": {
@@ -4023,8 +4045,9 @@ class SingleSupervisorGuardTests(unittest.TestCase):
         self.assertEqual(payload["new_pid"], 202)
 
 
-class WorkerReassignmentTests(unittest.TestCase):
+class WorkerReassignmentTests(EvidenceOutputIsolation, unittest.TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self.config = {
             "worker_reassignment": {
                 "enabled": True,

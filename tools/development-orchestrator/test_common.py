@@ -50,6 +50,25 @@ class TaskBriefPathTests(unittest.TestCase):
             common.ORCHESTRATOR_DIR / "generated" / "task-briefs" / "TASK-001.md",
         )
 
+    def test_configured_runtime_output_paths_are_used(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir)
+            config = {
+                "paths": {
+                    "task_briefs_dir": str(output_root / "briefs"),
+                    "evidence_dir": str(output_root / "evidence"),
+                }
+            }
+
+            self.assertEqual(
+                common.task_brief_path("TASK-001", config),
+                output_root / "briefs" / "TASK-001.md",
+            )
+            self.assertEqual(
+                common.evidence_path("run-001", config),
+                output_root / "evidence" / "run-001.json",
+            )
+
 
 class JsonlAppendTests(unittest.TestCase):
     def test_append_jsonl_keeps_every_line_parseable_under_concurrency(self) -> None:
