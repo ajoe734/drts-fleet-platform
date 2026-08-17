@@ -99,6 +99,10 @@ def worktree_cleanup_settings(config: dict[str, Any], overrides: dict[str, Any] 
     settings.setdefault("archive_retention_days", 1.0)
     settings.setdefault("archive_max_total_bytes", 2 * 1024 * 1024 * 1024)
     settings.setdefault("release_interval_seconds", 60.0)
+    # `git worktree add` holds its own `locked: initializing` marker only for
+    # the duration of the add, which this codebase caps at 90s. Anything still
+    # wearing that marker an hour later is residue from an add that died.
+    settings.setdefault("initializing_lock_stale_seconds", 3600.0)
     return settings
 
 
@@ -170,6 +174,72 @@ def _registered_worktrees(repo_root: Path) -> list[dict[str, Any]]:
     if current:
         records.append(current)
     return records
+
+
+GIT_INITIALIZING_LOCK_REASON = "initializing"
+
+
+def _worktree_admin_dir(repo_root: Path, worktree: Path) -> Path | None:
+    """Locate git's per-worktree admin directory (.git/worktrees/<name>)."""
+    pointer = worktree / ".git"
+    try:
+        text = pointer.read_text(encoding="utf-8").strip()
+    except OSError:
+        text = ""
+    if text.startswith("gitdir:"):
+        return Path(text[len("gitdir:"):].strip())
+    # The worktree directory may already be gone while git still lists it.
+    common = _git_capture(repo_root, ["rev-parse", "--git-common-dir"], timeout=10.0)
+    if common.returncode != 0:
+        return None
+    root = Path((common.stdout or "").strip())
+    if not root.is_absolute():
+        root = (repo_root / root).resolve()
+    candidate = root / "worktrees" / worktree.name
+    return candidate if candidate.is_dir() else None
+
+
+def _initializing_lock_age_seconds(repo_root: Path, worktree: Path) -> float | None:
+    """Seconds since git wrote the `locked` marker, or None if unknowable."""
+    admin = _worktree_admin_dir(repo_root, worktree)
+    if admin is None:
+        return None
+    try:
+        return max(0.0, time.time() - (admin / "locked").stat().st_mtime)
+    except OSError:
+        return None
+
+
+def _release_dead_initializing_lock(
+    repo_root: Path,
+    worktree: Path,
+    record: dict[str, Any],
+    settings: dict[str, Any],
+) -> tuple[bool, str | None]:
+    """Unlock a worktree stranded by an interrupted `git worktree add`.
+
+    A lock is normally an explicit ownership signal and must be respected. But
+    git sets `locked: initializing` itself, for the duration of the add only,
+    and a supervisor killed mid-add leaves it behind forever. This skip had no
+    age bound, so 21 such worktrees accumulated 13 GB, the oldest stranded on
+    2026-08-05. Only git's own transient reason is eligible, and only once it
+    is far older than an add could possibly take -- a human `git worktree lock
+    --reason ...` still means hands off.
+
+    Returns (released, detail-for-logging).
+    """
+    reason = str(record.get("locked_reason") or "").strip().lower()
+    if reason != GIT_INITIALIZING_LOCK_REASON:
+        return False, None
+    threshold = max(0.0, float(settings.get("initializing_lock_stale_seconds", 3600.0)))
+    age = _initializing_lock_age_seconds(repo_root, worktree)
+    if age is None or age < threshold:
+        return False, None
+    result = _git_capture(repo_root, ["worktree", "unlock", str(worktree)], timeout=30.0)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip().replace("\n", " | ")
+        return False, f"unlock failed: {detail[:160]}"
+    return True, f"released dead initializing lock after {age / 3600.0:.1f}h"
 
 
 def _worktree_archive_root(settings: dict[str, Any]) -> Path:
@@ -433,6 +503,7 @@ def _cleanup_registered_worker_worktrees(
             "skipped": 0,
             "failed": 0,
             "archived": 0,
+            "unlocked": 0,
             "errors": ["missing status_file path"],
         }
     if not _worker_worktrees_enabled(config):
@@ -442,6 +513,7 @@ def _cleanup_registered_worker_worktrees(
             "skipped": 0,
             "failed": 0,
             "archived": 0,
+            "unlocked": 0,
             "errors": ["worker worktrees disabled"],
         }
 
@@ -453,12 +525,21 @@ def _cleanup_registered_worker_worktrees(
             "skipped": 0,
             "failed": 0,
             "archived": 0,
+            "unlocked": 0,
             "errors": ["worker workspace cleanup disabled"],
         }
 
     base = _worker_worktree_base(config, repo_root)
     if not base.exists():
-        return {"checked": 0, "removed": 0, "skipped": 0, "failed": 0, "archived": 0, "errors": []}
+        return {
+            "checked": 0,
+            "removed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "archived": 0,
+            "unlocked": 0,
+            "errors": [],
+        }
 
     cutoff = None
     if respect_retention:
@@ -467,7 +548,7 @@ def _cleanup_registered_worker_worktrees(
 
     max_removed = max(0, int(cleanup_settings.get("max_worktrees_removed_per_tick", 200)))
     active_roots = active_worker_workspace_roots(state)
-    checked = removed = skipped = failed = archived = 0
+    checked = removed = skipped = failed = archived = unlocked = 0
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -484,15 +565,26 @@ def _cleanup_registered_worker_worktrees(
         if str(path) in active_roots:
             skipped += 1
             continue
-        # A lock is an explicit ownership signal from Git. `locked
-        # initializing` worktrees cannot be removed and used to be archived
-        # again on every worker poll.
+        # A lock is an explicit ownership signal from Git, so it is respected --
+        # except for git's own `initializing` marker, which only ever means "an
+        # add is in progress" and outlives the add when the supervisor is killed
+        # mid-worktree-add. Reclaim those once they are far too old to be real.
         if record.get("locked"):
-            skipped += 1
-            if len(warnings) < 10:
-                reason = str(record.get("locked_reason") or "locked")
-                warnings.append(f"{path}: skipped locked worktree ({reason})")
-            continue
+            released, detail = _release_dead_initializing_lock(
+                repo_root, path, record, cleanup_settings
+            )
+            if released:
+                unlocked += 1
+                if len(warnings) < 10:
+                    warnings.append(f"{path}: {detail}")
+            else:
+                skipped += 1
+                if len(warnings) < 10:
+                    reason = str(record.get("locked_reason") or "locked")
+                    warnings.append(f"{path}: skipped locked worktree ({reason})")
+                    if detail:
+                        warnings[-1] += f" [{detail}]"
+                continue
         try:
             stat = path.stat()
         except OSError:
@@ -523,6 +615,9 @@ def _cleanup_registered_worker_worktrees(
         "skipped": skipped,
         "failed": failed,
         "archived": archived,
+        # Surfaced so a reclaim that only ever unlocks (and never removes) is
+        # visible in the disk-guard record instead of reading as "did nothing".
+        "unlocked": unlocked,
         "errors": errors,
     }
     if warnings:
@@ -576,11 +671,17 @@ def cleanup_inactive_worker_worktrees(
     )
     cleanup_result = release_inactive_worker_worktrees(config, state, settings)
     maintenance["last_result"] = cleanup_result
-    if int(cleanup_result.get("removed") or 0) > 0:
+    unlocked = int(cleanup_result.get("unlocked") or 0)
+    if int(cleanup_result.get("removed") or 0) > 0 or unlocked > 0:
         archived = int(cleanup_result.get("archived") or 0)
         message = f"Released {cleanup_result.get('removed')} inactive auto worktree(s)"
         if archived > 0:
             message += f" after archiving {archived} dirty worktree(s)"
+        if unlocked > 0:
+            message += (
+                f"; reclaimed {unlocked} worktree(s) stranded by an interrupted "
+                "`git worktree add`"
+            )
         if int(cleanup_result.get("failed") or 0) > 0:
             message += f"; {cleanup_result.get('failed')} cleanup failure(s) remain"
         write_activity_log(
@@ -593,6 +694,7 @@ def cleanup_inactive_worker_worktrees(
                 "skipped": cleanup_result.get("skipped"),
                 "failed": cleanup_result.get("failed"),
                 "archived": cleanup_result.get("archived"),
+                "unlocked": cleanup_result.get("unlocked"),
                 "errors": cleanup_result.get("errors"),
             },
         )
