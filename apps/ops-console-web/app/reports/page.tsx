@@ -747,6 +747,9 @@ function OperationalReportsPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [exportIntentKey, setExportIntentKey] = useState(() =>
+    createIdempotencyKey("ops-report"),
+  );
   const [pending, startTransition] = useTransition();
 
   const isDaily = reportType === "daily_dispatch_record";
@@ -888,9 +891,10 @@ function OperationalReportsPanel() {
                 : {}),
             },
             {
-              idempotencyKey: createIdempotencyKey("ops-report"),
+              idempotencyKey: exportIntentKey,
             },
           );
+          setExportIntentKey(createIdempotencyKey("ops-report"));
           setNotice(
             t("reports.ops.export.accepted", { jobId: accepted.jobId }),
           );
@@ -1579,6 +1583,15 @@ export default function ReportsPage() {
   const [pending, startTransition] = useTransition();
   const [showJobComposer, setShowJobComposer] = useState(false);
   const [showPackageComposer, setShowPackageComposer] = useState(false);
+  const [jobIntentKey, setJobIntentKey] = useState(() =>
+    createIdempotencyKey("ops-report-job"),
+  );
+  const [packageIntentKey, setPackageIntentKey] = useState(() =>
+    createIdempotencyKey("ops-filing-package"),
+  );
+  const [jobRetryIntentKeys, setJobRetryIntentKeys] = useState<
+    Record<string, string>
+  >({});
   const [jobType, setJobType] = useState<ReportJobType>(REPORT_JOB_TYPES[0]!);
   const [format, setFormat] = useState<ReportOutputFormat>("xlsx");
   const [periodLabel, setPeriodLabel] = useState("");
@@ -1687,9 +1700,10 @@ export default function ReportsPage() {
               ...(Object.keys(filters).length > 0 ? { filters } : {}),
             },
             {
-              idempotencyKey: createIdempotencyKey("ops-report-job"),
+              idempotencyKey: jobIntentKey,
             },
           );
+          setJobIntentKey(createIdempotencyKey("ops-report-job"));
           setShowJobComposer(false);
           await loadData();
           await inspectReportJob(accepted.jobId);
@@ -1712,9 +1726,10 @@ export default function ReportsPage() {
               scope: packageScope.trim() ? { channel: packageScope.trim() } : {},
             },
             {
-              idempotencyKey: createIdempotencyKey("ops-filing-package"),
+              idempotencyKey: packageIntentKey,
             },
           );
+          setPackageIntentKey(createIdempotencyKey("ops-filing-package"));
           setShowPackageComposer(false);
           await loadData();
           await inspectFilingPackage(accepted.packageId);
@@ -1726,6 +1741,15 @@ export default function ReportsPage() {
   }
 
   function retryReportJob(job: ReportJobRecord) {
+    const retryKey =
+      jobRetryIntentKeys[job.jobId] ??
+      createIdempotencyKey("ops-report-retry");
+    if (!jobRetryIntentKeys[job.jobId]) {
+      setJobRetryIntentKeys((prev) => ({
+        ...prev,
+        [job.jobId]: retryKey,
+      }));
+    }
     startTransition(() => {
       void (async () => {
         try {
@@ -1736,9 +1760,14 @@ export default function ReportsPage() {
               filters: job.filters,
             },
             {
-              idempotencyKey: createIdempotencyKey("ops-report-retry"),
+              idempotencyKey: retryKey,
             },
           );
+          setJobRetryIntentKeys((prev) => {
+            const next = { ...prev };
+            delete next[job.jobId];
+            return next;
+          });
           await loadData();
           await inspectReportJob(accepted.jobId);
         } catch (e) {

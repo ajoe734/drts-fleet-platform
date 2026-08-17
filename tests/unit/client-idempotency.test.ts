@@ -299,4 +299,162 @@ describe("CONF-IDEM-005: Client Idempotency Key Binding", () => {
       expect(capturedRequests[capturedRequests.length - 1]!.headers.has("Idempotency-Key")).toBe(false);
     });
   });
+
+  describe("Reporting & filing package state-bound idempotency lifecycle", () => {
+    let client: ApiClient;
+
+    beforeEach(() => {
+      client = new ApiClient({ baseUrl: "https://api.drts.example" });
+    });
+
+    it("maintains the same key across retries on failure for createReportJob, and resets on success", async () => {
+      let callCount = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = typeof input === "string" ? input : input.toString();
+          const headers = new Headers(init?.headers);
+          capturedRequests.push({ url, method: init?.method, headers });
+
+          callCount++;
+          if (callCount <= 2) {
+            return new Response(JSON.stringify({ error: "Temporary error" }), {
+              status: 500,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return new Response(
+            JSON.stringify({ data: { jobId: "job-123", status: "queued" } }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }),
+      );
+
+      let intentKey = createIdempotencyKey("ops-report-job");
+      const initialKey = intentKey;
+
+      // Attempt 1 (fails)
+      await expect(
+        client.createReportJob(
+          { jobType: "daily_dispatch_records", format: "csv" } as never,
+          { idempotencyKey: intentKey },
+        ),
+      ).rejects.toThrow();
+
+      // Attempt 2 (retry on error - must reuse initialKey)
+      await expect(
+        client.createReportJob(
+          { jobType: "daily_dispatch_records", format: "csv" } as never,
+          { idempotencyKey: intentKey },
+        ),
+      ).rejects.toThrow();
+
+      // Attempt 3 (success - same key)
+      const res = await client.createReportJob(
+        { jobType: "daily_dispatch_records", format: "csv" } as never,
+        { idempotencyKey: intentKey },
+      );
+      expect(res).toBeDefined();
+
+      // Upon success, key is regenerated
+      intentKey = createIdempotencyKey("ops-report-job");
+      expect(intentKey).not.toBe(initialKey);
+
+      // Verify all 3 attempts sent the identical key
+      expect(capturedRequests).toHaveLength(3);
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(initialKey);
+      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(initialKey);
+      expect(capturedRequests[2]!.headers.get("Idempotency-Key")).toBe(initialKey);
+    });
+
+    it("maintains the same key across retries on failure for generateFilingPackage, preventing duplicate immutable manifests", async () => {
+      let callCount = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = typeof input === "string" ? input : input.toString();
+          const headers = new Headers(init?.headers);
+          capturedRequests.push({ url, method: init?.method, headers });
+
+          callCount++;
+          if (callCount === 1) {
+            return new Response(JSON.stringify({ error: "Network timeout" }), {
+              status: 504,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return new Response(
+            JSON.stringify({ data: { packageId: "pkg-456", status: "queued" } }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }),
+      );
+
+      const intentKey = createIdempotencyKey("ops-filing-package");
+
+      // Attempt 1 (fails)
+      await expect(
+        client.generateFilingPackage(
+          { packageType: "monthly_report" } as never,
+          { idempotencyKey: intentKey },
+        ),
+      ).rejects.toThrow();
+
+      // Attempt 2 (success retry)
+      const pkg = await client.generateFilingPackage(
+        { packageType: "monthly_report" } as never,
+        { idempotencyKey: intentKey },
+      );
+      expect(pkg).toBeDefined();
+
+      expect(capturedRequests).toHaveLength(2);
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(intentKey);
+      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(intentKey);
+    });
+
+    it("maintains the same key across retries on failure for createTenantReportJob / handleRerun", async () => {
+      let callCount = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = typeof input === "string" ? input : input.toString();
+          const headers = new Headers(init?.headers);
+          capturedRequests.push({ url, method: init?.method, headers });
+
+          callCount++;
+          if (callCount === 1) {
+            return new Response(JSON.stringify({ error: "Rate limit" }), {
+              status: 429,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+          return new Response(
+            JSON.stringify({ data: { jobId: "tenant-job-789", status: "queued" } }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }),
+      );
+
+      const rerunKey = createIdempotencyKey("tenant-report-rerun");
+
+      // Attempt 1 fails
+      await expect(
+        client.createTenantReportJob(
+          { jobType: "monthly_trip_report", format: "xlsx" } as never,
+          { idempotencyKey: rerunKey },
+        ),
+      ).rejects.toThrow();
+
+      // Attempt 2 succeeds
+      const result = await client.createTenantReportJob(
+        { jobType: "monthly_trip_report", format: "xlsx" } as never,
+        { idempotencyKey: rerunKey },
+      );
+      expect(result).toBeDefined();
+
+      expect(capturedRequests).toHaveLength(2);
+      expect(capturedRequests[0]!.headers.get("Idempotency-Key")).toBe(rerunKey);
+      expect(capturedRequests[1]!.headers.get("Idempotency-Key")).toBe(rerunKey);
+    });
+  });
 });

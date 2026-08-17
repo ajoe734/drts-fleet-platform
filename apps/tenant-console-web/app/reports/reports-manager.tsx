@@ -479,6 +479,12 @@ export function ReportsManager({
   const [statusFilter, setStatusFilter] = useState<ReportStatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [periodFilter, setPeriodFilter] = useState("");
+  const [createJobIntentKey, setCreateJobIntentKey] = useState(() =>
+    createIdempotencyKey("tenant-report"),
+  );
+  const [rerunIntentKeys, setRerunIntentKeys] = useState<
+    Record<string, string>
+  >({});
   const [draft, setDraft] = useState<ReportDraft>({
     jobType: "monthly_trip_report",
     format: "xlsx",
@@ -659,10 +665,11 @@ export function ReportsManager({
           filters,
         },
         {
-          idempotencyKey: createIdempotencyKey("tenant-report"),
+          idempotencyKey: createJobIntentKey,
         },
       );
 
+      setCreateJobIntentKey(createIdempotencyKey("tenant-report"));
       setFlash({
         title: t("reports.flash.jobQueued.title"),
         description: t("reports.flash.jobQueued.description", {
@@ -684,6 +691,16 @@ export function ReportsManager({
       return;
     }
 
+    const rerunKey =
+      rerunIntentKeys[job.jobId] ??
+      createIdempotencyKey("tenant-report-rerun");
+    if (!rerunIntentKeys[job.jobId]) {
+      setRerunIntentKeys((prev) => ({
+        ...prev,
+        [job.jobId]: rerunKey,
+      }));
+    }
+
     runTransition(async () => {
       const result = await client.createTenantReportJob(
         {
@@ -692,9 +709,15 @@ export function ReportsManager({
           filters: job.filters,
         },
         {
-          idempotencyKey: createIdempotencyKey("tenant-report-rerun"),
+          idempotencyKey: rerunKey,
         },
       );
+
+      setRerunIntentKeys((prev) => {
+        const next = { ...prev };
+        delete next[job.jobId];
+        return next;
+      });
 
       setFlash({
         title: t("reports.flash.rerunQueued.title"),
