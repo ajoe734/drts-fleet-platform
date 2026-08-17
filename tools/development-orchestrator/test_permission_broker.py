@@ -28,7 +28,12 @@ class PreToolUseDecisionVocabularyTests(unittest.TestCase):
     VALID = {"allow", "deny", "ask"}
 
     def _run_pretooluse(self, command: str) -> dict:
-        config = permission_broker.load_config()
+        # Deliberately not load_config(): this asserts which decision strings
+        # the harness accepts, which has nothing to do with the machine's
+        # .orchestrator/config.json. Reading it made the test pass here and
+        # fail on a fresh CI checkout, where that file does not exist -- the
+        # mocks below already cover everything on this path that consults it.
+        config: dict = {}
         buffer = io.StringIO()
         with mock.patch.object(permission_broker, "create_approval"), \
                 mock.patch.object(permission_broker, "log_event"), \
