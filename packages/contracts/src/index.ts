@@ -3211,6 +3211,8 @@ export interface CreateOwnedOrderCommand {
   rideType?: "immediate";
   servicePreferences?: Partial<ServicePreferences>;
   paymentMethod?: "cash" | "card";
+  idempotencyKey?: string;
+  tenantId?: string;
 }
 
 export interface CallCenterMapFallbackReview {
@@ -3235,6 +3237,7 @@ export interface CreateTenantBookingCommand {
   businessDispatchSubtype: BusinessDispatchSubtype;
   partnerEntrySlug?: string;
   eligibilityVerificationId?: string;
+  idempotencyKey?: string;
   passengerId?: string;
   pickupAddressId?: string;
   dropoffAddressId?: string;
@@ -3345,6 +3348,7 @@ export interface ApplyManualFareOverrideCommand {
 
 export interface DispatchOrderCommand {
   mode: "auto";
+  idempotencyKey?: string;
 }
 
 export interface AssignDispatchCommand {
@@ -3352,6 +3356,7 @@ export interface AssignDispatchCommand {
   vehicleId: string;
   driverId: string;
   sandboxDispatchSnapshot?: SandboxDispatchAssignmentSnapshot | null;
+  idempotencyKey?: string;
 }
 
 export interface ReassignDispatchCommand {
@@ -3360,6 +3365,7 @@ export interface ReassignDispatchCommand {
   driverId: string;
   reasonCode: string;
   reasonNote?: string;
+  idempotencyKey?: string;
 }
 
 export interface RedispatchOrderCommand {
@@ -3372,6 +3378,7 @@ export interface RedispatchOrderCommand {
   // event cannot cancel an assignment the caller never saw. Omit to redispatch
   // unconditionally.
   expectedAssignmentVersion?: number | null;
+  idempotencyKey?: string;
 }
 
 export interface CancelOwnedOrderCommand {
