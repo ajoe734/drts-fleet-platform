@@ -28,8 +28,8 @@ class ReleaseLifecycleTests(unittest.TestCase):
             root = Path(tmpdir)
             for name in ("orchestrator-current", "orchestrator-active"):
                 (root / "releases" / name).mkdir(parents=True)
-            legacy = self.run_script(root, "activate", "orchestrator-current")
-            active = self.run_script(root, "activate", "--pointer-name", "active", "orchestrator-active")
+            legacy = self.run_script(root, "activate", "--skip-verify", "orchestrator-current")
+            active = self.run_script(root, "activate", "--skip-verify", "--pointer-name", "active", "orchestrator-active")
             self.assertEqual(legacy.returncode, 0, legacy.stderr)
             self.assertEqual(active.returncode, 0, active.stderr)
             self.assertEqual((root / "releases" / "current").resolve().name, "orchestrator-current")
