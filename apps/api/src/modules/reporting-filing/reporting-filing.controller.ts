@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Optional,
+  Param,
+  Post,
+} from "@nestjs/common";
 
 import type {
   CreateReportJobCommand,
@@ -12,12 +20,20 @@ import {
 } from "../../common/api-envelope";
 import { CurrentIdentity, RequireRealms } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import {
+  IdempotencyRepository,
+  IdempotencyService,
+} from "../../common/idempotency";
 import { ReportingFilingService } from "./reporting-filing.service";
 
 @Controller()
 export class ReportingFilingController {
   constructor(
     private readonly reportingFilingService: ReportingFilingService,
+    @Optional()
+    private readonly idempotencyService: IdempotencyService = new IdempotencyService(
+      new IdempotencyRepository(),
+    ),
   ) {}
 
   private requireTenantId(tenantId?: string) {
@@ -34,33 +50,64 @@ export class ReportingFilingController {
 
   @Post("reports/jobs")
   @RequireRealms("platform", "ops")
-  createReportJob(
+  async createReportJob(
     @Body() command: CreateReportJobCommand,
     @CurrentIdentity() _identity: BootstrapRequestIdentity | null,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.reportingFilingService.createReportJob(command, requestId),
-      requestId,
-    );
+    const scope = "reporting:job_create";
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: command,
+      execute: async () => {
+        const data = this.reportingFilingService.createReportJob(
+          command,
+          requestId,
+        );
+        return {
+          data,
+          statusCode: 201,
+        };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Post("tenant/reports/jobs")
   @RequireRealms("tenant", "platform", "ops")
-  createTenantReportJob(
+  async createTenantReportJob(
     @Body() command: CreateReportJobCommand,
     @CurrentIdentity() _identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.reportingFilingService.createReportJob(
-        command,
-        requestId,
-        this.requireTenantId(tenantId),
-      ),
-      requestId,
-    );
+    const normalizedTenantId = this.requireTenantId(tenantId);
+    const scope = `tenant:${normalizedTenantId}:reporting:job_create`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      tenantId: normalizedTenantId,
+      required: true,
+      payload: { ...command, tenantId: normalizedTenantId },
+      execute: async () => {
+        const data = this.reportingFilingService.createReportJob(
+          command,
+          requestId,
+          normalizedTenantId,
+        );
+        return {
+          data,
+          statusCode: 201,
+        };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Get("reports/jobs")
@@ -125,15 +172,32 @@ export class ReportingFilingController {
 
   @Post("filing-packages/generate")
   @RequireRealms("platform", "ops")
-  generateFilingPackage(
+  async generateFilingPackage(
     @Body() command: GenerateFilingPackageCommand,
     @CurrentIdentity() _identity: BootstrapRequestIdentity | null,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.reportingFilingService.generateFilingPackage(command, requestId),
-      requestId,
-    );
+    const scope = "reporting:filing";
+
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: command,
+      execute: async () => {
+        const data = this.reportingFilingService.generateFilingPackage(
+          command,
+          requestId,
+        );
+        return {
+          data,
+          statusCode: 201,
+        };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Get("filing-packages")
