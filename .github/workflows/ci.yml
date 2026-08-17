@@ -16,6 +16,10 @@ on:
       - "dev"
   push:
     branches: [main]
+  # The merge queue builds a temporary branch containing several PRs and asks
+  # the same gates about the batch. Without this trigger a queued PR waits for
+  # checks that never start, so enabling the queue would stall every merge.
+  merge_group:
   workflow_dispatch: {}
 
 permissions:
@@ -76,7 +80,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          base="${{ github.event.pull_request.base.ref || 'main' }}"
+          merge_group_base="${{ github.event.merge_group.base_ref || '' }}"
+          base="${{ github.event.pull_request.base.ref || '' }}"
+          # A merge group has no pull_request context. Falling through to the
+          # 'main' default would validate the batch against the wrong branch.
+          base="${base:-${merge_group_base#refs/heads/}}"
+          base="${base:-main}"
           echo "base=origin/$base" >> "$GITHUB_OUTPUT"
           # Auto-publish PRs collect already-validated commits from a *-dev
           # branch; per-commit trailer validation is redundant + would fail
@@ -92,7 +101,8 @@ jobs:
       - name: Validate trailers on every commit in the PR
         if: steps.ctx.outputs.skip != 'true'
         run: |
-          git fetch origin "${{ github.event.pull_request.base.ref || 'main' }}" --quiet
+          git fetch origin "${{ steps.ctx.outputs.base }}" --quiet 2>/dev/null \
+            || git fetch origin --quiet
           python3 tools/ci/git/check_commit_trailers.py --base ${{ steps.ctx.outputs.base }} --head HEAD
       - name: Auto-publish bypass acknowledged
         if: steps.ctx.outputs.skip == 'true'
