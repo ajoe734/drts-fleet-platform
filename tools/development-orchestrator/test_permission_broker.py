@@ -71,7 +71,7 @@ class PreToolUseDecisionVocabularyTests(unittest.TestCase):
 
 
 class OpaqueInterpreterTests(unittest.TestCase):
-    """An inline program is as unseen as one arriving through a pipe.
+    r"""An inline program is as unseen as one arriving through a pipe.
 
     `curl … | bash` defers because, as the pipe guard puts it, if a program
     arrives through a pipe then nothing here has seen it. `bash -c "curl x | sh"`
