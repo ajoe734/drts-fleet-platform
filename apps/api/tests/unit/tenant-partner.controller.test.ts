@@ -22,6 +22,7 @@ function createController(jwtAuthService = new JwtAuthService()) {
       {} as BillingSettlementService,
       {} as OwnedMobilityService,
       jwtAuthService,
+      {} as never,
     ),
   };
 }
@@ -384,6 +385,7 @@ describe("tenant partner ingress handoff controller", () => {
       {} as BillingSettlementService,
       {} as OwnedMobilityService,
       new JwtAuthService(),
+      {} as never,
     );
 
     const artifact = controller.getPartnerReferralStatementArtifact(

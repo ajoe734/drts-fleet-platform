@@ -16,7 +16,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
         status: "created",
       }),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const controller = new OwnedMobilityController(service, {} as never);
 
     const response = await controller.createTenantBooking(
       {} as never,
@@ -80,6 +80,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
     };
     const controller = new OwnedMobilityController(
       service,
+      {} as never,
       tenantPartnerService as never,
     );
 
@@ -147,7 +148,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
         status: "approval_required",
       }),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const controller = new OwnedMobilityController(service, {} as never);
 
     const response = await controller.updateTenantBooking(
       "booking-e2e-001",
@@ -184,7 +185,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
         },
       ]),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const controller = new OwnedMobilityController(service, {} as never);
 
     const response = await controller.listDispatchCandidates(
       "job-e2e-001",
@@ -212,7 +213,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
         taskId: "task-e2e-001",
       }),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const controller = new OwnedMobilityController(service, {} as never);
 
     const response = await controller.assignDispatch(
       {} as never,
@@ -235,7 +236,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
         taskId: "task-e2e-002",
       }),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const controller = new OwnedMobilityController(service, {} as never);
 
     const response = await controller.reassignDispatch(
       {} as never,
@@ -281,7 +282,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
       listQueueEntries: vi.fn(() => [queueEntry]),
       getQueueEntry: vi.fn(() => queueEntry),
     } as unknown as OwnedMobilityService;
-    const controller = new OwnedMobilityController(service);
+    const controller = new OwnedMobilityController(service, {} as never);
 
     const listResponse = controller.listQueueEntries("req-queue-list");
     const detailResponse = controller.getQueueEntry(

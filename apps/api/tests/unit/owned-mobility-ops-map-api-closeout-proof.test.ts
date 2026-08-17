@@ -20,6 +20,10 @@ vi.mock("node:crypto", async () => {
 });
 
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
+import {
+  IdempotencyRepository,
+  IdempotencyService,
+} from "../../src/common/idempotency";
 import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
@@ -62,7 +66,10 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
           "0",
         )}`;
       }
-      if (!createdOrderId && stack.includes("createCallCenterOrder")) {
+      if (
+        !createdOrderId &&
+        stack.includes("OwnedMobilityService.createCallCenterOrder")
+      ) {
         createdOrderId = true;
         return SERVICEABLE_ORDER_ID;
       }
@@ -71,9 +78,13 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
     });
 
     const { service, regulatoryRegistryService } = createOwnedMobilityService();
-    const controller = new OwnedMobilityController(service);
+    const idempotencyService = new IdempotencyService(
+      new IdempotencyRepository(),
+    );
+    const controller = new OwnedMobilityController(service, idempotencyService);
 
-    const createResponse = controller.createCallCenterOrder(
+    const { response } = fakeResponse();
+    const createResponse = await controller.createCallCenterOrder(
       {
         callId: "CALL-SMOKE-001",
         agentId: "AGENT-OPS-001",
@@ -126,6 +137,8 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
         },
         notes: "FLEETS-CLOSEOUT-004 API envelope Ops map proof",
       },
+      response,
+      "idem-fleets-closeout-004-api-create",
       "req-fleets-closeout-004-api-create",
     );
     const orderId = createResponse.data.orderId;
@@ -325,6 +338,21 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
     writeFileSync(ARTIFACT_PATH, `${JSON.stringify(artifact, null, 2)}\n`);
   });
 });
+
+function fakeResponse() {
+  const headers: Record<string, string> = {};
+  return {
+    response: {
+      status() {
+        return this;
+      },
+      setHeader(name: string, value: string) {
+        headers[name] = value;
+        return this;
+      },
+    },
+  };
+}
 
 function createOwnedMobilityService() {
   const regulatoryCandidates: DispatchCandidate[] = [

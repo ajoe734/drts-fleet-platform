@@ -230,6 +230,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
       {} as never,
       {} as never,
       jwtAuthService,
+      {} as never,
       identityRepository,
       auditService,
     );
