@@ -4640,6 +4640,91 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertIn("Dispatch pauses requiring chair attention", message)
         self.assertIn("OPX-DP-003-SIDECAR-ACCEPTANCE", message)
 
+    def _identity_paused_fleet(self) -> tuple[dict, dict, dict]:
+        """codex and codex2 are one account, and that account is 401-paused."""
+        fingerprint = "7dd7f7fd9f792c596f59a98e"
+        config = {
+            "paths": {},
+            "agents": {
+                "claude": {"display_name": "Claude", "provider": "claude"},
+                "codex": {"display_name": "Codex", "provider": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            },
+        }
+        state = {
+            "provider_pauses": {
+                f"identity:codex2:{fingerprint}": {
+                    "kind": "auth",
+                    "reason": "status: 401,",
+                    "paused_at": "2026-08-15T04:51:02Z",
+                    "resume_at": None,
+                    "schema": 3,
+                    "lane_id": "codex2",
+                    "scope": "identity",
+                    "identity_fingerprint": fingerprint,
+                }
+            },
+            "dispatch_pauses": [],
+            "failure_streaks": {},
+        }
+        report = {
+            "providers": {
+                "claude": {"auth_ready": True, "local_cli_worker_supported": True},
+                "codex": {"auth_ready": True, "local_cli_worker_supported": True,
+                          "identity": {"fingerprint": fingerprint}},
+                "codex2": {"auth_ready": True, "local_cli_worker_supported": True,
+                           "identity": {"fingerprint": fingerprint}},
+            }
+        }
+        return config, state, report
+
+    def test_briefing_never_offers_a_lane_the_dispatcher_would_refuse(self) -> None:
+        """The dispatch-capable list looked pauses up by lane name, which cannot
+        see an identity-scoped pause. codex2's 401 correctly stopped both codex
+        and codex2 -- one account -- but the same briefing listed codex2 as
+        auth-paused and then offered codex AND codex2 as dispatch-capable a few
+        lines below. The chair reassigned work onto Codex believing it healthy,
+        the dispatcher silently refused, and the task sat in todo forever.
+        """
+        config, state, report = self._identity_paused_fleet()
+        message = supervisor.build_chair_review_message(
+            config,
+            reason="provider_health_triage",
+            markdown_path=Path(".orchestrator/chair-reviews/test.md"),
+            json_path=Path(".orchestrator/chair-reviews/test.json"),
+            approval_state={"pending": []},
+            state=state,
+            provider_report=report,
+        )
+
+        self.assertIn("claude (Claude): not_paused=true", message)
+        self.assertNotIn("codex (Codex): not_paused=true", message)
+        self.assertNotIn("codex2 (Codex2): not_paused=true", message)
+
+    def test_briefing_names_every_lane_a_pause_covers(self) -> None:
+        """codex never appeared in any pause section, so the chair had no way to
+        learn the account it shares with codex2 was the thing that was down."""
+        config, state, report = self._identity_paused_fleet()
+        message = supervisor.build_chair_review_message(
+            config,
+            reason="provider_health_triage",
+            markdown_path=Path(".orchestrator/chair-reviews/test.md"),
+            json_path=Path(".orchestrator/chair-reviews/test.json"),
+            approval_state={"pending": []},
+            state=state,
+            provider_report=report,
+        )
+
+        pause_line = next(
+            line for line in message.splitlines()
+            if line.startswith("- ") and "status: 401" in line
+        )
+        # Substring checks would pass vacuously ("codex" is inside "codex2"),
+        # so assert on the explicit list of lanes the pause takes out.
+        self.assertIn("affects=", pause_line)
+        affected = pause_line.split("affects=", 1)[1].split()[0]
+        self.assertEqual(sorted(affected.split(",")), ["codex", "codex2"])
+
     def test_chair_review_message_requires_approval_actions_for_approval_triage(self) -> None:
         message = supervisor.build_chair_review_message(
             {"paths": {}},

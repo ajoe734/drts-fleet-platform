@@ -3111,6 +3111,47 @@ def lane_has_recorded_pause(state: dict[str, Any], agent_id: str) -> bool:
     )
 
 
+def pause_covers_lane(
+    config: dict[str, Any],
+    provider_report: dict[str, Any],
+    pause: dict[str, Any],
+    agent_id: str,
+) -> bool:
+    """Whether one pause entry applies to one lane.
+
+    A pause is not always keyed by lane. An identity-scoped entry is keyed by
+    the account fingerprint and therefore covers every lane sharing that
+    account, which is the whole point: when codex2 returned 401 the same
+    credentials backed codex, so both had to stop. Anything that answers "can
+    this lane take work" must go through here, or it will disagree with the
+    dispatcher -- the chair briefing used to look pauses up by lane name, could
+    not see the identity-scoped entry, and offered the chair a lane the
+    dispatcher was silently refusing.
+    """
+    normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
+    provider_info = provider_info_for_agent(config, provider_report, normalized)
+    identity = provider_info.get("identity") if isinstance(provider_info.get("identity"), dict) else None
+    pool = str((identity or {}).get("quota_pool") or "") or None
+    if not pause_matches_lane(pause, identity, pool):
+        return False
+    if str(pause.get("scope") or "lane") == "lane" and pause.get("lane_id") not in {None, normalized}:
+        return False
+    return True
+
+
+def lanes_covered_by_pause(
+    config: dict[str, Any],
+    provider_report: dict[str, Any],
+    pause: dict[str, Any],
+) -> list[str]:
+    """Every configured lane the given pause takes out, not just its trigger."""
+    return sorted(
+        normalize_agent_id(agent_id) or str(agent_id).strip()
+        for agent_id in (config.get("agents", {}) or {})
+        if pause_covers_lane(config, provider_report, pause, agent_id)
+    )
+
+
 def is_agent_dispatch_paused(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -3123,12 +3164,8 @@ def is_agent_dispatch_paused(
     provider_info = provider_info_for_agent(config, report, normalized)
     if provider_info.get("auth_ready") is False:
         return True
-    identity = provider_info.get("identity") if isinstance(provider_info.get("identity"), dict) else None
-    pool = str((identity or {}).get("quota_pool") or "") or None
     for entry in provider_pause_registry(state).values():
-        if not isinstance(entry, dict) or not pause_matches_lane(entry, identity, pool):
-            continue
-        if str(entry.get("scope") or "lane") == "lane" and entry.get("lane_id") not in {None, normalized}:
+        if not isinstance(entry, dict) or not pause_covers_lane(config, report, entry, normalized):
             continue
         if str(entry.get("kind") or "") == "auth":
             return True
@@ -6592,33 +6629,33 @@ def _chair_review_summary_lines(
         failure_lines.append("- none")
 
     provider_lines: list[str] = []
+    report = provider_report if isinstance(provider_report, dict) else {}
+    pauses = provider_pause_registry(state)
     for item in active_provider_pause_records(state)[:8]:
         resume = item.get("resume_at")
         resume_text = f" resume_at={resume}" if resume is not None else ""
+        # Name every lane the pause takes out. Only the triggering lane used to
+        # be reported, so when one account's 401 stopped both codex and codex2
+        # the chair never learned codex was affected and kept routing work to it.
+        entry = pauses.get(str(item.get("pause_scope") or ""))
+        covered = lanes_covered_by_pause(config, report, entry) if isinstance(entry, dict) else []
+        affects_text = f" affects={','.join(covered)}" if covered else ""
         provider_lines.append(
-            f"- {item.get('agent_id')}: kind={item.get('kind')} paused_at={item.get('paused_at') or '-'}{resume_text} reason={brief_reason_text(item.get('reason'), max_length=180)}"
+            f"- {item.get('agent_id')}: kind={item.get('kind')} paused_at={item.get('paused_at') or '-'}{resume_text}{affects_text} reason={brief_reason_text(item.get('reason'), max_length=180)}"
         )
     if not provider_lines:
         provider_lines.append("- none")
 
     dispatchable_provider_lines: list[str] = []
-    report = provider_report if isinstance(provider_report, dict) else {}
-    now_ts = datetime.now(timezone.utc).timestamp()
-    pauses = provider_pause_registry(state)
     for agent_id, agent in (config.get("agents", {}) or {}).items():
         display_name = task_agent_display_name(config, status, agent_id)
         normalized = normalize_agent_id(agent_id)
         if not display_name or display_name_is_legacy_alias(display_name):
             continue
-        pause = pauses.get(normalized)
-        if isinstance(pause, dict):
-            resume_at = pause.get("resume_at")
-            try:
-                resume_ts = float(resume_at) if resume_at is not None else None
-            except (TypeError, ValueError):
-                resume_ts = None
-            if str(pause.get("kind") or "") == "auth" or resume_ts is None or resume_ts > now_ts:
-                continue
+        # Ask the dispatcher's own question. Anything else here is a second
+        # opinion the chair cannot act on: this list is what it picks lanes from.
+        if is_agent_dispatch_paused(config, state, normalized, provider_report=report):
+            continue
         provider_info = provider_info_for_agent(config, report, normalized)
         adapter_info = (report.get("agent_adapters", {}) or {}).get(normalized, {})
         if provider_info.get("auth_ready") is False:
