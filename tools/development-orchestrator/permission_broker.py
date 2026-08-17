@@ -124,7 +124,36 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^git shortlog(\s|$)"),
     re.compile(r"^git blame(\s|$)"),
     re.compile(r"^git tag -l(\s|$)"),
-    re.compile(r"^git config --get(\s|$)"),
+    # `--get-all` and `--get-regexp` ask the same question of more than one
+    # value; the `(\s|$)` boundary excluded them for no reason.
+    re.compile(r"^git config --get"),
+    re.compile(r"^git grep(\s|$)"),
+    # Read-only inspection. These report on the tree without touching it, and
+    # each was costing a review to answer a question about a symlink or a size.
+    # Safe to recognise only now that a prefix can no longer smuggle something
+    # else in behind them.
+    re.compile(r"^readlink(\s|$)"),
+    re.compile(r"^realpath(\s|$)"),
+    re.compile(r"^basename(\s|$)"),
+    re.compile(r"^dirname(\s|$)"),
+    re.compile(r"^stat(\s|$)"),
+    re.compile(r"^file(\s|$)"),
+    re.compile(r"^du(\s|$)"),
+    re.compile(r"^df(\s|$)"),
+    re.compile(r"^nl(\s|$)"),
+    re.compile(r"^column(\s|$)"),
+    re.compile(r"^comm(\s|$)"),
+    re.compile(r"^md5sum(\s|$)"),
+    re.compile(r"^sha256sum(\s|$)"),
+    # `pnpm` and `npx` are already allowed in full; `npm run <script>` is the
+    # same class of thing, and typecheck, lint and build all arrive by it.
+    re.compile(r"^npm run(\s|$)"),
+    # Shell scaffolding runs nothing on its own: the commands it wraps are
+    # split into their own segments and judged there. A loop whose body is
+    # `sudo rm -rf /` is still denied.
+    re.compile(r"^for\s+\w+\s+in\b"),
+    re.compile(r"^(?:do|done|then|else|fi|esac)$"),
+    re.compile(r"^test\s"),
     re.compile(r"^git push(\s|$)"),
     # Read-only observability. A worker that operates a service and a cloud
     # project cannot see either of them: every `systemctl show`, `journalctl`
@@ -486,13 +515,21 @@ def _split_shell_segments(
     return [segment.strip() for segment in segments if segment.strip()]
 
 
-def _segment_is_safe(segment: str) -> bool:
+def _segment_is_safe(segment: str, *, _depth: int = 0) -> bool:
     """A single separator-free command that needs no human review."""
     if _writes_outside_workspace(segment):
         return False
     if _cd_target_is_within_workspace(segment):
         return True
-    return any(pattern.search(segment) for pattern in SAFE_BASH_PATTERNS)
+    # The stripped form only: a prefix must not carry an unrecognised command
+    # past a pattern that would not have matched it.
+    inner = _inline_shell_program(segment)
+    if inner is not None:
+        return classify_command(inner, _depth=_depth + 1) == "allow" if _depth < 2 else False
+    if _reads_outside_workspace(segment):
+        return False
+    candidate = _strip_invocation_prefixes(segment)
+    return any(pattern.search(candidate) for pattern in SAFE_BASH_PATTERNS)
 
 
 def _cd_target_is_within_workspace(segment: str) -> bool:
@@ -535,9 +572,15 @@ _INTERPRETER_INLINE_PROGRAM_FLAGS = frozenset({"-c", "-e", "-m"})
 
 
 def _reads_its_program_from_stdin(segment: str) -> bool:
-    """True when this segment is an interpreter whose program arrives on stdin."""
+    """True when this segment is an interpreter whose program arrives on stdin.
+
+    Stripped before tokenising, because this guard decides that something is
+    dangerous: `curl … | timeout 5 bash` must be read as a pipe into `bash`,
+    not as a pipe into `timeout`. Without this the safety checks downstream
+    would see the stripped form, match it, and grant an outright allow.
+    """
     try:
-        tokens = shlex.split(segment)
+        tokens = shlex.split(_strip_invocation_prefixes(segment))
     except ValueError:
         return True
     if not tokens:
@@ -746,7 +789,9 @@ def _force_pushes_a_shared_branch(shell_command: str) -> bool:
     """True when this rewrites history on a branch other people build on."""
     for segment in _split_shell_segments(shell_command, opaque_substitution=True) or []:
         try:
-            tokens = shlex.split(segment)
+            # Stripped for the same reason as the pipe-sink guard: a prefix
+            # must not hide a forced push onto a shared branch.
+            tokens = shlex.split(_strip_invocation_prefixes(segment))
         except ValueError:
             continue
         if len(tokens) < 2 or tokens[0] != "git" or tokens[1] != "push":
@@ -770,7 +815,102 @@ def _force_pushes_a_shared_branch(shell_command: str) -> bool:
     return False
 
 
-def classify_command(shell_command: str) -> str:
+_ENV_ASSIGNMENT_PREFIX_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=(?:\"[^\"]*\"|'[^']*'|[^\s]*)\s+")
+_TIMEOUT_PREFIX_RE = re.compile(r"^timeout\s+(?:-[A-Za-z-]+\s+|--[A-Za-z-]+(?:=\S+)?\s+)*[0-9]+[smhd]?\s+")
+_CONTROL_KEYWORD_PREFIX_RE = re.compile(r"^(?:do|then|else|elif|while|until|if)\s+")
+_INVOCATION_PREFIX_RES = (
+    _ENV_ASSIGNMENT_PREFIX_RE,
+    _TIMEOUT_PREFIX_RE,
+    _CONTROL_KEYWORD_PREFIX_RE,
+)
+
+
+def _strip_invocation_prefixes(segment: str) -> str:
+    """`segment` with leading env assignments, `timeout <dur>` and keywords removed.
+
+    Every check in this broker reads the first token of a segment to decide
+    what it is looking at, so a prefix in front of that token hid the command
+    from all of them at once.
+    """
+    stripped = segment.strip()
+    while True:
+        for pattern in _INVOCATION_PREFIX_RES:
+            match = pattern.match(stripped)
+            if match:
+                stripped = stripped[match.end():].lstrip()
+                break
+        else:
+            return stripped
+
+
+_SHELL_INTERPRETERS = frozenset({"bash", "sh", "zsh", "dash", "ksh", "fish"})
+
+
+def _inline_shell_program(segment: str) -> str | None:
+    """The shell program a `-c` hands to a shell interpreter, if any.
+
+    `-c` puts the program somewhere inspectable, which is why a pipe feeding a
+    `-c` invocation stays allowed -- the pipe then carries data, not a program.
+    But inspectable only helps if something inspects it: `bash -c "curl x | sh"`
+    matched the broad bash pattern and was allowed outright, so the inner pipe-into-shell
+    never met the guard that exists to catch exactly that. The text is visible,
+    so read it.
+    """
+    try:
+        tokens = shlex.split(_strip_invocation_prefixes(segment))
+    except ValueError:
+        return None
+    if not tokens or Path(tokens[0]).name not in _SHELL_INTERPRETERS:
+        return None
+    for index, token in enumerate(tokens[1:], start=1):
+        if token == "-c" and index + 1 < len(tokens):
+            return tokens[index + 1]
+    return None
+
+
+def _reads_outside_workspace(segment: str) -> bool:
+    """True when a path operand names something outside the boundary.
+
+    `_writes_outside_workspace` keeps a redirection inside the workspace or
+    /tmp, but nothing asked the same of a path a command *reads*, so
+    `cat /etc/shadow` and `cat ~/.ssh/id_rsa` were allowed outright. A boundary
+    that only covers writes does not protect a secret. Relative operands are
+    inside by construction -- the worker's cwd is its worktree -- so only
+    absolute and `~` paths are judged here.
+    """
+    try:
+        tokens = shlex.split(_strip_invocation_prefixes(segment))
+    except ValueError:
+        return False
+    for token in tokens[1:]:
+        if not token.startswith(("/", "~")):
+            continue
+        candidate = Path(token).expanduser()
+        try:
+            resolved = candidate.resolve(strict=False)
+        except OSError:
+            return True
+        if resolved.is_relative_to(Path("/tmp")):
+            continue
+        if _paths_within_workspace([resolved]):
+            continue
+        return True
+    return False
+
+
+def _segment_forms(segment: str) -> list[str]:
+    """The segment as written, and its form with invocation prefixes removed.
+
+    The asymmetry is the point. A check that grants safety must satisfy itself
+    on the *stripped* form, or a prefix smuggles a command past a pattern. A
+    check that refuses must look at *both*, or a prefix hides it. Reversing
+    that would turn `timeout 5 git push --force origin dev` into an allow.
+    """
+    stripped = _strip_invocation_prefixes(segment)
+    return [segment] if stripped == segment else [segment, stripped]
+
+
+def classify_command(shell_command: str, *, _depth: int = 0) -> str:
     # Checked before the allow-list: `^git push` covers every push, including a
     # forced one onto a shared branch. Rewriting a worker's own branch is
     # routine and stays allowed; rewriting the branch everyone else builds on
@@ -803,21 +943,29 @@ def classify_command(shell_command: str) -> str:
         # Command/process substitution hides what actually runs.
         return "defer"
     for segment in segments:
-        for pattern in DENY_BASH_PATTERNS:
-            if pattern.search(segment):
-                return "deny"
+        # Both forms: a prefix must not hide a denied command.
+        for form in _segment_forms(segment):
+            for pattern in DENY_BASH_PATTERNS:
+                if pattern.search(form):
+                    return "deny"
     if len(segments) > 1:
         # Every part has to stand on its own, otherwise a safe prefix would
         # carry the rest of the line past the gate.
-        return "allow" if all(_segment_is_safe(segment) for segment in segments) else "defer"
+        return "allow" if all(_segment_is_safe(segment, _depth=_depth) for segment in segments) else "defer"
     single = segments[0] if segments else normalized
     if _writes_outside_workspace(single):
         return "defer"
+    inner = _inline_shell_program(single)
+    if inner is not None:
+        return classify_command(inner, _depth=_depth + 1) if _depth < 2 else "defer"
+    if _reads_outside_workspace(single):
+        return "defer"
+    candidate = _strip_invocation_prefixes(single)
     for pattern in SAFE_BASH_PATTERNS:
-        if pattern.search(single):
+        if pattern.search(candidate):
             return "allow"
     for pattern in DEFER_BASH_PATTERNS:
-        if pattern.search(single):
+        if pattern.search(candidate):
             return "defer"
     return "defer"
 
