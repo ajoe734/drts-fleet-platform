@@ -22,11 +22,57 @@ except ImportError:  # pragma: no cover - non-POSIX fallback
 
 TOOL_ROOT = Path(__file__).resolve().parent
 SOURCE_ROOT = TOOL_ROOT.parents[1]
-ROOT = Path(
-    os.environ.get("ORCH_STATUS_ROOT")
-    or os.environ.get("AI_STATUS_ROOT")
-    or SOURCE_ROOT
-).resolve()
+
+
+def _resolve_status_root() -> Path:
+    """Locate the checkout that owns the live orchestrator state.
+
+    SOURCE_ROOT answers "where does this code live", which is a different
+    question. Everything now runs from an immutable release copy under
+    .artifacts/releases/<name>, and `.orchestrator/` is gitignored, so a
+    release checkout never carries runtime state -- falling back to SOURCE_ROOT
+    there resolves the config to a path that cannot exist.
+
+    That is not hypothetical: every permission-broker hook event has been dying
+    on `KeyError: Missing config path for approval_queue` since the config left
+    git in 30ac0542b. The supervisor was unaffected only because systemd
+    exports ORCH_STATUS_ROOT and bin/run-supervisor.sh passes --config, while
+    Claude Code spawns hooks with neither.
+
+    Same resolution order as run-supervisor.sh, so an entry point that forgets
+    to export the environment lands where one that remembers does. The git call
+    is the last resort: a checkout that owns its own state never reaches it.
+    """
+    for name in ("ORCH_STATUS_ROOT", "AI_STATUS_ROOT"):
+        raw = os.environ.get(name)
+        if raw:
+            return Path(raw).resolve()
+    if (SOURCE_ROOT / ".orchestrator" / "config.json").exists():
+        return SOURCE_ROOT.resolve()
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(SOURCE_ROOT),
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return SOURCE_ROOT.resolve()
+    common_dir = Path((result.stdout or "").strip())
+    if result.returncode == 0 and common_dir.name == ".git":
+        return common_dir.parent.resolve()
+    return SOURCE_ROOT.resolve()
+
+
+ROOT = _resolve_status_root()
 ORCHESTRATOR_DIR = ROOT / ".orchestrator"
 DEFAULT_CONFIG_PATH = ORCHESTRATOR_DIR / "config.json"
 LOCAL_CONFIG_PATH = ORCHESTRATOR_DIR / "config.local.json"
@@ -237,6 +283,17 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     config_file = resolve_path(config_path) if config_path else DEFAULT_CONFIG_PATH
     if config_file is None:
         raise RuntimeError("Unable to resolve orchestrator config path")
+    # A missing config used to load as `{}`, which is indistinguishable from a
+    # configured-but-empty one. Callers ask it for a path immediately, so the
+    # failure surfaced as `KeyError: Missing config path for approval_queue`
+    # from somewhere far away, naming a config key instead of the file nobody
+    # found. Fail here, where the path that was looked for is still in hand.
+    if not config_file.exists() and not LOCAL_CONFIG_PATH.exists():
+        raise FileNotFoundError(
+            f"orchestrator config not found at {config_file} "
+            f"(status root: {ROOT}). Pass --config, or export ORCH_STATUS_ROOT "
+            "to the checkout that owns .orchestrator/."
+        )
     config = load_json(config_file, default={})
     if LOCAL_CONFIG_PATH.exists():
         config = deep_merge(config, load_json(LOCAL_CONFIG_PATH, default={}))
