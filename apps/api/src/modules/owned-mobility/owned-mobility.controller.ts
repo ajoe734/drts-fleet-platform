@@ -3,11 +3,13 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
   Optional,
   Param,
   Post,
   Put,
   Query,
+  Res,
   Sse,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
@@ -49,7 +51,10 @@ import {
 } from "../../common/api-envelope";
 import { CurrentIdentity, RequireRealms } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { IdempotencyService } from "../../common/idempotency";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import type { PassthroughResponseLike } from "../../common/idempotency-http";
+import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
 
@@ -57,6 +62,7 @@ import { OwnedMobilityService } from "./owned-mobility.service";
 export class OwnedMobilityController {
   constructor(
     private readonly ownedMobilityService: OwnedMobilityService,
+    private readonly idempotencyService: IdempotencyService,
     @Optional()
     private readonly tenantPartnerService?: TenantPartnerService,
   ) {}
@@ -173,26 +179,39 @@ export class OwnedMobilityController {
   }
 
   @Post("call-center/orders")
-  createCallCenterOrder(
+  async createCallCenterOrder(
     @Body() command: CreateCallCenterOrderCommand,
+    @Res({ passthrough: true }) response: PassthroughResponseLike,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
   ) {
-    const order = this.ownedMobilityService.createCallCenterOrder(
-      command,
-      requestId,
-      runtimeProfileCode,
-    );
-    return toApiSuccessEnvelope(
-      {
-        orderId: order.orderId,
-        orderSource: order.orderSource,
-        callId: order.callId,
-        recordingId: order.recordingId,
-        status: order.status,
+    const result = await this.idempotencyService.execute({
+      scope: `crm:callcenter:session:${command.callId ?? ""}:order_create`,
+      idempotencyKey,
+      requestPath: "call-center/orders",
+      payload: command,
+      execute: async () => {
+        const order = this.ownedMobilityService.createCallCenterOrder(
+          command,
+          requestId,
+          runtimeProfileCode,
+        );
+        return {
+          data: {
+            orderId: order.orderId,
+            orderSource: order.orderSource,
+            callId: order.callId,
+            recordingId: order.recordingId,
+            status: order.status,
+          },
+          statusCode: HttpStatus.CREATED,
+        };
       },
-      requestId,
-    );
+    });
+
+    applyIdempotentResponseHeaders(response, result);
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Post("tenant/bookings")

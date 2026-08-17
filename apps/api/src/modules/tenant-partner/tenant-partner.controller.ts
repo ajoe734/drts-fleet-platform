@@ -4,11 +4,13 @@ import {
   Delete,
   Get,
   Headers,
+  HttpStatus,
   Param,
   Post,
   Put,
   Query,
   Req,
+  Res,
   StreamableFile,
   Optional,
 } from "@nestjs/common";
@@ -92,6 +94,9 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
+import { IdempotencyService } from "../../common/idempotency";
+import type { PassthroughResponseLike } from "../../common/idempotency-http";
+import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IdentityRepository } from "../identity/identity.repository";
 import {
@@ -136,6 +141,7 @@ export class TenantPartnerController {
     private readonly billingSettlementService: BillingSettlementService,
     private readonly ownedMobilityService: OwnedMobilityService,
     private readonly jwtAuthService: JwtAuthService,
+    private readonly idempotencyService: IdempotencyService,
     @Optional() private readonly identityRepository?: IdentityRepository,
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
@@ -1861,21 +1867,33 @@ export class TenantPartnerController {
   @Post("tenant/webhooks/test")
   async sendTestWebhook(
     @Body() command: SendTestWebhookCommand,
+    @Res({ passthrough: true }) response: PassthroughResponseLike,
     @Headers("x-tenant-id") tenantId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = await this.tenantPartnerService.sendTestWebhook(
-      this.requireTenantId(tenantId),
-      command,
-      requestId,
-    );
-    return toApiSuccessEnvelope(
-      result ?? {
-        deliveryId: null,
-        httpStatus: 404,
-      },
-      requestId,
-    );
+    const resolvedTenantId = this.requireTenantId(tenantId);
+    const result = await this.idempotencyService.execute({
+      scope: `tenant:${resolvedTenantId}:webhook_test_send`,
+      idempotencyKey,
+      tenantId: resolvedTenantId,
+      requestPath: "tenant/webhooks/test",
+      payload: command,
+      execute: async () => ({
+        data: (await this.tenantPartnerService.sendTestWebhook(
+          resolvedTenantId,
+          command,
+          requestId,
+        )) ?? {
+          deliveryId: null,
+          httpStatus: 404,
+        },
+        statusCode: HttpStatus.CREATED,
+      }),
+    });
+
+    applyIdempotentResponseHeaders(response, result);
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 
   @Post("tenant/webhooks/:webhookId")
