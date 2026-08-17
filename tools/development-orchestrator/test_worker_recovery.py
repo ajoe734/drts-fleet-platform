@@ -11,6 +11,95 @@ from orchestrator_test_support import EvidenceOutputIsolation
 
 
 class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
+    def _coordination_worker_config(self) -> dict:
+        return {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {
+                "active_worker_statuses": ["running", "started", "manual_pending"],
+                "dependency_done_statuses": ["done"],
+            },
+            "providers": {},
+            "agents": {"gemini2": {"id": "gemini2", "display_name": "Gemini2"}},
+        }
+
+    def _dead_coordination_worker(self, target_files: list[str]) -> dict:
+        return {
+            "run_id": "run-chair",
+            "task_id": None,
+            "provider": "gemini2",
+            "agent_id": "gemini2",
+            "status": "running",
+            "queue_event_id": "evt-chair",
+            "pid": 4242,
+            "last_event_at": "2026-01-01T00:00:00Z",
+            "request_snapshot": {
+                "reason": "chair_review:blocked_task_triage",
+                "metadata": {"mode": "coordination"},
+                "target_files": target_files,
+            },
+        }
+
+    def _poll_dead_coordination_worker(self, worker: dict, config: dict) -> list[dict]:
+        state = {"queue": {"events": {"evt-chair": {"status": "started"}}}, "workers": {"run-chair": worker}}
+        logged: list[dict] = []
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": []}),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+            mock.patch.object(supervisor, "detect_worker_failure_signal", return_value=None),
+            mock.patch.object(supervisor, "record_worker_evidence", return_value="evidence-ref"),
+            mock.patch.object(supervisor, "write_activity_log", side_effect=lambda _c, payload: logged.append(payload)),
+        ):
+            supervisor.poll_workers(config, state)
+        return logged
+
+    def test_coordination_worker_is_failed_when_it_produced_no_declared_output(self) -> None:
+        """A dispatch declares target_files; producing none of them is not success.
+
+        The runtime never captures an exit status -- workers are detached and
+        observed through /proc -- so before this, a coordination worker was
+        called complete whenever the process was gone and no known error string
+        appeared in its log. An antigravity run whose entire log was
+        "Error: Agent execution terminated due to error." was therefore recorded
+        as "exited cleanly", and the lane failure was never attributed.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing = str(Path(tmpdir) / "chair.json")
+            worker = self._dead_coordination_worker([missing])
+            logged = self._poll_dead_coordination_worker(worker, self._coordination_worker_config())
+
+        self.assertEqual(worker["status"], "failed")
+        messages = [str(entry.get("message") or "") for entry in logged]
+        self.assertFalse([m for m in messages if "exited cleanly" in m], messages)
+        self.assertIn("worker_failed", [entry.get("type") for entry in logged])
+
+    def test_coordination_worker_completes_when_its_declared_output_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            produced = Path(tmpdir) / "chair.json"
+            produced.write_text("{}", encoding="utf-8")
+            worker = self._dead_coordination_worker([str(produced)])
+            logged = self._poll_dead_coordination_worker(worker, self._coordination_worker_config())
+
+        self.assertEqual(worker["status"], "completed")
+        self.assertIn("worker_completed", [entry.get("type") for entry in logged])
+
+    def test_coordination_worker_without_a_declared_contract_still_completes(self) -> None:
+        """Only a declared contract can be enforced; an empty list stays a no-op."""
+        worker = self._dead_coordination_worker([])
+        logged = self._poll_dead_coordination_worker(worker, self._coordination_worker_config())
+
+        self.assertEqual(worker["status"], "completed")
+        self.assertIn("worker_completed", [entry.get("type") for entry in logged])
+
     def test_lower_priority_worker_is_superseded_when_review_backlog_exists(self) -> None:
         config = {
             "schema": {
