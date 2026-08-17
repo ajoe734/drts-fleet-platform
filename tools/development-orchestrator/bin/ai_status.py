@@ -9,7 +9,6 @@ import subprocess
 import sys
 import uuid
 from contextlib import contextmanager
-from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -250,16 +249,6 @@ def flatten_canonical_document_layers(layers: dict[str, list[str]]) -> list[str]
             if document not in flattened:
                 flattened.append(document)
     return flattened
-
-
-def short_summary(text: Any, max_length: int = 280) -> str:
-    raw = re.sub(r"\s+", " ", str(text or "")).strip()
-    if len(raw) <= max_length:
-        return raw
-    clipped = raw[: max_length - 1].rstrip()
-    if " " in clipped:
-        clipped = clipped.rsplit(" ", 1)[0]
-    return clipped + "…"
 
 
 def sync_canonical_document_metadata(state: dict[str, Any]) -> None:

@@ -5,24 +5,13 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
-from common import config_path, load_json, utc_now, write_json
+from common import config_path, load_json, parse_iso_utc, utc_now, write_json
 from control_plane.domain.worker_lifecycle import (
     ACTIVE_WORKER_STATUSES,
     TERMINAL_WORKER_STATUSES,
     is_active_worker,
 )
-from control_plane.infra.queue_repo import enqueue_event, load_event_queue
-
-
-def _parse_iso_utc(value: object) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+from control_plane.infra.queue_repo import load_event_queue
 
 
 def default_state() -> dict[str, Any]:
@@ -220,7 +209,7 @@ def prune_worker_records(state: dict[str, Any]) -> None:
             keep[run_id] = worker
             continue
         if status == "completed" and str(worker.get("redispatch_after") or "").strip():
-            resume_at = _parse_iso_utc(worker.get("redispatch_after"))
+            resume_at = parse_iso_utc(worker.get("redispatch_after"))
             if resume_at is not None and resume_at > datetime.now(timezone.utc):
                 keep[run_id] = worker
                 continue
@@ -354,10 +343,6 @@ def queue_event_record(state: dict[str, Any], event_id: str) -> dict[str, Any]:
     events = queue.setdefault("events", {})
     record = events.setdefault(event_id, {"attempt_count": 0, "status": "queued"})
     return record
-
-
-def dispatch_pauses_for_task(state: dict[str, Any], task_id: str) -> list[dict[str, Any]]:
-    return [pause for pause in state.setdefault("dispatch_pauses", []) if str(pause.get("task_id") or "") == str(task_id)]
 
 
 def upsert_dispatch_pause(state: dict[str, Any], pause: dict[str, Any]) -> None:

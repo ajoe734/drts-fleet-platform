@@ -76,9 +76,3 @@ def load_event_queue(config: dict[str, Any]) -> list[dict[str, Any]]:
 
 def enqueue_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
     return queue_repository(config).enqueue(event)
-
-
-def replace_event_queue(
-    config: dict[str, Any], events: Iterable[dict[str, Any]]
-) -> None:
-    queue_repository(config).replace(events)

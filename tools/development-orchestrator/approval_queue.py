@@ -18,10 +18,9 @@ THIS_DIR = Path(__file__).resolve().parent
 if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
-from common import config_path, load_config, new_runtime_id, utc_now, write_activity_log, write_json
+from common import load_config, new_runtime_id, utc_now, write_activity_log
 from control_plane.infra.approval_repo import (
     approval_transaction,
-    default_approval_state,
     load_approval_state,
     save_approval_state,
 )

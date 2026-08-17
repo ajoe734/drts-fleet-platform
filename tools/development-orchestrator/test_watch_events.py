@@ -107,6 +107,7 @@ class WatcherBookkeepingTests(unittest.TestCase):
                     "status_file": str(status_path),
                     "event_queue": str(event_queue_path),
                     "activity_log": str(tmp / "activity.jsonl"),
+                    "task_briefs_dir": str(tmp / "task-briefs"),
                 },
                 "agents": {
                     "codex": {
@@ -153,6 +154,7 @@ class WatcherBookkeepingTests(unittest.TestCase):
                     "status_file": str(status_path),
                     "event_queue": str(event_queue_path),
                     "activity_log": str(tmp / "activity.jsonl"),
+                    "task_briefs_dir": str(tmp / "task-briefs"),
                 },
                 "agents": {
                     "codex": {

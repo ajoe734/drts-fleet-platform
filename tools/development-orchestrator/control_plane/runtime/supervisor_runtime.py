@@ -3,19 +3,16 @@ from __future__ import annotations
 
 import argparse
 import atexit
-import fnmatch
 import hashlib
 import json
 import os
 import socket
 import random
 import re
-import shutil
 import shlex
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
@@ -38,8 +35,6 @@ from control_plane.domain.dispatch_policy import (
     DispatchReason as DomainDispatchReason,
     ReadyDispatchPolicy,
     build_dispatch_event as build_domain_dispatch_event,
-    dependencies_satisfied as domain_dependencies_satisfied,
-    dependency_signature as domain_dependency_signature,
     ready_dispatch_signature as domain_ready_dispatch_signature,
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
@@ -59,34 +54,39 @@ from control_plane.domain.resource_admission import decide as resource_admission
 from control_plane.domain.lane_health import pause_matches_lane
 from control_plane.domain.chair_policy import (
     normalize_review_defaults as normalize_domain_review_defaults,
-    validate_review_payload as validate_domain_review_payload,
 )
 from control_plane.infra.approval_repo import load_approval_state
 from control_plane.infra.queue_repo import (
     enqueue_event,
     load_event_queue,
     queue_repository,
-    replace_event_queue,
 )
 from control_plane.infra.runtime_repo import (
     clear_dispatch_pause,
     load_runtime_state,
-    prune_worker_records,
     queue_event_record,
     save_runtime_state,
     upsert_dispatch_pause,
 )
 from control_plane.infra.worker_failure_detector import (
     WorkerFailureSignal,
-    _captured_tool_log_line_indexes as infra_captured_tool_log_line_indexes,
-    _detect_json_worker_failure as infra_detect_json_worker_failure,
-    _detect_json_worker_failure_signal as infra_detect_json_worker_failure_signal,
-    _extract_failure_candidate as infra_extract_failure_candidate,
-    _ignore_embedded_failure_line as infra_ignore_embedded_failure_line,
-    _is_result_level_provider_blocker as infra_is_result_level_provider_blocker,
-    _iter_json_string_values as infra_iter_json_string_values,
-    detect_worker_failure as infra_detect_worker_failure,
-    detect_worker_failure_signal as infra_detect_worker_failure_signal,
+    detect_worker_failure,
+    detect_worker_failure_signal,
+)
+from control_plane.infra.worker_evidence import (
+    brief_reason_text,
+    record_worker_evidence,
+    summarize_worker_failure,
+)
+from control_plane.infra.worktree_maintenance import (
+    _disk_guard_path,
+    _disk_guard_should_cleanup,
+    _prune_worktree_archive,
+    cleanup_inactive_worker_worktrees,
+    disk_guard_settings,
+    disk_usage_snapshot,
+    prune_stale_worker_worktrees,
+    worktree_cleanup_settings,
 )
 from control_plane.projections.control_plane_summary import (
     refresh_control_plane_summary,
@@ -98,6 +98,28 @@ from control_plane.usecases.supervisor_tick import (
     SupervisorTickRunner,
 )
 from control_plane.usecases.task_board_commands import run_task_board_command
+from control_plane.usecases.dispatch_runtime import (
+    active_worker_agent_counts,
+    active_worker_indexes,
+    active_worker_queue_event_ids,
+    agent_has_dispatchable_primary_work,
+    dependencies_satisfied,
+    governance_lineage_depth,
+    helper_claim_settings,
+    is_governance_artifact,
+    lane_dispatch_disabled,
+    max_tasks_per_agent_for_lane,
+    ready_dispatch_settings,
+    redispatch_candidate_statuses,
+    task_phase_priority,
+)
+from control_plane.usecases.chair_review_policy import (
+    blocked_task_triage_kind,
+    chair_provider_pause_reason_is_actionable,
+    chair_task_action_index,
+    pending_approval_items,
+    validate_chair_review_payload,
+)
 from common import (
     AI_GUIDE_PATH,
     ROTATION_FALLBACK_SLOT,
@@ -109,16 +131,15 @@ from common import (
     canonical_relpath,
     command_exists,
     config_path,
-    load_rotation_cooldowns,
     record_rotation_cooldown,
     display_name_for,
-    evidence_path,
     ensure_task_brief,
     load_config,
     load_json,
     load_status,
     new_runtime_id,
     normalize_agent_id,
+    parse_iso_utc as parse_runtime_timestamp,
     relpath,
     runtime_env_overrides,
     selected_shared_files,
@@ -127,7 +148,6 @@ from common import (
     spawn_background_process,
     task_board_cli_path,
     utc_now,
-    write_json,
     write_activity_log,
 )
 from github_bus import sync_github_bus
@@ -242,554 +262,6 @@ def clear_supervisor_pid(config: dict[str, Any]) -> None:
         path.unlink(missing_ok=True)
 
 
-def disk_guard_settings(config: dict[str, Any]) -> dict[str, Any]:
-    supervisor_settings = config.get("supervisor", {}) if isinstance(config.get("supervisor"), dict) else {}
-    raw = supervisor_settings.get("disk_guard")
-    settings = dict(raw) if isinstance(raw, dict) else {}
-    # Keep disabled unless the deployment config opts in, so small unit-test
-    # configs and ad-hoc local runs are not coupled to host disk pressure.
-    settings.setdefault("enabled", bool(raw))
-    settings.setdefault("path", ".")
-    settings.setdefault("warn_usage_percent", 80.0)
-    settings.setdefault("cleanup_usage_percent", 85.0)
-    settings.setdefault("block_dispatch_usage_percent", 85.0)
-    settings.setdefault("min_free_gb", 5.0)
-    settings.setdefault("cleanup_interval_seconds", 3600.0)
-    settings.setdefault("worktree_retention_days", 3.0)
-    settings.setdefault("max_worktrees_removed_per_tick", 200)
-    settings.setdefault("remove_dirty_worktrees", False)
-    return settings
-
-def worktree_cleanup_settings(config: dict[str, Any], overrides: dict[str, Any] | None = None) -> dict[str, Any]:
-    supervisor_settings = config.get("supervisor", {}) if isinstance(config.get("supervisor"), dict) else {}
-    raw = supervisor_settings.get("worker_workspace_cleanup")
-    settings = dict(raw) if isinstance(raw, dict) else {}
-    if isinstance(overrides, dict):
-        settings.update(overrides)
-    settings.setdefault("enabled", True)
-    settings.setdefault("archive_dirty_worktrees", True)
-    settings.setdefault("force_remove_dirty_worktrees_after_archive", True)
-    settings.setdefault("archive_root", str(Path(tempfile.gettempdir()) / f"{REPO_ROOT.name}-worktree-archive"))
-    settings.setdefault("max_worktrees_removed_per_tick", 200)
-    settings.setdefault("worktree_retention_days", 3.0)
-    settings.setdefault("remove_dirty_worktrees", False)
-    settings.setdefault("max_copied_files_per_archive", 200)
-    settings.setdefault("max_copied_file_bytes", 2 * 1024 * 1024)
-    settings.setdefault("max_copied_bytes_per_archive", 20 * 1024 * 1024)
-    # Bound the dirty-worktree archive so it cannot grow without limit and fill
-    # the disk (which would trip the disk guard and block ALL dispatch).
-    settings.setdefault("archive_retention_days", 1.0)
-    settings.setdefault("archive_max_total_bytes", 2 * 1024 * 1024 * 1024)
-    settings.setdefault("release_interval_seconds", 60.0)
-    return settings
-
-
-def _disk_guard_path(config: dict[str, Any], settings: dict[str, Any]) -> Path:
-    raw_path = Path(str(settings.get("path") or ".")).expanduser()
-    if raw_path.is_absolute():
-        return raw_path
-    try:
-        root = config_path(config, "status_file").parent
-    except KeyError:
-        root = REPO_ROOT
-    return (root / raw_path).resolve()
-
-
-def disk_usage_snapshot(path: Path) -> dict[str, Any] | None:
-    try:
-        usage = shutil.disk_usage(path)
-    except OSError:
-        return None
-    usage_percent = (usage.used / usage.total * 100.0) if usage.total else 0.0
-    return {
-        "path": str(path),
-        "total_bytes": usage.total,
-        "used_bytes": usage.used,
-        "free_bytes": usage.free,
-        "usage_percent": round(usage_percent, 2),
-        "free_gb": round(usage.free / (1024**3), 2),
-    }
-
-
-def active_worker_workspace_roots(state: dict[str, Any]) -> set[str]:
-    active_statuses = ACTIVE_RUNTIME_STATUSES
-    roots: set[str] = set()
-    for worker in (state.get("workers", {}) or {}).values():
-        if not isinstance(worker, dict):
-            continue
-        if str(worker.get("status") or "") not in active_statuses and not pid_is_alive(worker.get("pid")):
-            continue
-        for key in ("workspace_root", "cwd", "worktree", "worktree_path"):
-            value = worker.get(key)
-            if value:
-                roots.add(str(Path(str(value)).expanduser().resolve()))
-        command = worker.get("command") or []
-        if isinstance(command, list):
-            for index, token in enumerate(command[:-1]):
-                if token == "-C":
-                    roots.add(str(Path(str(command[index + 1])).expanduser().resolve()))
-    return roots
-
-
-def _registered_worktrees(repo_root: Path) -> list[dict[str, Any]]:
-    result = _git_capture(repo_root, ["worktree", "list", "--porcelain"], timeout=30.0)
-    if result.returncode != 0:
-        return []
-    records: list[dict[str, Any]] = []
-    current: dict[str, Any] = {}
-    for line in (result.stdout or "").splitlines():
-        if line.startswith("worktree "):
-            if current:
-                records.append(current)
-            current = {"path": line[len("worktree "):]}
-        elif line.startswith("branch "):
-            current["branch"] = line[len("branch "):]
-        elif line.startswith("HEAD "):
-            current["head"] = line[len("HEAD "):]
-        elif line.startswith("locked"):
-            current["locked"] = True
-            current["locked_reason"] = line[len("locked"):].strip() or None
-    if current:
-        records.append(current)
-    return records
-
-
-def _worktree_archive_root(settings: dict[str, Any]) -> Path:
-    raw_value = settings.get("archive_root")
-    if raw_value:
-        root = Path(str(raw_value)).expanduser()
-    else:
-        root = Path(tempfile.gettempdir()) / f"{REPO_ROOT.name}-worktree-archive"
-    if not root.is_absolute():
-        root = Path(tempfile.gettempdir()) / root
-    return root.resolve()
-
-
-def _prune_worktree_archive(settings: dict[str, Any]) -> dict[str, Any]:
-    """Keep the dirty-worktree archive bounded.
-
-    Each disk-guard cleanup archives dirty worktrees into a timestamped subdir
-    under the archive root, but nothing ever removed those subdirs, so the
-    archive grew without limit (observed at 90GB) and eventually filled the
-    disk — which trips the disk guard and blocks ALL dispatch. The archived
-    snapshots are only a best-effort recovery aid (the real work lives on the
-    pushed branches/PRs), so we cap them by age then by total size.
-    """
-    root = _worktree_archive_root(settings)
-    if not root.exists():
-        return {"removed": 0, "freed_bytes": 0}
-    retention_days = max(0.0, float(settings.get("archive_retention_days", 1.0) or 0.0))
-    max_total_bytes = max(0, int(settings.get("archive_max_total_bytes", 2 * 1024 * 1024 * 1024) or 0))
-
-    def _dir_size(path: Path) -> int:
-        total = 0
-        for dirpath, _dirs, files in os.walk(path):
-            for name in files:
-                try:
-                    total += os.path.getsize(os.path.join(dirpath, name))
-                except OSError:
-                    pass
-        return total
-
-    entries: list[tuple[Path, float, int]] = []
-    try:
-        children = list(root.iterdir())
-    except OSError:
-        return {"removed": 0, "freed_bytes": 0}
-    for child in children:
-        try:
-            mtime = child.stat().st_mtime
-        except OSError:
-            continue
-        entries.append((child, mtime, _dir_size(child)))
-
-    removed = 0
-    freed = 0
-    now = time.time()
-    cutoff = now - retention_days * 86400.0
-    survivors: list[tuple[Path, float, int]] = []
-    for child, mtime, size in entries:
-        if retention_days > 0 and mtime < cutoff:
-            shutil.rmtree(child, ignore_errors=True)
-            removed += 1
-            freed += size
-        else:
-            survivors.append((child, mtime, size))
-
-    if max_total_bytes > 0:
-        total = sum(size for _child, _mtime, size in survivors)
-        survivors.sort(key=lambda item: item[1])  # oldest first
-        for child, _mtime, size in survivors:
-            if total <= max_total_bytes:
-                break
-            shutil.rmtree(child, ignore_errors=True)
-            removed += 1
-            freed += size
-            total -= size
-    return {"removed": removed, "freed_bytes": freed}
-
-
-def _worktree_changed_paths_for_archive(worktree: Path) -> list[str]:
-    commands = (
-        ["diff", "--name-only"],
-        ["diff", "--cached", "--name-only"],
-        ["ls-files", "--others", "--exclude-standard"],
-    )
-    seen: set[str] = set()
-    paths: list[str] = []
-    for args in commands:
-        result = _git_capture(worktree, args, timeout=30.0)
-        if result.returncode != 0:
-            continue
-        for line in (result.stdout or "").splitlines():
-            candidate = line.strip()
-            if not candidate or candidate in seen:
-                continue
-            seen.add(candidate)
-            paths.append(candidate)
-    return paths
-
-
-def _archive_dirty_worktree(worktree: Path, settings: dict[str, Any]) -> tuple[Path | None, list[str]]:
-    warnings: list[str] = []
-    archive_root = _worktree_archive_root(settings)
-    try:
-        archive_root.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        return None, [f"archive root unavailable: {exc}"]
-
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", worktree.name).strip("-") or "worktree"
-    archive_dir = archive_root / f"{stamp}-{slug}-{time.time_ns()}"
-    try:
-        archive_dir.mkdir(parents=True, exist_ok=False)
-    except OSError as exc:
-        return None, [f"archive directory unavailable: {exc}"]
-
-    snapshots = (
-        (["status", "--short", "--branch", "--untracked-files=all"], "git-status.txt"),
-        (["diff", "--binary", "--full-index"], "git-diff.patch"),
-        (["diff", "--cached", "--binary", "--full-index"], "git-diff-cached.patch"),
-        (["ls-files", "--others", "--exclude-standard"], "untracked.txt"),
-    )
-    for args, filename in snapshots:
-        result = _git_capture(worktree, args, timeout=60.0)
-        try:
-            (archive_dir / filename).write_text(result.stdout or result.stderr or "", encoding="utf-8")
-        except OSError as exc:
-            warnings.append(f"{filename}: {exc}")
-        if result.returncode != 0:
-            warnings.append(f"{' '.join(args)} exited {result.returncode}")
-
-    max_files = max(0, int(settings.get("max_copied_files_per_archive", 200)))
-    max_file_bytes = max(0, int(settings.get("max_copied_file_bytes", 2 * 1024 * 1024)))
-    max_total_bytes = max(0, int(settings.get("max_copied_bytes_per_archive", 20 * 1024 * 1024)))
-    copied_entries = 0
-    copied_bytes = 0
-    manifest: dict[str, Any] = {
-        "worktree_path": str(worktree),
-        "archived_at": utc_now(),
-        "copied_files": [],
-        "skipped_files": [],
-        "warnings": warnings,
-    }
-    files_root = archive_dir / "files"
-
-    for rel_path in _worktree_changed_paths_for_archive(worktree):
-        source = worktree / rel_path
-        if not _path_is_within(source.parent, worktree):
-            manifest["skipped_files"].append({"path": rel_path, "reason": "outside_worktree"})
-            continue
-        if source.is_symlink():
-            try:
-                target = os.readlink(source)
-            except OSError as exc:
-                target = f"<unreadable: {exc}>"
-            manifest["copied_files"].append({"path": rel_path, "kind": "symlink", "target": target})
-            copied_entries += 1
-            continue
-        if not source.exists():
-            manifest["skipped_files"].append({"path": rel_path, "reason": "missing"})
-            continue
-        if source.is_dir():
-            manifest["skipped_files"].append({"path": rel_path, "reason": "directory"})
-            continue
-        resolved = source.resolve()
-        if not _path_is_within(resolved, worktree):
-            manifest["skipped_files"].append({"path": rel_path, "reason": "outside_worktree"})
-            continue
-        if max_files and copied_entries >= max_files:
-            manifest["skipped_files"].append({"path": rel_path, "reason": "max_files"})
-            continue
-        try:
-            size = source.stat().st_size
-        except OSError as exc:
-            manifest["skipped_files"].append({"path": rel_path, "reason": f"stat_failed: {exc}"})
-            continue
-        if max_file_bytes and size > max_file_bytes:
-            manifest["skipped_files"].append({"path": rel_path, "reason": f"file_too_large:{size}"})
-            continue
-        if max_total_bytes and copied_bytes + size > max_total_bytes:
-            manifest["skipped_files"].append({"path": rel_path, "reason": "archive_budget_exceeded"})
-            continue
-        destination = files_root / rel_path
-        try:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, destination)
-        except OSError as exc:
-            manifest["skipped_files"].append({"path": rel_path, "reason": f"copy_failed: {exc}"})
-            continue
-        manifest["copied_files"].append({"path": rel_path, "kind": "file", "size": size})
-        copied_entries += 1
-        copied_bytes += size
-
-    manifest["copied_bytes"] = copied_bytes
-    try:
-        (archive_dir / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        warnings.append(f"manifest.json: {exc}")
-    return archive_dir, warnings
-
-
-def _cleanup_registered_worktree(
-    repo_root: Path,
-    worktree: Path,
-    settings: dict[str, Any],
-) -> dict[str, Any]:
-    status = _git_capture(worktree, ["status", "--porcelain", "--untracked-files=all"], timeout=30.0)
-    if status.returncode != 0:
-        message = (status.stderr or status.stdout or "").strip().replace("\n", " | ")
-        return {"removed": False, "archived": None, "warning": None, "error": message[:240]}
-
-    dirty = bool((status.stdout or "").strip())
-    archive_dir: Path | None = None
-    warnings: list[str] = []
-    if dirty and bool(settings.get("archive_dirty_worktrees", True)):
-        archive_dir, warnings = _archive_dirty_worktree(worktree, settings)
-
-    command = ["worktree", "remove"]
-    force_remove = bool(
-        settings.get("force_remove_dirty_worktrees_after_archive", True)
-        or settings.get("remove_dirty_worktrees", False)
-    )
-    if dirty and force_remove:
-        command.append("--force")
-    command.append(str(worktree))
-    result = _git_capture(repo_root, command, timeout=60.0)
-    if result.returncode != 0:
-        message = (result.stderr or result.stdout or "").strip().replace("\n", " | ")
-        if warnings:
-            message = f"{message} | archive: {' | '.join(warnings[:2])}"
-        return {
-            "removed": False,
-            "archived": str(archive_dir) if archive_dir else None,
-            "warning": None,
-            "error": message[:240],
-        }
-
-    warning_message = " | ".join(warnings[:2])[:240] if warnings else None
-    return {
-        "removed": True,
-        "archived": str(archive_dir) if archive_dir else None,
-        "warning": warning_message,
-        "error": None,
-    }
-
-
-def _cleanup_registered_worker_worktrees(
-    config: dict[str, Any],
-    state: dict[str, Any],
-    settings: dict[str, Any] | None,
-    *,
-    respect_retention: bool,
-) -> dict[str, Any]:
-    try:
-        repo_root = config_path(config, "status_file").parent.resolve()
-    except KeyError:
-        return {
-            "checked": 0,
-            "removed": 0,
-            "skipped": 0,
-            "failed": 0,
-            "archived": 0,
-            "errors": ["missing status_file path"],
-        }
-    if not _worker_worktrees_enabled(config):
-        return {
-            "checked": 0,
-            "removed": 0,
-            "skipped": 0,
-            "failed": 0,
-            "archived": 0,
-            "errors": ["worker worktrees disabled"],
-        }
-
-    cleanup_settings = worktree_cleanup_settings(config, settings)
-    if not cleanup_settings.get("enabled", True):
-        return {
-            "checked": 0,
-            "removed": 0,
-            "skipped": 0,
-            "failed": 0,
-            "archived": 0,
-            "errors": ["worker workspace cleanup disabled"],
-        }
-
-    base = _worker_worktree_base(config, repo_root)
-    if not base.exists():
-        return {"checked": 0, "removed": 0, "skipped": 0, "failed": 0, "archived": 0, "errors": []}
-
-    cutoff = None
-    if respect_retention:
-        retention_seconds = max(0.0, float(cleanup_settings.get("worktree_retention_days", 3.0))) * 86400.0
-        cutoff = time.time() - retention_seconds
-
-    max_removed = max(0, int(cleanup_settings.get("max_worktrees_removed_per_tick", 200)))
-    active_roots = active_worker_workspace_roots(state)
-    checked = removed = skipped = failed = archived = 0
-    errors: list[str] = []
-    warnings: list[str] = []
-
-    for record in sorted(_registered_worktrees(repo_root), key=lambda item: str(item.get("path") or "")):
-        if max_removed and removed >= max_removed:
-            break
-        raw_path = str(record.get("path") or "").strip()
-        if not raw_path:
-            continue
-        path = Path(raw_path).expanduser().resolve()
-        if path == repo_root or not _path_is_within(path, base):
-            continue
-        checked += 1
-        if str(path) in active_roots:
-            skipped += 1
-            continue
-        # A lock is an explicit ownership signal from Git. `locked
-        # initializing` worktrees cannot be removed and used to be archived
-        # again on every worker poll.
-        if record.get("locked"):
-            skipped += 1
-            if len(warnings) < 10:
-                reason = str(record.get("locked_reason") or "locked")
-                warnings.append(f"{path}: skipped locked worktree ({reason})")
-            continue
-        try:
-            stat = path.stat()
-        except OSError:
-            skipped += 1
-            continue
-        if cutoff is not None and stat.st_mtime > cutoff:
-            skipped += 1
-            continue
-        outcome = _cleanup_registered_worktree(repo_root, path, cleanup_settings)
-        if outcome.get("removed"):
-            removed += 1
-            if outcome.get("archived"):
-                archived += 1
-            warning = outcome.get("warning")
-            if warning and len(warnings) < 10:
-                warnings.append(f"{path}: {warning}")
-            continue
-        failed += 1
-        if len(errors) < 10:
-            errors.append(f"{path}: {outcome.get('error') or 'cleanup failed'}")
-
-    prune = _git_capture(repo_root, ["worktree", "prune"], timeout=30.0)
-    if prune.returncode != 0 and len(errors) < 10:
-        errors.append(f"git worktree prune: {(prune.stderr or prune.stdout or '').strip()[:240]}")
-    result = {
-        "checked": checked,
-        "removed": removed,
-        "skipped": skipped,
-        "failed": failed,
-        "archived": archived,
-        "errors": errors,
-    }
-    if warnings:
-        result["warnings"] = warnings
-    return result
-
-
-def prune_stale_worker_worktrees(
-    config: dict[str, Any],
-    state: dict[str, Any],
-    settings: dict[str, Any] | None,
-) -> dict[str, Any]:
-    return _cleanup_registered_worker_worktrees(
-        config,
-        state,
-        settings,
-        respect_retention=True,
-    )
-
-
-def release_inactive_worker_worktrees(
-    config: dict[str, Any],
-    state: dict[str, Any],
-    settings: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return _cleanup_registered_worker_worktrees(
-        config,
-        state,
-        settings,
-        respect_retention=False,
-    )
-
-
-def cleanup_inactive_worker_worktrees(
-    config: dict[str, Any],
-    state: dict[str, Any],
-) -> bool:
-    """Run inactive-worktree cleanup as throttled maintenance, not per poll."""
-    settings = worktree_cleanup_settings(config)
-    interval = max(1.0, float(settings.get("release_interval_seconds", 60.0)))
-    maintenance = state.setdefault("maintenance", {}).setdefault(
-        "worker_workspace_cleanup", {}
-    )
-    now = datetime.now(timezone.utc)
-    last_attempt = _parse_iso_utc(maintenance.get("last_attempt_at"))
-    if last_attempt is not None and (now - last_attempt).total_seconds() < interval:
-        return False
-
-    maintenance["last_attempt_at"] = now.replace(microsecond=0).isoformat().replace(
-        "+00:00", "Z"
-    )
-    cleanup_result = release_inactive_worker_worktrees(config, state, settings)
-    maintenance["last_result"] = cleanup_result
-    if int(cleanup_result.get("removed") or 0) > 0:
-        archived = int(cleanup_result.get("archived") or 0)
-        message = f"Released {cleanup_result.get('removed')} inactive auto worktree(s)"
-        if archived > 0:
-            message += f" after archiving {archived} dirty worktree(s)"
-        if int(cleanup_result.get("failed") or 0) > 0:
-            message += f"; {cleanup_result.get('failed')} cleanup failure(s) remain"
-        write_activity_log(
-            config,
-            {
-                "type": "worker_workspace_cleanup",
-                "message": message,
-                "checked": cleanup_result.get("checked"),
-                "removed": cleanup_result.get("removed"),
-                "skipped": cleanup_result.get("skipped"),
-                "failed": cleanup_result.get("failed"),
-                "archived": cleanup_result.get("archived"),
-                "errors": cleanup_result.get("errors"),
-            },
-        )
-    return True
-
-
-def _disk_guard_should_cleanup(record: dict[str, Any], settings: dict[str, Any], snapshot: dict[str, Any]) -> bool:
-    if float(snapshot.get("usage_percent") or 0.0) >= float(settings.get("cleanup_usage_percent", 85.0)):
-        return True
-    last_cleanup = _parse_iso_utc(record.get("last_cleanup_at"))
-    if last_cleanup is None:
-        return True
-    return (datetime.now(timezone.utc) - last_cleanup).total_seconds() >= float(
-        settings.get("cleanup_interval_seconds", 3600.0)
-    )
 
 
 def maintain_disk_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
@@ -925,7 +397,7 @@ def _host_available_memory_bytes() -> int | None:
 def maintain_resource_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
     record = state.setdefault("resource_guard", {})
     now = datetime.now(timezone.utc)
-    last = _parse_iso_utc(str(record.get("last_check_at") or ""))
+    last = parse_runtime_timestamp(str(record.get("last_check_at") or ""))
     settings = ((config.get("supervisor") or {}).get("resource_guard") or {})
     interval = float(settings.get("check_interval_seconds", 5.0))
     if last is not None and (now - last).total_seconds() < max(1.0, interval):
@@ -1000,7 +472,7 @@ def note_dispatch_blocked_by_disk_guard(config: dict[str, Any], state: dict[str,
     guard = state.setdefault("disk_guard", {})
     reason = str(guard.get("reason") or "disk guard blocked dispatch")
     now = utc_now()
-    last_at = _parse_iso_utc(guard.get("last_dispatch_block_log_at"))
+    last_at = parse_runtime_timestamp(guard.get("last_dispatch_block_log_at"))
     cooldown_seconds = 300.0
     if (
         guard.get("last_dispatch_block_source") == source
@@ -1194,15 +666,6 @@ def console_log(message: str, *, quiet: bool = False) -> None:
         return
     timestamp = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}", flush=True)
-
-
-def parse_runtime_timestamp(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def heartbeat_lag_seconds(previous_heartbeat: str | None, current_heartbeat: str | None) -> float | None:
@@ -2011,7 +1474,7 @@ def provider_report_age_seconds(
 ) -> float:
     """Age of a cached capability report; infinite when it cannot be dated."""
     now = now or datetime.now(timezone.utc)
-    generated_at = _parse_iso_utc(str((report or {}).get("generated_at") or ""))
+    generated_at = parse_runtime_timestamp(str((report or {}).get("generated_at") or ""))
     if generated_at is not None:
         return max(0.0, (now - generated_at).total_seconds())
     try:
@@ -2379,7 +1842,7 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
         if record.get("status") in {"started", "manual_pending", "completed", "failed"}:
             continue
         if record.get("status") == "waiting_capacity":
-            next_retry = _parse_iso_utc(record.get("next_retry_at"))
+            next_retry = parse_runtime_timestamp(record.get("next_retry_at"))
             if next_retry is not None and next_retry > datetime.now(timezone.utc):
                 continue
         active_worker = next(
@@ -2741,42 +2204,6 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
                 break
 
 
-def _iter_json_string_values(payload: Any) -> list[str]:
-    return infra_iter_json_string_values(payload)
-
-
-def _ignore_embedded_failure_line(stripped: str) -> bool:
-    return infra_ignore_embedded_failure_line(stripped)
-
-
-def _extract_failure_candidate(text: str) -> str | None:
-    return infra_extract_failure_candidate(text)
-
-
-def _captured_tool_log_line_indexes(lines: list[str]) -> set[int]:
-    return infra_captured_tool_log_line_indexes(lines)
-
-
-def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
-    return infra_detect_json_worker_failure_signal(line)
-
-
-def _detect_json_worker_failure(line: str) -> str | None:
-    return infra_detect_json_worker_failure(line)
-
-
-def _is_result_level_provider_blocker(candidate: str) -> bool:
-    return infra_is_result_level_provider_blocker(candidate)
-
-
-def detect_worker_failure_signal(worker: dict[str, Any]) -> WorkerFailureSignal | None:
-    return infra_detect_worker_failure_signal(worker)
-
-
-def detect_worker_failure(worker: dict[str, Any]) -> str | None:
-    return infra_detect_worker_failure(worker)
-
-
 def resolve_terminal_worker_reason(worker: dict[str, Any], reason: str) -> str:
     if reason != PREMATURE_EXIT_REASON:
         return reason
@@ -2786,15 +2213,6 @@ def resolve_terminal_worker_reason(worker: dict[str, Any], reason: str) -> str:
 
 def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reason: str | None) -> dict[str, Any]:
     return classify_domain_failure(config, worker, reason).as_mapping()
-
-
-def _parse_iso_utc(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def infer_pause_resume_at(reason: str | None, *, paused_at: datetime | None = None) -> float | None:
@@ -2866,7 +2284,7 @@ def _hydrate_reason_hint_resume_at(state: dict[str, Any], agent_id: str, entry: 
             return None
     hinted = infer_pause_resume_at(
         str(entry.get("reason") or ""),
-        paused_at=_parse_iso_utc(str(entry.get("paused_at") or "")),
+        paused_at=parse_runtime_timestamp(str(entry.get("paused_at") or "")),
     )
     if hinted is None:
         return None
@@ -3228,19 +2646,8 @@ def worker_reassignment_settings(config: dict[str, Any]) -> dict[str, Any]:
     return settings
 
 
-# Tree-guard primitives are defined in worker_tree_guard.py so the chatbox
-# PreToolUse hook (permission_broker.py) can share them without pulling
-# supervisor's heavy import graph. Re-exported here so historical
-# `supervisor.X` references — including the unit-test mock
-# `mock.patch.object(supervisor.subprocess, "run", ...)` — keep working.
 from worker_tree_guard import (  # noqa: E402
-    DEFAULT_WORKER_TREE_GUARD_BLOCKING_GLOBS,
-    WORKER_TREE_GUARD_SKIP_REASONS,
-    _worker_tree_guard_matches,
-    _worker_tree_guard_porcelain,
-    check_chatbox_tree_guard,
     check_worker_tree_guard,
-    worker_tree_guard_settings,
 )
 
 
@@ -3407,7 +2814,7 @@ def chair_reassignment_guard_active(state: dict[str, Any] | None, task_id: str, 
     guard = chair_reassignment_guard_registry(state).get(chair_reassignment_guard_key(task_id, role))
     if not isinstance(guard, dict):
         return False
-    expires_at = _parse_iso_utc(guard.get("expires_at"))
+    expires_at = parse_runtime_timestamp(guard.get("expires_at"))
     if expires_at is not None and expires_at <= datetime.now(timezone.utc):
         chair_reassignment_guard_registry(state).pop(chair_reassignment_guard_key(task_id, role), None)
         return False
@@ -3565,12 +2972,12 @@ def chair_review_needs_immediate_attention(
     # Only a pause recorded since the last review is new information; one the
     # chair has already seen must fall back to the normal review cooldown
     # instead of re-triggering a review on every tick.
-    last_review_at = _parse_iso_utc((state.get("chair_review") or {}).get("last_review_at"))
+    last_review_at = parse_runtime_timestamp((state.get("chair_review") or {}).get("last_review_at"))
     for pause in (
         *actionable_dispatch_pause_records(state, status, limit=1),
         *active_provider_pause_records(state),
     ):
-        paused_at = _parse_iso_utc(str(pause.get("paused_at") or ""))
+        paused_at = parse_runtime_timestamp(str(pause.get("paused_at") or ""))
         if last_review_at is None or paused_at is None or paused_at > last_review_at:
             return True
     return False
@@ -4010,32 +3417,6 @@ def proactive_claim_plan_for_idle_agent(
     }
 
 
-def proactive_claim_plan_for_task(
-    config: dict[str, Any],
-    *,
-    task: dict[str, Any],
-    task_map: dict[str, dict[str, Any]],
-    idle_agent_names: list[str],
-    agent_loads: dict[str, list[int]],
-    helper_settings: dict[str, Any],
-    state: dict[str, Any] | None = None,
-) -> dict[str, str] | None:
-    for idle_agent_name in ordered_idle_agent_names(idle_agent_names, agent_loads):
-        plan = proactive_claim_plan_for_idle_agent(
-            config,
-            task=task,
-            task_map=task_map,
-            idle_agent_name=idle_agent_name,
-            idle_agent_names=idle_agent_names,
-            agent_loads=agent_loads,
-            helper_settings=helper_settings,
-            state=state,
-        )
-        if plan:
-            return plan
-    return None
-
-
 def ensure_candidate_lifecycle_migration(
     config: dict[str, Any], status: dict[str, Any]
 ) -> bool:
@@ -4056,45 +3437,6 @@ def ensure_candidate_lifecycle_migration(
         },
     )
     return False
-
-
-def brief_reason_text(text: str | None, max_length: int = 240) -> str:
-    raw = re.sub(r"\s+", " ", str(text or "")).strip()
-    if len(raw) <= max_length:
-        return raw
-    clipped = raw[: max_length - 1].rstrip()
-    if " " in clipped:
-        clipped = clipped.rsplit(" ", 1)[0]
-    return clipped + "…"
-
-
-def summarize_worker_failure(config: dict[str, Any], worker: dict[str, Any], reason: str) -> tuple[str, str]:
-    failure = classify_worker_failure(config, worker, reason)
-    label = str(failure.get("label") or "worker failure").strip()
-    summary = brief_reason_text(reason, max_length=220)
-    if label and label.lower() not in summary.lower():
-        summary = f"{label}: {summary}"
-    return label or "worker failure", summary
-
-
-def record_worker_evidence(config: dict[str, Any], worker: dict[str, Any], reason: str) -> str:
-    run_id = str(worker.get("run_id") or new_runtime_id("worker")).strip()
-    path = evidence_path(run_id)
-    label, summary = summarize_worker_failure(config, worker, reason)
-    payload = {
-        "created_at": utc_now(),
-        "provider": worker.get("provider"),
-        "task_id": worker.get("task_id"),
-        "worker_run_id": run_id,
-        "queue_event_id": worker.get("queue_event_id"),
-        "kind": label,
-        "summary": summary,
-        "log_path": worker.get("log_path"),
-        "payload_path": worker.get("payload_path"),
-        "raw_message": reason,
-    }
-    write_json(path, payload)
-    return relpath(path)
 
 
 def upsert_worker_dispatch_pause(
@@ -4119,14 +3461,6 @@ def upsert_worker_dispatch_pause(
             "raw_ref": raw_ref,
             "mode_bucket": "execution",
         },
-    )
-
-
-def clear_worker_dispatch_pause(state: dict[str, Any], worker: dict[str, Any]) -> None:
-    clear_dispatch_pause(
-        state,
-        task_id=str(worker.get("task_id") or "") or None,
-        worker_run_id=str(worker.get("run_id") or "") or None,
     )
 
 
@@ -4416,7 +3750,7 @@ def maybe_trigger_retry_or_fallback(
         schedule_worker_retry(config, worker, failure_summary)
         if failure.get("kind") == "capacity" and allow_provider_pause:
             agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-            next_retry_at = _parse_iso_utc(worker.get("next_retry_at"))
+            next_retry_at = parse_runtime_timestamp(worker.get("next_retry_at"))
             reset_seconds = None
             if next_retry_at is not None:
                 reset_seconds = max(1, int((next_retry_at - datetime.now(timezone.utc)).total_seconds()))
@@ -4677,7 +4011,7 @@ def retry_due_workers(
     for worker in list(state.get("workers", {}).values()):
         if worker.get("status") != "retry_backoff":
             continue
-        next_retry_at = _parse_iso_utc(worker.get("next_retry_at"))
+        next_retry_at = parse_runtime_timestamp(worker.get("next_retry_at"))
         if next_retry_at is None or next_retry_at > now:
             continue
         queue_event_id = worker.get("queue_event_id")
@@ -4870,6 +4204,410 @@ def resume_claude_worker(
     }
 
 
+def handle_worker_failure_signal(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any],
+    worker: dict[str, Any],
+    failure_signal: WorkerFailureSignal,
+    *,
+    current_mode: str,
+    live: bool,
+) -> tuple[bool, bool]:
+    """Apply a detected provider failure and report (handled, changed)."""
+    failure_reason = failure_signal.reason
+    failure = classify_worker_failure(config, worker, failure_reason)
+    if live and failure.get("kind") not in {"auth", "quota_terminal", "capacity"}:
+        return False, False
+
+    prefix = "live worker failure" if live else "worker failure"
+    transient = "" if live else f" transient={'yes' if failure.get('transient') else 'no'}"
+    console_log(
+        f"{prefix}: provider={worker.get('provider')} task={worker.get('task_id')} "
+        f"kind={failure.get('label')}{transient} source={failure_signal.source} reason={failure_reason}",
+        quiet=SUPERVISOR_LOG_QUIET,
+    )
+    if maybe_rotate_antigravity_lane(
+        config,
+        state,
+        provider_report,
+        worker,
+        failure,
+        failure_reason,
+        authorized=failure_signal.provider_pause_authorized,
+    ):
+        return True, True
+
+    if live:
+        terminate_worker_pid(worker.get("pid"))
+
+    authorized = failure_signal.provider_pause_authorized
+    agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+    if failure.get("kind") == "quota_terminal" and authorized and agent_id:
+        pause_provider(
+            state,
+            agent_id,
+            failure_reason,
+            kind="quota",
+            reset_seconds=14400,
+            identity=worker.get("identity"),
+        )
+    if failure.get("kind") == "auth" and authorized and agent_id:
+        pause_provider(
+            state,
+            agent_id,
+            failure_reason,
+            kind="auth",
+            reset_seconds=None,
+            identity=worker.get("identity"),
+        )
+    if failure.get("kind") == "capacity" and current_mode == "coordination":
+        reset_seconds = int(
+            worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300)
+        )
+        if agent_id and authorized:
+            pause_provider(
+                state,
+                agent_id,
+                failure_reason,
+                kind="capacity",
+                reset_seconds=reset_seconds,
+            )
+        finalize_terminal_worker_outcome(config, state, worker, failure_reason)
+        return True, True
+
+    if is_transient_worker_failure(config, worker, failure_reason):
+        handled, changed = maybe_trigger_retry_or_fallback(
+            config,
+            state,
+            provider_report,
+            worker,
+            failure_reason,
+            allow_provider_pause=authorized,
+        )
+        if handled:
+            return True, changed
+
+    reassigned_to = maybe_reassign_task_after_worker_failure(
+        config,
+        worker,
+        failure_reason,
+        terminal=True,
+        state=state,
+        provider_report=provider_report,
+    )
+    if reassigned_to:
+        worker["status"] = "reassigned"
+        worker["reassigned_to"] = reassigned_to
+        worker["last_error"] = failure_reason
+        worker["last_event_at"] = utc_now()
+        finalize_queue_event_record(config, state, worker, "completed")
+        return True, True
+
+    finalize_terminal_worker_outcome(config, state, worker, failure_reason)
+    return True, True
+
+
+def finalize_exited_worker(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    *,
+    current_mode: str,
+    task_status: str,
+    expected_completion_statuses: set[str],
+    now: datetime,
+) -> bool:
+    """Consume the outcome of a dead worker that has no provider failure."""
+    if is_terminal_worker(worker) or worker.get("status") == "manual_pending":
+        return False
+
+    if current_mode in {"planning", "coordination"}:
+        worker["status"] = "completed"
+        worker["last_event_at"] = utc_now()
+        write_activity_log(
+            config,
+            {
+                "type": "worker_completed",
+                "provider": worker.get("provider"),
+                "task_id": worker.get("task_id"),
+                "message": f"{current_mode.title()} worker exited cleanly.",
+                "worker_run_id": worker["run_id"],
+                "session_url": worker.get("session_url"),
+            },
+        )
+        finalize_queue_event_record(config, state, worker, "completed")
+    elif task_status in expected_completion_statuses:
+        worker["status"] = "completed"
+        worker["last_event_at"] = utc_now()
+        write_activity_log(
+            config,
+            {
+                "type": "worker_completed",
+                "provider": worker.get("provider"),
+                "task_id": worker.get("task_id"),
+                "message": f"Background worker process exited after advancing the task to `{task_status}`.",
+                "worker_run_id": worker["run_id"],
+                "pr_url": worker.get("pr_url"),
+                "session_url": worker.get("session_url"),
+            },
+        )
+        finalize_queue_event_record(config, state, worker, "completed")
+    else:
+        outcome = worker_reported_outcome(worker)
+        if outcome and outcome.get("outcome") == "blocked" and apply_worker_reported_block(config, worker, outcome):
+            worker["status"] = "completed"
+            worker["last_event_at"] = utc_now()
+            finalize_queue_event_record(config, state, worker, "completed")
+            write_activity_log(
+                config,
+                {
+                    "type": "worker_completed",
+                    "provider": worker.get("provider"),
+                    "task_id": worker.get("task_id"),
+                    "message": "Supervisor persisted the worker's reported task blocker.",
+                    "worker_run_id": worker["run_id"],
+                },
+            )
+            return True
+        if outcome and outcome.get("outcome") in {"advanced", "progress"}:
+            if not consume_progress_outcome(config, worker, outcome, now=now):
+                return False
+            finalize_queue_event_record(config, state, worker, "completed")
+            write_activity_log(
+                config,
+                {
+                    "type": "worker_progress_completed",
+                    "provider": worker.get("provider"),
+                    "task_id": worker.get("task_id"),
+                    "message": "Worker reported progress; its completed attempt owns the redispatch cooldown.",
+                    "worker_run_id": worker["run_id"],
+                    "result_id": worker.get("consumed_result_id"),
+                },
+            )
+            return True
+
+        # The cached task snapshot can predate a worker's final status write.
+        fresh_task = task_index_from_status(config, load_status(config)).get(worker.get("task_id")) or {}
+        fresh_status = str(fresh_task.get("status") or "").lower()
+        if fresh_status and fresh_status != task_status and fresh_status in expected_completion_statuses:
+            worker["status"] = "completed"
+            worker["last_event_at"] = utc_now()
+            write_activity_log(
+                config,
+                {
+                    "type": "worker_completed",
+                    "provider": worker.get("provider"),
+                    "task_id": worker.get("task_id"),
+                    "message": (
+                        f"Background worker process exited after advancing the task to `{fresh_status}` "
+                        "(observed on fresh re-read; cached snapshot predated the worker's status write)."
+                    ),
+                    "worker_run_id": worker["run_id"],
+                    "pr_url": worker.get("pr_url"),
+                    "session_url": worker.get("session_url"),
+                },
+            )
+            finalize_queue_event_record(config, state, worker, "completed")
+        else:
+            finalize_terminal_worker_outcome(
+                config,
+                state,
+                worker,
+                PREMATURE_EXIT_REASON,
+                allow_provider_pause=True,
+            )
+
+    if worker.get("status") == "completed":
+        clear_lane_failure(state, worker.get("agent_id") or worker.get("provider"))
+    return True
+
+
+def handle_worker_approval_state(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any],
+    worker: dict[str, Any],
+    *,
+    pending: list[dict[str, Any]],
+    resolved: list[dict[str, Any]],
+    alive: bool,
+) -> tuple[bool, bool]:
+    """Advance approval state and report (stop_processing, changed)."""
+    if pending:
+        if not alive and not worker_supports_approval_resume(worker):
+            worker["status"] = "failed"
+            worker["deferred_action"] = None
+            worker["deferred_tool_use"] = None
+            worker["last_event_at"] = utc_now()
+            worker["last_error"] = "Worker exited while waiting for approval."
+            for approval in pending:
+                approval_id = approval.get("approval_id")
+                if not approval_id:
+                    continue
+                try:
+                    resolve_approval(
+                        config,
+                        approval_id,
+                        decision="deny",
+                        note="Auto-denied because the worker exited before approval could be applied.",
+                        remember=False,
+                    )
+                except KeyError:
+                    pass
+            write_activity_log(
+                config,
+                {
+                    "type": "worker_failed",
+                    "provider": worker.get("provider"),
+                    "task_id": worker.get("task_id"),
+                    "message": worker["last_error"],
+                    "worker_run_id": worker["run_id"],
+                },
+            )
+            finalize_queue_event_record(config, state, worker, "failed", worker["last_error"])
+            return True, True
+
+        approval = pending[0]
+        next_status = "waiting_approval" if alive else "suspended_approval"
+        if worker.get("status") == next_status:
+            return True, False
+        worker["status"] = next_status
+        worker["deferred_action"] = approval.get("approval_id")
+        worker["last_event_at"] = approval.get("created_at") or worker.get("last_event_at") or utc_now()
+        write_activity_log(
+            config,
+            {
+                "type": "worker_waiting_approval",
+                "provider": worker.get("provider"),
+                "task_id": worker.get("task_id"),
+                "message": (
+                    f"Worker suspended for approval {approval.get('approval_id')}"
+                    if next_status == "suspended_approval"
+                    else f"Worker waiting on approval {approval.get('approval_id')}"
+                ),
+                "worker_run_id": worker["run_id"],
+                "approval_id": approval.get("approval_id"),
+            },
+        )
+        if worker.get("queue_event_id"):
+            queue_status(state, worker["queue_event_id"])["status"] = "manual_pending"
+        return True, True
+
+    changed = False
+    if worker.get("status") in {"waiting_approval", "suspended_approval"} and resolved:
+        latest = resolved[-1]
+        if latest.get("approval_id") != worker.get("last_approval_id"):
+            worker["last_approval_id"] = latest.get("approval_id")
+            if latest.get("decision") == "allow" and worker_supports_approval_resume(worker):
+                resumed = resume_claude_worker(config, worker, provider_report, approval=latest)
+                write_activity_log(
+                    config,
+                    {
+                        "type": "worker_resumed",
+                        "provider": worker.get("provider"),
+                        "task_id": worker.get("task_id"),
+                        "message": f"Resumed worker after approval {latest.get('approval_id')}",
+                        "worker_run_id": worker["run_id"],
+                        "approval_id": latest.get("approval_id"),
+                        "command": resumed.get("command") if resumed else None,
+                        "log_path": resumed.get("log_path") if resumed else None,
+                        "allowed_tools": resumed.get("allowed_tools") if resumed else None,
+                    },
+                )
+                changed = True
+                if resumed:
+                    return True, True
+            if latest.get("decision") == "deny":
+                worker["status"] = "failed"
+                worker["last_event_at"] = utc_now()
+                reason = latest.get("note") or "Worker approval denied."
+                write_activity_log(
+                    config,
+                    {
+                        "type": "worker_failed",
+                        "provider": worker.get("provider"),
+                        "task_id": worker.get("task_id"),
+                        "message": reason,
+                        "worker_run_id": worker["run_id"],
+                        "approval_id": latest.get("approval_id"),
+                    },
+                )
+                finalize_queue_event_record(config, state, worker, "failed", reason)
+                return True, True
+        changed = True
+
+    current_status = worker.get("status")
+    if current_status not in {"waiting_approval", "suspended_approval"}:
+        return False, changed
+
+    worker["deferred_action"] = None
+    worker["deferred_tool_use"] = None
+    if not resolved:
+        worker["last_approval_id"] = None
+    worker["last_event_at"] = utc_now()
+    if alive:
+        worker["status"] = "running"
+    else:
+        worker["status"] = "failed"
+        worker["last_error"] = (
+            "Approval state disappeared before the worker could resume."
+            if current_status == "waiting_approval"
+            else "Approval state disappeared before the suspended worker could resume."
+        )
+        write_activity_log(
+            config,
+            {
+                "type": "worker_failed",
+                "provider": worker.get("provider"),
+                "task_id": worker.get("task_id"),
+                "message": worker["last_error"],
+                "worker_run_id": worker["run_id"],
+            },
+        )
+        finalize_queue_event_record(config, state, worker, "failed", worker["last_error"])
+    return False, True
+
+
+def supersede_worker(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    *,
+    alive: bool,
+    reason: str,
+    console_reason: str,
+) -> bool:
+    """Supersede a worker unless its dispatch cooldown still protects it."""
+    if alive and worker_in_dispatch_cooldown(
+        worker,
+        ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
+    ):
+        return False
+    if alive:
+        terminate_worker_pid(worker.get("pid"))
+    worker["status"] = "superseded"
+    worker["last_event_at"] = utc_now()
+    worker["last_error"] = reason
+    finalize_queue_event_record(config, state, worker, "completed", reason)
+    write_activity_log(
+        config,
+        {
+            "type": "worker_superseded",
+            "provider": worker.get("provider"),
+            "task_id": worker.get("task_id"),
+            "message": reason,
+            "worker_run_id": worker.get("run_id"),
+        },
+    )
+    console_log(
+        f"worker superseded{console_reason}: task={worker.get('task_id')} "
+        f"provider={worker.get('provider')} run={worker.get('run_id')}",
+        quiet=SUPERVISOR_LOG_QUIET,
+    )
+    return True
+
+
 def poll_workers(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -4950,107 +4688,35 @@ def poll_workers(
         current_mode = worker_runtime_mode(worker)
         task_status = str(task.get("status") or "").lower()
         expected_completion_statuses = worker_expected_completion_statuses(config, worker, task)
-        if (
+        assignment_moved = (
             worker.get("queue_event_id")
             and current_mode == "execution"
             and not worker_matches_current_assignment(config, worker, task_map)
-        ):
-            if not alive and task_status in expected_completion_statuses:
-                pass
-            else:
-                if worker.get("status") == "superseded":
-                    continue
-                # Dispatch cooldown: protect freshly-dispatched workers
-                # from being killed for an assignment reshuffle. Without
-                # this guard, availability-first claims thrash the worker
-                # pool — a worker that just spawned is wasteful to kill
-                # before it has had a chance to make progress.
-                if alive and worker_in_dispatch_cooldown(
-                    worker,
-                    ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
-                ):
-                    # supersede skipped: worker still within dispatch cooldown.
-                    # Intentionally silent — this branch is re-evaluated every
-                    # tick for every protected worker, so logging it floods the
-                    # journal with hundreds of identical lines and buries real
-                    # events. The cooldown check is cheap; only the log was noise.
-                    continue
-                if alive:
-                    terminate_worker_pid(worker.get("pid"))
-                worker["status"] = "superseded"
-                worker["last_event_at"] = utc_now()
-                worker["last_error"] = "Worker superseded after task responsibility moved to another agent."
-                finalize_queue_event_record(
-                    config,
-                    state,
-                    worker,
-                    "completed",
-                    worker["last_error"],
-                )
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_superseded",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": worker["last_error"],
-                        "worker_run_id": worker.get("run_id"),
-                    },
-                )
-                console_log(
-                    f"worker superseded: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
-                    quiet=SUPERVISOR_LOG_QUIET,
-                )
-                changed = True
-                continue
-        if (
+        )
+        priority_escalation = (
             worker.get("queue_event_id")
             and current_mode == "execution"
             and worker.get("status") in active_worker_statuses
             and higher_priority_ready_task_exists(config, worker, task_map, state=state, active_statuses=active_worker_statuses)
-        ):
-            # Dispatch cooldown: same protection as the assignment-moved
-            # branch. Priority escalation that fires within seconds of a
-            # dispatch is almost always thrashing — the new "higher
-            # priority" task was already visible when this worker was
-            # claimed, so the supervisor should have taken that task
-            # then rather than killing a fresh worker now.
-            if alive and worker_in_dispatch_cooldown(
-                worker,
-                ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
-            ):
-                # priority-escalation supersede skipped: worker still within
-                # dispatch cooldown. Intentionally silent for the same reason as
-                # the assignment-moved branch above — re-evaluated every tick per
-                # worker, so logging it is pure journal noise.
+        )
+        supersede_reason = None
+        console_reason = ""
+        if assignment_moved and not (not alive and task_status in expected_completion_statuses):
+            supersede_reason = "Worker superseded after task responsibility moved to another agent."
+        elif priority_escalation:
+            supersede_reason = "Worker superseded to prioritize higher-priority review work."
+            console_reason = " for priority escalation"
+        if supersede_reason:
+            if worker.get("status") == "superseded":
                 continue
-            if alive:
-                terminate_worker_pid(worker.get("pid"))
-            worker["status"] = "superseded"
-            worker["last_event_at"] = utc_now()
-            worker["last_error"] = "Worker superseded to prioritize higher-priority review work."
-            finalize_queue_event_record(
+            changed = supersede_worker(
                 config,
                 state,
                 worker,
-                "completed",
-                worker["last_error"],
-            )
-            write_activity_log(
-                config,
-                {
-                    "type": "worker_superseded",
-                    "provider": worker.get("provider"),
-                    "task_id": worker.get("task_id"),
-                    "message": worker["last_error"],
-                    "worker_run_id": worker.get("run_id"),
-                },
-            )
-            console_log(
-                f"worker superseded for priority escalation: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
-                quiet=SUPERVISOR_LOG_QUIET,
-            )
-            changed = True
+                alive=alive,
+                reason=supersede_reason,
+                console_reason=console_reason,
+            ) or changed
             continue
         if (
             not alive
@@ -5148,206 +4814,33 @@ def poll_workers(
             continue
         pending = pending_by_run.get(worker["run_id"], [])
         resolved = resolved_by_run.get(worker["run_id"], [])
-        if pending:
-            if not alive and not worker_supports_approval_resume(worker):
-                worker["status"] = "failed"
-                worker["deferred_action"] = None
-                worker["deferred_tool_use"] = None
-                worker["last_event_at"] = utc_now()
-                worker["last_error"] = "Worker exited while waiting for approval."
-                for approval in pending:
-                    approval_id = approval.get("approval_id")
-                    if not approval_id:
-                        continue
-                    try:
-                        resolve_approval(
-                            config,
-                            approval_id,
-                            decision="deny",
-                            note="Auto-denied because the worker exited before approval could be applied.",
-                            remember=False,
-                        )
-                    except KeyError:
-                        pass
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_failed",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": worker["last_error"],
-                        "worker_run_id": worker["run_id"],
-                    },
-                )
-                finalize_queue_event_record(config, state, worker, "failed", worker["last_error"])
-                changed = True
-                continue
-            approval = pending[0]
-            next_status = "waiting_approval" if pid_is_alive(worker.get("pid")) else "suspended_approval"
-            if worker.get("status") != next_status:
-                worker["status"] = next_status
-                worker["deferred_action"] = approval.get("approval_id")
-                worker["last_event_at"] = approval.get("created_at") or worker.get("last_event_at") or utc_now()
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_waiting_approval",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": (
-                            f"Worker suspended for approval {approval.get('approval_id')}"
-                            if next_status == "suspended_approval"
-                            else f"Worker waiting on approval {approval.get('approval_id')}"
-                        ),
-                        "worker_run_id": worker["run_id"],
-                        "approval_id": approval.get("approval_id"),
-                    },
-                )
-                if worker.get("queue_event_id"):
-                    queue_status(state, worker["queue_event_id"])["status"] = "manual_pending"
-                changed = True
+        stop_processing, approval_changed = handle_worker_approval_state(
+            config,
+            state,
+            provider_report,
+            worker,
+            pending=pending,
+            resolved=resolved,
+            alive=alive,
+        )
+        changed = approval_changed or changed
+        if stop_processing:
             continue
-
-        if worker.get("status") in {"waiting_approval", "suspended_approval"} and resolved:
-            latest = resolved[-1]
-            if latest.get("approval_id") != worker.get("last_approval_id"):
-                worker["last_approval_id"] = latest.get("approval_id")
-                if latest.get("decision") == "allow" and worker_supports_approval_resume(worker):
-                    resumed = resume_claude_worker(config, worker, provider_report, approval=latest)
-                    write_activity_log(
-                        config,
-                        {
-                            "type": "worker_resumed",
-                            "provider": worker.get("provider"),
-                            "task_id": worker.get("task_id"),
-                            "message": f"Resumed worker after approval {latest.get('approval_id')}",
-                            "worker_run_id": worker["run_id"],
-                            "approval_id": latest.get("approval_id"),
-                            "command": resumed.get("command") if resumed else None,
-                            "log_path": resumed.get("log_path") if resumed else None,
-                            "allowed_tools": resumed.get("allowed_tools") if resumed else None,
-                        },
-                    )
-                    changed = True
-                    if resumed:
-                        continue
-                if latest.get("decision") == "deny":
-                    worker["status"] = "failed"
-                    worker["last_event_at"] = utc_now()
-                    write_activity_log(
-                        config,
-                        {
-                            "type": "worker_failed",
-                            "provider": worker.get("provider"),
-                            "task_id": worker.get("task_id"),
-                            "message": latest.get("note") or "Worker approval denied.",
-                            "worker_run_id": worker["run_id"],
-                            "approval_id": latest.get("approval_id"),
-                        },
-                    )
-                    finalize_queue_event_record(config, state, worker, "failed", latest.get("note") or "Worker approval denied.")
-                    changed = True
-                    continue
-            changed = True
-
-        current_status = worker.get("status")
-        if current_status in {"waiting_approval", "suspended_approval"} and not pending:
-            worker["deferred_action"] = None
-            worker["deferred_tool_use"] = None
-            if not resolved:
-                worker["last_approval_id"] = None
-            if alive:
-                worker["status"] = "running"
-                worker["last_event_at"] = utc_now()
-            else:
-                worker["status"] = "failed"
-                worker["last_event_at"] = utc_now()
-                worker["last_error"] = (
-                    "Approval state disappeared before the worker could resume."
-                    if current_status == "waiting_approval"
-                    else "Approval state disappeared before the suspended worker could resume."
-                )
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_failed",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": worker["last_error"],
-                        "worker_run_id": worker["run_id"],
-                    },
-                )
-                finalize_queue_event_record(config, state, worker, "failed", worker["last_error"])
-            changed = True
 
         if alive:
             live_failure_signal = detect_worker_failure_signal(worker)
             if live_failure_signal:
-                live_failure_reason = live_failure_signal.reason
-                failure = classify_worker_failure(config, worker, live_failure_reason)
-                if failure.get("kind") in {"auth", "quota_terminal", "capacity"}:
-                    console_log(
-                        f"live worker failure: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} source={live_failure_signal.source} reason={live_failure_reason}",
-                        quiet=SUPERVISOR_LOG_QUIET,
-                    )
-                    if maybe_rotate_antigravity_lane(
-                        config,
-                        state,
-                        provider_report,
-                        worker,
-                        failure,
-                        live_failure_reason,
-                        authorized=live_failure_signal.provider_pause_authorized,
-                    ):
-                        changed = True
-                        continue
-                    terminate_worker_pid(worker.get("pid"))
-                    if failure.get("kind") == "quota_terminal" and live_failure_signal.provider_pause_authorized:
-                        agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                        if agent_id:
-                            pause_provider(state, agent_id, live_failure_reason, kind="quota", reset_seconds=14400, identity=worker.get("identity"))
-                    if failure.get("kind") == "auth" and live_failure_signal.provider_pause_authorized:
-                        agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                        if agent_id:
-                            pause_provider(state, agent_id, live_failure_reason, kind="auth", reset_seconds=None, identity=worker.get("identity"))
-                    if failure.get("kind") == "capacity" and current_mode == "coordination":
-                        agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                        reset_seconds = int(worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300))
-                        if agent_id and live_failure_signal.provider_pause_authorized:
-                            pause_provider(state, agent_id, live_failure_reason, kind="capacity", reset_seconds=reset_seconds)
-                        finalize_terminal_worker_outcome(config, state, worker, live_failure_reason)
-                        changed = True
-                        continue
-                    if is_transient_worker_failure(config, worker, live_failure_reason):
-                        handled, retry_changed = maybe_trigger_retry_or_fallback(
-                            config,
-                            state,
-                            provider_report,
-                            worker,
-                            live_failure_reason,
-                            allow_provider_pause=live_failure_signal.provider_pause_authorized,
-                        )
-                        if handled:
-                            changed = changed or retry_changed
-                            continue
-                    reassigned_to = maybe_reassign_task_after_worker_failure(
-                        config,
-                        worker,
-                        live_failure_reason,
-                        terminal=True,
-                        state=state,
-                        provider_report=provider_report,
-                    )
-                    if reassigned_to:
-                        worker["status"] = "reassigned"
-                        worker["reassigned_to"] = reassigned_to
-                        worker["last_error"] = live_failure_reason
-                        worker["last_event_at"] = utc_now()
-                        finalize_queue_event_record(config, state, worker, "completed")
-                        changed = True
-                        continue
-                    finalize_terminal_worker_outcome(config, state, worker, live_failure_reason)
-                    changed = True
+                handled, failure_changed = handle_worker_failure_signal(
+                    config,
+                    state,
+                    provider_report,
+                    worker,
+                    live_failure_signal,
+                    current_mode=current_mode,
+                    live=True,
+                )
+                changed = failure_changed or changed
+                if handled:
                     continue
             if worker.get("status") == "stalled" and (last_event_advanced or process_activity_advanced):
                 worker["status"] = "running"
@@ -5399,181 +4892,28 @@ def poll_workers(
 
         failure_signal = detect_worker_failure_signal(worker)
         if failure_signal and worker.get("status") != "failed":
-            failure_reason = failure_signal.reason
-            failure = classify_worker_failure(config, worker, failure_reason)
-            console_log(
-                f"worker failure: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} transient={'yes' if failure.get('transient') else 'no'} source={failure_signal.source} reason={failure_reason}",
-                quiet=SUPERVISOR_LOG_QUIET,
-            )
-            if maybe_rotate_antigravity_lane(
+            handled, failure_changed = handle_worker_failure_signal(
                 config,
                 state,
                 provider_report,
                 worker,
-                failure,
-                failure_reason,
-                authorized=failure_signal.provider_pause_authorized,
-            ):
-                changed = True
-                continue
-            if failure.get("kind") == "quota_terminal" and failure_signal.provider_pause_authorized:
-                agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                if agent_id:
-                    pause_provider(state, agent_id, failure_reason, kind="quota", reset_seconds=14400, identity=worker.get("identity"))
-            if failure.get("kind") == "auth" and failure_signal.provider_pause_authorized:
-                agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                if agent_id:
-                    pause_provider(state, agent_id, failure_reason, kind="auth", reset_seconds=None, identity=worker.get("identity"))
-            if failure.get("kind") == "capacity" and current_mode == "coordination":
-                agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                reset_seconds = int(worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300))
-                if agent_id and failure_signal.provider_pause_authorized:
-                    pause_provider(state, agent_id, failure_reason, kind="capacity", reset_seconds=reset_seconds)
-                finalize_terminal_worker_outcome(config, state, worker, failure_reason)
-                changed = True
-                continue
-            if is_transient_worker_failure(config, worker, failure_reason):
-                handled, retry_changed = maybe_trigger_retry_or_fallback(
-                    config,
-                    state,
-                    provider_report,
-                    worker,
-                    failure_reason,
-                    allow_provider_pause=failure_signal.provider_pause_authorized,
-                )
-                if handled:
-                    changed = changed or retry_changed
-                    continue
-            reassigned_to = maybe_reassign_task_after_worker_failure(
-                config,
-                worker,
-                failure_reason,
-                terminal=True,
-                state=state,
-                provider_report=provider_report,
+                failure_signal,
+                current_mode=current_mode,
+                live=False,
             )
-            if reassigned_to:
-                worker["status"] = "reassigned"
-                worker["reassigned_to"] = reassigned_to
-                worker["last_error"] = failure_reason
-                worker["last_event_at"] = utc_now()
-                finalize_queue_event_record(config, state, worker, "completed")
-                changed = True
+            changed = failure_changed or changed
+            if handled:
                 continue
-            finalize_terminal_worker_outcome(config, state, worker, failure_reason)
-            changed = True
-            continue
 
-        if not is_terminal_worker(worker) and worker.get("status") != "manual_pending":
-            if current_mode in {"planning", "coordination"}:
-                worker["status"] = "completed"
-                worker["last_event_at"] = utc_now()
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_completed",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": f"{current_mode.title()} worker exited cleanly.",
-                        "worker_run_id": worker["run_id"],
-                        "session_url": worker.get("session_url"),
-                    },
-                )
-                finalize_queue_event_record(config, state, worker, "completed")
-            elif task_status in expected_completion_statuses:
-                worker["status"] = "completed"
-                worker["last_event_at"] = utc_now()
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_completed",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": f"Background worker process exited after advancing the task to `{task_status}`.",
-                        "worker_run_id": worker["run_id"],
-                        "pr_url": worker.get("pr_url"),
-                        "session_url": worker.get("session_url"),
-                    },
-                )
-                finalize_queue_event_record(config, state, worker, "completed")
-            else:
-                outcome = worker_reported_outcome(worker)
-                if outcome and outcome.get("outcome") == "blocked" and apply_worker_reported_block(config, worker, outcome):
-                    worker["status"] = "completed"
-                    worker["last_event_at"] = utc_now()
-                    finalize_queue_event_record(config, state, worker, "completed")
-                    write_activity_log(
-                        config,
-                        {
-                            "type": "worker_completed",
-                            "provider": worker.get("provider"),
-                            "task_id": worker.get("task_id"),
-                            "message": "Supervisor persisted the worker's reported task blocker.",
-                            "worker_run_id": worker["run_id"],
-                        },
-                    )
-                    changed = True
-                    continue
-                if outcome and outcome.get("outcome") in {"advanced", "progress"}:
-                    if not consume_progress_outcome(config, worker, outcome, now=now):
-                        continue
-                    finalize_queue_event_record(config, state, worker, "completed")
-                    write_activity_log(
-                        config,
-                        {
-                            "type": "worker_progress_completed",
-                            "provider": worker.get("provider"),
-                            "task_id": worker.get("task_id"),
-                            "message": "Worker reported progress; its completed attempt owns the redispatch cooldown.",
-                            "worker_run_id": worker["run_id"],
-                            "result_id": worker.get("consumed_result_id"),
-                        },
-                    )
-                    changed = True
-                    continue
-                # Race protection: the worker may have written status='review' (or another
-                # expected_completion status) to ai-status.json moments before exiting.
-                # The task_map cached at the start of this tick can predate that write, so
-                # re-read fresh before declaring "exited before terminal status".
-                fresh_task = task_index_from_status(config, load_status(config)).get(worker.get("task_id")) or {}
-                fresh_status = str(fresh_task.get("status") or "").lower()
-                if (
-                    fresh_status
-                    and fresh_status != task_status
-                    and fresh_status in expected_completion_statuses
-                ):
-                    worker["status"] = "completed"
-                    worker["last_event_at"] = utc_now()
-                    write_activity_log(
-                        config,
-                        {
-                            "type": "worker_completed",
-                            "provider": worker.get("provider"),
-                            "task_id": worker.get("task_id"),
-                            "message": (
-                                f"Background worker process exited after advancing the task to `{fresh_status}` "
-                                "(observed on fresh re-read; cached snapshot predated the worker's status write)."
-                            ),
-                            "worker_run_id": worker["run_id"],
-                            "pr_url": worker.get("pr_url"),
-                            "session_url": worker.get("session_url"),
-                        },
-                    )
-                    finalize_queue_event_record(config, state, worker, "completed")
-                else:
-                    finalize_terminal_worker_outcome(
-                        config,
-                        state,
-                        worker,
-                        PREMATURE_EXIT_REASON,
-                        allow_provider_pause=True,
-                    )
-            if worker.get("status") == "completed":
-                # A clean completion proves the lane is alive — reset its
-                # terminal-failure streak so the lane-health auto-pause only ever
-                # fires on genuinely dead lanes, not on intermittent blips.
-                clear_lane_failure(state, worker.get("agent_id") or worker.get("provider"))
-            changed = True
+        changed = finalize_exited_worker(
+            config,
+            state,
+            worker,
+            current_mode=current_mode,
+            task_status=task_status,
+            expected_completion_statuses=expected_completion_statuses,
+            now=now,
+        ) or changed
     return changed
 
 
@@ -5661,190 +5001,6 @@ def worker_in_dispatch_cooldown(
     return (now - dispatched_at).total_seconds() < cooldown_seconds
 
 
-def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
-    settings = dict(config.get("ready_dispatcher", {}) or {})
-    settings.setdefault("enabled", True)
-    settings.setdefault("review_statuses", ["review"])
-    settings.setdefault("acceptance_statuses", ["acceptance"])
-    settings.setdefault("owned_statuses", ["in_progress", "todo", "backlog"])
-    settings.setdefault("dependency_done_statuses", ["done"])
-    # Worker attempt activity is an invariant shared with the repository and
-    # summary projection. Configuration cannot redefine it.
-    settings["active_worker_statuses"] = sorted(ACTIVE_RUNTIME_STATUSES)
-    settings.setdefault("max_tasks_per_agent", 1)
-    settings.setdefault("max_tasks_per_agent_by_lane", {})
-    settings.setdefault("max_dispatches_per_tick", 4)
-    # Dispatch cooldown: a *running* worker dispatched within the last
-    # N seconds is protected from voluntary supersede (assignment-moved
-    # or priority-escalation paths). Dead, stalled, and fallback workers
-    # are NOT protected — recovery flows still work. Default 300s
-    # (5 min) is enough to absorb a normal supervisor reshuffle without
-    # killing real work; set to 0 to disable. See worker_in_dispatch_cooldown.
-    settings.setdefault("dispatch_cooldown_seconds", 300)
-    return settings
-
-
-def max_tasks_per_agent_for_lane(settings: dict[str, Any], agent_id: str) -> int:
-    default = max(1, int(settings.get("max_tasks_per_agent", 1)))
-    raw_overrides = settings.get("max_tasks_per_agent_by_lane") or settings.get("max_tasks_per_agent_by_agent") or {}
-    if not isinstance(raw_overrides, dict):
-        return default
-    normalized_agent_id = normalize_agent_id(agent_id)
-    for key, value in raw_overrides.items():
-        if normalize_agent_id(str(key)) != normalized_agent_id:
-            continue
-        try:
-            # A lane override of 0 is an intentional operator disable/ban.
-            return max(0, int(value))
-        except (TypeError, ValueError):
-            return default
-    return default
-
-
-def lane_dispatch_disabled(config: dict[str, Any], agent_id: str) -> bool:
-    """True when local dispatcher policy intentionally disables a lane."""
-    settings = ready_dispatch_settings(config)
-    return max_tasks_per_agent_for_lane(settings, agent_id) <= 0
-
-
-def helper_claim_settings(config: dict[str, Any]) -> dict[str, Any]:
-    settings = dict(ready_dispatch_settings(config).get("helper_claim", {}) or {})
-    settings.setdefault("enabled", False)
-    settings.setdefault("task_statuses", ["backlog", "todo", "in_progress", "review"])
-    settings.setdefault("availability_first", True)
-    settings.setdefault("allow_any_idle_lane", True)
-    settings.setdefault("prefer_assigned_when_idle", True)
-    settings.setdefault("require_assigned_agent_busy", True)
-    settings.setdefault("require_owner_higher_priority_load", False)
-    settings.setdefault("respect_explicit_owner_when_paused", True)
-    return settings
-
-
-# Supervisor-generated unblock tasks must never become parents of another
-# unblock task, or the recovery flow recursively reproduces itself.
-GOVERNANCE_TASK_CLASSES = {"unblock"}
-
-
-def is_governance_artifact(task: dict[str, Any] | None) -> bool:
-    """True when a task is an auto-generated unblock/repair artifact.
-
-    Used as the recursion base case: governance artifacts do not get their own
-    governance children. Detects three independent markers so a generator that
-    sets any one of them is covered."""
-    if not isinstance(task, dict):
-        return False
-    if str(task.get("task_class") or "").strip().lower() in GOVERNANCE_TASK_CLASSES:
-        return True
-    if task.get("auto_generated"):
-        return True
-    if str(task.get("helper_parent") or "").strip():
-        return True
-    return False
-
-
-def governance_lineage_depth(task: dict[str, Any] | None, task_map: dict[str, dict[str, Any]]) -> int:
-    """Number of ancestors reachable via the `helper_parent` chain above `task`.
-
-    A first-class task has depth 0; its unblock child has depth 1; a
-    repair-of-the-repair would be depth 2. Cycle-safe (bounded by `seen`)."""
-    depth = 0
-    seen: set[str] = set()
-    current = task
-    while isinstance(current, dict):
-        parent_id = str(current.get("helper_parent") or "").strip()
-        if not parent_id or parent_id in seen:
-            break
-        seen.add(parent_id)
-        depth += 1
-        current = task_map.get(parent_id)
-    return depth
-
-
-def task_phase_priority(task: dict[str, Any], task_map: dict[str, dict[str, Any]], dependency_done_statuses: set[str]) -> int:
-    status = str(task.get("status") or "").lower()
-    if status == "in_progress":
-        return 0
-    if status == "review":
-        return 1
-    if status in {"integrating", "acceptance"}:
-        return 2
-    if status in {"todo", "backlog"} and dependencies_satisfied(task, task_map, dependency_done_statuses):
-        return 3
-    if status in {"todo", "backlog"}:
-        return 4
-    if status == "blocked":
-        return 5
-    return 9
-
-
-def agent_has_dispatchable_primary_work(
-    config: dict[str, Any],
-    status: dict[str, Any],
-    agent_name: str,
-    task_map: dict[str, dict[str, Any]],
-) -> bool:
-    policy = ReadyDispatchPolicy.from_config(config)
-    for task in status.get("tasks", []) or []:
-        decision = resolve_domain_dispatch_target(task, task_map, policy)
-        if decision is not None and decision.target_agent == agent_name:
-            return True
-    return False
-
-
-def redispatch_candidate_statuses(config: dict[str, Any]) -> set[str]:
-    policy = ReadyDispatchPolicy.from_config(config)
-    statuses = set(policy.review_statuses)
-    statuses.update(policy.acceptance_statuses)
-    statuses.update(policy.in_progress_statuses)
-    statuses.update(policy.owned_statuses)
-    return statuses
-
-
-def dependencies_satisfied(task: dict[str, Any], task_map: dict[str, dict[str, Any]], done_statuses: set[str]) -> bool:
-    return domain_dependencies_satisfied(task, task_map, done_statuses)
-
-
-def task_dependency_signature(task: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> str:
-    return domain_dependency_signature(task, task_map)
-
-
-def active_worker_indexes(state: dict[str, Any], active_statuses: set[str]) -> tuple[set[str], set[tuple[str, str]]]:
-    agents: set[str] = set()
-    task_agents: set[tuple[str, str]] = set()
-    for worker in state.get("workers", {}).values():
-        if worker.get("status") not in active_statuses:
-            continue
-        agent_id = str(worker.get("agent_id") or "")
-        task_id = str(worker.get("task_id") or "")
-        if agent_id:
-            agents.add(agent_id)
-        if task_id and agent_id:
-            task_agents.add((task_id, agent_id))
-    return agents, task_agents
-
-
-def active_worker_agent_counts(state: dict[str, Any], active_statuses: set[str]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for worker in state.get("workers", {}).values():
-        if worker.get("status") not in active_statuses:
-            continue
-        agent_id = str(worker.get("agent_id") or "")
-        if agent_id:
-            counts[agent_id] = counts.get(agent_id, 0) + 1
-    return counts
-
-
-def active_worker_queue_event_ids(state: dict[str, Any], active_statuses: set[str]) -> set[str]:
-    event_ids: set[str] = set()
-    for worker in state.get("workers", {}).values():
-        if worker.get("status") not in active_statuses:
-            continue
-        queue_event_id = str(worker.get("queue_event_id") or "")
-        if queue_event_id:
-            event_ids.add(queue_event_id)
-    return event_ids
-
-
 def outstanding_delivery_indexes(config: dict[str, Any], state: dict[str, Any]) -> tuple[set[str], set[tuple[str, str]], set[str]]:
     agents: set[str] = set()
     task_agents: set[tuple[str, str]] = set()
@@ -5911,10 +5067,6 @@ def finalize_queue_event_record(config: dict[str, Any], state: dict[str, Any], w
     else:
         record.pop("error", None)
 
-
-
-def save_event_queue(config: dict[str, Any], events: list[dict[str, Any]]) -> None:
-    replace_event_queue(config, events)
 
 
 def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
@@ -6008,10 +5160,6 @@ def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
     return queue_repository(config).update(prune_loaded_queue)
 
 
-def task_status_map(status: dict[str, Any]) -> dict[str, str]:
-    return {str(task.get("id")): str(task.get("status") or "") for task in status.get("tasks", []) if task.get("id")}
-
-
 def task_index_from_status(config: dict[str, Any], status: dict[str, Any]) -> dict[str, dict[str, Any]]:
     schema = config.get("schema", {})
     tasks_path = schema.get("tasks_path", "tasks")
@@ -6045,39 +5193,6 @@ def dispatch_reason_priority(reason: str | None) -> int | None:
         "owned_ready_dispatch": 2,
     }
     return priorities.get(normalized)
-
-
-def dispatch_priority_for_task(
-    config: dict[str, Any],
-    task: dict[str, Any],
-    agent_name: str,
-    *,
-    dependencies_done_statuses: set[str] | None = None,
-) -> int | None:
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    dependency_done_statuses = dependencies_done_statuses or {
-        str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])
-    }
-    schema = config.get("schema", {})
-    owner_field = schema.get("assignee_field", "owner")
-    reviewer_field = schema.get("reviewer_field", "reviewer")
-    task_status = str(task.get("status") or "").lower()
-    if task_status in review_statuses and task.get(reviewer_field) == agent_name:
-        return 0
-    if (
-        task_status == "in_progress"
-        and task.get(owner_field) == agent_name
-        and dependencies_satisfied(task, {str(task.get("id") or ""): task}, dependency_done_statuses)
-    ):
-        return 1
-    if (
-        task_status in {"todo", "backlog"}
-        and task.get(owner_field) == agent_name
-        and dependencies_satisfied(task, {str(task.get("id") or ""): task}, dependency_done_statuses)
-    ):
-        return 2
-    return None
 
 
 def agent_dispatch_loads(
@@ -6120,32 +5235,6 @@ def agent_dispatch_loads(
         loads.setdefault(agent_name, []).append(priority)
 
     return loads
-
-
-def choose_helper_claim_agent(
-    config: dict[str, Any],
-    *,
-    task: dict[str, Any],
-    owner_name: str,
-    reviewer_name: str,
-    idle_agent_name: str,
-    agent_loads: dict[str, list[int]],
-    helper_settings: dict[str, Any],
-    state: dict[str, Any] | None = None,
-) -> bool:
-    if not helper_settings.get("enabled", True):
-        return False
-    plan = proactive_claim_plan_for_idle_agent(
-        config,
-        task=task,
-        task_map={str(task.get("id") or ""): task},
-        idle_agent_name=idle_agent_name,
-        idle_agent_names=[idle_agent_name],
-        agent_loads=agent_loads,
-        helper_settings=helper_settings,
-        state=state,
-    )
-    return plan is not None
 
 
 def higher_priority_ready_task_exists(
@@ -6285,56 +5374,6 @@ def chair_review_output_paths(config: dict[str, Any], agent_name: str) -> tuple[
     return review_dir / f"{stamp}-{slug}.md", review_dir / f"{stamp}-{slug}.json"
 
 
-def pending_approval_items(approval_state: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        item
-        for item in approval_state.get("pending", []) or []
-        if str(item.get("status") or "pending") == "pending" and not item.get("decision")
-    ]
-
-
-def blocked_task_triage_kind(task: dict[str, Any]) -> str:
-    text = " ".join(
-        str(value or "")
-        for value in (
-            task.get("id"),
-            task.get("title"),
-            task.get("summary_zh"),
-            task.get("next"),
-            " ".join(str(item or "") for item in (task.get("artifacts") or [])),
-        )
-    ).lower()
-    if any(
-        marker in text
-        for marker in (
-            "commit",
-            "branch",
-            "worktree",
-            "task-scoped",
-            "history",
-            "head moved",
-            "pre-commit",
-            "push",
-        )
-    ):
-        return "history_repair"
-    if any(
-        marker in text
-        for marker in (
-            "contract",
-            "discussion_planning",
-            "canonical",
-            "scope decision",
-            "cost-center",
-            "approval-rule",
-            "quota contract",
-            "product",
-        )
-    ):
-        return "planning_decision"
-    return "manual_unblock"
-
-
 def dependency_ready_blocked_task_records(
     config: dict[str, Any],
     status: dict[str, Any] | None,
@@ -6372,19 +5411,6 @@ def dependency_ready_blocked_task_records(
         )
     records.sort(key=lambda item: task_phase_priority(item["task"], task_map, dependency_done_statuses))
     return records[:limit]
-
-
-def chair_task_action_index(payload: dict[str, Any]) -> dict[str, set[str]]:
-    action_index: dict[str, set[str]] = {}
-    for action in payload.get("task_actions", []) or []:
-        if not isinstance(action, dict):
-            continue
-        task_id = str(action.get("task_id") or "").strip()
-        action_name = str(action.get("action") or "").strip()
-        if not task_id or not action_name:
-            continue
-        action_index.setdefault(task_id, set()).add(action_name)
-    return action_index
 
 
 def reassignment_followup_task_records(
@@ -6790,7 +5816,7 @@ def queue_chair_review(
     # therefore raises urgency for reviewer-lane selection but must not bypass
     # the cooldown, or every tick re-queues the same blocked_task_triage.
     bypass_cooldown = bool(pending_approval_items(approval_state) or needs_immediate_attention)
-    cooldown_until = _parse_iso_utc(chair_state.get("cooldown_until"))
+    cooldown_until = parse_runtime_timestamp(chair_state.get("cooldown_until"))
     now = datetime.now(timezone.utc)
     if not bypass_cooldown and cooldown_until is not None and cooldown_until > now:
         return False
@@ -6923,10 +5949,6 @@ def normalize_chair_review_payload_for_reason(
         if synthesized:
             normalized["task_actions"] = [*task_actions, *synthesized]
     return normalized
-
-
-def validate_chair_review_payload(payload: Any) -> str | None:
-    return validate_domain_review_payload(payload)
 
 
 def validate_chair_review_context(
@@ -8026,36 +7048,6 @@ def apply_chair_provider_action(
     return False
 
 
-def chair_provider_pause_reason_is_actionable(kind: str, reason: str) -> bool:
-    if kind != "auth":
-        return True
-    lowered = reason.lower()
-    non_actionable_markers = (
-        "investigate",
-        "verify ",
-        "garbled",
-        "erroneous",
-        "propagat",
-        "cross-lane",
-        "not a real",
-        "mentioned",
-        "citing",
-    )
-    if any(marker in lowered for marker in non_actionable_markers):
-        return False
-    concrete_auth_markers = (
-        "failed to authenticate",
-        "authentication_error",
-        "invalid authentication credentials",
-        "status: 401",
-        "api error: 401",
-        "error authenticating:",
-        "ineligibletiererror:",
-        "restricted_dasher_user",
-    )
-    return any(marker in lowered for marker in concrete_auth_markers)
-
-
 def apply_chair_provider_actions(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -8551,7 +7543,7 @@ def break_full_deadlock(
         return False
     rec = state.setdefault("deadlock_recovery", {})
     cooldown = float(settings.get("deadlock_breaker_cooldown_seconds", 1800))
-    last_attempt = _parse_iso_utc(rec.get("last_attempt_at"))
+    last_attempt = parse_runtime_timestamp(rec.get("last_attempt_at"))
     now = datetime.now(timezone.utc)
     if last_attempt is not None and (now - last_attempt).total_seconds() < cooldown:
         return False
