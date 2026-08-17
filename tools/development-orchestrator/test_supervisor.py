@@ -6,16 +6,16 @@ import signal
 import subprocess
 import tempfile
 import types
-import pathlib
 from datetime import datetime, timezone
 import unittest
 import os
 from pathlib import Path
 from unittest import mock
 
-import common
 from control_plane.runtime import supervisor_runtime as supervisor
 from orchestrator_test_support import EvidenceOutputIsolation
+from common import load_rotation_cooldowns
+from worker_tree_guard import _worker_tree_guard_matches, worker_tree_guard_settings
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -1580,7 +1580,7 @@ class WorkerReassignmentTests(EvidenceOutputIsolation, unittest.TestCase):
 
 class WorkerTreeGuardSettingsTests(unittest.TestCase):
     def test_defaults_off_with_canonical_blocking_globs(self) -> None:
-        settings = supervisor.worker_tree_guard_settings({})
+        settings = worker_tree_guard_settings({})
         self.assertFalse(settings["enabled"])
         self.assertFalse(settings["log_only"])
         # All fragile surfaces from branch-strategy.md §11.1.
@@ -1606,13 +1606,13 @@ class WorkerTreeGuardSettingsTests(unittest.TestCase):
                 }
             }
         }
-        settings = supervisor.worker_tree_guard_settings(config)
+        settings = worker_tree_guard_settings(config)
         self.assertTrue(settings["enabled"])
         self.assertEqual(settings["blocking_globs"], ["my-special-file.txt"])
 
     def test_empty_globs_list_falls_back_to_defaults(self) -> None:
         config = {"branch_strategy": {"worker_tree_guard": {"blocking_globs": []}}}
-        settings = supervisor.worker_tree_guard_settings(config)
+        settings = worker_tree_guard_settings(config)
         self.assertIn("tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py", settings["blocking_globs"])
 
 
@@ -1628,25 +1628,25 @@ class WorkerTreeGuardMatchingTests(unittest.TestCase):
 
     def test_exact_file_matches(self) -> None:
         self.assertEqual(
-            supervisor._worker_tree_guard_matches("tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py", self.GLOBS),
+            _worker_tree_guard_matches("tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py", self.GLOBS),
             "tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py",
         )
 
     def test_double_star_matches_direct_child(self) -> None:
         self.assertEqual(
-            supervisor._worker_tree_guard_matches("tools/development-orchestrator/skills/task-closeout.md", self.GLOBS),
+            _worker_tree_guard_matches("tools/development-orchestrator/skills/task-closeout.md", self.GLOBS),
             "tools/development-orchestrator/skills/**",
         )
 
     def test_double_star_matches_nested_child(self) -> None:
         self.assertEqual(
-            supervisor._worker_tree_guard_matches("docs/ops/branch-strategy.md", self.GLOBS),
+            _worker_tree_guard_matches("docs/ops/branch-strategy.md", self.GLOBS),
             "docs/**",
         )
 
     def test_single_star_matches_one_level_only(self) -> None:
         self.assertEqual(
-            supervisor._worker_tree_guard_matches("tools/development-orchestrator/templates/wakeup.txt", self.GLOBS),
+            _worker_tree_guard_matches("tools/development-orchestrator/templates/wakeup.txt", self.GLOBS),
             "tools/development-orchestrator/templates/*",
         )
 
@@ -1656,12 +1656,12 @@ class WorkerTreeGuardMatchingTests(unittest.TestCase):
                 # docs-site is outside the docs/** blocking pattern when
                 # treated as a separate top-level directory.
                 self.assertIsNone(
-                    supervisor._worker_tree_guard_matches(path, self.GLOBS)
+                    _worker_tree_guard_matches(path, self.GLOBS)
                 )
 
     def test_unrelated_paths_do_not_match(self) -> None:
         self.assertIsNone(
-            supervisor._worker_tree_guard_matches("apps/driver/src/index.tsx", self.GLOBS)
+            _worker_tree_guard_matches("apps/driver/src/index.tsx", self.GLOBS)
         )
 
 
@@ -2035,10 +2035,6 @@ class WorkerProcessReaperTests(unittest.TestCase):
 
         self.assertEqual(count, 2)
         self.assertEqual(waitpid.call_count, 3)
-if __name__ == "__main__":
-    unittest.main()
-
-
 class BreakFullDeadlockTests(unittest.TestCase):
     CONFIG = {
         "agents": {"claude2": {"provider": "claude2"}},
@@ -2403,10 +2399,6 @@ class ProactiveReassignmentAntiFlapTests(unittest.TestCase):
         self.assertIsNone(plan)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class WorktreeNodeModulesProvisioningTests(unittest.TestCase):
     """RCA fix: fresh task worktrees must get node_modules (symlinked from the
     canonical checkout) so workers can typecheck/build at closeout instead of
@@ -2510,7 +2502,7 @@ class AntigravityModelRotationTests(unittest.TestCase):
         start.assert_called_once()
         request_for_worker.assert_called_once()
         # gemini slot recorded as cooling; lane NOT paused.
-        cooldowns = supervisor.load_rotation_cooldowns(self.config, "gemini")
+        cooldowns = load_rotation_cooldowns(self.config, "gemini")
         self.assertGreater(cooldowns["gemini_until"], 0)
         self.assertEqual(cooldowns["claude_until"], 0)
         self.assertNotIn("gemini", supervisor.provider_pause_registry(state))
@@ -2827,3 +2819,7 @@ class SupervisorTickContainmentTests(unittest.TestCase):
 
         self.assertEqual(calls, 1)
         self.assertEqual(code, 128 + 15)
+
+
+if __name__ == "__main__":
+    unittest.main()

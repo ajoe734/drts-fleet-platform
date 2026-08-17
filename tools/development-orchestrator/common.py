@@ -41,6 +41,17 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def parse_iso_utc(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -177,12 +188,6 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
         if line:
             rows.append(json.loads(line))
     return rows
-
-
-def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
-    ensure_parent(path)
-    with hold_jsonl_lock(path):
-        append_jsonl_line_unlocked(path, json.dumps(payload, ensure_ascii=False))
 
 
 def deep_merge(base: Any, overlay: Any) -> Any:
@@ -1050,7 +1055,9 @@ def serialize_shared_files(paths: list[Path]) -> str:
     return "\n".join(f"- {relpath(path)}" for path in paths)
 
 
-def to_bool(value: Any) -> bool:
+def to_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
     if isinstance(value, bool):
         return value
     if isinstance(value, str):

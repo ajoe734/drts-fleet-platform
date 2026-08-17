@@ -9,7 +9,6 @@ import subprocess
 import sys
 import uuid
 from contextlib import contextmanager
-from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any

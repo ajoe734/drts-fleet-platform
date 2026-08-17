@@ -55,6 +55,8 @@ class CliPathScriptTests(unittest.TestCase):
         self.assertIn("10-release-pointer.conf", installer)
         self.assertNotIn("@REPO_ROOT@/tools/development-orchestrator/bin/run-supervisor.sh", service)
         self.assertIn(".artifacts/releases/current/tools/development-orchestrator/bin/run-supervisor.sh", service)
+        self.assertIn("KillMode=control-group", service)
+        self.assertNotIn("\nKillMode=mixed\n", service)
         self.assertIn("ExecStart=", pointer)
         self.assertIn(".artifacts/releases/current/tools/development-orchestrator/bin/run-supervisor.sh", pointer)
 

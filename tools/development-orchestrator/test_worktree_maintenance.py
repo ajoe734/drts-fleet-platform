@@ -144,7 +144,7 @@ class DiskGuardTests(unittest.TestCase):
             _git(root, "worktree", "add", "-b", "codex/running", str(running), "dev")
             (completed / "scratch.txt").write_text("left behind\n", encoding="utf-8")
 
-            result = supervisor.release_inactive_worker_worktrees(
+            result = worktree_maintenance.release_inactive_worker_worktrees(
                 self._repo_config(root),
                 {
                     "workers": {
@@ -177,7 +177,7 @@ class DiskGuardTests(unittest.TestCase):
             _git(root, "worktree", "lock", "--reason", "initializing", str(locked))
             (locked / "scratch.txt").write_text("unfinished\n", encoding="utf-8")
 
-            result = supervisor.release_inactive_worker_worktrees(
+            result = worktree_maintenance.release_inactive_worker_worktrees(
                 self._repo_config(root),
                 {"workers": {}},
                 {"archive_root": str(archive_root)},

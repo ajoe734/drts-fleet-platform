@@ -3,19 +3,16 @@ from __future__ import annotations
 
 import argparse
 import atexit
-import fnmatch
 import hashlib
 import json
 import os
 import socket
 import random
 import re
-import shutil
 import shlex
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
@@ -38,7 +35,6 @@ from control_plane.domain.dispatch_policy import (
     DispatchReason as DomainDispatchReason,
     ReadyDispatchPolicy,
     build_dispatch_event as build_domain_dispatch_event,
-    dependencies_satisfied as domain_dependencies_satisfied,
     ready_dispatch_signature as domain_ready_dispatch_signature,
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
@@ -68,21 +64,14 @@ from control_plane.infra.queue_repo import (
 from control_plane.infra.runtime_repo import (
     clear_dispatch_pause,
     load_runtime_state,
-    prune_worker_records,
     queue_event_record,
     save_runtime_state,
     upsert_dispatch_pause,
 )
 from control_plane.infra.worker_failure_detector import (
     WorkerFailureSignal,
-    _captured_tool_log_line_indexes as infra_captured_tool_log_line_indexes,
-    _detect_json_worker_failure_signal as infra_detect_json_worker_failure_signal,
-    _extract_failure_candidate as infra_extract_failure_candidate,
-    _ignore_embedded_failure_line as infra_ignore_embedded_failure_line,
-    _is_result_level_provider_blocker as infra_is_result_level_provider_blocker,
-    _iter_json_string_values as infra_iter_json_string_values,
-    detect_worker_failure as infra_detect_worker_failure,
-    detect_worker_failure_signal as infra_detect_worker_failure_signal,
+    detect_worker_failure,
+    detect_worker_failure_signal,
 )
 from control_plane.infra.worker_evidence import (
     brief_reason_text,
@@ -93,12 +82,10 @@ from control_plane.infra.worktree_maintenance import (
     _disk_guard_path,
     _disk_guard_should_cleanup,
     _prune_worktree_archive,
-    active_worker_workspace_roots,
     cleanup_inactive_worker_worktrees,
     disk_guard_settings,
     disk_usage_snapshot,
     prune_stale_worker_worktrees,
-    release_inactive_worker_worktrees,
     worktree_cleanup_settings,
 )
 from control_plane.projections.control_plane_summary import (
@@ -144,7 +131,6 @@ from common import (
     canonical_relpath,
     command_exists,
     config_path,
-    load_rotation_cooldowns,
     record_rotation_cooldown,
     display_name_for,
     ensure_task_brief,
@@ -153,6 +139,7 @@ from common import (
     load_status,
     new_runtime_id,
     normalize_agent_id,
+    parse_iso_utc as parse_runtime_timestamp,
     relpath,
     runtime_env_overrides,
     selected_shared_files,
@@ -410,7 +397,7 @@ def _host_available_memory_bytes() -> int | None:
 def maintain_resource_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
     record = state.setdefault("resource_guard", {})
     now = datetime.now(timezone.utc)
-    last = _parse_iso_utc(str(record.get("last_check_at") or ""))
+    last = parse_runtime_timestamp(str(record.get("last_check_at") or ""))
     settings = ((config.get("supervisor") or {}).get("resource_guard") or {})
     interval = float(settings.get("check_interval_seconds", 5.0))
     if last is not None and (now - last).total_seconds() < max(1.0, interval):
@@ -485,7 +472,7 @@ def note_dispatch_blocked_by_disk_guard(config: dict[str, Any], state: dict[str,
     guard = state.setdefault("disk_guard", {})
     reason = str(guard.get("reason") or "disk guard blocked dispatch")
     now = utc_now()
-    last_at = _parse_iso_utc(guard.get("last_dispatch_block_log_at"))
+    last_at = parse_runtime_timestamp(guard.get("last_dispatch_block_log_at"))
     cooldown_seconds = 300.0
     if (
         guard.get("last_dispatch_block_source") == source
@@ -679,15 +666,6 @@ def console_log(message: str, *, quiet: bool = False) -> None:
         return
     timestamp = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}", flush=True)
-
-
-def parse_runtime_timestamp(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def heartbeat_lag_seconds(previous_heartbeat: str | None, current_heartbeat: str | None) -> float | None:
@@ -1496,7 +1474,7 @@ def provider_report_age_seconds(
 ) -> float:
     """Age of a cached capability report; infinite when it cannot be dated."""
     now = now or datetime.now(timezone.utc)
-    generated_at = _parse_iso_utc(str((report or {}).get("generated_at") or ""))
+    generated_at = parse_runtime_timestamp(str((report or {}).get("generated_at") or ""))
     if generated_at is not None:
         return max(0.0, (now - generated_at).total_seconds())
     try:
@@ -1864,7 +1842,7 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
         if record.get("status") in {"started", "manual_pending", "completed", "failed"}:
             continue
         if record.get("status") == "waiting_capacity":
-            next_retry = _parse_iso_utc(record.get("next_retry_at"))
+            next_retry = parse_runtime_timestamp(record.get("next_retry_at"))
             if next_retry is not None and next_retry > datetime.now(timezone.utc):
                 continue
         active_worker = next(
@@ -2226,38 +2204,6 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
                 break
 
 
-def _iter_json_string_values(payload: Any) -> list[str]:
-    return infra_iter_json_string_values(payload)
-
-
-def _ignore_embedded_failure_line(stripped: str) -> bool:
-    return infra_ignore_embedded_failure_line(stripped)
-
-
-def _extract_failure_candidate(text: str) -> str | None:
-    return infra_extract_failure_candidate(text)
-
-
-def _captured_tool_log_line_indexes(lines: list[str]) -> set[int]:
-    return infra_captured_tool_log_line_indexes(lines)
-
-
-def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
-    return infra_detect_json_worker_failure_signal(line)
-
-
-def _is_result_level_provider_blocker(candidate: str) -> bool:
-    return infra_is_result_level_provider_blocker(candidate)
-
-
-def detect_worker_failure_signal(worker: dict[str, Any]) -> WorkerFailureSignal | None:
-    return infra_detect_worker_failure_signal(worker)
-
-
-def detect_worker_failure(worker: dict[str, Any]) -> str | None:
-    return infra_detect_worker_failure(worker)
-
-
 def resolve_terminal_worker_reason(worker: dict[str, Any], reason: str) -> str:
     if reason != PREMATURE_EXIT_REASON:
         return reason
@@ -2267,15 +2213,6 @@ def resolve_terminal_worker_reason(worker: dict[str, Any], reason: str) -> str:
 
 def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reason: str | None) -> dict[str, Any]:
     return classify_domain_failure(config, worker, reason).as_mapping()
-
-
-def _parse_iso_utc(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def infer_pause_resume_at(reason: str | None, *, paused_at: datetime | None = None) -> float | None:
@@ -2347,7 +2284,7 @@ def _hydrate_reason_hint_resume_at(state: dict[str, Any], agent_id: str, entry: 
             return None
     hinted = infer_pause_resume_at(
         str(entry.get("reason") or ""),
-        paused_at=_parse_iso_utc(str(entry.get("paused_at") or "")),
+        paused_at=parse_runtime_timestamp(str(entry.get("paused_at") or "")),
     )
     if hinted is None:
         return None
@@ -2709,19 +2646,8 @@ def worker_reassignment_settings(config: dict[str, Any]) -> dict[str, Any]:
     return settings
 
 
-# Tree-guard primitives are defined in worker_tree_guard.py so the chatbox
-# PreToolUse hook (permission_broker.py) can share them without pulling
-# supervisor's heavy import graph. Re-exported here so historical
-# `supervisor.X` references — including the unit-test mock
-# `mock.patch.object(supervisor.subprocess, "run", ...)` — keep working.
 from worker_tree_guard import (  # noqa: E402
-    DEFAULT_WORKER_TREE_GUARD_BLOCKING_GLOBS,
-    WORKER_TREE_GUARD_SKIP_REASONS,
-    _worker_tree_guard_matches,
-    _worker_tree_guard_porcelain,
-    check_chatbox_tree_guard,
     check_worker_tree_guard,
-    worker_tree_guard_settings,
 )
 
 
@@ -2888,7 +2814,7 @@ def chair_reassignment_guard_active(state: dict[str, Any] | None, task_id: str, 
     guard = chair_reassignment_guard_registry(state).get(chair_reassignment_guard_key(task_id, role))
     if not isinstance(guard, dict):
         return False
-    expires_at = _parse_iso_utc(guard.get("expires_at"))
+    expires_at = parse_runtime_timestamp(guard.get("expires_at"))
     if expires_at is not None and expires_at <= datetime.now(timezone.utc):
         chair_reassignment_guard_registry(state).pop(chair_reassignment_guard_key(task_id, role), None)
         return False
@@ -3046,12 +2972,12 @@ def chair_review_needs_immediate_attention(
     # Only a pause recorded since the last review is new information; one the
     # chair has already seen must fall back to the normal review cooldown
     # instead of re-triggering a review on every tick.
-    last_review_at = _parse_iso_utc((state.get("chair_review") or {}).get("last_review_at"))
+    last_review_at = parse_runtime_timestamp((state.get("chair_review") or {}).get("last_review_at"))
     for pause in (
         *actionable_dispatch_pause_records(state, status, limit=1),
         *active_provider_pause_records(state),
     ):
-        paused_at = _parse_iso_utc(str(pause.get("paused_at") or ""))
+        paused_at = parse_runtime_timestamp(str(pause.get("paused_at") or ""))
         if last_review_at is None or paused_at is None or paused_at > last_review_at:
             return True
     return False
@@ -3824,7 +3750,7 @@ def maybe_trigger_retry_or_fallback(
         schedule_worker_retry(config, worker, failure_summary)
         if failure.get("kind") == "capacity" and allow_provider_pause:
             agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-            next_retry_at = _parse_iso_utc(worker.get("next_retry_at"))
+            next_retry_at = parse_runtime_timestamp(worker.get("next_retry_at"))
             reset_seconds = None
             if next_retry_at is not None:
                 reset_seconds = max(1, int((next_retry_at - datetime.now(timezone.utc)).total_seconds()))
@@ -4085,7 +4011,7 @@ def retry_due_workers(
     for worker in list(state.get("workers", {}).values()):
         if worker.get("status") != "retry_backoff":
             continue
-        next_retry_at = _parse_iso_utc(worker.get("next_retry_at"))
+        next_retry_at = parse_runtime_timestamp(worker.get("next_retry_at"))
         if next_retry_at is None or next_retry_at > now:
             continue
         queue_event_id = worker.get("queue_event_id")
@@ -5890,7 +5816,7 @@ def queue_chair_review(
     # therefore raises urgency for reviewer-lane selection but must not bypass
     # the cooldown, or every tick re-queues the same blocked_task_triage.
     bypass_cooldown = bool(pending_approval_items(approval_state) or needs_immediate_attention)
-    cooldown_until = _parse_iso_utc(chair_state.get("cooldown_until"))
+    cooldown_until = parse_runtime_timestamp(chair_state.get("cooldown_until"))
     now = datetime.now(timezone.utc)
     if not bypass_cooldown and cooldown_until is not None and cooldown_until > now:
         return False
@@ -7617,7 +7543,7 @@ def break_full_deadlock(
         return False
     rec = state.setdefault("deadlock_recovery", {})
     cooldown = float(settings.get("deadlock_breaker_cooldown_seconds", 1800))
-    last_attempt = _parse_iso_utc(rec.get("last_attempt_at"))
+    last_attempt = parse_runtime_timestamp(rec.get("last_attempt_at"))
     now = datetime.now(timezone.utc)
     if last_attempt is not None and (now - last_attempt).total_seconds() < cooldown:
         return False

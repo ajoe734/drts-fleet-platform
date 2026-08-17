@@ -18,7 +18,6 @@ from provider_permissions import (
     _antigravity_identity,
     _codex_auth_ready,
     _copilot_auth_ready,
-    _copilot_plaintext_token,
     desired_claude_local_settings,
     _verified_claude_hooks,
     _verified_claude_policy,

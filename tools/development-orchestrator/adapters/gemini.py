@@ -13,28 +13,17 @@ from common import (
     command_exists,
     config_path,
     delivery_workspace_root,
-    load_json,
     new_runtime_id,
     runtime_log_path,
     runtime_env_overrides,
     spawn_background_process,
+    to_bool,
 )
-
-
-GEMINI_SETTINGS_PATH = Path.home() / ".gemini" / "settings.json"
-GEMINI_OAUTH_CREDS_PATH = Path.home() / ".gemini" / "oauth_creds.json"
-
-
-def _truthy_env(name: str, env: dict[str, str] | None = None) -> bool:
-    source = env or os.environ
-    return source.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _gemini_paths(runtime: dict | None = None) -> tuple[Path, Path]:
-    overrides = runtime_env_overrides(runtime)
-    home = Path(overrides.get("HOME") or str(Path.home()))
-    base = home / ".gemini"
-    return base / "settings.json", base / "oauth_creds.json"
+from provider_credentials import (
+    gemini_paths as _gemini_paths,
+    gemini_settings as _gemini_settings,
+    truthy_env as _truthy_env,
+)
 
 
 def _gemini_runtime_env(runtime: dict | None = None, *, ensure_dirs: bool = False) -> dict[str, str]:
@@ -48,11 +37,6 @@ def _gemini_runtime_env(runtime: dict | None = None, *, ensure_dirs: bool = Fals
     env = os.environ.copy()
     env.update(overrides)
     return env
-
-
-def _gemini_settings(runtime: dict | None = None) -> dict:
-    settings_path, _ = _gemini_paths(runtime)
-    return load_json(settings_path, default={}) or {}
 
 
 def _gemini_provider_for_agent(config: dict, agent_id: str) -> tuple[str, dict, dict]:
@@ -109,17 +93,9 @@ def _string_list(value: object) -> list[str]:
     return result
 
 
-def _truthy_setting(value: object, *, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _gemini_allowed_tools(gemini_settings: dict) -> list[str]:
     tools = _string_list(gemini_settings.get("allowed_tools") or gemini_settings.get("allowedTools"))
-    if _truthy_setting(gemini_settings.get("enable_shell_tool"), default=True) and "run_shell_command" not in tools:
+    if to_bool(gemini_settings.get("enable_shell_tool"), default=True) and "run_shell_command" not in tools:
         tools.append("run_shell_command")
     return tools
 
@@ -267,7 +243,7 @@ class GeminiAdapter(BaseAdapter):
         approval_mode = approval.get("default_approval_mode")
         if approval_mode:
             command.extend(["--approval-mode", approval_mode])
-        if _truthy_setting(gemini_settings.get("skip_trust"), default=True):
+        if to_bool(gemini_settings.get("skip_trust"), default=True):
             command.append("--skip-trust")
         allowed_tools = _gemini_allowed_tools(gemini_settings)
         if allowed_tools:

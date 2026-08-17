@@ -19,7 +19,6 @@ from common import (
     config_path,
     load_config,
     load_json,
-    load_jsonl,
     load_status,
     relpath,
     render_template,

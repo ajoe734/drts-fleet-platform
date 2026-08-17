@@ -53,9 +53,9 @@ SyslogIdentifier=drts-supervisor
 # Run as the invoking user; do NOT escalate privileges.
 NoNewPrivileges=true
 
-# Keep child process group together so SIGTERM cleans up dispatched worker
-# CLIs (claude / codex / gemini) instead of orphaning them to PID 1.
-KillMode=mixed
+# Signal the whole cgroup immediately. KillMode=mixed only signals the main PID
+# until TimeoutStopSec, which leaves untracked CLI descendants hanging for 30s.
+KillMode=control-group
 KillSignal=SIGTERM
 TimeoutStopSec=30
 

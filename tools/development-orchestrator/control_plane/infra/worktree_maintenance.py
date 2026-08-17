@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from common import config_path, utc_now, write_activity_log
+from common import config_path, parse_iso_utc, utc_now, write_activity_log
 from control_plane.domain.worker_lifecycle import ACTIVE_WORKER_STATUSES as ACTIVE_RUNTIME_STATUSES
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -48,15 +48,6 @@ def _worker_worktree_base(config: dict[str, Any], repo_root: Path) -> Path:
     settings = strategy.get("worker_worktrees", {}) if isinstance(strategy.get("worker_worktrees"), dict) else {}
     raw = Path(str(settings.get("root") or ".artifacts/worktrees/auto")).expanduser()
     return raw.resolve() if raw.is_absolute() else (repo_root / raw).resolve()
-
-
-def _parse_iso_utc(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def _pid_is_alive(pid: int | None) -> bool:
@@ -576,7 +567,7 @@ def cleanup_inactive_worker_worktrees(
         "worker_workspace_cleanup", {}
     )
     now = datetime.now(timezone.utc)
-    last_attempt = _parse_iso_utc(maintenance.get("last_attempt_at"))
+    last_attempt = parse_iso_utc(maintenance.get("last_attempt_at"))
     if last_attempt is not None and (now - last_attempt).total_seconds() < interval:
         return False
 
@@ -611,10 +602,9 @@ def cleanup_inactive_worker_worktrees(
 def _disk_guard_should_cleanup(record: dict[str, Any], settings: dict[str, Any], snapshot: dict[str, Any]) -> bool:
     if float(snapshot.get("usage_percent") or 0.0) >= float(settings.get("cleanup_usage_percent", 85.0)):
         return True
-    last_cleanup = _parse_iso_utc(record.get("last_cleanup_at"))
+    last_cleanup = parse_iso_utc(record.get("last_cleanup_at"))
     if last_cleanup is None:
         return True
     return (datetime.now(timezone.utc) - last_cleanup).total_seconds() >= float(
         settings.get("cleanup_interval_seconds", 3600.0)
     )
-
