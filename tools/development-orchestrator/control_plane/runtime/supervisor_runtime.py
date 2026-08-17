@@ -4278,6 +4278,410 @@ def resume_claude_worker(
     }
 
 
+def handle_worker_failure_signal(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any],
+    worker: dict[str, Any],
+    failure_signal: WorkerFailureSignal,
+    *,
+    current_mode: str,
+    live: bool,
+) -> tuple[bool, bool]:
+    """Apply a detected provider failure and report (handled, changed)."""
+    failure_reason = failure_signal.reason
+    failure = classify_worker_failure(config, worker, failure_reason)
+    if live and failure.get("kind") not in {"auth", "quota_terminal", "capacity"}:
+        return False, False
+
+    prefix = "live worker failure" if live else "worker failure"
+    transient = "" if live else f" transient={'yes' if failure.get('transient') else 'no'}"
+    console_log(
+        f"{prefix}: provider={worker.get('provider')} task={worker.get('task_id')} "
+        f"kind={failure.get('label')}{transient} source={failure_signal.source} reason={failure_reason}",
+        quiet=SUPERVISOR_LOG_QUIET,
+    )
+    if maybe_rotate_antigravity_lane(
+        config,
+        state,
+        provider_report,
+        worker,
+        failure,
+        failure_reason,
+        authorized=failure_signal.provider_pause_authorized,
+    ):
+        return True, True
+
+    if live:
+        terminate_worker_pid(worker.get("pid"))
+
+    authorized = failure_signal.provider_pause_authorized
+    agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+    if failure.get("kind") == "quota_terminal" and authorized and agent_id:
+        pause_provider(
+            state,
+            agent_id,
+            failure_reason,
+            kind="quota",
+            reset_seconds=14400,
+            identity=worker.get("identity"),
+        )
+    if failure.get("kind") == "auth" and authorized and agent_id:
+        pause_provider(
+            state,
+            agent_id,
+            failure_reason,
+            kind="auth",
+            reset_seconds=None,
+            identity=worker.get("identity"),
+        )
+    if failure.get("kind") == "capacity" and current_mode == "coordination":
+        reset_seconds = int(
+            worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300)
+        )
+        if agent_id and authorized:
+            pause_provider(
+                state,
+                agent_id,
+                failure_reason,
+                kind="capacity",
+                reset_seconds=reset_seconds,
+            )
+        finalize_terminal_worker_outcome(config, state, worker, failure_reason)
+        return True, True
+
+    if is_transient_worker_failure(config, worker, failure_reason):
+        handled, changed = maybe_trigger_retry_or_fallback(
+            config,
+            state,
+            provider_report,
+            worker,
+            failure_reason,
+            allow_provider_pause=authorized,
+        )
+        if handled:
+            return True, changed
+
+    reassigned_to = maybe_reassign_task_after_worker_failure(
+        config,
+        worker,
+        failure_reason,
+        terminal=True,
+        state=state,
+        provider_report=provider_report,
+    )
+    if reassigned_to:
+        worker["status"] = "reassigned"
+        worker["reassigned_to"] = reassigned_to
+        worker["last_error"] = failure_reason
+        worker["last_event_at"] = utc_now()
+        finalize_queue_event_record(config, state, worker, "completed")
+        return True, True
+
+    finalize_terminal_worker_outcome(config, state, worker, failure_reason)
+    return True, True
+
+
+def finalize_exited_worker(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    *,
+    current_mode: str,
+    task_status: str,
+    expected_completion_statuses: set[str],
+    now: datetime,
+) -> bool:
+    """Consume the outcome of a dead worker that has no provider failure."""
+    if is_terminal_worker(worker) or worker.get("status") == "manual_pending":
+        return False
+
+    if current_mode in {"planning", "coordination"}:
+        worker["status"] = "completed"
+        worker["last_event_at"] = utc_now()
+        write_activity_log(
+            config,
+            {
+                "type": "worker_completed",
+                "provider": worker.get("provider"),
+                "task_id": worker.get("task_id"),
+                "message": f"{current_mode.title()} worker exited cleanly.",
+                "worker_run_id": worker["run_id"],
+                "session_url": worker.get("session_url"),
+            },
+        )
+        finalize_queue_event_record(config, state, worker, "completed")
+    elif task_status in expected_completion_statuses:
+        worker["status"] = "completed"
+        worker["last_event_at"] = utc_now()
+        write_activity_log(
+            config,
+            {
+                "type": "worker_completed",
+                "provider": worker.get("provider"),
+                "task_id": worker.get("task_id"),
+                "message": f"Background worker process exited after advancing the task to `{task_status}`.",
+                "worker_run_id": worker["run_id"],
+                "pr_url": worker.get("pr_url"),
+                "session_url": worker.get("session_url"),
+            },
+        )
+        finalize_queue_event_record(config, state, worker, "completed")
+    else:
+        outcome = worker_reported_outcome(worker)
+        if outcome and outcome.get("outcome") == "blocked" and apply_worker_reported_block(config, worker, outcome):
+            worker["status"] = "completed"
+            worker["last_event_at"] = utc_now()
+            finalize_queue_event_record(config, state, worker, "completed")
+            write_activity_log(
+                config,
+                {
+                    "type": "worker_completed",
+                    "provider": worker.get("provider"),
+                    "task_id": worker.get("task_id"),
+                    "message": "Supervisor persisted the worker's reported task blocker.",
+                    "worker_run_id": worker["run_id"],
+                },
+            )
+            return True
+        if outcome and outcome.get("outcome") in {"advanced", "progress"}:
+            if not consume_progress_outcome(config, worker, outcome, now=now):
+                return False
+            finalize_queue_event_record(config, state, worker, "completed")
+            write_activity_log(
+                config,
+                {
+                    "type": "worker_progress_completed",
+                    "provider": worker.get("provider"),
+                    "task_id": worker.get("task_id"),
+                    "message": "Worker reported progress; its completed attempt owns the redispatch cooldown.",
+                    "worker_run_id": worker["run_id"],
+                    "result_id": worker.get("consumed_result_id"),
+                },
+            )
+            return True
+
+        # The cached task snapshot can predate a worker's final status write.
+        fresh_task = task_index_from_status(config, load_status(config)).get(worker.get("task_id")) or {}
+        fresh_status = str(fresh_task.get("status") or "").lower()
+        if fresh_status and fresh_status != task_status and fresh_status in expected_completion_statuses:
+            worker["status"] = "completed"
+            worker["last_event_at"] = utc_now()
+            write_activity_log(
+                config,
+                {
+                    "type": "worker_completed",
+                    "provider": worker.get("provider"),
+                    "task_id": worker.get("task_id"),
+                    "message": (
+                        f"Background worker process exited after advancing the task to `{fresh_status}` "
+                        "(observed on fresh re-read; cached snapshot predated the worker's status write)."
+                    ),
+                    "worker_run_id": worker["run_id"],
+                    "pr_url": worker.get("pr_url"),
+                    "session_url": worker.get("session_url"),
+                },
+            )
+            finalize_queue_event_record(config, state, worker, "completed")
+        else:
+            finalize_terminal_worker_outcome(
+                config,
+                state,
+                worker,
+                PREMATURE_EXIT_REASON,
+                allow_provider_pause=True,
+            )
+
+    if worker.get("status") == "completed":
+        clear_lane_failure(state, worker.get("agent_id") or worker.get("provider"))
+    return True
+
+
+def handle_worker_approval_state(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any],
+    worker: dict[str, Any],
+    *,
+    pending: list[dict[str, Any]],
+    resolved: list[dict[str, Any]],
+    alive: bool,
+) -> tuple[bool, bool]:
+    """Advance approval state and report (stop_processing, changed)."""
+    if pending:
+        if not alive and not worker_supports_approval_resume(worker):
+            worker["status"] = "failed"
+            worker["deferred_action"] = None
+            worker["deferred_tool_use"] = None
+            worker["last_event_at"] = utc_now()
+            worker["last_error"] = "Worker exited while waiting for approval."
+            for approval in pending:
+                approval_id = approval.get("approval_id")
+                if not approval_id:
+                    continue
+                try:
+                    resolve_approval(
+                        config,
+                        approval_id,
+                        decision="deny",
+                        note="Auto-denied because the worker exited before approval could be applied.",
+                        remember=False,
+                    )
+                except KeyError:
+                    pass
+            write_activity_log(
+                config,
+                {
+                    "type": "worker_failed",
+                    "provider": worker.get("provider"),
+                    "task_id": worker.get("task_id"),
+                    "message": worker["last_error"],
+                    "worker_run_id": worker["run_id"],
+                },
+            )
+            finalize_queue_event_record(config, state, worker, "failed", worker["last_error"])
+            return True, True
+
+        approval = pending[0]
+        next_status = "waiting_approval" if alive else "suspended_approval"
+        if worker.get("status") == next_status:
+            return True, False
+        worker["status"] = next_status
+        worker["deferred_action"] = approval.get("approval_id")
+        worker["last_event_at"] = approval.get("created_at") or worker.get("last_event_at") or utc_now()
+        write_activity_log(
+            config,
+            {
+                "type": "worker_waiting_approval",
+                "provider": worker.get("provider"),
+                "task_id": worker.get("task_id"),
+                "message": (
+                    f"Worker suspended for approval {approval.get('approval_id')}"
+                    if next_status == "suspended_approval"
+                    else f"Worker waiting on approval {approval.get('approval_id')}"
+                ),
+                "worker_run_id": worker["run_id"],
+                "approval_id": approval.get("approval_id"),
+            },
+        )
+        if worker.get("queue_event_id"):
+            queue_status(state, worker["queue_event_id"])["status"] = "manual_pending"
+        return True, True
+
+    changed = False
+    if worker.get("status") in {"waiting_approval", "suspended_approval"} and resolved:
+        latest = resolved[-1]
+        if latest.get("approval_id") != worker.get("last_approval_id"):
+            worker["last_approval_id"] = latest.get("approval_id")
+            if latest.get("decision") == "allow" and worker_supports_approval_resume(worker):
+                resumed = resume_claude_worker(config, worker, provider_report, approval=latest)
+                write_activity_log(
+                    config,
+                    {
+                        "type": "worker_resumed",
+                        "provider": worker.get("provider"),
+                        "task_id": worker.get("task_id"),
+                        "message": f"Resumed worker after approval {latest.get('approval_id')}",
+                        "worker_run_id": worker["run_id"],
+                        "approval_id": latest.get("approval_id"),
+                        "command": resumed.get("command") if resumed else None,
+                        "log_path": resumed.get("log_path") if resumed else None,
+                        "allowed_tools": resumed.get("allowed_tools") if resumed else None,
+                    },
+                )
+                changed = True
+                if resumed:
+                    return True, True
+            if latest.get("decision") == "deny":
+                worker["status"] = "failed"
+                worker["last_event_at"] = utc_now()
+                reason = latest.get("note") or "Worker approval denied."
+                write_activity_log(
+                    config,
+                    {
+                        "type": "worker_failed",
+                        "provider": worker.get("provider"),
+                        "task_id": worker.get("task_id"),
+                        "message": reason,
+                        "worker_run_id": worker["run_id"],
+                        "approval_id": latest.get("approval_id"),
+                    },
+                )
+                finalize_queue_event_record(config, state, worker, "failed", reason)
+                return True, True
+        changed = True
+
+    current_status = worker.get("status")
+    if current_status not in {"waiting_approval", "suspended_approval"}:
+        return False, changed
+
+    worker["deferred_action"] = None
+    worker["deferred_tool_use"] = None
+    if not resolved:
+        worker["last_approval_id"] = None
+    worker["last_event_at"] = utc_now()
+    if alive:
+        worker["status"] = "running"
+    else:
+        worker["status"] = "failed"
+        worker["last_error"] = (
+            "Approval state disappeared before the worker could resume."
+            if current_status == "waiting_approval"
+            else "Approval state disappeared before the suspended worker could resume."
+        )
+        write_activity_log(
+            config,
+            {
+                "type": "worker_failed",
+                "provider": worker.get("provider"),
+                "task_id": worker.get("task_id"),
+                "message": worker["last_error"],
+                "worker_run_id": worker["run_id"],
+            },
+        )
+        finalize_queue_event_record(config, state, worker, "failed", worker["last_error"])
+    return False, True
+
+
+def supersede_worker(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    *,
+    alive: bool,
+    reason: str,
+    console_reason: str,
+) -> bool:
+    """Supersede a worker unless its dispatch cooldown still protects it."""
+    if alive and worker_in_dispatch_cooldown(
+        worker,
+        ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
+    ):
+        return False
+    if alive:
+        terminate_worker_pid(worker.get("pid"))
+    worker["status"] = "superseded"
+    worker["last_event_at"] = utc_now()
+    worker["last_error"] = reason
+    finalize_queue_event_record(config, state, worker, "completed", reason)
+    write_activity_log(
+        config,
+        {
+            "type": "worker_superseded",
+            "provider": worker.get("provider"),
+            "task_id": worker.get("task_id"),
+            "message": reason,
+            "worker_run_id": worker.get("run_id"),
+        },
+    )
+    console_log(
+        f"worker superseded{console_reason}: task={worker.get('task_id')} "
+        f"provider={worker.get('provider')} run={worker.get('run_id')}",
+        quiet=SUPERVISOR_LOG_QUIET,
+    )
+    return True
+
+
 def poll_workers(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -4358,107 +4762,35 @@ def poll_workers(
         current_mode = worker_runtime_mode(worker)
         task_status = str(task.get("status") or "").lower()
         expected_completion_statuses = worker_expected_completion_statuses(config, worker, task)
-        if (
+        assignment_moved = (
             worker.get("queue_event_id")
             and current_mode == "execution"
             and not worker_matches_current_assignment(config, worker, task_map)
-        ):
-            if not alive and task_status in expected_completion_statuses:
-                pass
-            else:
-                if worker.get("status") == "superseded":
-                    continue
-                # Dispatch cooldown: protect freshly-dispatched workers
-                # from being killed for an assignment reshuffle. Without
-                # this guard, availability-first claims thrash the worker
-                # pool — a worker that just spawned is wasteful to kill
-                # before it has had a chance to make progress.
-                if alive and worker_in_dispatch_cooldown(
-                    worker,
-                    ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
-                ):
-                    # supersede skipped: worker still within dispatch cooldown.
-                    # Intentionally silent — this branch is re-evaluated every
-                    # tick for every protected worker, so logging it floods the
-                    # journal with hundreds of identical lines and buries real
-                    # events. The cooldown check is cheap; only the log was noise.
-                    continue
-                if alive:
-                    terminate_worker_pid(worker.get("pid"))
-                worker["status"] = "superseded"
-                worker["last_event_at"] = utc_now()
-                worker["last_error"] = "Worker superseded after task responsibility moved to another agent."
-                finalize_queue_event_record(
-                    config,
-                    state,
-                    worker,
-                    "completed",
-                    worker["last_error"],
-                )
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_superseded",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": worker["last_error"],
-                        "worker_run_id": worker.get("run_id"),
-                    },
-                )
-                console_log(
-                    f"worker superseded: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
-                    quiet=SUPERVISOR_LOG_QUIET,
-                )
-                changed = True
-                continue
-        if (
+        )
+        priority_escalation = (
             worker.get("queue_event_id")
             and current_mode == "execution"
             and worker.get("status") in active_worker_statuses
             and higher_priority_ready_task_exists(config, worker, task_map, state=state, active_statuses=active_worker_statuses)
-        ):
-            # Dispatch cooldown: same protection as the assignment-moved
-            # branch. Priority escalation that fires within seconds of a
-            # dispatch is almost always thrashing — the new "higher
-            # priority" task was already visible when this worker was
-            # claimed, so the supervisor should have taken that task
-            # then rather than killing a fresh worker now.
-            if alive and worker_in_dispatch_cooldown(
-                worker,
-                ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
-            ):
-                # priority-escalation supersede skipped: worker still within
-                # dispatch cooldown. Intentionally silent for the same reason as
-                # the assignment-moved branch above — re-evaluated every tick per
-                # worker, so logging it is pure journal noise.
+        )
+        supersede_reason = None
+        console_reason = ""
+        if assignment_moved and not (not alive and task_status in expected_completion_statuses):
+            supersede_reason = "Worker superseded after task responsibility moved to another agent."
+        elif priority_escalation:
+            supersede_reason = "Worker superseded to prioritize higher-priority review work."
+            console_reason = " for priority escalation"
+        if supersede_reason:
+            if worker.get("status") == "superseded":
                 continue
-            if alive:
-                terminate_worker_pid(worker.get("pid"))
-            worker["status"] = "superseded"
-            worker["last_event_at"] = utc_now()
-            worker["last_error"] = "Worker superseded to prioritize higher-priority review work."
-            finalize_queue_event_record(
+            changed = supersede_worker(
                 config,
                 state,
                 worker,
-                "completed",
-                worker["last_error"],
-            )
-            write_activity_log(
-                config,
-                {
-                    "type": "worker_superseded",
-                    "provider": worker.get("provider"),
-                    "task_id": worker.get("task_id"),
-                    "message": worker["last_error"],
-                    "worker_run_id": worker.get("run_id"),
-                },
-            )
-            console_log(
-                f"worker superseded for priority escalation: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
-                quiet=SUPERVISOR_LOG_QUIET,
-            )
-            changed = True
+                alive=alive,
+                reason=supersede_reason,
+                console_reason=console_reason,
+            ) or changed
             continue
         if (
             not alive
@@ -4556,206 +4888,33 @@ def poll_workers(
             continue
         pending = pending_by_run.get(worker["run_id"], [])
         resolved = resolved_by_run.get(worker["run_id"], [])
-        if pending:
-            if not alive and not worker_supports_approval_resume(worker):
-                worker["status"] = "failed"
-                worker["deferred_action"] = None
-                worker["deferred_tool_use"] = None
-                worker["last_event_at"] = utc_now()
-                worker["last_error"] = "Worker exited while waiting for approval."
-                for approval in pending:
-                    approval_id = approval.get("approval_id")
-                    if not approval_id:
-                        continue
-                    try:
-                        resolve_approval(
-                            config,
-                            approval_id,
-                            decision="deny",
-                            note="Auto-denied because the worker exited before approval could be applied.",
-                            remember=False,
-                        )
-                    except KeyError:
-                        pass
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_failed",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": worker["last_error"],
-                        "worker_run_id": worker["run_id"],
-                    },
-                )
-                finalize_queue_event_record(config, state, worker, "failed", worker["last_error"])
-                changed = True
-                continue
-            approval = pending[0]
-            next_status = "waiting_approval" if pid_is_alive(worker.get("pid")) else "suspended_approval"
-            if worker.get("status") != next_status:
-                worker["status"] = next_status
-                worker["deferred_action"] = approval.get("approval_id")
-                worker["last_event_at"] = approval.get("created_at") or worker.get("last_event_at") or utc_now()
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_waiting_approval",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": (
-                            f"Worker suspended for approval {approval.get('approval_id')}"
-                            if next_status == "suspended_approval"
-                            else f"Worker waiting on approval {approval.get('approval_id')}"
-                        ),
-                        "worker_run_id": worker["run_id"],
-                        "approval_id": approval.get("approval_id"),
-                    },
-                )
-                if worker.get("queue_event_id"):
-                    queue_status(state, worker["queue_event_id"])["status"] = "manual_pending"
-                changed = True
+        stop_processing, approval_changed = handle_worker_approval_state(
+            config,
+            state,
+            provider_report,
+            worker,
+            pending=pending,
+            resolved=resolved,
+            alive=alive,
+        )
+        changed = approval_changed or changed
+        if stop_processing:
             continue
-
-        if worker.get("status") in {"waiting_approval", "suspended_approval"} and resolved:
-            latest = resolved[-1]
-            if latest.get("approval_id") != worker.get("last_approval_id"):
-                worker["last_approval_id"] = latest.get("approval_id")
-                if latest.get("decision") == "allow" and worker_supports_approval_resume(worker):
-                    resumed = resume_claude_worker(config, worker, provider_report, approval=latest)
-                    write_activity_log(
-                        config,
-                        {
-                            "type": "worker_resumed",
-                            "provider": worker.get("provider"),
-                            "task_id": worker.get("task_id"),
-                            "message": f"Resumed worker after approval {latest.get('approval_id')}",
-                            "worker_run_id": worker["run_id"],
-                            "approval_id": latest.get("approval_id"),
-                            "command": resumed.get("command") if resumed else None,
-                            "log_path": resumed.get("log_path") if resumed else None,
-                            "allowed_tools": resumed.get("allowed_tools") if resumed else None,
-                        },
-                    )
-                    changed = True
-                    if resumed:
-                        continue
-                if latest.get("decision") == "deny":
-                    worker["status"] = "failed"
-                    worker["last_event_at"] = utc_now()
-                    write_activity_log(
-                        config,
-                        {
-                            "type": "worker_failed",
-                            "provider": worker.get("provider"),
-                            "task_id": worker.get("task_id"),
-                            "message": latest.get("note") or "Worker approval denied.",
-                            "worker_run_id": worker["run_id"],
-                            "approval_id": latest.get("approval_id"),
-                        },
-                    )
-                    finalize_queue_event_record(config, state, worker, "failed", latest.get("note") or "Worker approval denied.")
-                    changed = True
-                    continue
-            changed = True
-
-        current_status = worker.get("status")
-        if current_status in {"waiting_approval", "suspended_approval"} and not pending:
-            worker["deferred_action"] = None
-            worker["deferred_tool_use"] = None
-            if not resolved:
-                worker["last_approval_id"] = None
-            if alive:
-                worker["status"] = "running"
-                worker["last_event_at"] = utc_now()
-            else:
-                worker["status"] = "failed"
-                worker["last_event_at"] = utc_now()
-                worker["last_error"] = (
-                    "Approval state disappeared before the worker could resume."
-                    if current_status == "waiting_approval"
-                    else "Approval state disappeared before the suspended worker could resume."
-                )
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_failed",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": worker["last_error"],
-                        "worker_run_id": worker["run_id"],
-                    },
-                )
-                finalize_queue_event_record(config, state, worker, "failed", worker["last_error"])
-            changed = True
 
         if alive:
             live_failure_signal = detect_worker_failure_signal(worker)
             if live_failure_signal:
-                live_failure_reason = live_failure_signal.reason
-                failure = classify_worker_failure(config, worker, live_failure_reason)
-                if failure.get("kind") in {"auth", "quota_terminal", "capacity"}:
-                    console_log(
-                        f"live worker failure: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} source={live_failure_signal.source} reason={live_failure_reason}",
-                        quiet=SUPERVISOR_LOG_QUIET,
-                    )
-                    if maybe_rotate_antigravity_lane(
-                        config,
-                        state,
-                        provider_report,
-                        worker,
-                        failure,
-                        live_failure_reason,
-                        authorized=live_failure_signal.provider_pause_authorized,
-                    ):
-                        changed = True
-                        continue
-                    terminate_worker_pid(worker.get("pid"))
-                    if failure.get("kind") == "quota_terminal" and live_failure_signal.provider_pause_authorized:
-                        agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                        if agent_id:
-                            pause_provider(state, agent_id, live_failure_reason, kind="quota", reset_seconds=14400, identity=worker.get("identity"))
-                    if failure.get("kind") == "auth" and live_failure_signal.provider_pause_authorized:
-                        agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                        if agent_id:
-                            pause_provider(state, agent_id, live_failure_reason, kind="auth", reset_seconds=None, identity=worker.get("identity"))
-                    if failure.get("kind") == "capacity" and current_mode == "coordination":
-                        agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                        reset_seconds = int(worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300))
-                        if agent_id and live_failure_signal.provider_pause_authorized:
-                            pause_provider(state, agent_id, live_failure_reason, kind="capacity", reset_seconds=reset_seconds)
-                        finalize_terminal_worker_outcome(config, state, worker, live_failure_reason)
-                        changed = True
-                        continue
-                    if is_transient_worker_failure(config, worker, live_failure_reason):
-                        handled, retry_changed = maybe_trigger_retry_or_fallback(
-                            config,
-                            state,
-                            provider_report,
-                            worker,
-                            live_failure_reason,
-                            allow_provider_pause=live_failure_signal.provider_pause_authorized,
-                        )
-                        if handled:
-                            changed = changed or retry_changed
-                            continue
-                    reassigned_to = maybe_reassign_task_after_worker_failure(
-                        config,
-                        worker,
-                        live_failure_reason,
-                        terminal=True,
-                        state=state,
-                        provider_report=provider_report,
-                    )
-                    if reassigned_to:
-                        worker["status"] = "reassigned"
-                        worker["reassigned_to"] = reassigned_to
-                        worker["last_error"] = live_failure_reason
-                        worker["last_event_at"] = utc_now()
-                        finalize_queue_event_record(config, state, worker, "completed")
-                        changed = True
-                        continue
-                    finalize_terminal_worker_outcome(config, state, worker, live_failure_reason)
-                    changed = True
+                handled, failure_changed = handle_worker_failure_signal(
+                    config,
+                    state,
+                    provider_report,
+                    worker,
+                    live_failure_signal,
+                    current_mode=current_mode,
+                    live=True,
+                )
+                changed = failure_changed or changed
+                if handled:
                     continue
             if worker.get("status") == "stalled" and (last_event_advanced or process_activity_advanced):
                 worker["status"] = "running"
@@ -4807,181 +4966,28 @@ def poll_workers(
 
         failure_signal = detect_worker_failure_signal(worker)
         if failure_signal and worker.get("status") != "failed":
-            failure_reason = failure_signal.reason
-            failure = classify_worker_failure(config, worker, failure_reason)
-            console_log(
-                f"worker failure: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} transient={'yes' if failure.get('transient') else 'no'} source={failure_signal.source} reason={failure_reason}",
-                quiet=SUPERVISOR_LOG_QUIET,
-            )
-            if maybe_rotate_antigravity_lane(
+            handled, failure_changed = handle_worker_failure_signal(
                 config,
                 state,
                 provider_report,
                 worker,
-                failure,
-                failure_reason,
-                authorized=failure_signal.provider_pause_authorized,
-            ):
-                changed = True
-                continue
-            if failure.get("kind") == "quota_terminal" and failure_signal.provider_pause_authorized:
-                agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                if agent_id:
-                    pause_provider(state, agent_id, failure_reason, kind="quota", reset_seconds=14400, identity=worker.get("identity"))
-            if failure.get("kind") == "auth" and failure_signal.provider_pause_authorized:
-                agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                if agent_id:
-                    pause_provider(state, agent_id, failure_reason, kind="auth", reset_seconds=None, identity=worker.get("identity"))
-            if failure.get("kind") == "capacity" and current_mode == "coordination":
-                agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
-                reset_seconds = int(worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300))
-                if agent_id and failure_signal.provider_pause_authorized:
-                    pause_provider(state, agent_id, failure_reason, kind="capacity", reset_seconds=reset_seconds)
-                finalize_terminal_worker_outcome(config, state, worker, failure_reason)
-                changed = True
-                continue
-            if is_transient_worker_failure(config, worker, failure_reason):
-                handled, retry_changed = maybe_trigger_retry_or_fallback(
-                    config,
-                    state,
-                    provider_report,
-                    worker,
-                    failure_reason,
-                    allow_provider_pause=failure_signal.provider_pause_authorized,
-                )
-                if handled:
-                    changed = changed or retry_changed
-                    continue
-            reassigned_to = maybe_reassign_task_after_worker_failure(
-                config,
-                worker,
-                failure_reason,
-                terminal=True,
-                state=state,
-                provider_report=provider_report,
+                failure_signal,
+                current_mode=current_mode,
+                live=False,
             )
-            if reassigned_to:
-                worker["status"] = "reassigned"
-                worker["reassigned_to"] = reassigned_to
-                worker["last_error"] = failure_reason
-                worker["last_event_at"] = utc_now()
-                finalize_queue_event_record(config, state, worker, "completed")
-                changed = True
+            changed = failure_changed or changed
+            if handled:
                 continue
-            finalize_terminal_worker_outcome(config, state, worker, failure_reason)
-            changed = True
-            continue
 
-        if not is_terminal_worker(worker) and worker.get("status") != "manual_pending":
-            if current_mode in {"planning", "coordination"}:
-                worker["status"] = "completed"
-                worker["last_event_at"] = utc_now()
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_completed",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": f"{current_mode.title()} worker exited cleanly.",
-                        "worker_run_id": worker["run_id"],
-                        "session_url": worker.get("session_url"),
-                    },
-                )
-                finalize_queue_event_record(config, state, worker, "completed")
-            elif task_status in expected_completion_statuses:
-                worker["status"] = "completed"
-                worker["last_event_at"] = utc_now()
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_completed",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": f"Background worker process exited after advancing the task to `{task_status}`.",
-                        "worker_run_id": worker["run_id"],
-                        "pr_url": worker.get("pr_url"),
-                        "session_url": worker.get("session_url"),
-                    },
-                )
-                finalize_queue_event_record(config, state, worker, "completed")
-            else:
-                outcome = worker_reported_outcome(worker)
-                if outcome and outcome.get("outcome") == "blocked" and apply_worker_reported_block(config, worker, outcome):
-                    worker["status"] = "completed"
-                    worker["last_event_at"] = utc_now()
-                    finalize_queue_event_record(config, state, worker, "completed")
-                    write_activity_log(
-                        config,
-                        {
-                            "type": "worker_completed",
-                            "provider": worker.get("provider"),
-                            "task_id": worker.get("task_id"),
-                            "message": "Supervisor persisted the worker's reported task blocker.",
-                            "worker_run_id": worker["run_id"],
-                        },
-                    )
-                    changed = True
-                    continue
-                if outcome and outcome.get("outcome") in {"advanced", "progress"}:
-                    if not consume_progress_outcome(config, worker, outcome, now=now):
-                        continue
-                    finalize_queue_event_record(config, state, worker, "completed")
-                    write_activity_log(
-                        config,
-                        {
-                            "type": "worker_progress_completed",
-                            "provider": worker.get("provider"),
-                            "task_id": worker.get("task_id"),
-                            "message": "Worker reported progress; its completed attempt owns the redispatch cooldown.",
-                            "worker_run_id": worker["run_id"],
-                            "result_id": worker.get("consumed_result_id"),
-                        },
-                    )
-                    changed = True
-                    continue
-                # Race protection: the worker may have written status='review' (or another
-                # expected_completion status) to ai-status.json moments before exiting.
-                # The task_map cached at the start of this tick can predate that write, so
-                # re-read fresh before declaring "exited before terminal status".
-                fresh_task = task_index_from_status(config, load_status(config)).get(worker.get("task_id")) or {}
-                fresh_status = str(fresh_task.get("status") or "").lower()
-                if (
-                    fresh_status
-                    and fresh_status != task_status
-                    and fresh_status in expected_completion_statuses
-                ):
-                    worker["status"] = "completed"
-                    worker["last_event_at"] = utc_now()
-                    write_activity_log(
-                        config,
-                        {
-                            "type": "worker_completed",
-                            "provider": worker.get("provider"),
-                            "task_id": worker.get("task_id"),
-                            "message": (
-                                f"Background worker process exited after advancing the task to `{fresh_status}` "
-                                "(observed on fresh re-read; cached snapshot predated the worker's status write)."
-                            ),
-                            "worker_run_id": worker["run_id"],
-                            "pr_url": worker.get("pr_url"),
-                            "session_url": worker.get("session_url"),
-                        },
-                    )
-                    finalize_queue_event_record(config, state, worker, "completed")
-                else:
-                    finalize_terminal_worker_outcome(
-                        config,
-                        state,
-                        worker,
-                        PREMATURE_EXIT_REASON,
-                        allow_provider_pause=True,
-                    )
-            if worker.get("status") == "completed":
-                # A clean completion proves the lane is alive — reset its
-                # terminal-failure streak so the lane-health auto-pause only ever
-                # fires on genuinely dead lanes, not on intermittent blips.
-                clear_lane_failure(state, worker.get("agent_id") or worker.get("provider"))
-            changed = True
+        changed = finalize_exited_worker(
+            config,
+            state,
+            worker,
+            current_mode=current_mode,
+            task_status=task_status,
+            expected_completion_statuses=expected_completion_statuses,
+            now=now,
+        ) or changed
     return changed
 
 
