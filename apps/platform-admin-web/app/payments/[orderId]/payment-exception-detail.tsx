@@ -162,14 +162,14 @@ export function PaymentExceptionDetail({ orderId }: { orderId: string }) {
     setErrorKind(null);
     setInvalidResponse(false);
 
-    client
-      .get<unknown>(`/api/platform-admin/payments/exceptions/${encodeURIComponent(orderId)}`)
+    void client
+      .get<unknown>(`/api/payment-exceptions/${encodeURIComponent(orderId)}`)
       .then((payload) => {
         if (!active) {
           return;
         }
         const parsed = parsePaymentExceptionView(payload);
-        if (!parsed) {
+        if (!parsed || parsed.orderId !== orderId) {
           setInvalidResponse(true);
           return;
         }
