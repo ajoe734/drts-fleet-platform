@@ -9,6 +9,7 @@ LOCAL_HOST="${LOCAL_HOST:-127.0.0.1}"
 # Third-party tools are user-local dependencies, not orchestrator runtime
 # state. Keeping them out of .orchestrator makes state cleanup safe.
 BIN_DIR="${CLOUDFLARED_BIN_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/drts-tools}"
+CLOUDFLARED_VERSION="${CLOUDFLARED_VERSION:-2026.8.2}"
 LOG_DIR="${DASHBOARD_TUNNEL_LOG_DIR:-$ROOT_DIR/.orchestrator/logs}"
 DASHBOARD_LOG="$LOG_DIR/dashboard-${PORT}.log"
 TUNNEL_LOG="$LOG_DIR/dashboard-tunnel.log"
@@ -70,11 +71,35 @@ ensure_cloudflared() {
 
   local asset_name
   asset_name="$(pick_cloudflared_asset)"
-  local download_url="https://github.com/cloudflare/cloudflared/releases/latest/download/${asset_name}"
+  # Pinned rather than `latest`: this fetches an executable and runs it with the
+  # developer's own privileges, so "whatever is newest at this moment" is not a
+  # thing to resolve at runtime.
+  local download_url="https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/${asset_name}"
 
-  echo "Downloading cloudflared to $bin_path" >&2
-  curl -fsSL "$download_url" -o "$bin_path"
-  chmod +x "$bin_path"
+  echo "Downloading cloudflared ${CLOUDFLARED_VERSION} to $bin_path" >&2
+  curl -fsSL "$download_url" -o "$bin_path.part"
+
+  local actual
+  actual="$(sha256sum "$bin_path.part" | awk '{print $1}')"
+  # Cloudflare publishes no digests alongside these release assets, so there is
+  # no upstream value to check against. Rather than pretend otherwise, verify
+  # when the operator has pinned one and say plainly when nobody has.
+  if [[ -n "${CLOUDFLARED_SHA256:-}" ]]; then
+    if [[ "$actual" != "$CLOUDFLARED_SHA256" ]]; then
+      rm -f "$bin_path.part"
+      echo "cloudflared checksum mismatch for ${asset_name}" >&2
+      echo "  expected $CLOUDFLARED_SHA256" >&2
+      echo "  actual   $actual" >&2
+      return 1
+    fi
+  else
+    echo "WARNING: cloudflared was not verified -- upstream publishes no digest." >&2
+    echo "  To pin this exact binary for future runs, re-run with:" >&2
+    echo "    CLOUDFLARED_SHA256=$actual" >&2
+  fi
+
+  chmod +x "$bin_path.part"
+  mv "$bin_path.part" "$bin_path"
   echo "$bin_path"
 }
 
@@ -136,6 +161,29 @@ wait_for_tunnel_url() {
 }
 
 trap cleanup EXIT INT TERM
+
+# A quick tunnel mints a public trycloudflare.com hostname with no login in
+# front of it, and the dashboard authenticates nobody: whoever holds the URL
+# reads the task board, the approval queue, and the full runtime state. That is
+# a decision to take deliberately, not something to discover from the URL this
+# script prints, so it has to be stated before the tunnel exists.
+if [[ "${DASHBOARD_TUNNEL_PUBLIC_ACK:-}" != "1" ]]; then
+  cat >&2 <<'ACK'
+refusing to open a Cloudflare quick tunnel.
+
+It publishes an unauthenticated page on a public trycloudflare.com URL. Anyone
+with that URL can read ai-status.json, the approval queue, and the orchestrator
+runtime state, and can POST /__refresh to trigger a sync on this machine.
+
+If that is what you want, acknowledge it explicitly:
+
+    DASHBOARD_TUNNEL_PUBLIC_ACK=1 bash tools/development-orchestrator/bin/run-dashboard-tunnel.sh
+
+For anything beyond a one-off demo, put a named tunnel with Cloudflare Access
+in front of the dashboard instead of a quick tunnel.
+ACK
+  exit 2
+fi
 
 CLOUDFLARED_BIN="$(ensure_cloudflared)"
 

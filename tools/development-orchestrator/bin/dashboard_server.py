@@ -26,9 +26,11 @@ class NoCacheRequestHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path == "/__refresh":
-            self.handle_refresh()
-            return
+        # `/__refresh` shells out to ai-status.sh, so it is not a safe method
+        # and never belonged on GET: any prefetch, <img src>, or link preview
+        # pointing at it would run the sync. The dashboard has always called it
+        # with POST (dashboard/data.js), so this only ever served as reach for
+        # something that was not the dashboard.
         if parsed.path == "/approval-queue.json":
             live_path = self.live_file_map.get(parsed.path)
             if live_path is None or not live_path.exists():
@@ -127,9 +129,33 @@ class NoCacheRequestHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/__refresh":
+            if not self.is_same_origin():
+                self.send_error(403, "Cross-site refresh rejected")
+                return
             self.handle_refresh()
             return
         self.send_error(404, "Not Found")
+
+    def is_same_origin(self) -> bool:
+        """Is this request from the dashboard page itself?
+
+        The dashboard binds to loopback, which is reachable by every page the
+        browser has open: any site could POST `/__refresh` at 127.0.0.1:4174
+        and drive a sync on this machine. Browsers label that for us, so the
+        check is a header comparison rather than a session token.
+
+        A client that sends neither header cannot be a third-party page being
+        used as the lever (curl, a script), so it passes: this closes CSRF, it
+        is not an authentication boundary. Reaching the port at all is still
+        governed by the bind address -- see the loopback guard in main().
+        """
+        site = self.headers.get("Sec-Fetch-Site")
+        if site is not None:
+            return site == "same-origin"
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        return urlparse(origin).netloc == (self.headers.get("Host") or "")
 
     def handle_refresh(self) -> None:
         repo_root = self.repo_root
@@ -177,6 +203,16 @@ class NoCacheRequestHandler(SimpleHTTPRequestHandler):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Serve local orchestrator dashboard assets without browser caching.")
     parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind. Default: 127.0.0.1")
+    parser.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help=(
+            "Permit binding a non-loopback interface. The dashboard has no "
+            "authentication and serves the task board, approval queue, and "
+            "runtime state, so this publishes them to whoever can reach the "
+            "port. Put an authenticating proxy in front of it."
+        ),
+    )
     parser.add_argument("--port", type=int, default=4174, help="Port to bind. Default: 4174")
     parser.add_argument(
         "--directory",
@@ -191,8 +227,21 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", ""})
+
+
 def main() -> None:
     args = parse_args()
+    # This server authenticates nobody and serves ai-status.json, the approval
+    # queue, and the runtime state. Binding it anywhere reachable is a decision
+    # someone has to make on purpose, not a default that a HOST env var can
+    # drift into.
+    if args.host not in LOOPBACK_HOSTS and not args.allow_remote:
+        raise SystemExit(
+            f"refusing to bind {args.host}: the dashboard is unauthenticated and would "
+            "expose the task board, approval queue, and runtime state to anyone who can "
+            "reach it. Pass --allow-remote once an authenticating proxy is in front of it."
+        )
     directory = str(Path(args.directory).resolve())
     repo_root = Path(args.repo_root).resolve()
     NoCacheRequestHandler.live_file_map = {
