@@ -51,6 +51,75 @@ class CommandActivityLogSummaryTests(unittest.TestCase):
         self.assertEqual(summary["prompt_chars"], len(prompt))
 
 
+class ProviderPauseRetirementTests(unittest.TestCase):
+    CONFIG = {
+        "agents": {
+            "claude": {"display_name": "Claude", "provider": "claude"},
+            "codex2": {"display_name": "Codex2", "provider": "codex2"},
+        }
+    }
+
+    def _report(self, **fingerprints: str) -> dict:
+        return {
+            "providers": {
+                lane: {"auth_ready": True, "identity": {"fingerprint": fp}}
+                for lane, fp in fingerprints.items()
+            }
+        }
+
+    def _state(self, pause: dict) -> dict:
+        return {"provider_pauses": {"identity:codex2:old-account": pause}}
+
+    def test_a_pause_whose_account_no_longer_backs_any_lane_is_retired(self) -> None:
+        """codex2 was repointed to a different account and the 401 recorded
+        against the old one survived. It could no longer block dispatch, but it
+        kept the probe warning about a fault that no longer existed and pinned
+        the chair to provider_health_triage instead of ordinary review."""
+        state = self._state({"kind": "auth", "scope": "identity", "lane_id": "codex2",
+                             "identity_fingerprint": "old-account", "paused_at": "2026-08-15T04:51:02Z"})
+        report = self._report(claude="claude-account", codex2="new-account")
+
+        with mock.patch.object(supervisor, "write_activity_log") as log:
+            changed = supervisor.prune_unmatched_provider_pauses({}, self.CONFIG, state, report)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["provider_pauses"], {})
+        self.assertEqual(log.call_args.args[1]["type"], "provider_pause_retired")
+
+    def test_a_pause_still_covering_a_lane_is_kept(self) -> None:
+        state = self._state({"kind": "auth", "scope": "identity", "lane_id": "codex2",
+                             "identity_fingerprint": "shared-account", "paused_at": "2026-08-15T04:51:02Z"})
+        report = self._report(claude="claude-account", codex2="shared-account")
+
+        changed = supervisor.prune_unmatched_provider_pauses({}, self.CONFIG, state, report)
+
+        self.assertFalse(changed)
+        self.assertIn("identity:codex2:old-account", state["provider_pauses"])
+
+    def test_an_unreadable_probe_never_retires_an_identity_pause(self) -> None:
+        """The safeguard. A transient probe failure makes every identity look
+        unresolvable, so every identity-scoped pause would look dead at once.
+        Dropping a real pause because the account was momentarily invisible is
+        far worse than carrying a stale one."""
+        state = self._state({"kind": "auth", "scope": "identity", "lane_id": "codex2",
+                             "identity_fingerprint": "old-account", "paused_at": "2026-08-15T04:51:02Z"})
+
+        changed = supervisor.prune_unmatched_provider_pauses({}, self.CONFIG, state, {"providers": {}})
+
+        self.assertFalse(changed)
+        self.assertIn("identity:codex2:old-account", state["provider_pauses"])
+
+    def test_a_lane_scoped_pause_for_a_configured_lane_is_kept(self) -> None:
+        """Lane-scoped records need no identity, so they are judged on the lane
+        alone and must survive a probe that cannot see accounts."""
+        state = {"provider_pauses": {"claude": {"kind": "auth", "scope": "lane", "lane_id": "claude"}}}
+
+        changed = supervisor.prune_unmatched_provider_pauses({}, self.CONFIG, state, {"providers": {}})
+
+        self.assertFalse(changed)
+        self.assertIn("claude", state["provider_pauses"])
+
+
 class DetectWorkerFailureTests(unittest.TestCase):
     def _worker_for_log(self, content: str) -> dict[str, str]:
         handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)

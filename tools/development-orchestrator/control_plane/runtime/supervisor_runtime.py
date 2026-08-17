@@ -3296,6 +3296,66 @@ def recovered_taskless_dispatch_pause(
     return True
 
 
+def prune_unmatched_provider_pauses(
+    config_paths: dict[str, Any],
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> bool:
+    """Retire pause records that can no longer stop any configured lane.
+
+    A pause is scoped to a lane, an identity or a quota pool. When the lane it
+    was recorded against moves to a different account -- as codex2 did when its
+    adapter changed -- the record outlives what it described: it cannot block
+    dispatch any more, but it keeps the probe warning about a fault that no
+    longer exists and pins the chair to provider_health_triage, because
+    chair_review_reason picks that topic whenever any pause is on file. Stale
+    state that still speaks is the failure this whole series has been removing.
+
+    Identity- and pool-scoped records are only retired when at least one lane's
+    identity actually resolved. A transient probe failure makes every account
+    invisible at once, and dropping a real pause because we momentarily could
+    not see the account is far worse than carrying a stale one for a cycle.
+    Lane-scoped records need no identity, so they are judged on the lane alone.
+    """
+    registry = provider_pause_registry(state)
+    if not registry:
+        return False
+    agent_ids = list((config.get("agents", {}) or {}))
+    identities_resolved = any(
+        isinstance(provider_info_for_agent(config, provider_report, agent_id).get("identity"), dict)
+        for agent_id in agent_ids
+    )
+    kept: dict[str, Any] = {}
+    retired: list[str] = []
+    for key, entry in registry.items():
+        if not isinstance(entry, dict):
+            retired.append(key)
+            continue
+        if str(entry.get("scope") or "lane") != "lane" and not identities_resolved:
+            kept[key] = entry
+            continue
+        if any(pause_covers_lane(config, provider_report, entry, agent_id) for agent_id in agent_ids):
+            kept[key] = entry
+            continue
+        retired.append(key)
+    if not retired:
+        return False
+    state["provider_pauses"] = kept
+    write_activity_log(
+        config_paths or config,
+        {
+            "type": "provider_pause_retired",
+            "message": (
+                "Retired provider pause(s) that no longer cover any configured lane: "
+                + ", ".join(retired)
+            ),
+            "pause_scopes": retired,
+        },
+    )
+    return True
+
+
 def prune_completed_dispatch_pauses(
     state: dict[str, Any],
     status: dict[str, Any],
@@ -7825,6 +7885,7 @@ def supervisor_tick_ports() -> SupervisorTickPorts:
         reconcile_queue_records=reconcile_queue_records,
         prune_event_queue=prune_event_queue,
         prune_completed_dispatch_pauses=prune_completed_dispatch_pauses,
+        prune_unmatched_provider_pauses=prune_unmatched_provider_pauses,
         prune_failure_streaks=prune_failure_streaks,
         refresh_chair_review_state=refresh_chair_review_state,
         reconcile_optional_automation=optional_automation.reconcile,
