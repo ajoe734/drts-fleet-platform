@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import re
@@ -576,11 +577,67 @@ def render_template(path: Path, variables: dict[str, Any]) -> str:
 # is microseconds — cheaper than discovering the bloat after-the-fact.
 ACTIVITY_LOG_MAX_BYTES = int(os.environ.get("ACTIVITY_LOG_MAX_BYTES", str(50 * 1024 * 1024)))
 ACTIVITY_LOG_KEEP_LINES = int(os.environ.get("ACTIVITY_LOG_KEEP_LINES", "10000"))
+# How many rotated archives to retain. JSONL compresses roughly 10x, so a 50 MB
+# rotation lands near 5 MB and the default holds ~1 GB of history in ~20 files.
+ACTIVITY_LOG_ARCHIVE_KEEP = int(os.environ.get("ACTIVITY_LOG_ARCHIVE_KEEP", "20"))
+
+
+def activity_log_archive_dir(path: Path) -> Path:
+    """Where rotated segments of `path` are kept."""
+    return path.parent / f"{path.stem}-archive"
+
+
+def _archive_activity_log(path: Path) -> Path:
+    """Compress the whole current log into a timestamped archive beside it.
+
+    Raises on failure, because the caller must not truncate what it could not
+    preserve.
+    """
+    archive_dir = activity_log_archive_dir(path)
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    target = archive_dir / f"{path.stem}-{stamp}{path.suffix}.gz"
+    partial = target.with_name(target.name + ".part")
+    with path.open("rb") as source, gzip.open(partial, "wb") as sink:
+        shutil.copyfileobj(source, sink)
+    os.replace(partial, target)
+    return target
+
+
+def _prune_activity_log_archives(path: Path) -> None:
+    """Drop the oldest archives past ACTIVITY_LOG_ARCHIVE_KEEP.
+
+    Retention is bounded on purpose, but deciding how far back history goes is
+    not the same act as dropping the current file's contents mid-rotation.
+    """
+    if ACTIVITY_LOG_ARCHIVE_KEEP <= 0:
+        return
+    archive_dir = activity_log_archive_dir(path)
+    if not archive_dir.is_dir():
+        return
+    # Timestamped names sort chronologically.
+    archives = sorted(archive_dir.glob(f"{path.stem}-*{path.suffix}.gz"))
+    for stale in archives[: -ACTIVITY_LOG_ARCHIVE_KEEP]:
+        try:
+            stale.unlink()
+        except OSError:
+            continue
 
 
 def _rotate_activity_log_if_oversize(path: Path) -> None:
-    """If `path` exceeds ACTIVITY_LOG_MAX_BYTES, rewrite it to keep only the
-    last ACTIVITY_LOG_KEEP_LINES lines.
+    """If `path` exceeds ACTIVITY_LOG_MAX_BYTES, archive it whole, then keep
+    only the last ACTIVITY_LOG_KEEP_LINES lines in the live file.
+
+    The archive step is what makes this a rotation rather than a truncation.
+    It used to write the tail and drop everything before it: at the configured
+    50 MB / 10k lines that discarded ~93% of the record, while
+    SUPERVISOR_OPERATING_MODEL.md told readers the file was append-only
+    history. An audit trail does not get to be silently shorter than the
+    document describing it.
+
+    If archiving fails the live file is left alone. Growing past the ceiling is
+    a problem an operator can see and fix; a rotation that destroyed the
+    history it could not copy is not.
 
     Atomic via tempfile + os.replace so concurrent writers from other
     processes see either the pre-rotation file or the post-rotation file,
@@ -598,6 +655,12 @@ def _rotate_activity_log_if_oversize(path: Path) -> None:
             return
     except OSError:
         return
+    try:
+        _archive_activity_log(path)
+    except (OSError, ValueError):
+        # Preserving the record outranks holding the size ceiling.
+        return
+    _prune_activity_log_archives(path)
     try:
         with path.open("rb") as handle:
             # tail by reading from the end. ACTIVITY_LOG_KEEP_LINES lines is

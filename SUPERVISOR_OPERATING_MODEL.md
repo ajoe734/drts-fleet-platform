@@ -36,7 +36,12 @@ Primary artifacts:
 - `.orchestrator/state.json`
 - `.orchestrator/evidence/<run-id>.json`
 - `current-work.md` as a human summary
-- `ai-activity-log.jsonl` as append-only history
+- `ai-activity-log.jsonl` as append-only history. Nothing rewrites entries in
+  place. Past a size ceiling the file is rotated: the whole current file is
+  compressed into `ai-activity-log-archive/`, and only then is the live file
+  reduced to its tail. Reading the full record means reading the archives too,
+  and retention there is bounded — so the history is finite, but it is never
+  shortened without being written down first.
 - the accepted consensus packet
 
 Control-plane rule:

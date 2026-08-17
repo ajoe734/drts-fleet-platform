@@ -8,6 +8,7 @@ appearing dead.
 
 from __future__ import annotations
 
+import gzip
 import json
 import unittest
 from pathlib import Path
@@ -98,6 +99,108 @@ class WriteActivityLogRotationTests(unittest.TestCase):
                 common.write_activity_log(self.config, {"type": "after-fail"})
             except OSError:
                 self.fail("rotation failure must NOT propagate to caller")
+
+
+class RotationPreservesHistoryTests(unittest.TestCase):
+    """Rotation must not be truncation.
+
+    The tail-and-drop rotation discarded ~93% of the record at the configured
+    50 MB / 10k lines, while SUPERVISOR_OPERATING_MODEL.md described the file
+    as append-only history. These pin the archive that closes that gap.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.log_path = self.root / "ai-activity-log.jsonl"
+        self.config = {"paths": {"activity_log": str(self.log_path)}}
+
+    def _write(self, n: int) -> None:
+        for i in range(n):
+            common.write_activity_log(self.config, {"type": "test", "i": i})
+
+    def _archived_entries(self) -> list[dict]:
+        # Deliberately discovered by globbing rather than by asking common for
+        # the archive directory: this test must be able to run against a build
+        # that has no archiving at all, and fail because entries are gone --
+        # not because a symbol is missing.
+        entries: list[dict] = []
+        for archive in sorted(self.root.rglob("*.gz")):
+            with gzip.open(archive, "rt", encoding="utf-8") as handle:
+                entries.extend(json.loads(line) for line in handle if line.strip())
+        return entries
+
+    def test_every_entry_dropped_from_the_live_file_survives_in_an_archive(self) -> None:
+        with mock.patch.object(common, "ACTIVITY_LOG_MAX_BYTES", 2000):
+            with mock.patch.object(common, "ACTIVITY_LOG_KEEP_LINES", 5):
+                self._write(60)
+
+        live = [
+            json.loads(line)
+            for line in self.log_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        archived = self._archived_entries()
+        seen = {entry["i"] for entry in live} | {entry["i"] for entry in archived}
+        lost = sorted(set(range(60)) - seen)
+        self.assertEqual(
+            lost,
+            [],
+            f"{len(lost)} of 60 entries vanished: rotation dropped history "
+            f"instead of archiving it (live={len(live)}, archived={len(archived)})",
+        )
+        self.assertTrue(archived, "rotation kept no archive at all")
+
+    def test_live_file_is_still_bounded_after_rotation(self) -> None:
+        """The ceiling is on bytes, and rotation runs before the append.
+
+        So the live file settles just above the threshold rather than at
+        KEEP_LINES: it refills to the ceiling, rotates, refills again.
+        """
+        threshold = 2000
+        with mock.patch.object(common, "ACTIVITY_LOG_MAX_BYTES", threshold):
+            with mock.patch.object(common, "ACTIVITY_LOG_KEEP_LINES", 5):
+                self._write(60)
+
+        size = self.log_path.stat().st_size
+        self.assertLessEqual(
+            size,
+            threshold + 4096,
+            "the size ceiling stopped working",
+        )
+        lines = self.log_path.read_text(encoding="utf-8").splitlines()
+        self.assertLess(len(lines), 60, "nothing was ever rotated out of the live file")
+
+    def test_archive_retention_is_bounded(self) -> None:
+        with mock.patch.object(common, "ACTIVITY_LOG_MAX_BYTES", 500):
+            with mock.patch.object(common, "ACTIVITY_LOG_KEEP_LINES", 2):
+                with mock.patch.object(common, "ACTIVITY_LOG_ARCHIVE_KEEP", 3):
+                    self._write(120)
+
+        archives = list(common.activity_log_archive_dir(self.log_path).glob("*.gz"))
+        self.assertLessEqual(len(archives), 3)
+        self.assertTrue(archives, "retention pruned everything")
+
+    def test_live_file_is_untouched_when_the_archive_cannot_be_written(self) -> None:
+        """Growing past the ceiling beats destroying what could not be copied."""
+        with mock.patch.object(common, "ACTIVITY_LOG_MAX_BYTES", 2000):
+            with mock.patch.object(common, "ACTIVITY_LOG_KEEP_LINES", 5):
+                self._write(40)
+                before = self.log_path.read_text(encoding="utf-8")
+                with mock.patch.object(
+                    common, "_archive_activity_log", side_effect=OSError("disk full")
+                ):
+                    self._write(1)
+
+        after = self.log_path.read_text(encoding="utf-8")
+        self.assertTrue(after.startswith(before), "a failed archive still truncated the log")
+
+    def test_no_archive_is_written_below_the_threshold(self) -> None:
+        with mock.patch.object(common, "ACTIVITY_LOG_MAX_BYTES", 10 * 1024 * 1024):
+            self._write(5)
+
+        self.assertFalse(common.activity_log_archive_dir(self.log_path).exists())
 
 
 if __name__ == "__main__":
