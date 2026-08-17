@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 import traceback
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -177,7 +178,37 @@ EXECUTION_DISPATCH_REASONS = {
 CHAIRMAN_SKILL_PATH = THIS_DIR / "skills" / "chairman-operational-review.md"
 
 
-class SupervisorShutdown(Exception):
+# Shutdown timing budget. systemd's TimeoutStopSec is 30s (see the unit file);
+# everything below must finish well inside it so the stop never escalates to a
+# SIGKILL of the control group, which is what strands in-flight `git worktree
+# add` calls as permanently locked `initializing` worktrees.
+WORKER_TERM_GRACE_SECONDS = 1.0
+WORKER_TERM_POLL_SECONDS = 0.05
+SHUTDOWN_TOTAL_BUDGET_SECONDS = 10.0
+
+
+class SupervisorShutdown(BaseException):
+    """Raised from the SIGTERM/SIGINT handler to unwind the tick and stop cleanly.
+
+    Derives from BaseException, not Exception, for the same reason
+    KeyboardInterrupt and SystemExit do: a shutdown request is not a failure
+    that recovery code may absorb, it is an instruction to leave.
+
+    This used to derive from Exception, and a tick crosses 17 `except
+    Exception` handlers that log-and-continue or `pass` (worktree node_modules
+    provisioning, recovery probes, approval classification, tick accounting).
+    Any of them silently ate the shutdown, so the supervisor kept ticking as
+    if nothing had been asked of it. systemd waited out TimeoutStopSec=30 and
+    escalated to SIGKILL of the whole control group, which killed whatever
+    `git worktree add` was in flight and left the worktree locked
+    `initializing` forever -- residue the disk guard then skips by design.
+    Two SIGKILLs on 2026-08-17 (03:24, 05:00) and 21 stranded worktrees
+    holding 13 GB came from that chain.
+
+    Consequence to respect when editing: `except Exception` no longer runs
+    during shutdown. Cleanup that must survive a stop belongs in `finally`.
+    """
+
     def __init__(self, signum: int) -> None:
         self.signum = signum
         self.reason = supervisor_shutdown_reason(signum)
@@ -550,6 +581,22 @@ def raise_supervisor_shutdown(signum: int, _frame: Any) -> None:
 def install_supervisor_signal_handlers() -> None:
     signal.signal(signal.SIGTERM, raise_supervisor_shutdown)
     signal.signal(signal.SIGINT, raise_supervisor_shutdown)
+
+
+def suspend_supervisor_signal_handlers() -> None:
+    """Stop converting stop signals into exceptions once shutdown has begun.
+
+    Shutdown cleanup writes runtime state and reaps workers. A second SIGTERM
+    landing mid-cleanup would raise a fresh SupervisorShutdown out of that
+    work and persist a half-written stop, which is worse than finishing.
+    Cleanup is deadline-bounded (SHUTDOWN_TOTAL_BUDGET_SECONDS), so ignoring
+    the signal cannot hang: systemd's SIGKILL remains the outer backstop.
+    """
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(signum, signal.SIG_IGN)
+        except (OSError, ValueError):  # not the main thread, or unsupported
+            pass
 
 
 def _supervisor_script_arg_matches(
@@ -1231,6 +1278,7 @@ def mark_supervisor_stopped(
     changed = True
 
     active_statuses = set(ACTIVE_RUNTIME_STATUSES)
+    doomed_pids: list[int] = []
     for worker in state.setdefault("workers", {}).values():
         status = str(worker.get("status") or "")
         if status not in active_statuses:
@@ -1243,8 +1291,7 @@ def mark_supervisor_stopped(
         worker["supervisor_stopped_at"] = stopped_at
         if worker.get("pid"):
             worker["stopped_pid"] = worker.get("pid")
-        if terminate_workers:
-            terminate_worker_pid(worker.get("pid"))
+            doomed_pids.append(int(worker["pid"]))
         worker["pid"] = None
         queue_event_id = worker.get("queue_event_id")
         if queue_event_id:
@@ -1254,6 +1301,11 @@ def mark_supervisor_stopped(
                 record["processed_at"] = stopped_at
                 record["error"] = message
         changed = True
+
+    # One overlapped sweep instead of a serial grace period per worker, so a
+    # full fleet costs ~1s of the stop budget rather than ~12s.
+    if terminate_workers and doomed_pids:
+        terminate_worker_pids(doomed_pids)
 
     chair = state.setdefault("chair_review", {})
     active_review = chair.get("active_review")
@@ -2103,34 +2155,73 @@ def reap_finished_children(*, limit: int = 64) -> int:
     return reaped
 
 
+def _signal_worker_pid(pid: int, sig: int) -> bool:
+    """Signal a worker's process group, falling back to the bare pid."""
+    try:
+        os.killpg(pid, sig)
+        return True
+    except OSError:
+        try:
+            os.kill(pid, sig)
+            return True
+        except OSError:
+            return False
+
+
 def terminate_worker_pid(pid: int | None) -> bool:
     if not pid:
         return False
-    signaled = False
-    try:
-        os.killpg(pid, signal.SIGTERM)
-        signaled = True
-    except OSError:
-        try:
-            os.kill(pid, signal.SIGTERM)
-            signaled = True
-        except OSError:
-            return False
-    deadline = time.time() + 1.0
+    if not _signal_worker_pid(int(pid), signal.SIGTERM):
+        return False
+    deadline = time.time() + WORKER_TERM_GRACE_SECONDS
     while time.time() < deadline:
         if not pid_is_alive(pid):
             reap_child_pid(pid)
             return True
-        time.sleep(0.05)
-    try:
-        os.killpg(pid, signal.SIGKILL)
-    except OSError:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            return signaled
+        time.sleep(WORKER_TERM_POLL_SECONDS)
+    # SIGKILL failing here means the pid is already gone, which is the outcome
+    # we wanted; SIGTERM was delivered either way.
+    _signal_worker_pid(int(pid), signal.SIGKILL)
     reap_child_pid(pid)
     return True
+
+
+def terminate_worker_pids(
+    pids: Iterable[int | None],
+    *,
+    budget_seconds: float = SHUTDOWN_TOTAL_BUDGET_SECONDS,
+) -> dict[int, bool]:
+    """SIGTERM every worker at once, then collect them all against one deadline.
+
+    Terminating serially cost WORKER_TERM_GRACE_SECONDS per worker, so stopping
+    a full fleet (`supervisor.resource_guard.max_total_workers` is 12) spent
+    ~12s of systemd's 30s TimeoutStopSec waiting out grace periods that could
+    have overlapped. Signalling first and waiting once bounds the sweep by the
+    grace period plus polling no matter how many workers are running.
+
+    Returns {pid: whether a stop signal was delivered}.
+    """
+    targets = [int(pid) for pid in pids if pid]
+    if not targets:
+        return {}
+    delivered = {pid: _signal_worker_pid(pid, signal.SIGTERM) for pid in targets}
+    pending = [pid for pid, ok in delivered.items() if ok]
+    deadline = time.time() + min(WORKER_TERM_GRACE_SECONDS, budget_seconds)
+    while pending and time.time() < deadline:
+        pending = [pid for pid in pending if _still_running_after_reap(pid)]
+        if pending:
+            time.sleep(WORKER_TERM_POLL_SECONDS)
+    for pid in pending:
+        _signal_worker_pid(pid, signal.SIGKILL)
+        reap_child_pid(pid)
+    return delivered
+
+
+def _still_running_after_reap(pid: int) -> bool:
+    if pid_is_alive(pid):
+        return True
+    reap_child_pid(pid)
+    return False
 
 
 def normalize_pr_url(config: dict[str, Any], url: str | None) -> str | None:
@@ -8026,6 +8117,7 @@ def main() -> int:
             )
     except SupervisorShutdown as exc:
         console_log(f"stopping supervisor after {exc.reason}", quiet=args.quiet)
+        suspend_supervisor_signal_handlers()
         mark_supervisor_stopped(config, reason=exc.reason, signum=exc.signum, terminate_workers=True)
         return 128 + exc.signum
     except SupervisorTickFailureLimit as exc:
