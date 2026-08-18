@@ -281,3 +281,99 @@ class DiskGuardTests(unittest.TestCase):
             state["maintenance"]["worker_workspace_cleanup"]["last_result"],
             result,
         )
+
+
+class ReclaimCoversEveryWorktreeTests(unittest.TestCase):
+    """Reclamation asks which worktrees are load-bearing, not where they live.
+
+    Scoping it to .artifacts/worktrees/auto meant that of 86 registered
+    worktrees exactly one was in scope. Workers create review and verification
+    trees wherever they are standing -- .artifacts/worktrees/review/,
+    .artifacts/review-tmp/, /tmp/<task>-review -- and none of those could ever
+    be reclaimed. Enumerating more paths would only move the boundary; the next
+    ad-hoc location escapes it again.
+    """
+
+    def _repo_config(self, root: Path) -> dict:
+        (root / "ai-status.json").write_text('{"tasks":[]}\n', encoding="utf-8")
+        return {
+            "paths": {
+                "status_file": str(root / "ai-status.json"),
+                "activity_log": str(root / "ai-activity-log.jsonl"),
+                "state_file": str(root / ".orchestrator/state.json"),
+            },
+            "branch_strategy": {"worker_worktrees": {"enabled": True}},
+        }
+
+    def _init_repo(self, root: Path) -> None:
+        _git(root, "init", "--quiet", "--initial-branch=dev")
+        _git(root, "config", "user.email", "t@example.com")
+        _git(root, "config", "user.name", "t")
+        (root / "seed.txt").write_text("seed\n", encoding="utf-8")
+        _git(root, "add", "seed.txt")
+        _git(root, "commit", "--quiet", "-m", "seed")
+
+    def test_a_worktree_outside_the_managed_directory_is_reclaimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            # The shape workers actually produce: a review tree beside the
+            # managed directory rather than inside it.
+            stray = root / ".artifacts" / "worktrees" / "review" / "task-verify"
+            _git(root, "worktree", "add", "--detach", str(stray), "dev")
+
+            result = worktree_maintenance.release_inactive_worker_worktrees(
+                self._repo_config(root), {"workers": {}},
+                {"archive_root": str(Path(tmpdir) / "archive")},
+            )
+
+            self.assertEqual(result["removed"], 1, "a worktree outside auto/ was left forever")
+            self.assertFalse(stray.exists())
+
+    def test_a_release_snapshot_is_never_reclaimed(self) -> None:
+        """The supervisor executes from one of these."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            release = root / ".artifacts" / "releases" / "orchestrator-abc123"
+            _git(root, "worktree", "add", "--detach", str(release), "dev")
+
+            result = worktree_maintenance.release_inactive_worker_worktrees(
+                self._repo_config(root), {"workers": {}},
+                {"archive_root": str(Path(tmpdir) / "archive")},
+            )
+
+            self.assertTrue(release.exists(), "reclamation removed the running release")
+            self.assertEqual(result["removed"], 0)
+
+    def test_the_canonical_checkout_is_never_reclaimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+
+            worktree_maintenance.release_inactive_worker_worktrees(
+                self._repo_config(root), {"workers": {}},
+                {"archive_root": str(Path(tmpdir) / "archive")},
+            )
+
+            self.assertTrue((root / "seed.txt").exists())
+
+    def test_an_active_workers_tree_is_never_reclaimed_wherever_it_sits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            live = root / ".artifacts" / "review-tmp" / "in-use"
+            _git(root, "worktree", "add", "--detach", str(live), "dev")
+            state = {"workers": {"r1": {"status": "running", "workspace_root": str(live.resolve())}}}
+
+            result = worktree_maintenance.release_inactive_worker_worktrees(
+                self._repo_config(root), state,
+                {"archive_root": str(Path(tmpdir) / "archive")},
+            )
+
+            self.assertTrue(live.exists(), "reclamation removed a tree a worker is using")
+            self.assertEqual(result["removed"], 0)
