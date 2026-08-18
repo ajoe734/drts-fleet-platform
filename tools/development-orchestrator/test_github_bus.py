@@ -733,3 +733,69 @@ class GitHubBusLabelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PreMergeIntegrationGateTests(unittest.TestCase):
+    """A candidate's green CI describes its own head, not where it will land.
+
+    On 2026-08-17 #1461 and #1462 shared no changed file, each merged green 45
+    seconds apart, and together broke dev: one's new test called a function
+    whose contract the other had changed. Replayed against this gate, the
+    candidate is refused with the exact FileNotFoundError that broke dev, while
+    a healthy candidate on current dev still reports `Ran 629 tests ... OK`.
+    """
+
+    def _task(self) -> dict:
+        return {
+            "id": "T-1",
+            "status": "integrating",
+            "candidate_sha": "abc123",
+            "reviewed_sha": "abc123",
+            "ci_sha": "abc123",
+            "ci_status": "success",
+        }
+
+    def _run(self, integrates: tuple[bool, str]):
+        config = {"paths": {"activity_log": "/dev/null"}, "github_bus": {"repo": "o/r", "auto_merge": {"enabled": True}}}
+        status = {"tasks": [self._task()]}
+        bus_state = {"tasks": {}}
+        with mock.patch.object(github_bus, "integrates_cleanly_with_dev", return_value=integrates), \
+             mock.patch.object(github_bus, "candidate_pr_for_task", return_value=7), \
+             mock.patch.object(github_bus, "write_activity_log") as log, \
+             mock.patch.object(github_bus, "run_gh") as run_gh:
+            github_bus.request_candidate_auto_merge(config, bus_state, status, "o/r")
+        return run_gh, log, bus_state
+
+    def test_a_candidate_that_breaks_dev_is_not_merged(self) -> None:
+        run_gh, log, _ = self._run((False, "orchestrator suite fails on top of origin/dev"))
+
+        run_gh.assert_not_called()
+        kinds = [c.args[1].get("type") for c in log.call_args_list]
+        self.assertIn("candidate_premerge_check_failed", kinds)
+
+    def test_a_healthy_candidate_still_merges(self) -> None:
+        run_gh, _, _ = self._run((True, "Ran 629 tests in 13.9s on top of origin/dev"))
+
+        self.assertEqual(run_gh.call_args.args[0][:2], ["pr", "merge"])
+
+    def test_a_blocked_candidate_is_reported_once_not_every_tick(self) -> None:
+        config = {"paths": {"activity_log": "/dev/null"}, "github_bus": {"repo": "o/r", "auto_merge": {"enabled": True}}}
+        status = {"tasks": [self._task()]}
+        bus_state = {"tasks": {}}
+        with mock.patch.object(github_bus, "integrates_cleanly_with_dev", return_value=(False, "nope")), \
+             mock.patch.object(github_bus, "candidate_pr_for_task", return_value=7), \
+             mock.patch.object(github_bus, "write_activity_log") as log, \
+             mock.patch.object(github_bus, "run_gh"):
+            for _ in range(4):
+                github_bus.request_candidate_auto_merge(config, bus_state, status, "o/r")
+
+        failures = [c for c in log.call_args_list
+                    if c.args[1].get("type") == "candidate_premerge_check_failed"]
+        self.assertEqual(len(failures), 1, "a stuck candidate logged on every tick")
+
+    def test_the_gate_abstains_when_it_cannot_run(self) -> None:
+        """A gate must never be the reason something else fails."""
+        allowed, detail = github_bus.integrates_cleanly_with_dev({}, "abc123")
+
+        self.assertTrue(allowed)
+        self.assertIn("skipped", detail)

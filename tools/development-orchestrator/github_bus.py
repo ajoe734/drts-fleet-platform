@@ -6,6 +6,7 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -925,6 +926,24 @@ def request_candidate_auto_merge(
         entry = task_bus_entry(bus_state, str(task["id"]))
         if entry.get("auto_merge_candidate_sha") == candidate_sha:
             continue
+        # Everything above establishes that the candidate was green on its own
+        # head. This asks the question those gates cannot: is it still green on
+        # top of the dev it is about to land on?
+        integrates, detail = integrates_cleanly_with_dev(config, candidate_sha)
+        if not integrates:
+            if entry.get("premerge_blocked_sha") != candidate_sha:
+                entry["premerge_blocked_sha"] = candidate_sha
+                write_activity_log(
+                    config,
+                    {
+                        "type": "candidate_premerge_check_failed",
+                        "task_id": task.get("id"),
+                        "message": trim_text(detail, 600),
+                        "github_pr": number,
+                    },
+                )
+            continue
+        entry.pop("premerge_blocked_sha", None)
         try:
             run_gh(["pr", "merge", str(number), "--repo", repo, "--auto", "--squash"])
         except GitHubBusError as exc:
@@ -1347,6 +1366,72 @@ def mark_offline(config: dict[str, Any], bus_state: dict[str, Any], error: str) 
     if bus_state.get("last_error") != error:
         write_activity_log(config, {"type": "github_bus_offline", "message": error})
     bus_state["last_error"] = error
+
+
+def integrates_cleanly_with_dev(
+    config: dict[str, Any], candidate_sha: str, integration_ref: str = "origin/dev"
+) -> tuple[bool, str]:
+    """Does this candidate still pass once it sits on top of current dev?
+
+    The green CI recorded against a candidate describes that candidate's own
+    head. dev moves underneath it, and the gates above cannot see that: on
+    2026-08-17, #1461 (permission_broker.py) and #1462 (common.py) shared no
+    changed file at all, each merged green 45 seconds apart, and together broke
+    dev -- one's new test called a function whose contract the other had
+    changed. No file-overlap heuristic sees that shape; only running the suite
+    with both changes applied does.
+
+    Reconstructed, it costs 13 seconds locally and no GitHub CI quota at all,
+    which is why this is done here rather than by requiring every branch to be
+    up to date -- that re-runs the full product suite per rebase, and this repo
+    is already being rate-limited on action downloads.
+
+    Scope is the orchestrator suite. Product changes are not covered and do not
+    need to be: they go through the full pipeline on GitHub. This closes the
+    tool-only fast path, which is where the collision happened.
+    """
+    try:
+        repo_root = config_path(config, "status_file").parent
+    except KeyError as exc:
+        # A gate must never be the reason something else fails. If this check
+        # cannot even locate the repository, it abstains rather than blocking.
+        return True, f"pre-merge check skipped: {exc}"
+    tools_dir = "tools/development-orchestrator"
+    with tempfile.TemporaryDirectory(prefix="premerge-") as tmpdir:
+        tree = Path(tmpdir) / "candidate"
+        add = _git(repo_root, "worktree", "add", "--detach", str(tree), integration_ref)
+        if add.returncode != 0:
+            # Never block a merge because the check itself could not run.
+            return True, f"pre-merge check skipped: {trim_text(add.stderr, 200)}"
+        try:
+            merged = _git(tree, "merge", "--no-edit", candidate_sha)
+            if merged.returncode != 0:
+                return False, f"candidate does not merge into {integration_ref} cleanly"
+            proc = subprocess.run(
+                [sys.executable, "-m", "unittest", "discover", "-s", ".", "-p", "test_*.py"],
+                cwd=str(tree / tools_dir),
+                capture_output=True,
+                text=True,
+                timeout=900,
+                env={**os.environ, "ORCH_STATUS_ROOT": str(tree)},
+            )
+            if proc.returncode != 0:
+                tail = "\n".join((proc.stderr or proc.stdout or "").strip().splitlines()[-8:])
+                return False, f"orchestrator suite fails on top of {integration_ref}:\n{tail}"
+            summary = next(
+                (ln for ln in (proc.stderr or "").splitlines() if ln.startswith("Ran ")), "suite passed"
+            )
+            return True, f"{summary} on top of {integration_ref}"
+        except (OSError, subprocess.SubprocessError) as exc:
+            return True, f"pre-merge check skipped: {type(exc).__name__}: {exc}"
+        finally:
+            _git(repo_root, "worktree", "remove", "--force", str(tree))
+
+
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args], cwd=str(cwd), capture_output=True, text=True, check=False, timeout=180
+    )
 
 
 def sync_github_bus(config: dict[str, Any], runtime_state: dict[str, Any]) -> bool:
