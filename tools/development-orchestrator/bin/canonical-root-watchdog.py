@@ -63,6 +63,55 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 LOG_FILE = ROOT_DIR / ".orchestrator/logs/canonical-root-watchdog.jsonl"
+
+# The timer fires every minute whether or not anything moved. Writing the
+# observation each time produced 24,739 lines carrying 271 distinct
+# observations -- 98.9% duplication, one state repeated 1,770 times in a row,
+# 16.4 MB. Rotation would have trimmed a file that should never have grown.
+#
+# So: record a change. A heartbeat still lands periodically, because a log that
+# goes quiet must stay distinguishable from a watchdog that died.
+HEARTBEAT_SECONDS = 3600.0
+
+
+def _observation(record: dict) -> str:
+    """The record minus the fields that differ on every run by construction."""
+    return json.dumps({k: v for k, v in record.items() if k != "ts"}, sort_keys=True)
+
+
+def _should_record(record: dict) -> bool:
+    """Is this worth a line: a changed observation, or a due heartbeat?"""
+    try:
+        with open(LOG_FILE, "rb") as handle:
+            handle.seek(0, 2)
+            size = handle.tell()
+            handle.seek(max(0, size - 65536))
+            tail = handle.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return True
+    for line in reversed(tail):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            previous = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if _observation(previous) != _observation(record):
+            return True
+        last = _parse_ts(previous.get("ts"))
+        now = _parse_ts(record.get("ts"))
+        if last is None or now is None:
+            return True
+        return (now - last).total_seconds() >= HEARTBEAT_SECONDS
+    return True
+
+
+def _parse_ts(value: object) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
 DEFAULT_ALLOWED = {"main", "dev"}
 DEFAULT_STALE_THRESHOLD = 5
 
@@ -187,8 +236,9 @@ def main(argv):
         elif args.enforce and not clean:
             record["action"] = "refused_enforce_dirty_tree"
 
-    with open(LOG_FILE, "a") as f:
-        f.write(json.dumps(record) + "\n")
+    if _should_record(record):
+        with open(LOG_FILE, "a") as f:
+            f.write(json.dumps(record) + "\n")
 
     # exit codes:
     #   0 = healthy
