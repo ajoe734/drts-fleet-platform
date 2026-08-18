@@ -1,84 +1,145 @@
 #!/usr/bin/env python3
-"""Every test file must be on a path CI actually runs.
+"""Every test file must contribute at least one test that CI actually runs.
 
 A test that nobody runs is worse than no test: it reads as coverage. This
-repository has been bitten twice. `control_plane/tests/test_lane_health.py`
-used bare functions with no TestCase, so unittest collected the module and
-skipped its three tests -- and those were the only tests for the predicate at
-the centre of a lane-pause fault, so they had never executed once. Separately,
-`tools/ci/git/` is on no discovery path at all, so a test file placed beside
-the script it covers would never have run.
+repository has been bitten twice. control_plane/tests/test_lane_health.py held
+three pytest-style functions with no TestCase, so unittest imported the module,
+collected nothing, and stayed green -- and those were the only tests for the
+predicate at the centre of the lane-pause fault that stalled dispatch.
+Separately, tools/ci/git/ sits on no discovery root, so a test placed beside the
+script it covers would never have run.
 
-The covered paths are read out of the workflow files rather than restated here.
-Restating them would make this checker a second answer to "what does CI run",
-free to drift from the first -- which is the exact fault it exists to catch.
+Nothing here restates a fact it can measure. Which files exist is asked of git,
+what CI runs is read out of the workflows, and what unittest reaches is settled
+by running discovery and seeing which files yield a test. Restating any of those
+would make this checker a second answer to a question that already has one --
+the exact fault it exists to catch, and the fault its first version shipped
+with: a hand-written exclusion list silently dropped a real test file whose
+name happened to contain `node_modules`, and a path-prefix rule blessed
+directories discovery cannot enter for want of an __init__.py.
 
-Exit 0 when every test file is both reachable and collectable.
+One measurement covers every way a test can fail to run -- unreachable
+directory, missing __init__.py, bare functions, a module that fails to import.
+The AST pass that follows only names the reason.
+
+Exit 0 when every tracked test file yields at least one collected test.
 """
 from __future__ import annotations
 
 import argparse
 import ast
+import fnmatch
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 WORKFLOWS = ("ci.yml", "ci-integ.yml")
-# Copies of the tree, not source: worktrees, release bundles, extracted archives.
-EXCLUDED_ROOTS = {"workspace", ".artifacts", ".git", "node_modules"}
-EXCLUDED_MARKERS = ("node_modules", "__pycache__", "_extracted", "tmp_iam_acc3_fix")
-SEARCH_ROOTS = ("tools", "operations", "apps", "packages")
+DEFAULT_PATTERN = "test_*.py"
 
-_DISCOVER_RE = re.compile(r"unittest\s+discover\s+-s\s+(\S+)")
-_DIRECT_RE = re.compile(r"unittest\s+(\S+\.py)")
+_DISCOVER_RE = re.compile(r"unittest\s+discover\s+-s\s+(\S+)(?:\s+-p\s+['\"]?([^'\"\s]+))?")
+_DIRECT_RE = re.compile(r"unittest\s+((?:\S+/)*\S+\.py)")
+
+# Enumerate the files that actually yield a test, in a child process: discovery
+# imports the modules it walks, and those imports belong nowhere near this one.
+_COLLECT = """
+import sys, unittest
+from pathlib import Path
+start, pattern, top = sys.argv[1], sys.argv[2], sys.argv[3]
+seen = set()
+def walk(suite):
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            walk(test)
+            continue
+        module = sys.modules.get(type(test).__module__)
+        path = getattr(module, "__file__", None)
+        if path:
+            seen.add(str(Path(path).resolve()))
+try:
+    walk(unittest.defaultTestLoader.discover(start, pattern=pattern, top_level_dir=top))
+except Exception as error:
+    print(f"!{error}", file=sys.stderr)
+print("\\n".join(sorted(seen)))
+"""
 
 
-def covered_targets(repo_root: Path) -> tuple[set[str], set[str]]:
-    """(discovery roots, explicitly named files) as the workflows declare them."""
-    roots: set[str] = set()
+def covered_targets(repo_root: Path) -> tuple[set[tuple[str, str]], set[str]]:
+    """((discovery root, pattern), explicit files) as the workflows declare them."""
+    roots: set[tuple[str, str]] = set()
     files: set[str] = set()
     for name in WORKFLOWS:
         path = repo_root / ".github" / "workflows" / name
         if not path.exists():
             continue
         text = path.read_text(encoding="utf-8")
-        roots.update(m.rstrip("/") for m in _DISCOVER_RE.findall(text))
+        for start, pattern in _DISCOVER_RE.findall(text):
+            roots.add((start.rstrip("/"), pattern or DEFAULT_PATTERN))
         files.update(_DIRECT_RE.findall(text))
     return roots, files
 
 
-def python_test_files(repo_root: Path) -> list[Path]:
-    found: list[Path] = []
-    for root in SEARCH_ROOTS:
-        base = repo_root / root
-        if not base.is_dir():
-            continue
-        for path in base.rglob("test_*.py"):
-            relative = path.relative_to(repo_root)
-            if relative.parts[0] in EXCLUDED_ROOTS:
-                continue
-            if any(marker in str(relative) for marker in EXCLUDED_MARKERS):
-                continue
-            found.append(relative)
-    return sorted(found)
+def tracked_test_files(repo_root: Path, patterns: set[str]) -> list[Path]:
+    """Tracked files whose name matches a pattern CI discovers by.
 
-
-def uncollectable(repo_root: Path, relative: Path) -> int:
-    """Count of bare `def test_*` functions unittest will silently skip.
-
-    unittest collects TestCase subclasses. A module of bare functions -- pytest
-    style -- imports cleanly, reports nothing, and passes.
+    git is the authority on which files are source. Release worktrees, extracted
+    bundles and vendored trees are untracked here, so they never enter the scan
+    and no hand-written exclusion list can misfire on a real file.
     """
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "*.py"], cwd=repo_root,
+                            capture_output=True, text=True, check=True).stdout
+    return sorted(
+        Path(name) for name in listed.split("\0")
+        if name and any(fnmatch.fnmatch(Path(name).name, pattern) for pattern in patterns)
+    )
+
+
+def collected_files(repo_root: Path, roots: set[tuple[str, str]], explicit: set[str]) -> set[Path]:
+    """The files that yield at least one test when CI's own commands run."""
+    targets = [(start, pattern, start) for start, pattern in roots]
+    # `python3 -m unittest path/to/test_x.py` is discovery over a single name.
+    targets += [(str(Path(name).parent), Path(name).name, str(Path(name).parent)) for name in explicit]
+
+    collected: set[Path] = set()
+    for start, pattern, top in targets:
+        if not (repo_root / start).is_dir():
+            continue
+        result = subprocess.run([sys.executable, "-c", _COLLECT, start, pattern, top],
+                                cwd=repo_root, capture_output=True, text=True, check=False)
+        for line in result.stdout.splitlines():
+            try:
+                collected.add(Path(line).resolve().relative_to(repo_root))
+            except ValueError:
+                continue
+    return collected
+
+
+def reason(repo_root: Path, relative: Path, roots: set[tuple[str, str]]) -> str:
+    """Name the likeliest cause, to save the next person the bisect."""
+    text = str(relative)
+    if not any(text.startswith(f"{start}/") for start, _ in roots):
+        listed = ", ".join(sorted(start for start, _ in roots)) or "(none)"
+        return f"on no path CI runs (discovery roots: {listed})"
+
     try:
         tree = ast.parse((repo_root / relative).read_text(encoding="utf-8", errors="ignore"))
-    except (OSError, SyntaxError):
-        return 0
-    if any(isinstance(node, ast.ClassDef) for node in tree.body):
-        return 0
-    return sum(
-        1 for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
-    )
+    except (OSError, SyntaxError) as error:
+        return f"does not parse: {error}"
+
+    bare = [node.name for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.startswith("test_")]
+    if bare:
+        return (f"{len(bare)} bare test function(s) and no TestCase collecting them; "
+                "unittest only collects TestCase methods")
+
+    for parent in relative.parents:
+        if str(parent) == "." or any(str(parent) == start for start, _ in roots):
+            break
+        if not (repo_root / parent / "__init__.py").exists():
+            return f"{parent}/ has no __init__.py, so discovery cannot descend into it"
+
+    return "yields no test when discovery runs (import error, or no TestCase at all)"
 
 
 def main() -> int:
@@ -89,32 +150,23 @@ def main() -> int:
 
     roots, explicit = covered_targets(repo_root)
     if not roots and not explicit:
-        print("::error::check_test_coverage: no unittest invocation found in the workflows.", file=sys.stderr)
+        print("::error::check_test_coverage: no unittest invocation found in the workflows.",
+              file=sys.stderr)
         return 1
 
-    unreachable: list[Path] = []
-    silent: list[tuple[Path, int]] = []
-    for relative in python_test_files(repo_root):
-        text = str(relative)
-        if not (any(text.startswith(f"{root}/") for root in roots) or text in explicit):
-            unreachable.append(relative)
-            continue
-        count = uncollectable(repo_root, relative)
-        if count:
-            silent.append((relative, count))
+    patterns = {pattern for _, pattern in roots} | {Path(name).name for name in explicit}
+    tracked = tracked_test_files(repo_root, patterns | {DEFAULT_PATTERN})
+    collected = collected_files(repo_root, roots, explicit)
 
-    if not unreachable and not silent:
-        print(f"check_test_coverage: every test file is reachable and collectable "
-              f"({len(python_test_files(repo_root))} checked).")
+    silent = [path for path in tracked if path not in collected]
+    if not silent:
+        print(f"check_test_coverage: all {len(tracked)} test files yield tests CI runs.")
         return 0
 
-    print("::error::check_test_coverage: tests that will never run", file=sys.stderr)
-    for relative in unreachable:
-        print(f"  - {relative}: on no path CI runs. Covered roots: {', '.join(sorted(roots)) or '(none)'}",
-              file=sys.stderr)
-    for relative, count in silent:
-        print(f"  - {relative}: {count} bare test function(s) and no TestCase; unittest will skip them.",
-              file=sys.stderr)
+    print("::error::check_test_coverage: test files that yield nothing when CI runs",
+          file=sys.stderr)
+    for path in silent:
+        print(f"  - {path}: {reason(repo_root, path, roots)}", file=sys.stderr)
     return 1
 
 
