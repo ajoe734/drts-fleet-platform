@@ -43,13 +43,6 @@ def _worker_worktrees_enabled(config: dict[str, Any]) -> bool:
     return bool(settings.get("enabled", False))
 
 
-def _worker_worktree_base(config: dict[str, Any], repo_root: Path) -> Path:
-    strategy = config.get("branch_strategy", {}) if isinstance(config.get("branch_strategy"), dict) else {}
-    settings = strategy.get("worker_worktrees", {}) if isinstance(strategy.get("worker_worktrees"), dict) else {}
-    raw = Path(str(settings.get("root") or ".artifacts/worktrees/auto")).expanduser()
-    return raw.resolve() if raw.is_absolute() else (repo_root / raw).resolve()
-
-
 def _pid_is_alive(pid: int | None) -> bool:
     if not pid:
         return False
@@ -487,6 +480,35 @@ def _cleanup_registered_worktree(
     }
 
 
+def _protected_worktree(path: Path, repo_root: Path, active_roots: set[str]) -> str | None:
+    """Why this worktree must not be reclaimed, or None if it may be.
+
+    Reclamation used to ask "is this under .artifacts/worktrees/auto?" and skip
+    everything else. Workers create review and verification worktrees wherever
+    they happen to be standing -- .artifacts/worktrees/review/,
+    .artifacts/review-tmp/, /tmp/<task>-review -- so of 86 registered worktrees
+    exactly one was in scope, and 80 could never be reclaimed at all.
+
+    Asking the inverse question covers every one of them without enumerating
+    paths that the next ad-hoc location would escape anyway. git already knows
+    where every worktree is; the only thing worth writing down is which ones
+    are load-bearing.
+
+    The protected set stays small because removal is not destructive to
+    history: `git worktree remove` keeps the branch and its commits, so only
+    uncommitted work is at stake, and that is archived before removal.
+    """
+    if path == repo_root:
+        return "canonical checkout"
+    if str(path) in active_roots:
+        return "active worker workspace"
+    # The supervisor executes from a release worktree. Removing one pulls the
+    # code out from under the running process.
+    if _path_is_within(path, repo_root / ".artifacts" / "releases"):
+        return "release snapshot"
+    return None
+
+
 def _cleanup_registered_worker_worktrees(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -529,18 +551,6 @@ def _cleanup_registered_worker_worktrees(
             "errors": ["worker workspace cleanup disabled"],
         }
 
-    base = _worker_worktree_base(config, repo_root)
-    if not base.exists():
-        return {
-            "checked": 0,
-            "removed": 0,
-            "skipped": 0,
-            "failed": 0,
-            "archived": 0,
-            "unlocked": 0,
-            "errors": [],
-        }
-
     cutoff = None
     if respect_retention:
         retention_seconds = max(0.0, float(cleanup_settings.get("worktree_retention_days", 3.0))) * 86400.0
@@ -559,12 +569,9 @@ def _cleanup_registered_worker_worktrees(
         if not raw_path:
             continue
         path = Path(raw_path).expanduser().resolve()
-        if path == repo_root or not _path_is_within(path, base):
+        if _protected_worktree(path, repo_root, active_roots) is not None:
             continue
         checked += 1
-        if str(path) in active_roots:
-            skipped += 1
-            continue
         # A lock is an explicit ownership signal from Git, so it is respected --
         # except for git's own `initializing` marker, which only ever means "an
         # add is in progress" and outlives the add when the supervisor is killed
