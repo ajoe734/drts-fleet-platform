@@ -181,9 +181,25 @@ class AntigravityAdapter(BaseAdapter):
             return _fallback_to_inbox(self, request, note, hard_error=True)
 
         command = [cli]
+        # An unattended lane cannot answer a permission prompt, so auto-approval
+        # stays on: without it the worker blocks forever on the first tool call.
+        # That decides *whether* tools run, not *what they may reach*, and those
+        # are separable -- `agy` accepts both flags together.
+        #
+        # Sandboxing is therefore the default. Five of seven lanes were running
+        # with approval disabled and no restriction of any kind, which is the
+        # only enforcement surface they have: they carry no .claude/ settings
+        # (a worktree checkout has none), and the MCP approval tool is never
+        # consulted because auto-approval means nothing is ever asked. The deny
+        # list in permission_broker.py reaches neither, so it protects the
+        # chatbox session and nothing that actually edits files.
+        #
+        # A lane that genuinely needs an unrestricted terminal can set
+        # `"sandbox": false`; an explicit false overrides this default without
+        # a redeploy.
         if to_bool(settings.get("skip_permissions"), default=True):
             command.append("--dangerously-skip-permissions")
-        if to_bool(settings.get("sandbox")):
+        if to_bool(settings.get("sandbox"), default=True):
             command.append("--sandbox")
         # Model rotation: when enabled, the shared cooldown file (written by the
         # supervisor on quota/capacity walls) decides which model this dispatch
