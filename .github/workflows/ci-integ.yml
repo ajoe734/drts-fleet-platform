@@ -12,8 +12,6 @@ on:
   pull_request:
     branches:
       - "dev"
-  # Same reason as ci.yml: the queue needs these gates to answer for the batch.
-  merge_group:
   workflow_dispatch:
     inputs:
       ref:
