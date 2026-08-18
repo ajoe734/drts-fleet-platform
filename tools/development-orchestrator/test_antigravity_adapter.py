@@ -135,3 +135,54 @@ class AntigravityAdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SandboxDefaultTests(unittest.TestCase):
+    """An auto-approving lane must still be restricted in what it can reach.
+
+    Five of seven lanes ran with `--dangerously-skip-permissions` and no
+    restriction of any kind. That is their only enforcement surface: a worktree
+    checkout carries no .claude/ settings, and the MCP approval tool is never
+    consulted because auto-approval means nothing is ever asked -- measured at
+    zero calls across every recent worker log. The deny list in
+    permission_broker.py reaches neither path, so it protected the chatbox
+    session and nothing that actually edits files.
+
+    `agy` accepts both flags together, so whether tools run and what they may
+    reach are separable, and only the first one has to stay open.
+    """
+
+    def _spawn_command(self, antigravity_settings: dict) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            config = _base_config(tmp, {"cli": "agy", "assume_authed": True, **antigravity_settings})
+            request = DeliveryRequest(
+                agent_id="gemini2", provider="gemini2", delivery_mode="antigravity",
+                message="wake up", task_id="SANDBOX-001",
+            )
+            process = mock.Mock(); process.pid = 4242
+            with (
+                mock.patch("adapters.antigravity.command_exists", return_value="/usr/bin/agy"),
+                mock.patch("adapters.antigravity.spawn_background_process",
+                           return_value=(process, Path("/tmp/agy.log"))) as spawn,
+                mock.patch("adapters.antigravity.runtime_log_path", return_value=Path("/tmp/agy.log")),
+                mock.patch("adapters.antigravity.new_runtime_id", return_value="gemini2-test"),
+            ):
+                AntigravityAdapter(config=config, provider_capabilities={}).deliver(request)
+            return list(spawn.call_args.args[0])
+
+    def test_a_lane_is_sandboxed_unless_it_opts_out(self) -> None:
+        self.assertIn("--sandbox", self._spawn_command({}))
+
+    def test_auto_approval_stays_on_so_the_lane_does_not_block(self) -> None:
+        """Removing this would hang an unattended worker on its first tool call."""
+        self.assertIn("--dangerously-skip-permissions", self._spawn_command({}))
+
+    def test_an_explicit_false_still_opts_out_without_a_redeploy(self) -> None:
+        self.assertNotIn("--sandbox", self._spawn_command({"sandbox": False}))
+
+    def test_the_two_flags_are_independent(self) -> None:
+        command = self._spawn_command({"skip_permissions": False})
+
+        self.assertNotIn("--dangerously-skip-permissions", command)
+        self.assertIn("--sandbox", command)
