@@ -480,6 +480,9 @@ def _cleanup_registered_worktree(
     }
 
 
+SESSION_CLAIM_FILENAME = ".orchestrator-session"
+
+
 def _protected_worktree(path: Path, repo_root: Path, active_roots: set[str]) -> str | None:
     """Why this worktree must not be reclaimed, or None if it may be.
 
@@ -506,6 +509,19 @@ def _protected_worktree(path: Path, repo_root: Path, active_roots: set[str]) -> 
     # code out from under the running process.
     if _path_is_within(path, repo_root / ".artifacts" / "releases"):
         return "release snapshot"
+    # Nothing here knew that a session -- a person, or an agent working
+    # interactively -- can be standing in a worktree. Only dispatched workers
+    # register a workspace, so any tree an interactive session opened was
+    # reclaimed out from under it, which left the canonical checkout as the
+    # only place such a session could safely work. That is precisely how four
+    # sessions ended up sharing one working tree and moving each other's HEAD.
+    #
+    # The claim is a file the session writes in the tree it is using, so the
+    # answer stays with the thing being protected rather than in a list here
+    # that the next location would escape. Removing the file gives the tree
+    # back; the sweep needs no further knowledge of who claimed it.
+    if (path / SESSION_CLAIM_FILENAME).exists():
+        return "claimed by a session"
     return None
 
 
