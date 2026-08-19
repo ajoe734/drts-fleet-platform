@@ -8,7 +8,9 @@ Documentation=file:@REPO_ROOT@/tools/development-orchestrator/systemd/README-vel
 [Service]
 Type=oneshot
 WorkingDirectory=@REPO_ROOT@
-ExecStart=@REPO_ROOT@/tools/development-orchestrator/bin/health.sh --quiet
+# The code runs from the pinned release; WorkingDirectory stays the canonical
+# root so machine truth is read where it lives. See systemd/install-common.sh.
+ExecStart=@RELEASE_ROOT@/tools/development-orchestrator/bin/health.sh --quiet
 
 StandardOutput=journal
 StandardError=journal

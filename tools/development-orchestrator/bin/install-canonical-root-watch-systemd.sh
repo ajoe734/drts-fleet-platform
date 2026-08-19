@@ -11,8 +11,14 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-TEMPLATE_DIR="$ROOT_DIR/tools/development-orchestrator/systemd"
+# shellcheck source=../systemd/install-common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../systemd" && pwd)/install-common.sh"
+ROOT_DIR="$(orch_canonical_root "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)")"
+RELEASE_ROOT="$(orch_release_root "$ROOT_DIR")"
+orch_require_release "$RELEASE_ROOT"
+# The unit definition comes from the same pinned release as the code it
+# points at, so the two cannot describe different versions.
+TEMPLATE_DIR="$RELEASE_ROOT/tools/development-orchestrator/systemd"
 USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 ENV_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/drts"
 ENV_FILE="$ENV_DIR/canonical-root.env"
@@ -22,13 +28,7 @@ mkdir -p "$USER_UNIT_DIR" "$ENV_DIR"
 for unit in drts-canonical-root-watch.service drts-canonical-root-watch.timer; do
   src="$TEMPLATE_DIR/$unit"
   dst="$USER_UNIT_DIR/$unit"
-  if [[ ! -f "$src" ]]; then
-    echo "ERROR: template missing at $src" >&2
-    exit 1
-  fi
-  sed -e "s|%h|$HOME|g" -e "s|@REPO_ROOT@|$ROOT_DIR|g" "$src" > "$dst"
-  chmod 0644 "$dst"
-  echo "Installed: $dst"
+  orch_render_unit "$src" "$dst" "$ROOT_DIR" "$RELEASE_ROOT"
 done
 
 # Seed env file with current canonical-root branch unless it already exists.
