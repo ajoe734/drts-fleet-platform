@@ -27,6 +27,29 @@ from typing import Any
 
 THIS_DIR = Path(__file__).resolve().parent
 
+
+def _guarded_root() -> Path:
+    """The tree whose uncommitted work this guard exists to protect.
+
+    It used to be `THIS_DIR.parent` -- where this file happens to live. Once
+    the supervisor moved to a pinned release that became
+    `.artifacts/releases/<name>/tools`, a worktree that is clean by
+    construction, so the guard could never fire: enabling it was a no-op with
+    an on-switch. Before that move it read the canonical checkout, which is
+    why the surviving measurement of its cost (88.5% of samples dirty)
+    described a tree it no longer looks at.
+
+    The work at risk is uncommitted design-intent work, and since workers
+    dispatch into their own worktrees, that lives in the canonical checkout.
+    common.ROOT resolves it the way the rest of the control plane does.
+    Callers that know better still pass workspace_root explicitly.
+    """
+    try:
+        from common import ROOT
+    except Exception:  # pragma: no cover - the guard never fails a dispatch
+        return THIS_DIR.parent
+    return ROOT
+
 DEFAULT_WORKER_TREE_GUARD_BLOCKING_GLOBS = [
     "tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py",
     "tools/development-orchestrator/control_plane/**",
@@ -146,7 +169,7 @@ def _collect_offenders(
     `log_only` when the guard fires.
     """
     settings = worker_tree_guard_settings(config)
-    root = workspace_root or THIS_DIR.parent
+    root = workspace_root or _guarded_root()
     ok, dirty_paths, _ = _worker_tree_guard_porcelain(root)
     if not ok:
         return None
