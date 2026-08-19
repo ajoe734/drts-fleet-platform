@@ -2683,7 +2683,7 @@ def pause_covers_lane(
     provider_info = provider_info_for_agent(config, provider_report, normalized)
     identity = provider_info.get("identity") if isinstance(provider_info.get("identity"), dict) else None
     pool = str((identity or {}).get("quota_pool") or "") or None
-    if not pause_matches_lane(pause, identity, pool):
+    if not pause_matches_lane(pause, identity, pool, normalized):
         return False
     if str(pause.get("scope") or "lane") == "lane" and pause.get("lane_id") not in {None, normalized}:
         return False
