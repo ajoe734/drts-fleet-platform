@@ -29,11 +29,20 @@ concurrency:
 env:
   CI: true
 
+# Every job carries timeout-minutes. GitHub's default is six hours, and on
+# 2026-08-19 a transient hang in `apt-get install postgresql-client` held
+# iam-negative-matrix for three hours and twenty minutes on dev while the
+# branch's CI result stayed unknown; the same step had hung three jobs on a PR
+# earlier the same day. The limits are three times the longest observed
+# successful run, floored at ten minutes, so a slow runner still passes and a
+# hang is capped in minutes rather than hours.
+
 jobs:
   # Owner checkpoints are intentionally cheap. A review candidate is the first
   # immutable SHA that may start the full integration gate.
   candidate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       run_full_ci: ${{ steps.gate.outputs.run_full_ci }}
     steps:
@@ -56,6 +65,7 @@ jobs:
   changes:
     needs: candidate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       scope: ${{ steps.filter.outputs.scope }}
       product: ${{ steps.filter.outputs.product }}
@@ -70,6 +80,7 @@ jobs:
           python3 -m unittest tools/ci/test_classify_change_scope.py
           python3 -m unittest tools/ci/test_check_commit_trailers.py
           python3 -m unittest tools/ci/test_check_test_coverage.py
+          python3 -m unittest tools/ci/test_workflow_timeouts.py
       - name: Verify every test file is on a path CI runs
         run: python3 tools/ci/check_test_coverage.py
       - id: filter
@@ -91,6 +102,7 @@ jobs:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -109,6 +121,7 @@ jobs:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -127,6 +140,7 @@ jobs:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -182,6 +196,7 @@ jobs:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -221,6 +236,7 @@ jobs:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -271,6 +287,7 @@ jobs:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -289,6 +306,7 @@ jobs:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -307,6 +325,7 @@ jobs:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.orchestrator == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -324,6 +343,7 @@ jobs:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         # PostGIS-enabled image: V0038 migration enables the postgis extension
@@ -380,6 +400,7 @@ jobs:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -427,6 +448,7 @@ jobs:
   e2e:
     needs: [candidate, changes, cross-surface-e2e, ui-route-e2e]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: always()
     steps:
       - name: Aggregate E2E gates
@@ -461,6 +483,7 @@ jobs:
         e2e,
       ]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: always()
     steps:
       - name: Aggregate
