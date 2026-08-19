@@ -28,8 +28,13 @@ from provider_permissions import (
 
 class ProviderPermissionsTest(unittest.TestCase):
     def test_verified_claude_hooks_use_absolute_broker_path(self) -> None:
+        # ROOT, not SOURCE_ROOT. This asserted SOURCE_ROOT and passed anywhere
+        # the two are the same directory -- which is every checkout except the
+        # release copies the supervisor actually runs from. Only the release
+        # verification gate could tell them apart, and that is where it failed
+        # after ORCH-HOOK-PATH-001 changed which one the hook names.
         expected = str(
-            Path(SOURCE_ROOT)
+            Path(ROOT)
             / "tools"
             / "development-orchestrator"
             / "permission_broker.py"
@@ -84,7 +89,7 @@ class ProviderPermissionsTest(unittest.TestCase):
         self.assertEqual(entries[0], custom_hook)
         self.assertEqual(len(entries), 2)
         command = entries[1]["hooks"][0]["command"]
-        self.assertIn(str(SOURCE_ROOT), command)
+        self.assertIn(str(ROOT), command)
         self.assertEqual(command.count("permission_broker.py"), 1)
 
     def test_toolsearch_is_auto_allowed(self) -> None:
