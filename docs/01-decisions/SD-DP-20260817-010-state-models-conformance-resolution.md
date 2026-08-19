@@ -7,7 +7,24 @@
 - `owner`: `Gemini2 / CONF-STATE-001`
 - `reviewer`: `Gemini`
 - `date`: `2026-08-17`
-- `status`: `accepted-for-execution`
+- `status`: `accepted`
+- `approval`:
+  - accepted by the repository owner on 2026-08-19, in answer to
+    `docs/01-decisions/l1-amendment-acceptance-request-20260817.md`. This satisfies the
+    human/system-design precondition `SD-DP-20260422-003` sets for a packet to supersede L1 wording
+- `accepted_scope_note`:
+  - `GAP-CONF-04` accepted as argued: the five removed forwarded states are pipeline phases, an
+    external mirror already expressed by `authoritativeSnapshot.nativeStatus`, a per-driver action
+    outcome, and two cases subsumed by `lost_race` / `cancelled_by_platform`
+  - `GAP-CONF-05` accepted with the product question answered rather than assumed. A driver's
+    acceptable dispatch types are **set by the platform at driver registration**
+    (`CreateDriverMasterCommand.supportedServiceBuckets`, defaulting to `["standard_taxi"]`), and
+    drivers have no self-selection. The removed `AVAILABLE_STANDARD` / `AVAILABLE_BUSINESS` /
+    `AVAILABLE_HYBRID` states described driver agency that Phase 1 deliberately does not offer, so
+    removing them records a design choice rather than deleting an unbuilt requirement. PRD 11.4
+    states this explicitly
+  - follow-up, not a blocker: there is no admin endpoint to change `supportedServiceBuckets` after
+    registration. Recorded in the `PHASE1_OPEN_QUESTIONS.md` synchronisation backlog
 - `task_id`: `CONF-STATE-001`
 - `gaps_resolved`:
   - `GAP-CONF-04` (Forwarded order lifecycle states: PRD 11.2 13 states vs Contracts/Codebase 8 states)

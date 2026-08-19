@@ -99,7 +99,7 @@ not re-open them without cause.
 | 4   | suspended driver still able to go online                     | `jwt-auth.service.ts:968` calls `assertDriverAuthEligible` on **every** token verification, raising `DRIVER_AUTH_SUSPENDED` / `DRIVER_CERT_INVALID` (`regulatory-registry.service.ts:1971`) |     PASS — see 4.4 for the ownership note      |
 | 5   | complaint and incident share one lifecycle                   | separate modules, separate state machines                                                                                                                                                   |                      PASS                      |
 | 6   | historical pricing version overwritten in place              | `billing-settlement.service.ts:1603` — "Published driver fee plan versions are immutable."                                                                                                  |                      PASS                      |
-| 7   | audit log can be modified or deleted                         | database triggers `trg_audit_logs_append_only` and `trg_audit_logs_prevent_truncate` (V0080) + REVOKE + role-gated privileged retention archival path | PASS (closed via GAP-CONF-03 / CONF-AUDIT-001) |
+| 7   | audit log can be modified or deleted                         | database triggers `trg_audit_logs_append_only` and `trg_audit_logs_prevent_truncate` (V0080) + REVOKE + role-gated privileged retention archival path                                       | PASS (closed via GAP-CONF-03 / CONF-AUDIT-001) |
 
 ### 3.3 Contracts and product surfaces
 
@@ -171,6 +171,7 @@ writes. The repository already contains a correct four-layer reference implement
 ### GAP-CONF-02 — domain event contract has no implementation layer
 
 **Severity:** P0 for decision; implementation severity depends on the decision
+**Status:** **CLOSED** 2026-08-19 — `SD-DP-20260817-009` accepted by the repository owner. Phase 1 commits to no event bus; contracts §5.2 is a target contract for a future service split.
 **Spec:** contracts section 5.2 (~40 topics) and section 6 (five compensation designs)
 
 **Current behaviour.** There is no event bus, no outbox table, and no publish/subscribe
@@ -249,6 +250,7 @@ explicitly absent.
 ### GAP-CONF-04 — forwarded order lifecycle is missing five states
 
 **Severity:** P2, pending product confirmation
+**Status:** **CLOSED** 2026-08-19 — `SD-DP-20260817-010` accepted; the eight implemented states are ratified as the canonical forwarded lifecycle.
 **Spec:** PRD 11.2, thirteen states
 
 `FORWARDED_ORDER_STATUSES` (`packages/contracts/src/index.ts:5797-5806`) contains
@@ -269,6 +271,7 @@ external platform state is authoritative and must be reconciled.
 ### GAP-CONF-05 — driver status model does not exist
 
 **Severity:** P2, pending product confirmation
+**Status:** **CLOSED** 2026-08-19 — `SD-DP-20260817-010` accepted with the product question answered: a driver's acceptable dispatch types are set by the platform at registration and drivers have no self-selection, so the three `AVAILABLE_*` states described a capability Phase 1 deliberately does not offer. PRD 11.4 now says so.
 **Spec:** PRD 11.4, eleven states
 
 There is no corresponding enum. `PlatformPresenceStatus` is
@@ -302,6 +305,7 @@ below only because the remedy touches the same files.
 ### GAP-CONF-07 — service boundary: three write authorities in one module
 
 **Severity:** P2, informational; subsumed by the GAP-CONF-02 decision
+**Status:** **CLOSED** 2026-08-19 with `GAP-CONF-02`; contracts §7.1 now names the real module boundaries.
 **Spec:** contracts section 3.5, 3.6, 3.8 and the section 7.1 write-authority matrix
 
 Contracts section 7.1 assigns `owned order / booking` to the Order Service,
@@ -359,15 +363,15 @@ currently satisfied.
 Behaviour is equivalent; only identifiers differ. Recorded so the specification can be
 aligned in one pass rather than debated per endpoint.
 
-| Contracts 4.1                            | Implementation                                                         | Note                                  |
-| ---------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------- |
-| `ADDRESS_UNRESOLVED`                     | `ADDRESS_UNRESOLVABLE`                                                 | equivalent                            |
-| `AREA_NOT_SERVICEABLE`                   | `SERVICE_AREA_NOT_SERVICEABLE`, plus `PICKUP_*` / `DROPOFF_*` variants | equivalent, finer                     |
-| `AUTH_FORBIDDEN`                         | `AUTH_SCOPE_DENIED` / `AUTH_REALM_DENIED`                              | equivalent, finer                     |
-| `DUPLICATE_IDEMPOTENCY_KEY`              | `IDEMPOTENCY_KEY_REUSED`                                               | equivalent                            |
-| `TOO_SOON_TO_BOOK`                       | `TOO_SOON_TO_BOOK` (configurable lead time)                            | resolved under `CONF-CODE-001` (GAP-CONF-06) |
-| contracts 5.2 `tenant.invoice.generated` | webhook `invoice.issued`                                               | resolve with the GAP-CONF-02 decision |
-| contracts 2.1 `call_point_id`            | database column only, no contract type                                 | `packages/contracts` not synchronised |
+| Contracts 4.1                            | Implementation                                                         | Note                                                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `ADDRESS_UNRESOLVED`                     | `ADDRESS_UNRESOLVABLE`                                                 | equivalent                                                               |
+| `AREA_NOT_SERVICEABLE`                   | `SERVICE_AREA_NOT_SERVICEABLE`, plus `PICKUP_*` / `DROPOFF_*` variants | equivalent, finer                                                        |
+| `AUTH_FORBIDDEN`                         | `AUTH_SCOPE_DENIED` / `AUTH_REALM_DENIED`                              | equivalent, finer                                                        |
+| `DUPLICATE_IDEMPOTENCY_KEY`              | `IDEMPOTENCY_KEY_REUSED`                                               | equivalent                                                               |
+| `TOO_SOON_TO_BOOK`                       | `TOO_SOON_TO_BOOK` (configurable lead time)                            | resolved under `CONF-CODE-001` (GAP-CONF-06)                             |
+| contracts 5.2 `tenant.invoice.generated` | webhook `invoice.issued`                                               | resolved to `invoice.issued` (`SD-DP-20260817-009`, accepted 2026-08-19) |
+| contracts 2.1 `call_point_id`            | database column only, no contract type                                 | `packages/contracts` not synchronised                                    |
 
 ---
 
@@ -431,7 +435,7 @@ These are recorded to prevent them from being rediscovered as defects.
 
 | Gate    | Requirement                                                                                                                                                                             | Owning task                      |
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| **C1**  | `admin.audit_logs` rejects `UPDATE`, `DELETE`, and `TRUNCATE` at the database level, proven by a negative test that attempts all three                                                   | `CONF-AUDIT-001` (CLOSED / PASS) |
+| **C1**  | `admin.audit_logs` rejects `UPDATE`, `DELETE`, and `TRUNCATE` at the database level, proven by a negative test that attempts all three                                                  | `CONF-AUDIT-001` (CLOSED / PASS) |
 | **C2**  | Idempotency semantics (replay versus conflict) are decided and recorded before any schema change                                                                                        | `CONF-IDEM-001`                  |
 | **C3**  | All nine specified commands reject a missing key, replay the stored response for a repeated key with an identical payload, and return `409` for a repeated key with a differing payload | `CONF-IDEM-002/003/004`          |
 | **C4**  | Concurrent duplicate submission of one key creates exactly one record, proven under parallel execution rather than sequential calls                                                     | `CONF-VERIFY-001`                |

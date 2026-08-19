@@ -1538,6 +1538,7 @@ Phase 1 不依賴 Phase 2 才能上線。
 - SYNC_FAILED (`sync_failed`): 外部同步異常或 relay 失敗，需進入對帳與人工備援（`reconciliationJob` / `manualFallback`）。
 
 > **狀態模型審計說明 (GAP-CONF-04)**：
+>
 > 1. 原草案 `MAPPED` 與 `ELIGIBLE` 屬 `ingestExternalOrder` / `broadcastOrder` 之記憶體管線同步運算階段，非持久化頂層生命週期狀態。
 > 2. `NATIVE_IN_PROGRESS` 由 `confirmed_by_platform` 狀態配合 `authoritativeSnapshot.nativeStatus` 與統一司機任務視圖之 `driverActionState: "in_progress"` 完整表達，無須在鏡像頂層拆分冗餘狀態。
 > 3. `REJECTED` 為單一司機拒絕廣播之動作結果（將該司機自 `candidateDriverIds` 移除），訂單本體維持 `broadcasted` 供其他候選司機搶單，非訂單終態。
@@ -1557,7 +1558,24 @@ Phase 1 不依賴 Phase 2 才能上線。
 
 ## 11.4 司機狀態
 
-依 SD-DP-20260817-010，司機狀態解耦為四個正交維度與動態資格引擎，取代單一 11 狀態列舉：
+依 SD-DP-20260817-010，司機狀態解耦為四個正交維度與動態資格引擎，取代單一 11 狀態列舉。
+
+> **可接單類型由平台在司機註冊時設定，司機端無自選權（2026-08-19 人工決議）。**
+>
+> 原草案的 `AVAILABLE_STANDARD` / `AVAILABLE_BUSINESS` / `AVAILABLE_HYBRID` 隱含「司機自行選擇要接哪一類單」。
+> Phase 1 不採此模型：司機可接的 service bucket 由平台在建立司機主檔時以
+> `CreateDriverMasterCommand.supportedServiceBuckets` 指定（未指定時預設 `["standard_taxi"]`），
+> 之後由 `regulatoryRegistryService.getDriverAvailability(driverId, serviceBucket)` 依資格動態判定是否可派。
+>
+> 因此上線／下線（`PlatformPresenceStatus`）是司機唯一可自行切換的維度，接單類型不是。
+> 三個 `AVAILABLE_*` 狀態被移除，是因為它們描述一個 Phase 1 刻意不提供的能力，
+> 而不是因為該能力未實作。
+>
+> 尚未提供的配套：註冊後調整 `supportedServiceBuckets` 沒有對應的 admin 端點，
+> 目前只能在建立時決定。已記入 `PHASE1_OPEN_QUESTIONS.md` 的
+> Contract & Schema Synchronisation Backlog。
+
+四個維度：
 
 1. **監管帳號狀態 (Regulatory Profile Status)** (`reg.driver_status_t`):
    - `ACTIVE`: 帳號正常

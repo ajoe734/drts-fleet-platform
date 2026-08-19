@@ -6,7 +6,17 @@
 - `title`: `Phase 1 keeps synchronous in-process calls instead of an event bus; contracts section 5.2 is annotated as an unimplemented target contract, and section 7.1's write-authority matrix is rewritten to the actual code module boundaries`
 - `owner`: `Claude / CONF-EVENT-001`
 - `date`: `2026-08-17`
-- `status`: `accepted-for-execution`
+- `status`: `accepted`
+- `approval`:
+  - accepted by the repository owner on 2026-08-19, in answer to
+    `docs/01-decisions/l1-amendment-acceptance-request-20260817.md`. This satisfies the
+    human/system-design precondition `SD-DP-20260422-003` sets for a packet to supersede L1 wording
+- `accepted_scope_note`:
+  - Phase 1 commits to no event bus. Contracts section 5.2 is a target contract for a future
+    service split, not a description of Phase 1 runtime behaviour
+  - the reversal trigger stands: physically separating Order, Dispatch, or Driver Task into
+    independently deployed services is what reopens the transactional-outbox option, sized as its
+    own wave. A partial implementation of the topic list remains rejected
 - `affected_docs`:
   - `phase1_service_contracts_v1.md` sections `5.2`, `6`, `7.1`
 - `superseding_decision`:
@@ -67,11 +77,11 @@ events. Grepping each of the ~40 topics individually finds 26 with zero occurren
 
 What exists instead are three narrower mechanisms that are not the section 5.2 contract:
 
-| Mechanism | Real topic names | Audience | Implementation |
-| --- | --- | --- | --- |
-| Tenant webhook | `booking.created`, `booking.updated`, `dispatch.assigned`, `invoice.issued` | tenant systems | `tenant-partner.service.ts:526-530` |
-| Dispatch trace log | `dispatch.assigned` (a trace label, not a published topic) | audit and regulator | `owned-mobility.service.ts:7138` |
-| Audit log | per-module action names | audit | `audit-notification` module |
+| Mechanism          | Real topic names                                                            | Audience            | Implementation                      |
+| ------------------ | --------------------------------------------------------------------------- | ------------------- | ----------------------------------- |
+| Tenant webhook     | `booking.created`, `booking.updated`, `dispatch.assigned`, `invoice.issued` | tenant systems      | `tenant-partner.service.ts:526-530` |
+| Dispatch trace log | `dispatch.assigned` (a trace label, not a published topic)                  | audit and regulator | `owned-mobility.service.ts:7138`    |
+| Audit log          | per-module action names                                                     | audit               | `audit-notification` module         |
 
 Section 7.1's write-authority matrix assigns `owned order / booking` to an Order Service,
 `dispatch_job / attempt / assignment` to a Dispatch Service, and driver task state to a Driver Task
@@ -122,13 +132,15 @@ queues, and therefore inherit the same gap.
   safer (no dual-write problem between the business write and the event write), and more traceable
   (a stack trace beats a correlation ID) than publishing and consuming an event between two pieces
   of the same process.
-- **Consistent with the already-accepted Phase 1 architecture direction.** The Phase 1 consensus
-  packet (`docs/02-architecture/consensus/phase1/consensus-packet.md`, "Accepted Conclusions") holds
-  that "SQL migrations are the schema authority" and that execution keeps "a modular monolith in
-  `apps/api`... aligned to service-contract ownership boundaries" rather than a physical service
-  split. Rewriting section 7.1 to name the monolith's actual module boundaries is the direct
-  application of that already-accepted direction to this specific gap, not a new architectural
-  stance.
+- **Consistent with the direction two pre-consensus inputs recommended, though never ratified.**
+  `docs/02-architecture/consensus/phase1/starter-draft.md:35` proposes keeping "a modular monolith in
+  `apps/api` for Phase 1 execution, but align modules, migrations, and tasks to service-contract
+  ownership boundaries", and `codex-readout.md:42` reaches the same conclusion from the migration
+  plan. Both are Provisional Design Inputs under `CANONICAL_DOCUMENT_MAP.md` section 3 -- inputs to
+  consensus, not consensus itself. The accepted consensus packet takes **no position on deployment
+  topology**. Accepting this decision therefore establishes that position for the first time; it does
+  not apply an existing one. That is a reason for a human to accept it deliberately, not a reason
+  against it, but it must not be presented as routine.
 - **The failure mode an event bus would prevent here is already owned by a parallel decision.**
   Duplicate writes from retries are the concern `GAP-CONF-01` addresses through idempotency keys and
   a database `UNIQUE` constraint (`CONF-IDEM-001`), not through event deduplication. An outbox does
@@ -177,6 +189,22 @@ the audit records this explicitly, and this decision agrees. It is closed as inf
 this decision: section 7.1 now states the real module boundaries so that the next reader of the
 contract sees the architecture that exists, and so that a future decision to physically split
 Order/Dispatch/Driver Task has an accurate starting map rather than a fictional one.
+
+## Correction to the consensus citation
+
+The revision merged in #1477 attributed to the accepted consensus packet, under "Accepted
+Conclusions", both "SQL migrations are the schema authority" and "a modular monolith in
+`apps/api`... aligned to service-contract ownership boundaries".
+
+Only the first is there. The second is `docs/02-architecture/consensus/phase1/starter-draft.md:35`,
+which `CANONICAL_DOCUMENT_MAP.md` section 3 classifies as a Provisional Design Input -- "inputs to
+consensus, not consensus itself". Welding the two into one quotation under one source gave a
+pre-consensus draft the standing of an accepted conclusion.
+
+It mattered because that rationale carried weight: it claimed this decision merely applied an
+existing architectural agreement. The consensus packet takes no position on deployment topology, so
+no such agreement exists and this packet is setting the position. The rationale has been rewritten
+to say so.
 
 ## Standing rule
 
