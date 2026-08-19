@@ -61,7 +61,29 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parents[3]
+# The subject of the observation is the canonical checkout, which is not the
+# same question as where this file lives. parents[3] answered the second and
+# was used for the first, so once the systemd unit moved to the pinned release
+# the watchdog began inspecting `.artifacts/releases/active` -- a detached
+# worktree. It has reported `off-allowlist branch 'HEAD'` on every fire since
+# 2026-08-19 01:12, and the canonical log stops at that exact minute; its last
+# real observation recorded the canonical root sitting on
+# docs/l1-freeze-controlled-sync-20260817. It went blind on a drift.
+#
+# The unit already carries `WorkingDirectory=<canonical root>` with a comment
+# saying machine truth is read where it lives -- a mitigation that was written
+# and was inert, because nothing here ever read the working directory.
+#
+# common.ROOT is the resolver the rest of the control plane uses (env, then the
+# checkout that owns .orchestrator/, then the git common dir), so a release copy
+# resolves back to the repository it was cut from.
+_SOURCE_ROOT = Path(__file__).resolve().parents[3]
+_TOOL_ROOT = _SOURCE_ROOT / "tools" / "development-orchestrator"
+if str(_TOOL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOL_ROOT))
+
+from common import ROOT as ROOT_DIR  # noqa: E402
+
 LOG_FILE = ROOT_DIR / ".orchestrator/logs/canonical-root-watchdog.jsonl"
 
 # The timer fires every minute whether or not anything moved. Writing the

@@ -13,6 +13,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shutil
+import subprocess
+import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -110,6 +114,67 @@ class RecordOnChangeTests(unittest.TestCase):
         second = _record(self.now + timedelta(seconds=30))
 
         self.assertEqual(watchdog._observation(first), watchdog._observation(second))
+
+
+class CanonicalRootResolutionTests(unittest.TestCase):
+    """The watchdog must observe the canonical checkout, not its own location.
+
+    ROOT_DIR was `Path(__file__).parents[3]`, which answers "where does this
+    code live". Once the systemd unit moved to the pinned release, that became
+    `.artifacts/releases/active` -- a detached worktree -- so the watchdog
+    reported `off-allowlist branch 'HEAD'` on every fire and wrote its log
+    inside a release that gets pruned. The canonical log stops at the exact
+    minute the unit changed, on an observation that recorded real drift.
+    """
+
+    def _run_from_release_copy(self, tmp: Path) -> tuple[subprocess.CompletedProcess, Path, Path]:
+        repo = tmp / "canonical"
+        repo.mkdir()
+        run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
+        subprocess.run(["git", "init", "-q", "-b", "dev", str(repo)], check=True)
+        run("config", "user.email", "t@example.com")
+        run("config", "user.name", "t")
+        (repo / "README").write_text("canonical\n", encoding="utf-8")
+        # The real repository ignores .artifacts/; without it the release
+        # worktree we are about to create reads as residue on its own parent.
+        (repo / ".gitignore").write_text(".artifacts/\n.orchestrator/\n", encoding="utf-8")
+        run("add", "README", ".gitignore")
+        run("commit", "-qm", "init")
+
+        # A release is a detached worktree of the canonical repo, which is
+        # exactly the shape that made parents[3] resolve to the wrong tree.
+        release = repo / ".artifacts" / "releases" / "orchestrator-test"
+        run("worktree", "add", "--detach", "-q", str(release))
+
+        staged = release / "tools" / "development-orchestrator"
+        (staged / "bin").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(SCRIPT, staged / "bin" / SCRIPT.name)
+        shutil.copy2(SCRIPT.parents[1] / "common.py", staged / "common.py")
+
+        env = {k: v for k, v in os.environ.items() if k not in ("ORCH_STATUS_ROOT", "AI_STATUS_ROOT")}
+        result = subprocess.run(
+            [sys.executable, str(staged / "bin" / SCRIPT.name)],
+            capture_output=True, text=True, check=False, env=env, cwd=str(tmp),
+        )
+        return result, repo, release
+
+    def test_release_copy_observes_the_canonical_checkout(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            result, repo, release = self._run_from_release_copy(Path(tmpdir))
+
+            # The canonical repo is on `dev`, clean, and not behind: healthy.
+            # Resolving to the release worktree instead reports drift to 'HEAD'.
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("HEAD", result.stderr)
+
+    def test_release_copy_logs_to_the_canonical_root(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            _, repo, release = self._run_from_release_copy(Path(tmpdir))
+
+            # A log written inside the release dies with it: every activation
+            # restarts the history and the change-detection baseline.
+            self.assertTrue((repo / ".orchestrator" / "logs" / "canonical-root-watchdog.jsonl").exists())
+            self.assertFalse((release / ".orchestrator" / "logs" / "canonical-root-watchdog.jsonl").exists())
 
 
 if __name__ == "__main__":

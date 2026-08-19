@@ -7,11 +7,17 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 
 SOURCE_ROOT = Path(__file__).resolve().parents[3]
+_TOOL_ROOT = SOURCE_ROOT / "tools" / "development-orchestrator"
+if str(_TOOL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOL_ROOT))
+
+from common import ROOT as CANONICAL_ROOT  # noqa: E402
 
 
 def git_status(repo_root: Path) -> list[tuple[str, str]]:
@@ -32,7 +38,11 @@ def classify(path: str, manifest: dict) -> tuple[str, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo-root", type=Path, default=SOURCE_ROOT)
+    # Defaulting to SOURCE_ROOT reconciles whichever tree this script was
+    # copied into. Run from a release copy with no --repo-root, it would
+    # reconcile the release worktree instead of the canonical checkout the
+    # name promises. No automated caller passes the flag today.
+    parser.add_argument("--repo-root", type=Path, default=CANONICAL_ROOT)
     parser.add_argument("--output", type=Path, help="write JSON inventory to this path")
     args = parser.parse_args()
     repo_root = args.repo_root.resolve()
