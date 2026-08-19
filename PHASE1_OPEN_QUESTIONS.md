@@ -30,6 +30,8 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Contract & Schema Synchronisation Backlog
 
+- The canonical Phase 1 CRM schema is declared and bypassed. `crm.call_sessions`, `crm.call_recordings`, `crm.complaint_cases`, and `crm.callback_tasks` (`V0007`) have **zero** application references; the runtime persists to `crm.phase1_*` jsonb snapshot tables instead. `crm.call_sessions` nonetheless carries a real `linked_order_id` 1:1 FK, an index on it (`V0010:737`), and a view joining it (`V0010:839`). Open question: are the snapshot tables an intentional stage or unreviewed drift, and which is meant to be the record? Surfaced while scoping the Q-001 packet, 2026-08-19, and deliberately left out of it — resolving it there would have answered it by implication. Owner: `Codex` (Contracts & Schema).
+
 - `crm.call_sessions.linked_order_id` is a single FK while `ops.orders.call_id` permits many orders per call: the same relationship modelled with opposite cardinalities. The UI-only `linked_order_exists` block hides it. Surfaced by the Q-001 decision, 2026-08-19. Owner: `Codex` (Contracts & Schema).
 
 - Completed filing packages in `admin.phase1_filing_packages` carry an application-level `immutable: true` flag but no database-level protection, unlike `admin.audit_logs` after `V0080__audit_log_immutability.sql`. Same threat model, regulator-facing audience. Surfaced by the Q-005 split, 2026-08-19. Owner: `Gemini` (Infra & Compliance).
