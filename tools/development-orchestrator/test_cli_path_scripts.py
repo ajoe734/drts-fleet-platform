@@ -54,10 +54,12 @@ class CliPathScriptTests(unittest.TestCase):
         self.assertIn("release-lifecycle.py", installer)
         self.assertIn("10-release-pointer.conf", installer)
         self.assertNotIn("@REPO_ROOT@/tools/development-orchestrator/bin/run-supervisor.sh", service)
-        # The supervisor moved to the `active` pointer so it is isolated from the
-        # legacy `current` selector; the KillMode assertions came from the other
-        # lineage. Both changes are real and both belong here.
-        self.assertIn("activate --pointer-name active", installer)
+        # `active` is now the only release selector, so the installer names no
+        # pointer at all. It must still not resurrect the flag: an installer that
+        # passes --pointer-name would abort on argparse, and one that passed the
+        # old `current` default would activate a pointer systemd never reads.
+        self.assertNotIn("--pointer-name", installer)
+        self.assertNotIn("releases/current", installer)
         self.assertIn(".artifacts/releases/active/tools/development-orchestrator/bin/run-supervisor.sh", service)
         self.assertIn("KillMode=control-group", service)
         self.assertNotIn("\nKillMode=mixed\n", service)

@@ -60,7 +60,7 @@ fi
 python3 "$LIFECYCLE" \
   --repo-root "$ROOT_DIR" \
   --artifact-root "$STATUS_ROOT/.artifacts" \
-  activate --pointer-name active "$RELEASE_NAME"
+  activate "$RELEASE_NAME"
 
 mkdir -p "$USER_UNIT_DIR" "$DROP_IN_DIR"
 
