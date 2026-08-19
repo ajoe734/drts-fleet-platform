@@ -17,8 +17,10 @@ EnvironmentFile=-%h/.config/drts/claude-lanes.env
 # the health snapshot reflects any token refresh the keepalive just
 # triggered. A warn-level TTL snapshot should not mark the keepalive
 # itself failed; only refresh failure or unreadable credentials should.
-ExecStart=@REPO_ROOT@/tools/development-orchestrator/bin/claude-lane-keepalive.sh
-ExecStart=/usr/bin/env LANE_HEALTH_WARN_EXIT_CODE=0 @REPO_ROOT@/tools/development-orchestrator/bin/lane-health.sh
+# The code runs from the pinned release; WorkingDirectory stays the canonical
+# root so machine truth is read where it lives. See systemd/install-common.sh.
+ExecStart=@RELEASE_ROOT@/tools/development-orchestrator/bin/claude-lane-keepalive.sh
+ExecStart=/usr/bin/env LANE_HEALTH_WARN_EXIT_CODE=0 @RELEASE_ROOT@/tools/development-orchestrator/bin/lane-health.sh
 
 StandardOutput=journal
 StandardError=journal

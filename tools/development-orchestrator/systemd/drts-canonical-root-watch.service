@@ -9,7 +9,9 @@ WorkingDirectory=@REPO_ROOT@
 # exit on drift, but does NOT auto-switch the branch. Switch to
 # --enforce in a follow-up after operator is comfortable that the
 # `ORCH_CANONICAL_BRANCH` allow list is correctly maintained.
-ExecStart=@REPO_ROOT@/tools/development-orchestrator/bin/canonical-root-watchdog.py
+# The code runs from the pinned release; WorkingDirectory stays the canonical
+# root so machine truth is read where it lives. See systemd/install-common.sh.
+ExecStart=@RELEASE_ROOT@/tools/development-orchestrator/bin/canonical-root-watchdog.py
 
 # When the wave-dispatch / sprint branches are intentionally checked out
 # on canonical root, add them via an env override file at
