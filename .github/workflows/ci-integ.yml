@@ -154,8 +154,6 @@ jobs:
             cache: pnpm,
             cache-dependency-path: pnpm-lock.yaml,
           }
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
       # Built here rather than inside the test: a cold image build is minutes of
       # work, and paying for it inside a vitest budget made the suite fail with
@@ -211,8 +209,6 @@ jobs:
             cache: pnpm,
             cache-dependency-path: pnpm-lock.yaml,
           }
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
       - name: Apply migrations
         run: pnpm db:migrate
@@ -262,8 +258,6 @@ jobs:
             cache: pnpm,
             cache-dependency-path: pnpm-lock.yaml,
           }
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
       # The suite asserts denial behaviour against real iam.* tables; without
       # the schema every case fails with `relation "iam.identity_principals"
@@ -413,8 +407,6 @@ jobs:
             cache: pnpm,
             cache-dependency-path: pnpm-lock.yaml,
           }
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - run: pnpm install --frozen-lockfile
       # This runner owns its web server. Parallel E2E jobs cannot consume the
       # API build produced by cross-surface-e2e's ephemeral filesystem.
