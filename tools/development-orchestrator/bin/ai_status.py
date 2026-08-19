@@ -429,6 +429,60 @@ def build_doc_sync_audit_report(state: dict[str, Any]) -> tuple[bool, list[str]]
     return success, lines
 
 
+def integration_trunk() -> str:
+    """The branch a merged candidate must be reachable from."""
+    for name in ("config.local.json", "config.json"):
+        path = ROOT / ".orchestrator" / name
+        try:
+            if not path.exists():
+                continue
+            data = json.loads(path.read_text(encoding="utf-8"))
+            branch = ((data.get("github_bus") or {}) if isinstance(data, dict) else {}).get(
+                "default_branch"
+            )
+            if branch:
+                return str(branch)
+        except (OSError, ValueError):
+            continue
+    return "dev"
+
+
+def merge_reachability(commit_hash: str) -> str:
+    """Is `commit_hash` reachable from the integration trunk?
+
+    Returns `verified`, `unreachable`, or `unknown`.
+
+    Recording a commit is not the same as landing it. Twenty of fifty recorded
+    delivery SHAs were not ancestors of `dev` -- most from squash-merge, which
+    rewrites the SHA, but at least one task was `done` with nothing on any
+    branch. `git_commit_exists` cannot tell those apart: a commit on a deleted
+    branch still exists as an object.
+
+    `unknown` is a real answer and must not be treated as failure. The trunk ref
+    is often absent in a worker's worktree, and blocking a completion on a ref
+    that was simply never fetched would stall the fleet for a bookkeeping check.
+    """
+    sha = commit_hash.strip()
+    if not sha or sha == "not_applicable":
+        return "unknown"
+    trunk = integration_trunk()
+    for ref in (f"origin/{trunk}", trunk):
+        probe = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            cwd=str(ROOT), text=True, capture_output=True,
+        )
+        if probe.returncode != 0:
+            continue
+        if not git_commit_exists(sha):
+            return "unknown"
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", sha, ref],
+            cwd=str(ROOT), text=True, capture_output=True,
+        )
+        return "verified" if result.returncode == 0 else "unreachable"
+    return "unknown"
+
+
 def git_commit_exists(commit_hash: str) -> bool:
     if not commit_hash.strip():
         return False
@@ -548,6 +602,11 @@ def transition_after_merge(state: dict[str, Any], task: dict[str, Any], *, messa
         task["status"] = "acceptance"
         return
     task["status"] = "done"
+    # Say whether the recorded delivery actually landed, rather than leaving the
+    # claim unqualified. Not a gate: `unknown` means the trunk ref was not
+    # available here, which is a normal condition in a worker worktree and no
+    # reason to hold up a completion. The scheduled audit reports `unreachable`.
+    task["merge_reachability"] = merge_reachability(str(task.get("merge_sha") or ""))
     apply_unblock_parent_resolution(
         state,
         task,
