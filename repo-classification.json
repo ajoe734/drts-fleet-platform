@@ -198,7 +198,7 @@
     },
     {
       "id": "ci-workflows",
-      "pattern": "^\\.github/workflows/(?:build-driver-ios|ci|ci-integ)\\.yml$",
+      "pattern": "^\\.github/workflows/(?:build-driver-ios|ci|ci-integ|canonical-consistency-audit)\\.yml$",
       "classification": "test_only",
       "status": "active"
     },

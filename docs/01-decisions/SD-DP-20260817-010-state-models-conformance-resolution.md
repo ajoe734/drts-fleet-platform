@@ -9,9 +9,10 @@
 - `date`: `2026-08-17`
 - `status`: `accepted`
 - `approval`:
-  - accepted by the repository owner on 2026-08-19, in answer to
-    `docs/01-decisions/l1-amendment-acceptance-request-20260817.md`. This satisfies the
-    human/system-design precondition `SD-DP-20260422-003` sets for a packet to supersede L1 wording
+  - accepted by the repository owner on 2026-08-19, answering the questions this packet raises.
+    That satisfies the human/system-design precondition `SD-DP-20260422-003` sets for a packet
+    to supersede L1 wording. The answers are in `accepted_scope_note` below; the one-shot request
+    document that carried the questions has been removed rather than left to sit resolved forever
 - `accepted_scope_note`:
   - `GAP-CONF-04` accepted as argued: the five removed forwarded states are pipeline phases, an
     external mirror already expressed by `authoritativeSnapshot.nativeStatus`, a per-driver action

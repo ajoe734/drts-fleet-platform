@@ -1385,16 +1385,11 @@ Order / Dispatch / Driver Task 為三個獨立部署服務的版本。契約原�
 
 ---
 
-## 10. 契約評審待確認項（Review Questions & Decision Routing）
+## 10. 契約評審待確認項
 
-以下 5 項契約評審待確認項對應 `PHASE1_OPEN_QUESTIONS.md` 中的 Q-001 至 Q-005，各項已指派負責 Owner 與決策途徑（Decision Route）。
+契約評審待確認項**單一記錄於 `PHASE1_OPEN_QUESTIONS.md`**（Q-001 起），包含問題敘述、
+負責 Owner、決策途徑與暫定預設。本節不重複列出。
 
-**暫定預設（interim default）不列於本契約。** 依 `SD-DP-20260422-003` 與 2026-08-19 的人工決議，未經決策的暫定答案寫進契約會被實作者當成已定案的規則照做；工作假設一律只記在 `PHASE1_OPEN_QUESTIONS.md` 對應問題的「interim default」欄位，待正式決策產出後才回寫本節。
-
-| 編號 / 對應問題  | 待確認項目                                                                                                                                                                      | 負責 Owner                                                  | 決策途徑（Decision Route）                                                                                                                        |
-| :--------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **10.1 (Q-001)** | **`call_session` 與 `order` 關聯基數**<br>- 問題：`call_session` 是否允許 1:n 關聯（同一通電話建立多單），或 Phase 1 流程維持一通電話建立一筆主訂單？                           | `Codex` (Contracts & Schema) / `Callcenter & Order Service` | **Callcenter / Order 契約評審 RFC**：由 Codex 牽頭、Claude 審查，確認資料庫外鍵關聯設計與 `apps/ops-console-web` 話務派單操作流程之多單支援需求。 |
-| **10.2 (Q-002)** | **機場接送航班監控欄位 `flight_ref` 保留**<br>- 問題：機場接送契約是否在 Phase 1 尚未具備航班即時追蹤 runtime 前即保留 `flight_ref` 欄位？                                      | `Codex2` (Partner & Airport Transfer) / `Claude2`           | **Partner 渠道與機場接送契約評審**：由 Codex2 牽頭、Claude 審查，評估 `CreateBookingDto` 欄位定義與 Phase 2 航班追蹤整合介面銜接規格。            |
-| **10.3 (Q-003)** | **司機提領（Driver Payout）模式**<br>- 問題：driver payout 是否僅限對帳單與請款申請（statement & reimbursement request），或 Phase 1 需包含即時錢包餘額與會計帳扣帳流程？       | `Codex` (Contracts & Financial Model) / `Billing Service`   | **Billing & Settlement 架構決策 RFC**：由 Codex 牽頭、Claude 與財務產品負責人審查，界定 Phase 1 批次請款與 Phase 2 即時錢包帳本之功能邊界。       |
-| **10.4 (Q-004)** | **Forwarded 訂單之本地 `trip completed` 狀態投影**<br>- 問題：轉派（forwarded）訂單是否需要強本地 `trip completed` 真值，或僅依賴外部平台鏡像同步投影？                         | `Codex2` (Forwarder Adapter) / `Claude2`                    | **Forwarder 生命週期與狀態機 RFC**：由 Codex2 / Claude2 牽頭、Claude 審查，結合 `GAP-CONF-04` 決定轉派訂單狀態機與對帳同步機制。                  |
-| **10.5 (Q-005)** | **報表產物（Report & Filing Artifacts）儲存鎖定層級**<br>- 問題：監理申報與報表產物是否需 storage-level 物件鎖（Object Lock），或不可變 manifest 加上雜湊（hash）保證即已足夠？ | `Gemini` (Infra & Compliance) / `Reporting Service`         | **法規儲存與合規架構 RFC**：由 Gemini 牽頭、Claude 審查，評估雲端儲存 Object Lock 政策與資料庫不可變產物清單之合規性需求。                        |
+依 `SD-DP-20260819-011`：同一個事實不由兩份 canonical 文件各記一份。待確認項會隨著被回答
+而變動，因此記在問題清單，而不是記在提出它的契約裡 —— 本節先前重複列出這五項，兩邊的內容
+已經開始分歧。

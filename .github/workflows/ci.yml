@@ -56,7 +56,7 @@ jobs:
           python3 -m unittest tools/ci/test_check_commit_trailers.py
           python3 -m unittest tools/ci/test_check_test_coverage.py
           python3 -m unittest tools/ci/test_workflow_timeouts.py
-          python3 -m unittest tools/ci/test_l1_product_truth_guard.py
+          python3 -m unittest tools/ci/test_canonical_consistency.py
       - name: Verify every test file is on a path CI runs
         run: python3 tools/ci/check_test_coverage.py
       - id: classify
@@ -119,8 +119,8 @@ jobs:
       - name: Verify archived source specs are full UTF-8 originals (not derived summaries)
         run: python3 tools/ci/check_spec_source_archive.py
 
-  l1-product-truth:
-    name: L1 product truth
+  canonical-consistency:
+    name: Canonical consistency
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -128,11 +128,14 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Enforce the L1 edit rule from SD-DP-20260422-003
+      - name: Check what this change asserts against what is there
         run: |
+          # Diff-scoped: prevents new drift without failing on the debt already
+          # in the tree. The repository-wide view runs on a schedule in
+          # canonical-consistency-audit.yml.
           base="${{ github.event.pull_request.base.ref || 'main' }}"
           git fetch origin "$base" --quiet
-          python3 tools/ci/git/check_l1_product_truth_guard.py --base "origin/$base" --head HEAD
+          python3 tools/ci/git/check_canonical_consistency.py --ci --base "origin/$base" --head HEAD
 
   bff-only-imports:
     name: BFF-only imports
