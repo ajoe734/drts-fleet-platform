@@ -28,10 +28,19 @@ concurrency:
 env:
   CI: true
 
+# Every job carries timeout-minutes. GitHub's default is six hours, and on
+# 2026-08-19 a transient hang in `apt-get install postgresql-client` held
+# iam-negative-matrix for three hours and twenty minutes on dev while the
+# branch's CI result stayed unknown; the same step had hung three jobs on a PR
+# earlier the same day. The limits are three times the longest observed
+# successful run, floored at ten minutes, so a slow runner still passes and a
+# hang is capped in minutes rather than hours.
+
 jobs:
   scope:
     name: Change scope
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       scope: ${{ steps.classify.outputs.scope }}
       product: ${{ steps.classify.outputs.product }}
@@ -46,6 +55,7 @@ jobs:
           python3 -m unittest tools/ci/test_classify_change_scope.py
           python3 -m unittest tools/ci/test_check_commit_trailers.py
           python3 -m unittest tools/ci/test_check_test_coverage.py
+          python3 -m unittest tools/ci/test_workflow_timeouts.py
           python3 -m unittest tools/ci/test_l1_product_truth_guard.py
       - name: Verify every test file is on a path CI runs
         run: python3 tools/ci/check_test_coverage.py
@@ -67,6 +77,7 @@ jobs:
   commit-trailers:
     name: Commit trailers
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -102,6 +113,7 @@ jobs:
   spec-source-archive:
     name: Spec source archive
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Verify archived source specs are full UTF-8 originals (not derived summaries)
@@ -110,6 +122,7 @@ jobs:
   l1-product-truth:
     name: L1 product truth
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -124,6 +137,7 @@ jobs:
   bff-only-imports:
     name: BFF-only imports
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Enforce BFF-only imports for protected UI surfaces
@@ -132,6 +146,7 @@ jobs:
   verify-internal-key-exceptions:
     name: Verify Internal Key Exceptions
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Verify internal key exception registry and documentation
@@ -140,6 +155,7 @@ jobs:
   runtime-mirror-guard:
     name: Runtime mirror guard
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -163,6 +179,7 @@ jobs:
     needs: scope
     if: needs.scope.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -184,6 +201,7 @@ jobs:
     needs: scope
     if: needs.scope.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -232,6 +250,7 @@ jobs:
     needs: [scope, product_smoke_acceptance]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Aggregate scoped smoke gate
         env:
