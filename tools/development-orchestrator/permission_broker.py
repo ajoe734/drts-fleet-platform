@@ -1007,6 +1007,10 @@ def classify_command(shell_command: str, *, _depth: int = 0) -> str:
             for pattern in DENY_BASH_PATTERNS:
                 if pattern.search(form):
                     return "deny"
+    # After the deny scan, never before it: `git reset --hard` on the canonical
+    # checkout has to stay a refusal rather than soften into a prompt.
+    if _moves_head_in_the_canonical_checkout(normalized):
+        return "defer"
     if len(segments) > 1:
         # Every part has to stand on its own, otherwise a safe prefix would
         # carry the rest of the line past the gate.
@@ -1207,6 +1211,98 @@ def _pnpm_command_index(tokens: list[str]) -> int:
             continue
         break
     return index
+
+
+# Moving HEAD is not destructive on its own -- nothing is lost -- but the
+# canonical checkout is a working tree that several sessions share, and a
+# branch switch under someone else's feet makes their next commit land on the
+# wrong branch. That happened twice on 2026-08-19 alone: `git status` in one
+# session showed another's staged rename, and HEAD moved to
+# ci/canonical-consistency-v2 mid-task, so commits had to be made with explicit
+# pathspecs to avoid capturing an index nobody here owned.
+#
+# `defer` rather than `deny`: the operation is legitimate, it just needs to
+# happen in a tree the session owns. ORCH-SESSION-CLAIM-001 made owning one
+# possible, and the same command inside a worktree is untouched.
+_HEAD_MOVING_GIT_SUBCOMMANDS = frozenset({"checkout", "switch", "reset", "rebase", "merge"})
+
+
+def _enclosing_main_checkout(path: Path) -> Path | None:
+    """The main checkout containing `path`, or None if a linked worktree does.
+
+    git writes `.git` as a directory in the main checkout and as a file naming
+    the admin dir in every linked worktree, so this distinguishes them without
+    running git -- which matters on a hook that fires on every tool call.
+    """
+    try:
+        current = path.resolve()
+    except OSError:
+        return None
+    for candidate in [current, *current.parents]:
+        marker = candidate / ".git"
+        if marker.is_dir():
+            return candidate
+        if marker.is_file():
+            return None
+    return None
+
+
+def _git_head_move_targets_canonical(tokens: list[str], cwd: Path) -> bool:
+    """Does this one command move HEAD in the canonical checkout?"""
+    if not tokens or PurePosixPath(tokens[0]).name != "git":
+        return False
+    effective_cwd = cwd
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "-C" and index + 1 < len(tokens):
+            effective_cwd = _resolve_workspace_path(cwd, tokens[index + 1])
+            index += 2
+            continue
+        if token.startswith("-C="):
+            effective_cwd = _resolve_workspace_path(cwd, token.split("=", 1)[1])
+            index += 1
+            continue
+        if token in _GIT_GLOBAL_VALUE_OPTIONS and index + 1 < len(tokens):
+            index += 2
+            continue
+        if any(token.startswith(f"{option}=") for option in _GIT_GLOBAL_VALUE_OPTIONS):
+            index += 1
+            continue
+        if token in _GIT_GLOBAL_FLAGS:
+            index += 1
+            continue
+        break
+    if index >= len(tokens) or tokens[index] not in _HEAD_MOVING_GIT_SUBCOMMANDS:
+        return False
+    return _enclosing_main_checkout(effective_cwd) == workspace_root()
+
+
+def _moves_head_in_the_canonical_checkout(shell_command: str) -> bool:
+    """Walk the line carrying cwd, because `cd <worktree> && git switch` is one
+    of the shapes this has to get right -- reading the git segment alone would
+    resolve it against the canonical root and prompt on work that is already
+    correctly isolated.
+    """
+    normalized = _normalize_shell_command(shell_command)
+    segments = _split_shell_segments(normalized)
+    if segments is None:
+        return False
+    cwd = workspace_root()
+    for segment in segments:
+        try:
+            tokens = shlex.split(_strip_invocation_prefixes(segment))
+        except ValueError:
+            continue
+        if not tokens:
+            continue
+        if tokens[0] == "cd":
+            if len(tokens) >= 2:
+                cwd = _resolve_workspace_path(cwd, tokens[1])
+            continue
+        if _git_head_move_targets_canonical(tokens, cwd):
+            return True
+    return False
 
 
 def _is_canonical_root_pnpm_install_command(shell_command: str) -> bool:

@@ -427,13 +427,101 @@ class GitGlobalOptionsDoNotDefeatDenyRulesTests(unittest.TestCase):
     def test_ordinary_git_work_is_untouched(self) -> None:
         # The normalization must not turn reads into refusals, and must leave
         # commands that were never denied exactly where they were.
-        self.assertEqual(self._decision("git checkout dev"), "allow")
+        # `git checkout dev` became a prompt in ORCH-CANONICAL-HEAD-001, which
+        # is a different contract than this one: what matters here is that
+        # folding git's global options away did not turn a read into a refusal.
+        self.assertNotEqual(self._decision("git checkout dev"), "deny")
         self.assertEqual(self._decision("git status"), "allow")
         for command in ("git -C /repo status", "git -C /repo log --oneline"):
             self.assertNotEqual(self._decision(command), "deny", command)
 
     def test_a_non_git_program_named_like_one_is_left_alone(self) -> None:
         self.assertNotEqual(self._decision("gitk -C /repo reset --hard"), "deny")
+
+
+class CanonicalCheckoutHeadGuardTests(unittest.TestCase):
+    """Moving HEAD in a working tree several sessions share.
+
+    Nothing is lost by a branch switch, so this is not a deny -- but the
+    canonical checkout is shared, and a switch under another session's feet
+    makes its next commit land on the wrong branch. On 2026-08-19 that happened
+    twice: `git status` in one session showed another's staged rename, and HEAD
+    moved to ci/canonical-consistency-v2 mid-task, so commits had to be made
+    with explicit pathspecs to avoid capturing an index nobody there owned.
+
+    The operation is legitimate; it just belongs in a tree the session owns.
+    ORCH-SESSION-CLAIM-001 made owning one possible, so the same command inside
+    a worktree has to stay exactly as frictionless as it was.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name) / "repo"
+        root.mkdir()
+        run = lambda *a: subprocess.run(["git", "-C", str(root), *a], check=True, capture_output=True)
+        subprocess.run(["git", "init", "-q", "-b", "dev", str(root)], check=True)
+        run("config", "user.email", "t@example.com")
+        run("config", "user.name", "t")
+        (root / "seed").write_text("seed\n", encoding="utf-8")
+        run("add", "seed")
+        run("commit", "-qm", "seed")
+        self.root = root.resolve()
+        self.worktree = (self.root / ".artifacts" / "worktrees" / "session").resolve()
+        run("worktree", "add", "--detach", "-q", str(self.worktree))
+        self._env = mock.patch.dict(os.environ, {"ORCH_CANONICAL_ROOT": str(self.root)}, clear=False)
+        self._env.start()
+        permission_broker._WORKSPACE_ROOTS_CACHE = None
+
+    def tearDown(self) -> None:
+        self._env.stop()
+        # The cache outlives the patch, so leaving it set would point every
+        # later test's boundary at a directory that no longer exists.
+        permission_broker._WORKSPACE_ROOTS_CACHE = None
+        self._tmp.cleanup()
+
+    def test_a_branch_switch_in_the_shared_tree_is_held_for_a_person(self) -> None:
+        for command in ("git checkout dev", "git checkout -b feature/x", "git switch dev", "git rebase dev"):
+            self.assertEqual(permission_broker.classify_command(command), "defer", command)
+
+    def test_the_same_switch_inside_a_worktree_is_untouched(self) -> None:
+        # The whole point of the claim: a session that isolated itself must not
+        # pay for it. Read with the cd, not segment by segment -- reading the
+        # git segment alone resolves it against the canonical root.
+        self.assertFalse(
+            permission_broker._moves_head_in_the_canonical_checkout(
+                f"cd {self.worktree} && git checkout -b feature/x"
+            )
+        )
+        self.assertFalse(
+            permission_broker._moves_head_in_the_canonical_checkout(
+                f"git -C {self.worktree} switch dev"
+            )
+        )
+
+    def test_a_linked_worktree_is_not_mistaken_for_the_main_checkout(self) -> None:
+        # git writes `.git` as a directory in the main checkout and as a file
+        # in every linked worktree, which is what tells them apart here.
+        self.assertEqual(permission_broker._enclosing_main_checkout(self.root), self.root)
+        self.assertIsNone(permission_broker._enclosing_main_checkout(self.worktree))
+
+    def test_a_denied_command_is_still_denied_not_softened_to_a_prompt(self) -> None:
+        # The guard runs after the deny scan on purpose.
+        self.assertEqual(permission_broker.classify_command("git reset --hard origin/dev"), "deny")
+        self.assertEqual(
+            permission_broker.classify_command(f"git -C {self.root} reset --hard HEAD"), "deny"
+        )
+
+    def test_work_that_does_not_move_head_is_unaffected(self) -> None:
+        for command in ("git status", "git log --oneline", "git commit -m x",
+                        "git push origin HEAD", "git pull --ff-only"):
+            self.assertEqual(permission_broker.classify_command(command), "allow", command)
+        # `git worktree add` is how a session gets a tree of its own, so the
+        # guard must not be what stands in its way. Its overall classification
+        # depends on path-boundary rules this change does not touch, so the
+        # assertion is on the guard itself.
+        self.assertFalse(
+            permission_broker._moves_head_in_the_canonical_checkout("git worktree add x dev")
+        )
 
 
 if __name__ == "__main__":
