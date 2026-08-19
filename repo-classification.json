@@ -209,6 +209,12 @@
       "status": "active"
     },
     {
+      "id": "workflow-fallback",
+      "classification": "development_tool",
+      "pattern": "^\\.github/workflows/[^/]+\\.ya?ml$",
+      "note": "Catch-all so a new workflow cannot fail the gate on its own existence. The three rules above are first-match and still win; move a workflow up if it deploys product or gates product tests."
+    },
+    {
       "id": "development-records",
       "pattern": "^support/|^\\.artifacts/|^\\.ai-loop-(?:incoming|outgoing)/|^ai-task-archive\\.json$",
       "classification": "development_record",
@@ -240,7 +246,7 @@
     },
     {
       "id": "repository-policy",
-      "pattern": "^(?:repo-classification\\.json|\\.dockerignore|\\.editorconfig|\\.gitattributes|\\.gitignore|\\.npmrc|\\.nvmrc|\\.prettierignore|\\.prettierrc\\.json|Makefile|docker-compose\\.dev\\.yml|drts-fleet-platform\\.code-workspace|eslint\\.config\\.mjs|package\\.json|pnpm-lock\\.yaml|pnpm-workspace\\.yaml|tsconfig(?:\\.base)?\\.json|turbo\\.json)$|^\\.(?:codex|husky|vscode)/|^\\.github/CODEOWNERS$",
+      "pattern": "^(?:repo-classification\\.json|Makefile|docker-compose\\.dev\\.yml|drts-fleet-platform\\.code-workspace|eslint\\.config\\.mjs|package\\.json|pnpm-lock\\.yaml|pnpm-workspace\\.yaml|tsconfig(?:\\.base)?\\.json|turbo\\.json)$|^\\.(?:codex|husky|vscode)/|^\\.github/CODEOWNERS$|^\\.[a-z0-9][a-z0-9.-]*$",
       "classification": "repository_governance",
       "status": "active"
     }
