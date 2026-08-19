@@ -167,8 +167,30 @@ def activate(args: argparse.Namespace) -> int:
         temporary.symlink_to(target.name)
         temporary.replace(pointer)
         write_manifest(args.manifest, manifest)
+    # `prune` has always written an audit record; `activate` never did. So the
+    # one operation that decides which code runs left no trace of who ran it or
+    # what moved, and a 134 KB audit log contained nothing but prunes. Pointer
+    # divergence could recur indefinitely with nothing to read afterwards.
+    _audit(args, {
+        "ts": now(),
+        "mode": "activate",
+        "release": target.name,
+        "pointer": args.pointer_name,
+        "previous_active": old_active,
+        "verified": not args.skip_verify,
+    })
     print(json.dumps(manifest, indent=2, sort_keys=True))
     return 0
+
+
+def _audit(args: argparse.Namespace, payload: dict) -> None:
+    try:
+        args.audit_log.parent.mkdir(parents=True, exist_ok=True)
+        with args.audit_log.open("a", encoding="utf-8") as audit:
+            audit.write(json.dumps(payload, sort_keys=True) + "\n")
+    except OSError as exc:
+        # An unwritable audit trail must not stop a rollback.
+        print(f"WARNING: could not write audit record: {exc}", file=sys.stderr)
 
 
 def prune(args: argparse.Namespace) -> int:
@@ -205,9 +227,7 @@ def prune(args: argparse.Namespace) -> int:
         candidates.append({"release": release.name, "path": str(release), "age_seconds": int(age_seconds), "eligible": reason is None, "reason": reason, "cleanup_action": cleanup_action})
 
     payload = {"ts": now(), "mode": "apply" if args.apply else "dry_run", "protected": sorted(protected), "releases": candidates}
-    args.audit_log.parent.mkdir(parents=True, exist_ok=True)
-    with args.audit_log.open("a", encoding="utf-8") as audit:
-        audit.write(json.dumps(payload, sort_keys=True) + "\n")
+    _audit(args, payload)
     print(json.dumps(payload, indent=2, sort_keys=True))
 
     if args.apply:

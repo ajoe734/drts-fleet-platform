@@ -371,7 +371,18 @@ def _verified_claude_policy(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _verified_claude_hooks() -> dict[str, Any]:
-    broker_path = SOURCE_ROOT / "tools" / "development-orchestrator" / "permission_broker.py"
+    # ROOT, not SOURCE_ROOT. SOURCE_ROOT is wherever this code happens to live,
+    # so a sync run from a release copy baked that release's path into the hook
+    # permanently: the live settings still name
+    # .artifacts/releases/current/... from whenever that last happened. The
+    # broker then ran from a snapshot while everything else moved on, and
+    # `current` acquired a consumer purely by accident -- which is why the two
+    # release pointers kept drifting apart with nothing to reconcile them.
+    #
+    # The canonical checkout always exists, always matches dev, and depends on
+    # no pointer at all. Same distinction as _resolve_status_root in common.py:
+    # "where does this code live" is not "where does this repository live".
+    broker_path = ROOT / "tools" / "development-orchestrator" / "permission_broker.py"
     command = f"python3 {broker_path} hook"
     hook = lambda event: [{"hooks": [{"type": "command", "command": f"{command} {event}", "shell": "bash"}]}]
     return {
