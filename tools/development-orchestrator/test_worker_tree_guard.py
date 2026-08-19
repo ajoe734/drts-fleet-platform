@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import worker_tree_guard
@@ -175,6 +182,71 @@ class CheckChatboxTreeGuardTests(unittest.TestCase):
         self.assertIsNone(
             result, "chatbox guard must not block on its own diagnostic failure"
         )
+
+
+MODULE = Path(__file__).resolve().parent / "worker_tree_guard.py"
+
+
+class GuardedRootIsTheCanonicalCheckoutTests(unittest.TestCase):
+    """The guard has to look at the tree whose work is at risk.
+
+    `THIS_DIR.parent` answers where this file lives. Once the supervisor moved
+    to a pinned release that became `.artifacts/releases/<name>/tools` -- a
+    worktree clean by construction -- so the guard could never fire and
+    enabling it was a no-op with an on-switch.
+    """
+
+    def _run_from_release_copy(self, driver: str) -> str:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            repo = tmp / "canonical"
+            repo.mkdir()
+            run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
+            subprocess.run(["git", "init", "-q", "-b", "dev", str(repo)], check=True)
+            run("config", "user.email", "t@example.com")
+            run("config", "user.name", "t")
+            (repo / ".gitignore").write_text(".artifacts/\n.orchestrator/\n", encoding="utf-8")
+            docs = repo / "docs"
+            docs.mkdir()
+            (docs / "design.md").write_text("committed\n", encoding="utf-8")
+            run("add", ".gitignore", "docs/design.md")
+            run("commit", "-qm", "seed")
+            # The uncommitted design-intent work the guard exists to protect.
+            (docs / "design.md").write_text("uncommitted intent\n", encoding="utf-8")
+
+            release = repo / ".artifacts" / "releases" / "orchestrator-test"
+            run("worktree", "add", "--detach", "-q", str(release))
+            staged = release / "tools" / "development-orchestrator"
+            staged.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(MODULE, staged / MODULE.name)
+            shutil.copy2(MODULE.parent / "common.py", staged / "common.py")
+
+            env = {k: v for k, v in os.environ.items() if k not in ("ORCH_STATUS_ROOT", "AI_STATUS_ROOT")}
+            result = subprocess.run(
+                [sys.executable, "-c", driver],
+                cwd=str(staged), capture_output=True, text=True, check=False, env=env,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.strip()
+
+    def test_a_release_copy_guards_the_canonical_checkout(self) -> None:
+        output = self._run_from_release_copy(
+            "import sys; sys.path.insert(0, '.');"
+            "import worker_tree_guard as g; print(g._guarded_root())"
+        )
+        self.assertTrue(output.endswith("canonical"), output)
+        self.assertNotIn(".artifacts/releases", output)
+
+    def test_uncommitted_fragile_work_is_seen_from_a_release_copy(self) -> None:
+        """The behaviour, not just the path: the guard must actually fire."""
+        output = self._run_from_release_copy(
+            "import sys, json; sys.path.insert(0, '.');"
+            "import worker_tree_guard as g;"
+            "cfg = {'branch_strategy': {'worker_tree_guard': {'enabled': True}}};"
+            "block = g.check_worker_tree_guard(cfg, reason=None);"
+            "print(json.dumps(sorted(block['dirty_paths']) if block else []))"
+        )
+        self.assertEqual(json.loads(output), ["docs/design.md"])
 
 
 if __name__ == "__main__":
