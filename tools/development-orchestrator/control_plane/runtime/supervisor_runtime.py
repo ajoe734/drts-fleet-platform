@@ -2655,10 +2655,17 @@ def clear_provider_pause(state: dict[str, Any], agent_id: str) -> None:
 
 
 def lane_has_recorded_pause(state: dict[str, Any], agent_id: str) -> bool:
+    """Whether the registry holds a pause naming this lane, by key or by field.
+
+    The key carries the name too, and for lane-scoped entries it is the only
+    place it appears -- `{"gemini": {...}}` with no lane_id inside. Reading the
+    field alone made those entries invisible here while clear_provider_pause,
+    asking the same question two functions away, found them by checking both.
+    """
     normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
     return any(
-        isinstance(entry, dict) and entry.get("lane_id") == normalized
-        for entry in provider_pause_registry(state).values()
+        key == normalized or (isinstance(entry, dict) and entry.get("lane_id") == normalized)
+        for key, entry in provider_pause_registry(state).items()
     )
 
 
@@ -3413,7 +3420,21 @@ def recovered_taskless_dispatch_pause(
 ) -> bool:
     if str(pause.get("task_id") or "").strip():
         return False
-    if str(pause.get("failure_kind") or "").strip().lower() != "auth":
+    # The kind of failure that recorded it is not what makes it stale. This used
+    # to clear only `auth`, so a taskless quota/terminal entry could never be
+    # removed by anything: it names no task, so the task-based rules skip it,
+    # and it named the wrong kind, so this one did too. One from 2026-08-13 was
+    # still on the board six days later. It blocks nothing -- the consumer drops
+    # taskless records -- but it counts as a failure on every surface that reads
+    # the list, forever, and each new one adds another.
+    #
+    # What the guards below check is whether the lane still has a subject: a
+    # recorded provider pause, an unfinished retry window, or a probe that says
+    # it is unusable. Those are the same questions for a quota failure as for an
+    # auth one, which is why the existing auth case still keeps a lane whose
+    # provider pause has not expired.
+    blocked_until = parse_runtime_timestamp(str(pause.get("blocked_until") or ""))
+    if blocked_until is not None and blocked_until > datetime.now(timezone.utc):
         return False
     agent_id = normalize_agent_id(str(pause.get("provider") or ""))
     if not agent_id:
