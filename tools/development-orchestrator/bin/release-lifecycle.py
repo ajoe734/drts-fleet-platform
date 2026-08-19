@@ -15,6 +15,15 @@ from pathlib import Path
 
 SOURCE_ROOT = Path(__file__).resolve().parents[3]
 
+# There is exactly one release selector, and systemd reads it. `activate` used
+# to take --pointer-name, defaulting to `current` -- the pointer nothing reads.
+# So the bare command printed a manifest naming the new release, exited 0, and
+# left the running supervisor on the old code. Every real caller already passed
+# --pointer-name active to avoid that; the option existed only so its default
+# could be wrong. Its last genuine consumer was the Claude Code hook path,
+# which ORCH-HOOK-PATH-001 moved off the pointer entirely.
+POINTER_NAME = "active"
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -49,9 +58,9 @@ def registered_worktree_paths(repo_root: Path) -> set[Path]:
 
 def protected_names(manifest: dict, releases_dir: Path, keep: int) -> set[str]:
     names = {name for name in [manifest.get("active"), *manifest.get("previous", [])] if name}
-    # Multiple pointers can coexist during the migration from the legacy
-    # `current` selector. Preserve every pointed-to release, not just the one
-    # named in the mutable manifest.
+    # Preserve every pointed-to release, not just the one named in the mutable
+    # manifest: the manifest is a record, the symlink is what actually runs, and
+    # pruning the release a live pointer resolves to would break the service.
     if releases_dir.exists():
         for pointer in releases_dir.iterdir():
             if pointer.is_symlink():
@@ -160,8 +169,8 @@ def activate(args: argparse.Namespace) -> int:
         old_active = manifest.get("active")
         previous = [name for name in [old_active, *manifest.get("previous", [])] if name and name != target.name]
         manifest.update({"schema_version": 1, "active": target.name, "previous": previous[:2], "activated_at": now()})
-        pointer = args.releases_dir / args.pointer_name
-        temporary = args.releases_dir / f".{args.pointer_name}.tmp"
+        pointer = args.releases_dir / POINTER_NAME
+        temporary = args.releases_dir / f".{POINTER_NAME}.tmp"
         if temporary.exists() or temporary.is_symlink():
             temporary.unlink()
         temporary.symlink_to(target.name)
@@ -175,7 +184,7 @@ def activate(args: argparse.Namespace) -> int:
         "ts": now(),
         "mode": "activate",
         "release": target.name,
-        "pointer": args.pointer_name,
+        "pointer": POINTER_NAME,
         "previous_active": old_active,
         "verified": not args.skip_verify,
     })
@@ -252,12 +261,6 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="delete eligible releases; default is dry-run")
     subparsers = parser.add_subparsers(dest="command", required=True)
     activate_parser = subparsers.add_parser("activate", help="atomically select an existing release")
-    activate_parser.add_argument(
-        "--pointer-name",
-        default="current",
-        choices=("active", "current"),
-        help="release selector to update; `active` is reserved for the live systemd service",
-    )
     activate_parser.add_argument(
         "--integration-ref",
         default="origin/dev",

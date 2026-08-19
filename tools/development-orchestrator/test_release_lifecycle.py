@@ -14,32 +14,46 @@ class ReleaseLifecycleTests(unittest.TestCase):
     def run_script(self, artifact_root: Path, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run([str(SCRIPT), "--repo-root", str(ROOT), "--artifact-root", str(artifact_root), *args], capture_output=True, text=True, check=False)
 
-    def test_activate_creates_manifest_and_current_pointer(self) -> None:
+    def test_bare_activate_moves_the_pointer_systemd_reads(self) -> None:
+        """The default has to be the pointer that decides what runs.
+
+        `activate` used to take --pointer-name defaulting to `current`, so the
+        bare command printed a manifest naming the new release and exited 0
+        while systemd -- which reads `active` -- stayed on the old code. A
+        deploy could be reported complete without changing anything running.
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "releases" / "orchestrator-one").mkdir(parents=True)
             result = self.run_script(root, "activate", "--skip-verify", "orchestrator-one")
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual((root / "releases" / "current").resolve().name, "orchestrator-one")
+            self.assertEqual((root / "releases" / "active").resolve().name, "orchestrator-one")
+            self.assertFalse((root / "releases" / "current").exists())
             self.assertEqual(json.loads((root / "orchestrator-release.json").read_text())["active"], "orchestrator-one")
+            self.assertEqual(json.loads(result.stdout)["active"], "orchestrator-one")
 
-    def test_active_pointer_is_isolated_from_legacy_current_pointer(self) -> None:
+    def test_pointer_name_option_is_gone(self) -> None:
+        """A second selector cannot come back by way of the old flag."""
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            for name in ("orchestrator-current", "orchestrator-active"):
+            (root / "releases" / "orchestrator-one").mkdir(parents=True)
+            result = self.run_script(root, "activate", "--skip-verify", "--pointer-name", "current", "orchestrator-one")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--pointer-name", result.stderr)
+            self.assertFalse((root / "releases" / "current").exists())
+            self.assertFalse((root / "releases" / "active").exists())
+
+    def test_prune_protects_whatever_a_live_pointer_resolves_to(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            for name in ("orchestrator-old", "orchestrator-live"):
                 (root / "releases" / name).mkdir(parents=True)
-            legacy = self.run_script(root, "activate", "--skip-verify", "orchestrator-current")
-            active = self.run_script(root, "activate", "--skip-verify", "--pointer-name", "active", "orchestrator-active")
-            self.assertEqual(legacy.returncode, 0, legacy.stderr)
-            self.assertEqual(active.returncode, 0, active.stderr)
-            self.assertEqual((root / "releases" / "current").resolve().name, "orchestrator-current")
-            self.assertEqual((root / "releases" / "active").resolve().name, "orchestrator-active")
+            activated = self.run_script(root, "activate", "--skip-verify", "orchestrator-live")
+            self.assertEqual(activated.returncode, 0, activated.stderr)
 
             result = self.run_script(root, "--keep", "1", "prune")
             self.assertEqual(result.returncode, 0, result.stderr)
-            protected = json.loads(result.stdout)["protected"]
-            self.assertIn("orchestrator-current", protected)
-            self.assertIn("orchestrator-active", protected)
+            self.assertIn("orchestrator-live", json.loads(result.stdout)["protected"])
 
     def test_prune_defaults_to_dry_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -124,7 +138,7 @@ class ReleaseLifecycleTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 3, result.stdout)
             self.assertIn("not reachable from", result.stderr)
-            self.assertFalse((artifact_root / "releases" / "current").exists())
+            self.assertFalse((artifact_root / "releases" / "active").exists())
 
     def test_activate_accepts_a_release_on_the_integration_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -135,7 +149,7 @@ class ReleaseLifecycleTests(unittest.TestCase):
                 capture_output=True, text=True, check=False)
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual((artifact_root / "releases" / "current").resolve().name, "orchestrator-ondev")
+            self.assertEqual((artifact_root / "releases" / "active").resolve().name, "orchestrator-ondev")
 
     def test_skip_verify_still_allows_an_off_branch_rollback(self) -> None:
         """One gate, one bypass: emergency rollback to an older pinned release
@@ -162,7 +176,7 @@ class ReleaseLifecycleTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 3, result.stdout)
             self.assertIn("orchestrator tests failed", result.stderr)
-            self.assertFalse((artifact_root / "releases" / "current").exists())
+            self.assertFalse((artifact_root / "releases" / "active").exists())
 
     def test_skip_verify_allows_rollback_to_a_release_that_cannot_be_verified(self) -> None:
         """Emergency rollback must never be blocked by a failing test suite."""
@@ -174,7 +188,7 @@ class ReleaseLifecycleTests(unittest.TestCase):
                 capture_output=True, text=True, check=False)
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual((artifact_root / "releases" / "current").resolve().name, "orchestrator-broken")
+            self.assertEqual((artifact_root / "releases" / "active").resolve().name, "orchestrator-broken")
 
 
 if __name__ == "__main__":

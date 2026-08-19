@@ -35,7 +35,7 @@ orch_require_release() {
   # create it.
   if [[ ! -d "$1" ]]; then
     echo "ERROR: no active release at $1" >&2
-    echo "       run: tools/development-orchestrator/bin/release-lifecycle.py activate --pointer-name active <release>" >&2
+    echo "       run: tools/development-orchestrator/bin/release-lifecycle.py activate <release>" >&2
     return 1
   fi
 }
