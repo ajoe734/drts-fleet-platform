@@ -9,7 +9,7 @@ import os
 import re
 import shlex
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 THIS_DIR = Path(__file__).resolve().parent
@@ -750,9 +750,12 @@ def command_hard_boundary_reason(shell_command: str) -> str | None:
     if segments is None:
         return "a backtick or process substitution hides what would actually run"
     for segment in [*segments, *bodies]:
-        for pattern in DENY_BASH_PATTERNS:
-            if pattern.search(segment):
-                return f"a denied pattern matches: {segment[:100]}"
+        # Same forms as classify_command. This surface gates the supervisor's
+        # own approvals, so a spelling that slips past here is auto-approved.
+        for form in _segment_forms(segment):
+            for pattern in DENY_BASH_PATTERNS:
+                if pattern.search(form):
+                    return f"a denied pattern matches: {segment[:100]}"
         if _writes_outside_workspace(segment):
             return f"it writes outside the workspace: {segment[:100]}"
     return None
@@ -898,6 +901,54 @@ def _reads_outside_workspace(segment: str) -> bool:
     return False
 
 
+# git accepts its own global options *between* the program name and the
+# subcommand, so `^git reset --hard` never sees `git -C /repo reset --hard`.
+# The operation is identical; the spelling that names a target repository is
+# the more dangerous of the two, because it acts on a tree the caller is not
+# standing in. Measured before the fix: `git reset --hard origin/dev` denied,
+# `git -C /home/lupin/drts-fleet-platform reset --hard HEAD` merely asked.
+_GIT_GLOBAL_VALUE_OPTIONS = frozenset({
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env",
+})
+_GIT_GLOBAL_FLAGS = frozenset({
+    "-p", "-P", "--paginate", "--no-pager", "--bare", "--no-replace-objects",
+    "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
+    "--icase-pathspecs", "--no-optional-locks",
+})
+
+
+def _strip_git_global_options(segment: str) -> str:
+    """`segment` with git's own global options folded away.
+
+    Only ever used to produce an *additional* form for the deny scan, so the
+    worst case of a misparse is that a pattern fails to match something it
+    already failed to match.
+    """
+    text = segment.strip()
+    try:
+        tokens = shlex.split(text)
+    except ValueError:
+        return text
+    if not tokens or PurePosixPath(tokens[0]).name != "git":
+        return text
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in _GIT_GLOBAL_VALUE_OPTIONS:
+            index += 2
+            continue
+        if any(token.startswith(f"{option}=") for option in _GIT_GLOBAL_VALUE_OPTIONS):
+            index += 1
+            continue
+        if token in _GIT_GLOBAL_FLAGS:
+            index += 1
+            continue
+        break
+    if index == 1:
+        return text
+    return " ".join(["git", *tokens[index:]])
+
+
 def _segment_forms(segment: str) -> list[str]:
     """The segment as written, and its form with invocation prefixes removed.
 
@@ -906,8 +957,16 @@ def _segment_forms(segment: str) -> list[str]:
     check that refuses must look at *both*, or a prefix hides it. Reversing
     that would turn `timeout 5 git push --force origin dev` into an allow.
     """
+    forms = [segment]
     stripped = _strip_invocation_prefixes(segment)
-    return [segment] if stripped == segment else [segment, stripped]
+    if stripped != segment:
+        forms.append(stripped)
+    # Applied to both, so `timeout 5 git -C /repo reset --hard` reduces too.
+    for form in list(forms):
+        without_git_options = _strip_git_global_options(form)
+        if without_git_options not in forms:
+            forms.append(without_git_options)
+    return forms
 
 
 def classify_command(shell_command: str, *, _depth: int = 0) -> str:

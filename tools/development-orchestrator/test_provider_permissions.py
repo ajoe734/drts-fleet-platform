@@ -383,6 +383,59 @@ class ProviderPermissionsTest(unittest.TestCase):
         self.assertIn(str(codex2_home), seen_homes)
 
 
+class GitGlobalOptionsDoNotDefeatDenyRulesTests(unittest.TestCase):
+    """`git -C <path> reset --hard` is `git reset --hard` with a target.
+
+    The deny patterns anchor on `^git reset --hard`, and git accepts its own
+    global options between the program name and the subcommand, so the deny
+    never saw them. Measured on the deployed broker: `git reset --hard
+    origin/dev` denied, `git -C /home/lupin/drts-fleet-platform reset --hard
+    HEAD` merely asked -- and the second form is the more dangerous one,
+    because it acts on a tree the caller is not standing in.
+
+    That matters here specifically: four Claude Code sessions run with their
+    cwd inside the canonical checkout, and this broker is the only enforcement
+    surface any of them has.
+    """
+
+    def _decision(self, command: str) -> str:
+        return permission_broker.evaluate_tool_request("Bash", {"command": command}, {})["decision"]
+
+    def test_global_options_do_not_hide_a_denied_git_command(self) -> None:
+        for command in (
+            "git -C /home/lupin/drts-fleet-platform reset --hard HEAD",
+            "git --git-dir=/repo/.git --work-tree=/repo reset --hard",
+            "git -c user.name=x -C /repo checkout -- .",
+            "git --no-pager -C /repo reset --hard origin/dev",
+            "/usr/bin/git -C /repo reset --hard",
+        ):
+            self.assertEqual(self._decision(command), "deny", command)
+
+    def test_an_invocation_prefix_and_a_global_option_together_still_deny(self) -> None:
+        # Both reductions have to compose: stripping only one leaves the other
+        # in front of the subcommand.
+        self.assertEqual(self._decision("timeout 5 git -C /repo reset --hard HEAD"), "deny")
+        self.assertEqual(self._decision("FOO=1 git -C /repo reset --hard HEAD"), "deny")
+
+    def test_the_supervisors_own_approval_surface_agrees(self) -> None:
+        # command_hard_boundary_reason gates what the supervisor auto-approves.
+        # A spelling that slips past it is approved without anyone reading it.
+        self.assertIsNotNone(
+            permission_broker.command_hard_boundary_reason("git -C /repo reset --hard HEAD")
+        )
+
+    def test_ordinary_git_work_is_untouched(self) -> None:
+        # The normalization must not turn reads into refusals, and must leave
+        # commands that were never denied exactly where they were.
+        self.assertEqual(self._decision("git checkout dev"), "allow")
+        self.assertEqual(self._decision("git status"), "allow")
+        for command in ("git -C /repo status", "git -C /repo log --oneline"):
+            self.assertNotEqual(self._decision(command), "deny", command)
+
+    def test_a_non_git_program_named_like_one_is_left_alone(self) -> None:
+        self.assertNotEqual(self._decision("gitk -C /repo reset --hard"), "deny")
+
+
 if __name__ == "__main__":
     unittest.main()
 
