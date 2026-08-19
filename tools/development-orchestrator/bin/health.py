@@ -43,6 +43,7 @@ if str(_TOOL_ROOT) not in sys.path:
 # `workers: 0 running`, which is the same lie the supervisor's own
 # `queue: empty` told while it span.
 from control_plane.domain.worker_lifecycle import ACTIVE_WORKER_STATUSES  # noqa: E402
+from control_plane.runtime.supervisor_runtime import is_agent_dispatch_paused  # noqa: E402
 
 # --- config / tunables ---
 RUNTIME_ROOT = Path(__file__).resolve().parents[3]
@@ -343,6 +344,22 @@ def _unit_is_running(unit: str | None) -> bool:
     return state in {"activating", "active", "reloading", "deactivating"}
 
 
+SYSTEMD_UNIT_DIR = _TOOL_ROOT / "systemd"
+
+
+def expected_watchdog_timers() -> list[str]:
+    """The timers this repository installs, asked of the installer's own source.
+
+    A hand-written list is a second answer to "which timers should exist", and
+    it fails silently in the one direction that matters: rename or drop a timer
+    and the probe stops looking for it, reporting a healthy system with one
+    fewer watchdog. systemd cannot settle it either -- `show` on a unit that
+    does not exist returns inactive with no next elapse, which is byte-for-byte
+    how a disarmed timer reports itself.
+    """
+    return sorted(path.name for path in SYSTEMD_UNIT_DIR.glob("*.timer"))
+
+
 def collect_watchdog_timers(result: dict) -> None:
     """Watch the watchers.
 
@@ -352,12 +369,12 @@ def collect_watchdog_timers(result: dict) -> None:
     `list-units` while firing nothing for eight hours. A disarmed probe reports
     no issues, which reads exactly like a healthy system.
     """
-    for unit in ("drts-health.timer", "drts-canonical-root-watch.timer", "drts-claude-keepalive.timer"):
+    for unit in expected_watchdog_timers():
         entry = {"unit": unit, "active_state": None, "next_elapse": None, "armed": None}
         try:
             out = subprocess.check_output(
                 ["systemctl", "--user", "show", unit,
-                 "-p", "ActiveState", "-p", "UnitFileState", "-p", "Unit",
+                 "-p", "ActiveState", "-p", "UnitFileState", "-p", "Unit", "-p", "LoadState",
                  "-p", "NextElapseUSecRealtime", "-p", "NextElapseUSecMonotonic"],
                 text=True, stderr=subprocess.DEVNULL)
         except (OSError, subprocess.CalledProcessError):
@@ -366,6 +383,16 @@ def collect_watchdog_timers(result: dict) -> None:
         props = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
         entry["active_state"] = props.get("ActiveState")
         entry["unit_file_state"] = props.get("UnitFileState")
+        # A timer this repository ships but the host was never given is a
+        # missing watchdog, not a healthy one. systemd reports it exactly like a
+        # stopped timer, so the difference has to be read from LoadState.
+        entry["installed"] = props.get("LoadState") != "not-found"
+        if not entry["installed"]:
+            entry["armed"] = False
+            result["watchdogs"].append(entry)
+            result["issues"].append(
+                f"WARN: {unit} is shipped by this repo but not installed on this host")
+            continue
         # systemd reports "no scheduled elapse" as an empty realtime value and
         # the literal "infinity" for the monotonic one. Treating either as a
         # timestamp is how a disarmed timer reports itself as armed -- the exact
@@ -476,16 +503,60 @@ def collect_supersede_rate(result: dict, now_dt: datetime) -> None:
         result["issues"].append(f"WARN: failed to scan supervisor log: {exc}")
 
 
+def dispatch_paused_lanes(result: dict) -> dict[str, bool] | None:
+    """Whether each lane can take work, answered by the dispatcher itself.
+
+    `enabled` in the projection means "configured on", which is a different
+    question from "will the supervisor send it work". On 2026-08-18 an expired
+    OAuth token paused the account behind claude and claude2; the dispatcher
+    refused both lanes for fifteen hours while this probe printed all seven as
+    enabled. The chair briefing was corrected for exactly this and the probe was
+    not, so the operator-facing surface kept the wrong answer.
+
+    The report is read from disk and passed in. Letting the predicate load it
+    would let a read-only probe re-run the provider CLIs and rewrite the cache.
+    """
+    try:
+        config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        report_path = ROOT_DIR / str(
+            (config.get("paths") or {}).get("provider_capabilities")
+            or ".orchestrator/provider_capabilities.json")
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        # Saying nothing is the failure mode this exists to prevent; an
+        # unanswerable question must read as unanswered, never as healthy.
+        result["issues"].append(f"WARN: cannot ask the dispatcher which lanes are paused: {exc}")
+        return None
+    paused = {}
+    for agent_id in (config.get("agents") or {}):
+        try:
+            paused[agent_id] = is_agent_dispatch_paused(
+                config, state, agent_id, provider_report=report)
+        except Exception as exc:  # noqa: BLE001 - a probe must not die on one lane
+            result["issues"].append(f"WARN: dispatch-pause check failed for {agent_id}: {exc}")
+    return paused
+
+
 def collect_lane_summary(result: dict) -> None:
+    paused = dispatch_paused_lanes(result)
     try:
         projection = json.loads(CONTROL_PLANE_SUMMARY.read_text(encoding="utf-8"))
         for lane in projection.get("lanes", []):
             if not isinstance(lane, dict):
                 continue
+            lane_id = lane.get("id") or lane.get("name")
+            if not lane.get("enabled", True):
+                status = "disabled"
+            elif paused is None or lane_id not in paused:
+                status = "unknown"
+            else:
+                status = "paused" if paused[lane_id] else "enabled"
             result["lanes"].append(
                 {
-                    "lane": lane.get("id") or lane.get("name"),
-                    "status": "enabled" if lane.get("enabled", True) else "disabled",
+                    "lane": lane_id,
+                    "status": status,
+                    "dispatch_paused": None if paused is None else paused.get(lane_id),
                     "load": lane.get("load"),
                     "as_of": projection.get("generated_at"),
                 }
@@ -605,7 +676,8 @@ def render_human(s: dict) -> None:
         print(f"\n{c(BOLD, 'lanes')}:")
         for ln in lanes:
             st = ln.get("status") or "?"
-            sc = c(GREEN if st == "ok" else YELLOW if st == "warn" else RED, st)
+            sc = c(GREEN if st in {"ok", "enabled"}
+                   else YELLOW if st in {"warn", "unknown"} else RED, st)
             ttl = fmt_dur(ln.get("ttl_seconds"))
             keepalive = ""
             if ln.get("keepalive_result"):

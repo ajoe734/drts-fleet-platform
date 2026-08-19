@@ -210,3 +210,120 @@ class HealthScriptTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LaneTableAgreesWithDispatcherTests(unittest.TestCase):
+    """The probe and the dispatcher must not answer the same question differently.
+
+    `enabled` in the projection means "configured on". Whether a lane will be
+    sent work is the dispatcher's answer, and on 2026-08-18 the two diverged:
+    an expired OAuth token paused the account behind claude and claude2, the
+    supervisor refused both for fifteen hours, and this probe printed all seven
+    lanes as enabled the whole time. pause_covers_lane already says in its own
+    docstring that anything answering "can this lane take work" has to go
+    through it; the chair briefing was corrected for that and the probe was not.
+    """
+
+    def _root(self, tmpdir: str, *, pauses: dict, report: str | None = '{}') -> Path:
+        root = Path(tmpdir)
+        (root / ".orchestrator" / "projections").mkdir(parents=True)
+        (root / ".orchestrator" / "config.json").write_text(json.dumps({
+            "agents": {"claude": {"provider": "claude"}, "gemini": {"provider": "gemini"}},
+            "providers": {},
+            "paths": {"provider_capabilities": ".orchestrator/provider_capabilities.json"},
+        }), encoding="utf-8")
+        (root / ".orchestrator" / "state.json").write_text(
+            json.dumps({"provider_pauses": pauses}), encoding="utf-8")
+        if report is not None:
+            (root / ".orchestrator" / "provider_capabilities.json").write_text(
+                report, encoding="utf-8")
+        (root / ".orchestrator" / "projections" / "summary.json").write_text(json.dumps({
+            "lanes": [{"id": "claude", "enabled": True}, {"id": "gemini", "enabled": True}],
+            "generated_at": "2026-08-18T00:00:00Z",
+        }), encoding="utf-8")
+        return root
+
+    def _lanes(self, root: Path) -> dict:
+        result = {"lanes": [], "issues": []}
+        with mock.patch.object(health, "ROOT_DIR", root), \
+             mock.patch.object(health, "CONFIG_FILE", root / ".orchestrator" / "config.json"), \
+             mock.patch.object(health, "STATE_FILE", root / ".orchestrator" / "state.json"), \
+             mock.patch.object(health, "CONTROL_PLANE_SUMMARY",
+                               root / ".orchestrator" / "projections" / "summary.json"):
+            health.collect_lane_summary(result)
+        return result
+
+    def test_a_lane_the_dispatcher_refuses_is_not_shown_as_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = self._root(tmpdir, pauses={
+                "lane:claude": {"kind": "auth", "scope": "lane", "lane_id": "claude"}})
+
+            result = self._lanes(root)
+
+            lanes = {entry["lane"]: entry for entry in result["lanes"]}
+            self.assertEqual(lanes["claude"]["status"], "paused")
+            self.assertTrue(lanes["claude"]["dispatch_paused"])
+            self.assertEqual(lanes["gemini"]["status"], "enabled")
+
+    def test_an_unpaused_fleet_still_reads_as_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self._lanes(self._root(tmpdir, pauses={}))
+
+            self.assertEqual({entry["status"] for entry in result["lanes"]}, {"enabled"})
+            self.assertEqual(result["issues"], [])
+
+    def test_a_question_it_cannot_ask_reads_as_unknown_not_healthy(self) -> None:
+        """Saying nothing is the failure this collector exists to prevent."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = self._root(tmpdir, pauses={}, report=None)
+
+            result = self._lanes(root)
+
+            self.assertEqual({entry["status"] for entry in result["lanes"]}, {"unknown"})
+            self.assertTrue([i for i in result["issues"] if "cannot ask the dispatcher" in i])
+
+    def test_reading_the_lane_table_never_rewrites_the_capability_cache(self) -> None:
+        """The predicate refreshes the provider report by running the provider
+        CLIs and writing the cache back. A read-only probe must not."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = self._root(tmpdir, pauses={})
+            cache = root / ".orchestrator" / "provider_capabilities.json"
+            before = cache.stat().st_mtime_ns
+
+            self._lanes(root)
+
+            self.assertEqual(cache.stat().st_mtime_ns, before)
+
+
+class WatchdogSetComesFromTheInstallerTests(unittest.TestCase):
+    """A hand-written unit list stops looking for a timer that gets renamed.
+
+    systemd cannot flag it either: `show` on a unit that does not exist returns
+    inactive with no next elapse, byte-for-byte how a disarmed timer reports
+    itself. That is what made a manual check on 2026-08-18 read two healthy
+    watchdogs as dead and two invented ones as real.
+    """
+
+    def test_the_units_probed_are_the_units_this_repo_ships(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            units = Path(tmpdir)
+            (units / "drts-renamed.timer").write_text("[Timer]\n", encoding="utf-8")
+            (units / "drts-health.service").write_text("[Service]\n", encoding="utf-8")
+            with mock.patch.object(health, "SYSTEMD_UNIT_DIR", units):
+                self.assertEqual(health.expected_watchdog_timers(), ["drts-renamed.timer"])
+
+    def test_a_timer_this_repo_ships_but_the_host_lacks_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            units = Path(tmpdir)
+            (units / "drts-missing.timer").write_text("[Timer]\n", encoding="utf-8")
+            result = {"watchdogs": [], "issues": []}
+            props = "\n".join(["LoadState=not-found", "ActiveState=inactive",
+                               "UnitFileState=", "NextElapseUSecMonotonic=infinity"])
+            with mock.patch.object(health, "SYSTEMD_UNIT_DIR", units), \
+                 mock.patch.object(health.subprocess, "check_output", return_value=props + "\n"):
+                health.collect_watchdog_timers(result)
+
+            entry = result["watchdogs"][0]
+            self.assertFalse(entry["installed"])
+            self.assertFalse(entry["armed"])
+            self.assertTrue([i for i in result["issues"] if "not installed" in i])
