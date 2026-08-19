@@ -88,9 +88,30 @@ class EmptyReportIsNeverWrittenTests(unittest.TestCase):
 
             self.assertEqual(json.loads(target.read_text()), fresh)
 
-    def test_a_config_that_declares_no_providers_can_still_write_an_empty_report(self) -> None:
-        """The guard compares against the config; it does not forbid an empty
-        fleet, only an answer that contradicts one that is configured."""
+    def test_an_empty_report_is_refused_even_when_the_config_also_looks_empty(self) -> None:
+        """The case that walked past the first version of this guard.
+
+        That version compared the report against the providers the config
+        declares. The very next occurrence, minutes after deploying it, wrote an
+        empty report anyway: whatever produced it also presented a config with
+        no providers, so the comparison agreed with itself and let the write
+        through. The invariant has to be about the two documents.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "provider_capabilities.json"
+            good = {"generated_at": "2026-08-19T00:00:00Z",
+                    "providers": {"claude": {"auth_ready": True}}}
+            target.write_text(json.dumps(good), encoding="utf-8")
+
+            write_provider_capabilities({"providers": {}, "agents": {},
+                                         "paths": {"provider_capabilities": str(target)}},
+                                        report={"generated_at": "x", "providers": {}})
+
+            self.assertEqual(json.loads(target.read_text()), good)
+
+    def test_a_first_report_can_still_be_empty(self) -> None:
+        """Nothing to lose, nothing to protect: a fleet with no providers
+        configured must still be able to write its first report."""
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "provider_capabilities.json"
             report = {"generated_at": "x", "providers": {}}
