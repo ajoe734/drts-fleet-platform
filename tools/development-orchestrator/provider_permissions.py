@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import shutil
 import base64
 from pathlib import Path
@@ -636,6 +637,25 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
 def write_provider_capabilities(config: dict[str, Any], report: dict[str, Any] | None = None) -> Path:
     report = report or provider_capabilities(config)
     target = config_path(config, "provider_capabilities")
+    configured = len(config.get("providers") or {})
+    described = len((report.get("providers") or {}))
+    if configured and not described:
+        # A probe that finds nothing reports lanes as not installed; it does not
+        # report no lanes. Zero entries against a config that declares some is
+        # incoherent, and persisting it is the worst available outcome: every
+        # identity-scoped pause resolves through this file, so an empty one made
+        # a 27-hour auth pause stop applying and the dispatcher read a paused
+        # fleet as an open one. Keeping the previous report stale beats that.
+        #
+        # The refusal goes to stderr because the supervisor's journal is where
+        # this would have been diagnosable, and when it happened on 2026-08-19
+        # there were 1764 log lines in the window and not one mentioned
+        # providers.
+        sys.stderr.write(
+            f"provider capabilities: refusing to overwrite {target} -- the report "
+            f"describes 0 providers but the config declares {configured}. "
+            "Keeping the previous report.\n")
+        return target
     write_json(target, report)
     return target
 
