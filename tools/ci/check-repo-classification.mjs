@@ -66,13 +66,25 @@ function classify(file, rules) {
 }
 
 function validateCoverage(manifest, files) {
+  const knownClassifications = new Set(
+    Object.keys(manifest.classifications ?? {}),
+  );
   const counts = new Map();
   const classificationsByFile = new Map();
 
   for (const file of files) {
     const rule = classify(file, manifest.compiledRules);
     if (!rule) {
-      fail(`unclassified tracked file: ${file}`);
+      // Naming only the file sent three separate changes red in one day --
+      // .prettierignore, then two new workflows -- because nothing connected
+      // "I added a file" to "a regex in repo-classification.json has to learn
+      // about it". Say where to go and what the choice means.
+      fail(
+        `unclassified tracked file: ${file}\n` +
+          `    Add a rule for it in repo-classification.json (rules are first-match,\n` +
+          `    so put a specific rule above a general one). Pick the classification by\n` +
+          `    what breaks if CI skips it: ${[...knownClassifications].join(", ")}.`,
+      );
       continue;
     }
     classificationsByFile.set(file, rule.classification);
