@@ -183,7 +183,11 @@ class HealthScriptTests(unittest.TestCase):
         self.assertEqual(result["failures"]["dispatch_pauses"], 1)
         self.assertEqual(result["failures"]["blockers"], 1)
         self.assertEqual(len(result["failures"]["provider_pauses"]), 2)
-        self.assertIn("WARN: provider claude auth paused", result["issues"])
+        # An auth pause never expires on its own, so naming the lane is only
+        # half an alarm: without the remedy the reader still has to guess, and
+        # on 2026-08-17 nobody guessed for a day.
+        warning = next(i for i in result["issues"] if "provider claude auth paused" in i)
+        self.assertIn("provider-pause.py clear", warning)
 
     def test_collect_heartbeat_prefers_supervisor_state(self) -> None:
         result = health.empty_health_result(self.now)

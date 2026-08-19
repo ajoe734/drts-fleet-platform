@@ -313,7 +313,14 @@ def collect_state_failures(result: dict, state: dict, tasks: dict[str, dict]) ->
         kind = pause.get("kind")
         result["failures"]["provider_pauses"].append({"lane": lane, "kind": kind})
         if kind == "auth":
-            result["issues"].append(f"WARN: provider {lane} auth paused")
+            # An auth pause never expires on its own -- by design, because the
+            # capability probe reads stored credentials and can say "logged in"
+            # while the real call returns 401. That leaves a human as the only
+            # way out, so the warning has to say which one, or the fleet waits
+            # for someone to guess. It waited a day on 2026-08-17.
+            result["issues"].append(
+                f"WARN: provider {lane} auth paused; re-authenticate, then clear it with "
+                "tools/development-orchestrator/bin/provider-pause.py clear <lane>")
     # A chair review that keeps failing is not the same as an idle one, but
     # until the runtime started counting the streak the two were
     # indistinguishable here: the supervisor heartbeat stayed green, the queue
