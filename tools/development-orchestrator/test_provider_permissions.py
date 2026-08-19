@@ -10,6 +10,7 @@ from unittest import mock
 from unittest.mock import patch
 
 import permission_broker
+import provider_permissions
 from provider_permissions import (
     ROOT,
     SOURCE_ROOT,
@@ -659,3 +660,43 @@ class CommandSubstitutionBoundaryTest(unittest.TestCase):
         # Substitution still never runs unreviewed; only the reviewer's reach
         # changes.
         self.assertEqual(permission_broker.classify_command("x=$(pwd); echo $x"), "defer")
+
+
+class HookPathIsNotASnapshotTests(unittest.TestCase):
+    """The hook must name the repository, not wherever the generator ran.
+
+    `_verified_claude_hooks` built the broker path from SOURCE_ROOT, which is
+    the tree this code lives in. A sync run from a release copy therefore baked
+    that release's path into the hook permanently -- the live settings still
+    named .artifacts/releases/current/... from whenever that last happened.
+
+    That is how `current` acquired a consumer at all. Nothing referenced it on
+    purpose; a snapshot did, which left two release pointers with nothing to
+    reconcile them and no reason for anyone to keep them together.
+    """
+
+    def _command(self) -> str:
+        hooks = provider_permissions._verified_claude_hooks()
+        return hooks["PreToolUse"][0]["hooks"][0]["command"]
+
+    def test_the_hook_does_not_depend_on_a_release_pointer(self) -> None:
+        command = self._command()
+
+        self.assertNotIn(".artifacts/releases/", command)
+
+    def test_the_hook_names_the_canonical_checkout(self) -> None:
+        command = self._command()
+
+        self.assertIn(
+            str(provider_permissions.ROOT / "tools" / "development-orchestrator"),
+            command,
+        )
+
+    def test_the_path_is_stable_when_the_code_lives_elsewhere(self) -> None:
+        """A release copy generating settings must not pin itself into them."""
+        elsewhere = Path("/somewhere/.artifacts/releases/orchestrator-abc123")
+
+        with mock.patch.object(provider_permissions, "SOURCE_ROOT", elsewhere):
+            command = self._command()
+
+        self.assertNotIn("orchestrator-abc123", command)
