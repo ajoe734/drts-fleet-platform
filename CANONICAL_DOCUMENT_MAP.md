@@ -41,6 +41,7 @@ the canonical PRD / SA files in the same wave.
 - `docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md`
 - `docs/01-decisions/SD-DP-20260817-009-domain-event-contract-and-write-authority.md`
 - `docs/01-decisions/SD-DP-20260817-010-state-models-conformance-resolution.md`
+- `docs/01-decisions/SD-DP-20260819-011-canonical-single-source-rule.md`
 
 A packet enters this layer only once a human has accepted it, which `SD-DP-20260422-003` makes the
 precondition for superseding L1 wording. A packet still marked `proposed` or
@@ -106,6 +107,8 @@ These files are intentionally editable and reviewable. They are inputs to consen
 
 Important:
 
+- a fact belongs in one canonical document; where two would carry it, one links to the
+  other, and it is kept where it changes (`SD-DP-20260819-011`)
 - provisional design docs must not override product truth
 - accepted decision packets may temporarily supersede older L1 wording, but
   only within the scope they name explicitly

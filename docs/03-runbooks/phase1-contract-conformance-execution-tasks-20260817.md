@@ -1,6 +1,10 @@
 # Phase 1 Contract Conformance Execution Tasks (2026-08-17)
 
-**Status:** ready for supervisor registration and dispatch
+**Status:** **CLOSED 2026-08-19.** All eleven tasks merged. Kept for the lineage that eleven
+`ai-status` task records and four documents cite; not deleted, because removing it would create
+fifteen dead references, which is the defect this wave existed to find. Dispatch rule 5 (no L1
+edits) is the only rule here with a life beyond this wave, and it now lives in
+`CANONICAL_DOCUMENT_MAP.md` section 6.
 **Baseline:** `origin/dev@f068135e0`
 **GAP:** `docs/02-architecture/phase1-prd-service-contracts-conformance-audit-20260817.md`
 **Registration:** `tools/task-dispatch/dispatch-phase1-contract-conformance-20260817.py`
