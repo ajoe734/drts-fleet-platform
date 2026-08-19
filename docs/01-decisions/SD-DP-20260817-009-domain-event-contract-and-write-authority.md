@@ -6,14 +6,17 @@
 - `title`: `Phase 1 keeps synchronous in-process calls instead of an event bus; contracts section 5.2 is annotated as an unimplemented target contract, and section 7.1's write-authority matrix is rewritten to the actual code module boundaries`
 - `owner`: `Claude / CONF-EVENT-001`
 - `date`: `2026-08-17`
-- `status`: `pending-human-acceptance`
-- `status_note`:
-  - authored and reviewed by agent lanes only. `SD-DP-20260422-003` makes a human/system-design
-    answer the precondition for a packet to supersede L1 wording, so this is not `accepted` yet
-  - the contracts amendments are already applied to `phase1_service_contracts_v1.md` and are left
-    there because they are accurate; `docs/01-decisions/l1-amendment-acceptance-request-20260817.md`
-    asks for the missing answer and states what happens on rejection
-  - see "Correction to the consensus citation" below
+- `status`: `accepted`
+- `approval`:
+  - accepted by the repository owner on 2026-08-19, in answer to
+    `docs/01-decisions/l1-amendment-acceptance-request-20260817.md`. This satisfies the
+    human/system-design precondition `SD-DP-20260422-003` sets for a packet to supersede L1 wording
+- `accepted_scope_note`:
+  - Phase 1 commits to no event bus. Contracts section 5.2 is a target contract for a future
+    service split, not a description of Phase 1 runtime behaviour
+  - the reversal trigger stands: physically separating Order, Dispatch, or Driver Task into
+    independently deployed services is what reopens the transactional-outbox option, sized as its
+    own wave. A partial implementation of the topic list remains rejected
 - `affected_docs`:
   - `phase1_service_contracts_v1.md` sections `5.2`, `6`, `7.1`
 - `superseding_decision`:

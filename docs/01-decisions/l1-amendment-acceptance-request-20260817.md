@@ -1,7 +1,7 @@
 # L1 Amendment Acceptance Request (2026-08-17)
 
 **For:** whoever owns Phase 1 product truth
-**Asks for:** one yes/no on four amendments already applied to L1 files
+**Status:** **RESOLVED 2026-08-19.** All four answered by the repository owner; the answers are recorded below and applied.
 **Governing rule:** `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`
 
 ## Why this exists
@@ -31,7 +31,17 @@ What is missing is not correctness. It is your answer. This file asks for it onc
 Recover any original wording with `git show <commit>^:<file>`: `48a96183d` (1), `0872d4a0a` (2),
 `9438fd52a` (3), `7ff344446` (4).
 
-## What each one needs from you
+## Answers (2026-08-19)
+
+| #   | Answer                                                                                                       | What was done                                                                                                                                                                                                                                                                                                          |
+| :-- | :----------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | interim defaults do **not** belong in the contract                                                           | removed from contracts §10; the working assumptions already live in `PHASE1_OPEN_QUESTIONS.md` Q-001..Q-005, which is now the only place they appear. Owner and decision-route columns stay in the contract                                                                                                            |
+| 2   | **accept** — Phase 1 builds no event bus                                                                     | `SD-DP-20260817-009` → `accepted`; §5.2 stands as a target contract; reversal trigger unchanged                                                                                                                                                                                                                        |
+| 3   | **accept** — the spec adopts the implemented error-code names                                                | `SD-DP` not required; the §4.1 register stands as amended                                                                                                                                                                                                                                                              |
+| 4a  | **accept** — eight forwarded states are canonical                                                            | `SD-DP-20260817-010` → `accepted`                                                                                                                                                                                                                                                                                      |
+| 4b  | acceptable dispatch types are **set by the platform at driver registration**; drivers have no self-selection | `SD-DP-20260817-010` → `accepted`, and PRD 11.4 now states the rule explicitly rather than only describing the four-dimension model. Verified already implemented: `CreateDriverMasterCommand.supportedServiceBuckets`, default `["standard_taxi"]`. Follow-up logged: no admin endpoint adjusts it after registration |
+
+## What each one needed (original request)
 
 **1 — contracts §10 interim defaults.** The owner and decision-route columns are administrative. The
 interim defaults are not: they take a position on all five open questions (no flight-tracking runtime

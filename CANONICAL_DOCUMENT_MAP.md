@@ -39,12 +39,12 @@ the canonical PRD / SA files in the same wave.
 - `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`
 - `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`
 - `docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md`
-
-Pending human acceptance -- their L1 amendments are applied but not yet ratified, and they enter this
-layer only once accepted. See `docs/01-decisions/l1-amendment-acceptance-request-20260817.md`:
-
 - `docs/01-decisions/SD-DP-20260817-009-domain-event-contract-and-write-authority.md`
 - `docs/01-decisions/SD-DP-20260817-010-state-models-conformance-resolution.md`
+
+A packet enters this layer only once a human has accepted it, which `SD-DP-20260422-003` makes the
+precondition for superseding L1 wording. A packet still marked `proposed` or
+`pending-human-acceptance` supersedes nothing, however well argued.
 
 Optional future addition beyond the accepted packets above:
 
