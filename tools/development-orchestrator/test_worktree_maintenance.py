@@ -283,6 +283,16 @@ class DiskGuardTests(unittest.TestCase):
         )
 
 
+def _claim_filename() -> str:
+    """The claim file's name, tolerating a build that has no such concept.
+
+    Written this way so the guard fails on the *behaviour* against a parent
+    commit -- the tree gets reclaimed -- rather than erroring on a missing
+    attribute, which would prove only that the constant is new.
+    """
+    return getattr(worktree_maintenance, "SESSION_CLAIM_FILENAME", ".orchestrator-session")
+
+
 class ReclaimCoversEveryWorktreeTests(unittest.TestCase):
     """Reclamation asks which worktrees are load-bearing, not where they live.
 
@@ -330,6 +340,53 @@ class ReclaimCoversEveryWorktreeTests(unittest.TestCase):
 
             self.assertEqual(result["removed"], 1, "a worktree outside auto/ was left forever")
             self.assertFalse(stray.exists())
+
+    def test_a_worktree_a_session_claimed_is_never_reclaimed(self) -> None:
+        """A session standing in a tree is load-bearing too.
+
+        Only dispatched workers register a workspace, so an interactive
+        session's tree was reclaimed out from under it -- which left the
+        canonical checkout as the only place such a session could safely work,
+        and that is how four sessions came to share one working tree and move
+        each other's HEAD.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            session = root / ".artifacts" / "worktrees" / "session-chatbox"
+            _git(root, "worktree", "add", "--detach", str(session), "dev")
+            (session / _claim_filename()).write_text(
+                "chatbox\n", encoding="utf-8"
+            )
+
+            result = worktree_maintenance.release_inactive_worker_worktrees(
+                self._repo_config(root), {"workers": {}},
+                {"archive_root": str(Path(tmpdir) / "archive")},
+            )
+
+            self.assertTrue(session.exists(), "reclamation removed a session's working tree")
+            self.assertEqual(result["removed"], 0)
+
+    def test_releasing_the_claim_returns_the_worktree_to_the_sweep(self) -> None:
+        """The claim is a file, so giving the tree back needs no bookkeeping."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            session = root / ".artifacts" / "worktrees" / "session-done"
+            _git(root, "worktree", "add", "--detach", str(session), "dev")
+            claim = session / _claim_filename()
+            claim.write_text("done\n", encoding="utf-8")
+            claim.unlink()
+
+            result = worktree_maintenance.release_inactive_worker_worktrees(
+                self._repo_config(root), {"workers": {}},
+                {"archive_root": str(Path(tmpdir) / "archive")},
+            )
+
+            self.assertEqual(result["removed"], 1)
+            self.assertFalse(session.exists())
 
     def test_a_release_snapshot_is_never_reclaimed(self) -> None:
         """The supervisor executes from one of these."""
