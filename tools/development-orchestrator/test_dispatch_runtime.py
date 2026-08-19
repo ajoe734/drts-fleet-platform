@@ -841,6 +841,74 @@ class ProcessQueueDispatchGuardTests(EvidenceOutputIsolation, unittest.TestCase)
             ],
         )
 
+    def _taskless(self, **overrides) -> dict:
+        pause = {
+            "provider": "gemini",
+            "task_id": None,
+            "worker_run_id": "gemini-20260813T155207Z-aaafb200",
+            "failure_kind": "quota/terminal",
+            "summary": "quota/terminal: Individual quota reached.",
+            "paused_at": "2026-08-13T15:52:16Z",
+            "blocked_until": None,
+        }
+        pause.update(overrides)
+        return pause
+
+    HEALTHY = {"providers": {"gemini": {"auth_ready": True}},
+               "agent_adapters": {"gemini": {"supported": True}}}
+
+    def test_a_taskless_quota_pause_on_a_recovered_lane_is_pruned(self) -> None:
+        """The entry found on the live board six days after it was written.
+
+        Nothing could remove it. It names no task, so every task-based rule
+        skipped it, and the taskless rule only recognised failure_kind `auth`.
+        It blocks no dispatch -- the consumer drops taskless records -- but it
+        counts as a failure on every surface reading the list, forever, and each
+        new one adds another.
+        """
+        state = {"provider_pauses": {}, "dispatch_pauses": [self._taskless()], "workers": {}}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, {"tasks": []}, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["dispatch_pauses"], [])
+
+    def test_a_taskless_pause_inside_its_retry_window_is_kept(self) -> None:
+        """blocked_until is the lane's own answer to when it is worth trying
+        again; recovering it early would dispatch straight back into the wall."""
+        state = {"provider_pauses": {},
+                 "dispatch_pauses": [self._taskless(blocked_until="2099-01-01T00:00:00Z")],
+                 "workers": {}}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, {"tasks": []}, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertFalse(changed)
+        self.assertEqual(len(state["dispatch_pauses"]), 1)
+
+    def test_a_lane_keyed_provider_pause_still_holds_the_dispatch_pause(self) -> None:
+        """The registry names the lane in the key, and for lane-scoped entries
+        that is the only place it appears. Reading only the lane_id field made
+        those invisible, so widening the rule above would have cleared a lane
+        that is still recorded as paused."""
+        state = {"provider_pauses": {"gemini": {"kind": "quota", "resume_at": 9999999999}},
+                 "dispatch_pauses": [self._taskless()], "workers": {}}
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state, {"tasks": []}, config=self.config, provider_report=self.HEALTHY)
+
+        self.assertFalse(changed)
+        self.assertEqual(len(state["dispatch_pauses"]), 1)
+
+    def test_lane_has_recorded_pause_reads_the_key_as_well_as_the_field(self) -> None:
+        self.assertTrue(supervisor.lane_has_recorded_pause(
+            {"provider_pauses": {"gemini": {"kind": "quota"}}}, "gemini"))
+        self.assertTrue(supervisor.lane_has_recorded_pause(
+            {"provider_pauses": {"identity:gemini:abc": {"lane_id": "gemini"}}}, "gemini"))
+        self.assertFalse(supervisor.lane_has_recorded_pause(
+            {"provider_pauses": {"codex": {"kind": "quota"}}}, "gemini"))
+
     def test_starts_current_owned_dispatch_event(self) -> None:
         current_task = {
             "id": "BUS-VAL-004",
