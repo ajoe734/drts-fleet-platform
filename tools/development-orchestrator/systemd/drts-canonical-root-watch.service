@@ -9,8 +9,12 @@ WorkingDirectory=@REPO_ROOT@
 # exit on drift, but does NOT auto-switch the branch. Switch to
 # --enforce in a follow-up after operator is comfortable that the
 # `ORCH_CANONICAL_BRANCH` allow list is correctly maintained.
-# The code runs from the pinned release; WorkingDirectory stays the canonical
-# root so machine truth is read where it lives. See systemd/install-common.sh.
+# The code runs from the pinned release. WorkingDirectory is kept on the
+# canonical root for anything that resolves paths relatively, but it is not
+# what points the watchdog at the right tree: this comment used to claim it
+# was, and the watchdog spent that whole time inspecting the release worktree
+# and reporting `off-allowlist branch 'HEAD'`. The script resolves the
+# canonical checkout itself, via common.ROOT. See ORCH-WATCHDOG-ROOT-001.
 ExecStart=@RELEASE_ROOT@/tools/development-orchestrator/bin/canonical-root-watchdog.py
 
 # When the wave-dispatch / sprint branches are intentionally checked out
