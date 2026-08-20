@@ -32,7 +32,7 @@ The primary threat model addressed by GAP-CONF-03 is an authorized insider or co
    - _Role Justification:_ In development, CI, and current Cloud SQL staging environments, `DATABASE_URL` connects as `postgres` or the table-owning database principal. Because table owners bypass standard SQL `GRANT`/`REVOKE` DAC checks, `REVOKE` alone is inert against table-owner connections. The database triggers are the indispensable primary controls. `REVOKE` is retained as defence-in-depth for auxiliary non-owner roles.
 
 4. **Privileged Archival Path & Privilege Gating:**
-   - Lawful regulatory data retention policies (e.g., 7-year / 2555-day retention) require pruning aged records.
+   - Lawful regulatory data retention policies (e.g., the two-year / 2555-day retention) require pruning aged records.
    - Crucially, lawful archival must **never require removing, disabling, or modifying the trigger protection** (i.e. no `DROP TRIGGER` or `ALTER TABLE ... DISABLE TRIGGER`).
    - The trigger checks both:
      1. Transaction-scoped configuration: `current_setting('audit.allow_retention_archival', true) = 'on'`
@@ -41,9 +41,9 @@ The primary threat model addressed by GAP-CONF-03 is an authorized insider or co
 
 5. **Accepted Residual Risk in Phase 1 & Future Hardening:**
    - In Phase 1 environments, application services, database migrations, and operational maintenance scripts connect using the shared database owner role (`postgres` via `DATABASE_URL`).
-   - *Residual Risk:* Any process possessing the direct `postgres` connection string can technically execute `SET LOCAL audit.allow_retention_archival = 'on'` prior to a `DELETE`.
-   - *Mitigation in Phase 1:* The engine triggers unconditionally eliminate all unintentional, ORM-generated, query-builder, and ad-hoc mutations (`UPDATE` and `TRUNCATE` have no bypass whatsoever; `DELETE` requires explicit multi-step intent).
-   - *Future Hardening:* When production least-privilege role separation is provisioned (e.g. creating distinct application roles such as `drts_api_app` without membership in `audit_retention_operator` and granting only `SELECT, INSERT` on `admin.audit_logs`), the database engine will strictly prevent application connections from executing the retention bypass even if they attempt to set the session flag.
+   - _Residual Risk:_ Any process possessing the direct `postgres` connection string can technically execute `SET LOCAL audit.allow_retention_archival = 'on'` prior to a `DELETE`.
+   - _Mitigation in Phase 1:_ The engine triggers unconditionally eliminate all unintentional, ORM-generated, query-builder, and ad-hoc mutations (`UPDATE` and `TRUNCATE` have no bypass whatsoever; `DELETE` requires explicit multi-step intent).
+   - _Future Hardening:_ When production least-privilege role separation is provisioned (e.g. creating distinct application roles such as `drts_api_app` without membership in `audit_retention_operator` and granting only `SELECT, INSERT` on `admin.audit_logs`), the database engine will strictly prevent application connections from executing the retention bypass even if they attempt to set the session flag.
 
 ---
 
@@ -56,7 +56,7 @@ The privileged archival script `./operations/database/audit-log-retention-archiv
 Inspect candidate records without modifying any data:
 
 ```bash
-./operations/database/audit-log-retention-archival.sh --dry-run --retention-days 2555
+./operations/database/audit-log-retention-archival.sh --dry-run --retention-days 730
 ```
 
 ### Execution (Apply Mode)
@@ -64,7 +64,7 @@ Inspect candidate records without modifying any data:
 Execute archival export to JSON Lines and purge aged records in an atomic transaction:
 
 ```bash
-./operations/database/audit-log-retention-archival.sh --apply --retention-days 2555 --export-dir /var/log/drts/audit-archives
+./operations/database/audit-log-retention-archival.sh --apply --retention-days 730 --export-dir /var/log/drts/audit-archives
 ```
 
 ### Execution Mechanism
@@ -78,7 +78,7 @@ SET LOCAL audit.allow_retention_archival = 'on';
 
 -- Purge records older than the retention threshold:
 DELETE FROM admin.audit_logs
-WHERE created_at < (now() - interval '2555 days');
+WHERE created_at < (now() - interval '730 days');
 
 COMMIT;
 ```

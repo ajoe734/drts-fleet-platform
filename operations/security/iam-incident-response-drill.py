@@ -361,7 +361,9 @@ def run_all_drills():
         "generatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "drillsExecuted": ["account_takeover", "credential_compromise"],
         "legalHoldActive": True,
-        "retentionDays": 2555,
+        # 730 per COMP-RETENTION-001; legalHoldActive above is what suspends
+        # expiry for held material, not this number.
+        "retentionDays": 730,
         "files": {
             "account_takeover_drill_log.json": sha256_file(ato_log_path),
             "credential_compromise_drill_log.json": sha256_file(cred_log_path)

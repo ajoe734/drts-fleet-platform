@@ -64,6 +64,15 @@ Two constraints pull in opposite directions and both are load-bearing:
   exposure, not safety. That is why two families were shortened rather than
   extended.
 
+### Why no L1 revision was needed
+
+`docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`
+is an L1 file and states the old `audit_log` baseline of 180 hot and 2555 archive.
+It also delegates: 「若法務調整，以 evidence retention policy 的新版為準」. This
+document is that policy, so the delegation resolves the conflict without an L1
+edit or a decision packet. A reader who reaches the L1 baseline first is sent
+here by the same sentence.
+
 ### Audio recordings: 180 days, and not held here
 
 The audio itself is retained **180 days** (decided 2026-08-20). That is a term of
