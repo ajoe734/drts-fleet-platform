@@ -331,3 +331,67 @@ class WatchdogSetComesFromTheInstallerTests(unittest.TestCase):
             self.assertFalse(entry["installed"])
             self.assertFalse(entry["armed"])
             self.assertTrue([i for i in result["issues"] if "not installed" in i])
+
+
+class EnabledServicesAreCheckedTests(unittest.TestCase):
+    """`enabled` and `running` are different questions, and only one was asked.
+
+    On the 2026-08-16 boot systemd deleted drts-dashboard.service from the
+    transaction to break an ordering cycle. It reported enabled for four days
+    without once being started -- never crashed, never restarted, simply never
+    run. The watchdog collector asks whether the timers still fire; nothing
+    asked the same of the services.
+    """
+
+    def _systemctl(self, units: str, props: dict):
+        def fake(cmd, *a, **kw):
+            if "list-unit-files" in cmd:
+                return units
+            unit = cmd[3]
+            return "\n".join(f"{k}={v}" for k, v in props[unit].items()) + "\n"
+        return fake
+
+    def test_an_enabled_service_that_never_started_is_reported(self) -> None:
+        result = {"services": [], "issues": []}
+        with mock.patch.object(
+                health.subprocess, "check_output",
+                side_effect=self._systemctl(
+                    "drts-dashboard.service enabled enabled\n",
+                    {"drts-dashboard.service": {"ActiveState": "inactive", "Type": "simple"}})):
+            health.collect_enabled_services(result)
+
+        self.assertEqual(result["services"], [{"unit": "drts-dashboard.service",
+                                               "active_state": "inactive"}])
+        self.assertTrue([i for i in result["issues"] if "enabled but inactive" in i])
+
+    def test_a_running_service_raises_nothing(self) -> None:
+        result = {"services": [], "issues": []}
+        with mock.patch.object(
+                health.subprocess, "check_output",
+                side_effect=self._systemctl(
+                    "drts-supervisor.service enabled enabled\n",
+                    {"drts-supervisor.service": {"ActiveState": "active", "Type": "simple"}})):
+            health.collect_enabled_services(result)
+
+        self.assertEqual(result["issues"], [])
+
+    def test_a_timer_driven_oneshot_is_left_to_the_watchdog_check(self) -> None:
+        """A oneshot is inactive between fires by design; judging it here would
+        cry wolf every five minutes."""
+        result = {"services": [], "issues": []}
+        with mock.patch.object(
+                health.subprocess, "check_output",
+                side_effect=self._systemctl(
+                    "drts-health.service enabled enabled\n",
+                    {"drts-health.service": {"ActiveState": "inactive", "Type": "oneshot"}})):
+            health.collect_enabled_services(result)
+
+        self.assertEqual(result["services"], [])
+        self.assertEqual(result["issues"], [])
+
+    def test_it_says_so_when_it_cannot_ask(self) -> None:
+        result = {"services": [], "issues": []}
+        with mock.patch.object(health.subprocess, "check_output", side_effect=OSError("no systemctl")):
+            health.collect_enabled_services(result)
+
+        self.assertTrue([i for i in result["issues"] if "cannot list enabled services" in i])

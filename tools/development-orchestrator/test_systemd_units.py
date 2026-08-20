@@ -55,6 +55,33 @@ class UnitsRunPinnedCodeTests(unittest.TestCase):
                     self.assertNotIn("releases/active", line,
                                      f"{unit.name} reads machine truth from a release worktree")
 
+    def test_no_unit_is_ordered_after_a_target_that_pulls_it_in(self) -> None:
+        """WantedBy=X and After=X close a loop, and systemd breaks it by force.
+
+        drts-supervisor.service declared both for default.target. The target
+        pulls the unit in and is then told to wait for it, so systemd deletes
+        one job from the boot transaction to resolve it -- and which one is not
+        something the units get to choose. On the 2026-08-16 boot it deleted
+        drts-dashboard.service, reached through After=drts-supervisor.service.
+        The dashboard stayed down for four days reporting `enabled` the whole
+        time, and the same coin toss could have deleted the supervisor.
+
+        `systemd-analyze verify` does not report it: a cycle only exists once a
+        transaction is built, so nothing catches this before a boot does.
+        """
+        def directive(text: str, name: str) -> set[str]:
+            values: set[str] = set()
+            for line in text.splitlines():
+                if line.strip().startswith(f"{name}="):
+                    values.update(line.split("=", 1)[1].split())
+            return values
+
+        for unit in sorted(SYSTEMD.glob("*.service")):
+            text = unit.read_text(encoding="utf-8")
+            overlap = directive(text, "After") & directive(text, "WantedBy")
+            self.assertEqual(overlap, set(),
+                             f"{unit.name} is ordered after the target that wants it")
+
     def test_canonical_root_is_resolved_from_a_worktree(self) -> None:
         """Installers are run from release worktrees. Deriving the root from
         the script's own location would then install units pointing inside the
