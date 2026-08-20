@@ -26,10 +26,10 @@ Out of scope:
 
 | Evidence family            | Authority            | Hot retention | Archive cutover | Archive retention | Access posture                                                                                                                             |
 | -------------------------- | -------------------- | ------------- | --------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `call_recording`           | `callcenter`         | 30 days       | day 30          | 365 days          | `platform_admin` and `ops_user` only; every read is audited                                                                                |
+| `call_recording`           | `callcenter`         | 30 days       | day 30          | 700 days          | `platform_admin` and `ops_user` only; every read is audited                                                                                |
 | `report_artifact`          | `reporting-filing`   | 30 days       | day 30          | 365 days          | `platform_admin` / `ops_user`, plus tenant-scoped `tenant_admin`; signed download issuance is audited                                      |
-| `filing_package`           | `reporting-filing`   | 90 days       | day 90          | 2555 days         | `platform_admin` / `ops_user`; package download issuance is audited                                                                        |
-| `audit_log`                | `audit-notification` | 180 days      | day 180         | 2555 days         | `platform_admin` / `ops_user`, plus tenant-scoped `tenant_admin`; audit evidence reads are audited                                         |
+| `filing_package`           | `reporting-filing`   | 90 days       | day 90          | 640 days          | `platform_admin` / `ops_user`; package download issuance is audited                                                                        |
+| `audit_log`                | `audit-notification` | 180 days      | day 180         | 550 days          | `platform_admin` / `ops_user`, plus tenant-scoped `tenant_admin`; audit evidence reads are audited                                         |
 | `webhook_delivery`         | `tenant-partner`     | 30 days       | day 30          | 365 days          | `platform_admin` / `ops_user`, plus tenant-scoped `tenant_admin`; delivery-history reads are audited                                       |
 | `eligibility_verification` | `tenant-partner`     | 90 days       | day 90          | 730 days          | `platform_admin` / `ops_user`, tenant-scoped `tenant_admin`, and matching `partner_api_key`; reads are audited                             |
 | `proof_bundle`             | `owned-mobility`     | 90 days       | day 90          | 730 days          | `platform_admin` / `ops_user`, plus tenant-scoped `tenant_admin`; retrieval policy is defined here without reopening proof-capture runtime |
@@ -41,8 +41,49 @@ Interpretation rules:
 - `archive cutover` is the point where the evidence family should be moved out
   of hot storage during future archival automation.
 - `archive retention` is the minimum preservation window after cutover.
-- `2555 days` is the Phase 1 long-retention default for filing and audit
-  families that are likely to back external reviews or regulator requests.
+- Total preservation for a family is `hot retention` plus `archive retention`.
+
+### Statutory basis (established 2026-08-20)
+
+Retention was previously carried by a `2555 days` "long-retention default" with no
+cited source. The figures below are now sourced, and two of them went **down**:
+
+| Family           |    Total | Basis                                                                                                                                                                                                                                                     |
+| :--------------- | -------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `proof_bundle`   | 820 days | 汽車運輸業管理規則 §91(4): operational data — vehicle number, booking and pickup/dropoff times, route, mileage, fares, tolls — must be kept **at least two years**. 820 leaves 90 days of margin over the floor.                                          |
+| `filing_package` | 730 days | Same §91(4) floor. **No accounting-law floor applies**: filing packages are not 會計憑證 or 會計帳簿, and a separate accounting system owns those (decided 2026-08-20), so 商業會計法 §38's five- and ten-year periods are out of scope.                  |
+| `audit_log`      | 730 days | Same basis as `filing_package`.                                                                                                                                                                                                                           |
+| `call_recording` | 730 days | **This family is the index**, not the audio. Contracts §3.9 places the recording binary with the CTI provider or object store. Held to the order retention period so that PRD §14.2 item 2 — "a phone order whose source cannot be traced" — stays false. |
+
+Two constraints pull in opposite directions and both are load-bearing:
+
+- §91(4) is a **floor**. Below two years the operator is non-compliant.
+- 個資法 and its 施行細則 make retention a **ceiling**: personal data may be kept
+  only for the period law or contract requires. Filing packages and recordings
+  carry passenger and driver data, so an unsourced seven-year default was
+  exposure, not safety. That is why two families were shortened rather than
+  extended.
+
+### Why no L1 revision was needed
+
+`docs/02-architecture/stage1-5-identity-access-account-security-hardening-plan-20260801.md`
+is an L1 file and states the old `audit_log` baseline of 180 hot and 2555 archive.
+It also delegates: 「若法務調整，以 evidence retention policy 的新版為準」. This
+document is that policy, so the delegation resolves the conflict without an L1
+edit or a decision packet. A reader who reaches the L1 baseline first is sent
+here by the same sentence.
+
+### Audio recordings: 180 days, and not held here
+
+The audio itself is retained **180 days** (decided 2026-08-20). That is a term of
+the CTI provider contract, not a setting in this repository — DRTS holds the
+index and the provider holds the binary. §91(4) does not list recordings among
+the operational data it governs, so no statutory floor conflicts with 180 days.
+
+The index outliving the audio is deliberate. After day 180 a phone order still
+resolves to a `call_id` and a `recording_id`; the audio behind it is gone. Callers
+that need the distinction should read `recording_missing` (contracts §3.9), which
+already exists for the case where an index arrives without audio.
 
 ## 3. Access Enforcement
 

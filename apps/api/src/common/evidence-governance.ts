@@ -58,9 +58,10 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
     authorityModule: "callcenter",
     description:
       "Phone-order call sessions, recording identifiers, and provider recording references.",
+    // 730 days total, deliberately longer than the 180-day audio retention decided 2026-08-20. This family is the index -- call sessions, recording identifiers, provider references -- not the audio, which contracts s3.9 places with the CTI provider or object store. Orders are kept 2 years, so an index expiring at 180 days would leave PRD 14.2 item 2, 'a phone order whose source cannot be traced', true by design.
     hotRetentionDays: 30,
     archiveAfterDays: 30,
-    archiveRetentionDays: 365,
+    archiveRetentionDays: 700,
     archiveTier: "warm_archive",
     accessRules: [
       {
@@ -169,9 +170,10 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
     authorityModule: "reporting-filing",
     description:
       "Immutable filing packages, manifests, and packaged audit-request bundles.",
+    // 730 days total. 2026-08-20: no statutory floor applies -- filing packages are not accounting vouchers or ledgers, a separate accounting system owns those. Aligned to the 2-year operational-data floor in 汽車運輸業管理規則 s91(4). The previous 2555 was an unsourced default, and these artifacts carry passenger and driver personal data, which 個資法 says may not be kept beyond the period law or contract requires.
     hotRetentionDays: 90,
     archiveAfterDays: 90,
-    archiveRetentionDays: 2555,
+    archiveRetentionDays: 640,
     archiveTier: "cold_archive",
     accessRules: [
       {
@@ -217,9 +219,10 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
     authorityModule: "audit-notification",
     description:
       "Immutable audit-log records and tenant/platform audit evidence derived from them.",
+    // 730 days total, same basis as filing_package: no accounting-law floor, aligned to 汽車運輸業管理規則 s91(4).
     hotRetentionDays: 180,
     archiveAfterDays: 180,
-    archiveRetentionDays: 2555,
+    archiveRetentionDays: 550,
     archiveTier: "cold_archive",
     accessRules: [
       {
