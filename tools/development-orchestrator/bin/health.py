@@ -191,6 +191,7 @@ def empty_health_result(now_dt: datetime) -> dict:
         },
         "lanes": [],
         "watchdogs": [],
+        "services": [],
         "issues": [],
     }
 
@@ -365,6 +366,53 @@ def expected_watchdog_timers() -> list[str]:
     how a disarmed timer reports itself.
     """
     return sorted(path.name for path in SYSTEMD_UNIT_DIR.glob("*.timer"))
+
+
+def collect_enabled_services(result: dict) -> None:
+    """Services this host is set to run at boot, and whether they are running.
+
+    The watchdog check asks whether the timers still fire. Nothing asked the
+    same of the services, and on the 2026-08-16 boot systemd deleted
+    drts-dashboard.service from the transaction to break an ordering cycle. It
+    reported `enabled` for four days without once being started -- never
+    crashed, never restarted, simply never run. `is-enabled` says yes and
+    `is-active` says no, and only the second one was being read by anyone.
+
+    The set comes from systemd rather than from a list here, because a unit can
+    be installed on this host without being shipped by this repository -- both
+    dashboard units are -- and a probe that only knew about the repository's own
+    units would have been blind to exactly the one that died.
+    """
+    try:
+        listed = subprocess.check_output(
+            ["systemctl", "--user", "list-unit-files", "drts-*.service",
+             "--state=enabled", "--no-legend", "--plain"],
+            text=True, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        result["issues"].append(f"WARN: cannot list enabled services: {exc}")
+        return
+
+    for line in listed.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        unit = parts[0]
+        try:
+            out = subprocess.check_output(
+                ["systemctl", "--user", "show", unit, "-p", "ActiveState", "-p", "Type"],
+                text=True, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.CalledProcessError):
+            continue
+        props = dict(item.split("=", 1) for item in out.splitlines() if "=" in item)
+        # A oneshot service is driven by its timer and is inactive between
+        # fires; the watchdog collector is what judges those.
+        if props.get("Type") == "oneshot":
+            continue
+        active = props.get("ActiveState")
+        result["services"].append({"unit": unit, "active_state": active})
+        if active != "active":
+            result["issues"].append(
+                f"WARN: {unit} is enabled but {active or 'not active'}")
 
 
 def collect_watchdog_timers(result: dict) -> None:
@@ -599,6 +647,7 @@ def collect() -> dict:
     result = empty_health_result(now_dt)
     collect_supervisor_process(result)
     collect_watchdog_timers(result)
+    collect_enabled_services(result)
     collect_state_metrics(result, now_dt)
     collect_supersede_rate(result, now_dt)
     collect_lane_summary(result)
@@ -692,6 +741,14 @@ def render_human(s: dict) -> None:
                 keepalive_color = GREEN if keepalive_status == "OK" else RED
                 keepalive = f" keepalive={c(keepalive_color, keepalive_status.lower())}"
             print(f"  {ln.get('lane', '?'):10s} {sc:20s} ttl={ttl}{keepalive}")
+
+    services = s.get("services") or []
+    if services:
+        print(f"\n{c(BOLD, 'services')}:")
+        for service in services:
+            state = service.get("active_state") or "?"
+            print(f"  {service.get('unit', '?'):32s} "
+                  f"{c(GREEN if state == 'active' else RED, state)}")
 
     watchdogs = s.get("watchdogs") or []
     if watchdogs:

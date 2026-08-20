@@ -3,7 +3,17 @@ Description=DRTS Fleet Platform supervisor (orchestrator)
 Documentation=file:@STATUS_ROOT@/.artifacts/releases/active/tools/development-orchestrator/systemd/README.md
 # Tied to user session bus so journald log labelling and resource accounting
 # stay scoped to the developer account that owns the workspace.
-After=default.target network-online.target
+#
+# Not After=default.target. This unit is WantedBy=default.target, so ordering
+# it after that target closes a loop: the target pulls the unit in and then
+# waits for it. systemd resolves such a loop by deleting one job from the boot
+# transaction, and which one is not something the units get to choose. On the
+# 2026-08-16 boot it deleted drts-dashboard.service -- reached through
+# After=drts-supervisor.service -- and the dashboard stayed down for four days
+# looking enabled the whole time. The next coin toss could have deleted this
+# unit instead. systemd-analyze verify does not catch it; a cycle only exists
+# once a transaction is built.
+After=network-online.target
 Wants=network-online.target
 
 StartLimitIntervalSec=300
