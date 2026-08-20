@@ -1425,6 +1425,19 @@ Phase 1 不依賴 Phase 2 才能上線。
 
 ## 9.10.2 Filing Package
 
+> **Phase 1 不產生本節描述的產物（2026-08-20 人工決議，`SD-DP-20260820-012`）。**
+>
+> 立案申請已由其他方式完成，產生器要趕的期限已經過去。系統保留的是**封裝的中繼資料**：
+> manifest、對該 manifest 的 checksum、不可變旗標，以及一組受控簽章下載參照。
+> 沒有 PDF、沒有 ZIP、沒有任何位元組。
+>
+> 注意 `artifactPdfUrl` / `artifactZipUrl` 欄位指向
+> `https://downloads.drts.local`，該主機不解析且無端點服務該路徑。依本決議這不是缺陷，
+> 但任何假設「有 URL 就有檔案」的呼叫端會踩到。
+>
+> 若未來需要真的產包，順序是：產生器 → 物件儲存 → Object Lock 評估
+> （`PHASE1_OPEN_QUESTIONS.md` Q-005 已因無產物而結案）。
+
 ### 功能需求
 
 1. 匯出立案 / 查核包
