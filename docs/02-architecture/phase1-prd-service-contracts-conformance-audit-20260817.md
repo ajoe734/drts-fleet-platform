@@ -106,7 +106,7 @@ not re-open them without cause.
 - **Contracts 5.1 event envelope**: `DomainEventEnvelope` (`packages/contracts/src/index.ts:757`) matches all ten specified fields verbatim.
 - **Contracts 2.1 canonical IDs**: 17 of 18 present as contract types. `call_point_id` exists in the database (`V0003:60`) and is referenced by `tenant-partner.controller.ts`, but has no type in `packages/contracts`.
 - **PRD 9.9 public disclosure**: `public-info` create/publish/delete and `placards` create/publish implemented in `platform-admin.controller.ts:47-125`.
-- **PRD 9.10.2 filing package**: `filing-packages/generate`, list, and detail implemented; manifest carries `manifestHash`, `checksum`, and `immutable: true`.
+- **PRD 9.10.2 filing package**: ~~conformant~~ — **this assessment was wrong and is corrected 2026-08-20.** The endpoints and the manifest exist, but no artifact does: `reporting-filing` writes no bytes, there is no object-store client, `DEFAULT_CONTROLLED_DOWNLOAD_HOST` is a non-resolving `.local` host with no route serving it, and the `checksum` hashes the manifest listing rather than any file. The original check verified the API surface and the data structure and never asked whether a PDF or ZIP was produced — the same class of error as a client injecting a header no server reads. Phase 1 will not build the generator (`SD-DP-20260820-012`): the 立案 registration was filed externally.
 - **Contracts 9 Phase 2 reserved contracts**: `packages/contracts/src/phase2-tesla-fsd-sandbox.ts` exists and is additive, satisfying "extension event and extension field only".
 
 ---

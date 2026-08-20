@@ -42,6 +42,7 @@ the canonical PRD / SA files in the same wave.
 - `docs/01-decisions/SD-DP-20260817-009-domain-event-contract-and-write-authority.md`
 - `docs/01-decisions/SD-DP-20260817-010-state-models-conformance-resolution.md`
 - `docs/01-decisions/SD-DP-20260819-011-canonical-single-source-rule.md`
+- `docs/01-decisions/SD-DP-20260820-012-phase1-regulatory-output-scope.md`
 
 A packet enters this layer only once a human has accepted it, which `SD-DP-20260422-003` makes the
 precondition for superseding L1 wording. A packet still marked `proposed` or
