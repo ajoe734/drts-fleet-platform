@@ -7,8 +7,8 @@
 # the database trigger protection on admin.audit_logs.
 #
 # Usage:
-#   ./operations/database/audit-log-retention-archival.sh --dry-run [--retention-days 2555]
-#   ./operations/database/audit-log-retention-archival.sh --apply [--retention-days 2555] [--export-dir ./archive]
+#   ./operations/database/audit-log-retention-archival.sh --dry-run [--retention-days 730]
+#   ./operations/database/audit-log-retention-archival.sh --apply [--retention-days 730] [--export-dir ./archive]
 # ==============================================================================
 set -euo pipefail
 
@@ -18,7 +18,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${ROOT_DIR}/operations/database/db-common.sh"
 ensure_database_url
 
-RETENTION_DAYS="2555" # Default: 7 years
+RETENTION_DAYS="730" # Default: 2 years -- 汽車運輸業管理規則 s91(4). Was 2555 (7 years),
+                     # an unsourced default; audit logs are not accounting records, so the
+                     # 商業會計法 s38 floors do not apply. See the evidence retention policy.
 EXPORT_DIR="${ROOT_DIR}/.artifacts/audit-archives"
 MODE="dry-run"
 REASON="Lawful regulatory retention archival sweep"
@@ -29,7 +31,7 @@ show_usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --retention-days <N>   Age in days beyond which audit logs are eligible for archival (default: 2555)
+  --retention-days <N>   Age in days beyond which audit logs are eligible for archival (default: 730)
   --export-dir <PATH>    Directory to store archived audit log dumps (default: .artifacts/audit-archives)
   --dry-run              Inspect and count candidate audit log records without deleting (default)
   --apply                Export candidate records and purge them from admin.audit_logs
