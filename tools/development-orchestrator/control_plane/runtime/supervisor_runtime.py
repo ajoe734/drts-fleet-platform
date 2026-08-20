@@ -57,6 +57,27 @@ from control_plane.domain.chair_policy import (
     normalize_review_defaults as normalize_domain_review_defaults,
 )
 from control_plane.infra.approval_repo import load_approval_state
+from control_plane.infra.agent_directory import (
+    adapter_info_for_agent,
+    display_name_is_legacy_alias,
+    known_agent_display_names,
+    ordered_idle_agent_names,
+    provider_report_age_seconds,
+    provider_report_key_for_agent,
+    resolve_agent_model_preference,
+    status_agent_names_by_lane,
+)
+from control_plane.infra.host_probes import (
+    _current_cgroup_path,
+    _host_available_memory_bytes,
+    _read_cgroup_number,
+    _read_memory_pressure_avg10,
+    _sd_notify,
+    _signal_worker_pid,
+    parse_proc_stat_process_accounting,
+    reap_child_pid,
+    reap_finished_children,
+)
 from control_plane.infra.queue_repo import (
     enqueue_event,
     load_event_queue,
@@ -241,37 +262,6 @@ WORKSPACE_BASELINE_MARKERS = (
 TASK_ID_MENTION_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+\b")
 
 
-def _sd_notify(message: str) -> None:
-    """Send a state message to systemd via the sd_notify protocol.
-
-    Used to deliver periodic WATCHDOG=1 heartbeats so a non-zero
-    WatchdogSec in the unit file accurately detects a hung tick loop
-    (instead of killing a healthy supervisor every interval — the
-    failure mode that produced OPS-SUPERVISOR-WATCHDOG-OFF-001 #313).
-
-    No-op when NOTIFY_SOCKET is unset (the supervisor is not running
-    under systemd, e.g., interactive smoke tests or --once invocations).
-    All socket / OS errors are swallowed so heartbeat delivery cannot
-    take the supervisor down.
-    """
-    sock_path = os.environ.get("NOTIFY_SOCKET")
-    if not sock_path:
-        return
-    try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        try:
-            # systemd encodes abstract namespace sockets with a leading '@';
-            # the kernel expects a leading NUL byte for those.
-            if sock_path.startswith("@"):
-                sock_path = "\0" + sock_path[1:]
-            sock.connect(sock_path)
-            sock.sendall(message.encode("utf-8"))
-        finally:
-            sock.close()
-    except OSError:
-        return
-
-
 def supervisor_pid_path(config: dict[str, Any]) -> Path:
     return config_path(config, "state_file").parent / "supervisor.pid"
 
@@ -421,50 +411,6 @@ def maintain_disk_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
             quiet=SUPERVISOR_LOG_QUIET,
         )
     return changed
-
-
-def _current_cgroup_path() -> Path | None:
-    try:
-        for line in Path("/proc/self/cgroup").read_text(encoding="utf-8").splitlines():
-            if line.startswith("0::"):
-                current = Path("/sys/fs/cgroup") / line.split("::", 1)[1].lstrip("/")
-                return current.parent if current.name.endswith(".service") else current
-    except OSError:
-        return None
-    return None
-
-
-def _read_cgroup_number(path: Path | None, name: str) -> int | None:
-    if path is None:
-        return None
-    try:
-        value = (path / name).read_text(encoding="utf-8").strip()
-        return None if value == "max" else int(value)
-    except (OSError, ValueError):
-        return None
-
-
-def _read_memory_pressure_avg10(path: Path | None) -> float | None:
-    if path is None:
-        return None
-    try:
-        for line in (path / "memory.pressure").read_text(encoding="utf-8").splitlines():
-            if line.startswith("some "):
-                match = re.search(r"avg10=([0-9.]+)", line)
-                return float(match.group(1)) if match else None
-    except (OSError, ValueError):
-        return None
-    return None
-
-
-def _host_available_memory_bytes() -> int | None:
-    try:
-        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
-            if line.startswith("MemAvailable:"):
-                return int(line.split()[1]) * 1024
-    except (OSError, ValueError, IndexError):
-        return None
-    return None
 
 
 def maintain_resource_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
@@ -1563,20 +1509,6 @@ def ensure_planning_baton_dispatch(
     return True
 
 
-def provider_report_age_seconds(
-    path: Path, report: dict[str, Any] | None, *, now: datetime | None = None
-) -> float:
-    """Age of a cached capability report; infinite when it cannot be dated."""
-    now = now or datetime.now(timezone.utc)
-    generated_at = parse_runtime_timestamp(str((report or {}).get("generated_at") or ""))
-    if generated_at is not None:
-        return max(0.0, (now - generated_at).total_seconds())
-    try:
-        return max(0.0, now.timestamp() - path.stat().st_mtime)
-    except OSError:
-        return float("inf")
-
-
 def load_provider_report(config: dict[str, Any]) -> dict[str, Any]:
     try:
         supervisor_cfg = config.get("supervisor", {})
@@ -1600,29 +1532,6 @@ def load_provider_report(config: dict[str, Any]) -> dict[str, Any]:
         return report
     except KeyError:
         return {}
-
-
-def resolve_agent_model_preference(config: dict[str, Any], agent: dict[str, Any]) -> str | None:
-    explicit = str(agent.get("model_preference") or "").strip()
-    if explicit:
-        return explicit
-
-    provider_id = str(agent.get("provider") or agent.get("id") or "").strip()
-    provider = config.get("providers", {}).get(provider_id, {})
-    model_preference = provider.get("model_preference", {})
-    if not isinstance(model_preference, dict):
-        return None
-
-    agent_id = str(agent.get("id") or "").strip()
-    direct = str(model_preference.get(agent_id) or "").strip()
-    if direct:
-        return direct
-
-    if agent_id == provider_id:
-        default = str(model_preference.get("default") or "").strip()
-        if default:
-            return default
-    return None
 
 
 def _sha256_text(value: str) -> str:
@@ -2056,21 +1965,6 @@ def pid_is_alive(pid: int | None) -> bool:
     return True
 
 
-def parse_proc_stat_process_accounting(stat_text: str) -> tuple[int, int] | None:
-    """Return a process's parent PID and accumulated CPU ticks from /proc."""
-    closing_paren = stat_text.rfind(")")
-    if closing_paren < 0:
-        return None
-    fields = stat_text[closing_paren + 1 :].strip().split()
-    # Fields begin at Linux procfs field 3 (state): ppid=4, utime=14, stime=15.
-    if len(fields) < 13:
-        return None
-    try:
-        return int(fields[1]), int(fields[11]) + int(fields[12])
-    except ValueError:
-        return None
-
-
 def worker_process_tree_cpu_ticks(worker_pids: list[int]) -> dict[int, int]:
     """Return cumulative CPU ticks for each worker and all of its descendants.
 
@@ -2172,42 +2066,6 @@ def worker_last_activity_at(worker: dict[str, Any]) -> str | None:
     ]
     timestamps = [value for value in timestamps if value]
     return max(timestamps) if timestamps else None
-
-
-def reap_child_pid(pid: int | None) -> bool:
-    if not pid:
-        return False
-    try:
-        reaped_pid, _status = os.waitpid(int(pid), os.WNOHANG)
-    except (ChildProcessError, OSError, ValueError):
-        return False
-    return reaped_pid == int(pid)
-
-
-def reap_finished_children(*, limit: int = 64) -> int:
-    reaped = 0
-    while reaped < limit:
-        try:
-            pid, _status = os.waitpid(-1, os.WNOHANG)
-        except (ChildProcessError, OSError):
-            break
-        if pid == 0:
-            break
-        reaped += 1
-    return reaped
-
-
-def _signal_worker_pid(pid: int, sig: int) -> bool:
-    """Signal a worker's process group, falling back to the bare pid."""
-    try:
-        os.killpg(pid, sig)
-        return True
-    except OSError:
-        try:
-            os.kill(pid, sig)
-            return True
-        except OSError:
-            return False
 
 
 def terminate_worker_pid(pid: int | None) -> bool:
@@ -2356,16 +2214,6 @@ def worker_retry_settings(config: dict[str, Any], provider: str | None) -> dict[
     return domain_retry_settings(config, provider)
 
 
-def provider_report_key_for_agent(config: dict[str, Any], agent_id: str) -> str:
-    agent = agent_config_for(config, agent_id)
-    candidates = [
-        str(agent.get("provider") or "").strip(),
-        str(agent.get("id") or "").strip(),
-        normalize_agent_id(agent_id),
-    ]
-    return candidates[0] or normalize_agent_id(agent_id)
-
-
 def provider_info_for_agent(
     config: dict[str, Any],
     provider_report: dict[str, Any],
@@ -2376,25 +2224,6 @@ def provider_info_for_agent(
     providers = (provider_report.get("providers", {}) or {}) if isinstance(provider_report, dict) else {}
     for candidate in candidates:
         info = providers.get(candidate)
-        if isinstance(info, dict):
-            return info
-    return {}
-
-
-def adapter_info_for_agent(
-    config: dict[str, Any],
-    provider_report: dict[str, Any],
-    agent_id: str,
-) -> dict[str, Any]:
-    agent = agent_config_for(config, agent_id)
-    candidates = [
-        str(agent.get("id") or "").strip(),
-        str(agent.get("provider") or "").strip(),
-        normalize_agent_id(agent_id),
-    ]
-    adapters = (provider_report.get("agent_adapters", {}) or {}) if isinstance(provider_report, dict) else {}
-    for candidate in candidates:
-        info = adapters.get(normalize_agent_id(candidate))
         if isinstance(info, dict):
             return info
     return {}
@@ -3289,45 +3118,6 @@ def normalized_mapping_values(mapping: dict[str, Any], key: str) -> list[str]:
     return []
 
 
-def known_agent_display_names(config: dict[str, Any]) -> set[str]:
-    names = {
-        str(agent.get("display_name") or agent.get("name") or agent_id).strip()
-        for agent_id, agent in (config.get("agents", {}) or {}).items()
-        if str(agent.get("display_name") or agent.get("name") or agent_id).strip()
-    }
-    try:
-        status = load_status(config)
-    except Exception:
-        status = {}
-    for agent in status.get("agents", []) or []:
-        if not isinstance(agent, dict):
-            continue
-        name = str(agent.get("name") or "").strip()
-        if name:
-            names.add(name)
-    return names
-
-
-def display_name_is_legacy_alias(name: str | None) -> bool:
-    return "legacy alias" in str(name or "").lower()
-
-
-def status_agent_names_by_lane(status: dict[str, Any] | None) -> dict[str, str]:
-    names: dict[str, str] = {}
-    if not isinstance(status, dict):
-        return names
-    for agent in status.get("agents", []) or []:
-        if not isinstance(agent, dict):
-            continue
-        name = str(agent.get("name") or "").strip()
-        if not name:
-            continue
-        normalized = normalize_agent_id(name)
-        if normalized:
-            names[normalized] = name
-    return names
-
-
 def task_agent_display_name(config: dict[str, Any], status: dict[str, Any] | None, agent_id: str) -> str:
     agent = agent_config_for(config, agent_id)
     configured = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
@@ -3398,18 +3188,6 @@ def first_viable_agent(
                 continue
             return name
     return None
-
-
-def ordered_idle_agent_names(idle_agent_names: list[str], agent_loads: dict[str, list[int]]) -> list[str]:
-    indexed = list(enumerate(idle_agent_names))
-    indexed.sort(
-        key=lambda item: (
-            len(agent_loads.get(item[1], [])),
-            min(agent_loads.get(item[1], [99])),
-            item[0],
-        )
-    )
-    return [name for _index, name in indexed]
 
 
 def recovered_taskless_dispatch_pause(
