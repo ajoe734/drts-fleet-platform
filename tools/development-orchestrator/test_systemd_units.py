@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import tempfile
 import unittest
@@ -159,6 +160,36 @@ class UnitsRunPinnedCodeTests(unittest.TestCase):
             rendered = dst.read_text(encoding="utf-8")
             self.assertIn("WorkingDirectory=/truth\n", rendered)
             self.assertIn("ExecStart=/truth/.artifacts/releases/active/bin/x\n", rendered)
+
+    def test_every_helper_an_installer_calls_is_defined(self) -> None:
+        """The installers only find out at run time, and nothing runs them.
+
+        Moving orch_canonical_root into bin/lib took orch_release_root with it:
+        the two definitions were adjacent, the edit was a slice, and the
+        function was simply gone. Every test still passed, CI was green, and it
+        merged. All four installers were broken -- `orch_release_root: command
+        not found` on the first line that mattered -- and the only reason it
+        surfaced was someone running one by hand.
+        """
+        bin_dir = ROOT / "tools" / "development-orchestrator" / "bin"
+        defined = set()
+        for path in (COMMON, bin_dir / "lib" / "orch-roots.sh"):
+            defined.update(re.findall(r"^(orch_[a-z_]+)\(\)",
+                                      path.read_text(encoding="utf-8"), re.MULTILINE))
+
+        for name in INSTALLERS:
+            text = (bin_dir / name).read_text(encoding="utf-8")
+            called = {call for call in re.findall(r"\b(orch_[a-z_]+)\b", text)}
+            missing = sorted(called - defined)
+            self.assertEqual(missing, [], f"{name} calls helpers nothing defines")
+
+    def test_the_shared_file_actually_loads(self) -> None:
+        """Sourcing it is what the installers do first; if that fails they die
+        on the next line with a message about a function instead."""
+        result = _bash("declare -F | grep -c orch_")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertGreaterEqual(int(result.stdout.strip()), 5, "helpers did not load")
 
     def test_the_canonical_root_rule_has_exactly_one_definition(self) -> None:
         """Two copies of this rule is the fault this repo keeps re-finding.

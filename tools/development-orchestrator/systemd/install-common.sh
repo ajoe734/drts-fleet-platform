@@ -17,6 +17,10 @@
 # shellcheck source=../bin/lib/orch-roots.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../bin/lib" && pwd)/orch-roots.sh"
 
+orch_release_root() {
+  echo "$1/.artifacts/releases/active"
+}
+
 orch_release_name() {
   # The name of the release a directory *is*, resolved physically. Deriving it
   # with a plain basename names it after whatever path was typed, so running an
