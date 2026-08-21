@@ -501,12 +501,12 @@ describe("report builder registry", () => {
   it("rejects a declared-but-unbuilt report instead of completing it empty", () => {
     const { reportingFilingService } = createServices();
 
-    // `vehicle_monthly_delta` needs vehicle lifecycle history that the registry
-    // does not keep, so it is still declared and unbuilt (REG-RPT-004).
+    // All nine of PRD 9.10.1 are built now, so the remaining declared-and-
+    // unbuilt types are operational ones outside that section.
     expectApiErrorCode(
       () =>
         reportingFilingService.createReportJob({
-          jobType: "vehicle_monthly_delta",
+          jobType: "trip_summary",
           format: "csv",
         }),
       "REPORT_TYPE_NOT_IMPLEMENTED",
@@ -563,28 +563,21 @@ describe("report builder registry", () => {
     expect(accepted).toEqual([...IMPLEMENTED_REPORT_JOB_TYPES].sort());
   });
 
-  it("either builds or refuses every regulatory report, never both nor neither", () => {
+  it("builds every one of PRD 9.10.1's nine reports", () => {
     const { reportingFilingService } = createServices();
 
-    // PRD 9.10.1 lists nine. Whichever are not built yet must reject; the ones
-    // that are must accept. A type that does neither is the original bug.
+    // The section lists nine. All nine must now be accepted and produce a job;
+    // a type that is declared and does neither is the original bug.
     for (const jobType of REGULATORY_REPORT_JOB_TYPES) {
-      let accepted = false;
-      try {
-        reportingFilingService.createReportJob({ jobType, format: "csv" });
-        accepted = true;
-      } catch (error) {
-        expect((error as ApiRequestError).code).toBe(
-          "REPORT_TYPE_NOT_IMPLEMENTED",
-        );
-      }
-
-      if (accepted) {
-        expect(reportingFilingService.listReportJobs()[0]?.jobType).toBe(
-          jobType,
-        );
-      }
+      const accepted = reportingFilingService.createReportJob({
+        jobType,
+        format: "csv",
+      });
+      expect(accepted.status).toBe("queued");
+      expect(reportingFilingService.listReportJobs()[0]?.jobType).toBe(jobType);
     }
+
+    expect(REGULATORY_REPORT_JOB_TYPES.length).toBe(9);
   });
 });
 
@@ -697,6 +690,112 @@ describe("PRD 9.10.1 regulatory rosters", () => {
     }
   });
 
+  it("counts a vehicle in the month it joined and the month it was offboarded", async () => {
+    const services = createServices();
+    const vehicles = services.regulatoryRegistryService.listVehicles();
+    const target = vehicles[0]!;
+
+    services.regulatoryRegistryService.initiateVehicleOffboarding(
+      target.vehicleId,
+      {
+        reason: "sold",
+        effectiveAt: "2026-05-20T00:00:00.000Z",
+        debrandingRequired: false,
+      },
+    );
+
+    const accepted = services.reportingFilingService.createReportJob({
+      jobType: "vehicle_monthly_delta",
+      format: "csv",
+    });
+    await flushReportingQueue();
+    await flushReportingQueue();
+    const job = services.reportingFilingService.getReportJob(accepted.jobId);
+    const rows = (job.rows ?? []) as Array<{
+      periodMonth: string;
+      addedCount: number;
+      removedCount: number;
+      netChange: number;
+      closingCount: number;
+      removed: Array<{ vehicleId: string; reason: string | null }>;
+    }>;
+
+    const may = rows.find((row) => row.periodMonth === "2026-05");
+    expect(may?.removedCount).toBe(1);
+    expect(may?.removed[0]).toMatchObject({
+      vehicleId: target.vehicleId,
+      reason: "sold",
+    });
+
+    // Every vehicle in the registry is counted as an addition somewhere.
+    const totalAdded = rows.reduce((sum, row) => sum + row.addedCount, 0);
+    expect(totalAdded).toBe(vehicles.length);
+
+    // netChange and closingCount must agree with the entries, not be computed
+    // separately from them.
+    for (const row of rows) {
+      expect(row.netChange).toBe(row.addedCount - row.removedCount);
+    }
+    expect(rows[rows.length - 1]!.closingCount).toBe(vehicles.length - 1);
+  });
+
+  it("does not count a lapsed insurance policy as a vehicle leaving the fleet", async () => {
+    const services = createServices();
+    const target = services.regulatoryRegistryService.listVehicles()[0]!;
+
+    // This is the failure mode worth guarding: dispatchableFlag is effective
+    // dispatchability and drops whenever insurance lapses, a contract expires
+    // or an operator holds the vehicle -- all recoverable. Reading it as 減車
+    // would report the fleet shrinking every time a policy renewed late.
+    services.regulatoryRegistryService.updateVehicleCompliance(
+      target.vehicleId,
+      { dispatchableFlag: false },
+    );
+
+    const accepted = services.reportingFilingService.createReportJob({
+      jobType: "vehicle_monthly_delta",
+      format: "csv",
+    });
+    await flushReportingQueue();
+    await flushReportingQueue();
+    const job = services.reportingFilingService.getReportJob(accepted.jobId);
+    const rows = (job.rows ?? []) as Array<{ removedCount: number }>;
+
+    expect(rows.reduce((sum, row) => sum + row.removedCount, 0)).toBe(0);
+  });
+
+  it("keeps the running total right when one month is requested", async () => {
+    const services = createServices();
+    const vehicles = services.regulatoryRegistryService.listVehicles();
+    services.regulatoryRegistryService.initiateVehicleOffboarding(
+      vehicles[0]!.vehicleId,
+      {
+        reason: "sold",
+        effectiveAt: "2026-05-20T00:00:00.000Z",
+        debrandingRequired: false,
+      },
+    );
+
+    const accepted = services.reportingFilingService.createReportJob({
+      jobType: "vehicle_monthly_delta",
+      format: "csv",
+      filters: { month: "2026-05" },
+    });
+    await flushReportingQueue();
+    await flushReportingQueue();
+    const job = services.reportingFilingService.getReportJob(accepted.jobId);
+    const rows = (job.rows ?? []) as Array<{
+      periodMonth: string;
+      closingCount: number;
+    }>;
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.periodMonth).toBe("2026-05");
+    // Closing count is cumulative: a single-month report must not restart the
+    // running total at zero.
+    expect(rows[0]!.closingCount).toBe(vehicles.length - 1);
+  });
+
   it("refuses to produce a platform-wide regulatory report inside a tenant scope", () => {
     const { reportingFilingService } = createServices();
 
@@ -712,9 +811,7 @@ describe("PRD 9.10.1 regulatory rosters", () => {
             "req-tenant-scope",
             "tenant-demo-001",
           ),
-        (IMPLEMENTED_REPORT_JOB_TYPES as readonly string[]).includes(jobType)
-          ? "REPORT_TYPE_NOT_TENANT_SCOPED"
-          : "REPORT_TYPE_NOT_IMPLEMENTED",
+        "REPORT_TYPE_NOT_TENANT_SCOPED",
       );
     }
   });
