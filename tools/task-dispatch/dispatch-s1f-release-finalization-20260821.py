@@ -111,7 +111,7 @@ TASKS = (
             "Deployed revisions identify the locked SHA",
             "Paused Partner Booking enforcement succeeds",
         ),
-        "B", "release-deploy", task_class="release",
+        "B", "release-deploy", task_class="implementation",
         required_acceptance=("dev_deploy_run_url", "dev_deploy_sha", "dev_service_urls"),
     ),
     Task(
@@ -298,4 +298,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
