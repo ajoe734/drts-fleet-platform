@@ -5429,6 +5429,8 @@ export const IMPLEMENTED_REPORT_JOB_TYPES = [
   "contract_roster",
   "insurance_roster",
   "complaint_case_detail",
+  "six_month_statistics",
+  "fare_version_history",
 ] as const satisfies readonly ReportJobType[];
 export type ImplementedReportJobType =
   (typeof IMPLEMENTED_REPORT_JOB_TYPES)[number];
@@ -5585,6 +5587,21 @@ export interface InsuranceRosterRowRecord {
   exportedAt: string;
 }
 
+export interface FareVersionHistoryRowRecord {
+  authorizationId: string;
+  operatorId: string;
+  authorityCode: string;
+  businessPlanVersion: string;
+  fareVersionId: string;
+  status: string;
+  serviceAreaCodes: string[];
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+  exportedAt: string;
+}
+
 export interface ComplaintCaseDetailRowRecord {
   caseNo: string;
   caseSource: "phone" | "web" | "app" | "ops";
@@ -5638,6 +5655,7 @@ export type ReportJobRowRecord =
   | ComplaintCaseDetailRowRecord
   | ContractRosterRowRecord
   | import("./phase1-delta-supply-eligibility").DispatchDailyRecord
+  | FareVersionHistoryRowRecord
   | DispatchRecordingIndexRowRecord
   | DriverRosterRowRecord
   | InsuranceRosterRowRecord

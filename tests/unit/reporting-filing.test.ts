@@ -35,6 +35,57 @@ import { ReportingFilingRepository } from "../../apps/api/src/modules/reporting-
 import { ReportingFilingService } from "../../apps/api/src/modules/reporting-filing/reporting-filing.service";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
+// Two fare versions of one authority, published in order: the shape the
+// unique index on (operator, authority code, business plan version) produces.
+const OPERATING_AUTHORIZATION_FIXTURE = [
+  {
+    authorizationId: "AUTH-002",
+    operatorId: "OP-001",
+    authorityCode: "TPE-MT-01",
+    businessPlanVersion: "v2",
+    status: "approved" as const,
+    serviceAreaCodes: ["TPE"],
+    activeFareVersionId: "FARE-2026-02",
+    effectiveFrom: "2026-02-01T00:00:00.000Z",
+    effectiveUntil: null,
+    createdAt: "2026-01-20T00:00:00.000Z",
+    updatedAt: "2026-02-01T00:00:00.000Z",
+  },
+  {
+    authorizationId: "AUTH-001",
+    operatorId: "OP-001",
+    authorityCode: "TPE-MT-01",
+    businessPlanVersion: "v1",
+    status: "expired" as const,
+    serviceAreaCodes: ["TPE"],
+    activeFareVersionId: "FARE-2026-01",
+    effectiveFrom: "2026-01-01T00:00:00.000Z",
+    effectiveUntil: "2026-02-01T00:00:00.000Z",
+    createdAt: "2025-12-20T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+];
+
+const SIX_MONTH_SUMMARY_FIXTURE = [
+  {
+    from: "2026-02-01T00:00:00.000Z",
+    to: "2026-07-31T23:59:59.000Z",
+    businessArea: "TPE",
+    serviceProductCode: "MT-STD",
+    demandRequestCount: 1200,
+    actualDispatchCount: 1150,
+    completedTripCount: 1100,
+    cancelledOrderCount: 50,
+    averageDispatchableVehicleCount: 42.5,
+    validSnapshotCount: 180,
+    expectedSnapshotCount: 180,
+    snapshotCoverageRate: 1,
+    complaintCount: 7,
+    complaintsByCategory: { service_attitude: 4, route: 3 },
+    generatedAt: "2026-08-01T00:00:00.000Z",
+  },
+];
+
 async function flushReportingQueue() {
   await Promise.resolve();
   await Promise.resolve();
@@ -75,6 +126,12 @@ function createServices() {
   );
   reportingFilingService.registerComplaintCaseFeedProvider(() =>
     complaintService.listComplaintCases(),
+  );
+  reportingFilingService.registerSixMonthOperationsSummaryProvider(() =>
+    SIX_MONTH_SUMMARY_FIXTURE.map((row) => ({ ...row })),
+  );
+  reportingFilingService.registerOperatingAuthorizationFeedProvider(
+    () => OPERATING_AUTHORIZATION_FIXTURE,
   );
 
   ownedMobilityService.registerCallRecordingListeners();
@@ -538,6 +595,9 @@ describe("PRD 9.10.1 regulatory rosters", () => {
       jobType,
       format: "csv",
     });
+    // An async builder settles a microtask later than a synchronous one, so
+    // this waits for the slowest shape rather than the fastest.
+    await flushReportingQueue();
     await flushReportingQueue();
     const job = services.reportingFilingService.getReportJob(accepted.jobId);
     return { services, job };
@@ -604,6 +664,36 @@ describe("PRD 9.10.1 regulatory rosters", () => {
       if (row.relatedCallId) {
         expect(row.relatedCallId).toContain("...");
       }
+    }
+  });
+
+  it("reports the six-month statistics under the name PRD 9.10.1 uses", async () => {
+    const { services, job } = await runReport("six_month_statistics");
+
+    expect(job.status).toBe("completed");
+    // The four figures PRD 9.10.1 names for 六個月統計. They existed already,
+    // behind the operational job type; only the regulatory name was unbound.
+    const operational = await runReport("six_month_operations_summary");
+    expect(job.rows).toEqual(operational.job.rows);
+    expect(services).toBeDefined();
+  });
+
+  it("reports the fare version history the authorization rows already hold", async () => {
+    const { job } = await runReport("fare_version_history");
+
+    expect(job.status).toBe("completed");
+    const rows = (job.rows ?? []) as Array<{
+      businessPlanVersion: string;
+      fareVersionId: string;
+      effectiveFrom: string;
+    }>;
+    // A new fare version is a new authorization row, not an edited one: the
+    // table is unique on (operator, authority code, business plan version) and
+    // only a draft is editable. So the history is these rows in order.
+    for (let index = 1; index < rows.length; index += 1) {
+      expect(rows[index]!.effectiveFrom >= rows[index - 1]!.effectiveFrom).toBe(
+        true,
+      );
     }
   });
 

@@ -10,8 +10,10 @@ import type {
   ContractRosterRowRecord,
   DriverRegistryRecord,
   DriverRosterRowRecord,
+  FareVersionHistoryRowRecord,
   InsurancePolicyRecord,
   InsuranceRosterRowRecord,
+  MultiTaxiOperatingAuthorizationRecord,
   VehicleContractRecord,
   VehicleRegistryRecord,
   VehicleRosterRowRecord,
@@ -153,6 +155,8 @@ type DriverRegistryFeedProvider = () => DriverRegistryRecord[];
 type VehicleContractFeedProvider = () => VehicleContractRecord[];
 type InsurancePolicyFeedProvider = () => InsurancePolicyRecord[];
 type ComplaintCaseFeedProvider = () => ComplaintCaseRecord[];
+type OperatingAuthorizationFeedProvider =
+  () => MultiTaxiOperatingAuthorizationRecord[];
 
 const REGULATORY_REPORT_JOB_TYPE_SET: ReadonlySet<string> = new Set(
   REGULATORY_REPORT_JOB_TYPES,
@@ -192,6 +196,9 @@ export class ReportingFilingService implements OnModuleInit {
   private insurancePolicyFeedProvider: InsurancePolicyFeedProvider = () => [];
 
   private complaintCaseFeedProvider: ComplaintCaseFeedProvider = () => [];
+
+  private operatingAuthorizationFeedProvider: OperatingAuthorizationFeedProvider =
+    () => [];
 
   /**
    * Every declared report type states here whether it produces anything.
@@ -247,8 +254,18 @@ export class ReportingFilingService implements OnModuleInit {
       job.rows = this.buildInsuranceRosterRows();
     },
     vehicle_monthly_delta: null,
-    six_month_statistics: null,
-    fare_version_history: null,
+    // PRD 9.10.1 item 6 under its regulatory name. The builder already existed
+    // behind the operational job type `six_month_operations_summary`, and
+    // `SixMonthOperationsSummary` already carries exactly the four figures the
+    // PRD names: 乘客要求派車次數, 派遣次數, 平均可派車輛數, 申訴次數.
+    // Two names, one report, one builder -- rather than a second implementation
+    // that would drift from the first.
+    six_month_statistics: async (job) => {
+      job.rows = await this.buildSixMonthOperationsSummaryRows(job);
+    },
+    fare_version_history: (job) => {
+      job.rows = this.buildFareVersionHistoryRows();
+    },
     complaint_case_detail: (job) => {
       job.rows = this.buildComplaintCaseDetailRows();
     },
@@ -347,6 +364,17 @@ export class ReportingFilingService implements OnModuleInit {
 
   registerComplaintCaseFeedProvider(provider: ComplaintCaseFeedProvider) {
     this.complaintCaseFeedProvider = provider;
+  }
+
+  /**
+   * Registered from `MultiTaxiModule`, not from this module's own `imports`.
+   * `MultiTaxiModule` already imports `ReportingFilingModule`, so importing it
+   * back would be a cycle; the dependency runs one way and the data is pushed.
+   */
+  registerOperatingAuthorizationFeedProvider(
+    provider: OperatingAuthorizationFeedProvider,
+  ) {
+    this.operatingAuthorizationFeedProvider = provider;
   }
 
   registerSixMonthOperationsSummaryProvider(
@@ -1411,6 +1439,40 @@ export class ReportingFilingService implements OnModuleInit {
       updatedAt: complaintCase.updatedAt,
       exportedAt,
     }));
+  }
+
+  /**
+   * PRD 9.10.1 item 7, 收費標準版本歷程.
+   *
+   * The history is already in the data, held as a set of rows rather than a
+   * versioned column: `reg.multi_taxi_operating_authorizations` is unique on
+   * (operator, authority code, business plan version), and an authorization is
+   * only editable while `draft`. Publishing a new fare version therefore means
+   * a new authorization row, each carrying its own fare version and effective
+   * window. Reporting the history is reading them in order.
+   */
+  private buildFareVersionHistoryRows(): FareVersionHistoryRowRecord[] {
+    const exportedAt = new Date().toISOString();
+    return this.operatingAuthorizationFeedProvider()
+      .map((authorization) => ({
+        authorizationId: authorization.authorizationId,
+        operatorId: authorization.operatorId,
+        authorityCode: authorization.authorityCode,
+        businessPlanVersion: authorization.businessPlanVersion,
+        fareVersionId: authorization.activeFareVersionId,
+        status: authorization.status,
+        serviceAreaCodes: [...authorization.serviceAreaCodes],
+        effectiveFrom: authorization.effectiveFrom,
+        effectiveUntil: authorization.effectiveUntil,
+        createdAt: authorization.createdAt,
+        updatedAt: authorization.updatedAt,
+        exportedAt,
+      }))
+      .sort((left, right) =>
+        left.effectiveFrom === right.effectiveFrom
+          ? left.businessPlanVersion.localeCompare(right.businessPlanVersion)
+          : left.effectiveFrom.localeCompare(right.effectiveFrom),
+      );
   }
 
   private buildDispatchRecordingIndexRows(): DispatchRecordingIndexRowRecord[] {
