@@ -1,9 +1,33 @@
 # Regulatory Reports Execution Tasks (2026-08-20)
 
-**Status:** ready for supervisor registration
+**Status:** **CLOSED 2026-08-21.** All nine reports produce rows. Delivered directly rather
+than through supervisor dispatch: `REG-RPT-001` (#1535), `REG-RPT-002`/`003` (#1538),
+`REG-RPT-004` (#1540). The packet is kept for the reasoning, and for two things it got wrong.
 **Baseline:** `origin/dev`
 **Requirement:** PRD §9.10.1 — nine regulatory reports, confirmed still wanted 2026-08-20
 **Registration:** `tools/task-dispatch/dispatch-regulatory-reports-20260820.py`
+
+## 0. Two corrections to this packet
+
+**`fare_version_history` was not sourceless.** Section 1 says "no version-history source
+exists", reasoning from `authorization.activeFareVersionId = command.activeFareVersionId`
+being an overwrite. It is not. `reg.multi_taxi_operating_authorizations` is unique on
+(operator_id, authority_code, business_plan_version) and `updateAuthorization` refuses
+anything that is not `draft`. A new fare version is a new row, so the history is a set of
+rows rather than a versioned column. Reading one line of a mutation and concluding the old
+value was gone missed the table that makes that impossible. Built as wiring in `REG-RPT-003`.
+
+**`vehicle_monthly_delta` needed one field, not a subsystem.** The packet is right that no
+change history exists, but the removal half was already recorded: vehicle offboarding writes
+`requestedAt`, `effectiveAt`, `completedAt` and a reason. What was missing was `createdAt` on
+`VehicleRegistryRecord` — the database has `reg.vehicles.created_at`, the application record
+never exposed it. A plan to mirror the driver's full lifecycle enum onto vehicles was dropped
+during implementation: `supplyLifecycle.offboarding` already answers "is this vehicle still in
+the fleet", and a second enum would be a second place for that fact to disagree.
+
+One thing the packet got right and worth keeping: the report must not read `dispatchableFlag`.
+That flag drops on a lapsed policy and recovers, so counting it as 減車 reports a different
+quantity that looks plausible. There is now a test for exactly that.
 
 ## 1. What is actually broken
 
