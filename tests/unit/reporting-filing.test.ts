@@ -5,6 +5,10 @@ import {
   IMPLEMENTED_REPORT_JOB_TYPES,
   REGULATORY_REPORT_JOB_TYPES,
 } from "@drts/contracts";
+import type {
+  DriverRosterRowRecord,
+  VehicleRosterRowRecord,
+} from "@drts/contracts";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 
@@ -22,6 +26,7 @@ function expectApiErrorCode(call: () => unknown, code: string) {
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
+import { ComplaintService } from "../../apps/api/src/modules/complaint/complaint.service";
 import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
@@ -29,6 +34,57 @@ import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory
 import { ReportingFilingRepository } from "../../apps/api/src/modules/reporting-filing/reporting-filing.repository";
 import { ReportingFilingService } from "../../apps/api/src/modules/reporting-filing/reporting-filing.service";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+
+// Two fare versions of one authority, published in order: the shape the
+// unique index on (operator, authority code, business plan version) produces.
+const OPERATING_AUTHORIZATION_FIXTURE = [
+  {
+    authorizationId: "AUTH-002",
+    operatorId: "OP-001",
+    authorityCode: "TPE-MT-01",
+    businessPlanVersion: "v2",
+    status: "approved" as const,
+    serviceAreaCodes: ["TPE"],
+    activeFareVersionId: "FARE-2026-02",
+    effectiveFrom: "2026-02-01T00:00:00.000Z",
+    effectiveUntil: null,
+    createdAt: "2026-01-20T00:00:00.000Z",
+    updatedAt: "2026-02-01T00:00:00.000Z",
+  },
+  {
+    authorizationId: "AUTH-001",
+    operatorId: "OP-001",
+    authorityCode: "TPE-MT-01",
+    businessPlanVersion: "v1",
+    status: "expired" as const,
+    serviceAreaCodes: ["TPE"],
+    activeFareVersionId: "FARE-2026-01",
+    effectiveFrom: "2026-01-01T00:00:00.000Z",
+    effectiveUntil: "2026-02-01T00:00:00.000Z",
+    createdAt: "2025-12-20T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+];
+
+const SIX_MONTH_SUMMARY_FIXTURE = [
+  {
+    from: "2026-02-01T00:00:00.000Z",
+    to: "2026-07-31T23:59:59.000Z",
+    businessArea: "TPE",
+    serviceProductCode: "MT-STD",
+    demandRequestCount: 1200,
+    actualDispatchCount: 1150,
+    completedTripCount: 1100,
+    cancelledOrderCount: 50,
+    averageDispatchableVehicleCount: 42.5,
+    validSnapshotCount: 180,
+    expectedSnapshotCount: 180,
+    snapshotCoverageRate: 1,
+    complaintCount: 7,
+    complaintsByCategory: { service_attitude: 4, route: 3 },
+    generatedAt: "2026-08-01T00:00:00.000Z",
+  },
+];
 
 async function flushReportingQueue() {
   await Promise.resolve();
@@ -50,17 +106,41 @@ function createServices() {
     new OwnedMobilityTaskEventsService(new EventEmitter() as never),
     new OpsDispatchEventsService(new EventEmitter() as never),
   );
+  const complaintService = new ComplaintService(auditService);
   const reportingFilingService = new ReportingFilingService(auditService);
 
   reportingFilingService.registerOrderFeedProvider(() =>
     ownedMobilityService.listOrders(),
+  );
+  reportingFilingService.registerVehicleRegistryFeedProvider(() =>
+    regulatoryRegistryService.listVehicles(),
+  );
+  reportingFilingService.registerDriverRegistryFeedProvider(() =>
+    regulatoryRegistryService.listDrivers(),
+  );
+  reportingFilingService.registerVehicleContractFeedProvider(() =>
+    regulatoryRegistryService.listContracts(),
+  );
+  reportingFilingService.registerInsurancePolicyFeedProvider(() =>
+    regulatoryRegistryService.listPolicies(),
+  );
+  reportingFilingService.registerComplaintCaseFeedProvider(() =>
+    complaintService.listComplaintCases(),
+  );
+  reportingFilingService.registerSixMonthOperationsSummaryProvider(() =>
+    SIX_MONTH_SUMMARY_FIXTURE.map((row) => ({ ...row })),
+  );
+  reportingFilingService.registerOperatingAuthorizationFeedProvider(
+    () => OPERATING_AUTHORIZATION_FIXTURE,
   );
 
   ownedMobilityService.registerCallRecordingListeners();
   return {
     auditService,
     callcenterService,
+    complaintService,
     ownedMobilityService,
+    regulatoryRegistryService,
     reportingFilingService,
   };
 }
@@ -421,10 +501,12 @@ describe("report builder registry", () => {
   it("rejects a declared-but-unbuilt report instead of completing it empty", () => {
     const { reportingFilingService } = createServices();
 
+    // `vehicle_monthly_delta` needs vehicle lifecycle history that the registry
+    // does not keep, so it is still declared and unbuilt (REG-RPT-004).
     expectApiErrorCode(
       () =>
         reportingFilingService.createReportJob({
-          jobType: "vehicle_roster",
+          jobType: "vehicle_monthly_delta",
           format: "csv",
         }),
       "REPORT_TYPE_NOT_IMPLEMENTED",
@@ -503,5 +585,149 @@ describe("report builder registry", () => {
         );
       }
     }
+  });
+});
+
+describe("PRD 9.10.1 regulatory rosters", () => {
+  async function runReport(jobType: string) {
+    const services = createServices();
+    const accepted = services.reportingFilingService.createReportJob({
+      jobType,
+      format: "csv",
+    });
+    // An async builder settles a microtask later than a synchronous one, so
+    // this waits for the slowest shape rather than the fastest.
+    await flushReportingQueue();
+    await flushReportingQueue();
+    const job = services.reportingFilingService.getReportJob(accepted.jobId);
+    return { services, job };
+  }
+
+  it("reports the vehicles the registry actually holds", async () => {
+    const { services, job } = await runReport("vehicle_roster");
+
+    expect(job.status).toBe("completed");
+    const rows = (job.rows ?? []) as VehicleRosterRowRecord[];
+    // The point of the report is that its row count tracks the registry. An
+    // empty roster used to be the only possible answer.
+    expect(rows).toHaveLength(
+      services.regulatoryRegistryService.listVehicles().length,
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0]).toMatchObject({
+      vehicleId: expect.any(String),
+      plateNo: expect.any(String),
+      exportedAt: expect.any(String),
+    });
+    // One export, one timestamp: rows must not disagree about when they were
+    // taken.
+    expect(new Set(rows.map((row) => row.exportedAt)).size).toBe(1);
+  });
+
+  it("reports drivers with the lifecycle the registry tracks", async () => {
+    const { services, job } = await runReport("driver_roster");
+
+    const rows = (job.rows ?? []) as DriverRosterRowRecord[];
+    expect(rows).toHaveLength(
+      services.regulatoryRegistryService.listDrivers().length,
+    );
+    expect(rows[0]).toMatchObject({
+      driverId: expect.any(String),
+      lifecycleStatus: expect.any(String),
+      dispatchEligible: expect.any(Boolean),
+    });
+  });
+
+  it("reports contracts and insurance policies", async () => {
+    const contractReport = await runReport("contract_roster");
+    expect(contractReport.job.rows).toHaveLength(
+      contractReport.services.regulatoryRegistryService.listContracts().length,
+    );
+
+    const insuranceReport = await runReport("insurance_roster");
+    expect(insuranceReport.job.rows).toHaveLength(
+      insuranceReport.services.regulatoryRegistryService.listPolicies().length,
+    );
+  });
+
+  it("reports complaint cases with the call id masked", async () => {
+    const { services, job } = await runReport("complaint_case_detail");
+
+    expect(job.rows).toHaveLength(
+      services.complaintService.listComplaintCases().length,
+    );
+    for (const row of (job.rows ?? []) as Array<{
+      relatedCallId: string | null;
+    }>) {
+      // Same treatment as the dispatch recording index: the report indexes what
+      // exists, and a call id is the key to a recording.
+      if (row.relatedCallId) {
+        expect(row.relatedCallId).toContain("...");
+      }
+    }
+  });
+
+  it("reports the six-month statistics under the name PRD 9.10.1 uses", async () => {
+    const { services, job } = await runReport("six_month_statistics");
+
+    expect(job.status).toBe("completed");
+    // The four figures PRD 9.10.1 names for 六個月統計. They existed already,
+    // behind the operational job type; only the regulatory name was unbound.
+    const operational = await runReport("six_month_operations_summary");
+    expect(job.rows).toEqual(operational.job.rows);
+    expect(services).toBeDefined();
+  });
+
+  it("reports the fare version history the authorization rows already hold", async () => {
+    const { job } = await runReport("fare_version_history");
+
+    expect(job.status).toBe("completed");
+    const rows = (job.rows ?? []) as Array<{
+      businessPlanVersion: string;
+      fareVersionId: string;
+      effectiveFrom: string;
+    }>;
+    // A new fare version is a new authorization row, not an edited one: the
+    // table is unique on (operator, authority code, business plan version) and
+    // only a draft is editable. So the history is these rows in order.
+    for (let index = 1; index < rows.length; index += 1) {
+      expect(rows[index]!.effectiveFrom >= rows[index - 1]!.effectiveFrom).toBe(
+        true,
+      );
+    }
+  });
+
+  it("refuses to produce a platform-wide regulatory report inside a tenant scope", () => {
+    const { reportingFilingService } = createServices();
+
+    // None of these sources carry a tenant -- VehicleRegistryRecord has no
+    // tenantId to filter on -- so a roster produced "for" a tenant is every
+    // tenant's data. The tenant endpoint stamps filters.tenantId, which is what
+    // job listing filters on, so the requester could read it back.
+    for (const jobType of REGULATORY_REPORT_JOB_TYPES) {
+      expectApiErrorCode(
+        () =>
+          reportingFilingService.createReportJob(
+            { jobType, format: "csv" },
+            "req-tenant-scope",
+            "tenant-demo-001",
+          ),
+        (IMPLEMENTED_REPORT_JOB_TYPES as readonly string[]).includes(jobType)
+          ? "REPORT_TYPE_NOT_TENANT_SCOPED"
+          : "REPORT_TYPE_NOT_IMPLEMENTED",
+      );
+    }
+  });
+
+  it("still allows a tenant-scoped operational report", () => {
+    const { reportingFilingService } = createServices();
+
+    const accepted = reportingFilingService.createReportJob(
+      { jobType: "monthly_trip_report", format: "csv" },
+      "req-tenant-ok",
+      "tenant-demo-001",
+    );
+
+    expect(accepted.status).toBe("queued");
   });
 });
