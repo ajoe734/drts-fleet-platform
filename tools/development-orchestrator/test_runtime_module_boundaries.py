@@ -25,6 +25,7 @@ from pathlib import Path
 TOOL_ROOT = Path(__file__).resolve().parent
 RUNTIME = TOOL_ROOT / "control_plane" / "runtime" / "supervisor_runtime.py"
 INFRA = TOOL_ROOT / "control_plane" / "infra"
+DOMAIN = TOOL_ROOT / "control_plane" / "domain"
 
 
 def _imported_modules(path: Path) -> set[str]:
@@ -47,8 +48,15 @@ def _top_level_defs(path: Path) -> set[str]:
     }
 
 
+EXTRACTED_PATHS = {
+    "host_probes.py": INFRA,
+    "agent_directory.py": INFRA,
+    "task_records.py": DOMAIN,
+}
+
+
 class ExtractedLeafModulesStayLeavesTests(unittest.TestCase):
-    EXTRACTED = ("host_probes.py", "agent_directory.py")
+    EXTRACTED = tuple(EXTRACTED_PATHS)
 
     def test_no_extracted_module_imports_the_runtime_back(self) -> None:
         """The whole reason these were safe to move.
@@ -59,23 +67,26 @@ class ExtractedLeafModulesStayLeavesTests(unittest.TestCase):
         """
         for name in self.EXTRACTED:
             with self.subTest(module=name):
-                imports = _imported_modules(INFRA / name)
+                imports = _imported_modules(EXTRACTED_PATHS[name] / name)
                 offenders = {m for m in imports if "runtime" in m}
                 self.assertEqual(offenders, set(), f"{name} imports {offenders}")
 
     def test_extracted_modules_do_not_reach_into_orchestration(self) -> None:
-        """Lookups and host reads, not decisions.
+        """What a module may reach for depends on the layer it landed in.
 
-        These two layers answer "what is this machine doing" and "which agent
-        is this". Importing dispatch or chair policy here would mean the module
-        had started deciding something, which is the point at which it stops
-        being a leaf.
+        host_probes and agent_directory answer "what is this machine doing" and
+        "which agent is this" -- importing policy there would mean they had
+        started deciding something, which is the point at which they stop being
+        lookups. task_records landed in the domain package, where importing a
+        sibling policy module is the existing arrangement, so the rule it has to
+        keep is the outward one: no usecases, no bus, no adapters.
         """
-        forbidden = ("control_plane.usecases", "control_plane.domain.dispatch_policy",
-                     "control_plane.domain.chair_policy", "github_bus", "adapters")
+        outward = ("control_plane.usecases", "github_bus", "adapters")
+        policy = ("control_plane.domain.dispatch_policy", "control_plane.domain.chair_policy")
         for name in self.EXTRACTED:
             with self.subTest(module=name):
-                imports = _imported_modules(INFRA / name)
+                imports = _imported_modules(EXTRACTED_PATHS[name] / name)
+                forbidden = outward if EXTRACTED_PATHS[name] is DOMAIN else outward + policy
                 for bad in forbidden:
                     self.assertNotIn(bad, imports, f"{name} imports {bad}")
 
@@ -83,7 +94,7 @@ class ExtractedLeafModulesStayLeavesTests(unittest.TestCase):
         """A re-inlined copy would drift from the extracted one in silence."""
         runtime_defs = _top_level_defs(RUNTIME)
         for name in self.EXTRACTED:
-            for moved in _top_level_defs(INFRA / name):
+            for moved in _top_level_defs(EXTRACTED_PATHS[name] / name):
                 with self.subTest(module=name, symbol=moved):
                     self.assertNotIn(moved, runtime_defs)
 
@@ -101,11 +112,30 @@ class ExtractedLeafModulesStayLeavesTests(unittest.TestCase):
         from control_plane.runtime import supervisor_runtime
 
         for name in self.EXTRACTED:
-            for moved in _top_level_defs(INFRA / name):
+            for moved in _top_level_defs(EXTRACTED_PATHS[name] / name):
                 if moved.startswith("__"):
                     continue
                 with self.subTest(symbol=moved):
                     self.assertTrue(hasattr(supervisor_runtime, moved), moved)
+
+    def test_the_domain_layer_does_not_depend_on_infrastructure(self) -> None:
+        """A rule the domain package already kept, now that it has a new member.
+
+        Every module under control_plane/domain imports only stdlib, common, and
+        its siblings. task_records was extracted because its functions touch no
+        I/O helper at all -- that is what made it domain rather than a third
+        repository -- so an infra import here would mean the distinction had
+        quietly stopped being true.
+        """
+        for module in sorted(DOMAIN.glob("*.py")):
+            if module.name == "__init__.py":
+                continue
+            with self.subTest(module=module.name):
+                for imported in _imported_modules(module):
+                    self.assertFalse(
+                        imported.startswith("control_plane.infra"),
+                        f"{module.name} imports {imported}",
+                    )
 
 
 if __name__ == "__main__":
