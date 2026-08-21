@@ -27,6 +27,7 @@ import type {
 import {
   FILING_PACKAGE_TYPES,
   OWNED_ORDER_STATUSES,
+  IMPLEMENTED_REPORT_JOB_TYPES,
   REGULATORY_REPORT_JOB_TYPES,
   REPORT_JOB_TYPES,
   REPORT_OUTPUT_FORMATS,
@@ -114,6 +115,13 @@ const th = buildCanvasTheme({
 
 const REGULATORY_JOB_TYPE_SET = new Set<ReportJobType>(
   REGULATORY_REPORT_JOB_TYPES,
+);
+
+// REPORT_JOB_TYPES names every report the platform recognises; only some are
+// built. Offering the rest handed the operator a job that completed with no
+// rows, which read as "nothing happened this period" rather than "not built".
+const OFFERABLE_REPORT_JOB_TYPES = REPORT_JOB_TYPES.filter((jobType) =>
+  (IMPLEMENTED_REPORT_JOB_TYPES as readonly ReportJobType[]).includes(jobType),
 );
 
 const pageStyle: CSSProperties = {
@@ -740,7 +748,9 @@ function OperationalReportsPanel() {
   const [periodTo, setPeriodTo] = useState("");
   const [format, setFormat] = useState<OperationalExportFormat>("csv");
 
-  const [dailyRows, setDailyRows] = useState<DispatchDailyRecord[] | null>(null);
+  const [dailyRows, setDailyRows] = useState<DispatchDailyRecord[] | null>(
+    null,
+  );
   const [summaryRows, setSummaryRows] = useState<
     SixMonthOperationsSummary[] | null
   >(null);
@@ -800,9 +810,8 @@ function OperationalReportsPanel() {
         setDailyRows(rows);
         setSummaryRows(null);
       } else {
-        const rows = await client.previewSixMonthOperationsSummary(
-          buildSummaryQuery(),
-        );
+        const rows =
+          await client.previewSixMonthOperationsSummary(buildSummaryQuery());
         setSummaryRows(rows);
         setDailyRows(null);
       }
@@ -821,9 +830,8 @@ function OperationalReportsPanel() {
         try {
           const client = getOpsClient();
           if (isDaily) {
-            const result = await client.rebuildDailyDispatchRecords(
-              buildDailyQuery(),
-            );
+            const result =
+              await client.rebuildDailyDispatchRecords(buildDailyQuery());
             setNotice(
               t("reports.ops.regenerate.done", {
                 count: result.rebuiltCount,
@@ -831,9 +839,10 @@ function OperationalReportsPanel() {
               }),
             );
           } else {
-            const result = await client.rebuildMonthlyOperationsSummaries(
-              buildSummaryQuery(),
-            );
+            const result =
+              await client.rebuildMonthlyOperationsSummaries(
+                buildSummaryQuery(),
+              );
             setNotice(
               t("reports.ops.regenerate.done", {
                 count: result.rebuiltCount,
@@ -875,9 +884,7 @@ function OperationalReportsPanel() {
             );
             setSummaryRows(rows);
             setDailyRows(null);
-            setNotice(
-              t("reports.ops.export.jsonDone", { count: rows.length }),
-            );
+            setNotice(t("reports.ops.export.jsonDone", { count: rows.length }));
             return;
           }
 
@@ -1200,7 +1207,10 @@ function OperationalReportsPanel() {
                   style={nativeMonoInputStyle}
                 />
               </CanvasField>
-              <CanvasField theme={th} label={t("reports.ops.filter.orderSource")}>
+              <CanvasField
+                theme={th}
+                label={t("reports.ops.filter.orderSource")}
+              >
                 <select
                   value={orderSource}
                   onChange={(event) => setOrderSource(event.target.value)}
@@ -1592,7 +1602,9 @@ export default function ReportsPage() {
   const [jobRetryIntentKeys, setJobRetryIntentKeys] = useState<
     Record<string, string>
   >({});
-  const [jobType, setJobType] = useState<ReportJobType>(REPORT_JOB_TYPES[0]!);
+  const [jobType, setJobType] = useState<ReportJobType>(
+    OFFERABLE_REPORT_JOB_TYPES[0]!,
+  );
   const [format, setFormat] = useState<ReportOutputFormat>("xlsx");
   const [periodLabel, setPeriodLabel] = useState("");
   const [vehicleId, setVehicleId] = useState("");
@@ -1723,7 +1735,9 @@ export default function ReportsPage() {
             {
               packageType,
               period: packageMonth.trim() ? { month: packageMonth.trim() } : {},
-              scope: packageScope.trim() ? { channel: packageScope.trim() } : {},
+              scope: packageScope.trim()
+                ? { channel: packageScope.trim() }
+                : {},
             },
             {
               idempotencyKey: packageIntentKey,
@@ -1742,8 +1756,7 @@ export default function ReportsPage() {
 
   function retryReportJob(job: ReportJobRecord) {
     const retryKey =
-      jobRetryIntentKeys[job.jobId] ??
-      createIdempotencyKey("ops-report-retry");
+      jobRetryIntentKeys[job.jobId] ?? createIdempotencyKey("ops-report-retry");
     if (!jobRetryIntentKeys[job.jobId]) {
       setJobRetryIntentKeys((prev) => ({
         ...prev,
@@ -1799,7 +1812,7 @@ export default function ReportsPage() {
   const expiringArtifacts = jobs.filter((job) =>
     expiresSoon(job.artifact?.expiresAt),
   ).length;
-  const reportTypeOptions = REPORT_JOB_TYPES.map((value) => ({
+  const reportTypeOptions = OFFERABLE_REPORT_JOB_TYPES.map((value) => ({
     value,
     label: t(`reports.type.${value}`),
   }));

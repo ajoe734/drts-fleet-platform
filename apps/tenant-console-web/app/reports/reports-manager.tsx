@@ -12,6 +12,7 @@ import type {
   ResourceActionDescriptor,
 } from "@drts/contracts";
 import {
+  IMPLEMENTED_REPORT_JOB_TYPES,
   OPERATIONAL_REPORT_JOB_TYPES,
   REPORT_OUTPUT_FORMATS,
 } from "@drts/contracts";
@@ -108,8 +109,18 @@ const MANUAL_EMPTY_REASONS: readonly EmptyReason[] = [
   "filtered_empty",
 ] as const;
 
+// Offering a report the API has no builder for produced a completed job with
+// zero rows; it now produces a 501. Either way the option was never usable, so
+// the picker shows only what IMPLEMENTED_REPORT_JOB_TYPES says exists.
+const OFFERABLE_REPORT_JOB_TYPES = OPERATIONAL_REPORT_JOB_TYPES.filter(
+  (jobType: ReportJobType) =>
+    (IMPLEMENTED_REPORT_JOB_TYPES as readonly ReportJobType[]).includes(
+      jobType,
+    ),
+);
+
 function getReportTypeOptions(t: Translate): ReportTypeOption[] {
-  return OPERATIONAL_REPORT_JOB_TYPES.map((jobType: ReportJobType) => ({
+  return OFFERABLE_REPORT_JOB_TYPES.map((jobType: ReportJobType) => ({
     value: jobType,
     label:
       jobType === "trip_summary"
@@ -692,8 +703,7 @@ export function ReportsManager({
     }
 
     const rerunKey =
-      rerunIntentKeys[job.jobId] ??
-      createIdempotencyKey("tenant-report-rerun");
+      rerunIntentKeys[job.jobId] ?? createIdempotencyKey("tenant-report-rerun");
     if (!rerunIntentKeys[job.jobId]) {
       setRerunIntentKeys((prev) => ({
         ...prev,

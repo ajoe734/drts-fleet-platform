@@ -391,7 +391,9 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
     it("createReportJob retried with same intent key creates exactly 1 job", async () => {
       const intentKey = createIdempotencyKey("ops-report-job");
       const command: CreateReportJobCommand = {
-        jobType: "daily_dispatch_records",
+        // Was "daily_dispatch_records", plural, which is not a report type.
+        // The old validation accepted any non-blank string, so the typo passed.
+        jobType: "daily_dispatch_record",
         format: "csv",
       };
 
