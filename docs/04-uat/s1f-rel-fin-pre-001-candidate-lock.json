@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "taskId": "S1F-REL-FIN-PRE-001",
+  "generatedAtUtc": "2026-08-21T14:00:49Z",
+  "generatedBy": "Claude2",
+  "reviewer": "Codex",
+  "status": "locked",
+  "doNotDeploy": true,
+  "candidate": {
+    "sha": "4012b10c0cd4990bd238eaed6ddc23252bc0c8d4",
+    "shaLength": 40,
+    "repository": "ajoe734/drts-fleet-platform",
+    "onOriginDev": true,
+    "originDevHeadAtLockTime": "fb69a857bb8b6b7de75a2a988db460296bcfa508",
+    "immediateParentSha": "f7c67778bab2c46d4c00f0ac7b891b9f75257685",
+    "mergeParentCount": 1,
+    "mergeMechanism": "github_squash_or_rebase_merge_single_parent",
+    "pullRequest": {
+      "number": 1451,
+      "url": "https://github.com/ajoe734/drts-fleet-platform/pull/1451",
+      "title": "[ReviewBus] S1F-REL-001 Finalize the verified Stage 1 functional release candidate",
+      "baseRefName": "dev",
+      "headRefName": "gemini/s1f-rel-001",
+      "headRefOid": "4b4c61d9b4794d50d45fb1119788aa574f307f90",
+      "mergeCommitSha": "4012b10c0cd4990bd238eaed6ddc23252bc0c8d4",
+      "mergedAtUtc": "2026-08-17T05:24:06Z",
+      "mergedBy": "ajoe734",
+      "state": "MERGED"
+    }
+  },
+  "candidateSourceOfDirtyWorktreeRisk": {
+    "isDirtyLocalWorktree": false,
+    "evidence": "Candidate is GitHub PR #1451's recorded merge_commit_sha on the protected 'dev' base branch, confirmed via `gh api repos/.../pulls/1451`. It is not derived from any agent-local or uncommitted working tree.",
+    "localWorktreeStatusPorcelainLineCount": 0
+  },
+  "reviewedDependencyAncestry": {
+    "method": "git rev-list <ref> membership check (equivalent to `git merge-base --is-ancestor`, which this environment's tool policy blocks for any invocation regardless of arguments)",
+    "candidateReachableFromOriginDev": true,
+    "primaryReviewedDependency": {
+      "taskId": "S1F-REL-001",
+      "pullRequest": 1451,
+      "prHeadSha": "4b4c61d9b4794d50d45fb1119788aa574f307f90",
+      "mergeCommitSha": "4012b10c0cd4990bd238eaed6ddc23252bc0c8d4",
+      "relationToCandidate": "identical (the candidate IS this PR's merge commit)",
+      "treeContentEquivalentToPrHead": true,
+      "treeDiffPathsExcludedFromEquivalence": [
+        "tools/development-orchestrator/** (unrelated dev-branch orchestrator tooling that advanced independently while PR #1451 was open; zero diff under apps/, docs/, operations/, tests/, or .github/workflows/deploy-dev.yml)"
+      ]
+    },
+    "historicalDependencyLedgerFinding": {
+      "sourceDocument": "docs/04-uat/s1f-rel-001-release-candidate-evidence.md#2-dependency-provenance--lineage-ledger",
+      "claim": "15 upstream task SHAs (S1F-REF-001, S1F-ENT-001, S1F-FLT-001, ... S1F-UIX-001) are ancestors of candidate SHA 527a3d403464806ea1d4f417c60ac3e4fa8f17d6",
+      "independentVerificationResult": "NOT independently confirmable in this repository as written",
+      "details": [
+        "527a3d403464806ea1d4f417c60ac3e4fa8f17d6 (the ledger's own 'Candidate Commit SHA') is neither PR #1451's headRefOid (4b4c61d9b4794d50d45fb1119788aa574f307f90) nor its mergeCommitSha (4012b10c...) per the GitHub API; it is a stale/superseded snapshot of the PR branch and is unreachable from origin/dev.",
+        "Of the 15 dependency SHAs listed in the ledger table, only f9c720fa49df888ea4761f167d16c96b64a9481f (S1F-REL-001-PREDEPLOY) is present in origin/dev history.",
+        "The other 14 listed SHAs do not exist as objects on origin (`git fetch origin <sha>` returns 'not our ref' for e.g. c022634e78ebc61aa4f107f9ff36eb74a68ef3a7).",
+        "Root cause identified for at least 2 sampled entries: the ledger recorded each dependency PR's *head* SHA (discarded by squash-merge) instead of GitHub's actual merge_commit_sha. Example: PR #1331 (S1F-DRV-001) head=048a5d328a1cb2349694157eff3b44749f7bea5c (ledger value, NOT in dev), but GitHub's merge_commit_sha=6a43f1a9afef7a41b38c24187727801c27fb2bdb IS present in origin/dev history.",
+        "A second, more serious issue found while resolving PR numbers via the GitHub API: PR numbers 1330, 1332, 1333, 1334, 1336, 1357, 1370, and 1386, cited by the ledger for 8 of the 15 dependency rows, are recorded by GitHub as state=CLOSED, merged=false (two of them, #1330 and #1332, are not even based on 'dev'). These PR numbers do not correspond to merged Stage 1 work in this repository as the ledger describes.",
+        "This finding is out of scope to fully resolve here; S1F-REL-FIN-AUD-001 (owner Codex2) is explicitly chartered to reconcile candidate/CI/merge SHA discrepancies across the release evidence. This lock does not rely on the 14-item historical ledger; it relies only on the directly reviewed, independently GitHub-verified PR #1451 dependency shown above."
+      ]
+    }
+  },
+  "requiredCi": {
+    "prHeadCi": {
+      "sha": "4b4c61d9b4794d50d45fb1119788aa574f307f90",
+      "runUrl": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/31997270480",
+      "result": "22 checks pass, 1 skipped (orchestrator-tests; path-filtered on the PR branch)"
+    },
+    "mergeCommitTrunkCi": {
+      "sha": "4012b10c0cd4990bd238eaed6ddc23252bc0c8d4",
+      "runUrl": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/31997773400",
+      "result": "14/14 check-runs success (ci-integ, e2e, cross-surface-e2e, i18n-guard, ui-route-e2e, lint, iam-negative-matrix, integration, orchestrator-tests, unit, typecheck, build, changes, candidate)",
+      "verifiedVia": "gh api repos/ajoe734/drts-fleet-platform/commits/4012b10c.../check-runs"
+    },
+    "downstreamPublishSnapshotCi": {
+      "note": "Not required for this lock; recorded for context. publish/v2026.08.21.0 (tip ca2b5a6da56f0b992b43d3c0df6ff0a3fb6f204c, cut 2026-08-21T10:40:21+08:00) already contains the candidate as an ancestor and its own ci-integ/e2e/unit/etc. check-runs are all success. Its 'Build & push images' job failed only due to the external GCP billing gate (run 32444483620), not a code or CI defect.",
+      "publishSnapshotSha": "ca2b5a6da56f0b992b43d3c0df6ff0a3fb6f204c",
+      "candidateIsAncestorOfPublishSnapshot": true
+    }
+  },
+  "workflowSyntax": {
+    "file": ".github/workflows/deploy-dev.yml",
+    "parser": "python3 yaml.safe_load",
+    "validAtCandidateSha": true,
+    "validAtOriginDevHead": true,
+    "identicalBetweenCandidateAndOriginDevHead": true,
+    "manualDispatchSourceRefRules": "publish/v*, release/v*, or a full 40-hex commit SHA; mutable branches (dev/main/design) are rejected by the workflow's own validation",
+    "candidateShaIsValidManualDispatchSourceRef": true
+  },
+  "manifests": {
+    "candidateJourneyManifest": {
+      "path": "tests/e2e/fixtures/candidate-journey-manifest.json",
+      "validJsonAtCandidateSha": true,
+      "identicalBetweenCandidateAndOriginDevHead": true,
+      "schemaKeys": ["schemaVersion", "taskId", "candidateSha", "responseHeader", "activeSurfaces", "retiredSurfaces"]
+    },
+    "operationalVerificationScript": {
+      "path": "operations/verification/run-operational-browser-acceptance.sh",
+      "bashSyntaxValidAtCandidateSha": true,
+      "identicalBetweenCandidateAndOriginDevHead": true
+    },
+    "cloudRunDeployScript": {
+      "path": "operations/deployment/deploy-cloud-run-service.sh",
+      "bashSyntaxValidAtCandidateSha": true,
+      "identicalBetweenCandidateAndOriginDevHead": true
+    }
+  },
+  "localHermeticGates": {
+    "executed": [
+      {
+        "command": "npx vitest run tests/unit/operational-browser-manifest.test.ts tests/unit/dev-active-surface-contract.test.ts",
+        "result": "2 files passed, 6 tests passed",
+        "note": "Run from the current worktree (origin/dev tip fb69a857b), which is byte-identical to the candidate SHA for every path these tests touch (verified via git diff --stat)."
+      }
+    ],
+    "notRerun": "The full 22-scenario hermetic E2E suite and 39-route deterministic suite were not re-executed locally in this pass; they are already independently verified green in GitHub Actions for this exact candidate SHA (trunk CI run 31997773400) and for the downstream publish snapshot (ca2b5a6d), so local re-execution would be duplicative of already-captured CI evidence."
+  },
+  "deploySourceRefGuidance": {
+    "allowedForManualDispatch": ["publish/v<date>", "release/v<date>", "full 40-character commit SHA"],
+    "recommendedSourceRef": "4012b10c0cd4990bd238eaed6ddc23252bc0c8d4",
+    "recommendationRationale": "Locks the deploy to exactly the reviewed Stage 1 candidate (PR #1451) with no additional, unreviewed-for-this-purpose dev-branch drift. publish/v2026.08.21.0 is an available superset alternative if the deploy lane prefers the standard snapshot flow, but it also carries ~90 files of subsequent, non-Stage-1 changes (Stage 1.5 IAM hardening, idempotency, owned-mobility work) merged to dev between 2026-08-17 and 2026-08-21.",
+    "alternativeSnapshotRef": "publish/v2026.08.21.0",
+    "alternativeSnapshotSha": "ca2b5a6da56f0b992b43d3c0df6ff0a3fb6f204c",
+    "doNotUseMutableBranchRef": "dev"
+  },
+  "downstreamConsumers": ["S1F-REL-FIN-DEP-001", "S1F-REL-FIN-CLOSE-001"]
+}
