@@ -15,6 +15,8 @@ import type {
   InsuranceRosterRowRecord,
   MultiTaxiOperatingAuthorizationRecord,
   VehicleContractRecord,
+  VehicleMonthlyDeltaEntryRecord,
+  VehicleMonthlyDeltaRowRecord,
   VehicleRegistryRecord,
   VehicleRosterRowRecord,
   CreateMultiTaxiTripOperationalExportJobCommand,
@@ -253,7 +255,9 @@ export class ReportingFilingService implements OnModuleInit {
     insurance_roster: (job) => {
       job.rows = this.buildInsuranceRosterRows();
     },
-    vehicle_monthly_delta: null,
+    vehicle_monthly_delta: (job) => {
+      job.rows = this.buildVehicleMonthlyDeltaRows(job);
+    },
     // PRD 9.10.1 item 6 under its regulatory name. The builder already existed
     // behind the operational job type `six_month_operations_summary`, and
     // `SixMonthOperationsSummary` already carries exactly the four figures the
@@ -1451,6 +1455,121 @@ export class ReportingFilingService implements OnModuleInit {
    * a new authorization row, each carrying its own fare version and effective
    * window. Reporting the history is reading them in order.
    */
+  /**
+   * PRD 9.10.1 item 5, 每月車輛增減月報.
+   *
+   * A vehicle is *added* in the month it entered the registry (`createdAt`) and
+   * *removed* in the month its offboarding took effect. Removal reads
+   * `supplyLifecycle.offboarding`, which already records `effectiveAt`,
+   * `completedAt` and a reason -- offboarding is the act of taking a vehicle
+   * out of the fleet, and it is the only one.
+   *
+   * It deliberately does **not** read `dispatchableFlag`. That flag is
+   * effective dispatchability, and it drops whenever insurance lapses, a
+   * contract expires or an operator sets a manual hold -- all of which recover.
+   * Counting those as 減車 would report a fleet shrinking and growing every
+   * time a policy renewed late, which is a different and much larger number
+   * than the one the regulator is asking for.
+   */
+  private buildVehicleMonthlyDeltaRows(
+    job: StoredReportJob,
+  ): VehicleMonthlyDeltaRowRecord[] {
+    const exportedAt = new Date().toISOString();
+    const monthFilter = this.extractMonthFilter(job.filters);
+    const vehicles = this.vehicleRegistryFeedProvider();
+
+    const added = new Map<string, VehicleMonthlyDeltaEntryRecord[]>();
+    const removed = new Map<string, VehicleMonthlyDeltaEntryRecord[]>();
+    const push = (
+      bucket: Map<string, VehicleMonthlyDeltaEntryRecord[]>,
+      month: string,
+      entry: VehicleMonthlyDeltaEntryRecord,
+    ) => {
+      const entries = bucket.get(month);
+      if (entries) {
+        entries.push(entry);
+        return;
+      }
+      bucket.set(month, [entry]);
+    };
+
+    for (const vehicle of vehicles) {
+      const joinedAt = vehicle.createdAt;
+      if (joinedAt) {
+        push(added, joinedAt.slice(0, 7), {
+          vehicleId: vehicle.vehicleId,
+          plateNo: vehicle.plateNo,
+          occurredAt: joinedAt,
+          reason: null,
+        });
+      }
+
+      const offboarding = vehicle.supplyLifecycle.offboarding;
+      // `requested` means somebody started the paperwork; the vehicle is out of
+      // the fleet once offboarding takes effect or completes, so a pending
+      // request is not counted until then.
+      const leftAt =
+        offboarding.status === "completed"
+          ? (offboarding.effectiveAt ?? offboarding.completedAt)
+          : null;
+      if (leftAt) {
+        push(removed, leftAt.slice(0, 7), {
+          vehicleId: vehicle.vehicleId,
+          plateNo: vehicle.plateNo,
+          occurredAt: leftAt,
+          reason: offboarding.reason,
+        });
+      }
+    }
+
+    const months = [...new Set([...added.keys(), ...removed.keys()])]
+      .filter((month) => !monthFilter || month === monthFilter)
+      .sort();
+
+    let closingCount = 0;
+    const rowsInOrder: VehicleMonthlyDeltaRowRecord[] = [];
+    // Closing count is cumulative, so it is computed over every month present
+    // and only then narrowed to the requested one -- a single-month report must
+    // not restart the running total at zero.
+    for (const month of [
+      ...new Set([...added.keys(), ...removed.keys()]),
+    ].sort()) {
+      const addedEntries = added.get(month) ?? [];
+      const removedEntries = removed.get(month) ?? [];
+      closingCount += addedEntries.length - removedEntries.length;
+      if (!months.includes(month)) {
+        continue;
+      }
+      rowsInOrder.push({
+        periodMonth: month,
+        addedCount: addedEntries.length,
+        removedCount: removedEntries.length,
+        netChange: addedEntries.length - removedEntries.length,
+        closingCount,
+        added: [...addedEntries].sort((left, right) =>
+          left.occurredAt.localeCompare(right.occurredAt),
+        ),
+        removed: [...removedEntries].sort((left, right) =>
+          left.occurredAt.localeCompare(right.occurredAt),
+        ),
+        exportedAt,
+      });
+    }
+
+    return rowsInOrder;
+  }
+
+  /** `filters.month` / `filters.period_month`, as `YYYY-MM`. */
+  private extractMonthFilter(filters: Record<string, unknown>): string | null {
+    for (const key of ["month", "periodMonth", "period_month"]) {
+      const value = filters[key];
+      if (typeof value === "string" && /^\d{4}-\d{2}$/.test(value.trim())) {
+        return value.trim();
+      }
+    }
+    return null;
+  }
+
   private buildFareVersionHistoryRows(): FareVersionHistoryRowRecord[] {
     const exportedAt = new Date().toISOString();
     return this.operatingAuthorizationFeedProvider()

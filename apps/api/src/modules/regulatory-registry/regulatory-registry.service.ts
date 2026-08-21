@@ -197,6 +197,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     dispatchableFlag: true,
     exclusivityApproved: true,
     insuranceStatus: "valid",
+    createdAt: SEED_TIMESTAMP,
     updatedAt: SEED_TIMESTAMP,
     supplyLifecycle: createEmptySupplyLifecycle(SEED_TIMESTAMP),
   },
@@ -209,6 +210,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     dispatchableFlag: false,
     exclusivityApproved: false,
     insuranceStatus: "valid",
+    createdAt: SEED_TIMESTAMP,
     updatedAt: SEED_TIMESTAMP,
     supplyLifecycle: createEmptySupplyLifecycle(SEED_TIMESTAMP),
   },
@@ -221,6 +223,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     dispatchableFlag: true,
     exclusivityApproved: true,
     insuranceStatus: "expired",
+    createdAt: SEED_TIMESTAMP,
     updatedAt: "2026-03-31T23:59:59.000Z",
     supplyLifecycle: createEmptySupplyLifecycle("2026-03-31T23:59:59.000Z"),
   },
@@ -233,6 +236,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     dispatchableFlag: true,
     exclusivityApproved: true,
     insuranceStatus: "valid",
+    createdAt: SEED_TIMESTAMP,
     updatedAt: SEED_TIMESTAMP,
     supplyLifecycle: createEmptySupplyLifecycle(SEED_TIMESTAMP),
   },
@@ -245,6 +249,7 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
     dispatchableFlag: true,
     exclusivityApproved: true,
     insuranceStatus: "valid",
+    createdAt: SEED_TIMESTAMP,
     updatedAt: SEED_TIMESTAMP,
     supplyLifecycle: createEmptySupplyLifecycle(SEED_TIMESTAMP),
   },
@@ -2085,6 +2090,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
     };
     const created: VehicleRegistryRecord = {
       vehicleId: `veh_${randomUUID()}`,
+      createdAt: approvedAt,
       plateNo: draft.plateNo.trim(),
       licenseType: this.normalizeVehicleLicenseType(draft.licenseType),
       operatingArea: draft.businessArea.trim(),
@@ -2677,6 +2683,11 @@ export class RegulatoryRegistryService implements OnModuleInit {
       ...vehicle,
       licenseType: this.normalizeVehicleLicenseType(vehicle.licenseType),
       supportedServiceBuckets: [...vehicle.supportedServiceBuckets],
+      // A row persisted before `createdAt` existed cannot tell us when the
+      // vehicle joined. `updatedAt` is the earliest moment we can actually
+      // evidence, so the monthly delta counts such a vehicle from then rather
+      // than inventing a registration date it would report to a regulator.
+      createdAt: vehicle.createdAt ?? updatedAt,
       updatedAt,
       supplyLifecycle: {
         ...lifecycle,

@@ -4105,6 +4105,14 @@ export interface VehicleSupplyLifecycleRecord {
 export interface VehicleRegistryRecord {
   vehicleId: string;
   plateNo: string;
+  /**
+   * When the vehicle entered the registry. `DriverRegistryRecord` has carried
+   * this since it existed; the vehicle record did not, so nothing above the
+   * database could say when a vehicle joined the fleet -- which is half of
+   * PRD 9.10.1's 每月車輛增減月報. The removal half was already recorded, in
+   * `supplyLifecycle.offboarding`.
+   */
+  createdAt: string;
   licenseType?: VehicleLicenseType | null;
   operatingArea: string;
   supportedServiceBuckets: Phase1ServiceBucket[];
@@ -5431,6 +5439,7 @@ export const IMPLEMENTED_REPORT_JOB_TYPES = [
   "complaint_case_detail",
   "six_month_statistics",
   "fare_version_history",
+  "vehicle_monthly_delta",
 ] as const satisfies readonly ReportJobType[];
 export type ImplementedReportJobType =
   (typeof IMPLEMENTED_REPORT_JOB_TYPES)[number];
@@ -5587,6 +5596,27 @@ export interface InsuranceRosterRowRecord {
   exportedAt: string;
 }
 
+export interface VehicleMonthlyDeltaEntryRecord {
+  vehicleId: string;
+  plateNo: string;
+  occurredAt: string;
+  /** Present only on a removal: why the vehicle left the fleet. */
+  reason: string | null;
+}
+
+export interface VehicleMonthlyDeltaRowRecord {
+  /** `YYYY-MM`. */
+  periodMonth: string;
+  addedCount: number;
+  removedCount: number;
+  netChange: number;
+  /** Vehicles in the registry at the end of the month. */
+  closingCount: number;
+  added: VehicleMonthlyDeltaEntryRecord[];
+  removed: VehicleMonthlyDeltaEntryRecord[];
+  exportedAt: string;
+}
+
 export interface FareVersionHistoryRowRecord {
   authorizationId: string;
   operatorId: string;
@@ -5662,6 +5692,7 @@ export type ReportJobRowRecord =
   | import("./phase1-p5-s3-multi-taxi").MultiTaxiTripOperationalExportRow
   | import("./phase1-delta-supply-eligibility").SixMonthOperationsSummary
   | TenantMonthlyTripReportRowRecord
+  | VehicleMonthlyDeltaRowRecord
   | VehicleRosterRowRecord;
 
 export interface PartnerRevenueSummaryRowRecord {
