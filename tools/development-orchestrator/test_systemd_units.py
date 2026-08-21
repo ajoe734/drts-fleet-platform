@@ -13,6 +13,7 @@ INSTALLERS = (
     "install-health-systemd.sh",
     "install-canonical-root-watch-systemd.sh",
     "install-claude-keepalive-systemd.sh",
+    "install-dashboard-systemd.sh",
 )
 
 
@@ -100,6 +101,41 @@ class UnitsRunPinnedCodeTests(unittest.TestCase):
 
             self.assertEqual(result.stdout.strip(), str(repo.resolve()), result.stderr)
 
+    def test_the_release_name_is_read_from_the_physical_directory(self) -> None:
+        """The pointer is the normal way to name the current release.
+
+        A plain basename names the release after whatever path was typed, so
+        running an installer through `.artifacts/releases/active` asked the
+        lifecycle tool to activate a release called "active". It refused,
+        correctly, and the unit silently kept its previous definition.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            real = Path(tmpdir) / "orchestrator-abc123"
+            real.mkdir()
+            pointer = Path(tmpdir) / "active"
+            pointer.symlink_to(real)
+
+            result = _bash(f'orch_release_name "{pointer}"')
+
+            self.assertEqual(result.stdout.strip(), "orchestrator-abc123", result.stderr)
+
+    def test_rendering_substitutes_the_values_passed_to_it(self) -> None:
+        """A number repeated across units is a number that can move in one of
+        them. The dashboard port appears three times in two files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src = Path(tmpdir) / "unit.service"
+            dst = Path(tmpdir) / "out.service"
+            src.write_text("ExecStart=x --url http://127.0.0.1:@DASHBOARD_PORT@\n"
+                           "ExecStartPre=curl http://127.0.0.1:@DASHBOARD_PORT@/index.html\n",
+                           encoding="utf-8")
+
+            result = _bash(f'orch_render_unit "{src}" "{dst}" /truth /truth/rel DASHBOARD_PORT=4174')
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rendered = dst.read_text(encoding="utf-8")
+            self.assertNotIn("@DASHBOARD_PORT@", rendered)
+            self.assertEqual(rendered.count("127.0.0.1:4174"), 2)
+
     def test_a_missing_release_pointer_is_refused_with_the_command_to_fix_it(self) -> None:
         """A unit pointed at a release that is not there fails on every fire
         with a bare exec error and no hint."""
@@ -123,6 +159,33 @@ class UnitsRunPinnedCodeTests(unittest.TestCase):
             rendered = dst.read_text(encoding="utf-8")
             self.assertIn("WorkingDirectory=/truth\n", rendered)
             self.assertIn("ExecStart=/truth/.artifacts/releases/active/bin/x\n", rendered)
+
+    def test_the_canonical_root_rule_has_exactly_one_definition(self) -> None:
+        """Two copies of this rule is the fault this repo keeps re-finding.
+
+        install-common.sh used to carry its own; the runtime scripts needed the
+        same answer and would have grown a third.
+        """
+        tool_root = ROOT / "tools" / "development-orchestrator"
+        definitions = [
+            path.relative_to(ROOT)
+            for path in sorted(tool_root.rglob("*.sh"))
+            if "orch_canonical_root() {" in path.read_text(encoding="utf-8", errors="ignore")
+        ]
+        self.assertEqual([str(p) for p in definitions],
+                         ["tools/development-orchestrator/bin/lib/orch-roots.sh"])
+
+    def test_the_dashboard_is_told_where_machine_truth_lives(self) -> None:
+        """dashboard_server.py defaults its repo root to the tree it lives in.
+
+        Serving it from a pinned release would then read that worktree's
+        ai-status.json -- absent, so the page renders empty and blames nobody.
+        """
+        launcher = (ROOT / "tools" / "development-orchestrator" / "bin"
+                    / "launch-dashboard.sh").read_text(encoding="utf-8")
+
+        self.assertIn("orch-roots.sh", launcher)
+        self.assertIn("--repo-root", launcher)
 
     def test_every_installer_goes_through_the_shared_resolution(self) -> None:
         """Four installers once carried the same ROOT_DIR line. Restating it is

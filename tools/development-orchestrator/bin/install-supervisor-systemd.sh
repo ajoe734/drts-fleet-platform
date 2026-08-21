@@ -40,7 +40,7 @@ USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 INSTALLED_UNIT="$USER_UNIT_DIR/drts-supervisor.service"
 DROP_IN_DIR="$USER_UNIT_DIR/drts-supervisor.service.d"
 POINTER_DROP_IN="$DROP_IN_DIR/10-release-pointer.conf"
-RELEASE_NAME="$(basename "$ROOT_DIR")"
+RELEASE_NAME="$(orch_release_name "$ROOT_DIR")"
 
 if [[ ! -f "$TEMPLATE" || ! -f "$POINTER_TEMPLATE" || ! -x "$LIFECYCLE" ]]; then
   echo "ERROR: supervisor release templates are incomplete under $ROOT_DIR" >&2
