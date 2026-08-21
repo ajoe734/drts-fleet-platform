@@ -5424,6 +5424,11 @@ export const IMPLEMENTED_REPORT_JOB_TYPES = [
   "daily_dispatch_record",
   "six_month_operations_summary",
   "dispatch_recording_index",
+  "vehicle_roster",
+  "driver_roster",
+  "contract_roster",
+  "insurance_roster",
+  "complaint_case_detail",
 ] as const satisfies readonly ReportJobType[];
 export type ImplementedReportJobType =
   (typeof IMPLEMENTED_REPORT_JOB_TYPES)[number];
@@ -5507,6 +5512,139 @@ export interface DispatchRecordingIndexRowRecord {
   missingRecording: boolean;
   exportedAt: string;
 }
+
+/**
+ * PRD 9.10.1 regulatory report rows.
+ *
+ * Each row is a projection of a registry record as of `exportedAt`, not a
+ * stored artifact: the reports are produced on demand from current state.
+ * Fields are limited to what the application layer actually holds -- the
+ * database carries more about a vehicle (VIN, 車輛形式, 牌照種類) than
+ * `VehicleRegistryRecord` exposes, and a roster cannot report what its source
+ * does not surface.
+ */
+export interface VehicleRosterRowRecord {
+  vehicleId: string;
+  plateNo: string;
+  licenseType: string | null;
+  operatingArea: string;
+  supportedServiceBuckets: string[];
+  dispatchableFlag: boolean;
+  exclusivityApproved: boolean;
+  insuranceStatus: "valid" | "expired";
+  supplyLifecycleStatus: string;
+  blockedReasons: string[];
+  updatedAt: string;
+  exportedAt: string;
+}
+
+export interface DriverRosterRowRecord {
+  driverId: string;
+  name: string;
+  supportedServiceBuckets: string[];
+  workState: string;
+  lifecycleStatus: string;
+  licensesValid: boolean;
+  dispatchEligible: boolean;
+  eligibilityBlockedReasons: string[];
+  createdAt: string;
+  activatedAt: string | null;
+  suspendedAt: string | null;
+  retiredAt: string | null;
+  exportedAt: string;
+}
+
+export interface ContractRosterRowRecord {
+  contractId: string;
+  vehicleId: string;
+  partnerId: string;
+  partnerType: string;
+  contractType: string;
+  operatingAreaId: string | null;
+  serviceScope: string;
+  startAt: string;
+  endAt: string;
+  status: "draft" | "active" | "terminated";
+  lifecycleStatus: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  exportedAt: string;
+}
+
+export interface InsuranceRosterRowRecord {
+  policyId: string;
+  vehicleId: string;
+  policyNo: string;
+  insuranceType: string;
+  insurerName: string;
+  coverageAmount: number;
+  startAt: string;
+  endAt: string;
+  status: "pending" | "active" | "expired" | "cancelled";
+  lifecycleStatus: string;
+  exportedAt: string;
+}
+
+export interface ComplaintCaseDetailRowRecord {
+  caseNo: string;
+  caseSource: "phone" | "web" | "app" | "ops";
+  category: string;
+  severity: "normal" | "high";
+  status: string;
+  description: string;
+  relatedOrderId: string | null;
+  /** Masked: the index into the call recording, not the recording itself. */
+  relatedCallId: string | null;
+  relatedIncidentId: string | null;
+  assigneeId: string | null;
+  slaDueAt: string;
+  slaBreach: boolean;
+  reopenCount: number;
+  resolutionCode: string | null;
+  closingNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+  exportedAt: string;
+}
+
+export interface TenantMonthlyTripReportRowRecord {
+  orderId: string;
+  orderNo: string;
+  tenantId: string | null;
+  userId: string | null;
+  costCenterCode: string | null;
+  serviceProduct: string;
+  businessDispatchSubtype: string | null;
+  bookingId: string | null;
+  status: OwnedOrderRecord["status"];
+  completedAt: string | null;
+  sourceMarker: "owned_mobility_order_feed";
+  costCenterSourceMarker: "tenant_partner_cost_center_directory" | null;
+  sourceUpdatedAt: string;
+  producerRequestId: string | null;
+  exportedAt: string;
+}
+
+/**
+ * Every row shape a completed report job can carry.
+ *
+ * This union existed twice -- once in `reporting-filing.service.ts` and once in
+ * `reporting-filing.repository.ts` -- along with two of its members, copied
+ * field for field. Adding a report meant remembering both. It lives here now
+ * because the repository persists these rows and the service produces them, so
+ * neither owns it.
+ */
+export type ReportJobRowRecord =
+  | ComplaintCaseDetailRowRecord
+  | ContractRosterRowRecord
+  | import("./phase1-delta-supply-eligibility").DispatchDailyRecord
+  | DispatchRecordingIndexRowRecord
+  | DriverRosterRowRecord
+  | InsuranceRosterRowRecord
+  | import("./phase1-p5-s3-multi-taxi").MultiTaxiTripOperationalExportRow
+  | import("./phase1-delta-supply-eligibility").SixMonthOperationsSummary
+  | TenantMonthlyTripReportRowRecord
+  | VehicleRosterRowRecord;
 
 export interface PartnerRevenueSummaryRowRecord {
   orderId: string;

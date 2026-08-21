@@ -5,6 +5,10 @@ import {
   IMPLEMENTED_REPORT_JOB_TYPES,
   REGULATORY_REPORT_JOB_TYPES,
 } from "@drts/contracts";
+import type {
+  DriverRosterRowRecord,
+  VehicleRosterRowRecord,
+} from "@drts/contracts";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 
@@ -22,6 +26,7 @@ function expectApiErrorCode(call: () => unknown, code: string) {
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
+import { ComplaintService } from "../../apps/api/src/modules/complaint/complaint.service";
 import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
@@ -50,17 +55,35 @@ function createServices() {
     new OwnedMobilityTaskEventsService(new EventEmitter() as never),
     new OpsDispatchEventsService(new EventEmitter() as never),
   );
+  const complaintService = new ComplaintService(auditService);
   const reportingFilingService = new ReportingFilingService(auditService);
 
   reportingFilingService.registerOrderFeedProvider(() =>
     ownedMobilityService.listOrders(),
+  );
+  reportingFilingService.registerVehicleRegistryFeedProvider(() =>
+    regulatoryRegistryService.listVehicles(),
+  );
+  reportingFilingService.registerDriverRegistryFeedProvider(() =>
+    regulatoryRegistryService.listDrivers(),
+  );
+  reportingFilingService.registerVehicleContractFeedProvider(() =>
+    regulatoryRegistryService.listContracts(),
+  );
+  reportingFilingService.registerInsurancePolicyFeedProvider(() =>
+    regulatoryRegistryService.listPolicies(),
+  );
+  reportingFilingService.registerComplaintCaseFeedProvider(() =>
+    complaintService.listComplaintCases(),
   );
 
   ownedMobilityService.registerCallRecordingListeners();
   return {
     auditService,
     callcenterService,
+    complaintService,
     ownedMobilityService,
+    regulatoryRegistryService,
     reportingFilingService,
   };
 }
@@ -421,10 +444,12 @@ describe("report builder registry", () => {
   it("rejects a declared-but-unbuilt report instead of completing it empty", () => {
     const { reportingFilingService } = createServices();
 
+    // `vehicle_monthly_delta` needs vehicle lifecycle history that the registry
+    // does not keep, so it is still declared and unbuilt (REG-RPT-004).
     expectApiErrorCode(
       () =>
         reportingFilingService.createReportJob({
-          jobType: "vehicle_roster",
+          jobType: "vehicle_monthly_delta",
           format: "csv",
         }),
       "REPORT_TYPE_NOT_IMPLEMENTED",
@@ -503,5 +528,116 @@ describe("report builder registry", () => {
         );
       }
     }
+  });
+});
+
+describe("PRD 9.10.1 regulatory rosters", () => {
+  async function runReport(jobType: string) {
+    const services = createServices();
+    const accepted = services.reportingFilingService.createReportJob({
+      jobType,
+      format: "csv",
+    });
+    await flushReportingQueue();
+    const job = services.reportingFilingService.getReportJob(accepted.jobId);
+    return { services, job };
+  }
+
+  it("reports the vehicles the registry actually holds", async () => {
+    const { services, job } = await runReport("vehicle_roster");
+
+    expect(job.status).toBe("completed");
+    const rows = (job.rows ?? []) as VehicleRosterRowRecord[];
+    // The point of the report is that its row count tracks the registry. An
+    // empty roster used to be the only possible answer.
+    expect(rows).toHaveLength(
+      services.regulatoryRegistryService.listVehicles().length,
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0]).toMatchObject({
+      vehicleId: expect.any(String),
+      plateNo: expect.any(String),
+      exportedAt: expect.any(String),
+    });
+    // One export, one timestamp: rows must not disagree about when they were
+    // taken.
+    expect(new Set(rows.map((row) => row.exportedAt)).size).toBe(1);
+  });
+
+  it("reports drivers with the lifecycle the registry tracks", async () => {
+    const { services, job } = await runReport("driver_roster");
+
+    const rows = (job.rows ?? []) as DriverRosterRowRecord[];
+    expect(rows).toHaveLength(
+      services.regulatoryRegistryService.listDrivers().length,
+    );
+    expect(rows[0]).toMatchObject({
+      driverId: expect.any(String),
+      lifecycleStatus: expect.any(String),
+      dispatchEligible: expect.any(Boolean),
+    });
+  });
+
+  it("reports contracts and insurance policies", async () => {
+    const contractReport = await runReport("contract_roster");
+    expect(contractReport.job.rows).toHaveLength(
+      contractReport.services.regulatoryRegistryService.listContracts().length,
+    );
+
+    const insuranceReport = await runReport("insurance_roster");
+    expect(insuranceReport.job.rows).toHaveLength(
+      insuranceReport.services.regulatoryRegistryService.listPolicies().length,
+    );
+  });
+
+  it("reports complaint cases with the call id masked", async () => {
+    const { services, job } = await runReport("complaint_case_detail");
+
+    expect(job.rows).toHaveLength(
+      services.complaintService.listComplaintCases().length,
+    );
+    for (const row of (job.rows ?? []) as Array<{
+      relatedCallId: string | null;
+    }>) {
+      // Same treatment as the dispatch recording index: the report indexes what
+      // exists, and a call id is the key to a recording.
+      if (row.relatedCallId) {
+        expect(row.relatedCallId).toContain("...");
+      }
+    }
+  });
+
+  it("refuses to produce a platform-wide regulatory report inside a tenant scope", () => {
+    const { reportingFilingService } = createServices();
+
+    // None of these sources carry a tenant -- VehicleRegistryRecord has no
+    // tenantId to filter on -- so a roster produced "for" a tenant is every
+    // tenant's data. The tenant endpoint stamps filters.tenantId, which is what
+    // job listing filters on, so the requester could read it back.
+    for (const jobType of REGULATORY_REPORT_JOB_TYPES) {
+      expectApiErrorCode(
+        () =>
+          reportingFilingService.createReportJob(
+            { jobType, format: "csv" },
+            "req-tenant-scope",
+            "tenant-demo-001",
+          ),
+        (IMPLEMENTED_REPORT_JOB_TYPES as readonly string[]).includes(jobType)
+          ? "REPORT_TYPE_NOT_TENANT_SCOPED"
+          : "REPORT_TYPE_NOT_IMPLEMENTED",
+      );
+    }
+  });
+
+  it("still allows a tenant-scoped operational report", () => {
+    const { reportingFilingService } = createServices();
+
+    const accepted = reportingFilingService.createReportJob(
+      { jobType: "monthly_trip_report", format: "csv" },
+      "req-tenant-ok",
+      "tenant-demo-001",
+    );
+
+    expect(accepted.status).toBe("queued");
   });
 });

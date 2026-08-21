@@ -4,6 +4,17 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   AuditLogRecord,
+  ComplaintCaseDetailRowRecord,
+  DispatchRecordingIndexRowRecord,
+  ComplaintCaseRecord,
+  ContractRosterRowRecord,
+  DriverRegistryRecord,
+  DriverRosterRowRecord,
+  InsurancePolicyRecord,
+  InsuranceRosterRowRecord,
+  VehicleContractRecord,
+  VehicleRegistryRecord,
+  VehicleRosterRowRecord,
   CreateMultiTaxiTripOperationalExportJobCommand,
   CreateReportJobCommand,
   DispatchDailyRecord,
@@ -24,12 +35,16 @@ import type {
   PackageItemRecord,
   ReportArtifactRecord,
   ReportJobAccepted,
+  ReportJobRowRecord,
   ReportJobRecord,
   ReportJobType,
   SettlementMatrixRecord,
   SixMonthOperationsSummary,
   TenantCostCenterRecord,
+  TenantMonthlyTripReportRowRecord,
 } from "@drts/contracts";
+
+import { REGULATORY_REPORT_JOB_TYPES } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import {
@@ -56,43 +71,9 @@ import {
 } from "./download-signing.util";
 import { buildSettlementMatrix } from "../billing-settlement/settlement-matrix";
 
-type DispatchRecordingIndexRow = {
-  orderId: string;
-  orderNo: string;
-  callId: string | null;
-  recordingId: string | null;
-  missingRecording: boolean;
-  exportedAt: string;
-};
-
-type TenantMonthlyTripReportRow = {
-  orderId: string;
-  orderNo: string;
-  tenantId: string | null;
-  userId: string | null;
-  costCenterCode: string | null;
-  serviceProduct: string;
-  businessDispatchSubtype: string | null;
-  bookingId: string | null;
-  status: OwnedOrderRecord["status"];
-  completedAt: string | null;
-  sourceMarker: "owned_mobility_order_feed";
-  costCenterSourceMarker: "tenant_partner_cost_center_directory" | null;
-  sourceUpdatedAt: string;
-  producerRequestId: string | null;
-  exportedAt: string;
-};
-
-type ReportingJobRow =
-  | DispatchRecordingIndexRow
-  | DispatchDailyRecord
-  | MultiTaxiTripOperationalExportRow
-  | SixMonthOperationsSummary
-  | TenantMonthlyTripReportRow;
-
 type ReportJobView = ReportJobRecord & {
   artifact: ReportArtifactView | null;
-  rows?: ReportingJobRow[];
+  rows?: ReportJobRowRecord[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
   settlementMatrix?: SettlementMatrixRecord[];
   evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
@@ -132,7 +113,7 @@ type FilingPackageDownloadMetadata = {
 
 type StoredReportJob = ReportJobRecord & {
   artifact: ReportArtifactView | null;
-  rows: ReportingJobRow[];
+  rows: ReportJobRowRecord[];
   partnerRevenueRows: PartnerRevenueSummaryRowRecord[];
   settlementMatrix: SettlementMatrixRecord[];
   multiTaxiTripExport?: MultiTaxiTripExportJobMetadata;
@@ -167,6 +148,16 @@ type ReportRowBuilder = (
   requestId?: string,
 ) => Promise<void> | void;
 
+type VehicleRegistryFeedProvider = () => VehicleRegistryRecord[];
+type DriverRegistryFeedProvider = () => DriverRegistryRecord[];
+type VehicleContractFeedProvider = () => VehicleContractRecord[];
+type InsurancePolicyFeedProvider = () => InsurancePolicyRecord[];
+type ComplaintCaseFeedProvider = () => ComplaintCaseRecord[];
+
+const REGULATORY_REPORT_JOB_TYPE_SET: ReadonlySet<string> = new Set(
+  REGULATORY_REPORT_JOB_TYPES,
+);
+
 const MULTI_TAXI_TRIP_EXPORT_JOB_TYPE = "multi_taxi_trip_records";
 const MULTI_TAXI_TRIP_EXPORT_SCOPE = "multi_taxi_records:export";
 const MAX_EXPORT_PURPOSE_LENGTH = 500;
@@ -191,6 +182,16 @@ export class ReportingFilingService implements OnModuleInit {
 
   private sixMonthOperationsSummaryProvider: SixMonthOperationsSummaryProvider =
     () => [];
+
+  private vehicleRegistryFeedProvider: VehicleRegistryFeedProvider = () => [];
+
+  private driverRegistryFeedProvider: DriverRegistryFeedProvider = () => [];
+
+  private vehicleContractFeedProvider: VehicleContractFeedProvider = () => [];
+
+  private insurancePolicyFeedProvider: InsurancePolicyFeedProvider = () => [];
+
+  private complaintCaseFeedProvider: ComplaintCaseFeedProvider = () => [];
 
   /**
    * Every declared report type states here whether it produces anything.
@@ -233,14 +234,24 @@ export class ReportingFilingService implements OnModuleInit {
     },
 
     // Regulatory reports, PRD 9.10.1.
-    vehicle_roster: null,
-    driver_roster: null,
-    contract_roster: null,
-    insurance_roster: null,
+    vehicle_roster: (job) => {
+      job.rows = this.buildVehicleRosterRows();
+    },
+    driver_roster: (job) => {
+      job.rows = this.buildDriverRosterRows();
+    },
+    contract_roster: (job) => {
+      job.rows = this.buildContractRosterRows();
+    },
+    insurance_roster: (job) => {
+      job.rows = this.buildInsuranceRosterRows();
+    },
     vehicle_monthly_delta: null,
     six_month_statistics: null,
     fare_version_history: null,
-    complaint_case_detail: null,
+    complaint_case_detail: (job) => {
+      job.rows = this.buildComplaintCaseDetailRows();
+    },
     dispatch_recording_index: (job) => {
       job.rows = this.buildDispatchRecordingIndexRows();
     },
@@ -316,6 +327,26 @@ export class ReportingFilingService implements OnModuleInit {
 
   registerDailyDispatchRecordProvider(provider: DailyDispatchRecordProvider) {
     this.dailyDispatchRecordProvider = provider;
+  }
+
+  registerVehicleRegistryFeedProvider(provider: VehicleRegistryFeedProvider) {
+    this.vehicleRegistryFeedProvider = provider;
+  }
+
+  registerDriverRegistryFeedProvider(provider: DriverRegistryFeedProvider) {
+    this.driverRegistryFeedProvider = provider;
+  }
+
+  registerVehicleContractFeedProvider(provider: VehicleContractFeedProvider) {
+    this.vehicleContractFeedProvider = provider;
+  }
+
+  registerInsurancePolicyFeedProvider(provider: InsurancePolicyFeedProvider) {
+    this.insurancePolicyFeedProvider = provider;
+  }
+
+  registerComplaintCaseFeedProvider(provider: ComplaintCaseFeedProvider) {
+    this.complaintCaseFeedProvider = provider;
   }
 
   registerSixMonthOperationsSummaryProvider(
@@ -609,6 +640,34 @@ export class ReportingFilingService implements OnModuleInit {
     }
   }
 
+  /**
+   * PRD 9.10.1 reports describe the operator's fleet to 公路主管機關, not one
+   * tenant's slice of it. Their sources are the regulatory registry and the
+   * complaint case book, none of which carry a tenant: `VehicleRegistryRecord`
+   * has no `tenantId` to filter on, so a roster produced for a tenant would be
+   * every tenant's data.
+   *
+   * `POST /tenant/reports/jobs` accepts realm `tenant`, and the tenant scope is
+   * stamped into `filters.tenantId`, which is what job listing filters on. A
+   * tenant could therefore create one of these and then read it back. That was
+   * already reachable for `dispatch_recording_index`, the one regulatory report
+   * that had a builder -- its rows are every phone order on the platform.
+   */
+  private assertReportTypeIsAvailableToScope(
+    jobType: string,
+    tenantScopeId: string | null,
+  ) {
+    if (!tenantScopeId || !REGULATORY_REPORT_JOB_TYPE_SET.has(jobType)) {
+      return;
+    }
+    throw new ApiRequestError(
+      HttpStatus.FORBIDDEN,
+      "REPORT_TYPE_NOT_TENANT_SCOPED",
+      `Report "${jobType}" is a platform-wide regulatory report and cannot be produced within a tenant scope.`,
+      { jobType, tenantId: tenantScopeId },
+    );
+  }
+
   private listImplementedReportTypes(): string[] {
     return Object.entries(this.reportRowBuilders)
       .filter(
@@ -627,6 +686,10 @@ export class ReportingFilingService implements OnModuleInit {
     this.assertNonBlank(command.jobType, "jobType");
     this.assertReportTypeProducesRows(command.jobType);
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
+    this.assertReportTypeIsAvailableToScope(
+      command.jobType,
+      normalizedTenantScopeId,
+    );
     const normalizedFilters = { ...(command.filters ?? {}) };
     if (normalizedTenantScopeId) {
       const commandTenantId =
@@ -1242,7 +1305,115 @@ export class ReportingFilingService implements OnModuleInit {
     );
   }
 
-  private buildDispatchRecordingIndexRows(): DispatchRecordingIndexRow[] {
+  // PRD 9.10.1 items 1-4 and 8. Each is a projection of live registry state:
+  // the regulator asks what the fleet looks like now, not what a nightly job
+  // captured. `exportedAt` is stamped once per report so every row in one
+  // export agrees on when it was taken.
+
+  private buildVehicleRosterRows(): VehicleRosterRowRecord[] {
+    const exportedAt = new Date().toISOString();
+    return this.vehicleRegistryFeedProvider().map((vehicle) => ({
+      vehicleId: vehicle.vehicleId,
+      plateNo: vehicle.plateNo,
+      licenseType: vehicle.licenseType ?? null,
+      operatingArea: vehicle.operatingArea,
+      supportedServiceBuckets: [...vehicle.supportedServiceBuckets],
+      dispatchableFlag: vehicle.dispatchableFlag,
+      exclusivityApproved: vehicle.exclusivityApproved,
+      insuranceStatus: vehicle.insuranceStatus,
+      supplyLifecycleStatus: vehicle.supplyLifecycle.dispatch.eligible
+        ? "dispatchable"
+        : "blocked",
+      blockedReasons: [...vehicle.supplyLifecycle.dispatch.blockedReasons],
+      updatedAt: vehicle.updatedAt,
+      exportedAt,
+    }));
+  }
+
+  private buildDriverRosterRows(): DriverRosterRowRecord[] {
+    const exportedAt = new Date().toISOString();
+    return this.driverRegistryFeedProvider().map((driver) => ({
+      driverId: driver.driverId,
+      name: driver.name,
+      supportedServiceBuckets: [...driver.supportedServiceBuckets],
+      workState: driver.workState,
+      lifecycleStatus: driver.lifecycleStatus,
+      licensesValid: driver.licensesValid,
+      dispatchEligible: driver.dispatchEligible,
+      eligibilityBlockedReasons: [...driver.eligibilityBlockedReasons],
+      createdAt: driver.createdAt,
+      activatedAt: driver.activatedAt,
+      suspendedAt: driver.suspendedAt,
+      retiredAt: driver.retiredAt,
+      exportedAt,
+    }));
+  }
+
+  private buildContractRosterRows(): ContractRosterRowRecord[] {
+    const exportedAt = new Date().toISOString();
+    return this.vehicleContractFeedProvider().map((contract) => ({
+      contractId: contract.contractId,
+      vehicleId: contract.vehicleId,
+      partnerId: contract.partnerId,
+      partnerType: contract.partnerType,
+      contractType: contract.contractType,
+      operatingAreaId: contract.operatingAreaId,
+      serviceScope: contract.serviceScope,
+      startAt: contract.startAt,
+      endAt: contract.endAt,
+      status: contract.status,
+      lifecycleStatus: contract.lifecycleStatus,
+      approvedBy: contract.approvedBy,
+      approvedAt: contract.approvedAt,
+      exportedAt,
+    }));
+  }
+
+  private buildInsuranceRosterRows(): InsuranceRosterRowRecord[] {
+    const exportedAt = new Date().toISOString();
+    return this.insurancePolicyFeedProvider().map((policy) => ({
+      policyId: policy.policyId,
+      vehicleId: policy.vehicleId,
+      policyNo: policy.policyNo,
+      insuranceType: policy.insuranceType,
+      insurerName: policy.insurerName,
+      coverageAmount: policy.coverageAmount,
+      startAt: policy.startAt,
+      endAt: policy.endAt,
+      status: policy.status,
+      lifecycleStatus: policy.lifecycleStatus,
+      exportedAt,
+    }));
+  }
+
+  private buildComplaintCaseDetailRows(): ComplaintCaseDetailRowRecord[] {
+    const exportedAt = new Date().toISOString();
+    return this.complaintCaseFeedProvider().map((complaintCase) => ({
+      caseNo: complaintCase.caseNo,
+      caseSource: complaintCase.caseSource,
+      category: complaintCase.category,
+      severity: complaintCase.severity,
+      status: complaintCase.status,
+      description: complaintCase.description,
+      relatedOrderId: complaintCase.relatedOrderId,
+      // Masked for the same reason the dispatch recording index masks it: the
+      // report is an index of what exists, and a call id is the key to a
+      // recording rather than a fact about the complaint.
+      relatedCallId: maskOpaqueToken(complaintCase.relatedCallId, 8, 4),
+      relatedIncidentId: complaintCase.relatedIncidentId,
+      assigneeId: complaintCase.assigneeId,
+      slaDueAt: complaintCase.slaDueAt,
+      slaBreach: complaintCase.slaBreach,
+      reopenCount: complaintCase.reopenCount,
+      resolutionCode: complaintCase.resolutionCode,
+      closingNote: complaintCase.closingNote,
+      createdAt: complaintCase.createdAt,
+      updatedAt: complaintCase.updatedAt,
+      exportedAt,
+    }));
+  }
+
+  private buildDispatchRecordingIndexRows(): DispatchRecordingIndexRowRecord[] {
     const exportedAt = new Date().toISOString();
     return this.orderFeedProvider()
       .filter((order) => order.orderSource === "phone")
@@ -1276,7 +1447,7 @@ export class ReportingFilingService implements OnModuleInit {
   private buildTenantMonthlyTripRows(
     job: StoredReportJob,
     requestId?: string,
-  ): TenantMonthlyTripReportRow[] {
+  ): TenantMonthlyTripReportRowRecord[] {
     const exportedAt = new Date().toISOString();
     const filterString = (camelKey: string, snakeKey: string) => {
       const value = job.filters[camelKey] ?? job.filters[snakeKey];
