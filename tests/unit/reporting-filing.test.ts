@@ -1,6 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 
+import {
+  IMPLEMENTED_REPORT_JOB_TYPES,
+  REGULATORY_REPORT_JOB_TYPES,
+} from "@drts/contracts";
+
+import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
+
+function expectApiErrorCode(call: () => unknown, code: string) {
+  try {
+    call();
+  } catch (error) {
+    expect(error).toBeInstanceOf(ApiRequestError);
+    expect((error as ApiRequestError).code).toBe(code);
+    return;
+  }
+  throw new Error(`expected ${code}, but the call succeeded`);
+}
+
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
@@ -382,5 +400,108 @@ describe("reporting and filing service", () => {
         ],
       }),
     );
+  });
+});
+
+const OPERATIONAL_TYPES = [
+  "trip_summary",
+  "monthly_trip_report",
+  "revenue_summary",
+  "incident_register",
+  "maintenance_overview",
+  "daily_dispatch_record",
+  "six_month_operations_summary",
+] as const;
+
+describe("report builder registry", () => {
+  // The defect these cover: a report type nobody built did not fail. It reached
+  // `completed` with `rows: []`, a manifest and a checksum, so "never
+  // implemented" and "no data this period" produced byte-identical results.
+
+  it("rejects a declared-but-unbuilt report instead of completing it empty", () => {
+    const { reportingFilingService } = createServices();
+
+    expectApiErrorCode(
+      () =>
+        reportingFilingService.createReportJob({
+          jobType: "vehicle_roster",
+          format: "csv",
+        }),
+      "REPORT_TYPE_NOT_IMPLEMENTED",
+    );
+
+    expect(reportingFilingService.listReportJobs()).toHaveLength(0);
+  });
+
+  it("rejects a job type that is not declared at all", () => {
+    const { reportingFilingService } = createServices();
+
+    // The old validation was `assertNonBlank`, so this string produced a
+    // completed job exactly like a real report type did.
+    expectApiErrorCode(
+      () =>
+        reportingFilingService.createReportJob({
+          jobType: "not_a_report",
+          format: "csv",
+        }),
+      "REPORT_TYPE_UNKNOWN",
+    );
+  });
+
+  it("points multi-taxi trip records at the endpoint that records a purpose", () => {
+    const { reportingFilingService } = createServices();
+
+    expectApiErrorCode(
+      () =>
+        reportingFilingService.createReportJob({
+          jobType: "multi_taxi_trip_records",
+          format: "csv",
+        }),
+      "REPORT_TYPE_REQUIRES_DEDICATED_ENDPOINT",
+    );
+  });
+
+  it("keeps the contract's implemented list and the service registry in step", () => {
+    const { reportingFilingService } = createServices();
+
+    // Surfaces read IMPLEMENTED_REPORT_JOB_TYPES to decide what to offer; the
+    // service decides what to accept. If those two ever disagree, a console
+    // offers a report that always errors, or hides one that works.
+    const accepted = [...REGULATORY_REPORT_JOB_TYPES, ...OPERATIONAL_TYPES]
+      .filter((jobType) => {
+        try {
+          reportingFilingService.createReportJob({ jobType, format: "csv" });
+          return true;
+        } catch {
+          return false;
+        }
+      })
+      .sort();
+
+    expect(accepted).toEqual([...IMPLEMENTED_REPORT_JOB_TYPES].sort());
+  });
+
+  it("either builds or refuses every regulatory report, never both nor neither", () => {
+    const { reportingFilingService } = createServices();
+
+    // PRD 9.10.1 lists nine. Whichever are not built yet must reject; the ones
+    // that are must accept. A type that does neither is the original bug.
+    for (const jobType of REGULATORY_REPORT_JOB_TYPES) {
+      let accepted = false;
+      try {
+        reportingFilingService.createReportJob({ jobType, format: "csv" });
+        accepted = true;
+      } catch (error) {
+        expect((error as ApiRequestError).code).toBe(
+          "REPORT_TYPE_NOT_IMPLEMENTED",
+        );
+      }
+
+      if (accepted) {
+        expect(reportingFilingService.listReportJobs()[0]?.jobType).toBe(
+          jobType,
+        );
+      }
+    }
   });
 });

@@ -5402,6 +5402,32 @@ export const REPORT_JOB_TYPES = [
 ] as const;
 export type ReportJobType = (typeof REPORT_JOB_TYPES)[number];
 
+/**
+ * The report types that actually produce rows today, and therefore the only
+ * ones a surface should offer or a caller should submit to `POST /reports/jobs`.
+ *
+ * Declaring a type in `REPORT_JOB_TYPES` says the report exists as a concept.
+ * It used to say nothing about whether anything was built: an unbuilt type
+ * reached `completed` with an empty result that looked exactly like a period
+ * with no data. The API rejects those now, and this list is what lets a picker
+ * avoid offering them in the first place.
+ *
+ * `multi_taxi_trip_records` is deliberately absent: it is built, but only
+ * through the dedicated export endpoint that captures an access purpose.
+ *
+ * The API's builder registry is asserted against this list in
+ * `tests/unit/reporting-filing.test.ts`, so the two cannot drift apart.
+ */
+export const IMPLEMENTED_REPORT_JOB_TYPES = [
+  "monthly_trip_report",
+  "revenue_summary",
+  "daily_dispatch_record",
+  "six_month_operations_summary",
+  "dispatch_recording_index",
+] as const satisfies readonly ReportJobType[];
+export type ImplementedReportJobType =
+  (typeof IMPLEMENTED_REPORT_JOB_TYPES)[number];
+
 export const REPORT_JOB_STATUSES = [
   "pending",
   "queued",

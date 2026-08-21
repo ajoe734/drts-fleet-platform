@@ -25,6 +25,7 @@ import type {
   ReportArtifactRecord,
   ReportJobAccepted,
   ReportJobRecord,
+  ReportJobType,
   SettlementMatrixRecord,
   SixMonthOperationsSummary,
   TenantCostCenterRecord,
@@ -156,6 +157,16 @@ type SixMonthOperationsSummaryProvider = (filters: {
   serviceProductCode?: string;
 }) => Promise<SixMonthOperationsSummary[]> | SixMonthOperationsSummary[];
 
+/**
+ * Fills in whatever a completed job of one report type is supposed to carry --
+ * `rows` for most, `partnerRevenueRows` for the revenue summary. Returning
+ * nothing is not the same as having no builder: see `reportRowBuilders`.
+ */
+type ReportRowBuilder = (
+  job: StoredReportJob,
+  requestId?: string,
+) => Promise<void> | void;
+
 const MULTI_TAXI_TRIP_EXPORT_JOB_TYPE = "multi_taxi_trip_records";
 const MULTI_TAXI_TRIP_EXPORT_SCOPE = "multi_taxi_records:export";
 const MAX_EXPORT_PURPOSE_LENGTH = 500;
@@ -180,6 +191,60 @@ export class ReportingFilingService implements OnModuleInit {
 
   private sixMonthOperationsSummaryProvider: SixMonthOperationsSummaryProvider =
     () => [];
+
+  /**
+   * Every declared report type states here whether it produces anything.
+   *
+   * This replaces a chain of `if (job.jobType === ...)` with no fallback. A type
+   * that matched no branch did not fail: it reached `completed` carrying
+   * `rows: []`, a manifest and a checksum, so a caller could not tell "this
+   * report was never built" from "no data in this period". `createReportJob`
+   * validated only that `jobType` was a non-blank string, so any string at all
+   * produced that same convincing empty result.
+   *
+   * `Record` over `ReportJobType` is the guard that outlives this change: adding
+   * a tenth report to the enum without deciding about it here fails to compile.
+   * `null` is that decision, made explicitly -- the type is declared but not
+   * built, and `createReportJob` rejects it rather than accepting the job.
+   */
+  private readonly reportRowBuilders: Record<
+    ReportJobType,
+    ReportRowBuilder | null
+  > = {
+    // Operational reports.
+    trip_summary: null,
+    monthly_trip_report: (job, requestId) => {
+      job.rows = this.buildTenantMonthlyTripRows(job, requestId);
+    },
+    revenue_summary: (job) => {
+      job.partnerRevenueRows = this.buildPartnerRevenueSummaryRows();
+    },
+    incident_register: null,
+    maintenance_overview: null,
+    // Rows are built by `createMultiTaxiTripOperationalExportJob`, which is the
+    // only way to create one of these: the export needs a purpose and a scope
+    // that `createReportJob` has no field for. Rejected there by name.
+    multi_taxi_trip_records: () => {},
+    daily_dispatch_record: async (job) => {
+      job.rows = await this.buildDailyDispatchRecordRows(job);
+    },
+    six_month_operations_summary: async (job) => {
+      job.rows = await this.buildSixMonthOperationsSummaryRows(job);
+    },
+
+    // Regulatory reports, PRD 9.10.1.
+    vehicle_roster: null,
+    driver_roster: null,
+    contract_roster: null,
+    insurance_roster: null,
+    vehicle_monthly_delta: null,
+    six_month_statistics: null,
+    fare_version_history: null,
+    complaint_case_detail: null,
+    dispatch_recording_index: (job) => {
+      job.rows = this.buildDispatchRecordingIndexRows();
+    },
+  };
 
   private readonly downloadHost = DEFAULT_CONTROLLED_DOWNLOAD_HOST;
 
@@ -508,12 +573,59 @@ export class ReportingFilingService implements OnModuleInit {
     };
   }
 
+  /**
+   * Refuses a report that would succeed empty.
+   *
+   * This is a deliberate, visible behaviour change for the types that have no
+   * builder: they used to return a queued job, then a completed one with zero
+   * rows and a valid checksum. An error naming the report is safer than a
+   * result that looks real, and it stops anyone building on numbers that were
+   * never computed.
+   */
+  private assertReportTypeProducesRows(jobType: string) {
+    if (jobType === MULTI_TAXI_TRIP_EXPORT_JOB_TYPE) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "REPORT_TYPE_REQUIRES_DEDICATED_ENDPOINT",
+        "Multi-taxi trip records are exported through the dedicated export endpoint, which records the access purpose this endpoint has no field for.",
+        { jobType },
+      );
+    }
+    if (!Object.hasOwn(this.reportRowBuilders, jobType)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "REPORT_TYPE_UNKNOWN",
+        `Unknown report type "${jobType}".`,
+        { jobType, supportedJobTypes: this.listImplementedReportTypes() },
+      );
+    }
+    if (!this.reportRowBuilders[jobType as ReportJobType]) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_IMPLEMENTED,
+        "REPORT_TYPE_NOT_IMPLEMENTED",
+        `Report "${jobType}" is declared but not implemented. It would return an empty result indistinguishable from a period with no data.`,
+        { jobType, supportedJobTypes: this.listImplementedReportTypes() },
+      );
+    }
+  }
+
+  private listImplementedReportTypes(): string[] {
+    return Object.entries(this.reportRowBuilders)
+      .filter(
+        ([jobType, builder]) =>
+          builder !== null && jobType !== MULTI_TAXI_TRIP_EXPORT_JOB_TYPE,
+      )
+      .map(([jobType]) => jobType)
+      .sort();
+  }
+
   createReportJob(
     command: CreateReportJobCommand,
     requestId?: string,
     tenantScopeId?: string | null,
   ): ReportJobAccepted {
     this.assertNonBlank(command.jobType, "jobType");
+    this.assertReportTypeProducesRows(command.jobType);
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
     const normalizedFilters = { ...(command.filters ?? {}) };
     if (normalizedTenantScopeId) {
@@ -889,20 +1001,12 @@ export class ReportingFilingService implements OnModuleInit {
   }
 
   private async completeReportJob(job: StoredReportJob, requestId?: string) {
-    if (job.jobType === "dispatch_recording_index") {
-      job.rows = this.buildDispatchRecordingIndexRows();
-    }
-    if (job.jobType === "daily_dispatch_record") {
-      job.rows = await this.buildDailyDispatchRecordRows(job);
-    }
-    if (job.jobType === "six_month_operations_summary") {
-      job.rows = await this.buildSixMonthOperationsSummaryRows(job);
-    }
-    if (job.jobType === "monthly_trip_report") {
-      job.rows = this.buildTenantMonthlyTripRows(job, requestId);
-    }
-    if (job.jobType === "revenue_summary") {
-      job.partnerRevenueRows = this.buildPartnerRevenueSummaryRows();
+    // A job persisted before the builder registry existed can still carry an
+    // unimplemented type. Those complete empty as they always did; the guard
+    // that stops new ones is in `createReportJob`, not here.
+    const buildRows = this.reportRowBuilders[job.jobType as ReportJobType];
+    if (buildRows) {
+      await buildRows(job, requestId);
     }
 
     const artifactPayload =
