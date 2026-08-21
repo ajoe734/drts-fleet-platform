@@ -8,12 +8,48 @@ import sys
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-CANONICAL_ROOT = Path(
-    os.environ.get("ORCH_STATUS_ROOT")
-    or os.environ.get("AI_STATUS_ROOT")
-    or REPO_ROOT
-).resolve()
+# parents[2] is `tools/`, not the repository. That was already wrong before
+# release copies existed: `drts_task_slice` runs
+# `bash tools/development-orchestrator/bin/ai-status.sh` with this as its cwd,
+# which resolved to <repo>/tools/tools/... -- a path that has never existed --
+# under check=True, so the tool could only ever raise.
+SOURCE_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _canonical_root() -> Path:
+    """The checkout that owns machine truth, not the one holding this file.
+
+    The environment is the authoritative answer and every adapter stamps it,
+    but this module is also reachable as a bare MCP server started by a client
+    that stamps nothing. Falling straight back to SOURCE_ROOT then names a
+    release copy, which owns no `.orchestrator/` and never will, so git's own
+    answer goes in between -- the same order run-supervisor.sh and common.py
+    already use.
+    """
+    for name in ("ORCH_STATUS_ROOT", "AI_STATUS_ROOT"):
+        raw = os.environ.get(name)
+        if raw:
+            return Path(raw).resolve()
+    if (SOURCE_ROOT / ".orchestrator" / "config.json").exists():
+        return SOURCE_ROOT.resolve()
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(SOURCE_ROOT), "rev-parse",
+             "--path-format=absolute", "--git-common-dir"],
+            capture_output=True, text=True, timeout=3, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return SOURCE_ROOT.resolve()
+    common_dir = Path(result.stdout.strip()) if result.returncode == 0 and result.stdout.strip() else None
+    if common_dir is not None and common_dir.name == ".git":
+        return common_dir.parent.resolve()
+    return SOURCE_ROOT.resolve()
+
+
+CANONICAL_ROOT = _canonical_root()
+# Both the shell helper and the branch read are questions about the checkout
+# that owns machine truth, not about wherever this file was copied to.
+REPO_ROOT = CANONICAL_ROOT
 MCP_LOG = os.environ.get("DRTS_OPENCLAW_MCP_LOG")
 PROTOCOL_VERSION = "2024-11-05"
 

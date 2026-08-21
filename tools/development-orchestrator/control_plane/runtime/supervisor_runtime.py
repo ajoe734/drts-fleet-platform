@@ -148,6 +148,7 @@ from control_plane.usecases.chair_review_policy import (
 )
 from common import (
     AI_GUIDE_PATH,
+    ROOT as CANONICAL_ROOT,
     ROTATION_FALLBACK_SLOT,
     ROTATION_PRIMARY_SLOT,
     agent_config_for,
@@ -598,11 +599,35 @@ def _supervisor_script_arg_matches(
 
 
 def supervisor_cmdline_matches_current_script(parts: list[str], proc_cwd: str) -> bool:
+    """Is this /proc entry a supervisor for this repository?
+
+    The cwd gate exists to avoid matching a supervisor serving some other
+    checkout on the same machine, which is a real thing to guard against. It
+    was written as `proc_cwd != str(REPO_ROOT)`, and REPO_ROOT is derived from
+    where this file lives. Once the supervisor ran from a pinned release those
+    stopped being the same directory:
+
+        proc cwd    /home/lupin/drts-fleet-platform
+        REPO_ROOT   .../.artifacts/releases/orchestrator-<sha>
+
+    The comparison could not come out true, so this returned False for every
+    process, and terminate_older_supervisors -- the only caller's caller -- had
+    nothing to terminate. It did not start failing; it never had the ability to
+    succeed. A second supervisor ran 43 hours alongside the systemd one and was
+    found only because someone read `ps`.
+
+    Equality was the wrong shape besides. That orphan's cwd was
+    `<repo>/tools/development-orchestrator`, a subdirectory, so even against
+    the correct root it would not have matched. The question the gate wants to
+    ask is whether the process stands inside this repository, which is what it
+    now asks.
+    """
     current_script = str(SUPERVISOR_ENTRYPOINT.resolve())
     current_script_name = SUPERVISOR_ENTRYPOINT.name
     current_script_rel = "tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py"
-    current_repo_root = str(REPO_ROOT)
-    if proc_cwd != current_repo_root or not parts:
+    if not parts or not proc_cwd:
+        return False
+    if not _path_is_within(Path(proc_cwd), CANONICAL_ROOT):
         return False
 
     # Only match the actual supervisor process, not a parent wrapper such as
@@ -1424,7 +1449,11 @@ def ensure_planning_baton_dispatch(
 
     workspace = Path(workspace_value)
     if not workspace.is_absolute():
-        workspace = (REPO_ROOT / workspace).resolve()
+        # Against the checkout that owns the status file, not against the
+        # release copy this code was cut into -- a relative value resolved
+        # there points at a path that cannot exist, and the exists() check
+        # below then turns that into a silently disabled feature.
+        workspace = (CANONICAL_ROOT / workspace).resolve()
     if not workspace.exists():
         return False
 
