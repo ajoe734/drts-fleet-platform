@@ -153,4 +153,5 @@ Once Cloud Billing is enabled for GCP project #`952590575714`, `S1F-REL-FIN-DEP-
 - `docs/02-architecture/s1f-release-finalization-system-design-20260821.md`
 - `docs/03-runbooks/s1f-release-finalization-execution-tasks-20260821.md`
 - `.github/workflows/deploy-dev.yml`
-- `docs/04-uat/s1f-rel-fin-gcp-001-billing-artifact-registry-gate-evidence-20260821.md`
+- External acceptance evidence: https://github.com/ajoe734/drts-fleet-platform/blob/1e034865db5e1ea389adf777b67cac1ba588fe1a/docs/04-uat/s1f-rel-fin-gcp-001-billing-artifact-registry-gate-evidence-20260821.md
+
