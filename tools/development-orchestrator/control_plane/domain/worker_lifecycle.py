@@ -9,9 +9,12 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Mapping
 
-from common import parse_iso_utc
+# The moved readers name this for what the timestamp is rather than what format
+# it is in; parse_iso_utc above is the same function under its other reading.
+from common import parse_iso_utc, parse_iso_utc as parse_runtime_timestamp
 
 
 ACTIVE_WORKER_STATUSES = frozenset(
@@ -110,3 +113,86 @@ def redispatch_is_deferred(
     )
     resume_at = parse_iso_utc(latest.get("redispatch_after"))
     return resume_at is not None and resume_at > current
+
+
+# Reading an attempt record: when it was dispatched, when it last moved, what
+# it reported, whether it can resume from an approval, and how much history to
+# keep. Same subject as the rules above -- a worker attempt -- so they live
+# together rather than in a fourth module about the same thing.
+#
+# Five siblings stayed in the runtime module rather than coming along: they
+# reach for detect_worker_failure, ready_dispatch_settings and
+# resolve_dispatch_target, which live in infra and usecases. Bringing them here
+# would have inverted the layering this package keeps.
+def worker_reported_outcome(worker: dict[str, Any]) -> dict[str, Any] | None:
+    result_path = str(worker.get("result_path") or "").strip()
+    if not result_path:
+        return None
+    try:
+        payload = json.loads(Path(result_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or str(payload.get("outcome") or "").lower() not in {
+        "advanced",
+        "progress",
+        "blocked",
+        "failed",
+    }:
+        return None
+    return payload
+
+
+def worker_last_activity_at(worker: dict[str, Any]) -> str | None:
+    """Use the newest semantic event or observed local process progress."""
+    timestamps = [
+        str(worker.get(key) or "").strip()
+        for key in ("last_event_at", "last_process_activity_at")
+    ]
+    timestamps = [value for value in timestamps if value]
+    return max(timestamps) if timestamps else None
+
+
+def parse_worker_dispatched_at(run_id: str | None) -> datetime | None:
+    """Extract the dispatch timestamp embedded in a worker run_id.
+
+    Production run_ids are formatted as ``<provider>-<YYYYMMDDTHHMMSSZ>-<hash>``
+    (see worker spawn paths). The supervisor never stored a dedicated
+    ``dispatched_at`` field on worker records, so parsing the run_id is the
+    least invasive way to recover the dispatch moment for cooldown checks.
+
+    Returns ``None`` when the run_id is missing or none of its dash-separated
+    components parse as the expected timestamp shape — that preserves prior
+    behaviour for synthetic test fixtures whose run_ids are short slugs like
+    ``run-1`` / ``old-run``.
+    """
+    if not run_id:
+        return None
+    for part in str(run_id).split("-"):
+        try:
+            return datetime.strptime(part, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def heartbeat_lag_seconds(previous_heartbeat: str | None, current_heartbeat: str | None) -> float | None:
+    previous_dt = parse_runtime_timestamp(previous_heartbeat)
+    current_dt = parse_runtime_timestamp(current_heartbeat)
+    if previous_dt is None or current_dt is None:
+        return None
+    return max(0.0, (current_dt - previous_dt).total_seconds())
+
+
+def worker_supports_approval_resume(worker: dict[str, Any]) -> bool:
+    return bool(
+        str(worker.get("provider") or "").startswith("claude")
+        and (worker.get("session_id") or worker.get("resume_token"))
+    )
+
+
+def trim_worker_history(state: dict[str, Any], max_entries: int) -> None:
+    workers = state.get("workers", {})
+    if len(workers) <= max_entries:
+        return
+    ordered = sorted(workers.items(), key=lambda item: item[1].get("last_event_at") or "")
+    state["workers"] = dict(ordered[-max_entries:])

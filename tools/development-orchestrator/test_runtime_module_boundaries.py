@@ -48,10 +48,48 @@ def _top_level_defs(path: Path) -> set[str]:
     }
 
 
+# Two of these existed before the split and were extended by it rather than
+# created: worker_lifecycle already owned worker-attempt rules, and host_probes
+# already read /proc and the cgroup files that worker CPU accounting needs. A
+# cut that lands in a module which already says what it holds is worth more
+# than a fourth module about the same subject.
 EXTRACTED_PATHS = {
     "host_probes.py": INFRA,
     "agent_directory.py": INFRA,
     "task_records.py": DOMAIN,
+    "worker_lifecycle.py": DOMAIN,
+}
+
+# What each cut actually lifted out of supervisor_runtime.py. Listed rather than
+# derived from "every def in the module", because two of these modules existed
+# first and hold names the runtime never imported -- deriving it asserted that
+# worker_lifecycle.outcome_id must be reachable from the runtime, which was
+# never true and has nothing to do with whether the extraction held.
+MOVED_FROM_RUNTIME = {
+    "host_probes.py": (
+        "_current_cgroup_path", "_host_available_memory_bytes", "_read_cgroup_number",
+        "_read_memory_pressure_avg10", "_sd_notify", "_signal_worker_pid",
+        "parse_proc_stat_process_accounting", "reap_child_pid", "reap_finished_children",
+        "observe_worker_process_activity", "worker_process_tree_cpu_ticks",
+        "worker_unit_cpu_usage",
+    ),
+    "agent_directory.py": (
+        "adapter_info_for_agent", "display_name_is_legacy_alias", "known_agent_display_names",
+        "ordered_idle_agent_names", "provider_report_age_seconds",
+        "provider_report_key_for_agent", "resolve_agent_model_preference",
+        "status_agent_names_by_lane",
+    ),
+    "task_records.py": (
+        "_has_dispatchable_backlog", "_task_branch", "_task_is_open", "build_dispatch_event",
+        "current_dispatch_event_key", "dispatch_reason_priority",
+        "outstanding_queue_event_references", "ready_dispatch_signature",
+        "task_index_from_status", "task_is_dispatch_eligible_for_agent",
+        "task_role_for_dispatch_reason", "workspace_baseline_cover_task_ids",
+    ),
+    "worker_lifecycle.py": (
+        "heartbeat_lag_seconds", "parse_worker_dispatched_at", "trim_worker_history",
+        "worker_last_activity_at", "worker_reported_outcome", "worker_supports_approval_resume",
+    ),
 }
 
 
@@ -94,8 +132,10 @@ class ExtractedLeafModulesStayLeavesTests(unittest.TestCase):
         """A re-inlined copy would drift from the extracted one in silence."""
         runtime_defs = _top_level_defs(RUNTIME)
         for name in self.EXTRACTED:
-            for moved in _top_level_defs(EXTRACTED_PATHS[name] / name):
+            module_defs = _top_level_defs(EXTRACTED_PATHS[name] / name)
+            for moved in MOVED_FROM_RUNTIME[name]:
                 with self.subTest(module=name, symbol=moved):
+                    self.assertIn(moved, module_defs, "the extraction list is out of date")
                     self.assertNotIn(moved, runtime_defs)
 
     def test_the_moved_names_are_still_reachable_from_the_runtime(self) -> None:
@@ -112,9 +152,7 @@ class ExtractedLeafModulesStayLeavesTests(unittest.TestCase):
         from control_plane.runtime import supervisor_runtime
 
         for name in self.EXTRACTED:
-            for moved in _top_level_defs(EXTRACTED_PATHS[name] / name):
-                if moved.startswith("__"):
-                    continue
+            for moved in MOVED_FROM_RUNTIME[name]:
                 with self.subTest(symbol=moved):
                     self.assertTrue(hasattr(supervisor_runtime, moved), moved)
 
@@ -136,6 +174,36 @@ class ExtractedLeafModulesStayLeavesTests(unittest.TestCase):
                         imported.startswith("control_plane.infra"),
                         f"{module.name} imports {imported}",
                     )
+
+    def test_the_readers_that_could_not_move_are_still_reachable(self) -> None:
+        """Five worker readers stayed in the runtime module on purpose.
+
+        classify_worker_failure, worker_expected_completion_statuses,
+        worker_matches_current_assignment, worker_assignment_role and
+        resolve_terminal_worker_reason reach for detect_worker_failure,
+        ready_dispatch_settings and resolve_dispatch_target -- which live in
+        infra and usecases. Moving them into domain alongside their siblings
+        would have inverted the layering, so the split stopped at the boundary
+        rather than at the group. This records that as a decision instead of an
+        oversight, and fails if one of them is quietly moved later.
+        """
+        import sys
+
+        if str(TOOL_ROOT) not in sys.path:
+            sys.path.insert(0, str(TOOL_ROOT))
+        from control_plane.runtime import supervisor_runtime
+
+        runtime_defs = _top_level_defs(RUNTIME)
+        for name in (
+            "classify_worker_failure",
+            "worker_expected_completion_statuses",
+            "worker_matches_current_assignment",
+            "worker_assignment_role",
+            "resolve_terminal_worker_reason",
+        ):
+            with self.subTest(symbol=name):
+                self.assertIn(name, runtime_defs)
+                self.assertTrue(hasattr(supervisor_runtime, name))
 
 
 if __name__ == "__main__":

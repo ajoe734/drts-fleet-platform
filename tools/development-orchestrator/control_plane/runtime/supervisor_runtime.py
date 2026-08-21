@@ -40,6 +40,12 @@ from control_plane.domain.dispatch_policy import (
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
 from control_plane.domain.worker_lifecycle import (
+    heartbeat_lag_seconds,
+    parse_worker_dispatched_at,
+    trim_worker_history,
+    worker_last_activity_at,
+    worker_reported_outcome,
+    worker_supports_approval_resume,
     ACTIVE_WORKER_STATUSES as ACTIVE_RUNTIME_STATUSES,
     consume_result as consume_worker_result,
     is_active_worker,
@@ -82,6 +88,9 @@ from control_plane.infra.agent_directory import (
     status_agent_names_by_lane,
 )
 from control_plane.infra.host_probes import (
+    observe_worker_process_activity,
+    worker_process_tree_cpu_ticks,
+    worker_unit_cpu_usage,
     _current_cgroup_path,
     _host_available_memory_bytes,
     _read_cgroup_number,
@@ -740,14 +749,6 @@ def console_log(message: str, *, quiet: bool = False) -> None:
         return
     timestamp = datetime.now(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}", flush=True)
-
-
-def heartbeat_lag_seconds(previous_heartbeat: str | None, current_heartbeat: str | None) -> float | None:
-    previous_dt = parse_runtime_timestamp(previous_heartbeat)
-    current_dt = parse_runtime_timestamp(current_heartbeat)
-    if previous_dt is None or current_dt is None:
-        return None
-    return max(0.0, (current_dt - previous_dt).total_seconds())
 
 
 def format_runtime_timestamp_local(ts: str | None) -> str:
@@ -2002,109 +2003,6 @@ def pid_is_alive(pid: int | None) -> bool:
     except OSError:
         return False
     return True
-
-
-def worker_process_tree_cpu_ticks(worker_pids: list[int]) -> dict[int, int]:
-    """Return cumulative CPU ticks for each worker and all of its descendants.
-
-    A long verification command can be quiet at the agent protocol layer while
-    its child compiler/test processes continue to make progress. Walking only
-    known worker process trees avoids a full /proc scan on every poll.
-    """
-    roots = {pid for pid in worker_pids if pid > 0}
-    if not roots:
-        return {}
-
-    def read_accounting(pid: int) -> tuple[int, int] | None:
-        try:
-            return parse_proc_stat_process_accounting(
-                Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="ignore")
-            )
-        except OSError:
-            return None
-
-    def child_pids(pid: int) -> list[int]:
-        try:
-            values = Path(f"/proc/{pid}/task/{pid}/children").read_text(encoding="utf-8").split()
-        except OSError:
-            return []
-        return [int(value) for value in values if value.isdigit()]
-
-    totals: dict[int, int] = {}
-    for root_pid in roots:
-        root_details = read_accounting(root_pid)
-        # Worker PIDs are spawned directly by this supervisor. Reject a stale
-        # state PID that has since been reused by an unrelated process.
-        if root_details is None or root_details[0] != os.getpid():
-            continue
-        pending = [root_pid]
-        seen: set[int] = set()
-        total = 0
-        while pending:
-            pid = pending.pop()
-            if pid in seen:
-                continue
-            seen.add(pid)
-            details = read_accounting(pid)
-            if details is None:
-                continue
-            total += details[1]
-            pending.extend(child_pids(pid))
-        if root_pid in seen and total:
-            totals[root_pid] = total
-    return totals
-
-
-def worker_unit_cpu_usage(worker: dict[str, Any]) -> int | None:
-    unit_name = str(worker.get("worker_unit") or "").strip()
-    cgroup = _current_cgroup_path()
-    if not unit_name or cgroup is None:
-        return None
-    try:
-        for line in (cgroup / unit_name / "cpu.stat").read_text(encoding="utf-8").splitlines():
-            key, value = line.split(maxsplit=1)
-            if key == "usage_usec":
-                return int(value)
-    except (OSError, ValueError):
-        return None
-    return None
-
-
-def observe_worker_process_activity(worker: dict[str, Any], cpu_ticks: int | None, now: datetime) -> tuple[bool, bool]:
-    """Return whether process activity advanced and whether state must persist it."""
-    if cpu_ticks is None:
-        return False, False
-    try:
-        previous_ticks = int(worker.get("process_tree_cpu_ticks"))
-    except (TypeError, ValueError):
-        previous_ticks = None
-    worker["process_tree_cpu_ticks"] = cpu_ticks
-    if previous_ticks is not None and cpu_ticks <= previous_ticks:
-        return False, False
-
-    now_text = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    previous_activity = worker.get("last_process_activity_at")
-    if previous_ticks is None:
-        worker["last_process_activity_at"] = now_text
-        return True, True
-    try:
-        previous_dt = datetime.fromisoformat(str(previous_activity).replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        previous_dt = None
-    if previous_dt is None or (now - previous_dt).total_seconds() >= 30:
-        worker["last_process_activity_at"] = now_text
-        return True, True
-    return True, False
-
-
-def worker_last_activity_at(worker: dict[str, Any]) -> str | None:
-    """Use the newest semantic event or observed local process progress."""
-    timestamps = [
-        str(worker.get(key) or "").strip()
-        for key in ("last_event_at", "last_process_activity_at")
-    ]
-    timestamps = [value for value in timestamps if value]
-    return max(timestamps) if timestamps else None
 
 
 def terminate_worker_pid(pid: int | None) -> bool:
@@ -4045,24 +3943,6 @@ def worker_expected_completion_statuses(
     return statuses
 
 
-def worker_reported_outcome(worker: dict[str, Any]) -> dict[str, Any] | None:
-    result_path = str(worker.get("result_path") or "").strip()
-    if not result_path:
-        return None
-    try:
-        payload = json.loads(Path(result_path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict) or str(payload.get("outcome") or "").lower() not in {
-        "advanced",
-        "progress",
-        "blocked",
-        "failed",
-    }:
-        return None
-    return payload
-
-
 def worker_progress_retry_seconds(config: dict[str, Any]) -> int:
     settings = config.get("supervisor") or {}
     return max(0, int(settings.get("progress_retry_seconds", 120)))
@@ -4217,13 +4097,6 @@ def _claude_resume_allowed_tools(approval: dict[str, Any] | None) -> list[str]:
         if normalized and normalized not in candidates:
             candidates.append(normalized)
     return candidates
-
-
-def worker_supports_approval_resume(worker: dict[str, Any]) -> bool:
-    return bool(
-        str(worker.get("provider") or "").startswith("claude")
-        and (worker.get("session_id") or worker.get("resume_token"))
-    )
 
 
 def resume_claude_worker(
@@ -5041,14 +4914,6 @@ def poll_workers(
     return changed
 
 
-def trim_worker_history(state: dict[str, Any], max_entries: int) -> None:
-    workers = state.get("workers", {})
-    if len(workers) <= max_entries:
-        return
-    ordered = sorted(workers.items(), key=lambda item: item[1].get("last_event_at") or "")
-    state["workers"] = dict(ordered[-max_entries:])
-
-
 def reconcile_queue_records(config: dict[str, Any], state: dict[str, Any]) -> bool:
     changed = False
     queue_events = state.get("queue", {}).get("events", {})
@@ -5071,29 +4936,6 @@ def reconcile_queue_records(config: dict[str, Any], state: dict[str, Any]) -> bo
             changed = True
     return changed
 
-
-
-def parse_worker_dispatched_at(run_id: str | None) -> datetime | None:
-    """Extract the dispatch timestamp embedded in a worker run_id.
-
-    Production run_ids are formatted as ``<provider>-<YYYYMMDDTHHMMSSZ>-<hash>``
-    (see worker spawn paths). The supervisor never stored a dedicated
-    ``dispatched_at`` field on worker records, so parsing the run_id is the
-    least invasive way to recover the dispatch moment for cooldown checks.
-
-    Returns ``None`` when the run_id is missing or none of its dash-separated
-    components parse as the expected timestamp shape — that preserves prior
-    behaviour for synthetic test fixtures whose run_ids are short slugs like
-    ``run-1`` / ``old-run``.
-    """
-    if not run_id:
-        return None
-    for part in str(run_id).split("-"):
-        try:
-            return datetime.strptime(part, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-    return None
 
 
 def worker_in_dispatch_cooldown(
