@@ -1,0 +1,26 @@
+[Unit]
+Description=DRTS dashboard Cloudflare quick tunnel
+Documentation=file:@RELEASE_ROOT@/tools/development-orchestrator/systemd/README.md
+After=network-online.target drts-dashboard.service
+Wants=network-online.target
+Requires=drts-dashboard.service
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO_ROOT@
+# Refuse to publish a tunnel to a port nothing is serving: a quick tunnel that
+# resolves to a closed port hands out a URL that answers 502, which reads as a
+# broken dashboard rather than an absent one.
+ExecStartPre=/usr/bin/curl --fail --silent --show-error --max-time 10 http://127.0.0.1:@DASHBOARD_PORT@/index.html
+ExecStart=%h/.local/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:@DASHBOARD_PORT@
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=drts-dashboard-tunnel
+
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
