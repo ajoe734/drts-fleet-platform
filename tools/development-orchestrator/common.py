@@ -816,6 +816,27 @@ def spawn_background_process(
     launched_command = list(command)
     if worker_unit and shutil.which("systemd-run"):
         log_target = str(log_path.resolve())
+        # `cwd=` below configures systemd-run itself. The transient service it
+        # asks systemd to create does not inherit it -- a unit with no
+        # WorkingDirectory starts in $HOME -- so every worker launched through
+        # a unit began life outside the repository, whatever workspace the
+        # supervisor had just built and recorded for it.
+        #
+        # Measured on 2026-08-21: 41 of 41 dispatched Claude workers reported
+        # `cwd: /home/lupin` at init. Two consequences, both of which looked
+        # like separate problems for days. The worker starts outside the
+        # project, so .claude/settings.local.json never loads and it has no
+        # PreToolUse hook at all -- the permission broker's deny list and
+        # guards were inert for every dispatched worker, 0 events in a day of
+        # dispatch. And it has to pick somewhere to work, with its assigned
+        # worktree present only in the environment, so the canonical checkout
+        # is the discoverable choice: HEAD on the shared tree moved four times
+        # in the twenty-six minutes this was found.
+        #
+        # Taken from the same `cwd` the Popen call uses rather than from
+        # metadata, so the unit cannot disagree with the launcher about where
+        # the worker is supposed to stand.
+        working_directory = str(Path(cwd).resolve()) if cwd else str(ROOT)
         launched_command = [
             "systemd-run",
             "--user",
@@ -823,6 +844,7 @@ def spawn_background_process(
             "--collect",
             "--service-type=exec",
             f"--unit={worker_unit}",
+            f"--property=WorkingDirectory={working_directory}",
             f"--property=StandardOutput=append:{log_target}",
             f"--property=StandardError=append:{log_target}",
             *[f"--property={value}" for value in worker_properties],
