@@ -57,6 +57,20 @@ from control_plane.domain.chair_policy import (
     normalize_review_defaults as normalize_domain_review_defaults,
 )
 from control_plane.infra.approval_repo import load_approval_state
+from control_plane.domain.task_records import (
+    _has_dispatchable_backlog,
+    _task_branch,
+    _task_is_open,
+    build_dispatch_event,
+    current_dispatch_event_key,
+    dispatch_reason_priority,
+    outstanding_queue_event_references,
+    ready_dispatch_signature,
+    task_index_from_status,
+    task_is_dispatch_eligible_for_agent,
+    task_role_for_dispatch_reason,
+    workspace_baseline_cover_task_ids,
+)
 from control_plane.infra.agent_directory import (
     adapter_info_for_agent,
     display_name_is_legacy_alias,
@@ -751,10 +765,6 @@ def _git_capture(repo_root: Path, args: list[str], *, timeout: float = 30.0) -> 
         capture_output=True,
         timeout=timeout,
     )
-
-
-def _task_branch(agent_id: str, task_id: str) -> str:
-    return f"{normalize_agent_id(agent_id)}/{task_id.lower()}"
 
 
 def _execution_branch(repo_root: Path, request: DeliveryRequest) -> str:
@@ -2866,15 +2876,6 @@ def clear_failure_streak(state: dict[str, Any], task_id: str, role: str | None =
     registry.pop(failure_streak_key(task_id, role), None)
 
 
-def task_role_for_dispatch_reason(reason: str | None) -> str | None:
-    normalized = str(reason or "").strip()
-    if normalized == "review_ready_dispatch":
-        return "reviewer"
-    if normalized in {"owned_in_progress_dispatch", "owned_ready_dispatch"}:
-        return "owner"
-    return None
-
-
 def worker_assignment_role(config: dict[str, Any], worker: dict[str, Any], task: dict[str, Any] | None) -> str | None:
     role = task_role_for_dispatch_reason(((worker.get("request_snapshot") or {}).get("reason")))
     if role:
@@ -2894,17 +2895,6 @@ def worker_assignment_role(config: dict[str, Any], worker: dict[str, Any], task:
     if normalize_agent_id(str(task.get("owner") or "")) in agent_ids:
         return "owner"
     return None
-
-
-def _task_is_open(task: dict[str, Any]) -> bool:
-    return str(task.get("status") or "").lower() not in {"done", "superseded"}
-
-
-def workspace_baseline_cover_task_ids(task: dict[str, Any]) -> set[str]:
-    raw = task.get("covers_task_ids")
-    if not isinstance(raw, list):
-        return set()
-    return {str(item).strip() for item in raw if str(item).strip()}
 
 
 def workspace_baseline_repair_task(status: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -5203,27 +5193,6 @@ def finalize_queue_event_record(config: dict[str, Any], state: dict[str, Any], w
 
 
 
-def outstanding_queue_event_references(state: dict[str, Any]) -> set[str]:
-    """Queue events a consumer other than a live worker has not finished with.
-
-    Pruning asked only whether a worker was still active, but a worker is not
-    the sole holder of an event: the chair keeps its own reference through
-    active_review.queue_event_id and reads the settled record back to tell a run
-    that produced nothing apart from an event that disappeared. Dropping the
-    record first made the accurate branch unreachable -- across 148,208 logged
-    events chair_review_missing_output never fired once, while its fallback
-    fired 45,923 times. The reference is released as soon as the review settles,
-    so nothing accumulates.
-    """
-    references: set[str] = set()
-    active_review = (state.get("chair_review") or {}).get("active_review")
-    if isinstance(active_review, dict):
-        event_id = str(active_review.get("queue_event_id") or "").strip()
-        if event_id:
-            references.add(event_id)
-    return references
-
-
 def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
     task_map = task_index_from_status(config, load_status(config))
     active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
@@ -5316,41 +5285,6 @@ def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
         return kept, changed
 
     return queue_repository(config).update(prune_loaded_queue)
-
-
-def task_index_from_status(config: dict[str, Any], status: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    schema = config.get("schema", {})
-    tasks_path = schema.get("tasks_path", "tasks")
-    task_id_field = schema.get("task_id_field", "id")
-    return {
-        str(task.get(task_id_field)): task
-        for task in status.get(tasks_path, [])
-        if task.get(task_id_field)
-    }
-
-
-def current_dispatch_event_key(config: dict[str, Any], event: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> str | None:
-    reason = str(event.get("reason") or "")
-    task_id = str(event.get("task_id") or "")
-    task = task_map.get(task_id)
-    if not task:
-        return None
-    target_agent = str(event.get("target_display_name") or display_name_for(config, str(event.get("target_agent") or "")))
-    decision = resolve_domain_dispatch_target(task, task_map, ReadyDispatchPolicy.from_config(config))
-    if decision is None or decision.reason.value != reason or decision.target_agent != target_agent:
-        return None
-    return str(build_domain_dispatch_event(task, decision, task_map).get("key") or "")
-
-
-def dispatch_reason_priority(reason: str | None) -> int | None:
-    normalized = str(reason or "")
-    priorities = {
-        "acceptance_ready_dispatch": 0,
-        "review_ready_dispatch": 0,
-        "owned_in_progress_dispatch": 1,
-        "owned_ready_dispatch": 2,
-    }
-    return priorities.get(normalized)
 
 
 def agent_dispatch_loads(
@@ -5508,36 +5442,6 @@ def stale_dispatch_skip_message(config: dict[str, Any], event: dict[str, Any], t
         return f"Skipped stale queued wake event for {task_id}: task state changed after the wake-up was queued."
 
     return None
-
-
-def ready_dispatch_signature(task: dict[str, Any], reason: str, task_map: dict[str, dict[str, Any]]) -> str:
-    return domain_ready_dispatch_signature(task, reason, task_map)
-
-
-def build_dispatch_event(task: dict[str, Any], target_agent: str, reason: str, task_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    decision = DomainDispatchDecision(
-        task_id=str(task.get("id") or ""),
-        target_agent=target_agent,
-        reason=DomainDispatchReason(reason),
-    )
-    return build_domain_dispatch_event(task, decision, task_map)
-
-
-def task_is_dispatch_eligible_for_agent(task: dict[str, Any], agent_name: str) -> bool:
-    raw = task.get("eligible_agents")
-    if raw is None:
-        raw = task.get("eligibility")
-    if raw is None:
-        return True
-    if isinstance(raw, list):
-        allowed = {str(item).strip() for item in raw if str(item).strip()}
-        return not allowed or agent_name in allowed
-    if isinstance(raw, dict):
-        allowed = raw.get("agents")
-        if isinstance(allowed, list):
-            normalized = {str(item).strip() for item in allowed if str(item).strip()}
-            return not normalized or agent_name in normalized
-    return True
 
 
 def chair_review_output_paths(config: dict[str, Any], agent_name: str) -> tuple[Path, Path]:
@@ -7686,15 +7590,6 @@ def dispatch_ready_tasks(
             dispatcher_state["next_agent_cursor"] = start_cursor
 
     return changed
-
-
-def _has_dispatchable_backlog(status: dict[str, Any]) -> bool:
-    dispatchable = {"backlog", "todo", "in_progress", "review"}
-    for task in (status.get("tasks") or []):
-        if isinstance(task, dict) and str(task.get("status") or "") in dispatchable:
-            return True
-    return False
-
 
 
 def _has_any_dispatchable_lane(
