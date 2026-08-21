@@ -72,7 +72,10 @@ describe("CONF-IDEM-003: Idempotency for Finance & Reporting Commands", () => {
       };
 
       await expect(
-        billingSettlementController.generateDriverStatements(command, undefined),
+        billingSettlementController.generateDriverStatements(
+          command,
+          undefined,
+        ),
       ).rejects.toThrowError(ApiRequestError);
 
       try {
@@ -204,11 +207,12 @@ describe("CONF-IDEM-003: Idempotency for Finance & Reporting Commands", () => {
         setupFinanceAndReportingHarness();
 
       // Generate statements to produce a reimbursement batch
-      const genResult =
-        await billingSettlementService.generateDriverStatements({
+      const genResult = await billingSettlementService.generateDriverStatements(
+        {
           periodMonth: "2026-03",
           driverId: "drv-demo-001",
-        });
+        },
+      );
       const batchId = genResult.reimbursementBatchIds[0]!;
       const batch = billingSettlementService.getReimbursementBatch(batchId);
 
@@ -239,11 +243,12 @@ describe("CONF-IDEM-003: Idempotency for Finance & Reporting Commands", () => {
         idempotencyRepository,
       } = setupFinanceAndReportingHarness();
 
-      const genResult =
-        await billingSettlementService.generateDriverStatements({
+      const genResult = await billingSettlementService.generateDriverStatements(
+        {
           periodMonth: "2026-03",
           driverId: "drv-demo-001",
-        });
+        },
+      );
       const batchId = genResult.reimbursementBatchIds[0]!;
       const batch = billingSettlementService.getReimbursementBatch(batchId);
 
@@ -299,11 +304,12 @@ describe("CONF-IDEM-003: Idempotency for Finance & Reporting Commands", () => {
       const { billingSettlementController, billingSettlementService } =
         setupFinanceAndReportingHarness();
 
-      const genResult =
-        await billingSettlementService.generateDriverStatements({
+      const genResult = await billingSettlementService.generateDriverStatements(
+        {
           periodMonth: "2026-03",
           driverId: "drv-demo-001",
-        });
+        },
+      );
       const batchId = genResult.reimbursementBatchIds[0]!;
       const batch = billingSettlementService.getReimbursementBatch(batchId);
 
@@ -398,28 +404,29 @@ describe("CONF-IDEM-003: Idempotency for Finance & Reporting Commands", () => {
         setupFinanceAndReportingHarness();
 
       const command: CreateReportJobCommand = {
-        jobType: "tenant_operations_summary",
+        // Was "tenant_operations_summary", which is not a report type at all.
+        // This case is about idempotency scoping between tenants, so it needs
+        // any real tenant-scoped report.
+        jobType: "monthly_trip_report",
         format: "csv",
       };
       const sharedKey = "tenant-shared-report-key";
 
       // Tenant A
-      const tenantAResp =
-        await reportingFilingController.createTenantReportJob(
-          command,
-          null,
-          "tenant-alpha",
-          sharedKey,
-        );
+      const tenantAResp = await reportingFilingController.createTenantReportJob(
+        command,
+        null,
+        "tenant-alpha",
+        sharedKey,
+      );
 
       // Tenant B using same key name should not collide because scope is tenant-isolated
-      const tenantBResp =
-        await reportingFilingController.createTenantReportJob(
-          command,
-          null,
-          "tenant-beta",
-          sharedKey,
-        );
+      const tenantBResp = await reportingFilingController.createTenantReportJob(
+        command,
+        null,
+        "tenant-beta",
+        sharedKey,
+      );
 
       expect(tenantAResp.data.jobId).not.toBe(tenantBResp.data.jobId);
 
@@ -518,9 +525,7 @@ describe("CONF-IDEM-003: Idempotency for Finance & Reporting Commands", () => {
           idempotencyKey,
         );
 
-      expect(replayResponse.data.packageId).toBe(
-        firstResponse.data.packageId,
-      );
+      expect(replayResponse.data.packageId).toBe(firstResponse.data.packageId);
 
       // Critical: No second filing package was generated
       const packagesAfterReplay = reportingFilingService.listFilingPackages();
