@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import re
 import socket
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -145,3 +146,99 @@ def _sd_notify(message: str) -> None:
             sock.close()
     except OSError:
         return
+
+
+# Worker CPU accounting reads the same two sources as the guards above --
+# /proc/<pid>/stat and the cgroup files -- and was the only reason those
+# readers still had a caller left in the runtime module.
+def worker_process_tree_cpu_ticks(worker_pids: list[int]) -> dict[int, int]:
+    """Return cumulative CPU ticks for each worker and all of its descendants.
+
+    A long verification command can be quiet at the agent protocol layer while
+    its child compiler/test processes continue to make progress. Walking only
+    known worker process trees avoids a full /proc scan on every poll.
+    """
+    roots = {pid for pid in worker_pids if pid > 0}
+    if not roots:
+        return {}
+
+    def read_accounting(pid: int) -> tuple[int, int] | None:
+        try:
+            return parse_proc_stat_process_accounting(
+                Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="ignore")
+            )
+        except OSError:
+            return None
+
+    def child_pids(pid: int) -> list[int]:
+        try:
+            values = Path(f"/proc/{pid}/task/{pid}/children").read_text(encoding="utf-8").split()
+        except OSError:
+            return []
+        return [int(value) for value in values if value.isdigit()]
+
+    totals: dict[int, int] = {}
+    for root_pid in roots:
+        root_details = read_accounting(root_pid)
+        # Worker PIDs are spawned directly by this supervisor. Reject a stale
+        # state PID that has since been reused by an unrelated process.
+        if root_details is None or root_details[0] != os.getpid():
+            continue
+        pending = [root_pid]
+        seen: set[int] = set()
+        total = 0
+        while pending:
+            pid = pending.pop()
+            if pid in seen:
+                continue
+            seen.add(pid)
+            details = read_accounting(pid)
+            if details is None:
+                continue
+            total += details[1]
+            pending.extend(child_pids(pid))
+        if root_pid in seen and total:
+            totals[root_pid] = total
+    return totals
+
+
+def worker_unit_cpu_usage(worker: dict[str, Any]) -> int | None:
+    unit_name = str(worker.get("worker_unit") or "").strip()
+    cgroup = _current_cgroup_path()
+    if not unit_name or cgroup is None:
+        return None
+    try:
+        for line in (cgroup / unit_name / "cpu.stat").read_text(encoding="utf-8").splitlines():
+            key, value = line.split(maxsplit=1)
+            if key == "usage_usec":
+                return int(value)
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def observe_worker_process_activity(worker: dict[str, Any], cpu_ticks: int | None, now: datetime) -> tuple[bool, bool]:
+    """Return whether process activity advanced and whether state must persist it."""
+    if cpu_ticks is None:
+        return False, False
+    try:
+        previous_ticks = int(worker.get("process_tree_cpu_ticks"))
+    except (TypeError, ValueError):
+        previous_ticks = None
+    worker["process_tree_cpu_ticks"] = cpu_ticks
+    if previous_ticks is not None and cpu_ticks <= previous_ticks:
+        return False, False
+
+    now_text = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    previous_activity = worker.get("last_process_activity_at")
+    if previous_ticks is None:
+        worker["last_process_activity_at"] = now_text
+        return True, True
+    try:
+        previous_dt = datetime.fromisoformat(str(previous_activity).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        previous_dt = None
+    if previous_dt is None or (now - previous_dt).total_seconds() >= 30:
+        worker["last_process_activity_at"] = now_text
+        return True, True
+    return True, False
