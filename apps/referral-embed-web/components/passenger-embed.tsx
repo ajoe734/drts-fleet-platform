@@ -309,11 +309,11 @@ function ActionButton({
   }
 
   return href.startsWith("tel:") ? (
-    <a href={href} style={style}>
+    <a href={href} data-drt-operation={dataDrtOperation} style={style}>
       {content}
     </a>
   ) : (
-    <Link href={href} style={style}>
+    <Link href={href} data-drt-operation={dataDrtOperation} style={style}>
       {content}
     </Link>
   );
