@@ -453,7 +453,8 @@
           "method": "POST",
           "headers": {
             "authorization": "Bearer {{tenantSessionToken}}",
-            "x-tenant-id": "10000000-0000-0000-0000-000000000201"
+            "x-tenant-id": "10000000-0000-0000-0000-000000000201",
+            "idempotency-key": "operational-create-{{runId}}"
           },
           "body": {
             "businessDispatchSubtype": "enterprise_dispatch",
@@ -491,7 +492,8 @@
           "method": "POST",
           "headers": {
             "authorization": "Bearer {{tenantSessionToken}}",
-            "x-tenant-id": "10000000-0000-0000-0000-000000000201"
+            "x-tenant-id": "10000000-0000-0000-0000-000000000201",
+            "idempotency-key": "operational-dispatch-timeout-{{runId}}"
           },
           "body": {
             "timeoutReasonCode": "acceptance_timeout"

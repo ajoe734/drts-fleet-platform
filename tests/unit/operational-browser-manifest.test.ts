@@ -97,6 +97,7 @@ describe("operational browser journeys manifest guard", () => {
           headers: expect.objectContaining({
             authorization: "Bearer {{tenantSessionToken}}",
             "x-tenant-id": "10000000-0000-0000-0000-000000000201",
+            "idempotency-key": "operational-create-{{runId}}",
           }),
           capture: { tenantBookingId: "data.booking_id" },
         }),
@@ -106,6 +107,7 @@ describe("operational browser journeys manifest guard", () => {
           headers: expect.objectContaining({
             authorization: "Bearer {{tenantSessionToken}}",
             "x-tenant-id": "10000000-0000-0000-0000-000000000201",
+            "idempotency-key": "operational-dispatch-timeout-{{runId}}",
           }),
         }),
       ]),
