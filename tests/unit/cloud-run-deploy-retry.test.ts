@@ -194,7 +194,12 @@ describe("Cloud Run deploy quota retry", () => {
     const scopes = getIamTenantRoleScopes("tenant_admin");
 
     expect(scopes).not.toBeNull();
-    expect(sessionStep).toContain("x-actor-id: tenant-user-demo-001");
+    expect(sessionStep).toContain(
+      "x-actor-id: 10000000-0000-0000-0000-000000000901",
+    );
+    expect(sessionStep).toContain(
+      "x-tenant-id: 10000000-0000-0000-0000-000000000201",
+    );
     expect(sessionStep).toContain(`x-scopes: ${scopes?.join(" ")}`);
   });
 
@@ -348,12 +353,14 @@ describe("Cloud Run deploy quota retry", () => {
     expect(candidateAcceptance).toContain(
       "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
     );
-    expect(candidateAcceptance).toContain("x-actor-id: tenant-user-demo-001");
+    expect(candidateAcceptance).toContain(
+      "x-actor-id: 10000000-0000-0000-0000-000000000901",
+    );
     const lineContinuation = "\\";
     expect(candidateAcceptance).toContain(
       [
         `--header 'x-actor-type: tenant_admin' ${lineContinuation}`,
-        `--header 'x-actor-id: tenant-user-demo-001' ${lineContinuation}`,
+        `--header 'x-actor-id: 10000000-0000-0000-0000-000000000901' ${lineContinuation}`,
       ].join("\n            "),
     );
     expect(workflow).toContain("DRTS_INTERNAL_KEY_ENFORCED=false");
