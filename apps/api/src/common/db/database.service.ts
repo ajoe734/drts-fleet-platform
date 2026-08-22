@@ -6,6 +6,19 @@ import {
   type QueryResultRow,
 } from "pg";
 
+export function resolveDatabasePoolMax(rawValue: string | undefined) {
+  if (rawValue === undefined || rawValue.trim() === "") {
+    return undefined;
+  }
+
+  const parsed = Number(rawValue);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error("DATABASE_POOL_MAX must be a positive integer");
+  }
+
+  return parsed;
+}
+
 @Injectable()
 export class DatabaseService implements OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
@@ -21,6 +34,7 @@ export class DatabaseService implements OnModuleDestroy {
 
     this.pool = new Pool({
       connectionString,
+      max: resolveDatabasePoolMax(process.env.DATABASE_POOL_MAX),
     });
   }
 
