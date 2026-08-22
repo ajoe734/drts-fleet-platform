@@ -6,6 +6,15 @@ Planning source:
 System design:
 `docs/02-architecture/s1f-release-finalization-system-design-20260821.md`
 
+## Current scheduling decision (2026-08-22)
+
+The immediate target is code and required CI completion. `AUD-001` and
+`PRE-001` provide the required evidence for that target. `GCP-001`, `DEP-001`,
+`UAT-001`, and `CLOSE-001` remain historical and future-live-release records,
+but no deployment retry or runtime acceptance should be dispatched while the
+live GCP milestone is deferred. Deferral is not acceptance: their live evidence
+fields remain unset until those tasks are explicitly resumed.
+
 ## Parallel wave A
 
 ### S1F-REL-FIN-AUD-001 - Reconcile release status and SHA evidence
@@ -119,4 +128,3 @@ Acceptance:
 - Treat GitHub Actions and GCP responses as external evidence, not code defects.
 - Keep the original `S1F-REL-001` history; this follow-up is the authoritative
   correction and finalization chain.
-
