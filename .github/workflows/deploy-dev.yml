@@ -1363,9 +1363,9 @@ jobs:
             --header 'content-type: application/json' \
             --header "x-drts-internal-key: ${internal_key}" \
             --header 'x-actor-type: tenant_admin' \
-            --header 'x-actor-id: tenant-user-demo-001' \
+            --header 'x-actor-id: 10000000-0000-0000-0000-000000000901' \
             --header 'x-realm: tenant' \
-            --header 'x-tenant-id: tenant-demo-001' \
+            --header 'x-tenant-id: 10000000-0000-0000-0000-000000000201' \
             --header 'x-scopes: identity:read audit:read tenant:read tenant:write tenant:webhooks:read tenant:webhooks:write tenant:sla:read tenant:sla:write tenant:billing:read tenant:billing:write reports:read reports:write' \
             --data '{}')"
           http_status="$(echo "$session_response" | tail -n 1)"
