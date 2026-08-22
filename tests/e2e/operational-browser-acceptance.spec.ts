@@ -582,9 +582,8 @@ for (const journey of manifest.journeys) {
         );
         await activeControl.click({ noWaitAfter: true });
         await navigation;
-        await page.waitForLoadState("networkidle", {
-          timeout: interactionTimeoutMs,
-        });
+        // URL convergence plus authority readback is the contract. Some target
+        // screens keep background requests open and never become network-idle.
         const target = page.url();
         if (operation.readback) {
           await assertReadback(
