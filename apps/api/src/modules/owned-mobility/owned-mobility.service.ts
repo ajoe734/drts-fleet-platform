@@ -114,7 +114,10 @@ import {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
-import { IdempotencyRepository, IdempotencyService } from "../../common/idempotency";
+import {
+  IdempotencyRepository,
+  IdempotencyService,
+} from "../../common/idempotency";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { resolvePassengerSubjectRef } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
@@ -160,6 +163,8 @@ type TenantBookingResult = {
   status: OwnedOrderRecord["status"];
   replayed: boolean;
 };
+
+const REFERRAL_PASSENGER_CANCEL_WINDOW_MS = 2 * 60_000;
 
 type PartnerBookingContext = {
   partnerId: string;
@@ -653,7 +658,9 @@ export class OwnedMobilityService
     options?: { required?: boolean },
   ): MaybePromise<OwnedOrderRecord> {
     const resolvedKey =
-      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
 
     if (resolvedKey || options?.required) {
       return this._executePassengerOrderIdempotent(
@@ -694,9 +701,7 @@ export class OwnedMobilityService
       required: options?.required ?? false,
       payload: {
         ...command,
-        ...(command.idempotencyKey
-          ? { idempotencyKey: resolvedKey }
-          : {}),
+        ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
       },
       execute: async () => {
         const order = this._executeCreatePassengerOrder(
@@ -1239,7 +1244,9 @@ export class OwnedMobilityService
     options?: { required?: boolean },
   ): MaybePromise<TenantBookingResult> {
     const resolvedKey =
-      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
 
     if (resolvedKey || options?.required) {
       return this._executeTenantBookingIdempotent(
@@ -1278,14 +1285,16 @@ export class OwnedMobilityService
       scope,
       idempotencyKey: resolvedKey,
       tenantId,
-      actorId: identity?.actorId ?? command.passengerId ?? command.passenger?.passengerId ?? null,
+      actorId:
+        identity?.actorId ??
+        command.passengerId ??
+        command.passenger?.passengerId ??
+        null,
       requestPath: "/owned-mobility/tenant/bookings",
       required: options?.required ?? false,
       payload: {
         ...command,
-        ...(command.idempotencyKey
-          ? { idempotencyKey: resolvedKey }
-          : {}),
+        ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
       },
       execute: async () => {
         const bookingResult = await this._executeCreateTenantBooking(
@@ -2475,7 +2484,9 @@ export class OwnedMobilityService
     options?: { required?: boolean },
   ): MaybePromise<any> {
     const resolvedKey =
-      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
 
     if (resolvedKey || options?.required) {
       return this._executeDispatchOrderIdempotent(
@@ -2510,9 +2521,7 @@ export class OwnedMobilityService
       required: options?.required ?? false,
       payload: {
         ...command,
-        ...(command.idempotencyKey
-          ? { idempotencyKey: resolvedKey }
-          : {}),
+        ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
       },
       execute: async () => {
         const res = this._executeDispatchOrder(orderId, command, requestId);
@@ -2795,7 +2804,9 @@ export class OwnedMobilityService
     options?: { required?: boolean },
   ): MaybePromise<any> {
     const resolvedKey =
-      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
 
     if (resolvedKey || options?.required) {
       return this._executeRedispatchOrderIdempotent(
@@ -2830,9 +2841,7 @@ export class OwnedMobilityService
       required: options?.required ?? false,
       payload: {
         ...command,
-        ...(command.idempotencyKey
-          ? { idempotencyKey: resolvedKey }
-          : {}),
+        ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
       },
       execute: async () => {
         const res = this._executeRedispatchOrder(orderId, command, requestId);
@@ -3560,7 +3569,9 @@ export class OwnedMobilityService
     options?: { required?: boolean },
   ): MaybePromise<DispatchAssignmentResult> {
     const resolvedKey =
-      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
 
     if (resolvedKey || options?.required) {
       return this._executeAssignDispatchIdempotent(
@@ -3604,9 +3615,7 @@ export class OwnedMobilityService
       required: options?.required ?? false,
       payload: {
         ...command,
-        ...(command.idempotencyKey
-          ? { idempotencyKey: resolvedKey }
-          : {}),
+        ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
       },
       execute: async () => {
         const res = await this.createDispatchAssignment(
@@ -3634,7 +3643,9 @@ export class OwnedMobilityService
     options?: { required?: boolean },
   ): MaybePromise<DispatchAssignmentResult> {
     const resolvedKey =
-      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
 
     if (resolvedKey || options?.required) {
       return this._executeReassignDispatchIdempotent(
@@ -3676,9 +3687,7 @@ export class OwnedMobilityService
       required: options?.required ?? false,
       payload: {
         ...command,
-        ...(command.idempotencyKey
-          ? { idempotencyKey: resolvedKey }
-          : {}),
+        ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
       },
       execute: async () => {
         const res = await this._executeReassignDispatch(
@@ -6838,6 +6847,16 @@ export class OwnedMobilityService
           status: order.status,
         },
       );
+    }
+
+    const createdAtMs = new Date(order.createdAt).getTime();
+    if (
+      order.partnerEntrySlug &&
+      order.status === "created" &&
+      Number.isFinite(createdAtMs) &&
+      Date.now() <= createdAtMs + REFERRAL_PASSENGER_CANCEL_WINDOW_MS
+    ) {
+      return;
     }
 
     if (order.dispatchSemantics === "reservation") {
@@ -10603,7 +10622,9 @@ export class OwnedMobilityService
     // Reconcile header and body idempotency key with documented precedence:
     // HTTP Header `Idempotency-Key` takes precedence over body field `idempotencyKey`.
     const resolvedIdempotencyKey =
-      idempotencyKeyHeader?.trim() || command.idempotencyKey?.trim() || undefined;
+      idempotencyKeyHeader?.trim() ||
+      command.idempotencyKey?.trim() ||
+      undefined;
 
     if (resolvedIdempotencyKey) {
       const existing = Array.from(this.orders.values()).find(
@@ -10644,7 +10665,8 @@ export class OwnedMobilityService
             : {}),
         },
         execute: async () => {
-          const nowIso = new Date().toISOString();
+          const reservationWindowStart =
+            command.scheduledAt ?? new Date().toISOString();
           const tenantBookingCommand: CreateTenantBookingCommand = {
             businessDispatchSubtype: partnerEntry.businessDispatchSubtype,
             direction: "pickup",
@@ -10658,8 +10680,10 @@ export class OwnedMobilityService
               lat: 25.048,
               lng: 121.517,
             },
-            reservationWindowStart: nowIso,
-            reservationWindowEnd: new Date(Date.now() + 3600000).toISOString(),
+            reservationWindowStart,
+            reservationWindowEnd: new Date(
+              new Date(reservationWindowStart).getTime() + 3600000,
+            ).toISOString(),
             passengerId,
             passenger: {
               passengerId,
@@ -10714,7 +10738,8 @@ export class OwnedMobilityService
       };
     }
 
-    const nowIso = new Date().toISOString();
+    const reservationWindowStart =
+      command.scheduledAt ?? new Date().toISOString();
     const tenantBookingCommand: CreateTenantBookingCommand = {
       // The partner entry owns the service product. VehicleType is a passenger
       // display preference, not an authorization to select a product.
@@ -10730,8 +10755,10 @@ export class OwnedMobilityService
         lat: 25.048,
         lng: 121.517,
       },
-      reservationWindowStart: nowIso,
-      reservationWindowEnd: new Date(Date.now() + 3600000).toISOString(),
+      reservationWindowStart,
+      reservationWindowEnd: new Date(
+        new Date(reservationWindowStart).getTime() + 3600000,
+      ).toISOString(),
       passengerId,
       passenger: {
         passengerId,
