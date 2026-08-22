@@ -4,7 +4,7 @@
   "candidateSha": "__SET_DRTS_CANDIDATE_SHA__",
   "journeys": [
     {
-      "id": "referral-create-read-cancel-rate-receipt",
+      "id": "referral-create-read-cancel-receipt",
       "surface": "referral",
       "baseUrlEnv": "DRTS_DEV_REFERRAL_EMBED_BASE_URL",
       "route": "/embed/yuhe-residence?screen=book",
@@ -66,19 +66,9 @@
           }
         },
         {
-          "kind": "request",
-          "name": "rate",
-          "control": "[data-drt-operation='referral-rate']",
-          "requestUrlIncludes": "/api/referral/rating",
-          "requestMethod": "POST",
-          "responseKind": "json",
-          "resultIdPath": "data.orderId",
-          "readback": {
-            "url": "/api/referral/history/{resultId}",
-            "idPath": "data.orderId",
-            "statePath": "data.status",
-            "expectedState": "cancelled"
-          }
+          "kind": "absence",
+          "name": "cancelled-trip-rating",
+          "control": "[data-drt-operation='referral-rate']"
         },
         {
           "kind": "navigation",

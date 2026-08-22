@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { ApiClient, createBearerClient } from "@drts/api-client";
+import { ApiClient, createTenantBearerClient } from "@drts/api-client";
 import { getServerApiBaseUrl } from "./runtime-config";
 import {
   TENANT_SESSION_COOKIE_NAME,
@@ -8,6 +8,7 @@ import {
 } from "./auth/constants";
 
 export const API_URL = getServerApiBaseUrl();
+const DEFAULT_TENANT_ID = "10000000-0000-0000-0000-000000000201";
 
 export interface TenantSessionContext {
   accessToken: string;
@@ -26,8 +27,12 @@ export async function getTenantSession(): Promise<TenantSessionContext | null> {
   }
 }
 
-export function createTenantBearerClientFromToken(accessToken: string): ApiClient {
-  return createBearerClient(API_URL, accessToken);
+export function createTenantBearerClientFromToken(
+  accessToken: string,
+): ApiClient {
+  const tenantId =
+    process.env.DRTS_TENANT_CONSOLE_TENANT_ID?.trim() || DEFAULT_TENANT_ID;
+  return createTenantBearerClient(API_URL, accessToken, tenantId);
 }
 
 export async function getTenantClient(): Promise<ApiClient> {
