@@ -4,12 +4,10 @@ import {
   TENANT_CSRF_COOKIE_NAME,
   TENANT_CSRF_HEADER_NAME,
 } from "../../../lib/auth/constants";
-import {
-  verifyCsrfToken,
-  verifySameOrigin,
-} from "../../../lib/auth/session";
+import { verifyCsrfToken, verifySameOrigin } from "../../../lib/auth/session";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
+const DEFAULT_TENANT_ID = "10000000-0000-0000-0000-000000000201";
 const METADATA_IDENTITY_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
 const RUN_APP_HOST_SUFFIX = ".a.run.app";
@@ -122,7 +120,11 @@ function buildTargetUrl(request: NextRequest, path: string[]) {
   return targetUrl;
 }
 
-function copyRequestHeaders(request: NextRequest) {
+function resolveTenantId() {
+  return process.env.DRTS_TENANT_CONSOLE_TENANT_ID?.trim() || DEFAULT_TENANT_ID;
+}
+
+function copyRequestHeaders(request: NextRequest, path: string[]) {
   const headers = new Headers();
 
   request.headers.forEach((value, key) => {
@@ -132,9 +134,15 @@ function copyRequestHeaders(request: NextRequest) {
     headers.set(key, value);
   });
 
-  const sessionToken = request.cookies.get(TENANT_SESSION_COOKIE_NAME)?.value?.trim();
+  const sessionToken = request.cookies
+    .get(TENANT_SESSION_COOKIE_NAME)
+    ?.value?.trim();
   if (sessionToken) {
     headers.set("authorization", `Bearer ${sessionToken}`);
+  }
+
+  if (path[0] === "tenant") {
+    headers.set("x-tenant-id", resolveTenantId());
   }
 
   return headers;
@@ -218,7 +226,12 @@ async function forward(
   }
 
   // Enforce same-origin & CSRF for state-mutating requests
-  if (method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE") {
+  if (
+    method === "POST" ||
+    method === "PUT" ||
+    method === "PATCH" ||
+    method === "DELETE"
+  ) {
     if (!verifySameOrigin(request)) {
       return NextResponse.json(
         {
@@ -244,7 +257,7 @@ async function forward(
   }
 
   const targetUrl = buildTargetUrl(request, path);
-  const headers = copyRequestHeaders(request);
+  const headers = copyRequestHeaders(request, path);
   await applyUpstreamAuth(headers, targetUrl);
 
   const init: RequestInit = {

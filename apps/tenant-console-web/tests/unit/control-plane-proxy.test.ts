@@ -14,6 +14,7 @@ import {
 describe("Control Plane Proxy Invariants", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    delete process.env.DRTS_TENANT_CONSOLE_TENANT_ID;
   });
 
   describe("Mutation CSRF and Same-Origin Protection", () => {
@@ -119,13 +120,38 @@ describe("Control Plane Proxy Invariants", () => {
 
       expect(response.status).toBe(200);
       expect(forwardedHeaders).not.toBeNull();
-      expect(forwardedHeaders!.get("authorization")).toBe("Bearer bearer-jwt-token-456");
+      expect(forwardedHeaders!.get("authorization")).toBe(
+        "Bearer bearer-jwt-token-456",
+      );
       expect(forwardedHeaders!.has("cookie")).toBe(false);
       expect(forwardedHeaders!.has("x-actor-id")).toBe(false);
       expect(forwardedHeaders!.has("x-realm")).toBe(false);
       expect(forwardedHeaders!.has("x-roles")).toBe(false);
-      expect(forwardedHeaders!.has("x-tenant-id")).toBe(false);
+      expect(forwardedHeaders!.get("x-tenant-id")).toBe(
+        "10000000-0000-0000-0000-000000000201",
+      );
       expect(forwardedHeaders!.has("x-drts-internal-key")).toBe(false);
+    });
+
+    it("uses the server tenant configuration instead of a browser-supplied tenant", async () => {
+      process.env.DRTS_TENANT_CONSOLE_TENANT_ID =
+        "10000000-0000-0000-0000-000000000299";
+      let forwardedHeaders: Headers | null = null;
+      global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+        forwardedHeaders = init.headers as Headers;
+        return { status: 200, headers: new Headers(), body: null } as Response;
+      });
+      const request = new NextRequest(
+        "http://localhost:3004/control-plane-proxy/tenant/bookings",
+        { method: "GET", headers: { "x-tenant-id": "spoofed-tenant" } },
+      );
+      const response = await proxyGet(request, {
+        params: Promise.resolve({ path: ["tenant", "bookings"] }),
+      });
+      expect(response.status).toBe(200);
+      expect(forwardedHeaders!.get("x-tenant-id")).toBe(
+        "10000000-0000-0000-0000-000000000299",
+      );
     });
   });
 
