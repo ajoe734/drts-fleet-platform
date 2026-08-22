@@ -798,9 +798,10 @@ jobs:
           fi
 
           # Use @ as the gcloud list delimiter because the allowlist itself is CSV.
-          # Two long-lived LISTEN bridges occupy pool clients; the third slot
-          # keeps startup and request queries moving within the 25-slot dev DB.
-          env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=3@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          # Two long-lived LISTEN bridges occupy pool clients. Four query slots
+          # keep startup and acceptance traffic moving; one API instance keeps
+          # rollout demand below the 25-connection dev database limit.
+          env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
             env_vars="${env_vars}@MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi
@@ -834,7 +835,7 @@ jobs:
             --set-env-vars "${{ steps.api_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.api_exposure_flag }} \
             --min-instances 0 \
-            --max-instances 3 \
+            --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
       - name: Resolve API URL
@@ -1379,6 +1380,26 @@ jobs:
           tenant_session="$(jq --exit-status --raw-output '.token' <<<"$response_body")"
           echo "::add-mask::$tenant_session"
           printf 'DRTS_OPERATIONAL_TENANT_SESSION_TOKEN=%s\n' "$tenant_session" >> "$GITHUB_ENV"
+
+          dispatch_response="$(curl --silent --show-error --write-out '\n%{http_code}' \
+            --request POST "${API_URL}/api/auth/token" \
+            --header 'content-type: application/json' \
+            --header "x-drts-internal-key: ${internal_key}" \
+            --header 'x-actor-type: tenant_admin' \
+            --header 'x-actor-id: 10000000-0000-0000-0000-000000000902' \
+            --header 'x-realm: tenant' \
+            --header 'x-tenant-id: 10000000-0000-0000-0000-000000000201' \
+            --header 'x-scopes: tenant:read tenant:write owned:read owned:write' \
+            --data '{}')"
+          http_status="$(echo "$dispatch_response" | tail -n 1)"
+          response_body="$(echo "$dispatch_response" | sed '$d')"
+          if [[ "$http_status" -lt 200 || "$http_status" -ge 300 ]]; then
+            echo "::error::Tenant Ops session issuance failed with HTTP ${http_status}: ${response_body}" >&2
+            exit 1
+          fi
+          dispatch_session="$(jq --exit-status --raw-output '.token' <<<"$response_body")"
+          echo "::add-mask::$dispatch_session"
+          printf 'DRTS_OPERATIONAL_DISPATCH_SESSION_TOKEN=%s\n' "$dispatch_session" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4
         with: { version: 10.33.0, run_install: false }
       - uses: actions/setup-node@v4

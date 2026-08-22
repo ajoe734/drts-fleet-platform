@@ -441,6 +441,9 @@
       "baseUrlEnv": "DRTS_DEV_TENANT_CONSOLE_BASE_URL",
       "route": "/bookings?q={{tenantBookingId}}",
       "actorScope": "tenant_admin",
+      "environmentVariables": {
+        "dispatchSessionToken": "DRTS_OPERATIONAL_DISPATCH_SESSION_TOKEN"
+      },
       "browserSession": {
         "cookieName": "drts_tenant_session",
         "tokenEnv": "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
@@ -491,7 +494,7 @@
           "path": "/api/orders/{{tenantOrderId}}/dispatch-timeout",
           "method": "POST",
           "headers": {
-            "authorization": "Bearer {{tenantSessionToken}}",
+            "authorization": "Bearer {{dispatchSessionToken}}",
             "x-tenant-id": "10000000-0000-0000-0000-000000000201",
             "idempotency-key": "operational-dispatch-timeout-{{runId}}"
           },

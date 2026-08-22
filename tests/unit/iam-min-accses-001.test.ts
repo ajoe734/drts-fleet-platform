@@ -61,7 +61,9 @@ async function expectApiError(
 ) {
   try {
     await fn();
-    throw new Error(`Expected ApiRequestError with code ${code}, but succeeded`);
+    throw new Error(
+      `Expected ApiRequestError with code ${code}, but succeeded`,
+    );
   } catch (err) {
     expect(err).toBeInstanceOf(ApiRequestError);
     if (err instanceof ApiRequestError) {
@@ -72,12 +74,23 @@ async function expectApiError(
 }
 
 describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revocation", () => {
+  it("limits owned-mobility operations to the tenant operations role", () => {
+    expect(getTenantRoleScopes("tenant_ops_admin")).toEqual(
+      expect.arrayContaining(["owned:read", "owned:write"]),
+    );
+    expect(getTenantRoleScopes("tenant_admin")).not.toEqual(
+      expect.arrayContaining(["owned:read", "owned:write"]),
+    );
+  });
+
   it("criterion 1: origin/dev has persistent platform account in identity repository", async () => {
     const { identityRepository } = createTestHarness();
     const seeded = await identityRepository.ensureDefaultPlatformAccount();
 
     expect(seeded.principal).toBeDefined();
-    expect(seeded.principal.principalId).toBe("principal_platform_admin_default");
+    expect(seeded.principal.principalId).toBe(
+      "principal_platform_admin_default",
+    );
     expect(seeded.principal.email).toBe("platform-admin@platform.drts");
     expect(seeded.principal.status).toBe("active");
 
@@ -547,9 +560,7 @@ describe("IAM-MIN-ACCSES-001 minimum account lifecycle and session logout/revoca
       },
     );
 
-    const newPayload = await jwtAuthService.verifyAccessToken(
-      newSession.token,
-    );
+    const newPayload = await jwtAuthService.verifyAccessToken(newSession.token);
     expect(newPayload).not.toBeNull();
 
     // 2. Disabling the user invalidates the new token

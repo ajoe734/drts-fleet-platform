@@ -396,14 +396,14 @@ export class OwnedMobilityController {
   }
 
   @Post("partner/referral/passenger/orders/:orderId/rating")
-  submitReferralPassengerRating(
+  async submitReferralPassengerRating(
     @Param("orderId") orderId: string,
     @Body() command: SubmitReferralPassengerRatingCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.submitReferralPassengerRating(
+      await this.ownedMobilityService.submitReferralPassengerRating(
         orderId,
         command,
         identity,

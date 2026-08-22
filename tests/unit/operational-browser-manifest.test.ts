@@ -84,6 +84,9 @@ describe("operational browser journeys manifest guard", () => {
       (j: { id: string }) => j.id === "tenant-ops-dispatch-intent",
     );
     expect(tenantJourney?.route).toBe("/bookings?q={{tenantBookingId}}");
+    expect(tenantJourney?.environmentVariables).toEqual({
+      dispatchSessionToken: "DRTS_OPERATIONAL_DISPATCH_SESSION_TOKEN",
+    });
     expect(tenantJourney?.browserSession).toEqual({
       cookieName: "drts_tenant_session",
       tokenEnv: "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
@@ -105,7 +108,7 @@ describe("operational browser journeys manifest guard", () => {
           baseUrlEnv: "DRTS_DEV_API_BASE_URL",
           path: expect.stringContaining("dispatch-timeout"),
           headers: expect.objectContaining({
-            authorization: "Bearer {{tenantSessionToken}}",
+            authorization: "Bearer {{dispatchSessionToken}}",
             "x-tenant-id": "10000000-0000-0000-0000-000000000201",
             "idempotency-key": "operational-dispatch-timeout-{{runId}}",
           }),
