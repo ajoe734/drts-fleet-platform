@@ -1690,6 +1690,8 @@ describe("tenant bootstrap-session auth controller", () => {
         scopes: expect.arrayContaining([
           "tenant:write",
           "tenant:webhooks:write",
+          "owned:read",
+          "owned:write",
         ]),
         tenantId: "tenant-demo-001",
       },
@@ -1702,7 +1704,12 @@ describe("tenant bootstrap-session auth controller", () => {
       realm: "tenant",
       tenantId: "tenant-demo-001",
       roles: ["tenant_ops_admin"],
-      scopes: expect.arrayContaining(["tenant:write", "tenant:webhooks:write"]),
+      scopes: expect.arrayContaining([
+        "tenant:write",
+        "tenant:webhooks:write",
+        "owned:read",
+        "owned:write",
+      ]),
     });
     expect(
       verifiedPayload &&

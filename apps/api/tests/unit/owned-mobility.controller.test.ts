@@ -5,6 +5,36 @@ import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-
 import type { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 
 describe("OwnedMobilityController tenant booking routes", () => {
+  it("awaits referral ratings before wrapping the API envelope", async () => {
+    const service = {
+      submitReferralPassengerRating: vi.fn().mockResolvedValue({
+        orderId: "order-rating-001",
+        score: 5,
+        comment: null,
+        tags: [],
+        submittedAt: "2026-08-22T15:00:00.000Z",
+      }),
+    } as unknown as OwnedMobilityService;
+    const controller = new OwnedMobilityController(service, {} as never);
+
+    const response = await controller.submitReferralPassengerRating(
+      "order-rating-001",
+      { score: 5 } as never,
+      null,
+      "req-rating-001",
+    );
+
+    expect(response.data).toMatchObject({
+      orderId: "order-rating-001",
+      score: 5,
+    });
+    expect(service.submitReferralPassengerRating).toHaveBeenCalledWith(
+      "order-rating-001",
+      { score: 5 },
+      null,
+    );
+  });
+
   it("awaits tenant booking creation before wrapping the API envelope", async () => {
     const service = {
       createTenantBooking: vi.fn().mockResolvedValue({

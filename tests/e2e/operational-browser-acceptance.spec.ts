@@ -63,6 +63,7 @@ type Journey = {
   baseUrlEnv: string;
   route: string;
   actorScope: string;
+  environmentVariables?: Record<string, string>;
   browserSession?: BrowserSession;
   setup?: SetupRequest[];
   operations: Operation[];
@@ -371,6 +372,17 @@ async function installBrowserSession(
   });
 }
 
+function installEnvironmentVariables(
+  journey: Journey,
+  variables: TemplateVariables,
+) {
+  for (const [name, envName] of Object.entries(
+    journey.environmentVariables ?? {},
+  )) {
+    variables[name] = requiredEnvironmentValue(envName);
+  }
+}
+
 test.afterAll(() => {
   mkdirSync(evidenceDir, { recursive: true });
   writeFileSync(
@@ -464,6 +476,7 @@ for (const journey of manifest.journeys) {
     const variables: TemplateVariables = {
       runId: `${journey.id}-${Date.now().toString(36)}`,
     };
+    installEnvironmentVariables(journey, variables);
     await installBrowserSession(page, journey, origin, variables);
     await runSetup(page, journey, variables);
     await navigate(
@@ -674,6 +687,7 @@ for (const journey of manifest.journeys) {
     const variables: TemplateVariables = {
       runId: `${journey.id}-route-${Date.now().toString(36)}`,
     };
+    installEnvironmentVariables(journey, variables);
     await installBrowserSession(page, journey, origin, variables);
     await runSetup(page, journey, variables);
     const response = await page.goto(

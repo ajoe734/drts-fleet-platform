@@ -709,6 +709,8 @@ export const IAM_TENANT_ROLE_POLICY_DEFINITIONS: readonly IamTenantRolePolicyDef
         "tenant:sla:read",
         "tenant:sla:write",
         "tenant:billing:read",
+        "owned:read",
+        "owned:write",
         "reports:read",
         "reports:write",
       ],
