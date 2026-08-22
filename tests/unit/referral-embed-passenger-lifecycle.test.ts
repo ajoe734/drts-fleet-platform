@@ -246,7 +246,10 @@ describe("referral embed passenger lifecycle API integration", () => {
 
     expect(component).toContain("/api/referral/cancel/");
     expect(component).toContain("/api/referral/rating/");
-    expect(component).toContain("screen: \"cancelled\"");
+    expect(component).toContain(
+      '{completed ? (\n        <Card theme={theme} title="為這趟行程評分">',
+    );
+    expect(component).toContain('screen: "cancelled"');
     expect(component).toContain("downloadUrl: liveData.receipt.downloadUrl");
     expect(component).not.toContain("embedTripHistory");
     expect(component).not.toContain("embedReceipt");

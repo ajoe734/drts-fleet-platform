@@ -56,7 +56,16 @@ type IntentOperation = {
   targetBaseUrlEnv: string;
   expectedPathPattern: string;
 };
-type Operation = RequestOperation | NavigationOperation | IntentOperation;
+type AbsenceOperation = {
+  kind: "absence";
+  name: string;
+  control: string;
+};
+type Operation =
+  | RequestOperation
+  | NavigationOperation
+  | IntentOperation
+  | AbsenceOperation;
 type Journey = {
   id: string;
   surface: string;
@@ -406,7 +415,7 @@ test("requires a single immutable candidate SHA and complete formal journey mani
     "candidate manifest must bind its executable operations to one SHA",
   ).toBe(candidateSha);
   expect(manifest.journeys.map(({ id }) => id)).toEqual([
-    "referral-create-read-cancel-rate-receipt",
+    "referral-create-read-cancel-receipt",
     "enterprise-create-read-update-cancel",
     "fleet-submit-read-withdraw-resubmit",
     "admin-review-approve-readback",
@@ -434,6 +443,10 @@ test("requires a single immutable candidate SHA and complete formal journey mani
       if (operation.kind === "intent") {
         expect(operation.targetBaseUrlEnv).not.toEqual("");
         expect(operation.expectedPathPattern).not.toEqual("");
+        continue;
+      }
+
+      if (operation.kind === "absence") {
         continue;
       }
 
@@ -513,6 +526,22 @@ for (const journey of manifest.journeys) {
           actorScope: journey.actorScope,
           operation: operation.name,
           target: target.toString(),
+        });
+        continue;
+      }
+
+      if (operation.kind === "absence") {
+        await expect(
+          page.locator(operation.control),
+          `${journey.id}/${operation.name} must not be offered`,
+        ).toHaveCount(0);
+        record({
+          kind: "control-absence",
+          journey: journey.id,
+          surface: journey.surface,
+          actorScope: journey.actorScope,
+          operation: operation.name,
+          control: operation.control,
         });
         continue;
       }

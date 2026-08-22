@@ -2371,47 +2371,52 @@ function OutcomeScreen({
         />
         <DetailRow theme={theme} label="付款" value="社區月結" last />
       </Card>
-      <Card theme={theme} title="為這趟行程評分">
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: 9,
-            padding: "4px 0",
-          }}
-        >
-          {[1, 2, 3, 4, 5].map((n) => (
-            <button
-              key={n}
-              type="button"
-              data-drt-operation="referral-rate"
-              onClick={() => submitRating(n)}
-              disabled={!trip || isPending || score !== null}
-              aria-label={`評分 ${n} 星`}
-              style={{
-                border: 0,
-                padding: 0,
-                background: "transparent",
-                color: score !== null && n > score ? theme.line : theme.warnFg,
-                cursor:
-                  !trip || isPending || score !== null ? "default" : "pointer",
-              }}
-            >
-              <Icon name="spark" size={30} />
-            </button>
-          ))}
-        </div>
-        {ratingMessage ? (
-          <Banner theme={theme} tone="success" icon="check">
-            {ratingMessage}
-          </Banner>
-        ) : null}
-        {error ? (
-          <Banner theme={theme} tone="danger" icon="alert">
-            {error}
-          </Banner>
-        ) : null}
-      </Card>
+      {completed ? (
+        <Card theme={theme} title="為這趟行程評分">
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              gap: 9,
+              padding: "4px 0",
+            }}
+          >
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                type="button"
+                data-drt-operation="referral-rate"
+                onClick={() => submitRating(n)}
+                disabled={!trip || isPending || score !== null}
+                aria-label={`評分 ${n} 星`}
+                style={{
+                  border: 0,
+                  padding: 0,
+                  background: "transparent",
+                  color:
+                    score !== null && n > score ? theme.line : theme.warnFg,
+                  cursor:
+                    !trip || isPending || score !== null
+                      ? "default"
+                      : "pointer",
+                }}
+              >
+                <Icon name="spark" size={30} />
+              </button>
+            ))}
+          </div>
+          {ratingMessage ? (
+            <Banner theme={theme} tone="success" icon="check">
+              {ratingMessage}
+            </Banner>
+          ) : null}
+          {error ? (
+            <Banner theme={theme} tone="danger" icon="alert">
+              {error}
+            </Banner>
+          ) : null}
+        </Card>
+      ) : null}
       {!completed ? (
         <Card theme={theme}>
           <div

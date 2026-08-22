@@ -126,21 +126,26 @@ describe("operational browser journeys manifest guard", () => {
 
     const referralJourney = manifest.journeys.find(
       (journey: { id: string }) =>
-        journey.id === "referral-create-read-cancel-rate-receipt",
+        journey.id === "referral-create-read-cancel-receipt",
     );
     expect(referralJourney).toBeDefined();
     expect(
-      referralJourney.operations.map(
-        (operation: { readback: { expectedState: string } }) =>
-          operation.readback.expectedState,
+      referralJourney.operations.flatMap(
+        (operation: { readback?: { expectedState: string } }) =>
+          operation.readback ? [operation.readback.expectedState] : [],
       ),
-    ).toEqual(["created", "cancelled", "cancelled", "cancelled"]);
+    ).toEqual(["created", "cancelled", "cancelled"]);
     expect(referralJourney.operations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "request",
           name: "create",
           resultIdQueryParam: "orderId",
+        }),
+        expect.objectContaining({
+          kind: "absence",
+          name: "cancelled-trip-rating",
+          control: "[data-drt-operation='referral-rate']",
         }),
         expect.objectContaining({
           kind: "navigation",
