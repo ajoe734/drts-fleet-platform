@@ -6,6 +6,23 @@ This GAP covers only the remaining minimum work needed to make the completed
 Stage 1 implementation a truthful deployed Dev release. It does not add product
 features or broaden the IAM scope.
 
+## Current milestone decision (2026-08-22)
+
+The immediate milestone is **Stage 1 code and required CI complete**, not a live
+GCP Dev release. For this milestone:
+
+- F1 evidence truth and F2 candidate lock are required.
+- F3 infrastructure readiness, F4 Dev deployment, F5 operational acceptance,
+  and the live-release portion of F6 are deferred until GCP billing is enabled
+  or a separately reviewed deployment target is adopted.
+- Deferred work remains explicitly incomplete. It is not waived, converted to
+  a pass, or represented by PR CI.
+
+The code/CI milestone is pinned to merge SHA
+`4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`, which is reachable from current
+`dev`. Its trunk integration run `31997773400` completed successfully. Live
+deployment and same-SHA runtime acceptance remain a separate future milestone.
+
 ## Verified current state
 
 - All tasks in `stage1-functional-completion-20260808` are recorded as `done`.
@@ -50,4 +67,3 @@ The release is complete only when one traceable chain exists:
 
 Billing unavailability is an external gate. It must remain explicit and must
 not be converted into a passing acceptance record.
-

@@ -4,14 +4,16 @@
 - **Task Title:** Finalize the verified Stage 1 functional release candidate
 - **Owner:** `Gemini`
 - **Reviewer:** `Claude`
-- **Candidate Commit SHA:** `527a3d403464806ea1d4f417c60ac3e4fa8f17d6`
+- **Evidence Snapshot SHA:** `527a3d403464806ea1d4f417c60ac3e4fa8f17d6`
+- **PR Head SHA:** `4b4c61d9b4794d50d45fb1119788aa574f307f90`
+- **Code/CI Milestone SHA:** `4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`
 - **Candidate Branch:** `gemini/s1f-rel-001`
 - **Pull Request:** [#1451](https://github.com/ajoe734/drts-fleet-platform/pull/1451)
 - **Base Branch:** `dev`
 - **Date:** `2026-08-17`
 - **Planning Ref:** [`docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`](../02-architecture/stage1-dev-functional-completeness-gap-20260808.md)
 - **Execution Ref:** [`docs/03-runbooks/stage1-dev-functional-completion-execution-tasks-20260808.md`](../03-runbooks/stage1-dev-functional-completion-execution-tasks-20260808.md)
-- **Status:** `ready_for_review`
+- **Status:** `code_ci_complete_live_release_deferred`
 
 ---
 
@@ -19,7 +21,19 @@
 
 Task `S1F-REL-001` finalizes, integrates, and verifies the comprehensive Stage 1 Dev Functional Release candidate closing all functional gaps G1 through G8 identified in `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`.
 
-All 14 upstream functional implementation and verification task dependencies across Waves A through D are fully integrated and reachable in the locked candidate SHA (`527a3d403464806ea1d4f417c60ac3e4fa8f17d6`):
+The current milestone is limited to code and required CI completion. The
+canonical milestone SHA is PR #1451's merge commit
+`4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`; the earlier snapshot and PR-head
+SHAs above describe its provenance, not competing release candidates. GCP Dev
+deployment and same-SHA operational acceptance are deferred and remain
+incomplete.
+
+All 14 upstream functional implementation and verification task dependencies
+across Waves A through D were reachable in evidence snapshot
+`527a3d403464806ea1d4f417c60ac3e4fa8f17d6`. PR #1451 was squash-merged, so its
+source commits are not Git ancestors of the merge SHA. The PR diff and squash
+merge diff have the same stable patch ID, which records the source-to-merge
+transition without making a false ancestry claim:
 
 1. **Formal Referral Embed Booking & Lifecycle (`S1F-REF-001`, `S1F-REF-002`)**: Real controlled inputs, active booking creation at `/embed/yuhe-residence`, active trip resume, cancellation, rating, and receipt with live API readback.
 2. **Enterprise Dispatch Semantic Controls & Lifecycle (`S1F-ENT-001`, `S1F-ENT-002`)**: Dynamic forms with live passenger, address, and cost-center bindings; create-read-update-cancel lifecycle against tenant booking command APIs.
@@ -52,7 +66,7 @@ All 14 upstream functional implementation and verification task dependencies acr
 | **S1F-CHAN-001**          | Channel Portal Yuhe residence binding        | PR #1357    | `ce80327f3aa41bf2803362a2656360ef372bb469` | Merged to `dev`    |
 | **S1F-REL-001-PREDEPLOY** | Candidate SHA plumbing & acceptance pipeline | PR #1389    | `f9c720fa49df888ea4761f167d16c96b64a9481f` | Merged / Reachable |
 | **S1F-UIX-001**           | Cross-surface operational browser suite      | PR #1386    | `5ef8259682ae8167234c64604a16478ffb13d6e4` | Merged / Reachable |
-| **S1F-REL-001**           | Release candidate integration & verification | PR #1451    | `527a3d403464806ea1d4f417c60ac3e4fa8f17d6` | Candidate Ready    |
+| **S1F-REL-001**           | Release candidate integration & verification | PR #1451    | `4012b10c0cd4990bd238eaed6ddc23252bc0c8d4` | Code/CI Complete   |
 
 ### Lineage Reachability Verification:
 
@@ -60,6 +74,8 @@ All 14 upstream functional implementation and verification task dependencies acr
 git merge-base --is-ancestor 5ef8259682ae8167234c64604a16478ffb13d6e4 527a3d403464806ea1d4f417c60ac3e4fa8f17d6 # UIX -> TRUE
 git merge-base --is-ancestor 048a5d328a1cb2349694157eff3b44749f7bea5c 527a3d403464806ea1d4f417c60ac3e4fa8f17d6 # DRV -> TRUE
 git merge-base --is-ancestor f9c720fa49df888ea4761f167d16c96b64a9481f 527a3d403464806ea1d4f417c60ac3e4fa8f17d6 # PREDEPLOY -> TRUE
+git diff $(git merge-base 4b4c61d9b4794d50d45fb1119788aa574f307f90 4012b10c0cd4990bd238eaed6ddc23252bc0c8d4^) 4b4c61d9b4794d50d45fb1119788aa574f307f90 | git patch-id --stable # 5fcae997...
+git diff 4012b10c0cd4990bd238eaed6ddc23252bc0c8d4^ 4012b10c0cd4990bd238eaed6ddc23252bc0c8d4 | git patch-id --stable # 5fcae997...
 ```
 
 ---
@@ -73,9 +89,9 @@ git merge-base --is-ancestor f9c720fa49df888ea4761f167d16c96b64a9481f 527a3d4034
 | **G3 Lifecycle truth**     | Create, update, cancel, submit, and approve operations survive refresh and readback.                 | Hermetic E2E suite (`001`, `002`, `006`, `012`, `019`) and operational browser specs validating API response IDs and subsequent readback.        | **PASS**                         |
 | **G4 Cross-surface truth** | Formal Referral and Fleet supply records are visible in downstream scoped surfaces.                  | E2E-016 (Referral Channel), E2E-019 (Fleet Supply Onboarding to Platform Admin Review), and journey manifest contracts.                          | **PASS**                         |
 | **G5 Native truth**        | Current-SHA Android emulator journey passes.                                                         | `docs/04-uat/s1f-drv-001-android-driver-journey-replay-evidence.md` & hermetic driver suites (E2E-001, E2E-006, E2E-017, E2E-018, E2E-021).      | **PASS**                         |
-| **G6 Runtime truth**       | Exact accepted SHA is verified across CI and all active services pass health and operational checks. | PR #1451 CI (22/22 checks passing). Cloud Run deploy status tracked (pending external GCP project billing enablement).                           | **PASS (Candidate CI Verified)** |
+| **G6 Runtime truth**       | Exact accepted SHA is verified across CI and all active services pass health and operational checks. | PR #1451 and merge-SHA CI pass; Cloud Run deploy and active-service checks are deferred pending the external GCP billing milestone.               | **PARTIAL (CI pass; runtime deferred)** |
 | **G7 Frozen surfaces**     | Partner Booking and Concierge remain stopped with HTTP 404.                                          | Operational candidate test (`playwright.operational-candidate.config.ts`), deterministic route suite (39/39), and workflow pause assertions.     | **PASS**                         |
-| **G8 Regression truth**    | Existing 22/22 API E2E, 39-route suite, build/typecheck, and deployed smoke stay green.              | Executed and passed locally & in CI: `run-e2e-hermetic.sh all` (22/22), `deterministic-route-suite.spec.ts` (39/39), unit tests, and typechecks. | **PASS**                         |
+| **G8 Regression truth**    | Existing 22/22 API E2E, 39-route suite, build/typecheck, and deployed smoke stay green.              | Hermetic E2E, deterministic routes, unit tests, build, and typecheck pass; deployed smoke is deferred with the live GCP milestone.              | **PARTIAL (code/CI pass; deployed smoke deferred)** |
 
 ---
 
@@ -179,4 +195,4 @@ Running 39 tests using 16 workers
 
 ## 5. Conclusion & Handoff
 
-The release candidate integrated via PR #1451 (`4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`) binds all Stage 1 functional changes, closes the dependency graph for `S1F-UIX-001` and `S1F-DRV-001`, satisfies functional completion gates G1 through G8 in the codebase and CI, and is fully verified for review by Claude. Live Cloud Run deployment remains tracked under the external GCP billing gate.
+The code/CI milestone integrated via PR #1451 (`4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`) binds all Stage 1 functional changes, closes the dependency graph for `S1F-UIX-001` and `S1F-DRV-001`, and passes the required code and CI checks. G6 runtime verification and the deployed-smoke portion of G8 are not complete; live Cloud Run deployment and same-SHA operational acceptance are deferred under the external GCP billing gate.

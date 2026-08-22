@@ -7,6 +7,12 @@ behaviour. The design separates evidence repair, source preflight,
 infrastructure readiness, deployment, runtime acceptance, and closeout so the
 supervisor can run independent work in parallel.
 
+As of 2026-08-22, the active short-term milestone stops after evidence repair
+and source preflight: Stage 1 code and required CI are complete at
+`4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`. Infrastructure, deployment,
+runtime acceptance, and live-release closeout are deferred. Their acceptance
+criteria remain unchanged and must not be reported as passing.
+
 ## Work boundaries
 
 ### Evidence lane
@@ -79,4 +85,3 @@ The handoff record must contain:
 - Runtime mismatch or browser failure: keep `OPERATIONAL-UAT` non-complete and
   report the exact surface and expected versus observed SHA or HTTP result.
 - Missing evidence: `CLOSEOUT` fails closed even if implementation CI is green.
-
