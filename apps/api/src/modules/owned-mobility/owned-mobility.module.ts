@@ -2,7 +2,7 @@ import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
 import { IdempotencyModule } from "../../common/idempotency";
-import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
+import { OpsDispatchEventsModule } from "../../common/ops-dispatch-events.module";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { CallcenterModule } from "../callcenter/callcenter.module";
 import { ProductRuleModule } from "../product-rule/product-rule.module";
@@ -23,6 +23,7 @@ import { OwnedMobilityService } from "./owned-mobility.service";
   imports: [
     DatabaseModule,
     IdempotencyModule,
+    OpsDispatchEventsModule,
     RegulatoryRegistryModule,
     ServiceAreaModule,
     ServiceProductModule,
@@ -39,7 +40,6 @@ import { OwnedMobilityService } from "./owned-mobility.service";
     OwnedMobilityService,
     OwnedMobilityTaskEventsService,
     ReferralBindingScaffoldService,
-    OpsDispatchEventsService,
   ],
   exports: [OwnedMobilityService, ReferralBindingScaffoldService],
 })
