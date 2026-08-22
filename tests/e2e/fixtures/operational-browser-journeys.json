@@ -46,7 +46,7 @@
             "url": "/api/referral/history/{resultId}",
             "idPath": "data.orderId",
             "statePath": "data.status",
-            "expectedState": "CONFIRMED"
+            "expectedState": "created"
           }
         },
         {
@@ -62,7 +62,7 @@
             "url": "/api/referral/history/{resultId}",
             "idPath": "data.orderId",
             "statePath": "data.status",
-            "expectedState": "CANCELLED"
+            "expectedState": "cancelled"
           }
         },
         {
@@ -77,7 +77,7 @@
             "url": "/api/referral/history/{resultId}",
             "idPath": "data.orderId",
             "statePath": "data.status",
-            "expectedState": "CANCELLED"
+            "expectedState": "cancelled"
           }
         },
         {
@@ -93,7 +93,7 @@
             "url": "/api/referral/receipt/{resultId}",
             "idPath": "data.orderId",
             "statePath": "data.status",
-            "expectedState": "CANCELLED"
+            "expectedState": "cancelled"
           }
         }
       ]
@@ -452,7 +452,8 @@
           "path": "/api/tenant/bookings",
           "method": "POST",
           "headers": {
-            "authorization": "Bearer {{tenantSessionToken}}"
+            "authorization": "Bearer {{tenantSessionToken}}",
+            "x-tenant-id": "10000000-0000-0000-0000-000000000201"
           },
           "body": {
             "businessDispatchSubtype": "enterprise_dispatch",
@@ -489,7 +490,8 @@
           "path": "/api/orders/{{tenantOrderId}}/dispatch-timeout",
           "method": "POST",
           "headers": {
-            "authorization": "Bearer {{tenantSessionToken}}"
+            "authorization": "Bearer {{tenantSessionToken}}",
+            "x-tenant-id": "10000000-0000-0000-0000-000000000201"
           },
           "body": {
             "timeoutReasonCode": "acceptance_timeout"

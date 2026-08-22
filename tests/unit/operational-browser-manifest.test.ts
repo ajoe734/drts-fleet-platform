@@ -96,6 +96,7 @@ describe("operational browser journeys manifest guard", () => {
           path: "/api/tenant/bookings",
           headers: expect.objectContaining({
             authorization: "Bearer {{tenantSessionToken}}",
+            "x-tenant-id": "10000000-0000-0000-0000-000000000201",
           }),
           capture: { tenantBookingId: "data.booking_id" },
         }),
@@ -104,6 +105,7 @@ describe("operational browser journeys manifest guard", () => {
           path: expect.stringContaining("dispatch-timeout"),
           headers: expect.objectContaining({
             authorization: "Bearer {{tenantSessionToken}}",
+            "x-tenant-id": "10000000-0000-0000-0000-000000000201",
           }),
         }),
       ]),
@@ -122,6 +124,12 @@ describe("operational browser journeys manifest guard", () => {
         journey.id === "referral-create-read-cancel-rate-receipt",
     );
     expect(referralJourney).toBeDefined();
+    expect(
+      referralJourney.operations.map(
+        (operation: { readback: { expectedState: string } }) =>
+          operation.readback.expectedState,
+      ),
+    ).toEqual(["created", "cancelled", "cancelled", "cancelled"]);
     expect(referralJourney.operations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

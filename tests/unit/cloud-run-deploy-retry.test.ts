@@ -203,6 +203,27 @@ describe("Cloud Run deploy quota retry", () => {
     expect(sessionStep).toContain(`x-scopes: ${scopes?.join(" ")}`);
   });
 
+  it("deploys tenant-facing web surfaces against the durable tenant", () => {
+    const workflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+    const durableTenantId = "10000000-0000-0000-0000-000000000201";
+
+    expect(workflow).toContain(
+      `DRTS_ENTERPRISE_DISPATCH_TENANT_ID=${durableTenantId}`,
+    );
+    expect(workflow).toContain(
+      `DRTS_TENANT_CONSOLE_TENANT_ID=${durableTenantId}`,
+    );
+    expect(workflow).not.toContain(
+      "DRTS_ENTERPRISE_DISPATCH_TENANT_ID=tenant-demo-001",
+    );
+    expect(workflow).not.toContain(
+      "DRTS_TENANT_CONSOLE_TENANT_ID=tenant-demo-001",
+    );
+  });
+
   it("enables public demo login only on the Bank Console deployment", () => {
     const workflow = readFileSync(
       path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
