@@ -415,6 +415,61 @@ class GitHubBusCommandTests(unittest.TestCase):
         self.assertEqual(failed, "failure")
         self.assertEqual(successful, "success")
 
+    def test_candidate_ci_status_ignores_a_cancelled_run_superseded_by_a_rerun(self) -> None:
+        # A concurrency-group rerun cancels the older run for the same job
+        # name but GitHub keeps both entries in statusCheckRollup. Only the
+        # most recently started entry per name should decide the outcome.
+        status, _ = github_bus.candidate_ci_status(
+            {
+                "state": "OPEN",
+                "mergeStateStatus": "CLEAN",
+                "statusCheckRollup": [
+                    {
+                        "workflowName": "CI",
+                        "name": "Smoke acceptance",
+                        "status": "COMPLETED",
+                        "conclusion": "CANCELLED",
+                        "startedAt": "2026-08-23T05:19:49Z",
+                    },
+                    {
+                        "workflowName": "CI",
+                        "name": "Smoke acceptance",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "startedAt": "2026-08-23T05:20:16Z",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(status, "success")
+
+    def test_candidate_ci_status_still_fails_when_the_latest_run_failed(self) -> None:
+        status, _ = github_bus.candidate_ci_status(
+            {
+                "state": "OPEN",
+                "mergeStateStatus": "CLEAN",
+                "statusCheckRollup": [
+                    {
+                        "workflowName": "CI",
+                        "name": "unit",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS",
+                        "startedAt": "2026-08-23T05:19:49Z",
+                    },
+                    {
+                        "workflowName": "CI",
+                        "name": "unit",
+                        "status": "COMPLETED",
+                        "conclusion": "FAILURE",
+                        "startedAt": "2026-08-23T05:20:16Z",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(status, "failure")
+
     def test_reconcile_skips_an_unchanged_same_sha_observation(self) -> None:
         task = {
             "id": "LIN-001",

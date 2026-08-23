@@ -770,6 +770,29 @@ def candidate_pr_observation(repo: str, number: int) -> dict[str, Any]:
     return data
 
 
+def latest_check_runs(checks: list[Any]) -> list[dict[str, Any]]:
+    """Collapse GitHub's check rollup to one entry per (workflow, job) name.
+
+    A concurrency-cancelled rerun leaves its CANCELLED entry in
+    statusCheckRollup alongside the superseding run's entry for the same
+    job name. Evaluating every entry treats that stale CANCELLED row as a
+    real candidate failure even though the job that actually determines
+    the outcome completed successfully. Keep only the most recently
+    started entry per name so a superseded run cannot outvote its
+    replacement.
+    """
+    latest: dict[tuple[str, str], dict[str, Any]] = {}
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        key = (str(check.get("workflowName") or ""), str(check.get("name") or ""))
+        started = str(check.get("startedAt") or "")
+        existing = latest.get(key)
+        if existing is None or started >= str(existing.get("startedAt") or ""):
+            latest[key] = check
+    return list(latest.values())
+
+
 def candidate_ci_status(observation: dict[str, Any]) -> tuple[str, str]:
     """Map GitHub's check rollup to the small lifecycle vocabulary."""
     if str(observation.get("state") or "").upper() == "MERGED":
@@ -784,9 +807,7 @@ def candidate_ci_status(observation: dict[str, Any]) -> tuple[str, str]:
         return "queued", ""
     details_url = ""
     pending = False
-    for check in checks:
-        if not isinstance(check, dict):
-            continue
+    for check in latest_check_runs(checks):
         conclusion = str(check.get("conclusion") or "").upper()
         status = str(check.get("status") or "").upper()
         details_url = details_url or str(check.get("detailsUrl") or "")

@@ -13,7 +13,14 @@
 - **Date:** `2026-08-17`
 - **Planning Ref:** [`docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`](../02-architecture/stage1-dev-functional-completeness-gap-20260808.md)
 - **Execution Ref:** [`docs/03-runbooks/stage1-dev-functional-completion-execution-tasks-20260808.md`](../03-runbooks/stage1-dev-functional-completion-execution-tasks-20260808.md)
-- **Status:** `code_ci_complete_live_release_deferred`
+- **Status:** `superseded_by_s1f_rel_fin_close_001` — GCP Dev deployment and same-SHA
+  operational acceptance, deferred at the time this pack was written, are now
+  real and complete. See
+  [`docs/04-uat/s1f-rel-fin-close-001-final-evidence-pack-20260823.md`](s1f-rel-fin-close-001-final-evidence-pack-20260823.md)
+  for the authoritative deployed/accepted SHA, deploy workflow evidence, and
+  the final G1-G8 matrix. This document is retained for the code/CI-milestone
+  and dependency-lineage record; its G6/G8 rows and §4.4 below are updated in
+  place rather than duplicated.
 
 ---
 
@@ -21,12 +28,18 @@
 
 Task `S1F-REL-001` finalizes, integrates, and verifies the comprehensive Stage 1 Dev Functional Release candidate closing all functional gaps G1 through G8 identified in `docs/02-architecture/stage1-dev-functional-completeness-gap-20260808.md`.
 
-The current milestone is limited to code and required CI completion. The
-canonical milestone SHA is PR #1451's merge commit
+The code/CI milestone SHA is PR #1451's merge commit
 `4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`; the earlier snapshot and PR-head
-SHAs above describe its provenance, not competing release candidates. GCP Dev
-deployment and same-SHA operational acceptance are deferred and remain
-incomplete.
+SHAs above describe its provenance, not competing release candidates.
+**Update (2026-08-23, `S1F-REL-FIN-CLOSE-001`):** GCP Dev deployment and
+same-SHA operational acceptance, described as deferred below, have since
+completed for real. The deployed and operationally-accepted SHA is
+`0d97e92fff563d32e0b33676edc3442ad32cd2e7` (a verified descendant of
+`4012b10c0cd4990bd238eaed6ddc23252bc0c8d4` reached via 11 reviewed fix PRs,
+and a verified ancestor of current `dev` HEAD with zero intervening
+application-code changes). Full evidence, including an initial deploy attempt
+of `4012b10c0` that failed operational acceptance and was not hidden, is in
+`docs/04-uat/s1f-rel-fin-close-001-final-evidence-pack-20260823.md`.
 
 All 14 upstream functional implementation and verification task dependencies
 across Waves A through D were reachable in evidence snapshot
@@ -89,9 +102,9 @@ git diff 4012b10c0cd4990bd238eaed6ddc23252bc0c8d4^ 4012b10c0cd4990bd238eaed6ddc2
 | **G3 Lifecycle truth**     | Create, update, cancel, submit, and approve operations survive refresh and readback.                 | Hermetic E2E suite (`001`, `002`, `006`, `012`, `019`) and operational browser specs validating API response IDs and subsequent readback.        | **PASS**                         |
 | **G4 Cross-surface truth** | Formal Referral and Fleet supply records are visible in downstream scoped surfaces.                  | E2E-016 (Referral Channel), E2E-019 (Fleet Supply Onboarding to Platform Admin Review), and journey manifest contracts.                          | **PASS**                         |
 | **G5 Native truth**        | Current-SHA Android emulator journey passes.                                                         | `docs/04-uat/s1f-drv-001-android-driver-journey-replay-evidence.md` & hermetic driver suites (E2E-001, E2E-006, E2E-017, E2E-018, E2E-021).      | **PASS**                         |
-| **G6 Runtime truth**       | Exact accepted SHA is verified across CI and all active services pass health and operational checks. | PR #1451 and merge-SHA CI pass; Cloud Run deploy and active-service checks are deferred pending the external GCP billing milestone.               | **PARTIAL (CI pass; runtime deferred)** |
+| **G6 Runtime truth**       | Exact accepted SHA is verified across CI and all active services pass health and operational checks. | **Updated 2026-08-23:** `Deploy - Dev` run [`32616137960`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/32616137960) deployed `0d97e92fff563d32e0b33676edc3442ad32cd2e7` to all 9 active Cloud Run services (100% traffic) with successful migration and health checks; `deployed=yes; all stages passed`. See `s1f-rel-fin-close-001-final-evidence-pack-20260823.md` §3.2, §6. | **PASS** |
 | **G7 Frozen surfaces**     | Partner Booking and Concierge remain stopped with HTTP 404.                                          | Operational candidate test (`playwright.operational-candidate.config.ts`), deterministic route suite (39/39), and workflow pause assertions.     | **PASS**                         |
-| **G8 Regression truth**    | Existing 22/22 API E2E, 39-route suite, build/typecheck, and deployed smoke stay green.              | Hermetic E2E, deterministic routes, unit tests, build, and typecheck pass; deployed smoke is deferred with the live GCP milestone.              | **PARTIAL (code/CI pass; deployed smoke deferred)** |
+| **G8 Regression truth**    | Existing 22/22 API E2E, 39-route suite, build/typecheck, and deployed smoke stay green.              | Hermetic E2E, deterministic routes, unit tests, build, and typecheck pass. **Updated 2026-08-23:** deployed smoke is now real — `operational-candidate.spec.ts` (14/14) and `operational-browser-acceptance.spec.ts` (16/16) passed live against Cloud Run in run `32616137960` job `97139160397`. | **PASS** |
 
 ---
 
@@ -189,10 +202,12 @@ Running 39 tests using 16 workers
   - `CI/Product smoke acceptance`
   - `CI/Verify Internal Key Exception Registry`
   - All 14 additional workflow compliance and security guards.
-- **Cloud Run Dev Deploy Workflow (`deploy-dev.yml`):** Tracked under external infrastructure gate. Last successful deploy run was `31244225462` (SHA `7e5a29d5a` on 2026-08-08); run `31992102746` failed due to GCP project #952590575714 billing requirement. Live Cloud Run endpoints currently respond with Cloud Run 503/500 ("service not available yet") or 404 until billing is enabled.
+- **Cloud Run Dev Deploy Workflow (`deploy-dev.yml`):** **Updated 2026-08-23.** The GCP billing gate (project #952590575714) was subsequently opened (`S1F-REL-FIN-DEP-001-UNBLOCK-*`, PR #1548). `Deploy - Dev` run [`32616137960`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/32616137960) succeeded end-to-end (build/push, migration, all 9 service deploys, health checks, Partner Booking pause enforcement, and same-SHA operational acceptance 30/30) for SHA `0d97e92fff563d32e0b33676edc3442ad32cd2e7`. A separate explicit dispatch of the original locked candidate `4012b10c0cd4990bd238eaed6ddc23252bc0c8d4` (run `32616532316`) deployed successfully but failed its bundled operational-acceptance job 3/16 — that failure drove 11 reviewed fix PRs, after which `0d97e92fff...` (their merged result) passed. Live Cloud Run endpoints now serve this candidate. Full detail: `docs/04-uat/s1f-rel-fin-close-001-final-evidence-pack-20260823.md`.
 
 ---
 
 ## 5. Conclusion & Handoff
 
-The code/CI milestone integrated via PR #1451 (`4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`) binds all Stage 1 functional changes, closes the dependency graph for `S1F-UIX-001` and `S1F-DRV-001`, and passes the required code and CI checks. G6 runtime verification and the deployed-smoke portion of G8 are not complete; live Cloud Run deployment and same-SHA operational acceptance are deferred under the external GCP billing gate.
+The code/CI milestone integrated via PR #1451 (`4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`) binds all Stage 1 functional changes, closes the dependency graph for `S1F-UIX-001` and `S1F-DRV-001`, and passes the required code and CI checks.
+
+**Update (2026-08-23):** G6 runtime verification and the deployed-smoke portion of G8, previously deferred under the external GCP billing gate, are now complete. Stage 1 is deployed to Dev and has passed live, same-SHA operational acceptance at `0d97e92fff563d32e0b33676edc3442ad32cd2e7`. See `docs/04-uat/s1f-rel-fin-close-001-final-evidence-pack-20260823.md` for the authoritative closeout evidence, including the one deploy attempt (of the original static lock) that failed acceptance and was not hidden.
