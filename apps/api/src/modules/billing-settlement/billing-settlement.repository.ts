@@ -1,3 +1,5 @@
+import { PLATFORM_CURRENCY } from "@drts/contracts";
+
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
@@ -206,7 +208,7 @@ const LIVE_TASK_COMPLETED_AT_ISO_UTC_SQL = "tasks.record->>'completedAt'";
 const LIVE_TASK_COMPLETED_AT_ISO_UTC_PREDICATE_SQL = `
   COALESCE(${LIVE_TASK_COMPLETED_AT_ISO_UTC_SQL}, '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$'
 `;
-const DEFAULT_CURRENCY = "NTD";
+const DEFAULT_CURRENCY = PLATFORM_CURRENCY;
 
 // The precise service-product code carried into settlement. Previously the trip
 // record only stored `businessDispatchSubtype`, which is null for standard taxi
@@ -685,7 +687,7 @@ export class BillingSettlementRepository {
       );
       const grossEarning = task.fare ??
         order.quotedFare ?? {
-          currency: "NTD",
+          currency: PLATFORM_CURRENCY,
           amountMinor: 0,
         };
 
@@ -1200,7 +1202,7 @@ export class BillingSettlementRepository {
       );
       const grossEarning = task.fare ??
         order.quotedFare ?? {
-          currency: "NTD",
+          currency: PLATFORM_CURRENCY,
           amountMinor: 0,
         };
 

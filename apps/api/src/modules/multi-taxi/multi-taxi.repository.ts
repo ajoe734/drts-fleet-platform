@@ -1,3 +1,4 @@
+import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { QueryResultRow } from "pg";
 
@@ -1025,7 +1026,7 @@ export class MultiTaxiRepository {
       orderId: row.order_id,
       receiptNo: row.receipt_no,
       amountMinor: Number(row.amount_minor),
-      currency: "NTD",
+      currency: PLATFORM_CURRENCY,
       issuedAt: this.toIso(row.issued_at),
       record:
         row.record !== null &&

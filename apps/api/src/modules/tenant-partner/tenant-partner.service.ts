@@ -141,6 +141,7 @@ import type {
   ReferralRevenueShareRule,
 } from "@drts/contracts";
 import {
+  PLATFORM_CURRENCY,
   REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
   REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES,
   PARTNER_REFERRAL_CHANNEL_KEY,
@@ -169,7 +170,7 @@ const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
       partnerEntrySlug: "referral-demo-community",
       rateType: "percent" as const,
       value: 15,
-      currency: "NTD",
+      currency: PLATFORM_CURRENCY,
       effectiveFrom: "2026-06-01T00:00:00.000Z",
       effectiveUntil: null,
       settlementDirection: REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
@@ -4578,7 +4579,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       currency:
         this.normalizeNullableText(command.currency ?? null) ??
         existing?.currency ??
-        "NTD",
+        PLATFORM_CURRENCY,
       effectiveFrom:
         this.normalizeNullableText(command.effectiveFrom ?? null) ??
         existing?.effectiveFrom ??
@@ -5183,7 +5184,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         this.reconcileStoredPartnerIngressCredential(credential, rotatedAt);
         if (
           !preservedOverlap &&
-          (credential.status === "active" || credential.status === "overlap_active")
+          (credential.status === "active" ||
+            credential.status === "overlap_active")
         ) {
           preservedOverlap = true;
           revokedCredentialId = credential.keyId;
@@ -5204,7 +5206,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
         credential.revokedAt = rotatedAt;
         credential.revokedBy = "platform_admin";
-        credential.revokeReason = command.rotationReason ?? "credential_rotated";
+        credential.revokeReason =
+          command.rotationReason ?? "credential_rotated";
         credential.status = "revoked";
         credential.overlapEndsAt = null;
         return this.cloneStoredPartnerIngressCredential(credential);
@@ -5346,7 +5349,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       apiKey,
     );
     if (!matchingCredential) {
-      const activeCredential = this.resolvePartnerIngressCredential(entry.entrySlug);
+      const activeCredential = this.resolvePartnerIngressCredential(
+        entry.entrySlug,
+      );
       if (!activeCredential) {
         this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
           reason: "credential_not_configured",
@@ -7515,12 +7520,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       autoRevokedAt: null,
       supersededByVersion: null,
       revokedAt: null,
-      signals: this.buildCredentialSignals(
-        null,
-        secretExpiresAt,
-        null,
-        now,
-      ),
+      signals: this.buildCredentialSignals(null, secretExpiresAt, null, now),
     };
     const webhookEndpoint: StoredWebhookEndpoint = {
       webhookId,
@@ -7998,18 +7998,23 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           history: endpoint.runtimeMetadata.secretRotation.history,
         },
       );
-      this.applyWebhookPostDispatchPolicy(endpoint, delivery, {
-        attempt: delivery.attempt,
-        status: delivery.status,
-        httpStatus: null,
-        signature: "",
-        attemptedAt,
-        nextAttemptAt: null,
-        signatureHeader: "",
-        signatureVersion: delivery.secretVersion,
-        secretVersion: delivery.secretVersion,
-        rawBody: { ...delivery.rawBody },
-      }, previousEndpointValues);
+      this.applyWebhookPostDispatchPolicy(
+        endpoint,
+        delivery,
+        {
+          attempt: delivery.attempt,
+          status: delivery.status,
+          httpStatus: null,
+          signature: "",
+          attemptedAt,
+          nextAttemptAt: null,
+          signatureHeader: "",
+          signatureVersion: delivery.secretVersion,
+          secretVersion: delivery.secretVersion,
+          rawBody: { ...delivery.rawBody },
+        },
+        previousEndpointValues,
+      );
       await this.persistChangesRequired(
         {
           webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
@@ -9759,11 +9764,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       Number.isFinite(expiresMs) &&
       expiresMs > nowMs &&
       expiresMs - nowMs <=
-        CREDENTIAL_APPROACHING_EXPIRY_THRESHOLD_DAYS *
-          24 *
-          60 *
-          60 *
-          1_000;
+        CREDENTIAL_APPROACHING_EXPIRY_THRESHOLD_DAYS * 24 * 60 * 60 * 1_000;
     const dormant = Number.isFinite(lastUsedMs)
       ? nowMs - lastUsedMs >=
         CREDENTIAL_DORMANT_THRESHOLD_DAYS * 24 * 60 * 60 * 1_000
@@ -9810,7 +9811,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const nowMs = Date.parse(params.nowIso);
-    const expiresMs = params.expiresAt ? Date.parse(params.expiresAt) : Number.NaN;
+    const expiresMs = params.expiresAt
+      ? Date.parse(params.expiresAt)
+      : Number.NaN;
     if (Number.isFinite(expiresMs) && expiresMs <= nowMs) {
       return "expired";
     }
@@ -9896,7 +9899,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       record.autoRevokedAt ?? null,
       params.nowIso,
     );
-    if (JSON.stringify(record.signals ?? null) !== JSON.stringify(nextSignals)) {
+    if (
+      JSON.stringify(record.signals ?? null) !== JSON.stringify(nextSignals)
+    ) {
       record.signals = nextSignals;
       changed = true;
     }
@@ -9963,11 +9968,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
     const maxExpiry =
       Date.parse(nowIso) +
-      MAX_PARTNER_INGRESS_CREDENTIAL_LIFETIME_DAYS *
-        24 *
-        60 *
-        60 *
-        1_000;
+      MAX_PARTNER_INGRESS_CREDENTIAL_LIFETIME_DAYS * 24 * 60 * 60 * 1_000;
     if (parsed > maxExpiry) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -10152,7 +10153,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const defaultExpiresAt =
       credential.expiresAt ??
       (credential.source === "env_bootstrap"
-        ? this.addDaysToIso(nowIso, DEFAULT_PARTNER_INGRESS_CREDENTIAL_LIFETIME_DAYS)
+        ? this.addDaysToIso(
+            nowIso,
+            DEFAULT_PARTNER_INGRESS_CREDENTIAL_LIFETIME_DAYS,
+          )
         : this.addDaysToIso(
             nowIso,
             DEFAULT_PARTNER_INGRESS_CREDENTIAL_LIFETIME_DAYS,
@@ -10210,7 +10214,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       changed = true;
     }
     const resourceScope =
-      endpoint.resourceScope ?? `tenant:${endpoint.tenantId}:webhook:${endpoint.webhookId}`;
+      endpoint.resourceScope ??
+      `tenant:${endpoint.tenantId}:webhook:${endpoint.webhookId}`;
     if (endpoint.resourceScope !== resourceScope) {
       endpoint.resourceScope = resourceScope;
       changed = true;
@@ -10297,15 +10302,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             record.signals,
             record.lastUsedAt ?? null,
             record.expiresAt ??
-              this.addDaysToIso(
-                nowIso,
-                DEFAULT_WEBHOOK_SECRET_LIFETIME_DAYS,
-              ),
+              this.addDaysToIso(nowIso, DEFAULT_WEBHOOK_SECRET_LIFETIME_DAYS),
             record.autoRevokedAt ?? null,
             nowIso,
           ),
         };
-        changed = this.reconcileWebhookSecretMaterial(secret, nowIso) || changed;
+        changed =
+          this.reconcileWebhookSecretMaterial(secret, nowIso) || changed;
         return secret;
       })
       .sort((left, right) => right.secretVersion - left.secretVersion);
@@ -10620,7 +10623,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           ownerRef: record.ownerRef ?? endpoint.ownerRef ?? null,
           ownerName: record.ownerName ?? defaultOwnerName,
           ownerType: record.ownerType ?? defaultOwnerType,
-          purpose: this.resolveCredentialPurpose(record.purpose, defaultPurpose),
+          purpose: this.resolveCredentialPurpose(
+            record.purpose,
+            defaultPurpose,
+          ),
           expiresAt: record.expiresAt ?? endpoint.secretExpiresAt ?? null,
           lastUsedAt: record.lastUsedAt ?? null,
           lastUsedWorkload: record.lastUsedWorkload ?? null,
@@ -11272,7 +11278,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           identity.partnerId !== entry.partnerId ||
           identity.partnerProgramId !== entry.programId ||
           identity.partnerEntrySlug !== entry.entrySlug
-        : (identity.actorType !== "partner_api_key" && identity.actorType !== "partner_user") ||
+        : (identity.actorType !== "partner_api_key" &&
+            identity.actorType !== "partner_user") ||
           (identity.tenantId !== null &&
             identity.tenantId !== undefined &&
             identity.tenantId !== entry.tenantId) ||

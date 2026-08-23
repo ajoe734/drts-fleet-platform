@@ -1,3 +1,5 @@
+import { PLATFORM_CURRENCY } from "@drts/contracts";
+
 import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
@@ -45,6 +47,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { sumMoney as sharedSumMoney } from "../../common/money";
 import { toActionReceipt } from "../../common/action-receipt";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
@@ -99,7 +102,7 @@ import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
-const DEFAULT_CURRENCY = "NTD";
+const DEFAULT_CURRENCY = PLATFORM_CURRENCY;
 const LIVE_SETTLEMENT_PRICING_VERSION = "tenant-pricing-live";
 const TENANT_REFRESH_INTERVAL_MS = 30_000;
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
@@ -3294,10 +3297,8 @@ export class BillingSettlementService implements OnModuleInit {
     return settlementChannelKeyForTrip(trip);
   }
 
-  private sumMoney(amounts: MoneyAmount[]) {
-    return this.money(
-      amounts.reduce((sum, amount) => sum + amount.amountMinor, 0),
-    );
+  private sumMoney(amounts: MoneyAmount[]): MoneyAmount {
+    return sharedSumMoney(amounts, DEFAULT_CURRENCY) as MoneyAmount;
   }
 
   private money(amountMinor: number): MoneyAmount {

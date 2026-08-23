@@ -230,7 +230,7 @@ function createReceipt(): MultiTaxiElectronicReceipt {
     orderId: "order-001",
     receiptNo: "RC-001",
     amountMinor: 35500,
-    currency: "NTD",
+    currency: "TWD",
     issuedAt: "2026-07-23T01:05:00.000Z",
     record: {
       plateNo: "BKR-2208",

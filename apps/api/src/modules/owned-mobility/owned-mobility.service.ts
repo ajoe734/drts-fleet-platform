@@ -106,6 +106,8 @@ import type {
 } from "@drts/contracts";
 
 import {
+  PLATFORM_CURRENCY,
+  normalisePlatformCurrency,
   QUEUE_ENTRY_POLICY_MAP,
   RESERVATION_HOLD_VALID_TRANSITIONS,
   hasAddressCoordinateProvenance,
@@ -373,7 +375,7 @@ const BASE64_DATA_URL_PREFIX = /^data:[^;]+;base64,/i;
 const BASE64_PAYLOAD_PATTERN =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const DEFAULT_PLATFORM_QUOTED_FARE: MoneyAmount = {
-  currency: "NTD",
+  currency: PLATFORM_CURRENCY,
   amountMinor: 150000,
 };
 const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
@@ -5348,7 +5350,7 @@ export class OwnedMobilityService
       !task.startedAt ||
       !plateNo ||
       !fare ||
-      fare.currency !== "NTD" ||
+      normalisePlatformCurrency(fare.currency) !== PLATFORM_CURRENCY ||
       !Number.isFinite(fare.amountMinor) ||
       fare.amountMinor < 0 ||
       !Number.isFinite(command.actualDistanceKm) ||
@@ -5381,7 +5383,7 @@ export class OwnedMobilityService
       distanceMeters: Math.round(command.actualDistanceKm * 1000),
       fareMinor: fare.amountMinor,
       tollMinor,
-      currency: "NTD",
+      currency: PLATFORM_CURRENCY,
       consumerServicePhone:
         process.env.MULTI_TAXI_CERTIFICATE_SERVICE_PHONE ??
         DEFAULT_CERTIFICATE_SERVICE_PHONE,
@@ -5425,7 +5427,7 @@ export class OwnedMobilityService
 
     const grossEarning = task.fare ??
       order.quotedFare ?? {
-        currency: "NTD",
+        currency: PLATFORM_CURRENCY,
         amountMinor: 0,
       };
     const sandboxFulfillmentSegments = this.buildSandboxFulfillmentSegments(
@@ -5605,7 +5607,7 @@ export class OwnedMobilityService
       fallbackPolicyId,
       policyResolution,
       passengerExtraChargeAllowed: false,
-      passengerExtraCharge: { currency: "NTD", amountMinor: 0 },
+      passengerExtraCharge: { currency: PLATFORM_CURRENCY, amountMinor: 0 },
       internalAvCost: currentTaskIsAv ? { ...grossEarning } : null,
       internalHumanFallbackCost: humanFallbackApplied
         ? { ...grossEarning }
@@ -7876,7 +7878,7 @@ export class OwnedMobilityService
       chargingMode: order.fixedPrice ? "fixed_quote" : "meter_estimate",
       estimatedFareMinor: fareMinor,
       payableFareMinor: fareMinor,
-      currency: "NTD",
+      currency: PLATFORM_CURRENCY,
       farePolicyId: order.operatingAuthorizationId?.trim() ?? "",
       farePolicyVersion: order.quotedFareRuleVersion?.trim() ?? "",
       fareChangeRuleId: "multi_taxi_passenger_confirmation",
@@ -7923,7 +7925,10 @@ export class OwnedMobilityService
     ) {
       return "quote_out_of_range";
     }
-    if (order.quotedFare && order.quotedFare.currency !== "NTD") {
+    if (
+      order.quotedFare &&
+      normalisePlatformCurrency(order.quotedFare.currency) !== PLATFORM_CURRENCY
+    ) {
       return "calculation_mismatch";
     }
     return null;

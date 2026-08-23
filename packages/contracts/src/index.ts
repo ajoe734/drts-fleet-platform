@@ -5430,6 +5430,37 @@ export const CANONICAL_IDS = [
 
 export type CanonicalIdName = (typeof CANONICAL_IDS)[number]["id"];
 
+/**
+ * The currency the platform prices, settles and reports in.
+ *
+ * `TWD` is the ISO 4217 code for the New Taiwan Dollar. The platform used to
+ * write it two ways -- `NTD` in billing, fleet-partner, multi-taxi and
+ * certificate-support, `TWD` in platform-earnings and the tenant governance
+ * seeds -- from three module-local constants that each called themselves
+ * `DEFAULT_CURRENCY`. Nothing reconciled them, and nothing needed to, because
+ * no total spanned both halves. The first feature to cross that boundary would
+ * have added two amounts whose labels disagreed.
+ *
+ * `NTD` is a colloquial abbreviation, not an ISO code, and an external payment
+ * or accounting system will not recognise it.
+ */
+export const PLATFORM_CURRENCY = "TWD";
+
+/** Recognised while `NTD`-labelled rows written before `V0084` are still around. */
+export const LEGACY_PLATFORM_CURRENCY = "NTD";
+
+/**
+ * Reads a stored or inbound currency code as the platform currency.
+ *
+ * A migration shim, deliberately narrow: it maps only the one legacy spelling
+ * of the one currency the platform uses, and leaves anything else alone so that
+ * a genuinely foreign currency is still recognised as foreign rather than
+ * quietly relabelled.
+ */
+export function normalisePlatformCurrency(currency: string): string {
+  return currency === LEGACY_PLATFORM_CURRENCY ? PLATFORM_CURRENCY : currency;
+}
+
 export const REPORT_OUTPUT_FORMATS = ["csv", "xlsx", "pdf", "zip"] as const;
 export type ReportOutputFormat = (typeof REPORT_OUTPUT_FORMATS)[number];
 

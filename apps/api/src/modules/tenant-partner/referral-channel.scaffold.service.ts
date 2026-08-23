@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 
 import {
+  PLATFORM_CURRENCY,
   PARTNER_REFERRAL_CHANNEL_KEY,
   REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
   type PartnerUserIdentityLinkRecord,
@@ -29,7 +30,7 @@ const REFERRAL_REVENUE_SHARE_RULE_SEED: readonly ReferralRevenueShareRule[] =
       partnerEntrySlug: "referral-demo-community",
       rateType: "percent" as const,
       value: 15,
-      currency: "NTD",
+      currency: PLATFORM_CURRENCY,
       effectiveFrom: "2026-06-01T00:00:00.000Z",
       effectiveUntil: null,
       settlementDirection: REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,

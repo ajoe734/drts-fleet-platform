@@ -80,7 +80,7 @@ const assignmentBase: PassengerDispatchDisclosureSnapshot = {
     chargingMode: "meter_estimate",
     estimatedFareMinor: 35500,
     payableFareMinor: null,
-    currency: "NTD",
+    currency: "TWD",
     farePolicyId: "fare-policy-2026-07",
     farePolicyVersion: "F-2026-03",
     fareChangeRuleId: "fare-rule-001",
