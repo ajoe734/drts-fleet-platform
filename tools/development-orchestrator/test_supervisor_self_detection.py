@@ -20,8 +20,10 @@ would still have been missed.
 
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from common import ROOT as CANONICAL_CHECKOUT
 from control_plane.runtime import supervisor_runtime as supervisor
@@ -108,6 +110,122 @@ class SupervisorSelfDetectionTests(unittest.TestCase):
         source = inspect.getsource(supervisor.supervisor_cmdline_matches_current_script)
         body = source.split('"""')[-1]
         self.assertNotIn("REPO_ROOT", body)
+
+
+def _stat_line(pid: int, comm: str, start_ticks: int) -> str:
+    """A /proc/<pid>/stat line carrying `start_ticks` in field 22."""
+    # Fields 3..21 inclusive is nineteen values; field 22 is starttime.
+    middle = ["S"] + ["0"] * 18
+    return f"{pid} ({comm}) " + " ".join(middle) + f" {start_ticks} 0 0 0\n"
+
+
+class SupervisorStartOrderTests(unittest.TestCase):
+    """PID order stops being start order once /proc/sys/kernel/pid_max wraps.
+
+    terminate_older_supervisors skipped every candidate that failed
+    `pid < current_pid`. On a host that has wrapped -- this one has, carrying a
+    two-day-old process at 3_210_175 beside a minutes-old one at 2_102_389 --
+    a restarted supervisor draws a low PID, so that test is false for exactly
+    the pre-wrap orphan the guard exists to kill.
+
+    The cwd gate above was the first way this guard failed to find a second
+    supervisor. This is the second, and it stood behind the first: widening
+    the cwd gate made orphans visible, and then this comparison refused to act
+    on them.
+    """
+
+    def test_a_pre_wrap_orphan_with_a_higher_pid_is_still_older(self) -> None:
+        """The regression, in the shape this host actually produces."""
+        self.assertTrue(
+            supervisor.supervisor_is_older_than_current(
+                candidate_pid=3_210_175,
+                candidate_start_ticks=1_000,
+                current_pid=781_069,
+                current_start_ticks=9_000,
+            )
+        )
+
+    def test_a_process_started_after_us_is_not_terminated(self) -> None:
+        """A low PID does not make a newer process a candidate either."""
+        self.assertFalse(
+            supervisor.supervisor_is_older_than_current(
+                candidate_pid=12_345,
+                candidate_start_ticks=9_000,
+                current_pid=3_210_175,
+                current_start_ticks=1_000,
+            )
+        )
+
+    def test_the_current_process_is_never_its_own_candidate(self) -> None:
+        self.assertFalse(
+            supervisor.supervisor_is_older_than_current(
+                candidate_pid=4242,
+                candidate_start_ticks=1_000,
+                current_pid=4242,
+                current_start_ticks=1_000,
+            )
+        )
+
+    def test_a_shared_start_tick_falls_back_to_pid_order(self) -> None:
+        """Two supervisors inside one clock tick: PID order is all that is left."""
+        self.assertTrue(
+            supervisor.supervisor_is_older_than_current(
+                candidate_pid=100, candidate_start_ticks=7, current_pid=200, current_start_ticks=7
+            )
+        )
+        self.assertFalse(
+            supervisor.supervisor_is_older_than_current(
+                candidate_pid=200, candidate_start_ticks=7, current_pid=100, current_start_ticks=7
+            )
+        )
+
+    def test_an_unreadable_start_time_falls_back_to_pid_order(self) -> None:
+        """An unreadable /proc entry must not silently come out as "older"."""
+        self.assertFalse(
+            supervisor.supervisor_is_older_than_current(
+                candidate_pid=900, candidate_start_ticks=None, current_pid=100, current_start_ticks=5
+            )
+        )
+        self.assertTrue(
+            supervisor.supervisor_is_older_than_current(
+                candidate_pid=100, candidate_start_ticks=5, current_pid=900, current_start_ticks=None
+            )
+        )
+
+    def test_start_ticks_are_read_from_field_22(self) -> None:
+        with mock.patch.object(Path, "read_text", return_value=_stat_line(42, "python3", 123_456)):
+            self.assertEqual(supervisor.process_start_ticks(42), 123_456)
+
+    def test_a_comm_with_spaces_and_parentheses_does_not_shift_fields(self) -> None:
+        """Splitting the whole line reads the wrong field for such a comm."""
+        with mock.patch.object(Path, "read_text", return_value=_stat_line(42, "a (b) c", 777)):
+            self.assertEqual(supervisor.process_start_ticks(42), 777)
+
+    def test_a_missing_process_yields_no_start_time(self) -> None:
+        with mock.patch.object(Path, "read_text", side_effect=OSError):
+            self.assertIsNone(supervisor.process_start_ticks(42))
+        self.assertIsNone(supervisor.process_start_ticks(0))
+
+    def test_a_truncated_stat_line_yields_no_start_time(self) -> None:
+        with mock.patch.object(Path, "read_text", return_value="42 (python3) S 1 42\n"):
+            self.assertIsNone(supervisor.process_start_ticks(42))
+
+    def test_this_process_reports_a_real_start_time(self) -> None:
+        """Against the live kernel rather than a fixture, so the offset is checked."""
+        ticks = supervisor.process_start_ticks(os.getpid())
+        self.assertIsNotNone(ticks)
+        assert ticks is not None
+        self.assertGreater(ticks, 0)
+        uptime_ticks = float(Path("/proc/uptime").read_text().split()[0]) * os.sysconf("SC_CLK_TCK")
+        self.assertLessEqual(ticks, uptime_ticks)
+
+    def test_the_guard_no_longer_compares_pids_directly(self) -> None:
+        """Invisible until a wrap happens, which is why it is pinned here."""
+        import inspect
+
+        source = inspect.getsource(supervisor.terminate_older_supervisors)
+        self.assertNotIn("pid >= current_pid", source)
+        self.assertIn("supervisor_is_older_than_current", source)
 
 
 if __name__ == "__main__":

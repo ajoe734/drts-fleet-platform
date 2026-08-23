@@ -696,11 +696,71 @@ def iter_matching_supervisor_pids() -> list[int]:
     return sorted(matches)
 
 
+def process_start_ticks(pid: int | None) -> int | None:
+    """When a process started, in clock ticks since boot, or None.
+
+    Field 22 of /proc/<pid>/stat, counted from after the final ')'. The comm
+    field is parenthesised and may itself contain spaces and parentheses, so
+    splitting the whole line would let a process named `(a b)` shift every
+    offset after it.
+    """
+    if not pid:
+        return None
+    try:
+        stat_text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+    # The remainder after the last ')' begins at field 3 (state), which puts
+    # field 22 (starttime) at index 19.
+    fields = stat_text.rpartition(")")[2].split()
+    if len(fields) < 20:
+        return None
+    try:
+        return int(fields[19])
+    except ValueError:
+        return None
+
+
+def supervisor_is_older_than_current(
+    candidate_pid: int,
+    candidate_start_ticks: int | None,
+    current_pid: int,
+    current_start_ticks: int | None,
+) -> bool:
+    """Did `candidate_pid` start before this process did?
+
+    This was `candidate_pid < current_pid`, which reads PID order as start
+    order. Linux issues PIDs cyclically up to /proc/sys/kernel/pid_max and
+    wraps, and this host has wrapped: processes days old hold PIDs above
+    3_000_000 while minutes-old ones sit near 2_000_000. After a wrap a fresh
+    supervisor takes a low PID, so `candidate_pid < current_pid` is false for
+    every pre-wrap orphan and the guard skips exactly the process it exists to
+    terminate. That is the same "a second supervisor ran beside the systemd
+    one" this module already documents, reached by a second, independent
+    route: the cwd gate was widened to make orphans visible, and then this
+    comparison declined to act on them.
+
+    Start order is what the question is actually about, so read it rather than
+    infer it. PID order stays the tiebreak for the two cases it can still
+    answer -- a shared start tick, and a /proc read that returned nothing.
+    """
+    if candidate_pid == current_pid:
+        return False
+    if candidate_start_ticks is None or current_start_ticks is None:
+        return candidate_pid < current_pid
+    if candidate_start_ticks != current_start_ticks:
+        return candidate_start_ticks < current_start_ticks
+    return candidate_pid < current_pid
+
+
 def terminate_older_supervisors(config: dict[str, Any]) -> None:
     current_pid = os.getpid()
+    current_start_ticks = process_start_ticks(current_pid)
     terminated: list[int] = []
     for pid in iter_matching_supervisor_pids():
-        if pid >= current_pid:
+        if not supervisor_is_older_than_current(
+            pid, process_start_ticks(pid), current_pid, current_start_ticks
+        ):
             continue
         if not pid_is_alive(pid):
             continue
