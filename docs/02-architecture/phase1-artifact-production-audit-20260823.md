@@ -162,11 +162,17 @@ now `/downloads`, a relative prefix on the API's own origin, and
 `GET /reports/{jobId}/artifact` when the kind is `report`. The link still yields no file,
 which is the truth; it no longer yields a DNS error, which was not.
 
-One thing that route deliberately does not do is verify the signature. The signature covers
-`manifestHash`, and the URL does not carry it, so **a controlled-download link cannot be
-verified from itself.** Every link the platform has ever issued has been unverifiable.
-Adding `manifest_hash` to the query is the prerequisite for serving anything from that
-route, and it is not done here.
+**Signature verification (`AUDIT-ARTIFACT-004`).** The signature covers `manifestHash`,
+and the URL did not carry it, so a controlled-download link could not be verified from
+itself: every link the platform had ever issued was unverifiable, throughout the period it
+was being described as a controlled download. `manifest_hash` is now a query parameter and
+`verifyControlledDownloadSignature` recomputes the HMAC and compares it in constant time.
+A link signed under a key the deployment does not hold is rejected rather than passed for
+want of a comparison.
+
+The route checks the signature **before** the expiry. Telling a forged link that it is
+merely expired would answer a question it has not earned, and would let an attacker probe
+which subject ids and windows exist.
 
 Step 3, storage, remains untouched and unneeded for anything currently in scope.
 
