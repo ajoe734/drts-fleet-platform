@@ -17,11 +17,22 @@ import { CertificateSupportRepository } from "./certificate-support.repository";
 import {
   CERTIFICATE_SUPPORT_STATES,
   type CertificateArtifact,
+  type CertificateArtifactBlocker,
   type CertificateRegenerationResult,
   type CertificateSupportRow,
   type CertificateSupportState,
   type CertificateSupportView,
 } from "./certificate-support.types";
+
+/**
+ * The currency a certificate may be priced in.
+ *
+ * `AUDIT-MONEY-001`: the platform writes the same currency two ways -- `NTD` in
+ * most modules, `TWD` in `platform-earnings`. This constant does not resolve
+ * that. It puts this module's requirement in one place so that resolving it is
+ * one edit rather than a search.
+ */
+const CERTIFICATE_CURRENCY = "NTD";
 
 @Injectable()
 export class CertificateSupportService {
@@ -234,9 +245,14 @@ export class CertificateSupportService {
       "superseded_by_receipt_id",
     ]);
     const state = this.resolveState(record, supersededByCertificateId);
-    const artifactsAvailable =
-      ["available", "superseded"].includes(state) &&
-      this.hasCanonicalArtifactFields(row, record);
+    const artifactBlockers = this.resolveArtifactBlockers(row, record);
+    if (!["available", "superseded"].includes(state)) {
+      artifactBlockers.unshift({
+        code: "state_not_issuable",
+        detail: `certificate state is ${state}`,
+      });
+    }
+    const artifactsAvailable = artifactBlockers.length === 0;
     const regenerationEnabled =
       row.isCurrent &&
       state === "available" &&
@@ -293,15 +309,20 @@ export class CertificateSupportService {
         ? this.artifactUrl(row.receiptId, "pdf")
         : null,
       supersededByCertificateId,
+      artifactBlockers,
       regeneration: {
         enabled: regenerationEnabled,
         reasonCode: regenerationEnabled
           ? null
           : !row.isCurrent
             ? "certificate_version_superseded"
-            : !artifactsAvailable
-              ? "certificate_canonical_record_incomplete"
-              : "certificate_writer_unavailable",
+            : artifactBlockers.some(
+                  (blocker) => blocker.code === "unexpected_currency",
+                )
+              ? "certificate_currency_unrecognised"
+              : !artifactsAvailable
+                ? "certificate_canonical_record_incomplete"
+                : "certificate_writer_unavailable",
       },
     };
   }
@@ -496,44 +517,90 @@ export class CertificateSupportService {
     )}/artifacts/${format}`;
   }
 
-  private hasCanonicalArtifactFields(
+  /**
+   * Every reason an artifact cannot be produced, rather than a single boolean.
+   *
+   * The boolean it replaces collapsed nine field checks and a currency check
+   * into one answer, which reached the caller as
+   * `certificate_canonical_record_incomplete`. A row whose currency was not
+   * `NTD` was therefore reported as an incomplete record -- the record was
+   * complete, and the label was unexpected. Naming the blocker is the
+   * difference between "we are missing your trip data" and "we do not
+   * recognise the currency this was priced in", which are different problems
+   * with different owners.
+   */
+  private resolveArtifactBlockers(
     row: CertificateSupportRow,
     record: Record<string, unknown>,
-  ) {
-    const textFields = [
-      this.stringValue(record, ["tripId", "trip_id"]),
-      this.stringValue(record, ["plateNo", "plate_no"]),
-      this.stringValue(record, ["pickupAt", "pickup_at"]),
-      this.stringValue(record, ["dropoffAt", "dropoff_at"]),
-      this.stringValue(record, ["routeSummary", "route", "route_summary"]),
-      this.stringValue(record, [
+  ): CertificateArtifactBlocker[] {
+    const blockers: CertificateArtifactBlocker[] = [];
+
+    const textFields: Array<[string, string | null]> = [
+      ["tripId", this.stringValue(record, ["tripId", "trip_id"])],
+      ["plateNo", this.stringValue(record, ["plateNo", "plate_no"])],
+      ["pickupAt", this.stringValue(record, ["pickupAt", "pickup_at"])],
+      ["dropoffAt", this.stringValue(record, ["dropoffAt", "dropoff_at"])],
+      [
+        "routeSummary",
+        this.stringValue(record, ["routeSummary", "route", "route_summary"]),
+      ],
+      [
         "consumerServicePhone",
-        "servicePhone",
-        "consumer_service_phone",
-      ]),
-      this.stringValue(record, [
+        this.stringValue(record, [
+          "consumerServicePhone",
+          "servicePhone",
+          "consumer_service_phone",
+        ]),
+      ],
+      [
         "authorityComplaintPhone",
-        "complaintPhone",
-        "authority_complaint_phone",
-      ]),
+        this.stringValue(record, [
+          "authorityComplaintPhone",
+          "complaintPhone",
+          "authority_complaint_phone",
+        ]),
+      ],
     ];
-    const numberFields = [
-      this.numberValue(record, [
+    for (const [field, value] of textFields) {
+      if (!value) {
+        blockers.push({ code: "missing_field", field });
+      }
+    }
+
+    const numberFields: Array<[string, number | null]> = [
+      [
         "travelDurationSeconds",
-        "durationSeconds",
-        "travel_duration_seconds",
-      ]),
-      this.numberValue(record, ["distanceMeters", "distance_meters"]),
-      this.numberValue(record, ["tollMinor", "toll_minor"]),
-      row.amountMinor,
+        this.numberValue(record, [
+          "travelDurationSeconds",
+          "durationSeconds",
+          "travel_duration_seconds",
+        ]),
+      ],
+      [
+        "distanceMeters",
+        this.numberValue(record, ["distanceMeters", "distance_meters"]),
+      ],
+      ["tollMinor", this.numberValue(record, ["tollMinor", "toll_minor"])],
+      ["amountMinor", row.amountMinor],
     ];
-    return (
-      textFields.every(Boolean) &&
-      numberFields.every(
-        (value) => value !== null && Number.isFinite(value) && value >= 0,
-      ) &&
-      row.currency === "NTD"
-    );
+    for (const [field, value] of numberFields) {
+      if (value === null || !Number.isFinite(value) || value < 0) {
+        blockers.push({ code: "missing_field", field });
+      }
+    }
+
+    // The platform prices in one currency. A row labelled anything else is not
+    // an incomplete record, and saying so sent whoever investigated looking for
+    // a missing field that was never missing.
+    if (row.currency !== CERTIFICATE_CURRENCY) {
+      blockers.push({
+        code: "unexpected_currency",
+        field: "currency",
+        detail: `expected ${CERTIFICATE_CURRENCY}, found ${row.currency}`,
+      });
+    }
+
+    return blockers;
   }
 
   private stringValue(
