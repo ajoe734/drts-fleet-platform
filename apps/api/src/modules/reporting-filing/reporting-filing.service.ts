@@ -7,10 +7,14 @@ import type {
   ComplaintCaseDetailRowRecord,
   DispatchRecordingIndexRowRecord,
   ComplaintCaseRecord,
+  MaintenanceRecord,
   ContractRosterRowRecord,
   DriverRegistryRecord,
   DriverRosterRowRecord,
   FareVersionHistoryRowRecord,
+  IncidentRecord,
+  IncidentRegisterRowRecord,
+  MaintenanceOverviewRowRecord,
   InsurancePolicyRecord,
   InsuranceRosterRowRecord,
   MultiTaxiOperatingAuthorizationRecord,
@@ -47,6 +51,7 @@ import type {
   SixMonthOperationsSummary,
   TenantCostCenterRecord,
   TenantMonthlyTripReportRowRecord,
+  TripSummaryRowRecord,
 } from "@drts/contracts";
 
 import { REGULATORY_REPORT_JOB_TYPES } from "@drts/contracts";
@@ -159,6 +164,8 @@ type DriverRegistryFeedProvider = () => DriverRegistryRecord[];
 type VehicleContractFeedProvider = () => VehicleContractRecord[];
 type InsurancePolicyFeedProvider = () => InsurancePolicyRecord[];
 type ComplaintCaseFeedProvider = () => ComplaintCaseRecord[];
+type IncidentFeedProvider = () => IncidentRecord[];
+type MaintenanceFeedProvider = () => MaintenanceRecord[];
 type OperatingAuthorizationFeedProvider =
   () => MultiTaxiOperatingAuthorizationRecord[];
 
@@ -204,6 +211,10 @@ export class ReportingFilingService implements OnModuleInit {
   private operatingAuthorizationFeedProvider: OperatingAuthorizationFeedProvider =
     () => [];
 
+  private incidentFeedProvider: IncidentFeedProvider = () => [];
+
+  private maintenanceFeedProvider: MaintenanceFeedProvider = () => [];
+
   /**
    * Every declared report type states here whether it produces anything.
    *
@@ -224,15 +235,21 @@ export class ReportingFilingService implements OnModuleInit {
     ReportRowBuilder | null
   > = {
     // Operational reports.
-    trip_summary: null,
+    trip_summary: (job) => {
+      job.rows = this.buildTripSummaryRows(job);
+    },
     monthly_trip_report: (job, requestId) => {
       job.rows = this.buildTenantMonthlyTripRows(job, requestId);
     },
     revenue_summary: (job) => {
       job.partnerRevenueRows = this.buildPartnerRevenueSummaryRows();
     },
-    incident_register: null,
-    maintenance_overview: null,
+    incident_register: (job) => {
+      job.rows = this.buildIncidentRegisterRows();
+    },
+    maintenance_overview: (job) => {
+      job.rows = this.buildMaintenanceOverviewRows();
+    },
     // Rows are built by `createMultiTaxiTripOperationalExportJob`, which is the
     // only way to create one of these: the export needs a purpose and a scope
     // that `createReportJob` has no field for. Rejected there by name.
@@ -409,6 +426,14 @@ export class ReportingFilingService implements OnModuleInit {
    * `MultiTaxiModule` already imports `ReportingFilingModule`, so importing it
    * back would be a cycle; the dependency runs one way and the data is pushed.
    */
+  registerIncidentFeedProvider(provider: IncidentFeedProvider) {
+    this.incidentFeedProvider = provider;
+  }
+
+  registerMaintenanceFeedProvider(provider: MaintenanceFeedProvider) {
+    this.maintenanceFeedProvider = provider;
+  }
+
   registerOperatingAuthorizationFeedProvider(
     provider: OperatingAuthorizationFeedProvider,
   ) {
@@ -1698,6 +1723,142 @@ export class ReportingFilingService implements OnModuleInit {
     for (const key of ["month", "periodMonth", "period_month"]) {
       const value = filters[key];
       if (typeof value === "string" && /^\d{4}-\d{2}$/.test(value.trim())) {
+        return value.trim();
+      }
+    }
+    return null;
+  }
+
+  /**
+   * An aggregate, deliberately. `monthly_trip_report` already lists orders one
+   * per row; a summary that is a listing under another name would be a second
+   * thing to maintain for no answer the first does not already give.
+   */
+  private buildTripSummaryRows(job: StoredReportJob): TripSummaryRowRecord[] {
+    const exportedAt = new Date().toISOString();
+    const from = this.extractFilterText(job.filters, [
+      "from",
+      "periodStart",
+      "period_start",
+    ]);
+    const to = this.extractFilterText(job.filters, [
+      "to",
+      "periodEnd",
+      "period_end",
+    ]);
+    const fromMs = from ? Date.parse(from) : Number.NEGATIVE_INFINITY;
+    const toMs = to ? Date.parse(to) : Number.POSITIVE_INFINITY;
+
+    const byProduct = new Map<string, TripSummaryRowRecord>();
+    for (const order of this.orderFeedProvider()) {
+      const stamp = Date.parse(order.createdAt);
+      if (!Number.isNaN(stamp) && (stamp < fromMs || stamp > toMs)) {
+        continue;
+      }
+      const key = order.serviceProductCode ?? "unknown";
+      const row =
+        byProduct.get(key) ??
+        ({
+          serviceProduct: key,
+          from,
+          to,
+          totalOrders: 0,
+          completedTrips: 0,
+          cancelledOrders: 0,
+          inFlightOrders: 0,
+          completionRate: null,
+          exportedAt,
+        } satisfies TripSummaryRowRecord);
+
+      row.totalOrders += 1;
+      if (order.status === "completed") {
+        row.completedTrips += 1;
+      } else if (order.status === "cancelled") {
+        row.cancelledOrders += 1;
+      } else {
+        row.inFlightOrders += 1;
+      }
+      byProduct.set(key, row);
+    }
+
+    return [...byProduct.values()]
+      .map((row) => ({
+        ...row,
+        // `null` rather than 0 when nothing happened: a rate of zero says every
+        // trip failed, which is a different claim from having no trips.
+        completionRate:
+          row.totalOrders === 0
+            ? null
+            : Number((row.completedTrips / row.totalOrders).toFixed(4)),
+      }))
+      .sort((left, right) =>
+        left.serviceProduct.localeCompare(right.serviceProduct),
+      );
+  }
+
+  private buildIncidentRegisterRows(): IncidentRegisterRowRecord[] {
+    const exportedAt = new Date().toISOString();
+    return this.incidentFeedProvider().map((incident) => ({
+      incidentId: incident.incidentId,
+      title: incident.title,
+      category: incident.category,
+      severity: incident.severity,
+      status: incident.status,
+      relatedOrderId: incident.relatedOrderId,
+      relatedVehicleId: incident.relatedVehicleId,
+      relatedDriverId: incident.relatedDriverId,
+      relatedComplaintCaseNo: incident.relatedComplaintCaseNo,
+      reportedBy: incident.reportedBy,
+      assignedTo: incident.assignedTo,
+      occurredAt: incident.occurredAt,
+      location: incident.location,
+      resolutionNote: incident.resolutionNote,
+      serviceRecoveryActionCount: incident.serviceRecoveryActions.length,
+      createdAt: incident.createdAt,
+      updatedAt: incident.updatedAt,
+      exportedAt,
+    }));
+  }
+
+  private buildMaintenanceOverviewRows(): MaintenanceOverviewRowRecord[] {
+    const exportedAt = new Date().toISOString();
+    const now = Date.now();
+    return this.maintenanceFeedProvider().map((record) => {
+      // Overdue is the reason anybody opens a maintenance overview, and it is
+      // not stored: it is scheduled-and-not-done measured against now.
+      const scheduled = record.scheduledAt
+        ? Date.parse(record.scheduledAt)
+        : Number.NaN;
+      const overdueDays =
+        record.completedAt || Number.isNaN(scheduled) || scheduled >= now
+          ? null
+          : Math.floor((now - scheduled) / 86_400_000);
+
+      return {
+        maintenanceId: record.maintenanceId,
+        vehicleId: record.vehicleId,
+        type: record.type,
+        status: record.status,
+        description: record.description,
+        scheduledAt: record.scheduledAt,
+        completedAt: record.completedAt,
+        overdueDays,
+        technician: record.technician,
+        cost: record.cost,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+        exportedAt,
+      };
+    });
+  }
+
+  private extractFilterText(
+    filters: Record<string, unknown>,
+    keys: readonly string[],
+  ): string | null {
+    for (const key of keys) {
+      const value = filters[key];
+      if (typeof value === "string" && value.trim()) {
         return value.trim();
       }
     }

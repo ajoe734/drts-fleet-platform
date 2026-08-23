@@ -5509,6 +5509,9 @@ export const IMPLEMENTED_REPORT_JOB_TYPES = [
   "six_month_statistics",
   "fare_version_history",
   "vehicle_monthly_delta",
+  "trip_summary",
+  "incident_register",
+  "maintenance_overview",
 ] as const satisfies readonly ReportJobType[];
 export type ImplementedReportJobType =
   (typeof IMPLEMENTED_REPORT_JOB_TYPES)[number];
@@ -5665,6 +5668,65 @@ export interface InsuranceRosterRowRecord {
   exportedAt: string;
 }
 
+/**
+ * Operational report rows.
+ *
+ * `trip_summary` aggregates; `monthly_trip_report` lists. Both read the same
+ * order feed, and keeping them distinct is the point -- a summary that is a
+ * listing under another name is a second thing to maintain for no answer the
+ * first does not already give.
+ */
+export interface TripSummaryRowRecord {
+  serviceProduct: string;
+  from: string | null;
+  to: string | null;
+  totalOrders: number;
+  completedTrips: number;
+  cancelledOrders: number;
+  inFlightOrders: number;
+  /** Completed as a share of total, rounded to four places. `null` when there were no orders. */
+  completionRate: number | null;
+  exportedAt: string;
+}
+
+export interface IncidentRegisterRowRecord {
+  incidentId: string;
+  title: string;
+  category: string;
+  severity: string;
+  status: string;
+  relatedOrderId: string | null;
+  relatedVehicleId: string | null;
+  relatedDriverId: string | null;
+  relatedComplaintCaseNo: string | null;
+  reportedBy: string;
+  assignedTo: string | null;
+  occurredAt: string | null;
+  location: string | null;
+  resolutionNote: string | null;
+  serviceRecoveryActionCount: number;
+  createdAt: string;
+  updatedAt: string;
+  exportedAt: string;
+}
+
+export interface MaintenanceOverviewRowRecord {
+  maintenanceId: string;
+  vehicleId: string;
+  type: string;
+  status: string;
+  description: string;
+  scheduledAt: string | null;
+  completedAt: string | null;
+  /** Positive when a scheduled job is past due and still not completed. */
+  overdueDays: number | null;
+  technician: string | null;
+  cost: number | null;
+  createdAt: string;
+  updatedAt: string;
+  exportedAt: string;
+}
+
 export interface VehicleMonthlyDeltaEntryRecord {
   vehicleId: string;
   plateNo: string;
@@ -5755,6 +5817,9 @@ export type ReportJobRowRecord =
   | ContractRosterRowRecord
   | import("./phase1-delta-supply-eligibility").DispatchDailyRecord
   | FareVersionHistoryRowRecord
+  | IncidentRegisterRowRecord
+  | MaintenanceOverviewRowRecord
+  | TripSummaryRowRecord
   | DispatchRecordingIndexRowRecord
   | DriverRosterRowRecord
   | InsuranceRosterRowRecord

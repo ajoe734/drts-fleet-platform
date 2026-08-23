@@ -29,6 +29,8 @@ import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
 import { ComplaintService } from "../../apps/api/src/modules/complaint/complaint.service";
 import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
+import { IncidentService } from "../../apps/api/src/modules/incident/incident.service";
+import { MaintenanceService } from "../../apps/api/src/modules/maintenance/maintenance.service";
 import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
@@ -108,6 +110,8 @@ function createServices() {
     new OpsDispatchEventsService(new EventEmitter() as never),
   );
   const complaintService = new ComplaintService(auditService);
+  const incidentService = new IncidentService(auditService);
+  const maintenanceService = new MaintenanceService(auditService);
   const reportingFilingService = new ReportingFilingService(auditService);
 
   reportingFilingService.registerOrderFeedProvider(() =>
@@ -131,6 +135,12 @@ function createServices() {
   reportingFilingService.registerSixMonthOperationsSummaryProvider(() =>
     SIX_MONTH_SUMMARY_FIXTURE.map((row) => ({ ...row })),
   );
+  reportingFilingService.registerIncidentFeedProvider(() =>
+    incidentService.listIncidents(),
+  );
+  reportingFilingService.registerMaintenanceFeedProvider(() =>
+    maintenanceService.listMaintenanceLogs(),
+  );
   reportingFilingService.registerOperatingAuthorizationFeedProvider(
     () => OPERATING_AUTHORIZATION_FIXTURE,
   );
@@ -140,6 +150,8 @@ function createServices() {
     auditService,
     callcenterService,
     complaintService,
+    incidentService,
+    maintenanceService,
     ownedMobilityService,
     regulatoryRegistryService,
     reportingFilingService,
@@ -509,15 +521,15 @@ describe("report builder registry", () => {
   it("rejects a declared-but-unbuilt report instead of completing it empty", () => {
     const { reportingFilingService } = createServices();
 
-    // All nine of PRD 9.10.1 are built now, so the remaining declared-and-
-    // unbuilt types are operational ones outside that section.
+    // Every declared report type is built now, so the only way to be refused is
+    // to ask for one that was never declared.
     expectApiErrorCode(
       () =>
         reportingFilingService.createReportJob({
-          jobType: "trip_summary",
+          jobType: "not_declared_anywhere",
           format: "csv",
         }),
-      "REPORT_TYPE_NOT_IMPLEMENTED",
+      "REPORT_TYPE_UNKNOWN",
     );
 
     expect(reportingFilingService.listReportJobs()).toHaveLength(0);
@@ -933,5 +945,98 @@ describe("report export", () => {
         "tenant-not-the-owner",
       ),
     ).toThrow();
+  });
+});
+
+describe("operational reports", () => {
+  async function completed(jobType: string, filters?: Record<string, unknown>) {
+    const services = createServices();
+    const accepted = services.reportingFilingService.createReportJob({
+      jobType,
+      format: "csv",
+      ...(filters ? { filters } : {}),
+    });
+    await flushReportingQueue();
+    await flushReportingQueue();
+    return {
+      services,
+      job: services.reportingFilingService.getReportJob(accepted.jobId),
+    };
+  }
+
+  it("summarises trips by service product rather than listing them", async () => {
+    const { services, job } = await completed("trip_summary");
+
+    expect(job.status).toBe("completed");
+    const rows = (job.rows ?? []) as Array<{
+      serviceProduct: string;
+      totalOrders: number;
+      completedTrips: number;
+      cancelledOrders: number;
+      inFlightOrders: number;
+      completionRate: number | null;
+    }>;
+
+    // An aggregate, not a per-order listing -- that is what
+    // `monthly_trip_report` is for.
+    const orders = services.ownedMobilityService.listOrders();
+    expect(rows.length).toBeLessThanOrEqual(orders.length);
+    expect(rows.reduce((sum, row) => sum + row.totalOrders, 0)).toBe(
+      orders.length,
+    );
+    for (const row of rows) {
+      expect(
+        row.completedTrips + row.cancelledOrders + row.inFlightOrders,
+      ).toBe(row.totalOrders);
+    }
+  });
+
+  it("says nothing happened rather than everything failed", async () => {
+    // A window with no orders must not report a completion rate of 0, which
+    // reads as "every trip failed".
+    const { job } = await completed("trip_summary", {
+      from: "1999-01-01T00:00:00.000Z",
+      to: "1999-12-31T23:59:59.000Z",
+    });
+
+    expect(job.rows).toHaveLength(0);
+  });
+
+  it("registers incidents with their recovery-action count", async () => {
+    const { services, job } = await completed("incident_register");
+
+    expect(job.rows).toHaveLength(
+      services.incidentService.listIncidents().length,
+    );
+  });
+
+  it("flags a maintenance job that is scheduled, overdue and still open", async () => {
+    const services = createServices();
+    services.maintenanceService.createMaintenanceLog({
+      vehicleId: "veh-demo-001",
+      type: "repair",
+      description: "brake pads",
+      scheduledAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    } as never);
+
+    const accepted = services.reportingFilingService.createReportJob({
+      jobType: "maintenance_overview",
+      format: "csv",
+    });
+    await flushReportingQueue();
+    await flushReportingQueue();
+    const rows = (services.reportingFilingService.getReportJob(accepted.jobId)
+      .rows ?? []) as Array<{
+      description: string;
+      overdueDays: number | null;
+      completedAt: string | null;
+    }>;
+
+    const overdue = rows.find((row) => row.description === "brake pads");
+    // Overdue is why anyone opens this report, and it is not a stored field.
+    expect(overdue?.overdueDays).toBe(3);
+    for (const row of rows.filter((r) => r.completedAt)) {
+      expect(row.overdueDays).toBeNull();
+    }
   });
 });

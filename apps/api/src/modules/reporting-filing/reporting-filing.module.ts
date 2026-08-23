@@ -5,6 +5,10 @@ import { IdempotencyModule } from "../../common/idempotency";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { ComplaintModule } from "../complaint/complaint.module";
 import { ComplaintService } from "../complaint/complaint.service";
+import { IncidentModule } from "../incident/incident.module";
+import { IncidentService } from "../incident/incident.service";
+import { MaintenanceModule } from "../maintenance/maintenance.module";
+import { MaintenanceService } from "../maintenance/maintenance.service";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
@@ -23,6 +27,8 @@ import { ReportingFilingService } from "./reporting-filing.service";
     IdempotencyModule,
     AuditNotificationModule,
     ComplaintModule,
+    IncidentModule,
+    MaintenanceModule,
     OwnedMobilityModule,
     RegulatoryRegistryModule,
     ReportingModule,
@@ -40,6 +46,8 @@ export class ReportingFilingModule implements OnModuleInit {
     private readonly tenantPartnerService: TenantPartnerService,
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     private readonly complaintService: ComplaintService,
+    private readonly incidentService: IncidentService,
+    private readonly maintenanceService: MaintenanceService,
   ) {}
 
   onModuleInit() {
@@ -72,6 +80,12 @@ export class ReportingFilingModule implements OnModuleInit {
     );
     this.reportingFilingService.registerComplaintCaseFeedProvider(() =>
       this.complaintService.listComplaintCases(),
+    );
+    this.reportingFilingService.registerIncidentFeedProvider(() =>
+      this.incidentService.listIncidents(),
+    );
+    this.reportingFilingService.registerMaintenanceFeedProvider(() =>
+      this.maintenanceService.listMaintenanceLogs(),
     );
   }
 }
