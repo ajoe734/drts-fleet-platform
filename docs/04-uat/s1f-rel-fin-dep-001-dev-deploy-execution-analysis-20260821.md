@@ -19,7 +19,7 @@
 
 Task `S1F-REL-FIN-DEP-001` has executed and verified the production-grade `Deploy — Dev` workflow ([`.github/workflows/deploy-dev.yml`](../../.github/workflows/deploy-dev.yml)) pinned strictly to the immutable Stage 1 candidate SHA `4012b10c0cd4990bd238eaed6ddc23252bc0c8d4` on Dev project `drts-dev-ray-tw-20260730` (`952590575714`).
 
-All required deployment phases—container image build and push to Google Artifact Registry, database migration job execution, Cloud Run service deployments, paused Partner Booking enforcement, fail-closed retired service verification, and post-deploy Dev health checks—completed with a status of `SUCCESS` in GitHub Actions run **`32616532316`**.
+In GitHub Actions run **`32616532316`**, the overall workflow run conclusion is `failure` due to downstream job `97141872207` ("Candidate SHA operational acceptance", which failed on 3 Playwright tests and belongs to Wave C `S1F-REL-FIN-UAT-001` scope per [`docs/03-runbooks/s1f-release-finalization-execution-tasks-20260821.md`](../03-runbooks/s1f-release-finalization-execution-tasks-20260821.md)). All DEP-001-scoped deployment phases—container image build and push to Google Artifact Registry, database migration job execution, Cloud Run service deployments, paused Partner Booking enforcement, fail-closed retired service verification, post-deploy Dev health checks, and Deploy outcome evaluation—completed with a status of `SUCCESS`, with the workflow's own `Deploy outcome` job explicitly evaluating `deployed=yes`.
 
 ### 1.1 Dependency Verification Summary
 
@@ -46,7 +46,7 @@ All required deployment phases—container image build and push to Google Artifa
 | **Run ID** | `32616532316` | GitHub Actions Run ID |
 | **Run URL** | [https://github.com/ajoe734/drts-fleet-platform/actions/runs/32616532316](https://github.com/ajoe734/drts-fleet-platform/actions/runs/32616532316) | Canonical workflow run URL |
 | **Trigger Event** | `workflow_dispatch` | Manual dispatch on `dev` targeting locked candidate SHA |
-| **Status / Conclusion** | `completed` | Core deployment rails 100% SUCCESS |
+| **Status / Conclusion** | `completed` / `failure` | Overall run conclusion is `failure` due to Wave C `S1F-REL-FIN-UAT-001` operational acceptance job `97141872207`; all DEP-001 deployment jobs succeeded and `Deploy outcome` evaluated `deployed=yes` |
 | **Execution Timestamp** | `2026-08-23T03:54:50Z` – `2026-08-23T04:33:38Z` (UTC) | Completed in 38m 48s (queued behind nightly publish run 32616137960) |
 | **Target Profile** | `current` | `drts-dev-ray-tw-20260730` |
 | **Source Ref** | `4012b10c0cd4990bd238eaed6ddc23252bc0c8d4` | Pinned immutable candidate SHA locked in PRE-001 |
@@ -56,7 +56,7 @@ All required deployment phases—container image build and push to Google Artifa
 
 ### 2.2 Job-Level Audit & Verification URLs
 
-Every required deployment job in `.github/workflows/deploy-dev.yml` succeeded:
+Every DEP-001 deployment-scoped job in `.github/workflows/deploy-dev.yml` succeeded:
 
 | Job Name | Job ID | Job URL | Duration | Outcome / Verification Notes |
 | :--- | :--- | :--- | :--- | :--- |
@@ -67,9 +67,10 @@ Every required deployment job in `.github/workflows/deploy-dev.yml` succeeded:
 | **Enforce Partner Booking paused state** | `97141634306` | [Job 97141634306](https://github.com/ajoe734/drts-fleet-platform/actions/runs/32616532316/job/97141634306) | 27s | **SUCCESS:** Verified `drts-dev-partner-booking-web` Cloud Run service is absent / removed. |
 | **Dev health check** | `97141682677` | [Job 97141682677](https://github.com/ajoe734/drts-fleet-platform/actions/runs/32616532316/job/97141682677) | 1m 9s | **SUCCESS:** Verified healthy HTTP responses and referral handoff session lifecycle across all active services. |
 | **Fail-closed retired service cleanup** | `97141811137` | [Job 97141811137](https://github.com/ajoe734/drts-fleet-platform/actions/runs/32616532316/job/97141811137) | 30s | **SUCCESS:** Verified retired services adhere to fail-closed configuration. |
+| **Candidate SHA operational acceptance** | `97141872207` | [Job 97141872207](https://github.com/ajoe734/drts-fleet-platform/actions/runs/32616532316/job/97141872207) | 2m 4s | **FAILURE (Wave C `S1F-REL-FIN-UAT-001` Scope):** 3 Playwright journeys failed on referral/booking readback against live endpoints. Causes overall workflow run conclusion to be `failure`. Does not affect DEP-001 deployment rails or image rollout. |
 | **Deploy outcome** | `97142086670` | [Job 97142086670](https://github.com/ajoe734/drts-fleet-platform/actions/runs/32616532316/job/97142086670) | 5s | **SUCCESS:** Evaluated deploy outcome: `deployed=yes`. |
 
-*(Note: Job `97141872207` `operational-candidate-acceptance` belongs to Wave C `S1F-REL-FIN-UAT-001` scope, where runtime acceptance against deployed endpoints is performed and reconciled).*
+*(Note: While overall GitHub Actions workflow run conclusion is `failure` due to job `97141872207` 'Candidate SHA operational acceptance', that job belongs to Wave C `S1F-REL-FIN-UAT-001` scope per [`docs/03-runbooks/s1f-release-finalization-execution-tasks-20260821.md`](../03-runbooks/s1f-release-finalization-execution-tasks-20260821.md). All DEP-001 deployment jobs succeeded, all 9 active Cloud Run services are running revision-pinned candidate containers with 100% traffic, health checks passed, and the Deploy outcome job explicitly evaluated `deployed=yes`).*
 
 ---
 

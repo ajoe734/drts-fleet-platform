@@ -23,7 +23,7 @@ Unblock decision: `support/unblock/S1F-REL-FIN-DEP-001/S1F-REL-FIN-DEP-001-UNBLO
 | **Locked Candidate SHA** | `4012b10c0cd4990bd238eaed6ddc23252bc0c8d4` (PR #1451 merge commit) |
 | **Deployed Workflow Ref** | `4012b10c0cd4990bd238eaed6ddc23252bc0c8d4` (Same-SHA candidate lock match) |
 | **Workflow Run URL** | [https://github.com/ajoe734/drts-fleet-platform/actions/runs/32616532316](https://github.com/ajoe734/drts-fleet-platform/actions/runs/32616532316) |
-| **Workflow Status** | `completed` |
+| **Workflow Status** | `completed` (Run conclusion: `failure` due to Wave C `S1F-REL-FIN-UAT-001` job `97141872207`; DEP-001 deployment jobs `SUCCESS` with `deployed=yes`) |
 | **Upstream Dependencies** | `S1F-REL-FIN-PRE-001` (done), `S1F-REL-FIN-GCP-001` (done / gate open via unblock decision) |
 | **Downstream Tasks** | `S1F-REL-FIN-UAT-001` (Wave C), `S1F-REL-FIN-CLOSE-001` (Wave D) |
 | **Current Task State** | `dev_deployed` / `ready_for_review` |
