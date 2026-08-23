@@ -23,6 +23,7 @@ import type {
   RegulatoryRegistrySummary,
   SubmitExclusivityReviewCommand,
   UpdateDriverMasterLifecycleCommand,
+  UpdateDriverServiceBucketsCommand,
   UpdateDriverWorkStateCommand,
   UpdateVehicleComplianceCommand,
   PassengerServiceRuntimeProfile,
@@ -221,6 +222,25 @@ export class RegulatoryRegistryController {
   ) {
     return toApiSuccessEnvelope(
       this.regulatoryRegistryService.updateDriverWorkState(driverId, command),
+      requestId,
+    );
+  }
+
+  // `SD-DP-20260817-010` (PRD 11.4) makes this the platform's call, but it could
+  // only ever be made at registration -- the one moment the platform knows least
+  // about the driver.
+  @Post("drivers/:driverId/service-buckets")
+  updateDriverServiceBuckets(
+    @Param("driverId") driverId: string,
+    @Body() command: UpdateDriverServiceBucketsCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryRegistryService.updateDriverServiceBuckets(
+        driverId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }

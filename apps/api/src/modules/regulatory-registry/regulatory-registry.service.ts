@@ -37,6 +37,7 @@ import type {
   SupplySubmissionRecord,
   SubmitExclusivityReviewCommand,
   UpdateDriverMasterLifecycleCommand,
+  UpdateDriverServiceBucketsCommand,
   UpdateDriverWorkStateCommand,
   UpdateVehicleComplianceCommand,
   VehicleContractLifecycleStatus,
@@ -51,6 +52,8 @@ import type {
   VehiclePassengerDisclosureProfile,
   DriverPublicRegistrationCredential,
 } from "@drts/contracts";
+
+import { PHASE1_SERVICE_BUCKETS } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
@@ -961,6 +964,72 @@ export class RegulatoryRegistryService implements OnModuleInit {
     );
 
     return this.cloneDriver(created);
+  }
+
+  /**
+   * Adjusts a driver's dispatchable service buckets after registration.
+   *
+   * Audited with old and new values, like `updateDriverLifecycle`, because this
+   * changes what work the platform may send someone.
+   */
+  updateDriverServiceBuckets(
+    driverId: string,
+    command: UpdateDriverServiceBucketsCommand,
+    requestId?: string,
+  ) {
+    const driver = this.requireDriver(driverId);
+    const previous = this.decorateDriver(driver);
+    const buckets = command.supportedServiceBuckets;
+
+    if (!Array.isArray(buckets) || buckets.length === 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "SERVICE_BUCKETS_REQUIRED",
+        "At least one service bucket is required; a driver with none can never be dispatched.",
+        { driverId },
+      );
+    }
+    const unknown = buckets.filter(
+      (bucket) => !PHASE1_SERVICE_BUCKETS.includes(bucket),
+    );
+    if (unknown.length > 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "SERVICE_BUCKET_UNKNOWN",
+        `Unknown service bucket(s): ${unknown.join(", ")}.`,
+        { driverId, unknown, supported: [...PHASE1_SERVICE_BUCKETS] },
+      );
+    }
+
+    driver.supportedServiceBuckets = [...new Set(buckets)];
+    driver.updatedAt = new Date().toISOString();
+
+    const updated = this.decorateDriver(driver);
+    this.persistChanges(
+      { drivers: [this.cloneDriver(updated)] },
+      "update_driver_service_buckets",
+    );
+    this.recordAudit(
+      {
+        actorId: "platform-admin",
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "regulatory-registry",
+        actionName: "update_driver_service_buckets",
+        resourceType: "driver_master",
+        resourceId: driverId,
+        oldValuesSummary: {
+          supportedServiceBuckets: [...previous.supportedServiceBuckets],
+        },
+        newValuesSummary: {
+          supportedServiceBuckets: [...updated.supportedServiceBuckets],
+          reason: command.reason ?? null,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneDriver(updated);
   }
 
   updateDriverLifecycle(
