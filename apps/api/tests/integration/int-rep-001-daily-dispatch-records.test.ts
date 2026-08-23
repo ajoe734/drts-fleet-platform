@@ -267,7 +267,10 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
     const accepted = reportingFilingService.createReportJob(
       {
         jobType: "daily_dispatch_record",
-        format: "json",
+        // Was "json", which is not a value ReportOutputFormat has ever had.
+        // Nothing validated `format`, so the test passed on it. This case is
+        // about the daily dispatch rows, not the rendering.
+        format: "csv",
         filters: { serviceDate },
       },
       "req-int-rep-report-job-001",

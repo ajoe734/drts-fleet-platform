@@ -6,6 +6,7 @@ import {
   Optional,
   Param,
   Post,
+  StreamableFile,
 } from "@nestjs/common";
 
 import type {
@@ -149,6 +150,48 @@ export class ReportingFilingController {
       this.reportingFilingService.getReportJob(jobId, requestId, identity),
       requestId,
     );
+  }
+
+  // The file itself. `GET reports/:jobId` describes the artifact; this one is
+  // the artifact. Until now the description carried a `downloadUrl` and there
+  // was nothing at the other end of it.
+  @Get("reports/:jobId/artifact")
+  @RequireRealms("platform", "ops")
+  downloadReportArtifact(
+    @Param("jobId") jobId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const artifact = this.reportingFilingService.renderReportArtifact(
+      jobId,
+      requestId,
+      identity,
+    );
+    return new StreamableFile(artifact.buffer, {
+      type: artifact.contentType,
+      disposition: `attachment; filename="${artifact.fileName}"`,
+    });
+  }
+
+  @Get("tenant/reports/:jobId/artifact")
+  @RequireRealms("tenant", "platform", "ops")
+  downloadTenantReportArtifact(
+    @Param("jobId") jobId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const normalizedTenantId = this.requireTenantId(tenantId);
+    const artifact = this.reportingFilingService.renderReportArtifact(
+      jobId,
+      requestId,
+      identity,
+      normalizedTenantId,
+    );
+    return new StreamableFile(artifact.buffer, {
+      type: artifact.contentType,
+      disposition: `attachment; filename="${artifact.fileName}"`,
+    });
   }
 
   @Get("tenant/reports/:jobId")

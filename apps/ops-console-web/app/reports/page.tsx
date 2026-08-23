@@ -28,9 +28,9 @@ import {
   FILING_PACKAGE_TYPES,
   OWNED_ORDER_STATUSES,
   IMPLEMENTED_REPORT_JOB_TYPES,
+  IMPLEMENTED_REPORT_OUTPUT_FORMATS,
   REGULATORY_REPORT_JOB_TYPES,
   REPORT_JOB_TYPES,
-  REPORT_OUTPUT_FORMATS,
 } from "@drts/contracts";
 import {
   createIdempotencyKey,
@@ -384,11 +384,12 @@ function artifactDownloadUrl(
     return null;
   }
 
-  const downloadMetadata = (
-    artifact as { downloadMetadata?: { downloadUrl?: unknown } }
-  ).downloadMetadata;
-  return typeof downloadMetadata?.downloadUrl === "string"
-    ? downloadMetadata.downloadUrl
+  // `downloadMetadata.downloadUrl` is the signed governance reference and points
+  // at a host that does not resolve. `artifact.downloadUrl` addresses the route
+  // that streams the file. This link is for a person to click, so it takes the
+  // one that serves bytes.
+  return typeof artifact.downloadUrl === "string" && artifact.downloadUrl
+    ? artifact.downloadUrl
     : null;
 }
 
@@ -644,7 +645,7 @@ function ReportJobComposerModal({
                 }
                 style={nativeSelectStyle}
               >
-                {REPORT_OUTPUT_FORMATS.map((value) => (
+                {IMPLEMENTED_REPORT_OUTPUT_FORMATS.map((value) => (
                   <option key={value} value={value}>
                     {value.toUpperCase()}
                   </option>

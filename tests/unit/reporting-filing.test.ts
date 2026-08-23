@@ -11,6 +11,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
+import { recordsToCsv } from "../../apps/api/src/common/csv";
 
 function expectApiErrorCode(call: () => unknown, code: string) {
   try {
@@ -291,7 +292,13 @@ describe("reporting and filing service", () => {
     job = reportingFilingService.getReportJob(accepted.jobId);
 
     expect(job.status).toBe("completed");
-    expect(job.artifact?.downloadUrl).toContain("sig=");
+    // The link a caller follows now addresses the route that streams the file.
+    // The signed reference stays on downloadMetadata, where it is a governance
+    // record rather than something anyone is invited to click.
+    expect(job.artifact?.downloadUrl).toBe(
+      `/reports/${accepted.jobId}/artifact`,
+    );
+    expect(job.artifact?.downloadMetadata.downloadUrl).toContain("sig=");
     expect(job.artifact?.downloadMetadata.kind).toBe("report");
     expect(job.artifact?.downloadMetadata.signatureVersion).toBe(1);
     expect(job.artifact?.expiresAt).toBeTruthy();
@@ -397,7 +404,8 @@ describe("reporting and filing service", () => {
 
     const accepted = reportingFilingService.createReportJob({
       jobType: "revenue_summary",
-      format: "xlsx",
+      // Was "xlsx", which has no renderer and is now rejected at creation.
+      format: "csv",
     });
 
     await flushReportingQueue();
@@ -826,5 +834,104 @@ describe("PRD 9.10.1 regulatory rosters", () => {
     );
 
     expect(accepted.status).toBe("queued");
+  });
+});
+
+describe("report export", () => {
+  async function completedJob(jobType: string, format = "csv") {
+    const services = createServices();
+    const accepted = services.reportingFilingService.createReportJob({
+      jobType,
+      format: format as never,
+    });
+    await flushReportingQueue();
+    await flushReportingQueue();
+    return { services, jobId: accepted.jobId };
+  }
+
+  it("streams a report as CSV with the rows it computed", async () => {
+    const { services, jobId } = await completedJob("vehicle_roster");
+
+    const artifact = services.reportingFilingService.renderReportArtifact(
+      jobId,
+      "req-download",
+    );
+    const text = artifact.buffer.toString("utf8");
+    const lines = text.split("\r\n");
+    const vehicles = services.regulatoryRegistryService.listVehicles();
+
+    expect(artifact.contentType).toContain("text/csv");
+    expect(artifact.fileName).toBe(`vehicle_roster-${jobId}.csv`);
+    // Header plus one line per vehicle -- the file has to carry what the API
+    // said the report contained, not a plausible-looking subset.
+    expect(lines).toHaveLength(vehicles.length + 1);
+    expect(lines[0]).toContain('"vehicleId"');
+    expect(text).toContain(vehicles[0]!.plateNo);
+  });
+
+  it("neutralises a cell a spreadsheet would execute", () => {
+    // A value beginning "=", "+", "-" or "@" is a formula to Excel, Numbers and
+    // LibreOffice. These files go to partners and to 公路主管機關, so the
+    // leading character is quoted rather than trusted.
+    const csv = recordsToCsv([
+      { plateNo: '=HYPERLINK("http://x")', note: 'has "quotes"' },
+    ]);
+
+    expect(csv).toContain(`"'=HYPERLINK`);
+    expect(csv).toContain('has ""quotes""');
+  });
+
+  it("exports every field even when rows are not uniformly shaped", () => {
+    // A report whose later rows carry a field the first row omitted must not
+    // silently drop that column.
+    const csv = recordsToCsv([{ a: 1 }, { a: 2, b: 3 }]);
+
+    expect(csv.split("\r\n")[0]).toBe('"a","b"');
+    expect(csv.split("\r\n")[2]).toBe('"2","3"');
+  });
+
+  it("refuses a format that has no renderer instead of returning no file", () => {
+    const { reportingFilingService } = createServices();
+
+    // `format` used to be decoration: xlsx and csv produced identical results,
+    // which is to say no bytes at all.
+    for (const format of ["xlsx", "pdf", "zip"] as const) {
+      expectApiErrorCode(
+        () =>
+          reportingFilingService.createReportJob({
+            jobType: "vehicle_roster",
+            format,
+          }),
+        "REPORT_FORMAT_NOT_IMPLEMENTED",
+      );
+    }
+  });
+
+  it("refuses to hand over a file for a job that has not completed", () => {
+    const { reportingFilingService } = createServices();
+    const accepted = reportingFilingService.createReportJob({
+      jobType: "vehicle_roster",
+      format: "csv",
+    });
+
+    expectApiErrorCode(
+      () => reportingFilingService.renderReportArtifact(accepted.jobId),
+      "REPORT_ARTIFACT_NOT_READY",
+    );
+  });
+
+  it("keeps the tenant boundary on the file, not only on the description", async () => {
+    const { services, jobId } = await completedJob("monthly_trip_report");
+
+    // Downloading is a stronger act than describing, so it cannot be the
+    // weaker check.
+    expect(() =>
+      services.reportingFilingService.renderReportArtifact(
+        jobId,
+        "req-download",
+        null,
+        "tenant-not-the-owner",
+      ),
+    ).toThrow();
   });
 });

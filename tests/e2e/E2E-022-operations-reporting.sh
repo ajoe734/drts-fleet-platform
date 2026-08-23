@@ -773,7 +773,7 @@ jq -n \
   --arg serviceDate "$SERVICE_DATE" \
   '{
     jobType: "daily_dispatch_record",
-    format: "json",
+    format: "csv",
     filters: {
       serviceDate: $serviceDate
     }
@@ -928,7 +928,7 @@ jq -n \
   --arg businessArea "$TAXI_BUSINESS_AREA" \
   '{
     jobType: "six_month_operations_summary",
-    format: "json",
+    format: "csv",
     filters: {
       from: $from,
       to: $to,
