@@ -11,18 +11,18 @@ name: Nightly publish (cut snapshot)
 on:
   schedule:
     # 03:00 UTC = 11:00 Asia/Taipei = start of TW business day
-    - cron: '0 3 * * *'
+    - cron: "0 3 * * *"
   workflow_dispatch:
     inputs:
       source_branch:
-        description: 'Branch to snapshot (default: dev)'
+        description: "Branch to snapshot (default: dev)"
         required: false
-        default: 'dev'
+        default: "dev"
         type: string
 
 permissions:
-  contents: write   # create branch + tag
-  actions: write    # gh workflow run deploy-dev.yml from inside this workflow
+  contents: write # create branch + tag
+  actions: write # gh workflow run deploy-dev.yml from inside this workflow
 
 concurrency:
   group: nightly-publish
@@ -49,16 +49,55 @@ jobs:
 
       - name: Verify dev's latest ci-integ is green
         id: green
+        env:
+          SRC_SHA: ${{ steps.src.outputs.sha }}
         run: |
-          state=$(gh api "repos/${{ github.repository }}/commits/${{ steps.src.outputs.sha }}/check-runs" \
-            --jq '[.check_runs[] | select(.name=="ci-integ")] | (if length==0 then "missing" else (.[0].conclusion // "pending") end)')
-          echo "ci-integ on dev HEAD = $state"
-          if [ "$state" != "success" ]; then
-            echo "::warning::ci-integ on dev HEAD is $state (need success). Skipping nightly publish."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
+          set -euo pipefail
+
+          # This gate used to read the check-run once and skip on anything that
+          # was not "success" -- including "missing", which means the check has
+          # not been created yet rather than that it failed.
+          #
+          # On 2026-08-22 a PR merged at 03:36:59, this ran at 03:37:39, and
+          # ci-integ was not created until 03:46:01. Forty seconds of GitHub
+          # latency cancelled that day's publish and deploy. The check itself
+          # passed. The cron fires at 03:00 and merges land continuously, so
+          # this race is a matter of timing, not of anything being wrong.
+          #
+          # Not-yet-started and failed are now different answers: wait for the
+          # first, skip on the second.
+          deadline=$(( SECONDS + 20 * 60 ))
+          state="missing"
+          while :; do
+            state=$(gh api "repos/${{ github.repository }}/commits/${SRC_SHA}/check-runs" \
+              --jq '[.check_runs[] | select(.name=="ci-integ")] | (if length==0 then "missing" else (.[0].conclusion // "pending") end)')
+            case "${state}" in
+              # A check filtered out by path rules is not a broken dev, and
+              # blocking on it would stop publishing on documentation-only days.
+              success|skipped|neutral)
+                echo "ci-integ on dev HEAD = ${state}"
+                echo "skip=false" >> "$GITHUB_OUTPUT"
+                echo "reason=" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              missing|pending|queued|in_progress)
+                if (( SECONDS >= deadline )); then
+                  echo "::warning::ci-integ on dev HEAD is still ${state} after 20 minutes. Skipping nightly publish."
+                  echo "skip=true" >> "$GITHUB_OUTPUT"
+                  echo "reason=ci-integ never concluded (last seen: ${state})" >> "$GITHUB_OUTPUT"
+                  exit 0
+                fi
+                echo "ci-integ on dev HEAD = ${state}; waiting."
+                sleep 30
+                ;;
+              *)
+                echo "::warning::ci-integ on dev HEAD is ${state} (need success). Skipping nightly publish."
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                echo "reason=ci-integ concluded ${state}" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+          done
 
       - name: Compute next version
         if: steps.green.outputs.skip != 'true'
@@ -93,6 +132,7 @@ jobs:
           if git diff --quiet "origin/$latest_publish..${{ steps.src.outputs.sha }}"; then
             echo "::notice::No content delta between $latest_publish and dev HEAD; skipping nightly publish."
             echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=no content delta since $latest_publish" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
@@ -130,19 +170,62 @@ jobs:
             echo "::warning::Failed to dispatch deploy-dev.yml. Operator can run manually: gh workflow run deploy-dev.yml -f source_ref=$branch"
           fi
 
+      # A skipped nightly used to report the run as a plain green tick, so
+      # "today's snapshot went out" and "today's snapshot never happened" were
+      # the same row in the workflow list. That is how a skipped 2026-08-22
+      # publish went unnoticed. This step always runs and always states which
+      # one it was, matching `deployed=yes|no` on the deploy-dev side.
       - name: Summarise
-        if: steps.green.outputs.skip != 'true' && steps.delta.outputs.skip != 'true'
+        if: always()
+        env:
+          GREEN_SKIP: ${{ steps.green.outputs.skip }}
+          GREEN_REASON: ${{ steps.green.outputs.reason }}
+          DELTA_SKIP: ${{ steps.delta.outputs.skip }}
+          DELTA_REASON: ${{ steps.delta.outputs.reason }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          SRC_SHA: ${{ steps.src.outputs.sha }}
         run: |
-          version="${{ steps.ver.outputs.version }}"
-          branch="publish/$version"
-          tag="release/$version"
-          sha="${{ steps.src.outputs.sha }}"
+          set -euo pipefail
+
+          if [ "${GREEN_SKIP:-}" = "true" ]; then
+            published="no"
+            reason="${GREEN_REASON:-dev HEAD was not verified green}"
+          elif [ "${DELTA_SKIP:-}" = "true" ]; then
+            published="no"
+            reason="${DELTA_REASON:-no content delta}"
+          elif [ -n "${VERSION:-}" ]; then
+            published="yes"
+            reason=""
+          else
+            published="no"
+            reason="the job did not reach the publish decision"
+          fi
+
           {
-            echo "## Nightly publish: \`$version\`"
+            echo "## Nightly publish"
             echo ""
-            echo "- Source: \`$SOURCE\` @ \`${sha:0:12}\`"
-            echo "- Branch: \`$branch\` (immutable snapshot)"
-            echo "- Tag:    \`$tag\` (same SHA)"
-            echo "- Deploy — Dev: dispatched explicitly (push by GITHUB_TOKEN can't auto-trigger)"
-            echo "- Promotion to master: \`hourly-promote.yml\` will pick this up after the ≥30 min soak window unless a \`regression:$version\` issue is opened."
+            echo "\`published=${published}\`"
+            echo ""
+            if [ "${published}" = "yes" ]; then
+              echo "- Version: \`${VERSION}\`"
+              echo "- Source: \`${SOURCE}\` @ \`${SRC_SHA:0:12}\`"
+              echo "- Branch: \`publish/${VERSION}\` (immutable snapshot)"
+              echo "- Tag:    \`release/${VERSION}\` (same SHA)"
+              echo "- Deploy — Dev: dispatched explicitly (a push by GITHUB_TOKEN cannot auto-trigger it)"
+              echo "- Promotion to master: \`hourly-promote.yml\` picks this up after the ≥30 min soak window unless a \`regression:${VERSION}\` issue is opened."
+            else
+              echo "**No snapshot was cut and no deploy was dispatched.** Dev is still serving the previous publish."
+              echo ""
+              echo "Reason: ${reason}."
+              if [ "${GREEN_SKIP:-}" = "true" ]; then
+                echo ""
+                echo "A green run with \`published=no\` for this reason is worth reading: nothing failed here, the nightly declined to publish."
+              fi
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${published}" = "yes" ]; then
+            echo "::notice title=Nightly publish::published=yes; ${VERSION} cut and Deploy — Dev dispatched"
+          else
+            echo "::notice title=Nightly publish::published=no; ${reason}"
+          fi
