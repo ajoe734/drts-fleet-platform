@@ -2,7 +2,21 @@ import { createHmac } from "node:crypto";
 
 import { resolveControlledDownloadPolicy } from "./sensitive-data-policy";
 
-export const DEFAULT_CONTROLLED_DOWNLOAD_HOST = "https://downloads.drts.local";
+/**
+ * Where a controlled-download link points when nothing overrides it.
+ *
+ * This was `https://downloads.drts.local`, a host that does not resolve, with no
+ * route serving the path. Five modules handed callers a signed link to it and
+ * two consoles rendered that link for a person to click; following it failed at
+ * DNS, which reads as a network fault rather than as "this file was never
+ * produced".
+ *
+ * A relative prefix keeps the link on the API's own origin in every
+ * environment, where `ControlledDownloadController` answers it. Set
+ * `CONTROLLED_DOWNLOAD_HOST` to an absolute origin once artifacts are served
+ * from somewhere else.
+ */
+export const DEFAULT_CONTROLLED_DOWNLOAD_HOST = "/downloads";
 export const DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES = 15;
 export const DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID =
   "phase1-controlled-download-key-v1";
