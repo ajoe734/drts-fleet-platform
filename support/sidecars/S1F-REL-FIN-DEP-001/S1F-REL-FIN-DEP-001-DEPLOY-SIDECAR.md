@@ -7,8 +7,8 @@ Branch: `gemini2/s1f-rel-fin-dep-001`
 Mutates canonical: `true`
 Helper kind: `verification_evidence_packet`
 Primary evidence: `docs/04-uat/s1f-rel-fin-dep-001-dev-deploy-execution-analysis-20260821.md`
-Candidate lock: `docs/04-uat/s1f-rel-fin-pre-001-candidate-lock-20260821.json`
-GCP gate evidence: `docs/04-uat/s1f-rel-fin-gcp-001-billing-artifact-registry-gate-evidence-20260821.md`
+Candidate lock: `S1F-REL-FIN-PRE-001` (`4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`)
+GCP gate evidence: `support/unblock/S1F-REL-FIN-DEP-001/S1F-REL-FIN-DEP-001-UNBLOCK-MANUAL-UNBLOCK.md`
 Unblock decision: `support/unblock/S1F-REL-FIN-DEP-001/S1F-REL-FIN-DEP-001-UNBLOCK-PLANNING-DECISION.md`
 
 ---
