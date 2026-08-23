@@ -2658,6 +2658,9 @@ def chair_review_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict(config.get("chair_review", {}) or {})
     settings.setdefault("enabled", False)
     settings.setdefault("cooldown_seconds", 900)
+    # How long an unchanged operational review may be skipped before the chair
+    # looks anyway. 0 disables the floor and skips for as long as nothing moves.
+    settings.setdefault("idle_review_interval_seconds", 86400)
     settings.setdefault(
         "failure_streak_threshold",
         int(worker_reassignment_settings(config).get("after_attempts", 2)),
@@ -5704,7 +5707,99 @@ def chair_review_reason(
         return "blocked_task_triage"
     if active_provider_pause_records(state) or actionable_dispatch_pause_records(state, status, limit=1):
         return "provider_health_triage"
+    if operational_review_is_redundant(state, status, approval_state, config=config):
+        return None
     return "operational_review"
+
+
+def operational_review_fingerprint(
+    status: dict[str, Any] | None,
+    approval_state: dict[str, Any],
+    state: dict[str, Any],
+) -> str:
+    """A digest of the machine truth an operational review reports on.
+
+    Only what the chair can act on: task status and routing, pending
+    approvals, provider and dispatch pauses, failure streaks. Note what is
+    absent -- heartbeats, disk and memory samples, every timestamp. Those move
+    on their own each tick, and including any of them would make every
+    fingerprint unique, which is indistinguishable from having none.
+    """
+    tasks = sorted(
+        (
+            str(task.get("id") or ""),
+            str(task.get("status") or ""),
+            str(task.get("owner") or ""),
+            str(task.get("reviewer") or ""),
+        )
+        for task in ((status or {}).get("tasks") or [])
+        if isinstance(task, dict)
+    )
+    payload = json.dumps(
+        {
+            "tasks": tasks,
+            "approvals": sorted(
+                str(item.get("id") or item.get("task_id") or "")
+                for item in pending_approval_items(approval_state)
+            ),
+            "provider_pauses": sorted(str(key) for key in (state.get("provider_pauses") or {})),
+            "dispatch_pauses": sorted(
+                str(entry.get("task_id") or entry.get("agent") or entry)
+                if isinstance(entry, dict)
+                else str(entry)
+                for entry in (state.get("dispatch_pauses") or [])
+            ),
+            "failure_streaks": sorted(
+                (str(key), int(value.get("count", 0)) if isinstance(value, dict) else int(value or 0))
+                for key, value in (state.get("failure_streaks") or {}).items()
+            ),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def operational_review_is_redundant(
+    state: dict[str, Any],
+    status: dict[str, Any] | None,
+    approval_state: dict[str, Any],
+    *,
+    config: dict[str, Any] | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Would this operational review re-derive the answer already on record?
+
+    chair_review_reason ended in an unconditional `return "operational_review"`.
+    The reason was therefore never None, the `if reason is None: return False`
+    gate in queue_chair_review could not fire, and the only throttle left was
+    the 900s cooldown -- which does not care whether there is anything to say.
+    An idle fleet spent one provider lane every fifteen minutes re-deriving the
+    same answer: on 2026-08-20, 91 reviews, every one of them with no actions
+    and no blockers.
+
+    Reviews that have something to report are untouched by this, and that is
+    the distinction the fingerprint draws rather than any notion of "busy": on
+    2026-08-22, with the release chain blocked, all 86 reviews carried actions
+    or blockers and every one of them would still run.
+
+    A floor keeps the chair looking on its own schedule even when nothing in
+    the fingerprint moves, so that whatever the digest does not cover cannot
+    silence it forever. Set idle_review_interval_seconds to 0 to remove it.
+    """
+    chair_state = state.setdefault("chair_review", {})
+    previous = str(chair_state.get("last_operational_fingerprint") or "")
+    if not previous:
+        return False
+    if previous != operational_review_fingerprint(status, approval_state, state):
+        return False
+    floor = float(chair_review_settings(config or {}).get("idle_review_interval_seconds", 86400) or 0)
+    if floor <= 0:
+        return True
+    last_review = parse_runtime_timestamp(chair_state.get("last_operational_review_at"))
+    if last_review is None:
+        return False
+    return ((now or datetime.now(timezone.utc)) - last_review).total_seconds() < floor
 
 
 def choose_chair_reviewer(
@@ -5887,6 +5982,11 @@ def queue_chair_review(
     # An attempt is a look, whatever its outcome: this is the watermark that
     # keeps already-seen pauses and approvals from re-triggering forever.
     chair_state["last_attempt_at"] = utc_now()
+    if reason == "operational_review":
+        chair_state["last_operational_fingerprint"] = operational_review_fingerprint(
+            status, approval_state, state
+        )
+        chair_state["last_operational_review_at"] = utc_now()
     chair_state["active_review"] = {
         "agent_id": agent_id,
         "agent": display_name,
