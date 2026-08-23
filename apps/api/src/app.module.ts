@@ -26,6 +26,7 @@ import { BillingSettlementModule } from "./modules/billing-settlement/billing-se
 import { CallcenterModule } from "./modules/callcenter/callcenter.module";
 import { CertificateSupportModule } from "./modules/certificate-support/certificate-support.module";
 import { ComplaintModule } from "./modules/complaint/complaint.module";
+import { ControlledDownloadModule } from "./modules/controlled-download/controlled-download.module";
 import { DriverProfileModule } from "./modules/driver-profile/driver-profile.module";
 import { DriverSosModule } from "./modules/driver-sos/driver-sos.module";
 import { DriverSettingsModule } from "./modules/driver-settings/driver-settings.module";
@@ -87,6 +88,7 @@ import { CandidateShaMiddleware } from "./common/candidate-sha.middleware";
     CallcenterModule,
     CertificateSupportModule,
     ComplaintModule,
+    ControlledDownloadModule,
     DriverProfileModule,
     DriverSosModule,
     OwnedMobilityModule,

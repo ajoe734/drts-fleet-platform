@@ -143,6 +143,42 @@ Steps 1 and 2 need no infrastructure and no new dependency.
 
 ---
 
+## 6a. Status, 2026-08-23
+
+Steps 1 and 2 are done.
+
+**Step 2, reports (`AUDIT-ARTIFACT-002`).** `format` is a renderer registry with the
+same compile-time guard as the row builders; csv renders and xlsx, pdf and zip are
+rejected at creation rather than producing a completed job and no file.
+`GET /reports/:jobId/artifact` streams the rendered file under the same access checks
+`getReportJob` applies, and `artifact.downloadUrl` addresses it. The CSV writer moved to
+`common/csv.ts` rather than being written a second time, taking with it the rule that a
+cell beginning `=`, `+`, `-` or `@` is quote-prefixed so a spreadsheet does not execute it.
+
+**Step 1, the other four (`AUDIT-ARTIFACT-003`).** `DEFAULT_CONTROLLED_DOWNLOAD_HOST` is
+now `/downloads`, a relative prefix on the API's own origin, and
+`ControlledDownloadController` answers it: `501 ARTIFACT_NOT_MATERIALISED` naming the kind,
+`410` for an expired link, `400` for one with no signature, and a pointer to
+`GET /reports/{jobId}/artifact` when the kind is `report`. The link still yields no file,
+which is the truth; it no longer yields a DNS error, which was not.
+
+One thing that route deliberately does not do is verify the signature. The signature covers
+`manifestHash`, and the URL does not carry it, so **a controlled-download link cannot be
+verified from itself.** Every link the platform has ever issued has been unverifiable.
+Adding `manifest_hash` to the query is the prerequisite for serving anything from that
+route, and it is not done here.
+
+Step 3, storage, remains untouched and unneeded for anything currently in scope.
+
+Two knock-on notes. `phase1_prd_detailed_v1.md` section 9.10.2 describes the artifact URL
+fields as pointing at `https://downloads.drts.local`; that sentence is now stale, and it is
+L1, so it is left for a controlled revision rather than edited here
+(`SD-DP-20260422-003`). And the `format` guard turned up five more tests passing a value
+`ReportOutputFormat` has never had -- the third such class this week, after two invented
+job types.
+
+---
+
 ## 7. Traceability
 
 | Finding                                                              | Severity | Nature                                 |
