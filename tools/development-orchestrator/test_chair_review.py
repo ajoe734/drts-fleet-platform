@@ -3136,3 +3136,179 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertIsNone(entry["resume_at"])
         self.assertNotIn("resume_at_source", entry)
+
+
+class IdleOperationalReviewTests(unittest.TestCase):
+    """An operational review that reports no change should not be re-run.
+
+    chair_review_reason ended in an unconditional `return "operational_review"`,
+    so the reason was never None, the `if reason is None: return False` gate in
+    queue_chair_review could not fire, and the 900s cooldown was the only
+    throttle -- one that does not ask whether there is anything to say. On
+    2026-08-20 that produced 91 reviews, every one with no actions and no
+    blockers. Reviews that carry something stay unaffected: on 2026-08-22, with
+    the release chain blocked, all 86 carried actions or blockers.
+    """
+
+    IDLE_STATUS = {
+        "tasks": [
+            {"id": "DRV-UI-002", "status": "done", "owner": "Codex", "reviewer": "Claude", "depends_on": []},
+        ]
+    }
+
+    def _state(self, **chair: object) -> dict:
+        return {
+            "provider_pauses": {},
+            "dispatch_pauses": [],
+            "failure_streaks": {},
+            "chair_review": dict(chair),
+        }
+
+    def _reason(self, state: dict, status: dict | None = None, config: dict | None = None):
+        return supervisor.chair_review_reason(
+            state,
+            {"pending": []},
+            status=status if status is not None else self.IDLE_STATUS,
+            config=config if config is not None else {"paths": {}, "chair_review": {"enabled": True}},
+        )
+
+    def _fingerprint(self, state: dict, status: dict | None = None) -> str:
+        return supervisor.operational_review_fingerprint(
+            status if status is not None else self.IDLE_STATUS, {"pending": []}, state
+        )
+
+    def test_the_first_operational_review_always_runs(self) -> None:
+        """Nothing on record yet is not the same as nothing to say."""
+        self.assertEqual(self._reason(self._state()), "operational_review")
+
+    def test_an_unchanged_fleet_does_not_get_a_second_review(self) -> None:
+        state = self._state(last_operational_review_at=supervisor.utc_now())
+        state["chair_review"]["last_operational_fingerprint"] = self._fingerprint(state)
+
+        self.assertIsNone(self._reason(state))
+
+    def test_a_task_status_change_brings_the_review_back(self) -> None:
+        state = self._state(last_operational_review_at=supervisor.utc_now())
+        state["chair_review"]["last_operational_fingerprint"] = self._fingerprint(state)
+        moved = {"tasks": [dict(self.IDLE_STATUS["tasks"][0], status="in_progress")]}
+
+        self.assertEqual(self._reason(state, status=moved), "operational_review")
+
+    def test_a_routing_change_brings_the_review_back(self) -> None:
+        """Ownership moving is a thing the chair reports on, so it counts."""
+        state = self._state(last_operational_review_at=supervisor.utc_now())
+        state["chair_review"]["last_operational_fingerprint"] = self._fingerprint(state)
+        reassigned = {"tasks": [dict(self.IDLE_STATUS["tasks"][0], owner="Gemini")]}
+
+        self.assertEqual(self._reason(state, status=reassigned), "operational_review")
+
+    def test_telemetry_churn_is_not_change(self) -> None:
+        """The reason the digest is a whitelist rather than the whole document.
+
+        Heartbeats and resource samples move on every 2s tick. Folding any of
+        them in would make each fingerprint unique, which is the same as not
+        having one.
+        """
+        state = self._state(last_operational_review_at=supervisor.utc_now())
+        state["chair_review"]["last_operational_fingerprint"] = self._fingerprint(state)
+        state["supervisor"] = {"last_heartbeat_at": "2026-08-23T04:00:00Z"}
+        state["resource_guard"] = {"memory_current_bytes": 6_000_000_000, "last_check_at": "2026-08-23T04:00:00Z"}
+        state["disk_guard"] = {"free_gb": 12.5}
+
+        self.assertIsNone(self._reason(state))
+
+    def test_the_floor_returns_the_chair_even_with_nothing_moving(self) -> None:
+        """Whatever the digest does not cover must not be able to silence it."""
+        state = self._state(last_operational_review_at="2026-08-20T00:00:00Z")
+        state["chair_review"]["last_operational_fingerprint"] = self._fingerprint(state)
+
+        self.assertEqual(self._reason(state), "operational_review")
+
+    def test_a_zero_floor_skips_for_as_long_as_nothing_moves(self) -> None:
+        state = self._state(last_operational_review_at="2020-01-01T00:00:00Z")
+        state["chair_review"]["last_operational_fingerprint"] = self._fingerprint(state)
+        config = {"paths": {}, "chair_review": {"enabled": True, "idle_review_interval_seconds": 0}}
+
+        self.assertIsNone(self._reason(state, config=config))
+
+    def test_a_missing_review_timestamp_does_not_suppress(self) -> None:
+        """A fingerprint with no time beside it cannot be aged, so it defers."""
+        state = self._state()
+        state["chair_review"]["last_operational_fingerprint"] = self._fingerprint(state)
+
+        self.assertEqual(self._reason(state), "operational_review")
+
+    def test_triage_reasons_still_outrank_the_idle_gate(self) -> None:
+        """The gate sits below every reason that has something to report."""
+        state = self._state(last_operational_review_at=supervisor.utc_now())
+        state["chair_review"]["last_operational_fingerprint"] = self._fingerprint(state)
+        state["provider_pauses"] = {
+            "claude": {
+                "schema": 3, "scope": "lane", "lane_id": "claude", "kind": "auth",
+                "reason": "Invalid authentication credentials",
+                "paused_at": "2026-08-23T03:00:00Z",
+            }
+        }
+
+        self.assertEqual(self._reason(state), "provider_health_triage")
+
+    def _queue_config(self, root: Path) -> dict:
+        return {
+            "agents": {"codex": {"id": "codex", "display_name": "Codex", "provider": "codex"}},
+            "chair_review": {"enabled": True},
+            "schema": {
+                "tasks_path": "tasks", "task_id_field": "id", "status_field": "status",
+                "assignee_field": "owner", "reviewer_field": "reviewer",
+            },
+            "paths": {
+                "status_file": str(root / "ai-status.json"),
+                "state_file": str(root / "state.json"),
+                "approval_queue": str(root / "approval-queue.json"),
+                "activity_log": str(root / "activity-log.jsonl"),
+                "event_queue": str(root / "event-queue.jsonl"),
+            },
+        }
+
+    def test_a_queued_operational_review_records_the_watermark(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = self._queue_config(Path(tmpdir))
+            state = {
+                "queue": {"events": {}}, "workers": {}, "seen_event_keys": {},
+                "provider_pauses": {}, "dispatch_pauses": [], "failure_streaks": {},
+                "chair_review": {},
+            }
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+                mock.patch.object(supervisor, "enqueue_event"),
+                mock.patch.object(supervisor, "write_activity_log"),
+            ):
+                queued = supervisor.queue_chair_review(config, state, self.IDLE_STATUS, provider_report={})
+
+        self.assertTrue(queued)
+        self.assertEqual(state["chair_review"]["active_review"]["reason"], "operational_review")
+        self.assertTrue(state["chair_review"]["last_operational_fingerprint"])
+        self.assertTrue(state["chair_review"]["last_operational_review_at"])
+
+    def test_a_review_that_could_not_be_dispatched_records_nothing(self) -> None:
+        """Recording on the attempt would answer a question nobody asked.
+
+        No lane was free, so no chair saw this state. Stamping the watermark
+        here would suppress the retry and leave the state unreviewed.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = self._queue_config(Path(tmpdir))
+            state = {
+                "queue": {"events": {}}, "workers": {}, "seen_event_keys": {},
+                "provider_pauses": {}, "dispatch_pauses": [], "failure_streaks": {},
+                "chair_review": {},
+            }
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+                mock.patch.object(supervisor, "choose_chair_reviewer", return_value=None),
+                mock.patch.object(supervisor, "enqueue_event") as enqueue_event,
+                mock.patch.object(supervisor, "write_activity_log"),
+            ):
+                supervisor.queue_chair_review(config, state, self.IDLE_STATUS, provider_report={})
+
+        enqueue_event.assert_not_called()
+        self.assertNotIn("last_operational_fingerprint", state["chair_review"])

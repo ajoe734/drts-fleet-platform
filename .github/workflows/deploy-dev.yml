@@ -1439,3 +1439,107 @@ jobs:
           name: operational-browser-evidence-${{ needs.build-push.outputs.candidate_sha }}
           path: test-results/
           if-no-files-found: error
+
+  # A red run used to mean two very different things that looked identical in the
+  # run list: images never reached Artifact Registry and nothing was deployed, or
+  # the deploy succeeded and a post-deploy check failed. Between 2026-08-09 and
+  # 2026-08-22 both happened -- eight runs deployed fine and failed on UI smoke or
+  # operational acceptance, four never built at all because GCP billing was off --
+  # and telling them apart meant opening the run and reading job durations.
+  outcome:
+    name: Deploy outcome
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - prepare
+      - build-push
+      - migrate
+      - deploy
+      - paused-partner-booking-cleanup
+      - health-check
+      - retired-service-cleanup
+      - operational-candidate-acceptance
+    steps:
+      - name: Summarise what actually reached Cloud Run
+        env:
+          CANDIDATE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+          API_URL: ${{ needs.health-check.outputs.api }}
+          R_PREPARE: ${{ needs.prepare.result }}
+          R_BUILD_PUSH: ${{ needs.build-push.result }}
+          R_MIGRATE: ${{ needs.migrate.result }}
+          R_DEPLOY: ${{ needs.deploy.result }}
+          R_PAUSED_CLEANUP: ${{ needs.paused-partner-booking-cleanup.result }}
+          R_HEALTH_CHECK: ${{ needs.health-check.result }}
+          R_RETIRED_CLEANUP: ${{ needs.retired-service-cleanup.result }}
+          R_ACCEPTANCE: ${{ needs.operational-candidate-acceptance.result }}
+        run: |
+          set -euo pipefail
+
+          # Stage order matters: the first non-success is the one that stopped the
+          # run, and everything after it is skipped rather than broken.
+          stages=(
+            "prepare|Prepare dev deploy|before deploy|${R_PREPARE}"
+            "build-push|Build & push images|before deploy|${R_BUILD_PUSH}"
+            "migrate|DB migration|before deploy|${R_MIGRATE}"
+            "deploy|Deploy services|the deploy itself|${R_DEPLOY}"
+            "paused-cleanup|Enforce Partner Booking paused state|after deploy|${R_PAUSED_CLEANUP}"
+            "health-check|Dev health check|after deploy|${R_HEALTH_CHECK}"
+            "retired-cleanup|Fail-closed retired service cleanup|after deploy|${R_RETIRED_CLEANUP}"
+            "acceptance|Candidate SHA operational acceptance|after deploy|${R_ACCEPTANCE}"
+          )
+
+          failed_name=""
+          failed_phase=""
+          failed_result=""
+          for stage in "${stages[@]}"; do
+            IFS='|' read -r _ name phase result <<<"${stage}"
+            if [[ "${result}" != "success" && "${result}" != "skipped" ]]; then
+              failed_name="${name}"
+              failed_phase="${phase}"
+              failed_result="${result}"
+              break
+            fi
+          done
+
+          # "Deployed" means exactly one thing: the Deploy services job succeeded,
+          # so Cloud Run is now serving the candidate SHA. Nothing after it can
+          # take that back, and nothing before it can stand in for it.
+          if [[ "${R_DEPLOY}" == "success" ]]; then
+            deployed="yes"
+          else
+            deployed="no"
+          fi
+
+          {
+            echo "## Dev deploy outcome"
+            echo
+            echo "\`deployed=${deployed}\`"
+            echo
+            if [[ "${deployed}" == "yes" ]]; then
+              echo "Cloud Run is serving \`${CANDIDATE_SHA:-<unknown>}\`."
+              if [[ -n "${API_URL:-}" ]]; then
+                echo "Confirm with \`curl ${API_URL}/api/health\` and compare \`candidateSha\`."
+              fi
+            else
+              echo "**Nothing reached Cloud Run. The previously deployed version is still running**, unchanged."
+            fi
+            echo
+            if [[ -n "${failed_name}" ]]; then
+              echo "First stage to fail: **${failed_name}** (${failed_phase}, \`${failed_result}\`)."
+              if [[ "${deployed}" == "yes" ]]; then
+                echo
+                echo "This run is red because a check after the deploy failed, not because the deploy failed."
+                echo "Do not read it as \"the change is not live\" -- it is live and something about it did not pass."
+              fi
+            else
+              echo "Every stage passed."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          # Also an annotation, so `gh run view` and the run header carry the
+          # verdict without anyone opening the summary tab.
+          if [[ -n "${failed_name}" ]]; then
+            echo "::notice title=Deploy outcome::deployed=${deployed}; first failure: ${failed_name} (${failed_phase})"
+          else
+            echo "::notice title=Deploy outcome::deployed=${deployed}; all stages passed"
+          fi
