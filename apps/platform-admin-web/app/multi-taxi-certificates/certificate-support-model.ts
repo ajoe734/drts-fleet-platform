@@ -167,7 +167,7 @@ export function displayValue(value: string | number | null) {
   return value === null || value === "" ? "未取得" : String(value);
 }
 
-export function formatMoney(value: number | null, currency = "NTD") {
+export function formatMoney(value: number | null, currency = "TWD") {
   if (value === null) return "未取得";
   return new Intl.NumberFormat("zh-TW", {
     style: "currency",

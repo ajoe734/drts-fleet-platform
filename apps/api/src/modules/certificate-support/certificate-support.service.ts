@@ -1,3 +1,4 @@
+import { PLATFORM_CURRENCY, normalisePlatformCurrency } from "@drts/contracts";
 import { createHash } from "node:crypto";
 
 import { HttpStatus, Injectable, Logger, Optional } from "@nestjs/common";
@@ -32,7 +33,7 @@ import {
  * that. It puts this module's requirement in one place so that resolving it is
  * one edit rather than a search.
  */
-const CERTIFICATE_CURRENCY = "NTD";
+const CERTIFICATE_CURRENCY = PLATFORM_CURRENCY;
 
 @Injectable()
 export class CertificateSupportService {
@@ -418,7 +419,7 @@ export class CertificateSupportService {
       event.runtimeProfileCode !== "multi_taxi_direct" ||
       requiredText.some((value) => !value.trim()) ||
       numeric.some((value) => !Number.isFinite(value) || value < 0) ||
-      event.currency !== "NTD"
+      normalisePlatformCurrency(event.currency) !== PLATFORM_CURRENCY
     ) {
       throw new ApiRequestError(
         HttpStatus.UNPROCESSABLE_ENTITY,
@@ -592,7 +593,10 @@ export class CertificateSupportService {
     // The platform prices in one currency. A row labelled anything else is not
     // an incomplete record, and saying so sent whoever investigated looking for
     // a missing field that was never missing.
-    if (row.currency !== CERTIFICATE_CURRENCY) {
+    // Normalised, because rows written before V0084 still say `NTD` and it is
+    // the same money. Withholding a receipt over a spelling would be the exact
+    // failure AUDIT-MONEY-001 predicted.
+    if (normalisePlatformCurrency(row.currency) !== CERTIFICATE_CURRENCY) {
       blockers.push({
         code: "unexpected_currency",
         field: "currency",

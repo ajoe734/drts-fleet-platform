@@ -1,3 +1,4 @@
+import { PLATFORM_CURRENCY } from "@drts/contracts";
 import type {
   FulfillmentSegmentRecord,
   MoneyAmount,
@@ -49,7 +50,7 @@ export type OwnedMobilityMultiTaxiTripCompletedEvent = {
   distanceMeters: number;
   fareMinor: number;
   tollMinor: number;
-  currency: "NTD";
+  currency: typeof PLATFORM_CURRENCY;
   consumerServicePhone: string;
   authorityComplaintPhone: string;
   completedAt: string;

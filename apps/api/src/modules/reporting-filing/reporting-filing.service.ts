@@ -54,7 +54,10 @@ import type {
   TripSummaryRowRecord,
 } from "@drts/contracts";
 
-import { REGULATORY_REPORT_JOB_TYPES } from "@drts/contracts";
+import {
+  PLATFORM_CURRENCY,
+  REGULATORY_REPORT_JOB_TYPES,
+} from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { recordsToCsv } from "../../common/csv";
@@ -2120,7 +2123,7 @@ export class ReportingFilingService implements OnModuleInit {
         businessDispatchSubtype: order.businessDispatchSubtype!,
         status: order.status,
         amount: order.quotedFare ?? {
-          currency: "NTD",
+          currency: PLATFORM_CURRENCY,
           amountMinor: 0,
         },
         completedAt: order.status === "completed" ? order.updatedAt : null,

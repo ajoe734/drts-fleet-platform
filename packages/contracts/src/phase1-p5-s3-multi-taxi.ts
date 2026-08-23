@@ -1,3 +1,4 @@
+import { PLATFORM_CURRENCY } from "./index";
 // Phase 1 · P-5 / S-3 · multi_taxi_direct contracts.
 //
 // Source of truth:
@@ -426,7 +427,7 @@ export interface RouteFareDisclosureSnapshot {
   chargingMode: "meter_estimate" | "fixed_quote";
   estimatedFareMinor: number | null;
   payableFareMinor: number | null;
-  currency: "NTD";
+  currency: typeof PLATFORM_CURRENCY;
 
   farePolicyId: string;
   farePolicyVersion: string;
@@ -676,7 +677,7 @@ export interface MultiTaxiElectronicReceipt {
   orderId: string;
   receiptNo: string;
   amountMinor: number;
-  currency: "NTD";
+  currency: typeof PLATFORM_CURRENCY;
   issuedAt: string;
   record: Partial<MultiTaxiElectronicReceiptRecord> & Record<string, unknown>;
 }
@@ -736,7 +737,7 @@ export interface MultiTaxiTripOperationalRecord {
   payableFareMinor: number;
   actualFareMinor: number;
   tollMinor: number;
-  currency: "NTD";
+  currency: typeof PLATFORM_CURRENCY;
 
   farePolicyVersion: string;
   chargingMode: "meter" | "platform_quote";
@@ -788,7 +789,7 @@ export interface MultiTaxiTripOperationalExportRow {
   payableFareMinor: number;
   actualFareMinor: number;
   tollMinor: number;
-  currency: "NTD";
+  currency: typeof PLATFORM_CURRENCY;
   farePolicyVersion: string;
   chargingMode: "meter" | "platform_quote";
   generatedAt: string;

@@ -46,7 +46,7 @@ function buildItem(): FareQuoteAnomalyAdminView {
       chargingMode: "fixed_quote",
       estimatedFareMinor: null,
       payableFareMinor: null,
-      currency: "NTD",
+      currency: "TWD",
       farePolicyId: "fare-policy-001",
       farePolicyVersion: "FARE-MTX-2026-07",
       fareChangeRuleId: "fare-change-001",
@@ -192,9 +192,10 @@ describe("Platform Admin fare anomaly response validation", () => {
       "utf8",
     );
 
-    expect(source).toContain('import { createIdempotencyKey } from "@drts/api-client"');
+    expect(source).toContain(
+      'import { createIdempotencyKey } from "@drts/api-client"',
+    );
     expect(source).toContain('createIdempotencyKey("fare-anomaly-retry")');
     expect(source).toContain('"Idempotency-Key"');
   });
 });
-

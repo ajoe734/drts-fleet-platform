@@ -1,3 +1,4 @@
+import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import {
@@ -1408,7 +1409,7 @@ export class MultiTaxiService implements OnModuleInit {
       payableFareMinor,
       actualFareMinor,
       tollMinor: 0,
-      currency: "NTD",
+      currency: PLATFORM_CURRENCY,
       farePolicyVersion:
         assignment?.routeFare?.farePolicyVersion ??
         order.quotedFareRuleVersion ??

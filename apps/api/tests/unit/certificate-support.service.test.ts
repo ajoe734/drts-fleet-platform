@@ -310,10 +310,21 @@ describe("CertificateSupportController authorization", () => {
 });
 
 describe("why a certificate artifact is withheld", () => {
+  it("still issues a receipt for a row written before the currency migration", async () => {
+    // baseRow says NTD. V0084 renames stored rows to TWD, but a row written by
+    // an older image during rollout must not lose its receipt over a spelling.
+    const { service } = createService();
+
+    const view = await service.get("receipt-001");
+
+    expect(view.artifactBlockers).toEqual([]);
+    expect(view.pdfUrl).not.toBeNull();
+  });
+
   it("names the currency rather than calling the record incomplete", async () => {
     // The record is complete. Reporting it as incomplete sent whoever
     // investigated looking for a missing field that was never missing.
-    const { service } = createService([{ ...baseRow, currency: "TWD" }]);
+    const { service } = createService([{ ...baseRow, currency: "USD" }]);
 
     const view = await service.get("receipt-001");
 
@@ -322,7 +333,7 @@ describe("why a certificate artifact is withheld", () => {
       {
         code: "unexpected_currency",
         field: "currency",
-        detail: "expected NTD, found TWD",
+        detail: "expected TWD, found USD",
       },
     ]);
     expect(view.regeneration.reasonCode).toBe(
@@ -355,7 +366,7 @@ describe("why a certificate artifact is withheld", () => {
     const { service } = createService([
       {
         ...baseRow,
-        currency: "TWD",
+        currency: "USD",
         record: {
           ...(baseRow.record as object),
           plateNo: undefined,
