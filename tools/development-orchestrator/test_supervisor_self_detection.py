@@ -228,6 +228,120 @@ class SupervisorStartOrderTests(unittest.TestCase):
         self.assertIn("supervisor_is_older_than_current", source)
 
 
+class SupervisorConfigScopeTests(unittest.TestCase):
+    """Same checkout is not the same fleet.
+
+    test_supervisor_shutdown starts the shipped entrypoint against a throwaway
+    config to prove a real SIGTERM stops it cleanly. That child is a
+    supervisor, it stands inside the repository, and main() runs
+    terminate_older_supervisors for it -- so it matched the production
+    supervisor, saw a lower pid, and killed it. Running the orchestrator suite
+    took the fleet's supervisor down, and the pre-merge gate runs that suite
+    against every candidate.
+
+    The evidence pointed away from the guard rather than at it: the child logs
+    its supervisor_replaced record through its own throwaway config, so the
+    canonical activity log holds none and the guard reads as though it had
+    never fired once.
+    """
+
+    CANONICAL_CONFIG = "/home/lupin/drts-fleet-platform/.orchestrator/config.json"
+
+    def test_a_supervisor_on_another_config_is_not_a_duplicate(self) -> None:
+        """The shape the shutdown test produces, and what it cost."""
+        self.assertNotEqual(
+            supervisor.supervisor_config_argument(
+                ["python3", SCRIPT_REL, "--config", "/tmp/pytest-xyz/config.json", "--quiet"],
+                str(CANONICAL_CHECKOUT),
+            ),
+            supervisor.supervisor_config_argument(
+                ["python3", SCRIPT_REL, "--config", self.CANONICAL_CONFIG, "--verbose"],
+                str(CANONICAL_CHECKOUT),
+            ),
+        )
+
+    def test_the_same_config_is_the_same_fleet(self) -> None:
+        """A real duplicate must still be found, from any cwd inside the repo."""
+        self.assertEqual(
+            supervisor.supervisor_config_argument(
+                ["python3", SCRIPT_REL, "--config", self.CANONICAL_CONFIG],
+                str(CANONICAL_CHECKOUT),
+            ),
+            supervisor.supervisor_config_argument(
+                ["python3", SCRIPT_REL, "--config", self.CANONICAL_CONFIG],
+                str(Path(CANONICAL_CHECKOUT) / "tools" / "development-orchestrator"),
+            ),
+        )
+
+    def test_a_relative_config_resolves_against_the_process_cwd(self) -> None:
+        """Not against ours: the other process resolved it against its own."""
+        self.assertEqual(
+            supervisor.supervisor_config_argument(
+                ["python3", SCRIPT_REL, "--config", ".orchestrator/config.json"],
+                str(CANONICAL_CHECKOUT),
+            ),
+            str(Path(CANONICAL_CHECKOUT) / ".orchestrator" / "config.json"),
+        )
+
+    def test_the_default_config_matches_what_parse_args_uses(self) -> None:
+        """A command line naming no config still names one."""
+        self.assertEqual(
+            supervisor.supervisor_config_argument(["python3", SCRIPT_REL], str(CANONICAL_CHECKOUT)),
+            str(Path(CANONICAL_CHECKOUT) / ".orchestrator" / "config.json"),
+        )
+
+    def test_the_equals_form_is_read_too(self) -> None:
+        self.assertEqual(
+            supervisor.supervisor_config_argument(
+                ["python3", SCRIPT_REL, f"--config={self.CANONICAL_CONFIG}"], str(CANONICAL_CHECKOUT)
+            ),
+            supervisor.supervisor_config_argument(
+                ["python3", SCRIPT_REL, "--config", self.CANONICAL_CONFIG], str(CANONICAL_CHECKOUT)
+            ),
+        )
+
+    def test_an_unknowable_cwd_yields_no_identity(self) -> None:
+        """Better to spare a process than to kill one we cannot identify."""
+        self.assertEqual(
+            supervisor.supervisor_config_argument(["python3", SCRIPT_REL], ""), ""
+        )
+
+    def test_enumeration_skips_a_supervisor_on_a_different_config(self) -> None:
+        """End to end over a faked /proc: the child must not be a candidate."""
+        ours = ["python3", SCRIPT_REL, "--config", self.CANONICAL_CONFIG, "--verbose"]
+        theirs = ["python3", SCRIPT_REL, "--config", "/tmp/throwaway/config.json", "--quiet"]
+        entries = {4242: ours, 4243: theirs}
+
+        class FakeProcDir:
+            def __init__(self, pid: int) -> None:
+                self.name = str(pid)
+                self._pid = pid
+
+            def __truediv__(self, child: str):
+                return FakeProcEntry(self._pid, child)
+
+        class FakeProcEntry:
+            def __init__(self, pid: int, child: str) -> None:
+                self._pid, self._child = pid, child
+
+            def read_bytes(self) -> bytes:
+                return b"\x00".join(part.encode() for part in entries[self._pid]) + b"\x00"
+
+            def resolve(self):
+                return Path(CANONICAL_CHECKOUT)
+
+        with (
+            mock.patch.object(supervisor.sys, "argv", ours),
+            mock.patch.object(supervisor.os, "getcwd", return_value=str(CANONICAL_CHECKOUT)),
+            mock.patch.object(
+                supervisor.Path, "iterdir", return_value=[FakeProcDir(4242), FakeProcDir(4243)]
+            ),
+        ):
+            found = supervisor.iter_matching_supervisor_pids()
+
+        self.assertEqual(found, [4242])
+
+
 if __name__ == "__main__":
     unittest.main()
 
