@@ -4190,6 +4190,19 @@ export interface CreateDriverMasterCommand {
   lifecycleStatus?: DriverMasterLifecycleStatus;
 }
 
+/**
+ * Which dispatch types a driver may be sent.
+ *
+ * `SD-DP-20260817-010` (PRD 11.4) settled that the platform decides this, not
+ * the driver. `CreateDriverMasterCommand` could set it at registration and
+ * nothing could change it afterwards, so a decision the platform owns was
+ * fixed at the one moment the platform was least likely to know it.
+ */
+export interface UpdateDriverServiceBucketsCommand {
+  supportedServiceBuckets: Phase1ServiceBucket[];
+  reason?: string;
+}
+
 export interface UpdateDriverMasterLifecycleCommand {
   lifecycleStatus: DriverMasterLifecycleStatus;
   reason?: string | null;
@@ -5377,6 +5390,46 @@ export interface ReconciliationIssueRecord {
 }
 
 // --- Reports ---
+/**
+ * The canonical identifiers `phase1_service_contracts_v1.md` section 2.1 names,
+ * and where each one lives.
+ *
+ * The list was prose in a specification, so "17 of 18 are present as contract
+ * types" was something a person had to establish by reading, and did. This
+ * makes it checkable: `tests/unit/canonical-ids.test.ts` asserts every id
+ * marked `in_use` appears as a field in this package, which is the property the
+ * prose was asserting informally.
+ *
+ * `call_point_id` is the eighteenth. It is not absent by oversight: the Call
+ * Point / Concierge surface is retired and serves HTTP 404 (PRD 9.1.3), so no
+ * command or record carries one. Adding a field nobody sets would make the
+ * count look right and mean less than it does now. `core.call_points` still
+ * exists in the database, and `call_point` is still a reserved root in
+ * `TenantPartnerSummary`.
+ */
+export const CANONICAL_IDS = [
+  { id: "tenant_id", field: "tenantId", status: "in_use" },
+  { id: "partner_id", field: "partnerId", status: "in_use" },
+  { id: "site_id", field: "siteId", status: "in_use" },
+  { id: "call_point_id", field: "callPointId", status: "retired_surface" },
+  { id: "passenger_id", field: "passengerId", status: "in_use" },
+  { id: "vehicle_id", field: "vehicleId", status: "in_use" },
+  { id: "driver_id", field: "driverId", status: "in_use" },
+  { id: "order_id", field: "orderId", status: "in_use" },
+  { id: "booking_id", field: "bookingId", status: "in_use" },
+  { id: "dispatch_job_id", field: "dispatchJobId", status: "in_use" },
+  { id: "attempt_id", field: "attemptId", status: "in_use" },
+  { id: "assignment_id", field: "assignmentId", status: "in_use" },
+  { id: "trip_id", field: "tripId", status: "in_use" },
+  { id: "call_id", field: "callId", status: "in_use" },
+  { id: "case_no", field: "caseNo", status: "in_use" },
+  { id: "invoice_id", field: "invoiceId", status: "in_use" },
+  { id: "statement_id", field: "statementId", status: "in_use" },
+  { id: "package_id", field: "packageId", status: "in_use" },
+] as const;
+
+export type CanonicalIdName = (typeof CANONICAL_IDS)[number]["id"];
+
 export const REPORT_OUTPUT_FORMATS = ["csv", "xlsx", "pdf", "zip"] as const;
 export type ReportOutputFormat = (typeof REPORT_OUTPUT_FORMATS)[number];
 

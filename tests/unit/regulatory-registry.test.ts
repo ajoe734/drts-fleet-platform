@@ -837,3 +837,93 @@ describe("regulatory registry controller", () => {
     expect(missingCred!.maskedDisplay).toBe("***");
   });
 });
+
+describe("driver service buckets after registration", () => {
+  function firstDriverId(service: RegulatoryRegistryService) {
+    return service.listDrivers()[0]!.driverId;
+  }
+
+  it("lets the platform change which dispatch types a driver may take", () => {
+    // SD-DP-20260817-010 (PRD 11.4) makes this the platform's decision, and it
+    // could only be made at registration -- the one moment the platform knows
+    // least about the driver.
+    const service = createRegulatoryRegistryService();
+    const driverId = firstDriverId(service);
+
+    const updated = service.updateDriverServiceBuckets(driverId, {
+      supportedServiceBuckets: ["business_dispatch"],
+      reason: "moved to the corporate fleet",
+    });
+
+    expect(updated.supportedServiceBuckets).toEqual(["business_dispatch"]);
+    expect(
+      service.listDrivers().find((d) => d.driverId === driverId)
+        ?.supportedServiceBuckets,
+    ).toEqual(["business_dispatch"]);
+  });
+
+  it("records what the buckets were before, not only what they became", () => {
+    const auditService = new AuditNotificationService();
+    const service = new RegulatoryRegistryService(
+      new OpsDispatchEventsService(new EventEmitter() as never),
+      auditService,
+      new DriverProfileService(auditService),
+    );
+    const driverId = firstDriverId(service);
+    const before = service
+      .listDrivers()
+      .find((d) => d.driverId === driverId)!.supportedServiceBuckets;
+
+    service.updateDriverServiceBuckets(driverId, {
+      supportedServiceBuckets: ["standard_taxi"],
+    });
+
+    const entry = auditService
+      .listAuditLogs()
+      .find((log) => log.actionName === "update_driver_service_buckets");
+    expect(entry?.oldValuesSummary).toMatchObject({
+      supportedServiceBuckets: [...before],
+    });
+    expect(entry?.newValuesSummary).toMatchObject({
+      supportedServiceBuckets: ["standard_taxi"],
+    });
+  });
+
+  it("refuses to leave a driver with no bucket at all", () => {
+    const service = createRegulatoryRegistryService();
+
+    // A driver with no bucket can never be dispatched, which is a suspension
+    // by accident rather than a dispatch setting.
+    try {
+      service.updateDriverServiceBuckets(firstDriverId(service), {
+        supportedServiceBuckets: [],
+      });
+      throw new Error("expected the call to throw");
+    } catch (error) {
+      expect((error as ApiRequestError).code).toBe("SERVICE_BUCKETS_REQUIRED");
+    }
+  });
+
+  it("refuses a bucket Phase 1 does not have", () => {
+    const service = createRegulatoryRegistryService();
+
+    try {
+      service.updateDriverServiceBuckets(firstDriverId(service), {
+        supportedServiceBuckets: ["av_pilot"] as never,
+      });
+      throw new Error("expected the call to throw");
+    } catch (error) {
+      expect((error as ApiRequestError).code).toBe("SERVICE_BUCKET_UNKNOWN");
+    }
+  });
+
+  it("does not let a duplicate silently double a bucket", () => {
+    const service = createRegulatoryRegistryService();
+
+    const updated = service.updateDriverServiceBuckets(firstDriverId(service), {
+      supportedServiceBuckets: ["standard_taxi", "standard_taxi"],
+    });
+
+    expect(updated.supportedServiceBuckets).toEqual(["standard_taxi"]);
+  });
+});
