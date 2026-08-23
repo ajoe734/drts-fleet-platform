@@ -673,7 +673,55 @@ def supervisor_cmdline_matches_current_script(parts: list[str], proc_cwd: str) -
     return False
 
 
+def supervisor_config_argument(parts: list[str], proc_cwd: str) -> str:
+    """The --config a supervisor command line names, resolved to a real path.
+
+    Two supervisors are duplicates when they manage the same machine truth,
+    not when they merely run the same code out of the same checkout. The
+    default matches parse_args, resolved against the process's own cwd because
+    that is what the process itself would have done.
+    """
+    value = ""
+    for index, part in enumerate(parts):
+        if part == "--config" and index + 1 < len(parts):
+            value = parts[index + 1]
+            break
+        if part.startswith("--config="):
+            value = part.split("=", 1)[1]
+            break
+    candidate = Path(value or ".orchestrator/config.json")
+    if not candidate.is_absolute():
+        if not proc_cwd:
+            return ""
+        candidate = Path(proc_cwd) / candidate
+    try:
+        return str(candidate.resolve())
+    except OSError:
+        return str(candidate)
+
+
 def iter_matching_supervisor_pids() -> list[int]:
+    """Live supervisors managing the same machine truth as this process.
+
+    The cwd gate alone answers "is this a supervisor for this repository",
+    which is not the same question. test_supervisor_shutdown starts the
+    shipped entrypoint against a throwaway config to prove a real SIGTERM
+    stops it cleanly. That child is a supervisor, it does stand inside the
+    repository, and main() runs terminate_older_supervisors for it -- so it
+    found the production supervisor, saw a lower pid, and killed it. Running
+    the orchestrator suite took the fleet's supervisor down with it, and the
+    pre-merge gate runs that suite on every candidate.
+
+    It left no trace where anyone would look: the child writes its
+    supervisor_replaced record through its own throwaway config, so the
+    canonical activity log shows none and the guard reads as though it had
+    never fired.
+
+    Config identity is the question the guard wants. A supervisor on another
+    config manages another state file and another queue, and is not a
+    duplicate of anything.
+    """
+    own_config = supervisor_config_argument(list(sys.argv), os.getcwd())
     matches: list[int] = []
     for proc_dir in Path("/proc").iterdir():
         if not proc_dir.name.isdigit():
@@ -691,8 +739,11 @@ def iter_matching_supervisor_pids() -> list[int]:
             proc_cwd = str((proc_dir / "cwd").resolve())
         except OSError:
             proc_cwd = ""
-        if supervisor_cmdline_matches_current_script(parts, proc_cwd):
-            matches.append(pid)
+        if not supervisor_cmdline_matches_current_script(parts, proc_cwd):
+            continue
+        if not own_config or supervisor_config_argument(parts, proc_cwd) != own_config:
+            continue
+        matches.append(pid)
     return sorted(matches)
 
 
