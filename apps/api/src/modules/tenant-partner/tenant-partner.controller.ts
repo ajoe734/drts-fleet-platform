@@ -88,6 +88,7 @@ import type {
   VerifyPartnerEligibilityCommand,
 } from "@drts/contracts";
 
+import { toCsv } from "../../common/csv";
 import {
   ApiRequestError,
   toApiListData,
@@ -683,12 +684,6 @@ export class TenantPartnerController {
   }
 
   private renderReferralStatementArtifact(statement: ReferralStatementRecord) {
-    const cell = (value: string | number) => {
-      const text = String(value);
-      // Prevent spreadsheet formula interpretation in partner-delivered CSVs.
-      const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
-      return `"${safeText.replaceAll('"', '""')}"`;
-    };
     const amount = (value: { amountMinor: number; currency: string }) =>
       `${value.currency} ${(value.amountMinor / 100).toFixed(2)}`;
 
@@ -719,7 +714,7 @@ export class TenantPartnerController {
       ]),
     ];
 
-    return rows.map((row) => row.map(cell).join(",")).join("\r\n");
+    return toCsv(rows);
   }
 
   @Get("platform-admin/partner-entries")

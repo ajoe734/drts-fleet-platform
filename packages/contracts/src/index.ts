@@ -5380,6 +5380,22 @@ export interface ReconciliationIssueRecord {
 export const REPORT_OUTPUT_FORMATS = ["csv", "xlsx", "pdf", "zip"] as const;
 export type ReportOutputFormat = (typeof REPORT_OUTPUT_FORMATS)[number];
 
+/**
+ * The formats a report can actually be rendered in.
+ *
+ * `REPORT_OUTPUT_FORMATS` says which formats the contract names. It used to say
+ * nothing about whether any of them produced a file: `format` was copied into
+ * the job record, the artifact payload and the view without ever reaching a
+ * renderer, so a job requested as `pdf` and one requested as `csv` came back
+ * identical -- no bytes either way. The API rejects the unrendered ones now, and
+ * a picker should offer only these.
+ */
+export const IMPLEMENTED_REPORT_OUTPUT_FORMATS = [
+  "csv",
+] as const satisfies readonly ReportOutputFormat[];
+export type ImplementedReportOutputFormat =
+  (typeof IMPLEMENTED_REPORT_OUTPUT_FORMATS)[number];
+
 export const REGULATORY_REPORT_JOB_TYPES = [
   "vehicle_roster",
   "driver_roster",

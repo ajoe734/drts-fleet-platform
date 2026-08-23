@@ -40,6 +40,7 @@ import type {
   ReportArtifactRecord,
   ReportJobAccepted,
   ReportJobRowRecord,
+  ReportOutputFormat,
   ReportJobRecord,
   ReportJobType,
   SettlementMatrixRecord,
@@ -51,6 +52,7 @@ import type {
 import { REGULATORY_REPORT_JOB_TYPES } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { recordsToCsv } from "../../common/csv";
 import {
   assertEvidenceAccess,
   buildEvidenceAccessAuditSummary,
@@ -276,6 +278,38 @@ export class ReportingFilingService implements OnModuleInit {
     dispatch_recording_index: (job) => {
       job.rows = this.buildDispatchRecordingIndexRows();
     },
+  };
+
+  /**
+   * How each declared output format is rendered.
+   *
+   * `format` used to be decoration: accepted, stored, echoed back, and never
+   * read by anything that produced content. Same `Record` guard as the row
+   * builders -- a format added to the contract without a renderer fails to
+   * compile, and `null` is an explicit "declared, not rendered" that
+   * `createReportJob` rejects rather than silently ignoring.
+   *
+   * xlsx and zip would need a new dependency; pdf needs a generic table writer
+   * rather than the certificate-shaped one in `certificate-support`. None of
+   * them is hard, and none of them is done, so none of them is offered.
+   */
+  private readonly reportArtifactRenderers: Record<
+    ReportOutputFormat,
+    { contentType: string; render: (job: StoredReportJob) => Buffer } | null
+  > = {
+    csv: {
+      contentType: "text/csv; charset=utf-8",
+      render: (job) =>
+        Buffer.from(
+          recordsToCsv(
+            (job.rows as unknown as Record<string, unknown>[]) ?? [],
+          ),
+          "utf8",
+        ),
+    },
+    xlsx: null,
+    pdf: null,
+    zip: null,
   };
 
   private readonly downloadHost = DEFAULT_CONTROLLED_DOWNLOAD_HOST;
@@ -700,6 +734,105 @@ export class ReportingFilingService implements OnModuleInit {
     );
   }
 
+  /**
+   * Renders a completed report and returns the bytes.
+   *
+   * The access checks are the same ones `getReportJob` applies -- tenant scope,
+   * then evidence-access policy -- because handing over the file is a stronger
+   * act than describing it, not a weaker one, and the audit trail records the
+   * download rather than the intent to download.
+   */
+  renderReportArtifact(
+    jobId: string,
+    requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
+    tenantScopeId?: string | null,
+  ): { buffer: Buffer; contentType: string; fileName: string } {
+    const job = this.requireReportJob(jobId);
+    const normalizedTenantScopeId = tenantScopeId?.trim() || null;
+    if (normalizedTenantScopeId) {
+      this.assertReportJobTenantScope(job, normalizedTenantScopeId);
+    }
+    assertEvidenceAccess({
+      family: "report_artifact",
+      identity,
+      tenantId: normalizedTenantScopeId,
+    });
+
+    if (job.status !== "completed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REPORT_ARTIFACT_NOT_READY",
+        `Report job ${jobId} is ${job.status}; there is nothing to download yet.`,
+        { jobId, status: job.status },
+      );
+    }
+
+    const renderer = this.reportArtifactRenderers[job.format];
+    if (!renderer) {
+      // Reachable only for a job created before its format was declared
+      // unrendered; new jobs are rejected at creation.
+      throw new ApiRequestError(
+        HttpStatus.NOT_IMPLEMENTED,
+        "REPORT_FORMAT_NOT_IMPLEMENTED",
+        `Report format "${job.format}" has no renderer.`,
+        { jobId, format: job.format },
+      );
+    }
+
+    const buffer = renderer.render(job);
+    this.recordArtifactAccessAudit(
+      {
+        actionName: "download_report_artifact",
+        resourceType: "report_artifact",
+        resourceId: job.artifact?.artifactId ?? null,
+        newValuesSummary: {
+          jobId: job.jobId,
+          jobType: job.jobType,
+          format: job.format,
+          rowCount: job.rows.length,
+          byteLength: buffer.byteLength,
+          tenantId: normalizedTenantScopeId,
+        },
+      },
+      requestId,
+      identity,
+      normalizedTenantScopeId,
+    );
+
+    return {
+      buffer,
+      contentType: renderer.contentType,
+      fileName: `${job.jobType}-${job.jobId}.${job.format}`,
+    };
+  }
+
+  private assertReportFormatRenders(format: string) {
+    if (!Object.hasOwn(this.reportArtifactRenderers, format)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "REPORT_FORMAT_UNKNOWN",
+        `Unknown report format "${format}".`,
+        { format, supportedFormats: this.listRenderableFormats() },
+      );
+    }
+    if (!this.reportArtifactRenderers[format as ReportOutputFormat]) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_IMPLEMENTED,
+        "REPORT_FORMAT_NOT_IMPLEMENTED",
+        `Report format "${format}" is declared but has no renderer, so the export would produce no file.`,
+        { format, supportedFormats: this.listRenderableFormats() },
+      );
+    }
+  }
+
+  private listRenderableFormats(): string[] {
+    return Object.entries(this.reportArtifactRenderers)
+      .filter(([, renderer]) => renderer !== null)
+      .map(([format]) => format)
+      .sort();
+  }
+
   private listImplementedReportTypes(): string[] {
     return Object.entries(this.reportRowBuilders)
       .filter(
@@ -717,6 +850,7 @@ export class ReportingFilingService implements OnModuleInit {
   ): ReportJobAccepted {
     this.assertNonBlank(command.jobType, "jobType");
     this.assertReportTypeProducesRows(command.jobType);
+    this.assertReportFormatRenders(command.format);
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
     this.assertReportTypeIsAvailableToScope(
       command.jobType,
@@ -1859,6 +1993,12 @@ export class ReportingFilingService implements OnModuleInit {
     subjectId: string,
     payload: Record<string, unknown>,
   ): ReportArtifactView {
+    // `downloadMetadata` stays the signed governance record it always was. What
+    // changes is `downloadUrl`, which callers and both consoles render as a
+    // link: for a report it now addresses the route that streams the file
+    // instead of `downloads.drts.local`, which does not resolve and which no
+    // controller serves. A filing package still has no bytes by decision
+    // (SD-DP-20260820-012), so its link is unchanged and still goes nowhere.
     const manifestHash = this.computeHash(payload);
     const createdAt = new Date().toISOString();
     const downloadMetadata = createControlledDownloadMetadata({
@@ -1875,7 +2015,10 @@ export class ReportingFilingService implements OnModuleInit {
     return {
       artifactId: `ART-${randomUUID()}`,
       artifactType,
-      downloadUrl: downloadMetadata.downloadUrl,
+      downloadUrl:
+        artifactType === "report"
+          ? `/reports/${encodeURIComponent(subjectId)}/artifact`
+          : downloadMetadata.downloadUrl,
       expiresAt: downloadMetadata.expiresAt,
       manifestHash,
       immutable: true,

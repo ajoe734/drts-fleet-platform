@@ -14,7 +14,7 @@ import type {
 import {
   IMPLEMENTED_REPORT_JOB_TYPES,
   OPERATIONAL_REPORT_JOB_TYPES,
-  REPORT_OUTPUT_FORMATS,
+  IMPLEMENTED_REPORT_OUTPUT_FORMATS,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -1101,11 +1101,13 @@ export function ReportsManager({
                   }
                   style={filterInputStyle}
                 >
-                  {REPORT_OUTPUT_FORMATS.map((format: ReportOutputFormat) => (
-                    <option key={format} value={format}>
-                      {format}
-                    </option>
-                  ))}
+                  {IMPLEMENTED_REPORT_OUTPUT_FORMATS.map(
+                    (format: ReportOutputFormat) => (
+                      <option key={format} value={format}>
+                        {format}
+                      </option>
+                    ),
+                  )}
                 </select>
               </CanvasField>
 
