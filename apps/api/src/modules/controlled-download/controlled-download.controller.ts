@@ -1,6 +1,7 @@
 import { Controller, Get, HttpStatus, Param, Query } from "@nestjs/common";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { verifyControlledDownloadSignature } from "../../common/controlled-download";
 import { OpenRoute } from "../../common/auth";
 
 /**
@@ -17,8 +18,9 @@ import { OpenRoute } from "../../common/auth";
  * file was never produced in the first place.
  *
  * The link is not authenticated, because a signed URL is meant to be its own
- * credential. That is safe here precisely because nothing is served: the route
- * looks nothing up, so there is no existence to disclose.
+ * credential -- and as of `AUDIT-ARTIFACT-004` the signature is actually
+ * checked, which it never was anywhere before. Until `manifest_hash` was added
+ * to the link, it could not be: the signature covers it and the URL omitted it.
  */
 @Controller("downloads")
 export class ControlledDownloadController {
@@ -31,25 +33,56 @@ export class ControlledDownloadController {
   resolve(
     @Param("kind") kind: string,
     @Param("subjectId") subjectId: string,
+    @Query("signed_at") signedAt?: string,
     @Query("expires_at") expiresAt?: string,
+    @Query("key_id") keyId?: string,
+    @Query("manifest_hash") manifestHash?: string,
     @Query("sig") signature?: string,
+    @Query("sig_v") signatureVersion?: string,
   ) {
-    if (!signature?.trim()) {
+    const missing = [
+      ["signed_at", signedAt],
+      ["expires_at", expiresAt],
+      ["key_id", keyId],
+      ["manifest_hash", manifestHash],
+      ["sig", signature],
+      ["sig_v", signatureVersion],
+    ]
+      .filter(([, value]) => !String(value ?? "").trim())
+      .map(([name]) => name);
+
+    if (missing.length > 0) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
-        "CONTROLLED_DOWNLOAD_SIGNATURE_MISSING",
-        "This link is missing its signature and cannot be resolved.",
-        { kind, subjectId },
+        "CONTROLLED_DOWNLOAD_LINK_INCOMPLETE",
+        "This link is missing the fields needed to check it.",
+        { kind, subjectId, missing },
       );
     }
 
-    // Expiry is checked and the signature is not. The signature covers
-    // `manifestHash`, which the URL does not carry, so a link cannot be
-    // verified from itself -- worth stating plainly rather than implying a
-    // check that is not happening. Adding `manifest_hash` to the query would
-    // make verification possible and is the prerequisite for serving anything
-    // here.
-    const expiry = expiresAt ? Date.parse(expiresAt) : Number.NaN;
+    // Signature before expiry, deliberately. Telling a forged link that it is
+    // merely "expired" would answer a question it has not earned, and would
+    // hand an attacker a way to probe which subject ids and windows exist.
+    const verification = verifyControlledDownloadSignature({
+      kind,
+      subjectId,
+      manifestHash: manifestHash!,
+      signedAt: signedAt!,
+      expiresAt: expiresAt!,
+      keyId: keyId!,
+      signatureVersion: Number(signatureVersion),
+      signature: signature!,
+    });
+    if (!verification.ok) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "CONTROLLED_DOWNLOAD_SIGNATURE_INVALID",
+        "This link could not be verified.",
+        { kind, subjectId, reason: verification.reason },
+      );
+    }
+
+    const expiry = Date.parse(expiresAt!);
     if (!Number.isNaN(expiry) && expiry <= Date.now()) {
       throw new ApiRequestError(
         HttpStatus.GONE,
@@ -59,6 +92,8 @@ export class ControlledDownloadController {
       );
     }
 
+    // The link is genuine, unexpired, and there is still nothing behind it.
+    // That is now the only remaining reason this route cannot serve a file.
     throw new ApiRequestError(
       HttpStatus.NOT_IMPLEMENTED,
       "ARTIFACT_NOT_MATERIALISED",
