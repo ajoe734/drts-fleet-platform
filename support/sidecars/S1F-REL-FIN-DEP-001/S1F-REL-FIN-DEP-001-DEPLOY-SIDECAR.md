@@ -22,7 +22,7 @@ Unblock decision: `support/unblock/S1F-REL-FIN-DEP-001/S1F-REL-FIN-DEP-001-UNBLO
 | **Execution Runbook** | `docs/03-runbooks/s1f-release-finalization-execution-tasks-20260821.md` §`S1F-REL-FIN-DEP-001` |
 | **Locked Candidate SHA** | `4012b10c0cd4990bd238eaed6ddc23252bc0c8d4` (PR #1451 merge commit) |
 | **Deployed Workflow Ref** | `eef4d5ff8a7fadd8143740055a185d80b042b582` (Lineage ancestor verified) |
-| **Workflow Run URL** | [https://github.com/ajoe734/drts-fleet-platform/actions/runs/32587756371](https://github.com/ajoe734/drts-fleet-platform/actions/runs/32587756371) |
+| **Workflow Run URL** | [https://github.com/ajoe734/drts-fleet-platform/actions/runs/32615726461](https://github.com/ajoe734/drts-fleet-platform/actions/runs/32615726461) |
 | **Workflow Status** | `completed` / `success` |
 | **Upstream Dependencies** | `S1F-REL-FIN-PRE-001` (done), `S1F-REL-FIN-GCP-001` (done / gate open via unblock decision) |
 | **Downstream Tasks** | `S1F-REL-FIN-UAT-001` (Wave C), `S1F-REL-FIN-CLOSE-001` (Wave D) |
@@ -32,7 +32,7 @@ Unblock decision: `support/unblock/S1F-REL-FIN-DEP-001/S1F-REL-FIN-DEP-001-UNBLO
 
 ## 2. Dev Deployment Evidence Parameters
 
-- **`dev_deploy_run_url`**: `https://github.com/ajoe734/drts-fleet-platform/actions/runs/32587756371`
+- **`dev_deploy_run_url`**: `https://github.com/ajoe734/drts-fleet-platform/actions/runs/32615726461`
 - **`dev_deploy_sha`**: `eef4d5ff8a7fadd8143740055a185d80b042b582`
 - **`dev_service_urls`**: `https://drts-dev-api-4t7rg6fmeq-uc.a.run.app,https://drts-dev-platform-admin-web-4t7rg6fmeq-uc.a.run.app,https://drts-dev-ops-console-web-4t7rg6fmeq-uc.a.run.app,https://drts-dev-fleet-partner-portal-web-4t7rg6fmeq-uc.a.run.app,https://drts-dev-tenant-console-web-4t7rg6fmeq-uc.a.run.app,https://drts-dev-bank-console-web-4t7rg6fmeq-uc.a.run.app,https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/yuhe-residence,https://drts-dev-enterprise-dispatch-web-4t7rg6fmeq-uc.a.run.app,https://drts-channel-partner-portal-web-4t7rg6fmeq-uc.a.run.app`
 
