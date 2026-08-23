@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -18,9 +20,24 @@ INSTALLERS = (
 )
 
 
+# orch_canonical_root answers ORCH_STATUS_ROOT / AI_STATUS_ROOT before it
+# derives anything, and the systemd units export both. A suite that inherits
+# them asserts nothing about derivation: the helper short-circuits and echoes
+# the inherited path back.
+#
+# That is not hypothetical. github_bus' pre-merge gate exports ORCH_STATUS_ROOT
+# when it runs this suite against a candidate merged onto origin/dev; GitHub CI
+# exports neither. dev was therefore green on GitHub and red under the gate, so
+# every candidate failed a check whose failure had nothing to do with the
+# candidate -- including both PRs unblocking S1F-REL-FIN-DEP-001, which sat
+# MERGEABLE and unmerged for a day while the fleet idled behind them.
+_ROOT_OVERRIDES = ("ORCH_STATUS_ROOT", "AI_STATUS_ROOT")
+
+
 def _bash(script: str) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items() if k not in _ROOT_OVERRIDES}
     return subprocess.run(["bash", "-c", f'source "{COMMON}"\n{script}'],
-                          capture_output=True, text=True, check=False)
+                          capture_output=True, text=True, check=False, env=env)
 
 
 class UnitsRunPinnedCodeTests(unittest.TestCase):
@@ -99,6 +116,29 @@ class UnitsRunPinnedCodeTests(unittest.TestCase):
             subprocess.run([*git, "worktree", "add", "-q", "--detach", str(tree)], check=True)
 
             result = _bash(f'orch_canonical_root "{tree}"')
+
+            self.assertEqual(result.stdout.strip(), str(repo.resolve()), result.stderr)
+
+    def test_derivation_survives_a_status_root_exported_by_the_caller(self) -> None:
+        """The pre-merge gate is such a caller, and this is what it cost.
+
+        Asserting derivation while inheriting the variable that overrides
+        derivation is a test that cannot fail for the right reason and does
+        fail for the wrong one. Pinned with the override set, so the scrubbing
+        in _bash cannot quietly go away again.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "repo"
+            git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+            subprocess.run(["git", "init", "-q", "-b", "dev", str(repo)], check=True)
+            (repo / "README").write_text("x\n", encoding="utf-8")
+            subprocess.run([*git, "add", "README"], check=True)
+            subprocess.run([*git, "commit", "-qm", "base"], check=True)
+            tree = repo / "release"
+            subprocess.run([*git, "worktree", "add", "-q", "--detach", str(tree)], check=True)
+
+            with mock.patch.dict(os.environ, {"ORCH_STATUS_ROOT": "/not/the/canonical/root"}):
+                result = _bash(f'orch_canonical_root "{tree}"')
 
             self.assertEqual(result.stdout.strip(), str(repo.resolve()), result.stderr)
 
