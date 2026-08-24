@@ -5,9 +5,12 @@ import {
   TENANT_CSRF_HEADER_NAME,
 } from "../../../lib/auth/constants";
 import { verifyCsrfToken, verifySameOrigin } from "../../../lib/auth/session";
+import {
+  type VerifiedTenantSession,
+  verifyTenantSession,
+} from "../../../lib/auth/verified-tenant-session.server";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
-const DEFAULT_TENANT_ID = "10000000-0000-0000-0000-000000000201";
 const METADATA_IDENTITY_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
 const RUN_APP_HOST_SUFFIX = ".a.run.app";
@@ -120,11 +123,10 @@ function buildTargetUrl(request: NextRequest, path: string[]) {
   return targetUrl;
 }
 
-function resolveTenantId() {
-  return process.env.DRTS_TENANT_CONSOLE_TENANT_ID?.trim() || DEFAULT_TENANT_ID;
-}
-
-function copyRequestHeaders(request: NextRequest, path: string[]) {
+function copyRequestHeaders(
+  request: NextRequest,
+  tenantSession: VerifiedTenantSession | null,
+) {
   const headers = new Headers();
 
   request.headers.forEach((value, key) => {
@@ -134,15 +136,9 @@ function copyRequestHeaders(request: NextRequest, path: string[]) {
     headers.set(key, value);
   });
 
-  const sessionToken = request.cookies
-    .get(TENANT_SESSION_COOKIE_NAME)
-    ?.value?.trim();
-  if (sessionToken) {
-    headers.set("authorization", `Bearer ${sessionToken}`);
-  }
-
-  if (path[0] === "tenant") {
-    headers.set("x-tenant-id", resolveTenantId());
+  if (tenantSession) {
+    headers.set("authorization", `Bearer ${tenantSession.accessToken}`);
+    headers.set("x-tenant-id", tenantSession.tenantId);
   }
 
   return headers;
@@ -256,8 +252,43 @@ async function forward(
     }
   }
 
+  let tenantSession: VerifiedTenantSession | null = null;
+  if (path[0] === "tenant") {
+    const accessToken = request.cookies
+      .get(TENANT_SESSION_COOKIE_NAME)
+      ?.value?.trim();
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: "AUTHENTICATION_REQUIRED" },
+        { status: 401 },
+      );
+    }
+    try {
+      tenantSession = (
+        await verifyTenantSession(accessToken, resolveTargetOrigin())
+      ).session;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "AUTH_UPSTREAM_UNAVAILABLE",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Session verification failed",
+        },
+        { status: 503 },
+      );
+    }
+    if (!tenantSession) {
+      return NextResponse.json(
+        { error: "AUTHENTICATION_REQUIRED" },
+        { status: 401 },
+      );
+    }
+  }
+
   const targetUrl = buildTargetUrl(request, path);
-  const headers = copyRequestHeaders(request, path);
+  const headers = copyRequestHeaders(request, tenantSession);
   await applyUpstreamAuth(headers, targetUrl);
 
   const init: RequestInit = {

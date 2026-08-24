@@ -1,14 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTenantBearerClientFromToken } from "@/lib/api-client";
+import { createTenantBearerClientFromSession } from "@/lib/api-client";
 
 describe("tenant server API client", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    delete process.env.DRTS_TENANT_CONSOLE_TENANT_ID;
   });
 
-  it("adds the configured tenant ID to authenticated server requests", async () => {
-    process.env.DRTS_TENANT_CONSOLE_TENANT_ID = "tenant-acceptance-001";
+  it("uses the tenant ID from the verified session", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ data: [] }), {
         status: 200,
@@ -17,9 +15,10 @@ describe("tenant server API client", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await createTenantBearerClientFromToken(
-      "tenant-session-token",
-    ).listTenantBookings();
+    await createTenantBearerClientFromSession({
+      accessToken: "tenant-session-token",
+      tenantId: "tenant-acceptance-001",
+    }).listTenantBookings();
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const headers = init.headers as Record<string, string>;
@@ -28,7 +27,8 @@ describe("tenant server API client", () => {
     expect(headers["x-realm"]).toBe("tenant");
   });
 
-  it("uses the canonical operational tenant when no override is configured", async () => {
+  it("does not replace a verified tenant with a configured default", async () => {
+    process.env.DRTS_TENANT_CONSOLE_TENANT_ID = "spoofed-config-tenant";
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ data: [] }), {
         status: 200,
@@ -37,13 +37,14 @@ describe("tenant server API client", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await createTenantBearerClientFromToken(
-      "tenant-session-token",
-    ).listTenantBookings();
+    await createTenantBearerClientFromSession({
+      accessToken: "tenant-session-token",
+      tenantId: "verified-tenant-201",
+    }).listTenantBookings();
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect((init.headers as Record<string, string>)["x-tenant-id"]).toBe(
-      "10000000-0000-0000-0000-000000000201",
+      "verified-tenant-201",
     );
   });
 });

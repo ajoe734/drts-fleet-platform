@@ -23,7 +23,8 @@ describe("Tenant Auth BFF Route Handlers", () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          authorizationUrl: "https://idp.example.com/oauth/authorize?state=upstream-state-1",
+          authorizationUrl:
+            "https://idp.example.com/oauth/authorize?state=upstream-state-1",
           state: "upstream-state-1",
         }),
       } as Response);
@@ -122,11 +123,17 @@ describe("Tenant Auth BFF Route Handlers", () => {
       });
 
       expect(response.status).toBe(307);
-      expect(response.headers.get("location")).toBe("http://localhost:3004/settings");
+      expect(response.headers.get("location")).toBe(
+        "http://localhost:3004/settings",
+      );
 
       const cookies = response.headers.getSetCookie();
-      expect(cookies.some((c) => c.includes(TENANT_SESSION_COOKIE_NAME))).toBe(true);
-      expect(cookies.some((c) => c.includes(TENANT_CSRF_COOKIE_NAME))).toBe(true);
+      expect(cookies.some((c) => c.includes(TENANT_SESSION_COOKIE_NAME))).toBe(
+        true,
+      );
+      expect(cookies.some((c) => c.includes(TENANT_CSRF_COOKIE_NAME))).toBe(
+        true,
+      );
     });
 
     it("rejects callback with 400 when code is missing from query param", async () => {
@@ -195,7 +202,10 @@ describe("Tenant Auth BFF Route Handlers", () => {
     });
 
     it("rejects callback with 400 when state cookie contains unsigned or invalid envelope", async () => {
-      const rawJson = JSON.stringify({ stateToken: "state-xyz", returnUrl: "/" });
+      const rawJson = JSON.stringify({
+        stateToken: "state-xyz",
+        returnUrl: "/",
+      });
       const request = new NextRequest(
         "http://localhost:3004/api/auth/tenant/callback?code=oauth-code-123&state=state-xyz",
         {
@@ -235,7 +245,9 @@ describe("Tenant Auth BFF Route Handlers", () => {
       });
 
       expect(response.status).toBe(307);
-      expect(response.headers.get("location")).toContain("/login?error=AUTH_STATE_MISMATCH");
+      expect(response.headers.get("location")).toContain(
+        "/login?error=AUTH_STATE_MISMATCH",
+      );
     });
   });
 
@@ -255,21 +267,26 @@ describe("Tenant Auth BFF Route Handlers", () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          active: true,
-          actor: {
-            actorId: "usr-tenant-1",
-            realm: "tenant",
-            tenantId: "tenant-acme-1",
-            roles: ["tenant_admin"],
+          data: {
+            active: true,
+            identity: {
+              actorId: "usr-tenant-1",
+              realm: "tenant",
+              tenantId: "tenant-acme-1",
+              roles: ["tenant_admin"],
+            },
           },
         }),
       } as Response);
 
-      const request = new NextRequest("http://localhost:3004/api/auth/session", {
-        headers: {
-          cookie: `${TENANT_SESSION_COOKIE_NAME}=valid-session-jwt`,
+      const request = new NextRequest(
+        "http://localhost:3004/api/auth/session",
+        {
+          headers: {
+            cookie: `${TENANT_SESSION_COOKIE_NAME}=valid-session-jwt`,
+          },
         },
-      });
+      );
 
       const response = await authGet(request, {
         params: Promise.resolve({ auth: ["session"] }),
@@ -277,22 +294,28 @@ describe("Tenant Auth BFF Route Handlers", () => {
 
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(data.active).toBe(true);
-      expect(data.actor.actorId).toBe("usr-tenant-1");
+      expect(data.data.active).toBe(true);
+      expect(data.data.identity.actorId).toBe("usr-tenant-1");
     });
 
     it("clears cookies when backend returns 401 (session revoked)", async () => {
-      global.fetch = vi.fn().mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        statusText: "Unauthorized",
-      } as Response);
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ error: { code: "AUTHENTICATION_REQUIRED" } }),
+            { status: 401 },
+          ),
+        );
 
-      const request = new NextRequest("http://localhost:3004/api/auth/session", {
-        headers: {
-          cookie: `${TENANT_SESSION_COOKIE_NAME}=revoked-session-jwt`,
+      const request = new NextRequest(
+        "http://localhost:3004/api/auth/session",
+        {
+          headers: {
+            cookie: `${TENANT_SESSION_COOKIE_NAME}=revoked-session-jwt`,
+          },
         },
-      });
+      );
 
       const response = await authGet(request, {
         params: Promise.resolve({ auth: ["session"] }),
@@ -300,7 +323,9 @@ describe("Tenant Auth BFF Route Handlers", () => {
 
       expect(response.status).toBe(401);
       const cookies = response.headers.getSetCookie();
-      expect(cookies.some((c) => c.includes(`${TENANT_SESSION_COOKIE_NAME}=;`))).toBe(true);
+      expect(
+        cookies.some((c) => c.includes(`${TENANT_SESSION_COOKIE_NAME}=;`)),
+      ).toBe(true);
     });
   });
 
@@ -343,7 +368,9 @@ describe("Tenant Auth BFF Route Handlers", () => {
 
       expect(response.status).toBe(200);
       const cookies = response.headers.getSetCookie();
-      expect(cookies.some((c) => c.includes(`${TENANT_SESSION_COOKIE_NAME}=;`))).toBe(true);
+      expect(
+        cookies.some((c) => c.includes(`${TENANT_SESSION_COOKIE_NAME}=;`)),
+      ).toBe(true);
     });
   });
 });
