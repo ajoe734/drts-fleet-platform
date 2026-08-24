@@ -14,7 +14,7 @@ interface AuthSessionEnvelope {
     active?: unknown;
     identity?: {
       realm?: unknown;
-      tenantId?: unknown;
+      tenant_id?: unknown;
     };
   };
 }
@@ -29,7 +29,7 @@ export async function verifyTenantSession(
   });
   const body: unknown = await response.json().catch(() => null);
   const payload = (body as AuthSessionEnvelope | null)?.data;
-  const tenantId = payload?.identity?.tenantId;
+  const tenantId = payload?.identity?.tenant_id;
   const session =
     response.ok &&
     payload?.active === true &&

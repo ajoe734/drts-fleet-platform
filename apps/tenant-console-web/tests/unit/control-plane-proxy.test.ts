@@ -22,7 +22,7 @@ describe("Control Plane Proxy Invariants", () => {
       JSON.stringify({
         data: {
           active: true,
-          identity: { realm: "tenant", tenantId },
+          identity: { realm: "tenant", tenant_id: tenantId },
         },
       }),
       { status: 200, headers: { "content-type": "application/json" } },
@@ -182,7 +182,7 @@ describe("Control Plane Proxy Invariants", () => {
           JSON.stringify({
             data: {
               active: true,
-              identity: { realm: "ops", tenantId: "spoofed-tenant" },
+              identity: { realm: "ops", tenant_id: "spoofed-tenant" },
             },
           }),
           { status: 200 },

@@ -1387,14 +1387,14 @@ jobs:
               --arg expected_role "$expected_role" \
               '.data.active == true and
                .data.identity.realm == "tenant" and
-               .data.identity.tenantId == $tenant_id and
+               .data.identity.tenant_id == $tenant_id and
                (.data.identity.roles | index($expected_role) != null)' \
               <<<"$response_body" >/dev/null || {
                 safe_summary="$(jq --compact-output \
                   '{active: .data.active, identity: {
-                    actorId: .data.identity.actorId,
+                    actor_id: .data.identity.actor_id,
                     realm: .data.identity.realm,
-                    tenantId: .data.identity.tenantId,
+                    tenant_id: .data.identity.tenant_id,
                     roles: .data.identity.roles
                   }}' <<<"$response_body")"
                 echo "::error::${label} session is not bound to the expected durable tenant role: ${safe_summary}" >&2

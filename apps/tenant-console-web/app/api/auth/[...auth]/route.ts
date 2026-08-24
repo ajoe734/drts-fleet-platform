@@ -89,8 +89,8 @@ export async function GET(
       const data = await res.json().catch(() => null);
       const payload = data && data.data ? data.data : data;
 
-      const authorizationUrl = payload?.authorizationUrl;
-      const stateToken = payload?.stateToken ?? payload?.state;
+      const authorizationUrl = payload?.authorization_url;
+      const stateToken = payload?.state_token ?? payload?.state;
       const oauthState = payload?.state;
 
       if (
@@ -232,7 +232,7 @@ export async function GET(
       const data = await exchangeRes.json().catch(() => null);
       const payload = data && data.data ? data.data : data;
       const accessToken =
-        payload?.sessionToken ?? payload?.accessToken ?? payload?.token;
+        payload?.session_token ?? payload?.access_token ?? payload?.token;
 
       if (!exchangeRes.ok || !accessToken) {
         return NextResponse.json(

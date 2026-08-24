@@ -23,7 +23,7 @@ describe("Tenant Auth BFF Route Handlers", () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          authorizationUrl:
+          authorization_url:
             "https://idp.example.com/oauth/authorize?state=upstream-state-1",
           state: "upstream-state-1",
         }),
@@ -49,7 +49,7 @@ describe("Tenant Auth BFF Route Handlers", () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => ({
-          authorizationUrl: "https://idp.example.com/oauth/authorize",
+          authorization_url: "https://idp.example.com/oauth/authorize",
           // missing stateToken and state
         }),
       } as Response);
@@ -100,11 +100,11 @@ describe("Tenant Auth BFF Route Handlers", () => {
         ok: true,
         json: async () => ({
           status: "success",
-          sessionToken: "session-jwt-token-12345",
+          session_token: "session-jwt-token-12345",
           user: {
-            actorId: "usr-tenant-1",
+            actor_id: "usr-tenant-1",
             realm: "tenant",
-            tenantId: "tenant-acme-1",
+            tenant_id: "tenant-acme-1",
           },
         }),
       } as Response);
@@ -270,9 +270,9 @@ describe("Tenant Auth BFF Route Handlers", () => {
           data: {
             active: true,
             identity: {
-              actorId: "usr-tenant-1",
+              actor_id: "usr-tenant-1",
               realm: "tenant",
-              tenantId: "tenant-acme-1",
+              tenant_id: "tenant-acme-1",
               roles: ["tenant_admin"],
             },
           },
@@ -295,7 +295,7 @@ describe("Tenant Auth BFF Route Handlers", () => {
       expect(response.status).toBe(200);
       const data = await response.json();
       expect(data.data.active).toBe(true);
-      expect(data.data.identity.actorId).toBe("usr-tenant-1");
+      expect(data.data.identity.actor_id).toBe("usr-tenant-1");
     });
 
     it("clears cookies when backend returns 401 (session revoked)", async () => {
