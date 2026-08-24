@@ -35,6 +35,9 @@ describe("operational browser journeys manifest guard", () => {
       expect.arrayContaining([
         expect.objectContaining({
           path: "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
+          body: expect.objectContaining({
+            supportedServiceProductCodes: ["business_dispatch"],
+          }),
           capture: expect.objectContaining({
             fleetSubmissionId: "data.submission.submission_id",
           }),
@@ -63,6 +66,9 @@ describe("operational browser journeys manifest guard", () => {
     );
     expect(adminJourney).toBeDefined();
     expect(adminJourney.route).toBe("/supply-review/{{adminSubmissionId}}");
+    expect(adminJourney.setup[0].body.supportedServiceProductCodes).toEqual([
+      "business_dispatch",
+    ]);
     const approveOp = adminJourney.operations[0];
     expect(approveOp.kind).toBe("request");
     expect(approveOp.responseKind).toBe("json");
