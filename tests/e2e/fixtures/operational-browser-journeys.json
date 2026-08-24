@@ -177,7 +177,7 @@
             "taxiDriverRegistrationNo": "ACC-TAXI-{{runId}}",
             "taxiDriverRegistrationArea": "taipei",
             "taxiDriverRegistrationExpiry": "2029-12-31",
-            "supportedServiceProductCodes": ["enterprise_dispatch"],
+            "supportedServiceProductCodes": ["business_dispatch"],
             "preferredVehicleSubmissionId": null
           },
           "capture": {
@@ -312,7 +312,7 @@
             "taxiDriverRegistrationNo": "ACC-ADMIN-TAXI-{{runId}}",
             "taxiDriverRegistrationArea": "taipei",
             "taxiDriverRegistrationExpiry": "2029-12-31",
-            "supportedServiceProductCodes": ["enterprise_dispatch"],
+            "supportedServiceProductCodes": ["business_dispatch"],
             "preferredVehicleSubmissionId": null
           },
           "capture": {

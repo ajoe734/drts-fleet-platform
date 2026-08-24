@@ -10,7 +10,7 @@ import type {
   SetStateAction,
   TextareaHTMLAttributes,
 } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   DriverSupplyDraft,
   SupplyDocumentRecord,
@@ -1191,6 +1191,7 @@ export function SupplySubmissionDetailView({
   const theme = buildFleetTheme();
   const { t } = useTranslation();
   const [detail, setDetail] = useState(initialDetail);
+  const [hydrated, setHydrated] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [driverForm, setDriverForm] = useState<DriverDraftInput | null>(
@@ -1223,6 +1224,11 @@ export function SupplySubmissionDetailView({
     ? DRIVER_DOC_TYPES
     : VEHICLE_DOC_TYPES;
   const subject = useMemo(() => formatSupplySubject(detail), [detail]);
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
+
   const setDriverDraftSafe: Dispatch<SetStateAction<DriverDraftInput>> = (
     next,
   ) => {
@@ -1498,7 +1504,7 @@ export function SupplySubmissionDetailView({
               helper={t("supply.detail.saveHelper")}
               variant="secondary"
               busy={busy === "save"}
-              disabled={!editable}
+              disabled={!editable || !hydrated}
               onClick={() => runAction("save", saveDraft)}
             />
             <ActionButton
@@ -1512,7 +1518,7 @@ export function SupplySubmissionDetailView({
               helper={t("supply.detail.submitHelper")}
               variant="primary"
               busy={busy === "submit"}
-              disabled={!editable}
+              disabled={!editable || !hydrated}
               onClick={() => runAction("submit", submitSubmission)}
               data-drt-operation={
                 detail.submission.status === "needs_revision" ||
@@ -1527,7 +1533,7 @@ export function SupplySubmissionDetailView({
               helper={t("supply.detail.withdrawHelper")}
               variant="secondary"
               busy={busy === "withdraw"}
-              disabled={detail.submission.status !== "submitted"}
+              disabled={!hydrated || detail.submission.status !== "submitted"}
               onClick={() => runAction("withdraw", withdrawSubmission)}
               data-drt-operation="fleet-withdraw"
             />
