@@ -86,20 +86,20 @@ No component is added beside the existing supervisor. The target remains one pro
 
 ### 4.0 Source ownership map
 
-| Responsibility       | Existing source to modify                                                                      | Existing source to remove or reduce                       |
-| -------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| adapter resolution   | `control_plane/runtime/supervisor_runtime.py`: `build_request()`, `start_worker_for_request()` | duplicate agent/provider fallback branches                |
-| capability reporting | `provider_permissions.py`: `provider_capabilities()`                                           | mixed `agent.adapter or provider.delivery_mode` selection |
-| model normalization  | `common.py`: `antigravity_rotation_config()`, `select_rotation_model()`                        | empty-primary/default-model semantics                     |
-| run identity/env     | `start_worker_for_request()`, `common.py`: `apply_orchestrator_runtime_env()`                  | adapter-local run-ID creation and private env blocks      |
-| AGY command          | `adapters/antigravity.py`: `AntigravityAdapter.deliver()`                                      | plain-output and one-hour default assumptions             |
-| log observation      | `supervisor_runtime.py`: `update_from_log()`                                                   | second file read in `infra/worker_failure_detector.py`    |
-| progress/lease       | `domain/worker_lifecycle.py`, `supervisor_runtime.py`: `poll_workers()`                        | CPU/mtime activity and persisted stall state              |
-| process probes       | retain PID/termination probes in `infra/host_probes.py`                                        | CPU-as-progress probes only                               |
-| canonical mutation   | `usecases/task_board_commands.py`, `bin/ai_status.py`                                          | status-only attempt inference                             |
-| terminal outcome     | existing `finalize_exited_worker()` call site in `poll_workers()`                              | duplicate weak completion branches                        |
-| retry/rotation       | existing retry, rotation, and reassignment functions                                           | process-local fallback reap breaker                       |
-| projection           | `projections/control_plane_summary.py`, existing dashboard normalizer/view                     | persisted/independent stall truth                         |
+| Responsibility       | Existing source to modify                                                                            | Existing source to remove or reduce                                                                 |
+| -------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| adapter resolution   | `control_plane/runtime/supervisor_runtime.py`: `build_request()`, `start_worker_for_request()`       | duplicate agent/provider fallback branches                                                          |
+| capability reporting | `provider_permissions.py`: `provider_capabilities()`                                                 | mixed `agent.adapter or provider.delivery_mode` selection                                           |
+| model normalization  | `common.py`: `antigravity_rotation_config()`, `select_rotation_model()`                              | empty-primary/default-model semantics                                                               |
+| run identity/env     | `start_worker_for_request()`, `common.py`: `apply_orchestrator_runtime_env()`                        | adapter-local run-ID creation and private env blocks                                                |
+| AGY command          | `adapters/antigravity.py`: `AntigravityAdapter.deliver()`                                            | plain-output and one-hour default assumptions                                                       |
+| log observation      | `tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py`: `update_from_log()`    | second file read in `tools/development-orchestrator/control_plane/infra/worker_failure_detector.py` |
+| progress/lease       | `domain/worker_lifecycle.py`, `supervisor_runtime.py`: `poll_workers()`                              | CPU/mtime activity and persisted stall state                                                        |
+| process probes       | retain PID/termination probes in `tools/development-orchestrator/control_plane/infra/host_probes.py` | CPU-as-progress probes only                                                                         |
+| canonical mutation   | `usecases/task_board_commands.py`, `bin/ai_status.py`                                                | status-only attempt inference                                                                       |
+| terminal outcome     | existing `finalize_exited_worker()` call site in `poll_workers()`                                    | duplicate weak completion branches                                                                  |
+| retry/rotation       | existing retry, rotation, and reassignment functions                                                 | process-local fallback reap breaker                                                                 |
+| projection           | `projections/control_plane_summary.py`, existing dashboard normalizer/view                           | persisted/independent stall truth                                                                   |
 
 This design does not introduce a new runtime package or service. Small pure helpers may be extracted only when they replace multiple existing branches and the original branches are deleted in the same phase.
 
