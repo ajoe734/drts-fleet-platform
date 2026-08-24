@@ -6,10 +6,17 @@ const repoRoot = path.resolve(__dirname, "../..");
 
 describe("deployment architecture guards", () => {
   it("keeps tenant acceptance users under the migration chain only", () => {
-    const migration = readFileSync(
+    const seedMigration = readFileSync(
       path.join(
         repoRoot,
         "infra/migrations/V0029__tenant_user_roles_demo_seed.sql",
+      ),
+      "utf8",
+    );
+    const reconciliationMigration = readFileSync(
+      path.join(
+        repoRoot,
+        "infra/migrations/V0085__reconcile_tenant_acceptance_roles.sql",
       ),
       "utf8",
     );
@@ -22,9 +29,20 @@ describe("deployment architecture guards", () => {
       "10000000-0000-0000-0000-000000000901",
       "10000000-0000-0000-0000-000000000902",
     ]) {
-      expect(migration).toContain(actorId);
+      expect(seedMigration).toContain(actorId);
+      expect(reconciliationMigration).toContain(actorId);
       expect(demoSeed).not.toContain(actorId);
     }
+  });
+
+  it("gives Cloud Run revisions a bounded cold-start readiness window", () => {
+    const workflow = readFileSync(
+      path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain("--retry-all-errors");
+    expect(workflow).toContain("--retry 10");
   });
 
   it("does not use network-idle as an operational readiness signal", () => {
