@@ -199,9 +199,7 @@ function interpolatePath(
 
 async function navigate(page: Page, origin: string, route: string) {
   await page.goto(new URL(route, origin).toString(), {
-    // An SSR control is visible before React wires its click handler. Wait for
-    // the page to become interactive so acceptance exercises the real action.
-    waitUntil: "networkidle",
+    waitUntil: "domcontentloaded",
   });
 }
 
@@ -698,11 +696,6 @@ for (const journey of manifest.journeys) {
         operation.readback as Readback,
         variables,
       );
-      if (operation.resultIdQueryParam) {
-        await page.waitForLoadState("networkidle", {
-          timeout: interactionTimeoutMs,
-        });
-      }
     }
   });
 }

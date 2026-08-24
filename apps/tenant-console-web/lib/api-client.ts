@@ -6,33 +6,34 @@ import {
   TENANT_SESSION_COOKIE_NAME,
   TENANT_LOGIN_PATH,
 } from "./auth/constants";
+import {
+  type VerifiedTenantSession,
+  verifyTenantSession,
+} from "./auth/verified-tenant-session.server";
 
 export const API_URL = getServerApiBaseUrl();
-const DEFAULT_TENANT_ID = "10000000-0000-0000-0000-000000000201";
 
-export interface TenantSessionContext {
-  accessToken: string;
-}
-
-export async function getTenantSession(): Promise<TenantSessionContext | null> {
+export async function getTenantSession(): Promise<VerifiedTenantSession | null> {
   try {
     const cookieStore = await cookies();
     const token = cookieStore.get(TENANT_SESSION_COOKIE_NAME)?.value?.trim();
     if (!token) {
       return null;
     }
-    return { accessToken: token };
+    return (await verifyTenantSession(token, API_URL)).session;
   } catch {
     return null;
   }
 }
 
-export function createTenantBearerClientFromToken(
-  accessToken: string,
+export function createTenantBearerClientFromSession(
+  session: VerifiedTenantSession,
 ): ApiClient {
-  const tenantId =
-    process.env.DRTS_TENANT_CONSOLE_TENANT_ID?.trim() || DEFAULT_TENANT_ID;
-  return createTenantBearerClient(API_URL, accessToken, tenantId);
+  return createTenantBearerClient(
+    API_URL,
+    session.accessToken,
+    session.tenantId,
+  );
 }
 
 export async function getTenantClient(): Promise<ApiClient> {
@@ -40,7 +41,7 @@ export async function getTenantClient(): Promise<ApiClient> {
   if (!session) {
     redirect(TENANT_LOGIN_PATH);
   }
-  return createTenantBearerClientFromToken(session.accessToken);
+  return createTenantBearerClientFromSession(session);
 }
 
 export async function getTenantClientForRouteHandler(): Promise<ApiClient | null> {
@@ -48,7 +49,7 @@ export async function getTenantClientForRouteHandler(): Promise<ApiClient | null
   if (!session) {
     return null;
   }
-  return createTenantBearerClientFromToken(session.accessToken);
+  return createTenantBearerClientFromSession(session);
 }
 
 export { createBrowserApiClient } from "./browser-api-client";

@@ -17,6 +17,7 @@ import {
   getOidcStateCookieOptions,
   getCsrfCookieOptions,
 } from "../../../../lib/auth/session";
+import { verifyTenantSession } from "../../../../lib/auth/verified-tenant-session.server";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 
@@ -86,7 +87,7 @@ export async function GET(
         cache: "no-store",
       });
       const data = await res.json().catch(() => null);
-      const payload = (data && data.data) ? data.data : data;
+      const payload = data && data.data ? data.data : data;
 
       const authorizationUrl = payload?.authorizationUrl;
       const stateToken = payload?.stateToken ?? payload?.state;
@@ -129,7 +130,10 @@ export async function GET(
       return NextResponse.json(
         {
           error: "AUTH_LOGIN_UNAVAILABLE",
-          message: error instanceof Error ? error.message : "Upstream authentication service unavailable",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Upstream authentication service unavailable",
         },
         { status: 503 },
       );
@@ -140,13 +144,16 @@ export async function GET(
   if (actionPath === "tenant/callback" || actionPath === "callback") {
     const code = request.nextUrl.searchParams.get("code")?.trim() || "";
     const state = request.nextUrl.searchParams.get("state")?.trim() || "";
-    const stateCookie = request.cookies.get(TENANT_OIDC_STATE_COOKIE_NAME)?.value;
+    const stateCookie = request.cookies.get(
+      TENANT_OIDC_STATE_COOKIE_NAME,
+    )?.value;
 
     if (!code) {
       return NextResponse.json(
         {
           error: "AUTH_SESSION_EXCHANGE_DENIED",
-          message: "Authorization code is required in callback query parameters.",
+          message:
+            "Authorization code is required in callback query parameters.",
         },
         { status: 400 },
       );
@@ -156,7 +163,8 @@ export async function GET(
       return NextResponse.json(
         {
           error: "AUTH_SESSION_EXCHANGE_DENIED",
-          message: "Authorization state is required in callback query parameters.",
+          message:
+            "Authorization state is required in callback query parameters.",
         },
         { status: 400 },
       );
@@ -190,7 +198,10 @@ export async function GET(
     if (state !== expectedState && state !== stateToken) {
       const loginUrl = new URL("/login", request.nextUrl.origin);
       loginUrl.searchParams.set("error", "AUTH_STATE_MISMATCH");
-      loginUrl.searchParams.set("message", "State token does not match authorization state");
+      loginUrl.searchParams.set(
+        "message",
+        "State token does not match authorization state",
+      );
       return NextResponse.redirect(loginUrl);
     }
 
@@ -210,15 +221,18 @@ export async function GET(
             callbackUrl,
             code,
             state,
-            ...(codeVerifier ? { pkceVerifier: codeVerifier, codeVerifier } : {}),
+            ...(codeVerifier
+              ? { pkceVerifier: codeVerifier, codeVerifier }
+              : {}),
           }),
           cache: "no-store",
         },
       );
 
       const data = await exchangeRes.json().catch(() => null);
-      const payload = (data && data.data) ? data.data : data;
-      const accessToken = payload?.sessionToken ?? payload?.accessToken ?? payload?.token;
+      const payload = data && data.data ? data.data : data;
+      const accessToken =
+        payload?.sessionToken ?? payload?.accessToken ?? payload?.token;
 
       if (!exchangeRes.ok || !accessToken) {
         return NextResponse.json(
@@ -264,7 +278,10 @@ export async function GET(
       return NextResponse.json(
         {
           error: "AUTH_CALLBACK_UNAVAILABLE",
-          message: error instanceof Error ? error.message : "Authentication callback service unavailable",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Authentication callback service unavailable",
         },
         { status: 503 },
       );
@@ -282,16 +299,10 @@ export async function GET(
     }
 
     try {
-      const sessionRes = await fetch(`${resolveApiUrl()}/api/auth/session`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
-      });
-      const data =
-        typeof sessionRes.json === "function"
-          ? await sessionRes.json().catch(() => null)
-          : null;
+      const verification = await verifyTenantSession(token, resolveApiUrl());
+      const { response: sessionRes, body: data, session } = verification;
 
-      if (!sessionRes.ok) {
+      if (!sessionRes.ok || !session) {
         const isSecure = isSecureEnvironment(request);
         const response = NextResponse.json(
           { active: false, error: "AUTHENTICATION_REQUIRED", upstream: data },
@@ -316,7 +327,10 @@ export async function GET(
         {
           active: false,
           error: "AUTH_UPSTREAM_UNAVAILABLE",
-          message: error instanceof Error ? error.message : "Upstream session check failed",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Upstream session check failed",
         },
         { status: 503 },
       );

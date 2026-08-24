@@ -10,7 +10,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
-import { getIamTenantRoleScopes } from "../../packages/contracts/src/iam-policy-catalog";
 
 const repoRoot = path.resolve(__dirname, "../..");
 const deployScript = path.join(
@@ -181,7 +180,7 @@ describe("Cloud Run deploy quota retry", () => {
     expect(apiEnv).toContain("AUTH_MODE=explicit");
   });
 
-  it("issues the candidate Tenant session with the canonical tenant_admin scopes", () => {
+  it("issues candidate Tenant sessions from durable roles without caller scopes", () => {
     const workflow = readFileSync(
       path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
       "utf8",
@@ -191,19 +190,19 @@ describe("Cloud Run deploy quota retry", () => {
     );
     const sessionEnd = workflow.indexOf("\n      - uses:", sessionStart);
     const sessionStep = workflow.slice(sessionStart, sessionEnd);
-    const scopes = getIamTenantRoleScopes("tenant_admin");
-
-    expect(scopes).not.toBeNull();
     expect(sessionStep).toContain(
       "x-actor-id: 10000000-0000-0000-0000-000000000901",
     );
     expect(sessionStep).toContain(
       "x-tenant-id: 10000000-0000-0000-0000-000000000201",
     );
-    expect(sessionStep).toContain(`x-scopes: ${scopes?.join(" ")}`);
+    expect(sessionStep).not.toContain("x-scopes:");
+    expect(sessionStep).toContain("assert_tenant_session");
+    expect(sessionStep).toContain('"tenant_admin" "Tenant Admin"');
+    expect(sessionStep).toContain('"tenant_ops_admin" "Tenant Ops"');
   });
 
-  it("deploys tenant-facing web surfaces against the durable tenant", () => {
+  it("does not configure a second Tenant Console identity authority", () => {
     const workflow = readFileSync(
       path.join(repoRoot, ".github/workflows/deploy-dev.yml"),
       "utf8",
@@ -213,14 +212,9 @@ describe("Cloud Run deploy quota retry", () => {
     expect(workflow).toContain(
       `DRTS_ENTERPRISE_DISPATCH_TENANT_ID=${durableTenantId}`,
     );
-    expect(workflow).toContain(
-      `DRTS_TENANT_CONSOLE_TENANT_ID=${durableTenantId}`,
-    );
+    expect(workflow).not.toContain("DRTS_TENANT_CONSOLE_TENANT_ID=");
     expect(workflow).not.toContain(
       "DRTS_ENTERPRISE_DISPATCH_TENANT_ID=tenant-demo-001",
-    );
-    expect(workflow).not.toContain(
-      "DRTS_TENANT_CONSOLE_TENANT_ID=tenant-demo-001",
     );
   });
 

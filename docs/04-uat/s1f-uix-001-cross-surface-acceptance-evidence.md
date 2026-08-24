@@ -3,7 +3,7 @@
 Task ID: `S1F-UIX-001`
 Owner: `Gemini2`
 Reviewer: `Claude`
-Status: `implementation verified; awaiting candidate deployment`
+Status: `release gate active; each candidate records its own deploy verdict`
 Candidate SHA: recorded only by the post-deploy workflow artifact
 Candidate Source: the release candidate merged to `dev`
 Created: `2026-08-13T14:35:47Z`
@@ -47,15 +47,15 @@ is established by the Deploy - Dev workflow, not by this document.
 The fixture manifest at `tests/e2e/fixtures/operational-browser-journeys.json`
 declares **7 formal journeys** covering all Stage 1 surfaces:
 
-| Journey ID                                 | Surface                | Actor Scope                       | Contract                                   |
-| ------------------------------------------ | ---------------------- | --------------------------------- | ------------------------------------------ |
-| `referral-create-read-cancel-rate-receipt` | Referral Embed         | partner-scoped referral passenger | mutation and API state readback            |
-| `enterprise-create-read-update-cancel`     | Enterprise Dispatch    | tenant_admin                      | review intent, mutation, and API readback  |
-| `fleet-submit-read-withdraw-resubmit`      | Fleet Partner Portal   | fleet partner                     | mutation and API state readback            |
-| `admin-review-approve-readback`            | Platform Admin         | platform_admin                    | mutation and API state readback            |
-| `tenant-ops-dispatch-intent`               | Tenant Console         | tenant_admin                      | authorised cross-app Ops detail intent     |
-| `bank-statement-download`                  | Bank Console           | bank_program_admin                | authenticated artifact attachment          |
-| `channel-statement-download`               | Channel Partner Portal | channel partner                   | partner-authorised CSV artifact attachment |
+| Journey ID                             | Surface                | Actor Scope                       | Contract                                   |
+| -------------------------------------- | ---------------------- | --------------------------------- | ------------------------------------------ |
+| `referral-create-read-cancel-receipt`  | Referral Embed         | partner-scoped referral passenger | mutation and API state readback            |
+| `enterprise-create-read-update-cancel` | Enterprise Dispatch    | tenant_admin                      | review intent, mutation, and API readback  |
+| `fleet-submit-read-withdraw-resubmit`  | Fleet Partner Portal   | fleet partner                     | mutation and API state readback            |
+| `admin-review-approve-readback`        | Platform Admin         | platform_admin                    | mutation and API state readback            |
+| `tenant-ops-dispatch-intent`           | Tenant Console         | tenant_admin                      | authorised cross-app Ops detail intent     |
+| `bank-statement-download`              | Bank Console           | bank_program_admin                | authenticated artifact attachment          |
+| `channel-statement-download`           | Channel Partner Portal | channel partner                   | partner-authorised CSV artifact attachment |
 
 Each operation asserts:
 
@@ -180,9 +180,10 @@ When the `operational-candidate-acceptance` CI job succeeds, the uploaded artifa
 
 ## 11. Open Items / Handoff Notes
 
-- **Live CI execution is pending**: Do not reuse a historical deploy, image
-  build, or SHA as evidence for a new candidate. The CI job is the authoritative
-  execution path; local sandbox execution is not release evidence.
+- **Per-candidate execution is required**: Do not reuse a historical deploy,
+  image build, or SHA as evidence for a new candidate. The CI job is the
+  authoritative execution path; local sandbox execution is not release
+  evidence.
 
 - **Actor authentication**: The acceptance suite uses the BFF cookie jar
   (`page.context().request`) for readback, not the global `request` fixture,

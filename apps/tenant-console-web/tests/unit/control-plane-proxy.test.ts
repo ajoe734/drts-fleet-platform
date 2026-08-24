@@ -17,6 +17,18 @@ describe("Control Plane Proxy Invariants", () => {
     delete process.env.DRTS_TENANT_CONSOLE_TENANT_ID;
   });
 
+  function activeTenantSession(tenantId = "tenant-from-session") {
+    return new Response(
+      JSON.stringify({
+        data: {
+          active: true,
+          identity: { realm: "tenant", tenantId },
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
+
   describe("Mutation CSRF and Same-Origin Protection", () => {
     it("rejects POST when Origin is mismatched", async () => {
       const request = new NextRequest(
@@ -90,7 +102,10 @@ describe("Control Plane Proxy Invariants", () => {
     it("forwards Authorization: Bearer from cookie and strips bootstrap headers", async () => {
       let forwardedHeaders: Headers | null = null;
 
-      global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+      global.fetch = vi.fn().mockImplementation(async (url, init) => {
+        if (String(url).endsWith("/api/auth/session")) {
+          return activeTenantSession();
+        }
         forwardedHeaders = init.headers as Headers;
         return {
           status: 200,
@@ -127,31 +142,66 @@ describe("Control Plane Proxy Invariants", () => {
       expect(forwardedHeaders!.has("x-actor-id")).toBe(false);
       expect(forwardedHeaders!.has("x-realm")).toBe(false);
       expect(forwardedHeaders!.has("x-roles")).toBe(false);
-      expect(forwardedHeaders!.get("x-tenant-id")).toBe(
-        "10000000-0000-0000-0000-000000000201",
-      );
+      expect(forwardedHeaders!.get("x-tenant-id")).toBe("tenant-from-session");
       expect(forwardedHeaders!.has("x-drts-internal-key")).toBe(false);
     });
 
-    it("uses the server tenant configuration instead of a browser-supplied tenant", async () => {
+    it("uses the verified session tenant instead of configuration or browser input", async () => {
       process.env.DRTS_TENANT_CONSOLE_TENANT_ID =
         "10000000-0000-0000-0000-000000000299";
       let forwardedHeaders: Headers | null = null;
-      global.fetch = vi.fn().mockImplementation(async (_url, init) => {
+      global.fetch = vi.fn().mockImplementation(async (url, init) => {
+        if (String(url).endsWith("/api/auth/session")) {
+          return activeTenantSession("verified-session-tenant");
+        }
         forwardedHeaders = init.headers as Headers;
         return { status: 200, headers: new Headers(), body: null } as Response;
       });
       const request = new NextRequest(
         "http://localhost:3004/control-plane-proxy/tenant/bookings",
-        { method: "GET", headers: { "x-tenant-id": "spoofed-tenant" } },
+        {
+          method: "GET",
+          headers: {
+            cookie: `${TENANT_SESSION_COOKIE_NAME}=verified-token`,
+            "x-tenant-id": "spoofed-tenant",
+          },
+        },
       );
       const response = await proxyGet(request, {
         params: Promise.resolve({ path: ["tenant", "bookings"] }),
       });
       expect(response.status).toBe(200);
       expect(forwardedHeaders!.get("x-tenant-id")).toBe(
-        "10000000-0000-0000-0000-000000000299",
+        "verified-session-tenant",
       );
+    });
+
+    it("rejects a session that is not bound to the tenant realm", async () => {
+      global.fetch = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: {
+              active: true,
+              identity: { realm: "ops", tenantId: "spoofed-tenant" },
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+      const request = new NextRequest(
+        "http://localhost:3004/control-plane-proxy/tenant/bookings",
+        {
+          method: "GET",
+          headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=ops-token` },
+        },
+      );
+
+      const response = await proxyGet(request, {
+        params: Promise.resolve({ path: ["tenant", "bookings"] }),
+      });
+
+      expect(response.status).toBe(401);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
     });
   });
 
