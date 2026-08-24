@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import os
+import re
 import sys
 import threading
 from contextlib import contextmanager
@@ -64,6 +66,8 @@ class TaskBoardCommandExecutor:
         if handler is None:
             raise SystemExit(f"Unknown command: {command}")
 
+        self._validate_worker_origin(command, args)
+
         with task_board_transaction(self.runtime.status_file):
             state = self.runtime.load_state()
             state_before = deepcopy(state)
@@ -74,6 +78,40 @@ class TaskBoardCommandExecutor:
                 self.runtime.save_state(state_before)
                 raise
         return result
+
+    def _validate_worker_origin(self, command: str, args: list[str]) -> None:
+        """Bind worker-origin task mutations to the existing runtime lease."""
+        run_id = os.environ.get("ORCH_RUN_ID", "").strip()
+        if not run_id or command in {"mode", "sync", "migrate-candidate-lifecycle"} or not args:
+            return
+        runtime_path = self.runtime.status_file.parent / ".orchestrator" / "state.json"
+        try:
+            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"Worker-origin mutation cannot verify supervisor lease: {exc}") from exc
+        worker = (runtime.get("workers") or {}).get(run_id)
+        if not isinstance(worker, dict):
+            raise SystemExit(f"Unknown ORCH_RUN_ID: {run_id}")
+        task_id = str(args[0]).strip()
+        if str(worker.get("task_id") or "") != task_id:
+            raise SystemExit(f"ORCH_RUN_ID {run_id} is not leased to {task_id}")
+        declared_task = os.environ.get("ORCH_TASK_ID", "").strip()
+        if declared_task and declared_task != task_id:
+            raise SystemExit("ORCH_TASK_ID does not match the task mutation")
+        declared_queue = os.environ.get("ORCH_QUEUE_EVENT_ID", "").strip()
+        leased_queue = str(worker.get("queue_event_id") or "").strip()
+        if declared_queue and declared_queue != leased_queue:
+            raise SystemExit("ORCH_QUEUE_EVENT_ID does not match the worker lease")
+
+        def normalized(value: Any) -> str:
+            return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+        actor = normalized(os.environ.get("AI_NAME") or "Codex")
+        owner = normalized(worker.get("agent_id") or worker.get("provider"))
+        if actor not in {"supervisor", owner}:
+            raise SystemExit(f"ORCH_RUN_ID {run_id} belongs to {owner}, not {actor}")
+        if str(worker.get("status") or "") in {"failed", "superseded", "reassigned", "rotated", "retried"}:
+            raise SystemExit(f"ORCH_RUN_ID {run_id} is no longer an active worker lease")
 
 
 _MODULE_CACHE: dict[tuple[str, str], ModuleType] = {}

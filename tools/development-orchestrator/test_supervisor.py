@@ -1102,17 +1102,6 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
         self.assertEqual(state["history"], [{"approval_id": "apr-old", "status": "resolved"}])
 
 
-class WorkerProcessActivityTests(unittest.TestCase):
-    def test_parses_proc_stat_with_spaces_in_process_name(self) -> None:
-        parsed = supervisor.parse_proc_stat_process_accounting(
-            "123 (worker with spaces) R 7 0 0 0 0 0 0 0 0 0 11 13"
-        )
-
-        self.assertEqual(parsed, (7, 24))
-
-
-
-
 class SingleSupervisorGuardTests(unittest.TestCase):
     def test_supervisor_cmdline_matches_actual_python_process(self) -> None:
         repo_root = str(supervisor.REPO_ROOT)
@@ -1422,10 +1411,9 @@ class WorkerReassignmentTests(EvidenceOutputIsolation, unittest.TestCase):
             mock.patch.object(supervisor, "maybe_reassign_task_after_worker_failure", return_value="Codex") as maybe_reassign,
             mock.patch.object(supervisor, "finalize_queue_event_record"),
         ):
-            handled, changed = supervisor.maybe_trigger_retry_or_fallback(
+            handled, changed = supervisor.maybe_trigger_retry(
                 config,
                 state,
-                {},
                 worker,
                 "status: 429",
             )
@@ -1468,10 +1456,9 @@ class WorkerReassignmentTests(EvidenceOutputIsolation, unittest.TestCase):
             mock.patch.object(supervisor, "record_worker_evidence", return_value=".orchestrator/evidence/capacity.json"),
             mock.patch.object(supervisor, "write_activity_log"),
         ):
-            handled, changed = supervisor.maybe_trigger_retry_or_fallback(
+            handled, changed = supervisor.maybe_trigger_retry(
                 config,
                 state,
-                {"providers": {"gemini2": {"auth_ready": True}}},
                 worker,
                 "status: 429 RESOURCE_EXHAUSTED No capacity available for model gemini-2.5-flash",
             )
@@ -1530,17 +1517,19 @@ class WorkerReassignmentTests(EvidenceOutputIsolation, unittest.TestCase):
             mock.patch.object(supervisor, "load_status", return_value={"tasks": []}),
             mock.patch.object(supervisor, "load_provider_report", return_value={"providers": {"gemini2": {"auth_ready": True}}}),
             mock.patch.object(supervisor, "retry_due_workers", return_value=False),
-            mock.patch.object(supervisor, "update_from_log"),
-            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
             mock.patch.object(
                 supervisor,
-                "detect_worker_failure_signal",
-                return_value=supervisor.WorkerFailureSignal(
-                    "status: 429 RESOURCE_EXHAUSTED No capacity available for model gemini-2.5-pro",
-                    source="raw_process_line",
-                    provider_pause_authorized=True,
-                ),
+                "update_from_log",
+                return_value={
+                    "changed": False,
+                    "failure_signal": supervisor.WorkerFailureSignal(
+                        "status: 429 RESOURCE_EXHAUSTED No capacity available for model gemini-2.5-pro",
+                        source="raw_process_line",
+                        provider_pause_authorized=True,
+                    ),
+                },
             ),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
             mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate,
             mock.patch.object(supervisor, "request_for_worker", return_value={"task_id": None}),
             mock.patch.object(supervisor, "maybe_reassign_task_after_worker_failure", return_value=None),
@@ -2519,6 +2508,7 @@ class AntigravityModelRotationTests(unittest.TestCase):
             },
             "providers": {
                 "gemini": {
+                    "delivery_mode": "antigravity",
                     "antigravity": {
                         "cli": "agy",
                         "model_rotation": {

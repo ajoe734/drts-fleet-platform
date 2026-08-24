@@ -69,9 +69,7 @@ MOVED_FROM_RUNTIME = {
     "host_probes.py": (
         "_current_cgroup_path", "_host_available_memory_bytes", "_read_cgroup_number",
         "_read_memory_pressure_avg10", "_sd_notify", "_signal_worker_pid",
-        "parse_proc_stat_process_accounting", "reap_child_pid", "reap_finished_children",
-        "observe_worker_process_activity", "worker_process_tree_cpu_ticks",
-        "worker_unit_cpu_usage",
+        "reap_child_pid", "reap_finished_children",
     ),
     "agent_directory.py": (
         "adapter_info_for_agent", "display_name_is_legacy_alias", "known_agent_display_names",
@@ -88,7 +86,7 @@ MOVED_FROM_RUNTIME = {
     ),
     "worker_lifecycle.py": (
         "heartbeat_lag_seconds", "parse_worker_dispatched_at", "trim_worker_history",
-        "worker_last_activity_at", "worker_reported_outcome", "worker_supports_approval_resume",
+        "worker_reported_outcome", "worker_supports_approval_resume",
     ),
 }
 
@@ -178,7 +176,7 @@ class ExtractedLeafModulesStayLeavesTests(unittest.TestCase):
     def test_the_readers_that_could_not_move_are_still_reachable(self) -> None:
         """Five worker readers stayed in the runtime module on purpose.
 
-        classify_worker_failure, worker_expected_completion_statuses,
+        classify_worker_failure, worker_task_evidence_match,
         worker_matches_current_assignment, worker_assignment_role and
         resolve_terminal_worker_reason reach for detect_worker_failure,
         ready_dispatch_settings and resolve_dispatch_target -- which live in
@@ -196,7 +194,7 @@ class ExtractedLeafModulesStayLeavesTests(unittest.TestCase):
         runtime_defs = _top_level_defs(RUNTIME)
         for name in (
             "classify_worker_failure",
-            "worker_expected_completion_statuses",
+            "worker_task_evidence_match",
             "worker_matches_current_assignment",
             "worker_assignment_role",
             "resolve_terminal_worker_reason",

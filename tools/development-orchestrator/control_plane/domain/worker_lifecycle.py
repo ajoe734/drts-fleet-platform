@@ -25,8 +25,6 @@ ACTIVE_WORKER_STATUSES = frozenset(
         "suspended_approval",
         "manual_pending",
         "retry_backoff",
-        "stalled",
-        "fallback",
     }
 )
 
@@ -140,16 +138,6 @@ def worker_reported_outcome(worker: dict[str, Any]) -> dict[str, Any] | None:
     }:
         return None
     return payload
-
-
-def worker_last_activity_at(worker: dict[str, Any]) -> str | None:
-    """Use the newest semantic event or observed local process progress."""
-    timestamps = [
-        str(worker.get(key) or "").strip()
-        for key in ("last_event_at", "last_process_activity_at")
-    ]
-    timestamps = [value for value in timestamps if value]
-    return max(timestamps) if timestamps else None
 
 
 def parse_worker_dispatched_at(run_id: str | None) -> datetime | None:

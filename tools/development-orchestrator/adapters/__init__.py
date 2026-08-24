@@ -3,10 +3,8 @@ from __future__ import annotations
 from adapters.base import BaseAdapter
 from adapters.claude_cli import ClaudeCLIAdapter
 from adapters.claude_code import ClaudeCodeAdapter
-from adapters.copilot_local import CopilotLocalAdapter
 from adapters.codex import CodexAdapter
 from adapters.file_inbox import FileInboxAdapter
-from adapters.gemini import GeminiAdapter
 from adapters.antigravity import AntigravityAdapter
 
 
@@ -14,8 +12,6 @@ ADAPTERS: dict[str, type[BaseAdapter]] = {
     "file_inbox": FileInboxAdapter,
     "claude_cli": ClaudeCLIAdapter,
     "claude_code": ClaudeCodeAdapter,
-    "copilot_local": CopilotLocalAdapter,
-    "gemini": GeminiAdapter,
     "antigravity": AntigravityAdapter,
     "codex": CodexAdapter,
 }
