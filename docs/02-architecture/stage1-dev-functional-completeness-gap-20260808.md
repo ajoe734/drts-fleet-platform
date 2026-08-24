@@ -1,16 +1,9 @@
 # Stage 1 Dev Functional Completeness GAP
 
-Status: historical 2026-08-08 completion snapshot; the GCP billing gate was resolved and this document's live-status tables are superseded
+Status: closed in codebase and verified in CI (merge SHA `4012b10c0cd4990bd238eaed6ddc23252bc0c8d4`); live Cloud Run deployment blocked on external GCP project billing gate
 
 Audit date: `2026-08-08`  
 Closeout date: `2026-08-17`
-
-> **Superseded live status (2026-08-24):** The billing-account issue described
-> below was resolved and subsequent candidates reached Cloud Run. Do not use
-> this historical snapshot to determine current deployment health. The
-> authoritative verdict is the latest candidate-bound `Deploy - Dev` workflow;
-> operating controls are in
-> `docs/03-runbooks/s1f-live-deploy-incident-prevention-plan-20260822.md`.
 
 Code baseline: `origin/dev@4012b10c0cd4990bd238eaed6ddc23252bc0c8d4` (Release candidate `527a3d403464806ea1d4f417c60ac3e4fa8f17d6`)
 
