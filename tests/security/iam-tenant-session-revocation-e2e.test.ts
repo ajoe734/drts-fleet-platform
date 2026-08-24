@@ -26,7 +26,6 @@ import {
 
 import { OidcPkceService } from "../../apps/api/src/modules/auth/oidc-pkce.service";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
-import { deepToSnakeCase } from "../../apps/api/src/common/snake-case.interceptor";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { TenantPartnerController } from "../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
@@ -400,7 +399,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
             undefined,
             "req-login",
           );
-          return new Response(JSON.stringify(deepToSnakeCase(res)), {
+          return new Response(JSON.stringify(res), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
@@ -427,7 +426,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
             "req-callback",
             stateToken,
           );
-          return new Response(JSON.stringify(deepToSnakeCase(res)), {
+          return new Response(JSON.stringify(res), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
@@ -459,7 +458,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
         }
         const identity = jwtAuthService.toRequestIdentity(payload);
         const res = authController.getAuthSession(identity, "req-session");
-        return new Response(JSON.stringify(deepToSnakeCase(res)), {
+        return new Response(JSON.stringify(res), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });

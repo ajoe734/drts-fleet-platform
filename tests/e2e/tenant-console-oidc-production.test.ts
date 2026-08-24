@@ -25,7 +25,6 @@ import { generateCsrfToken } from "../../apps/tenant-console-web/lib/auth/sessio
 
 import { OidcPkceService } from "../../apps/api/src/modules/auth/oidc-pkce.service";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
-import { deepToSnakeCase } from "../../apps/api/src/common/snake-case.interceptor";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -348,7 +347,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
             undefined,
             "req-e2e-login-001",
           );
-          return new Response(JSON.stringify(deepToSnakeCase(res)), {
+          return new Response(JSON.stringify(res), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
@@ -376,7 +375,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
             "req-e2e-callback-001",
             stateToken,
           );
-          return new Response(JSON.stringify(deepToSnakeCase(res)), {
+          return new Response(JSON.stringify(res), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
@@ -412,7 +411,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
           identity,
           "req-e2e-session-001",
         );
-        return new Response(JSON.stringify(deepToSnakeCase(res)), {
+        return new Response(JSON.stringify(res), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -637,12 +636,12 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     assertResponseSecretsScan(sessionRes, sessionData);
     expect(sessionData.data.active).toBe(true);
     expect(sessionData.data.identity.realm).toBe("tenant");
-    expect(sessionData.data.identity.tenant_id).toBe(tenantId);
+    expect(sessionData.data.identity.tenantId).toBe(tenantId);
     expect(sessionData.data.identity.roles).toContain("tenant_admin");
     // Ensure raw bearer token or IdP tokens are never returned in session payload
     expect(sessionData.data.token).toBeUndefined();
-    expect(sessionData.data.session_token).toBeUndefined();
-    expect(sessionData.data.access_token).toBeUndefined();
+    expect(sessionData.data.sessionToken).toBeUndefined();
+    expect(sessionData.data.accessToken).toBeUndefined();
     expect(sessionData.data.idToken).toBeUndefined();
 
     // ── STEP 5: Authorized Read via Control Plane Proxy ────────────────────────
