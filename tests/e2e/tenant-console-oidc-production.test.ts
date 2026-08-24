@@ -1,9 +1,4 @@
-import {
-  createHash,
-  createSign,
-  generateKeyPairSync,
-  randomBytes,
-} from "node:crypto";
+import { createHash, createSign, generateKeyPairSync, randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
@@ -21,10 +16,13 @@ import {
   TENANT_CSRF_COOKIE_NAME,
   TENANT_CSRF_HEADER_NAME,
 } from "../../apps/tenant-console-web/lib/auth/constants";
-import { generateCsrfToken } from "../../apps/tenant-console-web/lib/auth/session";
+import {
+  generateCsrfToken,
+} from "../../apps/tenant-console-web/lib/auth/session";
 
 import { OidcPkceService } from "../../apps/api/src/modules/auth/oidc-pkce.service";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { deepToSnakeCase } from "../../apps/api/src/common/snake-case.interceptor";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -58,9 +56,7 @@ class DeterministicOidcServer {
     const { publicKey, privateKey } = generateKeyPairSync("rsa", {
       modulusLength: 2048,
     });
-    this.privateKeyPem = privateKey
-      .export({ format: "pem", type: "pkcs8" })
-      .toString();
+    this.privateKeyPem = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
     const jwk = publicKey.export({ format: "jwk" }) as Record<string, unknown>;
     jwk.kid = this.keyId;
     jwk.use = "sig";
@@ -104,30 +100,18 @@ class DeterministicOidcServer {
     }
 
     if (!code || !code_verifier) {
-      return new Response(
-        JSON.stringify({
-          error: "invalid_request",
-          message: "Missing code or verifier",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return new Response(JSON.stringify({ error: "invalid_request", message: "Missing code or verifier" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     const session = this.issuedCodes.get(code);
     if (!session) {
-      return new Response(
-        JSON.stringify({
-          error: "invalid_grant",
-          message: "Code expired or not found",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return new Response(JSON.stringify({ error: "invalid_grant", message: "Code expired or not found" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     // Verify S256 PKCE verifier
@@ -139,16 +123,10 @@ class DeterministicOidcServer {
       .replace(/\//g, "_");
 
     if (computedChallenge !== session.codeChallenge) {
-      return new Response(
-        JSON.stringify({
-          error: "invalid_grant",
-          message: "PKCE verification failed",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return new Response(JSON.stringify({ error: "invalid_grant", message: "PKCE verification failed" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     const now = Math.floor(Date.now() / 1000);
@@ -169,9 +147,7 @@ class DeterministicOidcServer {
 
     const header = { alg: "RS256", typ: "JWT", kid: this.keyId };
     const headerB64 = Buffer.from(JSON.stringify(header)).toString("base64url");
-    const payloadB64 = Buffer.from(JSON.stringify(idTokenPayload)).toString(
-      "base64url",
-    );
+    const payloadB64 = Buffer.from(JSON.stringify(idTokenPayload)).toString("base64url");
     const data = `${headerB64}.${payloadB64}`;
     const sign = createSign("SHA256");
     sign.update(data);
@@ -209,13 +185,10 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     process.env.APP_ENV = "production";
     process.env.NODE_ENV = "production";
     process.env.OIDC_MOCK_MODE = "false";
-    process.env.JWT_SECRET =
-      "test_production_jwt_secret_key_32_characters_long!";
-    process.env.BFF_STATE_SECRET =
-      "test_production_bff_state_secret_32_characters_long!";
+    process.env.JWT_SECRET = "test_production_jwt_secret_key_32_characters_long!";
+    process.env.BFF_STATE_SECRET = "test_production_bff_state_secret_32_characters_long!";
     process.env.DRTS_API_URL = "http://localhost:3001";
-    process.env.AUTH_ALLOWED_ORIGINS =
-      "https://tenant.drts.internal,https://tenant.staging.drts.internal";
+    process.env.AUTH_ALLOWED_ORIGINS = "https://tenant.drts.internal,https://tenant.staging.drts.internal";
 
     oidcServer = new DeterministicOidcServer();
     process.env.OIDC_ISSUER = oidcServer.issuer;
@@ -223,17 +196,12 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     process.env.OIDC_CLIENT_SECRET = oidcServer.clientSecret;
     process.env.OIDC_TOKEN_ENDPOINT = `${oidcServer.issuer}/oauth/v1/token`;
     process.env.OIDC_AUTHORIZATION_ENDPOINT = `${oidcServer.issuer}/oauth/v1/authorize`;
-    process.env.OIDC_JWKS_JSON = JSON.stringify({
-      keys: [oidcServer.publicJwk],
-    });
+    process.env.OIDC_JWKS_JSON = JSON.stringify({ keys: [oidcServer.publicJwk] });
 
     auditService = new AuditNotificationService();
     identityRepository = new IdentityRepository();
     tenantPartnerService = new TenantPartnerService(auditService);
-    jwtAuthService = new JwtAuthService(
-      identityRepository,
-      tenantPartnerService,
-    );
+    jwtAuthService = new JwtAuthService(identityRepository, tenantPartnerService);
     oidcService = new OidcPkceService(jwtAuthService, tenantPartnerService);
 
     authController = new AuthController(
@@ -288,9 +256,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
 
   it("proves end-to-end active tenant login, callback exchange, session read, proxy write, and logout in strict production mode", async () => {
     const tenantId = "tenant-demo-001";
-    const activeAdmin = tenantPartnerService.findTenantUserBySubject(
-      "sub_oidc_admin_acme",
-    );
+    const activeAdmin = tenantPartnerService.findTenantUserBySubject("sub_oidc_admin_acme");
     expect(activeAdmin).toBeDefined();
     expect(activeAdmin?.status).toBe("active");
     expect(activeAdmin?.roleCode).toBe("tenant_admin");
@@ -305,11 +271,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
         const headers = init?.headers;
         if (!headers) return undefined;
         if (typeof (headers as any).get === "function") {
-          return (
-            (headers as any).get(name) ||
-            (headers as any).get(name.toLowerCase()) ||
-            undefined
-          );
+          return (headers as any).get(name) || (headers as any).get(name.toLowerCase()) || undefined;
         }
         const target = name.toLowerCase();
         for (const [key, val] of Object.entries(headers)) {
@@ -347,18 +309,15 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
             undefined,
             "req-e2e-login-001",
           );
-          return new Response(JSON.stringify(res), {
+          return new Response(JSON.stringify(deepToSnakeCase(res)), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
         } catch (err: any) {
-          return new Response(
-            JSON.stringify(err?.getResponse?.() || { error: err?.message }),
-            {
-              status: err?.getStatus?.() || 400,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
+          return new Response(JSON.stringify(err?.getResponse?.() || { error: err?.message }), {
+            status: err?.getStatus?.() || 400,
+            headers: { "Content-Type": "application/json" },
+          });
         }
       }
 
@@ -375,18 +334,15 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
             "req-e2e-callback-001",
             stateToken,
           );
-          return new Response(JSON.stringify(res), {
+          return new Response(JSON.stringify(deepToSnakeCase(res)), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
         } catch (err: any) {
-          return new Response(
-            JSON.stringify(err?.getResponse?.() || { error: err?.message }),
-            {
-              status: err?.getStatus?.() || 400,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
+          return new Response(JSON.stringify(err?.getResponse?.() || { error: err?.message }), {
+            status: err?.getStatus?.() || 400,
+            headers: { "Content-Type": "application/json" },
+          });
         }
       }
 
@@ -394,24 +350,16 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
       if (urlStr.includes("/api/auth/session")) {
         const authHeader = getHeader("authorization");
         const token = authHeader?.replace("Bearer ", "");
-        const payload = token
-          ? await jwtAuthService.verifyAccessToken(token)
-          : null;
+        const payload = token ? await jwtAuthService.verifyAccessToken(token) : null;
         if (!payload) {
-          return new Response(
-            JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }),
-            {
-              status: 401,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
+          return new Response(JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
         }
         const identity = jwtAuthService.toRequestIdentity(payload);
-        const res = authController.getAuthSession(
-          identity,
-          "req-e2e-session-001",
-        );
-        return new Response(JSON.stringify(res), {
+        const res = authController.getAuthSession(identity, "req-e2e-session-001");
+        return new Response(JSON.stringify(deepToSnakeCase(res)), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -421,17 +369,12 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
       if (urlStr.includes("/api/auth/logout")) {
         const authHeader = getHeader("authorization");
         const token = authHeader?.replace("Bearer ", "");
-        const payload = token
-          ? await jwtAuthService.verifyAccessToken(token)
-          : null;
+        const payload = token ? await jwtAuthService.verifyAccessToken(token) : null;
         if (!payload) {
-          return new Response(
-            JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }),
-            {
-              status: 401,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
+          return new Response(JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
         }
         const identity = jwtAuthService.toRequestIdentity(payload);
         const res = await authController.logout(
@@ -447,15 +390,10 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
       }
 
       // API: GET /api/tenant/cost-centers
-      if (
-        urlStr.includes("/api/tenant/cost-centers") &&
-        init?.method === "GET"
-      ) {
+      if (urlStr.includes("/api/tenant/cost-centers") && init?.method === "GET") {
         const authHeader = getHeader("authorization");
         const token = authHeader?.replace("Bearer ", "");
-        const payload = token
-          ? await jwtAuthService.verifyAccessToken(token)
-          : null;
+        const payload = token ? await jwtAuthService.verifyAccessToken(token) : null;
         if (!payload) {
           return new Response(JSON.stringify({ error: "JWT_INVALID" }), {
             status: 401,
@@ -476,15 +414,10 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
       }
 
       // API: POST /api/tenant/cost-centers
-      if (
-        urlStr.includes("/api/tenant/cost-centers") &&
-        init?.method === "POST"
-      ) {
+      if (urlStr.includes("/api/tenant/cost-centers") && init?.method === "POST") {
         const authHeader = getHeader("authorization");
         const token = authHeader?.replace("Bearer ", "");
-        const payload = token
-          ? await jwtAuthService.verifyAccessToken(token)
-          : null;
+        const payload = token ? await jwtAuthService.verifyAccessToken(token) : null;
         if (!payload) {
           return new Response(JSON.stringify({ error: "JWT_INVALID" }), {
             status: 401,
@@ -494,13 +427,8 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
         let bodyObj: any = {};
         if (typeof init?.body === "string") {
           bodyObj = JSON.parse(init.body);
-        } else if (
-          init?.body instanceof ArrayBuffer ||
-          init?.body instanceof Uint8Array
-        ) {
-          bodyObj = JSON.parse(
-            new TextDecoder().decode(init.body as ArrayBuffer),
-          );
+        } else if (init?.body instanceof ArrayBuffer || init?.body instanceof Uint8Array) {
+          bodyObj = JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
         }
         const res = tenantPartnerController.upsertCostCenter(
           bodyObj,
@@ -513,9 +441,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
         });
       }
 
-      return new Response(JSON.stringify({ error: "NOT_FOUND" }), {
-        status: 404,
-      });
+      return new Response(JSON.stringify({ error: "NOT_FOUND" }), { status: 404 });
     });
 
     // Helper to scan responses for raw secret, bearer token, or internal header leakage
@@ -594,9 +520,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
 
     expect(callbackRes.status).toBe(307);
     assertResponseSecretsScan(callbackRes);
-    expect(callbackRes.headers.get("location")).toBe(
-      "https://tenant.drts.internal/bookings",
-    );
+    expect(callbackRes.headers.get("location")).toBe("https://tenant.drts.internal/bookings");
 
     const sessionCookie = callbackRes.cookies.get(TENANT_SESSION_COOKIE_NAME);
     expect(sessionCookie).toBeDefined();
@@ -608,25 +532,18 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     expect(csrfCookie?.value).toBeDefined();
 
     // Verify state cookie is cleared
-    const clearedStateCookie = callbackRes.cookies.get(
-      TENANT_OIDC_STATE_COOKIE_NAME,
-    );
-    expect(
-      clearedStateCookie?.value === "" || clearedStateCookie?.maxAge === 0,
-    ).toBe(true);
+    const clearedStateCookie = callbackRes.cookies.get(TENANT_OIDC_STATE_COOKIE_NAME);
+    expect(clearedStateCookie?.value === "" || clearedStateCookie?.maxAge === 0).toBe(true);
 
     const activeSessionToken = sessionCookie!.value;
     const activeCsrfToken = csrfCookie!.value;
 
     // ── STEP 4: BFF Session Read ──────────────────────────────────────────────
-    const sessionReq = new NextRequest(
-      "https://tenant.drts.internal/api/auth/session",
-      {
-        headers: {
-          cookie: `${TENANT_SESSION_COOKIE_NAME}=${activeSessionToken}`,
-        },
+    const sessionReq = new NextRequest("https://tenant.drts.internal/api/auth/session", {
+      headers: {
+        cookie: `${TENANT_SESSION_COOKIE_NAME}=${activeSessionToken}`,
       },
-    );
+    });
     const sessionRes = await tenantAuthGet(sessionReq, {
       params: Promise.resolve({ auth: ["session"] }),
     });
@@ -636,12 +553,12 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     assertResponseSecretsScan(sessionRes, sessionData);
     expect(sessionData.data.active).toBe(true);
     expect(sessionData.data.identity.realm).toBe("tenant");
-    expect(sessionData.data.identity.tenantId).toBe(tenantId);
+    expect(sessionData.data.identity.tenant_id).toBe(tenantId);
     expect(sessionData.data.identity.roles).toContain("tenant_admin");
     // Ensure raw bearer token or IdP tokens are never returned in session payload
     expect(sessionData.data.token).toBeUndefined();
-    expect(sessionData.data.sessionToken).toBeUndefined();
-    expect(sessionData.data.accessToken).toBeUndefined();
+    expect(sessionData.data.session_token).toBeUndefined();
+    expect(sessionData.data.access_token).toBeUndefined();
     expect(sessionData.data.idToken).toBeUndefined();
 
     // ── STEP 5: Authorized Read via Control Plane Proxy ────────────────────────
@@ -695,18 +612,15 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     expect(proxyWriteData.data.code).toBe("CC-E2E-001");
 
     // ── STEP 7: Logout via BFF ────────────────────────────────────────────────
-    const logoutReq = new NextRequest(
-      "https://tenant.drts.internal/api/auth/logout",
-      {
-        method: "POST",
-        headers: {
-          cookie: `${TENANT_SESSION_COOKIE_NAME}=${activeSessionToken}; ${TENANT_CSRF_COOKIE_NAME}=${activeCsrfToken}`,
-          [TENANT_CSRF_HEADER_NAME]: activeCsrfToken,
-          origin: "https://tenant.drts.internal",
-          "Content-Type": "application/json",
-        },
+    const logoutReq = new NextRequest("https://tenant.drts.internal/api/auth/logout", {
+      method: "POST",
+      headers: {
+        cookie: `${TENANT_SESSION_COOKIE_NAME}=${activeSessionToken}; ${TENANT_CSRF_COOKIE_NAME}=${activeCsrfToken}`,
+        [TENANT_CSRF_HEADER_NAME]: activeCsrfToken,
+        origin: "https://tenant.drts.internal",
+        "Content-Type": "application/json",
       },
-    );
+    });
     const logoutRes = await tenantAuthPost(logoutReq, {
       params: Promise.resolve({ auth: ["logout"] }),
     });
@@ -716,22 +630,15 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     assertResponseSecretsScan(logoutRes, logoutData);
     expect(logoutData.success).toBe(true);
 
-    const expiredSessionCookie = logoutRes.cookies.get(
-      TENANT_SESSION_COOKIE_NAME,
-    );
-    expect(
-      expiredSessionCookie?.value === "" || expiredSessionCookie?.maxAge === 0,
-    ).toBe(true);
+    const expiredSessionCookie = logoutRes.cookies.get(TENANT_SESSION_COOKIE_NAME);
+    expect(expiredSessionCookie?.value === "" || expiredSessionCookie?.maxAge === 0).toBe(true);
 
     // ── STEP 8: Post-Logout Invalidation Verification ─────────────────────────
-    const postLogoutSessionReq = new NextRequest(
-      "https://tenant.drts.internal/api/auth/session",
-      {
-        headers: {
-          cookie: `${TENANT_SESSION_COOKIE_NAME}=${activeSessionToken}`,
-        },
+    const postLogoutSessionReq = new NextRequest("https://tenant.drts.internal/api/auth/session", {
+      headers: {
+        cookie: `${TENANT_SESSION_COOKIE_NAME}=${activeSessionToken}`,
       },
-    );
+    });
     const postLogoutSessionRes = await tenantAuthGet(postLogoutSessionReq, {
       params: Promise.resolve({ auth: ["session"] }),
     });
@@ -792,28 +699,17 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     });
 
     // Both sessions are initially valid
-    expect(
-      await jwtAuthService.verifyAccessToken(session1.token),
-    ).toBeDefined();
-    expect(
-      await jwtAuthService.verifyAccessToken(session2.token),
-    ).toBeDefined();
+    expect(await jwtAuthService.verifyAccessToken(session1.token)).toBeDefined();
+    expect(await jwtAuthService.verifyAccessToken(session2.token)).toBeDefined();
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const urlStr = input.toString();
       if (urlStr.includes("/api/auth/logout-all")) {
-        const authHeader =
-          (init?.headers as any)?.["Authorization"] ||
-          (init?.headers as any)?.["authorization"];
+        const authHeader = (init?.headers as any)?.["Authorization"] || (init?.headers as any)?.["authorization"];
         const token = authHeader?.replace("Bearer ", "");
-        const payload = token
-          ? await jwtAuthService.verifyAccessToken(token)
-          : null;
+        const payload = token ? await jwtAuthService.verifyAccessToken(token) : null;
         if (!payload) {
-          return new Response(
-            JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }),
-            { status: 401 },
-          );
+          return new Response(JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }), { status: 401 });
         }
         const identity = jwtAuthService.toRequestIdentity(payload);
         const res = await authController.logoutAll(
@@ -828,17 +724,14 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     });
 
     const csrfToken = generateCsrfToken();
-    const logoutAllReq = new NextRequest(
-      "https://tenant.drts.internal/api/auth/logout-all",
-      {
-        method: "POST",
-        headers: {
-          cookie: `${TENANT_SESSION_COOKIE_NAME}=${session1.token}; ${TENANT_CSRF_COOKIE_NAME}=${csrfToken}`,
-          [TENANT_CSRF_HEADER_NAME]: csrfToken,
-          origin: "https://tenant.drts.internal",
-        },
+    const logoutAllReq = new NextRequest("https://tenant.drts.internal/api/auth/logout-all", {
+      method: "POST",
+      headers: {
+        cookie: `${TENANT_SESSION_COOKIE_NAME}=${session1.token}; ${TENANT_CSRF_COOKIE_NAME}=${csrfToken}`,
+        [TENANT_CSRF_HEADER_NAME]: csrfToken,
+        origin: "https://tenant.drts.internal",
       },
-    );
+    });
 
     const logoutAllRes = await tenantAuthPost(logoutAllReq, {
       params: Promise.resolve({ auth: ["logout-all"] }),
@@ -849,10 +742,7 @@ describe("IAM-OP-AUTH-E2E-001: Production-Mode Hermetic Tenant Console OIDC & Ac
     expect(logoutAllData.success).toBe(true);
     expect(logoutAllRes.headers.get("authorization")).toBeNull();
     expect(logoutAllRes.headers.get("x-drts-internal-key")).toBeNull();
-    expect(
-      logoutAllRes.cookies.get(TENANT_SESSION_COOKIE_NAME)?.value === "" ||
-        logoutAllRes.cookies.get(TENANT_SESSION_COOKIE_NAME)?.maxAge === 0,
-    ).toBe(true);
+    expect(logoutAllRes.cookies.get(TENANT_SESSION_COOKIE_NAME)?.value === "" || logoutAllRes.cookies.get(TENANT_SESSION_COOKIE_NAME)?.maxAge === 0).toBe(true);
 
     // Both session 1 and session 2 must now be invalidated
     expect(await jwtAuthService.verifyAccessToken(session1.token)).toBeNull();

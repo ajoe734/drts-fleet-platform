@@ -1,13 +1,10 @@
-import {
-  createHash,
-  createSign,
-  generateKeyPairSync,
-  randomBytes,
-} from "node:crypto";
+import { createHash, createSign, generateKeyPairSync, randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-import { GET as tenantAuthGet } from "../../apps/tenant-console-web/app/api/auth/[...auth]/route";
+import {
+  GET as tenantAuthGet,
+} from "../../apps/tenant-console-web/app/api/auth/[...auth]/route";
 import {
   GET as proxyGet,
   POST as proxyPost,
@@ -26,6 +23,7 @@ import {
 
 import { OidcPkceService } from "../../apps/api/src/modules/auth/oidc-pkce.service";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { deepToSnakeCase } from "../../apps/api/src/common/snake-case.interceptor";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { TenantPartnerController } from "../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
@@ -59,9 +57,7 @@ class MockOidcServer {
     const { publicKey, privateKey } = generateKeyPairSync("rsa", {
       modulusLength: 2048,
     });
-    this.privateKeyPem = privateKey
-      .export({ format: "pem", type: "pkcs8" })
-      .toString();
+    this.privateKeyPem = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
     const jwk = publicKey.export({ format: "jwk" }) as Record<string, unknown>;
     jwk.kid = this.keyId;
     jwk.use = "sig";
@@ -105,30 +101,18 @@ class MockOidcServer {
     }
 
     if (!code || !code_verifier) {
-      return new Response(
-        JSON.stringify({
-          error: "invalid_request",
-          message: "Missing code or verifier",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return new Response(JSON.stringify({ error: "invalid_request", message: "Missing code or verifier" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     const session = this.issuedCodes.get(code);
     if (!session) {
-      return new Response(
-        JSON.stringify({
-          error: "invalid_grant",
-          message: "Code expired or not found",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return new Response(JSON.stringify({ error: "invalid_grant", message: "Code expired or not found" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     // Verify PKCE
@@ -140,16 +124,10 @@ class MockOidcServer {
       .replace(/\//g, "_");
 
     if (computedChallenge !== session.codeChallenge) {
-      return new Response(
-        JSON.stringify({
-          error: "invalid_grant",
-          message: "PKCE verification failed",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return new Response(JSON.stringify({ error: "invalid_grant", message: "PKCE verification failed" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     const now = Math.floor(Date.now() / 1000);
@@ -168,19 +146,14 @@ class MockOidcServer {
       ...(session.tenantId ? { tenant_id: session.tenantId } : {}),
       ...session.customIdTokenProps,
     };
-    if (
-      session.customIdTokenProps &&
-      "omitNonce" in session.customIdTokenProps
-    ) {
+    if (session.customIdTokenProps && "omitNonce" in session.customIdTokenProps) {
       delete idTokenPayload["nonce"];
       delete idTokenPayload["omitNonce"];
     }
 
     const header = { alg: "RS256", typ: "JWT", kid: this.keyId };
     const headerB64 = Buffer.from(JSON.stringify(header)).toString("base64url");
-    const payloadB64 = Buffer.from(JSON.stringify(idTokenPayload)).toString(
-      "base64url",
-    );
+    const payloadB64 = Buffer.from(JSON.stringify(idTokenPayload)).toString("base64url");
     const data = `${headerB64}.${payloadB64}`;
     const sign = createSign("SHA256");
     sign.update(data);
@@ -224,8 +197,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
     process.env.NODE_ENV = "production";
     process.env.OIDC_MOCK_MODE = "false";
     process.env.JWT_SECRET = "test_security_jwt_secret_key_32_chars_long!!";
-    process.env.BFF_STATE_SECRET =
-      "test_security_bff_state_secret_32_chars_long!";
+    process.env.BFF_STATE_SECRET = "test_security_bff_state_secret_32_chars_long!";
     process.env.DRTS_API_URL = "http://localhost:3001";
     process.env.AUTH_ALLOWED_ORIGINS = "https://tenant.drts.internal";
 
@@ -235,17 +207,12 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
     process.env.OIDC_CLIENT_SECRET = oidcServer.clientSecret;
     process.env.OIDC_TOKEN_ENDPOINT = `${oidcServer.issuer}/oauth/v1/token`;
     process.env.OIDC_AUTHORIZATION_ENDPOINT = `${oidcServer.issuer}/oauth/v1/authorize`;
-    process.env.OIDC_JWKS_JSON = JSON.stringify({
-      keys: [oidcServer.publicJwk],
-    });
+    process.env.OIDC_JWKS_JSON = JSON.stringify({ keys: [oidcServer.publicJwk] });
 
     auditService = new AuditNotificationService();
     identityRepository = new IdentityRepository();
     tenantPartnerService = new TenantPartnerService(auditService);
-    jwtAuthService = new JwtAuthService(
-      identityRepository,
-      tenantPartnerService,
-    );
+    jwtAuthService = new JwtAuthService(identityRepository, tenantPartnerService);
     oidcService = new OidcPkceService(jwtAuthService, tenantPartnerService);
 
     authController = new AuthController(
@@ -360,11 +327,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
         const headers = init?.headers;
         if (!headers) return undefined;
         if (typeof (headers as any).get === "function") {
-          return (
-            (headers as any).get(name) ||
-            (headers as any).get(name.toLowerCase()) ||
-            undefined
-          );
+          return (headers as any).get(name) || (headers as any).get(name.toLowerCase()) || undefined;
         }
         const target = name.toLowerCase();
         for (const [key, val] of Object.entries(headers)) {
@@ -379,9 +342,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
           try {
             bodyObj = JSON.parse(init.body);
           } catch {
-            bodyObj = Object.fromEntries(
-              new URLSearchParams(init.body).entries(),
-            );
+            bodyObj = Object.fromEntries(new URLSearchParams(init.body).entries());
           }
         }
         return oidcServer.handleTokenExchange(bodyObj);
@@ -399,18 +360,12 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
             undefined,
             "req-login",
           );
-          return new Response(JSON.stringify(res), {
-            status: 200,
+          return new Response(JSON.stringify(deepToSnakeCase(res)), { status: 200, headers: { "Content-Type": "application/json" } });
+        } catch (err: any) {
+          return new Response(JSON.stringify(err?.getResponse?.() || { error: err?.message }), {
+            status: err?.getStatus?.() || 400,
             headers: { "Content-Type": "application/json" },
           });
-        } catch (err: any) {
-          return new Response(
-            JSON.stringify(err?.getResponse?.() || { error: err?.message }),
-            {
-              status: err?.getStatus?.() || 400,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
         }
       }
 
@@ -426,61 +381,39 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
             "req-callback",
             stateToken,
           );
-          return new Response(JSON.stringify(res), {
-            status: 200,
+          return new Response(JSON.stringify(deepToSnakeCase(res)), { status: 200, headers: { "Content-Type": "application/json" } });
+        } catch (err: any) {
+          return new Response(JSON.stringify(err?.getResponse?.() || { error: err?.message }), {
+            status: err?.getStatus?.() || 400,
             headers: { "Content-Type": "application/json" },
           });
-        } catch (err: any) {
-          return new Response(
-            JSON.stringify(err?.getResponse?.() || { error: err?.message }),
-            {
-              status: err?.getStatus?.() || 400,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
         }
       }
 
       if (urlStr.includes("/api/auth/session")) {
         const authHeader = getHeader("authorization");
         const token = authHeader?.replace("Bearer ", "");
-        const payload = token
-          ? await jwtAuthService.verifyAccessToken(token)
-          : null;
+        const payload = token ? await jwtAuthService.verifyAccessToken(token) : null;
         if (!payload) {
-          return new Response(
-            JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }),
-            {
-              status: 401,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
+          return new Response(JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
         }
         const identity = jwtAuthService.toRequestIdentity(payload);
         const res = authController.getAuthSession(identity, "req-session");
-        return new Response(JSON.stringify(res), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+        return new Response(JSON.stringify(deepToSnakeCase(res)), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
       if (urlStr.includes("/api/tenant/cost-centers")) {
         const authHeader = getHeader("authorization");
         const token = authHeader?.replace("Bearer ", "");
-        const payload = token
-          ? await jwtAuthService.verifyAccessToken(token)
-          : null;
+        const payload = token ? await jwtAuthService.verifyAccessToken(token) : null;
         if (!payload) {
-          return new Response(
-            JSON.stringify({
-              error: "AUTHENTICATION_REQUIRED",
-              message: "Invalid or expired session",
-            }),
-            {
-              status: 401,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
+          return new Response(JSON.stringify({ error: "AUTHENTICATION_REQUIRED", message: "Invalid or expired session" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
         }
         const effectiveTenantId = payload.tenantId ?? tenantId;
         const url = new URL(urlStr);
@@ -489,85 +422,42 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
 
         if (init?.method === "GET") {
           if (costCenterCode) {
-            const listRes = tenantPartnerController.listCostCenters(
-              undefined,
-              undefined,
-              undefined,
-              effectiveTenantId,
-              "req-get-cc",
-            );
+            const listRes = tenantPartnerController.listCostCenters(undefined, undefined, undefined, effectiveTenantId, "req-get-cc");
             const items = (listRes as any)?.data?.items ?? [];
-            const found = items.find(
-              (item: any) => item.code === costCenterCode,
-            );
+            const found = items.find((item: any) => item.code === costCenterCode);
             if (!found) {
-              return new Response(
-                JSON.stringify({
-                  error: "NOT_FOUND",
-                  message: "Cost center not found",
-                }),
-                {
-                  status: 404,
-                  headers: { "Content-Type": "application/json" },
-                },
-              );
+              return new Response(JSON.stringify({ error: "NOT_FOUND", message: "Cost center not found" }), {
+                status: 404,
+                headers: { "Content-Type": "application/json" },
+              });
             }
-            return new Response(JSON.stringify({ data: found }), {
-              status: 200,
-              headers: { "Content-Type": "application/json" },
-            });
+            return new Response(JSON.stringify({ data: found }), { status: 200, headers: { "Content-Type": "application/json" } });
           }
-          const res = tenantPartnerController.listCostCenters(
-            undefined,
-            undefined,
-            undefined,
-            effectiveTenantId,
-            "req-list-cc",
-          );
-          return new Response(JSON.stringify(res), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
+          const res = tenantPartnerController.listCostCenters(undefined, undefined, undefined, effectiveTenantId, "req-list-cc");
+          return new Response(JSON.stringify(res), { status: 200, headers: { "Content-Type": "application/json" } });
         }
 
         if (init?.method === "POST") {
           let bodyObj: any = {};
           if (typeof init?.body === "string") {
             bodyObj = JSON.parse(init.body);
-          } else if (
-            init?.body instanceof ArrayBuffer ||
-            init?.body instanceof Uint8Array
-          ) {
-            bodyObj = JSON.parse(
-              new TextDecoder().decode(init.body as ArrayBuffer),
-            );
+          } else if (init?.body instanceof ArrayBuffer || init?.body instanceof Uint8Array) {
+            bodyObj = JSON.parse(new TextDecoder().decode(init.body as ArrayBuffer));
           }
-          const res = tenantPartnerController.upsertCostCenter(
-            bodyObj,
-            effectiveTenantId,
-            "req-post-cc",
-          );
-          return new Response(JSON.stringify(res), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
+          const res = tenantPartnerController.upsertCostCenter(bodyObj, effectiveTenantId, "req-post-cc");
+          return new Response(JSON.stringify(res), { status: 200, headers: { "Content-Type": "application/json" } });
         }
       }
 
       if (urlStr.includes("/api/tenant/users")) {
         const authHeader = getHeader("authorization");
         const token = authHeader?.replace("Bearer ", "");
-        const payload = token
-          ? await jwtAuthService.verifyAccessToken(token)
-          : null;
+        const payload = token ? await jwtAuthService.verifyAccessToken(token) : null;
         if (!payload) {
-          return new Response(
-            JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }),
-            {
-              status: 401,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
+          return new Response(JSON.stringify({ error: "AUTHENTICATION_REQUIRED" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
         }
         const effectiveTenantId = payload.tenantId ?? tenantId;
         const url = new URL(urlStr);
@@ -575,33 +465,18 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
         const targetUserId = pathSegments[3];
 
         if (targetUserId) {
-          const user = tenantPartnerService.findTenantUser(
-            effectiveTenantId,
-            targetUserId,
-          );
+          const user = tenantPartnerService.findTenantUser(effectiveTenantId, targetUserId);
           if (!user) {
-            return new Response(
-              JSON.stringify({
-                error: "NOT_FOUND",
-                message: "Tenant user not found",
-              }),
-              {
-                status: 404,
-                headers: { "Content-Type": "application/json" },
-              },
-            );
+            return new Response(JSON.stringify({ error: "NOT_FOUND", message: "Tenant user not found" }), {
+              status: 404,
+              headers: { "Content-Type": "application/json" },
+            });
           }
-          return new Response(JSON.stringify({ data: user }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
+          return new Response(JSON.stringify({ data: user }), { status: 200, headers: { "Content-Type": "application/json" } });
         }
 
         const users = tenantPartnerService.listTenantUsers(effectiveTenantId);
-        return new Response(JSON.stringify({ data: { items: users } }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+        return new Response(JSON.stringify({ data: { items: users } }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
 
       return new Response("Not found", { status: 404 });
@@ -613,14 +488,8 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
     vi.restoreAllMocks();
   });
 
-  async function issueValidAdminSessionToken(): Promise<{
-    token: string;
-    sessionId: string;
-  }> {
-    const user = tenantPartnerService.findTenantUser(
-      tenantId,
-      seededAdminUser.userId,
-    )!;
+  async function issueValidAdminSessionToken(): Promise<{ token: string; sessionId: string }> {
+    const user = tenantPartnerService.findTenantUser(tenantId, seededAdminUser.userId)!;
     const session = await jwtAuthService.issueSessionToken({
       authMode: "jwt_bearer",
       actorType: "tenant_admin",
@@ -645,15 +514,10 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
 
     // Verify token is active at both service and route levels
     expect(await jwtAuthService.verifyAccessToken(token)).not.toBeNull();
-    const preCheckReq = new NextRequest(
-      "https://tenant.drts.internal/api/auth/session",
-      {
-        headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
-      },
-    );
-    const preCheckRes = await tenantAuthGet(preCheckReq, {
-      params: Promise.resolve({ auth: ["session"] }),
+    const preCheckReq = new NextRequest("https://tenant.drts.internal/api/auth/session", {
+      headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
     });
+    const preCheckRes = await tenantAuthGet(preCheckReq, { params: Promise.resolve({ auth: ["session"] }) });
     expect(preCheckRes.status).toBe(200);
 
     // Demote role from tenant_admin to tenant_viewer (updates user.updatedAt and user.roleCode)
@@ -669,61 +533,37 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
     expect(verified).toBeNull();
 
     // 2. Route verification: BFF /api/auth/session rejects original token and clears cookies
-    const postSessionReq = new NextRequest(
-      "https://tenant.drts.internal/api/auth/session",
-      {
-        headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
-      },
-    );
-    const postSessionRes = await tenantAuthGet(postSessionReq, {
-      params: Promise.resolve({ auth: ["session"] }),
+    const postSessionReq = new NextRequest("https://tenant.drts.internal/api/auth/session", {
+      headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
     });
+    const postSessionRes = await tenantAuthGet(postSessionReq, { params: Promise.resolve({ auth: ["session"] }) });
     expect(postSessionRes.status).toBe(401);
     const postSessionData = await postSessionRes.json();
     expect(postSessionData.active).toBe(false);
     expect(postSessionData.error).toBe("AUTHENTICATION_REQUIRED");
-    const clearedCookie = postSessionRes.cookies.get(
-      TENANT_SESSION_COOKIE_NAME,
-    );
-    expect(clearedCookie?.value === "" || clearedCookie?.maxAge === 0).toBe(
-      true,
-    );
+    const clearedCookie = postSessionRes.cookies.get(TENANT_SESSION_COOKIE_NAME);
+    expect(clearedCookie?.value === "" || clearedCookie?.maxAge === 0).toBe(true);
 
     // 3. Route verification: Control plane proxy GET rejects original token with 401
-    const proxyReadReq = new NextRequest(
-      "https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers",
-      {
-        headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
-      },
-    );
-    const proxyReadRes = await proxyGet(proxyReadReq, {
-      params: Promise.resolve({ path: ["tenant", "cost-centers"] }),
+    const proxyReadReq = new NextRequest("https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers", {
+      headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
     });
+    const proxyReadRes = await proxyGet(proxyReadReq, { params: Promise.resolve({ path: ["tenant", "cost-centers"] }) });
     expect(proxyReadRes.status).toBe(401);
 
     // 4. Route verification: Control plane proxy POST with valid CSRF rejects original token with 401
     const validCsrf = generateCsrfToken();
-    const proxyWriteReq = new NextRequest(
-      "https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers",
-      {
-        method: "POST",
-        headers: {
-          cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}; ${TENANT_CSRF_COOKIE_NAME}=${validCsrf}`,
-          [TENANT_CSRF_HEADER_NAME]: validCsrf,
-          origin: "https://tenant.drts.internal",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          code: "CC-SEC-002",
-          name: "Security CC 2",
-          department: "Security",
-          monthlyBudget: 2000,
-        }),
+    const proxyWriteReq = new NextRequest("https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers", {
+      method: "POST",
+      headers: {
+        cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}; ${TENANT_CSRF_COOKIE_NAME}=${validCsrf}`,
+        [TENANT_CSRF_HEADER_NAME]: validCsrf,
+        origin: "https://tenant.drts.internal",
+        "Content-Type": "application/json",
       },
-    );
-    const proxyWriteRes = await proxyPost(proxyWriteReq, {
-      params: Promise.resolve({ path: ["tenant", "cost-centers"] }),
+      body: JSON.stringify({ code: "CC-SEC-002", name: "Security CC 2", department: "Security", monthlyBudget: 2000 }),
     });
+    const proxyWriteRes = await proxyPost(proxyWriteReq, { params: Promise.resolve({ path: ["tenant", "cost-centers"] }) });
     expect(proxyWriteRes.status).toBe(401);
   });
 
@@ -746,52 +586,32 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
     expect(verified).toBeNull();
 
     // 2. Route verification: BFF /api/auth/session rejects original token
-    const postSessionReq = new NextRequest(
-      "https://tenant.drts.internal/api/auth/session",
-      {
-        headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
-      },
-    );
-    const postSessionRes = await tenantAuthGet(postSessionReq, {
-      params: Promise.resolve({ auth: ["session"] }),
+    const postSessionReq = new NextRequest("https://tenant.drts.internal/api/auth/session", {
+      headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
     });
+    const postSessionRes = await tenantAuthGet(postSessionReq, { params: Promise.resolve({ auth: ["session"] }) });
     expect(postSessionRes.status).toBe(401);
 
     // 3. Route verification: Control plane proxy GET rejects original token with 401
-    const proxyReadReq = new NextRequest(
-      "https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers",
-      {
-        headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
-      },
-    );
-    const proxyReadRes = await proxyGet(proxyReadReq, {
-      params: Promise.resolve({ path: ["tenant", "cost-centers"] }),
+    const proxyReadReq = new NextRequest("https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers", {
+      headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
     });
+    const proxyReadRes = await proxyGet(proxyReadReq, { params: Promise.resolve({ path: ["tenant", "cost-centers"] }) });
     expect(proxyReadRes.status).toBe(401);
 
     // 4. Route verification: Control plane proxy POST rejects original token with 401
     const validCsrf = generateCsrfToken();
-    const proxyWriteReq = new NextRequest(
-      "https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers",
-      {
-        method: "POST",
-        headers: {
-          cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}; ${TENANT_CSRF_COOKIE_NAME}=${validCsrf}`,
-          [TENANT_CSRF_HEADER_NAME]: validCsrf,
-          origin: "https://tenant.drts.internal",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          code: "CC-SEC-003",
-          name: "Security CC 3",
-          department: "Security",
-          monthlyBudget: 3000,
-        }),
+    const proxyWriteReq = new NextRequest("https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers", {
+      method: "POST",
+      headers: {
+        cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}; ${TENANT_CSRF_COOKIE_NAME}=${validCsrf}`,
+        [TENANT_CSRF_HEADER_NAME]: validCsrf,
+        origin: "https://tenant.drts.internal",
+        "Content-Type": "application/json",
       },
-    );
-    const proxyWriteRes = await proxyPost(proxyWriteReq, {
-      params: Promise.resolve({ path: ["tenant", "cost-centers"] }),
+      body: JSON.stringify({ code: "CC-SEC-003", name: "Security CC 3", department: "Security", monthlyBudget: 3000 }),
     });
+    const proxyWriteRes = await proxyPost(proxyWriteReq, { params: Promise.resolve({ path: ["tenant", "cost-centers"] }) });
     expect(proxyWriteRes.status).toBe(401);
   });
 
@@ -808,52 +628,32 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
     expect(verified).toBeNull();
 
     // 2. Route verification: BFF /api/auth/session rejects original token
-    const postSessionReq = new NextRequest(
-      "https://tenant.drts.internal/api/auth/session",
-      {
-        headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
-      },
-    );
-    const postSessionRes = await tenantAuthGet(postSessionReq, {
-      params: Promise.resolve({ auth: ["session"] }),
+    const postSessionReq = new NextRequest("https://tenant.drts.internal/api/auth/session", {
+      headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
     });
+    const postSessionRes = await tenantAuthGet(postSessionReq, { params: Promise.resolve({ auth: ["session"] }) });
     expect(postSessionRes.status).toBe(401);
 
     // 3. Route verification: Control plane proxy GET rejects original token with 401
-    const proxyReadReq = new NextRequest(
-      "https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers",
-      {
-        headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
-      },
-    );
-    const proxyReadRes = await proxyGet(proxyReadReq, {
-      params: Promise.resolve({ path: ["tenant", "cost-centers"] }),
+    const proxyReadReq = new NextRequest("https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers", {
+      headers: { cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}` },
     });
+    const proxyReadRes = await proxyGet(proxyReadReq, { params: Promise.resolve({ path: ["tenant", "cost-centers"] }) });
     expect(proxyReadRes.status).toBe(401);
 
     // 4. Route verification: Control plane proxy POST rejects original token with 401
     const validCsrf = generateCsrfToken();
-    const proxyWriteReq = new NextRequest(
-      "https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers",
-      {
-        method: "POST",
-        headers: {
-          cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}; ${TENANT_CSRF_COOKIE_NAME}=${validCsrf}`,
-          [TENANT_CSRF_HEADER_NAME]: validCsrf,
-          origin: "https://tenant.drts.internal",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          code: "CC-SEC-004",
-          name: "Security CC 4",
-          department: "Security",
-          monthlyBudget: 4000,
-        }),
+    const proxyWriteReq = new NextRequest("https://tenant.drts.internal/control-plane-proxy/tenant/cost-centers", {
+      method: "POST",
+      headers: {
+        cookie: `${TENANT_SESSION_COOKIE_NAME}=${token}; ${TENANT_CSRF_COOKIE_NAME}=${validCsrf}`,
+        [TENANT_CSRF_HEADER_NAME]: validCsrf,
+        origin: "https://tenant.drts.internal",
+        "Content-Type": "application/json",
       },
-    );
-    const proxyWriteRes = await proxyPost(proxyWriteReq, {
-      params: Promise.resolve({ path: ["tenant", "cost-centers"] }),
+      body: JSON.stringify({ code: "CC-SEC-004", name: "Security CC 4", department: "Security", monthlyBudget: 4000 }),
     });
+    const proxyWriteRes = await proxyPost(proxyWriteReq, { params: Promise.resolve({ path: ["tenant", "cost-centers"] }) });
     expect(proxyWriteRes.status).toBe(401);
   });
 
@@ -871,9 +671,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
       },
     );
     const existsInOtherTenantRes = await proxyGet(existsInOtherTenantReq, {
-      params: Promise.resolve({
-        path: ["tenant", "cost-centers", "CC-SEC-OTHER-001"],
-      }),
+      params: Promise.resolve({ path: ["tenant", "cost-centers", "CC-SEC-OTHER-001"] }),
     });
 
     // Request B: Query cost center that does NOT exist anywhere (CC-SEC-NONEXISTENT-999)
@@ -884,9 +682,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
       },
     );
     const nonexistentRes = await proxyGet(nonexistentReq, {
-      params: Promise.resolve({
-        path: ["tenant", "cost-centers", "CC-SEC-NONEXISTENT-999"],
-      }),
+      params: Promise.resolve({ path: ["tenant", "cost-centers", "CC-SEC-NONEXISTENT-999"] }),
     });
 
     // Both requests must return identical 404 NOT_FOUND responses with identical error bodies
@@ -894,14 +690,8 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
     expect(nonexistentRes.status).toBe(404);
     const existsInOtherJson = await existsInOtherTenantRes.json();
     const nonexistentJson = await nonexistentRes.json();
-    expect(existsInOtherJson).toEqual({
-      error: "NOT_FOUND",
-      message: "Cost center not found",
-    });
-    expect(nonexistentJson).toEqual({
-      error: "NOT_FOUND",
-      message: "Cost center not found",
-    });
+    expect(existsInOtherJson).toEqual({ error: "NOT_FOUND", message: "Cost center not found" });
+    expect(nonexistentJson).toEqual({ error: "NOT_FOUND", message: "Cost center not found" });
     expect(existsInOtherJson).toEqual(nonexistentJson);
 
     // ── 2. Route-Level User Query: Exists in other tenant vs Nonexistent ───────
@@ -912,9 +702,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
       },
     );
     const userInOtherTenantRes = await proxyGet(userInOtherTenantReq, {
-      params: Promise.resolve({
-        path: ["tenant", "users", seededOtherAdminUser.userId],
-      }),
+      params: Promise.resolve({ path: ["tenant", "users", seededOtherAdminUser.userId] }),
     });
 
     const userNonexistentReq = new NextRequest(
@@ -924,16 +712,12 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
       },
     );
     const userNonexistentRes = await proxyGet(userNonexistentReq, {
-      params: Promise.resolve({
-        path: ["tenant", "users", "usr-sec-nonexistent-999"],
-      }),
+      params: Promise.resolve({ path: ["tenant", "users", "usr-sec-nonexistent-999"] }),
     });
 
     expect(userInOtherTenantRes.status).toBe(404);
     expect(userNonexistentRes.status).toBe(404);
-    expect(await userInOtherTenantRes.json()).toEqual(
-      await userNonexistentRes.json(),
-    );
+    expect(await userInOtherTenantRes.json()).toEqual(await userNonexistentRes.json());
 
     // ── 3. Cross-Tenant Mutation Attempt: Existing Other Tenant vs Nonexistent Tenant ──
     const crossTenantPayload = {
@@ -996,15 +780,8 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
     expect(errNonexistentTenant.code).toBe("TENANT_SCOPE_MISMATCH");
 
     // ── 4. Service-Level Query Isolation ──────────────────────────────────────
-    expect(
-      tenantPartnerService.findTenantUser(
-        tenantId,
-        seededOtherAdminUser.userId,
-      ),
-    ).toBeNull();
-    expect(
-      tenantPartnerService.findTenantUser(tenantId, "usr-sec-nonexistent-999"),
-    ).toBeNull();
+    expect(tenantPartnerService.findTenantUser(tenantId, seededOtherAdminUser.userId)).toBeNull();
+    expect(tenantPartnerService.findTenantUser(tenantId, "usr-sec-nonexistent-999")).toBeNull();
     const tenant1Users = tenantPartnerService.listTenantUsers(tenantId);
     expect(tenant1Users.some((u) => u.tenantId === otherTenantId)).toBe(false);
   });
@@ -1024,12 +801,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
           origin: "https://tenant.drts.internal",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          code: "CC-01",
-          name: "Test",
-          department: "Eng",
-          monthlyBudget: 100,
-        }),
+        body: JSON.stringify({ code: "CC-01", name: "Test", department: "Eng", monthlyBudget: 100 }),
       },
     );
     const invalidCsrfRes = await proxyPost(invalidCsrfReq, {
@@ -1050,12 +822,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
           origin: "https://evil-attacker.example.com",
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          code: "CC-01",
-          name: "Test",
-          department: "Eng",
-          monthlyBudget: 100,
-        }),
+        body: JSON.stringify({ code: "CC-01", name: "Test", department: "Eng", monthlyBudget: 100 }),
       },
     );
     const crossOriginRes = await proxyPost(crossOriginReq, {
@@ -1081,17 +848,14 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
       const authState = locationUrl.searchParams.get("state")!;
       const codeChallenge = locationUrl.searchParams.get("code_challenge")!;
       const nonce = locationUrl.searchParams.get("nonce")!;
-      const stateCookie = loginRes.cookies.get(
-        TENANT_OIDC_STATE_COOKIE_NAME,
-      )!.value;
+      const stateCookie = loginRes.cookies.get(TENANT_OIDC_STATE_COOKIE_NAME)!.value;
 
       return { authState, codeChallenge, nonce, stateCookie };
     }
 
     // ── Negative Case 1: Tampered State Cookie -> 400 ─────────────────────────
     {
-      const { authState, codeChallenge, nonce, stateCookie } =
-        await startLogin();
+      const { authState, codeChallenge, nonce, stateCookie } = await startLogin();
       const authCode = oidcServer.issueAuthorizationCode({
         codeChallenge,
         nonce,
@@ -1145,8 +909,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
 
     // ── Negative Case 3: PKCE Verifier Mismatch (Tampered in State Envelope) ──
     {
-      const { authState, codeChallenge, nonce, stateCookie } =
-        await startLogin();
+      const { authState, codeChallenge, nonce, stateCookie } = await startLogin();
       const authCode = oidcServer.issueAuthorizationCode({
         codeChallenge,
         nonce,
@@ -1234,8 +997,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
 
     // ── Negative Case 6: Missing Nonce (IdP ID token lacks nonce claim) ───────
     {
-      const { authState, codeChallenge, nonce, stateCookie } =
-        await startLogin();
+      const { authState, codeChallenge, nonce, stateCookie } = await startLogin();
       const authCodeMissingNonce = oidcServer.issueAuthorizationCode({
         codeChallenge,
         nonce,
@@ -1263,8 +1025,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
 
     // ── Happy Path: Successful First Exchange & State Replay ──────────────────
     {
-      const { authState, codeChallenge, nonce, stateCookie } =
-        await startLogin();
+      const { authState, codeChallenge, nonce, stateCookie } = await startLogin();
       const authCode = oidcServer.issueAuthorizationCode({
         codeChallenge,
         nonce,
@@ -1286,9 +1047,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
         params: Promise.resolve({ auth: ["tenant", "callback"] }),
       });
       expect(validCallbackRes.status).toBe(307);
-      expect(validCallbackRes.headers.get("location")).toBe(
-        "https://tenant.drts.internal/dashboard",
-      );
+      expect(validCallbackRes.headers.get("location")).toBe("https://tenant.drts.internal/dashboard");
 
       // State Replay -> Already consumed -> 403 AUTH_SESSION_EXCHANGE_DENIED
       const replayCallbackReq = new NextRequest(
