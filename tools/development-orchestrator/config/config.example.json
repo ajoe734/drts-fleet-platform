@@ -20,7 +20,7 @@
   "supervisor": {
     "poll_interval_seconds": 2.0,
     "heartbeat_warn_after_seconds": 10.0,
-    "stall_after_seconds": 300,
+    "worker_progress_timeout_seconds": 600,
     "max_worker_history": 200,
     "tick_failure_limit": 10,
     "auto_refresh_provider_capabilities": false,
@@ -76,8 +76,7 @@
       "quota exhausted",
       "exhausted your capacity",
       "no capacity available for model"
-    ],
-    "fallback_mode": "file_inbox"
+    ]
   },
   "worker_reassignment": {
     "enabled": true,
@@ -85,20 +84,18 @@
     "reassign_on_terminal_failure": true,
     "eligible_statuses": ["todo", "in_progress", "review"],
     "owner_fallbacks": {
-      "Claude": ["Claude2", "Codex", "Copilot", "Gemini", "Gemini2"],
-      "Claude2": ["Codex", "Claude", "Copilot", "Gemini", "Gemini2"],
-      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2", "Copilot"],
-      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2", "Copilot"],
-      "Codex": ["Claude2", "Claude", "Copilot", "Gemini", "Gemini2"],
-      "Copilot": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2"]
+      "Claude": ["Claude2", "Codex", "Gemini", "Gemini2"],
+      "Claude2": ["Codex", "Claude", "Gemini", "Gemini2"],
+      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2"],
+      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2"],
+      "Codex": ["Claude2", "Claude", "Gemini", "Gemini2"]
     },
     "reviewer_fallbacks": {
-      "Claude": ["Claude2", "Codex", "Copilot", "Gemini", "Gemini2"],
-      "Claude2": ["Codex", "Claude", "Copilot", "Gemini", "Gemini2"],
-      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2", "Copilot"],
-      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2", "Copilot"],
-      "Codex": ["Claude2", "Claude", "Copilot", "Gemini", "Gemini2"],
-      "Copilot": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2"]
+      "Claude": ["Claude2", "Codex", "Gemini", "Gemini2"],
+      "Claude2": ["Codex", "Claude", "Gemini", "Gemini2"],
+      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2"],
+      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2"],
+      "Codex": ["Claude2", "Claude", "Gemini", "Gemini2"]
     }
   },
   "chair_review": {
@@ -141,8 +138,7 @@
       "Claude2": ["your-github-handle"],
       "Gemini": ["your-github-handle"],
       "Gemini2": ["your-github-handle"],
-      "Codex": ["your-github-handle"],
-      "Copilot": ["your-github-handle"]
+      "Codex": ["your-github-handle"]
     },
     "templates": {
       "ops_issue": "tools/development-orchestrator/templates/github_ops_issue.md",
@@ -178,51 +174,38 @@
     "claude": {
       "display_name": "Claude",
       "provider": "claude",
-      "adapter": "claude_cli",
       "wake_template": "tools/development-orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/claude.md"
     },
     "gemini": {
       "display_name": "Gemini",
       "provider": "gemini",
-      "adapter": "gemini",
       "wake_template": "tools/development-orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/gemini.md"
     },
     "claude2": {
       "display_name": "Claude2",
       "provider": "claude2",
-      "adapter": "claude_cli",
       "wake_template": "tools/development-orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/claude2.md"
     },
     "gemini2": {
       "display_name": "Gemini2",
       "provider": "gemini2",
-      "adapter": "gemini",
       "wake_template": "tools/development-orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/gemini2.md"
     },
     "codex": {
       "display_name": "Codex",
       "provider": "codex",
-      "adapter": "codex",
       "wake_template": "tools/development-orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/codex.md"
     },
     "codex2": {
       "display_name": "Codex2",
       "provider": "codex2",
-      "adapter": "codex",
       "wake_template": "tools/development-orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/codex2.md"
-    },
-    "copilot": {
-      "display_name": "Copilot",
-      "provider": "copilot",
-      "adapter": "copilot_local",
-      "wake_template": "tools/development-orchestrator/templates/wakeup.txt",
-      "file_inbox_path": ".llm-inbox/copilot.md"
     }
   },
   "providers": {
@@ -254,7 +237,6 @@
       "approval": {
         "workspace_permission_mode": "acceptEdits",
         "allow_dangerous_skip": false,
-        "copilot_allow_dangerous_skip": false,
         "rule_default_mode": "acceptEdits",
         "disable_bypass_permissions": true
       }
@@ -287,19 +269,25 @@
       "approval": {
         "workspace_permission_mode": "acceptEdits",
         "allow_dangerous_skip": false,
-        "copilot_allow_dangerous_skip": false,
         "rule_default_mode": "acceptEdits",
         "disable_bypass_permissions": true
       }
     },
     "gemini": {
-      "delivery_mode": "gemini",
+      "delivery_mode": "antigravity",
       "file_inbox": {
         "path": ".llm-inbox/gemini.md",
         "open_in_vscode": false
       },
-      "gemini": {
-        "cli": "gemini",
+      "antigravity": {
+        "cli": "agy",
+        "print_timeout": "2h",
+        "model_rotation": {
+          "enabled": true,
+          "primary": "gemini-3.1-pro-high",
+          "fallback": "claude-sonnet-4-6",
+          "cooldown_seconds": 900
+        },
         "include_directories": true,
         "skip_trust": true,
         "allowed_tools": ["run_shell_command"]
@@ -314,14 +302,21 @@
       }
     },
     "gemini2": {
-      "delivery_mode": "gemini",
+      "delivery_mode": "antigravity",
       "file_inbox": {
         "path": ".llm-inbox/gemini2.md",
         "open_in_vscode": false
       },
-      "gemini": {
-        "cli": "gemini",
+      "antigravity": {
+        "cli": "agy",
         "config_home": "~/.gemini2-home",
+        "print_timeout": "2h",
+        "model_rotation": {
+          "enabled": true,
+          "primary": "gemini-3.1-pro-high",
+          "fallback": "claude-sonnet-4-6",
+          "cooldown_seconds": 900
+        },
         "env": {
           "GEMINI_CLI_TRUST_WORKSPACE": "true",
           "GOOGLE_GENAI_USE_GCA": "true",
@@ -329,15 +324,9 @@
           "GOOGLE_CLOUD_PROJECT_ID": "YOUR_WORKSPACE_GCA_PROJECT_ID",
           "GOOGLE_CLOUD_LOCATION": "us-central1"
         },
-        "model": "gemini-2.5-flash-lite",
         "include_directories": true,
         "skip_trust": true,
         "allowed_tools": ["run_shell_command"]
-      },
-      "model_preference": {
-        "default": "gemini-2.5-flash-lite",
-        "gemini2": "gemini-2.5-flash-lite",
-        "supported": ["gemini-2.5-flash-lite", "gemini-2.5-flash"]
       },
       "approval": {
         "default_approval_mode": "auto_edit",
@@ -388,31 +377,6 @@
         "sandbox_mode": "danger-full-access",
         "dangerously_bypass": true
       }
-    },
-    "copilot": {
-      "delivery_mode": "copilot_local",
-      "file_inbox": {
-        "path": ".llm-inbox/copilot.md",
-        "open_in_vscode": false,
-        "agent_paths": {
-          "copilot": ".llm-inbox/copilot.md"
-        }
-      },
-      "local": {
-        "cli": "copilot",
-        "autopilot": true,
-        "max_autopilot_continues": 12,
-        "allow_all_tools": true,
-        "add_workspace_dir": true,
-        "no_ask_user": true,
-        "allow_tools": [],
-        "deny_tools": [],
-        "extra_args": []
-      },
-      "model_preference": {
-        "default": null,
-        "supported": []
-      }
     }
   },
   "branch_strategy": {
@@ -442,8 +406,7 @@
       "codex": 4,
       "codex2": 4,
       "gemini": 2,
-      "gemini2": 2,
-      "copilot": 2
+      "gemini2": 2
     },
     "max_dispatches_per_tick": 4
   }

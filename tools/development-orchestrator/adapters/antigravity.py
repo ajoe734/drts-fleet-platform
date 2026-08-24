@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 
 from adapters.base import BaseAdapter, DeliveryCapability, DeliveryRequest, DeliveryResult
-from adapters.file_inbox import FileInboxAdapter
 from common import (
     agent_config_for,
     antigravity_rotation_config,
@@ -114,32 +113,6 @@ def _include_directories(config: dict, settings: dict, workspace_root: Path) -> 
     return result
 
 
-def _fallback_to_inbox(adapter: "AntigravityAdapter", request: DeliveryRequest, note: str, *, hard_error: bool) -> DeliveryResult:
-    fallback = FileInboxAdapter(config=adapter.config, provider_capabilities=adapter.provider_capabilities)
-    result = fallback.deliver(request)
-    result.adapter = adapter.name
-    result.mode = "file_inbox"
-    result.notes = f"{result.notes}. {note}"
-    if hard_error:
-        result.error = note
-    return DeliveryResult(
-        ok=result.ok,
-        adapter=result.adapter,
-        mode=result.mode,
-        target=result.target,
-        auto_delivered=result.auto_delivered,
-        manual_confirmation_required=result.manual_confirmation_required,
-        error=result.error,
-        notes=result.notes,
-        command=result.command,
-        log_path=result.log_path,
-        payload_path=result.payload_path,
-        pid=result.pid,
-        run_id=result.run_id,
-        metadata=result.metadata,
-    )
-
-
 class AntigravityAdapter(BaseAdapter):
     name = "antigravity"
 
@@ -153,7 +126,7 @@ class AntigravityAdapter(BaseAdapter):
         elif cli:
             notes = (
                 f"Antigravity CLI `agy` is installed but provider `{provider_key}` is not signed in "
-                "(run `agy` once to sign in). Delivery falls back to inbox until then."
+                "(run `agy` once to sign in). Automatic delivery is unavailable until then."
             )
         else:
             notes = "Antigravity CLI `agy` is not installed (curl -fsSL https://antigravity.google/cli/install.sh | bash)."
@@ -165,20 +138,38 @@ class AntigravityAdapter(BaseAdapter):
             can_auto_approve_edits=supported,
             delivery_mode="antigravity" if supported else "file_inbox",
             verified="verified" if supported else ("partial" if cli else "unavailable"),
-            host="Antigravity CLI" if cli else "Antigravity CLI + inbox fallback",
+            host="Antigravity CLI",
             notes=notes,
         )
 
     def deliver(self, request: DeliveryRequest) -> DeliveryResult:
         capability = self.capability(request.agent_id)
         if not capability.supported or not capability.can_auto_deliver:
-            return _fallback_to_inbox(self, request, capability.notes, hard_error=not capability.supported)
+            return DeliveryResult(
+                ok=False,
+                adapter=self.name,
+                mode="antigravity",
+                target=agent_config_for(self.config, request.agent_id).get("display_name", request.agent_id),
+                auto_delivered=False,
+                manual_confirmation_required=True,
+                error=capability.notes,
+                notes=capability.notes,
+            )
 
         provider_key, provider, settings = _provider_for_agent(self.config, request.agent_id)
         cli = _cli_path(self.config, settings)
         if not cli:
             note = "Antigravity CLI was available during capability probing but is no longer resolvable before dispatch."
-            return _fallback_to_inbox(self, request, note, hard_error=True)
+            return DeliveryResult(
+                ok=False,
+                adapter=self.name,
+                mode="antigravity",
+                target=request.agent_id,
+                auto_delivered=False,
+                manual_confirmation_required=True,
+                error=note,
+                notes=note,
+            )
 
         command = [cli]
         # An unattended lane cannot answer a permission prompt, so auto-approval
@@ -201,11 +192,9 @@ class AntigravityAdapter(BaseAdapter):
             command.append("--dangerously-skip-permissions")
         if to_bool(settings.get("sandbox"), default=True):
             command.append("--sandbox")
-        # Model rotation: when enabled, the shared cooldown file (written by the
-        # supervisor on quota/capacity walls) decides which model this dispatch
-        # uses. Primary ("") means the agy default (Gemini); the fallback is an
-        # explicit model. Rotation owns model selection and overrides any
-        # model_preference/model hint. See common.select_rotation_model.
+        # Model rotation is the only AGY model authority. The shared cooldown
+        # file selects the high-reasoning primary or fallback pool; request-level
+        # model hints are deliberately ignored.
         rotation = antigravity_rotation_config(settings)
         rotation_slot: str | None = None
         rotation_model: str | None = None
@@ -218,15 +207,26 @@ class AntigravityAdapter(BaseAdapter):
                     "Antigravity model rotation: both the Gemini and fallback pools are "
                     "cooling down; deferring to inbox until one frees."
                 )
-                return _fallback_to_inbox(self, request, note, hard_error=False)
+                return DeliveryResult(
+                    ok=False,
+                    adapter=self.name,
+                    mode="antigravity",
+                    target=request.agent_id,
+                    auto_delivered=False,
+                    manual_confirmation_required=False,
+                    error=note,
+                    notes=note,
+                )
             model = str(rotation_model or "").strip()
         else:
             model = str(request.metadata.get("model_preference") or settings.get("model") or "").strip()
         if model:
             command.extend(["--model", model])
-        # agy --print defaults to a 5m timeout which kills long agentic tasks;
-        # allow a per-provider override (default 1h).
-        print_timeout = str(settings.get("print_timeout") or "1h").strip()
+        command.extend(["--effort", "high", "--output-format", "stream-json"])
+        # The provider hard limit is intentionally separate from supervisor
+        # progress freshness. It prevents a long task from being killed at the
+        # CLI boundary while the supervisor remains the only stall authority.
+        print_timeout = str(settings.get("print_timeout") or "2h").strip()
         if print_timeout:
             command.extend(["--print-timeout", print_timeout])
         workspace_root = delivery_workspace_root(self.config, request.metadata)
@@ -236,10 +236,19 @@ class AntigravityAdapter(BaseAdapter):
         # prompt. Keep it last so another flag cannot be consumed as the prompt.
         command.extend(["--print", request.message])
 
-        run_id = new_runtime_id(provider_key)
+        run_id = request.run_id or new_runtime_id(provider_key)
         log_path = runtime_log_path(provider_key, request.agent_id)
         env = _runtime_env(settings, ensure_dirs=True)
-        apply_orchestrator_runtime_env(env, self.config, request.metadata)
+        apply_orchestrator_runtime_env(
+            env,
+            self.config,
+            request.metadata,
+            run_id=run_id,
+            queue_event_id=request.queue_event_id,
+            task_id=request.task_id,
+            agent_id=request.agent_id,
+            provider=request.provider,
+        )
         worker_unit = apply_worker_unit_env(env, self.config, run_id, request.metadata)
         process, _ = spawn_background_process(command, cwd=workspace_root, log_path=log_path, env=env)
 

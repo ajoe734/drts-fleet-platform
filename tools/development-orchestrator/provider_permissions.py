@@ -25,7 +25,6 @@ from common import (
     write_json,
 )
 from provider_credentials import (
-    copilot_plaintext_token as _copilot_plaintext_token,
     gemini_settings as _gemini_settings,
     truthy_env as _truthy_env,
 )
@@ -244,22 +243,6 @@ def _codex_auth_ready(binary: str | None, *, env: dict[str, str] | None = None) 
     return result.returncode == 0 and "logged in" in output and "not logged in" not in output
 
 
-def _gh_auth_token(binary: str | None) -> str | None:
-    if not binary:
-        return None
-    result = run_command([binary, "auth", "token"])
-    token = (result.stdout or "").strip()
-    return token or None
-
-
-def _copilot_auth_ready(gh_binary: str | None) -> bool:
-    if _gh_auth_token(gh_binary):
-        return True
-    if any(os.environ.get(name) for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")):
-        return True
-    return bool(_copilot_plaintext_token())
-
-
 def _verified_claude_policy(config: dict[str, Any]) -> dict[str, Any]:
     approval = config.get("providers", {}).get("claude", {}).get("approval", {})
     safe_allow = [
@@ -412,13 +395,6 @@ def desired_workspace_settings(config: dict[str, Any]) -> dict[str, Any]:
     return {
         "claudeCode.initialPermissionMode": claude_approval.get("workspace_permission_mode", "acceptEdits"),
         "claudeCode.allowDangerouslySkipPermissions": to_bool(claude_approval.get("allow_dangerous_skip", False)),
-        "github.copilot.chat.backgroundAgent.enabled": True,
-        "github.copilot.chat.cloudAgent.enabled": True,
-        "github.copilot.chat.claudeAgent.enabled": True,
-        "github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions": to_bool(
-            claude_approval.get("copilot_allow_dangerous_skip", False)
-        ),
-        "github.copilot.chat.reviewAgent.enabled": True,
         "geminicodeassist.enable": True,
         "geminicodeassist.agentYoloMode": to_bool(gemini_approval.get("workspace_agent_yolo_mode", False)),
     }
@@ -494,18 +470,10 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
     for provider_key, provider_cfg in (config.get("providers", {}) or {}).items():
         if not isinstance(provider_cfg, dict):
             continue
-        matching_agents = [
-            (agent_id, agent)
-            for agent_id, agent in agents.items()
-            if isinstance(agent, dict)
-            and str(agent.get("provider") or agent_id).strip() == provider_key
-        ]
-        adapter = str(
-            (matching_agents[0][1].get("adapter") if matching_agents else "")
-            or provider_cfg.get("delivery_mode")
-            or "file_inbox"
-        )
-        mode = str(provider_cfg.get("delivery_mode") or adapter)
+        # The provider delivery mode is the single lane-to-adapter authority.
+        # Agent records only identify ownership and display metadata.
+        adapter = str(provider_cfg.get("delivery_mode") or "file_inbox")
+        mode = adapter
         installed = False
         auth_ready = False
         identity: dict[str, Any] | None = None
@@ -557,7 +525,9 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
             auth_ready = bool(binary and _antigravity_auth_ready(settings))
             identity = _antigravity_identity(settings)
             rotation = settings.get("model_rotation", {}) or {}
-            selected_model = str(rotation.get("primary") or settings.get("model") or "").strip() or None
+            selected_model = str(
+                rotation.get("primary") or settings.get("model") or "gemini-3.1-pro-high"
+            ).strip() or None
             app_data = _antigravity_app_data_dir(settings)
             paths = {
                 "binary": binary,
@@ -566,18 +536,6 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
             }
             host_layer = "Antigravity CLI"
             notes = "Readiness requires agy plus the OAuth token in this lane's isolated app-data directory."
-
-        elif adapter == "copilot_local" or mode == "copilot_local":
-            local = provider_cfg.get("local", {}) or {}
-            binary = command_exists(local.get("cli") or "copilot", search_roots=search_roots)
-            installed = bool(binary)
-            auth_ready = bool(binary and _copilot_auth_ready(command_exists("gh")))
-            selected_model = str(
-                (provider_cfg.get("model_preference", {}) or {}).get("default") or ""
-            ).strip() or None
-            paths = {"binary": binary}
-            host_layer = "Copilot CLI"
-            notes = "Readiness requires the local Copilot CLI and a GitHub token."
 
         elif adapter == "file_inbox":
             installed = True
@@ -613,7 +571,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
             continue
         provider_key = str(agent.get("provider") or agent_id)
         provider = providers.get(provider_key, {})
-        adapter = str(agent.get("adapter") or provider.get("adapter") or "file_inbox")
+        adapter = str(provider.get("adapter") or provider.get("delivery_mode") or "file_inbox")
         can_auto_deliver = bool(provider.get("local_cli_worker_supported"))
         agent_adapters[agent_id] = {
             "adapter": adapter,

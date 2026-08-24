@@ -26,6 +26,8 @@ class DeliveryRequest:
     provider: str
     delivery_mode: str
     message: str
+    run_id: str | None = None
+    queue_event_id: str | None = None
     task_id: str | None = None
     reason: str | None = None
     context_files: list[str] = field(default_factory=list)

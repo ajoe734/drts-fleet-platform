@@ -203,7 +203,6 @@ def retry_settings(
             "deadline exceeded",
         ],
     )
-    retry.setdefault("fallback_mode", "file_inbox")
     return retry
 
 

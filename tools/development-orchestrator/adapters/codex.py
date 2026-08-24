@@ -56,7 +56,7 @@ class CodexAdapter(BaseAdapter):
         codex_settings = provider.get("codex", {})
         cli = codex_settings.get("cli") or "codex"
         workspace_root = delivery_workspace_root(self.config, request.metadata)
-        run_id = new_runtime_id("codex")
+        run_id = request.run_id or new_runtime_id("codex")
         result_path = worker_result_path(self.config, run_id)
         command = [
             cli,
@@ -85,7 +85,16 @@ class CodexAdapter(BaseAdapter):
         config_home = codex_settings.get("config_home")
         if config_home:
             env["CODEX_HOME"] = os.path.expanduser(config_home)
-        apply_orchestrator_runtime_env(env, self.config, request.metadata)
+        apply_orchestrator_runtime_env(
+            env,
+            self.config,
+            request.metadata,
+            run_id=request.run_id,
+            queue_event_id=request.queue_event_id,
+            task_id=request.task_id,
+            agent_id=request.agent_id,
+            provider=request.provider,
+        )
 
         log_path = runtime_log_path("codex", request.agent_id)
         worker_unit = apply_worker_unit_env(env, self.config, run_id, request.metadata)

@@ -19,7 +19,7 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
                 "assignee_field": "owner",
                 "reviewer_field": "reviewer",
             },
-            "supervisor": {"stall_after_seconds": 300},
+            "supervisor": {"worker_progress_timeout_seconds": 600},
             "ready_dispatcher": {
                 "active_worker_statuses": ["running", "started", "manual_pending"],
                 "dependency_done_statuses": ["done"],
@@ -108,7 +108,7 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
                 "assignee_field": "owner",
                 "reviewer_field": "reviewer",
             },
-            "supervisor": {"stall_after_seconds": 300},
+            "supervisor": {"worker_progress_timeout_seconds": 600},
             "ready_dispatcher": {
                 "active_worker_statuses": ["running", "started", "waiting_approval", "manual_pending", "retry_backoff", "suspended_approval", "stalled", "fallback"],
                 "dependency_done_statuses": ["done"],
@@ -495,7 +495,7 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
                 }
             },
         }
-        status = {"tasks": [{"id": "FBP-008", "status": "review", "owner": "Claude", "reviewer": "Codex"}]}
+        status = {"tasks": [{"id": "FBP-008", "status": "review", "owner": "Claude", "reviewer": "Codex", "candidate_worker_run_id": "run-1"}]}
 
         with (
             mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
@@ -526,7 +526,7 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
                 "assignee_field": "owner",
                 "reviewer_field": "reviewer",
             },
-            "supervisor": {"stall_after_seconds": 300},
+            "supervisor": {"worker_progress_timeout_seconds": 600},
             "ready_dispatcher": {},
             "providers": {},
             "agents": {
@@ -551,11 +551,10 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
             },
         }
         stale_status = {"tasks": [{"id": "PBK-UI-003", "status": "in_progress", "owner": "Codex", "reviewer": "Gemini2"}]}
-        fresh_status = {"tasks": [{"id": "PBK-UI-003", "status": "review", "owner": "Codex", "reviewer": "Gemini2"}]}
 
         with (
             mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
-            mock.patch.object(supervisor, "load_status", side_effect=[stale_status, fresh_status]),
+            mock.patch.object(supervisor, "load_status", return_value=stale_status),
             mock.patch.object(supervisor, "load_provider_report", return_value={}),
             mock.patch.object(supervisor, "retry_due_workers", return_value=False),
             mock.patch.object(supervisor, "pid_is_alive", return_value=False),
@@ -566,11 +565,9 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
 
         self.assertTrue(changed)
         worker = state["workers"]["run-1"]
-        self.assertEqual(worker["status"], "completed")
-        self.assertNotIn("last_error", {k: v for k, v in worker.items() if k == "last_error" and v})
-        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
-        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_completed")
-        self.assertIn("fresh re-read", write_activity_log.call_args.args[1]["message"])
+        self.assertEqual(worker["status"], "failed")
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "failed")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_failed")
 
     def test_dead_owner_worker_still_terminal_when_fresh_status_unchanged(self) -> None:
         """When the fresh re-read confirms the task did not advance, the worker is
@@ -727,7 +724,7 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
                 }
             },
         }
-        status = {"tasks": [{"id": "FBP-008", "status": "integrating", "owner": "Claude", "reviewer": "Codex"}]}
+        status = {"tasks": [{"id": "FBP-008", "status": "integrating", "owner": "Claude", "reviewer": "Codex", "review_worker_run_id": "run-1"}]}
 
         with (
             mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
@@ -945,7 +942,7 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_superseded")
 
-    def test_stalled_worker_returns_to_running_after_new_log_activity(self) -> None:
+    def test_legacy_stalled_worker_is_not_recovered_by_log_activity(self) -> None:
         config = {
             "schema": {
                 "tasks_path": "tasks",
@@ -996,9 +993,9 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
         ):
             changed = supervisor.poll_workers(config, state)
 
-        self.assertTrue(changed)
-        self.assertEqual(state["workers"]["run-1"]["status"], "running")
-        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_recovered")
+        self.assertFalse(changed)
+        self.assertEqual(state["workers"]["run-1"]["status"], "stalled")
+        write_activity_log.assert_not_called()
 
     def test_process_activity_prevents_quiet_verification_from_stalling(self) -> None:
         config = {
@@ -1043,7 +1040,6 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
             mock.patch.object(supervisor, "load_provider_report", return_value={}),
             mock.patch.object(supervisor, "retry_due_workers", return_value=False),
             mock.patch.object(supervisor, "pid_is_alive", return_value=True),
-            mock.patch.object(supervisor, "worker_process_tree_cpu_ticks", return_value={1234: 101}),
             mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
         ):
             changed = supervisor.poll_workers(config, state)
@@ -1051,11 +1047,11 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
         self.assertTrue(changed)
         worker = state["workers"]["run-1"]
         self.assertEqual(worker["status"], "running")
-        self.assertEqual(worker["process_tree_cpu_ticks"], 101)
-        self.assertGreater(worker["last_process_activity_at"], worker["last_event_at"])
+        self.assertNotIn("process_tree_cpu_ticks", worker)
+        self.assertNotIn("last_process_activity_at", worker)
         write_activity_log.assert_not_called()
 
-    def test_process_activity_recovers_a_stalled_worker(self) -> None:
+    def test_legacy_stalled_worker_is_not_recovered_by_process_activity(self) -> None:
         config = {
             "schema": {
                 "tasks_path": "tasks",
@@ -1098,14 +1094,15 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
             mock.patch.object(supervisor, "load_provider_report", return_value={}),
             mock.patch.object(supervisor, "retry_due_workers", return_value=False),
             mock.patch.object(supervisor, "pid_is_alive", return_value=True),
-            mock.patch.object(supervisor, "worker_process_tree_cpu_ticks", return_value={1234: 101}),
             mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
         ):
             changed = supervisor.poll_workers(config, state)
 
         self.assertTrue(changed)
-        self.assertEqual(state["workers"]["run-1"]["status"], "running")
-        self.assertIn("local process activity", write_activity_log.call_args.args[1]["message"])
+        self.assertEqual(state["workers"]["run-1"]["status"], "stalled")
+        self.assertNotIn("process_tree_cpu_ticks", state["workers"]["run-1"])
+        self.assertNotIn("last_process_activity_at", state["workers"]["run-1"])
+        write_activity_log.assert_not_called()
 
     def test_manual_pending_file_inbox_worker_is_reaped_after_auth_recovers(self) -> None:
         config = {
@@ -1173,13 +1170,12 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
         ):
             changed = supervisor.poll_workers(config, state)
 
-        self.assertTrue(changed)
-        self.assertNotIn("run-1", state["workers"])
-        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
-        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_reaped")
-        self.assertIn("auth recovered", write_activity_log.call_args.args[1]["message"])
+        self.assertFalse(changed)
+        self.assertIn("run-1", state["workers"])
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "manual_pending")
+        write_activity_log.assert_not_called()
 
-    def test_stalled_worker_is_terminated_after_extended_stall(self) -> None:
+    def test_legacy_stalled_worker_is_not_terminated_by_a_second_timer(self) -> None:
         config = {
             "schema": {
                 "tasks_path": "tasks",
@@ -1210,6 +1206,7 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
                     "queue_event_id": "evt-1",
                     "pid": 1234,
                     "last_event_at": "2026-04-06T14:00:00Z",
+                    "last_work_progress_at": "2026-04-06T14:00:00Z",
                 }
             },
         }
@@ -1227,13 +1224,13 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
         ):
             changed = supervisor.poll_workers(config, state)
 
-        self.assertTrue(changed)
-        self.assertEqual(state["workers"]["run-1"]["status"], "failed")
-        terminate_worker_pid.assert_called_once_with(1234)
-        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "failed")
-        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_failed")
+        self.assertFalse(changed)
+        self.assertEqual(state["workers"]["run-1"]["status"], "stalled")
+        terminate_worker_pid.assert_not_called()
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "started")
+        write_activity_log.assert_not_called()
 
-    def test_stalled_worker_can_be_reassigned_after_extended_stall(self) -> None:
+    def test_legacy_stalled_worker_is_not_reassigned_by_a_second_timer(self) -> None:
         config = {
             "schema": {
                 "tasks_path": "tasks",
@@ -1266,6 +1263,7 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
                     "queue_event_id": "evt-1",
                     "pid": 1234,
                     "last_event_at": "2026-04-06T14:00:00Z",
+                    "last_work_progress_at": "2026-04-06T14:00:00Z",
                 }
             },
         }
@@ -1288,16 +1286,12 @@ class PollWorkersRecoveryTests(EvidenceOutputIsolation, unittest.TestCase):
         ):
             changed = supervisor.poll_workers(config, state)
 
-        self.assertTrue(changed)
+        self.assertFalse(changed)
         worker = state["workers"]["run-1"]
-        self.assertEqual(worker["status"], "reassigned")
-        self.assertEqual(worker["reassigned_to"], "Claude")
-        self.assertIn("terminated for redispatch", worker["last_error"])
-        terminate_worker_pid.assert_called_once_with(1234)
-        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
-        maybe_reassign.assert_called_once()
-        self.assertIn("terminated for redispatch", maybe_reassign.call_args.args[2])
-        self.assertEqual(maybe_reassign.call_args.kwargs, {"terminal": True, "state": state})
+        self.assertEqual(worker["status"], "stalled")
+        terminate_worker_pid.assert_not_called()
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "started")
+        maybe_reassign.assert_not_called()
         write_activity_log.assert_not_called()
 
     def test_alive_worker_is_superseded_after_reassignment(self) -> None:

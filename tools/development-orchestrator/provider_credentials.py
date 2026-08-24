@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
@@ -22,19 +21,3 @@ def gemini_paths(runtime: dict | None = None) -> tuple[Path, Path]:
 def gemini_settings(runtime: dict | None = None) -> dict:
     settings_path, _ = gemini_paths(runtime)
     return load_json(settings_path, default={}) or {}
-
-
-def copilot_plaintext_token() -> str | None:
-    config_dir = Path(os.environ.get("COPILOT_CONFIG_DIR") or (Path.home() / ".copilot"))
-    try:
-        payload = json.loads((config_dir / "config.json").read_text())
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return None
-    for key in ("copilot_tokens", "copilotTokens"):
-        tokens = payload.get(key)
-        if not isinstance(tokens, dict):
-            continue
-        for value in tokens.values():
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    return None

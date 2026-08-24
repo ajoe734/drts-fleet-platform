@@ -363,11 +363,24 @@ def delivery_workspace_root(config: dict[str, Any], metadata: dict[str, Any] | N
 # cooldown for that model in a shared state file and lets the SAME lane
 # re-dispatch so this selector picks the other model instead of pausing the
 # whole lane. The lane only truly pauses when both pools are cooling.
-ANTIGRAVITY_ROTATION_DEFAULT_FALLBACK = "Claude Sonnet 4.6 (Thinking)"
+ANTIGRAVITY_ROTATION_DEFAULT_PRIMARY = "gemini-3.1-pro-high"
+ANTIGRAVITY_ROTATION_DEFAULT_FALLBACK = "claude-sonnet-4-6"
 ANTIGRAVITY_ROTATION_COOLDOWN_SECONDS = 900
 ROTATION_PRIMARY_SLOT = "gemini"
 ROTATION_FALLBACK_SLOT = "claude"
 ANTIGRAVITY_ROTATION_PATH_DEFAULT = ".orchestrator/antigravity-rotation.json"
+
+
+def _high_reasoning_model(value: object, default: str) -> str:
+    """Keep AGY rotation on deliberate reasoning tiers, never CLI defaults."""
+    model = str(value or "").strip()
+    if not model:
+        return default
+    lowered = model.lower()
+    low_reasoning_markers = ("flash", "lite", "haiku", "mini", "instant", "low")
+    if any(marker in lowered for marker in low_reasoning_markers):
+        return default
+    return model
 
 
 def antigravity_rotation_path(config: dict[str, Any]) -> Path:
@@ -377,8 +390,9 @@ def antigravity_rotation_path(config: dict[str, Any]) -> Path:
 def antigravity_rotation_config(settings: dict[str, Any] | None) -> dict[str, Any]:
     """Normalize a provider's `antigravity.model_rotation` block.
 
-    `primary` empty means "use the agy default model" (i.e. do not pass
-    `--model`), which is Gemini.
+    AGY lanes must name a high-reasoning model explicitly. A blank or legacy
+    primary is normalized to the stable high-reasoning model rather than
+    silently accepting the CLI default.
     """
     raw = settings.get("model_rotation") if isinstance(settings, dict) else None
     raw = raw if isinstance(raw, dict) else {}
@@ -387,9 +401,13 @@ def antigravity_rotation_config(settings: dict[str, Any] | None) -> dict[str, An
     except (TypeError, ValueError):
         cooldown = ANTIGRAVITY_ROTATION_COOLDOWN_SECONDS
     return {
-        "enabled": bool(raw.get("enabled", False)),
-        "primary": str(raw.get("primary") or "").strip(),
-        "fallback": str(raw.get("fallback") or ANTIGRAVITY_ROTATION_DEFAULT_FALLBACK).strip(),
+        "enabled": bool(raw.get("enabled", True)),
+        "primary": _high_reasoning_model(
+            raw.get("primary"), ANTIGRAVITY_ROTATION_DEFAULT_PRIMARY
+        ),
+        "fallback": _high_reasoning_model(
+            raw.get("fallback"), ANTIGRAVITY_ROTATION_DEFAULT_FALLBACK
+        ),
         "cooldown_seconds": max(1, cooldown),
     }
 
@@ -460,6 +478,12 @@ def apply_orchestrator_runtime_env(
     env: dict[str, str],
     config: dict[str, Any],
     metadata: dict[str, Any] | None = None,
+    *,
+    run_id: str | None = None,
+    queue_event_id: str | None = None,
+    task_id: str | None = None,
+    agent_id: str | None = None,
+    provider: str | None = None,
 ) -> dict[str, str]:
     """Stamp env vars that keep status writes pointed at machine truth."""
     canonical_root = canonical_workspace_root(config)
@@ -475,6 +499,16 @@ def apply_orchestrator_runtime_env(
     task_branch = str((metadata or {}).get("task_branch") or "").strip()
     if task_branch:
         env["ORCH_TASK_BRANCH"] = task_branch
+    values = {
+        "ORCH_RUN_ID": run_id or (metadata or {}).get("run_id"),
+        "ORCH_QUEUE_EVENT_ID": queue_event_id or (metadata or {}).get("queue_event_id"),
+        "ORCH_TASK_ID": task_id or (metadata or {}).get("task_id"),
+        "ORCH_AGENT_ID": agent_id or (metadata or {}).get("agent_id"),
+        "ORCH_PROVIDER": provider or (metadata or {}).get("provider"),
+    }
+    for key, value in values.items():
+        if value is not None and str(value).strip():
+            env[key] = str(value).strip()
     return env
 
 
@@ -587,7 +621,7 @@ def agent_config_for(config: dict[str, Any], agent_id: str) -> dict[str, Any]:
         merged.setdefault("id", normalized)
         merged.setdefault("display_name", agent_id)
         return merged
-    return {"id": normalized, "display_name": agent_id, "provider": normalized, "adapter": "file_inbox"}
+    return {"id": normalized, "display_name": agent_id, "provider": normalized}
 
 
 def render_template(path: Path, variables: dict[str, Any]) -> str:

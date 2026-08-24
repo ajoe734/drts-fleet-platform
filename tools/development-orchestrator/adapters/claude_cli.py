@@ -81,18 +81,17 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
                 host="Claude Code CLI",
                 notes=notes,
             )
-        fallback = super().capability(agent_id)
         missing_reason = "Claude CLI is not installed" if not cli else "Claude CLI is installed but not authenticated"
         return DeliveryCapability(
             adapter=self.name,
-            supported=fallback.supported,
+            supported=bool(cli),
             requires_manual_confirmation=True,
             can_auto_deliver=False,
-            can_auto_approve_edits=fallback.can_auto_approve_edits,
-            delivery_mode="file_inbox",
+            can_auto_approve_edits=False,
+            delivery_mode="claude_cli",
             verified="partial",
-            host="Claude Code CLI + inbox fallback",
-            notes=f"{missing_reason} for provider `{provider_key}`, so delivery falls back to the workspace inbox path.",
+            host="Claude Code CLI",
+            notes=f"{missing_reason} for provider `{provider_key}`; automatic delivery is unavailable.",
         )
 
     def deliver(self, request: DeliveryRequest) -> DeliveryResult:
@@ -102,14 +101,21 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
         env = _claude_runtime_env(runtime, ensure_dirs=True)
         auth_ready = _claude_auth_ready(cli, env=env)
         if not cli or not auth_ready:
-            result = super().deliver(request)
-            result.adapter = self.name
-            result.mode = "file_inbox"
-            if not cli:
-                result.notes = f"{result.notes}. Claude CLI is unavailable, so inbox fallback was used."
-            else:
-                result.notes = f"{result.notes}. Claude CLI provider `{provider_key}` is not authenticated, so inbox fallback was used."
-            return result
+            note = (
+                f"Claude CLI is unavailable for provider `{provider_key}`."
+                if not cli
+                else f"Claude CLI provider `{provider_key}` is not authenticated."
+            )
+            return DeliveryResult(
+                ok=False,
+                adapter=self.name,
+                mode="claude_cli",
+                target=request.agent_id,
+                auto_delivered=False,
+                manual_confirmation_required=True,
+                error=note,
+                notes=note,
+            )
 
         output_format = runtime.get("output_format", "stream-json")
         command = [
@@ -138,7 +144,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
         if mcp_config:
             command.extend(["--mcp-config", str(config_path(self.config, "claude_mcp_config"))])
 
-        run_id = new_runtime_id(provider_key)
+        run_id = request.run_id or new_runtime_id(provider_key)
         log_path = runtime_log_path(provider_key, request.agent_id)
         workspace_root = delivery_workspace_root(self.config, request.metadata)
         env.update(
@@ -151,7 +157,16 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
                 "ORCH_TARGET_FILES": "\n".join(request.target_files),
             }
         )
-        apply_orchestrator_runtime_env(env, self.config, request.metadata)
+        apply_orchestrator_runtime_env(
+            env,
+            self.config,
+            request.metadata,
+            run_id=request.run_id,
+            queue_event_id=request.queue_event_id,
+            task_id=request.task_id,
+            agent_id=request.agent_id,
+            provider=request.provider,
+        )
         worker_unit = apply_worker_unit_env(env, self.config, run_id, request.metadata)
         process, _ = spawn_background_process(
             command,
