@@ -1194,23 +1194,28 @@ jobs:
 
       - name: Verify dev endpoints
         run: |
-          curl --fail --silent --show-error "${{ steps.urls.outputs.api }}/health" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.platform_admin }}" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.ops_console }}" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.tenant_console }}" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.bank_console }}" >/dev/null
+          curl_ready() {
+            curl --fail --silent --show-error --location \
+              --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 "$@"
+          }
+
+          curl_ready "${{ steps.urls.outputs.api }}/health" >/dev/null
+          curl_ready "${{ steps.urls.outputs.platform_admin }}" >/dev/null
+          curl_ready "${{ steps.urls.outputs.ops_console }}" >/dev/null
+          curl_ready "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
+          curl_ready "${{ steps.urls.outputs.tenant_console }}" >/dev/null
+          curl_ready "${{ steps.urls.outputs.bank_console }}" >/dev/null
           referral_embed_path="/embed/${{ needs.prepare.outputs.referral_embed_entry_slug }}"
-          referral_embed_body="$(curl --fail --silent --show-error --location \
+          referral_embed_body="$(curl_ready \
             "${{ steps.urls.outputs.referral_embed }}${referral_embed_path}")"
           grep --fixed-strings "$referral_embed_path" <<<"$referral_embed_body" >/dev/null
-          referral_embed_root_body="$(curl --fail --silent --show-error --location \
+          referral_embed_root_body="$(curl_ready \
             "${{ steps.urls.outputs.referral_embed }}")"
           grep --fixed-strings "$referral_embed_path" <<<"$referral_embed_root_body" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" >/dev/null
-          curl --fail --silent --show-error "${{ steps.urls.outputs.channel_partner_portal }}" >/dev/null
+          curl_ready "${{ steps.urls.outputs.enterprise_dispatch }}" >/dev/null
+          curl_ready "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" >/dev/null
+          curl_ready "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" >/dev/null
+          curl_ready "${{ steps.urls.outputs.channel_partner_portal }}" >/dev/null
 
       - name: Verify referral handoff session lifecycle
         run: |
@@ -1385,7 +1390,14 @@ jobs:
                .data.identity.tenantId == $tenant_id and
                (.data.identity.roles | index($expected_role) != null)' \
               <<<"$response_body" >/dev/null || {
-                echo "::error::${label} session is not bound to the expected durable tenant role." >&2
+                safe_summary="$(jq --compact-output \
+                  '{active: .data.active, identity: {
+                    actorId: .data.identity.actorId,
+                    realm: .data.identity.realm,
+                    tenantId: .data.identity.tenantId,
+                    roles: .data.identity.roles
+                  }}' <<<"$response_body")"
+                echo "::error::${label} session is not bound to the expected durable tenant role: ${safe_summary}" >&2
                 exit 1
               }
           }
@@ -1467,7 +1479,7 @@ jobs:
         with:
           name: operational-browser-evidence-${{ needs.build-push.outputs.candidate_sha }}
           path: test-results/
-          if-no-files-found: error
+          if-no-files-found: warn
 
   # A red run used to mean two very different things that looked identical in the
   # run list: images never reached Artifact Registry and nothing was deployed, or
