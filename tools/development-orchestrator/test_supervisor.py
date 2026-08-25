@@ -1113,9 +1113,28 @@ class WorkerProcessActivityTests(unittest.TestCase):
 
 
 
+SUPERVISOR_SCRIPT_REL = "tools/development-orchestrator/control_plane/runtime/supervisor_runtime.py"
+
+
 class SingleSupervisorGuardTests(unittest.TestCase):
+    """The cwd these pass is the one the gate compares against.
+
+    They passed `supervisor.REPO_ROOT` -- where the code lives -- while the
+    gate compares proc_cwd against CANONICAL_ROOT, where machine truth lives.
+    In the canonical checkout the two are the same directory, so the mistake
+    is invisible exactly where anyone would look, which is how the identical
+    confusion has now surfaced five separate times in this module.
+
+    It is not invisible to the pre-merge gate. That gate checks a candidate out
+    under tempfile.TemporaryDirectory and runs this suite there, so REPO_ROOT
+    is /tmp/premerge-*/candidate while CANONICAL_ROOT stays the real checkout.
+    The assertion below then reads False and dev goes red under a gate that
+    GitHub CI, which runs from the canonical checkout, reports green -- the
+    same shape as ORCH-PREMERGE-ENV-001, arrived at by a different road.
+    """
+
     def test_supervisor_cmdline_matches_actual_python_process(self) -> None:
-        repo_root = str(supervisor.REPO_ROOT)
+        repo_root = str(supervisor.CANONICAL_ROOT)
 
         self.assertTrue(
             supervisor.supervisor_cmdline_matches_current_script(
@@ -1125,7 +1144,7 @@ class SingleSupervisorGuardTests(unittest.TestCase):
         )
 
     def test_supervisor_cmdline_ignores_timeout_parent_wrapper(self) -> None:
-        repo_root = str(supervisor.REPO_ROOT)
+        repo_root = str(supervisor.CANONICAL_ROOT)
 
         self.assertFalse(
             supervisor.supervisor_cmdline_matches_current_script(
@@ -1135,7 +1154,7 @@ class SingleSupervisorGuardTests(unittest.TestCase):
         )
 
     def test_supervisor_cmdline_ignores_shell_launcher(self) -> None:
-        repo_root = str(supervisor.REPO_ROOT)
+        repo_root = str(supervisor.CANONICAL_ROOT)
 
         self.assertFalse(
             supervisor.supervisor_cmdline_matches_current_script(
@@ -1143,6 +1162,28 @@ class SingleSupervisorGuardTests(unittest.TestCase):
                 repo_root,
             )
         )
+
+    def test_the_gate_holds_when_the_code_lives_outside_the_canonical_root(self) -> None:
+        """Reproduces the pre-merge gate's layout without needing its checkout.
+
+        REPO_ROOT moves with the code; CANONICAL_ROOT does not. Pinning the
+        two apart here means this file fails in the canonical checkout the
+        next time a cwd argument is taken from the wrong one, instead of only
+        under a gate nobody reads the output of.
+        """
+        with mock.patch.object(supervisor, "REPO_ROOT", Path("/tmp/premerge-abc123/candidate")):
+            self.assertTrue(
+                supervisor.supervisor_cmdline_matches_current_script(
+                    ["/usr/bin/python3", SUPERVISOR_SCRIPT_REL, "--config", "config.json"],
+                    str(supervisor.CANONICAL_ROOT),
+                )
+            )
+            self.assertFalse(
+                supervisor.supervisor_cmdline_matches_current_script(
+                    ["/usr/bin/python3", SUPERVISOR_SCRIPT_REL, "--config", "config.json"],
+                    "/tmp/premerge-abc123/candidate",
+                )
+            )
 
     def test_terminate_older_supervisors_kills_only_older_matching_processes(self) -> None:
         config = {"activity_log": "/tmp/fake-log.jsonl"}
