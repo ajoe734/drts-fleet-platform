@@ -1027,7 +1027,7 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(chosen, ("codex", "Codex"))
 
-    def test_chair_reviewer_skips_stale_adapter_capability_mismatch(self) -> None:
+    def test_chair_reviewer_uses_provider_capability_as_lane_authority(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "event-queue.jsonl").write_text("", encoding="utf-8")
@@ -1059,7 +1059,7 @@ class ChairmanFlowTests(unittest.TestCase):
 
             chosen = supervisor.choose_chair_reviewer(config, state, status, provider_report)
 
-        self.assertEqual(chosen, ("codex", "Codex"))
+        self.assertEqual(chosen, ("gemini", "Gemini"))
 
 
     def test_urgent_chair_review_can_recover_busy_lane_when_capacity_available(self) -> None:
@@ -1385,6 +1385,7 @@ class ChairmanFlowTests(unittest.TestCase):
             (root / "event-queue.jsonl").write_text("", encoding="utf-8")
             config = {
                 "agents": {"claude": {"display_name": "Claude", "provider": "claude"}},
+                "providers": {"claude": {"delivery_mode": "claude_cli"}},
                 "chair_review": {"enabled": True, "review_dir": str(root / "chair-reviews")},
                 "paths": {
                     "status_file": str(root / "ai-status.json"),
@@ -1659,6 +1660,7 @@ class ChairmanFlowTests(unittest.TestCase):
             (root / "event-queue.jsonl").write_text("", encoding="utf-8")
             config = {
                 "agents": {"claude": {"display_name": "Claude", "provider": "claude"}},
+                "providers": {"claude": {"delivery_mode": "claude_cli"}},
                 "chair_review": {"enabled": True, "review_dir": str(root / "chair-reviews")},
                 "paths": {
                     "status_file": str(root / "ai-status.json"),

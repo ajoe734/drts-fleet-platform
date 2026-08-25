@@ -63,6 +63,14 @@ class AntigravityAdapterTests(unittest.TestCase):
             self.assertEqual(command[0], "/usr/bin/agy")
             self.assertIn("--print", command)
             self.assertIn("--dangerously-skip-permissions", command)
+            self.assertIn("--effort", command)
+            self.assertEqual(command[command.index("--effort") + 1], "high")
+            self.assertIn("--output-format", command)
+            self.assertEqual(command[command.index("--output-format") + 1], "stream-json")
+            self.assertIn("--model", command)
+            self.assertEqual(command[command.index("--model") + 1], "gemini-3.1-pro-high")
+            self.assertIn("--print-timeout", command)
+            self.assertEqual(command[command.index("--print-timeout") + 1], "2h")
             print_index = command.index("--print")
             self.assertEqual(command[print_index + 1], "wake up")
             self.assertEqual(command[-2:], ["--print", "wake up"])
@@ -100,7 +108,7 @@ class AntigravityAdapterTests(unittest.TestCase):
             self.assertIn(str(tenant_repo), add_dirs)
             self.assertNotIn(str(stale_repo), add_dirs)
 
-    def test_falls_back_to_inbox_when_not_signed_in(self) -> None:
+    def test_automatic_lane_failure_is_not_silently_converted_to_inbox(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             config = _base_config(tmp, {
@@ -118,7 +126,8 @@ class AntigravityAdapterTests(unittest.TestCase):
             ):
                 result = AntigravityAdapter(config=config, provider_capabilities={}).deliver(request)
 
-            self.assertEqual(result.mode, "file_inbox")
+            self.assertEqual(result.mode, "antigravity")
+            self.assertFalse(result.ok)
             self.assertFalse(result.auto_delivered)
             self.assertTrue(result.manual_confirmation_required)
             self.assertIn("sign in", (result.notes or "").lower())

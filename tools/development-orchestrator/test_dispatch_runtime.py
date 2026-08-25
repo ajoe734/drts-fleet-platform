@@ -78,6 +78,17 @@ class ProcessQueueDispatchGuardTests(EvidenceOutputIsolation, unittest.TestCase)
         self.assertEqual(request.provider, "qwen")
         self.assertEqual(request.metadata["model_preference"], "qwen3-coder-plus")
 
+    def test_build_request_rejects_provider_without_delivery_mode(self) -> None:
+        config = {
+            "agents": {
+                "qwen": {"id": "qwen", "display_name": "Qwen", "provider": "qwen"}
+            },
+            "providers": {"qwen": {}},
+        }
+
+        with self.assertRaisesRegex(ValueError, "no configured delivery_mode"):
+            supervisor.build_request(config, {"target_agent": "qwen", "message": "wake"})
+
     def test_skips_stale_owned_dispatch_event_after_task_completion(self) -> None:
         queued_task = {
             "id": "BUS-VAL-001",

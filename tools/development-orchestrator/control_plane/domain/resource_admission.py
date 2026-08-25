@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 
 ACTIVE_EXECUTION_STATUSES = frozenset(
-    {"running", "started", "draining", "fallback", "retry_backoff", "stalled"}
+    {"running", "started", "draining", "retry_backoff"}
 )
 ACTIVE_CAPACITY_STATUSES = ACTIVE_EXECUTION_STATUSES | frozenset(
     {"waiting_approval", "suspended_approval", "manual_pending"}

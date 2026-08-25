@@ -27,8 +27,8 @@ def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("max_dispatches_per_tick", 4)
     # Dispatch cooldown: a *running* worker dispatched within the last
     # N seconds is protected from voluntary supersede (assignment-moved
-    # or priority-escalation paths). Dead, stalled, and fallback workers
-    # are NOT protected — recovery flows still work. Default 300s
+    # or priority-escalation paths). Non-running workers are NOT protected;
+    # recovery flows still work. Default 300s
     # (5 min) is enough to absorb a normal supervisor reshuffle without
     # killing real work; set to 0 to disable. See worker_in_dispatch_cooldown.
     settings.setdefault("dispatch_cooldown_seconds", 300)

@@ -30,7 +30,7 @@
       }
     },
     "gemini2": {
-      "gemini": {
+      "antigravity": {
         // Keep Gemini2 on a separate account/quota from the primary Gemini lane.
         "config_home": "~/.gemini2-home",
         // Workspace/school accounts need a Google Cloud project for Gemini Code Assist.
@@ -41,7 +41,11 @@
           "GOOGLE_CLOUD_PROJECT_ID": "YOUR_WORKSPACE_GCA_PROJECT_ID",
           "GOOGLE_CLOUD_LOCATION": "us-central1"
         },
-        "model": "gemini-2.5-flash-lite"
+        "model_rotation": {
+          "enabled": true,
+          "primary": "gemini-3.1-pro-high",
+          "fallback": "claude-sonnet-4-6"
+        }
       }
     }
   }

@@ -43,7 +43,6 @@ from control_plane.domain.worker_lifecycle import (
     heartbeat_lag_seconds,
     parse_worker_dispatched_at,
     trim_worker_history,
-    worker_last_activity_at,
     worker_reported_outcome,
     worker_supports_approval_resume,
     ACTIVE_WORKER_STATUSES as ACTIVE_RUNTIME_STATUSES,
@@ -88,16 +87,12 @@ from control_plane.infra.agent_directory import (
     status_agent_names_by_lane,
 )
 from control_plane.infra.host_probes import (
-    observe_worker_process_activity,
-    worker_process_tree_cpu_ticks,
-    worker_unit_cpu_usage,
     _current_cgroup_path,
     _host_available_memory_bytes,
     _read_cgroup_number,
     _read_memory_pressure_avg10,
     _sd_notify,
     _signal_worker_pid,
-    parse_proc_stat_process_accounting,
     reap_child_pid,
     reap_finished_children,
 )
@@ -115,6 +110,9 @@ from control_plane.infra.runtime_repo import (
 )
 from control_plane.infra.worker_failure_detector import (
     WorkerFailureSignal,
+    detect_failure_signal_in_lines,
+    # Raw-log helpers remain a public utility; the supervisor loop consumes
+    # only the normalized observation returned by update_from_log().
     detect_worker_failure,
     detect_worker_failure_signal,
 )
@@ -176,6 +174,7 @@ from common import (
     ROTATION_PRIMARY_SLOT,
     agent_config_for,
     antigravity_rotation_config,
+    apply_orchestrator_runtime_env,
     apply_worker_unit_env,
     background_process_pid,
     canonical_relpath,
@@ -213,10 +212,6 @@ URL_PATTERN = re.compile(r"https://github\.com/[^\s)]+")
 
 LOCAL_TZ = ZoneInfo("Asia/Taipei")
 SUPERVISOR_LOG_QUIET = False
-# Process-lifetime counter for the fallback-reap oscillation breaker. Kept as a
-# module global (not in `state`) because `state` is reloaded from disk each cycle,
-# which would reset per-cycle increments and defeat the cap. Resets on restart.
-_FALLBACK_REAP_COUNTS: dict[str, int] = {}
 MODE_BUCKETS = ("planning", "execution", "coordination")
 EXECUTION_DISPATCH_REASONS = {
     "review_ready_dispatch",
@@ -1737,6 +1732,11 @@ def summarize_command_for_activity_log(command: list[str]) -> dict[str, Any]:
 
 def build_request(config: dict[str, Any], event: dict[str, Any]) -> DeliveryRequest:
     agent = agent_config_for(config, event["target_agent"])
+    provider_key = str(agent.get("provider", agent["id"])).strip()
+    provider = (config.get("providers", {}).get(provider_key, {}) or {})
+    delivery_mode = str(provider.get("delivery_mode") or "").strip()
+    if not delivery_mode:
+        raise ValueError(f"Provider {provider_key!r} has no configured delivery_mode")
     metadata = dict(event.get("metadata", {}) or {})
     model_preference = resolve_agent_model_preference(config, agent)
     if model_preference and "model_preference" not in metadata:
@@ -1757,10 +1757,8 @@ def build_request(config: dict[str, Any], event: dict[str, Any]) -> DeliveryRequ
         ]
     return DeliveryRequest(
         agent_id=agent["id"],
-        provider=agent.get("provider", agent["id"]),
-        delivery_mode=config.get("providers", {}).get(agent.get("provider", agent["id"]), {}).get(
-            "delivery_mode", agent.get("adapter", "file_inbox")
-        ),
+        provider=provider_key,
+        delivery_mode=delivery_mode,
         message=event["message"],
         task_id=event.get("task_id"),
         reason=event.get("reason"),
@@ -1780,6 +1778,8 @@ def request_snapshot(request: DeliveryRequest) -> dict[str, Any]:
         "provider": request.provider,
         "delivery_mode": request.delivery_mode,
         "message": request.message,
+        "run_id": request.run_id,
+        "queue_event_id": request.queue_event_id,
         "task_id": request.task_id,
         "reason": request.reason,
         "context_files": list(request.context_files),
@@ -1794,6 +1794,8 @@ def request_from_snapshot(snapshot: dict[str, Any]) -> DeliveryRequest:
         provider=snapshot["provider"],
         delivery_mode=snapshot["delivery_mode"],
         message=snapshot["message"],
+        run_id=snapshot.get("run_id"),
+        queue_event_id=snapshot.get("queue_event_id"),
         task_id=snapshot.get("task_id"),
         reason=snapshot.get("reason"),
         context_files=list(snapshot.get("context_files", []) or []),
@@ -1896,55 +1898,49 @@ def start_worker_for_request(
     )
     attach_workspace_metadata(config, request, workspace_root, task_branch, base_branch, workspace_source)
 
-    adapter_name = delivery_mode_override or agent.get("adapter", "file_inbox")
-    adapter = build_adapter(adapter_name, config=config, provider_capabilities=provider_report)
-    result = adapter.deliver(request)
-    if not result.ok:
-        write_activity_log(
-            config,
-            {
-                "type": "worker_failed",
-                "task_id": request.task_id,
-                "target_agent": display_name_for(config, agent["id"]),
-                "delivery_mode": result.mode,
-                "message": result.error or result.notes or "Worker delivery failed.",
-                "queue_event_id": event_id_for_log,
-                "parent_run_id": parent_run_id,
-            },
-        )
-        return False, result.error or result.notes or "Worker delivery failed.", None
-
-    worker_run_id = result.run_id or new_runtime_id(request.provider)
+    worker_run_id = request.run_id or new_runtime_id(request.provider)
+    request.run_id = worker_run_id
+    request.queue_event_id = queue_event_id
+    request.metadata.update(
+        {
+            "run_id": worker_run_id,
+            "queue_event_id": queue_event_id,
+            "task_id": request.task_id,
+            "agent_id": agent["id"],
+            "provider": request.provider,
+        }
+    )
     provider_identity = provider_info_for_agent(config, provider_report, agent["id"]).get("identity")
-    # Branch-strategy routing: stamp the worker record with the integration
-    # track it belongs to so the dashboard, promote-nightly workflow, and
-    # any downstream PR-creation can see where this work is supposed to land.
-    # See docs/ops/branch-strategy.md §4 and orchestrator-integration-guide.md.
-    state.setdefault("workers", {})[worker_run_id] = {
+    worker = {
         "run_id": worker_run_id,
         "provider": request.provider,
         "agent_id": agent["id"],
         "identity": provider_identity if isinstance(provider_identity, dict) else None,
         "role": "chair" if request_metadata.get("control_role") == "chair" else "worker",
         "task_id": request.task_id,
-        "session_id": result.session_id,
-        "mode": result.mode,
-        "status": "manual_pending" if result.manual_confirmation_required and not result.auto_delivered else "running",
+        "session_id": None,
+        "mode": delivery_mode_override or request.delivery_mode,
+        "status": "started",
         "last_event_at": utc_now(),
+        "last_work_progress_at": utc_now(),
+        "log_offset_bytes": 0,
+        "provider_terminal_status": None,
+        "provider_terminal_reason": None,
+        "usage": {},
         "deferred_action": None,
-        "resume_token": result.resume_token or result.session_id,
-        "pr_url": normalize_pr_url(config, result.pr_url),
-        "session_url": result.session_url,
+        "resume_token": None,
+        "pr_url": None,
+        "session_url": None,
         "attempt_count": attempt_count,
         "queue_event_id": queue_event_id,
-        "command": result.command,
-        "log_path": result.log_path,
-        "payload_path": result.payload_path,
-        "result_path": (result.metadata or {}).get("result_path"),
-        "pid": result.pid,
-        "notes": result.notes,
-        "metadata": result.metadata,
-        "worker_unit": (result.metadata or {}).get("worker_unit"),
+        "command": [],
+        "log_path": None,
+        "payload_path": None,
+        "result_path": None,
+        "pid": None,
+        "notes": "Worker reserved before adapter spawn.",
+        "metadata": {},
+        "worker_unit": None,
         "workspace_root": str(workspace_root),
         "canonical_root": str(config_path(config, "status_file").parents[0].resolve()),
         "task_branch": task_branch,
@@ -1963,6 +1959,62 @@ def start_worker_for_request(
         "gate_layer": "feat" if routing else None,
         "routing_matched_rule": routing.matched_rule_index if routing else None,
     }
+    state.setdefault("workers", {})[worker_run_id] = worker
+    # Persist the lease before spawning. A worker may reach ai_status during
+    # startup, so validation must see the same run identity on disk first.
+    if (config.get("paths") or {}).get("state_file"):
+        save_runtime_state(config, state)
+
+    adapter_name = delivery_mode_override or request.delivery_mode
+    adapter = build_adapter(adapter_name, config=config, provider_capabilities=provider_report)
+    result = adapter.deliver(request)
+    if not result.ok:
+        worker["status"] = "failed"
+        worker["last_event_at"] = utc_now()
+        worker["last_error"] = result.error or result.notes or "Worker delivery failed."
+        worker["last_error_summary"] = worker["last_error"]
+        write_activity_log(
+            config,
+            {
+                "type": "worker_failed",
+                "task_id": request.task_id,
+                "target_agent": display_name_for(config, agent["id"]),
+                "delivery_mode": result.mode,
+                "message": result.error or result.notes or "Worker delivery failed.",
+                "queue_event_id": event_id_for_log,
+                "parent_run_id": parent_run_id,
+            },
+        )
+        return False, result.error or result.notes or "Worker delivery failed.", worker
+
+    if result.run_id and result.run_id != worker_run_id:
+        raise RuntimeError(
+            f"Adapter returned run_id {result.run_id!r}, expected supervisor lease {worker_run_id!r}"
+        )
+    # Branch-strategy routing: stamp the worker record with the integration
+    # track it belongs to so the dashboard, promote-nightly workflow, and
+    # any downstream PR-creation can see where this work is supposed to land.
+    # See docs/ops/branch-strategy.md §4 and orchestrator-integration-guide.md.
+    worker.update(
+        {
+            "session_id": result.session_id,
+            "mode": result.mode,
+            "status": "manual_pending" if result.manual_confirmation_required and not result.auto_delivered else "running",
+            "last_event_at": utc_now(),
+            "resume_token": result.resume_token or result.session_id,
+            "pr_url": normalize_pr_url(config, result.pr_url),
+            "session_url": result.session_url,
+            "command": result.command,
+            "log_path": result.log_path,
+            "payload_path": result.payload_path,
+            "result_path": (result.metadata or {}).get("result_path"),
+            "pid": result.pid,
+            "notes": result.notes,
+            "metadata": result.metadata,
+            "worker_unit": (result.metadata or {}).get("worker_unit"),
+            "request_snapshot": request_snapshot(request),
+        }
+    )
     clear_dispatch_pause(state, task_id=request.task_id, worker_run_id=worker_run_id)
     write_activity_log(
         config,
@@ -2184,38 +2236,86 @@ def normalize_pr_url(config: dict[str, Any], url: str | None) -> str | None:
     return url
 
 
-def file_iso_mtime(path: Path) -> str | None:
-    if not path.exists():
-        return None
-    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+MEANINGFUL_PROVIDER_EVENT_TYPES = frozenset(
+    {
+        "assistant",
+        "assistant_message",
+        "tool_start",
+        "tool_use",
+        "tool_result",
+        "tool_end",
+        "result",
+        "turn_complete",
+        "terminal",
+    }
+)
 
 
-def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
+def _provider_event_is_meaningful(payload: dict[str, Any]) -> bool:
+    event_type = str(payload.get("type") or payload.get("event") or "").strip().lower()
+    if event_type in MEANINGFUL_PROVIDER_EVENT_TYPES:
+        return True
+    role = str(payload.get("role") or "").strip().lower()
+    return role == "assistant" and bool(str(payload.get("text") or payload.get("content") or "").strip())
+
+
+def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> dict[str, Any]:
+    """Consume only complete, unread provider lines and normalize their evidence.
+
+    The file offset is the sole read cursor. Process liveness and file mtime are
+    deliberately not progress signals; only provider turns/tool activity and a
+    terminal result refresh ``last_work_progress_at``.
+    """
+    observation: dict[str, Any] = {"changed": False, "meaningful_progress": False, "failure_signal": None}
     log_path_value = worker.get("log_path")
     if not log_path_value:
-        return
+        return observation
     log_path = Path(log_path_value)
     if not log_path.exists():
-        return
-    mtime = file_iso_mtime(log_path)
-    if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
-        worker["last_event_at"] = mtime
+        return observation
     try:
-        content = log_path.read_text(encoding="utf-8", errors="ignore")
+        size = log_path.stat().st_size
+        offset = int(worker.get("log_offset_bytes") or 0)
+        if offset < 0 or offset > size:
+            offset = 0
+        with log_path.open("rb") as handle:
+            handle.seek(offset)
+            chunk = handle.read()
     except OSError:
-        return
-    for line in content.splitlines():
-        line = line.strip()
+        return observation
+    if not chunk:
+        return observation
+    complete_size = chunk.rfind(b"\n") + 1
+    if complete_size <= 0:
+        return observation
+    worker["log_offset_bytes"] = offset + complete_size
+    observation["changed"] = True
+    content = chunk[:complete_size].decode("utf-8", errors="ignore")
+    lines = content.splitlines()
+    worker["last_event_at"] = utc_now()
+    for raw_line in lines:
+        line = raw_line.strip()
         if not line.startswith("{"):
             continue
         try:
             payload = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(payload, dict):
+            continue
         if not worker.get("session_id") and payload.get("session_id"):
             worker["session_id"] = payload.get("session_id")
             worker.setdefault("resume_token", worker["session_id"])
         if payload.get("type") == "result":
+            worker["provider_terminal_status"] = "error" if payload.get("is_error") else str(
+                payload.get("stop_reason") or payload.get("outcome") or "completed"
+            )
+            worker["provider_terminal_reason"] = str(
+                payload.get("error") or payload.get("stop_reason") or payload.get("summary") or ""
+            ).strip() or None
+            usage = payload.get("usage") or payload.get("usage_metadata")
+            if isinstance(usage, dict):
+                worker["usage"] = dict(usage)
             if payload.get("stop_reason") == "tool_deferred":
                 worker["status"] = "waiting_approval"
                 worker["deferred_tool_use"] = payload.get("deferred_tool_use")
@@ -2223,6 +2323,8 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
                 worker["pr_url"] = normalize_pr_url(config, payload.get("pr_url"))
             if payload.get("session_url") and not worker.get("session_url"):
                 worker["session_url"] = payload.get("session_url")
+        if _provider_event_is_meaningful(payload):
+            observation["meaningful_progress"] = True
     if not worker.get("session_id"):
         for pattern in SESSION_ID_PATTERNS:
             match = pattern.search(content)
@@ -2241,13 +2343,18 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
             if "/agent" in url or "/sessions/" in url:
                 worker["session_url"] = url
                 break
+    failure_signal = detect_failure_signal_in_lines(lines)
+    if failure_signal:
+        observation["failure_signal"] = failure_signal
+    if observation["meaningful_progress"]:
+        worker["last_work_progress_at"] = utc_now()
+    return observation
 
 
 def resolve_terminal_worker_reason(worker: dict[str, Any], reason: str) -> str:
     if reason != PREMATURE_EXIT_REASON:
         return reason
-    detected = detect_worker_failure(worker)
-    return detected or reason
+    return str(worker.get("provider_terminal_reason") or reason)
 
 
 def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reason: str | None) -> dict[str, Any]:
@@ -2376,10 +2483,10 @@ def _antigravity_rotation_for_worker(config: dict[str, Any], worker: dict[str, A
     """Return the normalized model_rotation config for a worker's Antigravity lane
     (enabled=False for non-Antigravity lanes)."""
     agent = agent_config_for(config, str(worker.get("agent_id") or worker.get("provider") or ""))
-    if str(agent.get("adapter") or "") != "antigravity":
-        return {"enabled": False}
     provider_key = str(agent.get("provider") or "").strip()
     provider = config.get("providers", {}).get(provider_key, {})
+    if str(provider.get("delivery_mode") or "") != "antigravity":
+        return {"enabled": False}
     settings = provider.get("antigravity", {}) if isinstance(provider, dict) else {}
     return antigravity_rotation_config(settings)
 
@@ -2687,13 +2794,12 @@ def worker_reassignment_settings(config: dict[str, Any]) -> dict[str, Any]:
                 default_eligible_statuses.append(normalized)
     settings.setdefault("eligible_statuses", default_eligible_statuses or ["backlog", "todo", "in_progress", "review"])
     default_fallbacks = {
-        "Claude": ["Claude2", "Codex", "Codex2", "Gemini", "Gemini2", "Copilot"],
-        "Claude2": ["Codex", "Codex2", "Claude", "Gemini", "Gemini2", "Copilot"],
-        "Gemini": ["Gemini2", "Codex", "Codex2", "Claude", "Claude2", "Copilot"],
-        "Gemini2": ["Gemini", "Codex", "Codex2", "Claude", "Claude2", "Copilot"],
-        "Codex": ["Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
-        "Codex2": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
-        "Copilot": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"],
+        "Claude": ["Claude2", "Codex", "Codex2", "Gemini", "Gemini2"],
+        "Claude2": ["Codex", "Codex2", "Claude", "Gemini", "Gemini2"],
+        "Gemini": ["Gemini2", "Codex", "Codex2", "Claude", "Claude2"],
+        "Gemini2": ["Gemini", "Codex", "Codex2", "Claude", "Claude2"],
+        "Codex": ["Codex2", "Claude2", "Claude", "Gemini", "Gemini2"],
+        "Codex2": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2"],
     }
     settings.setdefault("owner_fallbacks", default_fallbacks)
     settings.setdefault("reviewer_fallbacks", default_fallbacks)
@@ -3176,7 +3282,9 @@ def agent_supports_auto_delivery(
         return False
     adapter_info = adapter_info_for_agent(config, report, agent_id)
     if adapter_info:
-        expected_adapter = str(agent_config_for(config, agent_id).get("adapter") or "").strip()
+        agent = agent_config_for(config, agent_id)
+        provider = (config.get("providers", {}) or {}).get(str(agent.get("provider") or ""), {})
+        expected_adapter = str(provider.get("delivery_mode") or "").strip()
         reported_adapter = str(adapter_info.get("adapter") or "").strip()
         if expected_adapter and reported_adapter and expected_adapter != reported_adapter:
             return False
@@ -3791,29 +3899,9 @@ def schedule_worker_retry(config: dict[str, Any], worker: dict[str, Any], reason
     worker["last_event_at"] = utc_now()
 
 
-def existing_file_inbox_fallback_run_id(state: dict[str, Any], queue_event_id: str | None, exclude_run_id: str | None = None) -> str | None:
-    if not queue_event_id:
-        return None
-    fallback_statuses = {"manual_pending", "waiting_approval", "running", "retry_backoff", "fallback", "completed"}
-    for candidate in state.get("workers", {}).values():
-        if candidate.get("run_id") == exclude_run_id:
-            continue
-        if candidate.get("queue_event_id") != queue_event_id:
-            continue
-        if candidate.get("mode") != "file_inbox":
-            continue
-        if candidate.get("status") not in fallback_statuses:
-            continue
-        run_id = candidate.get("run_id")
-        if run_id:
-            return str(run_id)
-    return None
-
-
-def maybe_trigger_retry_or_fallback(
+def maybe_trigger_retry(
     config: dict[str, Any],
     state: dict[str, Any],
-    provider_report: dict[str, Any],
     worker: dict[str, Any],
     reason: str,
     *,
@@ -3875,43 +3963,10 @@ def maybe_trigger_retry_or_fallback(
         )
         return True, True
 
-    if retry.get("fallback_mode") == "file_inbox":
-        existing_fallback = existing_file_inbox_fallback_run_id(
-            state,
-            worker.get("queue_event_id"),
-            exclude_run_id=worker.get("run_id"),
-        )
-        if existing_fallback:
-            worker["status"] = "fallback"
-            worker["fallback_run_id"] = existing_fallback
-            worker["last_event_at"] = utc_now()
-            return True, True
-        if not worker.get("fallback_run_id"):
-            ok, outcome, _ = start_worker_for_request(
-                config,
-                state,
-                provider_report,
-                request,
-                queue_event_id=worker.get("queue_event_id"),
-                attempt_count=int(worker.get("attempt_count", 0)) + 1,
-                event_id_for_log=worker.get("queue_event_id"),
-                parent_run_id=worker["run_id"],
-                delivery_mode_override="file_inbox",
-                activity_type="worker_fallback_started",
-                activity_message=f"Worker fell back to file inbox after transient failures: {reason}",
-            )
-            if ok:
-                worker["status"] = "fallback"
-                worker["fallback_run_id"] = outcome
-                worker["last_event_at"] = utc_now()
-                upsert_worker_dispatch_pause(
-                    state,
-                    worker,
-                    failure_kind=failure_kind,
-                    summary=failure_summary,
-                    raw_ref=evidence_ref,
-                )
-                return True, True
+    # Provider failures stay on the durable retry/rotation/reassignment path.
+    # A failed automatic lane must never be silently converted into a manual
+    # inbox attempt; FileInbox is only valid when explicitly configured as the
+    # request delivery mode.
     return False, False
 
 
@@ -4016,45 +4071,20 @@ def finalize_terminal_worker_outcome(
     return False
 
 
-def worker_expected_completion_statuses(
-    config: dict[str, Any],
-    worker: dict[str, Any],
-    task: dict[str, Any] | None,
-) -> set[str]:
-    settings = ready_dispatch_settings(config)
-    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
-    integrating_statuses = {"integrating"}
-    done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
-    statuses = set(done_statuses)
-
-    reason = str(((worker.get("request_snapshot") or {}).get("reason")) or "").strip().lower()
-    if reason in {"owned_ready_dispatch", "owned_in_progress_dispatch"}:
-        statuses.update(review_statuses)
-        return statuses
-    if reason == "review_ready_dispatch":
-        statuses.update(integrating_statuses)
-        return statuses
-    if reason == "acceptance_ready_dispatch":
-        # An acceptance worker either records all required same-SHA evidence,
-        # leaves the task in acceptance for a later evidence source, or
-        # reopens implementation when deployed verification finds a defect.
-        statuses.update({"acceptance", "in_progress"})
-        return statuses
-
+def worker_task_evidence_match(worker: dict[str, Any], task: dict[str, Any] | None) -> str:
+    """Classify task evidence as this run, another run, or absent."""
     if not task:
-        return statuses
-
-    schema = config.get("schema", {})
-    owner_field = schema.get("assignee_field", "owner")
-    reviewer_field = schema.get("reviewer_field", "reviewer")
-    agent_id = normalize_agent_id(str(worker.get("agent_id") or worker.get("provider") or ""))
-    owner_id = normalize_agent_id(str(task.get(owner_field) or ""))
-    reviewer_id = normalize_agent_id(str(task.get(reviewer_field) or ""))
-    if agent_id and agent_id == reviewer_id:
-        statuses.update(integrating_statuses)
-    elif agent_id and agent_id == owner_id:
-        statuses.update(review_statuses)
-    return statuses
+        return "absent"
+    run_id = str(worker.get("run_id") or "").strip()
+    provenance = (
+        task.get("candidate_worker_run_id"),
+        task.get("review_worker_run_id"),
+        task.get("acceptance_worker_run_id"),
+    )
+    values = {str(value).strip() for value in provenance if str(value or "").strip()}
+    if run_id in values:
+        return "match"
+    return "other" if values else "absent"
 
 
 def worker_progress_retry_seconds(config: dict[str, Any]) -> int:
@@ -4115,7 +4145,7 @@ def retry_due_workers(
     now: datetime,
 ) -> bool:
     changed = False
-    active_sibling_statuses = {"running", "manual_pending", "waiting_approval", "suspended_approval", "stalled", "fallback"}
+    active_sibling_statuses = {"running", "manual_pending", "waiting_approval", "suspended_approval"}
     for worker in list(state.get("workers", {}).values()):
         if worker.get("status") != "retry_backoff":
             continue
@@ -4265,15 +4295,18 @@ def resume_claude_worker(
         if runtime_overrides.get(key):
             Path(runtime_overrides[key]).mkdir(parents=True, exist_ok=True)
     env.update(runtime_overrides)
-    env.update(
-        {
-            "ORCH_RUN_ID": worker["run_id"],
-            "ORCH_TASK_ID": worker.get("task_id") or "",
-            "ORCH_AGENT_ID": worker.get("agent_id") or "",
-            "ORCH_SESSION_ID": str(session_id),
-        }
-    )
     metadata = worker.get("metadata") if isinstance(worker.get("metadata"), dict) else {}
+    env["ORCH_SESSION_ID"] = str(session_id)
+    apply_orchestrator_runtime_env(
+        env,
+        config,
+        metadata,
+        run_id=worker.get("run_id"),
+        queue_event_id=worker.get("queue_event_id"),
+        task_id=worker.get("task_id"),
+        agent_id=worker.get("agent_id"),
+        provider=provider_key,
+    )
     worker_unit = apply_worker_unit_env(env, config, worker["run_id"], metadata)
     process, _ = spawn_background_process(
         command,
@@ -4378,10 +4411,9 @@ def handle_worker_failure_signal(
         return True, True
 
     if is_transient_worker_failure(config, worker, failure_reason):
-        handled, changed = maybe_trigger_retry_or_fallback(
+        handled, changed = maybe_trigger_retry(
             config,
             state,
-            provider_report,
             worker,
             failure_reason,
             allow_provider_pause=authorized,
@@ -4416,14 +4448,22 @@ def finalize_exited_worker(
     *,
     current_mode: str,
     task_status: str,
-    expected_completion_statuses: set[str],
+    task: dict[str, Any] | None,
     now: datetime,
 ) -> bool:
     """Consume the outcome of a dead worker that has no provider failure."""
     if is_terminal_worker(worker) or worker.get("status") == "manual_pending":
         return False
 
-    if current_mode in {"planning", "coordination"}:
+    if worker.get("provider_terminal_status") == "error":
+        finalize_terminal_worker_outcome(
+            config,
+            state,
+            worker,
+            str(worker.get("provider_terminal_reason") or PREMATURE_EXIT_REASON),
+            allow_provider_pause=True,
+        )
+    elif current_mode in {"planning", "coordination"}:
         undelivered = undelivered_declared_outputs(worker)
         if undelivered:
             finalize_terminal_worker_outcome(
@@ -4448,7 +4488,7 @@ def finalize_exited_worker(
             },
         )
         finalize_queue_event_record(config, state, worker, "completed")
-    elif task_status in expected_completion_statuses:
+    elif worker_task_evidence_match(worker, task) == "match":
         worker["status"] = "completed"
         worker["last_event_at"] = utc_now()
         write_activity_log(
@@ -4457,7 +4497,7 @@ def finalize_exited_worker(
                 "type": "worker_completed",
                 "provider": worker.get("provider"),
                 "task_id": worker.get("task_id"),
-                "message": f"Background worker process exited after advancing the task to `{task_status}`.",
+                "message": f"Worker exited after its exact run evidence advanced the task to `{task_status}`.",
                 "worker_run_id": worker["run_id"],
                 "pr_url": worker.get("pr_url"),
                 "session_url": worker.get("session_url"),
@@ -4498,28 +4538,30 @@ def finalize_exited_worker(
             )
             return True
 
-        # The cached task snapshot can predate a worker's final status write.
-        fresh_task = task_index_from_status(config, load_status(config)).get(worker.get("task_id")) or {}
-        fresh_status = str(fresh_task.get("status") or "").lower()
-        if fresh_status and fresh_status != task_status and fresh_status in expected_completion_statuses:
-            worker["status"] = "completed"
+        evidence_match = worker_task_evidence_match(worker, task)
+        if evidence_match == "other":
+            worker["status"] = "superseded"
             worker["last_event_at"] = utc_now()
+            worker["last_error"] = "Task evidence belongs to another worker run."
             write_activity_log(
                 config,
                 {
-                    "type": "worker_completed",
+                    "type": "worker_superseded",
                     "provider": worker.get("provider"),
                     "task_id": worker.get("task_id"),
-                    "message": (
-                        f"Background worker process exited after advancing the task to `{fresh_status}` "
-                        "(observed on fresh re-read; cached snapshot predated the worker's status write)."
-                    ),
+                    "message": worker["last_error"],
                     "worker_run_id": worker["run_id"],
-                    "pr_url": worker.get("pr_url"),
-                    "session_url": worker.get("session_url"),
                 },
             )
             finalize_queue_event_record(config, state, worker, "completed")
+        elif worker.get("provider_terminal_status") and worker.get("provider_terminal_status") != "tool_deferred":
+            finalize_terminal_worker_outcome(
+                config,
+                state,
+                worker,
+                str(worker.get("provider_terminal_reason") or PREMATURE_EXIT_REASON),
+                allow_provider_pause=True,
+            )
         else:
             finalize_terminal_worker_outcome(
                 config,
@@ -4728,7 +4770,6 @@ def poll_workers(
     approval_state = load_approval_state(config)
     task_map = task_index_from_status(config, load_status(config))
     valid_queue_event_ids = set(state.get("queue", {}).get("events", {}))
-    redispatch_statuses = redispatch_candidate_statuses(config)
     active_worker_statuses = set(ACTIVE_RUNTIME_STATUSES)
     pending_by_run: dict[str, list[dict[str, Any]]] = {}
     resolved_by_run: dict[str, list[dict[str, Any]]] = {}
@@ -4741,22 +4782,18 @@ def poll_workers(
         if run_id:
             resolved_by_run.setdefault(run_id, []).append(item)
 
-    stall_after = float(config.get("supervisor", {}).get("stall_after_seconds", 300))
+    progress_timeout = float(
+        (config.get("supervisor") or {}).get("worker_progress_timeout_seconds", 600)
+    )
     now = datetime.now(timezone.utc)
     provider_report = provider_report or load_provider_report(config)
     changed = retry_due_workers(config, state, provider_report, now) or changed
     workers = state.setdefault("workers", {})
-    worker_cpu_ticks = worker_process_tree_cpu_ticks(
-        [int(worker["pid"]) for worker in workers.values() if str(worker.get("pid") or "").isdigit()]
-    )
-    for worker in state.get("workers", {}).values():
-        if not isinstance(worker, dict) or not str(worker.get("pid") or "").isdigit():
-            continue
-        unit_usage = worker_unit_cpu_usage(worker)
-        if unit_usage is not None:
-            worker_cpu_ticks[int(worker["pid"])] = unit_usage
     for run_id, worker in list(workers.items()):
-        previous_last_event_at = worker.get("last_event_at")
+        for obsolete in ("last_process_activity_at", "process_tree_cpu_ticks"):
+            if obsolete in worker:
+                worker.pop(obsolete, None)
+                changed = True
         task = task_map.get(worker.get("task_id"), {})
         # Finished attempts are immutable history. Their result was consumed
         # exactly once when they became terminal, so a later poll must not
@@ -4764,7 +4801,7 @@ def poll_workers(
         if is_terminal_worker(worker):
             continue
         if worker.get("queue_event_id") and worker.get("queue_event_id") not in valid_queue_event_ids:
-            if worker.get("status") in {"running", "waiting_approval", "retry_backoff", "manual_pending", "stalled"} and not pid_is_alive(worker.get("pid")):
+            if worker.get("status") in {"running", "waiting_approval", "retry_backoff", "manual_pending"} and not pid_is_alive(worker.get("pid")):
                 task_status = str(task_map.get(worker.get("task_id"), {}).get("status") or "").lower()
                 workers.pop(run_id, None)
                 write_activity_log(
@@ -4783,22 +4820,11 @@ def poll_workers(
                 )
                 changed = True
                 continue
-        update_from_log(config, worker)
+        observation = update_from_log(config, worker) or {}
+        changed = bool(observation.get("changed")) or changed
         alive = pid_is_alive(worker.get("pid"))
-        process_activity_advanced, process_activity_persisted = observe_worker_process_activity(
-            worker,
-            worker_cpu_ticks.get(int(worker["pid"])) if str(worker.get("pid") or "").isdigit() else None,
-            now,
-        )
-        changed = process_activity_persisted or changed
-        last_event_advanced = bool(
-            previous_last_event_at
-            and worker.get("last_event_at")
-            and worker.get("last_event_at") > previous_last_event_at
-        )
         current_mode = worker_runtime_mode(worker)
         task_status = str(task.get("status") or "").lower()
-        expected_completion_statuses = worker_expected_completion_statuses(config, worker, task)
         assignment_moved = (
             worker.get("queue_event_id")
             and current_mode == "execution"
@@ -4812,7 +4838,7 @@ def poll_workers(
         )
         supersede_reason = None
         console_reason = ""
-        if assignment_moved and not (not alive and task_status in expected_completion_statuses):
+        if assignment_moved and not (not alive and worker_task_evidence_match(worker, task) == "match"):
             supersede_reason = "Worker superseded after task responsibility moved to another agent."
         elif priority_escalation:
             supersede_reason = "Worker superseded to prioritize higher-priority review work."
@@ -4832,7 +4858,7 @@ def poll_workers(
         if (
             not alive
             and worker.get("queue_event_id")
-            and worker.get("status") in {"fallback", "manual_pending", "retry_backoff", "stalled", "waiting_approval", "suspended_approval"}
+            and worker.get("status") in {"manual_pending", "retry_backoff", "waiting_approval", "suspended_approval"}
             and not worker_matches_current_assignment(config, worker, task_map)
         ):
             workers.pop(run_id, None)
@@ -4855,74 +4881,6 @@ def poll_workers(
             )
             changed = True
             continue
-        provider_info = (provider_report or {}).get("providers", {}).get(str(worker.get("provider") or ""), {})
-        # Oscillation breaker: if the local CLI worker keeps transient-failing and
-        # falling back to file_inbox while the health probe reports the provider
-        # "recovered", the reap-drop-then-redispatch below spins forever (burning
-        # quota, never completing). Cap the number of times we drop-and-redispatch
-        # a given queue event; once capped, keep the file_inbox fallback in place so
-        # the task can actually be delivered via the inbox path instead of looping.
-        # Key on task_id (stable across redispatches) rather than queue_event_id,
-        # which can be regenerated on each redispatch and would defeat the cap.
-        _fallback_reap_key = str(worker.get("task_id") or worker.get("queue_event_id") or "")
-        _fallback_reap_counts = _FALLBACK_REAP_COUNTS
-        _fallback_reap_cap = int(
-            (config.get("supervisor", {}) or {}).get("fallback_reap_redispatch_cap", 4)
-        )
-        _fallback_reap_seen = int(_fallback_reap_counts.get(_fallback_reap_key, 0)) if _fallback_reap_key else 0
-        _fallback_reap_eligible = (
-            not alive
-            and worker.get("queue_event_id")
-            and worker.get("status") == "manual_pending"
-            and worker.get("mode") == "file_inbox"
-            and worker_matches_current_assignment(config, worker, task_map)
-            and task_status in redispatch_statuses
-            and provider_info.get("auth_ready")
-            and provider_info.get("local_cli_worker_supported")
-        )
-        if _fallback_reap_eligible and _fallback_reap_seen < _fallback_reap_cap:
-            if _fallback_reap_key:
-                _fallback_reap_counts[_fallback_reap_key] = _fallback_reap_seen + 1
-            workers.pop(run_id, None)
-            finalize_queue_event_record(
-                config,
-                state,
-                worker,
-                "completed",
-                "Dropped inbox fallback after provider auth recovered; task will be redispatched automatically.",
-            )
-            write_activity_log(
-                config,
-                {
-                    "type": "worker_reaped",
-                    "provider": worker.get("provider"),
-                    "task_id": worker.get("task_id"),
-                    "message": "Dropped inbox fallback after provider auth recovered; task will be redispatched automatically.",
-                    "worker_run_id": worker.get("run_id"),
-                },
-            )
-            changed = True
-            continue
-        if _fallback_reap_eligible and _fallback_reap_seen >= _fallback_reap_cap:
-            # Capped: stop dropping the fallback. Let the file_inbox delivery stand
-            # so the task can complete via the inbox path, and stop the redispatch
-            # storm. Log once per worker so the condition is visible.
-            if not worker.get("fallback_reap_capped_logged"):
-                worker["fallback_reap_capped_logged"] = True
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_reaped",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": (
-                            f"Fallback reap/redispatch oscillation capped at {_fallback_reap_cap}; "
-                            "keeping file_inbox delivery to break the loop."
-                        ),
-                        "worker_run_id": worker.get("run_id"),
-                    },
-                )
-            continue
         pending = pending_by_run.get(worker["run_id"], [])
         resolved = resolved_by_run.get(worker["run_id"], [])
         stop_processing, approval_changed = handle_worker_approval_state(
@@ -4939,7 +4897,7 @@ def poll_workers(
             continue
 
         if alive:
-            live_failure_signal = detect_worker_failure_signal(worker)
+            live_failure_signal = observation.get("failure_signal")
             if live_failure_signal:
                 handled, failure_changed = handle_worker_failure_signal(
                     config,
@@ -4953,55 +4911,23 @@ def poll_workers(
                 changed = failure_changed or changed
                 if handled:
                     continue
-            if worker.get("status") == "stalled" and (last_event_advanced or process_activity_advanced):
-                worker["status"] = "running"
-                worker["last_event_at"] = worker.get("last_event_at") or utc_now()
-                write_activity_log(
-                    config,
-                    {
-                        "type": "worker_recovered",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": "Worker produced new output or local process activity after being marked stalled; status restored to running.",
-                        "worker_run_id": worker["run_id"],
-                    },
-                )
-                console_log(
-                    f"worker recovered: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
-                    quiet=SUPERVISOR_LOG_QUIET,
-                )
-                changed = True
-                continue
-            last_activity = worker_last_activity_at(worker)
-            if last_activity:
-                last_dt = datetime.fromisoformat(last_activity.replace("Z", "+00:00"))
-                stalled_for_seconds = (now - last_dt).total_seconds()
-                if worker.get("status") == "stalled" and stalled_for_seconds >= stall_after * 2:
+            if worker.get("status") in {"running", "started"}:
+                progress_at = parse_runtime_timestamp(worker.get("last_work_progress_at"))
+                if progress_at is not None and (now - progress_at).total_seconds() >= progress_timeout:
                     terminate_worker_pid(worker.get("pid"))
-                    reason = f"Worker remained stalled for {int(stalled_for_seconds)} seconds and was terminated for redispatch."
+                    reason = (
+                        f"Worker produced no meaningful provider progress for {int(progress_timeout)} seconds; "
+                        "terminated for retry."
+                    )
                     finalize_terminal_worker_outcome(config, state, worker, reason)
                     console_log(
-                        f"worker terminated after extended stall: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
+                        f"worker terminated after progress timeout: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
                         quiet=SUPERVISOR_LOG_QUIET,
-                    )
-                    changed = True
-                    continue
-                if (now - last_dt).total_seconds() >= stall_after and worker.get("status") != "stalled":
-                    worker["status"] = "stalled"
-                    write_activity_log(
-                        config,
-                        {
-                            "type": "worker_stalled",
-                            "provider": worker.get("provider"),
-                            "task_id": worker.get("task_id"),
-                            "message": f"Worker appears stalled after {int(stall_after)} seconds.",
-                            "worker_run_id": worker["run_id"],
-                        },
                     )
                     changed = True
             continue
 
-        failure_signal = detect_worker_failure_signal(worker)
+        failure_signal = observation.get("failure_signal")
         if failure_signal and worker.get("status") != "failed":
             handled, failure_changed = handle_worker_failure_signal(
                 config,
@@ -5022,7 +4948,7 @@ def poll_workers(
             worker,
             current_mode=current_mode,
             task_status=task_status,
-            expected_completion_statuses=expected_completion_statuses,
+            task=task,
             now=now,
         ) or changed
     return changed
@@ -5060,8 +4986,8 @@ def worker_in_dispatch_cooldown(
 ) -> bool:
     """Return True if the worker is within the dispatch cooldown window.
 
-    Cooldown only protects *running* workers — stalled / fallback / etc.
-    workers must remain recoverable via the normal supersede paths.
+    Cooldown only protects *running* workers. Other worker states remain
+    recoverable via the normal supersede paths.
 
     Returns False when:
       - cooldown_seconds <= 0 (feature disabled)
@@ -5197,7 +5123,6 @@ def prune_event_queue(config: dict[str, Any], state: dict[str, Any]) -> bool:
                 "started",
                 "manual_pending",
                 "retry_backoff",
-                "stalled",
             }:
                 record["status"] = "queued"
                 record.pop("processed_at", None)
@@ -6533,7 +6458,7 @@ def create_chair_workspace_baseline_task(
         config,
         state,
         provider_report,
-        [preferred_owner or "", "Claude", "Codex", "Claude2", "Codex2", "Gemini2", "Gemini", "Copilot"],
+        [preferred_owner or "", "Claude", "Codex", "Claude2", "Codex2", "Gemini2", "Gemini"],
         exclude=set(),
     )
     if owner is None:
@@ -6542,7 +6467,7 @@ def create_chair_workspace_baseline_task(
         config,
         state,
         provider_report,
-        ["Codex", "Claude", "Claude2", "Codex2", "Gemini2", "Gemini", "Copilot"],
+        ["Codex", "Claude", "Claude2", "Codex2", "Gemini2", "Gemini"],
         exclude={owner},
     )
     if reviewer is None:
@@ -6800,7 +6725,7 @@ def create_chair_unblock_task(
         config,
         state,
         provider_report,
-        [requested_owner, parent_owner, "Codex", "Codex2", "Claude2", "Claude", "Gemini2", "Gemini", "Copilot"],
+        [requested_owner, parent_owner, "Codex", "Codex2", "Claude2", "Claude", "Gemini2", "Gemini"],
         exclude=set(),
     )
     if owner is None:
@@ -6809,7 +6734,7 @@ def create_chair_unblock_task(
         config,
         state,
         provider_report,
-        [requested_reviewer, parent_reviewer, "Codex2", "Codex", "Claude2", "Claude", "Gemini2", "Gemini", "Copilot"],
+        [requested_reviewer, parent_reviewer, "Codex2", "Codex", "Claude2", "Claude", "Gemini2", "Gemini"],
         exclude={owner},
     )
     if reviewer is None:

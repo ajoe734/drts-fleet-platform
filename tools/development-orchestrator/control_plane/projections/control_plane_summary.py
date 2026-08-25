@@ -16,11 +16,22 @@ from control_plane.infra.queue_repo import load_event_queue
 
 
 def control_plane_summary_path(config: dict[str, Any]) -> Path:
-    return config_path(
-        config,
-        "control_plane_summary",
-        ".orchestrator/projections/control-plane-summary.json",
+    canonical_root = config_path(config, "status_file").parent.resolve()
+    configured = (config.get("paths") or {}).get("control_plane_summary")
+    candidate = Path(str(configured)).expanduser() if configured else Path(
+        ".orchestrator/projections/control-plane-summary.json"
     )
+    if not candidate.is_absolute():
+        candidate = canonical_root / candidate
+    candidate = candidate.resolve()
+    try:
+        candidate.relative_to(canonical_root)
+    except ValueError:
+        # A summary outside the status root is a stale-state hazard: dashboards
+        # can read an older projection while the supervisor updates canonical
+        # task/runtime files. Always collapse it to the canonical projection.
+        candidate = canonical_root / ".orchestrator/projections/control-plane-summary.json"
+    return candidate
 
 
 def build_control_plane_summary(

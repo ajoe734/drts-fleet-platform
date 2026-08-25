@@ -586,7 +586,19 @@ def candidate_is_locked(task: dict[str, Any]) -> bool:
 
 def clear_candidate_evidence(task: dict[str, Any], *, preserve_failed_sha: bool = False) -> None:
     candidate_sha = task.get("candidate_sha") if preserve_failed_sha else None
-    for key in ("candidate_sha", "candidate_branch", "reviewed_sha", "ci_sha", "ci_status", "ci_run_url", "pr_url", "merge_sha"):
+    for key in (
+        "candidate_sha",
+        "candidate_branch",
+        "candidate_worker_run_id",
+        "reviewed_sha",
+        "review_worker_run_id",
+        "ci_sha",
+        "ci_status",
+        "ci_run_url",
+        "pr_url",
+        "merge_sha",
+        "acceptance_worker_run_id",
+    ):
         task.pop(key, None)
     if candidate_sha:
         task["candidate_sha"] = candidate_sha
@@ -1961,6 +1973,7 @@ def command_handoff(state: dict[str, Any], args: list[str]) -> None:
     task = get_task(state, task_id)
     if task is None:
         raise SystemExit(f"Unknown task: {task_id}")
+    run_id = os.environ.get("ORCH_RUN_ID", "").strip() or None
     if task.get("owner") != actor:
         raise SystemExit(f"Only the owner ({task.get('owner')}) can hand off {task_id} for review")
     if task.get("reviewer") != to_agent:
@@ -1984,6 +1997,8 @@ def command_handoff(state: dict[str, Any], args: list[str]) -> None:
     clear_candidate_evidence(task)
     task["candidate_sha"] = candidate_sha
     task["candidate_branch"] = candidate_branch
+    if run_id:
+        task["candidate_worker_run_id"] = run_id
     pr_url = os.environ.get("PR_URL", "").strip()
     if pr_url:
         task["pr_url"] = pr_url
@@ -2090,6 +2105,7 @@ def command_approve(state: dict[str, Any], args: list[str]) -> None:
     task = get_task(state, task_id)
     if task is None:
         raise SystemExit(f"Unknown task: {task_id}")
+    run_id = os.environ.get("ORCH_RUN_ID", "").strip() or None
     if task.get("reviewer") != actor:
         raise SystemExit(f"Only the reviewer ({task.get('reviewer')}) can approve {task_id}")
     if task.get("status") != "review":
@@ -2103,6 +2119,8 @@ def command_approve(state: dict[str, Any], args: list[str]) -> None:
 
     timestamp = iso_now()
     task["reviewed_sha"] = reviewed_sha
+    if run_id:
+        task["review_worker_run_id"] = run_id
     task["last_update"] = timestamp
     task["next"] = message
     task.pop("waiting_for", None)
@@ -2228,6 +2246,7 @@ def command_record_acceptance(state: dict[str, Any], args: list[str]) -> None:
     if task is None:
         raise SystemExit(f"Unknown task: {task_id}")
     actor = current_actor()
+    run_id = os.environ.get("ORCH_RUN_ID", "").strip() or None
     allowed = {canonical_agent_name(task.get("owner")), canonical_agent_name(task.get("reviewer")), "Supervisor"}
     if actor not in allowed:
         raise SystemExit(f"Only the owner, reviewer, or Supervisor can record acceptance for {task_id}")
@@ -2243,6 +2262,8 @@ def command_record_acceptance(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit("ACCEPTANCE_EVIDENCE_JSON must include at least one required evidence key")
     validate_acceptance_evidence(task, evidence)
     task.setdefault("acceptance_evidence", {}).update(evidence)
+    if run_id:
+        task["acceptance_worker_run_id"] = run_id
     timestamp = iso_now()
     transition_after_merge(state, task, message=message, timestamp=timestamp)
     append_log(

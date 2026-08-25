@@ -508,7 +508,7 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
             "task_id": event.get("task_id"),
             "target_agent": display_name_for(config, agent["id"]),
             "delivery_mode": config.get("providers", {}).get(agent.get("provider", agent["id"]), {}).get(
-                "delivery_mode", agent.get("adapter", "file_inbox")
+            "delivery_mode", "file_inbox"
             ),
             "message": f"Wake-up queued for supervisor: {event.get('reason')}",
             "queue_event_id": queue_payload["event_id"],
