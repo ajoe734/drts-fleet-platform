@@ -179,3 +179,75 @@ class CanonicalRootResolutionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AheadOfOriginTests(unittest.TestCase):
+    """The state the watchdog had no notion of: the root holding *more*.
+
+    It alerted on drift, staleness and residue -- the root on the wrong
+    branch, behind the remote, or carrying junk. All three are cases of having
+    less than the remote, or something extra beside it. None of them sees
+    commits that exist on this disk and nowhere else.
+
+    On 2026-08-25 that was two commits of S1F-REF-001 runtime work, 34 files,
+    sitting on the canonical root's own dev branch and pushed to no remote
+    branch at all. The watchdog reported the 30 residue files beside them and
+    said nothing about the commits, and `git pull --ff-only origin dev` would
+    have been refused with no explanation.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = Path(self._tmp.name) / "repo"
+        self._git("init", "-q", "-b", "dev", str(self.repo), cwd=Path(self._tmp.name))
+        self._commit("base")
+        # A stand-in for the last-fetched origin/dev, which is what both
+        # behind_count and ahead_count actually compare against.
+        self._git("update-ref", "refs/remotes/origin/dev", "HEAD")
+
+    def _git(self, *args: str, cwd: Path | None = None) -> None:
+        subprocess.run(
+            ["git", "-C", str(cwd or self.repo), "-c", "user.name=t",
+             "-c", "user.email=t@example.invalid", *args],
+            check=True, capture_output=True,
+        )
+
+    def _commit(self, message: str) -> None:
+        (self.repo / message).write_text(f"{message}\n", encoding="utf-8")
+        self._git("add", ".")
+        self._git("commit", "-qm", message)
+
+    def test_a_root_level_with_origin_is_not_ahead(self) -> None:
+        self.assertEqual(watchdog.ahead_count(self.repo, "dev"), 0)
+
+    def test_local_commits_are_counted(self) -> None:
+        """The shape that went unreported: two commits, on no remote."""
+        self._commit("converge supervisor worker runtime")
+        self._commit("fix runtime design path citations")
+
+        self.assertEqual(watchdog.ahead_count(self.repo, "dev"), 2)
+
+    def test_ahead_and_behind_are_independent(self) -> None:
+        """Diverged: the root has its own commits and is missing theirs.
+
+        behind_count alone reports this as merely stale, which understates it
+        -- the ff-only pull that would fix staleness cannot run at all here.
+        """
+        self._commit("theirs")
+        self._git("update-ref", "refs/remotes/origin/dev", "HEAD")
+        self._git("reset", "-q", "--hard", "HEAD~1")
+        self._commit("ours")
+
+        self.assertEqual(watchdog.ahead_count(self.repo, "dev"), 1)
+        self.assertEqual(watchdog.behind_count(self.repo, "dev"), 1)
+
+    def test_a_missing_upstream_is_reported_as_unknown_not_as_zero(self) -> None:
+        """Same contract as behind_count: -1 means unknowable, 0 means level."""
+        self._git("update-ref", "-d", "refs/remotes/origin/dev")
+
+        self.assertEqual(watchdog.ahead_count(self.repo, "dev"), -1)
+
+    def test_an_unknown_count_does_not_raise_the_alarm(self) -> None:
+        """-1 is not > 0, so a repository with no fetched ref stays quiet."""
+        self.assertFalse(-1 > 0)

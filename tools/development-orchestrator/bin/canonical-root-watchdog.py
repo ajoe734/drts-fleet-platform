@@ -194,6 +194,38 @@ def behind_count(repo: Path, branch: str) -> int:
         return -1
 
 
+def ahead_count(repo: Path, branch: str) -> int:
+    """Commits on HEAD that origin/<branch> does not have, last-fetched ref.
+
+    The mirror of behind_count, and the case this watchdog could not see. It
+    alerted on drift, staleness and residue -- all states where the root has
+    less than the remote, or junk beside it. It had no notion of the root
+    holding *more*: commits that exist on this disk and nowhere else.
+
+    On 2026-08-25 that was two commits of S1F-REF-001 runtime work, 34 files,
+    on the canonical root's own dev branch, pushed to no remote branch at all.
+    Nothing reported it, and the usual `git pull --ff-only origin dev` would
+    have been refused with no explanation of why.
+
+    Ahead is not by itself data loss -- the same commits may be safe on a
+    feature branch. `git rev-list HEAD --not --remotes` would say which, but
+    this repository fetches `+refs/heads/dev:refs/remotes/origin/dev` and
+    nothing else, so remote-tracking refs for other branches are absent or
+    stale and that question cannot be answered offline. Reporting ahead is
+    the honest signal available without a network call every 60s.
+    """
+    upstream = f"origin/{branch}"
+    if _git(repo, "rev-parse", "--verify", "--quiet", upstream).returncode != 0:
+        return -1
+    r = _git(repo, "rev-list", "--count", f"{upstream}..HEAD")
+    if r.returncode != 0:
+        return -1
+    try:
+        return int(r.stdout.strip())
+    except ValueError:
+        return -1
+
+
 def main(argv):
     p = argparse.ArgumentParser()
     p.add_argument("--observe", action="store_true", default=True)
@@ -227,10 +259,12 @@ def main(argv):
     clean = not pc
     residue = residue_files(ROOT_DIR)
     behind = behind_count(ROOT_DIR, branch)
+    ahead = ahead_count(ROOT_DIR, branch)
 
     drift = branch not in allowed
     stale = behind > args.stale_threshold
     has_residue = bool(residue)
+    has_unpushed = ahead > 0
 
     record = {
         "ts": ts,
@@ -240,6 +274,8 @@ def main(argv):
         "clean_tree": clean,
         "drift": drift,
         "behind_count": behind,
+        "ahead_count": ahead,
+        "has_unpushed": has_unpushed,
         "stale": stale,
         "stale_threshold": args.stale_threshold,
         "residue_file_count": len(residue),
@@ -266,7 +302,7 @@ def main(argv):
     #   0 = healthy
     #   1 = drift / staleness / residue (operator should look)
     #   2 = drift on a dirty tree under --enforce (can't auto-recover)
-    if not (drift or stale or has_residue):
+    if not (drift or stale or has_residue or has_unpushed):
         return 0
 
     if drift and not clean and args.enforce:
@@ -282,6 +318,11 @@ def main(argv):
         problems.append(f"{behind} commits behind origin/{branch}")
     if has_residue:
         problems.append(f"{len(residue)} residue file(s) e.g. {residue[:3]}")
+    if has_unpushed:
+        problems.append(
+            f"{ahead} commit(s) ahead of origin/{branch} — ff-only pull will refuse; "
+            "confirm they are pushed somewhere"
+        )
     print(f"WARN: canonical root unhealthy — {'; '.join(problems)}. "
           f"action={record['action']}", file=sys.stderr)
     return 1
