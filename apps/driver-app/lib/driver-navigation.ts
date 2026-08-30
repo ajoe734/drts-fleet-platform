@@ -493,3 +493,112 @@ export function getDriverLocationFixState({
     coordinateLabel: formatDriverCoordinate(location),
   };
 }
+
+export type DriverTabKey =
+  | "workbench"
+  | "jobs"
+  | "trip"
+  | "platform"
+  | "settings";
+
+export type DriverTabDefinition = {
+  readonly key: DriverTabKey;
+  readonly routeName: string;
+  readonly href: string;
+  readonly title: string;
+  readonly icon: string;
+  readonly activeIcon: string;
+  readonly accessibilityLabel: string;
+  readonly testID: string;
+};
+
+export const DRIVER_TABS: readonly DriverTabDefinition[] = [
+  {
+    key: "workbench",
+    routeName: "index",
+    href: "/",
+    title: "工作台",
+    icon: "speedometer-outline",
+    activeIcon: "speedometer",
+    accessibilityLabel: "工作台分頁",
+    testID: "driver-tab-workbench",
+  },
+  {
+    key: "jobs",
+    routeName: "jobs",
+    href: "/jobs",
+    title: "任務",
+    icon: "list-outline",
+    activeIcon: "list",
+    accessibilityLabel: "任務分頁",
+    testID: "driver-tab-jobs",
+  },
+  {
+    key: "trip",
+    routeName: "trip",
+    href: "/trip",
+    title: "行程",
+    icon: "navigate-outline",
+    activeIcon: "navigate",
+    accessibilityLabel: "行程分頁",
+    testID: "driver-tab-trip",
+  },
+  {
+    key: "platform",
+    routeName: "platform-presence",
+    href: "/platform-presence",
+    title: "平台",
+    icon: "layers-outline",
+    activeIcon: "layers",
+    accessibilityLabel: "平台分頁",
+    testID: "driver-tab-platform",
+  },
+  {
+    key: "settings",
+    routeName: "settings",
+    href: "/settings",
+    title: "設定",
+    icon: "settings-outline",
+    activeIcon: "settings",
+    accessibilityLabel: "設定分頁",
+    testID: "driver-tab-settings",
+  },
+] as const;
+
+export const DRIVER_ROUTE_TAB_MAP: Record<string, DriverTabKey> = {
+  "": "workbench",
+  index: "workbench",
+  jobs: "jobs",
+  trip: "trip",
+  "platform-presence": "platform",
+  settings: "settings",
+  // Sub-screens
+  onboarding: "workbench",
+  earnings: "settings",
+  shift: "workbench",
+  sos: "trip",
+  incident: "trip",
+  "safety-operator": "settings",
+};
+
+export function resolveActiveDriverTab(
+  routeName: string | undefined | null,
+  tabOverride?: DriverTabKey | null,
+): DriverTabKey {
+  if (tabOverride) {
+    return tabOverride;
+  }
+
+  if (!routeName) {
+    return "workbench";
+  }
+
+  const cleanName = routeName.replace(/^\//, "");
+  return DRIVER_ROUTE_TAB_MAP[cleanName] ?? "workbench";
+}
+
+export function isDriverTabRoute(routeName: string): boolean {
+  const cleanName = routeName.replace(/^\//, "");
+  return DRIVER_TABS.some((tab) => tab.routeName === cleanName);
+}
+

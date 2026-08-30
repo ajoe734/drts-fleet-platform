@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { Tabs, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { ThemeProvider } from "@react-navigation/native";
 import "react-native-reanimated";
@@ -25,6 +25,7 @@ import {
 
 import { driverNavigationTheme, driverTheme } from "@/lib/theme";
 import { driverRouteTitles } from "@/lib/strings";
+import { DriverBottomTabBar } from "@/components/driver-bottom-tab-bar";
 
 const DRIVER_SESSION_REVALIDATE_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -95,56 +96,92 @@ export default function RootLayout() {
     <ThemeProvider value={driverNavigationTheme}>
       <DriverHeartbeatBootstrap />
       <StatusBar style={driverTheme.mode === "dark" ? "light" : "dark"} />
-      <Stack
+      <Tabs
+        tabBar={(props) => <DriverBottomTabBar {...props} />}
         screenOptions={{
           headerShown: false,
-          headerStyle: {
+          tabBarStyle: {
             backgroundColor: driverTheme.colors.bgRaised,
+            borderTopColor: driverTheme.colors.border,
           },
-          headerTitleStyle: {
-            ...driverTheme.typography.sectionTitle,
-            color: driverTheme.colors.textStrong,
-          },
-          headerTintColor: driverTheme.colors.primary,
-          headerShadowVisible: false,
-          contentStyle: {
-            backgroundColor: driverTheme.colors.appBackground,
-          },
+          tabBarActiveTintColor: driverTheme.colors.primary,
+          tabBarInactiveTintColor: driverTheme.colors.textMuted,
         }}
       >
-        <Stack.Screen name="index" />
-        <Stack.Screen
-          name="onboarding"
-          options={{ title: driverRouteTitles.onboarding }}
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: "工作台",
+          }}
         />
-        <Stack.Screen name="jobs" options={{ title: driverRouteTitles.jobs }} />
-        <Stack.Screen name="trip" options={{ title: driverRouteTitles.trip }} />
-        <Stack.Screen
-          name="incident"
-          options={{ title: driverRouteTitles.incident }}
+        <Tabs.Screen
+          name="jobs"
+          options={{
+            title: "任務",
+          }}
         />
-        <Stack.Screen name="sos" options={{ title: driverRouteTitles.sos }} />
-        <Stack.Screen
-          name="earnings"
-          options={{ title: driverRouteTitles.earnings }}
+        <Tabs.Screen
+          name="trip"
+          options={{
+            title: "行程",
+          }}
         />
-        <Stack.Screen
+        <Tabs.Screen
           name="platform-presence"
-          options={{ title: driverRouteTitles.platformPresence }}
+          options={{
+            title: "平台",
+          }}
         />
-        <Stack.Screen
-          name="shift"
-          options={{ title: driverRouteTitles.shift }}
-        />
-        <Stack.Screen
+        <Tabs.Screen
           name="settings"
-          options={{ title: driverRouteTitles.settings }}
+          options={{
+            title: "設定",
+          }}
         />
-        <Stack.Screen
+        <Tabs.Screen
+          name="onboarding"
+          options={{
+            title: driverRouteTitles.onboarding,
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="earnings"
+          options={{
+            title: driverRouteTitles.earnings,
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="shift"
+          options={{
+            title: driverRouteTitles.shift,
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="sos"
+          options={{
+            title: driverRouteTitles.sos,
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="incident"
+          options={{
+            title: driverRouteTitles.incident,
+            href: null,
+          }}
+        />
+        <Tabs.Screen
           name="safety-operator"
-          options={{ title: driverRouteTitles.safetyOperator }}
+          options={{
+            title: driverRouteTitles.safetyOperator,
+            href: null,
+          }}
         />
-      </Stack>
+      </Tabs>
     </ThemeProvider>
   );
 }
+
