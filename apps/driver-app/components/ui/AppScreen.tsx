@@ -1,45 +1,63 @@
 import React from "react";
 import {
   StyleSheet,
-  View,
   SafeAreaView,
-  ScrollView,
   StatusBar,
   ViewStyle,
+  StyleProp,
 } from "react-native";
 import { Tokens } from "./tokens";
+import {
+  KeyboardAvoidingContainer,
+  type KeyboardAvoidingBehavior,
+} from "./KeyboardAvoidingContainer";
 
-interface AppScreenProps {
-  children: React.ReactNode;
+export interface AppScreenProps {
+  children?: React.ReactNode;
+  footer?: React.ReactNode;
   scrollable?: boolean;
-  style?: ViewStyle;
-  contentContainerStyle?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
+  contentContainerStyle?: StyleProp<ViewStyle>;
   backgroundColor?: string;
+  keyboardVerticalOffset?: number;
+  behavior?: KeyboardAvoidingBehavior;
+  keyboardShouldPersistTaps?: "always" | "never" | "handled";
+  extraBottomSpacing?: number;
+  testID?: string;
 }
 
 export const AppScreen: React.FC<AppScreenProps> = ({
   children,
+  footer,
   scrollable = true,
   style,
   contentContainerStyle,
   backgroundColor = Tokens.colors.appBg,
+  keyboardVerticalOffset,
+  behavior,
+  keyboardShouldPersistTaps = "handled",
+  extraBottomSpacing,
+  testID,
 }) => {
-  const Container = scrollable ? ScrollView : View;
-
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor }]}>
       <StatusBar
         barStyle={Tokens.mode === "dark" ? "light-content" : "dark-content"}
         backgroundColor={backgroundColor}
       />
-      <Container
-        style={[styles.container, style]}
-        contentContainerStyle={
-          scrollable ? [styles.scrollContent, contentContainerStyle] : undefined
-        }
+      <KeyboardAvoidingContainer
+        scrollable={scrollable}
+        style={style}
+        contentContainerStyle={contentContainerStyle}
+        keyboardVerticalOffset={keyboardVerticalOffset}
+        behavior={behavior}
+        keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+        extraBottomSpacing={extraBottomSpacing}
+        footer={footer}
+        testID={testID}
       >
         {children}
-      </Container>
+      </KeyboardAvoidingContainer>
     </SafeAreaView>
   );
 };
@@ -47,15 +65,5 @@ export const AppScreen: React.FC<AppScreenProps> = ({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-  },
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: Tokens.layout.pagePadding,
-    paddingTop: Tokens.spacing.sm,
-    paddingBottom: Tokens.spacing["3xl"],
-    gap: Tokens.layout.screenGap,
   },
 });

@@ -645,7 +645,41 @@ export default function ShiftScreen() {
 
   return (
     <View style={styles.screen}>
-      <AppScreen contentContainerStyle={styles.screenContent}>
+      <AppScreen
+        contentContainerStyle={styles.screenContent}
+        footer={
+          <BottomActionBar
+            notice={
+              activeShift
+                ? "完成下線打卡前，可先更新里程與位置。"
+                : gateBlocked
+                  ? (gate?.blockingReason?.title ?? "尚未符合上線條件。")
+                  : "上線打卡後才會建立 active shift。"
+            }
+          >
+            {activeShift ? (
+              <ActionButton
+                title={driverStrings.shift.punchOut}
+                onPress={handleClockOut}
+                variant="secondary"
+                loading={submitting}
+                disabled={hasValidationError}
+                style={[styles.bottomAction, styles.bottomDangerAction]}
+                textStyle={styles.bottomDangerText}
+              />
+            ) : (
+              <ActionButton
+                title={driverStrings.shift.punchIn}
+                onPress={handleClockIn}
+                variant="primary"
+                loading={submitting}
+                disabled={hasValidationError || gateBlocked}
+                style={styles.bottomAction}
+              />
+            )}
+          </BottomActionBar>
+        }
+      >
         <PageHeader
           title={driverStrings.shift.title}
           subtitle={activeShift ? "今日打卡記錄" : "準備開始班次"}
@@ -997,37 +1031,6 @@ export default function ShiftScreen() {
           icon="shield-checkmark"
         />
       </AppScreen>
-
-      <BottomActionBar
-        notice={
-          activeShift
-            ? "完成下線打卡前，可先更新里程與位置。"
-            : gateBlocked
-              ? (gate?.blockingReason?.title ?? "尚未符合上線條件。")
-              : "上線打卡後才會建立 active shift。"
-        }
-      >
-        {activeShift ? (
-          <ActionButton
-            title={driverStrings.shift.punchOut}
-            onPress={handleClockOut}
-            variant="secondary"
-            loading={submitting}
-            disabled={hasValidationError}
-            style={[styles.bottomAction, styles.bottomDangerAction]}
-            textStyle={styles.bottomDangerText}
-          />
-        ) : (
-          <ActionButton
-            title={driverStrings.shift.punchIn}
-            onPress={handleClockIn}
-            variant="primary"
-            loading={submitting}
-            disabled={hasValidationError || gateBlocked}
-            style={styles.bottomAction}
-          />
-        )}
-      </BottomActionBar>
     </View>
   );
 }

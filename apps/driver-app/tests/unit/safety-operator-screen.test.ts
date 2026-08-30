@@ -11,12 +11,22 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", () => ({
+  Platform: {
+    OS: "ios",
+    select: (obj: Record<string, unknown>) => obj.ios ?? obj.default,
+  },
+  KeyboardAvoidingView: "KeyboardAvoidingView",
+  Keyboard: { addListener: () => ({ remove: () => {} }), dismiss: () => {} },
   Pressable: "Pressable",
   ScrollView: "ScrollView",
   StyleSheet: { create: <T>(styles: T) => styles },
   Text: "Text",
   TextInput: "TextInput",
   View: "View",
+}));
+
+vi.mock("react-native-safe-area-context", () => ({
+  useSafeAreaInsets: () => ({ bottom: 34, top: 47, left: 0, right: 0 }),
 }));
 
 vi.mock("expo-router", () => ({
