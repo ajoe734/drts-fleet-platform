@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { REALM_COLORS, SURFACE_ACCENTS, type TokenMode } from "@drts/ui-tokens";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type {
   SubmitSafetyOperatorPreTripChecklistCommand,
   SubmitSafetyOperatorTakeoverReportResult,
@@ -348,7 +349,10 @@ function DetailRow({
   return (
     <View style={styles.detailRow}>
       <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={[styles.detailValue, danger ? styles.detailDanger : null]}>
+      <Text
+        style={[styles.detailValue, danger ? styles.detailDanger : null]}
+        selectable
+      >
         {value}
       </Text>
     </View>
@@ -424,10 +428,20 @@ function SOFrame({
   subtitle: string;
   children: ReactNode;
 }) {
+  const insets = useSafeAreaInsets();
+
   return (
-    <View style={styles.screen}>
-      <View style={styles.frameGlowTop} />
-      <View style={styles.frameGlowBottom} />
+    <View
+      style={[
+        styles.screen,
+        {
+          paddingTop: Math.max(insets?.top ?? 0, 16),
+          paddingBottom: Math.max(insets?.bottom ?? 0, 16),
+        },
+      ]}
+    >
+      <View style={styles.frameGlowTop} pointerEvents="none" />
+      <View style={styles.frameGlowBottom} pointerEvents="none" />
       <View style={styles.frameHeader}>
         <Text style={styles.frameEyebrow}>安全員模式</Text>
         <Text style={styles.frameTitle}>{title}</Text>
@@ -1890,23 +1904,27 @@ const styles = StyleSheet.create({
   detailRow: {
     flexDirection: "row",
     gap: 12,
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     paddingBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: THEME.colors.border,
+    flexWrap: "wrap",
   },
   detailLabel: {
-    flex: 1,
+    flexShrink: 0,
     color: THEME.colors.textMuted,
     fontSize: 12,
+    maxWidth: "45%",
   },
   detailValue: {
     flex: 1,
+    minWidth: 160,
     color: THEME.colors.textStrong,
     fontSize: 13,
     fontWeight: "700",
     textAlign: "right",
+    flexWrap: "wrap",
   },
   detailDanger: {
     color: THEME.colors.danger,

@@ -652,7 +652,7 @@ export default function SettingsScreen() {
                   <Text style={styles.deviceFieldLabel}>
                     {driverAuthStrings.devices.deviceIdLabel}
                   </Text>
-                  <Text style={styles.deviceFieldValue}>
+                  <Text style={styles.deviceFieldValue} selectable>
                     {getProvisionedSession()?.deviceId ?? (driverId ? `device-${driverId}` : "unknown-device")}
                   </Text>
                 </View>
@@ -660,7 +660,7 @@ export default function SettingsScreen() {
                   <Text style={styles.deviceFieldLabel}>
                     {driverAuthStrings.devices.bindingIdLabel}
                   </Text>
-                  <Text style={styles.deviceFieldValue}>
+                  <Text style={styles.deviceFieldValue} selectable>
                     {getProvisionedSession()?.bindingId ?? "bnd-active-001"}
                   </Text>
                 </View>
@@ -668,7 +668,7 @@ export default function SettingsScreen() {
                   <Text style={styles.deviceFieldLabel}>
                     {driverAuthStrings.devices.driverIdLabel}
                   </Text>
-                  <Text style={styles.deviceFieldValue}>
+                  <Text style={styles.deviceFieldValue} selectable>
                     {driverId || "尚未綁定"}
                   </Text>
                 </View>
@@ -911,18 +911,26 @@ const styles = StyleSheet.create({
   },
   deviceField: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
+    gap: Tokens.spacing.sm,
+    flexWrap: "wrap",
   },
   deviceFieldLabel: {
     ...Tokens.type.small,
     color: Tokens.colors.textMuted,
+    flexShrink: 0,
+    maxWidth: "45%",
   },
   deviceFieldValue: {
     ...Tokens.type.small,
     fontWeight: "600",
     color: Tokens.colors.textStrong,
     fontFamily: Tokens.fonts.mono,
+    flex: 1,
+    minWidth: 160,
+    textAlign: "right",
+    flexWrap: "wrap",
   },
   deviceActionsRow: {
     gap: Tokens.spacing.sm,

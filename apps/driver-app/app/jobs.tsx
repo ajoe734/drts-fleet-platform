@@ -910,74 +910,6 @@ function LayoutToggle({
   );
 }
 
-function DriverBottomTabs({
-  active,
-  jobsBadge,
-  onNavigate,
-}: {
-  active: "jobs" | "home" | "trip" | "platform" | "settings";
-  jobsBadge: number;
-  onNavigate: (route: string) => void;
-}) {
-  const items = [
-    { id: "home", label: "工作台", icon: "home-outline", route: "/" },
-    { id: "jobs", label: "任務", icon: "list-outline", route: "/jobs" },
-    { id: "trip", label: "行程", icon: "car-outline", route: "/trip" },
-    {
-      id: "platform",
-      label: "平台",
-      icon: "layers-outline",
-      route: "/platform-presence",
-      dot: true,
-    },
-    {
-      id: "settings",
-      label: "設定",
-      icon: "person-outline",
-      route: "/settings",
-    },
-  ] as const;
-
-  return (
-    <View style={styles.bottomTabs}>
-      {items.map((item) => {
-        const selected = item.id === active;
-        const hasDot = "dot" in item && Boolean(item.dot);
-        return (
-          <Pressable
-            key={item.id}
-            accessibilityRole="button"
-            onPress={() => onNavigate(item.route)}
-            style={styles.bottomTabItem}
-          >
-            <View style={styles.bottomTabIconWrap}>
-              <Ionicons
-                name={item.icon}
-                size={22}
-                color={selected ? THEME.accent : THEME.textDim}
-              />
-              {item.id === "jobs" && jobsBadge > 0 ? (
-                <View style={styles.bottomTabBadge}>
-                  <Text style={styles.bottomTabBadgeText}>{jobsBadge}</Text>
-                </View>
-              ) : null}
-              {hasDot ? <View style={styles.bottomTabDot} /> : null}
-            </View>
-            <Text
-              style={[
-                styles.bottomTabLabel,
-                selected && styles.bottomTabLabelActive,
-              ]}
-            >
-              {item.label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
 function TaskCard({
   task,
   order,
@@ -1699,16 +1631,7 @@ export default function JobsScreen() {
   }
 
   return (
-    <Shell
-      contentContainerStyle={styles.shellContent}
-      footer={
-        <DriverBottomTabs
-          active="jobs"
-          jobsBadge={needsActionCount}
-          onNavigate={(route) => router.push(route)}
-        />
-      }
-    >
+    <Shell contentContainerStyle={styles.shellContent}>
       <PageHeader
         title={layoutVariant === "A" ? driverStrings.jobs.title : "任務佇列"}
         subtitle={
@@ -2100,62 +2023,5 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     lineHeight: 16,
     color: THEME.textDim,
-  },
-  bottomTabs: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    backgroundColor: THEME.bgRaised,
-    borderTopWidth: 1,
-    borderTopColor: THEME.border,
-    paddingTop: 6,
-    paddingBottom: 8,
-    paddingHorizontal: 4,
-  },
-  bottomTabItem: {
-    flex: 1,
-    alignItems: "center",
-    gap: 3,
-    paddingVertical: 6,
-  },
-  bottomTabIconWrap: {
-    position: "relative",
-  },
-  bottomTabBadge: {
-    position: "absolute",
-    top: -4,
-    right: -8,
-    minWidth: 16,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 8,
-    backgroundColor: THEME.danger,
-    alignItems: "center",
-  },
-  bottomTabBadgeText: {
-    fontSize: 10,
-    lineHeight: 10,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  bottomTabDot: {
-    position: "absolute",
-    top: -2,
-    right: -2,
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: THEME.success,
-    borderWidth: 1,
-    borderColor: THEME.bgRaised,
-  },
-  bottomTabLabel: {
-    fontSize: 10.5,
-    lineHeight: 13,
-    fontWeight: "500",
-    color: THEME.textDim,
-  },
-  bottomTabLabelActive: {
-    fontWeight: "700",
-    color: THEME.accent,
   },
 });

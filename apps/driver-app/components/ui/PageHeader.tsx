@@ -40,9 +40,12 @@ const styles = StyleSheet.create({
     backgroundColor: Tokens.colors.bgRaised,
     borderBottomWidth: 1,
     borderBottomColor: Tokens.colors.border,
+    flexWrap: "wrap",
+    gap: Tokens.spacing.sm,
   },
   titleContainer: {
     flex: 1,
+    minWidth: 180,
     justifyContent: "center",
   },
   title: {
@@ -55,6 +58,6 @@ const styles = StyleSheet.create({
     color: Tokens.colors.textMuted,
   },
   rightElement: {
-    marginLeft: Tokens.spacing.md,
+    alignSelf: "center",
   },
 });
