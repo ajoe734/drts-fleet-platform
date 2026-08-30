@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import {
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -179,17 +180,24 @@ export function Shell({
     >
       {Platform.OS === "web" ? <View style={styles.phonePunchHole} /> : null}
       <ShellStatusBar theme={theme} />
-      <ScrollView
+      <KeyboardAvoidingView
         style={styles.shellScroll}
-        contentContainerStyle={[
-          styles.shellScrollContent,
-          contentContainerStyle,
-        ]}
-        showsVerticalScrollIndicator={false}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        {children}
-      </ScrollView>
-      {footer ? <View style={styles.shellFooter}>{footer}</View> : null}
+        <ScrollView
+          style={styles.shellScroll}
+          contentContainerStyle={[
+            styles.shellScrollContent,
+            contentContainerStyle,
+          ]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
+          {children}
+        </ScrollView>
+        {footer ? <View style={styles.shellFooter}>{footer}</View> : null}
+      </KeyboardAvoidingView>
     </View>
   );
 

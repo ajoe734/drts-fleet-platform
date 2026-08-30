@@ -470,7 +470,28 @@ export default function SettingsScreen() {
 
   return (
     <View style={styles.root}>
-      <AppScreen>
+      <AppScreen
+        footer={
+          <BottomActionBar>
+            <ActionButton
+              title={
+                saving
+                  ? "正在儲存…"
+                  : hasValidation
+                    ? "請先修正欄位"
+                    : dirty
+                      ? "儲存設定"
+                      : "目前無變更"
+              }
+              icon={saving ? undefined : "save-outline"}
+              onPress={handleSave}
+              loading={saving}
+              disabled={saveDisabled}
+              style={{ flex: 1 }}
+            />
+          </BottomActionBar>
+        }
+      >
         <View style={styles.heroHeader}>
           <Text style={styles.screenTitle}>設定</Text>
           <Text style={styles.screenSubtitle}>
@@ -718,25 +739,6 @@ export default function SettingsScreen() {
           </FormSection>
         </View>
       </AppScreen>
-
-      <BottomActionBar>
-        <ActionButton
-          title={
-            saving
-              ? "正在儲存…"
-              : hasValidation
-                ? "請先修正欄位"
-                : dirty
-                  ? "儲存設定"
-                  : "目前無變更"
-          }
-          icon={saving ? undefined : "save-outline"}
-          onPress={handleSave}
-          loading={saving}
-          disabled={saveDisabled}
-          style={{ flex: 1 }}
-        />
-      </BottomActionBar>
     </View>
   );
 }

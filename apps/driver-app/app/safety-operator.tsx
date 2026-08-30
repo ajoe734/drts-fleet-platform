@@ -15,6 +15,7 @@ import type {
 } from "@drts/contracts";
 
 import { driverTheme } from "@/lib/theme";
+import { KeyboardAvoidingContainer } from "@/components/ui/KeyboardAvoidingContainer";
 import {
   buildShiftHandoverCommand,
   buildTakeoverCommand,
@@ -1052,9 +1053,10 @@ export default function SafetyOperatorScreen() {
 
       <SOModeBar activeView={activeView} onChangeView={setActiveView} />
 
-      <ScrollView
+      <KeyboardAvoidingContainer
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         {!isProvisioned ? (
           <View style={styles.noticeBanner}>
@@ -1466,7 +1468,7 @@ export default function SafetyOperatorScreen() {
           onRetryOutstanding={() => void retryOutstandingQueueEntries()}
           onClearSynced={() => void clearSyncedQueueItems()}
         />
-      </ScrollView>
+      </KeyboardAvoidingContainer>
     </SOFrame>
   );
 }
