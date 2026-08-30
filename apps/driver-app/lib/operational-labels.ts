@@ -155,7 +155,7 @@ export function formatDriverServiceProductLabel(
     return locale === "zh" ? "產品待同步" : "Service Product Pending";
   }
 
-  return `${SERVICE_PRODUCT_LABELS[code][locale]} · ${code}`;
+  return SERVICE_PRODUCT_LABELS[code][locale];
 }
 
 export function formatDriverTaskTypeLabel(

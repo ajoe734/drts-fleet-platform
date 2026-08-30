@@ -87,18 +87,73 @@ const INITIAL_QUEUE_SNAPSHOT: SafetyOperatorQueueSnapshot = {
 const VIEW_TABS: Array<{
   id: SafetyOperatorView;
   label: string;
-  screenCode: string;
+  stageLabel: string;
 }> = [
-  { id: "provisioning", label: "資格", screenCode: "SO_Provisioning" },
-  { id: "shiftStart", label: "開班", screenCode: "SO_ShiftStart" },
-  { id: "vehicleAssign", label: "派車", screenCode: "SO_VehicleAssign" },
-  { id: "pretrip", label: "行前", screenCode: "SO_Pretrip" },
-  { id: "active", label: "監看", screenCode: "SO_ActiveTrip" },
-  { id: "takeover", label: "接管", screenCode: "SO_TakeoverReport" },
-  { id: "incident", label: "證據", screenCode: "SO_IncidentUpload" },
-  { id: "closeout", label: "結案", screenCode: "SO_TripCloseout" },
-  { id: "handover", label: "交班", screenCode: "SO_ShiftHandover" },
+  { id: "provisioning", label: "資格", stageLabel: "資格與沙盒確認" },
+  { id: "shiftStart", label: "開班", stageLabel: "開班準備" },
+  { id: "vehicleAssign", label: "派車", stageLabel: "派車與裝置綁定" },
+  { id: "pretrip", label: "行前", stageLabel: "行前檢查" },
+  { id: "active", label: "監看", stageLabel: "行程監看" },
+  { id: "takeover", label: "接管", stageLabel: "接管回報" },
+  { id: "incident", label: "證據", stageLabel: "事故證據" },
+  { id: "closeout", label: "結案", stageLabel: "行程結案" },
+  { id: "handover", label: "交班", stageLabel: "交班" },
 ];
+
+const SAFETY_OPERATOR_FIELD_LABELS: Record<string, string> = {
+  safetyOperatorId: "安全員編號",
+  sandboxProgramId: "沙盒計畫代號",
+  deviceId: "裝置識別碼",
+  activeAssignmentId: "目前任務代號",
+  matchedQualificationIds: "符合的資格項目",
+  shiftId: "班次代號",
+  experimentWindow: "開放時段",
+  coverageZone: "服務區域",
+  vehicleId: "車輛代號",
+  assignmentId: "任務代號",
+  orderId: "訂單代號",
+  vehicleAssignedAt: "派車時間",
+  clientGeneratedReportId: "回報編號",
+  serverReceivedAt: "伺服器接收時間",
+  incidentId: "事故代號",
+  bookmarkId: "標記代號",
+  evidenceArtifactIds: "證據檔案代號",
+  closeoutStatus: "結案狀態",
+  closeoutAt: "結案時間",
+  endLocation: "結束地點",
+  shiftStartedAt: "開班時間",
+};
+
+function formatSafetyOperatorFieldLabel(key: string): string {
+  return SAFETY_OPERATOR_FIELD_LABELS[key] ?? key.replace(/[_-]+/g, " ");
+}
+
+const CHECKLIST_ITEM_LABELS: Record<string, string> = {
+  vehicle_exterior: "車輛外觀",
+  cab_cleanliness: "車廂清潔",
+  seatbelts: "安全帶",
+  brakes: "煞車",
+  lights: "燈光",
+  tires: "輪胎",
+  mirrors: "後視鏡",
+  recorder_health: "行車記錄器",
+  autonomy_stack: "自動駕駛系統",
+  fallback_comms: "備援通訊設備",
+};
+
+function formatChecklistItemLabel(itemKey: string): string {
+  return CHECKLIST_ITEM_LABELS[itemKey] ?? itemKey.replace(/_/g, " ");
+}
+
+const CHECKLIST_STATUS_LABELS: Record<string, string> = {
+  pass: "通過",
+  fail: "未通過",
+  na: "不適用",
+};
+
+function formatChecklistStatusLabel(status: string): string {
+  return CHECKLIST_STATUS_LABELS[status] ?? "待確認";
+}
 
 function formatAt(value: string | null) {
   if (!value) {
@@ -133,7 +188,7 @@ function formatQueueKindLabel(kind: SafetyOperatorQueueEntry["kind"]): string {
     case "shift_handover":
       return "交班紀錄";
     default:
-      return kind;
+      return "其他項目";
   }
 }
 
@@ -148,7 +203,7 @@ function formatQueueStatusLabel(status: SafetyOperatorQueueStatus): string {
     case "synced":
       return "已同步";
     default:
-      return status;
+      return "狀態未知";
   }
 }
 
@@ -169,9 +224,9 @@ function describeQueueEntry(entry: SafetyOperatorQueueEntry): {
       const payload =
         entry.payload as Partial<SubmitSafetyOperatorPreTripChecklistCommand>;
       return {
-        summary: `${payload.items?.length ?? 0} 項檢查 · blocker ${
+        summary: `${payload.items?.length ?? 0} 項檢查 · 待處理 ${
           payload.blockerCodes?.length ?? 0
-        }`,
+        } 項`,
         detail: payload.notes ?? "行前檢查等待同步。",
       };
     }
@@ -192,10 +247,10 @@ function describeQueueEntry(entry: SafetyOperatorQueueEntry): {
       };
       return {
         summary: `${payload.evidenceArtifactIds?.length ?? 0} 份證據 · ${
-          payload.incidentId ?? "incident 未綁定"
+          payload.incidentId ?? "尚未綁定事故"
         }`,
         detail: payload.bookmarkId
-          ? `bookmark ${payload.bookmarkId}`
+          ? `標記代號 ${payload.bookmarkId}`
           : "等待證據同步服務接線。",
       };
     }
@@ -373,7 +428,7 @@ function SOFrame({
       <View style={styles.frameGlowTop} />
       <View style={styles.frameGlowBottom} />
       <View style={styles.frameHeader}>
-        <Text style={styles.frameEyebrow}>安全員模式 · Safety Operator</Text>
+        <Text style={styles.frameEyebrow}>安全員模式</Text>
         <Text style={styles.frameTitle}>{title}</Text>
         <Text style={styles.frameSubtitle}>{subtitle}</Text>
       </View>
@@ -413,7 +468,7 @@ function SOModeBar({
             <Text
               style={[styles.modeChipCode, active ? styles.modeChipCodeActive : null]}
             >
-              {tab.screenCode}
+              {tab.stageLabel}
             </Text>
           </Pressable>
         );
@@ -435,8 +490,8 @@ function SOSyncStrip({
   const stripCopy =
     syncState === "offline"
       ? {
-          title: "離線 replay 模式",
-          body: `queue ${queueSnapshot.items.length} · 所有寫入先留在本機 durable queue`,
+          title: "離線暫存模式",
+          body: `共 ${queueSnapshot.items.length} 筆 · 所有送出的資料會先保存在本機`,
           tone: styles.syncStripOffline,
         }
       : syncState === "failed"
@@ -460,8 +515,8 @@ function SOSyncStrip({
                 tone: styles.syncStripQueued,
               }
             : {
-                title: "Safety Operator 已同步",
-                body: `queue ${queueSnapshot.items.length} · 最近成功 ${formatAt(
+                title: "已完成同步",
+                body: `共 ${queueSnapshot.items.length} 筆 · 最近成功 ${formatAt(
                   queueSnapshot.lastSyncedAt,
                 )}`,
                 tone: styles.syncStripSynced,
@@ -529,8 +584,8 @@ function QueueLedger({
   return (
     <Panel
       eyebrow="離線佇列"
-      title="SOSyncStrip ledger"
-      caption="Safety Operator writes stay local-first until a sync receipt lands."
+      title="同步紀錄清單"
+      caption="所有送出的資料都會先保存在本機，收到伺服器確認後才視為完成同步。"
     >
       <View style={styles.queueToolbar}>
         <PrimaryButton
@@ -551,7 +606,7 @@ function QueueLedger({
 
       {queueSnapshot.items.length === 0 ? (
         <Text style={styles.emptyBody}>
-          目前沒有 Safety Operator queue 項目。下一次離線提交、同步失敗或重放都會在這裡保留明細。
+          目前沒有待同步項目。下一次離線提交、同步失敗或重新送出都會在這裡保留明細。
         </Text>
       ) : (
         queueSnapshot.items.map((entry) => {
@@ -576,10 +631,10 @@ function QueueLedger({
               ) : null}
               {entry.duplicateAccepted ? (
                 <Text style={styles.queueReceiptText}>
-                  duplicate replay 已合併到既有 receipt
+                  重複送出的紀錄已與先前的結果合併
                 </Text>
               ) : entry.receipt ? (
-                <Text style={styles.queueReceiptText}>receipt 已寫回本機佇列</Text>
+                <Text style={styles.queueReceiptText}>已收到伺服器確認並寫回本機記錄</Text>
               ) : null}
               {isRetryableQueueEntry(entry) ? (
                 <View style={styles.queueActionRow}>
@@ -750,8 +805,8 @@ export default function SafetyOperatorScreen() {
       setRecentTakeover(result);
       setSubmissionState(
         result.receipt.duplicate
-          ? "伺服器已接受同一份接管回報；本機佇列已與既有 receipt 合併。"
-          : "接管回報已送出並取得伺服器 receipt。",
+          ? "伺服器已接受同一份接管回報；本機佇列已與既有結果合併。"
+          : "接管回報已送出並取得伺服器確認。",
       );
     } catch (error) {
       if (await recoverDriverSessionFromApiError(error)) {
@@ -860,7 +915,7 @@ export default function SafetyOperatorScreen() {
       }
       case "incident_upload":
         setScreenError(
-          "證據同步服務尚未接線；這筆項目會繼續保留在 Safety Operator 本機佇列。",
+          "證據同步服務尚未接線；這筆項目會繼續保留在安全員本機佇列。",
         );
         return;
       default:
@@ -915,7 +970,7 @@ export default function SafetyOperatorScreen() {
       command.clientGeneratedReportId,
     );
     setSubmissionState(
-      "接管回報已寫入 durable queue，保留原始系統時間與修正 audit，正在嘗試同步。",
+      "接管回報已存入本機待同步清單，保留原始系統時間與修正紀錄，正在嘗試同步。",
     );
     await refreshQueueSnapshot();
 
@@ -953,7 +1008,7 @@ export default function SafetyOperatorScreen() {
     };
 
     const queued = await enqueueSafetyOperatorItem("pretrip", command);
-    setSubmissionState("行前檢查已寫入 durable queue。");
+    setSubmissionState("行前檢查已存入本機待同步清單。");
     await refreshQueueSnapshot();
     await syncPreTripChecklist(queued.clientGeneratedId, command);
   }
@@ -968,7 +1023,7 @@ export default function SafetyOperatorScreen() {
       createdAt: new Date().toISOString(),
     });
     setSubmissionState(
-      "事故 / 證據資料已暫存到 durable queue；待證據同步服務接線後可重放。",
+      "事故 / 證據資料已暫存到本機待同步清單；待證據同步服務接線後可重新送出。",
     );
     await refreshQueueSnapshot();
   }
@@ -996,7 +1051,7 @@ export default function SafetyOperatorScreen() {
       "shift_handover",
       queuedHandover,
     );
-    setSubmissionState("交班紀錄已寫入 durable queue。");
+    setSubmissionState("交班紀錄已存入本機待同步清單。");
     await refreshQueueSnapshot();
     await syncShiftHandover(queued.clientGeneratedId, queuedHandover);
   }
@@ -1008,8 +1063,8 @@ export default function SafetyOperatorScreen() {
 
   return (
     <SOFrame
-      title="Safety Operator Realm"
-      subtitle="與一般 driver mode 分離，只保留資格、班次、接管、證據與交班流程。"
+      title="安全員專屬模式"
+      subtitle="與一般駕駛模式分離，只保留資格、班次、接管、證據與交班流程。"
     >
       <View style={styles.topRail}>
         <Pressable
@@ -1017,7 +1072,7 @@ export default function SafetyOperatorScreen() {
           onPress={() => router.back()}
           style={styles.backButton}
         >
-          <Text style={styles.backButtonText}>返回 Driver</Text>
+          <Text style={styles.backButtonText}>返回駕駛模式</Text>
         </Pressable>
         <View style={styles.realmPill}>
           <Text style={styles.realmPillText}>FSD 沙盒</Text>
@@ -1026,12 +1081,12 @@ export default function SafetyOperatorScreen() {
 
       <View style={styles.heroCard}>
         <View style={styles.heroCopy}>
-          <Text style={styles.heroEyebrow}>SOFrame</Text>
+          <Text style={styles.heroEyebrow}>值班摘要</Text>
           <Text style={styles.heroTitle}>
             {SAFETY_OPERATOR_FIXTURE.operatorName} · {SAFETY_OPERATOR_FIXTURE.vehicleId}
           </Text>
           <Text style={styles.heroBody}>
-            current shift {SAFETY_OPERATOR_FIXTURE.shiftId} · assignment{" "}
+            目前班次 {SAFETY_OPERATOR_FIXTURE.shiftId} · 任務代號{" "}
             {SAFETY_OPERATOR_FIXTURE.assignmentId}
           </Text>
         </View>
@@ -1062,7 +1117,7 @@ export default function SafetyOperatorScreen() {
           <View style={styles.noticeBanner}>
             <Text style={styles.noticeTitle}>裝置尚未完成正式綁定</Text>
             <Text style={styles.noticeBody}>
-              目前以本機 durable queue 進行離線 replay；一般 driver 狀態與 Safety Operator 狀態不會混用。
+              目前以本機暫存進行離線重新送出；一般駕駛狀態與安全員狀態不會混用。
             </Text>
           </View>
         ) : null}
@@ -1082,13 +1137,13 @@ export default function SafetyOperatorScreen() {
         {activeView === "provisioning" ? (
           <>
             <ScreenLead
-              code="SO_Provisioning"
+              code="資格與沙盒確認"
               title="資格與沙盒上下文"
-              body="安全員資格、裝置綁定與 assignment ownership 在這裡先確認，未通過不得進入 active trip。"
+              body="安全員資格、裝置綁定與任務歸屬會在這裡先確認，未通過檢查不得進入執行中的行程。"
               aside={
                 <InlineMetric
                   label="資格狀態"
-                  value={SAFETY_OPERATOR_FIXTURE.qualified ? "qualified" : "blocked"}
+                  value={SAFETY_OPERATOR_FIXTURE.qualified ? "符合資格" : "未通過"}
                   tone={SAFETY_OPERATOR_FIXTURE.qualified ? "success" : "danger"}
                 />
               }
@@ -1096,23 +1151,23 @@ export default function SafetyOperatorScreen() {
             <Panel title="身份與授權" eyebrow="資格">
               <DetailRow label="安全員" value={SAFETY_OPERATOR_FIXTURE.operatorName} />
               <DetailRow
-                label="safetyOperatorId"
+                label={formatSafetyOperatorFieldLabel("safetyOperatorId")}
                 value={SAFETY_OPERATOR_FIXTURE.safetyOperatorId}
               />
-              <DetailRow label="sandboxProgramId" value={SAFETY_OPERATOR_FIXTURE.sandboxProgramId} />
-              <DetailRow label="deviceId" value={SAFETY_OPERATOR_FIXTURE.deviceId} />
+              <DetailRow label={formatSafetyOperatorFieldLabel("sandboxProgramId")} value={SAFETY_OPERATOR_FIXTURE.sandboxProgramId} />
+              <DetailRow label={formatSafetyOperatorFieldLabel("deviceId")} value={SAFETY_OPERATOR_FIXTURE.deviceId} />
               <DetailRow
-                label="activeAssignmentId"
+                label={formatSafetyOperatorFieldLabel("activeAssignmentId")}
                 value={SAFETY_OPERATOR_FIXTURE.activeAssignmentId}
               />
             </Panel>
             <Panel
               title="資格對應"
-              eyebrow="matchedQualificationIds"
-              caption="這裡只揭露 qualification / assignment context，不包含任何車控或 FSD 控制項。"
+              eyebrow="符合的資格項目"
+              caption="這裡只顯示資格與任務對應資訊，不包含任何車輛控制或 FSD 控制項。"
             >
               <DetailRow
-                label="matchedQualificationIds"
+                label={formatSafetyOperatorFieldLabel("matchedQualificationIds")}
                 value={SAFETY_OPERATOR_FIXTURE.matchedQualificationIds.join(", ")}
               />
               {SAFETY_OPERATOR_FIXTURE.qualificationReasons.map((reason) => (
@@ -1127,28 +1182,28 @@ export default function SafetyOperatorScreen() {
         {activeView === "shiftStart" ? (
           <>
             <ScreenLead
-              code="SO_ShiftStart"
-              title="開班只進入 Safety Operator realm"
-              body="班次啟動後，不回落到一般 driver cockpit；班次、assignment 與 queue 都是獨立保存。"
+              code="開班準備"
+              title="開班後只會進入安全員模式"
+              body="班次啟動後，不會退回一般駕駛工作台；班次、任務與待同步佇列都會獨立保存。"
               aside={
                 <InlineMetric
-                  label="shiftStartedAt"
+                  label={formatSafetyOperatorFieldLabel("shiftStartedAt")}
                   value={formatAt(SAFETY_OPERATOR_FIXTURE.shiftStartedAt)}
                 />
               }
             />
-            <Panel title="班次上下文" eyebrow="Shift">
-              <DetailRow label="shiftId" value={SAFETY_OPERATOR_FIXTURE.shiftId} />
+            <Panel title="班次上下文" eyebrow="班次">
+              <DetailRow label={formatSafetyOperatorFieldLabel("shiftId")} value={SAFETY_OPERATOR_FIXTURE.shiftId} />
               <DetailRow
-                label="activeAssignmentId"
+                label={formatSafetyOperatorFieldLabel("activeAssignmentId")}
                 value={SAFETY_OPERATOR_FIXTURE.activeAssignmentId}
               />
               <DetailRow
-                label="experimentWindow"
+                label={formatSafetyOperatorFieldLabel("experimentWindow")}
                 value={SAFETY_OPERATOR_FIXTURE.experimentWindow}
               />
               <DetailRow
-                label="coverageZone"
+                label={formatSafetyOperatorFieldLabel("coverageZone")}
                 value={SAFETY_OPERATOR_FIXTURE.coverageZone}
               />
             </Panel>
@@ -1158,18 +1213,18 @@ export default function SafetyOperatorScreen() {
         {activeView === "vehicleAssign" ? (
           <>
             <ScreenLead
-              code="SO_VehicleAssign"
-              title="裝置、車輛、order context"
-              body="派車只揭露 assignment / vehicle 綁定，後續接管、證據與 closeout 都沿用這組上下文。"
-              aside={<InlineMetric label="vehicleId" value={SAFETY_OPERATOR_FIXTURE.vehicleId} />}
+              code="派車與裝置綁定"
+              title="裝置、車輛與訂單資訊"
+              body="派車只會顯示任務與車輛的綁定資訊，後續的接管、證據與結案都會沿用這組資訊。"
+              aside={<InlineMetric label={formatSafetyOperatorFieldLabel("vehicleId")} value={SAFETY_OPERATOR_FIXTURE.vehicleId} />}
             />
-            <Panel title="車輛與任務綁定" eyebrow="Vehicle">
-              <DetailRow label="deviceId" value={SAFETY_OPERATOR_FIXTURE.deviceId} />
-              <DetailRow label="vehicleId" value={SAFETY_OPERATOR_FIXTURE.vehicleId} />
-              <DetailRow label="assignmentId" value={SAFETY_OPERATOR_FIXTURE.assignmentId} />
-              <DetailRow label="orderId" value={SAFETY_OPERATOR_FIXTURE.orderId} />
+            <Panel title="車輛與任務綁定" eyebrow="車輛">
+              <DetailRow label={formatSafetyOperatorFieldLabel("deviceId")} value={SAFETY_OPERATOR_FIXTURE.deviceId} />
+              <DetailRow label={formatSafetyOperatorFieldLabel("vehicleId")} value={SAFETY_OPERATOR_FIXTURE.vehicleId} />
+              <DetailRow label={formatSafetyOperatorFieldLabel("assignmentId")} value={SAFETY_OPERATOR_FIXTURE.assignmentId} />
+              <DetailRow label={formatSafetyOperatorFieldLabel("orderId")} value={SAFETY_OPERATOR_FIXTURE.orderId} />
               <DetailRow
-                label="vehicleAssignedAt"
+                label={formatSafetyOperatorFieldLabel("vehicleAssignedAt")}
                 value={formatAt(SAFETY_OPERATOR_FIXTURE.vehicleAssignedAt)}
               />
             </Panel>
@@ -1179,22 +1234,22 @@ export default function SafetyOperatorScreen() {
         {activeView === "pretrip" ? (
           <>
             <ScreenLead
-              code="SO_Pretrip"
-              title="行前檢查與 blocker codes"
-              body="提交時會一起帶入 checklist、blockerCodes、notes 與 completedAt，失敗時保留在 durable queue。"
+              code="行前檢查"
+              title="行前檢查與待處理項目"
+              body="提交時會一起送出檢查清單、待處理項目與備註，若送出失敗會保留在本機待同步清單中。"
               aside={
                 <InlineMetric
-                  label="blocker"
+                  label="待處理項目"
                   value={`${checklistBlockedCount}`}
                   tone={checklistBlockedCount > 0 ? "warn" : "success"}
                 />
               }
             />
-            <Panel title="Checklist" eyebrow="Pretrip">
+            <Panel title="檢查清單" eyebrow="行前">
               {SAFETY_OPERATOR_CHECKLIST_TEMPLATE.map((item) => (
                 <View key={item.itemKey} style={styles.checklistRow}>
                   <View style={styles.checklistCopy}>
-                    <Text style={styles.checklistItem}>{item.itemKey}</Text>
+                    <Text style={styles.checklistItem}>{formatChecklistItemLabel(item.itemKey)}</Text>
                     {item.note ? (
                       <Text style={styles.checklistNote}>{item.note}</Text>
                     ) : null}
@@ -1209,7 +1264,7 @@ export default function SafetyOperatorScreen() {
                           : styles.checklistBadgeFail,
                     ]}
                   >
-                    <Text style={styles.checklistBadgeText}>{item.status}</Text>
+                    <Text style={styles.checklistBadgeText}>{formatChecklistStatusLabel(item.status)}</Text>
                   </View>
                 </View>
               ))}
@@ -1226,9 +1281,9 @@ export default function SafetyOperatorScreen() {
         {activeView === "active" ? (
           <>
             <ScreenLead
-              code="SO_ActiveTrip"
-              title="主監看面只做情境、queue 與接管入口"
-              body="active trip 提供 shift / assignment / vehicle / order context、最近同步結果與 unsynced breakdown，不提供任何 Tesla/FSD control UI。"
+              code="行程監看"
+              title="監看畫面只呈現情境、待同步狀態與接管入口"
+              body="執行中的行程會顯示班次、任務、車輛與訂單資訊、最近同步結果與未同步明細，不提供任何 Tesla FSD 控制項。"
               aside={
                 <InlineMetric
                   label="最近同步"
@@ -1236,23 +1291,23 @@ export default function SafetyOperatorScreen() {
                 />
               }
             />
-            <Panel title="Active trip context" eyebrow="Live">
-              <DetailRow label="shiftId" value={SAFETY_OPERATOR_FIXTURE.shiftId} />
-              <DetailRow label="assignmentId" value={SAFETY_OPERATOR_FIXTURE.assignmentId} />
-              <DetailRow label="vehicleId" value={SAFETY_OPERATOR_FIXTURE.vehicleId} />
-              <DetailRow label="orderId" value={SAFETY_OPERATOR_FIXTURE.orderId} />
-              <DetailRow label="Telemetry 鮮度" value="2 秒" />
+            <Panel title="目前行程資訊" eyebrow="即時">
+              <DetailRow label={formatSafetyOperatorFieldLabel("shiftId")} value={SAFETY_OPERATOR_FIXTURE.shiftId} />
+              <DetailRow label={formatSafetyOperatorFieldLabel("assignmentId")} value={SAFETY_OPERATOR_FIXTURE.assignmentId} />
+              <DetailRow label={formatSafetyOperatorFieldLabel("vehicleId")} value={SAFETY_OPERATOR_FIXTURE.vehicleId} />
+              <DetailRow label={formatSafetyOperatorFieldLabel("orderId")} value={SAFETY_OPERATOR_FIXTURE.orderId} />
+              <DetailRow label="定位資料更新時間" value="2 秒" />
               <DetailRow label="監理事件鮮度" value="48 秒" danger />
             </Panel>
-            <Panel title="未同步摘要" eyebrow="Unsynced">
+            <Panel title="未同步摘要" eyebrow="未同步">
               <View style={styles.metricGrid}>
-                <InlineMetric label="pretrip" value={`${unsyncedBreakdown.pretrip}`} />
-                <InlineMetric label="takeover" value={`${unsyncedBreakdown.takeover}`} />
-                <InlineMetric label="incident" value={`${unsyncedBreakdown.incident}`} />
-                <InlineMetric label="handover" value={`${unsyncedBreakdown.handover}`} />
+                <InlineMetric label="行前檢查" value={`${unsyncedBreakdown.pretrip}`} />
+                <InlineMetric label="接管回報" value={`${unsyncedBreakdown.takeover}`} />
+                <InlineMetric label="事故證據" value={`${unsyncedBreakdown.incident}`} />
+                <InlineMetric label="交班紀錄" value={`${unsyncedBreakdown.handover}`} />
               </View>
               <Text style={styles.supportText}>
-                此 realm 僅顯示 assignment、trip、takeover、incident、closeout、handover 上下文；不顯示遠端控制、resume FSD 或任何內部車控。
+                這個模式僅顯示任務、行程、接管、事故、結案與交班相關資訊；不會顯示遠端控制、重新啟動 FSD 或任何車輛控制項。
               </Text>
             </Panel>
           </>
@@ -1261,9 +1316,9 @@ export default function SafetyOperatorScreen() {
         {activeView === "takeover" ? (
           <>
             <ScreenLead
-              code="SO_TakeoverReport"
-              title="可編輯 occurredAt，但 audit 先留本機"
-              body="送出前可反覆修正 takeover time；原始系統時間、修正歷程與 clientGeneratedReportId 都會保留在本地 queue，直到第一次 acceptance。"
+              code="接管回報"
+              title="可編輯接管時間，修正紀錄先留在本機"
+              body="送出前可以反覆修正接管時間；原始系統時間、修正歷程與回報編號都會保留在本機待同步清單中，直到伺服器第一次確認收到。"
               aside={
                 <InlineMetric
                   label="修正次數"
@@ -1271,7 +1326,7 @@ export default function SafetyOperatorScreen() {
                 />
               }
             />
-            <Panel title="接管草稿" eyebrow="Takeover">
+            <Panel title="接管草稿" eyebrow="接管">
               <DetailRow
                 label="原始系統時間"
                 value={formatAt(takeoverDraftAudit.originalSystemOccurredAt)}
@@ -1280,7 +1335,7 @@ export default function SafetyOperatorScreen() {
                 label="目前送出時間"
                 value={formatAt(takeoverDraftAudit.correctedOccurredAt)}
               />
-              <Text style={styles.fieldLabel}>修正輸入 occurredAt</Text>
+              <Text style={styles.fieldLabel}>修正接管時間</Text>
               <TextInput
                 autoCapitalize="none"
                 onChangeText={setTakeoverEditValue}
@@ -1288,9 +1343,9 @@ export default function SafetyOperatorScreen() {
                 value={takeoverEditValue}
               />
               <Text style={styles.fieldHint}>
-                submit 後伺服器只保存送出的 `occurredAt` 與 `serverReceivedAt`；本輪沒有 post-submit patch。
+                送出後，伺服器只會保存送出時間與伺服器接收時間；送出後無法再修改這筆紀錄。
               </Text>
-              <Text style={styles.fieldLabel}>備註 notes</Text>
+              <Text style={styles.fieldLabel}>備註</Text>
               <TextInput
                 multiline
                 onChangeText={setTakeoverNotes}
@@ -1310,10 +1365,10 @@ export default function SafetyOperatorScreen() {
                 />
               </View>
             </Panel>
-            <Panel title="時間修正 audit" eyebrow="Audit trail">
+            <Panel title="時間修正紀錄" eyebrow="歷程">
               {takeoverDraftAudit.corrections.length === 0 ? (
                 <Text style={styles.emptyBody}>
-                  目前尚未記錄時間修正；原始系統時間會在首次送出前持續保留於本地 draft。
+                  目前尚未記錄時間修正；原始系統時間會在首次送出前持續保留於本機草稿。
                 </Text>
               ) : (
                 takeoverDraftAudit.corrections.map((correction, index) => (
@@ -1330,22 +1385,22 @@ export default function SafetyOperatorScreen() {
                 ))
               )}
             </Panel>
-            <Panel title="最近 receipt" eyebrow="Idempotency">
+            <Panel title="最近送出結果" eyebrow="防重複送出">
               <DetailRow
-                label="clientGeneratedReportId"
+                label={formatSafetyOperatorFieldLabel("clientGeneratedReportId")}
                 value={recentTakeover?.receipt.clientGeneratedReportId ?? "尚未提交"}
               />
               <DetailRow
-                label="submitted occurredAt"
+                label="送出的接管時間"
                 value={formatAt(submittedTakeoverAudit?.correctedOccurredAt ?? null)}
               />
               <DetailRow
-                label="serverReceivedAt"
+                label={formatSafetyOperatorFieldLabel("serverReceivedAt")}
                 value={formatAt(recentTakeover?.receipt.serverReceivedAt ?? null)}
               />
               <DetailRow
-                label="duplicate replay"
-                value={recentTakeover?.receipt.duplicate ? "yes" : "no"}
+                label="重複送出"
+                value={recentTakeover?.receipt.duplicate ? "是" : "否"}
                 danger={Boolean(recentTakeover?.receipt.duplicate)}
               />
             </Panel>
@@ -1355,21 +1410,21 @@ export default function SafetyOperatorScreen() {
         {activeView === "incident" ? (
           <>
             <ScreenLead
-              code="SO_IncidentUpload"
-              title="事故與證據只做 linkage，不做車控"
-              body="incident、bookmark、evidence metadata 可先排入本地 queue；同步服務未接線時，狀態會如實停留在 pending / failed。"
+              code="事故證據"
+              title="事故與證據僅供關聯記錄，不涉及車輛控制"
+              body="事故、時間標記與證據資料可以先排入本機待同步清單；證據同步服務尚未串接時，狀態會誠實顯示為等待中或失敗。"
               aside={
                 <InlineMetric
-                  label="evidence"
+                  label="證據數量"
                   value={`${SAFETY_OPERATOR_FIXTURE.evidenceArtifactIds.length}`}
                 />
               }
             />
-            <Panel title="Incident linkage" eyebrow="Evidence">
-              <DetailRow label="incidentId" value={SAFETY_OPERATOR_FIXTURE.incidentId} />
-              <DetailRow label="bookmarkId" value={SAFETY_OPERATOR_FIXTURE.bookmarkId} />
+            <Panel title="事故關聯" eyebrow="證據">
+              <DetailRow label={formatSafetyOperatorFieldLabel("incidentId")} value={SAFETY_OPERATOR_FIXTURE.incidentId} />
+              <DetailRow label={formatSafetyOperatorFieldLabel("bookmarkId")} value={SAFETY_OPERATOR_FIXTURE.bookmarkId} />
               <DetailRow
-                label="evidenceArtifactIds"
+                label={formatSafetyOperatorFieldLabel("evidenceArtifactIds")}
                 value={SAFETY_OPERATOR_FIXTURE.evidenceArtifactIds.join(", ")}
               />
               <Text style={styles.fieldLabel}>標籤</Text>
@@ -1400,25 +1455,25 @@ export default function SafetyOperatorScreen() {
         {activeView === "closeout" ? (
           <>
             <ScreenLead
-              code="SO_TripCloseout"
-              title="單趟 closeout context"
-              body="這一段只收斂 trip closeout 所需 incident、takeover 與 end location 上下文；正式 shift handover 仍在下一段單獨送出。"
-              aside={<InlineMetric label="closeoutStatus" value="handoff" />}
+              code="行程結案"
+              title="本趟結案資訊"
+              body="這裡只整理結案所需的事故、接管與結束地點資訊；正式的交班紀錄需要在下一個步驟另外送出。"
+              aside={<InlineMetric label="結案狀態" value="待交班" />}
             />
-            <Panel title="Trip closeout" eyebrow="Closeout">
-              <DetailRow label="closeoutStatus" value="handoff" />
+            <Panel title="行程結案" eyebrow="結案">
+              <DetailRow label={formatSafetyOperatorFieldLabel("closeoutStatus")} value="待交班" />
               <DetailRow
-                label="closeoutAt"
+                label={formatSafetyOperatorFieldLabel("closeoutAt")}
                 value={formatAt(SAFETY_OPERATOR_FIXTURE.closeoutEndedAt)}
               />
               <DetailRow
-                label="endLocation"
+                label={formatSafetyOperatorFieldLabel("endLocation")}
                 value={SAFETY_OPERATOR_FIXTURE.endLocationLabel}
               />
-              <DetailRow label="incident linkage" value={SAFETY_OPERATOR_FIXTURE.incidentId} />
+              <DetailRow label="事故關聯" value={SAFETY_OPERATOR_FIXTURE.incidentId} />
               <DetailRow
-                label="takeover accepted"
-                value={recentTakeover?.report.reportId ? "1" : "0"}
+                label="已接受接管"
+                value={recentTakeover?.report.reportId ? "是" : "否"}
               />
             </Panel>
           </>
@@ -1427,19 +1482,19 @@ export default function SafetyOperatorScreen() {
         {activeView === "handover" ? (
           <>
             <ScreenLead
-              code="SO_ShiftHandover"
-              title="交班收尾與 takeover linkage"
-              body="handover 會解析目前 queue 中的 pending takeover，等待 reportId 可用後才真正完成 closeout / handover 同步。"
+              code="交班"
+              title="交班收尾與接管關聯"
+              body="交班會檢查目前待同步清單中尚未完成的接管回報，等待回報編號送達後才會真正完成結案與交班同步。"
               aside={
                 <InlineMetric
-                  label="handover queue"
+                  label="待同步交班數"
                   value={`${unsyncedBreakdown.handover}`}
                 />
               }
             />
-            <Panel title="交班送出" eyebrow="Handover">
-              <DetailRow label="activeAssignmentId" value={SAFETY_OPERATOR_FIXTURE.activeAssignmentId} />
-              <DetailRow label="incident linkage" value={SAFETY_OPERATOR_FIXTURE.incidentId} />
+            <Panel title="交班送出" eyebrow="交班">
+              <DetailRow label={formatSafetyOperatorFieldLabel("activeAssignmentId")} value={SAFETY_OPERATOR_FIXTURE.activeAssignmentId} />
+              <DetailRow label="事故關聯" value={SAFETY_OPERATOR_FIXTURE.incidentId} />
               <Text style={styles.fieldLabel}>交班備註</Text>
               <TextInput
                 multiline

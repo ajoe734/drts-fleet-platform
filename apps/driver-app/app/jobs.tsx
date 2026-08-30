@@ -1512,7 +1512,7 @@ export default function JobsScreen() {
             />
           }
           title="目前使用本地鏡像備援"
-          body="已退回舊任務 API；forwarded 任務仍會顯示，但平台原生狀態與同步摘要可能延後。"
+          body="已退回舊任務資料來源；轉單任務仍會顯示，但平台原生狀態與同步摘要可能延後。"
         />
       );
     }

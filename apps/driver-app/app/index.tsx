@@ -272,7 +272,7 @@ function getActionLabel(action: string) {
     case "review_sos":
       return "查看 SOS";
     default:
-      return action;
+      return "查看詳情";
   }
 }
 
@@ -315,10 +315,21 @@ function getActionRiskTone(
 
 function getRefreshTierLabel(tier: RefreshTier) {
   switch (tier) {
+    case "urgent":
+      return "每 5 秒更新";
+    case "fast":
+      return "每 3 秒更新";
+    case "dispatch":
+      return "派單更新";
     case "medium":
-      return "T3 · 15s";
+      return "每 15 秒更新";
+    case "medium_slow":
+    case "slow":
+      return "每 30 秒更新";
+    case "manual":
+      return "手動更新";
     default:
-      return tier;
+      return "定期更新";
   }
 }
 
@@ -591,11 +602,11 @@ function buildRefreshMetadata(
 function getRefreshFreshnessLabel(metadata: UiRefreshMetadata) {
   switch (metadata.dataFreshness) {
     case "fresh":
-      return "Fresh";
+      return "已更新";
     case "stale":
-      return "Stale";
+      return "資料稍舊";
     case "degraded":
-      return "Degraded";
+      return "更新延遲";
     default:
       return "尚未同步";
   }
@@ -604,13 +615,13 @@ function getRefreshFreshnessLabel(metadata: UiRefreshMetadata) {
 function getRefreshSourceLabel(metadata: UiRefreshMetadata) {
   switch (metadata.source) {
     case "live":
-      return "live";
+      return "即時";
     case "cache":
-      return "cache";
+      return "快取";
     case "sandbox":
-      return "sandbox";
+      return "測試環境";
     default:
-      return "static";
+      return "靜態資料";
   }
 }
 
@@ -1329,7 +1340,7 @@ function ActiveTripSummaryCard({
     <Card theme={THEME} padding={14} style={styles.activeTripCard}>
       <View style={styles.sectionHeader}>
         <View>
-          <Text style={styles.sectionEyebrow}>Active trip summary</Text>
+          <Text style={styles.sectionEyebrow}>目前行程</Text>
           <Text style={styles.sectionTitle}>{model.title}</Text>
         </View>
         <Pill theme={THEME} tone="accent" dot>
@@ -1391,7 +1402,7 @@ function NotificationInboxCard({
         <Card theme={THEME} padding={14}>
           <View style={styles.sectionHeader}>
             <View>
-              <Text style={styles.sectionEyebrow}>Notifications / inbox</Text>
+              <Text style={styles.sectionEyebrow}>通知</Text>
               <Text style={styles.sectionTitle}>
                 {unreadCount > 0 ? `${unreadCount} 則待讀通知` : "通知已清空"}
               </Text>
@@ -1402,7 +1413,7 @@ function NotificationInboxCard({
           </View>
           <Text style={styles.sectionBody}>
             {error ??
-              "依 packet，driver app 在 cockpit 內提供 backend inbox + native push 的收合式通知面板。"}
+              "這裡會顯示與你的任務、行程或帳號相關的通知，點一下可以展開查看。"}
           </Text>
         </Card>
       </Pressable>
@@ -1423,7 +1434,7 @@ function NotificationInboxCard({
           <View style={styles.notificationList}>
             {items.length === 0 ? (
               <Text style={styles.sectionBody}>
-                目前沒有後端通知。新的 push / inbox 事件會在這裡保留已讀路徑。
+                目前沒有通知。新的通知會顯示在這裡，並保留已讀記錄。
               </Text>
             ) : (
               items.map((item) => (
@@ -1925,7 +1936,7 @@ export default function WorkspaceIndex() {
       return {
         tone: "info",
         title: "目前沒有需立即處理的項目",
-        body: "工作台的 urgent lane 已清空，您可以查看今日收入、班次或維持平台在線待命。",
+        body: "目前沒有需要優先處理的任務，您可以查看今日收入、班次或維持平台在線待命。",
         action: createWorkspaceAction("/earnings", "open_earnings"),
         envelope: createEmptyStateEnvelope(
           "filtered_empty",
@@ -1961,7 +1972,7 @@ export default function WorkspaceIndex() {
         key: `reauth-${platform.platformCode}`,
         tone: "warn",
         title: `${name} 需重新授權`,
-        body: `Token 已失效 · 最後同步 ${formatCompactDateTime(platform.updatedAt)}`,
+        body: `憑證已失效 · 最後同步 ${formatCompactDateTime(platform.updatedAt)}`,
         action: createWorkspaceAction(
           "/platform-presence",
           "resolve_reauth",
@@ -2090,10 +2101,10 @@ export default function WorkspaceIndex() {
       return {
         state: "reauth",
         tone: "warn",
-        eyebrow: "Next Best Action · Re-auth",
+        eyebrow: "建議動作",
         title: `先恢復 ${name} 授權`,
         detail: "任何需重新授權的平台都應優先處理，否則該平台接單能力暫停。",
-        meta: `最後同步 ${formatCompactDateTime(platform.updatedAt)} · cross-app deep link: none`,
+        meta: `最後同步 ${formatCompactDateTime(platform.updatedAt)}`,
         primaryAction: createWorkspaceAction(
           "/platform-presence",
           "resolve_reauth",
@@ -2112,7 +2123,7 @@ export default function WorkspaceIndex() {
       return {
         state: "urgent_task",
         tone: "info",
-        eyebrow: "Next Best Action · Urgent task",
+        eyebrow: "建議動作",
         title: `優先回應 ${formatTaskHeadline(task)}`,
         detail: formatTaskRouteSummary(task),
         meta: `${task.platformDisplayName} · ${formatTaskActionSummary(task)}`,
@@ -2132,7 +2143,7 @@ export default function WorkspaceIndex() {
       return {
         state: "trip",
         tone: "accent",
-        eyebrow: "Next Best Action · Active trip",
+        eyebrow: "建議動作",
         title:
           task.allowedActions.length > 0
             ? `下一步：${getActionLabel(primaryAction.descriptor.action)}`
@@ -2152,9 +2163,9 @@ export default function WorkspaceIndex() {
       return {
         state: "off_shift",
         tone: "accent",
-        eyebrow: "Next Best Action · Start shift",
+        eyebrow: "建議動作",
         title: "先開始班次",
-        detail: "依 spec，off-shift 時工作台主 CTA 必須回到班次啟動。",
+        detail: "尚未開始班次時，最優先要做的是先啟動班次。",
         meta: "班次啟動後，自營派單會切換為可接單狀態。",
         primaryAction: createWorkspaceAction("/shift", "start_shift"),
         secondaryAction: createWorkspaceAction(
@@ -2168,7 +2179,7 @@ export default function WorkspaceIndex() {
       return {
         state: "go_online",
         tone: "info",
-        eyebrow: "Next Best Action · Go online",
+        eyebrow: "建議動作",
         title: "讓至少一個平台上線",
         detail: "目前沒有任何平台處於可接單狀態，新的派單不會送達。",
         meta: "平台健康與帳號授權狀態都可以在平台頁處理。",
@@ -2187,7 +2198,7 @@ export default function WorkspaceIndex() {
       return {
         state: "awaiting_platform",
         tone: "info",
-        eyebrow: "Next Best Action · Awaiting platform",
+        eyebrow: "建議動作",
         title: "等待平台確認",
         detail: formatTaskRouteSummary(taskSummary.awaitingPlatformTask),
         meta: "來源平台尚未回覆前，請不要提前前往接送點。",
@@ -2202,11 +2213,11 @@ export default function WorkspaceIndex() {
     return {
       state: "standing_by",
       tone: "accent",
-      eyebrow: "Next Best Action · Standing by",
+      eyebrow: "建議動作",
       title: "工作台待命中",
       detail:
         "沒有需要立即處理的任務，保持平台在線並留意新的派單或重新授權提醒。",
-      meta: "這是 cockpit，不是純入口頁；最重要的狀態已集中在上方。",
+      meta: "這裡是你的工作台，不只是入口頁；最重要的狀態已集中在上方。",
       primaryAction: createWorkspaceAction("/jobs", "open_jobs"),
       secondaryAction: createWorkspaceAction("/earnings", "open_earnings"),
     };
@@ -2471,7 +2482,7 @@ export default function WorkspaceIndex() {
         title={
           <View style={styles.headerTitleStack}>
             <Text style={styles.headerTitle}>工作台</Text>
-            <Text style={styles.headerSubtitle}>Workspace cockpit</Text>
+            <Text style={styles.headerSubtitle}>掌握任務、行程與平台狀態</Text>
           </View>
         }
         subtitle={
@@ -2537,7 +2548,7 @@ export default function WorkspaceIndex() {
           theme={THEME}
           tone="info"
           title="任務同步降級模式"
-          body="目前改用舊版任務摘要。平台原生狀態與 availableActions 尚未完整帶出時，請以前往任務頁查看為準。"
+          body="目前改用舊版任務摘要。平台原生狀態與可執行動作尚未完整帶出時，請以前往任務頁查看為準。"
         />
       ) : null}
 
@@ -2593,9 +2604,9 @@ export default function WorkspaceIndex() {
       <View style={styles.sectionBlock}>
         <View style={styles.sectionHeader}>
           <View>
-            <Text style={styles.sectionEyebrow}>Readiness summary</Text>
+            <Text style={styles.sectionEyebrow}>整備狀態</Text>
             <Text style={styles.sectionTitle}>
-              裝置 / 身份 / 平台 readiness
+              裝置 / 身份 / 平台整備狀態
             </Text>
           </View>
         </View>
@@ -2607,14 +2618,14 @@ export default function WorkspaceIndex() {
                 <Text style={styles.readinessStripValue}>{item.value}</Text>
                 <Pill theme={THEME} tone={item.tone} dot>
                   {item.tone === "success"
-                    ? "ready"
+                    ? "就緒"
                     : item.tone === "danger"
-                      ? "blocked"
+                      ? "已阻擋"
                       : item.tone === "warn"
-                        ? "attention"
+                        ? "待注意"
                         : item.tone === "info"
-                          ? "active"
-                          : "idle"}
+                          ? "使用中"
+                          : "閒置"}
                 </Pill>
               </Card>
             </View>
@@ -2755,29 +2766,28 @@ export default function WorkspaceIndex() {
       <View style={styles.sectionBlock}>
         <View style={styles.sectionHeader}>
           <View>
-            <Text style={styles.sectionEyebrow}>Workspace sitemap</Text>
+            <Text style={styles.sectionEyebrow}>工作台導覽</Text>
             <Text style={styles.sectionTitle}>工作台入口與深連結</Text>
           </View>
         </View>
         <Text style={styles.sectionBody}>
-          依 packet §5.3，workspace cockpit 必須提供 sitemap 級入口：
-          任務、行程、平台中心、收入、班次與設定，且 next-best-action 置於其上。
+          這裡整理了任務、行程、平台中心、收入、班次與設定的捷徑，最需要處理的項目會排在最上面。
         </Text>
         <Card theme={THEME} padding={14} style={styles.crossAppPolicyCard}>
-          <Text style={styles.crossAppPolicyTitle}>跨系統連結策略</Text>
+          <Text style={styles.crossAppPolicyTitle}>跨平台訊息處理方式</Text>
           <Text style={styles.crossAppPolicyBody}>
-            Phase 1 driver app 不直接跳轉 web console。跨系統訊息改由通知與
-            notice 卡片送進工作台，司機可留在 app 內完成後續處理。
+            本 App 不會另外跳轉到其他管理後台。跨平台的相關訊息會直接以通知方式
+            送進工作台，你可以留在 App 內完成後續處理。
           </Text>
           <Text style={styles.crossAppPolicyMeta}>
             {WORKSPACE_CROSS_APP_LINKS.length === 0
-              ? "CrossAppResourceLink · none"
-              : `CrossAppResourceLink · ${WORKSPACE_CROSS_APP_LINKS.length}`}
+              ? "目前沒有需要另外開啟的外部連結"
+              : `目前有 ${WORKSPACE_CROSS_APP_LINKS.length} 個外部連結待處理`}
           </Text>
         </Card>
         {WORKSPACE_CROSS_APP_LINKS.length > 0 ? (
           <Card theme={THEME} padding={14} style={styles.crossAppPolicyCard}>
-            <Text style={styles.crossAppPolicyTitle}>跨系統 deep links</Text>
+            <Text style={styles.crossAppPolicyTitle}>跨平台連結</Text>
             <View style={styles.crossAppNoticeList}>
               {WORKSPACE_CROSS_APP_LINKS.map((link) => (
                 <View
@@ -2800,7 +2810,7 @@ export default function WorkspaceIndex() {
         ) : null}
         {crossAppNotices.length > 0 ? (
           <Card theme={THEME} padding={14} style={styles.crossAppPolicyCard}>
-            <Text style={styles.crossAppPolicyTitle}>跨系統 notice</Text>
+            <Text style={styles.crossAppPolicyTitle}>跨平台通知</Text>
             <View style={styles.crossAppNoticeList}>
               {crossAppNotices.map((notice) => (
                 <View
@@ -2864,10 +2874,7 @@ export default function WorkspaceIndex() {
             </Pill>
           </View>
           <Text style={styles.readinessBody}>
-            必備資料已就位：裝置身份、班次狀態、多平台健康、urgent task
-            count、active trip summary、next-best-action、6 種 EmptyReason 與
-            app 內 deep-link sitemap。CTA 會優先跟隨 task allowedActions 與
-            ResourceActionDescriptor；舊版 task API 僅作 fallback。
+            這裡彙整你目前的資格狀態、班次進度與待處理事項，方便你快速掌握下一步該做什麼。
           </Text>
         </Card>
       </View>

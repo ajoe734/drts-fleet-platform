@@ -654,7 +654,7 @@ export default function ShiftScreen() {
                 ? "完成下線打卡前，可先更新里程與位置。"
                 : gateBlocked
                   ? (gate?.blockingReason?.title ?? "尚未符合上線條件。")
-                  : "上線打卡後才會建立 active shift。"
+                  : "上線打卡後才會建立班次紀錄。"
             }
           >
             {activeShift ? (
@@ -859,7 +859,7 @@ export default function ShiftScreen() {
           subtitle={
             activeShift
               ? "下線前可補充目前里程與位置。"
-              : "這些欄位皆為選填，不影響班次 guardrails。"
+              : "這些欄位皆為選填，不影響班次的保護機制。"
           }
         >
           {activeShift ? (
@@ -915,7 +915,7 @@ export default function ShiftScreen() {
           subtitle={
             availabilityItems.length > 0
               ? `${onlinePlatforms} 個平台上線中，${readyPlatforms} 個平台目前可接單。`
-              : "沿用既有 platform presence 資料來源，只讀顯示目前可接單狀態。"
+              : "沿用既有平台狀態資料來源，僅供顯示目前可接單狀態。"
           }
         >
           {presenceError ? <ErrorBanner message={presenceError} /> : null}
@@ -1014,7 +1014,7 @@ export default function ShiftScreen() {
           ) : (
             <EmptyState
               title="尚無平台可接單狀態"
-              description="目前沒有可顯示的平台 presence 資料，可前往平台狀態頁確認綁定與上線狀態。"
+              description="目前沒有可顯示的平台狀態資料，可前往平台狀態頁確認綁定與上線狀態。"
               icon="swap-horizontal-outline"
               actionTitle="查看平台狀態"
               onAction={() => router.push("/platform-presence")}
@@ -1024,8 +1024,8 @@ export default function ShiftScreen() {
         </SectionCard>
 
         <AuthorityBanner
-          title="班次資料 guardrails"
-          authorityLabel="不變更定位心跳、provisioning 與上下線 API"
+          title="班次資料保護原則"
+          authorityLabel="不會變更定位回報、裝置啟用與上下線相關功能"
           description="這個畫面只調整呈現方式；資料寫入仍沿用現有班次與出勤流程。"
           tone="owned"
           icon="shield-checkmark"

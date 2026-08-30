@@ -147,9 +147,9 @@ describe("SafetyOperatorScreen", () => {
       )
       .join(" ");
 
-    expect(text).toContain("Safety Operator Realm");
+    expect(text).toContain("安全員專屬模式");
     expect(text).toContain("FSD 沙盒");
-    expect(text).toContain("返回 Driver");
+    expect(text).toContain("返回駕駛模式");
     expect(text).toContain("待同步");
     expect(text).toContain("同步失敗");
     expect(text).toContain("裝置尚未完成正式綁定");
@@ -162,5 +162,35 @@ describe("SafetyOperatorScreen", () => {
     expect(text).toContain("證據");
     expect(text).toContain("結案");
     expect(text).toContain("交班");
+  });
+
+  it("never renders a program identifier, snake_case field, or spec marker to the user", async () => {
+    let renderer: any;
+
+    await act(async () => {
+      renderer = create(React.createElement(SafetyOperatorScreen));
+      await flushEffects();
+    });
+
+    const textNodes = renderer.root
+      .findAllByType("Text")
+      .flatMap((node: { props: { children?: unknown } }) =>
+        collectText(node.props.children),
+      );
+
+    const allowedPascalCase = new Set(["FSD"]);
+    const snakeCasePattern = /\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/;
+    const pascalCasePattern = /\b[A-Z][a-z0-9]+[A-Z][a-zA-Z0-9]*\b/;
+    const specMarkerPattern = /§|packet|Phase\s*\d|\bSO_[A-Za-z]+\b/i;
+
+    for (const value of textNodes) {
+      expect(value).not.toMatch(snakeCasePattern);
+      expect(value).not.toMatch(specMarkerPattern);
+
+      const pascalMatches = value.match(new RegExp(pascalCasePattern, "g")) ?? [];
+      for (const match of pascalMatches) {
+        expect(allowedPascalCase.has(match)).toBe(true);
+      }
+    }
   });
 });

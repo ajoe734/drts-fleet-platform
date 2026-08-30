@@ -1242,7 +1242,7 @@ export default function OnboardingScreen() {
 
         {isExpired ? (
           <AuthorityBanner
-            authorityLabel="SessionExpired / TokenRefreshFailed"
+            authorityLabel="連線憑證已失效"
             description="當前連線憑證已失效或被系統撤銷。請輸入車隊發放的新註冊代碼重新綁定此裝置。"
             icon="key-outline"
             title="請重新綁定裝置"
@@ -1252,7 +1252,7 @@ export default function OnboardingScreen() {
 
         {isRevoked ? (
           <AuthorityBanner
-            authorityLabel="DeviceRevoked / CompromiseRecovered"
+            authorityLabel="裝置憑證已撤銷"
             description="系統已安全撤銷無效或遭異常重播之憑證。本機已儲存之未同步離線完單佐證不會刪除，請重新註冊綁定。"
             icon="shield-outline"
             title="憑證已撤銷並完成安全離線保存"
@@ -1262,7 +1262,7 @@ export default function OnboardingScreen() {
 
         {isSuspended ? (
           <AuthorityBanner
-            authorityLabel="DriverSuspended / CertInvalid"
+            authorityLabel="帳號目前無法使用"
             description="您的司機帳號目前處於停權或證件審核無效狀態，無法接單。若有疑問請聯絡車隊營運團隊管理員。"
             icon="lock-closed-outline"
             title="帳號暫時無法存取派遣"
