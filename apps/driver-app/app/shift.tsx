@@ -24,6 +24,7 @@ import {
   getDriverClient,
   getDriverId,
   isDriverIdentityProvisioned,
+  registerProtectedCacheClearHandler,
 } from "@/lib/api-client";
 import {
   getActiveDriverHeartbeatWorkState,
@@ -384,8 +385,21 @@ export default function ShiftScreen() {
     }
   };
 
+  useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setActiveShift(null);
+      setPresenceSummary(null);
+      setPresenceError(null);
+    });
+    return () => unregister();
+  }, []);
+
   const loadShifts = async ({ manual = false }: { manual?: boolean } = {}) => {
-    if (!isProvisioned) {
+    if (!isDriverIdentityProvisioned()) {
+      setActiveShift(null);
+      setPresenceSummary(null);
+      setLoading(false);
+      setRefreshing(false);
       return;
     }
 
@@ -417,6 +431,8 @@ export default function ShiftScreen() {
       setScreenError(null);
       setNow(Date.now());
     } catch (error: unknown) {
+      setActiveShift(null);
+      setPresenceSummary(null);
       setScreenError(getErrorMessage(error, "班次資料載入失敗，請稍後再試。"));
     } finally {
       setLoading(false);

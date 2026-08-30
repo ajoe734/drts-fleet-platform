@@ -50,6 +50,7 @@ import {
   getDriverId,
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
+  registerProtectedCacheClearHandler,
 } from "@/lib/api-client";
 import {
   formatAmountNumber,
@@ -1554,6 +1555,16 @@ export default function WorkspaceIndex() {
 
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setWorkspace(INITIAL_WORKSPACE);
+      setProvisioned(false);
+    });
+    return () => {
+      unregister();
     };
   }, []);
 

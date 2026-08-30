@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   PLATFORM_CODE_REGISTRY,
   type DriverSosLocationSnapshot,
@@ -35,7 +35,9 @@ import {
 import {
   formatDriverError,
   getDriverClient,
+  isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
+  registerProtectedCacheClearHandler,
 } from "@/lib/api-client";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import { getLatestDriverLocationUpdate } from "@/lib/driver-location-heartbeat";
@@ -276,6 +278,10 @@ function pickForwardedTaskContext(
 }
 
 async function resolveIncidentPlatformContext(): Promise<IncidentPlatformContext | null> {
+  if (!isDriverIdentityProvisioned()) {
+    return null;
+  }
+
   const client = getDriverClient();
 
   try {
@@ -459,15 +465,32 @@ export default function IncidentScreen() {
   const entrySource = parseEntrySource(params.entry);
   const routeActions = parseAvailableActions(params.availableActions);
 
+  const isProvisioned = isDriverIdentityProvisioned();
+
   useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setIncidentContextPreview(null);
+    });
+    return () => unregister();
+  }, []);
+
+  useEffect(() => {
+    if (!isProvisioned) {
+      return;
+    }
     const client = getDriverClient();
     client
       .isFeatureEnabled("driver-app.incidents")
       .then((enabled) => setIncidentsEnabled(enabled))
       .catch(() => setIncidentsEnabled(true));
-  }, []);
+  }, [isProvisioned]);
 
   const loadIncidentContext = async (manual = false) => {
+    if (!isDriverIdentityProvisioned()) {
+      setIncidentContextPreview(null);
+      setIncidentContextReady(true);
+      return;
+    }
     if (manual) {
       setRefreshingContext(true);
     }
@@ -678,6 +701,10 @@ export default function IncidentScreen() {
     resetHoldProgress();
     void submitIncident();
   };
+
+  if (!isProvisioned) {
+    return <Redirect href="/onboarding" />;
+  }
 
   if (incidentsEnabled === null) {
     return (

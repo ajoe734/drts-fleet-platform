@@ -23,6 +23,7 @@ const { formatDriverError } = vi.hoisted(() => ({
 
 vi.mock("@/lib/api-client", () => ({
   formatDriverError,
+  registerProtectedCacheClearHandler: vi.fn().mockReturnValue(() => {}),
 }));
 
 import {

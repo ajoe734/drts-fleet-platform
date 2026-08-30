@@ -41,6 +41,7 @@ vi.mock("@/lib/api-client", () => ({
   getDriverId,
   recoverDriverSessionFromApiError,
   formatDriverError,
+  registerProtectedCacheClearHandler: vi.fn().mockReturnValue(() => {}),
 }));
 
 vi.mock("expo-sqlite", () => ({

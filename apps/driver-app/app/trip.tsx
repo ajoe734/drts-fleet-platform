@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import type {
   DriverTaskRecord,
@@ -55,6 +55,8 @@ import {
   getDriverClient,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
+  isDriverIdentityProvisioned,
+  registerProtectedCacheClearHandler,
   rejectForwardedDriverOffer,
   replayPendingDriverTaskCompletion,
   submitDriverTaskCompletion,
@@ -1123,7 +1125,30 @@ export default function TripScreen() {
     resetDriverAppToOnboarding(router);
   }
 
+  const isProvisioned = isDriverIdentityProvisioned();
+
+  useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setTaskDetail(null);
+      setTaskViewDetail(null);
+      setOrderDetail(null);
+      setPlatformPresenceSummary(null);
+    });
+    return () => unregister();
+  }, []);
+
   async function loadTrip(showSpinner: boolean) {
+    if (!isDriverIdentityProvisioned()) {
+      setTaskDetail(null);
+      setTaskViewDetail(null);
+      setOrderDetail(null);
+      setPlatformPresenceSummary(null);
+      if (showSpinner) {
+        setLoading(false);
+      }
+      return;
+    }
+
     if (showSpinner) {
       setLoading(true);
     }
@@ -1180,8 +1205,12 @@ export default function TripScreen() {
   }
 
   useEffect(() => {
-    void loadTrip(true);
-  }, []);
+    if (isProvisioned) {
+      void loadTrip(true);
+    } else {
+      setLoading(false);
+    }
+  }, [isProvisioned]);
 
   useEffect(() => {
     return subscribeTrackingDiagnostic(setTrackingDiagnostic);
@@ -1607,6 +1636,10 @@ export default function TripScreen() {
     } finally {
       setSubmittingAction(null);
     }
+  }
+
+  if (!isProvisioned) {
+    return <Redirect href="/onboarding" />;
   }
 
   if (loading) {

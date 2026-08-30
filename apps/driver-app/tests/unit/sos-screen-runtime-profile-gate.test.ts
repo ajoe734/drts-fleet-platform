@@ -106,6 +106,8 @@ vi.mock("@/lib/api-client", () => ({
     listUnifiedDriverTasks: mocks.listUnifiedDriverTasks,
     listDriverTasks: mocks.listDriverTasks,
   }),
+  isDriverIdentityProvisioned: vi.fn().mockReturnValue(true),
+  registerProtectedCacheClearHandler: vi.fn().mockReturnValue(() => {}),
   recoverDriverSessionFromApiError: vi.fn(),
 }));
 

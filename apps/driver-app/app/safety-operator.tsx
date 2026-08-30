@@ -55,6 +55,7 @@ import {
   getDriverClient,
   isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
+  registerProtectedCacheClearHandler,
 } from "@/lib/api-client";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 
@@ -741,6 +742,14 @@ export default function SafetyOperatorScreen() {
 
   useEffect(() => {
     void refreshQueueSnapshot();
+  }, []);
+
+  useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setScreenError(null);
+      void refreshQueueSnapshot();
+    });
+    return () => unregister();
   }, []);
 
   useEffect(() => {
