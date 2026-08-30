@@ -40,7 +40,7 @@ const DRIVER_DEVICE_ID_KEY = "drts.driver.deviceId";
 const DRIVER_SESSION_KEY = "drts.driver.session";
 const DRIVER_PENDING_TASK_COMPLETION_KEY = "drts.driver.pendingTaskCompletion";
 
-let publicClient = createPublicClient(API_URL);
+const publicClient = createPublicClient(API_URL);
 
 let client: ApiClient | null = null;
 let driverClientProxy: ApiClient | null = null;
@@ -695,7 +695,7 @@ export async function submitDriverTaskCompletion(
 
 function createDriverClientProxy(): ApiClient {
   return new Proxy({} as ApiClient, {
-    get(_target, prop, _receiver) {
+    get(_target, prop) {
       if (!client) {
         throw new Error(
           "Driver identity is not provisioned. Complete device registration or " +

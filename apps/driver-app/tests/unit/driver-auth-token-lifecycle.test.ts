@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import * as SecureStore from "expo-secure-store";
 import type { DriverDeviceProvisioningSession } from "@drts/contracts";
 
 import {
@@ -12,9 +11,6 @@ import {
   initializeDriverIdentity,
   isDriverIdentityHydrated,
   isDriverIdentityProvisioned,
-  recoverDriverSessionFromApiError,
-  refreshDriverSessionSingleFlight,
-  registerDriverDevice,
   registerProtectedCacheClearHandler,
   sanitizeLogMessage,
 } from "../../lib/api-client";
