@@ -19,6 +19,7 @@ const HTTP_DECORATORS = new Map<string, string>([
   ["Delete", "DELETE"],
   ["Head", "HEAD"],
   ["Options", "OPTIONS"],
+  ["Sse", "GET"],
 ]);
 
 export interface DiscoveredRoute {

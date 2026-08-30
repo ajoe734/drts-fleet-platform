@@ -10,6 +10,7 @@ import {
   CurrentIdentity,
   RequireRealms,
   RequireScopes,
+  isDriverIdentityMatching,
   type BootstrapRequestIdentity,
 } from "../../common/auth";
 import { AuditNotificationService } from "./audit-notification.service";
@@ -48,7 +49,7 @@ export class NotificationsController {
         if (
           notif &&
           notif.recipientUserId &&
-          notif.recipientUserId !== actorId
+          !isDriverIdentityMatching(actorId, notif.recipientUserId)
         ) {
           throw new ApiRequestError(
             403,

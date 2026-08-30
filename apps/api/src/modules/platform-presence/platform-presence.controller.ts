@@ -17,7 +17,13 @@ import {
   ApiRequestError,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
-import { CurrentIdentity, RequireRealms } from "../../common/auth";
+import {
+  CurrentIdentity,
+  RequireRealms,
+  RequireScopes,
+  isDriverIdentityMatching,
+  normalizeDriverId,
+} from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { PlatformPresenceService } from "./platform-presence.service";
@@ -30,8 +36,28 @@ export class PlatformPresenceController {
     identity: BootstrapRequestIdentity | null,
     requestedDriverId?: string,
   ) {
-    if (identity?.actorType === "driver_user" && identity.actorId) {
-      return identity.actorId;
+    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
+      const actorId = identity.actorId;
+      if (!actorId) {
+        throw new ApiRequestError(
+          HttpStatus.UNAUTHORIZED,
+          "DRIVER_IDENTITY_REQUIRED",
+          "Driver identity actorId is required.",
+        );
+      }
+      const normalizedDriverId = requestedDriverId?.trim();
+      if (
+        normalizedDriverId &&
+        !isDriverIdentityMatching(actorId, normalizedDriverId)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "DRIVER_IDENTITY_MISMATCH",
+          "Driver identity may only access its own platform presence.",
+          { actorId, requestedDriverId: normalizedDriverId },
+        );
+      }
+      return normalizeDriverId(actorId)!;
     }
 
     const normalizedDriverId = requestedDriverId?.trim();
@@ -47,7 +73,8 @@ export class PlatformPresenceController {
   }
 
   @Get()
-  @RequireRealms("driver", "platform", "ops")
+  @RequireRealms("system", "platform", "ops", "driver")
+  @RequireScopes("driver:read")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   async getSummary(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
@@ -61,7 +88,8 @@ export class PlatformPresenceController {
   }
 
   @Post("online")
-  @RequireRealms("driver", "platform", "ops")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async setOnline(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Body() body: SetPlatformOnlineCommand,
@@ -79,7 +107,8 @@ export class PlatformPresenceController {
   }
 
   @Post("offline")
-  @RequireRealms("driver", "platform", "ops")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async setOffline(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Body() body: SetPlatformOfflineCommand,

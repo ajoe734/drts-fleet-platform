@@ -584,6 +584,103 @@ export function resolveRouteAuthPolicy(
   }
 
   if (
+    routePath === "driver-settings" ||
+    routePath.startsWith("driver-settings/")
+  ) {
+    const isPatch = upperMethod === "PATCH";
+    return {
+      routeKey: `driver-settings:${upperMethod}`,
+      requiredScopes: isPatch ? ["driver:write"] : ["driver:read"],
+      allowedRealms: isPatch
+        ? baseAllowedRealms("driver")
+        : baseAllowedRealms("platform", "ops", "driver"),
+      description: isPatch
+        ? "Driver settings mutation"
+        : "Driver settings read access",
+    };
+  }
+
+  if (
+    routePath.startsWith("shift-attendance/") ||
+    routePath === "shift-attendance"
+  ) {
+    const isWrite = upperMethod === "POST";
+    return {
+      routeKey: `shift-attendance:${upperMethod}`,
+      requiredScopes: isWrite ? ["driver:write"] : ["driver:read"],
+      allowedRealms: isWrite
+        ? baseAllowedRealms("driver")
+        : baseAllowedRealms("platform", "ops", "driver"),
+      description: isWrite
+        ? "Shift attendance clock-in/out and mutation"
+        : "Shift attendance read access",
+    };
+  }
+
+  if (
+    routePath === "platform-presence" ||
+    routePath.startsWith("platform-presence/")
+  ) {
+    const isWrite = upperMethod === "POST";
+    return {
+      routeKey: `platform-presence:${upperMethod}`,
+      requiredScopes: isWrite ? ["driver:write"] : ["driver:read"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: isWrite
+        ? "Platform presence status mutation"
+        : "Platform presence summary access",
+    };
+  }
+
+  if (
+    routePath === "platform-earnings" ||
+    routePath.startsWith("platform-earnings/")
+  ) {
+    return {
+      routeKey: `platform-earnings:${upperMethod}`,
+      requiredScopes: ["driver:read"],
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Driver platform earnings read access",
+    };
+  }
+
+  if (
+    routePath === "safety-operator" ||
+    routePath.startsWith("safety-operator/")
+  ) {
+    const isWrite = !isReadMethod(upperMethod);
+    return {
+      routeKey: `safety-operator:${upperMethod}`,
+      requiredScopes: isWrite ? ["driver:write"] : ["driver:read"],
+      allowedRealms: baseAllowedRealms("ops", "driver"),
+      description: isWrite
+        ? "Safety operator assignment and shift management"
+        : "Safety operator read access",
+    };
+  }
+
+  if (
+    routePath === "driver/task-views" ||
+    routePath.startsWith("driver/task-views/")
+  ) {
+    return {
+      routeKey: `driver:task-views:${upperMethod}`,
+      requiredScopes: ["dispatch:read"],
+      allowedRealms: baseAllowedRealms("driver"),
+      description: "Driver forwarded task view read access",
+    };
+  }
+
+  if (routePath.startsWith("driver/forwarded-orders/")) {
+    return {
+      routeKey: `driver:forwarded-orders:${upperMethod}`,
+      requiredScopes: ["driver:write"],
+      allowedRealms: baseAllowedRealms("driver"),
+      description: "Driver forwarded order acceptance/rejection",
+    };
+  }
+
+  if (
     routePath === "driver/profile" ||
     routePath.startsWith("driver/profile/")
   ) {

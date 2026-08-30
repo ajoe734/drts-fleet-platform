@@ -49,7 +49,13 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
-import { CurrentIdentity, RequireRealms } from "../../common/auth";
+import {
+  CurrentIdentity,
+  RequireRealms,
+  RequireScopes,
+  isDriverIdentityMatching,
+  normalizeDriverId,
+} from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { IdempotencyService } from "../../common/idempotency";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
@@ -71,8 +77,25 @@ export class OwnedMobilityController {
     identity: BootstrapRequestIdentity | null,
     requestedDriverId?: string,
   ) {
-    if (identity?.actorType === "driver_user" && identity.actorId) {
-      return identity.actorId;
+    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
+      const actorId = identity.actorId;
+      if (!actorId) {
+        throw new ApiRequestError(
+          HttpStatus.UNAUTHORIZED,
+          "DRIVER_IDENTITY_REQUIRED",
+          "Driver identity actorId is required.",
+        );
+      }
+      const normalized = requestedDriverId?.trim();
+      if (normalized && !isDriverIdentityMatching(actorId, normalized)) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "DRIVER_IDENTITY_MISMATCH",
+          "Driver identity may only stream its own task events.",
+          { actorId, requestedDriverId: normalized },
+        );
+      }
+      return normalizeDriverId(actorId)!;
     }
 
     const normalizedDriverId = requestedDriverId?.trim();
@@ -81,10 +104,29 @@ export class OwnedMobilityController {
     }
 
     throw new ApiRequestError(
-      400,
+      HttpStatus.BAD_REQUEST,
       "DRIVER_ID_REQUIRED",
       "driverId query is required when the caller is not a driver bootstrap identity.",
     );
+  }
+
+  private assertDriverTaskAccess(
+    taskId: string,
+    identity: BootstrapRequestIdentity | null,
+  ) {
+    const task = this.ownedMobilityService.getDriverTask(taskId);
+    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
+      const actorId = identity.actorId;
+      if (actorId && !isDriverIdentityMatching(actorId, task.driverId)) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "DRIVER_IDENTITY_MISMATCH",
+          "Driver identity cannot access another driver's task.",
+          { taskId, actorId, taskDriverId: task.driverId },
+        );
+      }
+    }
+    return task;
   }
 
   private resolveOpsDispatchStreamActorId(
@@ -767,8 +809,35 @@ export class OwnedMobilityController {
   }
 
   @Get("driver/tasks")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listDriverTasks(@Headers("x-request-id") requestId?: string) {
+  listDriverTasks(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+    @Query("driverId") requestedDriverId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
+      const actorId = identity.actorId;
+      if (
+        requestedDriverId &&
+        actorId &&
+        !isDriverIdentityMatching(actorId, requestedDriverId)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "DRIVER_IDENTITY_MISMATCH",
+          "Driver identity may only view its own tasks.",
+          { actorId, requestedDriverId },
+        );
+      }
+      const driverId = normalizeDriverId(actorId) ?? requestedDriverId;
+      const allTasks = this.ownedMobilityService.listDriverTasks();
+      const items = driverId
+        ? allTasks.filter((t) => isDriverIdentityMatching(t.driverId, driverId))
+        : allTasks;
+      return toApiSuccessEnvelope({ items }, requestId);
+    }
     return toApiSuccessEnvelope(
       {
         items: this.ownedMobilityService.listDriverTasks(),
@@ -778,6 +847,8 @@ export class OwnedMobilityController {
   }
 
   @Sse("driver/task-events")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
   streamDriverTaskEvents(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Query("driverId") requestedDriverId?: string,
@@ -796,23 +867,31 @@ export class OwnedMobilityController {
   }
 
   @Get("driver/tasks/:taskId")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   getDriverTask(
     @Param("taskId") taskId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const task = this.assertDriverTaskAccess(taskId, identity);
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.getDriverTask(taskId),
+      task,
       requestId,
     );
   }
 
   @Post("driver/tasks/:taskId/accept")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async acceptDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverAcceptTaskCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const task = await this.ownedMobilityService.acceptDriverTask(
       taskId,
       command,
@@ -822,11 +901,15 @@ export class OwnedMobilityController {
   }
 
   @Post("driver/tasks/:taskId/reject")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async rejectDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverRejectTaskCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const task = await this.ownedMobilityService.rejectDriverTask(
       taskId,
       command,
@@ -836,11 +919,15 @@ export class OwnedMobilityController {
   }
 
   @Post("driver/tasks/:taskId/depart")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async departDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverDepartTaskCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const task = await this.ownedMobilityService.departDriverTask(
       taskId,
       command,
@@ -850,11 +937,15 @@ export class OwnedMobilityController {
   }
 
   @Post("driver/tasks/:taskId/arrived_pickup")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async arrivePickup(
     @Param("taskId") taskId: string,
     @Body() command: DriverArrivedPickupCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const task = await this.ownedMobilityService.arrivedPickup(
       taskId,
       command,
@@ -864,11 +955,15 @@ export class OwnedMobilityController {
   }
 
   @Post("driver/tasks/:taskId/start")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async startDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverStartTaskCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const task = await this.ownedMobilityService.startDriverTask(
       taskId,
       command,
@@ -878,11 +973,15 @@ export class OwnedMobilityController {
   }
 
   @Post("driver/tasks/:taskId/complete")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async completeDriverTask(
     @Param("taskId") taskId: string,
     @Body() command: DriverCompleteTaskCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertDriverTaskAccess(taskId, identity);
     const completedTask = await this.ownedMobilityService.completeDriverTask(
       taskId,
       command,
