@@ -25,16 +25,18 @@ import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
 import {
   CurrentIdentity,
   RequireRealms,
+  RequireScopes,
   type BootstrapRequestIdentity,
 } from "../../common/auth";
 import { SafetyOperatorService } from "./safety-operator.service";
 
-@RequireRealms("system", "ops", "driver")
 @Controller("safety-operator")
 export class SafetyOperatorController {
   constructor(private readonly safetyOperatorService: SafetyOperatorService) {}
 
   @Get("qualification")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
   checkQualification(
     @Query("safetyOperatorId") safetyOperatorId: string | undefined,
     @Query("sandboxProgramId") sandboxProgramId: string | undefined,
@@ -58,6 +60,8 @@ export class SafetyOperatorController {
   }
 
   @Get("assignments")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
   listAssignments(
     @Query("safetyOperatorId") safetyOperatorId: string | undefined,
     @Query("vehicleId") vehicleId: string | undefined,
@@ -80,6 +84,8 @@ export class SafetyOperatorController {
   }
 
   @Post("assignments")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async createAssignment(
     @Body() command: CreateSafetyOperatorAssignmentCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
@@ -96,6 +102,8 @@ export class SafetyOperatorController {
   }
 
   @Post("assignments/:assignmentId/engage")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async engageAssignment(
     @Param("assignmentId") assignmentId: string,
     @Body() command: EngageSafetyOperatorAssignmentCommand,
@@ -114,6 +122,8 @@ export class SafetyOperatorController {
   }
 
   @Post("assignments/:assignmentId/release")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async releaseAssignment(
     @Param("assignmentId") assignmentId: string,
     @Body() command: ReleaseSafetyOperatorAssignmentCommand,
@@ -132,6 +142,8 @@ export class SafetyOperatorController {
   }
 
   @Get("shifts")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
   listShifts(
     @Query("safetyOperatorId") safetyOperatorId: string | undefined,
     @Query("deviceId") deviceId: string | undefined,
@@ -152,6 +164,8 @@ export class SafetyOperatorController {
   }
 
   @Post("shifts/start")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async startShift(
     @Body() command: StartSafetyOperatorShiftCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
@@ -164,6 +178,8 @@ export class SafetyOperatorController {
   }
 
   @Post("shifts/:shiftId/end")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async endShift(
     @Param("shiftId") shiftId: string,
     @Body() command: EndSafetyOperatorShiftCommand,
@@ -182,6 +198,8 @@ export class SafetyOperatorController {
   }
 
   @Get("pre-trip-checklists")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
   listPreTripChecklists(
     @Query("safetyOperatorId") safetyOperatorId: string | undefined,
     @Query("vehicleId") vehicleId: string | undefined,
@@ -204,6 +222,8 @@ export class SafetyOperatorController {
   }
 
   @Post("pre-trip-checklists")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async submitPreTripChecklist(
     @Body() command: SubmitSafetyOperatorPreTripChecklistCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
@@ -220,6 +240,8 @@ export class SafetyOperatorController {
   }
 
   @Get("takeover-reports")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
   listTakeoverReports(
     @Query("safetyOperatorId") safetyOperatorId: string | undefined,
     @Query("vehicleId") vehicleId: string | undefined,
@@ -245,6 +267,8 @@ export class SafetyOperatorController {
   }
 
   @Post("takeover-reports")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async submitTakeoverReport(
     @Body() command: SubmitSafetyOperatorTakeoverReportCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
@@ -261,6 +285,8 @@ export class SafetyOperatorController {
   }
 
   @Get("trip-closeouts")
+  @RequireRealms("system", "ops", "driver")
+  @RequireScopes("driver:read")
   listTripCloseouts(
     @Query("safetyOperatorId") safetyOperatorId: string | undefined,
     @Query("vehicleId") vehicleId: string | undefined,
@@ -283,6 +309,8 @@ export class SafetyOperatorController {
   }
 
   @Post("trip-closeouts")
+  @RequireRealms("system", "driver")
+  @RequireScopes("driver:write")
   async createTripCloseout(
     @Body() command: CreateSafetyOperatorTripCloseoutCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,

@@ -25,7 +25,11 @@ import {
   ApiRequestError,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
-import { OpenRoute } from "../../common/auth";
+import {
+  CurrentIdentity,
+  OpenRoute,
+  RequireRealms,
+} from "../../common/auth";
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import {
   toPublicPartnerAuthError,
@@ -40,7 +44,6 @@ import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extracto
 import type { AuthBootstrapHeaders, AuthRealm } from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import type { BootstrapRequestIdentity } from "../../common/auth";
-import { CurrentIdentity } from "../../common/auth";
 import { detectAuthEnvironment } from "../../config/auth-startup-config";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import { DriverDeviceSessionService } from "./driver-device-session.service";
@@ -543,6 +546,7 @@ export class AuthController {
   }
 
   @Post("driver/device/revoke")
+  @RequireRealms("system", "platform", "ops", "driver")
   async revokeDriverDeviceSession(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Body() command: RevokeDriverDeviceBindingCommand,

@@ -7,15 +7,21 @@ import type {
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
-import { CurrentIdentity } from "../../common/auth";
+import {
+  CurrentIdentity,
+  RequireRealms,
+  RequireScopes,
+} from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { DriverProfileService } from "./driver-profile.service";
 
+@RequireRealms("system", "driver")
 @Controller("driver/profile")
 export class DriverProfileController {
   constructor(private readonly driverProfileService: DriverProfileService) {}
 
   @Get()
+  @RequireScopes("driver:read")
   getProfile(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
@@ -27,6 +33,7 @@ export class DriverProfileController {
   }
 
   @Post()
+  @RequireScopes("driver:write")
   createProfile(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Body() command: CreateDriverProfileCommand,
@@ -43,6 +50,7 @@ export class DriverProfileController {
   }
 
   @Patch()
+  @RequireScopes("driver:write")
   updateProfile(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Body() command: UpdateDriverProfileCommand,
