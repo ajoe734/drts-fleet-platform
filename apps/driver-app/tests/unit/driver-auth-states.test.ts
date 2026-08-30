@@ -226,13 +226,27 @@ describe("Driver Auth States & Device Flow (IAM-UI-DRV-001)", () => {
 
   describe("UI String Dictionary Integrity", () => {
     it("has complete declared auth states and device flow strings in driverAuthStrings", () => {
-      expect(driverAuthStrings.states.not_provisioned.badge).toContain("DeviceNotProvisioned");
-      expect(driverAuthStrings.states.session_expired.badge).toContain("SessionExpired");
-      expect(driverAuthStrings.states.device_revoked.badge).toContain("DeviceRevoked");
-      expect(driverAuthStrings.states.driver_suspended.badge).toContain("DriverSuspended");
-      expect(driverAuthStrings.devices.rebindAction).toContain("Rebind");
-      expect(driverAuthStrings.devices.revokeAction).toContain("Revoke");
+      expect(driverAuthStrings.states.not_provisioned.badge).toBe("未配置");
+      expect(driverAuthStrings.states.session_expired.badge).toBe("憑證失效");
+      expect(driverAuthStrings.states.device_revoked.badge).toBe("憑證撤銷");
+      expect(driverAuthStrings.states.driver_suspended.badge).toBe("帳號停權");
+      expect(driverAuthStrings.devices.rebindAction).toContain("重新綁定裝置");
+      expect(driverAuthStrings.devices.revokeAction).toContain("登出並撤銷裝置");
       expect(driverAuthStrings.devices.offlineProofNotice).toContain("不會刪除未同步的離線完單佐證");
+    });
+
+    it("never leaks a PascalCase type name or snake_case identifier through driverAuthStrings", () => {
+      const allValues = [
+        ...Object.values(driverAuthStrings.states).flatMap((state) =>
+          Object.values(state),
+        ),
+        ...Object.values(driverAuthStrings.devices),
+      ];
+
+      for (const value of allValues) {
+        expect(value).not.toMatch(/\b[A-Z][a-zA-Z]*[A-Z][a-zA-Z]*\b/);
+        expect(value).not.toMatch(/[a-z]+_[a-z_]+/);
+      }
     });
   });
 });

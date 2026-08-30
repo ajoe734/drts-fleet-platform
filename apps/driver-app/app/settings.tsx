@@ -647,7 +647,7 @@ export default function SettingsScreen() {
                 <Text style={styles.deviceCardTitle}>
                   {driverAuthStrings.devices.activeDevice}
                 </Text>
-                <StatusChip label="生效中 · active" variant="success" />
+                <StatusChip label="生效中" variant="success" />
               </View>
               <View style={styles.deviceDetailGrid}>
                 <View style={styles.deviceField}>
@@ -671,7 +671,7 @@ export default function SettingsScreen() {
                     {driverAuthStrings.devices.driverIdLabel}
                   </Text>
                   <Text style={styles.deviceFieldValue}>
-                    {driverId || "Unbound"}
+                    {driverId || "尚未綁定"}
                   </Text>
                 </View>
               </View>
@@ -696,7 +696,7 @@ export default function SettingsScreen() {
               </View>
             </View>
             <AuthorityBanner
-              authorityLabel="OfflineProofPreserved"
+              authorityLabel="離線佐證已保留"
               description={driverAuthStrings.devices.offlineProofNotice}
               icon="shield-checkmark-outline"
               title="安全合規保證"

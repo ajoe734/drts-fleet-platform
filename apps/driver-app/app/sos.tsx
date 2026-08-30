@@ -894,8 +894,8 @@ export default function DriverSosScreen() {
     setSupplementAttachments([]);
     setUiNotice(
       browserOnline === true
-        ? "補充資料已加入本機 case timeline，正在送出。"
-        : "補充資料已加入本機 case timeline，等待連線後送出。",
+        ? "補充資料已加入本次事件紀錄，正在送出。"
+        : "補充資料已加入本次事件紀錄，等待連線後送出。",
     );
     setScreenError(null);
     if (browserOnline === true && activeCase.receipt) {
@@ -1065,7 +1065,7 @@ export default function DriverSosScreen() {
       {loading ? (
         <Card theme={THEME} title="載入中">
           <Text style={styles.emptyCopy}>
-            正在準備 SOS task context 與本機 outbox…
+            正在準備 SOS 任務資料與本機暫存清單…
           </Text>
         </Card>
       ) : null}
@@ -1117,7 +1117,7 @@ export default function DriverSosScreen() {
           <Card
             theme={THEME}
             title="當前訂單情境"
-            subtitle="獨立 SOS surface，不折疊到 incident route"
+            subtitle="安全求援為獨立頁面，不會併入一般事故回報流程"
           >
             {context ? (
               <View style={styles.contextStack}>

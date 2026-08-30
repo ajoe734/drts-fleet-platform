@@ -755,7 +755,7 @@ function getTripAuthorityBannerProps(
         title: "平台同步異常",
         authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
         description:
-          "既有 sync_failed guardrail 保持鎖定；派車台接手處理前，司機端不開放本地狀態變更。",
+          "同步異常時系統會保持鎖定；派車台接手處理前，司機端不開放本地狀態變更。",
         tone: "danger",
         icon: "alert-circle-outline",
       };
@@ -923,22 +923,22 @@ export default function TripScreen() {
   const forwardedOfferOfflineBlocked =
     tripExperienceState === "forwarded_offered" && sourcePlatformOffline;
   const disabledForwardedAcceptReason = forwardedOfferOfflineBlocked
-    ? "來源平台目前離線，無法離線 relay 接單。"
+    ? "來源平台目前離線，無法在離線狀態下轉送接單。"
     : !forwardedAcceptAllowed
       ? taskViewDetail?.blockingReason?.trim() ||
         taskViewDetail?.syncIssueSummary?.trim() ||
-        "此平台目前不支援 relay 接單。"
+        "此平台目前不支援離線轉送接單。"
       : null;
   const disabledForwardedRejectReason = forwardedOfferOfflineBlocked
-    ? "來源平台目前離線，無法離線 relay 婉拒。"
+    ? "來源平台目前離線，無法在離線狀態下轉送婉拒。"
     : !forwardedRejectAllowed
       ? taskViewDetail?.blockingReason?.trim() ||
-        "此平台目前不支援 relay 婉拒。"
+        "此平台目前不支援離線轉送婉拒。"
       : null;
   const offlineBannerBody = queuedCompletionForActiveTask
     ? `此行程的完單資料已暫存佇列，待恢復連線後會自動重送。最後排隊時間 ${formatTimestamp(queuedCompletionUpdatedAt) ?? "待同步"}。`
     : sourcePlatformOffline
-      ? `${platformLabel} 目前為離線模式。來源平台 relay 動作已鎖定，請先回平台健康頁恢復上線。`
+      ? `${platformLabel} 目前為離線模式。來源平台的轉送動作已鎖定，請先回平台健康頁恢復上線。`
       : null;
   const recordingActive =
     Boolean(orderDetail?.recordingId) ||
@@ -1949,7 +1949,7 @@ export default function TripScreen() {
                   theme={driverCanvasTheme}
                   tone="danger"
                   title="需先載入訂單詳情"
-                  body="確認完單 requirements 前，請先重新整理行程。"
+                  body="確認完單所需資料前，請先重新整理行程。"
                 />
               ) : null}
 
