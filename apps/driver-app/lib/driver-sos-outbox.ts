@@ -4,15 +4,20 @@ import type {
   DriverSosEventType,
   DriverSosAttachmentScanStatus,
   DriverSosLocationSnapshot,
+  DriverSosSeverity,
   DriverSosSubmissionReceipt,
   PendingSosOutboxItem,
   SubmitDriverSosEventCommand,
   SubmitDriverSosEventResult,
 } from "@drts/contracts";
 
+import { driverIncidentSituations } from "./strings";
+
 const DRIVER_SOS_ACTIVE_CASE_KEY = "drts.driver.sos.activeCase";
 const DRIVER_SOS_RETRY_BASE_MS = 60_000;
 const DRIVER_SOS_RETRY_MAX_MS = 30 * 60_000;
+
+export type SosSituationId = (typeof driverIncidentSituations)[number]["id"];
 
 export type DriverSosCaseState = PendingSosOutboxItem["state"];
 export type DriverSosTimelineTone =
@@ -21,7 +26,6 @@ export type DriverSosTimelineTone =
   | "info"
   | "success"
   | "neutral";
-export type DriverSosDialTarget = "police" | "fire" | "fleet";
 
 export interface DriverSosAttachmentDraft {
   id: string;
@@ -50,13 +54,6 @@ export interface DriverSosSupplementDraft {
   lastError: string | null;
 }
 
-export interface DriverSosDialRecord {
-  id: string;
-  target: DriverSosDialTarget;
-  phoneNumber: string;
-  occurredAt: string;
-}
-
 export interface DriverSosTimelineRecord {
   id: string;
   kind: string;
@@ -71,7 +68,12 @@ export interface DriverSosActiveCase {
   incidentId: string | null;
   eventNo: string | null;
   eventType: DriverSosEventType | null;
+  situation?: SosSituationId | null;
+  severity?: DriverSosSeverity | null;
   description: string;
+  driverId?: string | null;
+  vehicleId?: string | null;
+  plateNo?: string | null;
   attachments: DriverSosAttachmentDraft[];
   originalTriggeredAt: string;
   offlineAtTrigger: boolean;
@@ -84,13 +86,91 @@ export interface DriverSosActiveCase {
   lastError: string | null;
   receipt: DriverSosSubmissionReceipt | null;
   supplements: DriverSosSupplementDraft[];
-  dialRecords: DriverSosDialRecord[];
+  dialRecords?: Array<{
+    id: string;
+    target: string;
+    phoneNumber: string;
+    occurredAt: string;
+  }>;
   falseAlarm: {
     dismissed: boolean;
     dismissedAt: string | null;
     note: string | null;
   };
   timeline: DriverSosTimelineRecord[];
+}
+
+export function mapSituationToDriverSosEventType(
+  situationId: SosSituationId | null | undefined,
+): DriverSosEventType | null {
+  switch (situationId) {
+    case "traffic_collision":
+      return "traffic_accident";
+    case "medical_emergency":
+      return "passenger_medical";
+    case "passenger_conflict":
+    case "route_threat":
+      return "security_incident";
+    case "vehicle_breakdown":
+    case "other":
+      return "other";
+    default:
+      return null;
+  }
+}
+
+export function getSituationLabel(
+  situationId: SosSituationId | null | undefined,
+): string | null {
+  if (!situationId) {
+    return null;
+  }
+
+  return (
+    driverIncidentSituations.find((situation) => situation.id === situationId)
+      ?.label ?? null
+  );
+}
+
+export function formatSosDescription(params: {
+  situationLabel?: string | null;
+  details?: string | null;
+  platformContext?: {
+    platformLabel?: string | null;
+    platformCode?: string | null;
+    mirrorOrderId?: string | null;
+    externalOrderId?: string | null;
+    nativeStatusLabel?: string | null;
+  } | null;
+}): string {
+  const lines: string[] = [];
+  if (params.situationLabel) {
+    lines.push(`事件情況：${params.situationLabel}`);
+  }
+
+  const detail = params.details?.trim();
+  if (detail) {
+    lines.push(detail);
+  }
+
+  if (params.platformContext && params.platformContext.platformCode) {
+    lines.push(
+      "",
+      "[SOS 平台任務上下文]",
+      `來源平台：${params.platformContext.platformLabel || params.platformContext.platformCode}（${params.platformContext.platformCode}）`,
+    );
+    if (params.platformContext.mirrorOrderId) {
+      lines.push(`本地鏡像訂單：${params.platformContext.mirrorOrderId}`);
+    }
+    if (params.platformContext.externalOrderId) {
+      lines.push(`外部訂單：${params.platformContext.externalOrderId}`);
+    }
+    if (params.platformContext.nativeStatusLabel) {
+      lines.push(`目前平台狀態：${params.platformContext.nativeStatusLabel}`);
+    }
+  }
+
+  return lines.join("\n").trim();
 }
 
 function createLocalId(prefix: string): string {
@@ -194,24 +274,41 @@ export function createDriverSosAttachmentDraft(
 }
 
 export function createDriverSosActiveCase(params: {
-  eventType: DriverSosEventType | null;
+  eventType?: DriverSosEventType | null;
+  situation?: SosSituationId | null;
+  severity?: DriverSosSeverity | null;
   description: string;
-  attachments: DriverSosAttachmentDraft[];
-  originalTriggeredAt: string;
+  driverId?: string | null;
+  vehicleId?: string | null;
+  plateNo?: string | null;
+  attachments?: DriverSosAttachmentDraft[];
+  originalTriggeredAt?: string;
   offlineAtTrigger: boolean;
   location: DriverSosLocationSnapshot | null;
   orderId: string | null;
   taskId: string | null;
 }): DriverSosActiveCase {
   const now = new Date().toISOString();
+  const originalTriggeredAt = params.originalTriggeredAt || now;
+  const eventType =
+    params.eventType !== undefined
+      ? params.eventType
+      : mapSituationToDriverSosEventType(params.situation);
+  const attachments = params.attachments ? [...params.attachments] : [];
+
   const baseCase: DriverSosActiveCase = {
     clientEventId: createClientEventId(),
     incidentId: null,
     eventNo: null,
-    eventType: params.eventType,
+    eventType,
+    situation: params.situation ?? null,
+    severity: params.severity ?? (eventType ? "major" : "normal"),
     description: params.description.trim(),
-    attachments: [...params.attachments],
-    originalTriggeredAt: params.originalTriggeredAt,
+    driverId: params.driverId ?? null,
+    vehicleId: params.vehicleId ?? null,
+    plateNo: params.plateNo ?? null,
+    attachments,
+    originalTriggeredAt,
     offlineAtTrigger: params.offlineAtTrigger,
     location: params.location,
     orderId: params.orderId,
@@ -235,17 +332,17 @@ export function createDriverSosActiveCase(params: {
     kind: "sos_local_triggered",
     title: "已觸發 SOS",
     detail: params.offlineAtTrigger
-      ? "裝置目前離線，事件已寫入本機 durable outbox。"
-      : "事件已寫入本機 durable outbox，準備送往安全值班。",
-    occurredAt: params.originalTriggeredAt,
+      ? "裝置目前離線，事件已保存於本機，連線後自動補送。"
+      : "事件已保存於本機，準備送往車隊安全值班。",
+    occurredAt: originalTriggeredAt,
     tone: "danger",
   });
 
-  if (params.attachments.length > 0) {
+  if (attachments.length > 0) {
     nextCase = appendTimelineEntry(nextCase, {
       kind: "attachment_added",
       title: "已附上現場附件",
-      detail: `${params.attachments.length} 件附件已綁定到 SOS case。`,
+      detail: `${attachments.length} 件附件已綁定到 SOS 事件。`,
       occurredAt: now,
       tone: "info",
     });
@@ -257,17 +354,30 @@ export function createDriverSosActiveCase(params: {
 export function buildDriverSosSubmitCommand(
   activeCase: DriverSosActiveCase,
 ): SubmitDriverSosEventCommand {
-  return {
+  const command: SubmitDriverSosEventCommand = {
     clientEventId: activeCase.clientEventId,
     orderId: activeCase.orderId,
     taskId: activeCase.taskId,
     eventType: activeCase.eventType,
-    severity: activeCase.eventType ? "major" : "normal",
+    severity:
+      activeCase.severity ?? (activeCase.eventType ? "major" : "normal"),
     description: activeCase.description || null,
     location: activeCase.location,
     originalTriggeredAt: activeCase.originalTriggeredAt,
     offlineAtTrigger: activeCase.offlineAtTrigger,
   };
+
+  if (activeCase.driverId !== undefined && activeCase.driverId !== null) {
+    command.driverId = activeCase.driverId;
+  }
+  if (activeCase.vehicleId !== undefined && activeCase.vehicleId !== null) {
+    command.vehicleId = activeCase.vehicleId;
+  }
+  if (activeCase.plateNo !== undefined && activeCase.plateNo !== null) {
+    command.plateNo = activeCase.plateNo;
+  }
+
+  return command;
 }
 
 export function markDriverSosCaseSending(
@@ -282,7 +392,7 @@ export function markDriverSosCaseSending(
     {
       kind: "server_received",
       title: "正在送出",
-      detail: "App 正在將 SOS 事件送往 driver-sos 服務。",
+      detail: "正在將 SOS 通報送往車隊安全值班。",
       occurredAt: new Date().toISOString(),
       tone: "info",
     },
@@ -305,18 +415,18 @@ export function markDriverSosCaseSubmitted(
 
   nextCase = appendTimelineEntry(nextCase, {
     kind: "fleet_report_confirmed",
-    title: result.receipt.duplicate ? "伺服器接受既有 SOS" : "已送達安全值班",
+    title: result.receipt.duplicate ? "伺服器已確認既有 SOS" : "已送達安全值班",
     detail: result.receipt.duplicate
-      ? `同一 clientEventId 已存在，沿用事件編號 ${result.receipt.eventNo}。`
-      : `事件編號 ${result.receipt.eventNo} 已建立並關聯 incident ${result.receipt.incidentId}。`,
+      ? `伺服器已確認既有通報，事件編號 ${result.receipt.eventNo}。`
+      : `事件編號 ${result.receipt.eventNo} 已建立並指派值班人員（事件編號：${result.receipt.incidentId}）。`,
     occurredAt: receivedAt,
     tone: "success",
   });
 
   nextCase = appendTimelineEntry(nextCase, {
     kind: "incident_created",
-    title: "已建立 incident",
-    detail: `incident ${result.receipt.incidentId} 已由 driver-sos domain 建立。`,
+    title: "已建立安全事件",
+    detail: `安全事件 ${result.receipt.incidentId} 已由系統建立。`,
     occurredAt: receivedAt,
     tone: "success",
   });
@@ -400,7 +510,7 @@ export function applyDriverSosAttachmentSyncResult(
       title: pending ? "附件等待補送" : "附件處理完成",
       detail: pending
         ? `${confirmedCount} 件已確認，${unavailableCount} 件服務未就緒，${failedCount} 件可重試。SOS 主事件不受影響。`
-        : `${confirmedCount} 件附件已由伺服器確認；掃描結果逐件保留。`,
+        : `${confirmedCount} 件附件已由伺服器確認。`,
       occurredAt: now,
       tone: pending ? "warn" : "success",
     },
@@ -424,45 +534,9 @@ export function markDriverSosCaseFailed(
     {
       kind: "sync_failed",
       title: "送出失敗",
-      detail: `${errorMessage} 系統會保留本機資料並允許重試。`,
+      detail: `${errorMessage} 系統已保留本機資料，將於連線後重試。`,
       occurredAt: now,
       tone: "warn",
-    },
-  );
-}
-
-export function addDriverSosDialRecord(
-  activeCase: DriverSosActiveCase,
-  params: {
-    target: DriverSosDialTarget;
-    phoneNumber: string;
-  },
-): DriverSosActiveCase {
-  const occurredAt = new Date().toISOString();
-  const dialRecord: DriverSosDialRecord = {
-    id: createLocalId("sos-dial"),
-    target: params.target,
-    phoneNumber: params.phoneNumber,
-    occurredAt,
-  };
-  const targetLabel =
-    params.target === "police"
-      ? "110 警政"
-      : params.target === "fire"
-        ? "119 消防"
-        : "車隊值班";
-
-  return appendTimelineEntry(
-    {
-      ...activeCase,
-      dialRecords: [dialRecord, ...activeCase.dialRecords],
-    },
-    {
-      kind: "native_dial_opened",
-      title: `已開啟 ${targetLabel}`,
-      detail: `原生撥號已切到 ${params.phoneNumber}。`,
-      occurredAt,
-      tone: "danger",
     },
   );
 }
@@ -489,7 +563,7 @@ export function queueDriverSosSupplement(
     detailParts.push("已加入補充說明");
   }
   if (itemCount > 0) {
-    detailParts.push(`${itemCount} 件附件待 evidence channel 補送`);
+    detailParts.push(`${itemCount} 件附件待補送`);
   }
 
   return appendTimelineEntry(
@@ -502,7 +576,7 @@ export function queueDriverSosSupplement(
       title: "已加入補充資料",
       detail:
         detailParts.join("，") ||
-        "補充資料已寫入本機 case timeline，待後續補送。",
+        "補充資料已寫入本機紀錄，待後續補送。",
       occurredAt: createdAt,
       tone: "info",
     },
@@ -582,3 +656,4 @@ export async function saveDriverSosActiveCase(
     JSON.stringify(activeCase),
   );
 }
+

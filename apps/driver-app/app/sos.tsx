@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  Linking,
   PanResponder,
   Pressable,
   StyleSheet,
@@ -19,7 +18,6 @@ import {
   type DriverSosAttachmentRecord,
   PLATFORM_CODE_REGISTRY,
   type DriverTaskRecord,
-  type DriverSosEventType,
   type DriverSosLocationSnapshot,
   type UnifiedDriverTaskView,
 } from "@drts/contracts";
@@ -43,11 +41,13 @@ import {
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import {
   applyDriverSosAttachmentSyncResult,
-  addDriverSosDialRecord,
   buildDriverSosSubmitCommand,
   createDriverSosActiveCase,
   createDriverSosAttachmentDraft,
+  formatSosDescription,
+  getSituationLabel,
   loadDriverSosActiveCase,
+  mapSituationToDriverSosEventType,
   markDriverSosCaseFailed,
   markDriverSosCaseSending,
   markDriverSosCaseSubmitted,
@@ -56,6 +56,7 @@ import {
   saveDriverSosActiveCase,
   type DriverSosActiveCase,
   type DriverSosAttachmentDraft,
+  type SosSituationId,
 } from "@/lib/driver-sos-outbox";
 import { syncDriverSosAttachments } from "@/lib/driver-sos-attachment-upload";
 import { getLatestDriverLocationUpdate } from "@/lib/driver-location-heartbeat";
@@ -76,9 +77,6 @@ const THEME = driverCanvasTheme;
 const HOLD_DURATION_MS = 2_000;
 const HOLD_PROGRESS_INTERVAL_MS = 50;
 const MAX_ATTACHMENTS = 4;
-const FLEET_DUTY_PHONE_NUMBER = "02-2191-7788";
-
-type SosSituationId = (typeof driverIncidentSituations)[number]["id"];
 // S3-FIX-DRIVER-SOS-VOCAB-001: the cross-platform fields live in their own
 // optional group rather than inline on the context, so the multi_taxi_direct
 // gate can drop them as a unit. When `crossPlatform` is null there is nothing
@@ -128,36 +126,6 @@ function getPlatformDisplayLabel(platformCode: string | null | undefined) {
   }
 
   return humanizeCode(normalized);
-}
-
-function mapSituationToDriverSosEventType(
-  situationId: SosSituationId | null,
-): DriverSosEventType | null {
-  switch (situationId) {
-    case "traffic_collision":
-      return "traffic_accident";
-    case "medical_emergency":
-      return "passenger_medical";
-    case "passenger_conflict":
-    case "route_threat":
-      return "security_incident";
-    case "vehicle_breakdown":
-    case "other":
-      return "other";
-    default:
-      return null;
-  }
-}
-
-function getSituationLabel(situationId: SosSituationId | null): string | null {
-  if (!situationId) {
-    return null;
-  }
-
-  return (
-    driverIncidentSituations.find((situation) => situation.id === situationId)
-      ?.label ?? null
-  );
 }
 
 function formatPlatformStatusLabel(status: string | null) {
@@ -273,10 +241,6 @@ function getDriverSosLocationSnapshot(): DriverSosLocationSnapshot | null {
   };
 }
 
-function getErrorMessage(error: unknown): string {
-  return formatDriverError(error, "SOS 送出失敗，請稍後再試。");
-}
-
 function formatAt(value: string | null) {
   if (!value) {
     return "尚無更新";
@@ -303,23 +267,23 @@ function getSyncChipModel(
     if (browserOnline === false) {
       return {
         tone: "warn",
-        label: "offline",
-        detail: "offline · 裝置離線，SOS 會先留在本機 durable outbox。",
+        label: "離線保存",
+        detail: "離線狀態 · 裝置離線，SOS 會先保存在手機，連線後自動送出。",
       };
     }
 
     return {
       tone: "info",
-      label: "online",
-      detail: "online · 可直接送往 driver-sos 服務。",
+      label: "連線正常",
+      detail: "連線正常 · 可直接送達車隊安全值班。",
     };
   }
 
   if (activeCase.syncState === "sending") {
     return {
       tone: "info",
-      label: "sending",
-      detail: "sending · 正在送出 SOS 與 incident 關聯。",
+      label: "正在送出",
+      detail: "正在送出 · 正在將 SOS 通報送往車隊值班。",
     };
   }
 
@@ -329,27 +293,27 @@ function getSyncChipModel(
   ) {
     return {
       tone: "success",
-      label: "submitted",
+      label: "已送達",
       detail: activeCase.receipt
-        ? `submitted · ${activeCase.receipt.eventNo} 已送達安全值班。`
-        : "submitted · 伺服器已接受 SOS。",
+        ? `已送達 · 事件編號 ${activeCase.receipt.eventNo} 已送達安全值班。`
+        : "已送達 · 伺服器已確認 SOS 通報。",
     };
   }
 
   if (activeCase.syncState === "attachment_pending") {
     return {
       tone: "warn",
-      label: "attachment pending",
+      label: "附件處理中",
       detail: activeCase.receipt
-        ? `SOS ${activeCase.receipt.eventNo} 已送達；附件等待儲存或掃描服務。`
-        : "SOS 已送達；附件等待儲存或掃描服務。",
+        ? `SOS ${activeCase.receipt.eventNo} 已送達；部分附件等待補送。`
+        : "SOS 已送達；部分附件等待補送。",
     };
   }
 
   return {
     tone: "warn",
-    label: "offline",
-    detail: "offline · 事件尚未送達，會保留在本機 outbox 並等待補送 / 重試。",
+    label: "待補送",
+    detail: "尚未送達 · 事件已保存在手機，將於連線後自動補送。",
   };
 }
 
@@ -369,6 +333,35 @@ function StatusChip({
       <Text style={styles.statusChipDetail}>{chip.detail}</Text>
     </View>
   );
+}
+
+function formatUploadStateLabel(state: string): string {
+  switch (state) {
+    case "confirmed":
+      return "已確認";
+    case "uploading":
+      return "上傳中";
+    case "unavailable":
+      return "服務未就緒";
+    case "failed_retryable":
+      return "待重試";
+    default:
+      return "本機保存";
+  }
+}
+
+function formatScanStatusLabel(status: string | null): string {
+  if (!status) return "";
+  switch (status) {
+    case "clean":
+      return " · 掃描通過";
+    case "pending":
+      return " · 掃描中";
+    case "infected":
+      return " · 檔案異常";
+    default:
+      return "";
+  }
 }
 
 function AttachmentList({
@@ -396,10 +389,8 @@ function AttachmentList({
             </Text>
             {attachment.uploadState !== "local" ? (
               <Text style={styles.attachmentMeta}>
-                upload {attachment.uploadState}
-                {attachment.scanStatus
-                  ? ` · scan ${attachment.scanStatus}`
-                  : ""}
+                上傳狀態：{formatUploadStateLabel(attachment.uploadState)}
+                {formatScanStatusLabel(attachment.scanStatus)}
                 {attachment.lastError ? ` · ${attachment.lastError}` : ""}
               </Text>
             ) : null}
@@ -463,7 +454,7 @@ function SosHoldButton({
         </Text>
         <Text style={styles.holdButtonHint}>
           {submitting
-            ? "driver-sos 正在建立事件"
+            ? "正在通報車隊安全值班"
             : `目前進度 ${Math.round(holdProgress * 100)}%`}
         </Text>
       </View>
@@ -820,24 +811,6 @@ export default function DriverSosScreen() {
     setSupplementAttachments((current) => [...current, ...nextAttachments]);
   }
 
-  async function openNativeDial(
-    target: "police" | "fire" | "fleet",
-    phoneNumber: string,
-  ) {
-    try {
-      await Linking.openURL(`tel:${phoneNumber}`);
-      if (activeCase) {
-        const nextCase = addDriverSosDialRecord(activeCase, {
-          target,
-          phoneNumber,
-        });
-        await persistActiveCase(nextCase);
-      }
-    } catch (error) {
-      Alert.alert("無法開啟原生撥號", getErrorMessage(error));
-    }
-  }
-
   async function handleSubmitSos() {
     if (submitting) {
       return;
@@ -849,29 +822,44 @@ export default function DriverSosScreen() {
       return;
     }
 
-    const description = details.trim();
+    const description = formatSosDescription({
+      situationLabel: selectedSituationLabel,
+      details,
+      platformContext: context?.crossPlatform
+        ? {
+            platformCode: context.crossPlatform.platformCode,
+            platformLabel: context.crossPlatform.platformLabel,
+            externalOrderId: context.crossPlatform.externalOrderId,
+            nativeStatusLabel: formatPlatformStatusLabel(
+              context.crossPlatform.platformStatus,
+            ),
+          }
+        : null,
+    });
     const location = getDriverSosLocationSnapshot();
+    const isOffline = browserOnline === false;
     const nextCase = createDriverSosActiveCase({
       eventType: mapSituationToDriverSosEventType(selectedSituation),
+      situation: selectedSituation,
       description,
       attachments: draftAttachments,
       originalTriggeredAt: new Date().toISOString(),
-      offlineAtTrigger: browserOnline === false,
+      offlineAtTrigger: isOffline,
       location,
       orderId: context?.orderId ?? null,
       taskId: context?.taskId ?? null,
     });
     await persistActiveCase(nextCase);
     setUiNotice(
-      browserOnline === false
-        ? "裝置離線，SOS 已寫入本機 outbox，等待補送。"
-        : "SOS 已寫入本機 outbox，正在送往安全值班。",
+      isOffline
+        ? "裝置離線，SOS 已保存在手機，連線後自動送出。"
+        : "SOS 已保存在本機，正在送往車隊安全值班。",
     );
     setDraftAttachments([]);
     setDetails("");
     setScreenError(null);
 
-    if (browserOnline === false) {
+    if (isOffline) {
       resetHoldProgress();
       return;
     }
@@ -1025,7 +1013,7 @@ export default function DriverSosScreen() {
       <PageHeader
         theme={THEME}
         title={driverRouteTitles.sos}
-        subtitle="獨立 SOS surface · 2 秒長按 · 原生撥號 · 離線 durable outbox"
+        subtitle="緊急求援 · 2 秒長按 · 離線自動保存與補送"
         actions={
           activeCase?.falseAlarm.dismissed ? (
             <Btn
@@ -1068,51 +1056,10 @@ export default function DriverSosScreen() {
           <View style={styles.heroCopy}>
             <Text style={styles.heroTitle}>緊急求援</Text>
             <Text style={styles.heroSubtitle}>
-              送出後會進入 driver-sos domain，建立 incident 關聯並抑制司機配對。
+              送出後將立即通報車隊值班人員並建立安全事件。
             </Text>
           </View>
         </View>
-      </Card>
-
-      <Card
-        theme={THEME}
-        title="原生緊急撥號"
-        subtitle="不需網路，直接開啟裝置原生 dialer"
-      >
-        <View style={styles.dialGrid}>
-          <Btn
-            theme={THEME}
-            variant="primary"
-            size="md"
-            danger
-            onPress={() => void openNativeDial("police", "110")}
-          >
-            110 警政
-          </Btn>
-          <Btn
-            theme={THEME}
-            variant="primary"
-            size="md"
-            danger
-            onPress={() => void openNativeDial("fire", "119")}
-          >
-            119 消防
-          </Btn>
-          <Btn
-            theme={THEME}
-            variant="secondary"
-            size="md"
-            onPress={() =>
-              void openNativeDial("fleet", FLEET_DUTY_PHONE_NUMBER)
-            }
-          >
-            車隊值班
-          </Btn>
-        </View>
-        <Text style={styles.supportingCopy}>
-          110 / 119 / 車隊值班分開撥打；這三個動作不依賴網路，且會寫入本機 SOS
-          timeline。
-        </Text>
       </Card>
 
       {loading ? (
@@ -1151,14 +1098,16 @@ export default function DriverSosScreen() {
                     >
                       {situation.label}
                     </Text>
-                    <Text
-                      style={[
-                        styles.situationMeta,
-                        selected ? styles.situationMetaSelected : null,
-                      ]}
-                    >
-                      {selected ? "目前選取" : humanizeCode(situation.id)}
-                    </Text>
+                    {selected ? (
+                      <Text
+                        style={[
+                          styles.situationMeta,
+                          styles.situationMetaSelected,
+                        ]}
+                      >
+                        目前選取
+                      </Text>
+                    ) : null}
                   </Pressable>
                 );
               })}
@@ -1273,8 +1222,7 @@ export default function DriverSosScreen() {
                 加入附件
               </Btn>
               <Text style={styles.supportingCopy}>
-                每筆 SOS 合計最多 {MAX_ATTACHMENTS} 件。附件會跟著本機 case
-                timeline 一起保留。
+                每筆 SOS 合計最多 {MAX_ATTACHMENTS} 件。附件會跟著本機紀錄一起保留。
               </Text>
             </View>
 
@@ -1295,12 +1243,12 @@ export default function DriverSosScreen() {
         <>
           <Card
             theme={THEME}
-            title={activeCase.receipt?.eventNo ?? "本機 SOS case"}
-            subtitle={`state · ${activeCase.syncState}`}
+            title={activeCase.receipt?.eventNo ?? "本機 SOS 事件"}
+            subtitle={`狀態 · ${activeCase.syncState === "submitted" || activeCase.syncState === "complete" ? "已送達" : activeCase.syncState === "attachment_pending" ? "附件處理中" : activeCase.syncState === "sending" ? "送出中" : "待補送"}`}
             actions={
               activeCase.receipt ? (
                 <Pill theme={THEME} tone="success" dot>
-                  incident {activeCase.receipt.incidentId}
+                  事件編號 {activeCase.receipt.incidentId}
                 </Pill>
               ) : null
             }
@@ -1310,31 +1258,31 @@ export default function DriverSosScreen() {
               cols={2}
               items={[
                 {
-                  label: "triggered at",
+                  label: "觸發時間",
                   value: formatAt(activeCase.originalTriggeredAt),
                   mono: true,
                 },
                 {
-                  label: "next retry",
+                  label: "下次重試",
                   value: formatAt(activeCase.nextAttemptAt),
                   mono: true,
                 },
                 {
-                  label: "attempts",
+                  label: "嘗試次數",
                   value: String(activeCase.attemptCount),
                   mono: true,
                 },
                 {
-                  label: "offline trigger",
-                  value: activeCase.offlineAtTrigger ? "yes" : "no",
+                  label: "離線觸發",
+                  value: activeCase.offlineAtTrigger ? "是" : "否",
                 },
                 {
-                  label: "task",
+                  label: "任務編號",
                   value: activeCase.taskId ?? context?.taskId ?? "—",
                   mono: Boolean(activeCase.taskId ?? context?.taskId),
                 },
                 {
-                  label: "order",
+                  label: "行程編號",
                   value: activeCase.orderId ?? context?.orderId ?? "—",
                   mono: Boolean(activeCase.orderId ?? context?.orderId),
                 },
@@ -1354,13 +1302,13 @@ export default function DriverSosScreen() {
           <Card
             theme={THEME}
             title="補充說明 / 附件"
-            subtitle="補充資料先寫入本機 case timeline，連線時使用同一附件驗證流程補送"
+            subtitle="補充資料先寫入本機紀錄，連線時使用同一附件驗證流程補送"
           >
             <Field theme={THEME} label="補充說明">
               <TextInput
                 multiline
                 onChangeText={setSupplementNote}
-                placeholder="可補充車內狀況、對外撥號結果、現場照片說明…"
+                placeholder="可補充車內狀況、現場照片說明…"
                 placeholderTextColor={THEME.textDim}
                 style={styles.multilineInput}
                 value={supplementNote}
@@ -1383,7 +1331,7 @@ export default function DriverSosScreen() {
                 size="sm"
                 onPress={() => void handleQueueSupplement()}
               >
-                加入本機 timeline
+                加入本機紀錄
               </Btn>
             </View>
             <AttachmentList
@@ -1405,7 +1353,7 @@ export default function DriverSosScreen() {
                       {supplement.note || "附件補件"}
                     </Text>
                     <Text style={styles.supplementMeta}>
-                      {formatAt(supplement.createdAt)} · {supplement.state}
+                      {formatAt(supplement.createdAt)} · {supplement.state === "complete" ? "已完成" : "待處理"}
                     </Text>
                   </View>
                 ))}
@@ -1444,8 +1392,8 @@ export default function DriverSosScreen() {
 
           <Card
             theme={THEME}
-            title="SOS timeline"
-            subtitle="local durable timeline · a11y 以文字和 tone 雙重標示"
+            title="求援進度紀錄"
+            subtitle="通報進度與時間線紀錄"
           >
             {activeCase.timeline.length === 0 ? (
               <Text style={styles.emptyCopy}>目前尚無 timeline。</Text>
@@ -1471,7 +1419,7 @@ export default function DriverSosScreen() {
                       <Text style={styles.timelineTitle}>{entry.title}</Text>
                       <Text style={styles.timelineDetail}>{entry.detail}</Text>
                       <Text style={styles.timelineMeta}>
-                        {formatAt(entry.occurredAt)} · {entry.kind}
+                        {formatAt(entry.occurredAt)}
                       </Text>
                     </View>
                   </View>
@@ -1524,11 +1472,6 @@ const styles = StyleSheet.create({
     fontFamily: THEME.fontFamily,
     fontSize: 12,
     lineHeight: 18,
-  },
-  dialGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
   },
   supportingCopy: {
     color: THEME.textMuted,
