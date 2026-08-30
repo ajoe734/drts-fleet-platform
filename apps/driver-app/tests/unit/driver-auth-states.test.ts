@@ -61,7 +61,7 @@ describe("Driver Auth States & Device Flow (IAM-UI-DRV-001)", () => {
       expect(getDriverIdentityIssue()).toContain("失效或被撤銷");
     });
 
-    it("returns 'device_revoked' when session is revoked or token reuse is detected", async () => {
+    it("returns 'device_revoked' when token reuse is detected", async () => {
       const reuseError = new Error(
         'API error 401: {"error":{"code":"DRIVER_DEVICE_REUSE_DETECTED","message":"Token reuse detected."}}',
       );
@@ -70,33 +70,24 @@ describe("Driver Auth States & Device Flow (IAM-UI-DRV-001)", () => {
       expect(recovered).toBe(true);
       expect(getDriverAuthState()).toBe("device_revoked");
       expect(getDriverIdentityIssue()).toContain("撤銷憑證並安全登出");
-
-      const revokeError = new Error(
-        'API error 403: {"error":{"code":"DRIVER_AUTH_REVOKED","message":"Driver account retired."}}',
-      );
-
-      await recoverDriverSessionFromApiError(revokeError);
-      expect(getDriverAuthState()).toBe("device_revoked");
-      expect(getDriverIdentityIssue()).toContain("退役或撤銷");
     });
 
-    it("returns 'driver_suspended' when driver account or cert is suspended", async () => {
+    it("surfaces permission messages on 403 without clearing session or logging out", async () => {
       const suspendedError = new Error(
         'API error 403: {"error":{"code":"DRIVER_AUTH_SUSPENDED","message":"Driver account suspended."}}',
       );
 
       const recovered = await recoverDriverSessionFromApiError(suspendedError);
-      expect(recovered).toBe(true);
-      expect(getDriverAuthState()).toBe("driver_suspended");
-      expect(getDriverIdentityIssue()).toContain("已被停權");
+      expect(recovered).toBe(false);
+      expect(formatDriverError(suspendedError)).toContain("已被停權");
 
       const certError = new Error(
         'API error 403: {"error":{"code":"DRIVER_CERT_INVALID","message":"Cert expired."}}',
       );
 
-      await recoverDriverSessionFromApiError(certError);
-      expect(getDriverAuthState()).toBe("driver_suspended");
-      expect(getDriverIdentityIssue()).toContain("證件狀態無效");
+      const recoveredCert = await recoverDriverSessionFromApiError(certError);
+      expect(recoveredCert).toBe(false);
+      expect(formatDriverError(certError)).toContain("證件狀態無效");
     });
   });
 

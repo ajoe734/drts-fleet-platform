@@ -1,5 +1,5 @@
 /**
- * Driver App API client factory.
+ * Driver App API client factory and token lifecycle authority.
  *
  * Production posture prefers a backend-issued, device-bound Bearer session.
  * Development may still opt into explicit env-var bootstrap identity.
@@ -40,13 +40,18 @@ const DRIVER_DEVICE_ID_KEY = "drts.driver.deviceId";
 const DRIVER_SESSION_KEY = "drts.driver.session";
 const DRIVER_PENDING_TASK_COMPLETION_KEY = "drts.driver.pendingTaskCompletion";
 
-const publicClient = createPublicClient(API_URL);
+let publicClient = createPublicClient(API_URL);
 
 let client: ApiClient | null = null;
+let driverClientProxy: ApiClient | null = null;
 let hydrated = false;
 let hydrationPromise: Promise<void> | null = null;
+let refreshPromise: Promise<DriverDeviceProvisioningSession> | null = null;
 let provisionedSession: DriverDeviceProvisioningSession | null = null;
 let driverIdentityIssue: string | null = null;
+
+export type ProtectedCacheClearCallback = () => void | Promise<void>;
+const protectedCacheClearHandlers = new Set<ProtectedCacheClearCallback>();
 
 export type PendingDriverTaskCompletion = {
   taskId: string;
@@ -55,6 +60,13 @@ export type PendingDriverTaskCompletion = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type DriverAuthState =
+  | "not_provisioned"
+  | "provisioned"
+  | "session_expired"
+  | "device_revoked"
+  | "driver_suspended";
 
 function createLocalId(prefix: string): string {
   if (
@@ -123,6 +135,68 @@ function parseApiError(error: unknown): {
   code: string | null;
   message: string | null;
 } {
+  let status: number | null = null;
+  let code: string | null = null;
+  let message: string | null = null;
+  let rawBody: string | null = null;
+
+  if (error && typeof error === "object") {
+    if ("statusCode" in error && typeof (error as { statusCode: unknown }).statusCode === "number") {
+      status = (error as { statusCode: number }).statusCode;
+    } else if ("status" in error && typeof (error as { status: unknown }).status === "number") {
+      status = (error as { status: number }).status;
+    }
+
+    if ("code" in error && typeof (error as { code: unknown }).code === "string") {
+      code = (error as { code: string }).code;
+    }
+
+    if ("apiMessage" in error && typeof (error as { apiMessage: unknown }).apiMessage === "string") {
+      message = (error as { apiMessage: string }).apiMessage;
+    }
+
+    if ("rawBody" in error && typeof (error as { rawBody: unknown }).rawBody === "string") {
+      rawBody = (error as { rawBody: string }).rawBody;
+    }
+  }
+
+  const payloadText =
+    rawBody ??
+    (error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "");
+
+  const apiMatch = /^API error (\d+):\s*(.*)$/s.exec(payloadText);
+  const jsonCandidate = apiMatch ? apiMatch[2] : payloadText;
+
+  if (apiMatch && status === null) {
+    status = Number.parseInt(apiMatch[1], 10);
+  }
+
+  if (jsonCandidate?.trim()) {
+    try {
+      const payload = JSON.parse(jsonCandidate.trim()) as {
+        error?: { code?: string; message?: string };
+        code?: string;
+        message?: string;
+      };
+      if (payload.error?.code) {
+        code = payload.error.code;
+      } else if (payload.code) {
+        code = payload.code;
+      }
+      if (payload.error?.message) {
+        message = sanitizeLogMessage(payload.error.message);
+      } else if (payload.message) {
+        message = sanitizeLogMessage(payload.message);
+      }
+    } catch {
+      // not json, keep existing code/message
+    }
+  }
+
   const rawFallback =
     error instanceof Error && error.message.trim()
       ? error.message.trim()
@@ -130,43 +204,73 @@ function parseApiError(error: unknown): {
         ? error.trim()
         : null;
   const fallback = sanitizeLogMessage(rawFallback);
-  if (typeof error !== "string" && !(error instanceof Error)) {
-    return {
-      status: null,
-      code: null,
-      message: fallback,
-    };
-  }
-
-  const errMsg = typeof error === "string" ? error : error.message;
-  const apiMatch = /^API error (\d+):\s*(.*)$/s.exec(errMsg);
-  if (!apiMatch) {
-    return {
-      status: null,
-      code: null,
-      message: fallback,
-    };
-  }
-
-  const [, statusText, payloadText] = apiMatch;
-  let code: string | null = null;
-  let message: string | null = null;
-
-  try {
-    const payload = JSON.parse(payloadText) as {
-      error?: { code?: string; message?: string };
-    };
-    code = payload.error?.code ?? null;
-    message = sanitizeLogMessage(payload.error?.message ?? null);
-  } catch {
-    message = sanitizeLogMessage(payloadText.trim()) || null;
-  }
 
   return {
-    status: Number.parseInt(statusText, 10),
+    status,
     code,
     message: message ?? fallback,
   };
+}
+
+function isUnauthorized401Error(error: unknown): boolean {
+  const parsed = parseApiError(error);
+  if (parsed.status === 401) {
+    return true;
+  }
+  if (
+    parsed.code === "UNAUTHORIZED" ||
+    parsed.code === "JWT_INVALID" ||
+    parsed.code === "DRIVER_DEVICE_REFRESH_INVALID" ||
+    parsed.code === "DRIVER_DEVICE_SESSION_INVALID" ||
+    parsed.code === "DRIVER_DEVICE_REUSE_DETECTED"
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isForbidden403Error(error: unknown): boolean {
+  const parsed = parseApiError(error);
+  if (parsed.status === 403) {
+    return true;
+  }
+  if (
+    parsed.code === "DRIVER_AUTH_SUSPENDED" ||
+    parsed.code === "DRIVER_AUTH_REVOKED" ||
+    parsed.code === "DRIVER_CERT_INVALID" ||
+    parsed.code === "DRIVER_DEVICE_BINDING_FORBIDDEN" ||
+    parsed.code === "FORBIDDEN"
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isDriverSessionAuthFailure(error: unknown): boolean {
+  return isUnauthorized401Error(error);
+}
+
+function getDriverIdentityIssueMessage(error: unknown): string {
+  const parsed = parseApiError(error);
+  switch (parsed.code) {
+    case "DRIVER_DEVICE_REUSE_DETECTED":
+      return "偵測到裝置憑證異常重複使用，系統已自動撤銷憑證並安全登出，請重新註冊。";
+    case "DRIVER_DEVICE_REFRESH_INVALID":
+    case "DRIVER_DEVICE_SESSION_INVALID":
+      return "此裝置的司機綁定已失效或被撤銷，請重新輸入註冊碼綁定。";
+    case "DRIVER_AUTH_SUSPENDED":
+      return "此司機帳號已被停權，暫時無法登入系統。";
+    case "DRIVER_AUTH_REVOKED":
+      return "此司機帳號已退役或撤銷，請聯絡平台管理員。";
+    case "DRIVER_CERT_INVALID":
+      return "司機證件狀態無效，請聯絡平台管理員重新啟用。";
+    case "DRIVER_DEVICE_BINDING_FORBIDDEN":
+      return "無權存取或變更此裝置的司機綁定，請重新登入。";
+    default:
+      return parsed.message && !parsed.message.startsWith("API error ")
+        ? sanitizeLogMessage(parsed.message)!
+        : "裝置登入已失效，請重新註冊。";
+  }
 }
 
 export function formatDriverError(
@@ -187,7 +291,7 @@ export function formatDriverError(
 
   if (parsed.message) {
     const sanitized = sanitizeLogMessage(parsed.message);
-    if (sanitized) {
+    if (sanitized && !sanitized.startsWith("API error ")) {
       return sanitized;
     }
   }
@@ -207,46 +311,6 @@ export function formatDriverError(
   return fallback;
 }
 
-function isDriverSessionAuthFailure(error: unknown): boolean {
-  const parsed = parseApiError(error);
-  if (parsed.code) {
-    return (
-      parsed.code === "DRIVER_DEVICE_REFRESH_INVALID" ||
-      parsed.code === "DRIVER_AUTH_SUSPENDED" ||
-      parsed.code === "DRIVER_AUTH_REVOKED" ||
-      parsed.code === "DRIVER_CERT_INVALID" ||
-      parsed.code === "DRIVER_DEVICE_SESSION_INVALID" ||
-      parsed.code === "DRIVER_DEVICE_REUSE_DETECTED" ||
-      parsed.code === "DRIVER_DEVICE_BINDING_FORBIDDEN" ||
-      parsed.code === "JWT_INVALID" ||
-      parsed.code === "UNAUTHORIZED"
-    );
-  }
-
-  return parsed.status === 401 || parsed.status === 403;
-}
-
-function getDriverIdentityIssueMessage(error: unknown): string {
-  const parsed = parseApiError(error);
-  switch (parsed.code) {
-    case "DRIVER_DEVICE_REUSE_DETECTED":
-      return "偵測到裝置憑證異常重複使用，系統已自動撤銷憑證並安全登出，請重新註冊。";
-    case "DRIVER_DEVICE_REFRESH_INVALID":
-    case "DRIVER_DEVICE_SESSION_INVALID":
-      return "此裝置的司機綁定已失效或被撤銷，請重新輸入註冊碼綁定。";
-    case "DRIVER_AUTH_SUSPENDED":
-      return "此司機帳號已被停權，暫時無法登入系統。";
-    case "DRIVER_AUTH_REVOKED":
-      return "此司機帳號已退役或撤銷，請聯絡平台管理員。";
-    case "DRIVER_CERT_INVALID":
-      return "司機證件狀態無效，請聯絡平台管理員重新啟用。";
-    case "DRIVER_DEVICE_BINDING_FORBIDDEN":
-      return "無權存取或變更此裝置的司機綁定，請重新登入。";
-    default:
-      return parsed.message ? sanitizeLogMessage(parsed.message)! : "裝置登入已失效，請重新註冊。";
-  }
-}
-
 function isTerminalDriverCompletionError(error: unknown): boolean {
   const parsed = parseApiError(error);
   return (
@@ -264,12 +328,24 @@ function getReplayHeaders(requestId: string): Record<string, string> {
   };
 }
 
-export type DriverAuthState =
-  | "not_provisioned"
-  | "provisioned"
-  | "session_expired"
-  | "device_revoked"
-  | "driver_suspended";
+export function registerProtectedCacheClearHandler(
+  handler: ProtectedCacheClearCallback,
+): () => void {
+  protectedCacheClearHandlers.add(handler);
+  return () => {
+    protectedCacheClearHandlers.delete(handler);
+  };
+}
+
+async function clearProtectedCachedData(): Promise<void> {
+  for (const handler of Array.from(protectedCacheClearHandlers)) {
+    try {
+      await handler();
+    } catch {
+      // Swallow error during cache invalidation
+    }
+  }
+}
 
 export function getDriverAuthState(): DriverAuthState {
   if (!isDriverIdentityProvisioned()) {
@@ -295,7 +371,7 @@ export function getDriverAuthState(): DriverAuthState {
     ) {
       return "device_revoked";
     }
-    return "not_provisioned";
+    return "session_expired";
   }
   return "provisioned";
 }
@@ -340,6 +416,7 @@ async function clearStoredSession() {
   provisionedSession = null;
   await SecureStore.deleteItemAsync(DRIVER_SESSION_KEY);
   applySession(null);
+  await clearProtectedCachedData();
 }
 
 async function persistPendingDriverTaskCompletion(
@@ -428,29 +505,52 @@ export async function initializeDriverIdentity(): Promise<void> {
       return;
     }
 
-    try {
-      applySession(storedSession);
-      const refreshedSession = await publicClient.refreshDriverDeviceSession({
-        refreshToken: storedSession.refreshToken,
-        deviceId: storedSession.deviceId,
-      });
-      setDriverIdentityIssue(null);
-      await persistSession(refreshedSession);
-    } catch (error) {
-      if (isDriverSessionAuthFailure(error)) {
-        setDriverIdentityIssue(getDriverIdentityIssueMessage(error));
-        await clearStoredSession();
-      } else {
-        applySession(provisionedSession);
-      }
-    }
-
+    // Restore identity synchronously from stored session without requiring network round trip
+    applySession(storedSession);
+    setDriverIdentityIssue(null);
     hydrated = true;
   })().finally(() => {
     hydrationPromise = null;
   });
 
   return hydrationPromise;
+}
+
+export async function refreshDriverSessionSingleFlight(): Promise<DriverDeviceProvisioningSession> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  if (!provisionedSession) {
+    throw new Error("Cannot refresh driver session: no provisioned session found.");
+  }
+
+  const sessionToRefresh = provisionedSession;
+
+  refreshPromise = (async () => {
+    try {
+      const refreshedSession = await publicClient.refreshDriverDeviceSession({
+        refreshToken: sessionToRefresh.refreshToken,
+        deviceId: sessionToRefresh.deviceId,
+      });
+
+      // A rotated refresh token is persisted before any waiter resumes,
+      // so no waiter reuses a consumed token.
+      await persistSession(refreshedSession);
+      setDriverIdentityIssue(null);
+      return refreshedSession;
+    } catch (error) {
+      if (isDriverSessionAuthFailure(error)) {
+        setDriverIdentityIssue(getDriverIdentityIssueMessage(error));
+        await clearStoredSession();
+      }
+      throw error;
+    }
+  })().finally(() => {
+    refreshPromise = null;
+  });
+
+  return refreshPromise;
 }
 
 export function isDriverIdentityProvisioned(): boolean {
@@ -593,6 +693,74 @@ export async function submitDriverTaskCompletion(
   return task;
 }
 
+function createDriverClientProxy(): ApiClient {
+  return new Proxy({} as ApiClient, {
+    get(_target, prop, _receiver) {
+      if (!client) {
+        throw new Error(
+          "Driver identity is not provisioned. Complete device registration or " +
+            "set EXPO_PUBLIC_DRIVER_ID for explicit development override.",
+        );
+      }
+
+      const value = (client as any)[prop];
+      if (typeof value !== "function") {
+        return value;
+      }
+
+      return async function (...args: any[]) {
+        // 1. Initial invocation
+        try {
+          if (!client) {
+            throw new Error(
+              "Driver identity is not provisioned. Complete device registration or " +
+                "set EXPO_PUBLIC_DRIVER_ID for explicit development override.",
+            );
+          }
+          const currentMethod = (client as any)[prop];
+          return await currentMethod.apply(client, args);
+        } catch (error) {
+          // If 403 Forbidden: never refresh, never logout, surface permission error
+          if (isForbidden403Error(error)) {
+            throw error;
+          }
+
+          // If 401 Unauthorized: single-flight refresh and retry once
+          if (isUnauthorized401Error(error)) {
+            if (DEV_DRIVER_ID && !provisionedSession) {
+              throw error;
+            }
+
+            // Trigger or join single-flight refresh
+            await refreshDriverSessionSingleFlight();
+
+            // Retry once with new token
+            try {
+              if (!client) {
+                throw new Error(
+                  "Driver identity is not provisioned. Complete device registration or " +
+                    "set EXPO_PUBLIC_DRIVER_ID for explicit development override.",
+                );
+              }
+              const retryMethod = (client as any)[prop];
+              return await retryMethod.apply(client, args);
+            } catch (retryError) {
+              // Second 401: clear session, logout, set issue
+              if (isUnauthorized401Error(retryError)) {
+                setDriverIdentityIssue(getDriverIdentityIssueMessage(retryError));
+                await clearStoredSession();
+              }
+              throw retryError;
+            }
+          }
+
+          throw error;
+        }
+      };
+    },
+  });
+}
+
 export function getDriverClient(): ApiClient {
   if (!client) {
     throw new Error(
@@ -600,7 +768,10 @@ export function getDriverClient(): ApiClient {
         "set EXPO_PUBLIC_DRIVER_ID for explicit development override.",
     );
   }
-  return client;
+  if (!driverClientProxy) {
+    driverClientProxy = createDriverClientProxy();
+  }
+  return driverClientProxy;
 }
 
 export function getDriverId(): string {
@@ -617,3 +788,4 @@ export function getDriverId(): string {
 }
 
 export { API_URL };
+
