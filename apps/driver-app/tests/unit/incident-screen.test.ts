@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   listUnifiedDriverTasks: vi.fn(),
   listDriverTasks: vi.fn(),
   submitDriverSosEvent: vi.fn(),
+  isDriverIdentityProvisioned: vi.fn().mockReturnValue(true),
   localSearchParams: {} as Record<string, string | undefined>,
 }));
 
@@ -133,6 +134,8 @@ vi.mock("@/lib/api-client", () => ({
     listDriverTasks: mocks.listDriverTasks,
     submitDriverSosEvent: mocks.submitDriverSosEvent,
   }),
+  isDriverIdentityProvisioned: mocks.isDriverIdentityProvisioned,
+  registerProtectedCacheClearHandler: vi.fn().mockReturnValue(() => {}),
   recoverDriverSessionFromApiError: vi.fn().mockResolvedValue(false),
 }));
 

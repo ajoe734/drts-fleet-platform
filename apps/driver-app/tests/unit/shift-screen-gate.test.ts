@@ -60,6 +60,7 @@ vi.mock("@/lib/api-client", () => ({
     clockIn: vi.fn(),
     clockOut: vi.fn(),
   }),
+  registerProtectedCacheClearHandler: vi.fn().mockReturnValue(() => {}),
   getDriverId: () => "driver-001",
 }));
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Redirect } from "expo-router";
 import {
   PLATFORM_CODE_REGISTRY,
   type DriverPayoutStatus,
@@ -28,6 +29,7 @@ import {
   formatDriverError,
   getDriverClient,
   isDriverIdentityProvisioned,
+  registerProtectedCacheClearHandler,
 } from "@/lib/api-client";
 import {
   formatAmountNumber,
@@ -419,7 +421,23 @@ export default function EarningsScreen() {
 
   const isProvisioned = isDriverIdentityProvisioned();
 
+  useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setSummary(null);
+      setPlatformItems([]);
+      setStatements([]);
+    });
+    return () => unregister();
+  }, []);
+
   const loadDashboard = async (period: PeriodKey) => {
+    if (!isDriverIdentityProvisioned()) {
+      setSummary(null);
+      setPlatformItems([]);
+      setStatements([]);
+      return;
+    }
+
     const client = getDriverClient();
 
     try {
@@ -450,6 +468,9 @@ export default function EarningsScreen() {
       );
       setError(null);
     } catch (nextError) {
+      setSummary(null);
+      setPlatformItems([]);
+      setStatements([]);
       setError(toErrorMessage(nextError));
     }
   };
@@ -495,22 +516,7 @@ export default function EarningsScreen() {
   };
 
   if (!isProvisioned) {
-    return (
-      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
-        <PageHeader
-          theme={THEME}
-          title={driverStrings.earnings.title}
-          subtitle="需要完成裝置綁定"
-        />
-        <Banner
-          theme={THEME}
-          tone="warn"
-          title="裝置尚未綁定司機身份"
-          body="完成裝置註冊後，才能查看平台收益與月結報表。"
-          icon={<Ionicons name="card-outline" size={16} color={THEME.warn} />}
-        />
-      </Shell>
-    );
+    return <Redirect href="/onboarding" />;
   }
 
   if (loading) {

@@ -338,6 +338,12 @@ export function registerProtectedCacheClearHandler(
 }
 
 async function clearProtectedCachedData(): Promise<void> {
+  await Promise.allSettled([
+    SecureStore.deleteItemAsync("drts.driver.sos.activeCase"),
+    SecureStore.deleteItemAsync("drts.safetyOperator.queue"),
+    SecureStore.deleteItemAsync("drts.driver.trackingSessionMarker"),
+  ]);
+
   for (const handler of Array.from(protectedCacheClearHandlers)) {
     try {
       await handler();

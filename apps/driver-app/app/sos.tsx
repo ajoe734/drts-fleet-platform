@@ -10,7 +10,7 @@ import {
   Vibration,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import {
   type ConfirmDriverSosAttachmentUploadResult,
@@ -36,7 +36,9 @@ import {
 import {
   formatDriverError,
   getDriverClient,
+  isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
+  registerProtectedCacheClearHandler,
 } from "@/lib/api-client";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import {
@@ -206,6 +208,10 @@ function pickSosTaskContext(
 }
 
 async function resolveSosTaskContext(): Promise<SosTaskContext | null> {
+  if (!isDriverIdentityProvisioned()) {
+    return null;
+  }
+
   const client = getDriverClient();
 
   try {
@@ -576,7 +582,25 @@ export default function DriverSosScreen() {
   const [screenError, setScreenError] = useState<string | null>(null);
   const [uiNotice, setUiNotice] = useState<string | null>(null);
 
+  const isProvisioned = isDriverIdentityProvisioned();
+
   useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setActiveCase(null);
+      setContext(null);
+      setDraftAttachments([]);
+      setSupplementAttachments([]);
+    });
+    return () => unregister();
+  }, []);
+
+  useEffect(() => {
+    if (!isProvisioned) {
+      setLoadingCase(false);
+      setLoadingContext(false);
+      return;
+    }
+
     let cancelled = false;
     void (async () => {
       const [storedCase, taskContext] = await Promise.all([
@@ -599,7 +623,7 @@ export default function DriverSosScreen() {
         clearInterval(progressIntervalRef.current);
       }
     };
-  }, []);
+  }, [isProvisioned]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -969,6 +993,10 @@ export default function DriverSosScreen() {
   const activeStatus = syncChip.detail;
   const selectedSituationLabel = getSituationLabel(selectedSituation);
   const currentLocation = getDriverSosLocationSnapshot();
+
+  if (!isProvisioned) {
+    return <Redirect href="/onboarding" />;
+  }
 
   return (
     <Shell

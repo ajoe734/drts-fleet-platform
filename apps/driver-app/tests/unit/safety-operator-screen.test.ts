@@ -78,6 +78,7 @@ vi.mock("@/lib/api-client", () => ({
     createSafetyOperatorTripCloseout: vi.fn(),
   }),
   isDriverIdentityProvisioned: mocks.isDriverIdentityProvisioned,
+  registerProtectedCacheClearHandler: vi.fn().mockReturnValue(() => {}),
   recoverDriverSessionFromApiError: vi.fn(),
 }));
 

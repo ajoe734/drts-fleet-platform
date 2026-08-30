@@ -9,13 +9,12 @@ import {
   Text,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import type { DriverProfileRecord, DriverSettings } from "@drts/contracts";
 import { PlatformBinding } from "@/components/platform-binding";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { AppScreen } from "@/components/ui/AppScreen";
 import { BottomActionBar } from "@/components/ui/BottomActionBar";
-import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { AuthorityBanner } from "@/components/ui/AuthorityBanner";
 import { FormField } from "@/components/ui/FormField";
@@ -29,6 +28,7 @@ import {
   getProvisionedSession,
   isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
+  registerProtectedCacheClearHandler,
   revokeDriverDeviceBinding,
 } from "@/lib/api-client";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
@@ -207,6 +207,16 @@ export default function SettingsScreen() {
   const [initialProfile, setInitialProfile] = useState<ProfileFormValues>(
     DEFAULT_PROFILE_VALUES,
   );
+
+  useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setSettingsValues(DEFAULT_SETTINGS_VALUES);
+      setProfileValues(DEFAULT_PROFILE_VALUES);
+      setInitialSettings(DEFAULT_SETTINGS_VALUES);
+      setInitialProfile(DEFAULT_PROFILE_VALUES);
+    });
+    return () => unregister();
+  }, []);
 
   useEffect(() => {
     if (!isProvisioned) {
@@ -439,19 +449,7 @@ export default function SettingsScreen() {
   };
 
   if (!isProvisioned) {
-    return (
-      <AppScreen scrollable={false}>
-        <PageHeader title={driverStrings.settings.title} />
-        <EmptyState
-          title="尚未完成裝置配置"
-          description="此裝置尚未分配司機身份，無法載入設定。"
-          icon="lock-closed-outline"
-          actionTitle="前往配置裝置"
-          onAction={() => router.push("/onboarding")}
-          style={styles.fillState}
-        />
-      </AppScreen>
-    );
+    return <Redirect href="/onboarding" />;
   }
 
   if (loading) {

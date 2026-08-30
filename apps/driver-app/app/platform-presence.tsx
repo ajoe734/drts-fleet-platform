@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import * as Linking from "expo-linking";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -34,6 +34,7 @@ import {
   formatDriverError,
   getDriverClient,
   isDriverIdentityProvisioned,
+  registerProtectedCacheClearHandler,
 } from "@/lib/api-client";
 import {
   canReceiveOrders,
@@ -697,10 +698,18 @@ export default function PlatformPresenceScreen() {
 
   const isProvisioned = isDriverIdentityProvisioned();
 
+  useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setSummary(null);
+    });
+    return () => unregister();
+  }, []);
+
   const loadPresence = async ({
     silent = false,
   }: { silent?: boolean } = {}) => {
-    if (!isProvisioned) {
+    if (!isDriverIdentityProvisioned()) {
+      setSummary(null);
       setLoading(false);
       return;
     }
@@ -728,12 +737,16 @@ export default function PlatformPresenceScreen() {
   };
 
   useEffect(() => {
-    void loadPresence();
-    const timer = setInterval(() => {
-      void loadPresence({ silent: true });
-    }, REFRESH_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, []);
+    if (isProvisioned) {
+      void loadPresence();
+      const timer = setInterval(() => {
+        void loadPresence({ silent: true });
+      }, REFRESH_INTERVAL_MS);
+      return () => clearInterval(timer);
+    } else {
+      setLoading(false);
+    }
+  }, [isProvisioned]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -945,6 +958,10 @@ export default function PlatformPresenceScreen() {
       setBusyPlatform(null);
     }
   };
+
+  if (!isProvisioned) {
+    return <Redirect href="/onboarding" />;
+  }
 
   const emptyState = emptyReason ? emptyStateCopy(emptyReason) : null;
 

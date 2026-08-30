@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import type {
   DriverTaskAction,
   DriverTaskRecord,
@@ -36,6 +36,8 @@ import {
   getDriverClient,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
+  isDriverIdentityProvisioned,
+  registerProtectedCacheClearHandler,
   rejectForwardedDriverOffer,
 } from "@/lib/api-client";
 import { formatMoney } from "@/lib/money";
@@ -1324,7 +1326,23 @@ export default function JobsScreen() {
   >(null);
   const router = useRouter();
 
+  const isProvisioned = isDriverIdentityProvisioned();
+
+  useEffect(() => {
+    const unregister = registerProtectedCacheClearHandler(() => {
+      setTasks([]);
+      setOrderMap({});
+    });
+    return () => unregister();
+  }, []);
+
   const loadTasks = async () => {
+    if (!isDriverIdentityProvisioned()) {
+      setTasks([]);
+      setOrderMap({});
+      return;
+    }
+
     const client = getDriverClient();
 
     try {
@@ -1372,12 +1390,19 @@ export default function JobsScreen() {
       setError(null);
       setLastSyncedAt(new Date().toISOString());
     } catch (nextError: unknown) {
+      setTasks([]);
+      setOrderMap({});
       setFallbackMode(false);
       setError(getErrorMessage(nextError) || "任務清單載入失敗。");
     }
   };
 
   useEffect(() => {
+    if (!isProvisioned) {
+      setLoading(false);
+      return;
+    }
+
     const client = getDriverClient();
 
     client
@@ -1391,7 +1416,7 @@ export default function JobsScreen() {
       })
       .catch(() => loadTasks())
       .finally(() => setLoading(false));
-  }, []);
+  }, [isProvisioned]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -1667,6 +1692,10 @@ export default function JobsScreen() {
         </Card>
       </>
     );
+  }
+
+  if (!isProvisioned) {
+    return <Redirect href="/onboarding" />;
   }
 
   return (
