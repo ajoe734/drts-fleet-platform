@@ -9,6 +9,7 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   PLATFORM_CODE_REGISTRY,
+  type DriverSosLocationSnapshot,
   type DriverTaskRecord,
   type EmptyReason,
   type RefreshTier,
@@ -31,7 +32,20 @@ import {
   isUnifiedTaskPlatformClosed,
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
-import { formatDriverError, getDriverClient } from "@/lib/api-client";
+import {
+  formatDriverError,
+  getDriverClient,
+  recoverDriverSessionFromApiError,
+} from "@/lib/api-client";
+import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
+import { getLatestDriverLocationUpdate } from "@/lib/driver-location-heartbeat";
+import {
+  buildDriverSosSubmitCommand,
+  createDriverSosActiveCase,
+  mapSituationToDriverSosEventType,
+  markDriverSosCaseSubmitted,
+  saveDriverSosActiveCase,
+} from "@/lib/driver-sos-outbox";
 import {
   driverForwardedTaskStatusLabels,
   driverIncidentSituations,
@@ -519,31 +533,62 @@ export default function IncidentScreen() {
       setIncidentContextPreview(platformContext);
       setIncidentContextReady(true);
 
-      const created = await client.createIncident({
-        title: "司機 SOS 緊急通報",
+      const isOffline =
+        typeof navigator !== "undefined" &&
+        typeof navigator.onLine === "boolean" &&
+        !navigator.onLine;
+
+      const latestLocation = getLatestDriverLocationUpdate();
+      const locationSnapshot: DriverSosLocationSnapshot | null = latestLocation
+        ? {
+            lat: latestLocation.latitude,
+            lng: latestLocation.longitude,
+            accuracyM: latestLocation.accuracyM,
+            recordedAt: latestLocation.recordedAt,
+            reverseGeocodedAddress: null,
+            geocodeProvider: null,
+          }
+        : null;
+
+      const nextCase = createDriverSosActiveCase({
+        eventType: mapSituationToDriverSosEventType(selectedSituation),
+        situation: selectedSituation,
         description: buildIncidentDescription(
           details,
           platformContext,
           selectedSituation,
         ),
-        category: "safety",
-        severity: "critical",
-        ...(platformContext
-          ? { relatedOrderId: platformContext.mirrorOrderId }
-          : {}),
-        reportedBy: "driver",
+        attachments: [],
+        originalTriggeredAt: new Date().toISOString(),
+        offlineAtTrigger: isOffline,
+        location: locationSnapshot,
+        orderId: platformContext?.mirrorOrderId ?? null,
+        taskId: null,
       });
+      await saveDriverSosActiveCase(nextCase);
 
-      if (created?.incidentId) {
-        await client.updateIncident(created.incidentId, {
-          escalationTarget: "safety_officer",
-        });
+      if (!isOffline) {
+        const result = await client.submitDriverSosEvent(
+          buildDriverSosSubmitCommand(nextCase),
+          {
+            headers: {
+              "Idempotency-Key": nextCase.clientEventId,
+              "X-Request-Id": nextCase.clientEventId,
+            },
+          },
+        );
+        const submittedCase = markDriverSosCaseSubmitted(nextCase, result);
+        await saveDriverSosActiveCase(submittedCase);
       }
 
       setDetails("");
       setSelectedSituation(null);
       router.replace(returnRoute);
     } catch (error: unknown) {
+      if (await recoverDriverSessionFromApiError(error)) {
+        resetDriverAppToOnboarding(router);
+        return;
+      }
       setSubmissionError(getErrorMessage(error));
     } finally {
       setSubmitting(false);

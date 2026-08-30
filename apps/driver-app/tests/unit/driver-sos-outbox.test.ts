@@ -10,6 +10,9 @@ import {
   buildDriverSosSubmitCommand,
   applyDriverSosAttachmentSyncResult,
   createDriverSosActiveCase,
+  formatSosDescription,
+  getSituationLabel,
+  mapSituationToDriverSosEventType,
   markDriverSosCaseFailed,
   markDriverSosCaseSubmitted,
   queueDriverSosSupplement,
@@ -194,12 +197,91 @@ describe("driver-sos-outbox", () => {
     expect(failed.timeline[0]?.kind).toBe("sync_failed");
 
     const supplemented = queueDriverSosSupplement(failed, {
-      note: "已改撥 119，等待拖吊。",
+      note: "已改聯絡現場，等待拖吊。",
       attachments: [createAttachment("att-2")],
     });
 
     expect(supplemented.supplements).toHaveLength(1);
     expect(supplemented.supplements[0]?.state).toBe("attachment_pending");
     expect(supplemented.timeline[0]?.kind).toBe("supplement_added");
+  });
+
+  it("maps all 6 canonical situations to typed event types and labels", () => {
+    expect(mapSituationToDriverSosEventType("passenger_conflict")).toBe("security_incident");
+    expect(getSituationLabel("passenger_conflict")).toBe("乘客衝突");
+
+    expect(mapSituationToDriverSosEventType("traffic_collision")).toBe("traffic_accident");
+    expect(getSituationLabel("traffic_collision")).toBe("交通事故");
+
+    expect(mapSituationToDriverSosEventType("vehicle_breakdown")).toBe("other");
+    expect(getSituationLabel("vehicle_breakdown")).toBe("車輛故障");
+
+    expect(mapSituationToDriverSosEventType("medical_emergency")).toBe("passenger_medical");
+    expect(getSituationLabel("medical_emergency")).toBe("醫療緊急");
+
+    expect(mapSituationToDriverSosEventType("route_threat")).toBe("security_incident");
+    expect(getSituationLabel("route_threat")).toBe("路線威脅");
+
+    expect(mapSituationToDriverSosEventType("other")).toBe("other");
+    expect(getSituationLabel("other")).toBe("其他");
+  });
+
+  it("formats SOS description with situation, details, and platform context", () => {
+    const description = formatSosDescription({
+      situationLabel: "乘客衝突",
+      details: "乘客拒絕配合並有言語威脅",
+      platformContext: {
+        platformLabel: "Grab",
+        platformCode: "grab",
+        mirrorOrderId: "mirror-123",
+        externalOrderId: "ext-456",
+        nativeStatusLabel: "平台已確認",
+      },
+    });
+
+    expect(description).toBe(
+      "事件情況：乘客衝突\n乘客拒絕配合並有言語威脅\n\n[SOS 平台任務上下文]\n來源平台：Grab（grab）\n本地鏡像訂單：mirror-123\n外部訂單：ext-456\n目前平台狀態：平台已確認",
+    );
+  });
+
+  it("ensures timeline entries contain clean Chinese strings with no raw identifiers", () => {
+    const activeCase = createDriverSosActiveCase({
+      situation: "passenger_conflict",
+      description: "乘客衝突",
+      attachments: [],
+      offlineAtTrigger: false,
+      location: null,
+      orderId: null,
+      taskId: null,
+    });
+
+    const submitted = markDriverSosCaseSubmitted(activeCase, {
+      event: {} as any,
+      receipt: {
+        sosEventId: "sos-1",
+        incidentId: "INC-999",
+        clientEventId: activeCase.clientEventId,
+        eventNo: "SOS-20260830-001",
+        duplicate: false,
+        serverReceivedAt: "2026-08-30T09:00:00Z",
+        fleetReportConfirmedAt: "2026-08-30T09:00:00Z",
+      },
+    });
+
+    const forbiddenPhrases = [
+      "driver-sos domain",
+      "passenger_conflict",
+      "incident_category",
+      "press_and_hold_2s",
+      "durable outbox",
+      "evidence channel",
+    ];
+
+    for (const entry of submitted.timeline) {
+      for (const phrase of forbiddenPhrases) {
+        expect(entry.title.toLowerCase()).not.toContain(phrase);
+        expect(entry.detail.toLowerCase()).not.toContain(phrase);
+      }
+    }
   });
 });

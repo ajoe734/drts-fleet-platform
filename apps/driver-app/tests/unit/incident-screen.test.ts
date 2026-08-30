@@ -2,14 +2,68 @@ import React from "react";
 import { act, create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+(globalThis as any).__DEV__ = true;
+
 const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   isFeatureEnabled: vi.fn(),
   listUnifiedDriverTasks: vi.fn(),
   listDriverTasks: vi.fn(),
-  createIncident: vi.fn(),
-  updateIncident: vi.fn(),
+  submitDriverSosEvent: vi.fn(),
   localSearchParams: {} as Record<string, string | undefined>,
+}));
+
+vi.mock("expo-secure-store", () => ({
+  deleteItemAsync: vi.fn(),
+  getItemAsync: vi.fn(),
+  setItemAsync: vi.fn(),
+}));
+
+vi.mock("expo-image-picker", () => ({
+  launchImageLibraryAsync: vi.fn(),
+  MediaTypeOptions: { Images: "Images" },
+}));
+
+vi.mock("@/lib/driver-location-heartbeat", () => ({
+  getLatestDriverLocationUpdate: vi.fn().mockReturnValue(null),
+}));
+
+vi.mock("@/lib/driver-sos-outbox", () => ({
+  createDriverSosActiveCase: vi.fn((params: any) => ({
+    clientEventId: "client-event-123",
+    eventType: params.eventType,
+    description: params.description,
+    orderId: params.orderId,
+    taskId: params.taskId,
+    location: params.location,
+    originalTriggeredAt: params.originalTriggeredAt,
+    offlineAtTrigger: params.offlineAtTrigger,
+    timeline: [],
+    attachments: [],
+    supplements: [],
+  })),
+  buildDriverSosSubmitCommand: vi.fn((activeCase: any) => ({
+    clientEventId: activeCase.clientEventId,
+    orderId: activeCase.orderId,
+    taskId: activeCase.taskId,
+    eventType: activeCase.eventType,
+    severity: "major",
+    description: activeCase.description,
+    location: activeCase.location,
+    originalTriggeredAt: activeCase.originalTriggeredAt,
+    offlineAtTrigger: activeCase.offlineAtTrigger,
+  })),
+  markDriverSosCaseSubmitted: vi.fn((activeCase: any, result: any) => ({
+    ...activeCase,
+    syncState: "submitted",
+    receipt: result.receipt,
+  })),
+  saveDriverSosActiveCase: vi.fn().mockResolvedValue(undefined),
+  mapSituationToDriverSosEventType: vi.fn((situation: any) => {
+    if (situation === "traffic_collision") return "traffic_accident";
+    if (situation === "medical_emergency") return "passenger_medical";
+    return "security_incident";
+  }),
 }));
 
 vi.mock("react-native", () => ({
@@ -77,9 +131,9 @@ vi.mock("@/lib/api-client", () => ({
     isFeatureEnabled: mocks.isFeatureEnabled,
     listUnifiedDriverTasks: mocks.listUnifiedDriverTasks,
     listDriverTasks: mocks.listDriverTasks,
-    createIncident: mocks.createIncident,
-    updateIncident: mocks.updateIncident,
+    submitDriverSosEvent: mocks.submitDriverSosEvent,
   }),
+  recoverDriverSessionFromApiError: vi.fn().mockResolvedValue(false),
 }));
 
 import IncidentScreen from "../../app/incident";
@@ -109,10 +163,13 @@ describe("IncidentScreen", () => {
     mocks.isFeatureEnabled.mockReset().mockResolvedValue(true);
     mocks.listUnifiedDriverTasks.mockReset().mockResolvedValue([]);
     mocks.listDriverTasks.mockReset().mockResolvedValue([]);
-    mocks.createIncident
-      .mockReset()
-      .mockResolvedValue({ incidentId: "INC-001" });
-    mocks.updateIncident.mockReset().mockResolvedValue(undefined);
+    mocks.submitDriverSosEvent.mockReset().mockResolvedValue({
+      receipt: {
+        eventNo: "SOS-001",
+        incidentId: "INC-001",
+        fleetReportConfirmedAt: "2026-08-30T09:00:00.000Z",
+      },
+    });
     mocks.localSearchParams = {};
   });
 
@@ -137,7 +194,7 @@ describe("IncidentScreen", () => {
       findLongPressButton(renderer).props.onPress();
     });
 
-    expect(mocks.createIncident).not.toHaveBeenCalled();
+    expect(mocks.submitDriverSosEvent).not.toHaveBeenCalled();
     expect(findLongPressButton(renderer).props.delayLongPress).toBe(2000);
 
     await act(async () => {
@@ -145,16 +202,14 @@ describe("IncidentScreen", () => {
       await flushEffects();
     });
 
-    expect(mocks.createIncident).toHaveBeenCalledWith({
-      title: "司機 SOS 緊急通報",
-      description: "事件情況：交通事故\n乘客情緒激動，需立即支援",
-      category: "safety",
-      severity: "critical",
-      reportedBy: "driver",
-    });
-    expect(mocks.updateIncident).toHaveBeenCalledWith("INC-001", {
-      escalationTarget: "safety_officer",
-    });
+    expect(mocks.submitDriverSosEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "traffic_accident",
+        severity: "major",
+        description: "事件情況：交通事故\n乘客情緒激動，需立即支援",
+      }),
+      expect.any(Object),
+    );
     expect(mocks.replace).toHaveBeenCalledWith("/trip");
   });
 
@@ -213,14 +268,15 @@ describe("IncidentScreen", () => {
       await flushEffects();
     });
 
-    expect(mocks.createIncident).toHaveBeenCalledWith({
-      title: "司機 SOS 緊急通報",
-      description:
-        "已由司機 App 送出 SOS 緊急通報。\n\n[SOS 平台任務上下文]\n來源平台：Grab（grab）\n本地鏡像訂單：mirror-001\n外部訂單：ext-777\n目前平台狀態：平台已確認",
-      category: "safety",
-      severity: "critical",
-      relatedOrderId: "mirror-001",
-      reportedBy: "driver",
-    });
+    expect(mocks.submitDriverSosEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "security_incident",
+        severity: "major",
+        orderId: "mirror-001",
+        description:
+          "已由司機 App 送出 SOS 緊急通報。\n\n[SOS 平台任務上下文]\n來源平台：Grab（grab）\n本地鏡像訂單：mirror-001\n外部訂單：ext-777\n目前平台狀態：平台已確認",
+      }),
+      expect.any(Object),
+    );
   });
 });
