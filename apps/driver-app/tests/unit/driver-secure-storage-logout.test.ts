@@ -117,43 +117,40 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
   });
 
   describe("Deterministic Auth States & Recovery", () => {
-    it("handles DRIVER_AUTH_SUSPENDED auth failure by clearing session and setting deterministic issue", async () => {
+    it("does not clear session on DRIVER_AUTH_SUSPENDED 403 and surfaces message", async () => {
       const authError = new Error(
         'API error 403: {"error":{"code":"DRIVER_AUTH_SUSPENDED","message":"The driver account is suspended."}}',
       );
 
       const recovered = await recoverDriverSessionFromApiError(authError);
-      expect(recovered).toBe(true);
-      expect(getDriverIdentityIssue()).toBe(
+      expect(recovered).toBe(false);
+      expect(formatDriverError(authError)).toBe(
         "此司機帳號已被停權，暫時無法登入系統。",
       );
-      expect(isDriverIdentityProvisioned()).toBe(false);
     });
 
-    it("handles DRIVER_AUTH_REVOKED auth failure by clearing session and setting deterministic issue", async () => {
+    it("does not clear session on DRIVER_AUTH_REVOKED 403 and surfaces message", async () => {
       const authError = new Error(
         'API error 403: {"error":{"code":"DRIVER_AUTH_REVOKED","message":"Driver account retired."}}',
       );
 
       const recovered = await recoverDriverSessionFromApiError(authError);
-      expect(recovered).toBe(true);
-      expect(getDriverIdentityIssue()).toBe(
+      expect(recovered).toBe(false);
+      expect(formatDriverError(authError)).toBe(
         "此司機帳號已退役或撤銷，請聯絡平台管理員。",
       );
-      expect(isDriverIdentityProvisioned()).toBe(false);
     });
 
-    it("handles DRIVER_CERT_INVALID auth failure by clearing session and setting deterministic issue", async () => {
+    it("does not clear session on DRIVER_CERT_INVALID 403 and surfaces message", async () => {
       const authError = new Error(
         'API error 403: {"error":{"code":"DRIVER_CERT_INVALID","message":"Certificates expired."}}',
       );
 
       const recovered = await recoverDriverSessionFromApiError(authError);
-      expect(recovered).toBe(true);
-      expect(getDriverIdentityIssue()).toBe(
+      expect(recovered).toBe(false);
+      expect(formatDriverError(authError)).toBe(
         "司機證件狀態無效，請聯絡平台管理員重新啟用。",
       );
-      expect(isDriverIdentityProvisioned()).toBe(false);
     });
 
     it("handles DRIVER_DEVICE_REUSE_DETECTED compromised-session auth failure", async () => {
