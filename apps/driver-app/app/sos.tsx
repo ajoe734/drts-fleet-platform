@@ -18,7 +18,6 @@ import {
   type DriverSosAttachmentRecord,
   PLATFORM_CODE_REGISTRY,
   type DriverTaskRecord,
-  type DriverSosEventType,
   type DriverSosLocationSnapshot,
   type UnifiedDriverTaskView,
 } from "@drts/contracts";
@@ -240,10 +239,6 @@ function getDriverSosLocationSnapshot(): DriverSosLocationSnapshot | null {
     reverseGeocodedAddress: null,
     geocodeProvider: null,
   };
-}
-
-function getErrorMessage(error: unknown): string {
-  return formatDriverError(error, "SOS 送出失敗，請稍後再試。");
 }
 
 function formatAt(value: string | null) {
