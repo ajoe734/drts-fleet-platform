@@ -34,7 +34,10 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
-import type { BootstrapRequestIdentity } from "../../common/auth";
+import {
+  type BootstrapRequestIdentity,
+  normalizeDriverId,
+} from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IncidentService } from "../incident/incident.service";
 import {
@@ -1023,7 +1026,7 @@ export class DriverSosService implements OnModuleInit {
 
   private requireDriverIdentity(identity: BootstrapRequestIdentity | null) {
     if (identity?.realm === "driver" && identity.actorId) {
-      return identity.actorId;
+      return normalizeDriverId(identity.actorId)!;
     }
 
     throw new ApiRequestError(

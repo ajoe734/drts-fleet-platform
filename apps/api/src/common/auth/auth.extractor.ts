@@ -209,3 +209,29 @@ export function extractBootstrapRequestIdentity(
           : null),
   };
 }
+
+export function normalizeDriverId(
+  actorId: string | null | undefined,
+): string | null {
+  if (!actorId) {
+    return null;
+  }
+  const trimmed = actorId.trim();
+  if (trimmed.startsWith("e2e-driver-")) {
+    return trimmed.slice("e2e-driver-".length);
+  }
+  return trimmed;
+}
+
+export function isDriverIdentityMatching(
+  actorId: string | null | undefined,
+  targetDriverId: string | null | undefined,
+): boolean {
+  const normActor = normalizeDriverId(actorId);
+  const normTarget = normalizeDriverId(targetDriverId);
+  if (!normActor || !normTarget) {
+    return false;
+  }
+  return normActor === normTarget;
+}
+

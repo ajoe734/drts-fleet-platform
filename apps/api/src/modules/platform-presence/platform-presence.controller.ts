@@ -21,6 +21,8 @@ import {
   CurrentIdentity,
   RequireRealms,
   RequireScopes,
+  isDriverIdentityMatching,
+  normalizeDriverId,
 } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
@@ -44,7 +46,10 @@ export class PlatformPresenceController {
         );
       }
       const normalizedDriverId = requestedDriverId?.trim();
-      if (normalizedDriverId && normalizedDriverId !== actorId) {
+      if (
+        normalizedDriverId &&
+        !isDriverIdentityMatching(actorId, normalizedDriverId)
+      ) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
           "DRIVER_IDENTITY_MISMATCH",
@@ -52,7 +57,7 @@ export class PlatformPresenceController {
           { actorId, requestedDriverId: normalizedDriverId },
         );
       }
-      return actorId;
+      return normalizeDriverId(actorId)!;
     }
 
     const normalizedDriverId = requestedDriverId?.trim();

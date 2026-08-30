@@ -8,6 +8,8 @@ import {
   CurrentIdentity,
   RequireRealms,
   RequireScopes,
+  isDriverIdentityMatching,
+  normalizeDriverId,
 } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
@@ -39,7 +41,7 @@ export class PlatformEarningsController {
           "Driver identity actorId is required.",
         );
       }
-      if (normalized && normalized !== actorId) {
+      if (normalized && !isDriverIdentityMatching(actorId, normalized)) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
           "DRIVER_IDENTITY_MISMATCH",
@@ -47,7 +49,7 @@ export class PlatformEarningsController {
           { actorId, requestedDriverId: normalized },
         );
       }
-      return actorId;
+      return normalizeDriverId(actorId)!;
     }
 
     if (normalized) {

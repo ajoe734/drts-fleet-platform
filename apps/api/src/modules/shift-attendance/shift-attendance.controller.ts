@@ -19,6 +19,8 @@ import {
   CurrentIdentity,
   RequireRealms,
   RequireScopes,
+  isDriverIdentityMatching,
+  normalizeDriverId,
   type BootstrapRequestIdentity,
 } from "../../common/auth";
 import { ShiftAttendanceService } from "./shift-attendance.service";
@@ -41,7 +43,7 @@ export class ShiftAttendanceController {
       identity?.realm === "driver" &&
       identity.actorId &&
       command.driverId &&
-      command.driverId !== identity.actorId
+      !isDriverIdentityMatching(identity.actorId, command.driverId)
     ) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -53,7 +55,7 @@ export class ShiftAttendanceController {
 
     const effectiveDriverId =
       identity?.realm === "driver" && identity.actorId
-        ? identity.actorId
+        ? normalizeDriverId(identity.actorId)!
         : command.driverId;
 
     const effectiveCommand: ClockInCommand = {
@@ -79,7 +81,7 @@ export class ShiftAttendanceController {
       identity?.realm === "driver" &&
       identity.actorId &&
       command.driverId &&
-      command.driverId !== identity.actorId
+      !isDriverIdentityMatching(identity.actorId, command.driverId)
     ) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -91,7 +93,7 @@ export class ShiftAttendanceController {
 
     const effectiveDriverId =
       identity?.realm === "driver" && identity.actorId
-        ? identity.actorId
+        ? normalizeDriverId(identity.actorId)!
         : command.driverId;
 
     const effectiveCommand: ClockOutCommand = {
@@ -115,10 +117,13 @@ export class ShiftAttendanceController {
   ) {
     let targetDriverId = requestedDriverId;
     if (identity?.realm === "driver") {
-      if (requestedDriverId && requestedDriverId !== identity.actorId) {
+      if (
+        requestedDriverId &&
+        !isDriverIdentityMatching(identity.actorId, requestedDriverId)
+      ) {
         return toApiSuccessEnvelope({ items: [] }, requestId);
       }
-      targetDriverId = identity.actorId ?? undefined;
+      targetDriverId = normalizeDriverId(identity.actorId) ?? undefined;
     }
 
     return toApiSuccessEnvelope(
@@ -139,7 +144,7 @@ export class ShiftAttendanceController {
     if (
       identity?.realm === "driver" &&
       identity.actorId &&
-      shift.driverId !== identity.actorId
+      !isDriverIdentityMatching(identity.actorId, shift.driverId)
     ) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -165,7 +170,7 @@ export class ShiftAttendanceController {
     if (
       identity?.realm === "driver" &&
       identity.actorId &&
-      shift.driverId !== identity.actorId
+      !isDriverIdentityMatching(identity.actorId, shift.driverId)
     ) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -191,10 +196,13 @@ export class ShiftAttendanceController {
   ) {
     let targetDriverId = requestedDriverId;
     if (identity?.realm === "driver") {
-      if (requestedDriverId && requestedDriverId !== identity.actorId) {
+      if (
+        requestedDriverId &&
+        !isDriverIdentityMatching(identity.actorId, requestedDriverId)
+      ) {
         return toApiSuccessEnvelope({ items: [] }, requestId);
       }
-      targetDriverId = identity.actorId ?? undefined;
+      targetDriverId = normalizeDriverId(identity.actorId) ?? undefined;
     }
 
     return toApiSuccessEnvelope(

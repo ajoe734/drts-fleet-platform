@@ -17,7 +17,8 @@ import {
 import {
   CurrentIdentity,
   RequireRealms,
-  RequireScopes,
+  isDriverIdentityMatching,
+  normalizeDriverId,
 } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { RegulatoryRegistryService } from "./regulatory-registry.service";
@@ -30,7 +31,6 @@ export class DriverHeartbeatController {
 
   @Post("location-heartbeats/batch")
   @RequireRealms("system", "driver")
-  @RequireScopes("driver:write")
   async recordHeartbeatBatch(
     @Body() request: DriverLocationHeartbeatBatchRequest,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
@@ -40,7 +40,7 @@ export class DriverHeartbeatController {
       const actorId = identity.actorId;
       if (actorId && Array.isArray(request?.items)) {
         for (const item of request.items) {
-          if (item?.driverId && item.driverId !== actorId) {
+          if (item?.driverId && !isDriverIdentityMatching(actorId, item.driverId)) {
             throw new ApiRequestError(
               HttpStatus.FORBIDDEN,
               "DRIVER_IDENTITY_MISMATCH",
@@ -60,7 +60,6 @@ export class DriverHeartbeatController {
 
   @Get("tracking-status")
   @RequireRealms("system", "platform", "ops", "driver")
-  @RequireScopes("driver:read")
   async getTrackingStatus(
     @Query("driverId") requestedDriverId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
@@ -69,7 +68,11 @@ export class DriverHeartbeatController {
     let effectiveDriverId = requestedDriverId?.trim();
     if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
       const actorId = identity.actorId;
-      if (effectiveDriverId && actorId && effectiveDriverId !== actorId) {
+      if (
+        effectiveDriverId &&
+        actorId &&
+        !isDriverIdentityMatching(actorId, effectiveDriverId)
+      ) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
           "DRIVER_IDENTITY_MISMATCH",
@@ -77,7 +80,7 @@ export class DriverHeartbeatController {
           { actorId, requestedDriverId: effectiveDriverId },
         );
       }
-      effectiveDriverId = actorId ?? effectiveDriverId;
+      effectiveDriverId = normalizeDriverId(actorId) ?? effectiveDriverId;
     }
 
     return toApiSuccessEnvelope(

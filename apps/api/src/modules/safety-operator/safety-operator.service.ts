@@ -26,7 +26,11 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
-import type { BootstrapRequestIdentity } from "../../common/auth";
+import {
+  type BootstrapRequestIdentity,
+  isDriverIdentityMatching,
+  normalizeDriverId,
+} from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { SandboxGovernanceService } from "../sandbox-governance/sandbox-governance.service";
 import {
@@ -1084,7 +1088,10 @@ export class SafetyOperatorService implements OnModuleInit {
     safetyOperatorId: string,
   ) {
     this.assertAccess(identity, "write");
-    if (identity?.realm === "driver" && identity.actorId !== safetyOperatorId) {
+    if (
+      identity?.realm === "driver" &&
+      !isDriverIdentityMatching(identity.actorId, safetyOperatorId)
+    ) {
       throw new ApiRequestError(
         HttpStatus.FORBIDDEN,
         "SAFETY_OPERATOR_IDENTITY_MISMATCH",
@@ -1169,7 +1176,10 @@ export class SafetyOperatorService implements OnModuleInit {
       );
     }
 
-    if (normalizedRequestedId && normalizedRequestedId !== identity.actorId) {
+    if (
+      normalizedRequestedId &&
+      !isDriverIdentityMatching(identity.actorId, normalizedRequestedId)
+    ) {
       throw new ApiRequestError(
         HttpStatus.FORBIDDEN,
         "SAFETY_OPERATOR_IDENTITY_MISMATCH",
@@ -1181,7 +1191,7 @@ export class SafetyOperatorService implements OnModuleInit {
       );
     }
 
-    return identity.actorId;
+    return normalizeDriverId(identity.actorId)!;
   }
 
   private assertScope(

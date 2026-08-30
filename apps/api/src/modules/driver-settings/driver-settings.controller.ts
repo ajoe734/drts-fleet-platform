@@ -18,6 +18,8 @@ import {
   CurrentIdentity,
   RequireRealms,
   RequireScopes,
+  isDriverIdentityMatching,
+  normalizeDriverId,
   type BootstrapRequestIdentity,
 } from "../../common/auth";
 import { DriverSettingsService } from "./driver-settings.service";
@@ -34,7 +36,7 @@ export class DriverSettingsController {
     @Headers("x-request-id") requestId?: string,
   ) {
     if (identity?.realm === "driver") {
-      const driverId = identity.actorId;
+      const driverId = normalizeDriverId(identity.actorId);
       const items = driverId
         ? [this.driverSettingsService.getSettings(driverId)]
         : [];
@@ -57,7 +59,7 @@ export class DriverSettingsController {
     if (
       identity?.realm === "driver" &&
       identity.actorId &&
-      identity.actorId !== driverId
+      !isDriverIdentityMatching(identity.actorId, driverId)
     ) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -84,7 +86,7 @@ export class DriverSettingsController {
     if (
       identity?.realm === "driver" &&
       identity.actorId &&
-      identity.actorId !== driverId
+      !isDriverIdentityMatching(identity.actorId, driverId)
     ) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,

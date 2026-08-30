@@ -53,6 +53,8 @@ import {
   CurrentIdentity,
   RequireRealms,
   RequireScopes,
+  isDriverIdentityMatching,
+  normalizeDriverId,
 } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { IdempotencyService } from "../../common/idempotency";
@@ -85,7 +87,7 @@ export class OwnedMobilityController {
         );
       }
       const normalized = requestedDriverId?.trim();
-      if (normalized && normalized !== actorId) {
+      if (normalized && !isDriverIdentityMatching(actorId, normalized)) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
           "DRIVER_IDENTITY_MISMATCH",
@@ -93,7 +95,7 @@ export class OwnedMobilityController {
           { actorId, requestedDriverId: normalized },
         );
       }
-      return actorId;
+      return normalizeDriverId(actorId)!;
     }
 
     const normalizedDriverId = requestedDriverId?.trim();
@@ -115,7 +117,7 @@ export class OwnedMobilityController {
     const task = this.ownedMobilityService.getDriverTask(taskId);
     if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
       const actorId = identity.actorId;
-      if (actorId && task.driverId !== actorId) {
+      if (actorId && !isDriverIdentityMatching(actorId, task.driverId)) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
           "DRIVER_IDENTITY_MISMATCH",
@@ -817,7 +819,11 @@ export class OwnedMobilityController {
   ) {
     if (identity?.realm === "driver" || identity?.actorType === "driver_user") {
       const actorId = identity.actorId;
-      if (requestedDriverId && actorId && requestedDriverId !== actorId) {
+      if (
+        requestedDriverId &&
+        actorId &&
+        !isDriverIdentityMatching(actorId, requestedDriverId)
+      ) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
           "DRIVER_IDENTITY_MISMATCH",
@@ -825,10 +831,10 @@ export class OwnedMobilityController {
           { actorId, requestedDriverId },
         );
       }
-      const driverId = actorId ?? requestedDriverId;
+      const driverId = normalizeDriverId(actorId) ?? requestedDriverId;
       const allTasks = this.ownedMobilityService.listDriverTasks();
       const items = driverId
-        ? allTasks.filter((t) => t.driverId === driverId)
+        ? allTasks.filter((t) => isDriverIdentityMatching(t.driverId, driverId))
         : allTasks;
       return toApiSuccessEnvelope({ items }, requestId);
     }
