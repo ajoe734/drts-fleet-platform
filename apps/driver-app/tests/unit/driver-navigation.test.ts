@@ -278,3 +278,95 @@ describe("driver route authority and degraded states", () => {
     ).toBe("stale");
   });
 });
+
+describe("driver root tab bar navigation", () => {
+  it("declares the exact five tabs in correct order", async () => {
+    const { DRIVER_TABS } = await import("../../lib/driver-navigation");
+
+    expect(DRIVER_TABS.map((t) => t.title)).toEqual([
+      "工作台",
+      "任務",
+      "行程",
+      "平台",
+      "設定",
+    ]);
+
+    expect(DRIVER_TABS.map((t) => t.key)).toEqual([
+      "workbench",
+      "jobs",
+      "trip",
+      "platform",
+      "settings",
+    ]);
+
+    expect(DRIVER_TABS.map((t) => t.routeName)).toEqual([
+      "index",
+      "jobs",
+      "trip",
+      "platform-presence",
+      "settings",
+    ]);
+  });
+
+  it("maps all existing screens to their designated parent tab", async () => {
+    const { DRIVER_ROUTE_TAB_MAP, resolveActiveDriverTab } = await import(
+      "../../lib/driver-navigation"
+    );
+
+    expect(DRIVER_ROUTE_TAB_MAP.index).toBe("workbench");
+    expect(DRIVER_ROUTE_TAB_MAP.jobs).toBe("jobs");
+    expect(DRIVER_ROUTE_TAB_MAP.trip).toBe("trip");
+    expect(DRIVER_ROUTE_TAB_MAP["platform-presence"]).toBe("platform");
+    expect(DRIVER_ROUTE_TAB_MAP.settings).toBe("settings");
+
+    expect(resolveActiveDriverTab("index")).toBe("workbench");
+    expect(resolveActiveDriverTab("/index")).toBe("workbench");
+    expect(resolveActiveDriverTab("jobs")).toBe("jobs");
+    expect(resolveActiveDriverTab("/jobs")).toBe("jobs");
+    expect(resolveActiveDriverTab("trip")).toBe("trip");
+    expect(resolveActiveDriverTab("/trip")).toBe("trip");
+    expect(resolveActiveDriverTab("platform-presence")).toBe("platform");
+    expect(resolveActiveDriverTab("/platform-presence")).toBe("platform");
+    expect(resolveActiveDriverTab("settings")).toBe("settings");
+    expect(resolveActiveDriverTab("/settings")).toBe("settings");
+
+    // Sub-screens
+    expect(resolveActiveDriverTab("incident")).toBe("trip");
+    expect(resolveActiveDriverTab("/incident")).toBe("trip");
+    expect(resolveActiveDriverTab("sos")).toBe("trip");
+    expect(resolveActiveDriverTab("/sos")).toBe("trip");
+    expect(resolveActiveDriverTab("earnings")).toBe("settings");
+    expect(resolveActiveDriverTab("/earnings")).toBe("settings");
+    expect(resolveActiveDriverTab("shift")).toBe("workbench");
+    expect(resolveActiveDriverTab("/shift")).toBe("workbench");
+    expect(resolveActiveDriverTab("safety-operator")).toBe("settings");
+    expect(resolveActiveDriverTab("/safety-operator")).toBe("settings");
+    expect(resolveActiveDriverTab("onboarding")).toBe("workbench");
+    expect(resolveActiveDriverTab("/onboarding")).toBe("workbench");
+  });
+
+  it("respects tab overrides passed through navigation state/params", async () => {
+    const { resolveActiveDriverTab } = await import(
+      "../../lib/driver-navigation"
+    );
+
+    expect(resolveActiveDriverTab("earnings", "workbench")).toBe("workbench");
+    expect(resolveActiveDriverTab("incident", "workbench")).toBe("workbench");
+  });
+
+  it("identifies whether a route is a top-level tab route", async () => {
+    const { isDriverTabRoute } = await import("../../lib/driver-navigation");
+
+    expect(isDriverTabRoute("index")).toBe(true);
+    expect(isDriverTabRoute("jobs")).toBe(true);
+    expect(isDriverTabRoute("trip")).toBe(true);
+    expect(isDriverTabRoute("platform-presence")).toBe(true);
+    expect(isDriverTabRoute("settings")).toBe(true);
+
+    expect(isDriverTabRoute("earnings")).toBe(false);
+    expect(isDriverTabRoute("incident")).toBe(false);
+    expect(isDriverTabRoute("sos")).toBe(false);
+    expect(isDriverTabRoute("safety-operator")).toBe(false);
+  });
+});
+
