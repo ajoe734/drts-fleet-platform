@@ -34,6 +34,11 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import {
+  assertTenantVisibility,
+  filterToTenantVisibility,
+  resolveTenantVisibility,
+} from "../../common/tenant-scope";
+import {
   CurrentIdentity,
   RequireRealms,
   RequireScopes,
@@ -263,10 +268,13 @@ export class BillingSettlementController {
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    let items = this.billingSettlementService.listPlatformInvoices();
-    if (identity?.realm === "tenant" && identity.tenantId) {
-      items = items.filter((invoice) => invoice.tenantId === identity.tenantId);
-    }
+    // `partner` is an allowed realm here and was never narrowed, so a partner
+    // could list every tenant's invoices. Visibility is resolved once and
+    // applies to whoever is asking.
+    const items = filterToTenantVisibility(
+      this.billingSettlementService.listPlatformInvoices(),
+      resolveTenantVisibility(identity),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
@@ -386,14 +394,14 @@ export class BillingSettlementController {
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    let items = this.billingSettlementService.listReconciliationIssues({
-      ...(status ? { status } : {}),
-      ...(issueType ? { issueType } : {}),
-      ...(channelKey ? { channelKey } : {}),
-    });
-    if (identity?.realm === "tenant" && identity.tenantId) {
-      items = items.filter((issue) => issue.tenantId === identity.tenantId);
-    }
+    const items = filterToTenantVisibility(
+      this.billingSettlementService.listReconciliationIssues({
+        ...(status ? { status } : {}),
+        ...(issueType ? { issueType } : {}),
+        ...(channelKey ? { channelKey } : {}),
+      }),
+      resolveTenantVisibility(identity),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
@@ -405,15 +413,16 @@ export class BillingSettlementController {
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    if (identity?.realm === "tenant" && identity.tenantId) {
-      if (command.tenantId && command.tenantId !== identity.tenantId) {
+    const visibility = resolveTenantVisibility(identity);
+    if (visibility.scope === "tenant") {
+      if (command.tenantId && command.tenantId !== visibility.tenantId) {
         throw new ApiRequestError(
           403,
           "TENANT_BOUNDARY_VIOLATION",
           "Tenant caller cannot create reconciliation issues for another tenant.",
         );
       }
-      command.tenantId = identity.tenantId;
+      command.tenantId = visibility.tenantId;
     }
     return toApiSuccessEnvelope(
       this.billingSettlementService.createReconciliationIssue(
@@ -433,18 +442,15 @@ export class BillingSettlementController {
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    if (identity?.realm === "tenant" && identity.tenantId) {
-      const issue = this.billingSettlementService
+    // `issue.tenantId && ...` let a tenant act on any issue whose tenant was
+    // null -- platform-level records were open to everyone.
+    assertTenantVisibility(
+      this.billingSettlementService
         .listReconciliationIssues()
-        .find((item) => item.issueId === issueId);
-      if (!issue || (issue.tenantId && issue.tenantId !== identity.tenantId)) {
-        throw new ApiRequestError(
-          404,
-          "NOT_FOUND",
-          "Reconciliation issue not found.",
-        );
-      }
-    }
+        .find((item) => item.issueId === issueId)?.tenantId,
+      resolveTenantVisibility(identity),
+      { issueId },
+    );
     return toApiSuccessEnvelope(
       this.billingSettlementService.assignReconciliationIssue(
         issueId,
@@ -464,18 +470,15 @@ export class BillingSettlementController {
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    if (identity?.realm === "tenant" && identity.tenantId) {
-      const issue = this.billingSettlementService
+    // `issue.tenantId && ...` let a tenant act on any issue whose tenant was
+    // null -- platform-level records were open to everyone.
+    assertTenantVisibility(
+      this.billingSettlementService
         .listReconciliationIssues()
-        .find((item) => item.issueId === issueId);
-      if (!issue || (issue.tenantId && issue.tenantId !== identity.tenantId)) {
-        throw new ApiRequestError(
-          404,
-          "NOT_FOUND",
-          "Reconciliation issue not found.",
-        );
-      }
-    }
+        .find((item) => item.issueId === issueId)?.tenantId,
+      resolveTenantVisibility(identity),
+      { issueId },
+    );
     return toApiSuccessEnvelope(
       this.billingSettlementService.addReconciliationIssueComment(
         issueId,
@@ -495,18 +498,15 @@ export class BillingSettlementController {
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    if (identity?.realm === "tenant" && identity.tenantId) {
-      const issue = this.billingSettlementService
+    // `issue.tenantId && ...` let a tenant act on any issue whose tenant was
+    // null -- platform-level records were open to everyone.
+    assertTenantVisibility(
+      this.billingSettlementService
         .listReconciliationIssues()
-        .find((item) => item.issueId === issueId);
-      if (!issue || (issue.tenantId && issue.tenantId !== identity.tenantId)) {
-        throw new ApiRequestError(
-          404,
-          "NOT_FOUND",
-          "Reconciliation issue not found.",
-        );
-      }
-    }
+        .find((item) => item.issueId === issueId)?.tenantId,
+      resolveTenantVisibility(identity),
+      { issueId },
+    );
     return toApiSuccessEnvelope(
       this.billingSettlementService.resolveReconciliationIssue(
         issueId,
@@ -526,18 +526,15 @@ export class BillingSettlementController {
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    if (identity?.realm === "tenant" && identity.tenantId) {
-      const issue = this.billingSettlementService
+    // `issue.tenantId && ...` let a tenant act on any issue whose tenant was
+    // null -- platform-level records were open to everyone.
+    assertTenantVisibility(
+      this.billingSettlementService
         .listReconciliationIssues()
-        .find((item) => item.issueId === issueId);
-      if (!issue || (issue.tenantId && issue.tenantId !== identity.tenantId)) {
-        throw new ApiRequestError(
-          404,
-          "NOT_FOUND",
-          "Reconciliation issue not found.",
-        );
-      }
-    }
+        .find((item) => item.issueId === issueId)?.tenantId,
+      resolveTenantVisibility(identity),
+      { issueId },
+    );
     return toApiSuccessEnvelope(
       this.billingSettlementService.reopenReconciliationIssue(
         issueId,
