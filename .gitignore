@@ -33,6 +33,7 @@ portable-orchestrator-bundle-*.tar.gz
 __pycache__/
 *.pyc
 ai-activity-log.jsonl
+ai-activity-log-archive/
 ai-task-archive.jsonl
 .runtime-consumed-oidc-states.json
 
