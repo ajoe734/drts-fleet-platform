@@ -17,6 +17,7 @@ import {
 import { EventEmitter2 } from "@nestjs/event-emitter";
 
 import type {
+  DriverTaskStatus,
   AddressPayload,
   ApplyManualFareOverrideCommand,
   ApproveTenantBookingApprovalRequestCommand,
@@ -113,6 +114,8 @@ import {
   hasAddressCoordinateProvenance,
   hasAddressCoordinates,
 } from "@drts/contracts";
+
+import { DRIVER_TASK_TRANSITIONS } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
@@ -4473,6 +4476,35 @@ export class OwnedMobilityService
     return clone;
   }
 
+  /**
+   * Refuses a task transition the lifecycle does not allow.
+   *
+   * Five of the eleven places that set `task.status` checked first and six did
+   * not, so the same rule held or did not depending on which endpoint the
+   * driver's phone happened to call.
+   */
+  private assertDriverTaskTransition(
+    task: { taskId: string; status: DriverTaskStatus },
+    next: DriverTaskStatus,
+  ) {
+    if (task.status === next) {
+      return;
+    }
+    if (!DRIVER_TASK_TRANSITIONS[task.status].includes(next)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "DRIVER_TASK_TRANSITION_INVALID",
+        `A task that is ${task.status} cannot become ${next}.`,
+        {
+          taskId: task.taskId,
+          from: task.status,
+          to: next,
+          allowed: [...DRIVER_TASK_TRANSITIONS[task.status]],
+        },
+      );
+    }
+  }
+
   async acceptDriverTask(
     taskId: string,
     command: DriverAcceptTaskCommand,
@@ -4481,6 +4513,7 @@ export class OwnedMobilityService
     const task = this.requireTask(taskId);
     const assignment = this.requireAssignment(task.assignmentId);
     const order = this.requireOrder(task.orderId);
+    this.assertDriverTaskTransition(task, "accepted");
     task.status = "accepted";
     task.acceptedAt = command.acceptedAt;
     assignment.status = "accepted";
@@ -4541,6 +4574,7 @@ export class OwnedMobilityService
     const assignment = this.requireAssignment(task.assignmentId);
     const order = this.requireOrder(task.orderId);
     const now = new Date().toISOString();
+    this.assertDriverTaskTransition(task, "rejected");
     task.status = "rejected";
     assignment.status = "rejected";
     assignment.rejectReasonCode = command.reasonCode;
@@ -4605,6 +4639,7 @@ export class OwnedMobilityService
   ) {
     const task = this.requireTask(taskId);
     const order = this.requireOrder(task.orderId);
+    this.assertDriverTaskTransition(task, "enroute_pickup");
     task.status = "enroute_pickup";
     task.departedAt = command.departedAt;
     order.status = "enroute_pickup";
@@ -4652,6 +4687,7 @@ export class OwnedMobilityService
   ) {
     const task = this.requireTask(taskId);
     const order = this.requireOrder(task.orderId);
+    this.assertDriverTaskTransition(task, "arrived_pickup");
     task.status = "arrived_pickup";
     task.arrivedPickupAt = command.arrivedAt;
     order.status = "arrived_pickup";

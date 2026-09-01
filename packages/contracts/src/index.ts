@@ -2874,6 +2874,38 @@ export const DRIVER_TASK_STATUSES = [
 ] as const;
 export type DriverTaskStatus = (typeof DRIVER_TASK_STATUSES)[number];
 
+/**
+ * Which task status may follow which.
+ *
+ * `DRIVER_TASK_STATUSES` was a list of names, and whether the order they imply
+ * was enforced depended on which function you landed in: `startDriverTask` and
+ * `completeDriverTask` checked, while `acceptDriverTask`, `rejectDriverTask`,
+ * `departDriverTask`, `arrivedPickup` and `markDriverTaskProofPending` did not.
+ * So accepting a task whose order had already been cancelled succeeded, and set
+ * the order back to `driver_accepted`.
+ *
+ * That needs no concurrency to happen -- a driver's phone coming back online
+ * after a cancellation is enough. `Record` over the union means a status added
+ * to the enum without deciding what may follow it fails to compile.
+ */
+export const DRIVER_TASK_TRANSITIONS: Record<
+  DriverTaskStatus,
+  readonly DriverTaskStatus[]
+> = {
+  pending_acceptance: ["accepted", "rejected", "cancelled"],
+  accepted: ["enroute_pickup", "cancelled"],
+  enroute_pickup: ["arrived_pickup", "cancelled"],
+  arrived_pickup: ["on_trip", "cancelled"],
+  on_trip: ["proof_pending", "completed", "cancelled"],
+  proof_pending: ["completed", "cancelled"],
+  // Terminal. A completed trip that can be re-cancelled is a refund nobody
+  // recorded, and a rejected task that can be accepted is a dispatch nobody
+  // made.
+  completed: [],
+  rejected: [],
+  cancelled: [],
+};
+
 export const BOOKING_TYPES = ["oneway", "roundtrip", "recurring"] as const;
 export type BookingType = (typeof BOOKING_TYPES)[number];
 

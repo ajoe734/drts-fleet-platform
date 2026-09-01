@@ -2217,7 +2217,9 @@ describe("owned mobility service", () => {
 
     it("rejects scheduled booking inside default 15-minute lead time with TOO_SOON_TO_BOOK", () => {
       const { ownedMobilityService } = createService();
-      const fiveMinutesFromNow = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+      const fiveMinutesFromNow = new Date(
+        Date.now() + 5 * 60 * 1000,
+      ).toISOString();
 
       try {
         ownedMobilityService.createMultiTaxiRide(
@@ -2237,7 +2239,9 @@ describe("owned mobility service", () => {
         const apiError = error as ApiRequestError;
         expect(apiError.code).toBe("TOO_SOON_TO_BOOK");
         expect(apiError.getStatus()).toBe(400);
-        const response = apiError.getResponse() as { error: { details?: Record<string, unknown> } };
+        const response = apiError.getResponse() as {
+          error: { details?: Record<string, unknown> };
+        };
         expect(response.error.details).toMatchObject({
           requestedPickupAt: fiveMinutesFromNow,
           minLeadTimeMinutes: 15,
@@ -2272,7 +2276,9 @@ describe("owned mobility service", () => {
 
     it("accepts scheduled booking with pickup beyond minimum lead time", () => {
       const { ownedMobilityService } = createService();
-      const thirtyMinutesFromNow = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+      const thirtyMinutesFromNow = new Date(
+        Date.now() + 30 * 60 * 1000,
+      ).toISOString();
 
       const order = ownedMobilityService.createMultiTaxiRide(
         {
@@ -2296,7 +2302,9 @@ describe("owned mobility service", () => {
       const { ownedMobilityService } = createService();
       ownedMobilityService.setMinLeadTimeMinutes(60); // 60 minutes minimum
 
-      const fortyMinutesFromNow = new Date(Date.now() + 40 * 60 * 1000).toISOString();
+      const fortyMinutesFromNow = new Date(
+        Date.now() + 40 * 60 * 1000,
+      ).toISOString();
 
       // 40 minutes is now inside 60-minute lead time -> rejected
       expect(() =>
@@ -2314,7 +2322,9 @@ describe("owned mobility service", () => {
       ).toThrowError();
 
       // 70 minutes is beyond 60-minute lead time -> accepted
-      const seventyMinutesFromNow = new Date(Date.now() + 70 * 60 * 1000).toISOString();
+      const seventyMinutesFromNow = new Date(
+        Date.now() + 70 * 60 * 1000,
+      ).toISOString();
       const order = ownedMobilityService.createMultiTaxiRide(
         {
           pickup: { address: "台北車站" },
@@ -2374,7 +2384,9 @@ describe("owned mobility service", () => {
         const { ownedMobilityService } = createService();
         expect(ownedMobilityService.getMinLeadTimeMinutes()).toBe(45);
 
-        const thirtyMinutesFromNow = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+        const thirtyMinutesFromNow = new Date(
+          Date.now() + 30 * 60 * 1000,
+        ).toISOString();
         expect(() =>
           ownedMobilityService.createMultiTaxiRide(
             {
@@ -2396,5 +2408,122 @@ describe("owned mobility service", () => {
         }
       }
     });
+  });
+});
+
+describe("driver task lifecycle is enforced everywhere, not in some places", () => {
+  async function assignedTask() {
+    const { ownedMobilityService } = createService();
+    const order = ownedMobilityService.createPassengerOrder({
+      pickup: { address: "台中市梧棲區中二路一段9號" },
+      dropoff: { address: "台中市大安區興安路378號" },
+      passenger: { name: "李先生", phone: "0911222333" },
+    });
+    const dispatchJob = ownedMobilityService.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const candidate = (
+      await ownedMobilityService.listDispatchCandidates(
+        dispatchJob.dispatchJobId,
+      )
+    )[0]!;
+    const assignment = await ownedMobilityService.assignDispatch({
+      dispatchJobId: dispatchJob.dispatchJobId,
+      vehicleId: candidate.vehicleId,
+      driverId: candidate.driverId,
+    });
+    return { ownedMobilityService, order, taskId: assignment.taskId };
+  }
+
+  async function codeOf(call: () => unknown): Promise<string> {
+    try {
+      await call();
+    } catch (error) {
+      return (error as ApiRequestError).code;
+    }
+    throw new Error("expected the call to throw");
+  }
+
+  it("refuses to accept a task the driver already rejected", async () => {
+    const { ownedMobilityService, taskId } = await assignedTask();
+    await ownedMobilityService.rejectDriverTask(taskId, {
+      reasonCode: "driver_unavailable",
+    });
+
+    expect(
+      await codeOf(() =>
+        ownedMobilityService.acceptDriverTask(taskId, {
+          acceptedAt: "2026-04-10T09:02:00Z",
+        }),
+      ),
+    ).toBe("DRIVER_TASK_TRANSITION_INVALID");
+  });
+
+  it("refuses to depart before accepting", async () => {
+    // The lifecycle says pending_acceptance -> accepted -> enroute_pickup.
+    // `departDriverTask` never checked, so a phone that skipped a step was
+    // taken at its word.
+    const { ownedMobilityService, taskId } = await assignedTask();
+
+    expect(
+      await codeOf(() =>
+        ownedMobilityService.departDriverTask(taskId, {
+          departedAt: "2026-04-10T09:03:00Z",
+          currentLocation: { lat: 24.266, lng: 120.522 },
+        }),
+      ),
+    ).toBe("DRIVER_TASK_TRANSITION_INVALID");
+  });
+
+  it("refuses a late acceptance after the order was cancelled", async () => {
+    // This is the case that needs no concurrency at all: a driver's phone
+    // comes back online after the passenger cancelled, and the old code
+    // accepted the task and set the order to driver_accepted -- reviving it.
+    const { ownedMobilityService, order, taskId } = await assignedTask();
+    await ownedMobilityService.cancelOwnedOrder(order.orderId, {
+      reasonCode: "passenger_cancelled",
+      cancelledBy: "passenger",
+    } as never);
+
+    expect(
+      await codeOf(() =>
+        ownedMobilityService.acceptDriverTask(taskId, {
+          acceptedAt: "2026-04-10T09:02:00Z",
+        }),
+      ),
+    ).toBe("DRIVER_TASK_TRANSITION_INVALID");
+  });
+
+  it("still allows the whole legal path", async () => {
+    const { ownedMobilityService, taskId } = await assignedTask();
+
+    await ownedMobilityService.acceptDriverTask(taskId, {
+      acceptedAt: "2026-04-10T09:02:00Z",
+    });
+    await ownedMobilityService.departDriverTask(taskId, {
+      departedAt: "2026-04-10T09:03:00Z",
+      currentLocation: { lat: 24.266, lng: 120.522 },
+    });
+    const task = await ownedMobilityService.arrivedPickup(taskId, {
+      arrivedAt: "2026-04-10T09:10:00Z",
+      currentLocation: { lat: 24.266, lng: 120.522 },
+    } as never);
+
+    expect(task.status).toBe("arrived_pickup");
+  });
+
+  it("treats a repeated call as the state it already reached", async () => {
+    // A retry that lands twice should not be a conflict; the task is already
+    // where the caller wanted it.
+    const { ownedMobilityService, taskId } = await assignedTask();
+    await ownedMobilityService.acceptDriverTask(taskId, {
+      acceptedAt: "2026-04-10T09:02:00Z",
+    });
+
+    await expect(
+      ownedMobilityService.acceptDriverTask(taskId, {
+        acceptedAt: "2026-04-10T09:02:00Z",
+      }),
+    ).resolves.toMatchObject({ status: "accepted" });
   });
 });
