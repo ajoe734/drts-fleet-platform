@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { AppState } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { AppState, StyleSheet, Text, View } from "react-native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { ThemeProvider } from "@react-navigation/native";
@@ -7,6 +7,7 @@ import "react-native-reanimated";
 
 import {
   initializeDriverLocationHeartbeat,
+  stopDriverLocationHeartbeat,
   syncDriverLocationHeartbeat,
 } from "@/lib/driver-location-heartbeat";
 import { syncDriverIdentityBootstrap } from "@/lib/driver-identity-bootstrap";
@@ -17,25 +18,27 @@ import {
 } from "@/lib/driver-identity-routing";
 import {
   formatDriverError,
-  getDriverClient,
+  getDriverClientOrNull,
   getDriverIdentityIssue,
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
+import {
+  subscribeDriverSession,
+  useDriverSessionEpoch,
+} from "@/lib/driver-session-lifecycle";
 
 import { driverNavigationTheme, driverTheme } from "@/lib/theme";
-import { driverRouteTitles } from "@/lib/strings";
 
 const DRIVER_SESSION_REVALIDATE_INTERVAL_MS = 10 * 60 * 1000;
-
-export const unstable_settings = {
-  initialRouteName: "onboarding",
-};
 
 function DriverHeartbeatBootstrap() {
   const router = useRouter();
   const segments = useSegments();
   const segmentsRef = useRef<string[]>(segments);
+  // Re-arms the whole bootstrap whenever the driver signs in or out, so the
+  // interval and the AppState listener below never outlive their session.
+  const sessionEpoch = useDriverSessionEpoch();
 
   useEffect(() => {
     segmentsRef.current = [...segments];
@@ -46,6 +49,15 @@ function DriverHeartbeatBootstrap() {
 
     let cancelled = false;
 
+    const warn = (error: unknown) => {
+      // console.warn (never console.error): LogBox turns console.error into a
+      // full-screen red overlay for the driver.
+      console.warn(
+        "Driver heartbeat bootstrap sync failed",
+        formatDriverError(error, "裝置同步失敗"),
+      );
+    };
+
     const syncWithActiveTrip = async () => {
       await syncDriverIdentityBootstrap({
         allowUnprovisionedRoute: allowUnprovisionedDriverRoute(
@@ -55,13 +67,14 @@ function DriverHeartbeatBootstrap() {
         getDriverIdentityIssue,
         initializeDriverIdentity,
         isDriverIdentityProvisioned,
-        listDriverTasks: () => getDriverClient().listDriverTasks(),
-        onWarning: (error) => {
-          console.warn(
-            "Driver heartbeat bootstrap sync failed",
-            formatDriverError(error, "裝置同步失敗"),
-          );
+        listDriverTasks: async () => {
+          const client = getDriverClientOrNull();
+          if (!client) {
+            return [];
+          }
+          return client.listDriverTasks();
         },
+        onWarning: warn,
         resetDriverAppToOnboarding,
         router,
         syncDriverLocationHeartbeat,
@@ -69,82 +82,111 @@ function DriverHeartbeatBootstrap() {
       });
     };
 
-    void syncWithActiveTrip();
+    const runSync = () => {
+      syncWithActiveTrip().catch(warn);
+    };
+
+    runSync();
 
     const subscription = AppState.addEventListener("change", (nextAppState) => {
       if (nextAppState === "active") {
-        void syncWithActiveTrip();
+        runSync();
       }
     });
-    const refreshInterval = setInterval(() => {
-      void syncWithActiveTrip();
-    }, DRIVER_SESSION_REVALIDATE_INTERVAL_MS);
+    const refreshInterval = setInterval(
+      runSync,
+      DRIVER_SESSION_REVALIDATE_INTERVAL_MS,
+    );
+
+    // Stop location tracking the moment the session ends, before this effect is
+    // re-created for the next session.
+    const unsubscribeSession = subscribeDriverSession((snapshot) => {
+      if (snapshot.state === "signed_out") {
+        stopDriverLocationHeartbeat().catch(warn);
+      }
+    });
 
     return () => {
       cancelled = true;
+      unsubscribeSession();
       subscription.remove();
       clearInterval(refreshInterval);
     };
-  }, [router]);
+  }, [router, sessionEpoch]);
 
   return null;
 }
 
+type DriverErrorBoundaryProps = { children: React.ReactNode };
+type DriverErrorBoundaryState = { failed: boolean };
+
+/**
+ * Last line of defence for render-time exceptions. Shows a plain Traditional
+ * Chinese message: never a stack trace, file name, environment variable or
+ * error code.
+ */
+class DriverErrorBoundary extends React.Component<
+  DriverErrorBoundaryProps,
+  DriverErrorBoundaryState
+> {
+  state: DriverErrorBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): DriverErrorBoundaryState {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.warn(
+      "Driver app render failure",
+      formatDriverError(error, "畫面載入失敗"),
+    );
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <View style={styles.errorScreen}>
+          <Text style={styles.errorTitle}>畫面暫時無法顯示</Text>
+          <Text style={styles.errorBody}>
+            請關閉後重新開啟 App。若仍無法使用，請聯絡車隊值班人員。
+          </Text>
+        </View>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+const styles = StyleSheet.create({
+  errorScreen: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    gap: 8,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  errorBody: {
+    fontSize: 14,
+    textAlign: "center",
+  },
+});
+
 export default function RootLayout() {
   return (
     <ThemeProvider value={driverNavigationTheme}>
-      <DriverHeartbeatBootstrap />
-      <StatusBar style={driverTheme.mode === "dark" ? "light" : "dark"} />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          headerStyle: {
-            backgroundColor: driverTheme.colors.bgRaised,
-          },
-          headerTitleStyle: {
-            ...driverTheme.typography.sectionTitle,
-            color: driverTheme.colors.textStrong,
-          },
-          headerTintColor: driverTheme.colors.primary,
-          headerShadowVisible: false,
-          contentStyle: {
-            backgroundColor: driverTheme.colors.appBackground,
-          },
-        }}
-      >
-        <Stack.Screen name="index" />
-        <Stack.Screen
-          name="onboarding"
-          options={{ title: driverRouteTitles.onboarding }}
-        />
-        <Stack.Screen name="jobs" options={{ title: driverRouteTitles.jobs }} />
-        <Stack.Screen name="trip" options={{ title: driverRouteTitles.trip }} />
-        <Stack.Screen
-          name="incident"
-          options={{ title: driverRouteTitles.incident }}
-        />
-        <Stack.Screen name="sos" options={{ title: driverRouteTitles.sos }} />
-        <Stack.Screen
-          name="earnings"
-          options={{ title: driverRouteTitles.earnings }}
-        />
-        <Stack.Screen
-          name="platform-presence"
-          options={{ title: driverRouteTitles.platformPresence }}
-        />
-        <Stack.Screen
-          name="shift"
-          options={{ title: driverRouteTitles.shift }}
-        />
-        <Stack.Screen
-          name="settings"
-          options={{ title: driverRouteTitles.settings }}
-        />
-        <Stack.Screen
-          name="safety-operator"
-          options={{ title: driverRouteTitles.safetyOperator }}
-        />
-      </Stack>
+      <DriverErrorBoundary>
+        <DriverHeartbeatBootstrap />
+        <StatusBar style={driverTheme.mode === "dark" ? "light" : "dark"} />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" />
+        </Stack>
+      </DriverErrorBoundary>
     </ThemeProvider>
   );
 }

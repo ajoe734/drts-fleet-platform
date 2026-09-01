@@ -8,7 +8,6 @@ Implemented / materially wired screens include:
 - `/onboarding`
 - `/jobs`
 - `/trip`
-- `/incident`
 - `/earnings`
 - `/settings`
 
@@ -16,22 +15,32 @@ This app is the active Phase 1 driver surface, not a placeholder shell.
 
 ## Driver Identity Requirement
 
-Driver identity **must** be explicitly provisioned. There is no silent demo
-fallback. A build without a provisioned identity will display a degraded
-provisioning screen instead of binding a demo actor.
+Driver identity comes from **device registration**. The driver enters a
+registration code on the onboarding screen, the backend issues a device-bound
+session, and the app stores it in SecureStore under `drts.driver.session`. That
+session — refreshed automatically on launch and on foreground — is the only
+identity source in production builds. There is no silent demo fallback.
 
-Set one of the following before running or building:
+Logging out revokes the binding and deletes `drts.driver.session` **only**. The
+device registration id (`drts.driver.deviceId`) and every pending queue
+(task-completion proof, safety requests, tracking marker, offline location
+events) are deliberately preserved so a logout never
+destroys un-submitted work.
 
-| Variable                | Purpose                                                      |
-| ----------------------- | ------------------------------------------------------------ |
-| `EXPO_PUBLIC_DRIVER_ID` | Explicit driver actor ID for local dev and internal builds   |
-| `EXPO_PUBLIC_API_URL`   | Explicit direct API origin for the selected environment tier |
+| Variable                | Purpose                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| `EXPO_PUBLIC_API_URL`   | Explicit direct API origin for the selected environment tier (required)              |
+| `EXPO_PUBLIC_DRIVER_ID` | **Local development override only.** Ignored in release builds (`__DEV__ === false`) |
+
+`EXPO_PUBLIC_DRIVER_ID` bypasses device registration and is a convenience for
+running against a local API. It is gated on `__DEV__`, so a production build
+never reads it and never asks anyone to set it. Do not use it as the identity
+source for internal test builds — register the device instead.
 
 Example local dev invocation:
 
 ```bash
 EXPO_PUBLIC_API_URL=http://192.168.1.10:3001 \
-EXPO_PUBLIC_DRIVER_ID=driver-dev-001 \
 pnpm --filter @drts/driver-app dev:client
 ```
 
@@ -68,9 +77,12 @@ Apple Developer membership:
 ```bash
 pnpm install
 EXPO_PUBLIC_API_URL=https://drts-dev-api-4t7rg6fmeq-uc.a.run.app \
-EXPO_PUBLIC_DRIVER_ID=driver-dev-001 \
 pnpm --filter @drts/driver-app ios
 ```
+
+Complete device registration in the app itself; the dev-only
+`EXPO_PUBLIC_DRIVER_ID` override is not required and has no effect outside a
+development bundle.
 
 Always select an explicit direct API origin. The current dev operator target is
 `https://drts-dev-api-4t7rg6fmeq-uc.a.run.app`; do not point the app at an

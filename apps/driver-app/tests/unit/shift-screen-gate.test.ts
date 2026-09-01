@@ -50,18 +50,29 @@ vi.mock("@/components/platform-status-card", () => ({
   getPlatformHealthSeverity: () => 0,
 }));
 
-vi.mock("@/lib/api-client", () => ({
-  isDriverIdentityProvisioned: mocks.isDriverIdentityProvisioned,
-  getDriverIdentityIssue: mocks.getDriverIdentityIssue,
-  getDriverClient: () => ({
+vi.mock("@/lib/api-client", () => {
+  const driverClient = {
     isFeatureEnabled: vi.fn().mockResolvedValue(true),
     listShifts: vi.fn().mockResolvedValue([]),
     getPlatformPresence: vi.fn().mockResolvedValue(null),
     clockIn: vi.fn(),
     clockOut: vi.fn(),
-  }),
-  getDriverId: () => "driver-001",
-}));
+  };
+  return {
+    isDriverIdentityProvisioned: mocks.isDriverIdentityProvisioned,
+    getDriverIdentityIssue: mocks.getDriverIdentityIssue,
+    getDriverClient: () => driverClient,
+    getDriverClientOrNull: () =>
+      mocks.isDriverIdentityProvisioned() ? driverClient : null,
+    getDriverId: () => "driver-001",
+    getDriverIdOrNull: () =>
+      mocks.isDriverIdentityProvisioned() ? "driver-001" : null,
+    formatDriverError: (error: unknown, fallback: string) =>
+      error instanceof Error ? error.message : fallback,
+    sanitizeLogMessage: (value: unknown) =>
+      typeof value === "string" ? value : null,
+  };
+});
 
 vi.mock("@/lib/driver-location-heartbeat", () => ({
   getActiveDriverHeartbeatWorkState: () => null,
@@ -117,7 +128,7 @@ vi.mock("@/components/ui", async () => {
   };
 });
 
-import ShiftScreen from "../../app/shift";
+import ShiftScreen from "../../app/(tabs)/index/shift";
 
 async function flushEffects() {
   await Promise.resolve();
@@ -132,6 +143,62 @@ async function renderShift() {
     await flushEffects();
   });
   return renderer;
+}
+
+// Requirement 2: nothing that names our architecture, APIs, spec numbers,
+// programme identifiers or internal sync strategy may reach a driver's screen.
+const DEVELOPER_COPY_BLOCKLIST = [
+  "sitemap",
+  "cockpit",
+  "packet",
+  "\u00a7",
+  "Phase 1",
+  "web console",
+  "CrossAppResourceLink",
+  "next-best-action",
+  "EmptyReason",
+  "ResourceActionDescriptor",
+  "deep-link",
+  "deep link",
+  "allowedActions",
+  "availableActions",
+  "fallback",
+  "API",
+  "/api/",
+  "\u65d7\u6a19",
+  "\u964d\u7d1a",
+];
+
+// Every string that actually reaches the rendered tree: text nodes plus the
+// string props (title / body / label / subtitle / placeholder / ...) that the
+// mocked design-system components receive.
+function renderedCopy(renderer: any): string {
+  const collected: string[] = [];
+  for (const node of renderer.root.findAll(() => true)) {
+    const props = (node.props ?? {}) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(props)) {
+      if (key === "style") {
+        continue;
+      }
+      if (typeof value === "string") {
+        collected.push(value);
+      } else if (Array.isArray(value)) {
+        for (const entry of value) {
+          if (typeof entry === "string") {
+            collected.push(entry);
+          }
+        }
+      }
+    }
+  }
+  return collected.join(" | ");
+}
+
+function expectNoDeveloperCopy(renderer: any) {
+  const copy = renderedCopy(renderer);
+  for (const term of DEVELOPER_COPY_BLOCKLIST) {
+    expect(copy, `rendered developer copy: ${term}`).not.toContain(term);
+  }
 }
 
 describe("ShiftScreen pre-online gate (unprovisioned)", () => {
@@ -174,4 +241,26 @@ describe("ShiftScreen pre-online gate (unprovisioned)", () => {
     expect(emptyState.props.description).toContain("車隊綁定");
     expect(emptyState.props.actionTitle).toBe("前往配置裝置");
   });
+
+  // Requirement 2: neither unprovisioned gate variant may leak developer copy.
+  it("keeps the identity-invalid gate free of developer copy", async () => {
+    mocks.isDriverIdentityProvisioned.mockReturnValue(false);
+    mocks.getDriverIdentityIssue.mockReturnValue(
+      "此司機帳號已被停權，暫時無法刷新裝置登入。",
+    );
+
+    const renderer = await renderShift();
+    expect(renderedCopy(renderer)).toContain("司機身分需重新驗證");
+    expectNoDeveloperCopy(renderer);
+  });
+
+  it("keeps the unbound-device gate free of developer copy", async () => {
+    mocks.isDriverIdentityProvisioned.mockReturnValue(false);
+    mocks.getDriverIdentityIssue.mockReturnValue(null);
+
+    const renderer = await renderShift();
+    expect(renderedCopy(renderer)).toContain("尚未綁定裝置");
+    expectNoDeveloperCopy(renderer);
+  });
+
 });

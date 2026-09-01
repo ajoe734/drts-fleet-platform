@@ -1,0 +1,7 @@
+URL=$(curl -s -m 8 http://127.0.0.1:4040/api/tunnels 2>/dev/null | grep -oE 'https://[a-z0-9-]+\.exp\.direct' | head -1)
+echo "目前的 Expo 網址: exp://${URL#https://}"
+node -e "
+const qr = require('/home/lupin/drts-fleet-platform/node_modules/.pnpm/qrcode-terminal@0.11.0/node_modules/qrcode-terminal');
+qr.setErrorLevel('L');
+qr.generate('exp://${URL#https://}', {small: true}, c => console.log(c));
+"

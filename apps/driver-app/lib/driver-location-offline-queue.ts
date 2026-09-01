@@ -7,11 +7,16 @@ import type {
 
 import {
   formatDriverError,
-  getDriverClient,
+  getDriverClientOrNull,
   getDriverDeviceId,
-  getDriverId,
+  getDriverIdOrNull,
   recoverDriverSessionFromApiError,
 } from "@/lib/api-client";
+import { recordDriverDiagnostic } from "@/lib/driver-diagnostics";
+import {
+  isDriverSessionSignedOut,
+  subscribeDriverSession,
+} from "@/lib/driver-session-lifecycle";
 
 const DRIVER_LOCATION_QUEUE_DB = "drts-driver-location-queue.db";
 const FLUSH_INTERVAL_MS = 10_000;
@@ -84,6 +89,50 @@ let initializePromise: Promise<void> | null = null;
 let flushLoop: Promise<void> = Promise.resolve();
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 let nowProvider = () => new Date();
+let sessionUnsubscribe: (() => void) | null = null;
+
+function stopFlushTimer(): void {
+  if (flushTimer) {
+    clearInterval(flushTimer);
+    flushTimer = null;
+  }
+}
+
+/**
+ * The flush timer lives at module scope, so nothing unmounts it: after a
+ * logout it would keep ticking (and keep hitting the API with a dead identity)
+ * for the rest of the process lifetime. Subscribing to the session lets it be
+ * torn down on sign-out and rebuilt on the next sign-in.
+ */
+function ensureSessionSubscription(): void {
+  if (sessionUnsubscribe) {
+    return;
+  }
+
+  sessionUnsubscribe = subscribeDriverSession((snapshot) => {
+    if (snapshot.state === "signed_out") {
+      stopFlushTimer();
+      return;
+    }
+
+    if (snapshot.state === "signed_in" && initializePromise && !flushTimer) {
+      startFlushTimer();
+    }
+  });
+}
+
+function startFlushTimer(): void {
+  if (flushTimer || isDriverSessionSignedOut()) {
+    return;
+  }
+
+  flushTimer = setInterval(() => {
+    flushDriverLocationQueue().catch(() => {
+      // flushDriverLocationQueue already contains its own failure handling;
+      // this guard only stops a rejection escaping the interval callback.
+    });
+  }, FLUSH_INTERVAL_MS);
+}
 
 function toMinuteBucket(isoTimestamp: string): string {
   return isoTimestamp.slice(0, 16);
@@ -194,11 +243,8 @@ async function ensureInitialized(): Promise<void> {
         new Date(nowProvider().getTime() - RETENTION_WINDOW_MS).toISOString(),
       );
       await compressQueueIfNeeded();
-      if (!flushTimer) {
-        flushTimer = setInterval(() => {
-          void flushDriverLocationQueue();
-        }, FLUSH_INTERVAL_MS);
-      }
+      ensureSessionSubscription();
+      startFlushTimer();
     })();
   }
 
@@ -236,7 +282,7 @@ async function applyFlushResponse(
       eventId: row.eventId,
       retryCount: nextRetryCount,
       nextAttemptAt: addMs(nowIso, buildBackoffMs(nextRetryCount)),
-      errorMessage: "Heartbeat batch response did not acknowledge this event.",
+      errorMessage: "Location batch response did not acknowledge this event.",
     });
   }
 
@@ -300,10 +346,18 @@ export function flushDriverLocationQueue(): Promise<void> {
         return;
       }
 
+      // No identity (signed out, or not yet bound): leave the rows queued and
+      // try again after the next sign-in instead of throwing from a timer.
+      const client = getDriverClientOrNull();
+      if (!client || isDriverSessionSignedOut()) {
+        stopFlushTimer();
+        return;
+      }
+
       await store.markSending(batch.map((row) => row.eventId));
 
       try {
-        const response = await getDriverClient().recordDriverLocationBatch({
+        const response = await client.recordDriverLocationBatch({
           items: batch.map((row) => row.payload),
         });
         await applyFlushResponse(batch, response);
@@ -318,14 +372,30 @@ export function flushDriverLocationQueue(): Promise<void> {
   return flushLoop;
 }
 
+/**
+ * Returns `null` when the event cannot be attributed to a driver (no bound
+ * device, or the driver signed out mid-flight). Dropping the sample is the
+ * correct outcome: a heartbeat with no driver identity is unusable, and
+ * throwing here used to escape as an unhandled rejection from the heartbeat
+ * timer.
+ */
 export async function enqueueDriverLocationEvent(
   draft: QueueEventDraft,
-): Promise<DriverLocationHeartbeatEnvelope> {
+): Promise<DriverLocationHeartbeatEnvelope | null> {
   await ensureInitialized();
+
+  const driverId = getDriverIdOrNull();
+  if (!driverId) {
+    recordDriverDiagnostic({
+      kind: "api_failure",
+      reason: "location_event_dropped_without_driver_identity",
+      requestResults: { location_queue: "skipped" },
+    });
+    return null;
+  }
 
   const store = await getStore();
   const deviceId = await getDriverDeviceId();
-  const driverId = getDriverId();
   const sequenceNo = await store.reserveSequenceNo();
   const eventId = `${deviceId}:${sequenceNo}`;
 
@@ -340,15 +410,19 @@ export async function enqueueDriverLocationEvent(
 
   await store.enqueue(toQueueRow(payload, draft.preserveKeyEvent === true));
   await compressQueueIfNeeded();
-  void flushDriverLocationQueue();
+  flushDriverLocationQueue().catch(() => {
+    // Flush failures are recorded on the queue rows themselves; they must not
+    // reject back into the heartbeat scheduler.
+  });
 
   return payload;
 }
 
 export async function __resetDriverLocationOfflineQueueForTests(): Promise<void> {
-  if (flushTimer) {
-    clearInterval(flushTimer);
-    flushTimer = null;
+  stopFlushTimer();
+  if (sessionUnsubscribe) {
+    sessionUnsubscribe();
+    sessionUnsubscribe = null;
   }
 
   initializePromise = null;

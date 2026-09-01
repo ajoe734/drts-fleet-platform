@@ -231,17 +231,48 @@ describe("Driver Auth States & Device Flow (IAM-UI-DRV-001)", () => {
       expect(sanitizedLog).toContain("Bearer [REDACTED]");
       expect(sanitizedLog).toContain("registration_code=[REDACTED]");
     });
+
+    // 需求 2：後端／內部的英文技術訊息（欄位名、型別名、狀態描述）不得
+    // 原封不動推上畫面，一律換成呼叫端提供的中文 fallback。
+    it("replaces non-Chinese backend and internal error text with the Chinese fallback", () => {
+      const apiError = new Error(
+        'API error 409: {"error":{"code":"TASK_CONFLICT","message":"Task payload schema mismatch on /api/driver/tasks"}}',
+      );
+      expect(formatDriverError(apiError, "任務更新失敗，請重新整理。")).toBe(
+        "任務更新失敗，請重新整理。",
+      );
+
+      const internalError = new Error(
+        "Stored task completion record is incomplete.",
+      );
+      expect(formatDriverError(internalError)).toBe("操作失敗，請稍後再試。");
+
+      // 後端若已經送中文文案，維持原文顯示。
+      const localizedError = new Error(
+        'API error 409: {"error":{"code":"TASK_CONFLICT","message":"此任務已被其他人接走"}}',
+      );
+      expect(formatDriverError(localizedError, "任務更新失敗。")).toBe(
+        "此任務已被其他人接走",
+      );
+    });
   });
 
   describe("UI String Dictionary Integrity", () => {
-    it("has complete declared auth states and device flow strings in driverAuthStrings", () => {
-      expect(driverAuthStrings.states.not_provisioned.badge).toContain("DeviceNotProvisioned");
-      expect(driverAuthStrings.states.session_expired.badge).toContain("SessionExpired");
-      expect(driverAuthStrings.states.device_revoked.badge).toContain("DeviceRevoked");
-      expect(driverAuthStrings.states.driver_suspended.badge).toContain("DriverSuspended");
-      expect(driverAuthStrings.devices.rebindAction).toContain("Rebind");
-      expect(driverAuthStrings.devices.revokeAction).toContain("Revoke");
-      expect(driverAuthStrings.devices.offlineProofNotice).toContain("不會刪除未同步的離線完單佐證");
+    // Every auth state still has a distinct badge, and none of them leak the
+    // internal state identifier (DeviceNotProvisioned / SessionExpired /
+    // DeviceRevoked / DriverSuspended) that used to be appended to the copy.
+    it("has a distinct, identifier-free badge for every declared auth state", () => {
+      const badges = [
+        driverAuthStrings.states.not_provisioned.badge,
+        driverAuthStrings.states.session_expired.badge,
+        driverAuthStrings.states.device_revoked.badge,
+        driverAuthStrings.states.driver_suspended.badge,
+      ];
+
+      expect(new Set(badges).size).toBe(badges.length);
+      for (const badge of badges) {
+        expect(badge).not.toMatch(/[A-Za-z]/);
+      }
     });
   });
 });

@@ -19,6 +19,10 @@ import type {
   DriverTaskRecord,
   ForwardedDriverActionResponse,
 } from "@drts/contracts";
+import {
+  markDriverSessionSignedIn,
+  markDriverSessionSignedOut,
+} from "@/lib/driver-session-lifecycle";
 
 type DriverExpoExtra = {
   apiBaseUrl?: string;
@@ -31,11 +35,37 @@ const API_URL =
   expoExtra.apiBaseUrl ??
   "https://drts-api-kdhu6wzufa-uc.a.run.app";
 
-const DEV_DRIVER_ID: string | undefined =
+/**
+ * Local-development identity override. Metro defines `__DEV__` as `true` only
+ * for development bundles, so release builds always fall back to the real
+ * device-bound session and can never be booted from an env var.
+ */
+function isDevOverrideAllowed(): boolean {
+  return (globalThis as { __DEV__?: boolean }).__DEV__ === true;
+}
+
+const DEV_DRIVER_ID_OVERRIDE: string | undefined =
   process.env.EXPO_PUBLIC_DRIVER_ID ??
   process.env.EXPO_PUBLIC_DRIVER_ACTOR_ID ??
   expoExtra.driverActorId;
 
+const DEV_DRIVER_ID: string | undefined = isDevOverrideAllowed()
+  ? DEV_DRIVER_ID_OVERRIDE
+  : undefined;
+
+/**
+ * SecureStore keys.
+ *
+ * Logout clears DRIVER_SESSION_KEY only. Everything else below (and the SOS /
+ * tracking keys plus the SQLite location queue owned by the respective
+ * modules) is device- or work-state data that must survive a logout so the
+ * driver does not lose device registration or un-submitted work:
+ *   - drts.driver.deviceId              device registration identity
+ *   - drts.driver.pendingTaskCompletion queued task completion proof
+ *   - drts.driver.sos.activeCase        pending safety request
+ *   - drts.driver.trackingSessionMarker tracking gap recovery marker
+ *   - SQLite driver-location-queue      pending location events
+ */
 const DRIVER_DEVICE_ID_KEY = "drts.driver.deviceId";
 const DRIVER_SESSION_KEY = "drts.driver.session";
 const DRIVER_PENDING_TASK_COMPLETION_KEY = "drts.driver.pendingTaskCompletion";
@@ -74,6 +104,14 @@ function applySession(session: DriverDeviceProvisioningSession | null) {
     : DEV_DRIVER_ID
       ? createDriverClient(API_URL, DEV_DRIVER_ID)
       : null;
+
+  // Single choke point for every credential change (hydrate, register, refresh,
+  // revoke, auth-failure recovery), so screens can tear timers down on logout.
+  if (client) {
+    markDriverSessionSignedIn();
+  } else {
+    markDriverSessionSignedOut();
+  }
 }
 
 function setDriverIdentityIssue(message: string | null) {
@@ -169,6 +207,17 @@ function parseApiError(error: unknown): {
   };
 }
 
+const HAN_CHARACTER = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
+
+/**
+ * 只有中文文案才可以直接顯示給司機。後端錯誤訊息、內部 Error message
+ * 與例外堆疊都是英文技術字串（欄位名、型別名、狀態碼描述），一旦原封不動
+ * 推上畫面就會外洩系統細節，所以非中文訊息一律改用呼叫端提供的中文 fallback。
+ */
+function isDriverReadableMessage(message: string | null): message is string {
+  return message !== null && HAN_CHARACTER.test(message);
+}
+
 export function formatDriverError(
   error: unknown,
   fallback = "操作失敗，請稍後再試。",
@@ -179,15 +228,17 @@ export function formatDriverError(
 
   const parsed = parseApiError(error);
   if (parsed.code) {
+    // 已知身分錯誤碼有專屬中文說明；未知錯誤碼的 default 分支會回後端原文，
+    // 那種英文訊息不可以顯示，改走下面的中文 fallback。
     const knownMessage = getDriverIdentityIssueMessage(error);
-    if (knownMessage) {
+    if (isDriverReadableMessage(knownMessage)) {
       return knownMessage;
     }
   }
 
   if (parsed.message) {
     const sanitized = sanitizeLogMessage(parsed.message);
-    if (sanitized) {
+    if (isDriverReadableMessage(sanitized)) {
       return sanitized;
     }
   }
@@ -200,7 +251,10 @@ export function formatDriverError(
         : null;
 
   const sanitizedRaw = sanitizeLogMessage(rawMessage);
-  if (sanitizedRaw && !sanitizedRaw.startsWith("API error ")) {
+  if (
+    isDriverReadableMessage(sanitizedRaw) &&
+    !sanitizedRaw.startsWith("API error ")
+  ) {
     return sanitizedRaw;
   }
 
@@ -366,7 +420,7 @@ async function loadPendingDriverTaskCompletion(): Promise<PendingDriverTaskCompl
       !pending.requestId?.trim() ||
       !pending.command?.completedAt
     ) {
-      throw new Error("Pending driver task completion payload is incomplete.");
+      throw new Error("Stored task completion record is incomplete.");
     }
 
     return pending;
@@ -387,7 +441,7 @@ async function persistSession(session: DriverDeviceProvisioningSession) {
 }
 
 export function hasDriverDevOverride(): boolean {
-  return Boolean(DEV_DRIVER_ID);
+  return isDevOverrideAllowed() && Boolean(DEV_DRIVER_ID);
 }
 
 export function isDriverIdentityHydrated(): boolean {
@@ -470,6 +524,7 @@ export async function registerDriverDevice(
   setDriverIdentityIssue(null);
   await persistSession(session);
   hydrated = true;
+  markDriverSessionSignedIn();
   return session;
 }
 
@@ -484,6 +539,7 @@ export async function clearDriverProvisioning(): Promise<void> {
   setDriverIdentityIssue(null);
   await clearStoredSession();
   hydrated = true;
+  markDriverSessionSignedOut();
 }
 
 export async function revokeDriverDeviceBinding(): Promise<void> {
@@ -491,6 +547,7 @@ export async function revokeDriverDeviceBinding(): Promise<void> {
     setDriverIdentityIssue(null);
     await clearStoredSession();
     hydrated = true;
+    markDriverSessionSignedOut();
     return;
   }
 
@@ -506,8 +563,11 @@ export async function revokeDriverDeviceBinding(): Promise<void> {
     // are still safely wiped in finally block to ensure local logout posture.
   } finally {
     setDriverIdentityIssue(null);
+    // Session credentials only. Device registration and every pending queue are
+    // deliberately preserved (see the SecureStore key notes at the top).
     await clearStoredSession();
     hydrated = true;
+    markDriverSessionSignedOut();
   }
 }
 
@@ -593,27 +653,64 @@ export async function submitDriverTaskCompletion(
   return task;
 }
 
+export const DRIVER_IDENTITY_NOT_PROVISIONED_MESSAGE =
+  "尚未完成裝置綁定，請先完成裝置註冊。";
+
+/**
+ * Typed marker so callers can branch on "no session yet" without string
+ * matching. The message is driver-facing Traditional Chinese and never names a
+ * function, file, environment variable or stack frame.
+ */
+export class DriverIdentityNotProvisionedError extends Error {
+  readonly code = "DRIVER_IDENTITY_NOT_PROVISIONED";
+
+  constructor(message: string = DRIVER_IDENTITY_NOT_PROVISIONED_MESSAGE) {
+    super(message);
+    this.name = "DriverIdentityNotProvisionedError";
+  }
+}
+
+export function isDriverIdentityNotProvisionedError(
+  error: unknown,
+): error is DriverIdentityNotProvisionedError {
+  return (
+    error instanceof DriverIdentityNotProvisionedError ||
+    (typeof error === "object" &&
+      error !== null &&
+      (error as { code?: string }).code === "DRIVER_IDENTITY_NOT_PROVISIONED")
+  );
+}
+
+/**
+ * Non-throwing accessor. UI callers should prefer this and render an empty /
+ * "please bind this device" state instead of letting a render or a detached
+ * promise throw.
+ */
+export function getDriverClientOrNull(): ApiClient | null {
+  return client;
+}
+
 export function getDriverClient(): ApiClient {
   if (!client) {
-    throw new Error(
-      "Driver identity is not provisioned. Complete device registration or " +
-        "set EXPO_PUBLIC_DRIVER_ID for explicit development override.",
-    );
+    throw new DriverIdentityNotProvisionedError();
   }
   return client;
 }
 
-export function getDriverId(): string {
+export function getDriverIdOrNull(): string | null {
   if (DEV_DRIVER_ID) {
     return DEV_DRIVER_ID;
   }
-  if (provisionedSession?.driverId) {
-    return provisionedSession.driverId;
+  return provisionedSession?.driverId ?? null;
+}
+
+export function getDriverId(): string {
+  const driverId = getDriverIdOrNull();
+  if (driverId) {
+    return driverId;
   }
 
-  throw new Error(
-    "Driver identity is not provisioned. Complete the device provisioning flow.",
-  );
+  throw new DriverIdentityNotProvisionedError();
 }
 
 export { API_URL };

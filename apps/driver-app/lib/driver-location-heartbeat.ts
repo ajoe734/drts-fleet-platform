@@ -363,8 +363,7 @@ async function ensureLocationPermissions(
     return {
       status: "permission_denied",
       reason: "LOCATION_PERMISSION_DENIED",
-      message:
-        "Foreground location access is required to start trip tracking and driver heartbeat updates.",
+      message: "需要開啟定位權限，才能開始行程追蹤與位置回報。",
       latestUpdate,
     };
   }
@@ -383,8 +382,7 @@ async function ensureLocationPermissions(
       return {
         status: "permission_denied",
         reason: "BACKGROUND_LOCATION_REQUIRED",
-        message:
-          "Background location access is required to stay online and available for dispatch.",
+        message: "需要允許背景定位，才能維持上線接單狀態。",
         latestUpdate,
       };
     }
@@ -392,7 +390,7 @@ async function ensureLocationPermissions(
     return {
       status: "active",
       message:
-        "Foreground trip tracking is active. Allow background location if you want heartbeats to continue while the app is backgrounded.",
+        "行程追蹤已啟動。若希望切換到其他 App 時仍持續回報位置，請一併允許背景定位。",
       latestUpdate,
     };
   }
@@ -547,12 +545,10 @@ async function applyHeartbeatTracking(
         showsBackgroundLocationIndicator: true,
         timeInterval: cadence.intervalMs,
         foregroundService: {
-          notificationTitle: isAvailability
-            ? "On duty — available for dispatch"
-            : "Trip tracking active",
+          notificationTitle: isAvailability ? "上線接單中" : "行程追蹤中",
           notificationBody: isAvailability
-            ? "DRTS is sharing your location so dispatch can offer you nearby jobs."
-            : "DRTS is sending driver location heartbeats for the active trip.",
+            ? "DRTS 正在更新您的位置，以便媒合附近的任務。"
+            : "DRTS 正在為進行中的行程更新位置。",
           killServiceOnDestroy: false,
         },
       });

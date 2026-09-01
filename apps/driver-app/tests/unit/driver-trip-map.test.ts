@@ -217,9 +217,9 @@ describe("DriverTripMap", () => {
       now: Date.parse("2026-07-01T00:00:30.000Z"),
     });
 
-    expect(text).toContain("Trip Map & Navigation Handoff");
-    expect(text).toContain("DRTS-owned route");
-    expect(text).toContain("Google native map active");
+    expect(text).toContain("導航");
+    expect(text).toContain("DRTS 自營路線");
+    expect(text).toContain("地圖已載入");
     expect(text).toContain("台北車站");
     expect(text).toContain("25.047800, 121.517000");
     expect(text).toContain("松山機場");
@@ -246,12 +246,12 @@ describe("DriverTripMap", () => {
       nativeMapAvailable: false,
     });
 
-    expect(text).toContain("Forwarded route - source platform authority");
+    expect(text).toContain("來源平台主導路線");
     expect(text).toContain("來源平台路線鎖定");
-    expect(text).toContain("source platform route intent");
-    expect(text).toContain("來源平台離線");
+    expect(text).toContain("路線也由來源平台指定");
+    expect(text).toContain("來源平台目前離線");
     expect(text).toContain("缺少座標");
     expect(text).toContain("無有效座標時不使用地址猜測導航");
-    expect(text).toContain("Offline fallback");
+    expect(text).toContain("離線備援");
   });
 });

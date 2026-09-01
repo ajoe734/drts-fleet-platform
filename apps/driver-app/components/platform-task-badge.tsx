@@ -66,7 +66,7 @@ export function PlatformAuthorityBanner({
     return (
       <AuthorityBanner
         title="自營派單 · DRTS"
-        authorityLabel="本地可操作"
+        authorityLabel="可直接操作"
         description={description}
         tone="owned"
         icon="shield-checkmark"

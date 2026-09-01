@@ -7,6 +7,8 @@ import type {
   ResourceActionDescriptor,
 } from "@drts/contracts";
 
+import { formatDriverBlockingReasonLabel } from "./operational-labels";
+
 export type ReauthMechanism =
   | "external_browser_oauth"
   | "native_app_deeplink"
@@ -67,9 +69,9 @@ export function getPlatformReauthMechanism(
 export function getMechanismLabel(mechanism: ReauthMechanism): string {
   switch (mechanism) {
     case "external_browser_oauth":
-      return "外部瀏覽器 OAuth";
+      return "在瀏覽器完成授權";
     case "native_app_deeplink":
-      return "平台 App 深連結";
+      return "在平台 App 內完成授權";
     case "manual_credential":
       return "手動憑證輸入";
     case "ops_managed":
@@ -148,7 +150,7 @@ export function deriveBlockingReasons(
     reasons.push("需要重新授權");
   }
   if (expired) {
-    reasons.push("Token 已過期");
+    reasons.push("授權已過期");
   }
   if (record.eligibility === "pending") {
     reasons.push("資格審核中");
@@ -156,14 +158,28 @@ export function deriveBlockingReasons(
   if (record.eligibility === "ineligible") {
     reasons.push("目前不符合派單資格");
   }
+  // 後端的 ineligibleReasons / blockingReason 可能是英文代碼，
+  // 一律先轉成中文顯示文案，未知代碼會退回中文 fallback。
   for (const reason of record.ineligibleReasons ?? []) {
-    reasons.push(reason);
+    reasons.push(
+      formatDriverBlockingReasonLabel(reason, "目前不符合派單資格"),
+    );
   }
   if (adapterStatus?.status === "degraded") {
-    reasons.push(adapterStatus.blockingReason ?? "平台同步延遲");
+    reasons.push(
+      formatDriverBlockingReasonLabel(
+        adapterStatus.blockingReason,
+        "平台同步延遲",
+      ),
+    );
   }
   if (adapterStatus?.status === "down") {
-    reasons.push(adapterStatus.blockingReason ?? "平台轉接中斷");
+    reasons.push(
+      formatDriverBlockingReasonLabel(
+        adapterStatus.blockingReason,
+        "平台連線中斷",
+      ),
+    );
   }
 
   return [...new Set(reasons)];

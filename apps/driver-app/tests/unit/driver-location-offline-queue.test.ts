@@ -33,15 +33,22 @@ const {
   }),
 }));
 
-vi.mock("@/lib/api-client", () => ({
-  getDriverClient: () => ({
-    recordDriverLocationBatch,
-  }),
-  getDriverDeviceId,
-  getDriverId,
-  recoverDriverSessionFromApiError,
-  formatDriverError,
-}));
+// The queue now takes the null-returning accessors, and it loads
+// `@/lib/driver-diagnostics` (which imports `sanitizeLogMessage` from here).
+vi.mock("@/lib/api-client", () => {
+  const driverClient = { recordDriverLocationBatch };
+  return {
+    getDriverClient: () => driverClient,
+    getDriverClientOrNull: () => driverClient,
+    getDriverDeviceId,
+    getDriverId,
+    getDriverIdOrNull: () => getDriverId() || null,
+    recoverDriverSessionFromApiError,
+    formatDriverError,
+    sanitizeLogMessage: (value: unknown) =>
+      typeof value === "string" ? value : null,
+  };
+});
 
 vi.mock("expo-sqlite", () => ({
   openDatabaseAsync: vi.fn(),
@@ -414,5 +421,76 @@ describe("driver location offline queue", () => {
     expect(
       new Set(snapshot.map((row) => row.minuteBucket)).size,
     ).toBeGreaterThanOrEqual(3);
+  });
+  // Requirement 5: the flush timer and the enqueue path live at module scope,
+  // so nothing unmounts them - they have to follow the session explicitly.
+  describe("session lifecycle", () => {
+    it("drops a location event and records a diagnostic when no driver is bound", async () => {
+      const queueModule = await import("../../lib/driver-location-offline-queue");
+      const diagnostics = await import("../../lib/driver-diagnostics");
+      diagnostics.clearDriverDiagnostics();
+      getDriverId.mockReturnValue("" as unknown as string);
+
+      const result = await queueModule.enqueueDriverLocationEvent({
+        taskId: "task-001",
+        recordedAt: now.toISOString(),
+        lat: 25.03,
+        lng: 121.56,
+        accuracyM: 5,
+        workState: "on_trip",
+        appState: "foreground",
+        transportMode: "foreground",
+        networkType: "cellular",
+      });
+
+      // Dropped, not thrown: a throw here used to escape the heartbeat timer
+      // as an unhandled rejection.
+      expect(result).toBeNull();
+      expect(store.snapshot()).toHaveLength(0);
+      expect(
+        diagnostics.getDriverDiagnostics().map((entry) => entry.reason),
+      ).toContain("location_event_dropped_without_driver_identity");
+    });
+
+    it("stops the flush timer when the driver signs out", async () => {
+      vi.useFakeTimers();
+      try {
+        const queueModule = await import(
+          "../../lib/driver-location-offline-queue"
+        );
+        const lifecycle = await import("../../lib/driver-session-lifecycle");
+        lifecycle.resetDriverSessionLifecycleForTests();
+
+        await queueModule.initializeDriverLocationOfflineQueue();
+        const withTimer = vi.getTimerCount();
+        expect(withTimer).toBeGreaterThan(0);
+
+        lifecycle.markDriverSessionSignedOut();
+        expect(vi.getTimerCount()).toBeLessThan(withTimer);
+
+        // And it comes back on the next sign-in.
+        lifecycle.markDriverSessionSignedIn();
+        expect(vi.getTimerCount()).toBe(withTimer);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("leaves queued rows untouched instead of calling the API after sign-out", async () => {
+      const queueModule = await import("../../lib/driver-location-offline-queue");
+      const lifecycle = await import("../../lib/driver-session-lifecycle");
+      lifecycle.resetDriverSessionLifecycleForTests();
+
+      await store.enqueue(createStoredRow(1));
+      recordDriverLocationBatch.mockClear();
+
+      lifecycle.markDriverSessionSignedOut();
+      await queueModule.flushDriverLocationQueue();
+
+      expect(recordDriverLocationBatch).not.toHaveBeenCalled();
+      expect(store.snapshot()[0]).toMatchObject({ status: "pending" });
+
+      lifecycle.resetDriverSessionLifecycleForTests();
+    });
   });
 });

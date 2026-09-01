@@ -131,7 +131,7 @@ function parseTrackingSessionMarker(raw: string): TrackingSessionMarker {
     Number.isNaN(Date.parse(parsed.lastHeartbeatRecordedAt)) ||
     typeof parsed.workState !== "string"
   ) {
-    throw new Error("Tracking session marker payload is incomplete.");
+    throw new Error("Stored tracking session marker is incomplete.");
   }
 
   return {

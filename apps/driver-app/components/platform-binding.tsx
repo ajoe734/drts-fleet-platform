@@ -19,6 +19,10 @@ import { FormField } from "@/components/ui/FormField";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { Tokens } from "@/components/ui/tokens";
 import { formatDriverError, getDriverClient } from "@/lib/api-client";
+import {
+  isDriverSessionSignedOut,
+  useDriverSessionEpoch,
+} from "@/lib/driver-session-lifecycle";
 
 interface PlatformBindingProps {
   showSectionTitle?: boolean;
@@ -74,9 +78,22 @@ export function PlatformBinding({
   const [submitting, setSubmitting] = useState(false);
   const [busyPlatform, setBusyPlatform] = useState<string | null>(null);
 
+  // Re-runs the load whenever the driver signs in or out, so this card never
+  // keeps calling the API with a session that no longer exists.
+  const sessionEpoch = useDriverSessionEpoch();
+
   const loadPresences = async ({
     silent = false,
   }: { silent?: boolean } = {}) => {
+    if (isDriverSessionSignedOut()) {
+      setPresences([]);
+      setAdapterStatuses([]);
+      setNotes([]);
+      setLoadError(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       const client = getDriverClient();
       const summary = await client.getPlatformPresence();
@@ -96,8 +113,8 @@ export function PlatformBinding({
   };
 
   useEffect(() => {
-    void loadPresences({ silent: true });
-  }, []);
+    loadPresences({ silent: true }).catch(() => {});
+  }, [sessionEpoch]);
 
   const handleSubmitForm = async () => {
     if (!form) {

@@ -602,3 +602,19 @@ export const driverNavigationTheme = createNavigationTheme(
   DRIVER_THEME_DEFAULT_MODE,
 );
 export const driverDisplayStrings = DISPLAY_STRINGS;
+
+export const driverStackScreenOptions = {
+  headerShown: false,
+  headerStyle: {
+    backgroundColor: driverTheme.colors.bgRaised,
+  },
+  headerTitleStyle: {
+    ...driverTheme.typography.sectionTitle,
+    color: driverTheme.colors.textStrong,
+  },
+  headerTintColor: driverTheme.colors.primary,
+  headerShadowVisible: false,
+  contentStyle: {
+    backgroundColor: driverTheme.colors.appBackground,
+  },
+} as const;

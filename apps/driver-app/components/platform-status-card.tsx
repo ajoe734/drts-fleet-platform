@@ -13,6 +13,11 @@ import {
   StatusChip,
   Tokens,
 } from "@/components/ui";
+import { formatDriverBlockingReasonLabel } from "@/lib/operational-labels";
+import {
+  isDriverSessionSignedOut,
+  useDriverSessionEpoch,
+} from "@/lib/driver-session-lifecycle";
 
 type TokenExpiryInfo = {
   label: string;
@@ -114,9 +119,16 @@ function getAdapterLabel(
     case "healthy":
       return "連線正常";
     case "degraded":
-      return adapterStatus.blockingReason ?? "平台連線異常";
+      // 後端可能回英文代碼，先轉中文再顯示。
+      return formatDriverBlockingReasonLabel(
+        adapterStatus.blockingReason,
+        "平台連線異常",
+      );
     default:
-      return adapterStatus.blockingReason ?? "平台轉接服務中斷";
+      return formatDriverBlockingReasonLabel(
+        adapterStatus.blockingReason,
+        "平台連線中斷",
+      );
   }
 }
 
@@ -163,17 +175,17 @@ export function assessPlatformHealth(
     blockers.push("資格已被限制");
   }
   if (adapterStatus?.status === "degraded") {
-    blockers.push("平台轉接器降級");
+    blockers.push("平台連線異常");
   }
   if (adapterStatus?.status === "down") {
-    blockers.push("平台轉接器中斷");
+    blockers.push("平台連線中斷");
   }
 
   const canReceiveOrders = blockers.length === 0;
   const attentionOnly =
     !canReceiveOrders &&
     blockers.every((reason) =>
-      ["需要重新驗證", "資格仍在審核", "平台轉接器降級"].includes(reason),
+      ["需要重新驗證", "資格仍在審核", "平台連線異常"].includes(reason),
     );
 
   const statusTone = canReceiveOrders
@@ -258,6 +270,9 @@ export function PlatformStatusCard({
   const [assessment, setAssessment] = useState(() =>
     assessPlatformHealth(record, adapterStatus),
   );
+  // This card lives inside always-mounted tab screens, so its token-expiry
+  // ticker has to be keyed on the session or it keeps running after logout.
+  const sessionEpoch = useDriverSessionEpoch();
   const platformLabel =
     PLATFORM_CODE_REGISTRY[record.platformCode]?.displayName ??
     record.platformCode;
@@ -265,7 +280,7 @@ export function PlatformStatusCard({
   useEffect(() => {
     setAssessment(assessPlatformHealth(record, adapterStatus));
 
-    if (!record.tokenExpiresAt) {
+    if (!record.tokenExpiresAt || isDriverSessionSignedOut()) {
       return;
     }
 
@@ -274,7 +289,7 @@ export function PlatformStatusCard({
     }, 60000);
 
     return () => clearInterval(interval);
-  }, [adapterStatus, record]);
+  }, [adapterStatus, record, sessionEpoch]);
 
   const statusColor =
     record.status === "online"
@@ -308,7 +323,7 @@ export function PlatformStatusCard({
             : "danger",
     },
     {
-      label: "平台轉接器",
+      label: "平台連線",
       value: assessment.adapterLabel,
       tone: assessment.adapterTone,
     },

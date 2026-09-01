@@ -2,16 +2,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as SecureStore from "expo-secure-store";
 
 import {
+  DRIVER_IDENTITY_NOT_PROVISIONED_MESSAGE,
+  DriverIdentityNotProvisionedError,
   clearDriverProvisioning,
   formatDriverError,
+  getDriverClient,
+  getDriverClientOrNull,
+  getDriverId,
+  getDriverIdOrNull,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
+  hasDriverDevOverride,
   initializeDriverIdentity,
+  isDriverIdentityNotProvisionedError,
   isDriverIdentityProvisioned,
   recoverDriverSessionFromApiError,
   revokeDriverDeviceBinding,
   sanitizeLogMessage,
 } from "../../lib/api-client";
+import {
+  getDriverSessionState,
+  resetDriverSessionLifecycleForTests,
+  subscribeDriverSession,
+} from "../../lib/driver-session-lifecycle";
 
 // Mock expo-secure-store in-memory store
 const mockStore = new Map<string, string>();
@@ -81,7 +94,12 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
 
       expect(formatted).not.toContain("API error 400");
       expect(formatted).not.toContain("secret_999");
-      expect(formatted).toContain("registration_code=[REDACTED]");
+      // 需求 2：後端英文訊息不再原樣顯示，改用呼叫端的中文 fallback；
+      // 秘密遮罩本身由 sanitizeLogMessage 負責（見下一個案例）。
+      expect(formatted).toBe("配置失敗");
+      expect(sanitizeLogMessage(rawApiError)).toContain(
+        "registration_code=[REDACTED]",
+      );
     });
 
     it("handles null or empty message sanitization gracefully", () => {
@@ -99,8 +117,7 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
       const formattedDriverError = formatDriverError(rawApiPayload, "操作失敗");
       expect(formattedDriverError).not.toContain("secret_token_abc");
       expect(formattedDriverError).not.toContain("eyJhbGciOiJIUzI1NiJ9");
-      expect(formattedDriverError).toContain("[REDACTED_JWT]");
-      expect(formattedDriverError).toContain("Bearer [REDACTED]");
+      expect(formattedDriverError).toBe("操作失敗");
 
       // Location heartbeat task & queueing error path
       const sanitizedLog = sanitizeLogMessage(rawApiPayload);
@@ -262,6 +279,144 @@ describe("Driver Secure Storage & Remote Logout UX (IAM-DRV-002)", () => {
 
       expect(isDriverIdentityProvisioned()).toBe(false);
       expect(mockStore.has("drts.driver.session")).toBe(false);
+    });
+
+    it("keeps the device registration id and every pending queue on logout", async () => {
+      await SecureStore.setItemAsync(
+        "drts.driver.deviceId",
+        "device-registered-001",
+      );
+      await SecureStore.setItemAsync(
+        "drts.driver.pendingTaskCompletion",
+        JSON.stringify({
+          taskId: "task-1",
+          requestId: "req-1",
+          command: { completedAt: new Date().toISOString() },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      );
+      await SecureStore.setItemAsync("drts.driver.sos.activeCase", "{}");
+      await SecureStore.setItemAsync(
+        "drts.driver.trackingSessionMarker",
+        "{}",
+      );
+      await SecureStore.setItemAsync(
+        "drts.driver.session",
+        JSON.stringify({
+          accessToken: "access-token-xyz",
+          refreshToken: "refresh-token-xyz",
+          tokenType: "Bearer",
+          expiresIn: 900,
+          refreshExpiresIn: 2592000,
+          driverId: "drv-test-001",
+          deviceId: "device-registered-001",
+          bindingId: "binding-test-001",
+          issuedAt: new Date().toISOString(),
+        }),
+      );
+
+      await initializeDriverIdentity();
+      await revokeDriverDeviceBinding();
+
+      expect(mockStore.has("drts.driver.session")).toBe(false);
+      expect(mockStore.get("drts.driver.deviceId")).toBe(
+        "device-registered-001",
+      );
+      expect(mockStore.has("drts.driver.pendingTaskCompletion")).toBe(true);
+      expect(mockStore.has("drts.driver.sos.activeCase")).toBe(true);
+      expect(mockStore.has("drts.driver.trackingSessionMarker")).toBe(true);
+    });
+
+    it("broadcasts exactly one sign-out even when logout is repeated", async () => {
+      resetDriverSessionLifecycleForTests();
+      const seen: string[] = [];
+      const unsubscribe = subscribeDriverSession((snapshot) => {
+        seen.push(snapshot.state);
+      });
+
+      await SecureStore.setItemAsync(
+        "drts.driver.session",
+        JSON.stringify({
+          accessToken: "access-token-xyz",
+          refreshToken: "refresh-token-xyz",
+          tokenType: "Bearer",
+          expiresIn: 900,
+          refreshExpiresIn: 2592000,
+          driverId: "drv-test-001",
+          deviceId: "device-test-001",
+          bindingId: "binding-test-001",
+          issuedAt: new Date().toISOString(),
+        }),
+      );
+      await initializeDriverIdentity();
+      expect(getDriverSessionState()).toBe("signed_in");
+
+      await revokeDriverDeviceBinding();
+      await revokeDriverDeviceBinding();
+      await clearDriverProvisioning();
+
+      expect(getDriverSessionState()).toBe("signed_out");
+      expect(seen).toEqual(["signed_in", "signed_out"]);
+      unsubscribe();
+    });
+  });
+
+  describe("Unprovisioned identity accessors", () => {
+    it("never exposes internals in the unprovisioned message", () => {
+      let thrown: unknown = null;
+      try {
+        getDriverClient();
+      } catch (error) {
+        thrown = error;
+      }
+
+      const message = (thrown as Error).message;
+      expect(message).toBe(DRIVER_IDENTITY_NOT_PROVISIONED_MESSAGE);
+      expect(message).not.toContain("EXPO_PUBLIC");
+      expect(message).not.toContain("Driver identity is not provisioned");
+      expect(message).not.toContain("getDriverClient");
+      expect(message).not.toContain("api-client");
+      expect(message).not.toMatch(/[A-Za-z]{4,}/);
+    });
+
+    it("uses the same driver-facing message for the driver id accessor", () => {
+      expect(() => getDriverId()).toThrowError(
+        DRIVER_IDENTITY_NOT_PROVISIONED_MESSAGE,
+      );
+      expect(() => getDriverId()).toThrowError(
+        DriverIdentityNotProvisionedError,
+      );
+    });
+
+    it("routes the unprovisioned error through formatDriverError unchanged", () => {
+      const formatted = formatDriverError(
+        new DriverIdentityNotProvisionedError(),
+        "操作失敗",
+      );
+      expect(formatted).toBe(DRIVER_IDENTITY_NOT_PROVISIONED_MESSAGE);
+      expect(formatted).not.toContain("EXPO_PUBLIC");
+    });
+
+    it("identifies the typed error so callers do not string-match", () => {
+      expect(
+        isDriverIdentityNotProvisionedError(
+          new DriverIdentityNotProvisionedError(),
+        ),
+      ).toBe(true);
+      expect(isDriverIdentityNotProvisionedError(new Error("其他錯誤"))).toBe(
+        false,
+      );
+    });
+
+    it("offers non-throwing accessors for UI call sites", () => {
+      expect(getDriverClientOrNull()).toBeNull();
+      expect(getDriverIdOrNull()).toBeNull();
+    });
+
+    it("disables the development identity override outside a dev bundle", () => {
+      // __DEV__ is undefined in a release bundle and in this test environment.
+      expect(hasDriverDevOverride()).toBe(false);
     });
   });
 });

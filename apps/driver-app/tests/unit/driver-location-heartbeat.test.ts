@@ -257,7 +257,7 @@ describe("driver location heartbeat transport", () => {
     expect(result).toMatchObject({
       status: "active",
       message:
-        "Foreground trip tracking is active. Allow background location if you want heartbeats to continue while the app is backgrounded.",
+        "行程追蹤已啟動。若希望切換到其他 App 時仍持續回報位置，請一併允許背景定位。",
     });
     expect(startLocationUpdatesAsync).not.toHaveBeenCalled();
     expect(watchCallback).not.toBeNull();

@@ -71,7 +71,17 @@ export interface DriverSosActiveCase {
   incidentId: string | null;
   eventNo: string | null;
   eventType: DriverSosEventType | null;
+  /**
+   * The exact situation the driver picked. The platform only accepts the four
+   * `DRIVER_SOS_EVENT_TYPES`, so the finer-grained choice is preserved here and
+   * replayed to the platform as a structured prefix on the description.
+   */
+  situationId: string | null;
+  situationLabel: string | null;
   description: string;
+  vehicleId: string | null;
+  plateNo: string | null;
+  deviceId: string | null;
   attachments: DriverSosAttachmentDraft[];
   originalTriggeredAt: string;
   offlineAtTrigger: boolean;
@@ -195,6 +205,8 @@ export function createDriverSosAttachmentDraft(
 
 export function createDriverSosActiveCase(params: {
   eventType: DriverSosEventType | null;
+  situationId?: string | null;
+  situationLabel?: string | null;
   description: string;
   attachments: DriverSosAttachmentDraft[];
   originalTriggeredAt: string;
@@ -202,6 +214,9 @@ export function createDriverSosActiveCase(params: {
   location: DriverSosLocationSnapshot | null;
   orderId: string | null;
   taskId: string | null;
+  vehicleId?: string | null;
+  plateNo?: string | null;
+  deviceId?: string | null;
 }): DriverSosActiveCase {
   const now = new Date().toISOString();
   const baseCase: DriverSosActiveCase = {
@@ -209,7 +224,12 @@ export function createDriverSosActiveCase(params: {
     incidentId: null,
     eventNo: null,
     eventType: params.eventType,
+    situationId: params.situationId ?? null,
+    situationLabel: params.situationLabel ?? null,
     description: params.description.trim(),
+    vehicleId: params.vehicleId ?? null,
+    plateNo: params.plateNo ?? null,
+    deviceId: params.deviceId ?? null,
     attachments: [...params.attachments],
     originalTriggeredAt: params.originalTriggeredAt,
     offlineAtTrigger: params.offlineAtTrigger,
@@ -235,8 +255,8 @@ export function createDriverSosActiveCase(params: {
     kind: "sos_local_triggered",
     title: "已觸發 SOS",
     detail: params.offlineAtTrigger
-      ? "裝置目前離線，事件已寫入本機 durable outbox。"
-      : "事件已寫入本機 durable outbox，準備送往安全值班。",
+      ? "目前沒有網路，求援已保存在手機，恢復連線後會自動送出。"
+      : "求援已保存在手機，正在送往車隊安全值班。",
     occurredAt: params.originalTriggeredAt,
     tone: "danger",
   });
@@ -245,7 +265,7 @@ export function createDriverSosActiveCase(params: {
     nextCase = appendTimelineEntry(nextCase, {
       kind: "attachment_added",
       title: "已附上現場附件",
-      detail: `${params.attachments.length} 件附件已綁定到 SOS case。`,
+      detail: `已附上 ${params.attachments.length} 件現場附件。`,
       occurredAt: now,
       tone: "info",
     });
@@ -254,16 +274,63 @@ export function createDriverSosActiveCase(params: {
   return nextCase;
 }
 
+/**
+ * Situations that are not immediately life-threatening. Everything else is
+ * escalated as `major` so the duty desk triages it first.
+ */
+const DRIVER_SOS_NORMAL_SEVERITY_SITUATIONS = new Set([
+  "vehicle_breakdown",
+  "other",
+]);
+
+function resolveDriverSosSeverity(
+  activeCase: DriverSosActiveCase,
+): "major" | "normal" {
+  if (activeCase.situationId) {
+    return DRIVER_SOS_NORMAL_SEVERITY_SITUATIONS.has(activeCase.situationId)
+      ? "normal"
+      : "major";
+  }
+
+  return activeCase.eventType && activeCase.eventType !== "other"
+    ? "major"
+    : "normal";
+}
+
+/**
+ * The platform contract only accepts four event types, while the driver picks
+ * from six situations. The exact situation is therefore replayed as a
+ * structured `[類別]` prefix so the duty desk still sees what the driver chose.
+ * The device identifier has no dedicated command field either, so it rides
+ * along on the same line — it is never rendered back to the driver.
+ */
 export function buildDriverSosSubmitCommand(
   activeCase: DriverSosActiveCase,
 ): SubmitDriverSosEventCommand {
+  const descriptionParts: string[] = [];
+  if (activeCase.situationLabel) {
+    descriptionParts.push(`[${activeCase.situationLabel}]`);
+  }
+  if (activeCase.description.trim()) {
+    descriptionParts.push(activeCase.description.trim());
+  }
+
+  let description = descriptionParts.join(" ");
+  if (activeCase.deviceId) {
+    description = description
+      ? `${description}\n（裝置：${activeCase.deviceId}）`
+      : `（裝置：${activeCase.deviceId}）`;
+  }
+
   return {
     clientEventId: activeCase.clientEventId,
     orderId: activeCase.orderId,
     taskId: activeCase.taskId,
+    vehicleId: activeCase.vehicleId,
+    plateNo: activeCase.plateNo,
     eventType: activeCase.eventType,
-    severity: activeCase.eventType ? "major" : "normal",
-    description: activeCase.description || null,
+    severity: resolveDriverSosSeverity(activeCase),
+    description: description || null,
     location: activeCase.location,
     originalTriggeredAt: activeCase.originalTriggeredAt,
     offlineAtTrigger: activeCase.offlineAtTrigger,
@@ -282,7 +349,7 @@ export function markDriverSosCaseSending(
     {
       kind: "server_received",
       title: "正在送出",
-      detail: "App 正在將 SOS 事件送往 driver-sos 服務。",
+      detail: "正在將求援送往車隊安全值班，尚未確認送達。",
       occurredAt: new Date().toISOString(),
       tone: "info",
     },
@@ -305,18 +372,18 @@ export function markDriverSosCaseSubmitted(
 
   nextCase = appendTimelineEntry(nextCase, {
     kind: "fleet_report_confirmed",
-    title: result.receipt.duplicate ? "伺服器接受既有 SOS" : "已送達安全值班",
+    title: "平台已接收",
     detail: result.receipt.duplicate
-      ? `同一 clientEventId 已存在，沿用事件編號 ${result.receipt.eventNo}。`
-      : `事件編號 ${result.receipt.eventNo} 已建立並關聯 incident ${result.receipt.incidentId}。`,
+      ? `平台已有同一筆求援，沿用事件編號 ${result.receipt.eventNo}。`
+      : `平台已接收求援，事件編號 ${result.receipt.eventNo}。`,
     occurredAt: receivedAt,
     tone: "success",
   });
 
   nextCase = appendTimelineEntry(nextCase, {
     kind: "incident_created",
-    title: "已建立 incident",
-    detail: `incident ${result.receipt.incidentId} 已由 driver-sos domain 建立。`,
+    title: "平台已建立案件",
+    detail: "車隊安全值班已收到通知，並開始處理本次求援。",
     occurredAt: receivedAt,
     tone: "success",
   });
@@ -325,7 +392,7 @@ export function markDriverSosCaseSubmitted(
     nextCase = appendTimelineEntry(nextCase, {
       kind: "offline_replayed",
       title: "離線補送完成",
-      detail: "離線期間建立的 SOS 已於重新連線後成功送達。",
+      detail: "沒有網路時建立的求援，已在恢復連線後成功送達平台。",
       occurredAt: receivedAt,
       tone: "success",
     });
@@ -393,14 +460,14 @@ export function applyDriverSosAttachmentSyncResult(
       ),
       supplements,
       syncState: pending ? "attachment_pending" : "complete",
-      lastError: pending ? "SOS 已送達；部分附件仍等待儲存或掃描服務。" : null,
+      lastError: pending ? "平台已接收求援，部分附件仍在上傳中。" : null,
     },
     {
       kind: pending ? "attachment_sync_pending" : "attachment_sync_complete",
       title: pending ? "附件等待補送" : "附件處理完成",
       detail: pending
-        ? `${confirmedCount} 件已確認，${unavailableCount} 件服務未就緒，${failedCount} 件可重試。SOS 主事件不受影響。`
-        : `${confirmedCount} 件附件已由伺服器確認；掃描結果逐件保留。`,
+        ? `${confirmedCount} 件附件已完成上傳，${unavailableCount + failedCount} 件會自動重試。求援本身已不受影響。`
+        : `${confirmedCount} 件附件已完成上傳。`,
       occurredAt: now,
       tone: pending ? "warn" : "success",
     },
@@ -424,7 +491,7 @@ export function markDriverSosCaseFailed(
     {
       kind: "sync_failed",
       title: "送出失敗",
-      detail: `${errorMessage} 系統會保留本機資料並允許重試。`,
+      detail: `${errorMessage} 求援仍保存在手機，會自動重試，也可以手動重新送出。`,
       occurredAt: now,
       tone: "warn",
     },
@@ -459,8 +526,8 @@ export function addDriverSosDialRecord(
     },
     {
       kind: "native_dial_opened",
-      title: `已開啟 ${targetLabel}`,
-      detail: `原生撥號已切到 ${params.phoneNumber}。`,
+      title: `已撥打 ${targetLabel}`,
+      detail: `已撥出 ${params.phoneNumber}。`,
       occurredAt,
       tone: "danger",
     },
@@ -489,7 +556,7 @@ export function queueDriverSosSupplement(
     detailParts.push("已加入補充說明");
   }
   if (itemCount > 0) {
-    detailParts.push(`${itemCount} 件附件待 evidence channel 補送`);
+    detailParts.push(`${itemCount} 件附件待連線後補送`);
   }
 
   return appendTimelineEntry(
@@ -502,7 +569,7 @@ export function queueDriverSosSupplement(
       title: "已加入補充資料",
       detail:
         detailParts.join("，") ||
-        "補充資料已寫入本機 case timeline，待後續補送。",
+        "補充資料已保存在手機，待連線後補送。",
       occurredAt: createdAt,
       tone: "info",
     },
@@ -526,7 +593,7 @@ export function markDriverSosFalseAlarm(
     {
       kind: "false_alarm_dismissed",
       title: "已標記誤觸",
-      detail: note.trim() || "司機已以二次確認方式標記本次 SOS 為誤觸。",
+      detail: note.trim() || "駕駛已完成二次確認，將本次求援標記為誤觸。",
       occurredAt: dismissedAt,
       tone: "warn",
     },
@@ -542,11 +609,16 @@ export async function loadDriverSosActiveCase(): Promise<DriverSosActiveCase | n
   try {
     const parsed = JSON.parse(raw) as DriverSosActiveCase;
     if (!parsed.clientEventId?.trim() || !parsed.originalTriggeredAt?.trim()) {
-      throw new Error("Driver SOS local case payload is incomplete.");
+      throw new Error("Stored safety request record is incomplete.");
     }
 
     return {
       ...parsed,
+      situationId: parsed.situationId ?? null,
+      situationLabel: parsed.situationLabel ?? null,
+      vehicleId: parsed.vehicleId ?? null,
+      plateNo: parsed.plateNo ?? null,
+      deviceId: parsed.deviceId ?? null,
       attachments: Array.isArray(parsed.attachments)
         ? parsed.attachments.map(normalizeAttachmentDraft)
         : [],

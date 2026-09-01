@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("react-native", () => ({
   Alert: { alert: vi.fn() },
+  AppState: { addEventListener: () => ({ remove: vi.fn() }) },
   Linking: { openURL: vi.fn() },
   PanResponder: { create: () => ({ panHandlers: {} }) },
   Pressable: "Pressable",
@@ -43,6 +44,16 @@ vi.mock("expo-router", () => ({
     back: mocks.back,
     replace: mocks.replace,
   }),
+}));
+
+vi.mock("expo-location", () => ({
+  getForegroundPermissionsAsync: vi.fn().mockResolvedValue({ granted: false }),
+  getCurrentPositionAsync: vi.fn(),
+  Accuracy: { Balanced: 3 },
+}));
+
+vi.mock("@/lib/driver-tracking-recovery", () => ({
+  loadTrackingSessionMarker: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("expo-image-picker", () => ({
@@ -102,10 +113,12 @@ vi.mock("@/components/canvas-primitives", () => {
 });
 
 vi.mock("@/lib/api-client", () => ({
+  formatDriverError: (_error: unknown, fallback: string) => fallback,
   getDriverClient: () => ({
     listUnifiedDriverTasks: mocks.listUnifiedDriverTasks,
     listDriverTasks: mocks.listDriverTasks,
   }),
+  getDriverDeviceId: vi.fn().mockResolvedValue("device-abc"),
   recoverDriverSessionFromApiError: vi.fn(),
 }));
 
@@ -117,7 +130,7 @@ vi.mock("@/lib/driver-location-heartbeat", () => ({
   getLatestDriverLocationUpdate: () => null,
 }));
 
-import SosScreen from "../../app/sos";
+import SosScreen from "../../app/(tabs)/index/sos";
 
 // §1.3 禁止出現 — the subset that a driver order-context card could plausibly
 // reintroduce. Matched case-insensitively against every rendered string.
@@ -275,6 +288,9 @@ describe("SOS screen · runtime profile capability gate", () => {
       "任務編號",
       "目前狀態",
       "目前位置",
+      "駕駛",
+      "車輛編號",
+      "裝置",
     ]);
     expect(labels).not.toContain("來源平台");
     expect(labels).not.toContain("平台狀態");

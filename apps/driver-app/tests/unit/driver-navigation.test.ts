@@ -240,12 +240,12 @@ describe("driver route authority and degraded states", () => {
     );
 
     expect(owned.kind).toBe("drts_owned");
-    expect(owned.description).toContain("DRTS owns this route");
+    expect(owned.description).toContain("此路線由 DRTS 管理");
     expect(owned.locked).toBe(false);
     expect(forwarded.kind).toBe("forwarded_platform");
-    expect(forwarded.description).toContain("source platform route intent");
+    expect(forwarded.description).toContain("路線也由來源平台指定");
     expect(forwarded.locked).toBe(true);
-    expect(forwarded.degradedHint).toContain("未提供完整路線 polyline");
+    expect(forwarded.degradedHint).toContain("來源平台沒有提供完整路線");
   });
 
   it("documents missing and stale driver GPS fixes", () => {

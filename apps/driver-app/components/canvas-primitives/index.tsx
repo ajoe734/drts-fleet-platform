@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { Ionicons } from "@expo/vector-icons";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import {
   Platform,
@@ -10,6 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import {
   buildCanvasTheme,
   type CanvasTheme,
@@ -132,33 +132,6 @@ export interface ShellProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
 }
 
-function ShellStatusBar({ theme }: { theme: DriverCanvasTheme }) {
-  return (
-    <View style={[styles.statusBar, { backgroundColor: theme.bg }]}>
-      <Text
-        style={[
-          styles.statusBarTime,
-          { color: theme.text, fontFamily: theme.monoFamily },
-        ]}
-      >
-        9:30
-      </Text>
-      <View style={styles.statusBarIcons}>
-        <Ionicons name="wifi-outline" size={13} color={theme.text} />
-        <Text
-          style={[
-            styles.statusBarBatteryText,
-            { color: theme.text, fontFamily: theme.monoFamily },
-          ]}
-        >
-          87%
-        </Text>
-        <Ionicons name="battery-half-outline" size={15} color={theme.text} />
-      </View>
-    </View>
-  );
-}
-
 export function Shell({
   theme: providedTheme,
   children,
@@ -166,19 +139,8 @@ export function Shell({
   contentContainerStyle,
 }: ShellProps) {
   const theme = resolveTheme(providedTheme);
-  const frame = (
-    <View
-      style={[
-        styles.shellFrame,
-        Platform.OS === "web" ? styles.shellFrameWeb : styles.shellFrameNative,
-        {
-          backgroundColor: theme.bg,
-          borderColor: Platform.OS === "web" ? "#0A0E14" : "transparent",
-        },
-      ]}
-    >
-      {Platform.OS === "web" ? <View style={styles.phonePunchHole} /> : null}
-      <ShellStatusBar theme={theme} />
+  const body = (
+    <>
       <ScrollView
         style={styles.shellScroll}
         contentContainerStyle={[
@@ -190,16 +152,46 @@ export function Shell({
         {children}
       </ScrollView>
       {footer ? <View style={styles.shellFooter}>{footer}</View> : null}
-    </View>
+    </>
   );
 
+  // On a device the screen is drawn edge to edge (every stack/tab layout runs
+  // with `headerShown: false`), so the real system status bar / notch has to be
+  // cleared by a safe area inset. The bottom inset is already owned by the tab
+  // bar, hence `top` only.
   if (Platform.OS !== "web") {
-    return frame;
+    return (
+      <SafeAreaView
+        edges={["top"]}
+        style={[
+          styles.shellFrame,
+          styles.shellFrameNative,
+          { backgroundColor: theme.bg },
+        ]}
+      >
+        {body}
+      </SafeAreaView>
+    );
   }
 
+  // Web renders a device-frame preview: the simulated chrome (bezel, punch
+  // hole) only ever exists inside that frame, never on a real handset. It
+  // deliberately carries no mock clock / battery / signal readout - those are
+  // demo props, not product, and a driver must never see them.
   return (
     <View style={styles.shellBackdrop}>
-      <View style={styles.shellWebCenter}>{frame}</View>
+      <View style={styles.shellWebCenter}>
+        <View
+          style={[
+            styles.shellFrame,
+            styles.shellFrameWeb,
+            { backgroundColor: theme.bg, borderColor: "#0A0E14" },
+          ]}
+        >
+          <View style={styles.phonePunchHole} />
+          {body}
+        </View>
+      </View>
     </View>
   );
 }
@@ -282,6 +274,11 @@ export interface BtnProps {
   disabled?: boolean;
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
+  /**
+   * Spoken name for the button. Needed whenever the visible label is an
+   * abbreviation or an icon and would not read out as a useful action.
+   */
+  accessibilityLabel?: string;
 }
 
 export function Btn({
@@ -294,6 +291,7 @@ export function Btn({
   disabled = false,
   onPress,
   style,
+  accessibilityLabel,
 }: BtnProps) {
   const theme = resolveTheme(providedTheme);
   const sizing =
@@ -313,6 +311,7 @@ export function Btn({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       disabled={disabled}
       onPress={disabled ? undefined : onPress}
       style={({ pressed }) => [
@@ -897,6 +896,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   shellFrameWeb: {
+    // Clears the simulated punch hole so page content does not run under it.
+    paddingTop: 30,
     borderWidth: 9,
     borderRadius: 36,
     shadowColor: "#000000",
@@ -926,28 +927,6 @@ const styles = StyleSheet.create({
   },
   shellFooter: {
     flexShrink: 0,
-  },
-  statusBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 18,
-    paddingTop: Platform.OS === "web" ? 18 : 10,
-    paddingBottom: 8,
-  },
-  statusBarTime: {
-    fontSize: 13,
-    fontWeight: "600",
-    letterSpacing: 0.2,
-  },
-  statusBarIcons: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  statusBarBatteryText: {
-    fontSize: 11,
-    fontWeight: "500",
   },
   pageHeader: {
     gap: 12,

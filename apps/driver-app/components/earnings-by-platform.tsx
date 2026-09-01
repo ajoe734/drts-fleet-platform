@@ -87,7 +87,7 @@ function EarningsRow({ item }: { item: PlatformEarningsItem }) {
   const ledgerLabel = owned
     ? "列入 DRTS 對帳"
     : shadowOnly
-      ? "Shadow-only 鏡像"
+      ? "僅供對帳檢視"
       : "外部平台結算";
   const authorityColor = forwarded
     ? Tokens.colors.forwarded
@@ -100,7 +100,7 @@ function EarningsRow({ item }: { item: PlatformEarningsItem }) {
   const netAmountAccessibilityLabel = owned
     ? "DRTS 淨額"
     : shadowOnly
-      ? "shadow-only 淨額"
+      ? "參考淨額"
       : "外部平台淨額";
 
   return (

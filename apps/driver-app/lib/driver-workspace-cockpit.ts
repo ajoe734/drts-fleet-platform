@@ -99,7 +99,7 @@ export function buildFallbackUnifiedDriverTaskView(
     requiresManualFallback: forwarded,
     requiresReauth: false,
     syncIssueSummary: forwarded
-      ? "來源平台原生狀態暫不可用，目前先以本地鏡像資料呈現；若內容異常請聯繫派車台。"
+      ? "來源平台狀態暫時無法取得，目前顯示最後一次同步的資料；若內容異常請聯繫派車台。"
       : null,
     blockingReason: null,
     pickupSummary: null,

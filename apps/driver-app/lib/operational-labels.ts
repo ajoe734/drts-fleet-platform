@@ -30,11 +30,15 @@ const DRIVER_PAYOUT_STATUS_LABELS: Record<DriverPayoutStatus, LocalizedText> = {
 
 const UNKNOWN_STATUS: LocalizedText = { en: "Unknown status", zh: "未知狀態" };
 
-function humanizeCode(value: string) {
-  return value
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
+/**
+ * Fallback for a status code we have no label for. It must stay human copy:
+ * an unmapped code used to be title-cased and rendered verbatim, so drivers
+ * saw raw identifiers such as "Some Unknown Code" on the task and trip screens.
+ */
+const UNMAPPED_STATUS: LocalizedText = {
+  en: "Pending confirmation",
+  zh: "待確認",
+};
 
 export function formatDriverTaskStatusLabel(
   status: DriverTaskStatus | string | null | undefined,
@@ -46,7 +50,7 @@ export function formatDriverTaskStatusLabel(
 
   return (
     DRIVER_TASK_STATUS_LABELS[status as DriverTaskStatus]?.[locale] ??
-    humanizeCode(status)
+    UNMAPPED_STATUS[locale]
   );
 }
 
@@ -60,7 +64,7 @@ export function formatDriverPayoutStatusLabel(
 
   return (
     DRIVER_PAYOUT_STATUS_LABELS[status as DriverPayoutStatus]?.[locale] ??
-    humanizeCode(status)
+    UNMAPPED_STATUS[locale]
   );
 }
 
@@ -152,10 +156,10 @@ export function formatDriverServiceProductLabel(
 ) {
   const code = resolveDriverServiceProductCode(context);
   if (!code) {
-    return locale === "zh" ? "產品待同步" : "Service Product Pending";
+    return locale === "zh" ? "服務類型待確認" : "Service Product Pending";
   }
 
-  return `${SERVICE_PRODUCT_LABELS[code][locale]} · ${code}`;
+  return SERVICE_PRODUCT_LABELS[code][locale];
 }
 
 export function formatDriverTaskTypeLabel(
@@ -191,4 +195,67 @@ export function formatDriverTaskTypeLabel(
   }
 
   return TASK_TYPE_LABELS.standard_taxi[locale];
+}
+
+/**
+ * 後端（平台介接層 / 派單服務）回傳的阻擋原因有時候是英文代碼
+ * （例如 "token_expired"、"ADAPTER_TIMEOUT"）。這些字串以前被原封不動
+ * 推進畫面，使用者就會看到內部代碼。
+ *
+ * 這張對照表把已知代碼翻成司機看得懂的中文；未知代碼一律改用中文
+ * fallback，永遠不會把原始代碼渲染出去。若後端本來就送中文文案，
+ * 則原樣保留。
+ */
+const BLOCKING_REASON_LABELS: Record<string, string> = {
+  token_expired: "平台授權已過期，請重新授權",
+  token_invalid: "平台授權失效，請重新授權",
+  token_revoked: "平台授權已被取消，請重新授權",
+  reauth_required: "需要重新授權平台帳號",
+  account_suspended: "平台帳號已被停權",
+  account_not_linked: "尚未綁定平台帳號",
+  not_provisioned: "此裝置尚未完成啟用",
+  adapter_timeout: "平台連線逾時",
+  adapter_unavailable: "平台暫時無法連線",
+  adapter_error: "平台連線異常",
+  adapter_degraded: "平台連線不穩定",
+  rate_limited: "平台要求過於頻繁，請稍後再試",
+  maintenance: "平台維護中",
+  offline: "平台目前為離線狀態",
+  ineligible: "目前不符合接單資格",
+  eligibility_pending: "接單資格審核中",
+  document_expired: "證件已到期，請更新後再接單",
+  document_missing: "尚未上傳必要證件",
+  background_check_pending: "資格審查進行中",
+  vehicle_mismatch: "車輛資料與平台登記不符",
+  vehicle_unavailable: "車輛目前無法接單",
+  shift_required: "請先開始班次",
+  location_required: "請先開啟定位權限",
+};
+
+const HAN_CHARACTER = /[㐀-䶿一-鿿豈-﫿]/;
+
+/**
+ * 把後端阻擋原因轉成中文顯示文案。
+ *
+ * - 空值 → 中文 fallback
+ * - 已知代碼 → 對照表中文
+ * - 已經是中文的文案 → 原樣顯示
+ * - 其他（未知英文代碼、內部識別名稱）→ 中文 fallback
+ */
+export function formatDriverBlockingReasonLabel(
+  reason: string | null | undefined,
+  fallback = "目前無法接單，請稍後再試或聯繫派車台。",
+): string {
+  const trimmed = reason?.trim() ?? "";
+  if (!trimmed) {
+    return fallback;
+  }
+
+  const normalized = trimmed.toLowerCase().replace(/[\s.-]+/g, "_");
+  const mapped = BLOCKING_REASON_LABELS[normalized];
+  if (mapped) {
+    return mapped;
+  }
+
+  return HAN_CHARACTER.test(trimmed) ? trimmed : fallback;
 }

@@ -323,7 +323,7 @@ export async function openDriverNavigation({
     return {
       status: "missing_coordinates",
       provider,
-      message: `${stop.label} 缺少有效座標，已停用座標導航交接。`,
+      message: `${stop.label} 缺少有效的定位資料，目前無法開啟導航。`,
     };
   }
 
@@ -395,10 +395,10 @@ export function getDriverRouteAuthorityCopy(
   if (!task?.sourcePlatform) {
     return {
       kind: "drts_owned",
-      title: "DRTS-owned route",
+      title: "DRTS 自營路線",
       badge: "DRTS 可派遣調整",
       description:
-        "DRTS owns this route. Pickup/dropoff coordinates come from the DRTS order snapshot, and dispatch may update the route under DRTS rules.",
+        "此路線由 DRTS 管理，上下車地點來自訂單資料；派車台可依派遣規則調整路線。",
       locked: false,
       degradedHint: null,
     };
@@ -416,15 +416,15 @@ export function getDriverRouteAuthorityCopy(
 
   return {
     kind: "forwarded_platform",
-    title: "Forwarded route - source platform authority",
+    title: "來源平台主導路線",
     badge: routeLocked ? "來源平台路線鎖定" : "來源平台路線",
     description: routeIntent
-      ? `DRTS forwards this route from ${task.sourcePlatform}; source platform route intent: ${routeIntent}. Do not imply local route edit authority.`
-      : `DRTS forwards this route from ${task.sourcePlatform}. The source platform owns route authority; DRTS displays the last synced pickup/dropoff coordinates only.`,
+      ? "此任務由來源平台派發，路線也由來源平台指定；司機端無法在本機改路線。"
+      : "此任務由來源平台派發，路線由來源平台決定；司機端只顯示最後一次同步的上下車地點。",
     locked: routeLocked,
     degradedHint:
       routeProvided === false
-        ? "來源平台未提供完整路線 polyline；司機端只顯示最後同步的上下車座標，改路線需聯絡派車台或來源平台。"
+        ? "來源平台沒有提供完整路線，司機端只顯示最後一次同步的上下車地點；需要改路線請聯絡派車台或來源平台。"
         : null,
   };
 }
@@ -465,7 +465,7 @@ export function getDriverLocationFixState({
     return {
       state: "missing",
       label: "GPS 尚未回報",
-      detail: "目前沒有可顯示的司機座標；heartbeat 仍會在權限允許時繼續嘗試。",
+      detail: "目前沒有可顯示的定位；只要定位權限開啟，系統會持續嘗試取得。",
       coordinateLabel: null,
     };
   }
@@ -480,7 +480,7 @@ export function getDriverLocationFixState({
     : null;
   const accuracy =
     typeof location.accuracyM === "number"
-      ? `；精度約 ${Math.round(location.accuracyM)}m`
+      ? `；精度約 ${Math.round(location.accuracyM)} 公尺`
       : "";
 
   return {

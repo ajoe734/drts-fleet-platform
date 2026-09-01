@@ -44,6 +44,8 @@ describe("driver-sos-outbox", () => {
   it("creates a pending SOS case and submit payload", () => {
     const activeCase = createDriverSosActiveCase({
       eventType: "security_incident",
+      situationId: "passenger_conflict",
+      situationLabel: "乘客衝突",
       description: "乘客情緒激動，要求立即支援。",
       attachments: [createAttachment("att-1")],
       originalTriggeredAt: "2026-07-20T09:00:00.000Z",
@@ -58,6 +60,8 @@ describe("driver-sos-outbox", () => {
       },
       orderId: "mirror-001",
       taskId: "task-001",
+      vehicleId: "veh-001",
+      deviceId: "device-001",
     });
 
     expect(activeCase.syncState).toBe("pending");
@@ -71,9 +75,15 @@ describe("driver-sos-outbox", () => {
       clientEventId: activeCase.clientEventId,
       orderId: "mirror-001",
       taskId: "task-001",
+      vehicleId: "veh-001",
+      plateNo: null,
       eventType: "security_incident",
       severity: "major",
-      description: "乘客情緒激動，要求立即支援。",
+      // The platform only accepts four event types, so the exact situation is
+      // carried as a structured prefix; the device id has no command field of
+      // its own and rides along on the same text.
+      description:
+        "[乘客衝突] 乘客情緒激動，要求立即支援。\n（裝置：device-001）",
       location: {
         lat: 25.0418,
         lng: 121.5652,
@@ -85,6 +95,59 @@ describe("driver-sos-outbox", () => {
       originalTriggeredAt: "2026-07-20T09:00:00.000Z",
       offlineAtTrigger: true,
     });
+  });
+
+  // The six driver-facing situations must collapse onto the four platform
+  // event types without losing which one the driver actually picked, and the
+  // severity has to follow the situation rather than the collapsed type.
+  it.each([
+    ["passenger_conflict", "乘客衝突", "security_incident", "major"],
+    ["traffic_collision", "交通事故", "traffic_accident", "major"],
+    ["vehicle_breakdown", "車輛故障", "other", "normal"],
+    ["medical_emergency", "醫療緊急", "passenger_medical", "major"],
+    ["route_threat", "路線威脅", "security_incident", "major"],
+    ["other", "其他", "other", "normal"],
+  ])(
+    "maps %s onto %s with the right severity and category prefix",
+    (situationId, situationLabel, eventType, severity) => {
+      const command = buildDriverSosSubmitCommand(
+        createDriverSosActiveCase({
+          eventType: eventType as never,
+          situationId,
+          situationLabel,
+          description: "現場說明",
+          attachments: [],
+          originalTriggeredAt: "2026-07-20T09:00:00.000Z",
+          offlineAtTrigger: false,
+          location: null,
+          orderId: null,
+          taskId: null,
+        }),
+      );
+
+      expect(command.eventType).toBe(eventType);
+      expect(command.severity).toBe(severity);
+      expect(command.description).toBe(`[${situationLabel}] 現場說明`);
+    },
+  );
+
+  it("still sends the category when the driver writes no description", () => {
+    const command = buildDriverSosSubmitCommand(
+      createDriverSosActiveCase({
+        eventType: "other",
+        situationId: "vehicle_breakdown",
+        situationLabel: "車輛故障",
+        description: "   ",
+        attachments: [],
+        originalTriggeredAt: "2026-07-20T09:00:00.000Z",
+        offlineAtTrigger: false,
+        location: null,
+        orderId: null,
+        taskId: null,
+      }),
+    );
+
+    expect(command.description).toBe("[車輛故障]");
   });
 
   it("records a submitted receipt and incident correlation", () => {

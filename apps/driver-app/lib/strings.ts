@@ -1,17 +1,23 @@
 import type { DriverTaskAction } from "@drts/contracts";
 import type { TripPrimaryActionKey } from "@/lib/trip-workflow";
 
+export const driverTabLabels = {
+  workspace: "工作台",
+  jobs: "任務",
+  trip: "行程",
+  platform: "平台",
+  settings: "設定",
+} as const;
+
 export const driverRouteTitles = {
   onboarding: "裝置啟用",
   jobs: "任務收件匣",
   trip: "行程作業台",
   sos: "安全求援",
-  incident: "SOS 緊急通報",
   earnings: "收益儀表板",
   platformPresence: "平台上線狀態",
   shift: "班次與出勤",
   settings: "設定",
-  safetyOperator: "安全員模式",
 } as const;
 
 export const driverTaskActionLabels: Record<DriverTaskAction, string> = {
@@ -62,12 +68,32 @@ export const driverEarningsPeriodOptions = [
 ] as const;
 
 export const driverIncidentSituations = [
-  { id: "passenger_conflict", label: "乘客衝突" },
-  { id: "traffic_collision", label: "交通事故" },
-  { id: "vehicle_breakdown", label: "車輛故障" },
-  { id: "medical_emergency", label: "醫療緊急" },
-  { id: "route_threat", label: "路線威脅" },
-  { id: "other", label: "其他" },
+  {
+    id: "passenger_conflict",
+    label: "乘客衝突",
+    hint: "與乘客發生爭執、辱罵或肢體衝突",
+  },
+  {
+    id: "traffic_collision",
+    label: "交通事故",
+    hint: "碰撞、擦撞或其他行車事故",
+  },
+  {
+    id: "vehicle_breakdown",
+    label: "車輛故障",
+    hint: "拋錨、故障或無法繼續行駛",
+  },
+  {
+    id: "medical_emergency",
+    label: "醫療緊急",
+    hint: "乘客或駕駛身體不適、需要救護",
+  },
+  {
+    id: "route_threat",
+    label: "路線威脅",
+    hint: "遭到跟車、恐嚇或路線上有危險",
+  },
+  { id: "other", label: "其他", hint: "上述以外，仍需要車隊立即協助" },
 ] as const;
 
 export const driverActivationSteps = [
@@ -112,7 +138,6 @@ export const driverStrings = {
     registrationCodeLabel: "註冊代碼",
     registrationCodePlaceholder: "請輸入註冊代碼",
     deviceNameLabel: "裝置名稱",
-    deviceNamePlaceholder: "例如：Driver Pixel 01",
     registerDevice: "註冊此裝置",
     registerDeviceLoading: "配置中…",
     provisioningWarning:
@@ -169,7 +194,7 @@ export const driverStrings = {
       in_progress: "進行中",
       blocked: "需派車台處理",
       completed: "已完成",
-      read_only: "唯讀鏡像",
+      read_only: "僅供查閱",
     },
   },
   trip: {
@@ -177,31 +202,11 @@ export const driverStrings = {
     subtitle: "同步目前指派的行程與狀態",
     routeLocked: "路線鎖定",
     sections: {
-      availableActions: "可用操作與邊界",
+      availableActions: "目前可執行的操作",
       statusMetrics: "行程狀態與度量",
       compliance: "合規檢查",
       completionProof: "完單佐證",
     },
-  },
-  incident: {
-    title: "安全求援",
-    subtitle: "開啟頁面後長按 2 秒送出，會同步通知派車台與安全主管",
-    loadingTitle: "準備中",
-    disabledTitle: "未啟用",
-    urgentTitle: "高風險",
-    heroEyebrow: "司機安全",
-    heroTitle: "緊急求援",
-    sections: {
-      situation: "情況",
-      context: "當前訂單情境",
-      details: "補充說明",
-      review: "送出前確認",
-    },
-    orderContextForwarded: "外部訂單",
-    orderContextOwned: "一般安全事件",
-    primaryAction: "開啟 SOS 緊急通報",
-    cancelAction: "取消",
-    confirmAction: "長按 2 秒送出",
   },
   platformPresence: {
     title: "平台連線",
@@ -230,7 +235,7 @@ export const driverStrings = {
     },
     sections: {
       drtsRecon: "DRTS 對帳與撥款",
-      financeAuthority: "外部平台 finance authority",
+      financeAuthority: "外部平台結算方",
       platformBreakdown: "平台分項",
       monthlyStatements: "月結報表",
     },
@@ -261,7 +266,7 @@ export const driverStrings = {
   },
   components: {
     routeDisplay: {
-      eyebrow: "Trip Route Summary",
+      eyebrow: "行程路線",
       title: "路線資訊",
       locked: "路線鎖定",
       pickup: "上車點",
@@ -272,7 +277,7 @@ export const driverStrings = {
     },
     platformTaskBadge: {
       ownedTitle: "自營派單 · DRTS",
-      ownedAuthority: "本地可操作",
+      ownedAuthority: "可直接操作",
       forwardedTitlePrefix: "平台主導 · ",
       forwardedAuthority: "來源平台規則生效",
     },
@@ -290,42 +295,27 @@ export const driverAuthStrings = {
   states: {
     not_provisioned: {
       title: "裝置未啟用",
-      badge: "未配置 · DeviceNotProvisioned",
+      badge: "尚未啟用",
       description: "連線車隊管理系統，啟用後此裝置可接收派單與平台訂單。",
       action: "註冊此裝置",
     },
     session_expired: {
       title: "裝置憑證已過期",
-      badge: "憑證失效 · SessionExpired",
+      badge: "憑證已失效",
       description: "此裝置的司機連線授權已過期，請重新輸入註冊代碼進行重新綁定。",
       action: "重新綁定裝置",
     },
     device_revoked: {
       title: "裝置綁定已撤銷",
-      badge: "憑證撤銷 · DeviceRevoked",
+      badge: "綁定已撤銷",
       description: "此裝置的司機綁定已遭遠端撤銷或偵測到憑證重複使用。未同步的離線完單佐證已妥善保存，請重新註冊綁定。",
       action: "重新註冊裝置",
     },
     driver_suspended: {
       title: "司機帳號已被停權",
-      badge: "帳號停權 · DriverSuspended",
+      badge: "帳號已停權",
       description: "此司機帳號目前處於停權或證件審查無效狀態，暫時無法接單與使用工作台。請聯絡平台管理員。",
       action: "聯絡車隊管理員",
     },
-  },
-  devices: {
-    title: "裝置與身份綁定",
-    subtitle: "管理當前裝置的 Session 與綁定狀態",
-    activeDevice: "目前綁定裝置",
-    deviceIdLabel: "裝置識別碼 (DeviceId)",
-    bindingIdLabel: "綁定識別碼 (BindingId)",
-    driverIdLabel: "司機帳號 (DriverId)",
-    statusLabel: "綁定狀態",
-    issuedAtLabel: "核發時間",
-    rebindAction: "重新綁定裝置 · Rebind",
-    revokeAction: "登出並撤銷裝置 · Revoke",
-    rebindModalTitle: "重新綁定裝置",
-    rebindModalDesc: "請輸入車隊發放的新註冊代碼，以更換裝置連線憑證。",
-    offlineProofNotice: "提示：撤銷與重新綁定不會刪除未同步的離線完單佐證。",
   },
 } as const;

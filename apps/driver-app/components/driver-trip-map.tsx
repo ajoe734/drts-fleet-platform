@@ -135,12 +135,9 @@ function StopCoordinateCard({
       <Text style={styles.addressText}>{stop.address}</Text>
       <Text style={styles.coordinateText}>{stop.coordinateLabel}</Text>
       <Text style={styles.metaText}>
-        {stop.geocodeProvider
-          ? `Provider ${stop.geocodeProvider}`
-          : "Provider 待同步"}
-        {stop.coordinateSource ? ` · Source ${stop.coordinateSource}` : ""}
+        {stop.geocodeProvider ? "座標已同步" : "地圖資料同步中"}
         {stop.coordinateAccuracyM != null
-          ? ` · Accuracy ${Math.round(stop.coordinateAccuracyM)}m`
+          ? ` · 精度約 ${Math.round(stop.coordinateAccuracyM)} 公尺`
           : ""}
       </Text>
 
@@ -148,7 +145,7 @@ function StopCoordinateCard({
         <View style={styles.navigationRow}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Google navigation to ${stop.target}`}
+            accessibilityLabel={`以 Google 導航前往${stop.label}`}
             onPress={() => onOpenNavigation(stop, "google")}
             style={({ pressed }) => [
               styles.navButton,
@@ -159,7 +156,7 @@ function StopCoordinateCard({
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`System navigation to ${stop.target}`}
+            accessibilityLabel={`以${systemLabel}導航前往${stop.label}`}
             onPress={() => onOpenNavigation(stop, "system")}
             style={({ pressed }) => [
               styles.navButtonSecondary,
@@ -237,10 +234,10 @@ export default function DriverTripMap({
     <View style={styles.card}>
       <View style={styles.headerRow}>
         <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>Trip Map & Navigation Handoff</Text>
-          <Text style={styles.title}>座標導航交接</Text>
+          <Text style={styles.eyebrow}>導航</Text>
+          <Text style={styles.title}>路線與導航</Text>
           <Text style={styles.subtitle}>
-            以後端同步的上下車座標交接外部導航，不以地址文字推測路線。
+            以車隊同步的上下車地點開啟導航，不用地址文字推測路線。
           </Text>
         </View>
         <View
@@ -273,19 +270,15 @@ export default function DriverTripMap({
       <View style={styles.previewPanel}>
         <View style={styles.previewHeader}>
           <Text style={styles.previewTitle}>
-            {nativeMapAvailable
-              ? "Native map adapter"
-              : "Coordinate handoff mode"}
+            {nativeMapAvailable ? "地圖檢視" : "座標導航"}
           </Text>
           <Text style={styles.previewStatus}>
-            {nativeMapEnabled
-              ? "Google native map active"
-              : "此 build 未 bundled native map SDK；不宣稱原生地圖渲染。"}
+            {nativeMapEnabled ? "地圖已載入" : "目前以簡圖顯示路線"}
           </Text>
         </View>
         {nativeMapEnabled && initialRegion ? (
           <MapView
-            accessibilityLabel="Driver trip Google map"
+            accessibilityLabel="行程地圖"
             initialRegion={initialRegion}
             mapType="standard"
             provider={PROVIDER_GOOGLE}
@@ -319,8 +312,8 @@ export default function DriverTripMap({
         )}
         <Text style={styles.previewMeta}>
           {model.hasNavigableRoute
-            ? "Pickup/dropoff pins use synced coordinates and can open external navigation."
-            : "座標資料不完整；畫面保留地址與 fallback 指引，導航按鈕僅在座標有效時啟用。"}
+            ? "上下車地點已標示在圖上，可直接開啟導航。"
+            : "座標資料不完整，畫面先顯示地址；導航按鈕會在座標可用時啟用。"}
         </Text>
       </View>
 
@@ -339,15 +332,15 @@ export default function DriverTripMap({
         <Text style={styles.noticeBody}>{fixState.detail}</Text>
         {fixState.coordinateLabel ? (
           <Text style={styles.noticeMeta}>
-            Driver coordinate {fixState.coordinateLabel}
+            目前位置 {fixState.coordinateLabel}
           </Text>
         ) : null}
       </View>
 
       {sourcePlatformOffline ? (
         <Text style={styles.degradedText}>
-          來源平台離線：使用最後同步的座標與權責文案。不得自行解除 route
-          lock，請聯絡派車台確認後再改道。
+          來源平台目前離線，畫面顯示最後一次同步的座標。路線由來源平台鎖定，
+          需要改道請先聯絡派車台確認。
         </Text>
       ) : null}
 
@@ -365,9 +358,8 @@ export default function DriverTripMap({
       />
 
       <Text style={styles.fallbackCopy}>
-        Offline fallback: 若地圖 provider、GPS 或導航 App
-        不可用，請保留此頁座標、 地址與任務
-        ID，聯絡派車台協助導航；司機端不會以地址文字替代座標權威。
+        離線備援：若地圖、定位或導航 App
+        無法使用，請保留此頁的座標與地址，並聯絡派車台協助導航。
       </Text>
     </View>
   );
