@@ -5948,9 +5948,33 @@ export class OwnedMobilityService
     leaseToken: string,
   ) {
     if (claimed.action === "dead_letter") {
+      // A dead letter is a trip-completion effect that has permanently failed.
+      // This used to be a log line and nothing else: no audit record, no
+      // operator surface, no endpoint that lists them. A failure recorded
+      // somewhere nobody reads is operationally the same as one never recorded,
+      // and the thing that failed here is the completion of a real trip.
+      //
+      // The audit log is the surface that already exists for this: immutable at
+      // the database level since V0080, retained 730 days, and queryable by
+      // platform and ops through `GET audit-logs`.
       this.logger.warn(
         `Driver completion outbox dead-lettered after lease recovery for ${claimed.record.effectType} on task ${claimed.record.taskId}.`,
       );
+      await this.recordAudit({
+        actorId: null,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "owned-mobility",
+        actionName: "driver_completion_outbox_dead_lettered",
+        resourceType: "driver_completion_outbox",
+        resourceId: claimed.record.outboxId ?? claimed.record.taskId,
+        newValuesSummary: {
+          taskId: claimed.record.taskId,
+          effectType: claimed.record.effectType,
+          attemptCount: claimed.record.attemptCount ?? null,
+          status: "dead_letter",
+        },
+      });
       return;
     }
 
