@@ -10,6 +10,13 @@ import {
   type InternalKeyExceptionMetadata,
 } from "../../apps/api/src/common/auth/internal-key-exception-registry";
 
+// The registry entries expire on real dates -- EXCP_003 on 2026-08-31,
+// EXCP_002 on 2026-09-15, EXCP_001 on 2026-10-31. Assertions about which
+// exception matches are about the registry's shape, not about today, so
+// they are evaluated at a fixed instant inside every window. Cases that
+// are about expiry pin their own later `now` and are left alone.
+const WITHIN_ALL_EXCEPTION_WINDOWS = new Date("2026-08-15T00:00:00Z");
+
 describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
   it("every registered production exception has complete metadata", () => {
     expect(INTERNAL_KEY_EXCEPTION_REGISTRY.length).toBeGreaterThan(0);
@@ -78,6 +85,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
       {
+        now: WITHIN_ALL_EXCEPTION_WINDOWS,
         headerName: "x-drts-internal-key",
         requestMethod: "GET",
         requestPath: "/api/tenants",
@@ -94,6 +102,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "old-rotated-key-123456789012345678",
       "new-primary-key-123456789012345678",
       {
+        now: WITHIN_ALL_EXCEPTION_WINDOWS,
         headerName: "x-drts-internal-key",
         previousKey: "old-rotated-key-123456789012345678",
       },
@@ -108,6 +117,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "revoked-key-12345678901234567890123",
       "revoked-key-12345678901234567890123",
       {
+        now: WITHIN_ALL_EXCEPTION_WINDOWS,
         headerName: "x-drts-internal-key",
         revokedKeys: ["revoked-key-12345678901234567890123"],
       },
@@ -123,6 +133,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "any-key-value-123456789012345678901",
       "any-key-value-123456789012345678901",
       {
+        now: WITHIN_ALL_EXCEPTION_WINDOWS,
         headerName: "x-drts-undocumented-header",
       },
     );
@@ -161,6 +172,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
       {
+        now: WITHIN_ALL_EXCEPTION_WINDOWS,
         headerName: "x-drts-internal-key",
         requestMethod: "GET",
         requestPath: "/health",
@@ -174,6 +186,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
       {
+        now: WITHIN_ALL_EXCEPTION_WINDOWS,
         headerName: "x-drts-internal-key",
         requestMethod: "POST",
         requestPath: "/api/ops/breakglass/activate",
@@ -188,6 +201,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
       {
+        now: WITHIN_ALL_EXCEPTION_WINDOWS,
         headerName: "x-drts-internal-key",
         requestMethod: "GET",
         requestPath: "/api/tenants",
@@ -200,6 +214,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
       {
+        now: WITHIN_ALL_EXCEPTION_WINDOWS,
         headerName: "x-drts-internal-key",
         requestMethod: "POST",
         requestPath: "/api/partner/bookings",
@@ -214,6 +229,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
       {
+        now: WITHIN_ALL_EXCEPTION_WINDOWS,
         headerName: "x-drts-internal-key",
         requestMethod: "POST",
         requestPath: "/api/ops/dispatch",
@@ -230,6 +246,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
       {
+        now: WITHIN_ALL_EXCEPTION_WINDOWS,
         headerName: "x-drts-internal-key",
         requestMethod: "POST",
         requestPath: "/api/ops/dispatch",
