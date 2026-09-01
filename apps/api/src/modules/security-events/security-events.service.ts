@@ -1,4 +1,5 @@
 import { Injectable, Optional } from "@nestjs/common";
+import { resolveTenantVisibility } from "../../common/tenant-scope";
 
 import type {
   IdentityContext,
@@ -43,9 +44,13 @@ export class SecurityEventsService {
     identity: IdentityContext | null,
     query: SecurityEventQuery = {},
   ) {
+    // `tenantId` arrives as a query parameter, so the caller proposes which
+    // tenant's events to read and this decides. Narrowing only when a tenantId
+    // was present meant the caller's proposal stood when it was not.
+    const visibility = resolveTenantVisibility(identity);
     const scopedQuery =
-      identity?.realm === "tenant" && identity.tenantId
-        ? { ...query, tenantId: identity.tenantId }
+      visibility.scope === "tenant"
+        ? { ...query, tenantId: visibility.tenantId }
         : query;
 
     if (this.securityEventsRepository?.isEnabled()) {

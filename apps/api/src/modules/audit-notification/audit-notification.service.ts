@@ -24,6 +24,10 @@ import {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import {
+  filterToTenantVisibility,
+  resolveTenantVisibility,
+} from "../../common/tenant-scope";
+import {
   assertEvidenceAccess,
   buildEvidenceAccessAuditSummary,
   type EvidenceAccessIdentity,
@@ -307,12 +311,12 @@ export class AuditNotificationService implements OnModuleInit {
       identity,
       tenantId: identity?.realm === "tenant" ? identity.tenantId : null,
     });
-    const items =
-      identity?.realm === "tenant" && identity.tenantId
-        ? this.auditLogs.filter(
-            (auditLog) => auditLog.tenantId === identity.tenantId,
-          )
-        : this.auditLogs;
+    // The condition this replaces narrowed only when a tenant identity carried
+    // a tenantId, and its `else` was every tenant's audit trail.
+    const items = filterToTenantVisibility(
+      this.auditLogs,
+      resolveTenantVisibility(identity),
+    );
 
     const accessAudit: Omit<
       AuditLogRecord,
