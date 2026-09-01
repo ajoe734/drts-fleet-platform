@@ -23,12 +23,13 @@ describe("Internal Key Exception Rotation & Retirement Integration (IAM-SVC-002)
   });
 
   it("verifies every production internal-key exception has complete metadata", () => {
-    expect(INTERNAL_KEY_EXCEPTION_REGISTRY.length).toBe(3);
+    expect(INTERNAL_KEY_EXCEPTION_REGISTRY.length).toBe(2);
 
     const ids = INTERNAL_KEY_EXCEPTION_REGISTRY.map((e) => e.exceptionId);
     expect(ids).toContain("INTERNAL_KEY_EXCP_001");
     expect(ids).toContain("INTERNAL_KEY_EXCP_002");
-    expect(ids).toContain("INTERNAL_KEY_EXCP_003");
+    // EXCP_003 retired 2026-09-01 to IAM-BG-001; see internal-key-exceptions.md.
+    expect(ids).not.toContain("INTERNAL_KEY_EXCP_003");
 
     for (const excp of INTERNAL_KEY_EXCEPTION_REGISTRY) {
       expect(() => validateExceptionMetadata(excp)).not.toThrow();

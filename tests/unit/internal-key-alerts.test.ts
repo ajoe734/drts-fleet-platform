@@ -146,9 +146,15 @@ describe("internal key alert rules", () => {
       );
     }
 
-    // Since routes are normalized to scope patterns, all 1500 requests resolve to route "POST ops/*"
+    // All 1500 still collapse to a single series, which is what this case is
+    // about. The label is now "other": normalizeMetricRoute falls back to
+    // scanning the registry for a non-wildcard pattern, and `POST ops/*`
+    // belonged to EXCP_003, retired 2026-09-01 to IAM-BG-001. EXCP_002's own
+    // scope is `* *`, which the function skips by design. Ops-route drift
+    // alerts therefore lose their route label until some exception declares
+    // that scope again.
     expect(internalKeyMetrics.driftAlertCounter.size).toBe(1);
-    expect(internalKeyMetrics.driftAlertCounter.get('exception_id="INTERNAL_KEY_EXCP_002",code="INTERNAL_KEY_INVALID",route="POST ops/*"')).toBe(1500);
+    expect(internalKeyMetrics.driftAlertCounter.get('exception_id="INTERNAL_KEY_EXCP_002",code="INTERNAL_KEY_INVALID",route="other"')).toBe(1500);
   });
 
   it("caps audit recorder memory and forwards events to SecurityEventsService sink (F7 & F9)", () => {

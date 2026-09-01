@@ -58,25 +58,6 @@ export const INTERNAL_KEY_EXCEPTION_REGISTRY: InternalKeyExceptionMetadata[] = [
     status: "active",
   },
   {
-    exceptionId: "INTERNAL_KEY_EXCP_003",
-    owner: "sre-ops",
-    purpose: "Staging emergency break-glass local operations key",
-    scope: ["GET health", "POST ops/*"],
-    ttl: "2026-08-31T23:59:59Z",
-    expiresAt: "2026-08-31T23:59:59Z",
-    networkBoundary: "staging-break-glass-only",
-    rotationCadence: "7d",
-    usageSignal: "AUTH_BREAKGLASS_INTERNAL_KEY_USED",
-    removalDate: "2026-08-31",
-    removalPlan:
-      "Replace with IAM-BG-001 break-glass two-person approval and short session token",
-    header: "x-drts-internal-key",
-    envVar: "DRTS_INTERNAL_KEY",
-    rotationEnvVar: "DRTS_INTERNAL_KEY_PREVIOUS",
-    revokedKeysEnvVar: "DRTS_INTERNAL_KEY_REVOKED_KEYS",
-    status: "active",
-  },
-  {
     exceptionId: "INTERNAL_KEY_EXCP_002",
     owner: "control-plane-ops",
     purpose:

@@ -17,6 +17,31 @@ import {
 // are about expiry pin their own later `now` and are left alone.
 const WITHIN_ALL_EXCEPTION_WINDOWS = new Date("2026-08-15T00:00:00Z");
 
+// EXCP_003 was retired from the registry on 2026-09-01 once its removalDate
+// passed and IAM-BG-001 shipped. Two cases below are about the evaluator's
+// handling of a staging-only boundary and of an expired entry, not about that
+// particular exception, so they keep their subject as a local fixture rather
+// than losing coverage with it.
+const RETIRED_STAGING_ONLY: InternalKeyExceptionMetadata = {
+  exceptionId: "INTERNAL_KEY_EXCP_003",
+  owner: "sre-ops",
+  purpose: "Staging emergency break-glass local operations key",
+  scope: ["GET health", "POST ops/*"],
+  ttl: "2026-08-31T23:59:59Z",
+  expiresAt: "2026-08-31T23:59:59Z",
+  networkBoundary: "staging-break-glass-only",
+  rotationCadence: "7d",
+  usageSignal: "AUTH_BREAKGLASS_INTERNAL_KEY_USED",
+  removalDate: "2026-08-31",
+  removalPlan:
+    "Replace with IAM-BG-001 break-glass two-person approval and short session token",
+  header: "x-drts-internal-key",
+  envVar: "DRTS_INTERNAL_KEY",
+  rotationEnvVar: "DRTS_INTERNAL_KEY_PREVIOUS",
+  revokedKeysEnvVar: "DRTS_INTERNAL_KEY_REVOKED_KEYS",
+  status: "active",
+};
+
 describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
   it("every registered production exception has complete metadata", () => {
     expect(INTERNAL_KEY_EXCEPTION_REGISTRY.length).toBeGreaterThan(0);
@@ -167,7 +192,8 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
   });
 
   it("enforces scope metadata and matches control-plane proxy and break-glass routes correctly", () => {
-    // EXCP_003 matches GET health or POST ops/*
+    // EXCP_003 covered these until it was retired; EXCP_002 scope `* *`
+    // has carried them since, on the same header.
     const resultHealth = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
       "secret-key-1234567890123456789012345",
@@ -180,7 +206,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       },
     );
     expect(resultHealth.valid).toBe(true);
-    expect(resultHealth.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
+    expect(resultHealth.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_002");
 
     const resultOps = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
@@ -194,7 +220,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
       },
     );
     expect(resultOps.valid).toBe(true);
-    expect(resultOps.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_003");
+    expect(resultOps.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_002");
 
     // EXCP_002 matches control-plane proxy routes like GET /api/tenants, POST /api/partner/bookings, etc.
     const resultTenants = evaluateInternalKey(
@@ -240,7 +266,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
     expect(resultProdOps.exception?.exceptionId).toBe("INTERNAL_KEY_EXCP_002");
 
     const stagingOnlyRegistry: InternalKeyExceptionMetadata[] = [
-      INTERNAL_KEY_EXCEPTION_REGISTRY.find((e) => e.exceptionId === "INTERNAL_KEY_EXCP_003")!,
+      RETIRED_STAGING_ONLY,
     ];
     const resultStagingOnlyInProd = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
@@ -261,7 +287,7 @@ describe("InternalKeyExceptionRegistry (IAM-SVC-002)", () => {
 
   it("triggers EXCP_003 expiration after 2026-08-31 and total expiration after 2026-09-15", () => {
     const excp003Registry = [
-      INTERNAL_KEY_EXCEPTION_REGISTRY.find((e) => e.exceptionId === "INTERNAL_KEY_EXCP_003")!,
+      RETIRED_STAGING_ONLY,
     ];
     const resultPostExpiry003 = evaluateInternalKey(
       "secret-key-1234567890123456789012345",
