@@ -31,7 +31,19 @@ To prevent undocumented credential proliferation and unmonitored backdoor access
 | ----------------------- | ------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- | ---------------------- | ---------------- | ----------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `INTERNAL_KEY_EXCP_001` | `referral-team`     | Scoped server-to-server referral embed handoff artifact issuance and consumption             | `x-drts-referral-handoff-key`<br>`POST partner/ingress/referral-embed-handoff`<br>`POST partner/ingress/referral-embed-handoff/consume`<br>`POST partner/ingress/referral-embed-handoff/consent` | `internal-vpc-to-api-ingress` | `2026-10-31T23:59:59Z` | `30d`            | `AUTH_SCOPED_INTERNAL_KEY_USED`     | `2026-10-31`        | Migrate `referral-embed-web` BFF caller to IAM-SVC-001 WIF token exchange once WIF proxy is enabled on referral web app.                     |
 | `INTERNAL_KEY_EXCP_002` | `control-plane-ops` | Legacy control-plane proxy serverless fallback key when GCP WIF identity assertion is absent | `x-drts-internal-key`<br>`* *`<br>`POST partner/ingress/handoff`<br>`POST auth/token`                                                                                                            | `control-plane-proxy-to-api`  | `2026-09-15T23:59:59Z` | `14d`            | `AUTH_LEGACY_INTERNAL_KEY_USED`     | `2026-09-15`        | Full deprecation of `DRTS_INTERNAL_KEY` fallback in favor of mandatory WIF workload identity assertion headers on all control-plane proxies. |
-| `INTERNAL_KEY_EXCP_003` | `sre-ops`           | Staging emergency break-glass local operations key                                           | `x-drts-internal-key`<br>`GET health`<br>`POST ops/*`                                                                                                                                            | `staging-break-glass-only`    | `2026-08-31T23:59:59Z` | `7d`             | `AUTH_BREAKGLASS_INTERNAL_KEY_USED` | `2026-08-31`        | Replace with IAM-BG-001 break-glass two-person approval and short session token.                                                             |
+
+### Retired exceptions
+
+INTERNAL_KEY_EXCP_003 (sre-ops, staging emergency break-glass) reached its
+`removalDate` of 2026-08-31 and was retired from the registry on 2026-09-01,
+per its own removal plan: replaced by IAM-BG-001 two-person break-glass
+approval with short session tokens, which shipped before that date.
+
+Retiring it changed no request outcome. It stopped matching when it expired,
+and `INTERNAL_KEY_EXCP_002` carries scope `* *` on the same header, so the
+routes it had covered -- `GET health` and `POST ops/*` -- already resolved
+through EXCP_002 in both staging and production. Verified against the
+evaluator with and without the entry before removal.
 
 ---
 
@@ -94,9 +106,9 @@ python3 operations/security/verify-internal-key-exceptions.py
 gantt
     title Internal Key Retirement Timeline (Stage 1.5 - Stage 2)
     dateFormat  YYYY-MM-DD
-    section INTERNAL_KEY_EXCP_003
-    SRE Break-Glass Key Expiry         :active, excp3, 2026-08-05, 2026-08-31
-    Retire EXCP_003 to IAM-BG-001      :crit, 2026-08-31, 2026-08-31
+    section INTERNAL_KEY_EXCP_003 (retired)
+    SRE Break-Glass Key Expiry         :done, excp3, 2026-08-05, 2026-08-31
+    Retired to IAM-BG-001              :done, 2026-08-31, 2026-08-31
     section INTERNAL_KEY_EXCP_002
     Control-Plane Fallback Key Expiry  :active, excp2, 2026-08-05, 2026-09-15
     Retire EXCP_002 to WIF Assertions  :crit, 2026-09-15, 2026-09-15
