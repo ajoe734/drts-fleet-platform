@@ -2893,7 +2893,12 @@ export const DRIVER_TASK_TRANSITIONS: Record<
   readonly DriverTaskStatus[]
 > = {
   pending_acceptance: ["accepted", "rejected", "cancelled"],
-  accepted: ["enroute_pickup", "cancelled"],
+  // `arrived_pickup` directly, because a driver already standing at the pickup
+  // point never departs for it. Both paths exist in the codebase and both
+  // passed before anything was enforced, so which one was intended could not be
+  // read off the code -- that ambiguity was part of what made the missing
+  // guards invisible.
+  accepted: ["enroute_pickup", "arrived_pickup", "cancelled"],
   enroute_pickup: ["arrived_pickup", "cancelled"],
   arrived_pickup: ["on_trip", "cancelled"],
   on_trip: ["proof_pending", "completed", "cancelled"],
