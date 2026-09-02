@@ -765,15 +765,20 @@ jobs:
         run: |
           set -euo pipefail
 
+          # This step runs before any service is deployed, so on a freshly
+          # provisioned project the Tenant Console does not exist yet. A missing
+          # service must not be fatal here: it only means its URL cannot be known
+          # on this pass. Treating it as fatal left the deploy unable to bootstrap
+          # an empty project at all -- the origin it demanded could only be
+          # created by the deploy it was blocking.
           tenant_console_cloud_run_origin="$(gcloud run services describe "${{ needs.prepare.outputs.tenant_console_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
-            --format='value(status.url)')"
-          tenant_console_origin="${{ needs.prepare.outputs.tenant_console_origin }}"
-          if [[ -z "$tenant_console_origin" ]]; then
-            tenant_console_origin="$tenant_console_cloud_run_origin"
-          fi
-          for origin in "$tenant_console_origin" "$tenant_console_cloud_run_origin"; do
+            --format='value(status.url)' 2>/dev/null || true)"
+
+          auth_allowed_origins=""
+          for origin in "${{ needs.prepare.outputs.tenant_console_origin }}" "$tenant_console_cloud_run_origin"; do
+            [[ -n "$origin" ]] || continue
             case "$origin" in
               https://*) ;;
               *)
@@ -781,10 +786,14 @@ jobs:
                 exit 1
                 ;;
             esac
+            case ",${auth_allowed_origins}," in
+              *",${origin},"*) continue ;;
+            esac
+            auth_allowed_origins="${auth_allowed_origins:+${auth_allowed_origins},}${origin}"
           done
-          auth_allowed_origins="$tenant_console_origin"
-          if [[ "$tenant_console_cloud_run_origin" != "$tenant_console_origin" ]]; then
-            auth_allowed_origins="${auth_allowed_origins},${tenant_console_cloud_run_origin}"
+
+          if [[ -z "$auth_allowed_origins" ]]; then
+            echo "::warning::No Tenant Console origin available: ${{ needs.prepare.outputs.tenant_console_service }} does not exist in ${{ needs.prepare.outputs.project_id }} yet and DEV_TENANT_CONSOLE_ORIGIN is unset. Deploying the API with an empty browser origin allowlist -- dev treats that as local-origins-only, not as a wildcard. Re-run this deploy once the Tenant Console service exists to grant it access."
           fi
 
           # Use @ as the gcloud list delimiter because the allowlist itself is CSV.
@@ -849,10 +858,16 @@ jobs:
 
           ops_console_origin="${{ needs.prepare.outputs.ops_console_origin }}"
           if [[ -z "$ops_console_origin" ]]; then
+            # Same bootstrap case as the Tenant Console above: this runs before
+            # `Deploy — ops-console-web`, so on a fresh project the service is
+            # not there to describe yet.
             ops_console_origin="$(gcloud run services describe "${{ needs.prepare.outputs.ops_console_service }}" \
               --region "${{ needs.prepare.outputs.region }}" \
               --project "${{ needs.prepare.outputs.project_id }}" \
-              --format='value(status.url)')"
+              --format='value(status.url)' 2>/dev/null || true)"
+          fi
+          if [[ -z "$ops_console_origin" ]]; then
+            echo "::warning::No Ops Console origin available yet; the web apps ship with NEXT_PUBLIC_OPS_CONSOLE_ORIGIN empty, which disables their cross-app links until a later deploy fills it in."
           fi
 
           env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},NEXT_PUBLIC_DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,NEXT_PUBLIC_OPS_CONSOLE_ORIGIN=${ops_console_origin},DRTS_FLEET_PARTNER_ID=fleet-demo-001,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
