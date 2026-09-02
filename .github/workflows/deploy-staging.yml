@@ -145,8 +145,8 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/api:${{ steps.tag.outputs.tag }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/api:cache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/api:cache,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=min
 
       # ── Migrate image ────────────────────────────────────────
       - name: Build & push — migrate
@@ -157,8 +157,8 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/migrate:${{ steps.tag.outputs.tag }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/migrate:cache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/migrate:cache,mode=max
+          cache-from: type=gha,scope=migrate
+          cache-to: type=gha,scope=migrate,mode=min
 
       # ── Web apps ─────────────────────────────────────────────
       # tenant-portal-web: RETIRED (SUNSET-001-tenant-portal-web, FBP-007).
@@ -173,8 +173,8 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/platform-admin-web:${{ steps.tag.outputs.tag }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/platform-admin-web:cache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/platform-admin-web:cache,mode=max
+          cache-from: type=gha,scope=platform-admin-web
+          cache-to: type=gha,scope=platform-admin-web,mode=min
 
       - name: Build & push — ops-console-web
         uses: docker/build-push-action@v5
@@ -186,8 +186,8 @@ jobs:
             NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE=${{ env.NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE }}
           tags: |
             ${{ env.REGISTRY }}/ops-console-web:${{ steps.tag.outputs.tag }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/ops-console-web:cache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/ops-console-web:cache,mode=max
+          cache-from: type=gha,scope=ops-console-web
+          cache-to: type=gha,scope=ops-console-web,mode=min
 
       # ── Active Tenant Console ────────────────────────────────
       - name: Build & push — tenant-console-web
@@ -198,8 +198,8 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/tenant-console-web:${{ steps.tag.outputs.tag }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/tenant-console-web:cache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/tenant-console-web:cache,mode=max
+          cache-from: type=gha,scope=tenant-console-web
+          cache-to: type=gha,scope=tenant-console-web,mode=min
 
   # ──────────────────────────────────────────────────────────────
   # Strict Startup Negative Gate — verifies fail-closed security

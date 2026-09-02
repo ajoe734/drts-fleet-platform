@@ -232,8 +232,8 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/api:${{ steps.tag.outputs.tag }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/api:cache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/api:cache,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=min
 
       - name: Build & push — migrate
         uses: docker/build-push-action@v5
@@ -243,8 +243,8 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/migrate:${{ steps.tag.outputs.tag }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/migrate:cache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/migrate:cache,mode=max
+          cache-from: type=gha,scope=migrate
+          cache-to: type=gha,scope=migrate,mode=min
 
       - name: Build & push — platform-admin-web
         uses: docker/build-push-action@v5
@@ -254,8 +254,8 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/platform-admin-web:${{ steps.tag.outputs.tag }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/platform-admin-web:cache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/platform-admin-web:cache,mode=max
+          cache-from: type=gha,scope=platform-admin-web
+          cache-to: type=gha,scope=platform-admin-web,mode=min
 
       - name: Build & push — ops-console-web
         uses: docker/build-push-action@v5
@@ -267,8 +267,8 @@ jobs:
             NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE=${{ env.NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE }}
           tags: |
             ${{ env.REGISTRY }}/ops-console-web:${{ steps.tag.outputs.tag }}
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/ops-console-web:cache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/ops-console-web:cache,mode=max
+          cache-from: type=gha,scope=ops-console-web
+          cache-to: type=gha,scope=ops-console-web,mode=min
 
   migrate:
     name: DB migration
