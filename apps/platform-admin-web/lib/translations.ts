@@ -1664,6 +1664,7 @@ const en = {
   "platformCode.invited": "Invited",
   "platformCode.issued": "Issued",
   "platformCode.manual_hold": "Manual Hold",
+  "platformCode.offboarding_pending_debranding": "Debranding Outstanding",
   "platformCode.missing": "Missing",
   "platformCode.mixed": "Mixed",
   "platformCode.none": "None",
@@ -2363,15 +2364,13 @@ const en = {
     "Privileged Role Approvals & SoD Governance",
   "users.governance.roleApproval.requestButton": "Request Privileged Role",
   "users.governance.roleApproval.loading": "Loading requests…",
-  "users.governance.roleApproval.empty":
-    "No privileged role requests recorded",
+  "users.governance.roleApproval.empty": "No privileged role requests recorded",
   "users.governance.roleApproval.modalTitle":
     "Request Privileged Role Elevation",
   "users.governance.roleApproval.roleSuperadmin":
     "platform_super_admin (High Risk)",
   "users.governance.roleApproval.roleAdmin": "platform_admin (Medium Risk)",
-  "users.governance.roleApproval.roleOperator":
-    "platform_operator (Low Risk)",
+  "users.governance.roleApproval.roleOperator": "platform_operator (Low Risk)",
   "users.governance.roleApproval.justificationPlaceholder":
     "e.g. Incident response INC-9921 requiring superadmin emergency fix",
   "users.governance.roleApproval.reviewModalTitle":
@@ -4253,6 +4252,15 @@ const en = {
     "Every transition needs timestamp · actor · evidence · audit",
   "fleetUi.refreshTierSubtitle": "Refresh tier {tier} / 30s · {freshness}",
   "fleetUi.refreshTab": "Refresh tab",
+  "fleetUi.actionFailedTitle": "Action not applied: {action}",
+  "fleetUi.vehicleNotDispatchable":
+    "This vehicle cannot be released for dispatch until every compliance blocker is cleared.",
+  "fleetUi.blockedReasonsLabel": "Blockers",
+  "fleetUi.actionBlockedBy": "Blocked by {reason}",
+  "fleetUi.traceLabel": "Trace",
+  "fleetUi.dismiss": "Dismiss",
+  "fleetUi.opsConsoleNotConfigured":
+    "This deployment has no Ops Console origin configured, so the deep link cannot be opened.",
   "partnerDetail.eligibility.contractId": "Contract ID",
   "partnerDetail.eligibility.adapter": "Adapter",
   "partnerDetail.eligibility.adapterPosture": "Adapter posture",
@@ -4720,6 +4728,7 @@ const zh: typeof en = {
   "platformCode.invited": "已邀請",
   "platformCode.issued": "已開立",
   "platformCode.manual_hold": "人工停派",
+  "platformCode.offboarding_pending_debranding": "除標識未完成",
   "platformCode.missing": "缺漏",
   "platformCode.mixed": "混合",
   "platformCode.none": "未設定",
@@ -5506,8 +5515,7 @@ const zh: typeof en = {
   "users.governance.accessReview.campaignsEmpty": "尚未設定存取審查活動",
   "users.governance.accessReview.evidenceTitle": "存取審查稽核證據紀錄",
   "users.governance.accessReview.evidenceEmpty": "尚無認證證據紀錄",
-  "users.governance.accessReview.createCampaignModalTitle":
-    "建立存取審查活動",
+  "users.governance.accessReview.createCampaignModalTitle": "建立存取審查活動",
   "users.governance.accessReview.titlePlaceholder":
     "例如：Q3 平台管理員存取認證",
 
@@ -7154,6 +7162,15 @@ const zh: typeof en = {
     "每一步狀態轉換都需要時間戳、操作人、證據與稽核紀錄",
   "fleetUi.refreshTierSubtitle": "更新層級 {tier} / 30 秒 · {freshness}",
   "fleetUi.refreshTab": "重新整理",
+  "fleetUi.actionFailedTitle": "「{action}」未執行",
+  "fleetUi.vehicleNotDispatchable":
+    "所有合規阻擋原因解除前，這台車無法恢復派遣。",
+  "fleetUi.blockedReasonsLabel": "阻擋原因",
+  "fleetUi.actionBlockedBy": "受「{reason}」阻擋",
+  "fleetUi.traceLabel": "追蹤編號",
+  "fleetUi.dismiss": "關閉",
+  "fleetUi.opsConsoleNotConfigured":
+    "此環境未設定營運主控台位址，無法開啟跨站深連結。",
   "partnerDetail.eligibility.contractId": "契約 ID",
   "partnerDetail.eligibility.adapter": "轉接器",
   "partnerDetail.eligibility.adapterPosture": "轉接器狀態",
