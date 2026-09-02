@@ -65,7 +65,7 @@ exit 99
 
   const result = spawnSync(
     "bash",
-    [cleanupScript, action, "drts-dev-ray-tw-20260730", "us-central1"],
+    [cleanupScript, action, "nodal-alloy-503700-s3", "us-central1"],
     {
       cwd: repoRoot,
       encoding: "utf8",
@@ -152,8 +152,8 @@ describe("retired Cloud Run service cleanup", () => {
 
     expect(result.status).toBe(0);
     expect(result.commands).toEqual([
-      "run services list --platform=managed --region us-central1 --project drts-dev-ray-tw-20260730 --format=value(metadata.name)",
-      "run services delete drts-passenger-web --platform=managed --region us-central1 --project drts-dev-ray-tw-20260730 --quiet",
+      "run services list --platform=managed --region us-central1 --project nodal-alloy-503700-s3 --format=value(metadata.name)",
+      "run services delete drts-passenger-web --platform=managed --region us-central1 --project nodal-alloy-503700-s3 --quiet",
     ]);
   });
 

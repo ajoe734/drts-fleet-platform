@@ -192,7 +192,7 @@ describe("dev active surface contract", () => {
       "fail closed and hand off to the single deploy cleanup task.",
     );
     expect(runbook).toContain("domain-maintenance");
-    expect(runbook).toContain("drts-dev-ray-tw-20260730");
+    expect(runbook).toContain("nodal-alloy-503700-s3");
     expect(runbook).toContain("us-central1");
     expect(runbook).toContain("Partner Booking — PAUSED");
     expect(runbook).not.toContain(

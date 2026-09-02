@@ -870,7 +870,21 @@ jobs:
             echo "::warning::No Ops Console origin available yet; the web apps ship with NEXT_PUBLIC_OPS_CONSOLE_ORIGIN empty, which disables their cross-app links until a later deploy fills it in."
           fi
 
-          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},NEXT_PUBLIC_DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,NEXT_PUBLIC_OPS_CONSOLE_ORIGIN=${ops_console_origin},DRTS_FLEET_PARTNER_ID=fleet-demo-001,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          # The Tenant Console links back into Platform Admin, so it needs that
+          # origin the same way it needs the Ops Console one. It was never
+          # passed, so those links could only ever fall back to localhost.
+          platform_admin_origin="${{ needs.prepare.outputs.platform_admin_origin }}"
+          if [[ -z "$platform_admin_origin" ]]; then
+            platform_admin_origin="$(gcloud run services describe "${{ needs.prepare.outputs.platform_admin_service }}" \
+              --region "${{ needs.prepare.outputs.region }}" \
+              --project "${{ needs.prepare.outputs.project_id }}" \
+              --format='value(status.url)' 2>/dev/null || true)"
+          fi
+          if [[ -z "$platform_admin_origin" ]]; then
+            echo "::warning::No Platform Admin origin available yet; the web apps ship with NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN empty, which disables their cross-app links until a later deploy fills it in."
+          fi
+
+          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},NEXT_PUBLIC_DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,NEXT_PUBLIC_OPS_CONSOLE_ORIGIN=${ops_console_origin},NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN=${platform_admin_origin},DRTS_FLEET_PARTNER_ID=fleet-demo-001,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
             env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi

@@ -4,10 +4,19 @@ set -euo pipefail
 domain="${1:-}"
 service="${2:-}"
 region="${3:-${DEV_GCP_REGION:-${REGION:-us-central1}}}"
-project="${4:-${DEV_GCP_PROJECT_ID:-${PROJECT:-drts-dev-ray-tw-20260730}}}"
+project="${4:-${DEV_GCP_PROJECT_ID:-${PROJECT:-}}}"
 
 if [ -z "$domain" ] || [ -z "$service" ]; then
   echo "Usage: $0 <domain> <service> [region] [project]" >&2
+  exit 2
+fi
+
+# No hardcoded project default. This script used to fall back to a literal dev
+# project id; that project has since been rotated twice and the previous one was
+# suspended, so the default silently pointed domain mappings at a project that
+# was either wrong or dead. Its sibling cleanup scripts already fail closed here.
+if [ -z "$project" ]; then
+  echo "Refusing to guess the GCP project. Pass it as the 4th argument, or set DEV_GCP_PROJECT_ID or PROJECT." >&2
   exit 2
 fi
 

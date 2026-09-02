@@ -2408,6 +2408,8 @@ const en = {
   "reports.deepLinks.auditReceipt":
     "View the audit receipt for tenant-side report actions",
   "reports.deepLinks.open": "Open",
+  "reports.deepLinks.originUnavailable":
+    "This deployment has no origin configured for that app, so the deep link cannot be opened.",
 
   // ── rules (i18n-fullsweep 20260614) ──
   "rules.header.eyebrow": "Approval & quota",
@@ -6294,6 +6296,8 @@ const zh: Record<keyof typeof en, string> = {
     "報表可導向檔案下載、租戶 audit 或外部營運後續。",
   "reports.deepLinks.auditReceipt": "查看租戶端報表操作的 audit 收據",
   "reports.deepLinks.open": "開啟",
+  "reports.deepLinks.originUnavailable":
+    "此環境未設定該應用程式的位址，無法開啟跨站深連結。",
 
   // ── rules (i18n-fullsweep 20260614) ──
   "rules.header.eyebrow": "審批與額度",

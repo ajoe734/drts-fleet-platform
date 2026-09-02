@@ -1,7 +1,7 @@
 # smarttransport.tw 自訂網域設定 Runbook
 
 **產生日期：** 2026-08-01
-**GCP Project：** `drts-dev-ray-tw-20260730`
+**GCP Project：** `nodal-alloy-503700-s3`
 **Region：** `us-central1`
 **目標：** 記錄 dev active inventory 與 `smarttransport.tw` 目前可觀測的 custom-domain 狀態，僅供控管與後續清理；本 task 不部署、不改 billing。
 
@@ -44,7 +44,7 @@ service，並會以 fail-closed cleanup 刪除殘留的
 ## 2. 建立 domain mappings（domain-maintenance；idempotent；不覆寫既有 live mapping）
 
 ```bash
-PROJECT=drts-dev-ray-tw-20260730
+PROJECT=nodal-alloy-503700-s3
 REGION=us-central1
 
 gcloud auth login   # 前提 1
@@ -99,7 +99,7 @@ for sub in fleets ops partners dispatch bank channel tenant refer api; do
   echo -n "$sub.smarttransport.tw → "
   curl -s -o /dev/null -w "%{http_code}\n" --max-time 20 "https://$sub.smarttransport.tw" || echo "尚未生效"
 done
-gcloud beta run domain-mappings list --region us-central1 --project drts-dev-ray-tw-20260730
+gcloud beta run domain-mappings list --region us-central1 --project nodal-alloy-503700-s3
 ```
 
 全部 active mapping `READY=True` 且憑證 ACTIVE 即完成。`book.smarttransport.tw`
@@ -109,7 +109,7 @@ gcloud beta run domain-mappings list --region us-central1 --project drts-dev-ray
 ## 5. 2026-07-31 實測現況
 
 - Authoritative active surface 是 `deploy-dev.yml` 內的 9 services：`drts-dev-api`、`drts-dev-platform-admin-web`、`drts-dev-ops-console-web`、`drts-dev-fleet-partner-portal-web`、`drts-dev-tenant-console-web`、`drts-dev-bank-console-web`、`drts-dev-enterprise-dispatch-web`、`drts-dev-referral-embed-web`、`drts-channel-partner-portal-web`；不含 paused `partner-booking-web`，也不含 retired `passenger-web`、`concierge-portal-web`、`assisted-entry-web`。
-- GCP target 已固定為 project `drts-dev-ray-tw-20260730`、region `us-central1`。
+- GCP target 已固定為 project `nodal-alloy-503700-s3`、region `us-central1`。
 - DNS 已存在：
   - `smarttransport.tw` → `185.158.133.1`
   - active inventory 子網域 `fleets/ops/partners/dispatch/bank/channel/tenant/refer/api.smarttransport.tw` 皆解析到 `ghs.googlehosted.com` 後的 Google anycast IP
@@ -134,6 +134,6 @@ gcloud beta run domain-mappings list --region us-central1 --project drts-dev-ray
   `referral-demo-community`；直接正式 URL 不受影響。
 - `referral-demo-community` 僅保留為測試 seed／歷史驗收資料，不再是 root
   default 或對外 partner URL。
-- 本節描述的是 project `drts-dev-ray-tw-20260730` 的 dev acceptance rail。
+- 本節描述的是 project `nodal-alloy-503700-s3` 的 dev acceptance rail。
   `app.yuhe-living.com.tw` 在設計 authority 中代表 partner primary host，但本
   runbook 不據此宣稱該外部 host 或 DRTS production rail 已完成 production cutover。

@@ -30,6 +30,10 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { createBrowserApiClient } from "@/lib/browser-api-client";
+import {
+  getRuntimeCrossAppOrigin,
+  type CrossAppTarget,
+} from "@/lib/runtime-config";
 import { createIdempotencyKey } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
 
@@ -88,7 +92,8 @@ type ReportRow = {
 
 type CrossAppLink = {
   label: string;
-  href: string;
+  /** null when this deployment has no origin for the target app. */
+  href: string | null;
 };
 
 type ReportTypeOption = { value: ReportJobType; label: string };
@@ -401,41 +406,27 @@ function getEmptyStateCopy(reason: EmptyReason | null, t: Translate) {
   }
 }
 
-function resolveAppOrigin(targetApp: "ops-console" | "platform-admin") {
-  const envCandidates =
-    targetApp === "platform-admin"
-      ? [
-          process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN,
-          process.env.PLATFORM_ADMIN_ORIGIN,
-          process.env.DEV_PLATFORM_ADMIN_ORIGIN,
-          process.env.STAGING_PLATFORM_ADMIN_ORIGIN,
-          process.env.PROD_PLATFORM_ADMIN_ORIGIN,
-        ]
-      : [
-          process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN,
-          process.env.OPS_CONSOLE_ORIGIN,
-          process.env.DEV_OPS_CONSOLE_ORIGIN,
-          process.env.STAGING_OPS_CONSOLE_ORIGIN,
-          process.env.PROD_OPS_CONSOLE_ORIGIN,
-        ];
-  const resolved = envCandidates.find(
-    (candidate) => typeof candidate === "string" && candidate.trim().length > 0,
-  );
-
-  if (resolved) {
-    return resolved.replace(/\/$/, "");
-  }
-
-  return targetApp === "platform-admin"
-    ? "http://localhost:3002"
-    : "http://localhost:3003";
-}
-
+/**
+ * Absolute href for a deep link into another app, or null when this deployment
+ * has no origin configured for it.
+ *
+ * This used to read `process.env` from inside a client component and fall back
+ * to `http://localhost:3002`. Only `NEXT_PUBLIC_` vars reach the browser at
+ * all, and those are inlined at image build time -- before the deployed URLs
+ * exist -- so every deployed tenant console linked its operators to localhost.
+ * The origin now comes from the runtime config, resolved on the server per
+ * request; when it is absent the caller renders a disabled affordance instead
+ * of a link that goes nowhere.
+ */
 function buildCrossAppHref(
-  targetApp: "ops-console" | "platform-admin",
+  targetApp: CrossAppTarget,
   route: string,
-) {
-  return `${resolveAppOrigin(targetApp)}${route.startsWith("/") ? route : `/${route}`}`;
+): string | null {
+  const origin = getRuntimeCrossAppOrigin(targetApp);
+  if (!origin) {
+    return null;
+  }
+  return `${origin}${route.startsWith("/") ? route : `/${route}`}`;
 }
 
 function ActionButton({
@@ -877,7 +868,7 @@ export function ReportsManager({
           body={t("reports.crossAppBanner.body")}
           actions={
             <>
-              {opsReportingAction ? (
+              {opsReportingAction && opsReportingLink.href ? (
                 <a
                   href={opsReportingLink.href}
                   target="_blank"
@@ -887,7 +878,7 @@ export function ReportsManager({
                   {t("reports.crossAppBanner.openOps")}
                 </a>
               ) : null}
-              {platformAuditAction ? (
+              {platformAuditAction && platformAuditLink.href ? (
                 <a
                   href={platformAuditLink.href}
                   target="_blank"
@@ -1211,14 +1202,23 @@ export function ReportsManager({
                     <span style={{ color: th.text, fontSize: 12.5 }}>
                       {link.label}
                     </span>
-                    <a
-                      href={link.href}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={buttonAnchorStyle}
-                    >
-                      {t("reports.deepLinks.open")}
-                    </a>
+                    {link.href ? (
+                      <a
+                        href={link.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={buttonAnchorStyle}
+                      >
+                        {t("reports.deepLinks.open")}
+                      </a>
+                    ) : (
+                      <span
+                        title={t("reports.deepLinks.originUnavailable")}
+                        style={{ ...buttonAnchorStyle, opacity: 0.5 }}
+                      >
+                        {t("reports.deepLinks.open")}
+                      </span>
+                    )}
                   </div>
                 ))}
                 <div style={linkItemStyle}>
