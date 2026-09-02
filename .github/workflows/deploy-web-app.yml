@@ -205,8 +205,8 @@ jobs:
           push: true
           tags: |
             ${{ steps.config.outputs.image }}
-          cache-from: type=registry,ref=${{ steps.config.outputs.registry }}/${{ inputs.image_name }}:cache
-          cache-to: type=registry,ref=${{ steps.config.outputs.registry }}/${{ inputs.image_name }}:cache,mode=max
+          cache-from: type=gha,scope=${{ inputs.image_name }}
+          cache-to: type=gha,scope=${{ inputs.image_name }},mode=min
 
       - name: Resolve web runtime env
         id: web_env

@@ -179,8 +179,8 @@ jobs:
           push: true
           tags: |
             ${{ steps.config.outputs.image }}
-          cache-from: type=registry,ref=${{ steps.config.outputs.registry }}/bank-console-web:cache
-          cache-to: type=registry,ref=${{ steps.config.outputs.registry }}/bank-console-web:cache,mode=max
+          cache-from: type=gha,scope=bank-console-web
+          cache-to: type=gha,scope=bank-console-web,mode=min
 
       - name: Resolve web runtime env
         id: web_env

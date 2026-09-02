@@ -179,8 +179,8 @@ jobs:
           push: true
           tags: |
             ${{ steps.config.outputs.image }}
-          cache-from: type=registry,ref=${{ steps.config.outputs.registry }}/fleet-partner-portal-web:cache
-          cache-to: type=registry,ref=${{ steps.config.outputs.registry }}/fleet-partner-portal-web:cache,mode=max
+          cache-from: type=gha,scope=fleet-partner-portal-web
+          cache-to: type=gha,scope=fleet-partner-portal-web,mode=min
 
       - name: Resolve web runtime env
         id: web_env
