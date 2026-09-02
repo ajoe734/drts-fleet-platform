@@ -6,15 +6,14 @@ import { useSearchParams } from "next/navigation";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import { getRuntimeOpsConsoleOrigin } from "@/lib/runtime-config";
 import { t as translateKey } from "@/lib/translations";
 import type { Locale } from "@/lib/translations";
 import type {
-  CrossAppResourceLink,
   CreateDriverMasterCommand,
   CreateVehicleContractCommand,
   DispatchExclusivityRecord,
   DriverDeviceBindingSummary,
-  DriverRegistryRecord,
   EmptyStateEnvelope,
   EmptyReason,
   RefreshTier,
@@ -36,28 +35,23 @@ import {
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
+import {
+  OPS_LINK_ACTIONS,
+  actionLabel,
+  describeActionFailure,
+  dispatchFlagForAction,
+  isSupportedAction,
+  makeAction,
+  resolveCrossAppHref,
+  resolveEmptyReason,
+  vehicleDispatchAction,
+  type ActionFailure,
+  type GovernedDriverRecord,
+  type GovernedVehicleRecord,
+} from "./fleet-governance";
 
 const REFRESH_TIER: RefreshTier = "medium_slow";
 const REFRESH_INTERVAL_MS = 30_000;
-const OPS_CONSOLE_ORIGIN =
-  process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN?.replace(/\/$/, "") ?? "";
-const SUPPORTED_ACTIONS = new Set([
-  "refresh_tab",
-  "create_driver",
-  "create_contract",
-  "update_vehicle_compliance",
-  "activate_driver",
-  "suspend_driver",
-  "retire_driver",
-  "revoke_device_binding",
-  "approve_exclusivity",
-  "reject_exclusivity",
-  "initiate_offboarding",
-  "complete_debranding",
-  "open_ops_vehicle",
-  "open_ops_driver",
-]);
-
 const theme = buildCanvasTheme({
   surface: "platform",
   density: "compact",
@@ -83,19 +77,6 @@ type ActionContext =
     }
   | { kind: "exclusivity"; exclusivity: GovernedExclusivityRecord }
   | { kind: "offboarding"; vehicle: GovernedVehicleRecord };
-
-type GovernedVehicleRecord = VehicleRegistryRecord &
-  Record<string, unknown> & {
-    availableActions?: ResourceActionDescriptor[];
-    offboardingAvailableActions?: ResourceActionDescriptor[];
-    opsLink?: CrossAppResourceLink | null;
-  };
-
-type GovernedDriverRecord = DriverRegistryRecord &
-  Record<string, unknown> & {
-    availableActions?: ResourceActionDescriptor[];
-    opsLink?: CrossAppResourceLink | null;
-  };
 
 type GovernedContractRecord = VehicleContractRecord &
   Record<string, unknown> & {
@@ -244,17 +225,6 @@ const stepperRowStyle: CSSProperties = {
   padding: "6px 0",
 };
 
-function opsHref(route: string) {
-  return OPS_CONSOLE_ORIGIN ? `${OPS_CONSOLE_ORIGIN}${route}` : route;
-}
-
-function resolveCrossAppHref(
-  link: CrossAppResourceLink | null | undefined,
-  fallbackRoute: string,
-) {
-  return link?.route?.trim() ? link.route : opsHref(fallbackRoute);
-}
-
 function formatFreshness(
   locale: Locale,
   lastFetchedAt: string | null,
@@ -283,60 +253,6 @@ function formatFreshness(
   return translateKey("fleetUi.snapshotAt", locale, {
     value: formatDateTime(lastFetchedAt),
   });
-}
-
-function actionLabel(locale: string, action: string) {
-  const en: Record<string, string> = {
-    refresh_tab: "Refresh",
-    create_driver: "Create driver",
-    create_contract: "Create contract",
-    update_vehicle_compliance: "Update compliance",
-    open_ops_vehicle: "ops-console",
-    activate_driver: "Activate",
-    suspend_driver: "Suspend",
-    retire_driver: "Retire",
-    revoke_device_binding: "Revoke binding",
-    approve_exclusivity: "Approve",
-    reject_exclusivity: "Reject",
-    initiate_offboarding: "Initiate",
-    advance_offboarding_step: "Advance",
-    complete_debranding: "Complete debranding",
-    open_ops_driver: "ops-console",
-  };
-  const zh: Record<string, string> = {
-    refresh_tab: "重新整理",
-    create_driver: "新增司機",
-    create_contract: "建立合約",
-    update_vehicle_compliance: "更新合規",
-    open_ops_vehicle: "營運主控台",
-    activate_driver: "啟用",
-    suspend_driver: "暫停",
-    retire_driver: "退役",
-    revoke_device_binding: "撤銷綁定",
-    approve_exclusivity: "核准",
-    reject_exclusivity: "退回",
-    initiate_offboarding: "啟動退場",
-    advance_offboarding_step: "推進",
-    complete_debranding: "完成除標識",
-    open_ops_driver: "營運主控台",
-  };
-  return (locale === "en" ? en : zh)[action] ?? action;
-}
-
-function makeAction(
-  action: string,
-  riskLevel: ResourceActionDescriptor["riskLevel"],
-  enabled = true,
-  requiresReason = false,
-  disabledReasonCode?: string,
-): ResourceActionDescriptor {
-  return {
-    action,
-    enabled,
-    riskLevel,
-    requiresReason,
-    ...(disabledReasonCode ? { disabledReasonCode } : {}),
-  };
 }
 
 function normalizeFleetListEnvelope<T>(
@@ -543,10 +459,6 @@ function openExternal(href: string) {
   window.open(href, "_blank", "noopener,noreferrer");
 }
 
-function isSupportedAction(action: string) {
-  return SUPPORTED_ACTIONS.has(action);
-}
-
 export default function FleetPage() {
   const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
@@ -564,7 +476,17 @@ export default function FleetPage() {
     GovernedExclusivityRecord[]
   >([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * Load failures and action failures are kept apart. They are different
+   * events with different recovery: a load failure means the tab has no data
+   * to show, an action failure means one command was refused while the loaded
+   * data is still valid. Sharing one slot made a rejected row action blank the
+   * whole table as if the fetch had failed.
+   */
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionFailure, setActionFailure] = useState<ActionFailure | null>(
+    null,
+  );
   const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [vehiclesEmptyState, setVehiclesEmptyState] =
@@ -588,9 +510,11 @@ export default function FleetPage() {
     setActiveTab(queryTab);
   }, [queryTab]);
 
+  const opsConsoleOrigin = useMemo(() => getRuntimeOpsConsoleOrigin(), []);
+
   const loadFleet = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     try {
       const [nextVehicles, nextDrivers, nextContracts, nextExclusivities] =
         await Promise.all([
@@ -626,13 +550,34 @@ export default function FleetPage() {
       setExclusivitiesRefreshMetadata(exclusivityState.refreshMetadata);
       setLastFetchedAt(new Date().toISOString());
     } catch (nextError) {
-      setError(
+      setLoadError(
         nextError instanceof Error ? nextError.message : String(nextError),
       );
     } finally {
       setLoading(false);
     }
   }, [client]);
+
+  const resolveOpsHref = useCallback(
+    (context: ActionContext): string | null => {
+      if (context.kind === "vehicle" || context.kind === "offboarding") {
+        return resolveCrossAppHref(
+          context.vehicle.opsLink,
+          `/vehicles/${context.vehicle.vehicleId}`,
+          opsConsoleOrigin,
+        );
+      }
+      if (context.kind === "driver" || context.kind === "binding") {
+        return resolveCrossAppHref(
+          context.driver.opsLink,
+          `/drivers/${context.driver.driverId}`,
+          opsConsoleOrigin,
+        );
+      }
+      return null;
+    },
+    [opsConsoleOrigin],
+  );
 
   useEffect(() => {
     void loadFleet();
@@ -695,7 +640,7 @@ export default function FleetPage() {
                     ? `${descriptor.action}:${context.exclusivity.vehicleId}`
                     : `${descriptor.action}:${context.vehicle.vehicleId}`;
       setBusyAction(key);
-      setError(null);
+      setActionFailure(null);
 
       try {
         switch (descriptor.action) {
@@ -747,14 +692,21 @@ export default function FleetPage() {
             break;
           }
           case "update_vehicle_compliance":
+          case "hold_vehicle_dispatch":
+          case "release_vehicle_dispatch": {
             if (context.kind !== "vehicle") {
               return;
             }
+            const dispatchableFlag = dispatchFlagForAction(
+              descriptor.action,
+              context.vehicle,
+            );
             await client.updateVehicleCompliance(context.vehicle.vehicleId, {
-              dispatchableFlag: !context.vehicle.dispatchableFlag,
+              dispatchableFlag,
             });
             await loadFleet();
             break;
+          }
           case "activate_driver":
           case "suspend_driver":
           case "retire_driver":
@@ -828,39 +780,45 @@ export default function FleetPage() {
             await loadFleet();
             break;
           case "open_ops_vehicle":
-            if (context.kind !== "vehicle") {
+          case "open_ops_driver": {
+            const href = resolveOpsHref(context);
+            if (!href) {
+              setActionFailure({
+                title: translateKey("fleetUi.actionFailedTitle", locale, {
+                  action: actionLabel(locale, descriptor.action),
+                }),
+                message: t("fleetUi.opsConsoleNotConfigured"),
+                reasons: [],
+                traceId: null,
+              });
               return;
             }
-            openExternal(
-              resolveCrossAppHref(
-                context.vehicle.opsLink,
-                `/vehicles/${context.vehicle.vehicleId}`,
-              ),
-            );
+            openExternal(href);
             break;
-          case "open_ops_driver":
-            if (context.kind !== "driver") {
-              return;
-            }
-            openExternal(
-              resolveCrossAppHref(
-                context.driver.opsLink,
-                `/drivers/${context.driver.driverId}`,
-              ),
-            );
-            break;
+          }
           default:
-            setError(t("fleetUi.actionNotWired"));
+            setActionFailure({
+              title: translateKey("fleetUi.actionFailedTitle", locale, {
+                action: actionLabel(locale, descriptor.action),
+              }),
+              message: t("fleetUi.actionNotWired"),
+              reasons: [],
+              traceId: null,
+            });
         }
       } catch (nextError) {
-        setError(
-          nextError instanceof Error ? nextError.message : String(nextError),
+        setActionFailure(
+          describeActionFailure(
+            locale,
+            actionLabel(locale, descriptor.action),
+            nextError,
+          ),
         );
       } finally {
         setBusyAction(null);
       }
     },
-    [client, loadFleet, locale, t, vehicles],
+    [client, loadFleet, locale, resolveOpsHref, t, vehicles],
   );
 
   const tabLabels: Record<TabKey, string> =
@@ -994,10 +952,12 @@ export default function FleetPage() {
     vehiclesEmptyState,
   ]);
 
-  const activeEmptyReason =
-    previewEmptyReason ||
-    envelopeEmptyReason ||
-    (error ? "fetch_failed" : tabCounts[activeTab] === 0 ? "no_data" : null);
+  const activeEmptyReason = resolveEmptyReason({
+    previewEmptyReason,
+    envelopeEmptyReason,
+    loadError,
+    itemCount: tabCounts[activeTab],
+  });
 
   const activePageActions = pageActions[activeTab];
   const emptyConfig = activeEmptyReason
@@ -1032,15 +992,27 @@ export default function FleetPage() {
                         : context.kind === "exclusivity"
                           ? context.exclusivity.vehicleId
                           : context.vehicle.vehicleId;
-            const enabled = descriptor.enabled && supported;
-            const busy = enabled && busyAction === `${descriptor.action}:${keyBase}`;
+            const opsLinkUnavailable =
+              OPS_LINK_ACTIONS.has(descriptor.action) &&
+              !resolveOpsHref(context);
+            const enabled =
+              descriptor.enabled && supported && !opsLinkUnavailable;
+            const busy =
+              enabled && busyAction === `${descriptor.action}:${keyBase}`;
             const title = enabled
               ? undefined
               : !supported
                 ? t("fleetUi.actionNotWired")
-                : descriptor.disabledReasonCode
-                  ? formatPlatformCodeLabel(locale, descriptor.disabledReasonCode)
-                  : t("fleetUi.unavailable");
+                : opsLinkUnavailable
+                  ? t("fleetUi.opsConsoleNotConfigured")
+                  : descriptor.disabledReasonCode
+                    ? t("fleetUi.actionBlockedBy", {
+                        reason: formatPlatformCodeLabel(
+                          locale,
+                          descriptor.disabledReasonCode,
+                        ),
+                      })
+                    : t("fleetUi.unavailable");
             return (
               <span key={`${descriptor.action}-${index}`} title={title}>
                 <CanvasBtn
@@ -1063,7 +1035,7 @@ export default function FleetPage() {
         </div>
       );
     },
-    [busyAction, locale, runAction, t],
+    [busyAction, locale, resolveOpsHref, runAction, t],
   );
 
   const vehicleColumns = useMemo<CanvasTableColumn<GovernedVehicleRecord>[]>(
@@ -1142,7 +1114,7 @@ export default function FleetPage() {
         r: (row) =>
           renderActionButtons(
             row.availableActions ?? [
-              makeAction("update_vehicle_compliance", "medium"),
+              vehicleDispatchAction(row),
               makeAction("open_ops_vehicle", "low"),
             ],
             { kind: "vehicle", vehicle: row },
@@ -1620,13 +1592,13 @@ export default function FleetPage() {
       />
 
       <div style={pageBodyStyle}>
-        {error ? (
+        {loadError ? (
           <CanvasBanner
             theme={theme}
             tone="danger"
             icon="warn"
             title={t("fleetUi.refreshFailedTitle")}
-            body={error}
+            body={loadError}
             actions={
               <CanvasBtn theme={theme} onClick={() => void loadFleet()}>
                 {t("fleetUi.retry")}
@@ -1635,7 +1607,47 @@ export default function FleetPage() {
           />
         ) : null}
 
-        {!error &&
+        {actionFailure ? (
+          <CanvasBanner
+            theme={theme}
+            tone="warn"
+            icon="warn"
+            title={actionFailure.title}
+            body={
+              <div style={{ display: "grid", gap: 4 }}>
+                <span>{actionFailure.message}</span>
+                {actionFailure.reasons.length > 0 ? (
+                  <span>
+                    {t("fleetUi.blockedReasonsLabel")}:{" "}
+                    {actionFailure.reasons.join(" · ")}
+                  </span>
+                ) : null}
+                {actionFailure.traceId ? (
+                  <span
+                    style={{
+                      fontFamily: theme.monoFamily,
+                      fontSize: 11,
+                      color: theme.textMuted,
+                    }}
+                  >
+                    {t("fleetUi.traceLabel")}: {actionFailure.traceId}
+                  </span>
+                ) : null}
+              </div>
+            }
+            actions={
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                onClick={() => setActionFailure(null)}
+              >
+                {t("fleetUi.dismiss")}
+              </CanvasBtn>
+            }
+          />
+        ) : null}
+
+        {!loadError &&
         activeRefreshMetadata &&
         activeRefreshMetadata.dataFreshness !== "fresh" ? (
           <CanvasBanner
