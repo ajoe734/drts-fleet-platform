@@ -232,7 +232,6 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/api:${{ steps.tag.outputs.tag }}
-            ${{ env.REGISTRY }}/api:latest
           cache-from: type=registry,ref=${{ env.REGISTRY }}/api:cache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/api:cache,mode=max
 
@@ -244,7 +243,6 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/migrate:${{ steps.tag.outputs.tag }}
-            ${{ env.REGISTRY }}/migrate:latest
           cache-from: type=registry,ref=${{ env.REGISTRY }}/migrate:cache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/migrate:cache,mode=max
 
@@ -256,7 +254,6 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/platform-admin-web:${{ steps.tag.outputs.tag }}
-            ${{ env.REGISTRY }}/platform-admin-web:latest
           cache-from: type=registry,ref=${{ env.REGISTRY }}/platform-admin-web:cache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/platform-admin-web:cache,mode=max
 
@@ -270,7 +267,6 @@ jobs:
             NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE=${{ env.NEXT_PUBLIC_MAP_TILE_URL_TEMPLATE }}
           tags: |
             ${{ env.REGISTRY }}/ops-console-web:${{ steps.tag.outputs.tag }}
-            ${{ env.REGISTRY }}/ops-console-web:latest
           cache-from: type=registry,ref=${{ env.REGISTRY }}/ops-console-web:cache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/ops-console-web:cache,mode=max
 

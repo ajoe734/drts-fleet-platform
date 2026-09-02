@@ -205,7 +205,6 @@ jobs:
           push: true
           tags: |
             ${{ steps.config.outputs.image }}
-            ${{ steps.config.outputs.registry }}/${{ inputs.image_name }}:latest
           cache-from: type=registry,ref=${{ steps.config.outputs.registry }}/${{ inputs.image_name }}:cache
           cache-to: type=registry,ref=${{ steps.config.outputs.registry }}/${{ inputs.image_name }}:cache,mode=max
 
