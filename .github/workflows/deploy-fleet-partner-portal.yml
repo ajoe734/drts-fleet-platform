@@ -179,7 +179,6 @@ jobs:
           push: true
           tags: |
             ${{ steps.config.outputs.image }}
-            ${{ steps.config.outputs.registry }}/fleet-partner-portal-web:latest
           cache-from: type=registry,ref=${{ steps.config.outputs.registry }}/fleet-partner-portal-web:cache
           cache-to: type=registry,ref=${{ steps.config.outputs.registry }}/fleet-partner-portal-web:cache,mode=max
 

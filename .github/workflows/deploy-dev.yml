@@ -410,7 +410,6 @@ jobs:
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/api:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/api:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/api:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/api:cache,mode=max
 
@@ -422,7 +421,6 @@ jobs:
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/migrate:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/migrate:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/migrate:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/migrate:cache,mode=max
 
@@ -435,7 +433,6 @@ jobs:
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/platform-admin-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/platform-admin-web:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/platform-admin-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/platform-admin-web:cache,mode=max
 
@@ -448,7 +445,6 @@ jobs:
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/ops-console-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/ops-console-web:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/ops-console-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/ops-console-web:cache,mode=max
 
@@ -461,7 +457,6 @@ jobs:
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:cache,mode=max
 
@@ -474,7 +469,6 @@ jobs:
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/tenant-console-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/tenant-console-web:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/tenant-console-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/tenant-console-web:cache,mode=max
 
@@ -487,7 +481,6 @@ jobs:
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/bank-console-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/bank-console-web:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/bank-console-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/bank-console-web:cache,mode=max
 
@@ -500,7 +493,6 @@ jobs:
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/referral-embed-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/referral-embed-web:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/referral-embed-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/referral-embed-web:cache,mode=max
 
@@ -513,7 +505,6 @@ jobs:
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/enterprise-dispatch-web:cache,mode=max
 
@@ -526,7 +517,6 @@ jobs:
           push: true
           tags: |
             ${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:${{ steps.tag.outputs.tag }}
-            ${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:latest
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:cache,mode=max
 
