@@ -211,12 +211,20 @@ export function resolveBankPageSession(
   cookieValue: string | null | undefined,
   requestedBank: string | string[] | null | undefined,
   requestedRole: string | string[] | null | undefined,
-): { bank: BankDemoTenant; role: BankConsoleRole; canReadStatements: boolean } | null {
-  const bankCode = Array.isArray(requestedBank) ? requestedBank[0] : requestedBank;
+): {
+  bank: BankDemoTenant;
+  role: BankConsoleRole;
+  canReadStatements: boolean;
+} | null {
+  const bankCode = Array.isArray(requestedBank)
+    ? requestedBank[0]
+    : requestedBank;
   const role = Array.isArray(requestedRole) ? requestedRole[0] : requestedRole;
   const session = resolveServerSessionRole(cookieValue, role);
   if (
-    !session.isAuthenticated || session.isForged || session.isTampered ||
+    !session.isAuthenticated ||
+    session.isForged ||
+    session.isTampered ||
     !session.bankCode ||
     !Object.hasOwn(BANK_DEMO_TENANTS, session.bankCode) ||
     (bankCode != null && bankCode !== session.bankCode)

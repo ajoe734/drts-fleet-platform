@@ -2,10 +2,7 @@ import type { CSSProperties } from "react";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
-import {
-  resolveLocale,
-  type BankDemoTenant,
-} from "@/lib/demo-tenants";
+import { resolveLocale, type BankDemoTenant } from "@/lib/demo-tenants";
 import { loadBankUsersData } from "@/lib/bank-dev-read-models";
 import {
   BANK_CONSOLE_SESSION_COOKIE,
@@ -44,10 +41,7 @@ function filterLabel(filter: UserFilter, locale: Locale) {
   return t(`users.filter.${filter}`, locale);
 }
 
-function getCount(
-  filter: UserFilter,
-  users: Array<{ status: UserStatus }>,
-) {
+function getCount(filter: UserFilter, users: Array<{ status: UserStatus }>) {
   if (filter === "all") {
     return users.length;
   }
@@ -87,9 +81,14 @@ export default async function UsersPage({
   const params = await searchParams;
   const locale = resolveLocale(params?.locale);
   const cookieStore = await cookies();
-  const cookieValue = cookieStore.get(BANK_CONSOLE_SESSION_COOKIE)?.value ||
+  const cookieValue =
+    cookieStore.get(BANK_CONSOLE_SESSION_COOKIE)?.value ||
     cookieStore.get(BANK_CONSOLE_ROLE_COOKIE)?.value;
-  const authenticated = resolveBankPageSession(cookieValue, params?.bank, params?.role);
+  const authenticated = resolveBankPageSession(
+    cookieValue,
+    params?.bank,
+    params?.role,
+  );
   if (!authenticated) notFound();
   const tenant = authenticated.bank;
   const session = getBankConsoleSession(tenant, locale, authenticated.role);
@@ -201,9 +200,7 @@ export default async function UsersPage({
                         <strong>{user.name}</strong>
                       </div>
                     </td>
-                    <td className="mono-cell">
-                      {user.email}
-                    </td>
+                    <td className="mono-cell">{user.email}</td>
                     <td>
                       <span className={`role-pill role-${user.role}`}>
                         {roleLabel(user.role, locale)}
