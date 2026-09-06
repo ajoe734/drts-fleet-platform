@@ -8,6 +8,7 @@ import type {
   AssistantSelection,
   OpsAssistantContext,
 } from "./context-envelope";
+import { getAssistantAuditDescription } from "./translations";
 
 export interface AssistantNavigationAction {
   kind: "navigate";
@@ -243,10 +244,7 @@ function buildRouteSpecificActions(
         {
           kind: "cross_app",
           label: t("opsAssistant.audit.view", context.locale),
-          description:
-            context.locale === "zh"
-              ? "於新分頁開啟 platform-admin 審計日誌與事件追查"
-              : "Opens platform-admin audit trail in a new tab with event context",
+          description: getAssistantAuditDescription(context.locale),
           link: {
             targetApp: "platform-admin",
             route: context.selectedEntity

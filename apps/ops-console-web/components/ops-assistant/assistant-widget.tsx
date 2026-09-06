@@ -68,7 +68,6 @@ type ConversationEntry = {
 };
 
 const STORAGE_KEY = "ops-console.assistant-widget.v1";
-const WIDGET_MIN_WIDTH = 320;
 const WIDGET_MIN_HEIGHT = 240;
 const WIDGET_MAX_WIDTH = 560;
 const WIDGET_MAX_HEIGHT = 720;

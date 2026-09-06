@@ -180,11 +180,9 @@ describe("SR-OPS-SHELL-001: Cross-App Platform Admin & Audit Link Resolution", (
 });
 
 describe("SR-OPS-SHELL-001: Assistant Widget Obstruction & Viewport Clamping", () => {
-  const WIDGET_MIN_WIDTH = 320;
   const WIDGET_MIN_HEIGHT = 240;
   const WIDGET_MAX_WIDTH = 560;
   const WIDGET_MAX_HEIGHT = 720;
-  const HEADER_HEIGHT = 48;
   const MINIMIZED_HEIGHT = 64;
   const EDGE_GAP = 20;
 

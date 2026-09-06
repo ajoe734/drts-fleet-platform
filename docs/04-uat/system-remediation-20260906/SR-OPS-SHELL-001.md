@@ -82,6 +82,11 @@
   - Keyboard focus return on close/minimize.
   - `OpsShell` link capture intercepting relative audit links and converting to absolute platform-admin URLs.
 
+### 5. `apps/ops-console-web/components/ops-assistant/translations.ts`
+- Added localized translations module for Ops Assistant cross-app action descriptions to satisfy `i18n-guard.mjs`.
+- Eliminated inline locale conditional ternary from `assistant-actions.ts`.
+- Removed unused variables (`WIDGET_MIN_WIDTH`, `HEADER_HEIGHT`) in `assistant-widget.tsx` and unit tests.
+
 ---
 
 ## 3. Verification & Test Evidence
@@ -94,12 +99,12 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/
 
  RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001
 
- ✓ tests/unit/system-remediation/sr-ops-shell-001/ops-shell-and-assistant.test.ts (19 tests) 29ms
+ ✓ tests/unit/system-remediation/sr-ops-shell-001/ops-shell-and-assistant.test.ts (19 tests) 31ms
 
  Test Files  1 passed (1)
       Tests  19 passed (19)
-   Start at  06:24:15
-   Duration  842ms
+   Start at  06:35:01
+   Duration  900ms
 ```
 
 #### 2. Next.js Typecheck
@@ -113,7 +118,31 @@ Generating route types...
 ✓ Types generated successfully
 ```
 
-#### 3. Git Diff Formatting
+#### 3. Root ESLint
+```bash
+$ pnpm lint:root
+
+> drts-fleet-platform@0.1.0 lint:root /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001
+> eslint eslint.config.mjs playwright*.config.ts vitest.config.ts tests --max-warnings=0
+(clean, exit code 0)
+```
+
+#### 4. Ops Console Package Lint
+```bash
+$ pnpm --filter @drts/ops-console-web lint
+
+> @drts/ops-console-web@0.1.0 lint /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001/apps/ops-console-web
+> eslint . --max-warnings=0
+(clean, exit code 0)
+```
+
+#### 5. i18n Guard
+```bash
+$ node tools/ci/i18n-guard.mjs
+i18n-guard: OK (517 files scanned across 10 apps, 52 exemption(s) from i18n-guard-baseline.json)
+```
+
+#### 6. Git Diff Formatting
 ```bash
 $ git diff --check
 (clean, no trailing whitespace or format issues)
