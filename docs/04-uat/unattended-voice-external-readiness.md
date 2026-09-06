@@ -291,6 +291,12 @@
 
 > **本輪複查結論：** 機器真相零變化，7 項 `required_acceptance` 仍全數為 Blocker。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄**（依既有記憶教訓：`progress` 在 `acceptance` 狀態任務上會清除候選生命週期證據）。已連續 32 輪 acceptance_ready_dispatch 喚醒均為零 delta 或與主題無關之 delta；重申建議 supervisor 將此任務改為「證據變更事件觸發」而非固定輪詢式 re-dispatch。
 
+### 2.30 Acceptance 階段複查記錄（2026-09-06T current UTC，Claude2，第 33 次連續 acceptance_ready_dispatch 喚醒，origin/dev 有新提交但與主題無關）
+
+本輪 `git fetch origin` 後發現 `origin/dev` **首次自 round 30 (§2.27) 以來前進**：由 `7dccddaba7d51dca8d56da01d5320d9f22f8b68f` 前進至 `69c519702047862212bc0e4890350e6b58917062`，新增 2 筆提交：`69c519702`（`[ReviewBus] UV-EXEC-007 Session 狀態機、有序事件與持久化控制權 (#1694)`，語音 session 狀態機程式碼實作）與 `b32ab8bad`（`[ReviewBus] SR-BANK-003 銀行證據摘要與簽章可獨立驗證 (#1688)`）。經 `git show --stat` 逐一核對兩筆提交內容，均為既有已核准任務的程式碼實作/修正（session 狀態機、銀行證據簽章），**不涉及 CTI/TWM/candidate 供應商帳號、費率、資料條件等本任務所需外部證據**，判定與本任務主題無關，非新證據來源。`git merge-base --is-ancestor` 重新確認 `merge_sha`=`2093cf7e3` 仍為新 `origin/dev` HEAD 之祖先。重新執行 `gh secret list`／`gh variable list`，計數仍為 11/97；CTI/TWM/Voice/Carrier/DTMF/Twilio/SIP/ASR/TTS/Phone/PSTN/Candidate 關鍵字比對仍為 0 筆匹配。`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`）與 `status`=`acceptance` 均未變化。第 6–8 節七項 `required_acceptance` 逐一核對仍維持 Blocker 標註與負責角色，無虛報通過。本地分支 `claude2/uv-exec-027` 工作樹乾淨。
+
+> **本輪複查結論：** `origin/dev` 有真實新提交，但經逐筆審查與本任務所需外部供應商證據無關，故判定仍為零 delta（就本任務範疇而言）。7 項 `required_acceptance` 仍全數為 Blocker。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄**。已連續 33 輪 acceptance_ready_dispatch 喚醒均為零 delta 或與主題無關之 delta；重申建議 supervisor 將此任務改為「證據變更事件觸發」而非固定輪詢式 re-dispatch，以避免持續喚醒消耗 worker 資源卻無法產生新證據。
+
 ---
 
 ## 3. CTI 準備度盤點 (CTI Capability Readiness)
