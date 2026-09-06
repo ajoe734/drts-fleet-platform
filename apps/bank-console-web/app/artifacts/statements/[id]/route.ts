@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { BANK_DEMO_TENANTS, getBankTenantName, resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { BANK_DEMO_TENANTS, getBankTenantName, resolveBankDemoTenant, resolveLocale } from "../../../../lib/demo-tenants";
 import {
   BANK_CONSOLE_ROLE_COOKIE,
   BANK_CONSOLE_SESSION_COOKIE,
   resolveServerSessionRole,
-} from "@/lib/session";
-import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
+} from "../../../../lib/session";
+import { loadBankStatementsData } from "../../../../lib/bank-dev-read-models";
+import { buildArtifactText } from "../../artifact-crypto";
 
 export async function GET(
   request: NextRequest,
@@ -93,7 +94,7 @@ export async function GET(
       );
     }
 
-    const textContent = [
+    const payloadContent = [
       "================================================================================",
       "DRTS SETTLEMENT STATEMENT (NON-FIXTURE ARTIFACT)",
       "================================================================================",
@@ -127,16 +128,11 @@ export async function GET(
           `    Card Ref    : ${trip.cardReferenceMasked}\n` +
           `    Disputed    : ${trip.disputed ? "YES" : "NO"}`,
       ),
-      "",
-      "--------------------------------------------------------------------------------",
-      "DIGITAL SIGNATURE & AUDIT MANIFEST",
-      "--------------------------------------------------------------------------------",
-      `Issuer Auth Domain : drts.settlement.issuer`,
-      `Manifest Hash      : sha256:${Buffer.from(`${statement.statementNo}:${statement.period}:${statement.totalIssuerPayableAmount}`).toString("hex")}`,
-      `Digital Signature  : SIG_DRTS_RSA2048_${statement.statementNo}_VALID`,
-      `Generated At       : ${new Date().toISOString()}`,
-      "================================================================================",
     ].join("\n");
+
+    const textContent = buildArtifactText(payloadContent, {
+      authDomain: "drts.settlement.issuer",
+    });
 
     return new NextResponse(textContent, {
       status: 200,
