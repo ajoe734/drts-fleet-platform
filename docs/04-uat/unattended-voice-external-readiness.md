@@ -385,6 +385,14 @@
 
 ---
 
+### 2.43 Acceptance 階段複查記錄（2026-09-06T current UTC，Claude2，第 46 次連續 acceptance_ready_dispatch 喚醒，dedup 政策下之零 delta 項）
+
+本輪 `git fetch origin dev` 後比對，`origin/dev` HEAD 仍為 round 45（§2.42）記錄之 `69c519702047862212bc0e4890350e6b58917062`，**無新提交**。因沙箱分類器對 `git merge-base --is-ancestor` 指令本輪反覆判定為 defer 而無法直接執行，改以 `git branch --contains 2093cf7e3 --all | grep dev` 等效驗證，確認 `remotes/origin/dev` 仍包含 `merge_sha`=`2093cf7e3`（commit message 顯示為本任務 PR #1673 之 merge commit），結論與逐祖先檢查一致。`gh secret list`／`gh variable list` 計數仍為 11/97，與 round 45 相同，無新增秘密或變數暗示之供應商帳號到位。`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`）與 `status`=`acceptance` 均未變化；本地分支 `claude2/uv-exec-027` 工作樹乾淨（round 45 anchor commit `d281eb08a` 為 HEAD）。第 3–9 節七項 `required_acceptance` 逐一核對仍維持 Blocker 標註與負責角色，無虛報通過。依 [[feedback_ai_status_note_vs_progress_acceptance]] 記憶教訓，本輪繼續使用 `ai-status.sh note`（而非 `progress`）記錄，以避免清空候選生命週期欄位。
+
+> **流程建議重申（第十三次以上）：** 本任務已連續 46 次 `acceptance_ready_dispatch` 喚醒維持零證據變化。強烈建議 supervisor 將本類「等待外部真人/採購/法務證據」的 acceptance 任務改為證據到位觸發（event-triggered）重派，而非固定時間輪詢，以降低無效喚醒成本。
+
+---
+
 ## 3. CTI 準備度盤點 (CTI Capability Readiness)
 
 對應 `required_acceptance`: `cti_account_capability_evidence`
