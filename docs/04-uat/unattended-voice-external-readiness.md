@@ -11,7 +11,8 @@
 - Decision Ref: `docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md`
 - Functional Requirements (FRs): `UV-FR-001`, `UV-FR-003`, `UV-FR-007`, `UV-FR-010`, `UV-FR-011`, `UV-FR-018`, `UV-FR-021`, `UV-FR-024`, `UV-FR-026`, `UV-FR-027`, `UV-FR-030`, `UV-FR-031`, `UV-FR-032`
 - Acceptance Criteria (ACs): `UV-AC-002`, `UV-AC-026`, `UV-AC-030`, `UV-AC-033`
-- Last Update: `2026-09-06T04:47:00Z`
+- Last Update: `2026-09-06T08:32:29Z`
+- Re-Verification: `2026-09-06T08:32:29Z` (acceptance-phase唯讀複查，Gemini2)
 
 ---
 
@@ -41,6 +42,16 @@
    - 查核結果：儲存庫僅配置基礎設施 WIF 金鑰（如 `BUILD_WIF_*`, `DEV_WIF_*`, `PROD_WIF_*`, `STAGING_WIF_*`, `CORE_REPO_PAT`），無 CTI 帳號、TWM 憑證或 PSTN 測試號碼。
 3. **Repository Variables 查核：**
    - 僅包含 GCP Project ID 與前端應用 URL，無語音服務端點或電話路由變數。
+
+### 2.3 Acceptance 階段複查記錄 (Acceptance-Phase Re-Verification 2026-09-06T08:32Z)
+
+| 查核項目 | 執行命令 | 查核結果 | 時間戳 |
+|---|---|---|---|
+| 行程環境語音憑證 | `env \| grep -E '^(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|OPENAI\|GEMINI_LIVE)'` | **[CONFIRMED] No CTI/TWM/Voice credentials in process environment** | 2026-09-06T08:33:18Z |
+| GitHub Secrets 語音憑證 | `gh secret list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED] No CTI/TWM/Voice secrets in GitHub repository** | 2026-09-06T08:33:23Z |
+| GitHub Variables 語音端點 | `gh variable list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED] No CTI/TWM/Voice variables in GitHub repository** | 2026-09-06T08:33:28Z |
+
+> **複查結論：** 三項唯讀查核均無新增語音/CTI/TWM 憑證，接受階段外部閘門阻礙狀態未有改變。7 項 `required_acceptance` 仍需外部角色（技術/採購/營運/法務）提供實體憑證方能解鎖。
 
 ---
 
