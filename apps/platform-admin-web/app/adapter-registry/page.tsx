@@ -497,7 +497,7 @@ export default function AdapterRegistryPage() {
   );
 
   const showUnavailableState =
-    !loading && Boolean(error) && adapters.length === 0;
+    !loading && error !== null && adapters.length === 0;
 
   async function toggleEnabled(adapter: PlatformAdapter) {
     const nextEnabled = !adapter.config.isEnabled;
