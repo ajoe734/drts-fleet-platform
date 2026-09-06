@@ -285,6 +285,12 @@
 
 > **本輪複查結論：** 機器真相零變化，7 項 `required_acceptance` 仍全數為 Blocker（`cti_account_capability_evidence`、`twm_account_model_voice_quota_evidence`、`native_candidate_account_evidence`、`line_product_service_area_evidence`、`human_queue_callback_sla_evidence`、`provider_data_terms_evidence`、`rate_card_capacity_evidence`），全部待供應商/電信/candidate 帳號等真實外部證據，超出本唯讀 worker 授權範圍。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄。** 已連續 31 輪 acceptance_ready_dispatch 喚醒均為零 delta 或與主題無關之 delta；再次建議 supervisor 將此任務改為「證據變更事件觸發」而非固定輪詢式 re-dispatch，以避免持續喚醒消耗 worker 資源卻無法產生新證據。
 
+### 2.29 Acceptance 階段複查記錄（2026-09-06T current UTC，Claude2，第 32 次連續 acceptance_ready_dispatch 喚醒，dedup 政策下之零 delta 項）
+
+依 §2.22 dedup 政策，本輪 `git fetch origin` 後比對 `origin/dev` 仍為 round 31 §2.28 記錄之 `7dccddaba7d51dca8d56da01d5320d9f22f8b68f`（`git merge-base --is-ancestor` 重新確認 `merge_sha`=`2093cf7e3` 仍為其祖先），**無新提交**。重新執行 `gh secret list`／`gh variable list`，計數仍為 11/97；CTI/TWM/Voice/Carrier/DTMF/Twilio/SIP/ASR/TTS/Phone/PSTN/Candidate 關鍵字比對仍為 0 筆匹配；`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`）與 `status`=`acceptance` 均未變化。第 6–8 節七項 `required_acceptance` 逐一核對仍維持 Blocker 標註與負責角色，無虛報通過。本地分支 `claude2/uv-exec-027` 工作樹乾淨。
+
+> **本輪複查結論：** 機器真相零變化，7 項 `required_acceptance` 仍全數為 Blocker。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄**（依既有記憶教訓：`progress` 在 `acceptance` 狀態任務上會清除候選生命週期證據）。已連續 32 輪 acceptance_ready_dispatch 喚醒均為零 delta 或與主題無關之 delta；重申建議 supervisor 將此任務改為「證據變更事件觸發」而非固定輪詢式 re-dispatch。
+
 ---
 
 ## 3. CTI 準備度盤點 (CTI Capability Readiness)
