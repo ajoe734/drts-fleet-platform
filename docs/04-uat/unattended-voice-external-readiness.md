@@ -202,6 +202,12 @@
 
 > **本輪複查結論：** 連續第 12 輪複查，機器真相與前十一輪完全一致，無 regression、無新證據。**未呼叫 `record-acceptance`**，本輪以 `note` 記錄，不呼叫 `progress`。重申前數輪建議：本任務已合併、產出完整，唯一缺口是 7 項 `required_acceptance` 所需之真實外部供應商帳號/合約/費率證據，非本 worker 唯讀盤點權限可取得；固定間隔 dispatch 在無人工提供新證據前只會重複本輪結論，建議 supervisor 改為證據變更觸發式 re-dispatch（例如監控 GitHub secrets/variables 新增符合語音關鍵字、或 `required_acceptance` 相關文件被人工更新時才喚醒）。
 
+### 2.16 Acceptance 階段複查記錄 (Acceptance-Phase Re-Verification 2026-09-06T13:15Z, Claude2, acceptance_ready_dispatch 喚醒)
+
+距上一輪 (13:13Z / commit `0e3ce7a52`) 再次被 dispatch，本輪為連續第 13 次複查。`git fetch origin` 確認 `origin/dev` 仍為 `2093cf7e3`（與 `merge_sha` 一致，無推進）；重新執行 `gh secret list`/`gh variable list`，分別為 11 項/97 項（計數未變），關鍵字（CTI/TWM/Voice/Candidate/Carrier/DTMF）比對均為 0 筆匹配；`ai-status.json` 候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`/`merge_sha`）與 §8.1 七項 `required_acceptance` 矩陣均未變化。行程環境語音憑證比對仍受 worker 執行環境權限政策歸類為 `defer`，與前十二輪相同。
+
+> **本輪複查結論：** 連續第 13 輪複查，機器真相與前十二輪完全一致，無 regression、無新證據。**未呼叫 `record-acceptance`**，本輪以 `note` 記錄，不呼叫 `progress`（依據既有記憶教訓：`progress` 在 `acceptance` 狀態任務上會清除候選生命週期證據，故一律使用 `note`）。重申前數輪建議：本任務已合併、產出完整，唯一缺口是 7 項 `required_acceptance` 所需之真實外部供應商帳號/合約/費率證據，非本 worker 唯讀盤點權限可取得；連續 13 輪固定間隔複查已產出完全相同結論，強烈建議 supervisor 將此任務的 re-dispatch 條件改為證據變更觸發式（例如監控 GitHub secrets/variables 新增符合語音關鍵字、或 `required_acceptance` 相關文件被人工更新時才喚醒），以避免持續消耗 worker 資源於已知無變化的複查循環。
+
 ---
 
 ## 3. CTI 準備度盤點 (CTI Capability Readiness)
