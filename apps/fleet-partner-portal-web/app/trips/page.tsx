@@ -113,6 +113,7 @@ export default async function FleetTripsPage({
   const exportQuery = new URLSearchParams();
   if (currentSvc !== "all") exportQuery.set("svc", currentSvc);
   if (params.period) exportQuery.set("period", params.period);
+  if (params.q) exportQuery.set("q", params.q);
   const exportHref = `/trips/export?${exportQuery.toString()}`;
 
   return (
@@ -155,6 +156,45 @@ export default async function FleetTripsPage({
             body={t("data.fixtureNotice", locale)}
           />
         ) : null}
+        <form
+          method="GET"
+          action="/trips"
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          {currentSvc !== "all" ? (
+            <input type="hidden" name="svc" value={currentSvc} />
+          ) : null}
+          {params.period ? (
+            <input type="hidden" name="period" value={params.period} />
+          ) : null}
+          <input
+            type="search"
+            name="q"
+            defaultValue={params.q ?? ""}
+            placeholder={t("common.search", locale)}
+            aria-label={t("common.search", locale)}
+            style={{
+              flex: 1,
+              maxWidth: 320,
+              padding: "6px 12px",
+              borderRadius: 7,
+              border: `1px solid ${theme.border}`,
+              background: theme.bgRaised,
+              color: theme.text,
+              fontSize: 12.5,
+              fontFamily: theme.fontFamily,
+              boxSizing: "border-box",
+              outline: "none",
+            }}
+          />
+          <CanvasBtn type="submit" theme={theme} size="sm" icon="search">
+            {t("common.filter", locale)}
+          </CanvasBtn>
+        </form>
         <CanvasCard theme={theme} padding={0}>
           {filteredRows.length > 0 ? (
             <TripsTable rows={filteredRows} />

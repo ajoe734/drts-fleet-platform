@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
   const period = searchParams.get("period") || undefined;
   const svcFilter = searchParams.get("svc") || undefined;
   const statusFilter = searchParams.get("status") || undefined;
+  const qFilter = searchParams.get("q")?.toLowerCase() || undefined;
 
   if (exportType === "summary" || exportType === "overview") {
     try {
@@ -89,6 +90,15 @@ export async function GET(request: NextRequest) {
       }
       if (statusFilter && statusFilter !== "all" && r.status !== statusFilter) {
         return false;
+      }
+      if (qFilter) {
+        const match =
+          r.id.toLowerCase().includes(qFilter) ||
+          (r.driver || "").toLowerCase().includes(qFilter) ||
+          (r.pickup || "").toLowerCase().includes(qFilter);
+        if (!match) {
+          return false;
+        }
       }
       return true;
     });
