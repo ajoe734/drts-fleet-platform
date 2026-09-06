@@ -68,7 +68,7 @@ not implemented capabilities or accepted procurement decisions.
 
 - [Unattended Voice Booking SA](02-architecture/phase1-unattended-voice-booking-sa-20260906.md)
   Product flows, 32 requirements, language and service boundaries, human fallback,
-  metrics, vendor comparison and 44 acceptance scenarios.
+  metrics, vendor comparison and 48 acceptance scenarios.
 - [Unattended Voice Booking SD](02-architecture/phase1-unattended-voice-booking-sd-20260906.md)
   Telephony and speech architecture, confirmation evidence, durable transactions,
   APIs/data, recovery, operations, implementation packages and rollout validation.

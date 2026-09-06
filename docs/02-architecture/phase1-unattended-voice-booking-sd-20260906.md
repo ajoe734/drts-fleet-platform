@@ -14,7 +14,7 @@
 3. 訂單、派遣、取消、費用與 ETA 的真值由既有領域模組提供。LLM 不直接寫資料庫，也不能替代領域驗證。
 4. 無供應商 confidence 欄位時使用 `null`，不得把 `final=1`、LLM 自評或文字流暢度轉成辨識可信分數。
 5. 新建訂單只對已確認且仍有效的草稿版本執行一次。斷線、重試、雙 worker、真人接手都不能造成第二張單。
-6. `order accepted`、`dispatch requested`、`driver assigned`、`ETA available` 是不同事實；播報內容必須對應已取得的後端結果。
+6. `order accepted`、`dispatch requested`、`offered`、`driver accepted`、`ETA available` 是不同事實；播報內容必須對應已取得的後端結果。
 7. 不借用真人 `agentId`，不放寬現有 ops assistant 的人工確認邊界。新增受限的機器行為身分與語音交易入口。
 8. 原始雙向通話錄音由話務／錄音層負責；TWM `saveResult`、ASR 逐字稿及 LLM 摘要都不能取代完整錄音。
 9. 同一通電話只有一個可執行 mutation 的控制者。真人接通後，AI 停止主動發話及交易；只保留被明確開啟的旁路輔助。
@@ -128,7 +128,7 @@ flowchart LR
 
 ### 4.2 機器身分
 
-本版採「既有 workload service principal＋第二階段 session capability」：IAM 的機器 principal 保留 `actorType=system`、`principalKind=service`；新增的訂單業務 actor 使用 `bookingActor.type=voice_agent`。兩者有明確映射，不把 `voice_agent` 直接送入尚未擴充的通用 JWT actor enum，也不冒充真人。接手後使用認證取得的真實 `ops_user`。
+本版採「既有 workload service principal＋第二階段 session capability」：IAM 的機器 principal 保留 `actorType=system`、`principalType=service`；新增的訂單業務 actor 使用 `bookingActor.type=voice_agent`。兩者有明確映射，不把 `voice_agent` 直接送入尚未擴充的通用 JWT actor enum，也不冒充真人。接手後使用認證取得的真實 `ops_user`。
 
 由既有 workload identity 驗證並 exchange 出服務身分，再由新的 voice capability issuer 發出短效、限定 session 的 token。專用 verifier 檢查簽章／issuer／`aud=voice-tool-gateway`、servicePrincipalId、voiceSessionId、resourceScopeId、routeProfileVersion、leaseEpoch、expiry 與 scopes；scope／epoch 仍回 DB 核對。不得只在 body 放這些欄位，也不得假設既有 `JwtAuthService` 會保留未知 claims。
 
@@ -183,9 +183,21 @@ Executor 以服務身分讀同交易封存的 command proof（principal/scope、
 
 每通 session 由單一 worker lease 處理；DB compare-and-swap 更新 `sessionVersion`。媒體事件攜帶 `mediaEpoch`、`sequence`，ASR 事件另有 provider session、segment、revision。相同事件 dedup，舊 epoch final 不得覆蓋新連線內容。
 
-偵測乘客開始說話時先增加 `inputEpoch`、停止／清除 TTS 播放、標記實際播到的位置，再解析語句。若處於 `confirming` 且回讀被打斷，該次回讀不算完整播放；對「嗯／對」不得建立確認。新命令受理前比較 `leaseEpoch`、`draftVersion`、`inputEpoch` 與當前 owner；任一改變則拒絕舊請求。已持久化受理的命令由 §7 的 executor／reconciler 接續，真人交接或媒體結束不能把它當作未送出。提交前再次檢查新更正是否使確認失效。
+偵測乘客開始說話時，media worker 本地立即使 playback generation 失效、clear outbound buffer、best-effort abort 合成，不等待 API、DB 鎖、LLM 或合成取消 ACK。隨後把控制事件按序送 API 持久化 inputEpoch；若 CTI 連線亦失效，停播結果標 unknown，不能假稱已停止。若處於 `confirming` 且回讀被打斷，該次回讀不算完整播放；對「嗯／對」不得建立確認。新命令受理前比較 `leaseEpoch`、`draftVersion`、`inputEpoch` 與當前 owner；任一改變則拒絕舊請求。已持久化受理的命令由 §7 的 executor／reconciler 接續，真人交接或媒體結束不能把它當作未送出。提交前再次檢查新更正是否使確認失效。
 
 資料庫 transaction 一旦提交，稍後更正只能走該既有 order 的修改／取消政策，不能假裝原提交尚未發生。若更正與提交併發，以持久化事件及 commit receipt 的順序判定，並明確向乘客說明狀態。
+
+### 5.4 控制事件順序、媒體權與提交邊界
+
+- 對 speech-start、clear、playback terminal、DTMF、語言／owner切換建立獨立 `controlSequence`，由當前媒體 control stream 單調編號；frame 不逐個寫 DB。API 保存 `lastAppliedControlSequence` 並按連續來源順序套用；跨 HTTP 到達次序不是因果順序。缺號時 buffer／補送，逾期失效未提交確認，不得跳號處理後面的肯定。
+- confirmation 與 booking command 綁 `controlCutoff={mediaEpoch,controlSequence}`，由可信 worker／API 填入而非模型決定。相同 session 鎖內驗證截止點前必要事件全數套用、沒有未解析輸入；worker 重啟／換手須恢復此 waterline。它不是 TWM frame ACK，也不依賴 ASR final 代表整個媒體已處理。
+- 新 speech-start 使 `pendingInput=true`，executor 等待解析結果；handoff coordinator 可記輸入及使舊確認安全失效，無新建單權。實質更正／撤回才改 draftVersion／confirmation；明確無關且已解析的回撥同意、等候回答、寒暄只更新 `lastResolvedInputEpoch`，不改 accepted snapshot。不可解析／來源不明的新語句持續阻擋 commit，直到重新澄清、重新回讀確認或轉例外；只有明確無關的已解析語句才能續用原 accepted proof，不以「可能無關」放行。
+- 即時停播獨立於事件落地。API 不可用時禁止新確認／受理，保留有限事件佇列；恢復先同步缺漏事件並查原 receipt。已 accepted 命令按其封存 proof 對帳，純 ASR 斷線不自行改寫已受理內容；診斷重播隔離在不能產生同意的 stream。
+- 保證範圍是提交 cut-off 前已被 media worker 觀測並提交的輸入；不能承諾跨網路瞬時知道尚未送達的口述。服務端已落地而未解析的輸入會阻止執行；在已確立 commit 之後才到達的更正須先查原單，依修改／取消政策處理。
+- 建立唯一 media output owner／epoch。切 handoff 前失效舊 generation、由同一 sink clear 舊 buffer，再以新 epoch 允許 coordinator 播等待詞；真人 bridge 接通前撤銷 coordinator 並清等待音。media-access issuer 同時驗 principal role、DB owner、scope；舊 AI 不能只拿新 epoch 申請 handoff／human 播音權。sink 對每批 chunk 做 fencing，短效 token 到期不是唯一撤銷機制。
+- 無法確認舊音訊已隔離時維持 handoff pending／失敗路徑，不宣稱真人已安全接手。限制 outbound buffer 的最大音訊時間，避免 worker 消失後仍長時間播放；具體值需 CTI 測試定版。
+
+所有活躍 dialogState 均可因真實 call.ended 進 closed；closed 僅停止新乘客指令，已接受的 booking／callback command 及必要對帳續作。
 
 ## 6. 草稿、地址與乘客確認
 
@@ -217,6 +229,7 @@ Executor 以服務身分讀同交易封存的 command proof（principal/scope、
     "finalEventId": "uuid"
   },
   "inputEpoch": 12,
+  "controlCutoff": { "mediaEpoch": 2, "controlSequence": 98 },
   "leaseEpoch": 3,
   "recordingCheckpointId": "uuid",
   "confirmedAt": "2026-09-06T02:00:00Z",
@@ -261,7 +274,7 @@ Executor 以服務身分讀同交易封存的 command proof（principal/scope、
 
 新增 typed `BookingRequirements`，至少含 passengerCount、luggageCount／規格、requiredCapabilities、乘客及聯絡角色。映射必須貫穿 `draft snapshot → owned order → candidate filter → assignment 前重驗 → driver task`，包含 policyVersion 與 validation reference。既有普通電話 command／order 尚無完整欄位，不能只存草稿或 notes。第一版只開通已具領域強制檢查的需求；例如五人、輪椅／兒童座椅或超規行李沒有可靠車型能力資料時，直接轉例外，不承諾後派普通車。
 
-代叫保存不可覆寫的 assertedCallerPhone、bookerContact、passengerContact、driverContact 及 callbackContact（角色／電話／同意 evidence）。改造舊 `linkOrderToCallSession`，不能再用 passenger.phone 覆寫原 callerPhone；callback 取乘客此次同意的 callbackContact，不盲目複製 session.callerPhone。voice-aware call 更新採欄位更新與版本 CAS。
+原始 assertedCallerPhone 在適用保存期間內不可覆寫，到期依 §9.2 處理；bookerContact、passengerContact、driverContact 與 callbackContact 採不可變 revision 歷史（角色／電話／同意 evidence），允許新 revision 取代有效值並使相關確認失效。已建 callback 綁定 contact／consent snapshot，變更回撥對象須新同意及受控更新，不能靜默改電話。改造舊 `linkOrderToCallSession`，不能再用 passenger.phone 覆寫原 callerPhone；callback 取乘客此次同意的 callbackContact，不盲目複製 session.callerPhone。voice-aware call 更新採欄位更新與版本 CAS。
 
 ## 7. 交易一致性與未知結果
 
@@ -277,9 +290,9 @@ Executor 以服務身分讀同交易封存的 command proof（principal/scope、
 4. **執行訂單交易：**executor 在同一 PostgreSQL transaction 內按固定順序鎖定 session、intent、confirmation 及 pending receipt；若已有終態直接回放。重驗最新業務資格、有效期限及新輸入／草稿更正，寫 owned order、可信 actor、call-order 關聯、確認 snapshot reference；消耗 confirmation，將 receipt 更新為 `succeeded` 並寫正式 orderId，同時新增派遣／結果通知工作及 audit。全部完成後 commit。
 5. **提交後播報：**只有第 4 步 durable commit 成功才回訂單已建立。媒體程序不以記憶體結果或第 3 步 accepted 提前播報。
 
-所有 mutation 共用固定鎖順序：`session → intent → confirmation → command receipt → order`；不存在的 receipt 由已鎖 intent 與唯一鍵仲裁。受理、executor、更正、handoff 及人工接手建單都必須遵守；只更新 inputEpoch 的 speech-start 可只鎖 session。executor 持有 session 鎖直到 order transaction commit，讓 inputEpoch／draftVersion 的最後檢查與寫單之間不能插入已處理的新更正。不能只靠程式先讀一次 epoch。
+所有 mutation 共用固定鎖順序：`session → intent → confirmation → command receipt → order`；不存在的 receipt 由已鎖 intent 與唯一鍵仲裁。受理、executor、更正、handoff 及人工接手建單都必須遵守；只更新 inputEpoch 的 speech-start 可只鎖 session。executor 持有 session 鎖直到 order transaction commit，驗證 controlCutoff、pendingInput、已解析輸入及 draftVersion 後才寫單。外部地圖／LLM／TTS／object download 和長運算在 transaction 外完成，再驗證 refs／版本；DB transaction 設 lock／statement deadline。媒體停播不等待此鎖，不能只靠程式先讀一次 epoch。
 
-第 3 步是命令受理的持久化界線。其後單純掛斷、worker 換手或開始交接不撤銷命令，授權由已封存的 command proof 限定給可信 executor；不得把舊 worker 的 token 換成一般管理權限。乘客在 order commit 前提出新的實質更正，則更新 input/draft epoch 並使尚未消耗的確認失效；executor 與更正寫入採同一鎖定順序，確保舊地址不會在已處理的更正之後提交。commit 後才抵達的更正走既有單的例外處理。
+第 3 步是命令受理的持久化界線。其後單純掛斷、worker 換手或開始交接不撤銷命令，授權由已封存的 command proof 限定給可信 executor；不得把舊 worker 的 token 換成一般管理權限。在 §5.4 提交邊界前已套用新的實質更正，則更新 input/draft epoch 並使尚未消耗的確認失效；executor 與更正寫入採同一鎖定順序，確保舊地址不會在已處理的更正之後提交。commit 後才抵達的更正走既有單的例外處理。
 
 第 4 步若確認過期、被更正或業務明確拒絕，須在查明沒有 order 後，以 transaction 將 pending receipt 寫為 `rejected` 並保存原因；同一已受理 action 不改 hash、不重新啟用。初版此類終態轉人工／結束；不得直接回 collecting 自動建另一單。資料庫／網路不明錯誤保留 pending，不能誤標業務拒絕。
 
@@ -303,7 +316,7 @@ sequenceDiagram
     participant D as 語音協調器
     participant G as 工具閘道
     participant O as 訂單模組及 DB
-    participant W as 持久化派遣 Worker
+    participant W as API內持久化派遣執行器
     P->>D: 回讀後明確確認
     D->>G: confirmationId 與固定 actionKey
     G->>O: 持久化 pending command 與執行工作
@@ -362,6 +375,12 @@ voice aggregate 以 DB row 與單調 `aggregateVersion` 為權威；commit 前�
 4. 司機拒絕、接受逾時或資格改變，依既有政策關閉舊 offer／保留、建立下一 attempt；候選耗盡交無車／delayed／manual policy。重試次數、總等候與回覆策略版本化，掛斷後亦有 runner 處理。
 5. 每階段有獨立 operation key：`order + request_dispatch`、`job + round + offer`、`assignment + notify`、`assignment + timeout/reject`；不能把 request 與 assign 共用同一 Idempotency-Key（現有 service scope 可能相同）。job/attempt/assignment 與 receipt 同交易；提供域內 receipt 查詢給 voice adapter。外部通知不支持冪等／查詢時，ack 不明標 unknown 並對帳，不盲目重發。
 
+Timeout 必須是具體 offer 的 command，攜 `targetJobId`、round、assignmentId、assignmentVersion、acceptanceDeadline。交易內重驗該 offer 仍是目前有效且 pending_acceptance、期限已到；已 accepted／替代／終態則回原 receipt 或 `superseded/no_op`。accept／reject／timeout 用共同鎖與互斥轉移；不能直接沿用 `handleDispatchTimeout(orderId)` 再尋找最新 assignment 取消，因為那會讓 A 的舊 timer 取消 B 或已接單的 A。
+
+容量保留屬共用派遣域，不能僅改造 voice writer。新增 `ops.dispatch_resource_reservations`：reservationId、resourceType（driver/vehicle）、resourceId、orderId、assignmentId、reservationGroupId、status（held/occupied/released）、expiresAt、version。對 held/occupied 建 resourceType/resourceId 的有效占用唯一約束，driver／vehicle 兩筆在同交易取得；資源鎖按固定 type/ID 順序，衝突 rollback 後再選候選。accepted 轉 occupied；釋放必須核對原 assignment/version，有效拒接、取消、完成、有效 timeout，或依規則原子關閉舊 assignment 的改派，才可釋放。不能僅看時鐘到期就讓舊 release 釋放新人的占用。結果 unknown 先對帳。
+
+所有會競爭同一即時供給的 voice／非 voice assign、reassign、人工／企業派車、queue release 及相容 revision，都需遵守共同 DB 保留；預約時段規則沿用其商品，但轉為當前實際派車時也要取得保留。若初期不能改造全部競爭入口，只能用可證明且有後端限制的隔離供給池；配置文字說專用而其他入口仍可選車，不算隔離。這是 WP-09 的共用域改造與正式開通條件。
+
 新增 voice projection 是展示契約，不是更改既有狀態 enum：
 
 | 語音投影              | 必須讀到的領域事實                                                                   | 可播報                               |
@@ -414,7 +433,7 @@ voice aggregate 以 DB row 與單調 `aggregateVersion` 為權威；commit 前�
 
 ### 8.4 舊錄音 callback／listener 的必要改造
 
-既有 `handleCallRecordingMissing` 會清 recordingId 並把訂單設回 recording_pending，不能直接套用已派出的 voice 單。bound/missing listener、close/failure callback 及 repository 都需 voice-aware：以 recording／manifest version 仲裁，已驗證 checkpoint refs 不因後半段失敗或舊 pending callback 被清除。錄音 lifecycle 與 order lifecycle 分開更新；行程中錄音失敗只記 evidence exception 與修復責任，不倒退 driver_accepted／in_trip。此改造必須和 §7.5 的 CAS/UoW 一起驗收。
+既有 `handleCallRecordingStateChanged` 在錄音缺失分支會清 recordingId 並把訂單設回 recording_pending，不能直接套用已派出的 voice 單。bound/missing listener、close/failure callback 及 repository 都需 voice-aware：以 recording／manifest version 仲裁，已驗證 checkpoint refs 不因後半段失敗或舊 pending callback 被清除。錄音 lifecycle 與 order lifecycle 分開更新；行程中錄音失敗只記 evidence exception 與修復責任，不倒退 driver_accepted／on_trip。此改造必須和 §7.5 的 CAS/UoW 一起驗收。
 
 ## 9. 持久化資料設計
 
@@ -422,27 +441,28 @@ voice aggregate 以 DB row 與單調 `aggregateVersion` 為權威；commit 前�
 
 以下為待新增的資料模型；實際 schema 與 migration 序號依當時 migration head 配置。既有 order／call session 仍為單一真值，不再建第二套訂單表。
 
-| 資料表                                          | 主鍵及關聯                               | 主要欄位                                                                                                                                     | 約束／索引                                                                                 |
-| ----------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `voice_resource_scope`／ops scope membership    | scopeId／principal-scope                 | 營運單位、品牌、runtime 映射、管理授權來源與版本                                                                                             | scope 隔離；不從 tenantId=null 推論歸屬                                                    |
-| `voice_callback_task`／`voice_callback_attempt` | taskId／task-attempt                     | §12.5 的聯絡／同意、owner、version、終態與聯繫結果                                                                                           | 獨立於 call closed；task/attempt 去重、終態不復活                                          |
-| `voice_line_binding`                            | `line_binding_id`                        | provider account、DNIS／trunk、brand、operating profile、queue、enabled、version                                                             | 有效版本的 provider/account/line 唯一；停用須阻止新 session                                |
-| `voice_route_profile`                           | `profile_id, version`                    | models、語言、retry/timeout、capabilities、recording policy、人工 fallback                                                                   | immutable published version；session pin 版本                                              |
-| `voice_call_admission`                          | `admission_id`；provider account/call    | receivedAt、line、brand（可空）、admitted/overflow/failed、reason、sessionId（可空）                                                         | provider account/call 唯一；電話商總進線對帳，不漏 session 建立前失敗                      |
-| `voice_session`                                 | `voice_session_id`；FK callId            | line binding version、controlOwner、leaseEpoch、sessionVersion、dialog/media/commit state、inputEpoch、outcome                               | provider account/call 唯一；active state／lease expiry 索引                                |
-| `voice_call_leg`                                | `leg_id`；FK session                     | provider leg ID、角色、媒體 epoch、started/endedAt、transfer correlation                                                                     | provider account/leg 唯一；不覆寫原通話起迄                                                |
-| `voice_session_event`                           | `event_id`；FK session/leg               | source、providerAccountId、sourceEventId、occurred/receivedAt、sequence、media/input/lease epoch、type、最小 payload 或 encrypted payloadRef | source/account/sourceEventId 去重；session/receivedSequence 單調唯一；核心證據 append-only |
-| `voice_turn`                                    | `turn_id`；FK session/event              | speakerRole、media epoch、segment、revision、final、語言、text encrypted、audio offsets、model version                                       | providerAccountId/session/providerSession/segment/revision 唯一；session/sequence 索引     |
-| `voice_intent`                                  | `intent_id`；FK session                  | action、currentDraftVersion、boundOrderId、status                                                                                            | 每個 v1 session 最多一個 create intent                                                     |
-| `voice_draft_revision`                          | `intent_id, draft_version`               | structured slots、validation refs、canonical snapshot、snapshotHash                                                                          | 版本不可變；修改產生新 row                                                                 |
-| `voice_confirmation`                            | `confirmation_id`；FK draft/checkpoint   | §6.2 全欄位、state、consumedCommandId                                                                                                        | action/intent/draft 的 active 票據唯一；consumption 鎖定                                   |
-| `recording_checkpoint`                          | `checkpoint_id`；FK recording/call       | immutable manifest/version、hash、coverage、verifiedAt、policyVersion                                                                        | 由 evidence owner 寫；call/recording/manifestVersion 唯一                                  |
-| `voice_command_receipt`                         | `command_id`；FK intent                  | actionKey、payloadHash、status、orderId、resultVersion、error、timestamps                                                                    | §7 唯一鍵；pending/updatedAt 索引                                                          |
-| `voice_work_item`                               | `work_id`；FK command/session            | workType、dedupeKey、payloadRef、status、attempt、runAfter、leaseEpoch、lastError                                                            | dedupeKey 唯一；可領取狀態/runAfter 索引                                                   |
-| `voice_handoff`                                 | `handoff_id`；FK session                 | reason、queue、state、agentId、ownerEpoch、summaryRef、callbackId                                                                            | 每 session 最多一個 active handoff；人工隊列索引                                           |
-| `voice_passenger_proof`                         | `proof_id`；FK session/order             | method、verifiedContactRef、allowedActions、orderScope、expiresAt、attemptCount                                                              | 短效、不可跨 session/action 任意重用；不保存 OTP 明文                                      |
-| `voice_usage_record`                            | `usage_id`；FK admission/session（可空） | provider/model/version、billingUnit、quantity、currency、rateCardVersion、estimated/actual、invoiceRef                                       | provider account/usage ID 唯一；按日期/brand 聚合；非逐通成本保留分攤來源                  |
-| `voice_rate_card`                               | `rate_card_id, version`                  | provider、currency、含稅、單位價格、有效期、取整／最低計費、條件及核對狀態                                                                   | published version 不覆寫；新費率產生新版本                                                 |
+| 資料表                                          | 主鍵及關聯                               | 主要欄位                                                                                                                                                                         | 約束／索引                                                                                 |
+| ----------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `ops.dispatch_resource_reservations`            | reservationId／resource與assignment      | §7.6 共用供給的resourceType/ID、group、held/occupied/released、期限、version                                                                                                     | 有效占用唯一；voice／非voice所有競爭writer共用；按assignment/version釋放                   |
+| `voice_resource_scope`／ops scope membership    | scopeId／principal-scope                 | 營運單位、品牌、runtime 映射、管理授權來源與版本                                                                                                                                 | scope 隔離；不從 tenantId=null 推論歸屬                                                    |
+| `voice_callback_task`／`voice_callback_attempt` | taskId／task-attempt                     | §12.5 的聯絡／同意、owner、version、終態與聯繫結果                                                                                                                               | 獨立於 call closed；task/attempt 去重、終態不復活                                          |
+| `voice_line_binding`                            | `line_binding_id`                        | provider account、DNIS／trunk、brand、operating profile、queue、enabled、version                                                                                                 | 有效版本的 provider/account/line 唯一；停用須阻止新 session                                |
+| `voice_route_profile`                           | `profile_id, version`                    | models、語言、retry/timeout、capabilities、recording policy、人工 fallback                                                                                                       | immutable published version；session pin 版本                                              |
+| `voice_call_admission`                          | `admission_id`；provider account/call    | receivedAt、line、brand（可空）、admitted/overflow/failed、reason、sessionId（可空）                                                                                             | provider account/call 唯一；電話商總進線對帳，不漏 session 建立前失敗                      |
+| `voice_session`                                 | `voice_session_id`；FK callId            | line binding version、controlOwner、leaseEpoch、sessionVersion、dialog/media/commit state、inputEpoch、pendingInput、lastResolvedInputEpoch、lastAppliedControlSequence、outcome | provider account/call 唯一；active state／lease expiry 索引                                |
+| `voice_call_leg`                                | `leg_id`；FK session                     | provider leg ID、角色、媒體 epoch、started/endedAt、transfer correlation                                                                                                         | provider account/leg 唯一；不覆寫原通話起迄                                                |
+| `voice_session_event`                           | `event_id`；FK session/leg               | source、providerAccountId、sourceEventId、occurred/receivedAt、sequence、media/input/lease epoch、type、最小 payload 或 encrypted payloadRef                                     | source/account/sourceEventId 去重；session/receivedSequence 單調唯一；核心證據 append-only |
+| `voice_turn`                                    | `turn_id`；FK session/event              | speakerRole、media epoch、segment、revision、final、語言、text encrypted、audio offsets、model version                                                                           | providerAccountId/session/providerSession/segment/revision 唯一；session/sequence 索引     |
+| `voice_intent`                                  | `intent_id`；FK session                  | action、currentDraftVersion、boundOrderId、status                                                                                                                                | 每個 v1 session 最多一個 create intent                                                     |
+| `voice_draft_revision`                          | `intent_id, draft_version`               | structured slots、validation refs、canonical snapshot、snapshotHash                                                                                                              | 版本不可變；修改產生新 row                                                                 |
+| `voice_confirmation`                            | `confirmation_id`；FK draft/checkpoint   | §6.2 全欄位、state、consumedCommandId                                                                                                                                            | action/intent/draft 的 active 票據唯一；consumption 鎖定                                   |
+| `recording_checkpoint`                          | `checkpoint_id`；FK recording/call       | immutable manifest/version、hash、coverage、verifiedAt、policyVersion                                                                                                            | 由 evidence owner 寫；call/recording/manifestVersion 唯一                                  |
+| `voice_command_receipt`                         | `command_id`；FK intent                  | actionKey、payloadHash、status、orderId、resultVersion、error、timestamps                                                                                                        | §7 唯一鍵；pending/updatedAt 索引                                                          |
+| `voice_work_item`                               | `work_id`；FK command/session            | workType、dedupeKey、payloadRef、status、attempt、runAfter、leaseEpoch、lastError                                                                                                | dedupeKey 唯一；可領取狀態/runAfter 索引                                                   |
+| `voice_handoff`                                 | `handoff_id`；FK session                 | reason、queue、state、agentId、ownerEpoch、summaryRef、callbackId                                                                                                                | 每 session 最多一個 active handoff；人工隊列索引                                           |
+| `voice_passenger_proof`                         | `proof_id`；FK session/order             | method、verifiedContactRef、allowedActions、orderScope、expiresAt、attemptCount                                                                                                  | 短效、不可跨 session/action 任意重用；不保存 OTP 明文                                      |
+| `voice_usage_record`                            | `usage_id`；FK admission/session（可空） | provider/model/version、billingUnit、quantity、currency、rateCardVersion、estimated/actual、invoiceRef                                                                           | provider account/usage ID 唯一；按日期/brand 聚合；非逐通成本保留分攤來源                  |
+| `voice_rate_card`                               | `rate_card_id, version`                  | provider、currency、含稅、單位價格、有效期、取整／最低計費、條件及核對狀態                                                                                                       | published version 不覆寫；新費率產生新版本                                                 |
 
 既有 owned order 增 `voiceIntentId`、`bookingActor`、`customerConfirmationId`、`recordingEvidenceRef`；既有 call session 增 source binding／AI 身分資料。`agentId` 在真人路徑仍保留；機器路徑改用明確 discriminator，不以空字串虛構真人。
 
@@ -497,7 +517,8 @@ voice aggregate 以 DB row 與單調 `aggregateVersion` 為權威；commit 前�
   "confirmationId": "uuid",
   "expectedDraftVersion": 7,
   "expectedLeaseEpoch": 3,
-  "expectedInputEpoch": 12
+  "expectedInputEpoch": 12,
+  "controlCutoff": { "mediaEpoch": 2, "controlSequence": 98 }
 }
 ```
 
@@ -635,7 +656,7 @@ TTS API V2.07 使用 `POST /api/v1/tts/login` 及 `POST /api/v1/tts/synthesize`�
 - 分開乘客／AI leg；具條件時採 echo cancellation，不能用「TTS 播放期間完全關閉 ASR」犧牲乘客插話能力。
 - `speech.started` 先使 playback generation 失效並 clear 電話 outbound buffer，再 best-effort abort TTS HTTP transport。停播不等待 provider cancel ACK；TWM TTS 文件未定義獨立 cancel API／停止計費保證，分別記錄 playbackCancellation 與 synthesisCancellation，未播放不代表未計費。
 - 自建分段 pipeline 保存對話中實際已播放的 assistant 內容。原生語音引擎則依其 truncate/cancel 協定修正 context，避免模型以為乘客已聽完整句。
-- TWM 基線 `supportsResumeCursor=false/unverified`：文件未提供 frame ACK／resume cursor，斷線即使尚未提交的回讀／確認與未完成 turn 失效；恢復後重問該欄位或重新回讀。若為文字診斷重播 bounded 音訊，保留本地 utteranceId／replay flag，禁止重播產生乘客同意。已 accepted command 先對帳，不能因重連再建單。
+- TWM 基線 `supportsResumeCursor=false/unverified`：文件未提供 frame ACK／resume cursor；`commitStatus=none` 時，斷線使尚未受理的回讀／確認與未完成 turn 失效，恢復後重問該欄位或重新回讀。`commitStatus=pending` 的已受理命令依 §5.4 封存 proof 與輸入阻擋規則對帳，不因純 ASR 斷線自行撤銷或重新建單。若為文字診斷重播 bounded 音訊，保留本地 utteranceId／replay flag，隔離於不能產生乘客同意的 stream。
 - 網路恢復後先恢復 draft/command/control 狀態，再繼續對話；若長時間無法恢復，將現有摘要交給人工。
 
 ### 11.5 Provider 能力與事件語義契約
@@ -687,7 +708,7 @@ Twilio 的 mark 在正常播畢與 clear 後都可回傳，是 adapter 必須區
 - 已有司機接受：播報真實車輛／ETA；沒有可靠 ETA 時明說未提供。
 - 尚在找車：清楚區分「掛電話後繼續找車」與「停止找車」。前者需說明已開通的通知途徑；若沒有通知能力且乘客不願繼續在線，轉人工／例外處理。
 - 乘客要求停止且仍有 active order／dispatch：只有已開通的取消／停止派遣工具取得正式終態才回覆停止；初版取消未開通就轉真人，不能只掛斷或寫備註留下活單。
-- `no_service` 等正式終態且不存在繼續派遣：可說明結果並結束；若提供重新嘗試，仍用原單的合法派遣重試規則，不能再建另一張單。
+- 只有 §7.6 的 `terminal` 投影成立，且不存在有效 assignment／重試／queue 責任：可說明結果並結束；若提供重新嘗試，仍用原單的合法派遣重試規則，不能再建另一張單。
 - 掛斷時仍有不明／活躍操作：保留 reconciliation／例外 owner，不能算「已停止」或「自助處置完成」。
 
 唯讀查單走 collecting→resolving（驗證／查詢）→reporting→closed，不經建單確認或 committing；未開通的改單／預約／取消直接進相應例外路由。
@@ -698,7 +719,7 @@ Twilio 的 mark 在正常播畢與 clear 後都可回傳，是 adapter 必須區
 
 ### 12.5 Handoff 與 callback 的獨立生命週期
 
-owner 切 handoff 時，凍結的是訂單 create／dispatch／cancel mutation。handoff coordinator 以新的 leaseEpoch 與專用 capability，僅可播放等待／選項、收集回撥聯絡與同意、建 callback、查受理結果及完成轉接；不能沿用失效 AI token，也不恢復 AI 建單權。此控制面保留媒體互動能力，解決「先轉人工、真人忙線後才同意回撥」的流程。
+owner 切 handoff 時，凍結的是訂單 create／dispatch／cancel mutation。handoff coordinator 以新的 leaseEpoch 與專用 capability，僅可播放等待／選項、收集回撥聯絡與同意、建 callback、查受理結果、依 §5.4 記錄新輸入及使舊確認安全失效，以及完成轉接；不能沿用失效 AI token，也不恢復 AI 建單權。此控制面保留媒體互動能力，解決「先轉人工、真人忙線後才同意回撥」的流程。
 
 既有 callback 只有 pending/completed，且取 session.callerPhone；目前 ops 畫面還會在 call closed 禁用 complete callback。新 voice callback 須明確擴充模型，不能只在 handoff 存一個 callbackId：
 
@@ -707,6 +728,10 @@ owner 切 handoff 時，凍結的是訂單 create／dispatch／cancel mutation�
 - 新 API：`POST /api/voice/sessions/{id}/callbacks`（contact＋consent＋去重）、`POST /api/voice/callbacks/{id}/claim`、`/attempts`、`/complete`、`/cancel`、`/transfer`，及 scoped list。各 command 有 actor、expectedVersion／claim lease 與 idempotency，cancel／complete 競態以已保存終態回放。
 - 任務不因 session.closed 而禁止領取、聯繫或結案；ops 新語音例外工作台為操作入口，舊 callback 列表若展示此任務須導向新 API，不用舊 complete 路徑改狀態。
 - 結束本通電話不等於允許之後任意重撥；回撥只按已同意對象／時段／目的執行。未有此能力時提供真實替代聯繫方式，不能口頭承諾已有任務。
+
+有效 callback consent 與 task，或可恢復的 callback command／receipt，須同 transaction 持久化。已受理者可以在 call.ended 後由 coordinator／runner 依 sealed consent proof 完成；只有口頭同意但未持久化時不能事後臆造。create 重試先查同一 receipt，不能因 closed 丟棄已受理工作。
+
+Callback terminal CAS 回放實際 completed／cancelled 結果，不把相反操作當新的成功。若後續新增自動外呼，還須以 task version／dial operation key 對每次外呼受理做 fence：取消後不允新 attempt，已受理或結果不明的外呼另行 reconcile；「任務取消」不等於已證明電話掛斷。第一版工作台聯繫流程不得宣稱能攔截客服在系統外手動撥號。
 
 ## 13. 非功能設計與營運介面
 
@@ -815,7 +840,7 @@ WP-01 另包含資源 scope／商品映射與兩階段 capability，WP-04 包含
 ### 15.2 Migration 與相容策略
 
 1. 先新增表、actor 型別及相容 readers，再上新 writer；不能把既有人工電話單全部改成 `voice_agent`。歷史資料保留原來源與證據。
-2. `voice_intent_id` 只加在新路徑訂單，對非空值建立唯一限制；call-order 與 receipt FK 完整。新增 enum 及 Zod 讀取端先部署，以免舊 reader 拒絕新 actor。
+2. `voice_intent_id` 只加在新路徑訂單，對非空值建立唯一限制；在 §7.5 真正 runtime 表確保 call-order 與 receipt FK。新增 enum／Zod 指業務 `bookingActor.type` 與 capability 契約；IAM 維持 `actorType=system`、canonical `principalType=service`，不新增通用 JWT voice_agent actor。相容 readers 先部署。
 3. transaction-aware command 可抽取既有業務規則，但人工 endpoint 的契約／行為變更需獨立回歸；不能因 AI 設計順便改 tenant／外部訂單寫入權。
 4. 錄音 checkpoint 用新 route／型別，整通 callback 沿用原語義；以同一 recordingId 的 immutable manifest reference 整合，不改寫 call endedAt。先驗相容性再開 AI 派遣 gate。
 5. route profile 與 prompt/models 設定使用 immutable version；新 session pin 版本，進行中通話不被設定更新改寫。kill switch 只停止新受理，新／舊 executor 都能完成已接受 command。
@@ -832,7 +857,7 @@ WP-01 另包含資源 scope／商品映射與兩階段 capability，WP-04 包含
 | 錄音證據     | 缺片、不可讀 object、checksum 不符、亂序 callback、後半段失敗、到期／hold       | checkpoint gate 決策、manifest、完整關聯及稽核         |
 | 派遣／例外   | 無車、pending、司機接受、乘客不等、取消未開通、真人未接／掉線                   | 正式 domain result、已播放話術、人工 task 終態         |
 | 安全／存取   | 跨 brand、prompt injection、provider replay、秘密隔離、錄音下載                 | backend 拒絕與遮罩；不得真的動到無關乘客單             |
-| UAT／品質    | SA UV-AC-001～044 的適用情境與供應商比較                                        | 場景ID→通話→確認→訂單→派遣→播報→人工／成本鏈           |
+| UAT／品質    | SA UV-AC-001～048 的適用情境與供應商比較                                        | 場景ID→通話→確認→訂單→派遣→播報→人工／成本鏈           |
 | 負載／營運   | N／1.5N、供應商限額、worker drain、fallback、告警與回退                         | 分層 p95/p99、容量釋放、例外 owner、故障恢復紀錄       |
 
 故障注入的關鍵斷點至少包含「命令未受理」「pending 已持久化」「order transaction 未 commit」「order 已 commit 但 response 遺失」「派遣副作用已發生但 ack 遺失」。最後一項必須由派遣域依 operation key 查結果，不能靠 voice worker 再發一次就算完成。
