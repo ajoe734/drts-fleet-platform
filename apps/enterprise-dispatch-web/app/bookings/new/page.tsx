@@ -51,13 +51,15 @@ export default async function NewBookingPage({
           active={0}
         />
       </div>
-      <EnterpriseBookingForm
-        initialDraft={initialDraft}
-        passengers={getEnterprisePassengers(locale)}
-        addresses={getEnterpriseAddresses(locale)}
-        costCenters={getEnterpriseCostCenters(locale)}
-        {...(bookingId ? { bookingId } : {})}
-      />
+      <div className="ent-booking-form-shell">
+        <EnterpriseBookingForm
+          initialDraft={initialDraft}
+          passengers={getEnterprisePassengers(locale)}
+          addresses={getEnterpriseAddresses(locale)}
+          costCenters={getEnterpriseCostCenters(locale)}
+          {...(bookingId ? { bookingId } : {})}
+        />
+      </div>
     </>
   );
 }
