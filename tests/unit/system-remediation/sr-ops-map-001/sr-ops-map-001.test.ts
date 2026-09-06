@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type {
+  AddressPayload,
   DispatchCandidate,
   DispatchJobRecord,
   OwnedOrderRecord,
@@ -19,18 +20,32 @@ import {
   getCandidateLocationState,
   isFreshLocation,
 } from "../../../../apps/ops-console-web/app/dispatch/location-state";
-import {
-  resolveGoogleMapBaseLayerStatus,
-  resetGoogleMapConfigCache,
-  type MapProviderConfig,
-} from "../../../../apps/ops-console-web/components/google-map-base-layer";
+
+export type MapProviderConfig = {
+  provider: "google" | "fallback";
+  enabled: boolean;
+  browserKey: string | null;
+  mapId: string | null;
+  reasonCode: string | null;
+};
+
+const GOOGLE_MAP_MODULE_PATH =
+  "../../../../apps/ops-console-web/components/google-map-base-layer";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const { resolveGoogleMapBaseLayerStatus, resetGoogleMapConfigCache }: any =
+  await import(GOOGLE_MAP_MODULE_PATH);
 
 const MOCK_TILES_DIR = resolve(
   __dirname,
   "../../../../apps/ops-console-web/public/mock-map-tiles",
 );
 
-function makeOrder(overrides: Partial<OwnedOrderRecord> = {}): OwnedOrderRecord {
+function makeOrder(
+  overrides: Partial<Omit<OwnedOrderRecord, "pickup" | "dropoff">> & {
+    pickup?: AddressPayload | null;
+    dropoff?: AddressPayload | null;
+  } = {},
+): OwnedOrderRecord {
   return {
     orderId: "order-map-1",
     orderNo: "ORD-MAP-001",
@@ -80,7 +95,6 @@ function makeCandidate(
       recordedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     },
-    locationState: "fresh",
     ...overrides,
   };
 }
@@ -164,7 +178,7 @@ describe("SR-OPS-MAP-001: Mock Map Tiles 404 Remediation", () => {
       tileUrlTemplate: "/mock-map-tiles/{z}/{x}/{y}.svg",
     });
 
-    for (const dir of ["north", "south", "west", "east"]) {
+    for (const dir of ["north", "south", "west", "east"] as const) {
       const shifted = shiftOpsMapCenter(initialViewport, dir);
       const pannedViewport = buildOpsMapTileViewport({
         bounds,
@@ -324,11 +338,11 @@ describe("SR-OPS-MAP-001: Location Freshness, Timeout & Degraded State", () => {
     expect(getCandidateLocationState(freshCandidate, now)).toBe("fresh");
 
     const staleCandidate = makeCandidate({
-      locationState: undefined,
       currentLocation: {
         driverId: "DRV-02",
         lat: 25.036,
         lng: 121.566,
+        accuracyM: 5,
         recordedAt: new Date(now - 20 * 60 * 1000).toISOString(),
         updatedAt: new Date(now - 20 * 60 * 1000).toISOString(),
       },
@@ -336,8 +350,7 @@ describe("SR-OPS-MAP-001: Location Freshness, Timeout & Degraded State", () => {
     expect(getCandidateLocationState(staleCandidate, now)).toBe("stale");
 
     const noLocationCandidate = makeCandidate({
-      locationState: undefined,
-      currentLocation: undefined,
+      currentLocation: null,
     });
     expect(getCandidateLocationState(noLocationCandidate, now)).toBe("missing");
   });
@@ -346,8 +359,7 @@ describe("SR-OPS-MAP-001: Location Freshness, Timeout & Degraded State", () => {
     const ord = makeOrder();
     const jb = makeJob();
     const candidateWithoutLocation = makeCandidate({
-      locationState: undefined,
-      currentLocation: undefined,
+      currentLocation: null,
     });
 
     const model = buildOpsMapBoardModel({
@@ -382,13 +394,13 @@ describe("SR-OPS-MAP-001: Location Freshness, Timeout & Degraded State", () => {
 
     const candidatePoints = model.points.filter((p) => p.kind === "candidate");
     expect(candidatePoints.length).toBe(1);
-    expect(candidatePoints[0].freshness).toBe("stale");
+    expect(candidatePoints[0]?.freshness).toBe("stale");
     expect(model.staleCandidatePoints).toBe(1);
   });
 
   it("marks board providerStatus as degraded_projection when pickup coordinates are missing", () => {
     const ordWithoutPickup = makeOrder({
-      pickup: undefined,
+      pickup: null,
     });
 
     const model = buildOpsMapBoardModel({
@@ -404,8 +416,8 @@ describe("SR-OPS-MAP-001: Location Freshness, Timeout & Degraded State", () => {
 
   it("marks board providerStatus as no_spatial_data when all coordinates are missing", () => {
     const ordWithoutAnyCoords = makeOrder({
-      pickup: undefined,
-      dropoff: undefined,
+      pickup: null,
+      dropoff: null,
     });
 
     const model = buildOpsMapBoardModel({

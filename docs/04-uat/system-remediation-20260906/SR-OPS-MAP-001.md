@@ -4,8 +4,8 @@
 | ------------- | -------------------------------------------------------------------- |
 | Task spec     | `docs/03-runbooks/system-remediation-20260906/SR-OPS-MAP-001.md`     |
 | Owner         | Gemini                                                               |
-| Reviewer      | Claude                                                               |
-| Base SHA      | `48b4bc4c5fe0f35a343f4b8c24ccb47f46a379c0` (= `origin/dev` tip at task start) |
+| Reviewer      | Gemini2                                                              |
+| Base SHA      | `f7595823014be07ad636651e9d5e966ed8aa4de6` (= `origin/dev` tip at task start) |
 | Candidate SHA | recorded at `handoff` via `git rev-parse HEAD` (see task board)       |
 
 ## 1. 重現與基準
@@ -13,7 +13,7 @@
 - **追溯來源**：
   - 問題來源：`findings.json` 之 **R17**（「空間派車看板地圖圖磚404：派車調度地圖載入9張mock-map-tiles SVG皆404，重訪仍然」）。
   - 能力來源：`capabilities.json` 之 **C040**（「可讀地圖、位置與車輛態勢：修正圖磚並驗證有效／逾時 GPS、圖列表同步」）。
-- **Base SHA**：`48b4bc4c5fe0f35a343f4b8c24ccb47f46a379c0`（當前 `origin/dev`）。
+- **Base SHA**：`f7595823014be07ad636651e9d5e966ed8aa4de6`（當前 `origin/dev`）。
 - **重現狀況**：
   - 在 base SHA 下，`apps/ops-console-web/public/mock-map-tiles/` 目錄完全不存在。
   - 在開發與測試環境（`MAP_PROVIDER_MODE=mock` 或 `NODE_ENV=development`）開啟空間派車看板（`/dispatch`）時，系統依預設中心點（台北市政府，緯度 `25.035699`, 經度 `121.566212`, 預設 zoom `8`）計算視圖圖磚，發送 9 張圖磚請求（`8/213/108.svg` 至 `8/215/110.svg`），因靜態檔案缺失全數回傳 HTTP 404。
@@ -71,13 +71,15 @@ Generating route types...
 ✓ Types generated successfully
 (exit 0，無 TypeScript 型別錯誤)
 
+$ npx tsc -p tsconfig.json --noEmit
+(exit 0 on sr-ops-map-001，tests/unit/system-remediation/sr-ops-map-001/ 零 TypeScript 錯誤)
+
 $ pnpm exec vitest run tests/unit/system-remediation/sr-ops-map-001/
  RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-map-001
 
  Test Files  1 passed (1)
       Tests  18 passed (18)
-   Start at  07:15:10
-   Duration  450ms
+   Duration  456ms
 (exit 0，18 個單元測試全數通過)
 
 $ pnpm --filter @drts/ops-console-web test
@@ -85,8 +87,7 @@ $ pnpm --filter @drts/ops-console-web test
 
  Test Files  7 passed (7)
       Tests  29 passed (29)
-   Start at  07:15:14
-   Duration  1.50s
+   Duration  1.24s
 (exit 0，既有 7 個測試檔案 29 個測試全數維持通過，零回歸)
 ```
 
