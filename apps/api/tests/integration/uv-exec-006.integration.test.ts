@@ -1,14 +1,20 @@
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { OwnedOrderRecord } from "@drts/contracts";
 
+import { ApiRequestError } from "../../src/common/api-envelope";
 import { DatabaseService } from "../../src/common/db";
+import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
 import {
   DispatchResourceReservationConflictError,
   OwnedMobilityRepository,
 } from "../../src/modules/owned-mobility/owned-mobility.repository";
+import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 
 // UV-EXEC-006: SD §7.6/§9.1 -- the shared driver+vehicle capacity
 // reservation ledger (`ops.dispatch_resource_reservations`, added by
@@ -165,6 +171,114 @@ async function readActiveReservations(
   return result.rows;
 }
 
+async function readAssignmentStatus(
+  database: DatabaseService,
+  assignmentId: string,
+) {
+  const result = await database.query<{ status: string }>(
+    `SELECT status FROM ops.phase1_dispatch_assignments WHERE assignment_id = $1`,
+    [assignmentId],
+  );
+  return result.rows[0]?.status ?? null;
+}
+
+async function purgeOrderCascade(database: DatabaseService, orderId: string) {
+  // FK-safe order: `dispatch_resource_reservations` has real (non-deferrable)
+  // FKs to both `phase1_owned_orders` and `phase1_dispatch_assignments`
+  // (V0087); the other runtime-snapshot tables (V0011) are plain varchar
+  // columns with no FK, but are still cleaned up here for test hygiene.
+  await database.query(
+    `DELETE FROM ops.dispatch_resource_reservations WHERE order_id = $1`,
+    [orderId],
+  );
+  await database.query(
+    `DELETE FROM ops.phase1_dispatch_trace_logs WHERE order_id = $1`,
+    [orderId],
+  );
+  await database.query(
+    `DELETE FROM ops.phase1_dispatch_attempts WHERE order_id = $1`,
+    [orderId],
+  );
+  await database.query(
+    `DELETE FROM ops.phase1_driver_tasks WHERE order_id = $1`,
+    [orderId],
+  );
+  await database.query(
+    `DELETE FROM ops.phase1_dispatch_assignments WHERE order_id = $1`,
+    [orderId],
+  );
+  await database.query(
+    `DELETE FROM ops.phase1_dispatch_jobs WHERE order_id = $1`,
+    [orderId],
+  );
+  await database.query(
+    `DELETE FROM ops.phase1_owned_orders WHERE order_id = $1`,
+    [orderId],
+  );
+}
+
+/**
+ * Real `OwnedMobilityService` wired to a real (Postgres-backed)
+ * `OwnedMobilityRepository`, matching UV-EXEC-005's `createTestService`
+ * pattern. Unlike the repository-only tests above, calling `dispatchOrder`/
+ * `assignDispatch`/`reassignDispatch`/`handleDispatchTimeout`/
+ * `acceptDriverTask` through this service exercises the exact mixed-entry
+ * write path (`OwnedMobilityService.createDispatchAssignment`) that owned-
+ * mobility, multi-taxi, tenant/enterprise, and voice dispatch all share --
+ * not just the reservation ledger in isolation.
+ */
+function createTestService(
+  database: DatabaseService,
+  candidates: Array<{
+    driverId: string;
+    vehicleId: string;
+    etaMinutes: number;
+    operatingArea: string;
+    serviceBuckets: string[];
+  }>,
+) {
+  const regulatoryRegistryService = {
+    getEligibleCandidates: () => candidates,
+    getVehicleDispatchability: () => true,
+    getDriverAvailability: () => true,
+    getVehicleLicenseType: () => null,
+    getVehiclePassengerDisclosureProfile: () => null,
+    getDriverPublicRegistrationCredential: () => null,
+  };
+  const auditNotificationService = new AuditNotificationService();
+  const callcenterService = new CallcenterService(auditNotificationService);
+  const taskEventsService = new OwnedMobilityTaskEventsService(
+    new EventEmitter() as never,
+  );
+  const ownedMobilityRepository = new OwnedMobilityRepository(database);
+
+  const service = new OwnedMobilityService(
+    regulatoryRegistryService as never,
+    auditNotificationService,
+    callcenterService,
+    taskEventsService,
+    undefined, // opsDispatchEventsService
+    ownedMobilityRepository,
+    undefined, // tenantPartnerService
+    undefined, // vehicleEligibilityService
+    undefined, // serviceProductService
+    undefined, // eventEmitter
+    undefined, // runtimeEligibilityEvaluator
+    undefined, // sandboxFallbackCostPolicyResolver (falls back to its default)
+    undefined, // sandboxDispatchGateService
+    undefined, // serviceAreaService
+    undefined, // fareAnomalyService
+    undefined, // idempotencyService
+    undefined, // voiceBookingRepository
+  );
+
+  return { service, ownedMobilityRepository };
+}
+
+function getErrorCode(error: unknown): string | null {
+  return error instanceof ApiRequestError ? error.code : null;
+}
+
 describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () => {
   const databases: DatabaseService[] = [];
   const orderIds: string[] = [];
@@ -216,7 +330,9 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
     const repository = new OwnedMobilityRepository(database);
 
     const orderAId = trackOrder(`order-uvexec006-${randomUUID()}`);
-    const assignmentAId = trackAssignment(`assignment-uvexec006-${randomUUID()}`);
+    const assignmentAId = trackAssignment(
+      `assignment-uvexec006-${randomUUID()}`,
+    );
     await insertOrder(repository, orderAId);
     await insertAssignment(database, {
       assignmentId: assignmentAId,
@@ -242,9 +358,9 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
       "vehicle",
     ]);
     expect(reserved.every((row) => row.status === "held")).toBe(true);
-    expect(
-      reserved.every((row) => row.assignmentId === assignmentAId),
-    ).toBe(true);
+    expect(reserved.every((row) => row.assignmentId === assignmentAId)).toBe(
+      true,
+    );
 
     // A second order/assignment competing for the *same driver* (different
     // vehicle) must be rejected -- SD §7.6's active-occupation uniqueness --
@@ -280,8 +396,7 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
       DispatchResourceReservationConflictError,
     );
     expect(
-      (driverConflict as DispatchResourceReservationConflictError)
-        .resourceType,
+      (driverConflict as DispatchResourceReservationConflictError).resourceType,
     ).toBe("driver");
     expect(
       (driverConflict as DispatchResourceReservationConflictError).resourceId,
@@ -330,11 +445,14 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
         .resourceType,
     ).toBe("vehicle");
     expect(
-      (vehicleConflict as DispatchResourceReservationConflictError)
-        .resourceId,
+      (vehicleConflict as DispatchResourceReservationConflictError).resourceId,
     ).toBe(vehicleId);
 
-    const driverRows = await readActiveReservations(database, "driver", driverId);
+    const driverRows = await readActiveReservations(
+      database,
+      "driver",
+      driverId,
+    );
     expect(driverRows).toEqual([
       expect.objectContaining({ assignment_id: assignmentAId, status: "held" }),
     ]);
@@ -355,13 +473,26 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
     const repository = new OwnedMobilityRepository(database);
 
     const orderAId = trackOrder(`order-uvexec006-${randomUUID()}`);
-    const assignmentAId = trackAssignment(`assignment-uvexec006-${randomUUID()}`);
+    const assignmentAId = trackAssignment(
+      `assignment-uvexec006-${randomUUID()}`,
+    );
     const orderBId = trackOrder(`order-uvexec006-${randomUUID()}`);
-    const assignmentBId = trackAssignment(`assignment-uvexec006-${randomUUID()}`);
-    await Promise.all([insertOrder(repository, orderAId), insertOrder(repository, orderBId)]);
+    const assignmentBId = trackAssignment(
+      `assignment-uvexec006-${randomUUID()}`,
+    );
     await Promise.all([
-      insertAssignment(database, { assignmentId: assignmentAId, orderId: orderAId }),
-      insertAssignment(database, { assignmentId: assignmentBId, orderId: orderBId }),
+      insertOrder(repository, orderAId),
+      insertOrder(repository, orderBId),
+    ]);
+    await Promise.all([
+      insertAssignment(database, {
+        assignmentId: assignmentAId,
+        orderId: orderAId,
+      }),
+      insertAssignment(database, {
+        assignmentId: assignmentBId,
+        orderId: orderBId,
+      }),
     ]);
 
     const driverId = `driver-uvexec006-race-${randomUUID()}`;
@@ -398,11 +529,15 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
     const rejected = outcomes.filter((r) => r.status === "rejected");
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
-    expect(
-      (rejected[0] as PromiseRejectedResult).reason,
-    ).toBeInstanceOf(DispatchResourceReservationConflictError);
+    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(
+      DispatchResourceReservationConflictError,
+    );
 
-    const driverRows = await readActiveReservations(database, "driver", driverId);
+    const driverRows = await readActiveReservations(
+      database,
+      "driver",
+      driverId,
+    );
     const vehicleRows = await readActiveReservations(
       database,
       "vehicle",
@@ -421,7 +556,9 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
     const repository = new OwnedMobilityRepository(database);
 
     const orderId = trackOrder(`order-uvexec006-${randomUUID()}`);
-    const assignmentId = trackAssignment(`assignment-uvexec006-${randomUUID()}`);
+    const assignmentId = trackAssignment(
+      `assignment-uvexec006-${randomUUID()}`,
+    );
     await insertOrder(repository, orderId);
     await insertAssignment(database, { assignmentId, orderId });
 
@@ -441,7 +578,11 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
       await repository.occupyDispatchResourceReservations(assignmentId);
     expect(occupiedCount).toBe(2);
 
-    const driverRows = await readActiveReservations(database, "driver", driverId);
+    const driverRows = await readActiveReservations(
+      database,
+      "driver",
+      driverId,
+    );
     expect(driverRows).toEqual([
       expect.objectContaining({
         assignment_id: assignmentId,
@@ -471,8 +612,14 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
       `assignment-uvexec006-new-${randomUUID()}`,
     );
     await insertOrder(repository, orderId);
-    await insertAssignment(database, { assignmentId: oldAssignmentId, orderId });
-    await insertAssignment(database, { assignmentId: newAssignmentId, orderId });
+    await insertAssignment(database, {
+      assignmentId: oldAssignmentId,
+      orderId,
+    });
+    await insertAssignment(database, {
+      assignmentId: newAssignmentId,
+      orderId,
+    });
 
     const driverId = `driver-uvexec006-${randomUUID()}`;
     const vehicleId = `vehicle-uvexec006-${randomUUID()}`;
@@ -554,12 +701,452 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
     const validReleaseCount =
       await repository.releaseDispatchResourceReservations(newAssignmentId);
     expect(validReleaseCount).toBe(2);
-    expect(await readActiveReservations(database, "driver", driverId)).toHaveLength(0);
-    expect(await readActiveReservations(database, "vehicle", vehicleId)).toHaveLength(0);
+    expect(
+      await readActiveReservations(database, "driver", driverId),
+    ).toHaveLength(0);
+    expect(
+      await readActiveReservations(database, "vehicle", vehicleId),
+    ).toHaveLength(0);
 
     // Releasing again (e.g. a duplicate cancel) is an idempotent no-op.
     const repeatReleaseCount =
       await repository.releaseDispatchResourceReservations(newAssignmentId);
     expect(repeatReleaseCount).toBe(0);
+  });
+});
+
+// The suite above tests `OwnedMobilityRepository` in isolation, pre-inserting
+// assignment rows by hand. It cannot be evidence for `required_acceptance:
+// mixed_entry_postgres_race_evidence` or `old_revision_fence_evidence` --
+// those require driving the actual mixed-entry write path
+// (`OwnedMobilityService.createDispatchAssignment`, shared by owned-mobility,
+// multi-taxi, tenant/enterprise, and voice dispatch) through its real public
+// methods (`assignDispatch`/`reassignDispatch`/`handleDispatchTimeout`/
+// `acceptDriverTask`), against a real Postgres transaction, from two
+// independent service instances competing for the same driver/vehicle.
+describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () => {
+  const databases: DatabaseService[] = [];
+  const orderIds: string[] = [];
+
+  afterEach(async () => {
+    if (DATABASE_URL && orderIds.length > 0) {
+      const cleanupDatabase = new DatabaseService();
+      try {
+        for (const orderId of orderIds.splice(0)) {
+          await purgeOrderCascade(cleanupDatabase, orderId);
+        }
+      } finally {
+        await cleanupDatabase.onModuleDestroy();
+      }
+    }
+    for (const database of databases.splice(0)) {
+      await database.onModuleDestroy();
+    }
+  });
+
+  function trackOrder(orderId: string) {
+    orderIds.push(orderId);
+    return orderId;
+  }
+
+  it("assigns through the real service without an FK violation (V0087's assignment_id FK is immediate, not deferrable) and reserves both resources", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const database = new DatabaseService();
+    databases.push(database);
+    const driverId = `driver-uvexec006-svc-${randomUUID()}`;
+    const vehicleId = `vehicle-uvexec006-svc-${randomUUID()}`;
+    const { service } = createTestService(database, [
+      {
+        driverId,
+        vehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ]);
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "UV-EXEC-006 Rider", phone: "0911000444" },
+    });
+    trackOrder(order.orderId);
+
+    const dispatchResult = await service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const assignment = await service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId,
+      driverId,
+    });
+
+    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
+      "assigned",
+    );
+    expect(await readActiveReservations(database, "driver", driverId)).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "held",
+      }),
+    ]);
+    expect(
+      await readActiveReservations(database, "vehicle", vehicleId),
+    ).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "held",
+      }),
+    ]);
+  });
+
+  it("atomically closes the superseded assignment and its reservation while reserving the replacement, through a real reassign", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const database = new DatabaseService();
+    databases.push(database);
+    const oldDriverId = `driver-uvexec006-old-${randomUUID()}`;
+    const oldVehicleId = `vehicle-uvexec006-old-${randomUUID()}`;
+    const newDriverId = `driver-uvexec006-new-${randomUUID()}`;
+    const newVehicleId = `vehicle-uvexec006-new-${randomUUID()}`;
+    const { service } = createTestService(database, [
+      {
+        driverId: oldDriverId,
+        vehicleId: oldVehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+      {
+        driverId: newDriverId,
+        vehicleId: newVehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ]);
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "UV-EXEC-006 Rider", phone: "0911000555" },
+    });
+    trackOrder(order.orderId);
+
+    const dispatchResult = await service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const oldAssignment = await service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: oldVehicleId,
+      driverId: oldDriverId,
+    });
+
+    const newAssignment = await service.reassignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: newVehicleId,
+      driverId: newDriverId,
+      reasonCode: "operator_redispatch",
+    });
+
+    // The old assignment is durably closed, not left dangling with a
+    // released reservation but a still-"assigned" DB row (P1(3)).
+    expect(
+      await readAssignmentStatus(database, oldAssignment.assignmentId),
+    ).toBe("cancelled");
+    expect(
+      await readActiveReservations(database, "driver", oldDriverId),
+    ).toHaveLength(0);
+    expect(
+      await readActiveReservations(database, "vehicle", oldVehicleId),
+    ).toHaveLength(0);
+
+    // The new assignment holds its own reservation.
+    expect(
+      await readAssignmentStatus(database, newAssignment.assignmentId),
+    ).toBe("assigned");
+    expect(
+      await readActiveReservations(database, "driver", newDriverId),
+    ).toEqual([
+      expect.objectContaining({
+        assignment_id: newAssignment.assignmentId,
+        status: "held",
+      }),
+    ]);
+    expect(
+      await readActiveReservations(database, "vehicle", newVehicleId),
+    ).toEqual([
+      expect.objectContaining({
+        assignment_id: newAssignment.assignmentId,
+        status: "held",
+      }),
+    ]);
+  });
+
+  it("mixed_entry_postgres_race_evidence: two orders from independent service instances racing for the same driver+vehicle resolve to exactly one winner", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const databaseA = new DatabaseService();
+    const databaseB = new DatabaseService();
+    databases.push(databaseA, databaseB);
+    const driverId = `driver-uvexec006-race-${randomUUID()}`;
+    const vehicleId = `vehicle-uvexec006-race-${randomUUID()}`;
+    const candidates = [
+      {
+        driverId,
+        vehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ];
+    const { service: serviceA } = createTestService(databaseA, candidates);
+    const { service: serviceB } = createTestService(databaseB, candidates);
+
+    const orderA = serviceA.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Rider A", phone: "0911000601" },
+    });
+    trackOrder(orderA.orderId);
+    const orderB = serviceB.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Rider B", phone: "0911000602" },
+    });
+    trackOrder(orderB.orderId);
+
+    const dispatchA = await serviceA.dispatchOrder(orderA.orderId, {
+      mode: "auto",
+    });
+    const dispatchB = await serviceB.dispatchOrder(orderB.orderId, {
+      mode: "auto",
+    });
+
+    // Two genuinely concurrent transactions (separate pool connections, one
+    // per service/database instance) competing for the same driver+vehicle
+    // -- the real `ops.dispatch_resource_reservations` unique partial index
+    // (V0087), not an application-level check-then-insert, must arbitrate
+    // this down to exactly one winner.
+    const results = await Promise.allSettled([
+      serviceA.assignDispatch({
+        dispatchJobId: dispatchA.dispatchJobId,
+        vehicleId,
+        driverId,
+      }),
+      serviceB.assignDispatch({
+        dispatchJobId: dispatchB.dispatchJobId,
+        vehicleId,
+        driverId,
+      }),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(getErrorCode((rejected[0] as PromiseRejectedResult).reason)).toBe(
+      "DISPATCH_RESOURCE_RESERVATION_CONFLICT",
+    );
+
+    const winnerAssignmentId = (
+      fulfilled[0] as PromiseFulfilledResult<{ assignmentId: string }>
+    ).value.assignmentId;
+    expect(await readActiveReservations(databaseA, "driver", driverId)).toEqual(
+      [
+        expect.objectContaining({
+          assignment_id: winnerAssignmentId,
+          status: "held",
+        }),
+      ],
+    );
+
+    // The losing side's own in-transaction work (assignment/job/order
+    // upsert, driver-rating init, etc.) must have rolled back completely --
+    // no partial assignment row left over from the loser.
+    const loserOrderId =
+      fulfilled[0] === results[0] ? orderB.orderId : orderA.orderId;
+    const loserRows = await databaseA.query<{ assignment_id: string }>(
+      `SELECT assignment_id FROM ops.phase1_dispatch_assignments WHERE order_id = $1`,
+      [loserOrderId],
+    );
+    expect(loserRows.rows).toHaveLength(0);
+  });
+
+  it("an accepted offer is not undone by a late acceptance_timeout naming it (accept/timeout share the row lock)", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const database = new DatabaseService();
+    databases.push(database);
+    const driverId = `driver-uvexec006-acc-${randomUUID()}`;
+    const vehicleId = `vehicle-uvexec006-acc-${randomUUID()}`;
+    const { service } = createTestService(database, [
+      {
+        driverId,
+        vehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ]);
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "UV-EXEC-006 Rider", phone: "0911000666" },
+    });
+    trackOrder(order.orderId);
+
+    const dispatchResult = await service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const assignment = await service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId,
+      driverId,
+    });
+
+    await service.acceptDriverTask(assignment.taskId, {
+      acceptedAt: new Date().toISOString(),
+    });
+    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
+      "accepted",
+    );
+    expect(await readActiveReservations(database, "driver", driverId)).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "occupied",
+      }),
+    ]);
+
+    // A stale acceptance-timeout timer, armed before the accept landed,
+    // fires late and still names the now-accepted assignment.
+    const timeoutResult = await service.handleDispatchTimeout(
+      order.orderId,
+      "acceptance_timeout",
+      undefined,
+      { targetAssignmentId: assignment.assignmentId },
+    );
+    expect(timeoutResult.escalationAction).toBe("superseded");
+
+    // The accepted offer and its occupied reservation must be untouched.
+    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
+      "accepted",
+    );
+    expect(await readActiveReservations(database, "driver", driverId)).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "occupied",
+      }),
+    ]);
+    expect(
+      await readActiveReservations(database, "vehicle", vehicleId),
+    ).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "occupied",
+      }),
+    ]);
+  });
+
+  it("rejects an acceptance_timeout call that omits its target assignment", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const database = new DatabaseService();
+    databases.push(database);
+    const driverId = `driver-uvexec006-noreq-${randomUUID()}`;
+    const vehicleId = `vehicle-uvexec006-noreq-${randomUUID()}`;
+    const { service } = createTestService(database, [
+      {
+        driverId,
+        vehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ]);
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "UV-EXEC-006 Rider", phone: "0911000777" },
+    });
+    trackOrder(order.orderId);
+
+    await expect(
+      service.handleDispatchTimeout(order.orderId, "acceptance_timeout"),
+    ).rejects.toMatchObject({
+      response: {
+        error: { code: "ACCEPTANCE_TIMEOUT_TARGET_REQUIRED" },
+      },
+    });
+  });
+
+  it("old_revision_fence_evidence: a stale timeout naming an assignment a real reassign already superseded is a no-op and never touches the replacement's reservation", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const database = new DatabaseService();
+    databases.push(database);
+    const oldDriverId = `driver-uvexec006-fence-old-${randomUUID()}`;
+    const oldVehicleId = `vehicle-uvexec006-fence-old-${randomUUID()}`;
+    const newDriverId = `driver-uvexec006-fence-new-${randomUUID()}`;
+    const newVehicleId = `vehicle-uvexec006-fence-new-${randomUUID()}`;
+    const { service } = createTestService(database, [
+      {
+        driverId: oldDriverId,
+        vehicleId: oldVehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+      {
+        driverId: newDriverId,
+        vehicleId: newVehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ]);
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "UV-EXEC-006 Rider", phone: "0911000888" },
+    });
+    trackOrder(order.orderId);
+
+    const dispatchResult = await service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const oldAssignment = await service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: oldVehicleId,
+      driverId: oldDriverId,
+    });
+    const newAssignment = await service.reassignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: newVehicleId,
+      driverId: newDriverId,
+      reasonCode: "operator_redispatch",
+    });
+
+    // A timer armed for the *old* offer (before the reassign) fires late.
+    const timeoutResult = await service.handleDispatchTimeout(
+      order.orderId,
+      "acceptance_timeout",
+      undefined,
+      { targetAssignmentId: oldAssignment.assignmentId },
+    );
+    expect(timeoutResult.escalationAction).toBe("superseded");
+
+    // The replacement assignment's own reservation is completely untouched.
+    expect(
+      await readAssignmentStatus(database, newAssignment.assignmentId),
+    ).toBe("assigned");
+    expect(
+      await readActiveReservations(database, "driver", newDriverId),
+    ).toEqual([
+      expect.objectContaining({
+        assignment_id: newAssignment.assignmentId,
+        status: "held",
+      }),
+    ]);
+    const order2 = service.getOrder(order.orderId);
+    expect(order2?.status).not.toBe("dispatch_timeout");
   });
 });

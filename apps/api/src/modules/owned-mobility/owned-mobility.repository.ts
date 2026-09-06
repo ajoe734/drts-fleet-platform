@@ -77,7 +77,10 @@ export class OwnedOrderDuplicateVoiceLinkError extends Error {
 }
 
 export type DispatchResourceType = "driver" | "vehicle";
-export type DispatchResourceReservationStatus = "held" | "occupied" | "released";
+export type DispatchResourceReservationStatus =
+  | "held"
+  | "occupied"
+  | "released";
 
 export type DispatchResourceReservationRecord = {
   reservationId: string;
@@ -648,6 +651,71 @@ export class OwnedMobilityRepository {
       [assignmentId],
     );
     return result.rowCount ?? 0;
+  }
+
+  /**
+   * SD §7.6: locks one dispatch assignment row for a status-fenced close --
+   * `assignment_id` is minted fresh per offer (reassign never reuses an old
+   * id), so the row's current `status` under `FOR UPDATE` is itself the
+   * concurrency fence: no separate version column is needed to tell "this
+   * offer is still the one I last observed" from "something else already
+   * closed it". Must run inside the same `withTransaction` block that
+   * subsequently persists a cancellation and/or releases the reservation,
+   * so the lock is held across both. Returns `null` if the assignment row
+   * does not exist (should not happen for a real assignment id, but keeps
+   * the caller's no-op handling uniform with the "already closed" case).
+   */
+  async lockDispatchAssignmentForUpdate(
+    executor: OwnedMobilityQueryExecutor,
+    assignmentId: string,
+  ): Promise<DispatchAssignmentRecord | null> {
+    const result = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_dispatch_assignments
+        WHERE assignment_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [assignmentId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    return this.parseRecord<DispatchAssignmentRecord>(
+      row.record,
+      "ops.phase1_dispatch_assignments",
+    );
+  }
+
+  /**
+   * SD §7.6: companion lock for the driver task tied to an assignment being
+   * closed, so its terminal-state check and update share the same
+   * transaction and row lock as the assignment above.
+   */
+  async lockDriverTaskForUpdate(
+    executor: OwnedMobilityQueryExecutor,
+    taskId: string,
+  ): Promise<DriverTaskRecord | null> {
+    const result = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_driver_tasks
+        WHERE task_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [taskId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    return this.parseRecord<DriverTaskRecord>(
+      row.record,
+      "ops.phase1_driver_tasks",
+    );
   }
 
   /**
