@@ -46,7 +46,7 @@ iOS/Android 打包不受影響）
 |---|---|
 | Base SHA (origin/dev) | `b32ab8badb740b94cdf67212315ecfccf21f6d5d` |
 | Branch | `gemini2/sr-driver-web-001` |
-| Candidate SHA | 見 commit 後更新 |
+| Candidate SHA | `3e4e43fe5718ebce25af3c9f25449e499d64471d` |
 
 ## 驗收條件核對
 
@@ -69,8 +69,8 @@ pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/
 
  Test Files  1 passed (1)
       Tests  21 passed (21)
-   Start at  15:26:28
-   Duration  316ms (transform 57ms, setup 0ms, import 83ms, tests 14ms, environment 0ms)
+   Start at  15:40:29
+   Duration  321ms (transform 61ms, setup 0ms, import 83ms, tests 16ms, environment 0ms)
 ```
 
 Exit code: **0**
@@ -103,3 +103,17 @@ Exit code: **0** (typecheck passes cleanly on current origin/dev base)
   回歸風險為零。
 - **react-native-maps native map 顯示驗證**：為 native 裝置功能，
   web 版本明確說明不渲染 native map，非功能退化。
+
+## CI 狀態說明
+
+| 項目 | 值 |
+|---|---|
+| 初次推送 SHA | `11561a10cc46bd657ebe680401d3766b9f31a6dd` |
+| CI 標記 | `failure` |
+| 失敗原因 | CI 全庫 typecheck 時，`packages/contracts/src/unattended-voice.ts` 有既有 zod v4 incompatibility error；此檔案不在本 task 的 `write_scopes` 內，且已存在於 `origin/dev`，不屬於本 task 引入 |
+| 本 task 引入的 typecheck | `pnpm --filter @drts/driver-app typecheck` → exit 0（見上）|
+| 候選 SHA（最終）| `3e4e43fe5718ebce25af3c9f25449e499d64471d` |
+| 推送驗證 | `git ls-remote origin gemini2/sr-driver-web-001` → 確認 remote HEAD = `3e4e43fe5718` |
+
+本 task 所引入的檔案在靜態測試與 driver-app typecheck 皆通過；全庫 CI 失敗為
+scope 外既有問題，非本 task 回退。
