@@ -21,10 +21,33 @@
 - `apps/platform-admin-web/app/adapter-registry/`
 - `apps/api/src/modules/platform-admin/platform-admin.controller.ts`
 - `apps/api/src/modules/platform-admin/platform-admin.service.ts`
+- `apps/api/src/modules/platform-admin/platform-admin.repository.ts`
 - `tests/unit/system-remediation/sr-admin-adapter-001/`
 - 待建立：docs/04-uat/system-remediation-20260906/SR-ADMIN-ADAPTER-001.md
 
-清單內尚不存在的 module／leaf 檔是新增目標；實際 repo 路徑變動由 supervisor 更新 reviewed scope。Migration 使用 SR-CONTRACT 分配的專屬檔名。沒有列出的共用檔不得順手修改。
+清單內尚不存在的 module／leaf 檔是新增目標；實際 repo 路徑變動由 supervisor 更新 reviewed scope。沒有列出的共用檔不得順手修改。
+
+### Scope 擴充（見 `support/unblock/SR-ADMIN-ADAPTER-001/SR-ADMIN-ADAPTER-001-UNBLOCK-PLANNING-DECISION.md`）
+
+Governance 裁決：本 task 的 registry 契約與 migration 不歸 SR-CONTRACT，因為
+`packages/contracts/src/platform-adapter-registry.ts` 是既有專屬檔，不是本波新功能
+（leave/academy/host）契約整合範圍。核准新增下列兩檔，不新增 depends_on：
+
+- `infra/migrations/V0090__platform_adapter_registry.sql`（新檔，建立
+  `admin.phase1_adapter_registry`，沿用 `V0033__missing_phase1_persistence_tables.sql`
+  的 JSON-record 列樣式）
+- `packages/contracts/src/platform-adapter-registry.ts`（既有檔，補
+  `credentialExpiresAt`／`credentialReference`／mutation `reason`／
+  `auditReceipt`）
+
+`packages/contracts/src/index.ts`（已於 :7416 匯出本檔，免改）與
+`packages/api-client/src/index.ts`（已有 `listPlatformAdapters` /
+`getPlatformAdapter` / `updatePlatformAdapter` 呼叫 `/api/platform-admin/adapters`，
+免改）不需要納入範圍。
+
+註冊／設定編輯／憑證編輯輪替三個表單維持 scope cut：畫布尚無對應畫面
+（已於 UAT 證據記錄 screen-requirements note），Q-ADM17 已裁決 write-authority
+分工，缺的是畫面而非決策，待 design lane 補畫布後再做，不在本 task 交付範圍。
 
 ## 驗收條件
 
