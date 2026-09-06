@@ -366,6 +366,58 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       expect(data.error.message).toBe("Database connection timeout");
     });
 
+    it("trips export with q filter returns only matching trips by id, driver, or pickup", async () => {
+      const reqId = new NextRequest(
+        "http://localhost:3000/trips/export?q=ord-002",
+      );
+      const resId = await exportHandler(reqId);
+      expect(resId.status).toBe(200);
+      const bodyId = await resId.text();
+      const linesId = bodyId.trim().split("\n");
+      expect(linesId).toHaveLength(2);
+      expect(linesId[1]).toContain("ord-002");
+      expect(linesId[1]).toContain("李駕駛");
+
+      const reqDriver = new NextRequest(
+        "http://localhost:3000/trips/export?q=張駕駛",
+      );
+      const resDriver = await exportHandler(reqDriver);
+      const bodyDriver = await resDriver.text();
+      const linesDriver = bodyDriver.trim().split("\n");
+      expect(linesDriver).toHaveLength(2);
+      expect(linesDriver[1]).toContain("ord-001");
+
+      const reqPickup = new NextRequest(
+        "http://localhost:3000/trips/export?q=信義區",
+      );
+      const resPickup = await exportHandler(reqPickup);
+      const bodyPickup = await resPickup.text();
+      const linesPickup = bodyPickup.trim().split("\n");
+      expect(linesPickup).toHaveLength(2);
+      expect(linesPickup[1]).toContain("ord-002");
+    });
+
+    it("trips export combining svc and q filters matches compound criteria", async () => {
+      const reqMatch = new NextRequest(
+        "http://localhost:3000/trips/export?svc=realtime&q=信義區",
+      );
+      const resMatch = await exportHandler(reqMatch);
+      expect(resMatch.status).toBe(200);
+      const bodyMatch = await resMatch.text();
+      const linesMatch = bodyMatch.trim().split("\n");
+      expect(linesMatch).toHaveLength(2);
+      expect(linesMatch[1]).toContain("ord-002");
+
+      const reqNoMatch = new NextRequest(
+        "http://localhost:3000/trips/export?svc=airport&q=信義區",
+      );
+      const resNoMatch = await exportHandler(reqNoMatch);
+      expect(resNoMatch.status).toBe(200);
+      const bodyNoMatch = await resNoMatch.text();
+      const linesNoMatch = bodyNoMatch.trim().split("\n");
+      expect(linesNoMatch).toHaveLength(1);
+    });
+
     it("overview export handles loader errors with 500 status", async () => {
       mockDrivers.mockRejectedValue(new Error("Fleet service down"));
       mockVehicles.mockRejectedValue(new Error("Fleet service down"));

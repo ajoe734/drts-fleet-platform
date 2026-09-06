@@ -156,6 +156,42 @@ export default async function FleetVehiclesPage({
             body={t("data.fixtureNotice", locale)}
           />
         ) : null}
+        <form
+          method="GET"
+          action="/vehicles"
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          {activeTabKey !== "all" ? (
+            <input type="hidden" name="tab" value={activeTabKey} />
+          ) : null}
+          <input
+            type="search"
+            name="q"
+            defaultValue={params.q ?? ""}
+            placeholder={t("common.search", locale)}
+            aria-label={t("common.search", locale)}
+            style={{
+              flex: 1,
+              maxWidth: 320,
+              padding: "6px 12px",
+              borderRadius: 7,
+              border: `1px solid ${theme.border}`,
+              background: theme.bgRaised,
+              color: theme.text,
+              fontSize: 12.5,
+              fontFamily: theme.fontFamily,
+              boxSizing: "border-box",
+              outline: "none",
+            }}
+          />
+          <CanvasBtn type="submit" theme={theme} size="sm" icon="search">
+            {t("common.filter", locale)}
+          </CanvasBtn>
+        </form>
         <CanvasCard theme={theme} padding={0}>
           {filteredRows.length > 0 ? (
             <VehiclesTable rows={filteredRows} />
