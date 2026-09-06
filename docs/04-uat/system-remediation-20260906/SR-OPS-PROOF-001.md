@@ -18,7 +18,7 @@
     - **C124**（「部署版本、health、業務驗收與回滾：以目前各服務版本與可重跑用戶旅程作發布門檻；记录rollback演练」）。
   - 規格與基準來源：
     - `docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md`（非功能性負載、容量與延遲 SLO 基準）。
-    - `docs/03-runbooks/incident-escalation-service-recovery-runbook.md`（RPO/RTO 災難復原 SLO 基準）。
+    - `docs/03-runbooks/incident-escalation-service-recovery-runbook.md`（事故升級、服務復原與派車異常交接程序；注意：全庫核查確認目前 repo 與該 runbook 尚未定義具體數值 RPO/RTO 指標，演練暫定參考值明確標記為待確認）。
     - `docs/03-runbooks/production-deploy-rail-spec-20260519.md` 與 `docs/03-runbooks/production-rollback-drill-20260519.md`（生產部署與回滾演練規範）。
 - **Base SHA**：`40ba315e4114369eaa7e12d35aae83a795c97b1d`（當前 `origin/dev`）。
 - **重現狀況與問題現狀**：
@@ -52,12 +52,15 @@
   - **帳務校核**：校核租戶發票金額等於各發票明細總和（`sum(line_total) == total_amount`）；校核幣別為標準 `TWD`；校核司機月結算單淨額符合毛額減服務費加補貼之算術關係（`net_amount == gross_earning - service_fee + subsidy_amount`），且等於結算明細總和。
   - **稽核校核**：驗證所有稽核日誌之 SHA-256 雜湊與原始負載相符（防篡改）；驗證關鍵生命週期（如 `order.created`、`invoice.issued`）皆具備稽核軌跡；驗證已完成行程具備派車追蹤軌跡（`dispatch_trace_logs`）。
 
-### C. 嚴格依 runbook 基準計算 RPO 與 RTO（`rpo-rto-calculator.ts`）
+#### C. 嚴格依全庫核查現狀處理 RPO 與 RTO（`rpo-rto-calculator.ts`）
 
-- 嚴格沿用 `incident-escalation-service-recovery-runbook.md` 之災難復原 SLO 基準，**絕不自行發明數字**：
-  - **RPO 目標**：≤ 15 分鐘（900 秒）。
-  - **RTO 目標**：≤ 60 分鐘（3600 秒）。
-- 實作 `calculateRpo`、`calculateRto` 與 `evaluateDisasterRecoveryReadiness`，依快照資料時間與還原校核耗時產出合規判定報告。
+- **核查結果與待確認標記**：
+  - 經全庫檢索（含 Phase 1 PRD、系統分析、服務合約、Runbook 及 Dev Pack），既有文件尚未定義具體數值之 RPO/RTO 指標。
+  - 依據 guardrail「沿runbook與現行SLO，RPO/RTO不自行發明」，**堅決不偽造引用，移除所有虛構 sourceRef 與虛擬章節**。
+  - 程式常數 `DISASTER_RECOVERY_BASELINE` 明確設定 `isConfirmed: false`、`status: "pending_confirmation"`、`sourceRef: null`，並載明警語說明此為「演練暫定參考值（RPO ≤ 15 分鐘 / RTO ≤ 60 分鐘），非既有文件值，待 SRE／維運團隊正式確認」。
+- **評定與傳遞機制**：
+  - 實作 `calculateRpo`、`calculateRto` 與 `evaluateDisasterRecoveryReadiness`，於評定物件中明確傳遞 `baselineConfirmed: false` 與 `baselineStatus: "pending_confirmation"`。
+  - 單元測試不再回頭自我斷言常數（消除循環斷言），改為檢驗待確認狀態、null sourceRef 及門檻數值計算邏輯，確保如實呈現待確認現狀，不冒充權威基準通過。
 
 ### D. 建立多負載容量與原始延遲/錯誤校驗工具（`workload-baseline-contracts.ts`, `load-generator.ts`）
 
@@ -88,7 +91,7 @@
   - 支援 `--json` 輸出機讀數據與 `--output <path>` 存檔。
   - 支援 `--isolated-url` 傳入外部隔離資料庫，遇生產 URL 自動阻擋。
 - 實作 `tests/unit/system-remediation/sr-ops-proof-001/sr-ops-proof-001.test.ts`：
-  - 涵蓋安全護欄、快照完整性、三領域校核、RPO/RTO、負載百分位數、錯誤回報、回滾演練及 CLI 整合共 30 項測試，全數通過。
+  - 涵蓋安全護欄、快照完整性、三領域校核、RPO/RTO 待確認狀態與門檻、負載百分位數、錯誤回報、回滾演練及 CLI 整合共 32 項測試，全數通過。
 
 ## 3. 驗收條件對應
 
@@ -96,7 +99,7 @@
 | -------- | -------------- |
 | **同一snapshot可在隔離DB還原並校核行程/帳務/audit，工具不碰正式DB** | `assertIsolatedDatabase` 嚴格阻擋生產連線（拋出 `PRODUCTION_DB_TOUCH_PROHIBITED`）；`IsolatedSnapshotRestoreEngine` 在隔離儲存成功還原；`OpsReconciliationEngine` 完整校核訂單-行程關聯、發票-明細與司機淨額算術、稽核 SHA-256 防篡改雜湊。單元測試與 CLI 驗證全數通過。 |
 | **負載包含booking/dispatch/report三種；閾值來自已確認基準且輸出原始延遲與錯誤** | 閾值嚴格源自 `docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md`（Booking p95≤2s、Dispatch p95≤10s、Report p95≤3s）。`LoadGenerator` 輸出每一筆 `rawLatencies` 與 `rawErrors`，並計算 p50/p90/p95/p99 統計量。 |
-| **證據包含 base/candidate SHA、實際指令結果與資源 ID；未做的 live／真機部分明列，不冒充成功** | 記錄 Base SHA（`40ba315e4114369eaa7e12d35aae83a795c97b1d`）、Resource ID（`iso-db-res-001`）；實際執行輸出與指令詳列於第 4 節；第 5 節明列真機雲端還原與線上壓測屬於 `SR-LIVE-OPS-001`，不冒充成功。 |
+| **證據包含 base/candidate SHA、實際指令結果與資源 ID；未做的 live／真機部分明列，不冒充成功** | 記錄 Base SHA（`40ba315e4114369eaa7e12d35aae83a795c97b1d`）、Resource ID（`iso-db-res-001`）；實際執行輸出與指令詳列於第 4 節；第 5 節明列真機雲端還原與線上壓測屬於 `SR-LIVE-OPS-001`，且 RPO/RTO 正式權威值標明待確認，不冒充成功。 |
 | **先 commit＋普通 push，再 handoff；owner 不直接 done，獨立 reviewer、同 candidate CI／merge及 required_acceptance 完備才可結案** | 依循工作流執行 task-scoped anchor commit，透過普通 push 推送至 `gemini/sr-ops-proof-001`，呼叫 `ai-status.sh handoff SR-OPS-PROOF-001 Claude`，不直接呼叫 `done`。 |
 
 ## 4. 實際指令與結果
@@ -116,10 +119,10 @@ $ node /home/lupin/drts-fleet-platform/node_modules/.pnpm/vitest@4.1.4_@types+no
  RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-proof-001
 
  Test Files  1 passed (1)
-      Tests  30 passed (30)
-   Start at  14:48:46
-   Duration  761ms
-(exit 0，30 項單元與整合測試全數通過)
+      Tests  32 passed (32)
+   Start at  14:58:57
+   Duration  737ms
+(exit 0，32 項單元與整合測試全數通過)
 ```
 
 ### C. CLI 驗證工具直接執行（人讀格式）
@@ -141,21 +144,21 @@ $ node tools/system-remediation/ops-proof/bin/ops-proof.mjs all
     - 行程校核: ✓ PASS (訂單/派車/行程關聯一致)
     - 帳務校核: ✓ PASS (發票/明細/司機結算金額平整)
     - 稽核校核: ✓ PASS (SHA-256 防篡改雜湊驗證通過)
-    - RPO 評定: 5m (目標 ≤15m) -> ✓ PASS
-    - RTO 評定: 0m (目標 ≤60m) -> ✓ PASS
+    - RPO 評定: 5m (暫定參考值 ≤15m [基準待確認，非既有文件值]) -> ✓ PASS (暫定)
+    - RTO 評定: 0m (暫定參考值 ≤60m [基準待確認，非既有文件值]) -> ✓ PASS (暫定)
 
 [2] 三負載容量與原始延遲校驗 (C123): ✓ PASS
     - Booking (Intake):
       樣本數: 25, 錯誤數: 0, 錯誤率: 0%
-      延遲統計: min=33.2ms, p50=77.5ms, p95=191.8ms (SLO ≤2000ms), max=211.3ms
+      延遲統計: min=36.6ms, p50=80.3ms, p95=202.5ms (SLO ≤2000ms), max=204ms
       SLO 達標: ✓ PASS
     - Dispatch:
       樣本數: 50, 錯誤數: 0, 錯誤率: 0%
-      延遲統計: min=57ms, p50=144ms, p95=407.6ms (SLO ≤10000ms), max=436ms
+      延遲統計: min=50.8ms, p50=113.7ms, p95=346.1ms (SLO ≤10000ms), max=401.9ms
       SLO 達標: ✓ PASS
     - Report:
       樣本數: 20, 錯誤數: 0, 錯誤率: 0%
-      延遲統計: min=105.9ms, p50=314.4ms, p95=866.4ms (SLO ≤3000ms), max=866.4ms
+      延遲統計: min=101.5ms, p50=349ms, p95=711.6ms (SLO ≤3000ms), max=711.6ms
       SLO 達標: ✓ PASS
 
 [3] 部署版本與回滾演練 (C124): ✓ PASS
@@ -178,6 +181,7 @@ $ node tools/system-remediation/ops-proof/bin/ops-proof.mjs all --isolated-url "
 
 ## 5. 未做的部分（明列，不冒充成功）
 
+- **正式 RPO / RTO 權威 SLA 數值定案**：經全庫查核確認既有文件中尚無具體數值定義，本任務工具暫定 15m / 60m 作為離線演練門檻並標記 `pending_confirmation`，待正式 SRE 與維運主管確認後更新，絕不偽稱已為 runbook 現行值。
 - **真機 GCP Cloud SQL 活體快照還原**：本任務為離線可重跑之還原校核 harness 與安全防線。真機 GCP Cloud SQL 實例建立、備份還原演練與雲端權限操作屬於 `SR-LIVE-OPS-001`（具備外部閘門 `authorized_isolated_ops_target`），本任務不冒充已在真機雲端執行還原。
 - **真機 Cloud Run 多實例線上高壓壓測**：跨實例真實負載與網路流量壓測保留至 `SR-LIVE-OPS-001`。
 - **真機 GitHub Actions 生產回滾工作流 dispatch**：涉及實際 GCP 雲端資源變更，保留至正式發布維運程序。

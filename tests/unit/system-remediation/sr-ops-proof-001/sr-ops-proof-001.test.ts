@@ -291,29 +291,64 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
   // 5. RPO / RTO Evaluator
   // --------------------------------------------------------------------------
   describe("RPO / RTO & Disaster Recovery Evaluator (C122)", () => {
-    it("evaluates compliant RPO and RTO within runbook baselines", () => {
+    it("explicitly flags RPO/RTO baseline as pending confirmation with no fabricated sourceRef", () => {
+      // Guardrail: RPO/RTO 不自行發明；既有文件查無數值時必須標記待確認，不得偽造 runbook 引用
+      expect(DISASTER_RECOVERY_BASELINE.status).toBe("pending_confirmation");
+      expect(DISASTER_RECOVERY_BASELINE.isConfirmed).toBe(false);
+      expect(DISASTER_RECOVERY_BASELINE.sourceRef).toBeNull();
+      expect(DISASTER_RECOVERY_BASELINE.note).toContain("RPO/RTO 基準待確認");
+    });
+
+    it("evaluates RPO and RTO against tentative benchmarks and propagates unconfirmed baseline status", () => {
       const snapshotTime = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes old
       const rpo = calculateRpo(snapshotTime);
       expect(rpo.compliant).toBe(true);
-      expect(rpo.rpoMinutes).toBeLessThanOrEqual(DISASTER_RECOVERY_BASELINE.rpoTargetMinutes);
+      expect(rpo.rpoMinutes).toBe(5);
+      expect(rpo.targetMinutes).toBe(15);
+      expect(rpo.baselineConfirmed).toBe(false);
+      expect(rpo.baselineStatus).toBe("pending_confirmation");
+      expect(rpo.notes).toContain("RPO基準待確認，非既有文件值");
 
       const restoreStart = new Date(Date.now() - 10 * 1000); // 10 seconds ago
       const verificationEnd = new Date();
       const rto = calculateRto(restoreStart, verificationEnd);
       expect(rto.compliant).toBe(true);
-      expect(rto.rtoMinutes).toBeLessThanOrEqual(DISASTER_RECOVERY_BASELINE.rtoTargetMinutes);
+      expect(rto.targetMinutes).toBe(60);
+      expect(rto.baselineConfirmed).toBe(false);
+      expect(rto.baselineStatus).toBe("pending_confirmation");
+      expect(rto.notes).toContain("RTO基準待確認，非既有文件值");
     });
 
-    it("flags breach when RPO or RTO exceeds baseline", () => {
-      const ancientSnapshot = new Date(Date.now() - 25 * 60 * 1000); // 25 minutes old (target 15m)
+    it("flags breach when RPO or RTO exceeds tentative benchmark thresholds", () => {
+      const ancientSnapshot = new Date(Date.now() - 25 * 60 * 1000); // 25 minutes old (threshold 15m)
       const rpo = calculateRpo(ancientSnapshot);
       expect(rpo.compliant).toBe(false);
-      expect(rpo.notes).toContain("breached baseline");
+      expect(rpo.notes).toContain("超出暫定參考值");
+      expect(rpo.notes).toContain("RPO基準待確認，非既有文件值");
 
-      const slowStart = new Date(Date.now() - 75 * 60 * 1000); // 75 minutes ago (target 60m)
+      const slowStart = new Date(Date.now() - 75 * 60 * 1000); // 75 minutes ago (threshold 60m)
       const rto = calculateRto(slowStart, new Date());
       expect(rto.compliant).toBe(false);
-      expect(rto.notes).toContain("breached baseline");
+      expect(rto.notes).toContain("超出暫定參考值");
+      expect(rto.notes).toContain("RTO基準待確認，非既有文件值");
+    });
+
+    it("evaluates overall DR readiness while explicitly noting pending confirmation in summary", () => {
+      const snapshotTime = new Date(Date.now() - 5 * 60 * 1000);
+      const rpo = calculateRpo(snapshotTime);
+      const rto = calculateRto(new Date(Date.now() - 10 * 1000), new Date());
+      const mockReconciliation = {
+        overallPassed: true,
+        trips: { passed: true },
+        billing: { passed: true },
+        audit: { passed: true },
+        allDiscrepancies: [],
+      } as any;
+
+      const assessment = evaluateDisasterRecoveryReadiness(rpo, rto, mockReconciliation);
+      expect(assessment.overallCompliant).toBe(true);
+      expect(assessment.baselineConfirmed).toBe(false);
+      expect(assessment.summaryZh).toContain("RPO/RTO 基準待確認，非既有文件值");
     });
   });
 

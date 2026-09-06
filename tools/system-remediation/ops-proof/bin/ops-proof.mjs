@@ -372,8 +372,20 @@ async function main() {
       tripsReconciliation: trips,
       billingReconciliation: billing,
       auditReconciliation: audit,
-      rpo: { valueMinutes: rpoMinutes, targetMinutes: 15, passed: rpoPassed },
-      rto: { valueMinutes: rtoMinutes, targetMinutes: 60, passed: rtoPassed },
+      rpo: {
+        valueMinutes: rpoMinutes,
+        targetMinutes: 15,
+        passed: rpoPassed,
+        baselineStatus: "pending_confirmation",
+        note: "RPO/RTO 基準待確認，非既有文件值",
+      },
+      rto: {
+        valueMinutes: rtoMinutes,
+        targetMinutes: 60,
+        passed: rtoPassed,
+        baselineStatus: "pending_confirmation",
+        note: "RPO/RTO 基準待確認，非既有文件值",
+      },
     };
   }
 
@@ -429,8 +441,8 @@ async function main() {
       console.log(`    - 行程校核: ${snap.tripsReconciliation.passed ? "✓ PASS" : "✗ FAIL"} (訂單/派車/行程關聯一致)`);
       console.log(`    - 帳務校核: ${snap.billingReconciliation.passed ? "✓ PASS" : "✗ FAIL"} (發票/明細/司機結算金額平整)`);
       console.log(`    - 稽核校核: ${snap.auditReconciliation.passed ? "✓ PASS" : "✗ FAIL"} (SHA-256 防篡改雜湊驗證通過)`);
-      console.log(`    - RPO 評定: ${snap.rpo.valueMinutes}m (目標 ≤${snap.rpo.targetMinutes}m) -> ${snap.rpo.passed ? "✓ PASS" : "✗ FAIL"}`);
-      console.log(`    - RTO 評定: ${snap.rto.valueMinutes}m (目標 ≤${snap.rto.targetMinutes}m) -> ${snap.rto.passed ? "✓ PASS" : "✗ FAIL"}`);
+      console.log(`    - RPO 評定: ${snap.rpo.valueMinutes}m (暫定參考值 ≤${snap.rpo.targetMinutes}m [基準待確認，非既有文件值]) -> ${snap.rpo.passed ? "✓ PASS (暫定)" : "✗ FAIL"}`);
+      console.log(`    - RTO 評定: ${snap.rto.valueMinutes}m (暫定參考值 ≤${snap.rto.targetMinutes}m [基準待確認，非既有文件值]) -> ${snap.rto.passed ? "✓ PASS (暫定)" : "✗ FAIL"}`);
     }
 
     if (results.loadCapacityVerification) {
