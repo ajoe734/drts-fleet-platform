@@ -130,6 +130,11 @@ const MULTI_TAXI_RATING_GOVERNANCE_SCOPES = [
   "multi_taxi_ratings:moderate",
 ] as const;
 
+const MULTI_TAXI_RECORD_GOVERNANCE_SCOPES = [
+  "multi_taxi_records:read",
+  "multi_taxi_records:export",
+] as const;
+
 export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
   {
     scope: "identity:read",
@@ -429,6 +434,13 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
     description: "Multi-taxi rating governance access.",
     resourceConstraints: [TENANT_CONSTRAINT, OBJECT_CONSTRAINT] as const,
   })),
+  ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES.map((scope) => ({
+    scope,
+    allowedRealms: ["system", "platform"] as const,
+    description:
+      "Multi-taxi P5 canonical operational-record read and controlled export.",
+    resourceConstraints: [TENANT_CONSTRAINT, OBJECT_CONSTRAINT] as const,
+  })),
   {
     scope: "partner:entries:read",
     allowedRealms: ["partner"],
@@ -535,6 +547,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         "forwarder:write",
         ...SANDBOX_COMPLIANCE_SCOPES,
         ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
+        ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES,
       ],
     },
     {
@@ -570,6 +583,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         "forwarder:read",
         ...SANDBOX_COMPLIANCE_SCOPES,
         ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
+        ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES,
       ],
     },
     {
