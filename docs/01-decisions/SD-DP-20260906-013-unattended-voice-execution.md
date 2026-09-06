@@ -30,7 +30,9 @@
 
 任務、依賴、驗收與來源存於版本庫 manifest，執行狀態由正式 `ai-status.json` 擁有；`current-work.md` 及 task briefs 由既有同步機制產生。不得把本文件或聊天當作 live task board。
 
-本波 owner／reviewer 以實際配置的 Gemini、Gemini2（agy）與 Claude、Claude2 分派，`eligible_agents` 使用同四條 lane，優先跨 provider 審查。既有全域容量及其他任務不改動。後續 UV helper／unblock 任務也應延續這個偏好；若重派落到其他 lane，須記錄原因並核對是否仍符合使用者偏好，不能僅修改文件顯示名稱。
+使用者後續指定 Codex 盡量擔任 reviewer，因此本波 owner 全部初始分派 Gemini、Gemini2（agy）與 Claude、Claude2；reviewer 初始分派 Codex／Codex2，使用 GPT-6 Astra／ULTRA。`eligible_agents` 包含六條 lane，實作與審查角色偏好在 task brief 明示。現有 runtime 沒有 per-role allowlist，不宣稱已強制隔離角色；後續 UV helper／unblock 與 fallback 也應延續 agy／Claude 主實作、Codex 主審查的偏好。
+
+使用者同時授權 Gemini／Gemini2、Claude／Claude2 各 3 slots，Codex／Codex2 各 2；全域 total／execution 上限維持 12。這是本次受控 runtime 設定調整，與任務定義分開保存驗證紀錄。
 
 ## 仍需證據的開通門檻
 

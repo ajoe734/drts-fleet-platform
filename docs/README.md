@@ -77,7 +77,7 @@ provider, procurement, operating thresholds and rollout acceptance gates.
   Source-backed findings, corrections, scenario rechecks and remaining live gates.
 
 - [Execution packet and task manifest](03-runbooks/unattended-voice-booking-execution-tasks-20260906.md)
-  Runnable dependencies, agy/Claude lane routing, FR/AC traceability and live gates.
+  Runnable dependencies, agy/Claude implementation, Codex review, FR/AC traceability and live gates.
 - [Scoped execution authority](01-decisions/SD-DP-20260906-013-unattended-voice-execution.md)
   User authorization and the boundary between engineering delivery and live opening.
 

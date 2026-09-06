@@ -14,9 +14,9 @@
 
 ## 2. 派工與依賴規則
 
-本波任務以 `eligible_agents=[Gemini,Gemini2,Claude,Claude2]` 進入控制面，owner／reviewer 跨 agy 與 Claude 配對。Gemini／Gemini2 是現有 agy lane，並非更改 provider 的名稱。容量由 supervisor 的有效配置控制，不由本 packet 另定副本。
+本波初始 owner 全部分派 Gemini／Gemini2（agy）及 Claude／Claude2，初始 reviewer 全部分派 Codex／Codex2。`eligible_agents` 包含這六條 lane，讓執行與審查都能派出；現有控制面沒有 per-role allowlist，因此這是實際初始指派與後續重派偏好，不是假稱已強制隔離角色。容量由 supervisor 的有效配置控制。
 
-2026-09-06 核對時 agy 兩 lane 各 2 slots、Claude 兩 lane 各 1 slot；Claude 兩 lane 共用帳號額度。依賴完成、健康狀態及主機資源仍影響實際同時工作數。已分配的正常主流程應由這四 lane 處理；新 UV helper／unblock 子任務也沿用偏好與 allowlist。
+使用者在本次任務中指定 agy 兩 lane 各 3 slots、Claude 兩 lane 各 3、Codex 兩 lane 各 2；六 lane 名額合計 16，全機 execution／total 上限保持 12。Claude 兩 lane 共用帳號額度。Codex reviewer 指定 GPT-6 Astra／ULTRA，需核對 adapter 的 `--model` 與各 lane 的有效推理設定。模型以固定完整 Codex CLI 0.153.0 bundle 執行，各帳號繼承有效 `model_reasoning_effort=ultra`，兩帳號的新版 model catalog 均列出 Astra／ULTRA。詳見[模型設定與驗證](../04-uat/unattended-voice-execution-activation-20260906/codex-model-change-20260906.json)。設定變更及程序啟動證據見[本次容量紀錄](../04-uat/unattended-voice-execution-activation-20260906/capacity-change-20260906.json)。新 UV helper／unblock 子任務也沿用 agy／Claude 主實作、Codex 主審查的偏好；quota、依賴及主機資源會影響實際派工。
 
 工具使用現有受鎖定的 task-board transaction 一次登錄完整 DAG，再放行可執行任務。不能先寫零散 backlog，因舊 dispatcher 對不存在的 dependency 可能按已歸檔處理。再次執行不能重設既有進度、candidate SHA、審查或完成證據。
 
@@ -28,7 +28,37 @@
 
 <!-- TASK_TABLE_START -->
 
-任務摘要由版本化 manifest 在本次交付時產生。
+| Task          | 工作                                               | Owner   | Reviewer | 前置                                                                 | 初始安排       |
+| ------------- | -------------------------------------------------- | ------- | -------- | -------------------------------------------------------------------- | -------------- |
+| `UV-EXEC-001` | 建立無人語音契約、錯誤碼與能力目錄                 | Gemini  | Codex    | 無                                                                   | 依賴就緒可執行 |
+| `UV-EXEC-002` | 遷移真正 runtime 表與語音持久化 schema             | Claude  | Codex2   | 001                                                                  | 依賴就緒可執行 |
+| `UV-EXEC-003` | 落實 line scope、服務身份與 session capability     | Claude2 | Codex    | 001、002                                                             | 依賴就緒可執行 |
+| `UV-EXEC-004` | 改造 Owned Mobility 交易與快照一致性               | Claude  | Codex2   | 002                                                                  | 依賴就緒可執行 |
+| `UV-EXEC-005` | 封住 Callcenter、multi-taxi 與 callback 舊入口競態 | Claude2 | Codex    | 003、004                                                             | 依賴就緒可執行 |
+| `UV-EXEC-006` | 所有派遣入口共用司機與車輛保留                     | Claude  | Codex2   | 004、005                                                             | 依賴就緒可執行 |
+| `UV-EXEC-007` | Session 狀態機、有序事件與持久化控制權             | Claude2 | Codex    | 001、002、003                                                        | 依賴就緒可執行 |
+| `UV-EXEC-008` | 建立 CTI adapter 與獨立媒體 worker 骨架            | Gemini  | Codex2   | 001、003                                                             | 依賴就緒可執行 |
+| `UV-EXEC-009` | 本地停播、音訊時序與媒體控制權 fence               | Gemini2 | Codex    | 007、008                                                             | 依賴就緒可執行 |
+| `UV-EXEC-010` | 雙向錄音 recorder 與不可變 checkpoint              | Gemini  | Codex2   | 002、005、008、009                                                   | 依賴就緒可執行 |
+| `UV-EXEC-011` | TWM 語音 adapter 與國台客語言路由                  | Gemini2 | Codex    | 001、008、009                                                        | 依賴就緒可執行 |
+| `UV-EXEC-012` | 受約束對話引擎、欄位修復及工具閘道                 | Claude2 | Codex2   | 003、007、011                                                        | 依賴就緒可執行 |
+| `UV-EXEC-013` | 地址、商品、時區與乘車需求跨域落實                 | Claude  | Codex    | 001、004、006、012                                                   | 依賴就緒可執行 |
+| `UV-EXEC-014` | 回讀、明確確認與 speech/DTMF 提交 gate             | Claude2 | Codex2   | 007、009、010、012、013                                              | 依賴就緒可執行 |
+| `UV-EXEC-015` | 原子建單、命令 receipt 與掛斷後恢復                | Claude  | Codex    | 004、005、007、014                                                   | 依賴就緒可執行 |
+| `UV-EXEC-016` | 自動選車、offer、司機接拒與安全逾時                | Claude2 | Codex2   | 006、013、015                                                        | 依賴就緒可執行 |
+| `UV-EXEC-017` | 真人轉接 coordinator 與排隊控制權移交              | Claude  | Codex    | 007、009、012、015                                                   | 依賴就緒可執行 |
+| `UV-EXEC-018` | 聯絡角色、經同意回撥與終態競態                     | Claude2 | Codex2   | 002、007、015、017                                                   | 依賴就緒可執行 |
+| `UV-EXEC-019` | 客服例外工作台、追查與回撥操作                     | Gemini2 | Codex    | 003、015、017、018                                                   | 依賴就緒可執行 |
+| `UV-EXEC-020` | 查單、重複來電及條件能力安全分流                   | Claude  | Codex2   | 003、012、013、015、017                                              | 依賴就緒可執行 |
+| `UV-EXEC-021` | 資料保存、存取稽核、版本與緊急停用                 | Gemini  | Codex    | 003、010、015、017、018                                              | 依賴就緒可執行 |
+| `UV-EXEC-022` | 全來電指標、完整成本 ledger 與告警                 | Gemini2 | Codex2   | 015、016、018、019、021                                              | 依賴就緒可執行 |
+| `UV-EXEC-023` | 獨立媒體部署、持續背景工作及回退                   | Gemini  | Codex    | 008、009、015、016、018                                              | 依賴就緒可執行 |
+| `UV-EXEC-024` | 真實 PostgreSQL 兩實例競態與故障驗收               | Gemini2 | Codex2   | 003、004、005、006、007、014、015、016、017、018、023                | 依賴就緒可執行 |
+| `UV-EXEC-025` | 情境追溯、互動電話與比較評測 harness               | Gemini  | Codex    | 012、013、014、015、016、017、018、019、020、021、022、023           | 依賴就緒可執行 |
+| `UV-EXEC-026` | 一個原生語音候選的公平對照 adapter                 | Gemini2 | Codex2   | 001、007、009、012、014、025                                         | 依賴就緒可執行 |
+| `UV-EXEC-027` | 唯讀盤點供應商與營運準備證據                       | Gemini2 | Codex    | 無                                                                   | 依賴就緒可執行 |
+| `UV-EXEC-028` | 真實 PSTN、逐語言、轉接與容量驗證                  | Gemini2 | Codex2   | 010、011、016、017、018、019、020、021、022、023、024、025、026、027 | 外部驗收 gate  |
+| `UV-EXEC-029` | UAT、小量營運開通與回退驗證                        | Claude  | Codex    | 024、025、027、028                                                   | 外部驗收 gate  |
 
 <!-- TASK_TABLE_END -->
 
@@ -56,7 +86,17 @@ python3 tools/task-dispatch/dispatch-unattended-voice-booking-20260906.py --veri
 
 登錄後必須查回任務總數、依賴、lane allowlist、來源 SHA 與外部 gate；再查 supervisor heartbeat、provider health、實際 worker/task 對應。若 runtime 產生 helper，核對其 owner/reviewer 與偏好；如需修正，使用正式精確 reassign，不改其他任務或全域 fallback。
 
-## 6. 外部條件與後续開通
+## 6. 工具驗證
+
+任務登錄器的 13 項隔離測試已通過，涵蓋單次交易、完整 DAG 後放行、失敗不發布、重跑保留證據、已歸檔任務不得重建、初始角色與合法 fallback。測試已接入現有 CI 的 orchestrator discovery：
+
+```bash
+python3 -m unittest discover -s tools/development-orchestrator -p 'test_unattended_voice_materializer.py'
+```
+
+實際 manifest dry-run 已驗證 29 tasks、32 FR、48 AC、27 個依賴就緒後可執行及 2 個初始外部 gate。這是登錄工具與規格驗證，不是無人叫車功能已完成。
+
+## 7. 外部條件與後續開通
 
 `UV-EXEC-027` 可先唯讀盤點正式帳號／音訊協定／配額與營運資料；資料不足時保留具體 blocker，不能買帳號、猜 SLA 或把文件介紹當 account 能力。`UV-EXEC-028` 的 live PSTN 與 `UV-EXEC-029` 的試辦／正式開通需取得各自 gate evidence 才恢復。
 
