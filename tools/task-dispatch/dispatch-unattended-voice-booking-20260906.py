@@ -25,7 +25,11 @@ from typing import Any, Iterator
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT_REF = "tools/task-dispatch/dispatch-unattended-voice-booking-20260906.py"
 MANIFEST_REF = "tools/task-dispatch/manifests/unattended-voice-booking-20260906.json"
-ELIGIBLE_AGENTS = ["Gemini", "Gemini2", "Claude", "Claude2"]
+INITIAL_OWNERS = ["Gemini", "Gemini2", "Claude", "Claude2"]
+INITIAL_REVIEWERS = ["Codex", "Codex2"]
+# Runtime eligibility has no per-role allowlist. Preserve legitimate supervisor
+# substitutions while enforcing the user's preferred roles at registration.
+ELIGIBLE_AGENTS = INITIAL_OWNERS + INITIAL_REVIEWERS
 REFERENCE_FIELDS = ("planning_ref", "system_design_ref", "audit_ref", "decision_ref", "execution_ref")
 FR_IDS = {f"UV-FR-{index:03d}" for index in range(1, 33)}
 AC_IDS = {f"UV-AC-{index:03d}" for index in range(1, 49)}
@@ -87,9 +91,10 @@ def validate_manifest(manifest: dict[str, Any], repo: Path) -> list[dict[str, An
         for key in ("title", "summary_zh", "workstream", "priority"):
             if not isinstance(task.get(key), str) or not task[key].strip():
                 raise ValueError(f"{task_id}: missing {key}")
-        for key in ("owner", "reviewer"):
-            if task.get(key) not in ELIGIBLE_AGENTS:
-                raise ValueError(f"{task_id}: {key} must use an agy/Gemini or Claude lane")
+        if task.get("owner") not in INITIAL_OWNERS:
+            raise ValueError(f"{task_id}: initial owner must use an agy/Gemini or Claude lane")
+        if task.get("reviewer") not in INITIAL_REVIEWERS:
+            raise ValueError(f"{task_id}: initial reviewer must use Codex or Codex2")
         if task["owner"] == task["reviewer"]:
             raise ValueError(f"{task_id}: owner equals reviewer")
         if "eligible_agents" in task and task["eligible_agents"] != ELIGIBLE_AGENTS:
@@ -195,7 +200,8 @@ def tasks_by_id(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return tasks
 
 
-def verify_materialized(manifest: dict[str, Any], state: dict[str, Any], *, require_all: bool = True) -> None:
+def verify_materialized(manifest: dict[str, Any], state: dict[str, Any], *, require_all: bool = True) -> list[str]:
+    notices: list[str] = []
     actual_tasks = tasks_by_id(state)
     archived_ids = set(state.get("archived_task_ids") or [])
     for expected in manifest["tasks"]:
@@ -221,6 +227,9 @@ def verify_materialized(manifest: dict[str, Any], state: dict[str, Any], *, requ
             raise ValueError(f"Existing task {task_id} has unsupported assignment")
         if not re.fullmatch(r"[0-9a-f]{40}", str(actual.get("source_commit", ""))):
             raise ValueError(f"Existing task {task_id} has missing source provenance")
+        if actual["owner"] not in INITIAL_OWNERS or actual["reviewer"] not in INITIAL_REVIEWERS:
+            notices.append(f"{task_id}: preserving supervisor assignment {actual['owner']} -> {actual['reviewer']}; differs from initial owner/reviewer preference")
+    return notices
 
 
 @contextmanager
@@ -327,7 +336,9 @@ def main(argv: list[str] | None = None) -> int:
         runtime = board._command_runtime()
         readers = dict(runtime.read_only_commands)
         readers["verify-voice-wave"] = lambda state, _args: verify_materialized(manifest, state)
-        board.TaskBoardCommandExecutor(replace(runtime, read_only_commands=readers)).execute_with_result("verify-voice-wave", [])
+        notices = board.TaskBoardCommandExecutor(replace(runtime, read_only_commands=readers)).execute_with_result("verify-voice-wave", [])
+        for notice in notices:
+            print(f"PREFERENCE NOTICE: {notice}")
         print(f"Verified {len(ordered)} materialized tasks; existing lifecycle state and evidence preserved.")
     else:
         print(f"DRY RUN: {len(ordered)} tasks; FR coverage={len(FR_IDS)}; AC coverage={len(AC_IDS)}; status_root={status_root}")

@@ -33,7 +33,7 @@ class MaterializerTests(unittest.TestCase):
             refs[field] = relative
         base = {
             "id": "UV-EXEC-001", "title": "Implement, verify, preserve",
-            "summary_zh": "逗號不應拆散驗收條件", "owner": "Claude2", "reviewer": "Gemini",
+            "summary_zh": "逗號不應拆散驗收條件", "owner": "Claude2", "reviewer": "Codex",
             "depends_on": [], "artifacts": ["apps/api/", "docs/"],
             "acceptance": ["One transaction, no partially published graph"],
             "fr_ids": sorted(wave.FR_IDS), "ac_ids": sorted(wave.AC_IDS),
@@ -43,7 +43,7 @@ class MaterializerTests(unittest.TestCase):
             "priority": "P1", "test_commands": ["python3 -m unittest"],
         }
         gate = {
-            **deepcopy(base), "id": "UV-EXEC-002", "owner": "Gemini2", "reviewer": "Claude",
+            **deepcopy(base), "id": "UV-EXEC-002", "owner": "Gemini2", "reviewer": "Codex2",
             "depends_on": [base["id"]], "fr_ids": [], "ac_ids": [],
             "initial_status": "blocked", "external_gate": True,
             "required_acceptance": ["live_call_evidence"], "gate_reason": "Live test account and evidence required",
@@ -110,6 +110,23 @@ class MaterializerTests(unittest.TestCase):
         result = self.apply()
         self.assertEqual(result["created"], [])
         self.assertEqual(self.state["tasks"], before)
+
+    def test_legal_six_lane_fallback_is_preserved_and_reported_honestly(self):
+        self.apply()
+        self.state["tasks"][0].update({
+            "status": "in_progress", "owner": "Codex", "reviewer": "Gemini2",
+            "candidate_sha": "2" * 40, "next": "Supervisor assigned available fallback lanes",
+        })
+        before = deepcopy(self.state["tasks"])
+        self.assertEqual(self.apply()["created"], [])
+        self.assertEqual(self.state["tasks"], before)
+        notices = wave.verify_materialized(self.manifest, self.state)
+        self.assertEqual(len(notices), 1)
+        self.assertIn("preserving supervisor assignment Codex -> Gemini2", notices[0])
+        self.assertIn("differs from initial", notices[0])
+        self.state["tasks"][0]["reviewer"] = "Codex"
+        with self.assertRaisesRegex(ValueError, "unsupported assignment"):
+            wave.verify_materialized(self.manifest, self.state)
 
     def test_collision_fails_before_creating_missing_tasks(self):
         self.apply()
@@ -183,6 +200,7 @@ class MaterializerTests(unittest.TestCase):
         for mutate, message in (
             (lambda m: m["tasks"][0]["ac_ids"].remove("UV-AC-048"), "Coverage missing"),
             (lambda m: m["tasks"][0].update(owner="Codex"), "agy/Gemini or Claude"),
+            (lambda m: m["tasks"][0].update(reviewer="Claude"), "initial reviewer must use Codex"),
             (lambda m: m["tasks"][1].update(required_acceptance=[]), "requires acceptance"),
             (lambda m: m["tasks"][1].update(gate_reason=""), "gate_reason"),
             (lambda m: m["tasks"][1].update(waiting_for="Supervisor"), "worker lane"),
