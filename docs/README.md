@@ -14,7 +14,8 @@ points so the team can answer three different questions quickly:
 - `docs/03-runbooks/local-development.md`
   Active environment model for this repo: dedicated project `VM dev` plus
   protected shared `stage`.
-  Machine-specific VM notes belong in `docs/03-runbooks/local-development.local.md`
+  Machine-specific VM notes belong in the ignored `local-development.local.md`
+  beside that runbook (generated locally, absent from a clean checkout).
   and broader local scratch belongs in `.local/`, both initialized by
   `./tools/local-development/init-local-workspace.sh`.
 - `docs/03-runbooks/master-system-closeout-checklist.md`
@@ -61,16 +62,19 @@ Supporting repo-local orientation:
 ## Unattended Voice Booking Design
 
 The user confirmed that AI should complete normal owned phone bookings and humans
-should handle exceptions. These detailed v0.1 documents add that scope explicitly;
+should handle exceptions. These detailed v0.2 documents add that scope explicitly;
 new technical choices, numeric targets and vendor selection remain design proposals,
 not implemented capabilities or accepted procurement decisions.
 
 - [Unattended Voice Booking SA](02-architecture/phase1-unattended-voice-booking-sa-20260906.md)
   Product flows, 32 requirements, language and service boundaries, human fallback,
-  metrics, vendor comparison and 34 acceptance scenarios.
+  metrics, vendor comparison and 44 acceptance scenarios.
 - [Unattended Voice Booking SD](02-architecture/phase1-unattended-voice-booking-sd-20260906.md)
   Telephony and speech architecture, confirmation evidence, durable transactions,
   APIs/data, recovery, operations, implementation packages and rollout validation.
+
+- [Two-pass feasibility audit](02-architecture/phase1-unattended-voice-booking-two-pass-audit-20260906.md)
+  Source-backed findings, corrections, scenario rechecks and remaining live gates.
 
 ## Accepted System Design Decisions
 

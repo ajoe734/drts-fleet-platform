@@ -84,12 +84,14 @@ These files are intentionally editable and reviewable. They are inputs to consen
 - [SA: Phase 1 unattended voice booking](docs/02-architecture/phase1-unattended-voice-booking-sa-20260906.md)
 - [SD: Phase 1 unattended voice booking](docs/02-architecture/phase1-unattended-voice-booking-sd-20260906.md)
 
+- [Two-pass feasibility audit](docs/02-architecture/phase1-unattended-voice-booking-two-pass-audit-20260906.md)
+
 The latest explicit user instruction establishes AI as the primary operator for
 owned phone bookings, with humans handling exceptions. SA §2 records the scoped
 extension to older human-operated phone-entry wording. SA owns functional scope,
 requirements, numeric product targets and business acceptance; SD owns proposed
 technical states, data, interfaces, transaction rules and implementation design.
-Both documents are detailed v0.1 drafts. This instruction does not imply acceptance
+Both documents are detailed v0.2 drafts. This instruction does not imply acceptance
 of every new technical choice, vendor, SLA or retention proposal, and the drafts do
 not claim runtime readiness. Implementation work enters the controlled sync path
 below when activated; this design delivery does not change the live task board.
