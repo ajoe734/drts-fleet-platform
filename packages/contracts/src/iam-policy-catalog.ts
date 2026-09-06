@@ -529,6 +529,19 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
       OBJECT_CONSTRAINT,
     ],
   },
+  {
+    // UV-EXEC-003 / SD §4.2: gates the *first* stage of the two-stage voice
+    // identity exchange. Only a workload service principal already holding
+    // this scope may exchange itself for a short-lived, session-scoped
+    // voice-tool-gateway capability token (see VoiceCapabilityService). It
+    // does not grant any voice tool action itself -- those are the separate
+    // VOICE_CAPABILITY_SCOPES minted onto the exchanged token.
+    scope: "voice:capability:issue",
+    allowedRealms: ["system"],
+    description:
+      "Exchange an authenticated workload service principal for a short-lived voice-tool-gateway session capability token.",
+    resourceConstraints: [ACTOR_CONSTRAINT],
+  },
 ];
 
 export const IAM_SCOPE_DEFINITION_BY_SCOPE = new Map(
@@ -579,6 +592,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         "reports:write",
         "forwarder:read",
         "forwarder:write",
+        "voice:capability:issue",
         ...SANDBOX_COMPLIANCE_SCOPES,
         ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
         ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES,
