@@ -56,6 +56,8 @@
   - 已交接驗證: 顯示「社區簽章有效 valid」、真實住戶識別與戶別，CTA 為「開始叫車」。
   - 未交接狀態: 顯示「等待社區簽章權杖 / 未交接」、簽章狀態為 `missing_or_invalid`、住戶「未解析」，CTA 為「回社區 App 重新進入」，嚴格禁止虛假宣稱。
 - **`FallbackScreen`**:
+  - 將 `buildStandaloneFallbackUrl` 拆分移至 client-safe 模組 `apps/referral-embed-web/lib/embed-fallback.ts`，並於 `embed-context.ts` 重新導出維持雙向相容；`components/passenger-embed.tsx` 改由 client-safe 模組載入，避免 client component 打包時連帶引入 `next/headers` 導致 Next.js build 失敗。
+  - 移除無用 `_demo` 參數，保證 `pnpm run lint` 零警告零錯誤。
   - 當有配置外部獨立網站（環境變數或品牌後設資料）時，透過 `buildStandaloneFallbackUrl` 帶入來源標註參數 (`source=referral_embed`、`entrySlug`、`partnerCode`、`partnerUserRef`、`drtsPassengerId`)，連結直接指向外部獨立叫車網站，不回連內嵌頁。
   - 當無配置外部獨立網站時，呈現清晰的可復原狀態與「轉介來源資訊」（包含轉介入口、合作夥伴代碼、住戶識別、客服專線），並提供撥打客服按鈕 (`tel:`) 與回社區 App 按鈕，完全杜絕自迴圈。
 - **`ReauthScreen`**: 根據 issue 標記準確區分過期 (`expired`) 與重播 (`replayed`)，避免含糊錯誤。
@@ -84,9 +86,11 @@ pnpm exec vitest run tests/unit/referral-embed-security.test.ts tests/unit/refer
 - **Exit Code**: `0`
 - **測試結果**: 23 passed (23)
 
-### 3. 專案 TypeScript 型別檢查
+### 3. 專案 TypeScript 型別與建置檢查
 - `pnpm --filter @drts/referral-embed-web typecheck` -> **Exit Code: 0**
 - `pnpm --filter @drts/api typecheck` -> **Exit Code: 0**
+- `pnpm --filter @drts/referral-embed-web build` -> **Exit Code: 0** (`next build --webpack` 成功，無 client-side next/headers 錯誤)
+- `pnpm --filter @drts/referral-embed-web lint` -> **Exit Code: 0** (`eslint . --max-warnings=0` 通過)
 
 ### 4. Git 差異與空白檢查
 ```bash

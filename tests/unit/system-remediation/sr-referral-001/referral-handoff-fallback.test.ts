@@ -15,6 +15,7 @@ import {
   resolveEmbedContext,
   buildStandaloneFallbackUrl,
 } from "../../../../apps/referral-embed-web/lib/embed-context";
+import { buildStandaloneFallbackUrl as buildStandaloneFallbackUrlDirect } from "../../../../apps/referral-embed-web/lib/embed-fallback";
 import { TenantPartnerController } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
 import type { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
@@ -456,6 +457,13 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
       expect(source).toContain('context.issues.some((i) => i.includes("expired"))');
       expect(source).toContain("權杖已被使用過 (Replay)");
       expect(source).toContain("單次權杖已重播");
+
+      // 6. passenger-embed.tsx imports buildStandaloneFallbackUrl from client-safe module embed-fallback
+      expect(source).toContain('from "../lib/embed-fallback"');
+      expect(source).not.toContain('import {\n  type EmbedContext,\n  buildStandaloneFallbackUrl,\n} from "../lib/embed-context"');
+
+      // 7. embed-fallback direct function exports match re-export
+      expect(buildStandaloneFallbackUrlDirect).toBe(buildStandaloneFallbackUrl);
     });
   });
 });
