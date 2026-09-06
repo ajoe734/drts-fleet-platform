@@ -16,3 +16,35 @@ body {
 a {
   color: inherit;
 }
+
+/*
+ * Narrow-viewport fix for the enterprise booking form and review pages
+ * (SR-ENTERPRISE-FORM-001 / R22): these surfaces lay out with inline
+ * two-column CSS Grid styles that don't shrink below their content's
+ * min-content width, so a 390px viewport overflows horizontally instead
+ * of stacking. `.ent-booking-form-shell` wraps the booking form (whose
+ * internal grid markup is owned by a shared component outside this
+ * task's write scope), so the override targets its inline grid styles
+ * directly; `.ent-page-grid` / `.ent-2col-grid` are applied to grids this
+ * task owns directly on the review page.
+ */
+@media (max-width: 640px) {
+  .ent-page-grid,
+  .ent-2col-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .ent-booking-form-shell > div {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .ent-booking-form-shell [style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  .ent-booking-form-shell [style*="position: sticky"] {
+    position: static !important;
+    top: auto !important;
+  }
+}
