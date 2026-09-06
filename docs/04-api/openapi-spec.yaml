@@ -2501,6 +2501,7 @@ components:
         - brandId
         - operatingProfileId
         - operatingProfileVersion
+      additionalProperties: false
     VoiceErrorCode:
       type: string
       enum:
@@ -2533,6 +2534,7 @@ components:
       required:
         - mediaEpoch
         - controlSequence
+      additionalProperties: false
     VoiceSpeechEvidence:
       type: object
       properties:
@@ -2545,6 +2547,7 @@ components:
       required:
         - turnId
         - finalEventId
+      additionalProperties: false
     VoiceDtmfEvidence:
       type: object
       properties:
@@ -2556,7 +2559,8 @@ components:
       required:
         - eventId
         - digit
-    VoiceProof:
+      additionalProperties: false
+    VoiceSpeechProof:
       type: object
       properties:
         confirmationId:
@@ -2582,11 +2586,9 @@ components:
           format: uuid
         confirmationMethod:
           type: string
-          enum: [speech, dtmf]
+          enum: [speech]
         evidence:
-          oneOf:
-            - $ref: "#/components/schemas/VoiceSpeechEvidence"
-            - $ref: "#/components/schemas/VoiceDtmfEvidence"
+          $ref: "#/components/schemas/VoiceSpeechEvidence"
         inputEpoch:
           type: integer
         controlCutoff:
@@ -2619,6 +2621,78 @@ components:
         - recordingCheckpointId
         - confirmedAt
         - expiresAt
+      additionalProperties: false
+    VoiceDtmfProof:
+      type: object
+      properties:
+        confirmationId:
+          type: string
+          format: uuid
+        voiceSessionId:
+          type: string
+          format: uuid
+        intentId:
+          type: string
+          format: uuid
+        action:
+          type: string
+        draftVersion:
+          type: integer
+        snapshotHash:
+          type: string
+        readbackPlaybackId:
+          type: string
+          format: uuid
+        readbackCompletedEventId:
+          type: string
+          format: uuid
+        confirmationMethod:
+          type: string
+          enum: [dtmf]
+        evidence:
+          $ref: "#/components/schemas/VoiceDtmfEvidence"
+        inputEpoch:
+          type: integer
+        controlCutoff:
+          $ref: "#/components/schemas/VoiceControlCutoff"
+        leaseEpoch:
+          type: integer
+        recordingCheckpointId:
+          type: string
+          format: uuid
+        confirmedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+        - confirmationId
+        - voiceSessionId
+        - intentId
+        - action
+        - draftVersion
+        - snapshotHash
+        - readbackPlaybackId
+        - readbackCompletedEventId
+        - confirmationMethod
+        - evidence
+        - inputEpoch
+        - controlCutoff
+        - leaseEpoch
+        - recordingCheckpointId
+        - confirmedAt
+        - expiresAt
+      additionalProperties: false
+    VoiceProof:
+      oneOf:
+        - $ref: "#/components/schemas/VoiceSpeechProof"
+        - $ref: "#/components/schemas/VoiceDtmfProof"
+      discriminator:
+        propertyName: confirmationMethod
+        mapping:
+          speech: "#/components/schemas/VoiceSpeechProof"
+          dtmf: "#/components/schemas/VoiceDtmfProof"
     VoiceCapabilityScope:
       type: string
       enum:
@@ -2659,6 +2733,7 @@ components:
         - routeProfileVersion
         - leaseEpoch
         - scopes
+      additionalProperties: false
     VoiceDialogState:
       type: string
       enum:
@@ -2689,6 +2764,42 @@ components:
         - handoff
         - human
         - none
+    VoiceCommitStatus:
+      type: string
+      enum:
+        - none
+        - pending
+        - succeeded
+        - rejected
+    VoiceRecordingState:
+      type: string
+      enum:
+        - starting
+        - capturing
+        - checkpoint_ready
+        - finalizing
+        - finalized
+        - failed
+        - expired
+    VoiceConfirmationState:
+      type: string
+      enum:
+        - absent
+        - readback_playing
+        - awaiting_answer
+        - accepted
+        - invalidated
+        - consumed
+    VoiceOutcome:
+      type: string
+      enum:
+        - auto_booking_created
+        - auto_no_service
+        - auto_query_completed
+        - human_handoff
+        - callback_scheduled
+        - abandoned
+        - technical_failure
     VoiceSession:
       type: object
       properties:
@@ -2712,6 +2823,22 @@ components:
         leaseEpoch:
           type: integer
         sessionVersion:
+          type: integer
+        commitStatus:
+          $ref: "#/components/schemas/VoiceCommitStatus"
+        recordingState:
+          $ref: "#/components/schemas/VoiceRecordingState"
+        confirmationState:
+          $ref: "#/components/schemas/VoiceConfirmationState"
+        outcome:
+          $ref: "#/components/schemas/VoiceOutcome"
+        inputEpoch:
+          type: integer
+        pendingInput:
+          type: boolean
+        lastResolvedInputEpoch:
+          type: integer
+        lastAppliedControlSequence:
           type: integer
       required:
         - voiceSessionId
@@ -2763,23 +2890,33 @@ components:
         actionKey:
           type: string
         status:
-          type: string
-          enum:
-            - none
-            - pending
-            - succeeded
-            - rejected
+          $ref: "#/components/schemas/VoiceCommitStatus"
         commandId:
           type: string
           format: uuid
         orderId:
           type: string
           format: uuid
+          nullable: true
+        nextAction:
+          type: string
+        pollAfterMs:
+          type: integer
         rejectionReason:
           type: string
       required:
         - actionKey
         - status
+    VoiceCallbackStatus:
+      type: string
+      enum:
+        - pending
+        - claimed
+        - in_progress
+        - completed
+        - failed
+        - cancelled
+        - unreachable
     VoiceCallback:
       type: object
       properties:
@@ -2794,12 +2931,7 @@ components:
         consentSnapshotHash:
           type: string
         status:
-          type: string
-          enum:
-            - pending
-            - completed
-            - failed
-            - cancelled
+          $ref: "#/components/schemas/VoiceCallbackStatus"
         scheduledAt:
           type: string
           format: date-time
@@ -2824,6 +2956,7 @@ components:
         - type
         - voiceSessionId
         - principalId
+      additionalProperties: false
     HumanBookingActor:
       type: object
       properties:
@@ -2835,6 +2968,7 @@ components:
       required:
         - type
         - agentId
+      additionalProperties: false
     BookingActor:
       oneOf:
         - $ref: "#/components/schemas/VoiceAgentBookingActor"

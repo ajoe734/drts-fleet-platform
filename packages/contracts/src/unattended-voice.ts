@@ -179,6 +179,48 @@ export const VoiceControlOwnerSchema = z.enum([
 ]);
 export type VoiceControlOwner = z.infer<typeof VoiceControlOwnerSchema>;
 
+export const VoiceCommitStatusSchema = z.enum([
+  "none",
+  "pending",
+  "succeeded",
+  "rejected",
+]);
+export type VoiceCommitStatus = z.infer<typeof VoiceCommitStatusSchema>;
+
+export const VoiceRecordingStateSchema = z.enum([
+  "starting",
+  "capturing",
+  "checkpoint_ready",
+  "finalizing",
+  "finalized",
+  "failed",
+  "expired",
+]);
+export type VoiceRecordingState = z.infer<typeof VoiceRecordingStateSchema>;
+
+export const VoiceConfirmationStateSchema = z.enum([
+  "absent",
+  "readback_playing",
+  "awaiting_answer",
+  "accepted",
+  "invalidated",
+  "consumed",
+]);
+export type VoiceConfirmationState = z.infer<
+  typeof VoiceConfirmationStateSchema
+>;
+
+export const VoiceOutcomeSchema = z.enum([
+  "auto_booking_created",
+  "auto_no_service",
+  "auto_query_completed",
+  "human_handoff",
+  "callback_scheduled",
+  "abandoned",
+  "technical_failure",
+]);
+export type VoiceOutcome = z.infer<typeof VoiceOutcomeSchema>;
+
 export const VoiceSessionSchema = z.object({
   voiceSessionId: z.string().uuid(),
   callId: z.string().uuid(),
@@ -189,6 +231,14 @@ export const VoiceSessionSchema = z.object({
   controlOwner: VoiceControlOwnerSchema.optional(),
   leaseEpoch: z.number().int().optional(),
   sessionVersion: z.number().int().optional(),
+  commitStatus: VoiceCommitStatusSchema.optional(),
+  recordingState: VoiceRecordingStateSchema.optional(),
+  confirmationState: VoiceConfirmationStateSchema.optional(),
+  outcome: VoiceOutcomeSchema.optional(),
+  inputEpoch: z.number().int().optional(),
+  pendingInput: z.boolean().optional(),
+  lastResolvedInputEpoch: z.number().int().optional(),
+  lastAppliedControlSequence: z.number().int().optional(),
 });
 export type VoiceSession = z.infer<typeof VoiceSessionSchema>;
 
@@ -205,28 +255,25 @@ export const VoiceDraftSchema = z.object({
 });
 export type VoiceDraft = z.infer<typeof VoiceDraftSchema>;
 
-export const VoiceCommitStatusSchema = z.enum([
-  "none",
-  "pending",
-  "succeeded",
-  "rejected",
-]);
-export type VoiceCommitStatus = z.infer<typeof VoiceCommitStatusSchema>;
-
 export const VoiceReceiptSchema = z.object({
   actionKey: z.string(),
   status: VoiceCommitStatusSchema,
   commandId: z.string().uuid().optional(),
-  orderId: z.string().uuid().optional(),
+  orderId: z.string().uuid().nullable().optional(),
+  nextAction: z.string().optional(),
+  pollAfterMs: z.number().int().optional(),
   rejectionReason: z.string().optional(),
 });
 export type VoiceReceipt = z.infer<typeof VoiceReceiptSchema>;
 
 export const VoiceCallbackStatusSchema = z.enum([
   "pending",
+  "claimed",
+  "in_progress",
   "completed",
   "failed",
   "cancelled",
+  "unreachable",
 ]);
 export type VoiceCallbackStatus = z.infer<typeof VoiceCallbackStatusSchema>;
 
