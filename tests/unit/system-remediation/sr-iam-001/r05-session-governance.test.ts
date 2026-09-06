@@ -8,6 +8,7 @@ import type {
 } from "@drts/contracts";
 import { ApiClient, ApiClientError } from "../../../../packages/api-client/src";
 import { createPlatformAdminIamClient } from "../../../../apps/platform-admin-web/lib/platform-admin-iam-client";
+import { getSessionGovernanceCopy } from "../../../../apps/platform-admin-web/app/users/translations";
 
 const governanceComponentSource = readFileSync(
   join(
@@ -51,22 +52,22 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
     // Structural regression check: ensuring iamClient is never created unmemoized inside render bodies,
     // which caused the callback dependency to change on every render and re-trigger useEffect indefinitely.
     const userDetailMatches = governanceComponentSource.match(
-      /export function UserDetailDrawer[\s\S]*?useMemo\(\(\) => createPlatformAdminIamClient\(rawClient\), \[rawClient\]\)/,
+      /export function UserDetailDrawer[\s\S]*?useMemo\(\s*\(\)\s*=>\s*createPlatformAdminIamClient\(rawClient\),\s*\[rawClient\],?\s*\)/,
     );
     expect(userDetailMatches).not.toBeNull();
 
     const roleApprovalMatches = governanceComponentSource.match(
-      /export function RoleApprovalPanel[\s\S]*?useMemo\(\(\) => createPlatformAdminIamClient\(rawClient\), \[rawClient\]\)/,
+      /export function RoleApprovalPanel[\s\S]*?useMemo\(\s*\(\)\s*=>\s*createPlatformAdminIamClient\(rawClient\),\s*\[rawClient\],?\s*\)/,
     );
     expect(roleApprovalMatches).not.toBeNull();
 
     const accessReviewMatches = governanceComponentSource.match(
-      /export function AccessReviewPanel[\s\S]*?useMemo\(\(\) => createPlatformAdminIamClient\(rawClient\), \[rawClient\]\)/,
+      /export function AccessReviewPanel[\s\S]*?useMemo\(\s*\(\)\s*=>\s*createPlatformAdminIamClient\(rawClient\),\s*\[rawClient\],?\s*\)/,
     );
     expect(accessReviewMatches).not.toBeNull();
 
     const breakGlassMatches = governanceComponentSource.match(
-      /export function BreakGlassPanel[\s\S]*?useMemo\(\(\) => createPlatformAdminIamClient\(rawClient\), \[rawClient\]\)/,
+      /export function BreakGlassPanel[\s\S]*?useMemo\(\s*\(\)\s*=>\s*createPlatformAdminIamClient\(rawClient\),\s*\[rawClient\],?\s*\)/,
     );
     expect(breakGlassMatches).not.toBeNull();
   });
@@ -104,6 +105,7 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
     let sessions: MaskedSessionSummary[] = [];
     let error: string | null = null;
     const locale = "zh";
+    const copy = getSessionGovernanceCopy(locale);
 
     const loadSessions = async () => {
       loadingSessions = true;
@@ -126,12 +128,10 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
               e.message.includes("AUTH_SCOPE_DENIED") ||
               e.message.includes("AUTH_REALM_DENIED")));
         const message = is403
-          ? locale === "en"
-            ? "Access Denied (403 Forbidden): Insufficient authority to inspect user session inventory (requires identity:sessions:read)."
-            : "存取被拒 (403 權限不足)：目前角色缺乏檢視工作階段清單授權 (需具備 identity:sessions:read)。"
+          ? copy.sessionsReadDenied
           : e instanceof Error
             ? e.message
-            : "Failed to load session inventory";
+            : copy.loadFailed;
         error = message;
       } finally {
         loadingSessions = false;
@@ -246,6 +246,7 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
     let revokingSid: string | null = "sess_ops_101";
     let error: string | null = null;
     const locale = "zh";
+    const copy = getSessionGovernanceCopy(locale);
 
     try {
       await iamClient.revokeSession("sess_ops_101", {
@@ -260,9 +261,7 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
           "statusCode" in e &&
           (e as { statusCode?: number }).statusCode === 403);
       error = is403
-        ? locale === "en"
-          ? "Access Denied (403 Forbidden): Insufficient authority to revoke session (requires identity:sessions:write)."
-          : "存取被拒 (403 權限不足)：目前角色缺乏撤銷工作階段授權 (需具備 identity:sessions:write)。"
+        ? copy.sessionsWriteDenied
         : e instanceof Error
           ? e.message
           : "Failed";

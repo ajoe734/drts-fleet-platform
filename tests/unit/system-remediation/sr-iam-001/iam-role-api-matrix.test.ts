@@ -5,11 +5,13 @@ import {
   getIamActorScopePreset,
   getIamScopeDefinition,
   isKnownIamScope,
-  type AuthRealm,
 } from "@drts/contracts";
 import { BootstrapAuthGuard } from "../../../../apps/api/src/common/auth/bootstrap-auth.guard";
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
-import type { BootstrapRequestIdentity } from "../../../../apps/api/src/common/auth/auth.types";
+import type {
+  AuthRealm,
+  BootstrapRequestIdentity,
+} from "../../../../apps/api/src/common/auth/auth.types";
 
 describe("SR-IAM-001 — 平台/ops/P5/tenant/driver/partner/唯讀 API 權限矩陣", () => {
   // Helper to test BootstrapAuthGuard directly against route policies and request identities
@@ -28,15 +30,12 @@ describe("SR-IAM-001 — 平台/ops/P5/tenant/driver/partner/唯讀 API 權限�
     const guard = new BootstrapAuthGuard(reflector as any);
 
     const fullIdentity: BootstrapRequestIdentity = {
+      authMode: "bootstrap_headers",
       actorId: "test-actor-001",
-      actorType: identity.actorType as any,
-      realm: identity.realm,
-      authMode: "bootstrap",
       roles: [],
       roleFamilies: [identity.realm as any],
-      scopes: identity.scopes,
-      tenantId: identity.tenantId ?? null,
-      partnerId: identity.partnerId ?? null,
+      tenantId: null,
+      partnerId: null,
       partnerProgramId: null,
       partnerEntrySlug: null,
       membershipId: null,
@@ -48,6 +47,7 @@ describe("SR-IAM-001 — 平台/ops/P5/tenant/driver/partner/唯讀 API 權限�
       acr: "aal1",
       requestId: "req-test-001",
       ...identity,
+      actorType: identity.actorType as any,
     };
 
     const request = {

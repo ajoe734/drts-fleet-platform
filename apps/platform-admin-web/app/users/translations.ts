@@ -1,4 +1,4 @@
-import type { Locale } from "@/lib/translations";
+export type Locale = "en" | "zh";
 
 export const sessionGovernanceTranslations = {
   en: {
