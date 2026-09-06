@@ -1,0 +1,37 @@
+{
+  "recorded_at": "2026-09-06T03:18:06.320674+00:00",
+  "task_id": "UV-DISPATCH-001",
+  "authorization": "User requested Gemini/Gemini2 and Claude/Claude2 each 3; Codex/Codex2 each 2.",
+  "before": {
+    "claude": 1,
+    "claude2": 1,
+    "codex": 4,
+    "codex2": 4,
+    "gemini": 2,
+    "gemini2": 2
+  },
+  "after": {
+    "claude": 3,
+    "claude2": 3,
+    "codex": 2,
+    "codex2": 2,
+    "gemini": 3,
+    "gemini2": 3
+  },
+  "global_max_total_workers": 12,
+  "global_max_execution_workers": 12,
+  "config_sha256_after": "8a2b3adfdc11a5ed78feb3db6a2cdf7aff6fabbde205a14654798401ce9ca08e",
+  "config_mtime_ns": 1788664686317147550,
+  "supervisor_pid_before": 2672,
+  "activation": "supervisor_restarted_with_updated_config",
+  "supervisor_pid_after": 1368608,
+  "supervisor_state_after": {
+    "pid": 1368608,
+    "started_at": "2026-09-06T03:18:06Z",
+    "last_heartbeat_at": "2026-09-06T03:20:52Z",
+    "lifecycle": "running",
+    "focus_mode": "execution"
+  },
+  "verified_at": "2026-09-06T03:18:18.826052+00:00",
+  "evidence_method": "New systemd MainPID equals supervisor state PID; proc cmdline names updated config; configuration hash unchanged since atomic write; runtime main loads config before entering its loop."
+}

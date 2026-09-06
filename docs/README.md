@@ -14,7 +14,8 @@ points so the team can answer three different questions quickly:
 - `docs/03-runbooks/local-development.md`
   Active environment model for this repo: dedicated project `VM dev` plus
   protected shared `stage`.
-  Machine-specific VM notes belong in `docs/03-runbooks/local-development.local.md`
+  Machine-specific VM notes belong in the ignored `local-development.local.md`
+  beside that runbook (generated locally, absent from a clean checkout).
   and broader local scratch belongs in `.local/`, both initialized by
   `./tools/local-development/init-local-workspace.sh`.
 - `docs/03-runbooks/master-system-closeout-checklist.md`
@@ -57,6 +58,28 @@ Supporting repo-local orientation:
 - `ROADMAP.md`
 - `DEVELOPMENT_WORKBREAKDOWN.md`
 - `CANONICAL_DOCUMENT_MAP.md`
+
+## Unattended Voice Booking Design
+
+The user authorized supervisor-managed execution of the audited v0.2 design:
+AI completes normal owned phone bookings and humans handle exceptions.
+The scoped execution decision separates the engineering baseline from live
+provider, procurement, operating thresholds and rollout acceptance gates.
+
+- [Unattended Voice Booking SA](02-architecture/phase1-unattended-voice-booking-sa-20260906.md)
+  Product flows, 32 requirements, language and service boundaries, human fallback,
+  metrics, vendor comparison and 48 acceptance scenarios.
+- [Unattended Voice Booking SD](02-architecture/phase1-unattended-voice-booking-sd-20260906.md)
+  Telephony and speech architecture, confirmation evidence, durable transactions,
+  APIs/data, recovery, operations, implementation packages and rollout validation.
+
+- [Two-pass feasibility audit](02-architecture/phase1-unattended-voice-booking-two-pass-audit-20260906.md)
+  Source-backed findings, corrections, scenario rechecks and remaining live gates.
+
+- [Execution packet and task manifest](03-runbooks/unattended-voice-booking-execution-tasks-20260906.md)
+  Runnable dependencies, agy/Claude implementation, Codex review, FR/AC traceability and live gates.
+- [Scoped execution authority](01-decisions/SD-DP-20260906-013-unattended-voice-execution.md)
+  User authorization and the boundary between engineering delivery and live opening.
 
 ## Accepted System Design Decisions
 

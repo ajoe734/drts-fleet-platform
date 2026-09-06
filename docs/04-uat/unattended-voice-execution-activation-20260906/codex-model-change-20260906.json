@@ -1,0 +1,51 @@
+{
+  "task_id": "UV-DISPATCH-001",
+  "requested_model": "gpt-6-astra",
+  "requested_reasoning_effort": "ultra",
+  "recorded_at": "2026-09-06T03:22:34.350687+00:00",
+  "provider_before": {
+    "codex": {
+      "cli": "codex",
+      "model": "gpt-5.6-terra"
+    },
+    "codex2": {
+      "cli": "codex",
+      "model": "gpt-5.6-terra"
+    }
+  },
+  "provider_after": {
+    "codex": {
+      "cli": "/home/lupin/.local/lib/codex/0.153.0/codex",
+      "model": "gpt-6-astra"
+    },
+    "codex2": {
+      "cli": "/home/lupin/.local/lib/codex/0.153.0/codex",
+      "model": "gpt-6-astra"
+    }
+  },
+  "cli_version": "codex-cli 0.153.0",
+  "binary_sha256": "fce635028842bfe9257140e8b7d53162732945e2f356fc35225be0702b4974be",
+  "reasoning_source": "Each lane CODEX_HOME/config.toml; current adapter reads model from provider config and inherits reasoning from CLI config.",
+  "catalog_check": "Both account catalogs through CLI 0.153.0 list gpt-6-astra and ultra; old worker CLI 0.146.0 did not list Astra.",
+  "config_sha256_after": "bb78b471a819b0c5f0252f377adab2994d820cab415cca0002732defdfd491e4",
+  "supervisor_pid_before": 1368608,
+  "activation": "supervisor_restarted_with_updated_config",
+  "bundle_layout": "Full installed linux-x86_64 bundle copied with relative resources and code-mode host; no global Codex symlink changed.",
+  "bundle_files_verified": [
+    "codex",
+    "codex-code-mode-host",
+    "codex-package.json",
+    "codex-resources",
+    "codex-path"
+  ],
+  "supervisor_pid_after": 1380682,
+  "supervisor_state_after": {
+    "pid": 1380682,
+    "started_at": "2026-09-06T03:23:04Z",
+    "last_heartbeat_at": "2026-09-06T03:23:04Z",
+    "lifecycle": "running",
+    "focus_mode": "execution"
+  },
+  "verified_at": "2026-09-06T03:23:21.093081+00:00",
+  "evidence_method": "Matching systemd/state PID and proc config path; unchanged config hash; both lane TOML reasoning values verified; runtime loads provider config at startup."
+}

@@ -56,6 +56,22 @@ Dedicated system design supplement introduced for operational closeout:
 
 - `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`
 
+### Accepted Unattended Voice Booking Execution Supplement
+
+- [Execution authority and scoped decisions](docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md)
+- [SA: requirements and business acceptance](docs/02-architecture/phase1-unattended-voice-booking-sa-20260906.md)
+- [SD: technical states, interfaces and transaction rules](docs/02-architecture/phase1-unattended-voice-booking-sd-20260906.md)
+- [Two-pass feasibility audit](docs/02-architecture/phase1-unattended-voice-booking-two-pass-audit-20260906.md)
+- [Supervisor execution packet](docs/03-runbooks/unattended-voice-booking-execution-tasks-20260906.md)
+
+The user authorized materialization and execution after the two-pass review.
+The scoped decision establishes the v0.2 engineering baseline; live provider,
+procurement, numeric operating thresholds and rollout evidence remain gated.
+The versioned task manifest owns task definitions and traceability. The live
+`ai-status.json` owns scheduling and completion; generated summaries mirror it.
+AI handles normal bookings and humans handle exceptions. Accepted design does
+not claim implemented or deployed capability.
+
 ### L2 Execution Rules
 
 - `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/README.md`
