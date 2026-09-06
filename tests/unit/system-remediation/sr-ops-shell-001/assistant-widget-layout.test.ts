@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Re-create the state and clamping logic to test pure viewport and storage mathematics
 // matching assistant-widget.tsx specifications.

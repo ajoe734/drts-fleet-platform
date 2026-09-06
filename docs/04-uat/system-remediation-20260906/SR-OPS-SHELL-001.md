@@ -103,8 +103,21 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/
 
  Test Files  2 passed (2)
       Tests  22 passed (22)
-   Start at  07:33:55
-   Duration  1.00s
+   Start at  07:43:47
+   Duration  926ms
+exit code: 0
+```
+
+### 4.4 ESLint 靜態檢查
+```text
+$ pnpm --filter @drts/ops-console-web lint
+> @drts/ops-console-web@0.1.0 lint /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-shell-001/apps/ops-console-web
+> eslint . --max-warnings=0
+exit code: 0
+
+$ pnpm lint:root
+> drts-fleet-platform@0.1.0 lint:root /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-shell-001
+> eslint eslint.config.mjs playwright*.config.ts vitest.config.ts tests --max-warnings=0
 exit code: 0
 ```
 

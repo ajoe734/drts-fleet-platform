@@ -136,7 +136,6 @@ function clampRect(
   );
   const width = clamp(rect.width, minW, maxW);
 
-  const effectiveH = minimized ? MINIMIZED_HEIGHT : rect.height;
   const height = minimized
     ? MINIMIZED_HEIGHT
     : clamp(
@@ -146,10 +145,7 @@ function clampRect(
       );
 
   const maxX = Math.max(EDGE_GAP, viewport.width - width - EDGE_GAP);
-  const maxY = Math.max(
-    EDGE_GAP,
-    viewport.height - (minimized ? MINIMIZED_HEIGHT : height) - EDGE_GAP,
-  );
+  const maxY = Math.max(EDGE_GAP, viewport.height - height - EDGE_GAP);
 
   return {
     x: clamp(rect.x, EDGE_GAP, maxX),
