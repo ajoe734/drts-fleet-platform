@@ -114,13 +114,13 @@ export class CallcenterController {
   }
 
   @Post("sessions/:callId/link-order")
-  linkCallOrder(
+  async linkCallOrder(
     @Param("callId") callId: string,
     @Body() command: LinkCallOrderCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.linkOrderToExistingSession(
+      await this.callcenterService.linkOrderToExistingSession(
         callId,
         command,
         requestId,

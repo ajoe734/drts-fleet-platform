@@ -3,6 +3,36 @@ import { describe, expect, it, vi } from "vitest";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { CallcenterRepository } from "../../apps/api/src/modules/callcenter/callcenter.repository";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
+import type { VoiceBookingRepository } from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
+
+type FakeVoiceFixture = {
+  session?: { voiceSessionId: string; resourceScopeId: string } | null;
+  intent?: {
+    intentId: string;
+    action: string;
+    boundOrderId: string | null;
+  } | null;
+  resourceScope?: { brandId: string } | null;
+  receipt?: {
+    status: "pending" | "succeeded" | "rejected";
+    orderId: string | null;
+  } | null;
+};
+
+/**
+ * A minimal `VoiceBookingRepository` double for exercising
+ * `CallcenterService`'s SD §7.4 link-order fence without a real database --
+ * only the four read methods `resolveVoiceOrderFence` actually calls.
+ */
+function createFakeVoiceBookingRepository(fixture: FakeVoiceFixture) {
+  return {
+    isEnabled: () => true,
+    findSessionByCallId: vi.fn(async () => fixture.session ?? null),
+    findActiveCreateIntent: vi.fn(async () => fixture.intent ?? null),
+    findResourceScopeById: vi.fn(async () => fixture.resourceScope ?? null),
+    findReceiptByActionKey: vi.fn(async () => fixture.receipt ?? null),
+  } as unknown as VoiceBookingRepository;
+}
 
 describe("callcenter service", () => {
   it("opens, fetches, and closes a call session", () => {
@@ -215,5 +245,106 @@ describe("callcenter service", () => {
         callerPhone: "0911000222",
       }),
     );
+  });
+
+  describe("SD §7.4 voice fence on link-order", () => {
+    it("rejects rebinding a call already bound to a different AI-originated order", async () => {
+      const auditService = new AuditNotificationService();
+      const voiceBookingRepository = createFakeVoiceBookingRepository({
+        session: { voiceSessionId: "vs-001", resourceScopeId: "scope-001" },
+        intent: {
+          intentId: "intent-001",
+          action: "create_owned_order",
+          boundOrderId: "order-bound-001",
+        },
+        resourceScope: { brandId: "brand-001" },
+        receipt: { status: "succeeded", orderId: "order-bound-001" },
+      });
+      const callcenterService = new CallcenterService(
+        auditService,
+        undefined,
+        voiceBookingRepository,
+      );
+      callcenterService.upsertExternalSession({ callId: "call-fence-001" });
+
+      await expect(
+        callcenterService.linkOrderToExistingSession("call-fence-001", {
+          orderId: "order-different-001",
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_ORDER_ALREADY_LINKED" });
+    });
+
+    it("allows re-linking the same call to the order it is already bound to", async () => {
+      const auditService = new AuditNotificationService();
+      const voiceBookingRepository = createFakeVoiceBookingRepository({
+        session: { voiceSessionId: "vs-002", resourceScopeId: "scope-002" },
+        intent: {
+          intentId: "intent-002",
+          action: "create_owned_order",
+          boundOrderId: "order-bound-002",
+        },
+        resourceScope: { brandId: "brand-002" },
+        receipt: { status: "succeeded", orderId: "order-bound-002" },
+      });
+      const callcenterService = new CallcenterService(
+        auditService,
+        undefined,
+        voiceBookingRepository,
+      );
+      callcenterService.upsertExternalSession({ callId: "call-fence-002" });
+
+      const session = await callcenterService.linkOrderToExistingSession(
+        "call-fence-002",
+        { orderId: "order-bound-002" },
+      );
+
+      expect(session.linkedOrderId).toBe("order-bound-002");
+    });
+
+    it("rejects linking any order while an AI command is still pending reconciliation", async () => {
+      const auditService = new AuditNotificationService();
+      const voiceBookingRepository = createFakeVoiceBookingRepository({
+        session: { voiceSessionId: "vs-003", resourceScopeId: "scope-003" },
+        intent: {
+          intentId: "intent-003",
+          action: "create_owned_order",
+          boundOrderId: null,
+        },
+        resourceScope: { brandId: "brand-003" },
+        receipt: { status: "pending", orderId: null },
+      });
+      const callcenterService = new CallcenterService(
+        auditService,
+        undefined,
+        voiceBookingRepository,
+      );
+      callcenterService.upsertExternalSession({ callId: "call-fence-003" });
+
+      await expect(
+        callcenterService.linkOrderToExistingSession("call-fence-003", {
+          orderId: "order-manual-003",
+        }),
+      ).rejects.toMatchObject({ code: "VOICE_ACTION_PENDING" });
+    });
+
+    it("falls through to legacy behavior when the call has no voice session", async () => {
+      const auditService = new AuditNotificationService();
+      const voiceBookingRepository = createFakeVoiceBookingRepository({
+        session: null,
+      });
+      const callcenterService = new CallcenterService(
+        auditService,
+        undefined,
+        voiceBookingRepository,
+      );
+      callcenterService.upsertExternalSession({ callId: "call-fence-004" });
+
+      const session = await callcenterService.linkOrderToExistingSession(
+        "call-fence-004",
+        { orderId: "order-manual-004" },
+      );
+
+      expect(session.linkedOrderId).toBe("order-manual-004");
+    });
   });
 });
