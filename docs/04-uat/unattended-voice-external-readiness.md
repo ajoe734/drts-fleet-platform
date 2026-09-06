@@ -238,6 +238,12 @@
 
 > **本輪複查結論：** 連續第 18 輪複查，機器真相與前十七輪完全一致，無 regression、無新證據。**未呼叫 `record-acceptance`**，本輪以 `note` 記錄，不呼叫 `progress`。重申：本任務已合併、產出完整，唯一缺口是 7 項 `required_acceptance` 所需之真實外部供應商帳號/合約/費率證據，非本 worker 唯讀盤點權限可取得；第六度建議 supervisor 將此任務的 re-dispatch 條件改為證據變更觸發式（GitHub secrets/variables 新增語音相關項目、或 `required_acceptance` 來源文件被人工更新），以避免對已知無變化的 blocked-on-external-evidence 任務持續消耗固定間隔 dispatch 資源。
 
+### 2.22 Acceptance 階段複查記錄 (Acceptance-Phase Re-Verification 2026-09-06, Claude2, 第 19 次連續 acceptance_ready_dispatch 喚醒)
+
+再次核對：`origin/dev` 仍為 `2093cf7e3`（= `merge_sha`，無推進）；`gh secret list`/`gh variable list` 計數仍為 11/97，CTI/TWM/Voice/Carrier/DTMF/Twilio/SIP/ASR/TTS/Phone/PSTN 關鍵字比對仍為 0 筆；`ai-status.json` 候選生命週期欄位與 §8.1 七項 `required_acceptance` 矩陣未變化。**未呼叫 `record-acceptance`／`progress`，本輪僅以 `note` 記錄。**
+
+> 連續 19 輪固定間隔 dispatch 產出完全相同結論，前 6 輪已在此節逐一記錄同一建議。**自本輪起，若後續喚醒仍無機器真相 delta（origin/dev SHA、gh secret/variable 計數與關鍵字、`required_acceptance` 矩陣三者皆無變化），不再新增重複子節**，僅透過 `ai-status.sh note` 更新 `next`/`last_update` 摘要，以避免此文件無限增長而不增加證據價值。本任務唯一解鎖路徑是取得真實外部供應商帳號/合約/費率證據並經人工確認後呼叫 `record-acceptance`；建議 supervisor 將 re-dispatch 條件改為證據變更觸發式。
+
 ---
 
 ## 3. CTI 準備度盤點 (CTI Capability Readiness)
