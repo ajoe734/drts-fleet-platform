@@ -6,7 +6,7 @@
 - Gap ID: `R26`
 - Capability IDs: `C087`
 - Base SHA: `40ba315e4114369eaa7e12d35aae83a795c97b1d` (`origin/dev` at branch creation)
-- Candidate SHA: recorded at `handoff` time via `git rev-parse HEAD`
+- Candidate SHA: `acca198c1180593b105073c5bc17fc97858a4fee`
 - Branch: `gemini/sr-channel-001`
 
 ## 1. Audit source (2026-09-06) vs. reproduction at base SHA
