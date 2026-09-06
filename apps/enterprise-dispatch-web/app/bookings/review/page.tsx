@@ -13,12 +13,13 @@ import {
 import { EntParty, EntRoute } from "@/components/ent-screen-bits";
 import { EntPageHead } from "@/components/enterprise-shell";
 import {
+  derivePlacard,
   getEnterpriseBookingPreview,
   getVehicleLabelFromDraft,
   parseEnterpriseBookingDraft,
   serializeEnterpriseBookingDraft,
+  validateReservationWindow,
 } from "@/lib/enterprise-booking-draft";
-import { enterpriseDriver } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { getServerLocale } from "@/lib/server-locale";
 import { type TranslationKey, t as translate } from "@/lib/translations";
@@ -59,6 +60,10 @@ export default async function ReviewBookingPage({
   const vehicleLabel = getVehicleLabelFromDraft(draft, locale);
   const airportParts = [draft.flight.trim(), draft.terminal.trim()].filter(Boolean);
   const airportLabel = airportParts.length > 0 ? airportParts.join(" · ") : undefined;
+  const timeValidation = validateReservationWindow(
+    draft.reservationDate,
+    draft.reservationTime,
+  );
 
   return (
     <>
@@ -79,14 +84,7 @@ export default async function ReviewBookingPage({
         />
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1.1fr",
-          gap: 18,
-          alignItems: "start",
-        }}
-      >
+      <div className="review-grid">
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <ECard
             t={t}
@@ -231,7 +229,12 @@ export default async function ReviewBookingPage({
                   {tr("review.summary.placard")}
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  {enterpriseDriver.placard}
+                  {displayDraftValue(
+                    draft.placard ||
+                      (draft.passengerMode === "self"
+                        ? draft.bookedBy
+                        : derivePlacard(draft.passenger)),
+                  )}
                 </div>
               </div>
             </div>
@@ -306,15 +309,68 @@ export default async function ReviewBookingPage({
               </div>
             </div>
           </ECard>
-          <div style={{ display: "flex", gap: 12 }}>
-            <Link
-              href={`/bookings/new?${serializeEnterpriseBookingDraft(draft).toString()}${bookingId ? `&bookingId=${encodeURIComponent(bookingId)}` : ""}`}
-              style={entBtnStyle(t, { variant: "default", block: true })}
-            >
-              <EBtnContent>{tr("review.back")}</EBtnContent>
-            </Link>
-            <BookingSubmitButton draft={draft} {...(bookingId ? { bookingId } : {})} />
-          </div>
+          {!timeValidation.valid ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <EBanner
+                t={t}
+                tone="danger"
+                icon="alert"
+                title={
+                  locale === "zh"
+                    ? "預約時間無效，無法送出"
+                    : "Invalid Reservation Time"
+                }
+                body={
+                  timeValidation.reason ??
+                  (locale === "zh"
+                    ? "用車時間已過期或小於最短提前時間，請返回修改時間。"
+                    : "Reservation time has expired or violates minimum advance booking lead time.")
+                }
+              />
+              <div style={{ display: "flex", gap: 12 }}>
+                <Link
+                  href={`/bookings/new?${serializeEnterpriseBookingDraft(draft).toString()}${bookingId ? `&bookingId=${encodeURIComponent(bookingId)}` : ""}`}
+                  style={entBtnStyle(t, { variant: "primary", block: true })}
+                >
+                  <EBtnContent icon="cal">
+                    {locale === "zh"
+                      ? "返回修改預約時間"
+                      : "Change Reservation Time"}
+                  </EBtnContent>
+                </Link>
+                <button
+                  type="button"
+                  disabled
+                  aria-disabled="true"
+                  style={entBtnStyle(t, {
+                    variant: "default",
+                    block: true,
+                    disabled: true,
+                  })}
+                  title={timeValidation.reason}
+                >
+                  <EBtnContent icon="ban">
+                    {locale === "zh"
+                      ? "時間過期不可送出"
+                      : "Time Expired · Cannot Submit"}
+                  </EBtnContent>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 12 }}>
+              <Link
+                href={`/bookings/new?${serializeEnterpriseBookingDraft(draft).toString()}${bookingId ? `&bookingId=${encodeURIComponent(bookingId)}` : ""}`}
+                style={entBtnStyle(t, { variant: "default", block: true })}
+              >
+                <EBtnContent>{tr("review.back")}</EBtnContent>
+              </Link>
+              <BookingSubmitButton
+                draft={draft}
+                {...(bookingId ? { bookingId } : {})}
+              />
+            </div>
+          )}
         </div>
       </div>
     </>

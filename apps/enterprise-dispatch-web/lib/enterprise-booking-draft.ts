@@ -6,8 +6,8 @@ import type {
 import {
   enterpriseBookingDraft,
   getEnterpriseBookingDraft,
-} from "@/lib/enterprise-fixtures";
-import { t as translate, type Locale } from "@/lib/translations";
+} from "./enterprise-fixtures";
+import { t as translate, type Locale } from "./translations";
 
 export type EnterprisePassengerMode = "self" | "other";
 export type EnterpriseAirportDirection = "pickup" | "dropoff";
@@ -30,6 +30,7 @@ export type EnterpriseBookingDraftForm = {
   terminal: string;
   flight: string;
   luggageCount: string;
+  placard: string;
 };
 
 type SearchParamRecord = Record<string, string | string[] | undefined>;
@@ -63,13 +64,162 @@ const QUERY_KEYS = {
   terminal: "terminal",
   flight: "flight",
   luggageCount: "luggage",
+  placard: "placard",
+  entry: "entry",
 } as const;
 
 const DISPLAY_BUDGET_TOTAL = 60_000;
 const DISPLAY_BUDGET_AVAILABLE = 31_000;
 const APPROVAL_THRESHOLD = 1_500;
-const DEFAULT_TIMEZONE_OFFSET = "+08:00";
-const DEFAULT_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
+export const DEFAULT_TIMEZONE_OFFSET = "+08:00";
+export const DEFAULT_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
+export const MIN_LEAD_TIME_MINUTES = 15;
+
+export function derivePlacard(passenger: string): string {
+  const trimmed = passenger.replace(/^(訪客|Guest)\s*[·•-]?\s*/i, "").trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (/^sato/i.test(trimmed) && !/様/.test(trimmed)) {
+    return `${trimmed.split(/\s+/)[0]} 様`;
+  }
+  return trimmed;
+}
+
+export function getEarliestReservationTime(
+  now = new Date(),
+  leadTimeMinutes = MIN_LEAD_TIME_MINUTES,
+) {
+  const minMs = now.getTime() + leadTimeMinutes * 60 * 1000;
+  const roundedMs = Math.ceil(minMs / (5 * 60 * 1000)) * (5 * 60 * 1000);
+  const localWallClock = new Date(
+    roundedMs + DEFAULT_TIMEZONE_OFFSET_MS,
+  ).toISOString();
+  const date = localWallClock.slice(0, 10);
+  const time = localWallClock.slice(11, 16);
+  return {
+    date,
+    time,
+    isoString: new Date(roundedMs).toISOString(),
+    label: `${date} ${time} (UTC+8)`,
+  };
+}
+
+export type ReservationValidationResult = {
+  valid: boolean;
+  code?: "INVALID_FORMAT" | "PAST_DATE" | "TOO_SOON_TO_BOOK";
+  reason?: string;
+  earliestAllowedDate: string;
+  earliestAllowedTime: string;
+  earliestAllowedLabel: string;
+};
+
+export function validateReservationWindow(
+  date: string,
+  time: string,
+  now = new Date(),
+  leadTimeMinutes = MIN_LEAD_TIME_MINUTES,
+): ReservationValidationResult {
+  const earliest = getEarliestReservationTime(now, leadTimeMinutes);
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  const timePattern = /^\d{2}:\d{2}$/;
+
+  if (!datePattern.test(date) || !timePattern.test(time)) {
+    return {
+      valid: false,
+      code: "INVALID_FORMAT",
+      reason: "請輸入有效的用車日期 (YYYY-MM-DD) 與時間 (HH:mm)",
+      earliestAllowedDate: earliest.date,
+      earliestAllowedTime: earliest.time,
+      earliestAllowedLabel: earliest.label,
+    };
+  }
+
+  const dateParts = date.split("-").map(Number);
+  const timeParts = time.split(":").map(Number);
+  const y = dateParts[0];
+  const m = dateParts[1];
+  const d = dateParts[2];
+  const hh = timeParts[0];
+  const mm = timeParts[1];
+
+  if (
+    y === undefined ||
+    m === undefined ||
+    d === undefined ||
+    hh === undefined ||
+    mm === undefined ||
+    Number.isNaN(y) ||
+    Number.isNaN(m) ||
+    Number.isNaN(d) ||
+    Number.isNaN(hh) ||
+    Number.isNaN(mm) ||
+    m < 1 ||
+    m > 12 ||
+    d < 1 ||
+    d > 31 ||
+    hh < 0 ||
+    hh > 23 ||
+    mm < 0 ||
+    mm > 59
+  ) {
+    return {
+      valid: false,
+      code: "INVALID_FORMAT",
+      reason: "日期或時間數值超出合理範圍",
+      earliestAllowedDate: earliest.date,
+      earliestAllowedTime: earliest.time,
+      earliestAllowedLabel: earliest.label,
+    };
+  }
+
+  const reservationStart = new Date(
+    `${date}T${time}:00${DEFAULT_TIMEZONE_OFFSET}`,
+  );
+  if (Number.isNaN(reservationStart.getTime())) {
+    return {
+      valid: false,
+      code: "INVALID_FORMAT",
+      reason: "無法解析預約時間",
+      earliestAllowedDate: earliest.date,
+      earliestAllowedTime: earliest.time,
+      earliestAllowedLabel: earliest.label,
+    };
+  }
+
+  const reservationMs = reservationStart.getTime();
+  const nowMs = now.getTime();
+  const minRequiredMs = nowMs + leadTimeMinutes * 60 * 1000;
+
+  if (reservationMs <= nowMs) {
+    return {
+      valid: false,
+      code: "PAST_DATE",
+      reason: `預約時間不能為過去時間。最早可預約時間為：${earliest.label}`,
+      earliestAllowedDate: earliest.date,
+      earliestAllowedTime: earliest.time,
+      earliestAllowedLabel: earliest.label,
+    };
+  }
+
+  if (reservationMs < minRequiredMs) {
+    return {
+      valid: false,
+      code: "TOO_SOON_TO_BOOK",
+      reason: `預約時間需至少提前 ${leadTimeMinutes} 分鐘（最短提前預約限制）。最早可預約時間為：${earliest.label}`,
+      earliestAllowedDate: earliest.date,
+      earliestAllowedTime: earliest.time,
+      earliestAllowedLabel: earliest.label,
+    };
+  }
+
+  return {
+    valid: true,
+    earliestAllowedDate: earliest.date,
+    earliestAllowedTime: earliest.time,
+    earliestAllowedLabel: earliest.label,
+  };
+}
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -184,6 +334,7 @@ export function formatReservationWindowLabel(
 export function createEnterpriseBookingDraft(
   locale: Locale,
   now = new Date(),
+  mode: EnterprisePassengerMode = "self",
 ): EnterpriseBookingDraftForm {
   const seed = getEnterpriseBookingDraft(locale);
   const vehicle = normalizeVehicle(enterpriseBookingDraft.vehicle, "business");
@@ -192,10 +343,13 @@ export function createEnterpriseBookingDraft(
   )
     .toISOString()
     .slice(0, 10);
+  const isSelf = mode === "self";
+  const passenger = isSelf ? seed.bookedBy : seed.passenger;
+  const placard = isSelf ? seed.bookedBy : derivePlacard(passenger);
 
   return {
-    passengerMode: "other",
-    passenger: seed.passenger,
+    passengerMode: mode,
+    passenger,
     bookedBy: seed.bookedBy,
     pickup: seed.pickup,
     dropoff: seed.dropoff,
@@ -212,25 +366,58 @@ export function createEnterpriseBookingDraft(
     terminal: seed.terminal,
     flight: seed.flight,
     luggageCount: "3",
+    placard,
   } satisfies EnterpriseBookingDraftForm;
 }
 
 export function parseEnterpriseBookingDraft(
   searchParams: SearchParamRecord | undefined,
   locale: Locale,
+  now = new Date(),
 ): EnterpriseBookingDraftForm {
-  const fallback = createEnterpriseBookingDraft(locale);
   const params = searchParams ?? {};
-  const passengerMode = firstParam(params[QUERY_KEYS.passengerMode]);
+  const explicitPm = firstParam(params[QUERY_KEYS.passengerMode]);
+  const hasPassengerParam = hasQueryKey(params, QUERY_KEYS.passenger);
+  const seed = getEnterpriseBookingDraft(locale);
+
+  let passengerMode: EnterprisePassengerMode = "self";
+  if (explicitPm === "other") {
+    passengerMode = "other";
+  } else if (explicitPm === "self") {
+    passengerMode = "self";
+  } else if (hasPassengerParam) {
+    const rawPassenger = firstParam(params[QUERY_KEYS.passenger])?.trim();
+    if (rawPassenger && rawPassenger !== seed.bookedBy) {
+      passengerMode = "other";
+    }
+  }
+
+  const fallback = createEnterpriseBookingDraft(locale, now, passengerMode);
+  const bookedBy = parseEditableText(
+    params,
+    QUERY_KEYS.bookedBy,
+    fallback.bookedBy,
+  );
+  let passenger = parseEditableText(
+    params,
+    QUERY_KEYS.passenger,
+    fallback.passenger,
+  );
+  if (passengerMode === "self") {
+    passenger = bookedBy;
+  }
+
+  let placard = "";
+  if (hasQueryKey(params, QUERY_KEYS.placard)) {
+    placard = parseEditableText(params, QUERY_KEYS.placard, "");
+  } else {
+    placard = passengerMode === "self" ? bookedBy : derivePlacard(passenger);
+  }
 
   const draft: EnterpriseBookingDraftForm = {
-    passengerMode: passengerMode === "self" ? "self" : "other",
-    passenger: parseEditableText(
-      params,
-      QUERY_KEYS.passenger,
-      fallback.passenger,
-    ),
-    bookedBy: parseEditableText(params, QUERY_KEYS.bookedBy, fallback.bookedBy),
+    passengerMode,
+    passenger,
+    bookedBy,
     pickup: parseEditableText(params, QUERY_KEYS.pickup, fallback.pickup),
     dropoff: parseEditableText(params, QUERY_KEYS.dropoff, fallback.dropoff),
     reservationDate: parseEditableText(
@@ -274,11 +461,8 @@ export function parseEnterpriseBookingDraft(
       QUERY_KEYS.luggageCount,
       fallback.luggageCount,
     ),
+    placard,
   };
-
-  if (draft.passengerMode === "self") {
-    draft.passenger = draft.bookedBy;
-  }
 
   return draft;
 }
@@ -313,6 +497,9 @@ export function serializeEnterpriseBookingDraft(
   params.set(QUERY_KEYS.terminal, draft.terminal);
   params.set(QUERY_KEYS.flight, draft.flight);
   params.set(QUERY_KEYS.luggageCount, draft.luggageCount);
+  if (draft.placard) {
+    params.set(QUERY_KEYS.placard, draft.placard);
+  }
 
   return params;
 }
@@ -421,12 +608,17 @@ export function createEnterpriseBookingDraftFromRecord(
   const { date, time } = getReservationWallClockFields(
     record.reservationWindowStart,
   );
+  const passengerMode =
+    record.bookedBy?.name === record.passenger.name ? "self" : "other";
+  const passenger = record.passenger.name;
+  const bookedBy = record.bookedBy?.name ?? record.passenger.name;
+  const placard =
+    passengerMode === "self" ? bookedBy : derivePlacard(passenger);
 
   return {
-    passengerMode:
-      record.bookedBy?.name === record.passenger.name ? "self" : "other",
-    passenger: record.passenger.name,
-    bookedBy: record.bookedBy?.name ?? record.passenger.name,
+    passengerMode,
+    passenger,
+    bookedBy,
     pickup: record.pickup.address,
     dropoff: record.dropoff.address,
     reservationDate: date,
@@ -443,6 +635,7 @@ export function createEnterpriseBookingDraftFromRecord(
     terminal: record.terminal ?? "",
     flight: record.flightNo ?? "",
     luggageCount: record.luggageCount?.toString() ?? "",
+    placard,
   };
 }
 
@@ -452,8 +645,11 @@ function inferAddressName(address: string) {
   return head?.trim() || trimmed;
 }
 
-export function isEnterpriseDraftComplete(draft: EnterpriseBookingDraftForm) {
-  return [
+export function isEnterpriseDraftComplete(
+  draft: EnterpriseBookingDraftForm,
+  now = new Date(),
+) {
+  const fieldsFilled = [
     draft.passengerMode === "self" ? draft.bookedBy : draft.passenger,
     draft.bookedBy,
     draft.pickup,
@@ -464,6 +660,16 @@ export function isEnterpriseDraftComplete(draft: EnterpriseBookingDraftForm) {
     draft.costCenterCode,
     draft.costCenterLabel,
   ].every((value) => value.trim().length > 0);
+
+  if (!fieldsFilled) {
+    return false;
+  }
+
+  return validateReservationWindow(
+    draft.reservationDate,
+    draft.reservationTime,
+    now,
+  ).valid;
 }
 
 export function getVehicleLabelFromDraft(
