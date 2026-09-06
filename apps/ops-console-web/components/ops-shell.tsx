@@ -8,9 +8,9 @@ import {
   type CanvasShellNavItem,
 } from "@drts/ui-web";
 import type { IncidentRecord } from "@drts/contracts";
-import { OpsHealthFooter } from "@/components/ops-health-footer";
-import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
-import { isSosIncident, unwrapListItems } from "@/lib/sos-view-model";
+import { OpsHealthFooter } from "./ops-health-footer";
+import { getOpsClient, createOpsDispatchEventSource } from "../lib/api-client";
+import { isSosIncident, unwrapListItems } from "../lib/sos-view-model";
 
 type OpsShellProps = {
   nav: CanvasShellNavItem[];
@@ -175,7 +175,16 @@ export function OpsShell({
       {...(avatarLabel !== undefined ? { avatarLabel } : {})}
       {...(searchPlaceholder !== undefined ? { searchPlaceholder } : {})}
     >
-      {children}
+      <div
+        data-testid="ops-shell-content-container"
+        style={{
+          minHeight: "100%",
+          paddingBottom: 72,
+          boxSizing: "border-box",
+        }}
+      >
+        {children}
+      </div>
     </CanvasShell>
   );
 }
