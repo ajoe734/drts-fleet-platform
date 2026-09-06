@@ -389,7 +389,7 @@ describe("owned mobility service", () => {
 
   it("creates a phone order without recording_id and binds it later", async () => {
     const { callcenterService, ownedMobilityService } = createService();
-    const order = ownedMobilityService.createCallCenterOrder({
+    const order = await ownedMobilityService.createCallCenterOrder({
       callId: "CALL-20260410-000120",
       agentId: "AGENT-0088",
       pickup: {
@@ -2274,13 +2274,13 @@ describe("owned mobility service", () => {
       }
     });
 
-    it("accepts scheduled booking with pickup beyond minimum lead time", () => {
+    it("accepts scheduled booking with pickup beyond minimum lead time", async () => {
       const { ownedMobilityService } = createService();
       const thirtyMinutesFromNow = new Date(
         Date.now() + 30 * 60 * 1000,
       ).toISOString();
 
-      const order = ownedMobilityService.createMultiTaxiRide(
+      const order = await ownedMobilityService.createMultiTaxiRide(
         {
           pickup: { address: "台北車站" },
           dropoff: { address: "松山機場" },
@@ -2298,7 +2298,7 @@ describe("owned mobility service", () => {
       expect(order.reservationWindowStart).toBe(thirtyMinutesFromNow);
     });
 
-    it("allows dynamically reconfiguring lead time via setMinLeadTimeMinutes", () => {
+    it("allows dynamically reconfiguring lead time via setMinLeadTimeMinutes", async () => {
       const { ownedMobilityService } = createService();
       ownedMobilityService.setMinLeadTimeMinutes(60); // 60 minutes minimum
 
@@ -2325,7 +2325,7 @@ describe("owned mobility service", () => {
       const seventyMinutesFromNow = new Date(
         Date.now() + 70 * 60 * 1000,
       ).toISOString();
-      const order = ownedMobilityService.createMultiTaxiRide(
+      const order = await ownedMobilityService.createMultiTaxiRide(
         {
           pickup: { address: "台北車站" },
           dropoff: { address: "松山機場" },
@@ -2339,12 +2339,12 @@ describe("owned mobility service", () => {
       expect(order.timingMode).toBe("scheduled");
     });
 
-    it("allows immediate future scheduled booking when minLeadTimeMinutes is 0", () => {
+    it("allows immediate future scheduled booking when minLeadTimeMinutes is 0", async () => {
       const { ownedMobilityService } = createService();
       ownedMobilityService.setMinLeadTimeMinutes(0);
 
       const oneMinuteFromNow = new Date(Date.now() + 60 * 1000).toISOString();
-      const order = ownedMobilityService.createMultiTaxiRide(
+      const order = await ownedMobilityService.createMultiTaxiRide(
         {
           pickup: { address: "台北車站" },
           dropoff: { address: "松山機場" },
@@ -2358,11 +2358,11 @@ describe("owned mobility service", () => {
       expect(order.timingMode).toBe("scheduled");
     });
 
-    it("allows on-demand rides with immediate pickup time without lead time restriction", () => {
+    it("allows on-demand rides with immediate pickup time without lead time restriction", async () => {
       const { ownedMobilityService } = createService();
       const nowIso = new Date().toISOString();
 
-      const order = ownedMobilityService.createMultiTaxiRide(
+      const order = await ownedMobilityService.createMultiTaxiRide(
         {
           pickup: { address: "台北車站" },
           dropoff: { address: "松山機場" },

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 
-import { EventEmitter2 } from "@nestjs/event-emitter";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { OwnedOrderRecord } from "@drts/contracts";
@@ -185,7 +185,6 @@ async function purgeVoiceFixture(database: DatabaseService, fixture: VoiceFixtur
 function buildOrderFixture(overrides: Partial<OwnedOrderRecord> & { orderId: string }): OwnedOrderRecord {
   const now = new Date().toISOString();
   return {
-    orderId: overrides.orderId,
     orderNo: `ON-${overrides.orderId}`,
     orderSource: "voice_agent",
     orderDomain: "owned",
@@ -256,7 +255,7 @@ function buildOrderFixture(overrides: Partial<OwnedOrderRecord> & { orderId: str
 function createTestService(database: DatabaseService) {
   const auditNotificationService = new AuditNotificationService();
   const callcenterService = new CallcenterService(auditNotificationService);
-  const taskEventsService = new OwnedMobilityTaskEventsService(new EventEmitter2());
+  const taskEventsService = new OwnedMobilityTaskEventsService(new EventEmitter() as never);
   const regulatoryRegistryService = {
     getEligibleCandidates: () => [],
     getVehicleDispatchability: () => true,

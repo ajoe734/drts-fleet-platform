@@ -67,7 +67,7 @@ describe("callcenter service", () => {
     expect(closedSession.flags).toContain("closed");
   });
 
-  it("tracks identity, ETA reply, callback queue, and recording-missing state for operator workflow", () => {
+  it("tracks identity, ETA reply, callback queue, and recording-missing state for operator workflow", async () => {
     const auditService = new AuditNotificationService();
     const callcenterService = new CallcenterService(auditService);
 
@@ -82,7 +82,7 @@ describe("callcenter service", () => {
       agentId: "AGENT-0033",
       announcedAt: "2026-04-10T09:02:00Z",
     });
-    const linked = callcenterService.linkOrderToExistingSession(
+    const linked = await callcenterService.linkOrderToExistingSession(
       session.callId,
       {
         orderId: "order-demo-operator-001",
@@ -158,7 +158,7 @@ describe("callcenter service", () => {
     );
   });
 
-  it("keeps late-linked closed sessions in recording_pending when sandbox already marked recording pending", () => {
+  it("keeps late-linked closed sessions in recording_pending when sandbox already marked recording pending", async () => {
     const auditService = new AuditNotificationService();
     const callcenterService = new CallcenterService(auditService);
 
@@ -179,7 +179,7 @@ describe("callcenter service", () => {
         endedAt: "2026-05-19T05:08:00.000Z",
       },
     );
-    const linked = callcenterService.linkOrderToExistingSession(
+    const linked = await callcenterService.linkOrderToExistingSession(
       "cti-sandbox-call-001",
       {
         orderId: "order-late-link-001",
