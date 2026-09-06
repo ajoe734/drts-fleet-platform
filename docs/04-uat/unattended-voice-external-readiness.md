@@ -11,8 +11,8 @@
 - Decision Ref: `docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md`
 - Functional Requirements (FRs): `UV-FR-001`, `UV-FR-003`, `UV-FR-007`, `UV-FR-010`, `UV-FR-011`, `UV-FR-018`, `UV-FR-021`, `UV-FR-024`, `UV-FR-026`, `UV-FR-027`, `UV-FR-030`, `UV-FR-031`, `UV-FR-032`
 - Acceptance Criteria (ACs): `UV-AC-002`, `UV-AC-026`, `UV-AC-030`, `UV-AC-033`
-- Last Update: `2026-09-06T14:19:00Z`
-- Re-Verification: `2026-09-06T14:19:00Z` (acceptance-phase唯讀複查，Claude2，acceptance_ready_dispatch 喚醒，連續第 17 輪，`ai-status.json` 機器真相與 GitHub secrets/variables 均無變化，7 項 required_acceptance 仍待外部證據)
+- Last Update: `2026-09-06T13:27:10Z`
+- Re-Verification: `2026-09-06T13:27:10Z` (acceptance-phase唯讀複查，Claude2，acceptance_ready_dispatch 喚醒，連續第 18 輪，`ai-status.json` 機器真相與 GitHub secrets/variables 均無變化，7 項 required_acceptance 仍待外部證據)
 
 ---
 
@@ -231,6 +231,12 @@
 距上一輪 (14:05Z / commit `b622b5872`) 再次被 dispatch，本輪為連續第 17 次複查。`git fetch origin` 確認 `origin/dev` 仍為 `2093cf7e3`（與 `merge_sha` 一致，無推進）；`git ls-remote origin refs/heads/claude2/uv-exec-027` 確認任務分支遠端 HEAD 為 `b622b5872`（與本地 HEAD 一致，前輪已推送）；重新執行 `gh secret list`/`gh variable list`，分別為 11 項/97 項（計數未變），關鍵字（CTI/TWM/Voice/Candidate/Carrier/DTMF/Twilio/SIP/ASR/TTS/Phone/PSTN）比對均為 0 筆匹配；`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`）與本文件 §8.1 七項 `required_acceptance` 矩陣均未變化、`status` 仍為 `acceptance`。行程環境語音憑證比對仍受 worker 執行環境權限政策歸類為 `defer`，與前十六輪相同。
 
 > **本輪複查結論：** 連續第 17 輪複查，機器真相與前十六輪完全一致，無 regression、無新證據。**未呼叫 `record-acceptance`**，本輪以 `note` 記錄，不呼叫 `progress`（依據既有記憶教訓：`progress` 在 `acceptance` 狀態任務上會清除候選生命週期證據，故一律使用 `note`）。重申前數輪建議：本任務已合併、產出完整，唯一缺口是 7 項 `required_acceptance` 所需之真實外部供應商帳號/合約/費率證據，非本 worker 唯讀盤點權限可取得；連續 17 輪固定間隔複查已產出完全相同結論，第五度強烈建議 supervisor 將此任務的 re-dispatch 條件改為證據變更觸發式，以避免持續消耗 worker 資源於已知無變化的複查循環。
+
+### 2.21 Acceptance 階段複查記錄 (Acceptance-Phase Re-Verification 2026-09-06T13:27Z, Claude2, acceptance_ready_dispatch 喚醒)
+
+距上一輪 (`adeb8d7fa`) 再次被 dispatch，本輪為連續第 18 次複查。`git fetch origin` 確認 `origin/dev` 仍為 `2093cf7e3`（與 `merge_sha` 一致，無推進）；`git ls-remote origin refs/heads/claude2/uv-exec-027` 確認任務分支遠端 HEAD 已是 `adeb8d7fa`（與本地一致，前輪已推送）；重新執行 `gh secret list`/`gh variable list`，分別為 11 項/97 項（計數未變），關鍵字（CTI/TWM/Voice/Twilio/SIP/ASR/TTS/Phone/PSTN 等）比對均為 0 筆匹配；`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`）與 §8.1 七項 `required_acceptance` 矩陣均未變化、`status` 仍為 `acceptance`。行程環境語音憑證比對本輪未重跑（連續 17 輪確認為工具限制，短間隔內不預期變化）。
+
+> **本輪複查結論：** 連續第 18 輪複查，機器真相與前十七輪完全一致，無 regression、無新證據。**未呼叫 `record-acceptance`**，本輪以 `note` 記錄，不呼叫 `progress`。重申：本任務已合併、產出完整，唯一缺口是 7 項 `required_acceptance` 所需之真實外部供應商帳號/合約/費率證據，非本 worker 唯讀盤點權限可取得；第六度建議 supervisor 將此任務的 re-dispatch 條件改為證據變更觸發式（GitHub secrets/variables 新增語音相關項目、或 `required_acceptance` 來源文件被人工更新），以避免對已知無變化的 blocked-on-external-evidence 任務持續消耗固定間隔 dispatch 資源。
 
 ---
 
