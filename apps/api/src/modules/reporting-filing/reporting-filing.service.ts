@@ -776,7 +776,7 @@ export class ReportingFilingService implements OnModuleInit {
     identity?: EvidenceAccessIdentity | null,
     tenantScopeId?: string | null,
   ): { buffer: Buffer; contentType: string; fileName: string } {
-    const job = this.requireReportJob(jobId);
+    const job = this.requireGenericReportJob(jobId);
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
     if (normalizedTenantScopeId) {
       this.assertReportJobTenantScope(job, normalizedTenantScopeId);
@@ -964,6 +964,7 @@ export class ReportingFilingService implements OnModuleInit {
       tenantId: normalizedTenantScopeId,
     });
     const items = this.reportJobs
+      .filter((job) => job.jobType !== MULTI_TAXI_TRIP_EXPORT_JOB_TYPE)
       .filter((job) =>
         normalizedTenantScopeId
           ? this.getReportJobTenantScopeId(job) === normalizedTenantScopeId
@@ -995,7 +996,7 @@ export class ReportingFilingService implements OnModuleInit {
     identity?: EvidenceAccessIdentity | null,
     tenantScopeId?: string | null,
   ): ReportJobView {
-    const job = this.requireReportJob(jobId);
+    const job = this.requireGenericReportJob(jobId);
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
     if (normalizedTenantScopeId) {
       this.assertReportJobTenantScope(job, normalizedTenantScopeId);
@@ -2315,6 +2316,29 @@ export class ReportingFilingService implements OnModuleInit {
       (candidateJob) => candidateJob.jobId === jobId,
     );
     if (!job) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "REPORT_JOB_NOT_FOUND",
+        "Report job was not found.",
+        {
+          jobId,
+        },
+      );
+    }
+    return job;
+  }
+
+  /**
+   * `reports:read` never grants P5 access -- generic list/get/artifact routes
+   * must not become a side door into `multi_taxi_records:export` rows. The
+   * dedicated multi-taxi endpoints (`getMultiTaxiTripExportJob`,
+   * `issueMultiTaxiTripExportDownload`) are the only path to that job type, so
+   * a generic caller sees it as absent, matching the creation-time rejection
+   * in `assertReportTypeProducesRows`.
+   */
+  private requireGenericReportJob(jobId: string) {
+    const job = this.requireReportJob(jobId);
+    if (job.jobType === MULTI_TAXI_TRIP_EXPORT_JOB_TYPE) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "REPORT_JOB_NOT_FOUND",
