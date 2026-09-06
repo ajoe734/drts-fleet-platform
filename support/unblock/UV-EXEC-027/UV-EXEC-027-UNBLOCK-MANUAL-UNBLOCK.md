@@ -18,7 +18,7 @@ Chairman triage created this unblock task `UV-EXEC-027-UNBLOCK-MANUAL-UNBLOCK` b
 
 Diagnosis confirms:
 1. **No upstream code or task dependencies exist:** `UV-EXEC-027` has `depends_on: []` and is not waiting on any other engineering task.
-2. **Repo-local readiness inventory is already completed and anchored:** On branch `gemini2/uv-exec-027` (commit `3599e9ad2479484a03cc0561ea385a11fbd8cc29`), `Gemini2` completed the read-only inventory report `docs/04-uat/unattended-voice-external-readiness.md`.
+2. **Repo-local readiness inventory is already completed and anchored:** On branch `gemini2/uv-exec-027` (commit `3599e9ad2479484a03cc0561ea385a11fbd8cc29`), `Gemini2` completed the read-only inventory report on branch `gemini2/uv-exec-027:docs/04-uat/unattended-voice-external-readiness.md`.
 3. **The blockage is strictly external:** `UV-EXEC-027` is explicitly configured with `external_gate: true` and requires seven (7) external evidence items (`cti_account_capability_evidence`, `twm_account_model_voice_quota_evidence`, `native_candidate_account_evidence`, `line_product_service_area_evidence`, `human_queue_callback_sla_evidence`, `provider_data_terms_evidence`, `rate_card_capacity_evidence`).
 4. **Compliance with acceptance criteria:** Per the parent task acceptance criteria ("不輸出秘密、不申請付費/採購/對外聯繫；帳號/電話授權不足就記明缺哪個證據與負責角色。營運商品/服務區、值班 queue/回撥 SLA、資料處理條件與預算有來源；未完成只產生準備報告，不滿足 required_acceptance") and runbook `docs/03-runbooks/unattended-voice-booking-execution-tasks-20260906.md:101`, entering and maintaining a `blocked` state when external credentials and operational settings are absent is the required safe behavior.
 5. **Action taken:** This unblock task documents the exact taxonomy of missing external evidence, confirms empirical absence from GitHub secrets and repository environment, updates parent `UV-EXEC-027` machine truth via `ai-status.sh note` with the concrete post-unblock resume steps, and establishes the gate conditions under which `UV-EXEC-027` can be resumed and verified.
@@ -56,7 +56,7 @@ From `ai-status.json` and task definitions:
 ### 2.3 Existing Anchored Work
 
 On branch `gemini2/uv-exec-027` at commit `3599e9ad2479484a03cc0561ea385a11fbd8cc29` (pushed to `origin/gemini2/uv-exec-027`), worker `Gemini2` already produced the complete initial readiness report:
-- File: `docs/04-uat/unattended-voice-external-readiness.md`
+- File (on branch `gemini2/uv-exec-027`): `gemini2/uv-exec-027:docs/04-uat/unattended-voice-external-readiness.md`
 - The report inventories all expected capabilities vs. current account readback capabilities across CTI, TWM, Operations, and Commercial terms, and clearly assigns responsible roles for each missing external dependency.
 - Following the generation of this report, `Gemini2` transitioned `UV-EXEC-027` to `blocked` on 2026-09-06T03:33:42Z because `required_acceptance` cannot be satisfied without real external credentials.
 
@@ -136,7 +136,7 @@ Once external credentials and configurations are provisioned:
    - Query TWM ASR/TTS read-only endpoints / model catalog to confirm voice models, language support, and concurrency quotas.
    - Verify operational service area and queue configurations against the fleet database.
 4. **Update Readiness Report:**
-   Update `docs/04-uat/unattended-voice-external-readiness.md` with empirical readback evidence for all seven (7) `required_acceptance` items.
+   Update parent artifact (`gemini2/uv-exec-027:docs/04-uat/unattended-voice-external-readiness.md`) with empirical readback evidence for all seven (7) `required_acceptance` items.
 5. **Handoff for Review:**
    Commit, push to remote, and hand off `UV-EXEC-027` to reviewer `Codex` using `ai-status.sh handoff`.
 
