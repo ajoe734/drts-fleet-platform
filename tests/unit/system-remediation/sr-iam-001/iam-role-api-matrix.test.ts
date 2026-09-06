@@ -7,7 +7,6 @@ import {
   isKnownIamScope,
   type AuthRealm,
 } from "@drts/contracts";
-import { resolveRouteAuthPolicy } from "../../../../apps/api/src/common/auth/auth.policy";
 import { BootstrapAuthGuard } from "../../../../apps/api/src/common/auth/bootstrap-auth.guard";
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../../../apps/api/src/common/auth/auth.types";
@@ -107,11 +106,15 @@ describe("SR-IAM-001 — 平台/ops/P5/tenant/driver/partner/唯讀 API 權限�
 
     it("合法成功: platform_admin can access POST /identity/sessions/sess_123/revoke", () => {
       const presetScopes = [...getIamActorScopePreset("platform_admin")];
-      const result = evaluateRouteAccess("POST", "/identity/sessions/sess_123/revoke", {
-        actorType: "platform_admin",
-        realm: "platform",
-        scopes: presetScopes,
-      });
+      const result = evaluateRouteAccess(
+        "POST",
+        "/identity/sessions/sess_123/revoke",
+        {
+          actorType: "platform_admin",
+          realm: "platform",
+          scopes: presetScopes,
+        },
+      );
       expect(result.allowed).toBe(true);
       expect(result.error).toBeUndefined();
     });
@@ -154,11 +157,15 @@ describe("SR-IAM-001 — 平台/ops/P5/tenant/driver/partner/唯讀 API 權限�
 
     it("非法拒絕: ops_user is denied POST /identity/sessions/sess_123/revoke with 403 AUTH_SCOPE_DENIED", () => {
       const presetScopes = [...getIamActorScopePreset("ops_user")];
-      const result = evaluateRouteAccess("POST", "/identity/sessions/sess_123/revoke", {
-        actorType: "ops_user",
-        realm: "ops",
-        scopes: presetScopes,
-      });
+      const result = evaluateRouteAccess(
+        "POST",
+        "/identity/sessions/sess_123/revoke",
+        {
+          actorType: "ops_user",
+          realm: "ops",
+          scopes: presetScopes,
+        },
+      );
       expect(result.allowed).toBe(false);
       expect(result.error?.getStatus()).toBe(403);
       expect(result.error?.code).toBe("AUTH_SCOPE_DENIED");
@@ -256,15 +263,11 @@ describe("SR-IAM-001 — 平台/ops/P5/tenant/driver/partner/唯讀 API 權限�
     });
 
     it("tenant_admin is denied access to platform control plane endpoints with 403 AUTH_REALM_DENIED", () => {
-      const result = evaluateRouteAccess(
-        "GET",
-        "/platform-admin/tenants",
-        {
-          actorType: "tenant_admin",
-          realm: "tenant",
-          scopes: [...getIamActorScopePreset("tenant_admin")],
-        },
-      );
+      const result = evaluateRouteAccess("GET", "/platform-admin/tenants", {
+        actorType: "tenant_admin",
+        realm: "tenant",
+        scopes: [...getIamActorScopePreset("tenant_admin")],
+      });
       expect(result.allowed).toBe(false);
       expect(result.error?.getStatus()).toBe(403);
       expect(result.error?.code).toBe("AUTH_REALM_DENIED");
@@ -378,11 +381,15 @@ describe("SR-IAM-001 — 平台/ops/P5/tenant/driver/partner/唯讀 API 權限�
       expect(readResult.allowed).toBe(true);
 
       // Mutation is rejected
-      const writeResult = evaluateRouteAccess("POST", "/tenant/t-001/cost-centers", {
-        actorType: "tenant_admin",
-        realm: "tenant",
-        scopes: viewerScopes,
-      });
+      const writeResult = evaluateRouteAccess(
+        "POST",
+        "/tenant/t-001/cost-centers",
+        {
+          actorType: "tenant_admin",
+          realm: "tenant",
+          scopes: viewerScopes,
+        },
+      );
       expect(writeResult.allowed).toBe(false);
       expect(writeResult.error?.getStatus()).toBe(403);
       expect(writeResult.error?.code).toBe("AUTH_SCOPE_DENIED");

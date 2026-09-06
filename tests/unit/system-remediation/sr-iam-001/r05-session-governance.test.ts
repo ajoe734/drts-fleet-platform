@@ -2,11 +2,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import type { MaskedSessionSummary, PlatformAdminUserRecord } from "@drts/contracts";
+import type {
+  MaskedSessionSummary,
+  PlatformAdminUserRecord,
+} from "@drts/contracts";
 import { ApiClient, ApiClientError } from "../../../../packages/api-client/src";
-import {
-  createPlatformAdminIamClient,
-} from "../../../../apps/platform-admin-web/lib/platform-admin-iam-client";
+import { createPlatformAdminIamClient } from "../../../../apps/platform-admin-web/lib/platform-admin-iam-client";
 
 const governanceComponentSource = readFileSync(
   join(
@@ -80,12 +81,14 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
         throw new ApiClientError({
           statusCode: 403,
           code: "AUTH_SCOPE_DENIED",
-          message: "Bootstrap identity is missing one or more required scopes: identity:sessions:read.",
+          message:
+            "Bootstrap identity is missing one or more required scopes: identity:sessions:read.",
           retryable: false,
           rawBody: JSON.stringify({
             error: {
               code: "AUTH_SCOPE_DENIED",
-              message: "Bootstrap identity is missing one or more required scopes: identity:sessions:read.",
+              message:
+                "Bootstrap identity is missing one or more required scopes: identity:sessions:read.",
               retryable: false,
             },
           }),
@@ -114,13 +117,21 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
       } catch (e: unknown) {
         const is403 =
           (e instanceof ApiClientError && e.statusCode === 403) ||
-          (typeof e === "object" && e !== null && "statusCode" in e && (e as { statusCode?: number }).statusCode === 403) ||
-          (e instanceof Error && (e.message.includes("403") || e.message.includes("AUTH_SCOPE_DENIED") || e.message.includes("AUTH_REALM_DENIED")));
+          (typeof e === "object" &&
+            e !== null &&
+            "statusCode" in e &&
+            (e as { statusCode?: number }).statusCode === 403) ||
+          (e instanceof Error &&
+            (e.message.includes("403") ||
+              e.message.includes("AUTH_SCOPE_DENIED") ||
+              e.message.includes("AUTH_REALM_DENIED")));
         const message = is403
-          ? (locale === "en"
-              ? "Access Denied (403 Forbidden): Insufficient authority to inspect user session inventory (requires identity:sessions:read)."
-              : "存取被拒 (403 權限不足)：目前角色缺乏檢視工作階段清單授權 (需具備 identity:sessions:read)。")
-          : (e instanceof Error ? e.message : "Failed to load session inventory");
+          ? locale === "en"
+            ? "Access Denied (403 Forbidden): Insufficient authority to inspect user session inventory (requires identity:sessions:read)."
+            : "存取被拒 (403 權限不足)：目前角色缺乏檢視工作階段清單授權 (需具備 identity:sessions:read)。"
+          : e instanceof Error
+            ? e.message
+            : "Failed to load session inventory";
         error = message;
       } finally {
         loadingSessions = false;
@@ -156,7 +167,8 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
         throw new ApiClientError({
           statusCode: 403,
           code: "AUTH_SCOPE_DENIED",
-          message: "Bootstrap identity is missing one or more required scopes: identity:sessions:read.",
+          message:
+            "Bootstrap identity is missing one or more required scopes: identity:sessions:read.",
           retryable: false,
           rawBody: "{}",
         });
@@ -166,7 +178,6 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
 
     const iamClient = createPlatformAdminIamClient(mockClient);
     let error: string | null = null;
-    const locale = "en";
 
     try {
       await iamClient.listSessions({ actorId: MOCK_OPERATOR_USER.userId });
@@ -174,7 +185,9 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
       const is403 = e instanceof ApiClientError && e.statusCode === 403;
       error = is403
         ? "Access Denied (403 Forbidden): Insufficient authority to inspect user session inventory (requires identity:sessions:read)."
-        : (e instanceof Error ? e.message : "Failed");
+        : e instanceof Error
+          ? e.message
+          : "Failed";
     }
 
     expect(error).toBe(
@@ -221,7 +234,8 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
         throw new ApiClientError({
           statusCode: 403,
           code: "AUTH_SCOPE_DENIED",
-          message: "Bootstrap identity is missing one or more required scopes: identity:sessions:write.",
+          message:
+            "Bootstrap identity is missing one or more required scopes: identity:sessions:write.",
           retryable: false,
           rawBody: "{}",
         });
@@ -241,12 +255,17 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
     } catch (e: unknown) {
       const is403 =
         (e instanceof ApiClientError && e.statusCode === 403) ||
-        (typeof e === "object" && e !== null && "statusCode" in e && (e as { statusCode?: number }).statusCode === 403);
+        (typeof e === "object" &&
+          e !== null &&
+          "statusCode" in e &&
+          (e as { statusCode?: number }).statusCode === 403);
       error = is403
-        ? (locale === "en"
-            ? "Access Denied (403 Forbidden): Insufficient authority to revoke session (requires identity:sessions:write)."
-            : "存取被拒 (403 權限不足)：目前角色缺乏撤銷工作階段授權 (需具備 identity:sessions:write)。")
-        : (e instanceof Error ? e.message : "Failed");
+        ? locale === "en"
+          ? "Access Denied (403 Forbidden): Insufficient authority to revoke session (requires identity:sessions:write)."
+          : "存取被拒 (403 權限不足)：目前角色缺乏撤銷工作階段授權 (需具備 identity:sessions:write)。"
+        : e instanceof Error
+          ? e.message
+          : "Failed";
     } finally {
       revokingSid = null;
     }
@@ -277,7 +296,9 @@ describe("SR-IAM-001 / R05 — Session governance 403 request loop regression", 
     expect(result.sessionId).toBe("sess_ops_101");
     expect(mockClient.post).toHaveBeenCalledWith(
       "/identity/sessions/sess_ops_101/revoke",
-      { body: { reason: "security_incident_containment", isCompromised: true } },
+      {
+        body: { reason: "security_incident_containment", isCompromised: true },
+      },
     );
   });
 });
