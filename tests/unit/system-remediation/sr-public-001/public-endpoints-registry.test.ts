@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 /**
  * SR-PUBLIC-001: 公開入口／callback／版本清單修復準備
- * 規範與不變量測試：驗證 9 個正式公開入口架構契約、防污染邊界及版本真值映射
+ * 規範與不變量測試：驗證 9 個正式公開入口架構契約、防污染邊界、Redirect 分類、DNS 錯誤 fail-closed 及版本真值映射
  */
 
 interface PublicEndpointDefinition {
@@ -13,6 +13,7 @@ interface PublicEndpointDefinition {
   targetPath: string;
   authRequired: boolean;
   expectedStatusCodes: number[];
+  expectedRedirectTarget?: string;
 }
 
 interface RetiredDomainDefinition {
@@ -40,6 +41,7 @@ const AUTHORITATIVE_ACTIVE_ENDPOINTS: PublicEndpointDefinition[] = [
     targetPath: "/",
     authRequired: true,
     expectedStatusCodes: [200, 307],
+    expectedRedirectTarget: "/dashboard",
   },
   {
     id: "entry-partners",
@@ -49,6 +51,7 @@ const AUTHORITATIVE_ACTIVE_ENDPOINTS: PublicEndpointDefinition[] = [
     targetPath: "/",
     authRequired: true,
     expectedStatusCodes: [200, 307],
+    expectedRedirectTarget: "/dashboard",
   },
   {
     id: "entry-dispatch",
@@ -76,6 +79,7 @@ const AUTHORITATIVE_ACTIVE_ENDPOINTS: PublicEndpointDefinition[] = [
     targetPath: "/",
     authRequired: true,
     expectedStatusCodes: [200, 307],
+    expectedRedirectTarget: "/dashboard",
   },
   {
     id: "entry-tenant",
@@ -85,6 +89,7 @@ const AUTHORITATIVE_ACTIVE_ENDPOINTS: PublicEndpointDefinition[] = [
     targetPath: "/",
     authRequired: true,
     expectedStatusCodes: [200, 307],
+    expectedRedirectTarget: "/login?redirect_uri=%2F",
   },
   {
     id: "entry-refer",
@@ -231,5 +236,44 @@ describe("SR-PUBLIC-001: Layered Diagnostics & Defect Classification", () => {
     expect(classifyCloudRunUrl("https://drts-dev-api-lyo6ra57fq-uc.a.run.app/api/health", 200)).toBe(
       "ACTIVE_DEPLOYMENT_HEALTHY",
     );
+  });
+
+  it("enforces DNS resolution fail-closed rules: EAI_AGAIN is temporary failure, NOT clean NXDOMAIN", () => {
+    const classifyDnsError = (status: string) => {
+      if (status === "NXDOMAIN") {
+        return { isCleanRetired: true, policyAction: "ACCEPT_EXCLUSION" };
+      }
+      if (status === "EAI_AGAIN") {
+        return { isCleanRetired: false, policyAction: "FAIL_CLOSED_RESOLVER_OUTAGE" };
+      }
+      return { isCleanRetired: false, policyAction: "FAIL_CLOSED_UNKNOWN" };
+    };
+
+    const nxdomainResult = classifyDnsError("NXDOMAIN");
+    expect(nxdomainResult.isCleanRetired).toBe(true);
+    expect(nxdomainResult.policyAction).toBe("ACCEPT_EXCLUSION");
+
+    const eaiAgainResult = classifyDnsError("EAI_AGAIN");
+    expect(eaiAgainResult.isCleanRetired).toBe(false);
+    expect(eaiAgainResult.policyAction).toBe("FAIL_CLOSED_RESOLVER_OUTAGE");
+  });
+
+  it("classifies HTTP redirect chains and detects broken redirects", () => {
+    const evaluateRedirectChain = (initialCode: number, finalCode: number, finalUrl: string) => {
+      if (initialCode === 307 || initialCode === 302) {
+        if ([200, 307].includes(finalCode) && finalUrl.length > 0) {
+          return "VALID_AUTH_REDIRECT";
+        }
+        return "BROKEN_REDIRECT";
+      }
+      if (initialCode === 200) {
+        return "DIRECT_SUCCESS";
+      }
+      return "HTTP_ERROR";
+    };
+
+    expect(evaluateRedirectChain(307, 200, "https://ops.smarttransport.tw/dashboard")).toBe("VALID_AUTH_REDIRECT");
+    expect(evaluateRedirectChain(307, 404, "https://ops.smarttransport.tw/broken")).toBe("BROKEN_REDIRECT");
+    expect(evaluateRedirectChain(200, 200, "https://api.smarttransport.tw/api/health")).toBe("DIRECT_SUCCESS");
   });
 });
