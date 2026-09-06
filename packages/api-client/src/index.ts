@@ -78,7 +78,6 @@ import type {
   DispatchCandidate,
   DispatchJobRecord,
   DispatchOrderCommand,
-  RedispatchOrderCommand,
   DispatchQueueEntryReadRecord,
   DispatchTraceLogRecord,
   DisableTenantCostCenterCommand,
@@ -628,12 +627,19 @@ export class ApiClient {
     return this.requestEnvelope<ListEnvelope<T>>("GET", path, options);
   }
 
-  private async getList<T>(
-    path: string,
-    options?: RequestOptions,
-  ): Promise<T[]> {
-    const result = await this.get<T[] | ListEnvelope<T>>(path, options);
-    return Array.isArray(result) ? result : (result.items ?? []);
+  /**
+   * Generic GET for list routes. Unwraps the success envelope and then
+   * tolerates both list shapes the API emits: a bare array payload, and the
+   * `toApiListData` payload (`{ items, pageInfo }`). Callers must use this
+   * rather than `get<T[]>`, which resolves to the `{ items, pageInfo }` object
+   * on any route wrapped with `toApiListData` and breaks on `.map`.
+   */
+  async getList<T>(path: string, options?: RequestOptions): Promise<T[]> {
+    const result = await this.get<T[] | ListEnvelope<T> | null>(path, options);
+    if (Array.isArray(result)) {
+      return result;
+    }
+    return result?.items ?? [];
   }
 
   private async requestEnvelope<T>(
