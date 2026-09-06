@@ -140,7 +140,15 @@ async function scenario(name, endpoint, responseForRequest, verify) {
         body: JSON.stringify(
           entry.status === 200
             ? {
-                data: { items: response.items, total: response.items.length },
+                data: {
+                  items: response.items,
+                  pageInfo: {
+                    page: 1,
+                    pageSize: response.items.length || 20,
+                    totalItems: response.items.length,
+                    totalPages: response.items.length ? 1 : 0,
+                  },
+                },
                 meta: {
                   requestId: entry.testOnlyResponseId,
                   timestamp: "2026-09-06T00:00:00.000Z",
@@ -202,11 +210,19 @@ async function expectUnavailableCoverage(surface) {
 }
 
 try {
+  let fleetReloadDenied = false;
   await scenario(
     "fleet-populated",
     FLEET_API,
-    () => ({ items: [fleet] }),
-    async (page) => {
+    () =>
+      fleetReloadDenied
+        ? {
+            status: 403,
+            code: "AUTH_SCOPE_DENIED",
+            message: "Browser-only fleet reload denial",
+          }
+        : { items: [fleet] },
+    async (page, evidence) => {
       await page.goto("/fleet-partners");
       await expect(
         page.getByRole("link", { name: /Browser-only Fleet Partner/ }),
@@ -217,6 +233,26 @@ try {
       await expect(
         page.getByText("No fleet partners found.", { exact: true }),
       ).toHaveCount(0);
+      const beforeRefresh = evidence.requests.length;
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      await expect.poll(() => evidence.requests.length).toBe(beforeRefresh + 1);
+      await expect(
+        page.getByRole("link", { name: /Browser-only Fleet Partner/ }),
+      ).toBeVisible();
+      evidence.successfulRefreshObserved = true;
+      fleetReloadDenied = true;
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      await expect.poll(() => evidence.requests.length).toBe(beforeRefresh + 2);
+      await expect(
+        page.getByText("Browser-only fleet reload denial", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("link", { name: /Browser-only Fleet Partner/ }),
+      ).toBeVisible();
+      await expect(
+        page.getByText("No fleet partners found.", { exact: true }),
+      ).toHaveCount(0);
+      evidence.existingRowsPreservedOnReloadFailure = true;
     },
   );
   await scenario(
@@ -334,6 +370,9 @@ try {
         if (failure.status === 403) {
           await expect(
             surface.getByText(/Request multi_taxi_records:read/),
+          ).toBeVisible();
+          await expect(
+            surface.getByText("Read authority · not granted", { exact: true }),
           ).toBeVisible();
         } else {
           await expect(
