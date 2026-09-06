@@ -2580,6 +2580,7 @@ components:
           type: integer
         snapshotHash:
           type: string
+          minLength: 1
         readbackPlaybackId:
           type: string
           format: uuid
@@ -2642,6 +2643,7 @@ components:
           type: integer
         snapshotHash:
           type: string
+          minLength: 1
         readbackPlaybackId:
           type: string
           format: uuid
@@ -3024,6 +3026,7 @@ components:
           type: object
         snapshotHash:
           type: string
+          minLength: 1
         createdAt:
           type: string
           format: date-time
@@ -3258,8 +3261,10 @@ components:
           format: uuid
         attemptNumber:
           type: integer
+          minimum: 1
         operatorId:
           type: string
+          minLength: 1
         startedAt:
           type: string
           format: date-time
@@ -3295,6 +3300,7 @@ components:
           format: date-time
         attemptCount:
           type: integer
+          minimum: 0
         lastOutcome:
           $ref: "#/components/schemas/VoiceCallbackAttemptOutcome"
         resourceScopeId:

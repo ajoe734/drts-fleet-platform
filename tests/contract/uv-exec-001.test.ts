@@ -2366,6 +2366,99 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         validateCapabilityTokenEnvelope({ ...baseEnvelope, expiresIn: 3600 }),
       ).toBe(true);
     });
+
+    it("ensures negative boundary parity between Zod and OpenAPI Ajv for VoiceCallbackAttempt, VoiceDraftRevision, VoiceCallback, and VoiceDraft", () => {
+      // 1. VoiceCallbackAttempt
+      const validAttempt = {
+        taskId: "123e4567-e89b-12d3-a456-426614174000",
+        attemptNumber: 1,
+        operatorId: "op-1",
+        startedAt: "2026-09-06T03:00:00.000Z",
+        endedAt: "2026-09-06T03:01:00.000Z",
+        outcome: "failed",
+        nextAction: "return_to_pending",
+      };
+      // Baseline valid
+      expect(VoiceCallbackAttemptSchema.safeParse(validAttempt).success).toBe(true);
+      expect(validateCallbackAttempt(validAttempt)).toBe(true);
+
+      // attemptNumber = 0 rejected by both Zod and OpenAPI
+      expect(
+        VoiceCallbackAttemptSchema.safeParse({ ...validAttempt, attemptNumber: 0 }).success,
+      ).toBe(false);
+      expect(
+        validateCallbackAttempt({ ...validAttempt, attemptNumber: 0 }),
+      ).toBe(false);
+
+      // attemptNumber = -1 rejected by both Zod and OpenAPI
+      expect(
+        VoiceCallbackAttemptSchema.safeParse({ ...validAttempt, attemptNumber: -1 }).success,
+      ).toBe(false);
+      expect(
+        validateCallbackAttempt({ ...validAttempt, attemptNumber: -1 }),
+      ).toBe(false);
+
+      // operatorId = "" rejected by both Zod and OpenAPI
+      expect(
+        VoiceCallbackAttemptSchema.safeParse({ ...validAttempt, operatorId: "" }).success,
+      ).toBe(false);
+      expect(
+        validateCallbackAttempt({ ...validAttempt, operatorId: "" }),
+      ).toBe(false);
+
+      // 2. VoiceDraftRevision
+      const validRevision = {
+        intentId: "123e4567-e89b-12d3-a456-426614174000",
+        draftVersion: 1,
+        slots: {
+          pickup: {
+            rawText: "台北車站",
+            sourceTurnIds: ["123e4567-e89b-12d3-a456-426614174001"],
+          },
+        },
+        snapshotHash: "hash-valid-123",
+      };
+      // Baseline valid
+      expect(VoiceDraftRevisionSchema.safeParse(validRevision).success).toBe(true);
+      expect(validateDraftRevision(validRevision)).toBe(true);
+
+      // snapshotHash = "" rejected by both Zod and OpenAPI
+      expect(
+        VoiceDraftRevisionSchema.safeParse({ ...validRevision, snapshotHash: "" }).success,
+      ).toBe(false);
+      expect(
+        validateDraftRevision({ ...validRevision, snapshotHash: "" }),
+      ).toBe(false);
+
+      // 3. VoiceCallback
+      const validCallback = {
+        callbackId: "123e4567-e89b-12d3-a456-426614174000",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        contactPhone: "+886912345678",
+        consentSnapshotHash: "hash-consent-xyz",
+        status: "pending",
+        attemptCount: 0,
+      };
+      // Baseline valid with attemptCount = 0
+      expect(VoiceCallbackSchema.safeParse(validCallback).success).toBe(true);
+      expect(validateCallback(validCallback)).toBe(true);
+
+      // attemptCount = -1 rejected by both Zod and OpenAPI
+      expect(
+        VoiceCallbackSchema.safeParse({ ...validCallback, attemptCount: -1 }).success,
+      ).toBe(false);
+      expect(
+        validateCallback({ ...validCallback, attemptCount: -1 }),
+      ).toBe(false);
+
+      // attemptCount = 1 accepted by both Zod and OpenAPI
+      expect(
+        VoiceCallbackSchema.safeParse({ ...validCallback, attemptCount: 1 }).success,
+      ).toBe(true);
+      expect(
+        validateCallback({ ...validCallback, attemptCount: 1 }),
+      ).toBe(true);
+    });
   });
 
   describe("Explicit Ajv 8.20.0 Schema Compilation and Validation", () => {
@@ -2521,6 +2614,70 @@ describe("UV-EXEC-001 Voice Contracts", () => {
           orderId: "123e4567-e89b-12d3-a456-426614174001",
         }),
       ).toBe(false);
+    });
+
+    it("ensures Ajv 8.20.0 enforces negative boundaries on VoiceCallbackAttempt, VoiceDraftRevision, VoiceCallback, and VoiceDraft", () => {
+      const YAML = resolvePnpmModule("yaml");
+      const Ajv8Class = resolvePnpmModule("ajv", "8.20.0");
+      const Ajv8 = Ajv8Class.default || Ajv8Class;
+      const ajv8 = new Ajv8({
+        strict: false,
+        validateFormats: false,
+        allErrors: true,
+      });
+
+      const openapiDoc = YAML.parse(readFileSync(OPENAPI_PATH, "utf8"));
+      for (const [name, schema] of Object.entries(
+        openapiDoc.components.schemas,
+      )) {
+        ajv8.addSchema(schema, `#/components/schemas/${name}`);
+      }
+
+      const vAttempt = ajv8.getSchema(
+        "#/components/schemas/VoiceCallbackAttempt",
+      )!;
+      const vRevision = ajv8.getSchema(
+        "#/components/schemas/VoiceDraftRevision",
+      )!;
+      const vCallback = ajv8.getSchema(
+        "#/components/schemas/VoiceCallback",
+      )!;
+
+      expect(vAttempt).toBeDefined();
+      expect(vRevision).toBeDefined();
+      expect(vCallback).toBeDefined();
+
+      const validAttempt = {
+        taskId: "123e4567-e89b-12d3-a456-426614174000",
+        attemptNumber: 1,
+        operatorId: "op-1",
+        outcome: "failed",
+      };
+      expect(vAttempt(validAttempt)).toBe(true);
+      expect(vAttempt({ ...validAttempt, attemptNumber: 0 })).toBe(false);
+      expect(vAttempt({ ...validAttempt, attemptNumber: -1 })).toBe(false);
+      expect(vAttempt({ ...validAttempt, operatorId: "" })).toBe(false);
+
+      const validRevision = {
+        intentId: "123e4567-e89b-12d3-a456-426614174000",
+        draftVersion: 1,
+        slots: {},
+        snapshotHash: "hash-valid-123",
+      };
+      expect(vRevision(validRevision)).toBe(true);
+      expect(vRevision({ ...validRevision, snapshotHash: "" })).toBe(false);
+
+      const validCallback = {
+        callbackId: "123e4567-e89b-12d3-a456-426614174000",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        contactPhone: "+886912345678",
+        consentSnapshotHash: "hash-consent-xyz",
+        status: "pending",
+        attemptCount: 0,
+      };
+      expect(vCallback(validCallback)).toBe(true);
+      expect(vCallback({ ...validCallback, attemptCount: -1 })).toBe(false);
+      expect(vCallback({ ...validCallback, attemptCount: 1 })).toBe(true);
     });
   });
 });
