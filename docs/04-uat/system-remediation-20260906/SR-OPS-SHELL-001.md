@@ -2,9 +2,10 @@
 
 - Task: `SR-OPS-SHELL-001`
 - Owner: `Gemini`
-- Reviewer: `Gemini2`
+- Reviewer: `Claude`
 - Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json`
 - Base SHA (`origin/dev` at start): `f759582305ca7ff1b17a0225d3dd54db22ee9a18` (歷史 audit SHA: `6bbeaaa45`)
+- Prior Candidate SHA (Reopened): `4e0e8b82e5e6c1b47b85d90b368e3e0bb48fa1da`
 - Worktree: `.artifacts/worktrees/auto/gemini-sr-ops-shell-001`
 - Branch: `gemini/sr-ops-shell-001`
 
@@ -25,24 +26,36 @@
   4. 重新由發射器展開時，焦點未移入拖曳把手（`ops-assistant-drag-handle`）以利後續鍵盤或滑鼠移動控制。
   5. 視窗適應性：在行動裝置寬度（390px 視窗）下，420px 的卡片會造成水平溢出，無法正常點擊內部操作。
 
+### 1.1 Candidate 4e0e8b82e 審查 Reopen 根因與回歸修復
+- **Reopen 審查發現**：
+  - 在第一版 candidate `4e0e8b82e` 中，為了解決全螢幕 portal 攔截底層點擊的問題，在 `assistant-widget.tsx` 建立了 portal root 並設定 `node.style.pointerEvents = "none"`，展開面板 `shellStyle` 設定了 `pointerEvents: "auto"`。
+  - **迴歸缺陷**：浮動發射器按鈕 `<button data-testid="ops-assistant-launcher">`（當 `widget.closed === true` 時呈現）的 inline style 遺漏了 `pointerEvents: "auto"` 設定。由於 CSS `pointer-events` 為繼承屬性，發射器按鈕繼承了 portal root 的 `pointer-events: none`，導致滑鼠與觸控點擊穿透按鈕，使用者一旦收合助理便無法透過滑鼠點擊重新打開（dead button）。
+  - **測試缺陷**：先前的單元測試將佈局數學在測試檔中重複實現，未直接引用元件實體模組，亦無 DOM 層級的 pointer-events 繼承或 click 事件驗證。
+- **本次修復重點**：
+  1. 於 `assistant-widget.tsx` 發射器按鈕 inline style 明確加入 `pointerEvents: "auto"`。
+  2. 模組化抽取 `apps/ops-console-web/components/ops-assistant/assistant-layout.ts`，由元件與測試共用純函式（`buildPortalRootStyle`, `buildLauncherButtonStyle`, `buildShellPanelStyle`, `resolveEffectivePointerEvents`, `buildDefaultState`, `readStoredState`, `writeStoredState` 等）。
+  3. 新增 DOM 事件層級測試，模擬 CSS 繼承特性，重現無設定時繼承 none 導致點擊無效的缺陷，並驗證加上 `auto` 後點擊觸發開關循環與 `localStorage` 持久化狀態。
+  4. 在 `cross-app-url.ts` 增加防護，避免對 Cloud Run 隨機 hash 網域（`*.run.app`）執行字串替換。
+
 ## 2. 解決方案與架構設計
 
 ### 2.1 跨應用 URL 權威解析器 (`cross-app-url.ts`)
 1. **Origin 解析 (`resolvePlatformAdminOrigin`)**：
-   - 優先讀取環境變數 `NEXT_PUBLIC_PLATFORM_ADMIN_WEB_URL`。
-   - 支援微前端或容器環境注入的 `window.__RUNTIME_CONFIG__.PLATFORM_ADMIN_WEB_URL`。
-   - 支援本機開發與測試環境自動 port 對應：當前 host 為 `localhost` 或 `127.0.0.1` 且埠號為 `3000`（或 `3100`）時，自動對映至 `3002`（或 `3102`）。
-   - 預設 fallback 為標準 platform-admin 埠號 `http://localhost:3002`。
+   - 優先讀取環境變數 `NEXT_PUBLIC_PLATFORM_ADMIN_URL`、`NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN`、`NEXT_PUBLIC_PLATFORM_ADMIN_WEB_URL` 等。
+   - 支援微前端或容器環境注入的 `window.__DRTS_RUNTIME_CONFIG__`。
+   - 支援本機開發與測試環境自動 port 對應：當前 host 為 `localhost` 或 `127.0.0.1` 且埠號為 `3100` 時，自動對映至 `3102`；其餘 fallback 至標準 platform-admin 埠號 `http://localhost:3002`。
+   - 排除 Cloud Run 產生的 `*.run.app` 隨機後綴網域，避免錯誤主機名解析。
 2. **Audit 與 Payments 連結建構 (`buildPlatformAdminAuditUrl`, `resolveCrossAppHref`, `sanitizeAuditHref`)**：
    - 產出具有完整審計上下文的 URL：`/audit?auditId=...&resourceType=...&resourceId=...&module=...&actorId=...`。
    - 自動過濾多餘的 `/platform-admin/` 或 `/_apps/platform-admin/` 路徑前綴，確保在 platform-admin 上命中正確的頂層路由 `/audit` 與 `/payments`。
    - 保證新分頁開拓模式 (`target="_blank"`, `rel="noopener noreferrer"`)，避免中斷使用者的 ops-console 操作流程。
 
-### 2.2 營運助理佈局與無障礙優化 (`assistant-widget.tsx`, `ops-shell.tsx`)
+### 2.2 營運助理佈局、穿透隔離與無障礙優化 (`assistant-layout.ts`, `assistant-widget.tsx`, `ops-shell.tsx`)
 1. **預設縮小化 (`minimized: true`)**：
    - 初始狀態預設為收合，以右下角輕量圓形按鈕（`data-testid="ops-assistant-launcher"`）呈現，預設絕不遮擋工作區主要控制項與資料表格分頁。
-2. **點擊穿透保護**：
-   - 外層全螢幕 Portal 容器節點強制設定 `pointerEvents: "none"`，僅對發射器按鈕與展開面板本體啟用 `pointerEvents: "auto"`，確保底層工作區與表單控制項無阻礙交互。
+2. **雙向點擊穿透保護**：
+   - 外層全螢幕 Portal 容器節點強制設定 `pointerEvents: "none"`，底層工作區與 1440px / 390px 控制項全面可點擊。
+   - 發射器按鈕（`ops-assistant-launcher`）與展開面板（`ops-assistant-panel`）本體均明確設定 `pointerEvents: "auto"`，確保滑鼠與觸控點擊均可正常交互並在二者間自由開關切換。
 3. **工作區底層安全內距 (`ops-shell.tsx`)**：
    - 於內容包裹層增加 `data-testid="ops-shell-content-container"`，並設定 `paddingBottom: 72px`，確保在頁面滾動到底部時，底部的主要控制項與提交按鈕不被右下角浮動發射器遮擋。
 4. **鍵盤導航與焦點管理**：
@@ -55,24 +68,26 @@
 
 ## 3. 實際變更檔案（符合嚴格 write_scopes）
 
+- `apps/ops-console-web/components/ops-assistant/assistant-layout.ts` (新增):
+  佈局數學、視窗邊界計算、localStorage 讀寫、樣式建構與 pointer-events 繼承解析純函式。
 - `apps/ops-console-web/components/ops-assistant/cross-app-url.ts` (新增):
-  跨 app origin 與審計/支付 URL 解析函式。
+  跨 app origin 與審計/支付 URL 解析函式，附帶 Cloud Run 網域防護。
 - `apps/ops-console-web/components/ops-assistant/assistant-actions.ts` (修改):
   以 `resolveCrossAppHref` 改寫 quick actions 導航，並新增 `/incidents` 審計連結。
 - `apps/ops-console-web/components/ops-assistant/assistant-widget.tsx` (修改):
-  預設縮小化、焦點返回發射器、Escape 鍵支援、拖曳把手聚焦、全螢幕容器 pointer-events 防護、行動裝置寬高適應。
+  引用 `assistant-layout`，發射器與面板均啟用 `pointerEvents: "auto"`，焦點管理與無障礙優化。
 - `apps/ops-console-web/components/ops-assistant/context-envelope.ts` (修改):
-  修正相對路徑引用，避免根目錄與 monorepo 跨層級型別檢查衝突。
+  修正相對路徑引用。
 - `apps/ops-console-web/components/ops-assistant/index.ts` (修改):
-  導出跨 app 導航相關工具函式。
+  導出跨 app 導航與佈局輔助函式。
 - `apps/ops-console-web/components/ops-shell.tsx` (修改):
   加入底層內容容器安全內距防護（72px）。
 - `tests/unit/system-remediation/sr-ops-shell-001/audit-and-cross-app-links.test.ts` (新增):
   15 個針對 cross-app audit/payments 連結、參數傳遞與 URL sanitization 的單元測試。
 - `tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts` (新增):
-  7 個針對預設縮小化、桌面與行動佈局適應、localStorage clamp、焦點返回 launcher 與 Escape 鍵的單元測試。
-- `docs/04-uat/system-remediation-20260906/SR-OPS-SHELL-001.md` (新增):
-  本完成證據文件。
+  20 個針對預設縮小化、桌面與行動佈局適應、localStorage clamp、pointer-events 繼承重現與修復、DOM 點擊開關循環、焦點管理與底層 CTA 點擊穿透的單元測試。
+- `docs/04-uat/system-remediation-20260906/SR-OPS-SHELL-001.md` (修改):
+  本完成證據文件（更新 reopen 根因與修復驗證）。
 
 ## 4. 驗證指令與結果
 
@@ -98,13 +113,13 @@ exit code: 0
 $ pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/
  RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-shell-001
 
- ✓ tests/unit/system-remediation/sr-ops-shell-001/audit-and-cross-app-links.test.ts (15 tests) 54ms
- ✓ tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts (7 tests) 8ms
+ ✓ tests/unit/system-remediation/sr-ops-shell-001/audit-and-cross-app-links.test.ts (15 tests) 52ms
+ ✓ tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts (20 tests) 11ms
 
  Test Files  2 passed (2)
-      Tests  22 passed (22)
-   Start at  07:43:47
-   Duration  926ms
+      Tests  35 passed (35)
+   Start at  08:09:18
+   Duration  913ms
 exit code: 0
 ```
 
@@ -124,5 +139,5 @@ exit code: 0
 ## 5. 未做 / 明列排除
 
 - 未修改其他 apps（如 `apps/platform-admin-web` 或 `apps/tenant-console-web`）的路由或元件，嚴格遵循單一應用程式關注點與 write_scopes 邊界。
-- 未修改共用套件的 `package.json` 或 `pnpm-lock.yaml`（本 task 僅使用現有 React 與 DOM 基礎功能，無須額外依賴）。
+- 未修改中央 shared exports、中央 test config、中央 routes、`package.json` 或 `pnpm-lock.yaml`。
 - 本 task 不以假 fixture 或固定 mock 取代真邏輯，所有 URL 解析均可於真實環境變數或執行階段無縫接軌。

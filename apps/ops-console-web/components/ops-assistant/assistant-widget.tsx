@@ -34,24 +34,27 @@ import { buildTier0HelpResult, buildTier1ScopedResult } from "./help-search";
 import type { AssistantActionReceipt } from "./context-envelope";
 import { sanitizeAuditHref } from "./cross-app-url";
 
-type DockSide = "free" | "left" | "right";
-
-type WidgetState = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  minimized: boolean;
-  closed: boolean;
-  docked: DockSide;
-};
-
-type Rect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
+import {
+  type DockSide,
+  type WidgetState,
+  type Rect,
+  HEADER_HEIGHT,
+  MINIMIZED_HEIGHT,
+  EDGE_GAP,
+  MOVE_STEP,
+  RESIZE_STEP,
+  STREAM_TICK_MS,
+  STREAM_PAUSE_MS,
+  PORTAL_ROOT_ATTR,
+  getViewportRect,
+  buildDefaultState,
+  clamp,
+  resolveDockedPosition,
+  readStoredState,
+  writeStoredState,
+  isAssistantEnabled,
+  isForcedDegraded,
+} from "./assistant-layout";
 
 type StreamState = {
   activeIndex: number;
@@ -67,203 +70,11 @@ type ConversationEntry = {
   auditHref?: string | null;
 };
 
-const STORAGE_KEY = "ops-console.assistant-widget.v1";
-const WIDGET_MIN_WIDTH = 320;
-const WIDGET_MIN_HEIGHT = 240;
-const WIDGET_MAX_WIDTH = 560;
-const WIDGET_MAX_HEIGHT = 720;
-const HEADER_HEIGHT = 48;
-const MINIMIZED_HEIGHT = 64;
-const EDGE_GAP = 20;
-const MOVE_STEP = 24;
-const RESIZE_STEP = 24;
-const STREAM_TICK_MS = 42;
-const STREAM_PAUSE_MS = 1500;
-const FORCE_DEGRADED_KEY = "ops-console.assistant.force-degraded";
-const FORCE_DISABLED_KEY = "ops-console.assistant.force-disabled";
-
 const theme = buildCanvasTheme({
   surface: "ops",
   dark: true,
   density: "compact",
 });
-
-function getViewportRect() {
-  if (typeof window === "undefined") {
-    return { width: 1280, height: 720 };
-  }
-  return {
-    width: window.innerWidth,
-    height: window.innerHeight,
-  };
-}
-
-function buildDefaultState(viewport = getViewportRect()): WidgetState {
-  const isMobile = viewport.width < 768;
-  const width = isMobile
-    ? Math.max(280, Math.min(viewport.width - EDGE_GAP * 2, 350))
-    : 420;
-  const height = 360;
-  const minimized = true; // Minimized by default to ensure workspace controls are not obscured (R19 / C048)
-  const effectiveHeight = minimized ? MINIMIZED_HEIGHT : height;
-  return {
-    width,
-    height,
-    x: Math.max(EDGE_GAP, viewport.width - width - EDGE_GAP),
-    y: Math.max(EDGE_GAP, viewport.height - effectiveHeight - EDGE_GAP),
-    minimized,
-    closed: false,
-    docked: "right",
-  };
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function clampRect(
-  rect: Rect,
-  viewport = getViewportRect(),
-  minimized = false,
-): Rect {
-  const isMobile = viewport.width < 768;
-  const minW = isMobile
-    ? Math.min(280, viewport.width - EDGE_GAP * 2)
-    : WIDGET_MIN_WIDTH;
-  const maxW = Math.max(
-    minW,
-    Math.min(WIDGET_MAX_WIDTH, viewport.width - EDGE_GAP * 2),
-  );
-  const width = clamp(rect.width, minW, maxW);
-
-  const height = minimized
-    ? MINIMIZED_HEIGHT
-    : clamp(
-        rect.height,
-        WIDGET_MIN_HEIGHT,
-        Math.min(WIDGET_MAX_HEIGHT, viewport.height - EDGE_GAP * 2),
-      );
-
-  const maxX = Math.max(EDGE_GAP, viewport.width - width - EDGE_GAP);
-  const maxY = Math.max(EDGE_GAP, viewport.height - height - EDGE_GAP);
-
-  return {
-    x: clamp(rect.x, EDGE_GAP, maxX),
-    y: clamp(rect.y, EDGE_GAP, maxY),
-    width,
-    height,
-  };
-}
-
-function resolveDockedPosition(
-  docked: DockSide,
-  rect: { x: number; y: number; width: number; height: number; minimized?: boolean },
-  viewport = getViewportRect(),
-): Rect {
-  const minimized = rect.minimized ?? false;
-  const next = clampRect(
-    {
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      height: rect.height,
-    },
-    viewport,
-    minimized,
-  );
-  const effectiveHeight = minimized ? MINIMIZED_HEIGHT : next.height;
-  const dockedY = Math.max(
-    EDGE_GAP,
-    viewport.height - effectiveHeight - EDGE_GAP,
-  );
-
-  if (docked === "left") {
-    return { ...next, x: EDGE_GAP, y: dockedY };
-  }
-  if (docked === "right") {
-    return {
-      ...next,
-      x: Math.max(EDGE_GAP, viewport.width - next.width - EDGE_GAP),
-      y: dockedY,
-    };
-  }
-  return next;
-}
-
-function readStoredState(viewport = getViewportRect()): WidgetState | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as Partial<WidgetState>;
-    if (
-      typeof parsed.x !== "number" ||
-      typeof parsed.y !== "number" ||
-      typeof parsed.width !== "number" ||
-      typeof parsed.height !== "number"
-    ) {
-      return null;
-    }
-    const minimized = parsed.minimized ?? true;
-    const closed = parsed.closed ?? false;
-    const docked: DockSide =
-      parsed.docked === "left" || parsed.docked === "right"
-        ? parsed.docked
-        : "free";
-
-    const dockedRect = resolveDockedPosition(
-      docked,
-      {
-        x: parsed.x,
-        y: parsed.y,
-        width: parsed.width,
-        height: parsed.height,
-        minimized,
-      },
-      viewport,
-    );
-
-    return {
-      ...dockedRect,
-      minimized,
-      closed,
-      docked,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredState(state: WidgetState) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
-function isAssistantEnabled() {
-  if (process.env.NEXT_PUBLIC_OPS_ASSISTANT_ENABLED === "false") {
-    return false;
-  }
-  if (typeof window === "undefined") {
-    return true;
-  }
-  return window.localStorage.getItem(FORCE_DISABLED_KEY) !== "true";
-}
-
-function isForcedDegraded() {
-  if (typeof window === "undefined") {
-    return process.env.NEXT_PUBLIC_OPS_ASSISTANT_DEGRADED === "true";
-  }
-  return (
-    process.env.NEXT_PUBLIC_OPS_ASSISTANT_DEGRADED === "true" ||
-    window.localStorage.getItem(FORCE_DEGRADED_KEY) === "true"
-  );
-}
 
 function ActionButton({
   label,
@@ -402,7 +213,7 @@ export function OpsAssistantWidget() {
 
   useEffect(() => {
     const node = document.createElement("div");
-    node.setAttribute("data-ops-assistant-root", "true");
+    node.setAttribute(PORTAL_ROOT_ATTR, "true");
     node.style.pointerEvents = "none";
     document.body.appendChild(node);
     setPortalNode(node);
@@ -957,6 +768,7 @@ export function OpsAssistantWidget() {
             alignItems: "center",
             gap: 10,
             cursor: "pointer",
+            pointerEvents: "auto",
           }}
         >
           <CanvasIcon name="callcenter" size={16} />
