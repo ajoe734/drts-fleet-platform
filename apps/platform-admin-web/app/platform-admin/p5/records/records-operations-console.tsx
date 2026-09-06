@@ -32,7 +32,6 @@ import {
 
 import {
   buildRecordsQueryPath,
-  calculateRetentionCoverage,
   createExportIdempotencyKey,
   formatRecordDateTime,
   formatRecordDistance,
@@ -40,6 +39,7 @@ import {
   formatRecordMoney,
   getApiErrorMessage,
   getLegalHoldActionError,
+  getVisibleRetentionCoverage,
   isExportTerminal,
   isPermissionError,
   isRetentionFloorMet,
@@ -231,7 +231,11 @@ export function RecordsOperationsConsole() {
 
   const selectedRecord =
     records.find((record) => record.recordId === selectedRecordId) ?? null;
-  const retentionCoverage = calculateRetentionCoverage(records);
+  const recordsAvailable = canAttemptRead && !recordsLoading && !recordsError;
+  const retentionCoverage = getVisibleRetentionCoverage(
+    records,
+    recordsAvailable,
+  );
 
   function resetExportWorkflow() {
     setExportPreview(null);
@@ -457,9 +461,16 @@ export function RecordsOperationsConsole() {
           <p className={styles.subtitle}>{t("page.subtitle")}</p>
         </div>
         <div className={styles.heroMeta}>
-          <Stat value={records.length} label={t("stats.records")} />
           <Stat
-            value={`${retentionCoverage.percent}%`}
+            value={recordsAvailable ? records.length : t("table.unavailable")}
+            label={t("stats.records")}
+          />
+          <Stat
+            value={
+              retentionCoverage
+                ? `${retentionCoverage.percent}%`
+                : t("table.unavailable")
+            }
             label={t("stats.retention")}
           />
           <Stat value="UTC+8" label={t("stats.timezone")} />
@@ -546,7 +557,11 @@ export function RecordsOperationsConsole() {
             </form>
             <div className={styles.toolbarMeta}>
               <CanvasPill theme={theme} tone="info" dot>
-                {t("query.resultCount", { count: records.length })}
+                {recordsLoading
+                  ? t("query.loading")
+                  : recordsAvailable
+                    ? t("query.resultCount", { count: records.length })
+                    : t("table.unavailable")}
               </CanvasPill>
               <CanvasPill
                 theme={theme}
@@ -590,6 +605,8 @@ export function RecordsOperationsConsole() {
           <CanvasCard theme={theme} padding={0}>
             {recordsLoading ? (
               <div style={{ padding: 28 }}>{t("query.loading")}</div>
+            ) : !recordsAvailable ? (
+              <div style={{ padding: 28 }}>{t("table.unavailable")}</div>
             ) : records.length === 0 ? (
               <CanvasEmptyState
                 theme={theme}
