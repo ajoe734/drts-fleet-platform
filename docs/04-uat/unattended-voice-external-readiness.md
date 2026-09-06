@@ -619,6 +619,12 @@
 
 > **流程建議重申（第四十八次以上）：** 本任務已連續 81 次 `acceptance_ready_dispatch` 喚醒維持零證據變化，阻塞源純為外部人力（供應商帳號申請、採購、法務條款簽署），非機器可推進項。再次請求 supervisor／dispatcher 評估將此類任務改為事件觸發式重派或大幅拉長輪詢間隔。
 
+### 2.79 Acceptance 階段複查記錄（2026-09-06T current UTC，Claude2，第 82 次連續 acceptance_ready_dispatch 喚醒，dedup 政策下之零 delta 項）
+
+本輪 `git fetch origin` 後比對，`origin/dev` 仍為 round 81（§2.78）記錄之 `650e233bb`，**無新提交**。`git ls-remote origin refs/heads/claude2/uv-exec-027` 回報 `f35a51150`，與本地 HEAD（round 81 anchor commit）一致，無漂移。`gh secret list`／`gh variable list` 計數仍為 11/97，項目清單（WIF/GCP infra 系列）逐一核對與先前各輪一致，無新增之 CTI/TWM/候選/營運/商務相關供應商項目。`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`、`ci_status`=`success`）與 `status`=`acceptance` 均未變化。第 3–9 節七項 `required_acceptance` 逐一核對仍維持 Blocker 標註與負責角色，無虛報通過。依 [[feedback_ai_status_note_vs_progress_acceptance]] 記憶教訓，本輪繼續使用 `ai-status.sh note`（而非 `progress`）記錄，以避免清空候選生命週期欄位。
+
+> **流程建議重申（第四十九次以上）：** 本任務已連續 82 次 `acceptance_ready_dispatch` 喚醒維持零證據變化，阻塞源純為外部人力（供應商帳號申請、採購、法務條款簽署），非機器可推進項。再次請求 supervisor／dispatcher 評估將此類任務改為事件觸發式重派或大幅拉長輪詢間隔。
+
 ---
 
 ## 3. CTI 準備度盤點 (CTI Capability Readiness)
