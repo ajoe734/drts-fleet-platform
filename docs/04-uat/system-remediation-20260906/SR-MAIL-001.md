@@ -29,6 +29,15 @@
 | `git diff --check`                                                                                                                                            | 0    | 無 whitespace error                                                                                |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/ tests/unit/tenant-invitation-lifecycle.test.ts tests/unit/system-remediation/sr-notify-001/` | 0    | 5 files、52 tests passed；含重啟、去重、撤銷競態及 shared outbox 子程序 durability                 |
 
+其餘本次完成的命令：
+
+- `pnpm --filter @drts/api typecheck`：exit 0。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/`：exit 0，1 file、8 tests passed（16:44 UTC）。
+- `pnpm exec eslint tests/unit/system-remediation/sr-mail-001/ apps/api/src/modules/tenant-partner/tenant-invitation-delivery.service.ts --max-warnings=0`：exit 0。
+- `pnpm exec eslint apps/api/src/modules/tenant-partner/tenant-partner.service.ts apps/api/src/modules/tenant-partner/tenant-partner.module.ts --max-warnings=0`：exit 0。
+- `git diff --check origin/dev...HEAD`：exit 0。
+- `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`：exit 0，14 commits OK（final evidence commit 前）。
+
 首次 root typecheck exit 2：除七個已修復 token 錯誤外，worktree 共用 canonical node_modules 造成兩份 ApiClient private identity 與 getList 型別不一致；獨立 offline install 後 root typecheck 通過。未修改 shared sources 或測試設定。
 
 ### 本次真實 Mailpit receiver
