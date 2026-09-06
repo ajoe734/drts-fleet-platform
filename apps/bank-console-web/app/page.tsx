@@ -100,14 +100,19 @@ function QuotaBar({
           })}
         </span>
         <span className="quota-pct">
-          {t("home.quota.used", locale, { pct })}
+          {pct !== null ? t("home.quota.used", locale, { pct }) : "—"}
         </span>
       </div>
       <div className="quota-track">
-        <div className="quota-fill" style={{ width: `${pct}%` }} />
+        <div
+          className="quota-fill"
+          style={{ width: pct !== null ? `${pct}%` : "0%" }}
+        />
       </div>
       <span className="quota-remaining">
-        {t("home.quota.remaining", locale, { remaining })}
+        {row.total > 0
+          ? t("home.quota.remaining", locale, { remaining })
+          : "—"}
       </span>
     </div>
   );
@@ -162,10 +167,17 @@ function SlaRow({
   );
 }
 
-function formatDateLabel(value: string) {
-  const date = new Date(`${value}T00:00:00Z`);
+function formatDateLabel(value?: string) {
+  if (!value) return "—";
+  const datePart = value.slice(0, 10);
+  const match = datePart.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match || !match[1] || !match[2] || !match[3]) return value;
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10) - 1;
+  const day = parseInt(match[3], 10);
+  const utcDate = new Date(Date.UTC(year, month, day, 12, 0, 0));
   const weekdays = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
-  return `${value} (${weekdays[date.getUTCDay()]})`;
+  return `${datePart} (${weekdays[utcDate.getUTCDay()]})`;
 }
 
 function formatCompactMoney(amount: number, locale: Locale) {
@@ -189,7 +201,7 @@ function toneForException(kind: ExceptionKind): ExceptionTone {
 }
 
 function mapExceptionKind(reasonCode: string): ExceptionKind {
-  const normalized = reasonCode.toLowerCase();
+  const normalized = (reasonCode ?? "").toLowerCase();
   if (normalized.includes("supply")) return "no_supply";
   if (normalized.includes("manual") || normalized.includes("review")) {
     return "manual_review";
@@ -197,12 +209,12 @@ function mapExceptionKind(reasonCode: string): ExceptionKind {
   return "sla_breach";
 }
 
-function buildHomeExceptions(contracts: IssuerContractStatusRecord[]) {
-  const exceptions = contracts.flatMap((contract) => {
-    const openExceptions = contract.exceptions
+function buildHomeExceptions(contracts: IssuerContractStatusRecord[] = []) {
+  const exceptions = (contracts ?? []).flatMap((contract) => {
+    const openExceptions = (contract.exceptions ?? [])
       .filter((item) => item.status === "open")
       .map((item) => {
-        const kind = mapExceptionKind(item.reasonCode);
+        const kind = mapExceptionKind(item.reasonCode ?? "");
         const entity = kind === "sla_breach" ? contract.contractId : item.orderId;
         const href =
           kind === "sla_breach"
@@ -224,7 +236,8 @@ function buildHomeExceptions(contracts: IssuerContractStatusRecord[]) {
     if (
       contract.status === "at_risk" ||
       contract.status === "breached" ||
-      contract.periodAttainment.breachedTargets.length > 0
+      (contract.periodAttainment?.breachedTargets &&
+        contract.periodAttainment.breachedTargets.length > 0)
     ) {
       return [
         {
@@ -242,13 +255,13 @@ function buildHomeExceptions(contracts: IssuerContractStatusRecord[]) {
   return exceptions.slice(0, 3);
 }
 
-function buildQuotaRows(usage: TenantProgramUsageRecord[]): QuotaRow[] {
-  return usage.map((record) => ({
+function buildQuotaRows(usage: TenantProgramUsageRecord[] = []): QuotaRow[] {
+  return (usage ?? []).map((record) => ({
     program:
-      record.programCode.toLowerCase().includes("we")
+      record.programCode?.toLowerCase().includes("we")
         ? "worldElite"
         : "signature",
-    used: record.tripsConsumed,
+    used: record.tripsConsumed ?? 0,
     total: record.quotaTotal ?? 0,
   }));
 }
@@ -261,29 +274,38 @@ function buildOverallQuota(rows: QuotaRow[]): QuotaRow {
   };
 }
 
-function buildSlaSummary(contracts: IssuerContractStatusRecord[]) {
-  const attained = contracts.map((contract) => contract.periodAttainment);
+function buildSlaSummary(contracts: IssuerContractStatusRecord[] = []) {
+  const attained = (contracts ?? [])
+    .map((contract) => contract.periodAttainment)
+    .filter((record): record is NonNullable<typeof record> => Boolean(record));
   const completedTrips = attained.reduce(
-    (sum, record) => sum + record.completedTrips,
+    (sum, record) => sum + (record.completedTrips ?? 0),
     0,
   );
-  const totalTrips = attained.reduce((sum, record) => sum + record.totalTrips, 0);
+  const totalTrips = attained.reduce(
+    (sum, record) => sum + (record.totalTrips ?? 0),
+    0,
+  );
   const onTimeWeighted = attained.reduce(
     (sum, record) =>
-      sum + (record.pickupPunctualityPercent ?? 0) * record.completedTrips,
+      sum + (record.pickupPunctualityPercent ?? 0) * (record.completedTrips ?? 0),
     0,
   );
   const completionWeighted = attained.reduce(
     (sum, record) =>
-      sum + (record.completionRatePercent ?? 0) * record.totalTrips,
+      sum + (record.completionRatePercent ?? 0) * (record.totalTrips ?? 0),
     0,
   );
 
   return {
     onTimeValue:
-      completedTrips > 0 ? Number((onTimeWeighted / completedTrips).toFixed(1)) : 0,
+      completedTrips > 0
+        ? Number((onTimeWeighted / completedTrips).toFixed(1))
+        : null,
     completionValue:
-      totalTrips > 0 ? Number((completionWeighted / totalTrips).toFixed(1)) : 0,
+      totalTrips > 0
+        ? Number((completionWeighted / totalTrips).toFixed(1))
+        : null,
   };
 }
 
@@ -306,11 +328,14 @@ export default async function HomePage({
   const quotaPrograms = buildQuotaRows(snapshot.data.usage);
   const quotaAll = buildOverallQuota(quotaPrograms);
   const exceptions = buildHomeExceptions(snapshot.data.contracts);
-  const currentStatement = [...snapshot.data.statements].sort((left, right) =>
-    right.period.localeCompare(left.period),
-  )[0];
+  const currentStatement =
+    snapshot.data.statements && snapshot.data.statements.length > 0
+      ? [...snapshot.data.statements].sort((left, right) =>
+          (right.period ?? "").localeCompare(left.period ?? ""),
+        )[0]
+      : undefined;
   const sla = buildSlaSummary(snapshot.data.contracts);
-  const upcomingOrders = snapshot.data.orders
+  const upcomingOrders = (snapshot.data.orders ?? [])
     .filter((order) => order.state === "assigned" || order.state === "en_route")
     .slice(0, 6);
 
@@ -353,42 +378,62 @@ export default async function HomePage({
       <section className="bank-home-kpis">
         <Kpi
           label={t("home.kpi.orders", locale)}
-          value={snapshot.data.tallies.total.toLocaleString()}
+          value={(snapshot.data.tallies?.total ?? 0).toLocaleString()}
           sub={t("home.kpi.orders.sub", locale, {
-            reserved: snapshot.data.tallies.reserved,
-            live: snapshot.data.tallies.live,
-            done: snapshot.data.tallies.completed,
-            cancelled: snapshot.data.tallies.cancelled,
+            reserved: snapshot.data.tallies?.reserved ?? 0,
+            live: snapshot.data.tallies?.live ?? 0,
+            done: snapshot.data.tallies?.completed ?? 0,
+            cancelled: snapshot.data.tallies?.cancelled ?? 0,
           })}
         />
         <Kpi
           label={t("home.kpi.quota", locale)}
-          value={`${quotaPct(quotaAll)}%`}
-          sub={t("home.kpi.quota.sub", locale, {
-            used: quotaAll.used.toLocaleString(),
-            total: quotaAll.total.toLocaleString(),
-          })}
+          value={quotaPct(quotaAll) !== null ? `${quotaPct(quotaAll)}%` : "—"}
+          sub={
+            quotaAll.total > 0
+              ? t("home.kpi.quota.sub", locale, {
+                  used: quotaAll.used.toLocaleString(),
+                  total: quotaAll.total.toLocaleString(),
+                })
+              : locale === "zh"
+                ? "無配額資料"
+                : "No quota data"
+          }
         />
         <Kpi
           label={t("home.kpi.onTime", locale)}
-          value={`${sla.onTimeValue}%`}
-          delta={t("home.kpi.onTime.delta", locale, { target: 95 })}
+          value={sla.onTimeValue !== null ? `${sla.onTimeValue}%` : "—"}
+          delta={
+            sla.onTimeValue !== null
+              ? t("home.kpi.onTime.delta", locale, { target: 95 })
+              : locale === "zh"
+                ? "無當期趟次"
+                : "No trips in period"
+          }
         />
         {view.seeFinance ? (
           <Kpi
             label={t("home.kpi.statement", locale)}
-            value={formatCompactMoney(
-              currentStatement?.totalIssuerPayableAmount ?? 0,
-              locale,
-            )}
+            value={
+              currentStatement
+                ? formatCompactMoney(
+                    currentStatement.totalIssuerPayableAmount ?? 0,
+                    locale,
+                  )
+                : "—"
+            }
             {...(currentStatement
               ? {
                   delta: t("home.kpi.statement.delta", locale, {
                     period: currentStatement.period,
-                    due: currentStatement.dueAt.slice(5, 10),
+                    due: currentStatement.dueAt
+                      ? currentStatement.dueAt.slice(5, 10)
+                      : "—",
                   }),
                 }
-              : {})}
+              : {
+                  delta: locale === "zh" ? "無當期帳單" : "No statement",
+                })}
           />
         ) : (
           <Kpi
@@ -446,7 +491,9 @@ export default async function HomePage({
                           {order.flightNo} · {order.terminal}
                         </td>
                         <td className="mono-cell">
-                          {order.scheduledAt.slice(5, 16).replace("T", " ")}
+                          {order.scheduledAt
+                            ? order.scheduledAt.slice(5, 16).replace("T", " ")
+                            : "—"}
                         </td>
                         <td className="mono-cell muted">
                           {order.cardholderRefMasked}
@@ -466,56 +513,80 @@ export default async function HomePage({
             </Card>
           ) : null}
 
-          {!view.seeOrders && view.seeFinance && currentStatement ? (
-            <Card
-              title={t("home.statement.title", locale, {
-                period: currentStatement.period,
-              })}
-              subtitle={t("home.statement.subtitle", locale)}
-              actions={
-                <a className="card-link" href={`/statements?${bankQuery}`}>
-                  {t("home.settlement.cta", locale)} →
-                </a>
-              }
-            >
-              <div className="bank-dl cols-2">
-                <DlItem
-                  label={t("home.settlement.period", locale)}
-                  value={currentStatement.period}
-                  mono
-                />
-                <DlItem
-                  label={t("home.settlement.status", locale)}
-                  value={
-                    <span className="pill dot tone-warning">
-                      {t("home.settlement.dueBadge", locale)}
-                    </span>
-                  }
-                />
-                <DlItem
-                  label={t("home.settlement.trips", locale)}
-                  value={t("home.settlement.tripsUnit", locale, {
-                    trips: currentStatement.totalTrips,
-                  })}
-                  mono
-                />
-                <DlItem
-                  label={t("home.settlement.total", locale)}
-                  value={formatMoney(currentStatement.totalIssuerPayableAmount, locale)}
-                  mono
-                />
-                <DlItem
-                  label={t("home.settlement.issued", locale)}
-                  value={currentStatement.issuedAt.slice(0, 10)}
-                  mono
-                />
-                <DlItem
-                  label={t("home.settlement.due", locale)}
-                  value={currentStatement.dueAt.slice(0, 10)}
-                  mono
-                />
-              </div>
-            </Card>
+          {!view.seeOrders && view.seeFinance ? (
+            currentStatement ? (
+              <Card
+                title={t("home.statement.title", locale, {
+                  period: currentStatement.period,
+                })}
+                subtitle={t("home.statement.subtitle", locale)}
+                actions={
+                  <a className="card-link" href={`/statements?${bankQuery}`}>
+                    {t("home.settlement.cta", locale)} →
+                  </a>
+                }
+              >
+                <div className="bank-dl cols-2">
+                  <DlItem
+                    label={t("home.settlement.period", locale)}
+                    value={currentStatement.period}
+                    mono
+                  />
+                  <DlItem
+                    label={t("home.settlement.status", locale)}
+                    value={
+                      <span className="pill dot tone-warning">
+                        {t("home.settlement.dueBadge", locale)}
+                      </span>
+                    }
+                  />
+                  <DlItem
+                    label={t("home.settlement.trips", locale)}
+                    value={t("home.settlement.tripsUnit", locale, {
+                      trips: currentStatement.totalTrips,
+                    })}
+                    mono
+                  />
+                  <DlItem
+                    label={t("home.settlement.total", locale)}
+                    value={formatMoney(currentStatement.totalIssuerPayableAmount, locale)}
+                    mono
+                  />
+                  <DlItem
+                    label={t("home.settlement.issued", locale)}
+                    value={
+                      currentStatement.issuedAt
+                        ? currentStatement.issuedAt.slice(0, 10)
+                        : "—"
+                    }
+                    mono
+                  />
+                  <DlItem
+                    label={t("home.settlement.due", locale)}
+                    value={
+                      currentStatement.dueAt
+                        ? currentStatement.dueAt.slice(0, 10)
+                        : "—"
+                    }
+                    mono
+                  />
+                </div>
+              </Card>
+            ) : (
+              <Card
+                title={t("home.settlement.title", locale)}
+                subtitle={t("home.settlement.subtitle", locale)}
+                actions={
+                  <a className="card-link" href={`/statements?${bankQuery}`}>
+                    {t("home.settlement.cta", locale)} →
+                  </a>
+                }
+              >
+                <div className="empty-state">
+                  <p>{locale === "zh" ? "尚無可顯示之對帳單" : "No settlement statement available"}</p>
+                </div>
+              </Card>
+            )
           ) : null}
 
           <Card
@@ -611,40 +682,55 @@ export default async function HomePage({
             </Card>
           ) : null}
 
-          {view.seeFinance && view.seeOrders && currentStatement ? (
-            <Card
-              title={t("home.settlement.title", locale)}
-              subtitle={t("home.settlement.subtitle", locale)}
-            >
-              <div className="bank-dl cols-2">
-                <DlItem
-                  label={t("home.settlement.period", locale)}
-                  value={currentStatement.period}
-                  mono
-                />
-                <DlItem
-                  label={t("home.settlement.status", locale)}
-                  value={
-                    <span className="pill dot tone-warning">
-                      {t("home.settlement.dueBadge", locale)}
-                    </span>
-                  }
-                />
-                <DlItem
-                  label={t("home.settlement.total", locale)}
-                  value={formatCompactMoney(
-                    currentStatement.totalIssuerPayableAmount,
-                    locale,
-                  )}
-                  mono
-                />
-                <DlItem
-                  label={t("home.settlement.due", locale)}
-                  value={currentStatement.dueAt.slice(5, 10)}
-                  mono
-                />
-              </div>
-            </Card>
+          {view.seeFinance && view.seeOrders ? (
+            currentStatement ? (
+              <Card
+                title={t("home.settlement.title", locale)}
+                subtitle={t("home.settlement.subtitle", locale)}
+              >
+                <div className="bank-dl cols-2">
+                  <DlItem
+                    label={t("home.settlement.period", locale)}
+                    value={currentStatement.period}
+                    mono
+                  />
+                  <DlItem
+                    label={t("home.settlement.status", locale)}
+                    value={
+                      <span className="pill dot tone-warning">
+                        {t("home.settlement.dueBadge", locale)}
+                      </span>
+                    }
+                  />
+                  <DlItem
+                    label={t("home.settlement.total", locale)}
+                    value={formatCompactMoney(
+                      currentStatement.totalIssuerPayableAmount,
+                      locale,
+                    )}
+                    mono
+                  />
+                  <DlItem
+                    label={t("home.settlement.due", locale)}
+                    value={
+                      currentStatement.dueAt
+                        ? currentStatement.dueAt.slice(5, 10)
+                        : "—"
+                    }
+                    mono
+                  />
+                </div>
+              </Card>
+            ) : (
+              <Card
+                title={t("home.settlement.title", locale)}
+                subtitle={t("home.settlement.subtitle", locale)}
+              >
+                <div className="empty-state">
+                  <p>{locale === "zh" ? "尚無可顯示之對帳單" : "No settlement statement available"}</p>
+                </div>
+              </Card>
+            )
           ) : null}
 
           {!view.seeFinance ? (

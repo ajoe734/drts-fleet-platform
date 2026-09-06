@@ -200,24 +200,56 @@ export function listContractRecords() {
 }
 
 export function getContractRecord(contractId: string) {
+  if (!contractId) return null;
+  const normalized = contractId.trim().toLowerCase();
   return (
-    contractRecords.find((record) => record.contractId === contractId) ?? null
+    contractRecords.find((record) => {
+      const cId = record.contractId.toLowerCase();
+      const pId = record.programId.toLowerCase();
+      const pCode = record.programCode.toLowerCase();
+      const pCodeDash = pCode.replace(/_/g, "-");
+      const pCodeNoPrefix = pCode.replace(/^ctbc_/, "");
+      const pCodeNoPrefixDash = pCodeNoPrefix.replace(/_/g, "-");
+
+      return (
+        cId === normalized ||
+        pId === normalized ||
+        pCode === normalized ||
+        pCodeDash === normalized ||
+        pCodeNoPrefix === normalized ||
+        pCodeNoPrefixDash === normalized ||
+        cId.includes(normalized) ||
+        normalized.includes(pId) ||
+        normalized.includes(pCode) ||
+        normalized.includes(pCodeNoPrefix)
+      );
+    }) ?? null
   );
 }
 
 export function metricValue(
-  attainment: IssuerContractPeriodAttainment,
-  metric: IssuerContractSlaMetric,
+  attainment?: IssuerContractPeriodAttainment | null,
+  metric?: IssuerContractSlaMetric,
 ) {
-  return metric === "pickup_punctuality"
-    ? attainment.pickupPunctualityPercent
-    : attainment.completionRatePercent;
+  if (!attainment || !metric) {
+    return null;
+  }
+  if (metric === "pickup_punctuality") {
+    return attainment.pickupPunctualityPercent ?? null;
+  }
+  if (metric === "completion_rate") {
+    return attainment.completionRatePercent ?? null;
+  }
+  return null;
 }
 
 export function metricTarget(
-  record: IssuerContractStatusRecord,
-  metric: IssuerContractSlaMetric,
+  record?: IssuerContractStatusRecord | null,
+  metric?: IssuerContractSlaMetric,
 ) {
+  if (!record?.slaTargets || !Array.isArray(record.slaTargets) || !metric) {
+    return null;
+  }
   return (
     record.slaTargets.find((target) => target.metric === metric)
       ?.thresholdPercent ?? null
@@ -225,9 +257,12 @@ export function metricTarget(
 }
 
 export function metricDelta(
-  record: IssuerContractStatusRecord,
-  metric: IssuerContractSlaMetric,
+  record?: IssuerContractStatusRecord | null,
+  metric?: IssuerContractSlaMetric,
 ) {
+  if (!record || !metric) {
+    return null;
+  }
   const target = metricTarget(record, metric);
   const current = metricValue(record.periodAttainment, metric);
 
@@ -239,18 +274,24 @@ export function metricDelta(
 }
 
 export function countOpenExceptions(
-  exceptions: IssuerContractExceptionRecord[],
+  exceptions?: IssuerContractExceptionRecord[] | null,
 ) {
+  if (!Array.isArray(exceptions)) {
+    return 0;
+  }
   return exceptions.filter((exception) => exception.status === "open").length;
 }
 
-export function formatPeriod(period: string) {
+export function formatPeriod(period?: string | null) {
+  if (!period || typeof period !== "string" || !period.includes("-")) {
+    return period || "—";
+  }
   const [year, month] = period.split("-");
   return `${year} 年 ${month} 月`;
 }
 
 export function formatPercent(value: number | null) {
-  if (value === null) {
+  if (value === null || value === undefined) {
     return "N/A";
   }
 
@@ -258,23 +299,34 @@ export function formatPercent(value: number | null) {
 }
 
 export function formatSignedPercent(value: number | null) {
-  if (value === null) {
+  if (value === null || value === undefined) {
     return "N/A";
   }
 
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
-const zhDateTime = new Intl.DateTimeFormat("zh-TW", {
+export const zhDateTime = new Intl.DateTimeFormat("zh-TW", {
   year: "numeric",
   month: "2-digit",
   day: "2-digit",
   hour: "2-digit",
   minute: "2-digit",
   hour12: false,
-  timeZone: "UTC",
+  timeZone: "Asia/Taipei",
 });
 
-export function formatDateTime(value: string) {
-  return zhDateTime.format(new Date(value));
+export function formatDateTime(value?: string | null) {
+  if (!value) {
+    return "—";
+  }
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) {
+      return value;
+    }
+    return zhDateTime.format(d);
+  } catch {
+    return value || "—";
+  }
 }

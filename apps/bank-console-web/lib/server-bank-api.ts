@@ -56,16 +56,24 @@ async function buildDefaultHeaders(tenantId: string, actorId: string) {
   return headers;
 }
 
+const DEFAULT_API_TIMEOUT_MS = 5000;
+
 async function unwrap<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const message = await response.text();
+    const message = await response.text().catch(() => "");
     throw new Error(
       `Bank API ${response.status} ${response.statusText}: ${message.slice(0, 240)}`,
     );
   }
 
-  const envelope = (await response.json()) as ApiSuccessEnvelope<T>;
-  return envelope.data;
+  try {
+    const envelope = (await response.json()) as ApiSuccessEnvelope<T>;
+    return envelope?.data;
+  } catch (error) {
+    throw new Error(
+      `Bank API returned invalid JSON: ${error instanceof Error ? error.message : "parse error"}`,
+    );
+  }
 }
 
 export async function bankApiGet<T>(
@@ -73,11 +81,13 @@ export async function bankApiGet<T>(
   tenantId: string,
   actorId: string,
 ): Promise<T> {
+  const timeoutMs =
+    Number(process.env.BANK_API_TIMEOUT_MS) || DEFAULT_API_TIMEOUT_MS;
   const headers = await buildDefaultHeaders(tenantId, actorId);
   const response = await fetch(new URL(path, `${resolveServerApiBaseUrl()}/`), {
     cache: "no-store",
     headers,
-    signal: AbortSignal.timeout(1000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   return unwrap<T>(response);
 }
@@ -87,6 +97,12 @@ export async function bankApiGetList<T>(
   tenantId: string,
   actorId: string,
 ): Promise<T[]> {
-  const data = await bankApiGet<ApiListData<T>>(path, tenantId, actorId);
-  return data.items;
+  const data = await bankApiGet<ApiListData<T> | T[]>(path, tenantId, actorId);
+  if (Array.isArray(data)) {
+    return data;
+  }
+  if (data && Array.isArray(data.items)) {
+    return data.items;
+  }
+  return [];
 }
