@@ -1,0 +1,164 @@
+[
+  {
+    "finding": "N01",
+    "file": "apps/api/src/modules/shift-attendance/shift-attendance.controller.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "d8457bb5671e31d24bd9429a8de8ac1b63ebcf649666a02ba3ae8c0e3fa95626",
+    "excerpt_start": 1,
+    "excerpt_end": 235
+  },
+  {
+    "finding": "N02",
+    "file": "apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "914b658702f93d6f9ad842c9ca384fc24889e06a377dfde0c3adb208f1e97ad4",
+    "excerpt_start": 635,
+    "excerpt_end": 651
+  },
+  {
+    "finding": "N04",
+    "file": "apps/api/src/modules/billing-settlement/billing-settlement.service.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "27f221e6096e11dc22b402fce99913decad13748829d602b6812910184de1448",
+    "excerpt_start": 1170,
+    "excerpt_end": 1228
+  },
+  {
+    "finding": "N04/N08",
+    "file": "apps/api/src/modules/controlled-download/controlled-download.controller.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "891d94f61ea685bdf2137d314e08e93666d4985aa29eca0c58cf47c555ecb0c4",
+    "excerpt_start": 45,
+    "excerpt_end": 120
+  },
+  {
+    "finding": "N05",
+    "file": "apps/api/src/modules/reporting-filing/reporting-filing.service.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "b0ec7b75f5a57658becde4777d64a000499c1998fa80d7be8672c11734b4e792",
+    "excerpt_start": 230,
+    "excerpt_end": 340
+  },
+  {
+    "finding": "N06",
+    "file": "apps/api/src/modules/tenant-partner/tenant-invitation-delivery.service.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "7e56ebe070cad0f4ffe7c557861938dcd1d208ad1cd427922946684663139968",
+    "excerpt_start": 1,
+    "excerpt_end": 60
+  },
+  {
+    "finding": "N06",
+    "file": "apps/api/src/modules/tenant-partner/tenant-partner.service.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "7d86925e81bab76940b56b0fb858bdcf3626e3ba1513c1593b5ee08d5eb7057e",
+    "excerpt_start": 14450,
+    "excerpt_end": 14484
+  },
+  {
+    "finding": "N07",
+    "file": "apps/api/src/modules/audit-notification/audit-notification.email-adapter.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "63c9c3fb16b24349ac1446822643dfbb9853f59e90666993becacdde8491cc4c",
+    "excerpt_start": 1,
+    "excerpt_end": 60
+  },
+  {
+    "finding": "N07",
+    "file": "apps/api/src/modules/audit-notification/audit-notification.service.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "d5a0454ec0bcfb1f45f2838f66b5f4fcb1d5b58fbd7e00118313b5b56999877a",
+    "excerpt_start": 250,
+    "excerpt_end": 302
+  },
+  {
+    "finding": "N08",
+    "file": "apps/api/src/modules/platform-admin/platform-admin.service.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "186fbb67fe6e6f37d1cf2f35e798520ba11933e35cdcb2534bede33e6f3109cc",
+    "excerpt_start": 1668,
+    "excerpt_end": 1704
+  },
+  {
+    "finding": "N09",
+    "file": "apps/api/src/modules/billing-settlement/billing-settlement.service.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "27f221e6096e11dc22b402fce99913decad13748829d602b6812910184de1448",
+    "excerpt_start": 2312,
+    "excerpt_end": 2366
+  },
+  {
+    "finding": "N09",
+    "file": "apps/platform-admin-web/app/payments/reimbursements/[batchId]/page.tsx",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "1c29daf15455dcf0476cc710685befee01e83e6ad3e4013a80eb442282c19024",
+    "excerpt_start": 750,
+    "excerpt_end": 790
+  },
+  {
+    "finding": "N10",
+    "file": "apps/api/src/modules/multi-taxi/passenger-push.port.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "5a32ba95617ab17b1961fe9fb46faf5eee4da6ef035773d012d3652263ee1d58",
+    "excerpt_start": 1,
+    "excerpt_end": 60
+  },
+  {
+    "finding": "N10",
+    "file": "apps/api/src/modules/multi-taxi/multi-taxi.module.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "c20f4098f5beb927b1e184504a3471df8470665474753a369db8e8d9fa9991a3",
+    "excerpt_start": 29,
+    "excerpt_end": 38
+  },
+  {
+    "finding": "整合",
+    "file": "apps/api/src/modules/forwarder/grab-taiwan.adapter.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "aa6a64c350be8e9499aa8d35bb5429a86ed64a202a549a59ecd4177444781216",
+    "excerpt_start": 14,
+    "excerpt_end": 35
+  },
+  {
+    "finding": "修正舊結論",
+    "file": "apps/api/src/modules/shift-attendance/shift-attendance.service.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "473ef194aff29e3c014fa5fb1d8015b8f089ff016bc0d78e7a21815069f191e1",
+    "excerpt_start": 45,
+    "excerpt_end": 89
+  },
+  {
+    "finding": "修正舊結論",
+    "file": "apps/api/src/modules/owned-mobility/owned-mobility.service.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "a98f6620fe4a408d84eed72a1e569bdef214278f4b9bc0f3047eef8e98f9fbe7",
+    "excerpt_start": 870,
+    "excerpt_end": 912
+  },
+  {
+    "finding": "延後",
+    "file": "apps/api/src/modules/tenant-partner/tenant-partner.controller.ts",
+    "deployed_sha_exists": true,
+    "same_as_deployed": true,
+    "working_tree_sha256": "c3c089f5b579ae9537ac9094addc2c7429ff6802af0c736ad8024763bf16eecf",
+    "excerpt_start": 1472,
+    "excerpt_end": 1484
+  }
+]
