@@ -103,11 +103,13 @@ function installRecordsTransport(
       headers,
     };
     try {
+      // This HTTP-only test context implements the methods used by the guard.
+      // RPC, WebSocket, and argument-list adapters are outside this transport.
       await guard.canActivate({
         getClass: () => MultiTaxiController,
         getHandler: () => controller.listTripOperationalRecords,
         switchToHttp: () => ({ getRequest: () => request }),
-      } as Parameters<BootstrapAuthGuard["canActivate"]>[0]);
+      } as unknown as Parameters<BootstrapAuthGuard["canActivate"]>[0]);
       const envelope = await controller.listTripOperationalRecords(
         Object.fromEntries(url.searchParams.entries()),
         headers["x-request-id"],
