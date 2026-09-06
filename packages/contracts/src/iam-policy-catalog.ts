@@ -141,10 +141,7 @@ const IDENTITY_BREAK_GLASS_SCOPES = [
   "identity:break-glass:activate",
 ] as const;
 
-const ASSISTANT_SCOPES = [
-  "assistant:write",
-] as const;
-
+const ASSISTANT_SCOPES = ["assistant:write"] as const;
 
 export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
   {
@@ -624,7 +621,6 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
         ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES,
         ...IDENTITY_BREAK_GLASS_SCOPES,
-        ...ASSISTANT_SCOPES,
       ],
     },
     {

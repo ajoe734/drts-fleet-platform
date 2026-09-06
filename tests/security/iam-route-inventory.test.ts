@@ -375,7 +375,9 @@ export function runDynamicRouteInventory(
  * now carry catalog definitions and appropriate grants across system,
  * platform_admin, and ops_user. The allowlist is now completely retired (empty).
  */
-export const KNOWN_PRE_EXISTING_SCOPE_DEFECTS: ReadonlySet<string> = new Set([]);
+export const KNOWN_PRE_EXISTING_SCOPE_DEFECTS: ReadonlySet<string> = new Set(
+  [],
+);
 
 describe("IAM dynamic route inventory and catalogue verification", () => {
   it("discovers every controller recursively without an allowlist", () => {
@@ -548,10 +550,7 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
       ts.ScriptKind.TS,
     );
 
-    const result = analyzeSourceFile(
-      sourceFile,
-      "bad-realm.controller.ts",
-    );
+    const result = analyzeSourceFile(sourceFile, "bad-realm.controller.ts");
 
     expect(result.realmMismatches.length).toBe(1);
     expect(result.realmMismatches[0]).toMatchObject({
@@ -571,7 +570,10 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
     expect(assistantScope?.allowedRealms).toEqual(
       expect.arrayContaining(["system", "platform", "ops", "tenant"]),
     );
-    expect(getIamActorScopePreset("platform_admin")).toContain("assistant:write");
+    // Principle of least privilege: only ops_user (the UI widget caller) and system hold assistant:write; platform_admin does not.
+    expect(getIamActorScopePreset("platform_admin")).not.toContain(
+      "assistant:write",
+    );
     expect(getIamActorScopePreset("ops_user")).toContain("assistant:write");
     expect(getIamActorScopePreset("system")).toContain("assistant:write");
 
@@ -615,4 +617,3 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
     expect(breakGlassRoutes.length).toBe(4);
   });
 });
-
