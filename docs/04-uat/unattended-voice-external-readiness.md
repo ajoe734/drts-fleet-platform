@@ -11,8 +11,8 @@
 - Decision Ref: `docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md`
 - Functional Requirements (FRs): `UV-FR-001`, `UV-FR-003`, `UV-FR-007`, `UV-FR-010`, `UV-FR-011`, `UV-FR-018`, `UV-FR-021`, `UV-FR-024`, `UV-FR-026`, `UV-FR-027`, `UV-FR-030`, `UV-FR-031`, `UV-FR-032`
 - Acceptance Criteria (ACs): `UV-AC-002`, `UV-AC-026`, `UV-AC-030`, `UV-AC-033`
-- Last Update: `2026-09-06T08:32:29Z`
-- Re-Verification: `2026-09-06T08:32:29Z` (acceptance-phase唯讀複查，Gemini2)
+- Last Update: `2026-09-06T11:22:41Z`
+- Re-Verification: `2026-09-06T11:22:41Z` (acceptance-phase唯讀複查，Claude2，availability-first reassignment 喚醒，較 09:12Z 無狀態變化)
 
 ---
 
@@ -52,6 +52,41 @@
 | GitHub Variables 語音端點 | `gh variable list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED] No CTI/TWM/Voice variables in GitHub repository** | 2026-09-06T08:33:28Z |
 
 > **複查結論：** 三項唯讀查核均無新增語音/CTI/TWM 憑證，接受階段外部閘門阻礙狀態未有改變。7 項 `required_acceptance` 仍需外部角色（技術/採購/營運/法務）提供實體憑證方能解鎖。
+
+### 2.4 Acceptance 階段複查記錄 (Acceptance-Phase Re-Verification 2026-09-06T09:08Z, Claude)
+
+| 查核項目 | 執行方式 | 查核結果 | 時間戳 |
+|---|---|---|---|
+| `dev` 分支推進狀態 | `git fetch origin && git rev-parse origin/dev` | **[CONFIRMED] `origin/dev` 仍停在 merge commit `6adf792381f99783d12c8142bfc69d2c54ad9103`，未推進** | 2026-09-06T09:08:12Z |
+| GitHub Secrets 語音憑證 | `gh secret list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED] 無符合項目，儲存庫未新增語音/CTI/TWM 秘密** | 2026-09-06T09:08:20Z |
+| GitHub Variables 語音端點 | `gh variable list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED] 無符合項目，儲存庫未新增語音/CTI/TWM 變數** | 2026-09-06T09:08:25Z |
+| 行程環境語音憑證 | `env` / `printenv` 型態指令，逐一比對 `CTI/TWM/TWILIO/SIP/ASR/TTS/OPENAI/GEMINI_LIVE*` 開頭之變數 | **[UNVERIFIED-THIS-SESSION] 本次 worker 執行環境的權限政策將任何比對憑證類變數名稱的指令歸類為需人工核准的高風險操作並自動阻擋執行，本輪未能重跑該項唯讀比對；不可據此推定新增或不存在憑證，僅記錄為本次工具限制** | 2026-09-06T09:08:40Z |
+
+> **本輪複查結論：** `dev` 未推進、GitHub Secrets/Variables 兩項確認無新增語音/CTI/TWM 憑證；行程環境變數比對因本次 session 的權限政策阻擋未能重跑，如實記錄為工具限制而非通過證據。接受階段外部閘門阻礙狀態未有改變，7 項 `required_acceptance` 仍待外部角色提供實體憑證。
+
+### 2.5 Acceptance 階段複查記錄 (Acceptance-Phase Re-Verification 2026-09-06T09:12Z, Claude, 二次 acceptance_ready_dispatch 喚醒)
+
+| 查核項目 | 執行方式 | 查核結果 | 時間戳 |
+|---|---|---|---|
+| `dev` 分支推進狀態 | `git fetch origin dev && git rev-parse origin/dev` | **[CONFIRMED] 仍停在 `6adf792381f99783d12c8142bfc69d2c54ad9103`，較上一輪 (09:08Z) 無推進** | 2026-09-06T09:11Z |
+| GitHub Secrets 語音憑證 | `gh secret list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED] 無符合項目，較上一輪無新增** | 2026-09-06T09:12Z |
+| GitHub Variables 語音端點 | `gh variable list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED] 無符合項目，較上一輪無新增** | 2026-09-06T09:12Z |
+| 行程環境語音憑證 | `env \| grep -E '^(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|OPENAI\|GEMINI_LIVE)'` | **[UNVERIFIED-THIS-SESSION] 本輪再次嘗試執行，仍被本次 worker 執行環境的權限政策歸類為需人工核准之高風險操作而阻擋，與上一輪相同的工具限制持續存在，非通過證據** | 2026-09-06T09:12Z |
+
+> **本輪複查結論：** 距上一輪複查僅約 3 分鐘，三項可執行查核（`dev` 分支、GitHub Secrets、GitHub Variables）結果與上一輪完全一致、無新增語音/CTI/TWM 憑證；行程環境變數比對再次被相同權限政策阻擋，如實記錄為持續性工具限制。接受階段外部閘門阻礙狀態未有改變，7 項 `required_acceptance` 仍無真實外部帳號/合約/供應商證據，維持 blocker，未呼叫 `record-acceptance`。
+
+### 2.6 Acceptance 階段複查記錄 (Acceptance-Phase Re-Verification 2026-09-06T11:22Z, Claude2, availability-first reassignment 喚醒)
+
+本輪由 `UV-EXEC-027` 之 availability-first reassignment 觸發（`Claude` 當時 unavailable/occupied，`Claude2` 依偏好序位接手 owner），並在此輪一併發現 `ai-status.json` 對本任務的 candidate-lifecycle 欄位曾第二次被 `progress`/reassign 動作清空（同類regression已於 `support/unblock/UV-EXEC-027/UV-EXEC-027-UNBLOCK-HISTORY-REPAIR.md` 診斷過一次），task 因而回落至 `todo`；本節僅記錄本輪唯讀複查結果，machine-truth 欄位修復另見該既有診斷文件的 replay 步驟。
+
+| 查核項目 | 執行方式 | 查核結果 | 時間戳 |
+|---|---|---|---|
+| `dev` 分支推進狀態 | `git fetch origin && git rev-parse origin/dev` | **[CONFIRMED] `origin/dev` 已推進至 `0dd3928944e455a3b50da80851155c71315c15a8`（`UV-EXEC-005-UNBLOCK-HISTORY-REPAIR` 文件型 PR #1670），與本任務之 CTI/TWM/營運/商務外部證據無關，未變更本任務阻礙狀態** | 2026-09-06T11:22:41Z |
+| GitHub Secrets 語音憑證 | `gh secret list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED] 無符合項目，較上一輪 (09:12Z) 無新增** | 2026-09-06T11:22Z |
+| GitHub Variables 語音端點 | `gh variable list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED] 無符合項目，較上一輪無新增** | 2026-09-06T11:22Z |
+| 行程環境語音憑證 | `env \| grep -E '^(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|OPENAI\|GEMINI_LIVE)'` | **[UNVERIFIED-THIS-SESSION] 本輪再次嘗試執行，仍被本次 worker 執行環境的權限政策歸類為需人工核准之高風險操作而阻擋（`gh secret list`／`gh variable list` 本身可正常執行，僅 `env`/`grep` 憑證變數名稱比對被攔截），與前兩輪相同的工具限制持續存在，非通過證據** | 2026-09-06T11:22Z |
+
+> **本輪複查結論：** `dev` 有推進但僅為無關的文件型 unblock PR，不構成新增語音/CTI/TWM 供應商證據；GitHub Secrets/Variables 兩項確認無新增；行程環境變數比對再次受相同工具限制阻擋，如實記錄。接受階段外部閘門阻礙狀態未有改變，7 項 `required_acceptance` 仍待外部角色（技術/採購/營運/法務）提供實體憑證與合約，維持 blocker，未呼叫 `record-acceptance`。
 
 ---
 
@@ -162,7 +197,7 @@
    - 補齊 TTS 語者 (`voice.name`) 盤點項目，補齊原生語音候選（OpenAI Realtime、Gemini Live）之架構定位與能力缺項分析。
    - 正確界定本機唯讀環境查核範圍，未查核之線上 DB 狀態標記為未驗證，不誇大否定結論。
 2. **候選生命週期與外部閘門判定：**
-   - **本任務產出之修正準備報告交付審查 (Handoff to Codex)。**
+   - **本任務產出之準備報告交付審查 (Handoff to Reviewer `Claude`，依當次 `ai-status.json` owner/reviewer 指派為準，先前輪次曾記錄為 Codex/Gemini2，皆為同一份唯讀盤點內容之連續複查交接)。**
    - **本任務不可直接宣稱 `done`，因七項 `required_acceptance` 尚未取得真實外部授權與合約證據。**
    - 依候選生命週期 (`tools/development-orchestrator/skills/candidate-lifecycle.md`)，本工件經 Review、CI 與 Merge 後，將依 control plane 規則停留在 `acceptance` 階段，保留外部閘門阻礙，等待後續真實外部資源就緒並透過 `record-acceptance` 補齊證據。
 3. **下游任務維持阻擋：**
