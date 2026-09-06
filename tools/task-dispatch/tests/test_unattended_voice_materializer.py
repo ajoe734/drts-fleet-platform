@@ -122,6 +122,17 @@ class MaterializerTests(unittest.TestCase):
         self.assertEqual(self.state, before)
         self.assertFalse(self.published)
 
+    def test_archived_completed_id_cannot_be_recreated_by_retry(self):
+        self.state["archived_task_ids"] = ["UV-EXEC-002"]
+        before = deepcopy(self.state)
+        with self.assertRaisesRegex(ValueError, "is archived"):
+            self.apply()
+        self.assertEqual(self.state, before)
+        self.assertFalse(self.published)
+        self.assertFalse(self.logs)
+        with self.assertRaisesRegex(ValueError, "is archived"):
+            wave.verify_materialized(self.manifest, self.state, require_all=False)
+
     def test_assign_failure_never_publishes_partial_graph(self):
         assign = self.board.command_assign
 

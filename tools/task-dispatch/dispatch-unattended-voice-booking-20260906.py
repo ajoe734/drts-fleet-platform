@@ -197,10 +197,13 @@ def tasks_by_id(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def verify_materialized(manifest: dict[str, Any], state: dict[str, Any], *, require_all: bool = True) -> None:
     actual_tasks = tasks_by_id(state)
+    archived_ids = set(state.get("archived_task_ids") or [])
     for expected in manifest["tasks"]:
         task_id = expected["id"]
         actual = actual_tasks.get(task_id)
         if actual is None:
+            if task_id in archived_ids:
+                raise ValueError(f"Task {task_id} is archived; inspect the canonical archive, never recreate it")
             if require_all:
                 raise ValueError(f"Missing materialized task: {task_id}")
             continue
