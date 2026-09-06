@@ -6713,7 +6713,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       "resend_tenant_invitation",
     );
     const current = identitySnapshot
-      ? await this.identityRepository?.findInvitationByMembershipId(
+      ? await this.identityRepository?.findPendingInvitationByMembershipId(
           identitySnapshot.membership.membershipId,
         )
       : null;
@@ -14448,7 +14448,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       email: userRole.email,
       roleCode: userRole.roleCode,
       tokenHash: createHash("sha256").update(rawToken).digest("hex"),
-      deliveryStatus: "pending_delivery",
+      deliveryStatus: this.tenantInvitationDelivery.isConfigured()
+        ? "pending_delivery"
+        : "delivery_failed",
       expiresAt,
       acceptedAt: null,
       revokedAt: null,
@@ -14467,18 +14469,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         expiresAt: stored.expiresAt,
         rawToken,
       });
-      return await this.identityRepository.upsertInvitationRecord({
-        ...stored,
-        deliveryStatus: "delivered",
-        updatedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      await this.identityRepository.upsertInvitationRecord({
-        ...stored,
-        deliveryStatus: "delivery_failed",
-        updatedAt: new Date().toISOString(),
-      });
-      throw error;
+      // Provider acceptance is not inbox delivery. Do not upsert this stale
+      // snapshot after network I/O: doing so can undo concurrent revocation or
+      // token consumption. The durable outbox owns sent/failed/retry receipts.
+      return stored;
+    } catch {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "TENANT_INVITATION_DELIVERY_UNAVAILABLE",
+        "Invitation delivery is unavailable; retry by resending the invitation.",
+        {},
+      );
     }
   }
 
