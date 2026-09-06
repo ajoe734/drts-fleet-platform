@@ -1,4 +1,8 @@
-import type { EnterpriseDispatchBookingFixture } from "./dispatch-fixture-adapter";
+import {
+  adaptBookingRecordToEnterpriseBooking,
+  type EnterpriseDispatchBookingFixture,
+} from "./dispatch-fixture-adapter";
+import type { BookingRecord } from "@drts/contracts";
 import { type Locale, type TranslationKey, t } from "@/lib/translations";
 
 export type BookingState =
@@ -446,6 +450,17 @@ export function getEnterpriseBooking(bookingId: string, locale?: Locale) {
   return locale
     ? getEnterpriseBookings(locale).find((item) => item.id === bookingId)
     : booking;
+}
+
+export function getAuthoritativeEnterpriseBooking(
+  bookingId: string,
+  records: BookingRecord[],
+): EnterpriseBooking | undefined {
+  const record = records.find((item) => item.bookingId === bookingId);
+  if (!record) {
+    return undefined;
+  }
+  return adaptBookingRecordToEnterpriseBooking(record);
 }
 
 function getEnterpriseCostCenterLabel(
