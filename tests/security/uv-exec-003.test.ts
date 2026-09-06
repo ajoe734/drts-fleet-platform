@@ -28,10 +28,12 @@ import type {
   VoiceSessionRecord,
 } from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import { AUTH_SCOPE_PRESETS } from "../../apps/api/src/common/auth/auth.constants";
+import { SigningKeyRing } from "../../apps/api/src/common/auth/signing-key-ring";
 import {
   getIamActorScopePreset,
   IAM_ACTOR_POLICY_BY_TYPE,
 } from "../../packages/contracts/src/iam-policy-catalog";
+import { VoiceCapabilityTokenClaimsSchema } from "../../packages/contracts/src/unattended-voice";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -258,18 +260,33 @@ describe("UV-EXEC-003: VoiceCapabilityService two-stage identity exchange", () =
   it("rejects an expired capability token", () => {
     setTestSigningKey();
     const service = new VoiceCapabilityService();
-    const envelope = service.issue(systemIdentity(), {
+
+    // A real `issue()` call can never mint an already-expired envelope
+    // (VoiceCapabilityTokenEnvelopeSchema requires expiresIn > 0), so an
+    // already-elapsed token is built directly with the same signing key
+    // `issue()` uses, to exercise `verify()`'s expiry check in isolation.
+    const issuedAtSeconds = Math.floor(Date.now() / 1000) - 120;
+    const claims = VoiceCapabilityTokenClaimsSchema.parse({
+      iss: "drts_voice_capability_issuer",
+      aud: VOICE_CAPABILITY_AUDIENCE,
+      exp: issuedAtSeconds + 10,
+      iat: issuedAtSeconds,
+      servicePrincipalId: "workload-voice-gateway",
       voiceSessionId: VOICE_SESSION_ID,
       resourceScopeId: RESOURCE_SCOPE_ID,
       routeProfileVersion: 1,
       leaseEpoch: 1,
       scopes: ["session_execute"],
-      ttlSeconds: -10,
+    });
+    const activeKey = new SigningKeyRing().getActiveSigningKey();
+    const expiredToken = jwt.sign(claims, activeKey.signKey, {
+      algorithm: activeKey.algorithm,
+      keyid: activeKey.kid,
     });
 
-    expect(() => service.verify(envelope.token)).toThrow(ApiRequestError);
+    expect(() => service.verify(expiredToken)).toThrow(ApiRequestError);
     try {
-      service.verify(envelope.token);
+      service.verify(expiredToken);
     } catch (error) {
       expect((error as ApiRequestError).code).toBe("VOICE_PROOF_EXPIRED");
     }
