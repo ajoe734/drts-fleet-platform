@@ -18,7 +18,7 @@
 
 ## 可寫入範圍
 
-- `operations/verification/system-remediation-ops/`
+- `tools/system-remediation/ops-proof/`
 - `tests/unit/system-remediation/sr-ops-proof-001/`
 - 待建立：docs/04-uat/system-remediation-20260906/SR-OPS-PROOF-001.md
 
@@ -42,7 +42,7 @@ git diff --check
 
 ## 整合与結案
 
-測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。
+測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。 新增檢查工具使用 tools/system-remediation 專屬目錄，避開既有 UV-EXEC-023 的 operations/ 廣域 writer。
 
 此任務在獨立worktree執行。根節點不需要等整波；相依task必須是canonical done並含正確merge證據。若issue當前已修，保留回歸與來源證據，不重造功能。
 

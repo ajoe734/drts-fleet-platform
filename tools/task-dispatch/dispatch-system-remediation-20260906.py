@@ -109,7 +109,10 @@ def validate_manifest(manifest: dict[str, Any], repo: Path) -> list[dict[str, An
                 path = PurePosixPath(relative)
                 if path.is_absolute() or ".." in path.parts:
                     raise ValueError(f"{task_id}: escaping {field}")
-                if relative in {"ai-status.json", "current-work.md", "pnpm-lock.yaml"} and task_id != "SR-DEPS-001":
+                if not path.parts or relative not in {path.as_posix(), path.as_posix() + "/"} or any(c in relative for c in ("\\", "\x00", "\n", "\r")):
+                    raise ValueError(f"{task_id}: non-canonical {field} path {relative!r}")
+                normalized = path.as_posix()
+                if normalized in {"ai-status.json", "current-work.md"} or normalized == "pnpm-lock.yaml" and task_id != "SR-DEPS-001":
                     raise ValueError(f"{task_id}: forbidden shared write {relative}")
         if task["task_class"] not in {"implementation", "verification", "documentation", "release"}:
             raise ValueError(f"{task_id}: invalid class")
@@ -152,10 +155,13 @@ def validate_manifest(manifest: dict[str, Any], repo: Path) -> list[dict[str, An
         return parents
     for tid in by_id:
         visit(tid)
+    for constraint in manifest.get("external_write_constraints", []):
+        if constraint["depends_on"] not in ancestors.get(constraint["task_id"], set()):
+            raise ValueError(f"Unordered external writer: {constraint['task_id']} must wait for {constraint['depends_on']}")
     def overlaps(a: str, b: str) -> bool:
         # Concrete file and directory scopes. Task-specific migration suffix globs
         # are disjoint; identical glob expressions still conflict.
-        return a == b or a.endswith("/") and b.startswith(a) or b.endswith("/") and a.startswith(b)
+        return a.rstrip("/") == b.rstrip("/") or a.endswith("/") and b.startswith(a) or b.endswith("/") and a.startswith(b)
     import itertools
     for left, right in itertools.combinations(tasks, 2):
         shared = set(left["serial_resources"]) & set(right["serial_resources"])
@@ -173,6 +179,16 @@ def validate_manifest(manifest: dict[str, Any], repo: Path) -> list[dict[str, An
                 raise ValueError(f"{cid}: unknown mapped task {tid}")
         if cid in manifest["excluded_capability_ids"] and (row["implementation_tasks"] or row["verification_tasks"] != ["SR-SCOPE-001"]):
             raise ValueError(f"{cid}: excluded scope must not become implementation")
+    for tid, task in by_id.items():
+        if not tid.startswith("SR-QA-"):
+            continue
+        producers = {producer for cid in task["capability_ids"] for producer in coverage[cid]["implementation_tasks"]}
+        missing = producers - ancestors[tid]
+        if missing:
+            raise ValueError(f"{tid}: verification before producers {sorted(missing)}")
+    missing = {tid for tid, task in by_id.items() if task["task_class"] == "implementation"} - ancestors["SR-RELEASE-001"]
+    if missing:
+        raise ValueError(f"Release candidate omits implementation tasks {sorted(missing)}")
     return ordered
 
 

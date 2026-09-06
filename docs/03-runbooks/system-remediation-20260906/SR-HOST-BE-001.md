@@ -1,14 +1,14 @@
 # SR-HOST-BE-001 — Host 自車受限 read model 與所有權授權
 
-| 欄位                                         | 內容            |
-| -------------------------------------------- | --------------- |
-| 初始狀態                                     | backlog         |
-| 優先級                                       | P2              |
-| Owner / Reviewer（可由 supervisor 合法調派） | Codex / Codex2  |
-| 前置任務                                     | SR-CONTRACT-001 |
-| 問題來源                                     | N03             |
-| 能力來源                                     | C012            |
-| 工作類型                                     | implementation  |
+| 欄位                                         | 內容                                      |
+| -------------------------------------------- | ----------------------------------------- |
+| 初始狀態                                     | backlog                                   |
+| 優先級                                       | P2                                        |
+| Owner / Reviewer（可由 supervisor 合法調派） | Codex / Codex2                            |
+| 前置任務                                     | SR-CONTRACT-001, UV-EXEC-006, UV-EXEC-023 |
+| 問題來源                                     | N03                                       |
+| 能力來源                                     | C012                                      |
+| 工作類型                                     | implementation                            |
 
 ## Execution prompt
 

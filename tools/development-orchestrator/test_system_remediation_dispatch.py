@@ -94,6 +94,42 @@ class WaveTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'escaping'):
             dispatch.validate_manifest(self.m, REPO)
 
+    def test_path_aliases_cannot_bypass_scope_checks(self):
+        for path in ['./ai-status.json', 'apps/api/src/./shared-danger.ts', 'apps//api/src/shared-danger.ts', 'apps/api/src/shared-danger.ts/', 'apps\\api\\src\\shared-danger.ts']:
+            with self.subTest(path=path):
+                manifest = copy.deepcopy(self.m)
+                manifest['tasks'][0]['write_scopes'].append('apps/api/src/shared-danger.ts')
+                manifest['tasks'][1]['write_scopes'].append(path)
+                with self.assertRaisesRegex(ValueError, 'non-canonical|Unordered shared writes'):
+                    dispatch.validate_manifest(manifest, REPO)
+
+    def test_dependency_writer_cannot_edit_runtime_board(self):
+        for path in ['ai-status.json', 'ai-status.json/', 'current-work.md', 'current-work.md/']:
+            with self.subTest(path=path):
+                manifest = copy.deepcopy(self.m)
+                task = next(t for t in manifest['tasks'] if t['id'] == 'SR-DEPS-001')
+                task['write_scopes'].append(path)
+                with self.assertRaisesRegex(ValueError, 'forbidden shared write'):
+                    dispatch.validate_manifest(manifest, REPO)
+
+    def test_cross_wave_client_writer_must_be_ordered(self):
+        task = next(t for t in self.m['tasks'] if t['id'] == 'SR-CONTRACT-001')
+        task['depends_on'].remove('UV-EXEC-019')
+        with self.assertRaisesRegex(ValueError, 'Unordered external writer'):
+            dispatch.validate_manifest(self.m, REPO)
+
+    def test_verification_cannot_run_before_covered_producers(self):
+        task = next(t for t in self.m['tasks'] if t['id'] == 'SR-QA-DISPATCH-001')
+        task['depends_on'] = ['SR-UAT-HARNESS-001']
+        with self.assertRaisesRegex(ValueError, 'verification before producers'):
+            dispatch.validate_manifest(self.m, REPO)
+
+    def test_release_candidate_contains_all_implementation(self):
+        task = next(t for t in self.m['tasks'] if t['id'] == 'SR-RELEASE-001')
+        task['depends_on'] = []
+        with self.assertRaisesRegex(ValueError, 'Release candidate omits'):
+            dispatch.validate_manifest(self.m, REPO)
+
     def test_missing_dependency_is_not_treated_as_done(self):
         with self.assertRaisesRegex(ValueError, 'missing/archived'):
             dispatch.verify_external_dependencies(self.m, {'tasks': []})

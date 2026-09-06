@@ -258,6 +258,11 @@
       "status_at_planning": "blocked",
       "title": "真實 PSTN、逐語言、轉接與容量驗證",
       "why": "重用已派既有工作；本wave不改其owner/status或重建任務"
+    },
+    "UV-EXEC-023": {
+      "title": "獨立媒體部署、持續背景工作及回退",
+      "status_at_planning": "backlog",
+      "why": "既有 infra/ 廣域 writer；新功能 migration 必須等待或經獨立審查後縮小既有 write scope。"
     }
   },
   "tasks": [
@@ -1883,7 +1888,12 @@
       "summary_zh": "先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 依feature-contracts新增leaf contracts與client typed methods，統一由此task改shared exports/OpenAPI。保留leave/academy/Host的獨立migration filenames並查現有編號；不得與UV schema爭用。根app.module留SR-WIRE-001獨寫。",
       "owner": "Codex",
       "reviewer": "Codex2",
-      "depends_on": ["SR-DESIGN-001", "UV-EXEC-001", "UV-EXEC-002"],
+      "depends_on": [
+        "SR-DESIGN-001",
+        "UV-EXEC-001",
+        "UV-EXEC-002",
+        "UV-EXEC-019"
+      ],
       "write_scopes": [
         "docs/04-api/openapi-spec.yaml",
         "docs/04-uat/system-remediation-20260906/schema-allocation.json",
@@ -1930,7 +1940,7 @@
       ],
       "initial_status": "backlog",
       "serial_resources": ["contracts-client"],
-      "integration_notes": "測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。",
+      "integration_notes": "測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。 共用 API-client index 與既有 UV-EXEC-019 的 src/ scope 重疊，必須等該 task canonical done；不得依初始 owner 或不同 worktree 假設可同寫。",
       "gate_reason": "",
       "waiting_for": "Codex",
       "estimated_size": "1–2個可獨立審查PR；超過則由 supervisor 拆 child task 保留追溯",
@@ -1996,7 +2006,7 @@
       "summary_zh": "先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 按契約實作申請/撤回/核准/拒絕、重疊班次與供給availability；只交新module，root wiring由SR-WIRE。呼叫既有shift authority，不另存可派真值。",
       "owner": "Gemini",
       "reviewer": "Gemini2",
-      "depends_on": ["SR-CONTRACT-001"],
+      "depends_on": ["SR-CONTRACT-001", "UV-EXEC-006", "UV-EXEC-023"],
       "write_scopes": [
         "apps/api/src/modules/driver-leave/",
         "infra/migrations/*__sr_driver_leave.sql",
@@ -2103,7 +2113,7 @@
       "summary_zh": "先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 建立課程/SOP/影片reference、版本化測驗、作答/成績與完訓到期；沿trainingRequired連到資格read model，不用硬編百分比。module接線由SR-WIRE。",
       "owner": "Claude2",
       "reviewer": "Claude",
-      "depends_on": ["SR-CONTRACT-001"],
+      "depends_on": ["SR-CONTRACT-001", "UV-EXEC-006", "UV-EXEC-023"],
       "write_scopes": [
         "apps/api/src/modules/driver-academy/",
         "infra/migrations/*__sr_driver_academy.sql",
@@ -2211,7 +2221,7 @@
       "summary_zh": "先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 先沿既有ownership與realm做受限投影；不可拿全fleet admin masquerade。接收益/維保/任务/案件authority，保留不適用和遮罩，額外IAM policy只由SR-WIRE接入。",
       "owner": "Codex",
       "reviewer": "Codex2",
-      "depends_on": ["SR-CONTRACT-001"],
+      "depends_on": ["SR-CONTRACT-001", "UV-EXEC-006", "UV-EXEC-023"],
       "write_scopes": [
         "apps/api/src/modules/host-view/",
         "infra/migrations/*__sr_host_vehicle_access.sql",
@@ -2608,9 +2618,10 @@
       "depends_on": [
         "SR-UAT-HARNESS-001",
         "SR-TENANT-LOGIN-001",
-        "SR-IAM-001",
         "SR-BANK-002",
-        "UV-EXEC-003"
+        "SR-MAIL-001",
+        "SR-PUBLIC-001",
+        "SR-READINESS-001"
       ],
       "write_scopes": [
         "tests/unit/system-remediation/sr-qa-identity-001/",
@@ -2732,7 +2743,11 @@
         "SR-ENTERPRISE-FORM-001",
         "SR-ENTERPRISE-SEARCH-001",
         "SR-REFERRAL-001",
-        "UV-EXEC-015"
+        "UV-EXEC-015",
+        "SR-FLEET-DATA-001",
+        "SR-MAIL-002",
+        "SR-PUSH-001",
+        "SR-READINESS-001"
       ],
       "write_scopes": [
         "tests/unit/system-remediation/sr-qa-booking-001/",
@@ -2805,7 +2820,13 @@
       "summary_zh": "先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 scheduler真觸發、無供給、hold、queue order、多平台busy、assign/reassign、duplicate/timeout與恢復；重用UV-006/016保留實作，不另造matcher。 此任務先建立可重跑驗收並如實驗證；若發現產品缺陷，以 canonical task command 建立具來源的修復子任務，不在本驗收範圍偷偷改業務碼或只寫待辦就稱閉環通過。",
       "owner": "Claude2",
       "reviewer": "Claude",
-      "depends_on": ["SR-UAT-HARNESS-001", "SR-OPS-MAP-001", "UV-EXEC-016"],
+      "depends_on": [
+        "SR-UAT-HARNESS-001",
+        "SR-OPS-MAP-001",
+        "UV-EXEC-016",
+        "SR-OPS-CONTRACT-001",
+        "SR-OPS-SHELL-001"
+      ],
       "write_scopes": [
         "tests/unit/system-remediation/sr-qa-dispatch-001/",
         "docs/04-uat/system-remediation-20260906/SR-QA-DISPATCH-001.md",
@@ -2868,8 +2889,7 @@
       "depends_on": [
         "SR-UAT-HARNESS-001",
         "SR-FLEET-CASE-001",
-        "SR-OPS-SHELL-001",
-        "UV-EXEC-019"
+        "SR-OPS-SHELL-001"
       ],
       "write_scopes": [
         "tests/unit/system-remediation/sr-qa-call-001/",
@@ -2919,7 +2939,12 @@
       "summary_zh": "先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 回歸已合併DRV工作。測背景/離線流程的可重跑模擬與trip状态/proof/earnings、suspend車禁派，native真機另LIVE-DRIVER。 此任務先建立可重跑驗收並如實驗證；若發現產品缺陷，以 canonical task command 建立具來源的修復子任務，不在本驗收範圍偷偷改業務碼或只寫待辦就稱閉環通過。",
       "owner": "Codex",
       "reviewer": "Codex2",
-      "depends_on": ["SR-UAT-HARNESS-001", "SR-DRIVER-WEB-001"],
+      "depends_on": [
+        "SR-UAT-HARNESS-001",
+        "SR-DRIVER-WEB-001",
+        "SR-INVOICE-001",
+        "SR-MAIL-002"
+      ],
       "write_scopes": [
         "tests/unit/system-remediation/sr-qa-driver-001/",
         "docs/04-uat/system-remediation-20260906/SR-QA-DRIVER-001.md",
@@ -2985,7 +3010,9 @@
         "SR-UAT-HARNESS-001",
         "SR-FLEET-FORM-001",
         "SR-ADMIN-VERIFY-001",
-        "SR-OPS-CONTRACT-001"
+        "SR-OPS-CONTRACT-001",
+        "SR-ENTERPRISE-SEARCH-001",
+        "SR-FLEET-CASE-001"
       ],
       "write_scopes": [
         "tests/unit/system-remediation/sr-qa-supply-001/",
@@ -3047,11 +3074,11 @@
       "reviewer": "Gemini2",
       "depends_on": [
         "SR-UAT-HARNESS-001",
-        "SR-INVOICE-001",
-        "SR-PROOF-001",
         "SR-FLEET-SETTLE-001",
         "SR-BANK-003",
-        "SR-CHANNEL-001"
+        "SR-CHANNEL-001",
+        "SR-BANK-001",
+        "SR-MAIL-002"
       ],
       "write_scopes": [
         "tests/unit/system-remediation/sr-qa-finance-001/",
@@ -3118,7 +3145,15 @@
       "summary_zh": "先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 九種builder各CSV+一般PDF/XLSX、certificate獨立PDF、篩選/期間、legal hold/controlled export與artifactfamily逐個授權；Phase2/filing排除只記不開發。 此任務先建立可重跑驗收並如實驗證；若發現產品缺陷，以 canonical task command 建立具來源的修復子任務，不在本驗收範圍偷偷改業務碼或只寫待辦就稱閉環通過。",
       "owner": "Codex2",
       "reviewer": "Codex",
-      "depends_on": ["SR-UAT-HARNESS-001", "SR-REPORT-001", "SR-PLACARD-001"],
+      "depends_on": [
+        "SR-UAT-HARNESS-001",
+        "SR-REPORT-001",
+        "SR-PLACARD-001",
+        "SR-ADMIN-VERIFY-001",
+        "SR-BANK-001",
+        "SR-ENTERPRISE-DATA-001",
+        "SR-IAM-001"
+      ],
       "write_scopes": [
         "tests/unit/system-remediation/sr-qa-reports-001/",
         "docs/04-uat/system-remediation-20260906/SR-QA-REPORTS-001.md",
@@ -3182,7 +3217,10 @@
       "depends_on": [
         "SR-UAT-HARNESS-001",
         "SR-ADMIN-ADAPTER-001",
-        "SR-ENV-COPY-001"
+        "SR-ENV-COPY-001",
+        "SR-ADMIN-VERIFY-001",
+        "SR-BANK-001",
+        "SR-ENTERPRISE-DATA-001"
       ],
       "write_scopes": [
         "tests/unit/system-remediation/sr-qa-governance-001/",
@@ -3346,7 +3384,12 @@
         "SR-ENV-COPY-001",
         "SR-ENTERPRISE-FORM-001",
         "SR-FLEET-FORM-001",
-        "SR-OPS-SHELL-001"
+        "SR-OPS-SHELL-001",
+        "SR-BANK-001",
+        "SR-ENTERPRISE-DATA-001",
+        "SR-IAM-001",
+        "SR-PLACARD-001",
+        "SR-PROOF-001"
       ],
       "write_scopes": [
         "tests/unit/system-remediation/sr-qa-ux-001/",
@@ -3447,14 +3490,14 @@
       "reviewer": "Codex",
       "depends_on": [],
       "write_scopes": [
-        "operations/verification/system-remediation-endpoints.py",
+        "tools/system-remediation/public-entry/system-remediation-endpoints.py",
         "docs/04-uat/system-remediation-20260906/public-entry-repair.md",
         "tests/unit/system-remediation/sr-public-001/",
         "docs/04-uat/system-remediation-20260906/SR-PUBLIC-001.md"
       ],
       "read_dependencies": [],
       "artifacts": [
-        "operations/verification/system-remediation-endpoints.py",
+        "tools/system-remediation/public-entry/system-remediation-endpoints.py",
         "docs/04-uat/system-remediation-20260906/public-entry-repair.md",
         "tests/unit/system-remediation/sr-public-001/",
         "docs/04-uat/system-remediation-20260906/SR-PUBLIC-001.md"
@@ -3484,7 +3527,7 @@
       ],
       "initial_status": "backlog",
       "serial_resources": [],
-      "integration_notes": "測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。",
+      "integration_notes": "測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。 新增檢查工具使用 tools/system-remediation 專屬目錄，避開既有 UV-EXEC-023 的 operations/ 廣域 writer。",
       "gate_reason": "",
       "waiting_for": "Codex2",
       "estimated_size": "1–2個可獨立審查PR；超過則由 supervisor 拆 child task 保留追溯",
@@ -3498,13 +3541,13 @@
       "reviewer": "Claude",
       "depends_on": [],
       "write_scopes": [
-        "operations/verification/system-remediation-ops/",
+        "tools/system-remediation/ops-proof/",
         "tests/unit/system-remediation/sr-ops-proof-001/",
         "docs/04-uat/system-remediation-20260906/SR-OPS-PROOF-001.md"
       ],
       "read_dependencies": [],
       "artifacts": [
-        "operations/verification/system-remediation-ops/",
+        "tools/system-remediation/ops-proof/",
         "tests/unit/system-remediation/sr-ops-proof-001/",
         "docs/04-uat/system-remediation-20260906/SR-OPS-PROOF-001.md"
       ],
@@ -3529,7 +3572,7 @@
       ],
       "initial_status": "backlog",
       "serial_resources": [],
-      "integration_notes": "測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。",
+      "integration_notes": "測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。 新增檢查工具使用 tools/system-remediation 專屬目錄，避開既有 UV-EXEC-023 的 operations/ 廣域 writer。",
       "gate_reason": "",
       "waiting_for": "Claude2",
       "estimated_size": "1–2個可獨立審查PR；超過則由 supervisor 拆 child task 保留追溯",
@@ -4264,6 +4307,36 @@
       "waiting_for": "Claude2",
       "estimated_size": "1–2個可獨立審查PR；超過則由 supervisor 拆 child task 保留追溯",
       "task_spec_ref": "docs/03-runbooks/system-remediation-20260906/SR-ACCEPT-001.md"
+    }
+  ],
+  "external_write_constraints": [
+    {
+      "task_id": "SR-CONTRACT-001",
+      "depends_on": "UV-EXEC-019"
+    },
+    {
+      "task_id": "SR-LEAVE-BE-001",
+      "depends_on": "UV-EXEC-006"
+    },
+    {
+      "task_id": "SR-LEAVE-BE-001",
+      "depends_on": "UV-EXEC-023"
+    },
+    {
+      "task_id": "SR-ACADEMY-BE-001",
+      "depends_on": "UV-EXEC-006"
+    },
+    {
+      "task_id": "SR-ACADEMY-BE-001",
+      "depends_on": "UV-EXEC-023"
+    },
+    {
+      "task_id": "SR-HOST-BE-001",
+      "depends_on": "UV-EXEC-006"
+    },
+    {
+      "task_id": "SR-HOST-BE-001",
+      "depends_on": "UV-EXEC-023"
     }
   ]
 }

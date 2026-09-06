@@ -1,14 +1,14 @@
 # SR-QA-SUPPLY-001 — 供給文件／資格／合約／退場驗收
 
-| 欄位                                         | 內容                                                                            |
-| -------------------------------------------- | ------------------------------------------------------------------------------- |
-| 初始狀態                                     | backlog                                                                         |
-| 優先級                                       | P1                                                                              |
-| Owner / Reviewer（可由 supervisor 合法調派） | Claude / Claude2                                                                |
-| 前置任務                                     | SR-UAT-HARNESS-001, SR-FLEET-FORM-001, SR-ADMIN-VERIFY-001, SR-OPS-CONTRACT-001 |
-| 問題來源                                     | 134能力盤點的驗收缺口                                                           |
-| 能力來源                                     | C063, C064, C065, C066, C067, C069, C070, C072, C073                            |
-| 工作類型                                     | verification                                                                    |
+| 欄位                                         | 內容                                                                                                                         |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 初始狀態                                     | backlog                                                                                                                      |
+| 優先級                                       | P1                                                                                                                           |
+| Owner / Reviewer（可由 supervisor 合法調派） | Claude / Claude2                                                                                                             |
+| 前置任務                                     | SR-UAT-HARNESS-001, SR-FLEET-FORM-001, SR-ADMIN-VERIFY-001, SR-OPS-CONTRACT-001, SR-ENTERPRISE-SEARCH-001, SR-FLEET-CASE-001 |
+| 問題來源                                     | 134能力盤點的驗收缺口                                                                                                        |
+| 能力來源                                     | C063, C064, C065, C066, C067, C069, C070, C072, C073                                                                         |
+| 工作類型                                     | verification                                                                                                                 |
 
 ## Execution prompt
 

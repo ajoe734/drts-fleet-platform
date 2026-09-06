@@ -1,14 +1,14 @@
 # SR-CONTRACT-001 — 一次整合新增功能契約與保留 migration 範圍
 
-| 欄位                                         | 內容                                    |
-| -------------------------------------------- | --------------------------------------- |
-| 初始狀態                                     | backlog                                 |
-| 優先級                                       | P2                                      |
-| Owner / Reviewer（可由 supervisor 合法調派） | Codex / Codex2                          |
-| 前置任務                                     | SR-DESIGN-001, UV-EXEC-001, UV-EXEC-002 |
-| 問題來源                                     | N01, N02, N03, N14                      |
-| 能力來源                                     | C012, C052, C059, C071, C134            |
-| 工作類型                                     | implementation                          |
+| 欄位                                         | 內容                                                 |
+| -------------------------------------------- | ---------------------------------------------------- |
+| 初始狀態                                     | backlog                                              |
+| 優先級                                       | P2                                                   |
+| Owner / Reviewer（可由 supervisor 合法調派） | Codex / Codex2                                       |
+| 前置任務                                     | SR-DESIGN-001, UV-EXEC-001, UV-EXEC-002, UV-EXEC-019 |
+| 問題來源                                     | N01, N02, N03, N14                                   |
+| 能力來源                                     | C012, C052, C059, C071, C134                         |
+| 工作類型                                     | implementation                                       |
 
 ## Execution prompt
 
@@ -49,7 +49,7 @@ pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/
 
 ## 整合与結案
 
-測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。
+測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。 共用 API-client index 與既有 UV-EXEC-019 的 src/ scope 重疊，必須等該 task canonical done；不得依初始 owner 或不同 worktree 假設可同寫。
 
 此任務在獨立worktree執行。根節點不需要等整波；相依task必須是canonical done並含正確merge證據。若issue當前已修，保留回歸與來源證據，不重造功能。
 

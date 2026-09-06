@@ -5,7 +5,7 @@
 | 初始狀態                                     | backlog                                                                |
 | 優先級                                       | P1                                                                     |
 | Owner / Reviewer（可由 supervisor 合法調派） | Codex / Codex2                                                         |
-| 前置任務                                     | SR-UAT-HARNESS-001, SR-DRIVER-WEB-001                                  |
+| 前置任務                                     | SR-UAT-HARNESS-001, SR-DRIVER-WEB-001, SR-INVOICE-001, SR-MAIL-002     |
 | 問題來源                                     | 134能力盤點的驗收缺口                                                  |
 | 能力來源                                     | C049, C050, C051, C053, C054, C055, C056, C057, C058, C060, C061, C062 |
 | 工作類型                                     | verification                                                           |
