@@ -2,7 +2,13 @@ import { PLATFORM_CURRENCY } from "@drts/contracts";
 
 import { createHash, randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Inject,
+  Injectable,
+  OnModuleInit,
+  Optional,
+} from "@nestjs/common";
 import { OnEvent } from "@nestjs/event-emitter";
 
 import type {
@@ -50,6 +56,11 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { sumMoney as sharedSumMoney } from "../../common/money";
 import { toActionReceipt } from "../../common/action-receipt";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import {
+  DOCUMENT_ARTIFACT_STORE,
+  InMemoryDocumentArtifactStore,
+  type DocumentArtifactStore,
+} from "../../common/document-artifacts";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   BillingSettlementRepository,
@@ -502,6 +513,146 @@ function createInitialReferralRevenueShareRules(): ReferralRevenueShareRule[] {
   return isStrictAuthEnvironment() ? [] : cloneReferralRevenueShareRuleSeed();
 }
 
+// ── Tenant invoice PDF rendering (SR-INVOICE-001) ───────────────────────────
+// A dependency-free, hand-rolled minimal PDF writer. `pdfkit` resolves from
+// this workspace's node_modules but is absent from pnpm-lock.yaml -- a clean
+// `pnpm install` in CI would not produce it, so depending on it here would be
+// a phantom dependency that only happens to work in this checkout. Adding a
+// real dependency is also out of this task's write_scopes (`package.json` /
+// the lockfile belong to SR-DEPS-001). The tradeoff is base-14 Helvetica only
+// supports Latin-1: any non-ASCII byte in tenant-supplied text (a CJK
+// invoice title, say) is rendered as `?` rather than dropped or corrupting
+// the byte stream -- every order id, amount, date and channel key on the
+// statement itself is ASCII, so the audited line items are unaffected.
+
+const TENANT_INVOICE_PDF_LINES_PER_PAGE = 48;
+
+function toPdfAsciiText(value: string): string {
+  return value.replace(/[^\x20-\x7e]/g, "?");
+}
+
+function escapePdfLiteralText(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function formatMoneyForPdf(amount: MoneyAmount): string {
+  const sign = amount.amountMinor < 0 ? "-" : "";
+  const absMinor = Math.abs(amount.amountMinor);
+  const whole = Math.floor(absMinor / 100);
+  const cents = String(absMinor % 100).padStart(2, "0");
+  return `${sign}${amount.currency} ${whole}.${cents}`;
+}
+
+function chunkPdfLines(lines: string[], size: number): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < lines.length; index += size) {
+    chunks.push(lines.slice(index, index + size));
+  }
+  return chunks.length > 0 ? chunks : [[]];
+}
+
+function buildPdfPageContentStream(lines: string[]): string {
+  const operators: string[] = ["BT", "/F1 10 Tf", "40 760 Td"];
+  lines.forEach((line, index) => {
+    if (index > 0) {
+      operators.push("0 -14 Td");
+    }
+    operators.push(`(${escapePdfLiteralText(toPdfAsciiText(line))}) Tj`);
+  });
+  operators.push("ET");
+  return operators.join("\n");
+}
+
+/**
+ * Builds a minimal, valid, byte-real PDF (1.4, uncompressed, one Type1
+ * Helvetica text object per page) out of plain text rows. It is real bytes a
+ * PDF reader can open and a text-extraction tool can parse back into these
+ * same rows -- not a fixture standing in for a renderer.
+ */
+function buildMinimalPdf(lines: string[]): Buffer {
+  const pages = chunkPdfLines(lines, TENANT_INVOICE_PDF_LINES_PER_PAGE);
+  const pageCount = pages.length;
+  const fontId = 3 + pageCount * 2;
+  const totalObjects = fontId;
+  const objectBodies: string[] = new Array(totalObjects + 1).fill("");
+  const kids = Array.from(
+    { length: pageCount },
+    (_, index) => `${3 + index * 2} 0 R`,
+  ).join(" ");
+
+  objectBodies[1] = `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`;
+  objectBodies[2] = `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>\nendobj\n`;
+
+  pages.forEach((pageLines, index) => {
+    const pageId = 3 + index * 2;
+    const contentId = 4 + index * 2;
+    const content = buildPdfPageContentStream(pageLines);
+    const contentByteLength = Buffer.byteLength(content, "latin1");
+    objectBodies[pageId] =
+      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 ${fontId} 0 R >> >> /MediaBox [0 0 612 792] /Contents ${contentId} 0 R >>\nendobj\n`;
+    objectBodies[contentId] =
+      `${contentId} 0 obj\n<< /Length ${contentByteLength} >>\nstream\n${content}\nendstream\nendobj\n`;
+  });
+
+  objectBodies[fontId] =
+    `${fontId} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`;
+
+  const header = "%PDF-1.4\n";
+  const offsets: number[] = new Array(totalObjects + 1).fill(0);
+  let offset = Buffer.byteLength(header, "latin1");
+  let body = "";
+  for (let id = 1; id <= totalObjects; id += 1) {
+    offsets[id] = offset;
+    const objectBody = objectBodies[id]!;
+    body += objectBody;
+    offset += Buffer.byteLength(objectBody, "latin1");
+  }
+
+  const xrefOffset = offset;
+  let xref = `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
+  for (let id = 1; id <= totalObjects; id += 1) {
+    xref += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
+  }
+  const trailer = `trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  return Buffer.from(header + body + xref + trailer, "latin1");
+}
+
+function buildTenantInvoicePdfRows(input: {
+  invoiceId: string;
+  tenantId: string;
+  billingProfile: TenantBillingProfile;
+  periodStart: string;
+  periodEnd: string;
+  amount: MoneyAmount;
+  lines: InvoiceLineRecord[];
+  generatedAt: string;
+}): string[] {
+  return [
+    `Tenant Invoice ${input.invoiceId}`,
+    `Bill To: ${toPdfAsciiText(input.billingProfile.invoiceTitle)} (${input.tenantId})`,
+    ...(input.billingProfile.taxId
+      ? [`Tax ID: ${toPdfAsciiText(input.billingProfile.taxId)}`]
+      : []),
+    ...(input.billingProfile.address
+      ? [`Address: ${toPdfAsciiText(input.billingProfile.address)}`]
+      : []),
+    `Billing Period: ${input.periodStart} to ${input.periodEnd}`,
+    `Generated At: ${input.generatedAt}`,
+    "",
+    "Order ID | Description | Channel | Amount",
+    "----------------------------------------------------------------",
+    ...input.lines.map(
+      (line) =>
+        `${line.orderId} | ${toPdfAsciiText(line.description)} | ${
+          line.channelKey ?? "-"
+        } | ${formatMoneyForPdf(line.amount)}`,
+    ),
+    "----------------------------------------------------------------",
+    `Total (${input.lines.length} line${input.lines.length === 1 ? "" : "s"}): ${formatMoneyForPdf(input.amount)}`,
+  ];
+}
+
 @Injectable()
 export class BillingSettlementService implements OnModuleInit {
   private tenantBillingProfiles = new Map<string, TenantBillingProfile>([
@@ -556,6 +707,9 @@ export class BillingSettlementService implements OnModuleInit {
     @Optional()
     @InjectPaymentRecoveryPort()
     private readonly paymentRecoveryPort: PaymentRecoveryPort = new UnavailablePaymentRecoveryPort(),
+    @Optional()
+    @Inject(DOCUMENT_ARTIFACT_STORE)
+    private readonly documentArtifactStore: DocumentArtifactStore = new InMemoryDocumentArtifactStore(),
   ) {}
 
   async getMultiTaxiPaymentException(
@@ -1128,7 +1282,9 @@ export class BillingSettlementService implements OnModuleInit {
         invoice.periodEnd === command.periodEnd,
     );
     if (existingInvoice) {
-      return this.cloneInvoice(existingInvoice);
+      return this.cloneInvoice(
+        this.ensureTenantInvoiceArtifact(existingInvoice),
+      );
     }
 
     const eligibleTrips = (
@@ -1171,17 +1327,32 @@ export class BillingSettlementService implements OnModuleInit {
     const amount = this.sumMoney(lines.map((line) => line.amount));
     const now = new Date().toISOString();
     const invoiceId = `invoice-${randomUUID()}`;
+    const billingProfile = this.requireTenantBillingProfile(command.tenantId);
+    const artifactRecord = this.documentArtifactStore.put({
+      kind: "tenant-invoice",
+      subjectId: invoiceId,
+      mimeType: "application/pdf",
+      bytes: buildMinimalPdf(
+        buildTenantInvoicePdfRows({
+          invoiceId,
+          tenantId: command.tenantId,
+          billingProfile,
+          periodStart: command.periodStart,
+          periodEnd: command.periodEnd,
+          amount,
+          lines,
+          generatedAt: now,
+        }),
+      ),
+    });
     const artifactDownloadMetadata = createControlledDownloadMetadata({
       kind: "tenant-invoice",
       subjectId: invoiceId,
-      manifestHash: this.computeHash({
-        invoiceId,
-        tenantId: command.tenantId,
-        periodStart: command.periodStart,
-        periodEnd: command.periodEnd,
-        amount,
-        lineCount: lines.length,
-      }),
+      // The signature must cover the hash of the bytes actually behind the
+      // link, not a separate metadata digest -- otherwise a verified,
+      // unexpired signature would still fail `resolveDocumentArtifact`'s
+      // content-mismatch check against the real stored artifact.
+      manifestHash: artifactRecord.sha256,
       createdAt: now,
       host: this.downloadHost,
       keyId: this.downloadSigningKeyId,
@@ -1268,17 +1439,23 @@ export class BillingSettlementService implements OnModuleInit {
     invoice: TenantInvoiceRecord,
   ): ResourceActionDescriptor[] {
     const artifactExpired = this.isInvoiceArtifactExpired(invoice.artifactUrl);
+    // `draft` is not produced by `generateTenantInvoice` today, but the
+    // contract's `BillingDocumentStatus` allows it and a not-yet-finalised
+    // bill must never be downloadable just because a link happens to exist.
+    const isUnfinalised = invoice.status === "draft";
 
     return [
       {
         action: "download_artifact",
-        enabled: Boolean(invoice.artifactUrl) && !artifactExpired,
+        enabled: Boolean(invoice.artifactUrl) && !artifactExpired && !isUnfinalised,
         riskLevel: "low",
-        ...(!invoice.artifactUrl
-          ? { disabledReasonCode: "artifact_missing" }
-          : artifactExpired
-            ? { disabledReasonCode: "artifact_expired" }
-            : {}),
+        ...(isUnfinalised
+          ? { disabledReasonCode: "invoice_not_finalized" }
+          : !invoice.artifactUrl
+            ? { disabledReasonCode: "artifact_missing" }
+            : artifactExpired
+              ? { disabledReasonCode: "artifact_expired" }
+              : {}),
       },
       {
         action: "view_detail",
@@ -1369,7 +1546,14 @@ export class BillingSettlementService implements OnModuleInit {
     }
 
     try {
-      const parsed = new URL(artifactUrl);
+      // `artifactUrl` is host-relative by default (`DEFAULT_CONTROLLED_DOWNLOAD_HOST`
+      // is `/downloads`, not an absolute origin), and `new URL()` throws on a
+      // relative string with no base -- which silently made this method
+      // return "never expired" for every real invoice link. The dummy base is
+      // ignored by the URL parser whenever `artifactUrl` is already absolute
+      // (a deployment that sets `CONTROLLED_DOWNLOAD_HOST`), so this is safe
+      // either way.
+      const parsed = new URL(artifactUrl, "http://controlled-download.invalid");
       const expiresAt = parsed.searchParams.get("expires_at");
       if (!expiresAt) {
         return false;
@@ -1382,16 +1566,101 @@ export class BillingSettlementService implements OnModuleInit {
     }
   }
 
+  /**
+   * Makes a stored invoice's download link trustworthy before it is handed
+   * back to a caller: reissues the signed link if its time window has
+   * lapsed, and re-renders + re-stores the PDF from this invoice's own
+   * persisted snapshot if `DocumentArtifactStore` no longer has bytes
+   * matching the link's manifest hash (the store is in-memory only per
+   * SR-ARTIFACT-001, so a process restart empties it while the invoice
+   * record itself survives via the repository).
+   *
+   * Only the link is ever recomputed here -- `createdAt` (the invoice's
+   * actual issuance date), `lines`, and `amount` are read, never
+   * recalculated, so viewing this invoice on a later date can never change
+   * what it says was issued or owed.
+   */
+  private ensureTenantInvoiceArtifact(
+    invoice: StoredTenantInvoice,
+  ): StoredTenantInvoice {
+    const stored = this.documentArtifactStore.get(
+      "tenant-invoice",
+      invoice.invoiceId,
+    );
+    const materialised =
+      stored?.record.sha256 === invoice.artifactDownloadMetadata.manifestHash;
+    const expired = this.isInvoiceArtifactExpired(invoice.artifactUrl);
+
+    if (materialised && !expired) {
+      return invoice;
+    }
+
+    const record = materialised
+      ? stored!.record
+      : this.documentArtifactStore.put({
+          kind: "tenant-invoice",
+          subjectId: invoice.invoiceId,
+          mimeType: "application/pdf",
+          bytes: buildMinimalPdf(
+            buildTenantInvoicePdfRows({
+              invoiceId: invoice.invoiceId,
+              tenantId: invoice.tenantId,
+              billingProfile: this.requireTenantBillingProfile(
+                invoice.tenantId,
+              ),
+              periodStart: invoice.periodStart,
+              periodEnd: invoice.periodEnd,
+              amount: invoice.amount,
+              lines: invoice.lines,
+              generatedAt: invoice.createdAt,
+            }),
+          ),
+        });
+
+    const artifactDownloadMetadata = createControlledDownloadMetadata({
+      kind: "tenant-invoice",
+      subjectId: invoice.invoiceId,
+      manifestHash: record.sha256,
+      host: this.downloadHost,
+      keyId: this.downloadSigningKeyId,
+      signingSecret: this.downloadSigningSecret,
+      ttlMinutes: this.downloadExpiryMinutes,
+      signatureVersion: this.downloadSignatureVersion,
+    });
+
+    const refreshed: StoredTenantInvoice = {
+      ...invoice,
+      artifactUrl: artifactDownloadMetadata.downloadUrl,
+      artifactDownloadMetadata,
+    };
+
+    this.tenantInvoices = this.tenantInvoices.map((candidate) =>
+      candidate.invoiceId === refreshed.invoiceId ? refreshed : candidate,
+    );
+    this.persistChanges(
+      { tenantInvoices: [this.cloneInvoice(refreshed)] },
+      "reissue_tenant_invoice_artifact",
+    );
+
+    return refreshed;
+  }
+
   listTenantInvoices(tenantId: string) {
     return this.tenantInvoices
       .filter((invoice) => invoice.tenantId === tenantId)
-      .map((invoice) => this.cloneInvoice(invoice));
+      .map((invoice) =>
+        this.cloneInvoice(this.ensureTenantInvoiceArtifact(invoice)),
+      );
   }
 
   listTenantInvoicesRuntime(tenantId: string): TenantInvoiceListData {
     const items = this.tenantInvoices
       .filter((invoice) => invoice.tenantId === tenantId)
-      .map((invoice) => this.toTenantInvoiceRuntimeRecord(invoice));
+      .map((invoice) =>
+        this.toTenantInvoiceRuntimeRecord(
+          this.ensureTenantInvoiceArtifact(invoice),
+        ),
+      );
 
     const refresh: UiRefreshMetadata = {
       generatedAt: new Date().toISOString(),
@@ -1585,7 +1854,7 @@ export class BillingSettlementService implements OnModuleInit {
         },
       );
     }
-    return this.cloneInvoice(invoice);
+    return this.cloneInvoice(this.ensureTenantInvoiceArtifact(invoice));
   }
 
   async publishDriverFeePlan(
