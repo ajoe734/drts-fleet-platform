@@ -5,6 +5,7 @@ import { DatabaseModule } from "../../common/db";
 import { IdempotencyModule } from "../../common/idempotency";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { BillingSettlementModule } from "../billing-settlement/billing-settlement.module";
+import { IdentityRepository } from "../identity/identity.repository";
 import { IdentityModule } from "../identity/identity.module";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { BankCardInlineEligibilityAdapter } from "./bank-card-inline-eligibility.adapter";
@@ -37,7 +38,12 @@ import { WebhookDispatchService } from "./webhook-dispatch.service";
     TenantPartnerService,
     JwtAuthService,
     TenantPartnerRepository,
-    TenantInvitationDeliveryService,
+    {
+      provide: TenantInvitationDeliveryService,
+      useFactory: (identity: IdentityRepository) =>
+        TenantInvitationDeliveryService.fromEnvironment(identity),
+      inject: [IdentityRepository],
+    },
     PartnerUserIdentityLinkRepository,
     ReferralEmbedHandoffRepository,
     ReferralChannelScaffoldService,

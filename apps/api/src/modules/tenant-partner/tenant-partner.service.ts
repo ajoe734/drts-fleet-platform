@@ -6713,7 +6713,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       "resend_tenant_invitation",
     );
     const current = identitySnapshot
-      ? await this.identityRepository?.findInvitationByMembershipId(
+      ? await this.identityRepository?.findPendingInvitationByMembershipId(
           identitySnapshot.membership.membershipId,
         )
       : null;
@@ -14459,7 +14459,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       await this.identityRepository.upsertInvitationRecord(invitation);
 
     try {
-      await this.tenantInvitationDelivery.send({
+      const receipt = await this.tenantInvitationDelivery.send({
         invitationId: stored.invitationId,
         tenantId: userRole.tenantId,
         recipientEmail: userRole.email,
@@ -14469,7 +14469,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       });
       return await this.identityRepository.upsertInvitationRecord({
         ...stored,
-        deliveryStatus: "delivered",
+        // SMTP acceptance is not evidence of inbox delivery. The durable
+        // outbox retains sent/failed/retry truth until the public enum adds sent.
+        deliveryStatus: receipt.status === "failed" ? "delivery_failed" : "pending_delivery",
         updatedAt: new Date().toISOString(),
       });
     } catch (error) {
