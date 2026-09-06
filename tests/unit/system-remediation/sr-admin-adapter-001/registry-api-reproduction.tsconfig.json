@@ -1,0 +1,9 @@
+{
+  "extends": "../../../../tsconfig.json",
+  "include": [
+    "../../../../apps/api/src/**/*.ts",
+    "../../../../packages/contracts/src/**/*.ts",
+    "../../../../packages/control-plane-auth/src/**/*.ts",
+    "./registry-api-reproduction.ts"
+  ]
+}

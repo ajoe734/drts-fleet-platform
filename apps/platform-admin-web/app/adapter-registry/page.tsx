@@ -6,7 +6,6 @@ import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type { PlatformAdapter } from "@drts/contracts";
 import {
-  CanvasBanner,
   CanvasBtn,
   CanvasCard,
   CanvasDL,
@@ -15,6 +14,12 @@ import {
   buildCanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
+
+import {
+  findAttentionAdapter,
+  RegistryNotice,
+  REGISTRY_NOTICE_COPY,
+} from "./registry-notice";
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -51,10 +56,10 @@ const flashStyle = (tone: CanvasTone): CSSProperties =>
     }`,
     background:
       tone === "danger"
-        ? "rgba(185, 28, 28, 0.08)"
+        ? theme.dangerBg
         : tone === "success"
-          ? "rgba(6, 95, 70, 0.08)"
-          : "rgba(59, 130, 246, 0.08)",
+          ? theme.successBg
+          : theme.infoBg,
     color:
       tone === "danger"
         ? theme.danger
@@ -170,11 +175,9 @@ type Copy = {
   loading: string;
   empty: string;
   unavailable: string;
-  bannerFallbackTitle: string;
-  bannerFallbackBody: string;
+  unknownExpiry: string;
   bannerTitle: (adapter: PlatformAdapter) => string;
   bannerBody: (adapter: PlatformAdapter) => string;
-  rotateNow: string;
   statusHealthy: string;
   statusDegraded: string;
   statusUnhealthy: string;
@@ -274,15 +277,6 @@ function booleanTone(value: boolean): CanvasTone {
   return value ? "success" : "neutral";
 }
 
-function findAttentionAdapter(adapters: PlatformAdapter[]) {
-  return adapters.find(
-    (adapter) =>
-      adapter.credentialStatus !== "VALID" ||
-      adapter.healthStatus.status !== "HEALTHY" ||
-      adapter.warn === true,
-  );
-}
-
 function hasSupportedAction(adapter: PlatformAdapter, actionName: string) {
   return adapter.supportedActions.some(
     (action: { name: string }) =>
@@ -349,6 +343,7 @@ function normalizeRegistryError(message: string, unavailable: string) {
 export default function AdapterRegistryPage() {
   const client = usePlatformAdminClient();
   const { locale, t } = useTranslation();
+  const noticeCopy = REGISTRY_NOTICE_COPY[locale];
   const [adapters, setAdapters] = useState<PlatformAdapter[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -364,26 +359,15 @@ export default function AdapterRegistryPage() {
         registerInfo: t("adapterRegistry.registerInfo"),
         loading: t("adapterRegistry.loading"),
         empty: t("adapterRegistry.empty"),
-        unavailable: t("adapterRegistry.unavailable"),
-        bannerFallbackTitle: t("adapterRegistry.banner.fallbackTitle"),
-        bannerFallbackBody: t("adapterRegistry.banner.fallbackBody"),
-        bannerTitle: (adapter) =>
-          t("adapterRegistry.banner.title", {
-            platformCode: adapter.platformCode.toLowerCase(),
-          }),
+        unavailable: `${t("adapterRegistry.unavailable")} ${noticeCopy.unknownExpiry}`,
+        unknownExpiry: noticeCopy.unknownExpiry,
+        bannerTitle: (adapter) => noticeCopy.title(adapter.platformCode),
         bannerBody: (adapter) =>
-          t("adapterRegistry.banner.body", {
-            name: adapter.name,
-            credentialStatus: formatPlatformCodeLabel(
-              locale,
-              adapter.credentialStatus,
-            ).toLowerCase(),
-            healthStatus: healthStatusText(
-              t,
-              adapter.healthStatus.status,
-            ).toLowerCase(),
-          }),
-        rotateNow: t("adapterRegistry.rotateNow"),
+          `${noticeCopy.body(
+            adapter.name,
+            formatPlatformCodeLabel(locale, adapter.credentialStatus),
+            healthStatusText(t, adapter.healthStatus.status),
+          )} ${noticeCopy.unknownExpiry}`,
         statusHealthy: t("adapterRegistry.status.healthy"),
         statusDegraded: t("adapterRegistry.status.degraded"),
         statusUnhealthy: t("adapterRegistry.status.unhealthy"),
@@ -458,7 +442,7 @@ export default function AdapterRegistryPage() {
         auditReceiptPrefix: t("adapterRegistry.auditReceiptPrefix"),
         notConfigured: t("adapterRegistry.notConfigured"),
       }) satisfies Copy,
-    [locale, t],
+    [locale, t, noticeCopy],
   );
 
   useEffect(() => {
@@ -476,6 +460,8 @@ export default function AdapterRegistryPage() {
         if (!cancelled) {
           const message =
             caught instanceof Error ? caught.message : String(caught);
+          setAdapters([]);
+          setFlash(null);
           setError(normalizeRegistryError(message, copy.unavailable));
         }
       } finally {
@@ -497,11 +483,6 @@ export default function AdapterRegistryPage() {
     [adapters],
   );
 
-  const bannerAdapter = useMemo(
-    () => attentionAdapter ?? adapters[0] ?? null,
-    [adapters, attentionAdapter],
-  );
-
   const sortedAdapters = useMemo(
     () =>
       [...adapters].sort((left, right) => {
@@ -516,7 +497,7 @@ export default function AdapterRegistryPage() {
   );
 
   const showUnavailableState =
-    !loading && Boolean(error) && adapters.length === 0;
+    !loading && error !== null && adapters.length === 0;
 
   async function toggleEnabled(adapter: PlatformAdapter) {
     const nextEnabled = !adapter.config.isEnabled;
@@ -603,35 +584,13 @@ export default function AdapterRegistryPage() {
       />
 
       <div style={pageBodyStyle}>
-        <CanvasBanner
+        <RegistryNotice
           theme={theme}
-          tone="danger"
-          icon="warn"
-          title={
-            bannerAdapter && attentionAdapter
-              ? copy.bannerTitle(bannerAdapter)
-              : copy.bannerFallbackTitle
-          }
-          body={
-            bannerAdapter && attentionAdapter
-              ? copy.bannerBody(bannerAdapter)
-              : copy.bannerFallbackBody
-          }
-          actions={
-            bannerAdapter ? (
-              <CanvasBtn
-                theme={theme}
-                variant="primary"
-                danger
-                icon="refresh"
-                onClick={() =>
-                  queueGovernedAction(copy.rotateCredential, bannerAdapter)
-                }
-              >
-                {copy.rotateNow}
-              </CanvasBtn>
-            ) : undefined
-          }
+          adapters={adapters}
+          loading={loading}
+          error={error}
+          title={copy.bannerTitle}
+          body={copy.bannerBody}
         />
 
         {flash ? (
@@ -838,6 +797,7 @@ export default function AdapterRegistryPage() {
                             : copy.disableAdapter}
                         </CanvasPill>
                       </div>
+                      <p style={helperTextStyle}>{copy.unknownExpiry}</p>
                       <div style={tokenRowStyle}>
                         {featureFlags.length > 0 ? (
                           featureFlags.map(([key, value]) => (
