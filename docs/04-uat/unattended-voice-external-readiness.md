@@ -175,6 +175,23 @@
 
 ---
 
+### 2.13 Acceptance 階段複查記錄 (Acceptance-Phase Re-Verification 2026-09-06T12:05Z, Claude2, acceptance_ready_dispatch 喚醒)
+
+距上一輪 (12:03Z-b / commit `c126fd0b4`) 再次被 dispatch，本輪為連續第 10 次複查，各項查核結果與前九輪完全一致，未發現任何機器真相變化。
+
+| 查核項目 | 執行方式 | 查核結果 |
+|---|---|---|
+| `dev` 分支推進狀態 | `git fetch origin && git rev-parse origin/dev` | **[CONFIRMED]** 仍為 `2093cf7e38526a7a7c027600be92004f7275efd3`，與 `ai-status.json` 之 `merge_sha` 一致，無推進 |
+| `ai-status.json` 候選生命週期欄位 | `ai-status.sh show UV-EXEC-027` | **[CONFIRMED]** `status: acceptance`、`candidate_sha`/`reviewed_sha`/`ci_sha` 均為 `7c3b763006784e0b3037e4c146d032011943d666`、`merge_sha: 2093cf7e3...`、`ci_status: success`，欄位完整未見清空 |
+| GitHub Secrets 語音憑證 | `gh secret list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN\|CANDIDATE\|CARRIER\|DTMF)'` | **[CONFIRMED]** 無符合項目；共 11 項，較上一輪無新增 |
+| GitHub Variables 語音端點 | `gh variable list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN\|CANDIDATE\|CARRIER\|DTMF)'` | **[CONFIRMED]** 無符合項目；共 97 項，較上一輪無新增 |
+| 本地任務分支推送狀態 | `git ls-remote origin refs/heads/claude2/uv-exec-027` | **[CONFIRMED]** 遠端 HEAD 為 `c126fd0b4`，與本地一致，無未同步 commit |
+| 行程環境語音憑證 | (本輪略過重複執行，權限政策與前九輪相同未變更) | **[UNVERIFIED-THIS-SESSION]** 沿用前九輪結論，工具限制未變 |
+
+> **本輪複查結論：** 連續第 10 輪複查未發現任何新增語音/CTI/TWM 供應商憑證或營運/商務證據，`dev` 分支與 `ai-status.json` 機器真相均與上一輪一致、無 regression。7 項 `required_acceptance` 仍維持 blocker，**未呼叫 `record-acceptance`**，本輪僅以 `note` 記錄，不呼叫會清空候選生命週期欄位的 `progress`。此為連續第 10 次在無新證據情況下被 re-dispatch 的複查，重申前九輪建議：supervisor 應將本任務 re-dispatch 觸發條件改為「僅於偵測到新證據來源時喚醒」，而非固定短間隔輪詢；除非有人工提供實際供應商帳號/合約/費率文件，否則後續輪次預期只會產生與本輪相同的複查結果。
+
+---
+
 ## 3. CTI 準備度盤點 (CTI Capability Readiness)
 
 對應 `required_acceptance`: `cti_account_capability_evidence`
