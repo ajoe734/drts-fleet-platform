@@ -41,6 +41,7 @@ export default async function ReferralStatementDetailPage({
           statement ? (
             <a
               href={`/control-plane-proxy/partner/referral/statements/${encodeURIComponent(period)}/artifact`}
+              download={`referral-statement-${period}.csv`}
               data-drt-operation="channel-statement-download"
               style={{
                 alignItems: "center",
@@ -161,15 +162,17 @@ export default async function ReferralStatementDetailPage({
                   cols={1}
                   items={[
                     {
-                      k: t("referral.table.artifactId", locale),
-                      v: statement.artifactId,
-                      mono: true,
-                    },
-                    { k: "SHA-256", v: statement.artifactHash, mono: true },
-                    {
                       k: t("table.issued", locale),
                       v: statement.issued,
                       mono: true,
+                    },
+                    {
+                      k: t("referral.statements.verificationStatus", locale),
+                      v: (
+                        <CanvasPill theme={theme} tone="success" dot>
+                          {t("referral.statements.verified", locale)}
+                        </CanvasPill>
+                      ),
                     },
                   ]}
                 />
@@ -181,6 +184,48 @@ export default async function ReferralStatementDetailPage({
                     body={t("referral.statements.artifactBody", locale)}
                   />
                 </div>
+                <details
+                  style={{
+                    marginTop: 12,
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    background: theme.surfaceHi,
+                    border: `1px solid ${theme.border}`,
+                    fontSize: 11,
+                    color: theme.textDim,
+                  }}
+                >
+                  <summary
+                    style={{
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      color: theme.textMuted,
+                    }}
+                  >
+                    {t("referral.statements.technicalDetails", locale)}
+                  </summary>
+                  <div
+                    style={{
+                      marginTop: 8,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                    }}
+                  >
+                    <div>
+                      <span style={{ color: theme.textDim }}>ID: </span>
+                      <span style={{ fontFamily: theme.monoFamily }}>
+                        {statement.artifactId}
+                      </span>
+                    </div>
+                    <div>
+                      <span style={{ color: theme.textDim }}>SHA-256: </span>
+                      <span style={{ fontFamily: theme.monoFamily }}>
+                        {statement.artifactHash}
+                      </span>
+                    </div>
+                  </div>
+                </details>
               </CanvasCard>
             </div>
           </div>

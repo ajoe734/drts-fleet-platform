@@ -66,7 +66,12 @@ export interface ServerReferralPartnerClient {
 
 export async function getServerReferralPartnerClient(): Promise<ServerReferralPartnerClient> {
   const apiUrl = resolveServerApiBaseUrl();
-  const requestHeaders = await nextHeaders();
+  let requestHeaders: Headers;
+  try {
+    requestHeaders = await nextHeaders();
+  } catch {
+    requestHeaders = new Headers();
+  }
   const { defaultHeaders, partnerId, partnerEntrySlug, requestEvidence } =
     buildReferralPortalBootstrapContext();
 
