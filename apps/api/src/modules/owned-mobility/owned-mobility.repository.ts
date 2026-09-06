@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 
@@ -71,6 +73,47 @@ export class OwnedOrderDuplicateVoiceLinkError extends Error {
     );
     this.name = "OwnedOrderDuplicateVoiceLinkError";
     this.cause = cause;
+  }
+}
+
+export type DispatchResourceType = "driver" | "vehicle";
+export type DispatchResourceReservationStatus =
+  | "held"
+  | "occupied"
+  | "released";
+
+export type DispatchResourceReservationRecord = {
+  reservationId: string;
+  resourceType: DispatchResourceType;
+  resourceId: string;
+  orderId: string;
+  assignmentId: string | null;
+  reservationGroupId: string;
+  status: DispatchResourceReservationStatus;
+  expiresAt: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * Thrown when SD §7.6's active-occupation uniqueness constraint on
+ * `ops.dispatch_resource_reservations` (resource_type, resource_id WHERE
+ * status IN ('held','occupied')) rejects a driver or vehicle that another
+ * competing order/revision already holds or occupies. This is the mechanism
+ * that guarantees "兩單/兩 revision 競爭最多一個成功" -- the losing insert
+ * fails here and the caller's transaction rolls back instead of both writers
+ * believing they won the same driver/vehicle.
+ */
+export class DispatchResourceReservationConflictError extends Error {
+  constructor(
+    public readonly resourceType: DispatchResourceType,
+    public readonly resourceId: string,
+  ) {
+    super(
+      `${resourceType} ${resourceId} is already held or occupied by another dispatch assignment.`,
+    );
+    this.name = "DispatchResourceReservationConflictError";
   }
 }
 
@@ -450,6 +493,229 @@ export class OwnedMobilityRepository {
       order: { ...order, aggregateVersion: row.aggregate_version },
       aggregateVersion: row.aggregate_version,
     };
+  }
+
+  /**
+   * SD §7.6: obtain the shared driver+vehicle capacity reservation for one
+   * dispatch assignment, in the same transaction as the assignment insert it
+   * protects. Reserves driver before vehicle -- a fixed lock order
+   * (independent of the actual resource IDs) so two transactions competing
+   * over the same driver/vehicle pair never wait on each other in opposite
+   * orders. The unique partial index on `ops.dispatch_resource_reservations
+   * (resource_type, resource_id) WHERE status IN ('held','occupied')` is
+   * what actually arbitrates "at most one of two competing orders/revisions
+   * succeeds": a losing insert throws
+   * `DispatchResourceReservationConflictError` and the caller is expected to
+   * let that propagate so its own transaction rolls back.
+   *
+   * Must be called with the same `PoolClient` the assignment row is
+   * persisted through in the same `withTransaction` block, not the bare
+   * `databaseService` pool.
+   */
+  async reserveDispatchResources(
+    executor: OwnedMobilityQueryExecutor,
+    params: {
+      orderId: string;
+      assignmentId: string;
+      driverId: string;
+      vehicleId: string;
+      expiresAt: string | null;
+    },
+  ): Promise<DispatchResourceReservationRecord[]> {
+    const reservationGroupId = randomUUID();
+    const resources: Array<{
+      resourceType: DispatchResourceType;
+      resourceId: string;
+    }> = [
+      { resourceType: "driver", resourceId: params.driverId },
+      { resourceType: "vehicle", resourceId: params.vehicleId },
+    ];
+
+    const reserved: DispatchResourceReservationRecord[] = [];
+    for (const resource of resources) {
+      try {
+        const result = await executor.query<{
+          reservation_id: string;
+          resource_type: DispatchResourceType;
+          resource_id: string;
+          order_id: string;
+          assignment_id: string | null;
+          reservation_group_id: string;
+          status: DispatchResourceReservationStatus;
+          expires_at: Date | string | null;
+          version: number;
+          created_at: Date | string;
+          updated_at: Date | string;
+        }>(
+          `
+            INSERT INTO ops.dispatch_resource_reservations (
+              resource_type, resource_id, order_id, assignment_id,
+              reservation_group_id, status, expires_at
+            ) VALUES ($1, $2, $3, $4, $5, 'held', $6)
+            RETURNING
+              reservation_id, resource_type, resource_id, order_id,
+              assignment_id, reservation_group_id, status, expires_at,
+              version, created_at, updated_at
+          `,
+          [
+            resource.resourceType,
+            resource.resourceId,
+            params.orderId,
+            params.assignmentId,
+            reservationGroupId,
+            params.expiresAt,
+          ],
+        );
+        const row = result.rows[0];
+        if (!row) {
+          throw new Error(
+            `INSERT ... RETURNING for ${resource.resourceType} ${resource.resourceId} unexpectedly returned no row`,
+          );
+        }
+        reserved.push({
+          reservationId: row.reservation_id,
+          resourceType: row.resource_type,
+          resourceId: row.resource_id,
+          orderId: row.order_id,
+          assignmentId: row.assignment_id,
+          reservationGroupId: row.reservation_group_id,
+          status: row.status,
+          expiresAt: row.expires_at
+            ? new Date(row.expires_at).toISOString()
+            : null,
+          version: row.version,
+          createdAt: new Date(row.created_at).toISOString(),
+          updatedAt: new Date(row.updated_at).toISOString(),
+        });
+      } catch (error) {
+        if ((error as { code?: string })?.code === "23505") {
+          throw new DispatchResourceReservationConflictError(
+            resource.resourceType,
+            resource.resourceId,
+          );
+        }
+        throw error;
+      }
+    }
+    return reserved;
+  }
+
+  /**
+   * SD §7.6: releasing a reservation must be fenced to the specific
+   * assignment whose offer actually ended (valid reject/cancel/complete/
+   * timeout, or the atomic close of an old assignment during reassign) --
+   * never "whatever is currently held for this resource". Every dispatch
+   * assignment gets its own reservation rows via `reserveDispatchResources`,
+   * so scoping the UPDATE to `assignment_id` makes a stale release (e.g. a
+   * late timer for an assignment a reassign already superseded) a safe
+   * no-op instead of releasing a newer assignment's occupation of the same
+   * driver/vehicle. Defaults to the bare pool for callers outside an
+   * existing transaction (accept/reject/cancel/timeout today all persist
+   * their own state with separate statements); pass the transaction's
+   * `PoolClient` when releasing atomically alongside another write (e.g.
+   * reassign, completion).
+   */
+  async releaseDispatchResourceReservations(
+    assignmentId: string,
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+  ): Promise<number> {
+    const result = await executor.query(
+      `
+        UPDATE ops.dispatch_resource_reservations
+        SET status = 'released', version = version + 1
+        WHERE assignment_id = $1
+          AND status IN ('held', 'occupied')
+      `,
+      [assignmentId],
+    );
+    return result.rowCount ?? 0;
+  }
+
+  /**
+   * SD §7.6: "accepted 轉 occupied" -- once the driver actually accepts the
+   * offer, the reservation stops being a soft hold and becomes a firm
+   * occupation for the rest of the trip lifecycle. Scoped to `assignment_id`
+   * for the same fencing reasons as release.
+   */
+  async occupyDispatchResourceReservations(
+    assignmentId: string,
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+  ): Promise<number> {
+    const result = await executor.query(
+      `
+        UPDATE ops.dispatch_resource_reservations
+        SET status = 'occupied', version = version + 1
+        WHERE assignment_id = $1
+          AND status = 'held'
+      `,
+      [assignmentId],
+    );
+    return result.rowCount ?? 0;
+  }
+
+  /**
+   * SD §7.6: locks one dispatch assignment row for a status-fenced close --
+   * `assignment_id` is minted fresh per offer (reassign never reuses an old
+   * id), so the row's current `status` under `FOR UPDATE` is itself the
+   * concurrency fence: no separate version column is needed to tell "this
+   * offer is still the one I last observed" from "something else already
+   * closed it". Must run inside the same `withTransaction` block that
+   * subsequently persists a cancellation and/or releases the reservation,
+   * so the lock is held across both. Returns `null` if the assignment row
+   * does not exist (should not happen for a real assignment id, but keeps
+   * the caller's no-op handling uniform with the "already closed" case).
+   */
+  async lockDispatchAssignmentForUpdate(
+    executor: OwnedMobilityQueryExecutor,
+    assignmentId: string,
+  ): Promise<DispatchAssignmentRecord | null> {
+    const result = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_dispatch_assignments
+        WHERE assignment_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [assignmentId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    return this.parseRecord<DispatchAssignmentRecord>(
+      row.record,
+      "ops.phase1_dispatch_assignments",
+    );
+  }
+
+  /**
+   * SD §7.6: companion lock for the driver task tied to an assignment being
+   * closed, so its terminal-state check and update share the same
+   * transaction and row lock as the assignment above.
+   */
+  async lockDriverTaskForUpdate(
+    executor: OwnedMobilityQueryExecutor,
+    taskId: string,
+  ): Promise<DriverTaskRecord | null> {
+    const result = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_driver_tasks
+        WHERE task_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [taskId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    return this.parseRecord<DriverTaskRecord>(
+      row.record,
+      "ops.phase1_driver_tasks",
+    );
   }
 
   /**
