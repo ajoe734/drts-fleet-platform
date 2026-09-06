@@ -16,6 +16,7 @@
 
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
+import { ApiRequestError } from "../../common/api-envelope";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -51,7 +52,7 @@ function cellText(value: unknown): string {
  * - Row 1 is a bold header derived from column names.
  * - All cells are plain strings to avoid formula-injection risk (same guard
  *   as the CSV renderer's leading-character neutralisation).
- * - Returns a `Buffer` synchronously via `xlsx.writeBuffer()`.
+ * - Resolves the workbook bytes after `xlsx.writeBuffer()` completes.
  */
 export async function recordsToXlsx(
   rows: readonly Record<string, unknown>[],
@@ -91,111 +92,69 @@ export async function recordsToXlsx(
   return Buffer.from(arrayBuffer);
 }
 
-// ---------------------------------------------------------------------------
-// PDF renderer
-// ---------------------------------------------------------------------------
-
 /**
- * Renders rows as a PDF table buffer.
- *
- * - Uses PDFKit with no external fonts; falls back to built-in Helvetica which
- *   is always available regardless of the deployment environment.
- * - Draws a simple grid: header row (bold) + data rows, line-wrapped when a
- *   column is wider than its allotted cell.
- * - Returns a `Buffer` from the concatenated chunks.
- *
- * Layout heuristic:
- *   - Each column is assigned equal width across the printable area.
- *   - If there are no rows the PDF says "No data." in the printable area.
- *   - Page size is A4 landscape when there are more than 4 columns.
+ * A record-oriented PDF keeps every field readable, including wide schemas
+ * and multiline values. PDFKit wraps text and paginates without truncation.
+ * A deployment font is required for Unicode; Helvetica must never silently
+ * turn tenant names and complaint text into unrelated glyphs.
  */
 export function recordsToPdf(
   rows: readonly Record<string, unknown>[],
-  title?: string,
+  title = "Report",
 ): Promise<Buffer> {
+  const columns = deriveColumns(rows);
+  const fontPath = process.env.REPORT_PDF_FONT_PATH?.trim();
+  const fontFamily = process.env.REPORT_PDF_FONT_FAMILY?.trim();
+  const texts = [
+    title,
+    ...columns,
+    ...rows.flatMap((row) => columns.map((key) => cellText(row[key]))),
+  ];
+  if (
+    !fontPath &&
+    texts.some((text) =>
+      Array.from(text).some(
+        (char) =>
+          !"\t\n\r".includes(char) &&
+          (char.charCodeAt(0) < 32 || char.charCodeAt(0) > 126),
+      ),
+    )
+  ) {
+    throw new ApiRequestError(
+      503,
+      "REPORT_PDF_FONT_REQUIRED",
+      "A Unicode report font must be configured before this PDF can be rendered.",
+    );
+  }
+
   return new Promise<Buffer>((resolve, reject) => {
-    const columns = deriveColumns(rows);
-
-    const landscape = columns.length > 4;
-    const doc = new PDFDocument({
-      size: "A4",
-      layout: landscape ? "landscape" : "portrait",
-      margins: { top: 40, bottom: 40, left: 40, right: 40 },
-      autoFirstPage: true,
-    });
-
+    const doc = new PDFDocument({ size: "A4", margin: 40 });
     const chunks: Buffer[] = [];
     doc.on("data", (chunk: Buffer) => chunks.push(chunk));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
-
-    // Title.
-    const reportTitle = title ?? "Report";
-    doc.fontSize(14).font("Helvetica-Bold").text(reportTitle, { align: "left" });
-    doc.moveDown(0.5);
-
-    if (columns.length === 0 || rows.length === 0) {
-      doc.fontSize(10).font("Helvetica").text("No data.", { align: "left" });
+    try {
+      if (fontPath) {
+        if (fontFamily) doc.font(fontPath, fontFamily);
+        else doc.font(fontPath);
+      } else {
+        doc.font("Helvetica");
+      }
+      doc.fontSize(14).text(title);
+      doc.moveDown();
+      doc.fontSize(9);
+      if (rows.length === 0) doc.text("No data.");
+      for (const [index, row] of rows.entries()) {
+        doc.text(`Record ${index + 1}`);
+        for (const column of columns) {
+          doc.text(`${column}: ${cellText(row[column])}`);
+        }
+        doc.moveDown();
+      }
       doc.end();
-      return;
+    } catch (error) {
+      doc.destroy();
+      reject(error);
     }
-
-    // Compute column widths.
-    const printW =
-      doc.page.width - doc.page.margins.left - doc.page.margins.right;
-    const colW = Math.floor(printW / columns.length);
-    const rowH = 18;
-    const headerH = 20;
-
-    // Header row.
-    const startX = doc.page.margins.left;
-    let y = doc.y;
-
-    doc.fontSize(9).font("Helvetica-Bold");
-    for (let ci = 0; ci < columns.length; ci++) {
-      const x = startX + ci * colW;
-      doc
-        .rect(x, y, colW, headerH)
-        .fillAndStroke("#E2E8F0", "#94A3B8");
-      doc
-        .fillColor("black")
-        .text(columns[ci] ?? "", x + 2, y + 4, {
-          width: colW - 4,
-          height: headerH - 4,
-          ellipsis: true,
-          lineBreak: false,
-        });
-    }
-    y += headerH;
-
-    // Data rows.
-    doc.fontSize(8).font("Helvetica");
-    for (let ri = 0; ri < rows.length; ri++) {
-      // Page break if needed (keep ~60px bottom margin).
-      if (
-        y + rowH >
-        doc.page.height - doc.page.margins.bottom - 60
-      ) {
-        doc.addPage();
-        y = doc.page.margins.top;
-      }
-
-      const fill = ri % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
-      for (let ci = 0; ci < columns.length; ci++) {
-        const x = startX + ci * colW;
-        doc.rect(x, y, colW, rowH).fillAndStroke(fill, "#CBD5E1");
-        doc
-          .fillColor("black")
-          .text(cellText(rows[ri]?.[columns[ci] ?? ""] ), x + 2, y + 4, {
-            width: colW - 4,
-            height: rowH - 4,
-            ellipsis: true,
-            lineBreak: false,
-          });
-      }
-      y += rowH;
-    }
-
-    doc.end();
   });
 }
