@@ -158,6 +158,21 @@
 
 > **本輪複查結論：** 連續第 8 輪複查未發現任何新增語音/CTI/TWM 供應商憑證或營運/商務證據，`dev` 分支與 `ai-status.json` 機器真相均與上一輪一致、無 regression。7 項 `required_acceptance` 仍維持 blocker，**未呼叫 `record-acceptance`**，本輪僅以 `note` 記錄，不呼叫會清空候選生命週期欄位的 `progress`。鑑於連續多輪 dispatch 間隔已縮短至數分鐘且結果完全一致，本輪起若後續 dispatch 未帶來新資訊來源，建議 supervisor 考慮拉長本任務的 re-dispatch 間隔以避免無意義的重複複查。
 
+### 2.12 Acceptance 階段複查記錄 (Acceptance-Phase Re-Verification 2026-09-06T12:03Z, Claude2, acceptance_ready_dispatch 喚醒)
+
+距上一輪 (12:03Z / commit `bcc8e43d1`) 不到 1 分鐘即再次被 dispatch，本輪為連續第 9 次複查，各項查核結果與前八輪完全一致，未發現任何機器真相變化。
+
+| 查核項目 | 執行方式 | 查核結果 |
+|---|---|---|
+| `dev` 分支推進狀態 | `git fetch origin && git rev-parse origin/dev` | **[CONFIRMED]** 仍為 `2093cf7e38526a7a7c027600be92004f7275efd3`，與上一輪及 `ai-status.json` 之 `merge_sha` 一致，無推進 |
+| `ai-status.json` 候選生命週期欄位 | `ai-status.sh show UV-EXEC-027` | **[CONFIRMED]** `status: acceptance`、`candidate_sha`/`reviewed_sha`/`ci_sha` 均為 `7c3b763006784e0b3037e4c146d032011943d666`、`merge_sha: 2093cf7e3...`、`ci_status: success`，欄位完整未見清空 |
+| GitHub Secrets 語音憑證 | `gh secret list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN\|CANDIDATE\|CARRIER\|DTMF)'` | **[CONFIRMED]** 無符合項目；共 11 項，較上一輪無新增 |
+| GitHub Variables 語音端點 | `gh variable list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN\|CANDIDATE\|CARRIER\|DTMF)'` | **[CONFIRMED]** 無符合項目；共 97 項，較上一輪無新增 |
+| 本地任務分支推送狀態 | `git ls-remote origin refs/heads/claude2/uv-exec-027` | **[CONFIRMED]** 遠端 HEAD 為 `bcc8e43d1`，與本地一致，無未同步 commit |
+| 行程環境語音憑證 | `env \| grep -E '^(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|OPENAI\|GEMINI_LIVE)'` | **[UNVERIFIED-THIS-SESSION]** 再次被本次 worker 執行環境的權限政策歸類為需人工核准之高風險操作而阻擋（分類為 `defer`），與前八輪相同的工具限制持續存在，非通過證據 |
+
+> **本輪複查結論：** 連續第 9 輪複查（距上一輪不到 1 分鐘）未發現任何新增語音/CTI/TWM 供應商憑證或營運/商務證據，`dev` 分支與 `ai-status.json` 機器真相均與上一輪一致、無 regression。7 項 `required_acceptance` 仍維持 blocker，**未呼叫 `record-acceptance`**，本輪僅以 `note` 記錄，不呼叫會清空候選生命週期欄位的 `progress`。連續 9 輪複查在約 40 分鐘內產生完全相同結果，且本輪與上一輪 dispatch 間隔已低於 1 分鐘，強烈建議 supervisor 將本任務的 re-dispatch 判斷條件改為「僅在偵測到新證據來源（如 GitHub secrets/variables 新增、`required_acceptance` 相關文件變更、或人工提供帳號存取）時才重新喚醒」，而非固定短間隔輪詢，以避免對已無新資訊的 blocked-on-external-evidence 任務持續消耗 dispatch 資源。
+
 ---
 
 ## 3. CTI 準備度盤點 (CTI Capability Readiness)
