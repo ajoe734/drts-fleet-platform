@@ -2716,12 +2716,15 @@ components:
           enum: [voice-tool-gateway]
         exp:
           type: integer
+          minimum: 1
           description: Expiry Unix epoch timestamp in seconds
         iat:
           type: integer
+          minimum: 1
           description: Issued-at Unix epoch timestamp in seconds
         nbf:
           type: integer
+          minimum: 1
           description: Not-before Unix epoch timestamp in seconds
         servicePrincipalId:
           type: string
@@ -2761,12 +2764,15 @@ components:
           enum: [voice-tool-gateway]
         exp:
           type: integer
+          minimum: 1
           description: Expiry Unix epoch timestamp in seconds
         iat:
           type: integer
+          minimum: 1
           description: Issued-at Unix epoch timestamp in seconds
         nbf:
           type: integer
+          minimum: 1
           description: Not-before Unix epoch timestamp in seconds
         servicePrincipalId:
           type: string
@@ -2808,6 +2814,7 @@ components:
           default: Bearer
         expiresIn:
           type: integer
+          minimum: 1
         claims:
           $ref: "#/components/schemas/VoiceCapabilityTokenClaims"
       required:
@@ -2981,9 +2988,8 @@ components:
           type: string
           enum: [pending]
         orderId:
-          type: string
-          format: uuid
           nullable: true
+          enum: [null]
         nextAction:
           type: string
         pollAfterMs:
@@ -3027,9 +3033,8 @@ components:
           type: string
           enum: [rejected]
         orderId:
-          type: string
-          format: uuid
           nullable: true
+          enum: [null]
         rejectionReason:
           type: string
         nextAction:
@@ -3053,7 +3058,7 @@ components:
           pending: "#/components/schemas/VoicePendingReceipt"
           succeeded: "#/components/schemas/VoiceSucceededReceipt"
           rejected: "#/components/schemas/VoiceRejectedReceipt"
-    VoiceReceiptRecord:
+    VoicePendingReceiptRecord:
       type: object
       properties:
         actionKey:
@@ -3063,22 +3068,104 @@ components:
           type: string
           format: uuid
         status:
-          $ref: "#/components/schemas/VoiceReceiptStatus"
-        orderId:
           type: string
-          format: uuid
+          enum: [pending]
+        orderId:
           nullable: true
+          enum: [null]
         payloadHash:
           type: string
         resultVersion:
           type: integer
         rejectionReason:
           type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
       required:
         - actionKey
         - commandId
         - status
       additionalProperties: false
+    VoiceSucceededReceiptRecord:
+      type: object
+      properties:
+        actionKey:
+          type: string
+          minLength: 1
+        commandId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [succeeded]
+        orderId:
+          type: string
+          format: uuid
+        payloadHash:
+          type: string
+        resultVersion:
+          type: integer
+        rejectionReason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - actionKey
+        - commandId
+        - status
+        - orderId
+      additionalProperties: false
+    VoiceRejectedReceiptRecord:
+      type: object
+      properties:
+        actionKey:
+          type: string
+          minLength: 1
+        commandId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [rejected]
+        orderId:
+          nullable: true
+          enum: [null]
+        payloadHash:
+          type: string
+        resultVersion:
+          type: integer
+        rejectionReason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - actionKey
+        - commandId
+        - status
+      additionalProperties: false
+    VoiceReceiptRecord:
+      oneOf:
+        - $ref: "#/components/schemas/VoicePendingReceiptRecord"
+        - $ref: "#/components/schemas/VoiceSucceededReceiptRecord"
+        - $ref: "#/components/schemas/VoiceRejectedReceiptRecord"
+      discriminator:
+        propertyName: status
+        mapping:
+          pending: "#/components/schemas/VoicePendingReceiptRecord"
+          succeeded: "#/components/schemas/VoiceSucceededReceiptRecord"
+          rejected: "#/components/schemas/VoiceRejectedReceiptRecord"
     VoiceCallbackStatus:
       type: string
       enum:

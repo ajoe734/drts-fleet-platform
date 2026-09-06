@@ -23,6 +23,9 @@ import {
   VoiceSucceededReceiptSchema,
   VoiceRejectedReceiptSchema,
   VoiceReceiptRecordSchema,
+  VoicePendingReceiptRecordSchema,
+  VoiceSucceededReceiptRecordSchema,
+  VoiceRejectedReceiptRecordSchema,
   VoiceActionKeyRecordSchema,
   VoiceCallbackSchema,
   VoiceCallbackStatusSchema,
@@ -777,6 +780,40 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       ).toBe(true);
     });
 
+    it("rejects non-null UUID orderId in VoicePendingReceiptSchema and VoiceRejectedReceiptSchema", () => {
+      expect(
+        VoicePendingReceiptSchema.safeParse({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "pending",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }).success,
+      ).toBe(false);
+
+      expect(
+        VoiceReceiptSchema.safeParse({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "pending",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }).success,
+      ).toBe(false);
+
+      expect(
+        VoiceRejectedReceiptSchema.safeParse({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "rejected",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }).success,
+      ).toBe(false);
+
+      expect(
+        VoiceReceiptSchema.safeParse({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "rejected",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }).success,
+      ).toBe(false);
+    });
+
     it("validates internal VoiceReceiptRecordSchema requiring actionKey, commandId, and status", () => {
       const validRecord = {
         actionKey: "brand+call+intent+action",
@@ -804,6 +841,115 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         VoiceReceiptRecordSchema.safeParse({
           ...validRecord,
           status: "none",
+        }).success,
+      ).toBe(false);
+    });
+
+    it("enforces SD §7.1 and §9.1 receipt record terminal status and orderId invariants in Zod", () => {
+      const baseRecord = {
+        actionKey: "brand+call+intent+action",
+        commandId: "123e4567-e89b-12d3-a456-426614174000",
+        createdAt: "2026-09-06T02:00:00.000Z",
+        updatedAt: "2026-09-06T02:00:01.000Z",
+      };
+
+      // Succeeded record MUST have a valid UUID orderId; rejects null or omitted
+      const validSucceeded = {
+        ...baseRecord,
+        status: "succeeded" as const,
+        orderId: "123e4567-e89b-12d3-a456-426614174001",
+      };
+      expect(VoiceReceiptRecordSchema.safeParse(validSucceeded).success).toBe(true);
+      expect(VoiceSucceededReceiptRecordSchema.safeParse(validSucceeded).success).toBe(true);
+      expect(VoiceActionKeyRecordSchema.safeParse(validSucceeded).success).toBe(true);
+
+      expect(
+        VoiceReceiptRecordSchema.safeParse({
+          ...baseRecord,
+          status: "succeeded",
+          orderId: null,
+        }).success,
+      ).toBe(false);
+      expect(
+        VoiceSucceededReceiptRecordSchema.safeParse({
+          ...baseRecord,
+          status: "succeeded",
+          orderId: null,
+        }).success,
+      ).toBe(false);
+
+      expect(
+        VoiceReceiptRecordSchema.safeParse({
+          ...baseRecord,
+          status: "succeeded",
+        }).success,
+      ).toBe(false);
+      expect(
+        VoiceSucceededReceiptRecordSchema.safeParse({
+          ...baseRecord,
+          status: "succeeded",
+        }).success,
+      ).toBe(false);
+
+      // Pending record allows null or omitted orderId, rejects non-null UUID
+      const validPendingNull = {
+        ...baseRecord,
+        status: "pending" as const,
+        orderId: null,
+      };
+      const validPendingOmit = {
+        ...baseRecord,
+        status: "pending" as const,
+      };
+      expect(VoiceReceiptRecordSchema.safeParse(validPendingNull).success).toBe(true);
+      expect(VoicePendingReceiptRecordSchema.safeParse(validPendingNull).success).toBe(true);
+      expect(VoiceReceiptRecordSchema.safeParse(validPendingOmit).success).toBe(true);
+      expect(VoicePendingReceiptRecordSchema.safeParse(validPendingOmit).success).toBe(true);
+
+      expect(
+        VoiceReceiptRecordSchema.safeParse({
+          ...baseRecord,
+          status: "pending",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }).success,
+      ).toBe(false);
+      expect(
+        VoicePendingReceiptRecordSchema.safeParse({
+          ...baseRecord,
+          status: "pending",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }).success,
+      ).toBe(false);
+
+      // Rejected record allows null or omitted orderId, rejects non-null UUID
+      const validRejectedNull = {
+        ...baseRecord,
+        status: "rejected" as const,
+        orderId: null,
+        rejectionReason: "VOICE_SERVICE_NOT_AVAILABLE",
+      };
+      const validRejectedOmit = {
+        ...baseRecord,
+        status: "rejected" as const,
+        rejectionReason: "VOICE_SERVICE_NOT_AVAILABLE",
+      };
+      expect(VoiceReceiptRecordSchema.safeParse(validRejectedNull).success).toBe(true);
+      expect(VoiceRejectedReceiptRecordSchema.safeParse(validRejectedNull).success).toBe(true);
+      expect(VoiceReceiptRecordSchema.safeParse(validRejectedOmit).success).toBe(true);
+      expect(VoiceRejectedReceiptRecordSchema.safeParse(validRejectedOmit).success).toBe(true);
+
+      expect(
+        VoiceReceiptRecordSchema.safeParse({
+          ...baseRecord,
+          status: "rejected",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }).success,
+      ).toBe(false);
+      expect(
+        VoiceRejectedReceiptRecordSchema.safeParse({
+          ...baseRecord,
+          status: "rejected",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
         }).success,
       ).toBe(false);
     });
@@ -919,6 +1065,9 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         "VoiceSucceededReceipt",
         "VoiceRejectedReceipt",
         "VoiceReceipt",
+        "VoicePendingReceiptRecord",
+        "VoiceSucceededReceiptRecord",
+        "VoiceRejectedReceiptRecord",
         "VoiceReceiptRecord",
         "VoiceCallbackStatus",
         "VoiceCallback",
@@ -1233,15 +1382,41 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       ).toBe(false);
     });
 
-    it("OpenAPI accepts VoiceReceipt with orderId: null without actionKey for SD §10.2 202 pending response", () => {
-      const pendingReceipt = {
+    it("OpenAPI accepts VoiceReceipt with orderId: null or omitted without actionKey for SD §10.2 202 pending response", () => {
+      const pendingReceiptNull = {
         commandId: "123e4567-e89b-12d3-a456-426614174000",
         status: "pending",
         orderId: null,
         nextAction: "query_same_command",
         pollAfterMs: 1000,
       };
-      expect(validateReceipt(pendingReceipt)).toBe(true);
+      expect(validateReceipt(pendingReceiptNull)).toBe(true);
+
+      const pendingReceiptOmit = {
+        commandId: "123e4567-e89b-12d3-a456-426614174000",
+        status: "pending",
+        nextAction: "query_same_command",
+        pollAfterMs: 1000,
+      };
+      expect(validateReceipt(pendingReceiptOmit)).toBe(true);
+    });
+
+    it("OpenAPI rejects VoicePendingReceipt and VoiceRejectedReceipt with non-null UUID orderId", () => {
+      expect(
+        validateReceipt({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "pending",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }),
+      ).toBe(false);
+
+      expect(
+        validateReceipt({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "rejected",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }),
+      ).toBe(false);
     });
 
     it("OpenAPI accepts succeeded VoiceReceipt with required orderId", () => {
@@ -1279,15 +1454,87 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       ).toBe(false);
     });
 
-    it("OpenAPI accepts VoiceReceiptRecord with actionKey, commandId, and status", () => {
+    it("OpenAPI accepts VoiceReceiptRecord across status variants, timestamps, and required orderId for succeeded", () => {
       expect(
         validateReceiptRecord({
           actionKey: "brand+call+intent+action",
           commandId: "123e4567-e89b-12d3-a456-426614174000",
           status: "pending",
           orderId: null,
+          createdAt: "2026-09-06T02:00:00.000Z",
+          updatedAt: "2026-09-06T02:00:01.000Z",
         }),
       ).toBe(true);
+
+      expect(
+        validateReceiptRecord({
+          actionKey: "brand+call+intent+action",
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "pending",
+          createdAt: "2026-09-06T02:00:00.000Z",
+        }),
+      ).toBe(true);
+
+      expect(
+        validateReceiptRecord({
+          actionKey: "brand+call+intent+action",
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "succeeded",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+          createdAt: "2026-09-06T02:00:00.000Z",
+          updatedAt: "2026-09-06T02:00:01.000Z",
+        }),
+      ).toBe(true);
+
+      expect(
+        validateReceiptRecord({
+          actionKey: "brand+call+intent+action",
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "rejected",
+          orderId: null,
+          rejectionReason: "VOICE_SERVICE_NOT_AVAILABLE",
+          createdAt: "2026-09-06T02:00:00.000Z",
+          updatedAt: "2026-09-06T02:00:01.000Z",
+        }),
+      ).toBe(true);
+    });
+
+    it("OpenAPI rejects VoiceReceiptRecord with invalid orderId across status states", () => {
+      const base = {
+        actionKey: "brand+call+intent+action",
+        commandId: "123e4567-e89b-12d3-a456-426614174000",
+      };
+
+      expect(
+        validateReceiptRecord({
+          ...base,
+          status: "succeeded",
+        }),
+      ).toBe(false);
+
+      expect(
+        validateReceiptRecord({
+          ...base,
+          status: "succeeded",
+          orderId: null,
+        }),
+      ).toBe(false);
+
+      expect(
+        validateReceiptRecord({
+          ...base,
+          status: "pending",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }),
+      ).toBe(false);
+
+      expect(
+        validateReceiptRecord({
+          ...base,
+          status: "rejected",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }),
+      ).toBe(false);
     });
 
     it("OpenAPI rejects VoiceReceiptRecord missing actionKey or commandId", () => {
@@ -1515,17 +1762,317 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       }
     });
 
-    it("OpenAPI accepts VoiceCallback lifecycle statuses (claimed, in_progress, unreachable)", () => {
-      for (const status of ["claimed", "in_progress", "unreachable"]) {
-        const callback = {
-          callbackId: "123e4567-e89b-12d3-a456-426614174000",
-          voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
-          contactPhone: "+886912345678",
-          consentSnapshotHash: "hash-consent-xyz",
-          status,
-        };
-        expect(validateCallback(callback)).toBe(true);
+    it("ensures bidirectional parity between Zod and OpenAPI Ajv for VoiceReceipt across status matrix and orderId boundaries", () => {
+      const cases: Array<{
+        name: string;
+        payload: Record<string, unknown>;
+        expectedValid: boolean;
+      }> = [
+        {
+          name: "pending with null orderId",
+          payload: {
+            commandId: "123e4567-e89b-12d3-a456-426614174000",
+            status: "pending",
+            orderId: null,
+          },
+          expectedValid: true,
+        },
+        {
+          name: "pending with omitted orderId",
+          payload: {
+            commandId: "123e4567-e89b-12d3-a456-426614174000",
+            status: "pending",
+          },
+          expectedValid: true,
+        },
+        {
+          name: "pending with non-null UUID orderId (must be rejected)",
+          payload: {
+            commandId: "123e4567-e89b-12d3-a456-426614174000",
+            status: "pending",
+            orderId: "123e4567-e89b-12d3-a456-426614174001",
+          },
+          expectedValid: false,
+        },
+        {
+          name: "succeeded with valid UUID orderId",
+          payload: {
+            commandId: "123e4567-e89b-12d3-a456-426614174000",
+            status: "succeeded",
+            orderId: "123e4567-e89b-12d3-a456-426614174001",
+          },
+          expectedValid: true,
+        },
+        {
+          name: "succeeded with null orderId (must be rejected)",
+          payload: {
+            commandId: "123e4567-e89b-12d3-a456-426614174000",
+            status: "succeeded",
+            orderId: null,
+          },
+          expectedValid: false,
+        },
+        {
+          name: "succeeded with omitted orderId (must be rejected)",
+          payload: {
+            commandId: "123e4567-e89b-12d3-a456-426614174000",
+            status: "succeeded",
+          },
+          expectedValid: false,
+        },
+        {
+          name: "rejected with null orderId",
+          payload: {
+            commandId: "123e4567-e89b-12d3-a456-426614174000",
+            status: "rejected",
+            orderId: null,
+          },
+          expectedValid: true,
+        },
+        {
+          name: "rejected with omitted orderId",
+          payload: {
+            commandId: "123e4567-e89b-12d3-a456-426614174000",
+            status: "rejected",
+          },
+          expectedValid: true,
+        },
+        {
+          name: "rejected with non-null UUID orderId (must be rejected)",
+          payload: {
+            commandId: "123e4567-e89b-12d3-a456-426614174000",
+            status: "rejected",
+            orderId: "123e4567-e89b-12d3-a456-426614174001",
+          },
+          expectedValid: false,
+        },
+      ];
+
+      for (const tc of cases) {
+        const zodValid = VoiceReceiptSchema.safeParse(tc.payload).success;
+        const ajvValid = validateReceipt(tc.payload);
+
+        expect(
+          zodValid,
+          `Zod validity for ${tc.name} should be ${tc.expectedValid}`,
+        ).toBe(tc.expectedValid);
+        expect(
+          ajvValid,
+          `OpenAPI Ajv validity for ${tc.name} should be ${tc.expectedValid}`,
+        ).toBe(tc.expectedValid);
+        expect(
+          zodValid,
+          `Zod and OpenAPI Ajv must agree on ${tc.name}`,
+        ).toBe(ajvValid);
       }
+    });
+
+    it("ensures bidirectional parity between Zod and OpenAPI Ajv for VoiceReceiptRecord across status matrix, orderId, and timestamps", () => {
+      const baseRecord = {
+        actionKey: "brand+call+intent+action",
+        commandId: "123e4567-e89b-12d3-a456-426614174000",
+        createdAt: "2026-09-06T02:00:00.000Z",
+        updatedAt: "2026-09-06T02:00:01.000Z",
+      };
+
+      const cases: Array<{
+        name: string;
+        payload: Record<string, unknown>;
+        expectedValid: boolean;
+      }> = [
+        {
+          name: "pending record with null orderId and timestamps",
+          payload: {
+            ...baseRecord,
+            status: "pending",
+            orderId: null,
+          },
+          expectedValid: true,
+        },
+        {
+          name: "pending record with omitted orderId and timestamps",
+          payload: {
+            ...baseRecord,
+            status: "pending",
+          },
+          expectedValid: true,
+        },
+        {
+          name: "pending record with non-null UUID orderId (must be rejected)",
+          payload: {
+            ...baseRecord,
+            status: "pending",
+            orderId: "123e4567-e89b-12d3-a456-426614174001",
+          },
+          expectedValid: false,
+        },
+        {
+          name: "succeeded record with UUID orderId and timestamps",
+          payload: {
+            ...baseRecord,
+            status: "succeeded",
+            orderId: "123e4567-e89b-12d3-a456-426614174001",
+          },
+          expectedValid: true,
+        },
+        {
+          name: "succeeded record with null orderId (must be rejected)",
+          payload: {
+            ...baseRecord,
+            status: "succeeded",
+            orderId: null,
+          },
+          expectedValid: false,
+        },
+        {
+          name: "succeeded record with omitted orderId (must be rejected)",
+          payload: {
+            ...baseRecord,
+            status: "succeeded",
+          },
+          expectedValid: false,
+        },
+        {
+          name: "rejected record with null orderId, rejectionReason, and timestamps",
+          payload: {
+            ...baseRecord,
+            status: "rejected",
+            orderId: null,
+            rejectionReason: "VOICE_SERVICE_NOT_AVAILABLE",
+          },
+          expectedValid: true,
+        },
+        {
+          name: "rejected record with omitted orderId and timestamps",
+          payload: {
+            ...baseRecord,
+            status: "rejected",
+          },
+          expectedValid: true,
+        },
+        {
+          name: "rejected record with non-null UUID orderId (must be rejected)",
+          payload: {
+            ...baseRecord,
+            status: "rejected",
+            orderId: "123e4567-e89b-12d3-a456-426614174001",
+          },
+          expectedValid: false,
+        },
+      ];
+
+      for (const tc of cases) {
+        const zodValid = VoiceReceiptRecordSchema.safeParse(tc.payload).success;
+        const ajvValid = validateReceiptRecord(tc.payload);
+
+        expect(
+          zodValid,
+          `Zod validity for ${tc.name} should be ${tc.expectedValid}`,
+        ).toBe(tc.expectedValid);
+        expect(
+          ajvValid,
+          `OpenAPI Ajv validity for ${tc.name} should be ${tc.expectedValid}`,
+        ).toBe(tc.expectedValid);
+        expect(
+          zodValid,
+          `Zod and OpenAPI Ajv must agree on ${tc.name}`,
+        ).toBe(ajvValid);
+      }
+    });
+
+    it("ensures bidirectional parity between Zod and OpenAPI Ajv for positive integer numeric boundaries (exp, iat, nbf, expiresIn)", () => {
+      const baseCapability = {
+        aud: "voice-tool-gateway",
+        servicePrincipalId: "svc-voice-runtime",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+        routeProfileVersion: 1,
+        leaseEpoch: 2,
+        scopes: ["session_execute"],
+      };
+
+      // VoiceCapability: positive integer checks
+      for (const field of ["exp", "iat", "nbf"] as const) {
+        // value 0 must be rejected by both
+        const withZero = { ...baseCapability, [field]: 0 };
+        expect(VoiceCapabilitySchema.safeParse(withZero).success).toBe(false);
+        expect(validateCapability(withZero)).toBe(false);
+
+        // value -1 must be rejected by both
+        const withNeg = { ...baseCapability, [field]: -1 };
+        expect(VoiceCapabilitySchema.safeParse(withNeg).success).toBe(false);
+        expect(validateCapability(withNeg)).toBe(false);
+
+        // value > 0 must be accepted by both
+        const withPos = { ...baseCapability, [field]: 1757134800 };
+        expect(VoiceCapabilitySchema.safeParse(withPos).success).toBe(true);
+        expect(validateCapability(withPos)).toBe(true);
+      }
+
+      // VoiceCapabilityTokenClaims: exp is required positive, iat/nbf optional positive
+      const baseClaims = {
+        iss: "https://auth.example.com",
+        ...baseCapability,
+        exp: 1757134800,
+      };
+      // exp: 0 rejected
+      expect(
+        VoiceCapabilityTokenClaimsSchema.safeParse({ ...baseClaims, exp: 0 }).success,
+      ).toBe(false);
+      expect(
+        validateCapabilityTokenClaims({ ...baseClaims, exp: 0 }),
+      ).toBe(false);
+
+      // iat: 0 rejected
+      expect(
+        VoiceCapabilityTokenClaimsSchema.safeParse({ ...baseClaims, iat: 0 }).success,
+      ).toBe(false);
+      expect(
+        validateCapabilityTokenClaims({ ...baseClaims, iat: 0 }),
+      ).toBe(false);
+
+      // nbf: 0 rejected
+      expect(
+        VoiceCapabilityTokenClaimsSchema.safeParse({ ...baseClaims, nbf: 0 }).success,
+      ).toBe(false);
+      expect(
+        validateCapabilityTokenClaims({ ...baseClaims, nbf: 0 }),
+      ).toBe(false);
+
+      // valid claims accepted by both
+      expect(
+        VoiceCapabilityTokenClaimsSchema.safeParse(baseClaims).success,
+      ).toBe(true);
+      expect(validateCapabilityTokenClaims(baseClaims)).toBe(true);
+
+      // VoiceCapabilityTokenEnvelope: expiresIn positive check
+      const baseEnvelope = {
+        token: "token-abc-123",
+        claims: baseClaims,
+      };
+      // expiresIn: 0 rejected
+      expect(
+        VoiceCapabilityTokenEnvelopeSchema.safeParse({ ...baseEnvelope, expiresIn: 0 }).success,
+      ).toBe(false);
+      expect(
+        validateCapabilityTokenEnvelope({ ...baseEnvelope, expiresIn: 0 }),
+      ).toBe(false);
+
+      // expiresIn: -10 rejected
+      expect(
+        VoiceCapabilityTokenEnvelopeSchema.safeParse({ ...baseEnvelope, expiresIn: -10 }).success,
+      ).toBe(false);
+      expect(
+        validateCapabilityTokenEnvelope({ ...baseEnvelope, expiresIn: -10 }),
+      ).toBe(false);
+
+      // expiresIn: 3600 accepted
+      expect(
+        VoiceCapabilityTokenEnvelopeSchema.safeParse({ ...baseEnvelope, expiresIn: 3600 }).success,
+      ).toBe(true);
+      expect(
+        validateCapabilityTokenEnvelope({ ...baseEnvelope, expiresIn: 3600 }),
+      ).toBe(true);
     });
   });
 });

@@ -315,12 +315,12 @@ export const VoiceReceiptSchema = z.discriminatedUnion("status", [
 ]);
 export type VoiceReceipt = z.infer<typeof VoiceReceiptSchema>;
 
-export const VoiceReceiptRecordSchema = z
+export const VoicePendingReceiptRecordSchema = z
   .object({
     actionKey: z.string().min(1),
     commandId: z.string().uuid(),
-    status: VoiceReceiptStatusSchema,
-    orderId: z.string().uuid().nullable().optional(),
+    status: z.literal("pending"),
+    orderId: z.null().optional(),
     payloadHash: z.string().optional(),
     resultVersion: z.number().int().optional(),
     rejectionReason: z.string().optional(),
@@ -328,6 +328,49 @@ export const VoiceReceiptRecordSchema = z
     updatedAt: z.string().datetime().optional(),
   })
   .strict();
+export type VoicePendingReceiptRecord = z.infer<
+  typeof VoicePendingReceiptRecordSchema
+>;
+
+export const VoiceSucceededReceiptRecordSchema = z
+  .object({
+    actionKey: z.string().min(1),
+    commandId: z.string().uuid(),
+    status: z.literal("succeeded"),
+    orderId: z.string().uuid(),
+    payloadHash: z.string().optional(),
+    resultVersion: z.number().int().optional(),
+    rejectionReason: z.string().optional(),
+    createdAt: z.string().datetime().optional(),
+    updatedAt: z.string().datetime().optional(),
+  })
+  .strict();
+export type VoiceSucceededReceiptRecord = z.infer<
+  typeof VoiceSucceededReceiptRecordSchema
+>;
+
+export const VoiceRejectedReceiptRecordSchema = z
+  .object({
+    actionKey: z.string().min(1),
+    commandId: z.string().uuid(),
+    status: z.literal("rejected"),
+    orderId: z.null().optional(),
+    rejectionReason: z.string().optional(),
+    payloadHash: z.string().optional(),
+    resultVersion: z.number().int().optional(),
+    createdAt: z.string().datetime().optional(),
+    updatedAt: z.string().datetime().optional(),
+  })
+  .strict();
+export type VoiceRejectedReceiptRecord = z.infer<
+  typeof VoiceRejectedReceiptRecordSchema
+>;
+
+export const VoiceReceiptRecordSchema = z.discriminatedUnion("status", [
+  VoicePendingReceiptRecordSchema,
+  VoiceSucceededReceiptRecordSchema,
+  VoiceRejectedReceiptRecordSchema,
+]);
 export type VoiceReceiptRecord = z.infer<typeof VoiceReceiptRecordSchema>;
 
 export const VoiceActionKeyRecordSchema = VoiceReceiptRecordSchema;
