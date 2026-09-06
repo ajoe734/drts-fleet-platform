@@ -11,6 +11,7 @@ import type { IncidentRecord } from "@drts/contracts";
 import { OpsHealthFooter } from "@/components/ops-health-footer";
 import { getOpsClient, createOpsDispatchEventSource } from "@/lib/api-client";
 import { isSosIncident, unwrapListItems } from "@/lib/sos-view-model";
+import { resolvePlatformAdminOrigin } from "./ops-assistant";
 
 type OpsShellProps = {
   nav: CanvasShellNavItem[];
@@ -160,6 +161,38 @@ export function OpsShell({
 
   const breadcrumb = deriveBreadcrumb(currentNav, pathname);
 
+  const handleClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    const anchor = (
+      event.target as HTMLElement | null
+    )?.closest<HTMLAnchorElement>("a[href]");
+    if (!anchor) return;
+    const href = anchor.getAttribute("href");
+    if (!href) return;
+
+    if (
+      href.startsWith("/platform-admin") ||
+      href.startsWith("/_apps/platform-admin") ||
+      href === "/audit" ||
+      href.startsWith("/audit?")
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      const origin = resolvePlatformAdminOrigin();
+      let targetPath = href;
+      if (targetPath.startsWith("/platform-admin")) {
+        targetPath = targetPath.slice("/platform-admin".length) || "/";
+      } else if (targetPath.startsWith("/_apps/platform-admin")) {
+        targetPath = targetPath.slice("/_apps/platform-admin".length) || "/";
+      }
+      const targetUrl = new URL(targetPath, origin);
+      window.open(
+        targetUrl.toString(),
+        anchor.target || "_blank",
+        "noopener,noreferrer",
+      );
+    }
+  };
+
   return (
     <CanvasShell
       theme={theme}
@@ -175,7 +208,13 @@ export function OpsShell({
       {...(avatarLabel !== undefined ? { avatarLabel } : {})}
       {...(searchPlaceholder !== undefined ? { searchPlaceholder } : {})}
     >
-      {children}
+      <div
+        data-testid="ops-shell-content"
+        onClickCapture={handleClickCapture}
+        style={{ display: "contents" }}
+      >
+        {children}
+      </div>
     </CanvasShell>
   );
 }

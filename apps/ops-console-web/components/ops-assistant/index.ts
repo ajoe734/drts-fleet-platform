@@ -33,4 +33,10 @@ export {
   type PublishAssistantSelectionProps,
   type PublishAssistantScopeProps,
 } from "./publish-assistant-context";
+export {
+  resolvePlatformAdminOrigin,
+  buildPlatformAdminCrossAppHref,
+  resolveAssistantActionHref,
+  buildAssistantActions,
+} from "./assistant-actions";
 export { OpsAssistantWidget } from "./assistant-widget";

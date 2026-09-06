@@ -2,12 +2,13 @@ import type { CrossAppResourceLink } from "@drts/contracts";
 import {
   crossAppHref,
   platformAdminPaymentsLink,
-} from "@/lib/ops-cross-app-links";
-import { t } from "@/lib/translations";
+} from "../../lib/ops-cross-app-links";
+import { t } from "../../lib/translations";
 import type {
   AssistantSelection,
   OpsAssistantContext,
 } from "./context-envelope";
+import { getAssistantAuditDescription } from "./translations";
 
 export interface AssistantNavigationAction {
   kind: "navigate";
@@ -29,6 +30,59 @@ export interface AssistantCrossAppAction {
 export type AssistantAction =
   | AssistantNavigationAction
   | AssistantCrossAppAction;
+
+export function resolvePlatformAdminOrigin(): string {
+  const envCandidates = [
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN,
+    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL,
+    process.env.PLATFORM_ADMIN_ORIGIN,
+    process.env.PLATFORM_ADMIN_URL,
+    process.env.DEV_PLATFORM_ADMIN_ORIGIN,
+    process.env.STAGING_PLATFORM_ADMIN_ORIGIN,
+    process.env.PROD_PLATFORM_ADMIN_ORIGIN,
+  ];
+  const envOrigin = envCandidates.find(
+    (c) => typeof c === "string" && c.trim().length > 0,
+  );
+  if (envOrigin) {
+    return envOrigin.trim().replace(/\/$/, "");
+  }
+
+  if (typeof window !== "undefined" && window.location) {
+    const { hostname, protocol } = window.location;
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return `${protocol}//${hostname}:3002`;
+    }
+    if (hostname.startsWith("ops.")) {
+      return `${protocol}//platform-admin.${hostname.slice(4)}`;
+    }
+    if (hostname.startsWith("ops-console.")) {
+      return `${protocol}//platform-admin.${hostname.slice(12)}`;
+    }
+  }
+
+  return "http://localhost:3002";
+}
+
+export function buildPlatformAdminCrossAppHref(
+  link: CrossAppResourceLink,
+): string {
+  if (link.route.startsWith("http://") || link.route.startsWith("https://")) {
+    return link.route;
+  }
+  const base = resolvePlatformAdminOrigin();
+  const route = link.route.startsWith("/") ? link.route : `/${link.route}`;
+  const url = new URL(route, base);
+  if (link.resourceId) {
+    if (link.resourceType && !url.searchParams.has("resourceType")) {
+      url.searchParams.set("resourceType", link.resourceType);
+    }
+    if (!url.searchParams.has("resourceId")) {
+      url.searchParams.set("resourceId", link.resourceId);
+    }
+  }
+  return url.toString();
+}
 
 type RouteConfig = {
   boardParam?: string;
@@ -187,6 +241,21 @@ function buildRouteSpecificActions(
             ),
           },
         },
+        {
+          kind: "cross_app",
+          label: t("opsAssistant.audit.view", context.locale),
+          description: getAssistantAuditDescription(context.locale),
+          link: {
+            targetApp: "platform-admin",
+            route: context.selectedEntity
+              ? `/audit?resourceType=${encodeURIComponent(context.selectedEntity.kind)}&resourceId=${encodeURIComponent(context.selectedEntity.id)}`
+              : "/audit",
+            resourceType: context.selectedEntity?.kind ?? "dispatch",
+            resourceId: context.selectedEntity?.id ?? "",
+            openMode: "new_tab",
+            label: t("opsAssistant.audit.view", context.locale),
+          },
+        },
       ];
     case "/drivers":
       return [
@@ -322,11 +391,15 @@ export function buildAssistantActions(
   actions.forEach((action) => {
     deduped.set(actionKey(action), action);
   });
-  return [...deduped.values()].slice(0, 4);
+  return [...deduped.values()].slice(0, 6);
 }
 
 export function resolveAssistantActionHref(action: AssistantAction): string {
-  return action.kind === "cross_app"
-    ? crossAppHref(action.link)
-    : buildAssistantNavigationHref(action);
+  if (action.kind === "cross_app") {
+    if (action.link.targetApp === "platform-admin") {
+      return buildPlatformAdminCrossAppHref(action.link);
+    }
+    return crossAppHref(action.link);
+  }
+  return buildAssistantNavigationHref(action);
 }
