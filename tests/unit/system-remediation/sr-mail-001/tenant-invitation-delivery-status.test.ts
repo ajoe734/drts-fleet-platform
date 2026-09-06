@@ -34,7 +34,7 @@ describe("SR-MAIL-001 tenant invitation delivery semantics", () => {
     roleFamilies: ["tenant"],
     roles: ["tenant_admin"],
     scopes: ["tenant:read", "tenant:write"],
-    requestId: "req-sr-mail-001-admin",
+    supportedExecutionModes: ["supervisor_managed_execution"],
   };
 
   beforeEach(async () => {
