@@ -19,7 +19,7 @@ import type {
   ResourceActionDescriptor,
   UiHealthEnvelope,
 } from "@drts/contracts";
-import type { Locale } from "@/lib/translations";
+import type { Locale } from "../../lib/translations";
 
 /**
  * Kind of the entity currently in focus. The known kinds mirror the design §5

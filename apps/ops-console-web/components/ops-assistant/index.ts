@@ -34,3 +34,18 @@ export {
   type PublishAssistantScopeProps,
 } from "./publish-assistant-context";
 export { OpsAssistantWidget } from "./assistant-widget";
+export {
+  buildAssistantActions,
+  buildAssistantNavigationHref,
+  resolveAssistantActionHref,
+  type AssistantAction,
+  type AssistantNavigationAction,
+  type AssistantCrossAppAction,
+} from "./assistant-actions";
+export {
+  resolveCrossAppHref,
+  resolvePlatformAdminOrigin,
+  buildPlatformAdminAuditUrl,
+  sanitizeAuditHref,
+  type PlatformAdminAuditContext,
+} from "./cross-app-url";
