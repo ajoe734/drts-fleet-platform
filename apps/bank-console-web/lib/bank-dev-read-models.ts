@@ -24,7 +24,10 @@ import {
 import { ORDER_TALLIES, QUOTA_PROGRAMS, type BankRole } from "./home-data";
 import { settlementStatements, type StatementStatus } from "./statements";
 import { listContractRecords } from "./contracts-data";
-import type { BankConsoleRole } from "./session";
+export type BankConsoleRole =
+  | "bank_program_admin"
+  | "bank_ops_viewer"
+  | "bank_finance";
 
 type ApiSettlementStatementRecord = {
   statement_id?: string;

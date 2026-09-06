@@ -110,7 +110,7 @@ export default async function ContractsPage({
                     colSpan={8}
                     style={{ textAlign: "center", padding: "2rem" }}
                   >
-                    {locale === "zh" ? "目前無合約資料" : "No contracts available"}
+                    {t("authBoundary.noData", locale)}
                   </td>
                 </tr>
               ) : (

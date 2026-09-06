@@ -135,6 +135,16 @@ Generating route types...
 exit code: 0
 ```
 
+### 4.6 國際化保護檢查（i18n:guard 通過）
+```text
+$ pnpm run i18n:guard
+> drts-fleet-platform@0.1.0 i18n:guard
+> node tools/ci/i18n-guard.mjs
+
+i18n-guard: OK (517 files scanned across 10 apps, 52 exemption(s) from i18n-guard-baseline.json)
+exit code: 0
+```
+
 ---
 
 ## 5. 驗收標準逐項對照

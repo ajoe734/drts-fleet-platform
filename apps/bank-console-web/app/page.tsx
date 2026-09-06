@@ -395,9 +395,7 @@ export default async function HomePage({
                   used: quotaAll.used.toLocaleString(),
                   total: quotaAll.total.toLocaleString(),
                 })
-              : locale === "zh"
-                ? "無配額資料"
-                : "No quota data"
+              : "—"
           }
         />
         <Kpi
@@ -406,9 +404,7 @@ export default async function HomePage({
           delta={
             sla.onTimeValue !== null
               ? t("home.kpi.onTime.delta", locale, { target: 95 })
-              : locale === "zh"
-                ? "無當期趟次"
-                : "No trips in period"
+              : "—"
           }
         />
         {view.seeFinance ? (
@@ -432,7 +428,7 @@ export default async function HomePage({
                   }),
                 }
               : {
-                  delta: locale === "zh" ? "無當期帳單" : "No statement",
+                  delta: "—",
                 })}
           />
         ) : (
@@ -583,7 +579,7 @@ export default async function HomePage({
                 }
               >
                 <div className="empty-state">
-                  <p>{locale === "zh" ? "尚無可顯示之對帳單" : "No settlement statement available"}</p>
+                  <p>{t("statements.empty", locale)}</p>
                 </div>
               </Card>
             )
@@ -727,7 +723,7 @@ export default async function HomePage({
                 subtitle={t("home.settlement.subtitle", locale)}
               >
                 <div className="empty-state">
-                  <p>{locale === "zh" ? "尚無可顯示之對帳單" : "No settlement statement available"}</p>
+                  <p>{t("statements.empty", locale)}</p>
                 </div>
               </Card>
             )

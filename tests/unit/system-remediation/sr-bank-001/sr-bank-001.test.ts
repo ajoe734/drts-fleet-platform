@@ -115,6 +115,8 @@ describe("SR-BANK-001: Bank Console Home, Contracts, and Statements Remediation"
             status: "open",
             occurredAt: "2026-03-01T00:00:00Z",
             summary: "test",
+            benefitReferenceMasked: "CARD-***-1234",
+            issuerAuthorizationRefMasked: "AUTH-***-5678",
           },
           {
             exceptionId: "ex-2",
@@ -123,6 +125,8 @@ describe("SR-BANK-001: Bank Console Home, Contracts, and Statements Remediation"
             status: "resolved",
             occurredAt: "2026-03-01T00:00:00Z",
             summary: "test",
+            benefitReferenceMasked: "CARD-***-1234",
+            issuerAuthorizationRefMasked: "AUTH-***-5678",
           },
         ]),
       ).toBe(1);
