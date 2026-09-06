@@ -135,6 +135,14 @@ const MULTI_TAXI_RECORD_GOVERNANCE_SCOPES = [
   "multi_taxi_records:export",
 ] as const;
 
+const IDENTITY_BREAK_GLASS_SCOPES = [
+  "identity:break-glass:request",
+  "identity:break-glass:approve",
+  "identity:break-glass:activate",
+] as const;
+
+const ASSISTANT_SCOPES = ["assistant:write"] as const;
+
 export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
   {
     scope: "identity:read",
@@ -442,6 +450,32 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
     resourceConstraints: [TENANT_CONSTRAINT, OBJECT_CONSTRAINT] as const,
   })),
   {
+    scope: "assistant:write",
+    allowedRealms: ["system", "platform", "tenant", "ops"] as const,
+    description: "Interact with the operational assistant and propose actions.",
+    resourceConstraints: [TENANT_CONSTRAINT, OBJECT_CONSTRAINT] as const,
+  },
+  {
+    scope: "identity:break-glass:request",
+    allowedRealms: ["system", "platform", "ops"] as const,
+    description: "Submit an emergency break-glass elevation request.",
+    resourceConstraints: [ACTOR_CONSTRAINT, OBJECT_CONSTRAINT] as const,
+  },
+  {
+    scope: "identity:break-glass:approve",
+    allowedRealms: ["system", "platform", "ops"] as const,
+    description:
+      "Review and approve an emergency break-glass elevation request.",
+    resourceConstraints: [ACTOR_CONSTRAINT, OBJECT_CONSTRAINT] as const,
+  },
+  {
+    scope: "identity:break-glass:activate",
+    allowedRealms: ["system", "platform", "ops"] as const,
+    description:
+      "Activate or close an approved emergency break-glass elevation session.",
+    resourceConstraints: [ACTOR_CONSTRAINT, OBJECT_CONSTRAINT] as const,
+  },
+  {
     scope: "partner:entries:read",
     allowedRealms: ["partner"],
     description: "Read partner entry configuration.",
@@ -548,6 +582,8 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         ...SANDBOX_COMPLIANCE_SCOPES,
         ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
         ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES,
+        ...IDENTITY_BREAK_GLASS_SCOPES,
+        ...ASSISTANT_SCOPES,
       ],
     },
     {
@@ -584,6 +620,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         ...SANDBOX_COMPLIANCE_SCOPES,
         ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
         ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES,
+        ...IDENTITY_BREAK_GLASS_SCOPES,
       ],
     },
     {
@@ -642,6 +679,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         "sandbox.compliance.read",
         "sandbox.investigation.read",
         "sandbox.evidence.preview",
+        ...ASSISTANT_SCOPES,
       ],
     },
     {

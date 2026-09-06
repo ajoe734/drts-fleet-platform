@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   IAM_ACTOR_POLICY_DEFINITIONS,
+  getIamActorScopePreset,
   getIamScopeDefinition,
   isKnownIamScope,
 } from "@drts/contracts";
@@ -369,13 +370,14 @@ export function runDynamicRouteInventory(
  * routes was denied by the bootstrap guard because no actor preset could hold
  * the scope. Entries here must stay paired with an owning task, and an entry
  * whose scope backs a shipped UI surface is a live outage, not a deferred one.
+ *
+ * Retired (FIX-IAM-UNGRANTABLE-002): assistant:write and identity:break-glass:*
+ * now carry catalog definitions and appropriate grants across system,
+ * platform_admin, and ops_user. The allowlist is now completely retired (empty).
  */
-export const KNOWN_PRE_EXISTING_SCOPE_DEFECTS: ReadonlySet<string> = new Set([
-  "assistant:write",
-  "identity:break-glass:request",
-  "identity:break-glass:approve",
-  "identity:break-glass:activate",
-]);
+export const KNOWN_PRE_EXISTING_SCOPE_DEFECTS: ReadonlySet<string> = new Set(
+  [],
+);
 
 describe("IAM dynamic route inventory and catalogue verification", () => {
   it("discovers every controller recursively without an allowlist", () => {
@@ -399,8 +401,8 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
     );
     expect(unexpectedUnknownScopes).toEqual([]);
 
-    // Explicitly track the 9 pre-existing defect instances across 2 controllers
-    expect(result.unknownScopes).toHaveLength(9);
+    // Zero pre-existing unknown scope defects remain across all discovered controllers
+    expect(result.unknownScopes).toHaveLength(0);
   });
 
   it("validates that every declared route scope is grantable to some actor", () => {
@@ -548,10 +550,7 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
       ts.ScriptKind.TS,
     );
 
-    const result = analyzeSourceFile(
-      sourceFile,
-      "bad-realm.controller.ts",
-    );
+    const result = analyzeSourceFile(sourceFile, "bad-realm.controller.ts");
 
     expect(result.realmMismatches.length).toBe(1);
     expect(result.realmMismatches[0]).toMatchObject({
@@ -563,5 +562,58 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
       routePath: "/test-realm-mismatch/bad-realm",
     });
   });
-});
 
+  it("ensures retired scopes assistant:write and identity:break-glass:* are catalogued and grantable to UI callers", () => {
+    // 1. assistant:write
+    const assistantScope = getIamScopeDefinition("assistant:write");
+    expect(assistantScope).not.toBeNull();
+    expect(assistantScope?.allowedRealms).toEqual(
+      expect.arrayContaining(["system", "platform", "ops", "tenant"]),
+    );
+    // Principle of least privilege: only ops_user (the UI widget caller) and system hold assistant:write; platform_admin does not.
+    expect(getIamActorScopePreset("platform_admin")).not.toContain(
+      "assistant:write",
+    );
+    expect(getIamActorScopePreset("ops_user")).toContain("assistant:write");
+    expect(getIamActorScopePreset("system")).toContain("assistant:write");
+
+    // 2. identity:break-glass:*
+    const breakGlassScopes = [
+      "identity:break-glass:request",
+      "identity:break-glass:approve",
+      "identity:break-glass:activate",
+    ];
+    for (const scope of breakGlassScopes) {
+      const scopeDef = getIamScopeDefinition(scope);
+      expect(scopeDef).not.toBeNull();
+      expect(scopeDef?.allowedRealms).toEqual(
+        expect.arrayContaining(["system", "platform", "ops"]),
+      );
+      expect(getIamActorScopePreset("platform_admin")).toContain(scope);
+      expect(getIamActorScopePreset("system")).toContain(scope);
+    }
+
+    // Principle of least privilege: ops_user must NOT hold emergency approve or activate
+    expect(getIamActorScopePreset("ops_user")).not.toContain(
+      "identity:break-glass:approve",
+    );
+    expect(getIamActorScopePreset("ops_user")).not.toContain(
+      "identity:break-glass:activate",
+    );
+
+    // 3. Controller route discovery verification
+    const result = runDynamicRouteInventory();
+    const assistantRoutes = result.routesDiscovered.filter(
+      (r) => r.controller === "AssistantController",
+    );
+    expect(assistantRoutes.length).toBe(5);
+    for (const route of assistantRoutes) {
+      expect(route.effectiveScopes).toContain("assistant:write");
+    }
+
+    const breakGlassRoutes = result.routesDiscovered.filter(
+      (r) => r.controller === "BreakGlassController",
+    );
+    expect(breakGlassRoutes.length).toBe(4);
+  });
+});
