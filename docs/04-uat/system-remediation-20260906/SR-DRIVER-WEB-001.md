@@ -2,8 +2,8 @@
 
 - Task: `SR-DRIVER-WEB-001`
 - Owner: `Codex`（availability-first reassignment；重放已驗證的平台分流，並以目前 `origin/dev` 重跑可用檢查）
-- Reviewer: `Claude`
-- Base SHA (`origin/dev`, 2026-09-08): `b5c3774e5e62fab7cf43b67a7e69fae7e0ca91ef`
+- Reviewer: `Codex2`
+- Base SHA (`origin/dev`, 2026-09-08 本次 dispatch): `fa0fd8257950764526a522d091be9d97effa82b9`
 - Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-driver-web-001`
 - Branch: `codex/sr-driver-web-001`
 - Gap: `R30` · Capabilities: `C049`, `C062`
@@ -276,3 +276,50 @@ platform resolution 中載入。
 資源 ID：Task `SR-DRIVER-WEB-001`；Gap `R30`；Capabilities `C049`, `C062`。最終
 candidate SHA 由 handoff 時的 `git rev-parse HEAD` 寫入 Supervisor machine truth；本文件
 不以舊 candidate SHA 冒充本次 candidate。
+
+## 9. 2026-09-08 18:01 UTC dispatch 重驗（最新，覆蓋歷史狀態）
+
+目前 owner/reviewer 為 Codex/Codex2。測試程式樹 SHA 為
+`59f738c06a775a0473c8d3ca0747482b9d9cc2c7`；最後提交只補本文證據。
+尚未 handoff，沒有鎖定 candidate，不能將此 SHA 視為已通過 review 的候選。
+已 `git fetch origin`、`git rebase origin/dev`（exit 0）；另合併已發布的
+`origin/codex/sr-driver-web-001` 保留原分支祖先，使普通 non-force push 可行。
+本次未修改 UI 或 native 程式。
+
+追溯的已合併成果：DRV-NAV-001 `1d4f34d92`、DRV-AUTH-001 `332db5119`、
+DRV-AUTH-002 `42d06673f`、DRV-KBD-001 `a095698a6`、DRV-SOS-001 `6f5d34510`、
+DRV-RWD-001 `bdd7af68b`。以下重跑其相關測試，不回退原成果。
+
+實際命令與結果：
+
+```text
+git diff --check origin/dev...HEAD
+exit 0
+
+pnpm --filter @drts/driver-app typecheck
+tsc --noEmit; exit 0
+
+pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/
+1 file, 5 tests passed; exit 0
+
+pnpm --filter @drts/driver-app exec vitest run tests/unit/driver-trip-map.test.ts tests/unit/driver-navigation.test.ts tests/unit/driver-root-navigator.test.ts tests/unit/driver-auth-token-lifecycle.test.ts tests/unit/driver-auth-states.test.ts tests/unit/driver-sos-no-os-dialer.test.ts tests/unit/driver-sos-end-to-end-platform.test.ts tests/unit/responsive-layout-and-overflow.test.ts tests/unit/keyboard-avoiding-container.test.ts
+9 files, 71 tests passed; exit 0
+
+pnpm --filter @drts/driver-app exec expo export --platform web --output-dir /tmp/sr-driver-web-001-current-web
+exit 1
+pnpm --filter @drts/driver-app exec expo export --platform ios --output-dir /tmp/sr-driver-web-001-current-ios
+exit 1
+pnpm --filter @drts/driver-app exec expo export --platform android --output-dir /tmp/sr-driver-web-001-current-android
+exit 1
+```
+
+三個 export 均於 Metro 解析 pnpm store 內的 `expo-router/entry.js` 時出現
+`Unable to resolve module`，尚未進入應用地圖模組。本次沒有產出可驗收 bundle。
+需 supervisor 提供可打包的隔離依賴環境，或擴 scope 處理 Metro/workspace 設定後重驗；
+目前允許的兩個地圖元件、task test、task evidence 無法修正該入口解析設定。
+
+資源 ID：SR-DRIVER-WEB-001 / R30 / C049 / C062；測試輸出目錄如上述命令，
+沒有 live tenant、order、SOS incident、EAS build 或真機資源 ID。
+未完成：瀏覽器 390px 首頁/onboarding/SOS 開啟、iOS/Android bundle imports、真機導航、
+真實 SOS 送達、live onboarding。單元測試含 mocks，不代表這些 live 行為成功。
+因此本次只記 progress/blocker，不 handoff 或 done。
