@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "tools/task-dispatch/dispatch-unattended-voice-booking-20260906.py"
 SPEC = importlib.util.spec_from_file_location("voice_materializer", SCRIPT)
 assert SPEC and SPEC.loader
