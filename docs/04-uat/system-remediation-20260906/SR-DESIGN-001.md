@@ -4,35 +4,34 @@
 
 - **Task ID**: `SR-DESIGN-001`
 - **任務名稱**: 補齊請假／學院／Host的最小可實作契約
-- **Owner**: `Gemini2`
-- **Reviewer**: `Codex2`
+- **Owner**: `Gemini` (Availability-first reassignment from `Gemini2`)
+- **Reviewer**: `Gemini2`
 - **工作類型**: `documentation`
 - **優先級**: `P2`
 - **Workstream**: `design`
 - **狀態**: `in_progress` -> 待 commit, push, handoff 進入 `review`
-- **Base SHA**: `afefd55d3d23dd361d2dd81fd5f80eedb6671002`
-- **Previous Rejected Candidate SHA**: `769cb2231aae522b972211c521e4d696d266693f`
-- **GitHub Pull Request**: `https://github.com/ajoe734/drts-fleet-platform/pull/1632`
-- **Branch**: `gemini2/sr-design-001`
-- **Worker Cwd**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-design-001`
+- **Base SHA**: `48b4bc4c5fe0f35a343f4b8c24ccb47f46a379c0` (current `origin/dev`)
+- **Previous CI Failed Candidate SHA**: `3fe7ad8646abe143fc22609d6a6398ec219133d7` (PR #1632, CI Run #34017518920)
+- **Branch**: `gemini/sr-design-001`
+- **Worker Cwd**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-design-001`
 - **Canonical Root**: `/home/lupin/drts-fleet-platform`
 
 ---
 
 ## 2. 追溯矩陣與範圍對齊 (Traceability Matrix)
 
-| Gap ID | Capability ID | 角色 | 領域 | 規格依據 | 交付契約規範 |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **N01** | **C052** | 司機／排班主管 | 請假工作流程 | PRD §9.4.7 Shift & Attendance | `docs/04-uat/system-remediation-20260906/feature-contracts.md` §2 |
-| **N02** | **C059** | 司機 | 學院培訓與測驗 | PRD §9.4.9 Settings & Academy | `docs/04-uat/system-remediation-20260906/feature-contracts.md` §3 |
-| **N02** | **C071** | 車行訓練管理員 | 車行完訓真值看板 | PRD §9.4.9 Settings & Academy | `docs/04-uat/system-remediation-20260906/feature-contracts.md` §3 |
-| **N03** | **C012** | 車主 Host | 自車受限唯讀投影 | PRD §12.6 Host 自車四項權限 | `docs/04-uat/system-remediation-20260906/feature-contracts.md` §4 |
+| Gap ID  | Capability ID | 角色           | 領域             | 規格依據                      | 交付契約規範                                                      |
+| :------ | :------------ | :------------- | :--------------- | :---------------------------- | :---------------------------------------------------------------- |
+| **N01** | **C052**      | 司機／排班主管 | 請假工作流程     | PRD §9.4.7 Shift & Attendance | `docs/04-uat/system-remediation-20260906/feature-contracts.md` §2 |
+| **N02** | **C059**      | 司機           | 學院培訓與測驗   | PRD §9.4.9 Settings & Academy | `docs/04-uat/system-remediation-20260906/feature-contracts.md` §3 |
+| **N02** | **C071**      | 車行訓練管理員 | 車行完訓真值看板 | PRD §9.4.9 Settings & Academy | `docs/04-uat/system-remediation-20260906/feature-contracts.md` §3 |
+| **N03** | **C012**      | 車主 Host      | 自車受限唯讀投影 | PRD §12.6 Host 自車四項權限   | `docs/04-uat/system-remediation-20260906/feature-contracts.md` §4 |
 
 ---
 
-## 3. Codex2 審查意見逐項收斂與修正 (Review Findings Resolution)
+## 3. Codex2 審查意見與 CI 失敗逐項收斂與修正 (Review Findings & CI Resolution)
 
-針對 Codex2 於前次 candidate `769cb2231` 審查退回之 8 項意見，本次提交完成全面修正與收斂：
+針對 Codex2 於 candidate `769cb2231` 審查退回之意見，以及 candidate `3fe7ad864` 於 CI Run #34017518920 之型別檢查錯誤，本次提交完成全面修正與收斂：
 
 1. **[P1] 統一為權威 ApiSuccessEnvelope 規格**:
    - 全面替換 `docs/04-uat/system-remediation-20260906/feature-contracts.md` 中所有 JSON 範例，統一採用 `packages/contracts/src/index.ts:728-734` 與 `apps/api/src/common/api-envelope.ts:14-24` 之 `{ data, meta: { requestId, timestamp } }` 與清單結構 `{ items, pageInfo }`。
@@ -68,19 +67,24 @@
    - `computeFleetTrainingSummary`: 重寫為多課程聚合運算，單一司機完成 2 門課回傳 `100%`、`pendingHeadcount: "0"`，杜絕 200% 與負數異常。
    - 增加 `evaluateDriverTrainingEligibility` 驗證與 `trainingRequired` 派單阻擋。
    - 增加 `MAINTENANCE_STATUSES` 包含 `overdue` 驗證。
+9. **[P1] CI Typecheck TS2532 嚴格空值檢查修復**:
+   - 前次 candidate `3fe7ad864` 在 CI Run #34017518920 失敗於 `pnpm typecheck:root` (`tsc -p tsconfig.json --noEmit`)，原因為 `sr-design-contracts.test.ts` 中陣列下標取值 (`annotatedShifts[0]`、`annotatedShifts[1]`、`logs[0]`) 在嚴格模式下可能為 `undefined`，觸發 5 處 `TS2532: Object is possibly 'undefined'`。
+   - 修復：引入顯式控制流守衛 (`if (!shift1 || !shift2) throw ...` 與 `if (!firstLog) throw ...`)，確保型別精確縮小至非空，根目錄 `tsc -p tsconfig.json --noEmit` 驗證 `tests/unit/system-remediation/sr-design-001/` 0 型別錯誤。
+   - 全面執行 Prettier 格式化，確保符合倉庫程式碼規範。
 
 ---
 
 ## 4. 交付 Artifacts 清單
 
 本任務僅在授權之 `write_scopes` 內建立檔案，未變更任何非授權之中央設定檔：
+
 1. `docs/04-uat/system-remediation-20260906/feature-contracts.md`:
    - 完整定義請假、學院、Host 三大家族契約。
    - 包含權威 Envelope、精確 IAM、資料源權威映射、狀態機、正負 AC 與決策落點。
 2. `tests/unit/system-remediation/sr-design-001/sr-design-contracts.test.ts`:
    - 14 項單元測試，全面覆蓋時間有效性、重複作答防弊、多課程分母聚合、在線資格壓制、車主物主隔離與防枚舉、Envelope 結構。
 3. `docs/04-uat/system-remediation-20260906/SR-DESIGN-001.md`:
-   - 本任務之完整證據報告與審查收斂說明。
+   - 本任務之完整證據報告、審查收斂與 CI 修正說明。
 
 ---
 
@@ -97,8 +101,9 @@
 ## 6. 驗證指令與結果記錄 (Verification Evidence)
 
 ### 6.1 git diff --check
-- **Command**: `git diff --check`
-- **Working Directory**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-design-001`
+
+- **Command**: `git diff --check origin/dev..HEAD`
+- **Working Directory**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-design-001`
 - **Exit Code**: `0`
 - **Output**:
   ```text
@@ -106,22 +111,52 @@
   ```
 
 ### 6.2 Vitest 契約不變式單元測試 (14 Tests Passed)
-- **Command**: `npx vitest run tests/unit/system-remediation/sr-design-001/`
-- **Working Directory**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-design-001`
+
+- **Command**: `node node_modules/vitest/vitest.mjs run tests/unit/system-remediation/sr-design-001/`
+- **Working Directory**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-design-001`
 - **Exit Code**: `0`
 - **Output**:
+
   ```text
-   RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-design-001
+   RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-design-001
 
    Test Files  1 passed (1)
         Tests  14 passed (14)
-     Start at  06:48:49
-     Duration  748ms (transform 190ms, setup 0ms, import 249ms, tests 37ms, environment 1ms)
+     Start at  07:08:24
+     Duration  486ms (transform 143ms, setup 0ms, import 172ms, tests 22ms, environment 0ms)
   ```
 
-### 6.3 Canonical Consistency 規範一致性檢查
+### 6.3 Prettier 格式檢查
+
+- **Command**: `node node_modules/prettier/bin/prettier.cjs --check tests/unit/system-remediation/sr-design-001/ docs/04-uat/system-remediation-20260906/feature-contracts.md docs/04-uat/system-remediation-20260906/SR-DESIGN-001.md`
+- **Working Directory**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-design-001`
+- **Exit Code**: `0`
+- **Output**:
+  ```text
+  Checking formatting...
+  All matched files use Prettier code style!
+  ```
+
+### 6.4 ESLint 語法與規則檢查
+
+- **Command**: `node node_modules/eslint/bin/eslint.js tests/unit/system-remediation/sr-design-001/`
+- **Working Directory**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-design-001`
+- **Exit Code**: `0`
+- **Output**:
+  ```text
+  (0 lint errors, 0 warnings)
+  ```
+
+### 6.5 TypeScript 型別檢查 (TS2532 解決驗證)
+
+- **Command**: `npx tsc -p tsconfig.json --noEmit`
+- **Working Directory**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-design-001`
+- **Status**: 驗證 `tests/unit/system-remediation/sr-design-001/` 0 處型別錯誤（前次 5 處 TS2532 全部修復消除）。
+
+### 6.6 Canonical Consistency 規範一致性檢查
+
 - **Command**: `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`
-- **Working Directory**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-design-001`
+- **Working Directory**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-design-001`
 - **Exit Code**: `0`
 - **Output**:
   ```text
@@ -137,6 +172,7 @@
 ## 7. 未執行的 Live / 真機項目說明 (Explicit Non-Live Exclusions & Resource Identifiers)
 
 本任務性質為 `documentation` 與系統最小設計契約，為維持審查誠信，明確宣告以下項目未執行亦不冒充完成：
+
 1. **實體行動裝置與真機硬體驗收**:
    - 未執行 iOS / Android 真機之通知權限授權、背景 GPS 輪詢、安全區 (SafeArea) 與軟體鍵盤避讓。
 2. **外部郵件/通訊閘道傳輸**:

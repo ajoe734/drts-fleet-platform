@@ -29,7 +29,11 @@ interface ShiftRecordMock {
   record: Record<string, unknown>;
 }
 
-function isValidTimeRange(startIso: string, endIso: string, nowIso: string): boolean {
+function isValidTimeRange(
+  startIso: string,
+  endIso: string,
+  nowIso: string,
+): boolean {
   const start = new Date(startIso).getTime();
   const end = new Date(endIso).getTime();
   const now = new Date(nowIso).getTime();
@@ -87,7 +91,11 @@ function transitionLeaveStatus(
 
 function checkClockInAndDispatchAllowedDuringLeave(
   timeIso: string,
-  approvedLeaves: Array<{ startTime: string; endTime: string; status: DriverLeaveStatus }>,
+  approvedLeaves: Array<{
+    startTime: string;
+    endTime: string;
+    status: DriverLeaveStatus;
+  }>,
 ): {
   allowed: boolean;
   presenceEligibility: "eligible" | "ineligible";
@@ -155,29 +163,51 @@ describe("SR-DESIGN-001: Driver Leave Contracts (N01 / C052)", () => {
   it("validates time range: rejects invalid strings, endTime <= startTime, and past dates beyond 15m grace", () => {
     // Non-date string inputs must return false
     expect(isValidTimeRange("not-a-date", "not-a-date", now)).toBe(false);
-    expect(isValidTimeRange("2026-09-10T08:00:00.000Z", "invalid", now)).toBe(false);
+    expect(isValidTimeRange("2026-09-10T08:00:00.000Z", "invalid", now)).toBe(
+      false,
+    );
 
     // End before or equal to start must return false
     expect(
-      isValidTimeRange("2026-09-10T17:00:00.000Z", "2026-09-10T08:00:00.000Z", now),
+      isValidTimeRange(
+        "2026-09-10T17:00:00.000Z",
+        "2026-09-10T08:00:00.000Z",
+        now,
+      ),
     ).toBe(false);
     expect(
-      isValidTimeRange("2026-09-10T08:00:00.000Z", "2026-09-10T08:00:00.000Z", now),
+      isValidTimeRange(
+        "2026-09-10T08:00:00.000Z",
+        "2026-09-10T08:00:00.000Z",
+        now,
+      ),
     ).toBe(false);
 
     // Past date beyond 15-minute grace period (now is 08:00, 07:40 is 20m ago)
     expect(
-      isValidTimeRange("2026-09-06T07:40:00.000Z", "2026-09-06T17:00:00.000Z", now),
+      isValidTimeRange(
+        "2026-09-06T07:40:00.000Z",
+        "2026-09-06T17:00:00.000Z",
+        now,
+      ),
     ).toBe(false);
 
     // Emergency leave within 15-minute grace period (now is 08:00, 07:50 is 10m ago) -> valid
     expect(
-      isValidTimeRange("2026-09-06T07:50:00.000Z", "2026-09-06T17:00:00.000Z", now),
+      isValidTimeRange(
+        "2026-09-06T07:50:00.000Z",
+        "2026-09-06T17:00:00.000Z",
+        now,
+      ),
     ).toBe(true);
 
     // Future time range -> valid
     expect(
-      isValidTimeRange("2026-09-10T08:00:00.000Z", "2026-09-10T17:00:00.000Z", now),
+      isValidTimeRange(
+        "2026-09-10T08:00:00.000Z",
+        "2026-09-10T17:00:00.000Z",
+        now,
+      ),
     ).toBe(true);
   });
 
@@ -200,7 +230,10 @@ describe("SR-DESIGN-001: Driver Leave Contracts (N01 / C052)", () => {
     // Overlaps with approved leave (09-10 12:00 to 18:00)
     expect(
       hasOverlappingActiveLeave(
-        { startTime: "2026-09-10T12:00:00.000Z", endTime: "2026-09-10T18:00:00.000Z" },
+        {
+          startTime: "2026-09-10T12:00:00.000Z",
+          endTime: "2026-09-10T18:00:00.000Z",
+        },
         existingLeaves,
       ),
     ).toBe(true);
@@ -208,7 +241,10 @@ describe("SR-DESIGN-001: Driver Leave Contracts (N01 / C052)", () => {
     // Does not overlap with withdrawn leave (09-12 09:00 to 12:00 is allowed)
     expect(
       hasOverlappingActiveLeave(
-        { startTime: "2026-09-12T09:00:00.000Z", endTime: "2026-09-12T12:00:00.000Z" },
+        {
+          startTime: "2026-09-12T09:00:00.000Z",
+          endTime: "2026-09-12T12:00:00.000Z",
+        },
         existingLeaves,
       ),
     ).toBe(false);
@@ -216,7 +252,10 @@ describe("SR-DESIGN-001: Driver Leave Contracts (N01 / C052)", () => {
     // Completely disjoint date (09-15)
     expect(
       hasOverlappingActiveLeave(
-        { startTime: "2026-09-15T08:00:00.000Z", endTime: "2026-09-15T17:00:00.000Z" },
+        {
+          startTime: "2026-09-15T08:00:00.000Z",
+          endTime: "2026-09-15T17:00:00.000Z",
+        },
         existingLeaves,
       ),
     ).toBe(false);
@@ -296,10 +335,15 @@ describe("SR-DESIGN-001: Driver Leave Contracts (N01 / C052)", () => {
 
     const result = annotateOverlappingShifts(leave, shifts);
     expect(result.impactedShiftIds).toEqual(["sh_1"]);
-    expect(result.annotatedShifts[0].record.leaveReassigned).toBe(true);
-    expect(result.annotatedShifts[0].record.reassignedReason).toBe("DRIVER_ON_LEAVE");
-    expect(result.annotatedShifts[0].record.leaveId).toBe("lv_100");
-    expect(result.annotatedShifts[1].record.leaveReassigned).toBeUndefined();
+    const shift1 = result.annotatedShifts[0];
+    const shift2 = result.annotatedShifts[1];
+    expect(shift1).toBeDefined();
+    expect(shift2).toBeDefined();
+    if (!shift1 || !shift2) throw new Error("Expected shifts to be defined");
+    expect(shift1.record.leaveReassigned).toBe(true);
+    expect(shift1.record.reassignedReason).toBe("DRIVER_ON_LEAVE");
+    expect(shift1.record.leaveId).toBe("lv_100");
+    expect(shift2.record.leaveReassigned).toBeUndefined();
   });
 });
 
@@ -346,7 +390,9 @@ function computeFleetTrainingSummary(
         allPassed = false;
         continue;
       }
-      const isExpired = rec.expiresAt ? new Date(rec.expiresAt).getTime() < now : false;
+      const isExpired = rec.expiresAt
+        ? new Date(rec.expiresAt).getTime() < now
+        : false;
       if (rec.status !== "passed" || isExpired) {
         allPassed = false;
       }
@@ -366,10 +412,18 @@ function computeFleetTrainingSummary(
   // Bounded completion percentage: 0% to 100%
   const completionPct =
     totalRosterDriversCount > 0
-      ? Math.min(100, Math.round((fullyCompletedDriversCount / totalRosterDriversCount) * 100))
+      ? Math.min(
+          100,
+          Math.round(
+            (fullyCompletedDriversCount / totalRosterDriversCount) * 100,
+          ),
+        )
       : 0;
 
-  const pendingHeadcount = Math.max(0, totalRosterDriversCount - fullyCompletedDriversCount);
+  const pendingHeadcount = Math.max(
+    0,
+    totalRosterDriversCount - fullyCompletedDriversCount,
+  );
 
   return {
     completionPct: `${completionPct}%`,
@@ -430,7 +484,10 @@ function evaluateDriverTrainingEligibility(
   requiredCourseCodes: string[],
   driverRecords: DriverTrainingItem[],
   nowIso: string,
-): { trainingStatus: "pending" | "passed" | "expired"; trainingRequiredDispatchBlocked: boolean } {
+): {
+  trainingStatus: "pending" | "passed" | "expired";
+  trainingRequiredDispatchBlocked: boolean;
+} {
   const now = new Date(nowIso).getTime();
   const recordMap = new Map(driverRecords.map((r) => [r.courseCode, r]));
 
@@ -443,7 +500,9 @@ function evaluateDriverTrainingEligibility(
       allPassed = false;
       continue;
     }
-    const isExpired = rec.expiresAt ? new Date(rec.expiresAt).getTime() < now : false;
+    const isExpired = rec.expiresAt
+      ? new Date(rec.expiresAt).getTime() < now
+      : false;
     if (rec.status === "expired" || isExpired) {
       hasExpired = true;
       allPassed = false;
@@ -469,10 +528,27 @@ describe("SR-DESIGN-001: Driver Academy & Fleet Training Contracts (N02 / C059 /
 
     // Case 1: 1 driver with 2 passed courses out of 2 required -> 100%, pending 0 (not 200% / -1)
     const singleDriverRecords: DriverTrainingItem[] = [
-      { driverId: "d1", courseCode: "platform_basics", status: "passed", score: 100, expiresAt: null },
-      { driverId: "d1", courseCode: "airport_sop", status: "passed", score: 90, expiresAt: null },
+      {
+        driverId: "d1",
+        courseCode: "platform_basics",
+        status: "passed",
+        score: 100,
+        expiresAt: null,
+      },
+      {
+        driverId: "d1",
+        courseCode: "airport_sop",
+        status: "passed",
+        score: 90,
+        expiresAt: null,
+      },
     ];
-    const summary1 = computeFleetTrainingSummary(1, requiredCourses, singleDriverRecords, now);
+    const summary1 = computeFleetTrainingSummary(
+      1,
+      requiredCourses,
+      singleDriverRecords,
+      now,
+    );
     expect(summary1.completionPct).toBe("100%");
     expect(summary1.pendingHeadcount).toBe("0");
     expect(summary1.overdueIncomplete).toBe(0);
@@ -480,10 +556,27 @@ describe("SR-DESIGN-001: Driver Academy & Fleet Training Contracts (N02 / C059 /
     // Case 2: 2 drivers: d1 passed all, d2 passed only 1 course -> 50%
     const twoDriverRecords: DriverTrainingItem[] = [
       ...singleDriverRecords,
-      { driverId: "d2", courseCode: "platform_basics", status: "passed", score: 85, expiresAt: null },
-      { driverId: "d2", courseCode: "airport_sop", status: "in_progress", score: null, expiresAt: null },
+      {
+        driverId: "d2",
+        courseCode: "platform_basics",
+        status: "passed",
+        score: 85,
+        expiresAt: null,
+      },
+      {
+        driverId: "d2",
+        courseCode: "airport_sop",
+        status: "in_progress",
+        score: null,
+        expiresAt: null,
+      },
     ];
-    const summary2 = computeFleetTrainingSummary(2, requiredCourses, twoDriverRecords, now);
+    const summary2 = computeFleetTrainingSummary(
+      2,
+      requiredCourses,
+      twoDriverRecords,
+      now,
+    );
     expect(summary2.completionPct).toBe("50%");
     expect(summary2.pendingHeadcount).toBe("1");
     expect(summary2.overdueIncomplete).toBe(0);
@@ -491,10 +584,27 @@ describe("SR-DESIGN-001: Driver Academy & Fleet Training Contracts (N02 / C059 /
     // Case 3: d2 has an expired course -> overdueIncomplete = 1
     const overdueDriverRecords: DriverTrainingItem[] = [
       ...singleDriverRecords,
-      { driverId: "d2", courseCode: "platform_basics", status: "passed", score: 85, expiresAt: "2026-08-01T00:00:00.000Z" },
-      { driverId: "d2", courseCode: "airport_sop", status: "passed", score: 85, expiresAt: null },
+      {
+        driverId: "d2",
+        courseCode: "platform_basics",
+        status: "passed",
+        score: 85,
+        expiresAt: "2026-08-01T00:00:00.000Z",
+      },
+      {
+        driverId: "d2",
+        courseCode: "airport_sop",
+        status: "passed",
+        score: 85,
+        expiresAt: null,
+      },
     ];
-    const summary3 = computeFleetTrainingSummary(2, requiredCourses, overdueDriverRecords, now);
+    const summary3 = computeFleetTrainingSummary(
+      2,
+      requiredCourses,
+      overdueDriverRecords,
+      now,
+    );
     expect(summary3.completionPct).toBe("50%");
     expect(summary3.pendingHeadcount).toBe("1");
     expect(summary3.overdueIncomplete).toBe(1);
@@ -527,7 +637,12 @@ describe("SR-DESIGN-001: Driver Academy & Fleet Training Contracts (N02 / C059 /
 
     // Incomplete submission throws QUIZ_INCOMPLETE_OR_DUPLICATE_SUBMISSION
     expect(() =>
-      gradeQuizSubmission([{ questionId: "q1", selectedOptionId: "opt_a" }], answerKey, 1, 1),
+      gradeQuizSubmission(
+        [{ questionId: "q1", selectedOptionId: "opt_a" }],
+        answerKey,
+        1,
+        1,
+      ),
     ).toThrow("QUIZ_INCOMPLETE_OR_DUPLICATE_SUBMISSION");
 
     // Stale version throws COURSE_VERSION_STALE
@@ -572,8 +687,20 @@ describe("SR-DESIGN-001: Driver Academy & Fleet Training Contracts (N02 / C059 /
     const passedEligibility = evaluateDriverTrainingEligibility(
       required,
       [
-        { driverId: "d1", courseCode: "platform_basics", status: "passed", score: 90, expiresAt: null },
-        { driverId: "d1", courseCode: "airport_sop", status: "passed", score: 85, expiresAt: null },
+        {
+          driverId: "d1",
+          courseCode: "platform_basics",
+          status: "passed",
+          score: 90,
+          expiresAt: null,
+        },
+        {
+          driverId: "d1",
+          courseCode: "airport_sop",
+          status: "passed",
+          score: 85,
+          expiresAt: null,
+        },
       ],
       now,
     );
@@ -584,8 +711,20 @@ describe("SR-DESIGN-001: Driver Academy & Fleet Training Contracts (N02 / C059 /
     const expiredEligibility = evaluateDriverTrainingEligibility(
       required,
       [
-        { driverId: "d1", courseCode: "platform_basics", status: "passed", score: 90, expiresAt: null },
-        { driverId: "d1", courseCode: "airport_sop", status: "passed", score: 85, expiresAt: "2026-08-01T00:00:00.000Z" },
+        {
+          driverId: "d1",
+          courseCode: "platform_basics",
+          status: "passed",
+          score: 90,
+          expiresAt: null,
+        },
+        {
+          driverId: "d1",
+          courseCode: "airport_sop",
+          status: "passed",
+          score: 85,
+          expiresAt: "2026-08-01T00:00:00.000Z",
+        },
       ],
       now,
     );
@@ -596,7 +735,13 @@ describe("SR-DESIGN-001: Driver Academy & Fleet Training Contracts (N02 / C059 /
     const pendingEligibility = evaluateDriverTrainingEligibility(
       required,
       [
-        { driverId: "d1", courseCode: "platform_basics", status: "passed", score: 90, expiresAt: null },
+        {
+          driverId: "d1",
+          courseCode: "platform_basics",
+          status: "passed",
+          score: 90,
+          expiresAt: null,
+        },
       ],
       now,
     );
@@ -646,7 +791,9 @@ function projectHostVehicle(
   vehiclesDb: VehicleRegistryRow[],
 ) {
   const vehicle = vehiclesDb.find(
-    (v) => v.vehicleId === requestedVehicleId && v.ownerPartnerId === callerPartnerId,
+    (v) =>
+      v.vehicleId === requestedVehicleId &&
+      v.ownerPartnerId === callerPartnerId,
   );
 
   if (!vehicle) {
@@ -671,7 +818,11 @@ function projectHostTrip(trip: RawTripData) {
   };
 }
 
-function projectHostEarnings(vehicleId: string, period: string, tripFares: number[]) {
+function projectHostEarnings(
+  vehicleId: string,
+  period: string,
+  tripFares: number[],
+) {
   const grossRevenue = tripFares.reduce((sum, fare) => sum + fare, 0);
   const platformFee = Math.round(grossRevenue * 0.15);
 
@@ -682,7 +833,7 @@ function projectHostEarnings(vehicleId: string, period: string, tripFares: numbe
     grossRevenue,
     platformFee,
     fleetCommission: null, // Unknown pending settlement contract in SR-HOST-BE-001
-    netEarnings: null,     // Unknown pending settlement contract in SR-HOST-BE-001
+    netEarnings: null, // Unknown pending settlement contract in SR-HOST-BE-001
     tripsCount: tripFares.length,
     settlementStatus: "pending_policy" as const,
   };
@@ -690,12 +841,26 @@ function projectHostEarnings(vehicleId: string, period: string, tripFares: numbe
 
 describe("SR-DESIGN-001: Host Vehicle Ownership Restricted Projection (N03 / C012)", () => {
   const mockVehicles: VehicleRegistryRow[] = [
-    { vehicleId: "veh_101", vin: "1HGCR2F83HA123456", plateNo: "TDC-1111", ownerPartnerId: "host_user_A" },
-    { vehicleId: "veh_202", vin: "2HGCR2F83HA654321", plateNo: "TDC-2222", ownerPartnerId: "host_user_B" },
+    {
+      vehicleId: "veh_101",
+      vin: "1HGCR2F83HA123456",
+      plateNo: "TDC-1111",
+      ownerPartnerId: "host_user_A",
+    },
+    {
+      vehicleId: "veh_202",
+      vin: "2HGCR2F83HA654321",
+      plateNo: "TDC-2222",
+      ownerPartnerId: "host_user_B",
+    },
   ];
 
   it("permits host to view only their own vehicle with masked VIN and denies enumeration via 404", () => {
-    const projection = projectHostVehicle("veh_101", "host_user_A", mockVehicles);
+    const projection = projectHostVehicle(
+      "veh_101",
+      "host_user_A",
+      mockVehicles,
+    );
     expect(projection).not.toBeNull();
     expect(projection?.vehicleId).toBe("veh_101");
     expect(projection?.plateNo).toBe("TDC-1111");
@@ -703,7 +868,11 @@ describe("SR-DESIGN-001: Host Vehicle Ownership Restricted Projection (N03 / C01
     expect(projection?.vinMasked).not.toContain("123456");
 
     // Host A querying Host B's vehicle returns null (404 NOT_FOUND)
-    const unauthorizedProjection = projectHostVehicle("veh_202", "host_user_A", mockVehicles);
+    const unauthorizedProjection = projectHostVehicle(
+      "veh_202",
+      "host_user_A",
+      mockVehicles,
+    );
     expect(unauthorizedProjection).toBeNull();
   });
 
@@ -725,9 +894,15 @@ describe("SR-DESIGN-001: Host Vehicle Ownership Restricted Projection (N03 / C01
     expect(hostTrip.fareAmount).toBe(450);
     expect(hostTrip.currency).toBe("TWD");
 
-    expect((hostTrip as unknown as Record<string, unknown>).passengerName).toBeUndefined();
-    expect((hostTrip as unknown as Record<string, unknown>).passengerPhone).toBeUndefined();
-    expect((hostTrip as unknown as Record<string, unknown>).pickupAddress).toBeUndefined();
+    expect(
+      (hostTrip as unknown as Record<string, unknown>).passengerName,
+    ).toBeUndefined();
+    expect(
+      (hostTrip as unknown as Record<string, unknown>).passengerPhone,
+    ).toBeUndefined();
+    expect(
+      (hostTrip as unknown as Record<string, unknown>).pickupAddress,
+    ).toBeUndefined();
   });
 
   it("projects host earnings with explicit null unknowns for uncontracted split policies", () => {
@@ -750,8 +925,10 @@ describe("SR-DESIGN-001: Host Vehicle Ownership Restricted Projection (N03 / C01
         description: "50000km Regular Service Overdue",
       },
     ];
-
-    expect(logs[0].status).toBe("overdue");
+    const firstLog = logs[0];
+    expect(firstLog).toBeDefined();
+    if (!firstLog) throw new Error("Expected log to be defined");
+    expect(firstLog.status).toBe("overdue");
   });
 });
 
@@ -777,20 +954,46 @@ describe("SR-DESIGN-001: Schema Envelope & Traceability Verification", () => {
 
     // Must NOT have top-level success, requestId, or timestamp
     expect((sampleEnvelope as Record<string, unknown>).success).toBeUndefined();
-    expect((sampleEnvelope as Record<string, unknown>).requestId).toBeUndefined();
-    expect((sampleEnvelope as Record<string, unknown>).timestamp).toBeUndefined();
+    expect(
+      (sampleEnvelope as Record<string, unknown>).requestId,
+    ).toBeUndefined();
+    expect(
+      (sampleEnvelope as Record<string, unknown>).timestamp,
+    ).toBeUndefined();
   });
 
   it("covers all target gaps and capabilities in traceability matrix", () => {
     const traceabilityMatrix = [
-      { gapId: "N01", capabilityId: "C052", domain: "driver_leave", specRef: "PRD §9.4.7" },
-      { gapId: "N02", capabilityId: "C059", domain: "driver_academy", specRef: "PRD §9.4.9" },
-      { gapId: "N02", capabilityId: "C071", domain: "fleet_training", specRef: "PRD §9.4.9" },
-      { gapId: "N03", capabilityId: "C012", domain: "host_ownership", specRef: "PRD §12.6" },
+      {
+        gapId: "N01",
+        capabilityId: "C052",
+        domain: "driver_leave",
+        specRef: "PRD §9.4.7",
+      },
+      {
+        gapId: "N02",
+        capabilityId: "C059",
+        domain: "driver_academy",
+        specRef: "PRD §9.4.9",
+      },
+      {
+        gapId: "N02",
+        capabilityId: "C071",
+        domain: "fleet_training",
+        specRef: "PRD §9.4.9",
+      },
+      {
+        gapId: "N03",
+        capabilityId: "C012",
+        domain: "host_ownership",
+        specRef: "PRD §12.6",
+      },
     ];
 
     const coveredGaps = new Set(traceabilityMatrix.map((m) => m.gapId));
-    const coveredCapabilities = new Set(traceabilityMatrix.map((m) => m.capabilityId));
+    const coveredCapabilities = new Set(
+      traceabilityMatrix.map((m) => m.capabilityId),
+    );
 
     expect(coveredGaps.has("N01")).toBe(true);
     expect(coveredGaps.has("N02")).toBe(true);

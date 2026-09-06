@@ -70,19 +70,22 @@
 ## 2. Family 1: 請假工作流程契約 (Driver Leave Workflow)
 
 ### 2.1 追溯與問題定義
+
 - **Gap ID**: `N01`（請假申請沒有完整工作流程）
 - **Capability ID**: `C052`（司機／排班主管: 請假申請、審核與班表聯動）
 - **PRD 參照**: §9.4.7 Shift & Attendance（3. 請假申請）
 - **現狀差距**: 目前 `apps/api/src/modules/shift-attendance/` 僅具備基本打卡與排班查詢，缺少請假申請、撤回、審核、排班調離註記、派單資格聯動壓制與防護。
 
 ### 2.2 角色與 IAM 映射
-| 角色 | Realm | Actor Type | Role Code | Required Scopes | Resource Constraint | 操作範圍 |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **司機 (Driver)** | `driver` | `driver_user` | `driver_user` | `driver:read`, `driver:write` | `kind: "driver"`, `actorId == driverId` | 提交請假、查看自身假單、撤回待審假單 |
-| **排班主管 (Ops Manager)** | `ops` | `ops_user` | `ops_user` | `driver:read`, `driver:write`, `dispatch:read`, `dispatch:write` | `kind: "tenant"`, Tenant boundary | 查看轄下司機假單、核准/駁回假單 |
-| **系統派單核心 (Dispatch)** | `system` | `system` | `system` | `system:internal` | 無 | 連動派單壓制與在線資格阻擋 |
+
+| 角色                        | Realm    | Actor Type    | Role Code     | Required Scopes                                                  | Resource Constraint                     | 操作範圍                             |
+| :-------------------------- | :------- | :------------ | :------------ | :--------------------------------------------------------------- | :-------------------------------------- | :----------------------------------- |
+| **司機 (Driver)**           | `driver` | `driver_user` | `driver_user` | `driver:read`, `driver:write`                                    | `kind: "driver"`, `actorId == driverId` | 提交請假、查看自身假單、撤回待審假單 |
+| **排班主管 (Ops Manager)**  | `ops`    | `ops_user`    | `ops_user`    | `driver:read`, `driver:write`, `dispatch:read`, `dispatch:write` | `kind: "tenant"`, Tenant boundary       | 查看轄下司機假單、核准/駁回假單      |
+| **系統派單核心 (Dispatch)** | `system` | `system`      | `system`      | `system:internal`                                                | 無                                      | 連動派單壓制與在線資格阻擋           |
 
 ### 2.3 狀態機與生命週期 (State Machine)
+
 ```mermaid
 stateDiagram-v2
     [*] --> pending : 司機提交申請 (POST /requests)
@@ -95,6 +98,7 @@ stateDiagram-v2
 ```
 
 **業務不變式 (Business Invariants)**:
+
 1. **時間合法性與寬限期**:
    - `startTime < endTime`。
    - `startTime >= now - 15 minutes`（容許突發緊急請假之 15 分鐘寬限，超過 15 分鐘前之過去日期一律回傳 `400 LEAVE_INVALID_TIME_RANGE`）。
@@ -112,32 +116,33 @@ stateDiagram-v2
    - **已上線司機進入請假區間**: 當現在時間進入核准請假起始點時，背景監控／派單調度器自動寫入 `ops.phase1_driver_matching_suppressions`（`driver_id`, `reason: 'DRIVER_ON_LEAVE'`, `effective_start`, `effective_end`），即時剔除於媒合候選人名單之外；司機端 App 收到推播通知提示請假生效並下線。
 
 ### 2.4 資料模型與 TypeScript 契約
+
 ```typescript
 export type DriverLeaveType =
-  | "annual"       // 特休
-  | "sick"         // 病假
-  | "personal"     // 事假
-  | "bereavement"  // 喪假
-  | "emergency";   // 緊急事假
+  | "annual" // 特休
+  | "sick" // 病假
+  | "personal" // 事假
+  | "bereavement" // 喪假
+  | "emergency"; // 緊急事假
 
 export type DriverLeaveStatus =
-  | "pending"      // 待審核
-  | "approved"     // 已核准
-  | "rejected"     // 已駁回
-  | "withdrawn";   // 已撤回
+  | "pending" // 待審核
+  | "approved" // 已核准
+  | "rejected" // 已駁回
+  | "withdrawn"; // 已撤回
 
 export interface DriverLeaveRecord {
-  leaveId: string;               // UUID
-  driverId: string;              // 司機識別碼
+  leaveId: string; // UUID
+  driverId: string; // 司機識別碼
   leaveType: DriverLeaveType;
-  startTime: string;             // ISO 8601 UTC
-  endTime: string;               // ISO 8601 UTC
-  reason: string;                // 請假事由
+  startTime: string; // ISO 8601 UTC
+  endTime: string; // ISO 8601 UTC
+  reason: string; // 請假事由
   status: DriverLeaveStatus;
   reviewedByPrincipalId: string | null;
-  reviewedAt: string | null;     // ISO 8601 UTC
-  reviewNotes: string | null;    // 審核備註
-  impactedShiftIds: string[];    // 連動受影響班次 ID 列表
+  reviewedAt: string | null; // ISO 8601 UTC
+  reviewNotes: string | null; // 審核備註
+  impactedShiftIds: string[]; // 連動受影響班次 ID 列表
   createdAt: string;
   updatedAt: string;
 }
@@ -171,6 +176,7 @@ export interface DriverLeaveQueryFilter {
 ### 2.5 API 路由與 Envelope 規格
 
 #### 1. 建立請假申請
+
 - **Method & Path**: `POST /api/driver-leave/requests`
 - **Auth**: Realm `driver`, Actor `driver_user`, Scope `driver:write`
 - **Request Body**: `CreateDriverLeaveCommand`
@@ -200,6 +206,7 @@ export interface DriverLeaveQueryFilter {
   ```
 
 #### 2. 查詢假單列表
+
 - **Method & Path**: `GET /api/driver-leave/requests`
 - **Auth**:
   - 司機 (`driver_user`): 強制過濾 `driverId = identity.actorId`。
@@ -240,29 +247,33 @@ export interface DriverLeaveQueryFilter {
   ```
 
 #### 3. 司機主動撤回假單
+
 - **Method & Path**: `POST /api/driver-leave/requests/:leaveId/withdraw`
 - **Auth**: Realm `driver`, Scope `driver:write`
 - **Request Body**: `WithdrawDriverLeaveCommand`
 - **Success Response (200 OK)**: 返回 `ApiSuccessEnvelope<DriverLeaveRecord>`（狀態更新為 `withdrawn`）。
 
 #### 4. 主管審核假單 (核准 / 駁回)
+
 - **Method & Path**: `POST /api/driver-leave/requests/:leaveId/review`
 - **Auth**: Realm `ops`, Role `ops_user`, Scope `driver:write`
 - **Request Body**: `ReviewDriverLeaveCommand`
 - **Success Response (200 OK)**: 返回 `ApiSuccessEnvelope<DriverLeaveRecord>`（狀態更新為 `approved` 或 `rejected`，核准時包含 `impactedShiftIds`）。
 
 ### 2.6 錯誤代碼與 HTTP 映射
-| Error Code | HTTP Status | 觸發情境與說明 |
-| :--- | :--- | :--- |
-| `LEAVE_INVALID_TIME_RANGE` | `400 Bad Request` | `endTime <= startTime`，日期格式無效，或請假起始時間早於當前時間 15 分鐘以上。 |
-| `LEAVE_MISSING_REQUIRED_FIELDS` | `400 Bad Request` | 未提供 `leaveType`、`startTime`、`endTime` 或 `reason`。 |
-| `LEAVE_FORBIDDEN_ACCESS` | `403 Forbidden` | 司機嘗試查看或撤回他人所屬之假單。 |
-| `LEAVE_NOT_FOUND` | `404 Not Found` | 指定之 `leaveId` 不存在。 |
-| `LEAVE_OVERLAPPING_REQUEST` | `409 Conflict` | 申請時間與該司機既有之 `pending` 或 `approved` 假單區間重疊。 |
-| `LEAVE_INVALID_STATE_TRANSITION` | `409 Conflict` | 嘗試對非 `pending` 狀態假單進行撤回或審核。 |
-| `DRIVER_ON_LEAVE` | `409 Conflict` | 司機於請假生效期間嘗試出勤打卡 (`clock-in`) 或請求上線 (`online`)。 |
+
+| Error Code                       | HTTP Status       | 觸發情境與說明                                                                 |
+| :------------------------------- | :---------------- | :----------------------------------------------------------------------------- |
+| `LEAVE_INVALID_TIME_RANGE`       | `400 Bad Request` | `endTime <= startTime`，日期格式無效，或請假起始時間早於當前時間 15 分鐘以上。 |
+| `LEAVE_MISSING_REQUIRED_FIELDS`  | `400 Bad Request` | 未提供 `leaveType`、`startTime`、`endTime` 或 `reason`。                       |
+| `LEAVE_FORBIDDEN_ACCESS`         | `403 Forbidden`   | 司機嘗試查看或撤回他人所屬之假單。                                             |
+| `LEAVE_NOT_FOUND`                | `404 Not Found`   | 指定之 `leaveId` 不存在。                                                      |
+| `LEAVE_OVERLAPPING_REQUEST`      | `409 Conflict`    | 申請時間與該司機既有之 `pending` 或 `approved` 假單區間重疊。                  |
+| `LEAVE_INVALID_STATE_TRANSITION` | `409 Conflict`    | 嘗試對非 `pending` 狀態假單進行撤回或審核。                                    |
+| `DRIVER_ON_LEAVE`                | `409 Conflict`    | 司機於請假生效期間嘗試出勤打卡 (`clock-in`) 或請求上線 (`online`)。            |
 
 ### 2.7 正負驗收條件 (Acceptance Criteria)
+
 - **AC-LEAVE-POS-1 (司機申請與撤回)**: 司機提交合法時間區段（`startTime >= now - 15m` 且 `endTime > startTime`），狀態轉為 `pending`；在主管審核前可成功撤回為 `withdrawn`。
 - **AC-LEAVE-POS-2 (主管審核與班表連動)**: 主管審核核准後，假單狀態為 `approved`；`ops.phase1_driver_shifts` 中重疊之班次標記 `leaveReassigned: true`，且其 ID 記錄於 `impactedShiftIds`。
 - **AC-LEAVE-POS-3 (出勤與在線防護)**: 處於核准請假區段內的司機呼叫 `/api/shift-attendance/clock-in` 或 `/api/platform-presence/online`，系統回傳 `409 DRIVER_ON_LEAVE` 且設定 `eligibility: "ineligible"`。
@@ -276,19 +287,22 @@ export interface DriverLeaveQueryFilter {
 ## 3. Family 2: 學院與培訓驗證契約 (Driver Academy & Fleet Training)
 
 ### 3.1 追溯與問題定義
+
 - **Gap ID**: `N02`（學院、測驗、完訓證據未落地）
 - **Capability IDs**: `C059`（司機: 教學影片、SOP、測驗與完訓紀錄）、`C071`（車行訓練管理員: 看真完訓率與逾期名單）
 - **PRD 參照**: §9.4.9 Settings & Academy（教學影片/SOP/小測驗、合規與安全訓練）
 - **現狀差距**: 既有前端代碼使用 `FX_FLEET_TRAINING` 固定百分比，缺乏真實作答儲存、版本可追溯性與可派資格（`trainingRequired`）之數據連動。
 
 ### 3.2 角色與 IAM 映射
-| 角色 | Realm | Actor Type | Role Code | Required Scopes | Resource Constraint | 操作範圍 |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **司機 (Driver)** | `driver` | `driver_user` | `driver_user` | `driver:read`, `driver:write` | `kind: "driver"`, `actorId == driverId` | 瀏覽課程、取得試卷、提交測驗、查詢個人完訓紀錄與答題歷史證據 |
-| **車行管理員 (Fleet Admin)** | `tenant` / `ops` | `ops_user` / `tenant_ops_admin` | `tenant_ops_admin` | `reports:read`, `driver:read` | `kind: "tenant"`, Tenant boundary | 查詢車行完訓率看板、司機名冊、下鑽司機答題證據 |
-| **平台營運/稽核 (Platform Ops)** | `platform` | `platform_admin` | `platform_admin` | `reports:read`, `driver:read` | 全域 | 課程題庫版本管理與合規稽核 |
+
+| 角色                             | Realm            | Actor Type                      | Role Code          | Required Scopes               | Resource Constraint                     | 操作範圍                                                     |
+| :------------------------------- | :--------------- | :------------------------------ | :----------------- | :---------------------------- | :-------------------------------------- | :----------------------------------------------------------- |
+| **司機 (Driver)**                | `driver`         | `driver_user`                   | `driver_user`      | `driver:read`, `driver:write` | `kind: "driver"`, `actorId == driverId` | 瀏覽課程、取得試卷、提交測驗、查詢個人完訓紀錄與答題歷史證據 |
+| **車行管理員 (Fleet Admin)**     | `tenant` / `ops` | `ops_user` / `tenant_ops_admin` | `tenant_ops_admin` | `reports:read`, `driver:read` | `kind: "tenant"`, Tenant boundary       | 查詢車行完訓率看板、司機名冊、下鑽司機答題證據               |
+| **平台營運/稽核 (Platform Ops)** | `platform`       | `platform_admin`                | `platform_admin`   | `reports:read`, `driver:read` | 全域                                    | 課程題庫版本管理與合規稽核                                   |
 
 ### 3.3 狀態機與生命週期 (State Machine)
+
 ```mermaid
 stateDiagram-v2
     [*] --> not_started : 建立司機課程指標
@@ -301,6 +315,7 @@ stateDiagram-v2
 ```
 
 **業務不變式 (Business Invariants)**:
+
 1. **多課程完訓率與分母收斂 (Fleet Multi-Course Metrics Invariants)**:
    - **分母 ($N_{\text{total}}$)**: 該車行當前所有綁定之有效司機總人數（`reg.drivers`）。
    - **必修課程集 ($M_{\text{required}}$)**: 所有標記 `isRequired: true` 之課程代碼集合。
@@ -327,6 +342,7 @@ stateDiagram-v2
    - 派單資格評估引擎（`runtime-eligibility-evaluator.service.ts`）在車輛／服務產品具備 `trainingRequired: true` 時，強制檢查 `driver_reg_profiles.training_status === 'passed'`。未通過或過期者自動阻擋指派並輸出 `DRIVER_TRAINING_INCOMPLETE`。
 
 ### 3.4 資料模型與 TypeScript 契約
+
 ```typescript
 export type TrainingStatus =
   | "not_started"
@@ -428,8 +444,8 @@ export interface FleetTrainingView {
   fleetPartnerId: string;
   rows: FleetTrainingSummaryRow[];
   summary: {
-    completionPct: string;       // e.g. "95%"
-    pendingHeadcount: string;    // e.g. "5"
+    completionPct: string; // e.g. "95%"
+    pendingHeadcount: string; // e.g. "5"
     overdueIncomplete: number;
   };
   source: "authoritative";
@@ -450,6 +466,7 @@ export interface FleetDriverRosterItem {
 ### 3.5 API 路由與 Envelope 規格
 
 #### 1. 司機查詢課程列表
+
 - **Method & Path**: `GET /api/driver-academy/courses`
 - **Auth**: Realm `driver`, Scope `driver:read`
 - **Success Response (200 OK)**:
@@ -485,11 +502,13 @@ export interface FleetDriverRosterItem {
   ```
 
 #### 2. 司機取得課程教材與試卷
+
 - **Method & Path**: `GET /api/driver-academy/courses/:courseId`
 - **Auth**: Realm `driver`, Scope `driver:read`
 - **Success Response (200 OK)**: 返回 `ApiSuccessEnvelope<AcademyCourseDetail>`。
 
 #### 3. 司機提交測驗答案
+
 - **Method & Path**: `POST /api/driver-academy/courses/:courseId/quiz/submit`
 - **Auth**: Realm `driver`, Scope `driver:write`
 - **Request Body**: `QuizSubmissionCommand`
@@ -513,16 +532,19 @@ export interface FleetDriverRosterItem {
   ```
 
 #### 4. 司機查詢個人完訓紀錄列表
+
 - **Method & Path**: `GET /api/driver-academy/records`
 - **Auth**: Realm `driver`, Scope `driver:read`
 - **Success Response (200 OK)**: 返回 `ApiSuccessEnvelope<ApiListData<DriverTrainingRecord>>`。
 
 #### 5. 司機查詢個人作答歷史證據
+
 - **Method & Path**: `GET /api/driver-academy/courses/:courseId/attempts/:attemptId`
 - **Auth**: Realm `driver`, Scope `driver:read`
 - **Success Response (200 OK)**: 返回 `ApiSuccessEnvelope<DriverQuizAttemptDetail>`。
 
 #### 6. 車行管理員查詢完訓看板
+
 - **Method & Path**: `GET /api/fleet-partner/training/summary`
 - **Auth**: Realm `tenant` / `ops`, Role `tenant_ops_admin`, Scopes `reports:read`, `driver:read`
 - **Success Response (200 OK)**:
@@ -554,25 +576,29 @@ export interface FleetDriverRosterItem {
   ```
 
 #### 7. 車行管理員查詢司機名冊
+
 - **Method & Path**: `GET /api/fleet-partner/training/roster`
 - **Auth**: Realm `tenant` / `ops`, Scopes `reports:read`, `driver:read`
 - **Success Response (200 OK)**: 返回 `ApiSuccessEnvelope<ApiListData<FleetDriverRosterItem>>`。
 
 #### 8. 車行管理員下鑽司機答題證據
+
 - **Method & Path**: `GET /api/fleet-partner/training/drivers/:driverId/attempts/:attemptId`
 - **Auth**: Realm `tenant` / `ops`, Scopes `reports:read`, `driver:read`
 - **Success Response (200 OK)**: 返回 `ApiSuccessEnvelope<DriverQuizAttemptDetail>`。
 
 ### 3.6 錯誤代碼與 HTTP 映射
-| Error Code | HTTP Status | 觸發情境與說明 |
-| :--- | :--- | :--- |
-| `QUIZ_INCOMPLETE_OR_DUPLICATE_SUBMISSION` | `400 Bad Request` | 提交題目未覆蓋所有試卷題目，或包含重複題號作答。 |
-| `COURSE_VERSION_STALE` | `409 Conflict` | 司機提交答案所基於之 `courseVersion` 早於目前最新發布之版本。 |
-| `COURSE_NOT_FOUND` | `404 Not Found` | 查詢之 `courseId` 不存在。 |
-| `ACADEMY_FORBIDDEN_FLEET_ACCESS` | `403 Forbidden` | 車行嘗試存取其他車行之司機培訓紀錄或下鑽證據。 |
-| `ATTEMPT_NOT_FOUND` | `404 Not Found` | 指定之 `attemptId` 不存在或不屬於該使用者。 |
+
+| Error Code                                | HTTP Status       | 觸發情境與說明                                                |
+| :---------------------------------------- | :---------------- | :------------------------------------------------------------ |
+| `QUIZ_INCOMPLETE_OR_DUPLICATE_SUBMISSION` | `400 Bad Request` | 提交題目未覆蓋所有試卷題目，或包含重複題號作答。              |
+| `COURSE_VERSION_STALE`                    | `409 Conflict`    | 司機提交答案所基於之 `courseVersion` 早於目前最新發布之版本。 |
+| `COURSE_NOT_FOUND`                        | `404 Not Found`   | 查詢之 `courseId` 不存在。                                    |
+| `ACADEMY_FORBIDDEN_FLEET_ACCESS`          | `403 Forbidden`   | 車行嘗試存取其他車行之司機培訓紀錄或下鑽證據。                |
+| `ATTEMPT_NOT_FOUND`                       | `404 Not Found`   | 指定之 `attemptId` 不存在或不屬於該使用者。                   |
 
 ### 3.7 正負驗收條件 (Acceptance Criteria)
+
 - **AC-ACAD-POS-1 (測驗計分與版本記錄)**: 司機提交完整無重複題號之作答，後端依該 `courseVersion` 正確計分；分數 $\ge 80$ 時標記 `passed: true`，並將作答細節存入 `DriverQuizAttemptRecord`。
 - **AC-ACAD-POS-2 (多課程看板聚合與邊界)**: 車行有多門必修課時，單一司機完成所有課程則完訓數計 1；若 1 位司機完成 2 門課，車行看板 `completionPct` 正確呈現 `100%`，`pendingHeadcount` 為 `"0"`，絕不溢出至 200% 或負數。
 - **AC-ACAD-POS-3 (監管紀錄與資格連動)**: 司機通過必修課程後，`reg.driver_training_records` 新增紀錄，且 `reg.driver_reg_profiles.training_status` 同步更新為 `'passed'`；`runtime-eligibility-evaluator` 檢查 `trainingRequired` 順利放行。
@@ -587,21 +613,23 @@ export interface FleetDriverRosterItem {
 ## 4. Family 3: 車主 Host 自車受限唯讀投影契約 (Host Vehicle Ownership Restricted Projection)
 
 ### 4.1 追溯與問題定義
+
 - **Gap ID**: `N03`（車主的受限自助入口尚未產品化）
 - **Capability ID**: `C012`（車主 Host: 只看自有車輛收益／維保／任務／案件）
 - **PRD 參照**: §12.6 Host（可查看: 自車收益、自車維保、自車任務、自車相關案件）
 - **現狀差距**: 角色矩陣標記 partial / not productized。資料庫 `reg.vehicles` 雖有 `owner_partner_id`，但缺少專屬的唯讀投影模型、防越權探測防護與 PII 去識別化。
 
 ### 4.2 角色與 IAM 映射
-| 項目 | 規範說明 |
-| :--- | :--- |
-| **Realm** | `partner` |
-| **Partner Type** | `core.partner_type_t` 之 `'individual_owner'` |
-| **Actor Type / Role** | `actorType: "ops_user"` 或 Partner 身分，Role Code: `vehicle_owner` |
-| **Required Scopes** | 使用既有 Scopes: `owned:read`, `reports:read`, `maintenance:read` |
-| **Resource Constraint** | `kind: "object"`, 強制校驗 `reg.vehicles.owner_partner_id === identity.partnerId` |
-| **憑證登入途徑** | 車主透過 Partner 登入途徑（OIDC PKCE BFF 或 Partner API 憑證）登入，Token 包含合法 `partnerId` |
-| **操作限制** | **嚴格唯讀 (Strictly Read-Only)**，禁止任何 Mutation 請求 |
+
+| 項目                    | 規範說明                                                                                       |
+| :---------------------- | :--------------------------------------------------------------------------------------------- |
+| **Realm**               | `partner`                                                                                      |
+| **Partner Type**        | `core.partner_type_t` 之 `'individual_owner'`                                                  |
+| **Actor Type / Role**   | `actorType: "ops_user"` 或 Partner 身分，Role Code: `vehicle_owner`                            |
+| **Required Scopes**     | 使用既有 Scopes: `owned:read`, `reports:read`, `maintenance:read`                              |
+| **Resource Constraint** | `kind: "object"`, 強制校驗 `reg.vehicles.owner_partner_id === identity.partnerId`              |
+| **憑證登入途徑**        | 車主透過 Partner 登入途徑（OIDC PKCE BFF 或 Partner API 憑證）登入，Token 包含合法 `partnerId` |
+| **操作限制**            | **嚴格唯讀 (Strictly Read-Only)**，禁止任何 Mutation 請求                                      |
 
 ### 4.3 核心業務規則與安全防護 (Security Invariants)
 
@@ -621,16 +649,17 @@ export interface FleetDriverRosterItem {
    - 狀態枚舉嚴格對齊 `packages/contracts/src/index.ts:6710-6716` 之 `MAINTENANCE_STATUSES`：`"scheduled" | "in_progress" | "completed" | "cancelled" | "overdue"`。
 
 ### 4.4 資料模型與 TypeScript 契約
+
 ```typescript
 export interface HostVehicleSummary {
   vehicleId: string;
   plateNo: string;
-  vinMasked: string;            // 遮蔽後 6 碼
-  vehicleForm: string;          // sedan, mpv, etc.
-  licenseClass: string;         // taxi, rental, multi_taxi
-  energyType: string;           // fuel, electric, hybrid
-  currentStatus: string;        // active, maintenance, inactive
-  operatingFleetName: string;   // 營運車行名稱
+  vinMasked: string; // 遮蔽後 6 碼
+  vehicleForm: string; // sedan, mpv, etc.
+  licenseClass: string; // taxi, rental, multi_taxi
+  energyType: string; // fuel, electric, hybrid
+  currentStatus: string; // active, maintenance, inactive
+  operatingFleetName: string; // 營運車行名稱
   contractPeriod: {
     startAt: string;
     endAt: string;
@@ -640,14 +669,14 @@ export interface HostVehicleSummary {
 
 export interface HostVehicleEarningsSummary {
   vehicleId: string;
-  period: string;               // YYYY-MM
+  period: string; // YYYY-MM
   currency: "TWD";
-  grossRevenue: number;         // 該車產出之總車資
-  platformFee: number;          // 平台服務費
+  grossRevenue: number; // 該車產出之總車資
+  platformFee: number; // 平台服務費
   fleetCommission: number | null; // 待車行分潤政策確定 (決策落點: SR-HOST-BE-001，暫為 null)
-  netEarnings: number | null;     // 車主淨分潤 (若未定 split 政策，為 null，不可自創偽數據)
-  tripsCount: number;           // 完成趟次
-  operatingDays: number;        // 出勤天數
+  netEarnings: number | null; // 車主淨分潤 (若未定 split 政策，為 null，不可自創偽數據)
+  tripsCount: number; // 完成趟次
+  operatingDays: number; // 出勤天數
   settlementStatus: "calculated" | "pending_policy";
 }
 
@@ -668,7 +697,7 @@ export interface HostVehicleTripItem {
   vehicleId: string;
   startedAt: string;
   completedAt: string | null;
-  areaSummary: string;          // e.g. "大安區 → 南港區"
+  areaSummary: string; // e.g. "大安區 → 南港區"
   distanceKm: number;
   fareAmount: number;
   status: string;
@@ -688,6 +717,7 @@ export interface HostVehicleCaseItem {
 ### 4.5 API 路由與 Envelope 規格
 
 #### 1. 查詢車主名下車輛列表
+
 - **Method & Path**: `GET /api/host/vehicles`
 - **Auth**: Realm `partner`, Scopes `owned:read`, Resource constraint: `vehicle.owner_partner_id === identity.partnerId`
 - **Success Response (200 OK)**:
@@ -726,6 +756,7 @@ export interface HostVehicleCaseItem {
   ```
 
 #### 2. 查詢自車收益摘要
+
 - **Method & Path**: `GET /api/host/vehicles/:vehicleId/earnings`
 - **Auth**: Realm `partner`, Scopes `reports:read`, `owned:read`
 - **Query Params**: `month` (e.g. `2026-08`)
@@ -752,29 +783,34 @@ export interface HostVehicleCaseItem {
   ```
 
 #### 3. 查詢自車維保紀錄
+
 - **Method & Path**: `GET /api/host/vehicles/:vehicleId/maintenance`
 - **Auth**: Realm `partner`, Scopes `maintenance:read`, `owned:read`
 - **Success Response (200 OK)**: 返回 `ApiSuccessEnvelope<ApiListData<HostVehicleMaintenanceItem>>`。
 
 #### 4. 查詢自車行程任務 (去識別化)
+
 - **Method & Path**: `GET /api/host/vehicles/:vehicleId/trips`
 - **Auth**: Realm `partner`, Scopes `owned:read`
 - **Success Response (200 OK)**: 返回 `ApiSuccessEnvelope<ApiListData<HostVehicleTripItem>>`。
 
 #### 5. 查詢自車相關案件 (去識別化)
+
 - **Method & Path**: `GET /api/host/vehicles/:vehicleId/cases`
 - **Auth**: Realm `partner`, Scopes `owned:read`
 - **Success Response (200 OK)**: 返回 `ApiSuccessEnvelope<ApiListData<HostVehicleCaseItem>>`。
 
 ### 4.6 錯誤代碼與 HTTP 映射
-| Error Code | HTTP Status | 觸發情境與說明 |
-| :--- | :--- | :--- |
-| `HOST_UNAUTHORIZED` | `401 Unauthorized` | 未帶有效 Token 或 Session 失效。 |
-| `HOST_FORBIDDEN` | `403 Forbidden` | 呼叫端無有效 Partner 授權。 |
-| `HOST_VEHICLE_NOT_FOUND` | `404 Not Found` | 車輛不存在，或該車輛不屬於該車主（防枚舉統一回傳 404）。 |
-| `HOST_MUTATION_NOT_SUPPORTED` | `405 Method Not Allowed` | 車主嘗試發送 POST/PUT/DELETE 對自車資料進行寫入修改。 |
+
+| Error Code                    | HTTP Status              | 觸發情境與說明                                           |
+| :---------------------------- | :----------------------- | :------------------------------------------------------- |
+| `HOST_UNAUTHORIZED`           | `401 Unauthorized`       | 未帶有效 Token 或 Session 失效。                         |
+| `HOST_FORBIDDEN`              | `403 Forbidden`          | 呼叫端無有效 Partner 授權。                              |
+| `HOST_VEHICLE_NOT_FOUND`      | `404 Not Found`          | 車輛不存在，或該車輛不屬於該車主（防枚舉統一回傳 404）。 |
+| `HOST_MUTATION_NOT_SUPPORTED` | `405 Method Not Allowed` | 車主嘗試發送 POST/PUT/DELETE 對自車資料進行寫入修改。    |
 
 ### 4.7 正負驗收條件 (Acceptance Criteria)
+
 - **AC-HOST-POS-1 (多車查詢與遮蔽)**: 車主名下有車輛時，列表可正常回傳，VIN 後 6 碼以星號遮蔽；維保狀態正確對齊 `MAINTENANCE_STATUSES`（可包含 `overdue`）。
 - **AC-HOST-POS-2 (行程與案件去識別化)**: 車主檢視行程僅呈現概括行政區與金額，絕無乘客電話或門牌個資；案件僅呈現處理結論。
 - **AC-HOST-POS-3 (零營收與空資料兼容)**: 新車無行程或維保時，API 正常返回 200 與空陣列或零金額，不報錯崩潰。
@@ -785,11 +821,11 @@ export interface HostVehicleCaseItem {
 
 ## 5. 契約決策與下游落地落點對照表 (Decision Ledger & Execution Plan)
 
-| 關鍵考量點 | 決策落點與權威對齊 | 對應任務與 Migration |
-| :--- | :--- | :--- |
-| **請假與班表連動模式** | 班表底層為 `ops.phase1_driver_shifts`；請假核准後在 `record` jsonb 註記 `leaveReassigned: true`。在線司機進入假期啟動 `ops.phase1_driver_matching_suppressions`。出勤打卡與請求在線回傳 `409 DRIVER_ON_LEAVE`。 | `SR-LEAVE-BE-001`, `SR-LEAVE-FE-001`<br>Migration `V0086__sr_driver_leave.sql` |
-| **學院完訓率真值計算** | 廢止 fixture，以 `reg.driver_training_records` 真實作答動態計算；多課程以「通過全部必修課」為司機完成分母，完訓率不溢出。連動 `reg.driver_reg_profiles.training_status` 與 `trainingRequired`。作答綁定 `courseVersion`。 | `SR-ACADEMY-BE-001`, `SR-ACADEMY-FE-001`<br>Migration `V0087__sr_driver_academy.sql` |
-| **Host 車主身份與入口** | 沿用 `partner` realm（對應 `individual_owner`），授權使用現有 `owned:read`, `reports:read`, `maintenance:read`。維保對齊 `ops.phase1_maintenance_logs`，案件對齊 `crm.phase1_complaint_cases`。 | `SR-HOST-BE-001`, `SR-HOST-FE-001`<br>Migration `V0088__sr_host_vehicle_access.sql` |
-| **Host 收益與分潤規則** | 權威來源為 `ops.phase1_platform_earnings_ledger`；`fleetCommission` 與 `netEarnings` 明確標註為 `null` (決策落點: `SR-HOST-BE-001` 分潤政策)，不建立假數據。 | `SR-HOST-BE-001` |
-| **全域 API Envelope** | 全面統一為權威 `ApiSuccessEnvelope<T>`（`{ data, meta: { requestId, timestamp } }`）與 `ApiListData<T>`。 | `SR-CONTRACT-001` |
-| **全局整合與統一 Wiring** | 各模組只輸出獨立 module，由 `SR-WIRE-001` 統一於 `app.module.ts` 及各 App 導航列進行總裝配線。 | `SR-WIRE-001` |
+| 關鍵考量點                | 決策落點與權威對齊                                                                                                                                                                                                        | 對應任務與 Migration                                                                 |
+| :------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :----------------------------------------------------------------------------------- |
+| **請假與班表連動模式**    | 班表底層為 `ops.phase1_driver_shifts`；請假核准後在 `record` jsonb 註記 `leaveReassigned: true`。在線司機進入假期啟動 `ops.phase1_driver_matching_suppressions`。出勤打卡與請求在線回傳 `409 DRIVER_ON_LEAVE`。           | `SR-LEAVE-BE-001`, `SR-LEAVE-FE-001`<br>Migration `V0086__sr_driver_leave.sql`       |
+| **學院完訓率真值計算**    | 廢止 fixture，以 `reg.driver_training_records` 真實作答動態計算；多課程以「通過全部必修課」為司機完成分母，完訓率不溢出。連動 `reg.driver_reg_profiles.training_status` 與 `trainingRequired`。作答綁定 `courseVersion`。 | `SR-ACADEMY-BE-001`, `SR-ACADEMY-FE-001`<br>Migration `V0087__sr_driver_academy.sql` |
+| **Host 車主身份與入口**   | 沿用 `partner` realm（對應 `individual_owner`），授權使用現有 `owned:read`, `reports:read`, `maintenance:read`。維保對齊 `ops.phase1_maintenance_logs`，案件對齊 `crm.phase1_complaint_cases`。                           | `SR-HOST-BE-001`, `SR-HOST-FE-001`<br>Migration `V0088__sr_host_vehicle_access.sql`  |
+| **Host 收益與分潤規則**   | 權威來源為 `ops.phase1_platform_earnings_ledger`；`fleetCommission` 與 `netEarnings` 明確標註為 `null` (決策落點: `SR-HOST-BE-001` 分潤政策)，不建立假數據。                                                              | `SR-HOST-BE-001`                                                                     |
+| **全域 API Envelope**     | 全面統一為權威 `ApiSuccessEnvelope<T>`（`{ data, meta: { requestId, timestamp } }`）與 `ApiListData<T>`。                                                                                                                 | `SR-CONTRACT-001`                                                                    |
+| **全局整合與統一 Wiring** | 各模組只輸出獨立 module，由 `SR-WIRE-001` 統一於 `app.module.ts` 及各 App 導航列進行總裝配線。                                                                                                                            | `SR-WIRE-001`                                                                        |
