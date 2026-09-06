@@ -6,7 +6,7 @@
 - **任務名稱**: 修復轉介 handoff 與可用 fallback
 - **Owner**: `Gemini2`
 - **Reviewer**: `Claude`
-- **Base SHA**: `ea1b1b4f0359d5ca5ab00ad604d37281a74d70df`
+- **Base SHA**: `bb265b286d718e61d2c50479deb0ddcd031a4597`
 - **Candidate Branch**: `gemini2/sr-referral-001`
 - **審計關聯項**: R07, C020, C021
 
