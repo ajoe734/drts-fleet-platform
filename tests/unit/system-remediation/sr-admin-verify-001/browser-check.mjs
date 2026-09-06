@@ -245,7 +245,7 @@ try {
       await page.getByRole("button", { name: "Refresh", exact: true }).click();
       await expect.poll(() => evidence.requests.length).toBe(beforeRefresh + 2);
       await expect(
-        page.getByText("Browser-only fleet reload denial", { exact: true }),
+        page.getByText(/API error 403:.*Browser-only fleet reload denial/),
       ).toBeVisible();
       await expect(
         page.getByRole("link", { name: /Browser-only Fleet Partner/ }),
@@ -282,7 +282,7 @@ try {
         page.getByText("Unable to load fleet partner data", { exact: true }),
       ).toBeVisible();
       await expect(
-        page.getByText("Browser-only fleet permission denial", { exact: true }),
+        page.getByText(/API error 403:.*Browser-only fleet permission denial/),
       ).toBeVisible();
       await expect(
         page.getByText("No fleet partners found.", { exact: true }),
