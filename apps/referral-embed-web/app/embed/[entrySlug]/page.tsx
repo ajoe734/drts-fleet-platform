@@ -32,6 +32,11 @@ export default async function PassengerEmbedPage({
         typeof query.entryHost === "string"
           ? { entryHost: query.entryHost }
           : null,
+        typeof query.artifact === "string"
+          ? { artifact: query.artifact }
+          : typeof query.token === "string"
+            ? { artifact: query.token }
+            : null,
       ),
     );
   } catch (error) {
