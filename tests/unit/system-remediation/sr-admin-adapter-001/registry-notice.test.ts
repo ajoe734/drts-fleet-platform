@@ -63,7 +63,7 @@ describe("SR-ADMIN-ADAPTER-001 registry notices", () => {
     expect(renderNotice()).toBe("");
   });
 
-  it.each(["404 Not Found", "403 Forbidden", "503 Service Unavailable"])(
+  it.each(["404 Not Found", "403 Forbidden", "503 Service Unavailable", ""])(
     "does not show an adapter warning after %s, even with stale attention data",
     (error) => {
       expect(

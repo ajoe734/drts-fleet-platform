@@ -43,7 +43,7 @@ export function RegistryNotice({
   title: (adapter: PlatformAdapter) => string;
   body: (adapter: PlatformAdapter) => string;
 }) {
-  if (loading || error) return null;
+  if (loading || error !== null) return null;
   const adapter = findAttentionAdapter(adapters);
   if (!adapter) return null;
 
