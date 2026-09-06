@@ -11,8 +11,8 @@
 - Decision Ref: `docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md`
 - Functional Requirements (FRs): `UV-FR-001`, `UV-FR-003`, `UV-FR-007`, `UV-FR-010`, `UV-FR-011`, `UV-FR-018`, `UV-FR-021`, `UV-FR-024`, `UV-FR-026`, `UV-FR-027`, `UV-FR-030`, `UV-FR-031`, `UV-FR-032`
 - Acceptance Criteria (ACs): `UV-AC-002`, `UV-AC-026`, `UV-AC-030`, `UV-AC-033`
-- Last Update: `2026-09-06T13:52:31Z`
-- Re-Verification: `2026-09-06T13:52:31Z` (acceptance-phase唯讀複查，Claude2，acceptance_ready_dispatch 喚醒，連續第 20 輪，origin/dev 推進 8 個提交但均與 7 項 required_acceptance 無關（含逐一核對 CTI adapter 骨架提交 UV-EXEC-008，確認 sandbox-only/未接線/無真實供應商憑證），GitHub secrets/variables 計數與關鍵字均無變化，7 項 required_acceptance 仍待外部證據)
+- Last Update: `2026-09-06T14:36:00Z`
+- Re-Verification: `2026-09-06T14:36:00Z` (acceptance-phase唯讀複查，Claude2，acceptance_ready_dispatch 喚醒，dedup 政策例外項：origin/dev 推進至 `40ba315e4`，新增提交 `40ba315e4`（SR-SCOPE-001 排除範圍與全能力追溯驗收表）逐一核對其 C044 CTI/錄音 callback 條目與 UV-EXEC-028 交叉引用，確認僅為既有阻礙之文件化重申，未含任何正式供應商帳號/合約憑證，不構成 required_acceptance 之可用證據，GitHub secrets/variables 計數與關鍵字均無變化，7 項 required_acceptance 仍待外部證據)
 
 ---
 
@@ -247,6 +247,17 @@
 ### 2.23 Acceptance 階段複查記錄（2026-09-06T13:52:31Z，Claude2，第 20 次連續 acceptance_ready_dispatch 喚醒，dedup 政策下之例外項）
 
 依 2.22 訂立之 dedup 政策，本輪僅在偵測到 `origin/dev` SHA 變化時才需要說明；本次確實偵測到變化，故簡述而非重複完整表格：`origin/dev` 已由 `2093cf7e3`（本任務 merge_sha）推進至 `a4876ac529abfb634c2b96f237116202abf3d87d`，中間新增 8 個提交，其中唯一與本任務主題相鄰者為 `2aa3cb5d8`（`UV-EXEC-008`：建立 CTI adapter 與獨立媒體 worker 骨架）。逐一核對該提交內容：其 `voice-cti.adapter.ts` 明確標註 sandbox-only、fail-closed-in-production，且「Not wired into CallcenterModule/Controller/Service」；未含任何正式/測試 CTI 供應商帳號憑證、號碼池或轉接授權，因此**不構成 `cti_account_capability_evidence` 之可用證據**，第 3 節 CTI 盤點與 §8.1 矩陣維持不變。其餘 7 個提交（發票、推薦、UV-EXEC-005/007 unblock 診斷等）與七項 `required_acceptance` 主題無關。`gh secret list`/`gh variable list` 計數仍為 11/97，關鍵字比對仍為 0 筆；`ai-status.json` 候選生命週期欄位未變。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄。**
+
+### 2.24 Acceptance 階段複查記錄（2026-09-06T14:36:00Z，Claude2，acceptance_ready_dispatch 喚醒，dedup 政策下之例外項）
+
+依 §2.22 dedup 政策，本輪偵測到 `origin/dev` SHA 變化，故說明：`origin/dev` 已由 `a4876ac52`（round 27 note 記錄之基準）推進至 `40ba315e4114369eaa7e12d35aae83a795c97b1d`，`git log a4876ac52..origin/dev --oneline` 顯示僅新增 1 個提交：`40ba315e4`（`[ReviewBus] SR-SCOPE-001 排除範圍與全能力追溯驗收表` #1681，作者 Gemini2/Claude reviewer）。逐一核對其內容（`docs/.../SR-SCOPE-001.md`、`scope-and-coverage.md`、`sr-scope-matrix.test.ts`，共 987 行新增，皆為文件與測試，無程式邏輯變更）：
+
+- 該工件為 134 項能力最終驗收擁有者矩陣，其中 **C044**（調度與營運／CTI／錄音 callback 來源）條目記載狀態為「外部待完成」，負責角色標註 `SR-QA-CALL-001 (Gemini2), UV-EXEC-028 (Gemini)`，驗收依據為「真來電／失敗／延遲錄音／補件／保存與授權播放」。
+- 該矩陣同時重申 `UV-EXEC-028`（真實 PSTN、逐語言、轉接與容量驗證）維持 `blocked`，且明確要求「絕不因 dev 閉環通過而誤關外部 live 驗收」，並要求 `SR-ACCEPT-001` 須等待 `UV-EXEC-028` 真實 PSTN 電話完備。
+- 上述內容為**既有阻礙之交叉引用與正式文件化重申**，並未提供任何正式/測試 CTI、TWM 或原生語音候選供應商帳號憑證、合約、費率或資料條款，因此**不構成 §8.1 任一 `required_acceptance` 項目之可用證據**；第 3–7 節盤點與 §8.1 矩陣維持全數 `❌ 未滿足`。
+- `gh secret list`／`gh variable list` 重新執行，計數仍為 11/97，CTI/TWM/Voice/Carrier/DTMF/Twilio/SIP/ASR/TTS/Phone/PSTN/Candidate 關鍵字比對仍為 0 筆匹配；`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`）與 `status`=`acceptance` 均未變化。
+
+> **本輪複查結論：** 機器真相僅新增 1 筆與本任務主題相鄰但不構成證據的文件化提交，7 項 `required_acceptance` 仍全數為 Blocker。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄**（依既有記憶教訓：`progress` 在 `acceptance` 狀態任務上會清除候選生命週期證據）。重申建議：本任務已合併、產出完整，唯一缺口是真實外部供應商帳號/合約/費率證據，非本 worker 唯讀盤點權限可取得；建議 supervisor 維持證據變更觸發式 re-dispatch 政策。
 
 ---
 
