@@ -72,6 +72,16 @@ export function calculateRetentionCoverage(
   };
 }
 
+/** Only a successful, nonempty query can establish retention coverage. */
+export function getVisibleRetentionCoverage(
+  records: readonly MultiTaxiTripOperationalAdminView[],
+  available: boolean,
+) {
+  return available && records.length > 0
+    ? calculateRetentionCoverage(records)
+    : null;
+}
+
 export function isExportTerminal(
   status: MultiTaxiTripOperationalExportJobStatus,
 ) {

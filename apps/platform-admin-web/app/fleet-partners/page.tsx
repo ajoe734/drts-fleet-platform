@@ -422,7 +422,7 @@ export default function FleetPartnersPage() {
       <CanvasCard>
         {loading ? (
           <div>{t("fleetPartners.loading")}</div>
-        ) : filteredPartners.length === 0 ? (
+        ) : error ? null : filteredPartners.length === 0 ? (
           <div>{t("fleetPartners.empty")}</div>
         ) : (
           <CanvasTable
