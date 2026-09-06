@@ -11,8 +11,8 @@
 - Decision Ref: `docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md`
 - Functional Requirements (FRs): `UV-FR-001`, `UV-FR-003`, `UV-FR-007`, `UV-FR-010`, `UV-FR-011`, `UV-FR-018`, `UV-FR-021`, `UV-FR-024`, `UV-FR-026`, `UV-FR-027`, `UV-FR-030`, `UV-FR-031`, `UV-FR-032`
 - Acceptance Criteria (ACs): `UV-AC-002`, `UV-AC-026`, `UV-AC-030`, `UV-AC-033`
-- Last Update: `2026-09-06T14:36:00Z`
-- Re-Verification: `2026-09-06T14:36:00Z` (acceptance-phase唯讀複查，Claude2，acceptance_ready_dispatch 喚醒，dedup 政策例外項：origin/dev 推進至 `40ba315e4`，新增提交 `40ba315e4`（SR-SCOPE-001 排除範圍與全能力追溯驗收表）逐一核對其 C044 CTI/錄音 callback 條目與 UV-EXEC-028 交叉引用，確認僅為既有阻礙之文件化重申，未含任何正式供應商帳號/合約憑證，不構成 required_acceptance 之可用證據，GitHub secrets/variables 計數與關鍵字均無變化，7 項 required_acceptance 仍待外部證據)
+- Last Update: `2026-09-06T15:00:10Z`
+- Re-Verification: `2026-09-06T15:00:10Z` (acceptance-phase唯讀複查，Claude2，第 28 輪 acceptance_ready_dispatch 喚醒，零 delta：origin/dev 仍停在 `548608e45`，與 round 27 記錄基準相同，無新提交；GitHub secrets/variables 計數 (11/97) 與關鍵字比對均無變化，7 項 required_acceptance 仍待外部證據)
 
 ---
 
@@ -258,6 +258,12 @@
 - `gh secret list`／`gh variable list` 重新執行，計數仍為 11/97，CTI/TWM/Voice/Carrier/DTMF/Twilio/SIP/ASR/TTS/Phone/PSTN/Candidate 關鍵字比對仍為 0 筆匹配；`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`）與 `status`=`acceptance` 均未變化。
 
 > **本輪複查結論：** 機器真相僅新增 1 筆與本任務主題相鄰但不構成證據的文件化提交，7 項 `required_acceptance` 仍全數為 Blocker。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄**（依既有記憶教訓：`progress` 在 `acceptance` 狀態任務上會清除候選生命週期證據）。重申建議：本任務已合併、產出完整，唯一缺口是真實外部供應商帳號/合約/費率證據，非本 worker 唯讀盤點權限可取得；建議 supervisor 維持證據變更觸發式 re-dispatch 政策。
+
+### 2.25 Acceptance 階段複查記錄（2026-09-06T15:00:10Z，Claude2，第 28 次連續 acceptance_ready_dispatch 喚醒，dedup 政策下之零 delta 項）
+
+依 §2.22 dedup 政策，本輪 `git fetch origin` 後比對 `origin/dev` 仍為 `548608e45841ca9edcbf382399bbbfb74d164535`（`[ReviewBus] SR-IAM-001 工作階段 scope 與角色 API 權限回歸` #1683），與 round 27 §2.24 之後記錄的最新基準一致，**無新提交**，因此依政策省略逐筆說明。重新執行 `gh secret list`／`gh variable list`，計數仍為 11/97；CTI/TWM/Voice/Carrier/DTMF/Twilio/SIP/ASR/TTS/Phone/PSTN/Candidate 關鍵字比對仍為 0 筆匹配；`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`）與 `status`=`acceptance` 均未變化。本地分支 `claude2/uv-exec-027` 工作樹乾淨。
+
+> **本輪複查結論：** 機器真相零變化，7 項 `required_acceptance` 仍全數為 Blocker。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄。**
 
 ---
 
