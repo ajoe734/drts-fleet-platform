@@ -28,14 +28,17 @@
     "@nestjs/platform-express": "^11.1.18",
     "@nestjs/throttler": "^6.5.0",
     "eventemitter2": "^6.4.9",
+    "exceljs": "^4.4.0",
     "jsonwebtoken": "^9.0.3",
     "openclaw": "2026.6.1",
+    "pdfkit": "^0.20.2",
     "pg": "^8.20.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.20.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
