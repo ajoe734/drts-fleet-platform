@@ -197,7 +197,7 @@ describe("step-up proof policy", () => {
     });
 
     const activateIssued = service.createProof(
-      opsIdentity,
+      { ...opsIdentity, amr: ["webauthn"], acr: "aal2" },
       {
         method: "POST",
         path: "/api/platform-admin/break-glass/requests/req-1/activate",
@@ -250,6 +250,51 @@ describe("step-up proof policy", () => {
         ),
       ),
     ).toThrowError(ApiRequestError);
+  });
+
+  it("rejects generic MFA (TOTP/push/OTP/aal2) for break-glass activation and requires hardware/phishing-resistant proof", () => {
+    const service = new StepUpProofService();
+    const opsIdentity = makeIdentity({
+      actorType: "ops_user",
+      actorId: "ops-001",
+      principalId: "ops-001",
+      realm: "ops",
+      tenantId: null,
+      roleFamilies: ["ops"],
+      roles: ["ops_user"],
+      scopes: ["identity:break-glass:activate"],
+    });
+    const activateCommand = {
+      method: "POST",
+      path: "/api/platform-admin/break-glass/requests/req-1/activate",
+    };
+
+    for (const identity of [
+      { ...opsIdentity, amr: ["totp"], acr: "aal2" },
+      { ...opsIdentity, amr: ["push"], acr: "aal2" },
+      { ...opsIdentity, amr: ["otp"], acr: null },
+      { ...opsIdentity, amr: [], acr: "aal2" },
+    ]) {
+      let thrown: unknown;
+      try {
+        service.createProof(identity, activateCommand);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(ApiRequestError);
+      expect(getErrorCode(thrown)).toBe("MFA_REQUIRED");
+    }
+
+    // Hardware/phishing-resistant factors are accepted.
+    const issued = service.createProof(
+      { ...opsIdentity, amr: ["fido2"], acr: null },
+      activateCommand,
+    );
+    expect(issued).toMatchObject({
+      required: true,
+      actionId: "platform:break-glass:activate",
+      stepUpReference: expect.any(String),
+    });
   });
 
   it("returns MFA_REQUIRED when the current session lacks trusted MFA evidence", () => {

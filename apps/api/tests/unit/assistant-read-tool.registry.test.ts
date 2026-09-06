@@ -397,19 +397,14 @@ describe("AssistantReadToolRegistry", () => {
     ).toThrowError(ApiRequestError);
   });
 
-  it("masks complaint exports and keeps them scoped to the linked order", () => {
+  it("masks complaint exports for an ops caller holding complaints:read", () => {
     const { registry } = createRegistry();
 
     const result = registry.execute({
       toolName: "get_complaint_export_view",
       input: { caseNo: "CMP-001" },
       identity: createIdentity({
-        actorType: "tenant_admin",
-        actorId: "tenant-admin-001",
-        realm: "tenant",
-        tenantId: "tenant-001",
-        roleFamilies: ["tenant"],
-        roles: ["tenant_admin"],
+        scopes: ["complaints:read"],
       }),
     });
 
@@ -426,5 +421,64 @@ describe("AssistantReadToolRegistry", () => {
         }),
       ],
     });
+  });
+
+  it("denies complaint access for a tenant_admin even for a same-tenant linked order", () => {
+    const { registry } = createRegistry();
+
+    const identity = createIdentity({
+      actorType: "tenant_admin",
+      actorId: "tenant-admin-001",
+      realm: "tenant",
+      tenantId: "tenant-001",
+      roleFamilies: ["tenant"],
+      roles: ["tenant_admin"],
+      scopes: ["assistant:write"],
+    });
+
+    for (const toolName of [
+      "get_complaint_case",
+      "get_complaint_timeline",
+      "get_complaint_export_view",
+    ] as const) {
+      expect(() =>
+        registry.execute({
+          toolName,
+          input: { caseNo: "CMP-001" },
+          identity,
+        }),
+      ).toThrowError(ApiRequestError);
+    }
+  });
+
+  it("denies complaint access for an ops realm caller lacking complaints:read", () => {
+    const { registry } = createRegistry();
+
+    expect(() =>
+      registry.execute({
+        toolName: "get_complaint_case",
+        input: { caseNo: "CMP-001" },
+        identity: createIdentity({ scopes: ["assistant:write"] }),
+      }),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("denies complaint access for a platform realm caller even with complaints:read", () => {
+    const { registry } = createRegistry();
+
+    expect(() =>
+      registry.execute({
+        toolName: "get_complaint_case",
+        input: { caseNo: "CMP-001" },
+        identity: createIdentity({
+          actorType: "platform_admin",
+          actorId: "platform-admin-001",
+          realm: "platform",
+          roleFamilies: ["platform"],
+          roles: ["platform_admin"],
+          scopes: ["complaints:read"],
+        }),
+      }),
+    ).toThrowError(ApiRequestError);
   });
 });

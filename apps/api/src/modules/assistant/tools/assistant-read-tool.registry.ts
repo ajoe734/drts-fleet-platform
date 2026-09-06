@@ -239,7 +239,7 @@ export class AssistantReadToolRegistry {
     caseNo: string,
   ) {
     const complaintCase = this.complaintService.getComplaintCase(caseNo);
-    if (this.canReadComplaint(identity, complaintCase)) {
+    if (this.canReadComplaint(identity)) {
       return complaintCase;
     }
 
@@ -253,26 +253,15 @@ export class AssistantReadToolRegistry {
     );
   }
 
-  private canReadComplaint(
-    identity: BootstrapRequestIdentity,
-    complaintCase: ComplaintCaseRecord,
-  ) {
-    if (this.hasGlobalReadAccess(identity)) {
-      return true;
-    }
-
-    if (!complaintCase.relatedOrderId) {
-      return false;
-    }
-
-    try {
-      const linkedOrder = this.ownedMobilityService.getOrder(
-        complaintCase.relatedOrderId,
-      );
-      return this.canReadOrder(identity, linkedOrder);
-    } catch {
-      return false;
-    }
+  private canReadComplaint(identity: BootstrapRequestIdentity) {
+    // Mirrors the REST complaints route policy (auth.policy.ts complaints:*):
+    // system/ops realm only, gated by complaints:read. Tenant/partner tenancy
+    // matching an order's tenant is not sufficient authority to read
+    // complaint records, so it is intentionally not consulted here.
+    return (
+      (identity.realm === "system" || identity.realm === "ops") &&
+      identity.scopes.includes("complaints:read")
+    );
   }
 
   private canReadOrder(
