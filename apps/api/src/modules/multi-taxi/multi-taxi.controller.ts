@@ -364,19 +364,6 @@ export class MultiTaxiController {
     );
   }
 
-  @Get("platform-admin/multi-taxi-trip-records/export")
-  @RequireRealms("platform")
-  @RequireScopes("multi_taxi_records:export")
-  async exportTripOperationalRecords(
-    @Query() query: MultiTaxiTripOperationalRecordQuery,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      await this.multiTaxiService.exportTripOperationalRecords(query),
-      requestId,
-    );
-  }
-
   private requireActorId(identity: BootstrapRequestIdentity | null) {
     const actorId = identity?.actorId?.trim();
     if (!actorId) {

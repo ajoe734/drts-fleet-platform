@@ -4,6 +4,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 import {
+  IAM_ACTOR_POLICY_DEFINITIONS,
   getIamScopeDefinition,
   isKnownIamScope,
 } from "@drts/contracts";
@@ -355,20 +356,25 @@ export function runDynamicRouteInventory(
  * Known pre-existing scope defects discovered in controllers outside the 4 Wave A route groups:
  * - modules/assistant/assistant.controller.ts (assistant:write)
  * - modules/auth/break-glass.controller.ts (identity:break-glass:request/approve/activate)
- * - modules/multi-taxi/multi-taxi.controller.ts (multi_taxi_records:read/export)
  *
  * Per SD §6 and runbook execution prompt, verification tasks do not author de novo
  * authorization catalog decisions or change policies to make tests pass; these defects
  * are explicitly isolated and tracked here until their owning feature tasks land reviewed
  * catalog definitions and grants.
+ *
+ * Retired: multi_taxi_records:read/export now carry catalog definitions and
+ * system/platform_admin grants (IAM_SCOPE_DEFINITIONS,
+ * IAM_ACTOR_POLICY_DEFINITIONS). An allowlisted scope is unreachable in
+ * production, not merely untested: every caller of the P5 operational-record
+ * routes was denied by the bootstrap guard because no actor preset could hold
+ * the scope. Entries here must stay paired with an owning task, and an entry
+ * whose scope backs a shipped UI surface is a live outage, not a deferred one.
  */
 export const KNOWN_PRE_EXISTING_SCOPE_DEFECTS: ReadonlySet<string> = new Set([
   "assistant:write",
   "identity:break-glass:request",
   "identity:break-glass:approve",
   "identity:break-glass:activate",
-  "multi_taxi_records:read",
-  "multi_taxi_records:export",
 ]);
 
 describe("IAM dynamic route inventory and catalogue verification", () => {
@@ -393,8 +399,55 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
     );
     expect(unexpectedUnknownScopes).toEqual([]);
 
-    // Explicitly track the 15 pre-existing defect instances across 3 controllers
-    expect(result.unknownScopes).toHaveLength(15);
+    // Explicitly track the 9 pre-existing defect instances across 2 controllers
+    expect(result.unknownScopes).toHaveLength(9);
+  });
+
+  it("validates that every declared route scope is grantable to some actor", () => {
+    const result = runDynamicRouteInventory();
+
+    const grantableScopes = new Set(
+      IAM_ACTOR_POLICY_DEFINITIONS.flatMap((definition) => definition.scopes),
+    );
+
+    // A scope that exists in the catalogue but sits in no actor preset is
+    // unreachable: the bootstrap guard denies every caller, so the surface
+    // behind it is dead in production while every catalogue test still passes.
+    // multi_taxi_records:read shipped that way and 403'd the P5 records console
+    // for all accounts, platform_admin included.
+    const ungrantableScopes = result.routesDiscovered
+      .flatMap((route) =>
+        route.effectiveScopes.map((scope) => ({
+          scope,
+          routePath: route.routePath,
+          controller: route.controller,
+        })),
+      )
+      .filter(
+        (item) =>
+          !KNOWN_PRE_EXISTING_SCOPE_DEFECTS.has(item.scope) &&
+          !grantableScopes.has(item.scope),
+      );
+
+    expect(ungrantableScopes).toEqual([]);
+  });
+
+  it("keeps the uncontrolled multi-taxi trip-records export route retired", () => {
+    const result = runDynamicRouteInventory();
+
+    // Granting multi_taxi_records:export made this scope reachable for the
+    // first time. A raw `GET .../multi-taxi-trip-records/export` handler
+    // returned masked export rows directly, with no purpose capture, no
+    // step-up freshness check, and no actor-bound export audit entry -- unlike
+    // the export-jobs preview/create/download flow, which ReportingFilingService
+    // enforces those controls for. That handler was retired rather than exposed;
+    // this guards against it (or an equivalent shortcut) reappearing.
+    const uncontrolledExportRoutes = result.routesDiscovered.filter(
+      (route) =>
+        route.routePath === "platform-admin/multi-taxi-trip-records/export",
+    );
+
+    expect(uncontrolledExportRoutes).toEqual([]);
   });
 
   it("validates that all declared realms are compatible with the scope catalogue", () => {

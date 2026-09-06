@@ -316,8 +316,8 @@ export function toFleetPartnerFormState(
 }
 
 export async function listFleetPartners(client: ApiClient) {
-  const result = await client.get<unknown[]>("/api/admin/fleet-partners");
-  return (result ?? []).map(normalizeFleetPartnerRecord);
+  const result = await client.getList<unknown>("/api/admin/fleet-partners");
+  return result.map(normalizeFleetPartnerRecord);
 }
 
 export async function getFleetPartner(
@@ -374,10 +374,10 @@ export async function listFleetPartnerDrivers(
   client: ApiClient,
   fleetPartnerId: string,
 ) {
-  const result = await client.get<unknown[]>(
+  const result = await client.getList<unknown>(
     `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/drivers`,
   );
-  return (result ?? []).map(normalizeAffiliationRecord);
+  return result.map(normalizeAffiliationRecord);
 }
 
 export async function createDriverAffiliation(
@@ -403,10 +403,10 @@ export async function listRevenueShareRules(
   client: ApiClient,
   fleetPartnerId: string,
 ) {
-  const result = await client.get<unknown[]>(
+  const result = await client.getList<unknown>(
     `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/revenue-share-rules`,
   );
-  return (result ?? []).map(normalizeRuleRecord);
+  return result.map(normalizeRuleRecord);
 }
 
 export async function createRevenueShareRule(
@@ -453,10 +453,10 @@ export async function listFleetStatements(
   client: ApiClient,
   fleetPartnerId: string,
 ) {
-  const result = await client.get<unknown[]>(
+  const result = await client.getList<unknown>(
     `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/statements`,
   );
-  return (result ?? []).map(normalizeStatementRecord);
+  return result.map(normalizeStatementRecord);
 }
 
 export function formatMoneyMinor(
