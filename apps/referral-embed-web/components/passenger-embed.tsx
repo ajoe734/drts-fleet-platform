@@ -14,10 +14,8 @@ import type {
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
 } from "@drts/contracts";
-import {
-  type EmbedContext,
-  buildStandaloneFallbackUrl,
-} from "../lib/embed-context";
+import type { EmbedContext } from "../lib/embed-context";
+import { buildStandaloneFallbackUrl } from "../lib/embed-fallback";
 import {
   EMBED_TRIP_FALLBACK_PROGRESS,
   EMBED_TRIP_FALLBACK_SCREENS,
