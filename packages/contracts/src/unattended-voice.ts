@@ -44,10 +44,17 @@ export const VoiceSpeechEvidenceSchema = z
   .strict();
 export type VoiceSpeechEvidence = z.infer<typeof VoiceSpeechEvidenceSchema>;
 
+export const DTMF_DIGIT_REGEX = /^[0-9*#A-Da-d]$/;
+
 export const VoiceDtmfEvidenceSchema = z
   .object({
     eventId: z.string().uuid(),
-    digit: z.string(),
+    digit: z
+      .string()
+      .regex(
+        DTMF_DIGIT_REGEX,
+        "Must be a single valid CTI DTMF digit (0-9, *, #, A-D)",
+      ),
   })
   .strict();
 export type VoiceDtmfEvidence = z.infer<typeof VoiceDtmfEvidenceSchema>;
@@ -255,16 +262,76 @@ export const VoiceDraftSchema = z.object({
 });
 export type VoiceDraft = z.infer<typeof VoiceDraftSchema>;
 
-export const VoiceReceiptSchema = z.object({
-  actionKey: z.string(),
-  status: VoiceCommitStatusSchema,
-  commandId: z.string().uuid().optional(),
-  orderId: z.string().uuid().nullable().optional(),
-  nextAction: z.string().optional(),
-  pollAfterMs: z.number().int().optional(),
-  rejectionReason: z.string().optional(),
-});
+export const VOICE_RECEIPT_STATUSES = [
+  "pending",
+  "succeeded",
+  "rejected",
+] as const;
+
+export const VoiceReceiptStatusSchema = z.enum(VOICE_RECEIPT_STATUSES);
+export type VoiceReceiptStatus = z.infer<typeof VoiceReceiptStatusSchema>;
+
+export const VoicePendingReceiptSchema = z
+  .object({
+    commandId: z.string().uuid(),
+    status: z.literal("pending"),
+    orderId: z.null().optional(),
+    nextAction: z.string().optional(),
+    pollAfterMs: z.number().int().optional(),
+    actionKey: z.string().optional(),
+  })
+  .strict();
+export type VoicePendingReceipt = z.infer<typeof VoicePendingReceiptSchema>;
+
+export const VoiceSucceededReceiptSchema = z
+  .object({
+    commandId: z.string().uuid(),
+    status: z.literal("succeeded"),
+    orderId: z.string().uuid(),
+    nextAction: z.string().optional(),
+    pollAfterMs: z.number().int().optional(),
+    actionKey: z.string().optional(),
+  })
+  .strict();
+export type VoiceSucceededReceipt = z.infer<typeof VoiceSucceededReceiptSchema>;
+
+export const VoiceRejectedReceiptSchema = z
+  .object({
+    commandId: z.string().uuid(),
+    status: z.literal("rejected"),
+    orderId: z.null().optional(),
+    rejectionReason: z.string().optional(),
+    nextAction: z.string().optional(),
+    pollAfterMs: z.number().int().optional(),
+    actionKey: z.string().optional(),
+  })
+  .strict();
+export type VoiceRejectedReceipt = z.infer<typeof VoiceRejectedReceiptSchema>;
+
+export const VoiceReceiptSchema = z.discriminatedUnion("status", [
+  VoicePendingReceiptSchema,
+  VoiceSucceededReceiptSchema,
+  VoiceRejectedReceiptSchema,
+]);
 export type VoiceReceipt = z.infer<typeof VoiceReceiptSchema>;
+
+export const VoiceReceiptRecordSchema = z
+  .object({
+    actionKey: z.string().min(1),
+    commandId: z.string().uuid(),
+    status: VoiceReceiptStatusSchema,
+    orderId: z.string().uuid().nullable().optional(),
+    payloadHash: z.string().optional(),
+    resultVersion: z.number().int().optional(),
+    rejectionReason: z.string().optional(),
+    createdAt: z.string().datetime().optional(),
+    updatedAt: z.string().datetime().optional(),
+  })
+  .strict();
+export type VoiceReceiptRecord = z.infer<typeof VoiceReceiptRecordSchema>;
+
+export const VoiceActionKeyRecordSchema = VoiceReceiptRecordSchema;
+export type VoiceActionKeyRecord = VoiceReceiptRecord;
 
 export const VoiceCallbackStatusSchema = z.enum([
   "pending",
@@ -301,7 +368,11 @@ export type VoiceCapabilityScope = z.infer<typeof VoiceCapabilityScopeSchema>;
 
 export const VoiceCapabilitySchema = z
   .object({
+    iss: z.string().min(1).optional(),
     aud: z.literal("voice-tool-gateway"),
+    exp: z.number().int().positive().optional(),
+    iat: z.number().int().positive().optional(),
+    nbf: z.number().int().positive().optional(),
     servicePrincipalId: z.string().min(1),
     voiceSessionId: z.string().uuid(),
     resourceScopeId: z.string().uuid(),
@@ -311,3 +382,37 @@ export const VoiceCapabilitySchema = z
   })
   .strict();
 export type VoiceCapability = z.infer<typeof VoiceCapabilitySchema>;
+
+export const VoiceCapabilityTokenClaimsSchema = z
+  .object({
+    iss: z.string().min(1),
+    aud: z.literal("voice-tool-gateway"),
+    exp: z.number().int().positive(),
+    iat: z.number().int().positive().optional(),
+    nbf: z.number().int().positive().optional(),
+    servicePrincipalId: z.string().min(1),
+    voiceSessionId: z.string().uuid(),
+    resourceScopeId: z.string().uuid(),
+    routeProfileVersion: z.number().int(),
+    leaseEpoch: z.number().int(),
+    scopes: z.array(VoiceCapabilityScopeSchema),
+  })
+  .strict();
+export type VoiceCapabilityTokenClaims = z.infer<
+  typeof VoiceCapabilityTokenClaimsSchema
+>;
+
+export const VoiceCapabilityClaimsSchema = VoiceCapabilityTokenClaimsSchema;
+export type VoiceCapabilityClaims = VoiceCapabilityTokenClaims;
+
+export const VoiceCapabilityTokenEnvelopeSchema = z
+  .object({
+    token: z.string().min(1),
+    tokenType: z.literal("Bearer").default("Bearer"),
+    expiresIn: z.number().int().positive(),
+    claims: VoiceCapabilityTokenClaimsSchema,
+  })
+  .strict();
+export type VoiceCapabilityTokenEnvelope = z.infer<
+  typeof VoiceCapabilityTokenEnvelopeSchema
+>;

@@ -8,18 +8,29 @@ import {
   SpeechVoiceProofSchema,
   DtmfVoiceProofSchema,
   VoiceCapabilitySchema,
+  VoiceCapabilityTokenClaimsSchema,
+  VoiceCapabilityClaimsSchema,
+  VoiceCapabilityTokenEnvelopeSchema,
   VoiceScopeProfileSchema,
   VoiceErrorCodeSchema,
   VOICE_ERROR_CODES,
   VoiceSessionSchema,
   VoiceDraftSchema,
   VoiceReceiptSchema,
+  VoiceReceiptStatusSchema,
+  VOICE_RECEIPT_STATUSES,
+  VoicePendingReceiptSchema,
+  VoiceSucceededReceiptSchema,
+  VoiceRejectedReceiptSchema,
+  VoiceReceiptRecordSchema,
+  VoiceActionKeyRecordSchema,
   VoiceCallbackSchema,
   VoiceCallbackStatusSchema,
   VoiceRecordingStateSchema,
   VoiceConfirmationStateSchema,
   VoiceOutcomeSchema,
   VoiceCommitStatusSchema,
+  VoiceDtmfEvidenceSchema,
 } from "../../packages/contracts/src/unattended-voice";
 
 const OPENAPI_PATH = resolve(process.cwd(), "docs/04-api/openapi-spec.yaml");
@@ -218,6 +229,114 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       const result = VoiceCapabilitySchema.safeParse(capability);
       expect(result.success).toBe(false);
     });
+
+    it("accepts valid capability token claims with iss and exp in VoiceCapabilitySchema", () => {
+      const capability = {
+        iss: "https://auth.example.com",
+        aud: "voice-tool-gateway",
+        exp: 1757134800,
+        iat: 1757131200,
+        servicePrincipalId: "123e4567-e89b-12d3-a456-426614174000",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+        routeProfileVersion: 1,
+        leaseEpoch: 2,
+        scopes: ["session_execute", "address_resolve"],
+      };
+      const result = VoiceCapabilitySchema.safeParse(capability);
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts valid full token claims in VoiceCapabilityTokenClaimsSchema per SD §4.2", () => {
+      const claims = {
+        iss: "https://auth.example.com",
+        aud: "voice-tool-gateway",
+        exp: 1757134800,
+        iat: 1757131200,
+        servicePrincipalId: "svc-voice-runtime",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+        routeProfileVersion: 1,
+        leaseEpoch: 2,
+        scopes: ["session_execute", "address_resolve"],
+      };
+      expect(VoiceCapabilityTokenClaimsSchema.safeParse(claims).success).toBe(
+        true,
+      );
+      expect(VoiceCapabilityClaimsSchema.safeParse(claims).success).toBe(true);
+    });
+
+    it("rejects token claims missing iss or with empty iss in VoiceCapabilityTokenClaimsSchema", () => {
+      const baseClaims = {
+        aud: "voice-tool-gateway",
+        exp: 1757134800,
+        servicePrincipalId: "svc-voice-runtime",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+        routeProfileVersion: 1,
+        leaseEpoch: 2,
+        scopes: ["session_execute"],
+      };
+      expect(
+        VoiceCapabilityTokenClaimsSchema.safeParse(baseClaims).success,
+      ).toBe(false);
+      expect(
+        VoiceCapabilityTokenClaimsSchema.safeParse({ ...baseClaims, iss: "" })
+          .success,
+      ).toBe(false);
+    });
+
+    it("rejects token claims missing exp, with non-positive or non-integer exp in VoiceCapabilityTokenClaimsSchema", () => {
+      const baseClaims = {
+        iss: "https://auth.example.com",
+        aud: "voice-tool-gateway",
+        servicePrincipalId: "svc-voice-runtime",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+        routeProfileVersion: 1,
+        leaseEpoch: 2,
+        scopes: ["session_execute"],
+      };
+      expect(
+        VoiceCapabilityTokenClaimsSchema.safeParse(baseClaims).success,
+      ).toBe(false);
+      expect(
+        VoiceCapabilityTokenClaimsSchema.safeParse({ ...baseClaims, exp: 0 })
+          .success,
+      ).toBe(false);
+      expect(
+        VoiceCapabilityTokenClaimsSchema.safeParse({ ...baseClaims, exp: -10 })
+          .success,
+      ).toBe(false);
+      expect(
+        VoiceCapabilityTokenClaimsSchema.safeParse({
+          ...baseClaims,
+          exp: 1757134800.5,
+        }).success,
+      ).toBe(false);
+    });
+
+    it("validates VoiceCapabilityTokenEnvelopeSchema with Bearer token and valid claims", () => {
+      const envelope = {
+        token: "eyJhbGciOi...",
+        tokenType: "Bearer" as const,
+        expiresIn: 3600,
+        claims: {
+          iss: "https://auth.example.com",
+          aud: "voice-tool-gateway",
+          exp: 1757134800,
+          servicePrincipalId: "svc-voice-runtime",
+          voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+          resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+          routeProfileVersion: 1,
+          leaseEpoch: 2,
+          scopes: ["session_execute"],
+        },
+      };
+      expect(
+        VoiceCapabilityTokenEnvelopeSchema.safeParse(envelope).success,
+      ).toBe(true);
+    });
   });
 
   describe("VoiceProofSchema", () => {
@@ -262,6 +381,69 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       };
       expect(DtmfVoiceProofSchema.safeParse(proof).success).toBe(true);
       expect(VoiceProofSchema.safeParse(proof).success).toBe(true);
+    });
+
+    it("validates VoiceDtmfEvidenceSchema for valid single keys (0-9, *, #, A-D)", () => {
+      const validKeys = ["0", "1", "9", "*", "#", "A", "B", "C", "D", "a", "d"];
+      for (const digit of validKeys) {
+        const result = VoiceDtmfEvidenceSchema.safeParse({
+          eventId: "123e4567-e89b-12d3-a456-426614174008",
+          digit,
+        });
+        expect(result.success, `digit '${digit}' should be valid`).toBe(true);
+      }
+    });
+
+    it("rejects empty string, multi-character, and invalid characters in VoiceDtmfEvidenceSchema", () => {
+      const invalidKeys = ["", "12", " ", "**", "##", "E", "invalid", "\n"];
+      for (const digit of invalidKeys) {
+        const result = VoiceDtmfEvidenceSchema.safeParse({
+          eventId: "123e4567-e89b-12d3-a456-426614174008",
+          digit,
+        });
+        expect(result.success, `digit '${digit}' should be rejected`).toBe(
+          false,
+        );
+      }
+    });
+
+    it("rejects full DTMF proof with empty digit or multi-character digit", () => {
+      const proofEmpty = {
+        ...baseProof,
+        confirmationMethod: "dtmf" as const,
+        evidence: {
+          eventId: "123e4567-e89b-12d3-a456-426614174008",
+          digit: "",
+        },
+      };
+      expect(DtmfVoiceProofSchema.safeParse(proofEmpty).success).toBe(false);
+      expect(VoiceProofSchema.safeParse(proofEmpty).success).toBe(false);
+
+      const proofMulti = {
+        ...baseProof,
+        confirmationMethod: "dtmf" as const,
+        evidence: {
+          eventId: "123e4567-e89b-12d3-a456-426614174008",
+          digit: "12",
+        },
+      };
+      expect(DtmfVoiceProofSchema.safeParse(proofMulti).success).toBe(false);
+      expect(VoiceProofSchema.safeParse(proofMulti).success).toBe(false);
+    });
+
+    it("rejects full DTMF proof with invalid eventId UUID", () => {
+      const proofInvalidEvent = {
+        ...baseProof,
+        confirmationMethod: "dtmf" as const,
+        evidence: {
+          eventId: "not-a-uuid",
+          digit: "1",
+        },
+      };
+      expect(DtmfVoiceProofSchema.safeParse(proofInvalidEvent).success).toBe(
+        false,
+      );
+      expect(VoiceProofSchema.safeParse(proofInvalidEvent).success).toBe(false);
     });
 
     it("rejects speech confirmationMethod with DTMF evidence shape", () => {
@@ -503,33 +685,127 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       ).toBe(true);
     });
 
-    it("validates valid VoiceReceipt with orderId", () => {
-      const receipt = {
-        actionKey: "brand+call+intent+action",
-        status: "succeeded",
-        commandId: "123e4567-e89b-12d3-a456-426614174000",
-        orderId: "123e4567-e89b-12d3-a456-426614174001",
-      };
-      expect(VoiceReceiptSchema.safeParse(receipt).success).toBe(true);
+    it("validates all VoiceReceiptStatus enum values per SD §7.1 and §10.1", () => {
+      for (const status of VOICE_RECEIPT_STATUSES) {
+        expect(VoiceReceiptStatusSchema.safeParse(status).success).toBe(true);
+      }
+      expect(VoiceReceiptStatusSchema.safeParse("none").success).toBe(false);
     });
 
-    it("validates valid VoiceReceipt with orderId: null for SD §10.2 documented 202 pending receipt", () => {
+    it("validates exact SD §10.2 documented 202 response data shape without actionKey", () => {
       const pendingReceipt = {
-        actionKey: "brand+call+intent+action",
         commandId: "123e4567-e89b-12d3-a456-426614174000",
-        status: "pending",
+        status: "pending" as const,
         orderId: null,
         nextAction: "query_same_command",
         pollAfterMs: 1000,
       };
       const result = VoiceReceiptSchema.safeParse(pendingReceipt);
       expect(result.success).toBe(true);
+      expect(VoicePendingReceiptSchema.safeParse(pendingReceipt).success).toBe(
+        true,
+      );
       if (result.success) {
         expect(result.data.status).toBe("pending");
         expect(result.data.orderId).toBeNull();
         expect(result.data.nextAction).toBe("query_same_command");
         expect(result.data.pollAfterMs).toBe(1000);
       }
+    });
+
+    it("validates succeeded VoiceReceipt with required valid UUID orderId and commandId", () => {
+      const receipt = {
+        commandId: "123e4567-e89b-12d3-a456-426614174000",
+        status: "succeeded" as const,
+        orderId: "123e4567-e89b-12d3-a456-426614174001",
+      };
+      expect(VoiceReceiptSchema.safeParse(receipt).success).toBe(true);
+      expect(VoiceSucceededReceiptSchema.safeParse(receipt).success).toBe(true);
+    });
+
+    it("rejects succeeded VoiceReceipt missing commandId, missing orderId, or with orderId: null", () => {
+      expect(
+        VoiceReceiptSchema.safeParse({
+          status: "succeeded",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }).success,
+      ).toBe(false);
+
+      expect(
+        VoiceReceiptSchema.safeParse({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "succeeded",
+        }).success,
+      ).toBe(false);
+
+      expect(
+        VoiceReceiptSchema.safeParse({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "succeeded",
+          orderId: null,
+        }).success,
+      ).toBe(false);
+    });
+
+    it("rejects { actionKey: 'key', status: 'succeeded' } without commandId and orderId", () => {
+      expect(
+        VoiceReceiptSchema.safeParse({
+          actionKey: "brand+call+intent+action",
+          status: "succeeded",
+        }).success,
+      ).toBe(false);
+    });
+
+    it("rejects session commitStatus 'none' in VoiceReceiptSchema", () => {
+      expect(
+        VoiceReceiptSchema.safeParse({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "none",
+        }).success,
+      ).toBe(false);
+    });
+
+    it("validates rejected VoiceReceipt with commandId and optional rejectionReason", () => {
+      const rejectedReceipt = {
+        commandId: "123e4567-e89b-12d3-a456-426614174000",
+        status: "rejected" as const,
+        rejectionReason: "VOICE_SERVICE_NOT_AVAILABLE",
+      };
+      expect(VoiceReceiptSchema.safeParse(rejectedReceipt).success).toBe(true);
+      expect(
+        VoiceRejectedReceiptSchema.safeParse(rejectedReceipt).success,
+      ).toBe(true);
+    });
+
+    it("validates internal VoiceReceiptRecordSchema requiring actionKey, commandId, and status", () => {
+      const validRecord = {
+        actionKey: "brand+call+intent+action",
+        commandId: "123e4567-e89b-12d3-a456-426614174000",
+        status: "pending" as const,
+        orderId: null,
+      };
+      expect(VoiceReceiptRecordSchema.safeParse(validRecord).success).toBe(
+        true,
+      );
+      expect(VoiceActionKeyRecordSchema.safeParse(validRecord).success).toBe(
+        true,
+      );
+
+      // missing actionKey
+      expect(
+        VoiceReceiptRecordSchema.safeParse({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "pending",
+        }).success,
+      ).toBe(false);
+
+      // status: none
+      expect(
+        VoiceReceiptRecordSchema.safeParse({
+          ...validRecord,
+          status: "none",
+        }).success,
+      ).toBe(false);
     });
 
     it("validates all VoiceCallbackStatus lifecycle states per SD §9.1 and §12.5", () => {
@@ -627,6 +903,8 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         "VoiceProof",
         "VoiceCapabilityScope",
         "VoiceCapability",
+        "VoiceCapabilityTokenClaims",
+        "VoiceCapabilityTokenEnvelope",
         "VoiceDialogState",
         "VoiceMediaState",
         "VoiceControlOwner",
@@ -636,7 +914,12 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         "VoiceOutcome",
         "VoiceSession",
         "VoiceDraft",
+        "VoiceReceiptStatus",
+        "VoicePendingReceipt",
+        "VoiceSucceededReceipt",
+        "VoiceRejectedReceipt",
         "VoiceReceipt",
+        "VoiceReceiptRecord",
         "VoiceCallbackStatus",
         "VoiceCallback",
         "VoiceAgentBookingActor",
@@ -706,8 +989,17 @@ describe("UV-EXEC-001 Voice Contracts", () => {
     const validateCapability = ajv.getSchema(
       "#/components/schemas/VoiceCapability",
     )!;
+    const validateCapabilityTokenClaims = ajv.getSchema(
+      "#/components/schemas/VoiceCapabilityTokenClaims",
+    )!;
+    const validateCapabilityTokenEnvelope = ajv.getSchema(
+      "#/components/schemas/VoiceCapabilityTokenEnvelope",
+    )!;
     const validateActor = ajv.getSchema("#/components/schemas/BookingActor")!;
     const validateReceipt = ajv.getSchema("#/components/schemas/VoiceReceipt")!;
+    const validateReceiptRecord = ajv.getSchema(
+      "#/components/schemas/VoiceReceiptRecord",
+    )!;
     const validateSession = ajv.getSchema("#/components/schemas/VoiceSession")!;
     const validateDraft = ajv.getSchema("#/components/schemas/VoiceDraft")!;
     const validateCallback = ajv.getSchema(
@@ -718,6 +1010,9 @@ describe("UV-EXEC-001 Voice Contracts", () => {
     )!;
     const validateCutoff = ajv.getSchema(
       "#/components/schemas/VoiceControlCutoff",
+    )!;
+    const validateDtmfEvidence = ajv.getSchema(
+      "#/components/schemas/VoiceDtmfEvidence",
     )!;
 
     const baseProofData = {
@@ -938,9 +1233,8 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       ).toBe(false);
     });
 
-    it("OpenAPI accepts VoiceReceipt with orderId: null for 202 pending response", () => {
+    it("OpenAPI accepts VoiceReceipt with orderId: null without actionKey for SD §10.2 202 pending response", () => {
       const pendingReceipt = {
-        actionKey: "brand+call+intent+action",
         commandId: "123e4567-e89b-12d3-a456-426614174000",
         status: "pending",
         orderId: null,
@@ -948,6 +1242,152 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         pollAfterMs: 1000,
       };
       expect(validateReceipt(pendingReceipt)).toBe(true);
+    });
+
+    it("OpenAPI accepts succeeded VoiceReceipt with required orderId", () => {
+      const succeededReceipt = {
+        commandId: "123e4567-e89b-12d3-a456-426614174000",
+        status: "succeeded",
+        orderId: "123e4567-e89b-12d3-a456-426614174001",
+      };
+      expect(validateReceipt(succeededReceipt)).toBe(true);
+    });
+
+    it("OpenAPI rejects succeeded VoiceReceipt missing orderId or with orderId: null", () => {
+      expect(
+        validateReceipt({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "succeeded",
+        }),
+      ).toBe(false);
+
+      expect(
+        validateReceipt({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "succeeded",
+          orderId: null,
+        }),
+      ).toBe(false);
+    });
+
+    it("OpenAPI rejects VoiceReceipt with status: none", () => {
+      expect(
+        validateReceipt({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "none",
+        }),
+      ).toBe(false);
+    });
+
+    it("OpenAPI accepts VoiceReceiptRecord with actionKey, commandId, and status", () => {
+      expect(
+        validateReceiptRecord({
+          actionKey: "brand+call+intent+action",
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "pending",
+          orderId: null,
+        }),
+      ).toBe(true);
+    });
+
+    it("OpenAPI rejects VoiceReceiptRecord missing actionKey or commandId", () => {
+      expect(
+        validateReceiptRecord({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "pending",
+        }),
+      ).toBe(false);
+
+      expect(
+        validateReceiptRecord({
+          actionKey: "brand+call+intent+action",
+          status: "pending",
+        }),
+      ).toBe(false);
+    });
+
+    it("OpenAPI accepts VoiceCapabilityTokenClaims with iss, aud, exp, and scopes", () => {
+      expect(
+        validateCapabilityTokenClaims({
+          iss: "https://auth.example.com",
+          aud: "voice-tool-gateway",
+          exp: 1757134800,
+          servicePrincipalId: "svc-voice-runtime",
+          voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+          resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+          routeProfileVersion: 1,
+          leaseEpoch: 2,
+          scopes: ["session_execute"],
+        }),
+      ).toBe(true);
+    });
+
+    it("OpenAPI rejects VoiceCapabilityTokenClaims missing iss or exp", () => {
+      expect(
+        validateCapabilityTokenClaims({
+          aud: "voice-tool-gateway",
+          exp: 1757134800,
+          servicePrincipalId: "svc-voice-runtime",
+          voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+          resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+          routeProfileVersion: 1,
+          leaseEpoch: 2,
+          scopes: ["session_execute"],
+        }),
+      ).toBe(false);
+
+      expect(
+        validateCapabilityTokenClaims({
+          iss: "https://auth.example.com",
+          aud: "voice-tool-gateway",
+          servicePrincipalId: "svc-voice-runtime",
+          voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+          resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+          routeProfileVersion: 1,
+          leaseEpoch: 2,
+          scopes: ["session_execute"],
+        }),
+      ).toBe(false);
+    });
+
+    it("OpenAPI accepts VoiceCapabilityTokenEnvelope with token, expiresIn, and claims", () => {
+      expect(
+        validateCapabilityTokenEnvelope({
+          token: "valid-token-string",
+          expiresIn: 3600,
+          claims: {
+            iss: "https://auth.example.com",
+            aud: "voice-tool-gateway",
+            exp: 1757134800,
+            servicePrincipalId: "svc-voice-runtime",
+            voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+            resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+            routeProfileVersion: 1,
+            leaseEpoch: 2,
+            scopes: ["session_execute"],
+          },
+        }),
+      ).toBe(true);
+    });
+
+    it("OpenAPI accepts valid single DTMF digits and rejects empty or multi-character digits", () => {
+      for (const digit of ["0", "1", "9", "*", "#", "A", "D"]) {
+        expect(
+          validateDtmfEvidence({
+            eventId: "123e4567-e89b-12d3-a456-426614174008",
+            digit,
+          }),
+        ).toBe(true);
+      }
+
+      for (const digit of ["", "12", " ", "**", "invalid"]) {
+        expect(
+          validateDtmfEvidence({
+            eventId: "123e4567-e89b-12d3-a456-426614174008",
+            digit,
+          }),
+        ).toBe(false);
+      }
     });
 
     it("OpenAPI accepts closed+pending VoiceSession snapshot with orthogonal states", () => {

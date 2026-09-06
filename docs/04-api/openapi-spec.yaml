@@ -2556,6 +2556,8 @@ components:
           format: uuid
         digit:
           type: string
+          pattern: "^[0-9*#A-Da-d]$"
+          description: Single trusted CTI DTMF digit (0-9, *, #, A-D)
       required:
         - eventId
         - digit
@@ -2705,9 +2707,22 @@ components:
     VoiceCapability:
       type: object
       properties:
+        iss:
+          type: string
+          minLength: 1
+          description: Issuer URL or identifier
         aud:
           type: string
           enum: [voice-tool-gateway]
+        exp:
+          type: integer
+          description: Expiry Unix epoch timestamp in seconds
+        iat:
+          type: integer
+          description: Issued-at Unix epoch timestamp in seconds
+        nbf:
+          type: integer
+          description: Not-before Unix epoch timestamp in seconds
         servicePrincipalId:
           type: string
           minLength: 1
@@ -2733,6 +2748,72 @@ components:
         - routeProfileVersion
         - leaseEpoch
         - scopes
+      additionalProperties: false
+    VoiceCapabilityTokenClaims:
+      type: object
+      properties:
+        iss:
+          type: string
+          minLength: 1
+          description: Issuer URL or identifier
+        aud:
+          type: string
+          enum: [voice-tool-gateway]
+        exp:
+          type: integer
+          description: Expiry Unix epoch timestamp in seconds
+        iat:
+          type: integer
+          description: Issued-at Unix epoch timestamp in seconds
+        nbf:
+          type: integer
+          description: Not-before Unix epoch timestamp in seconds
+        servicePrincipalId:
+          type: string
+          minLength: 1
+        voiceSessionId:
+          type: string
+          format: uuid
+        resourceScopeId:
+          type: string
+          format: uuid
+        routeProfileVersion:
+          type: integer
+        leaseEpoch:
+          type: integer
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/VoiceCapabilityScope"
+      required:
+        - iss
+        - aud
+        - exp
+        - servicePrincipalId
+        - voiceSessionId
+        - resourceScopeId
+        - routeProfileVersion
+        - leaseEpoch
+        - scopes
+      additionalProperties: false
+    VoiceCapabilityTokenEnvelope:
+      type: object
+      properties:
+        token:
+          type: string
+          minLength: 1
+        tokenType:
+          type: string
+          enum: [Bearer]
+          default: Bearer
+        expiresIn:
+          type: integer
+        claims:
+          $ref: "#/components/schemas/VoiceCapabilityTokenClaims"
+      required:
+        - token
+        - expiresIn
+        - claims
       additionalProperties: false
     VoiceDialogState:
       type: string
@@ -2884,16 +2965,21 @@ components:
         - providerConfidence
         - validationState
         - confirmedByCustomerAt
-    VoiceReceipt:
+    VoiceReceiptStatus:
+      type: string
+      enum:
+        - pending
+        - succeeded
+        - rejected
+    VoicePendingReceipt:
       type: object
       properties:
-        actionKey:
-          type: string
-        status:
-          $ref: "#/components/schemas/VoiceCommitStatus"
         commandId:
           type: string
           format: uuid
+        status:
+          type: string
+          enum: [pending]
         orderId:
           type: string
           format: uuid
@@ -2902,11 +2988,97 @@ components:
           type: string
         pollAfterMs:
           type: integer
+        actionKey:
+          type: string
+      required:
+        - commandId
+        - status
+      additionalProperties: false
+    VoiceSucceededReceipt:
+      type: object
+      properties:
+        commandId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [succeeded]
+        orderId:
+          type: string
+          format: uuid
+        nextAction:
+          type: string
+        pollAfterMs:
+          type: integer
+        actionKey:
+          type: string
+      required:
+        - commandId
+        - status
+        - orderId
+      additionalProperties: false
+    VoiceRejectedReceipt:
+      type: object
+      properties:
+        commandId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [rejected]
+        orderId:
+          type: string
+          format: uuid
+          nullable: true
+        rejectionReason:
+          type: string
+        nextAction:
+          type: string
+        pollAfterMs:
+          type: integer
+        actionKey:
+          type: string
+      required:
+        - commandId
+        - status
+      additionalProperties: false
+    VoiceReceipt:
+      oneOf:
+        - $ref: "#/components/schemas/VoicePendingReceipt"
+        - $ref: "#/components/schemas/VoiceSucceededReceipt"
+        - $ref: "#/components/schemas/VoiceRejectedReceipt"
+      discriminator:
+        propertyName: status
+        mapping:
+          pending: "#/components/schemas/VoicePendingReceipt"
+          succeeded: "#/components/schemas/VoiceSucceededReceipt"
+          rejected: "#/components/schemas/VoiceRejectedReceipt"
+    VoiceReceiptRecord:
+      type: object
+      properties:
+        actionKey:
+          type: string
+          minLength: 1
+        commandId:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/VoiceReceiptStatus"
+        orderId:
+          type: string
+          format: uuid
+          nullable: true
+        payloadHash:
+          type: string
+        resultVersion:
+          type: integer
         rejectionReason:
           type: string
       required:
         - actionKey
+        - commandId
         - status
+      additionalProperties: false
     VoiceCallbackStatus:
       type: string
       enum:
