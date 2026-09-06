@@ -58,6 +58,20 @@ Supporting repo-local orientation:
 - `DEVELOPMENT_WORKBREAKDOWN.md`
 - `CANONICAL_DOCUMENT_MAP.md`
 
+## Unattended Voice Booking Design
+
+The user confirmed that AI should complete normal owned phone bookings and humans
+should handle exceptions. These detailed v0.1 documents add that scope explicitly;
+new technical choices, numeric targets and vendor selection remain design proposals,
+not implemented capabilities or accepted procurement decisions.
+
+- [Unattended Voice Booking SA](02-architecture/phase1-unattended-voice-booking-sa-20260906.md)
+  Product flows, 32 requirements, language and service boundaries, human fallback,
+  metrics, vendor comparison and 34 acceptance scenarios.
+- [Unattended Voice Booking SD](02-architecture/phase1-unattended-voice-booking-sd-20260906.md)
+  Telephony and speech architecture, confirmation evidence, durable transactions,
+  APIs/data, recovery, operations, implementation packages and rollout validation.
+
 ## Accepted System Design Decisions
 
 Use these when a scoped human-accepted decision temporarily supersedes older
