@@ -757,9 +757,9 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       if (parseResult.success) {
         expect(parseResult.data.slots).toBeDefined();
         expect(parseResult.data.slots?.pickup).toBeDefined();
-        expect(parseResult.data.slots?.pickup.rawText).toBe("台北車站東三門");
+        expect(parseResult.data.slots?.pickup?.rawText).toBe("台北車站東三門");
         expect(parseResult.data.slots?.passengerCount).toBeDefined();
-        expect(parseResult.data.slots?.passengerCount.normalizedValue).toBe(2);
+        expect(parseResult.data.slots?.passengerCount?.normalizedValue).toBe(2);
         expect(parseResult.data.snapshotHash).toBe(
           "sha256-canonical-business-snapshot-hash-12345",
         );
@@ -789,8 +789,8 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       const revResult = VoiceDraftRevisionSchema.safeParse(revisionPayload);
       expect(revResult.success).toBe(true);
       if (revResult.success) {
-        expect(revResult.data.slots.pickup.rawText).toBe("台北車站東三門");
-        expect(revResult.data.slots.passengerCount.normalizedValue).toBe(2);
+        expect(revResult.data.slots.pickup?.rawText).toBe("台北車站東三門");
+        expect(revResult.data.slots.passengerCount?.normalizedValue).toBe(2);
         expect(revResult.data.snapshotHash).toBe(
           "sha256-canonical-business-snapshot-hash-12345",
         );
@@ -1064,16 +1064,7 @@ describe("UV-EXEC-001 Voice Contracts", () => {
     });
 
     it("validates all VoiceCallbackStatus lifecycle states per SD §9.1 and §12.5", () => {
-      const statuses = [
-        "pending",
-        "claimed",
-        "in_progress",
-        "completed",
-        "cancelled",
-        "unreachable",
-      ] as const;
-
-      for (const status of statuses) {
+      for (const status of VOICE_CALLBACK_STATUSES) {
         expect(VoiceCallbackStatusSchema.safeParse(status).success).toBe(true);
         const callback = {
           callbackId: "123e4567-e89b-12d3-a456-426614174000",
@@ -2044,6 +2035,10 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         validationRefs: ["ref-address-v1"],
       };
 
+      expect(
+        VoiceDraftSlotSchema.safeParse(multiSlotDraft.slots.pickup).success,
+      ).toBe(true);
+      expect(validateDraftSlot(multiSlotDraft.slots.pickup)).toBe(true);
       expect(VoiceDraftSchema.safeParse(multiSlotDraft).success).toBe(true);
       expect(validateDraft(multiSlotDraft)).toBe(true);
 
