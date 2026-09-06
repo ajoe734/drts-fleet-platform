@@ -130,6 +130,8 @@ import { CallcenterService } from "../callcenter/callcenter.service";
 import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
 import {
   OwnedMobilityRepository,
+  OwnedOrderDuplicateVoiceLinkError,
+  OwnedOrderVersionConflictError,
   type DriverCompletionOutboxClaimResult,
   type DriverCompletionOutboxEffectType,
   type DriverCompletionOutboxRecord,
@@ -1768,7 +1770,7 @@ export class OwnedMobilityService
       const persistedOrder =
         (await this.ownedMobilityRepository.findOrderById(orderId)) ??
         undefined;
-      order = this.pickNewestOrder(order, persistedOrder);
+      order = this.resolveAuthoritativeOrder(order, persistedOrder);
     }
     if (order) {
       const resolvedOrderId = order.orderId;
@@ -1852,7 +1854,7 @@ export class OwnedMobilityService
           bookingId,
           tenantId,
         )) ?? undefined;
-      order = this.pickNewestOrder(order, persistedOrder);
+      order = this.resolveAuthoritativeOrder(order, persistedOrder);
     }
     if (order) {
       const resolvedOrderId = order.orderId;
@@ -1870,20 +1872,146 @@ export class OwnedMobilityService
     return this.mapOrderToBooking(order);
   }
 
-  private pickNewestOrder(
+  /**
+   * SD §7.5: "不得以 updatedAt 從 DB 與記憶體挑較新者，因為記憶體可能是未持久化
+   * 狀態" -- a persisted DB row is always authoritative over the in-memory
+   * copy once persistence is enabled, because the in-memory copy may reflect
+   * a mutation whose transaction never committed (it can carry a strictly
+   * newer `updatedAt` than the last durable write). Only fall back to the
+   * in-memory copy when the DB genuinely has no row yet.
+   */
+  private resolveAuthoritativeOrder(
     localOrder: OwnedOrderRecord | undefined,
     persistedOrder: OwnedOrderRecord | undefined,
   ) {
-    if (!localOrder) {
-      return persistedOrder;
+    return persistedOrder ?? localOrder;
+  }
+
+  /**
+   * Replaces the in-memory projection for `orderId` with a row that is
+   * already durably committed. Only ever called after a transaction commits
+   * (SD §7.5: "commit 後再投影...不在交易中呼叫會先改共享 arrays...的舊建單方
+   * 法") -- never before, and never on a failed/rolled-back attempt.
+   */
+  private applyAuthoritativeOrder(order: OwnedOrderRecord) {
+    const resolvedOrderId = order.orderId;
+    this.orders = [
+      this.cloneOrder(order),
+      ...this.orders.filter(
+        (candidateOrder) => candidateOrder.orderId !== resolvedOrderId,
+      ),
+    ];
+  }
+
+  /**
+   * Creates a brand-new voice-linked order through the shared PoolClient
+   * UoW (SD §7.1/§7.5). Fails closed when durable storage is not
+   * configured -- a voice mutation with no DB must be rejected, not
+   * silently accepted into memory only, unlike the legacy
+   * `persistChanges`/`persistChangesRequired` fallback used by non-voice
+   * writers. A collision on `order_id`, or on the partial unique
+   * `voice_intent_id`/`call_id` indexes (V0088), surfaces as
+   * `VOICE_ORDER_DUPLICATE_LINK` so the caller can replay/look up the
+   * existing order instead of creating a second one for the same intent.
+   */
+  async createVoiceOrder(
+    order: OwnedOrderRecord,
+    context: string,
+  ): Promise<OwnedOrderRecord> {
+    const repository = this.requireVoiceCapableRepository(context);
+    const aggregateVersion = await repository
+      .withTransaction((client) => repository.insertVoiceOrder(client, order))
+      .catch((error) => {
+        if (error instanceof OwnedOrderDuplicateVoiceLinkError) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "VOICE_ORDER_DUPLICATE_LINK",
+            error.message,
+            { orderId: order.orderId },
+          );
+        }
+        throw error;
+      });
+    const committed: OwnedOrderRecord = { ...order, aggregateVersion };
+    this.applyAuthoritativeOrder(committed);
+    return this.cloneOrder(committed);
+  }
+
+  /**
+   * Pure-prepare + CAS transaction for mutating an existing voice-linked
+   * order (SD §7.1/§7.5). `prepare` receives the DB-authoritative current
+   * order and version, locked `FOR UPDATE` for the lifetime of the
+   * transaction, and must be pure: it only computes and returns the next
+   * order (and an arbitrary `result`), never mutating `this.orders`,
+   * `this.dispatchTraceLogs`, an event emitter, or the audit sink.
+   *
+   * Those side effects belong in the caller, applied only after this method
+   * resolves -- i.e. only after the CAS write has durably committed. A
+   * transaction that fails for any reason (stale `aggregateVersion`, a
+   * rejected precondition thrown by `prepare`, a dropped DB connection)
+   * leaves the in-memory cache, every event, and the audit sink exactly as
+   * they were: nothing here mutates shared state ahead of commit.
+   *
+   * Fails closed when durable storage is not configured, and translates a
+   * version conflict into `409 VOICE_ORDER_VERSION_CONFLICT` so two
+   * instances racing on the same stale snapshot cannot both "win".
+   */
+  async commitVoiceOrderMutation<TResult>(
+    orderId: string,
+    context: string,
+    prepare: (
+      current: OwnedOrderRecord,
+      currentVersion: number,
+    ) => { order: OwnedOrderRecord; result: TResult },
+  ): Promise<TResult> {
+    const repository = this.requireVoiceCapableRepository(context);
+    const { order, result } = await repository
+      .withTransaction(async (client) => {
+        const current = await repository.findOrderForUpdate(client, orderId);
+        if (!current) {
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "OWNED_ORDER_NOT_FOUND",
+            `Order ${orderId} was not found.`,
+            { orderId, context },
+          );
+        }
+        const prepared = prepare(current.order, current.aggregateVersion);
+        const aggregateVersion = await repository.updateOrderWithCas(
+          client,
+          prepared.order,
+          current.aggregateVersion,
+        );
+        return {
+          ...prepared,
+          order: { ...prepared.order, aggregateVersion },
+        };
+      })
+      .catch((error) => {
+        if (error instanceof OwnedOrderVersionConflictError) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "VOICE_ORDER_VERSION_CONFLICT",
+            error.message,
+            { orderId, context },
+          );
+        }
+        throw error;
+      });
+    this.applyAuthoritativeOrder(order);
+    return result;
+  }
+
+  private requireVoiceCapableRepository(context: string) {
+    if (!this.ownedMobilityRepository?.isEnabled()) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "OWNED_MOBILITY_DB_REQUIRED",
+        `Voice order mutation "${context}" requires durable storage; DATABASE_URL is not configured.`,
+        { context },
+      );
     }
-    if (!persistedOrder) {
-      return localOrder;
-    }
-    return Date.parse(persistedOrder.updatedAt) >=
-      Date.parse(localOrder.updatedAt)
-      ? persistedOrder
-      : localOrder;
+    return this.ownedMobilityRepository;
   }
 
   async approveTenantBookingApprovalRequest(
