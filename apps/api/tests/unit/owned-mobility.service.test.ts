@@ -1271,6 +1271,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         work({}),
       ),
       reportPersistenceFailure: vi.fn(),
+      reserveDispatchResources: vi.fn(async () => []),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
+      occupyDispatchResourceReservations: vi.fn(async () => 0),
     };
     const { service } = createOwnedMobilityService({
       candidates: [
@@ -3693,6 +3696,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         work({}),
       ),
       reportPersistenceFailure: vi.fn(),
+      reserveDispatchResources: vi.fn(async () => []),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
+      occupyDispatchResourceReservations: vi.fn(async () => 0),
     };
     const { service } = createOwnedMobilityService({
       candidates: [
@@ -4212,6 +4218,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         return record ? { action: "dispatch", record } : null;
       }),
       reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
     };
 
     const { service, auditNotificationService } = createOwnedMobilityService({
@@ -4392,6 +4399,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       })),
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
       reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
     };
 
     const { service } = createOwnedMobilityService({
@@ -4526,6 +4534,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
       claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => null),
       reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
     };
 
     const { service } = createOwnedMobilityService({
@@ -4824,6 +4833,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       })),
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
       reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
     };
 
     const { service, auditNotificationService } = createOwnedMobilityService({
@@ -6018,7 +6028,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       await createFareAnomalyAuthority(databaseService);
     const recordSpy = vi.spyOn(fareAnomalyService, "recordQuoteAnomaly");
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = await createFareProducerOrder(service, { resolvedRoute: false });
+    const order = await createFareProducerOrder(service, {
+      resolvedRoute: false,
+    });
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
 
     await expect(
@@ -6319,7 +6331,7 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
     expect(updatedOrder.noSupplyEscalation!.resolvedAt).not.toBeNull();
   });
 
-  it("handles dispatch timeout and places order in redispatch priority queue", () => {
+  it("handles dispatch timeout and places order in redispatch priority queue", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
         {
@@ -6340,13 +6352,17 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
 
     service.dispatchOrder(order.orderId, { mode: "auto" });
 
-    const timeoutResult = service.handleDispatchTimeout(
+    // No assignment has been made yet at this point (only `dispatchOrder`,
+    // not `assignDispatch`, has run), so this is a matching-stage timeout --
+    // `acceptance_timeout` now requires a `targetAssignmentId` (SD §7.6) and
+    // there is no assignment yet for this test to name.
+    const timeoutResult = await service.handleDispatchTimeout(
       order.orderId,
-      "acceptance_timeout",
+      "matching_timeout",
     );
 
     expect(timeoutResult.status).toBe("dispatch_timeout");
-    expect(timeoutResult.timeoutReasonCode).toBe("acceptance_timeout");
+    expect(timeoutResult.timeoutReasonCode).toBe("matching_timeout");
 
     const updatedOrder = service.getOrder(order.orderId);
     expect(updatedOrder.status).toBe("dispatch_timeout");
@@ -6354,7 +6370,7 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
     expect(updatedOrder.queueEntryReason).toBe("dispatch_timeout_retry");
     expect(updatedOrder.dispatchTimeout).not.toBeNull();
     expect(updatedOrder.dispatchTimeout!.timeoutReasonCode).toBe(
-      "acceptance_timeout",
+      "matching_timeout",
     );
     expect(updatedOrder.dispatchAttemptCount).toBe(1);
   });

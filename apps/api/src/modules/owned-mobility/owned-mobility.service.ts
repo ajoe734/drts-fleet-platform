@@ -132,6 +132,7 @@ import {
   OwnedMobilityRepository,
   OwnedOrderDuplicateVoiceLinkError,
   OwnedOrderVersionConflictError,
+  DispatchResourceReservationConflictError,
   type DriverCompletionOutboxClaimResult,
   type DriverCompletionOutboxEffectType,
   type DriverCompletionOutboxRecord,
@@ -304,6 +305,14 @@ type DriverCompletionOutboxPayload =
 
 type CreateDispatchAssignmentOptions = {
   dispatchAttemptSequence?: number;
+  /**
+   * SD §7.6: when a reassign supersedes an existing assignment, its shared
+   * driver+vehicle reservation must be released in the same transaction
+   * that reserves the new driver/vehicle -- otherwise the old reservation's
+   * unique-occupation row can block the new one, or a moment exists where
+   * neither the old nor the new assignment holds the resource.
+   */
+  previousAssignmentId?: string;
 };
 
 type MultiTaxiCallContext = {
@@ -3213,7 +3222,11 @@ export class OwnedMobilityService
         ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
       },
       execute: async () => {
-        const res = this._executeRedispatchOrder(orderId, command, requestId);
+        const res = await this._executeRedispatchOrder(
+          orderId,
+          command,
+          requestId,
+        );
         return {
           data: res,
           statusCode: 200,
@@ -3228,7 +3241,7 @@ export class OwnedMobilityService
     orderId: string,
     command: RedispatchOrderCommand,
     requestId?: string,
-  ) {
+  ): MaybePromise<any> {
     if (!command.reasonCode?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -3279,73 +3292,130 @@ export class OwnedMobilityService
     }
 
     const now = new Date().toISOString();
-    order.status = "redispatch_required";
-    order.dispatchAttemptCount += 1;
-    order.lastDispatchFailureReason = command.reasonCode;
-    order.updatedAt = now;
 
-    const latestTask = latestAssignment
-      ? this.driverTasks.find(
-          (task) =>
-            task.assignmentId === latestAssignment.assignmentId &&
-            !["completed", "cancelled", "rejected"].includes(task.status),
-        )
-      : null;
-    if (latestAssignment) {
-      latestAssignment.status = "cancelled";
-      latestAssignment.updatedAt = now;
-    }
-    if (latestTask) {
-      latestTask.status = "cancelled";
-      latestTask.completedAt = now;
-    }
+    const proceed = (
+      closedPrevious: {
+        assignment: DispatchAssignmentRecord;
+        task: DriverTaskRecord | null;
+      } | null,
+    ): MaybePromise<any> => {
+      order.status = "redispatch_required";
+      order.dispatchAttemptCount += 1;
+      order.lastDispatchFailureReason = command.reasonCode;
+      order.updatedAt = now;
 
-    const traceLog = this.appendTrace(orderId, "dispatch.redispatch_required", {
-      reasonCode: command.reasonCode,
-      reasonNote: command.reasonNote ?? null,
-      operatorId: command.operatorId ?? null,
-      escalationTarget: command.escalationTarget ?? null,
-      attemptCount: order.dispatchAttemptCount,
-    });
-    this.persistChanges(
-      {
-        orders: [order],
-        ...(latestAssignment
-          ? { dispatchAssignments: [latestAssignment] }
-          : {}),
-        ...(latestTask ? { driverTasks: [latestTask] } : {}),
-        dispatchTraceLogs: [traceLog],
-      },
-      "redispatch_order",
-    );
-    this.recordAudit(
-      {
-        actorId: command.operatorId ?? null,
-        actorType: command.operatorId ? "ops_user" : "system",
-        tenantId: order.tenantId,
-        moduleName: "dispatch",
-        actionName: "redispatch_order",
-        resourceType: "order",
-        resourceId: orderId,
-        newValuesSummary: {
+      const latestTask = latestAssignment
+        ? this.driverTasks.find(
+            (task) =>
+              task.assignmentId === latestAssignment.assignmentId &&
+              !["completed", "cancelled", "rejected"].includes(task.status),
+          )
+        : null;
+      if (latestAssignment) {
+        latestAssignment.status = "cancelled";
+        latestAssignment.updatedAt = now;
+      }
+      if (latestTask) {
+        latestTask.status = "cancelled";
+        latestTask.completedAt = now;
+      }
+
+      const traceLog = this.appendTrace(
+        orderId,
+        "dispatch.redispatch_required",
+        {
           reasonCode: command.reasonCode,
           reasonNote: command.reasonNote ?? null,
+          operatorId: command.operatorId ?? null,
           escalationTarget: command.escalationTarget ?? null,
-          status: order.status,
           attemptCount: order.dispatchAttemptCount,
         },
-      },
-      requestId,
-    );
-    if (latestTask) {
-      this.ownedMobilityTaskEventsService.publishTaskCancelled(
-        latestTask,
-        order,
+      );
+      this.persistChanges(
+        {
+          orders: [order],
+          // Already durably persisted atomically by closeSupersededDispatchAssignment
+          // above when closedPrevious is set; re-including it here would just be a
+          // redundant (harmless, but pointless) re-upsert of identical values.
+          ...(latestAssignment && !closedPrevious
+            ? { dispatchAssignments: [latestAssignment] }
+            : {}),
+          ...(latestTask && !closedPrevious
+            ? { driverTasks: [latestTask] }
+            : {}),
+          dispatchTraceLogs: [traceLog],
+        },
+        "redispatch_order",
+      );
+
+      this.recordAudit(
+        {
+          actorId: command.operatorId ?? null,
+          actorType: command.operatorId ? "ops_user" : "system",
+          tenantId: order.tenantId,
+          moduleName: "dispatch",
+          actionName: "redispatch_order",
+          resourceType: "order",
+          resourceId: orderId,
+          newValuesSummary: {
+            reasonCode: command.reasonCode,
+            reasonNote: command.reasonNote ?? null,
+            escalationTarget: command.escalationTarget ?? null,
+            status: order.status,
+            attemptCount: order.dispatchAttemptCount,
+          },
+        },
         requestId,
+      );
+      if (latestTask) {
+        this.ownedMobilityTaskEventsService.publishTaskCancelled(
+          latestTask,
+          order,
+          requestId,
+        );
+      }
+
+      return this.dispatchOrder(orderId, { mode: "auto" }, requestId);
+    };
+
+    if (latestAssignment && this.ownedMobilityRepository?.isEnabled()) {
+      // SD §7.6: close the current assignment (and release its reservation)
+      // atomically in one transaction, before mutating any in-memory state
+      // or reading it into the audit/event payloads below -- redispatch
+      // closes the current assignment before the subsequent `dispatchOrder`
+      // call tries to reserve a (possibly identical) driver/vehicle for the
+      // next attempt, and a crash between closing and releasing can never
+      // leave the old assignment still active with its reservation already
+      // gone. A `null` result means the row was already closed by something
+      // else (accept, reject/cancel, a confirmed timeout) since this
+      // in-memory snapshot was read, so the redispatch must not proceed as
+      // if it still owned that offer.
+      return this.afterMaybePromise(
+        this.ownedMobilityRepository.withTransaction((tx) =>
+          this.closeSupersededDispatchAssignment(
+            tx,
+            latestAssignment.assignmentId,
+            now,
+          ),
+        ),
+        (closedPrevious) => {
+          if (!closedPrevious) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "REDISPATCH_ASSIGNMENT_ALREADY_CLOSED",
+              "The assignment being redispatched was already closed by another operation.",
+              {
+                orderId,
+                assignmentId: latestAssignment.assignmentId,
+              },
+            );
+          }
+          return proceed(closedPrevious);
+        },
       );
     }
 
-    return this.dispatchOrder(orderId, { mode: "auto" }, requestId);
+    return proceed(null);
   }
 
   resolveExceptionHold(
@@ -4146,6 +4216,7 @@ export class OwnedMobilityService
         requestId,
         {
           dispatchAttemptSequence: reassignAttemptSequence + 1,
+          previousAssignmentId: activeAssignment.assignmentId,
         },
       ),
       (result) => {
@@ -4203,6 +4274,64 @@ export class OwnedMobilityService
         return result;
       },
     );
+  }
+
+  /**
+   * SD §7.6: atomically close one dispatch assignment (and its driver task,
+   * if still open) that a reassign/redispatch is superseding -- lock, verify
+   * it is still in an open (`assigned`/`accepted`) state, persist the
+   * cancellation, and release its shared reservation, all inside the
+   * caller's transaction. Returns `null` if the assignment was already
+   * terminal by the time this ran (raced closed by an accept, a driver
+   * reject/cancel, or a confirmed timeout); callers must treat that as a
+   * stale-state conflict rather than silently proceeding, since it means
+   * whatever in-memory snapshot triggered this close no longer matches the
+   * authoritative row.
+   */
+  private async closeSupersededDispatchAssignment(
+    tx: OwnedMobilityQueryExecutor,
+    assignmentId: string,
+    now: string,
+  ): Promise<{
+    assignment: DispatchAssignmentRecord;
+    task: DriverTaskRecord | null;
+  } | null> {
+    const locked =
+      await this.ownedMobilityRepository!.lockDispatchAssignmentForUpdate(
+        tx,
+        assignmentId,
+      );
+    if (!locked || !["assigned", "accepted"].includes(locked.status)) {
+      return null;
+    }
+    const closedAssignment: DispatchAssignmentRecord = {
+      ...locked,
+      status: "cancelled",
+      updatedAt: now,
+    };
+    let closedTask: DriverTaskRecord | null = null;
+    if (locked.taskId) {
+      const lockedTask =
+        await this.ownedMobilityRepository!.lockDriverTaskForUpdate(
+          tx,
+          locked.taskId,
+        );
+      if (
+        lockedTask &&
+        !["completed", "cancelled", "rejected"].includes(lockedTask.status)
+      ) {
+        closedTask = { ...lockedTask, status: "cancelled", completedAt: now };
+      }
+    }
+    await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+      dispatchAssignments: [closedAssignment],
+      ...(closedTask ? { driverTasks: [closedTask] } : {}),
+    });
+    await this.ownedMobilityRepository!.releaseDispatchResourceReservations(
+      assignmentId,
+      tx,
+    );
+    return { assignment: closedAssignment, task: closedTask };
   }
 
   private createDispatchAssignment(
@@ -4270,6 +4399,12 @@ export class OwnedMobilityService
             sandboxDispatchSnapshot,
             requestId,
           );
+          // SD §7.6: the new assignment row must exist before it can be
+          // referenced by `dispatch_resource_reservations.assignment_id`,
+          // which is an immediate (non-deferrable) FK against
+          // `phase1_dispatch_assignments` (V0087) -- reserving with the new,
+          // not-yet-inserted assignment id first would always roll back with
+          // a 23503. Insert first, then reserve, in the same transaction.
           await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
             orders: [this.cloneOrder(bundle.order)],
             dispatchJobs: [{ ...bundle.dispatchJob }],
@@ -4301,6 +4436,54 @@ export class OwnedMobilityService
                 }
               : {}),
           });
+          if (options?.previousAssignmentId) {
+            // SD §7.6: atomically close the superseded assignment (and its
+            // driver task) and release its reservation in the same
+            // transaction that takes the new one, so the old occupation
+            // never overlaps or gaps with the new one, and a crash between
+            // the two writes can never happen. A `null` result means the
+            // old assignment was already closed by something else (accept,
+            // reject/cancel, or a confirmed timeout) since the caller last
+            // observed it -- that snapshot is stale, so this reassign must
+            // not proceed as if it still owned that offer.
+            const closedPrevious = await this.closeSupersededDispatchAssignment(
+              tx,
+              options.previousAssignmentId,
+              new Date().toISOString(),
+            );
+            if (!closedPrevious) {
+              throw new ApiRequestError(
+                HttpStatus.CONFLICT,
+                "SUPERSEDED_ASSIGNMENT_ALREADY_CLOSED",
+                "The assignment being replaced was already closed by another operation.",
+                {
+                  assignmentId: options.previousAssignmentId,
+                },
+              );
+            }
+          }
+          try {
+            await this.ownedMobilityRepository!.reserveDispatchResources(tx, {
+              orderId: bundle.order.orderId,
+              assignmentId: bundle.assignment.assignmentId,
+              driverId,
+              vehicleId,
+              expiresAt: null,
+            });
+          } catch (error) {
+            if (error instanceof DispatchResourceReservationConflictError) {
+              throw new ApiRequestError(
+                HttpStatus.CONFLICT,
+                "DISPATCH_RESOURCE_RESERVATION_CONFLICT",
+                `The ${error.resourceType} is already held or occupied by another dispatch assignment.`,
+                {
+                  resourceType: error.resourceType,
+                  resourceId: error.resourceId,
+                },
+              );
+            }
+            throw error;
+          }
           return bundle;
         })
         .then(async (bundle) => {
@@ -4398,12 +4581,34 @@ export class OwnedMobilityService
       {
         orders: [order],
         ...(dispatchJob ? { dispatchJobs: [dispatchJob] } : {}),
-        ...(assignment ? { dispatchAssignments: [assignment] } : {}),
         ...(task ? { driverTasks: [task] } : {}),
         dispatchTraceLogs: traceLogs,
       },
       "cancel_owned_order",
     );
+    if (assignment) {
+      if (this.ownedMobilityRepository?.isEnabled()) {
+        // SD §7.6: persist the cancelled assignment and release its shared
+        // reservation in the same transaction -- a crash between two
+        // separately-committed writes would otherwise strand a
+        // held/occupied reservation with no expiry and no path back to
+        // "released".
+        await this.ownedMobilityRepository.withTransaction(async (tx) => {
+          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+            dispatchAssignments: [assignment],
+          });
+          await this.ownedMobilityRepository!.releaseDispatchResourceReservations(
+            assignment.assignmentId,
+            tx,
+          );
+        });
+      } else {
+        this.persistChanges(
+          { dispatchAssignments: [assignment] },
+          "cancel_owned_order_assignment",
+        );
+      }
+    }
     this.recordAudit(
       {
         actorId: null,
@@ -4877,27 +5082,114 @@ export class OwnedMobilityService
     const task = this.requireTask(taskId);
     const assignment = this.requireAssignment(task.assignmentId);
     const order = this.requireOrder(task.orderId);
-    this.assertDriverTaskTransition(task, "accepted");
-    task.status = "accepted";
-    task.acceptedAt = command.acceptedAt;
-    assignment.status = "accepted";
-    assignment.acceptedAt = command.acceptedAt;
-    assignment.updatedAt = new Date().toISOString();
-    order.status = "driver_accepted";
-    order.updatedAt = assignment.updatedAt;
-    const traceLog = this.appendTrace(order.orderId, "driver.accepted", {
-      taskId,
-      assignmentId: assignment.assignmentId,
-    });
-    await this.persistChangesRequired(
-      {
-        orders: [order],
-        dispatchAssignments: [assignment],
-        driverTasks: [task],
-        dispatchTraceLogs: [traceLog],
-      },
-      "accept_driver_task",
-    );
+    const now = new Date().toISOString();
+
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      // SD §7.6: accept must not blind-upsert the in-memory snapshot -- a
+      // concurrent timeout/reassign can have already closed this exact
+      // assignment (under `closeSupersededDispatchAssignment`'s lock) since
+      // this process last read it. Lock assignment then task, in the same
+      // fixed order `closeSupersededDispatchAssignment` uses, and re-check
+      // both against the authoritative DB row before committing the accept
+      // and occupying the reservation, all in one transaction.
+      const committed = await this.ownedMobilityRepository.withTransaction(
+        async (tx) => {
+          const lockedAssignment =
+            await this.ownedMobilityRepository!.lockDispatchAssignmentForUpdate(
+              tx,
+              assignment.assignmentId,
+            );
+          if (!lockedAssignment || lockedAssignment.status !== "assigned") {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE",
+              "This offer is no longer awaiting driver acceptance.",
+              {
+                assignmentId: assignment.assignmentId,
+                status: lockedAssignment?.status ?? null,
+              },
+            );
+          }
+          const lockedTask =
+            await this.ownedMobilityRepository!.lockDriverTaskForUpdate(
+              tx,
+              taskId,
+            );
+          if (!lockedTask) {
+            throw new ApiRequestError(
+              HttpStatus.NOT_FOUND,
+              "DRIVER_TASK_NOT_FOUND",
+              `Driver task ${taskId} was not found.`,
+              { taskId },
+            );
+          }
+          this.assertDriverTaskTransition(lockedTask, "accepted");
+
+          const updatedTask: DriverTaskRecord = {
+            ...lockedTask,
+            status: "accepted",
+            acceptedAt: command.acceptedAt,
+          };
+          const updatedAssignment: DispatchAssignmentRecord = {
+            ...lockedAssignment,
+            status: "accepted",
+            acceptedAt: command.acceptedAt,
+            updatedAt: now,
+          };
+          const updatedOrder: OwnedOrderRecord = {
+            ...order,
+            status: "driver_accepted",
+            updatedAt: now,
+          };
+          const traceLog = this.appendTrace(order.orderId, "driver.accepted", {
+            taskId,
+            assignmentId: assignment.assignmentId,
+          });
+
+          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+            orders: [updatedOrder],
+            dispatchAssignments: [updatedAssignment],
+            driverTasks: [updatedTask],
+            dispatchTraceLogs: [traceLog],
+          });
+          // SD §7.6: "accepted 轉 occupied" -- the reservation stops being a
+          // soft hold once the driver actually accepts, atomically with the
+          // accept write.
+          await this.ownedMobilityRepository!.occupyDispatchResourceReservations(
+            assignment.assignmentId,
+            tx,
+          );
+
+          return { updatedTask, updatedAssignment, updatedOrder };
+        },
+      );
+
+      Object.assign(task, committed.updatedTask);
+      Object.assign(assignment, committed.updatedAssignment);
+      Object.assign(order, committed.updatedOrder);
+    } else {
+      this.assertDriverTaskTransition(task, "accepted");
+      task.status = "accepted";
+      task.acceptedAt = command.acceptedAt;
+      assignment.status = "accepted";
+      assignment.acceptedAt = command.acceptedAt;
+      assignment.updatedAt = now;
+      order.status = "driver_accepted";
+      order.updatedAt = now;
+      const traceLog = this.appendTrace(order.orderId, "driver.accepted", {
+        taskId,
+        assignmentId: assignment.assignmentId,
+      });
+      await this.persistChangesRequired(
+        {
+          orders: [order],
+          dispatchAssignments: [assignment],
+          driverTasks: [task],
+          dispatchTraceLogs: [traceLog],
+        },
+        "accept_driver_task",
+      );
+    }
     await this.recordAudit(
       {
         actorId: task.driverId,
@@ -4938,15 +5230,11 @@ export class OwnedMobilityService
     const assignment = this.requireAssignment(task.assignmentId);
     const order = this.requireOrder(task.orderId);
     const now = new Date().toISOString();
-    this.assertDriverTaskTransition(task, "rejected");
-    task.status = "rejected";
-    assignment.status = "rejected";
-    assignment.rejectReasonCode = command.reasonCode;
-    assignment.rejectedAt = now;
-    assignment.updatedAt = now;
-    order.status = "redispatch_required";
-    order.updatedAt = now;
-    const dispatchAttempt: DispatchAttemptRecord = {
+    // Built once so the same attempt row is both persisted and pushed into
+    // the in-memory cache -- but only after the lock (below) confirms this
+    // reject is actually legal, so a stale/superseded reject never leaves a
+    // phantom attempt behind in memory that was never durably persisted.
+    const buildDispatchAttempt = (): DispatchAttemptRecord => ({
       attemptId: randomUUID(),
       dispatchJobId: task.dispatchJobId,
       orderId: order.orderId,
@@ -4954,23 +5242,120 @@ export class OwnedMobilityService
       outcome: "rejected",
       reasonCode: command.reasonCode,
       createdAt: now,
-    };
-    this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
-    const traceLog = this.appendTrace(order.orderId, "driver.rejected", {
-      taskId,
-      reasonCode: command.reasonCode,
-      reasonNote: command.reasonNote ?? null,
     });
-    await this.persistChangesRequired(
-      {
-        orders: [order],
-        dispatchAssignments: [assignment],
-        driverTasks: [task],
-        dispatchAttempts: [dispatchAttempt],
-        dispatchTraceLogs: [traceLog],
-      },
-      "reject_driver_task",
-    );
+
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      // SD §7.6: same authoritative-lock requirement as accept, plus the
+      // reject and its reservation release must land in the same
+      // transaction -- a crash between a separately-committed reject and a
+      // separately-committed release would strand a held/occupied
+      // reservation with no expiry and no path back to "released".
+      const committed = await this.ownedMobilityRepository.withTransaction(
+        async (tx) => {
+          const lockedAssignment =
+            await this.ownedMobilityRepository!.lockDispatchAssignmentForUpdate(
+              tx,
+              assignment.assignmentId,
+            );
+          if (!lockedAssignment || lockedAssignment.status !== "assigned") {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE",
+              "This offer is no longer awaiting driver acceptance.",
+              {
+                assignmentId: assignment.assignmentId,
+                status: lockedAssignment?.status ?? null,
+              },
+            );
+          }
+          const lockedTask =
+            await this.ownedMobilityRepository!.lockDriverTaskForUpdate(
+              tx,
+              taskId,
+            );
+          if (!lockedTask) {
+            throw new ApiRequestError(
+              HttpStatus.NOT_FOUND,
+              "DRIVER_TASK_NOT_FOUND",
+              `Driver task ${taskId} was not found.`,
+              { taskId },
+            );
+          }
+          this.assertDriverTaskTransition(lockedTask, "rejected");
+
+          const updatedTask: DriverTaskRecord = {
+            ...lockedTask,
+            status: "rejected",
+          };
+          const updatedAssignment: DispatchAssignmentRecord = {
+            ...lockedAssignment,
+            status: "rejected",
+            rejectReasonCode: command.reasonCode,
+            rejectedAt: now,
+            updatedAt: now,
+          };
+          const updatedOrder: OwnedOrderRecord = {
+            ...order,
+            status: "redispatch_required",
+            updatedAt: now,
+          };
+          const dispatchAttempt = buildDispatchAttempt();
+          const traceLog = this.appendTrace(order.orderId, "driver.rejected", {
+            taskId,
+            reasonCode: command.reasonCode,
+            reasonNote: command.reasonNote ?? null,
+          });
+
+          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+            orders: [updatedOrder],
+            dispatchAssignments: [updatedAssignment],
+            driverTasks: [updatedTask],
+            dispatchAttempts: [dispatchAttempt],
+            dispatchTraceLogs: [traceLog],
+          });
+          // SD §7.6: a valid reject releases the shared reservation so
+          // another dispatch attempt can pick up the same driver/vehicle,
+          // atomically with the reject write.
+          await this.ownedMobilityRepository!.releaseDispatchResourceReservations(
+            assignment.assignmentId,
+            tx,
+          );
+
+          return { updatedTask, updatedAssignment, updatedOrder, dispatchAttempt };
+        },
+      );
+
+      this.dispatchAttempts = [committed.dispatchAttempt, ...this.dispatchAttempts];
+      Object.assign(task, committed.updatedTask);
+      Object.assign(assignment, committed.updatedAssignment);
+      Object.assign(order, committed.updatedOrder);
+    } else {
+      this.assertDriverTaskTransition(task, "rejected");
+      const dispatchAttempt = buildDispatchAttempt();
+      this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
+      task.status = "rejected";
+      assignment.status = "rejected";
+      assignment.rejectReasonCode = command.reasonCode;
+      assignment.rejectedAt = now;
+      assignment.updatedAt = now;
+      order.status = "redispatch_required";
+      order.updatedAt = now;
+      const traceLog = this.appendTrace(order.orderId, "driver.rejected", {
+        taskId,
+        reasonCode: command.reasonCode,
+        reasonNote: command.reasonNote ?? null,
+      });
+      await this.persistChangesRequired(
+        {
+          orders: [order],
+          dispatchAssignments: [assignment],
+          driverTasks: [task],
+          dispatchAttempts: [dispatchAttempt],
+          dispatchTraceLogs: [traceLog],
+        },
+        "reject_driver_task",
+      );
+    }
     await this.recordAudit(
       {
         actorId: task.driverId,
@@ -5588,6 +5973,12 @@ export class OwnedMobilityService
       driverTasks: [this.cloneTask(task)],
       dispatchTraceLogs: [this.cloneTraceLog(traceLog)],
     });
+    // SD §7.6: a valid completion releases the shared reservation, in the
+    // same transaction as the completion write.
+    await this.ownedMobilityRepository!.releaseDispatchResourceReservations(
+      assignment.assignmentId,
+      tx,
+    );
     await this.persistDriverCompletionOutbox(tx, {
       order,
       dispatchJob,
@@ -7378,10 +7769,11 @@ export class OwnedMobilityService
     return "escalate_to_ops";
   }
 
-  handleDispatchTimeout(
+  async handleDispatchTimeout(
     orderId: string,
     timeoutReasonCode: "acceptance_timeout" | "matching_timeout",
     requestId?: string,
+    options?: { targetAssignmentId?: string },
   ) {
     const order = this.requireOrder(orderId);
     const now = new Date().toISOString();
@@ -7399,6 +7791,97 @@ export class OwnedMobilityService
             ["assigned", "accepted"].includes(assignment.status),
         )
       : null;
+
+    // SD §7.6: an acceptance timeout is armed for one specific offer and
+    // must be able to name it -- without a target, there is nothing to fence
+    // the timer to "whatever assignment happens to be latest" (see below),
+    // which is exactly the unfenced case this guard exists to reject.
+    if (
+      timeoutReasonCode === "acceptance_timeout" &&
+      !options?.targetAssignmentId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ACCEPTANCE_TIMEOUT_TARGET_REQUIRED",
+        "An acceptance timeout must name the assignment its timer was armed for.",
+        { orderId },
+      );
+    }
+
+    // SD §7.6: "不能直接沿用 handleDispatchTimeout(orderId) 再尋找最新
+    // assignment 取消" -- a timer set for one specific offer must not cancel
+    // whatever assignment happens to be latest by the time it fires (a
+    // reassign or a fresh dispatch attempt may have already replaced it),
+    // nor an offer that already left the "pending acceptance" state since
+    // the timer was armed -- an accepted offer is no longer waiting on this
+    // timeout, and cancelling it here would undo a driver's acceptance out
+    // from under them. Both cases are indistinguishable "this timer no
+    // longer applies" outcomes and resolve the same way: leave state and
+    // reservations untouched instead of closing a different, or no longer
+    // pending, assignment.
+    if (
+      options?.targetAssignmentId &&
+      (latestAssignment?.assignmentId !== options.targetAssignmentId ||
+        latestAssignment.status !== "assigned")
+    ) {
+      return {
+        orderId,
+        status: order.status,
+        timeoutReasonCode,
+        escalationAction: "superseded" as const,
+      };
+    }
+
+    // SD §7.6: a `matching_timeout` armed while the order had no assignment
+    // yet is allowed to omit a target (there is nothing to name). But if an
+    // assignment now exists, this timer predates it and is exactly as stale
+    // as an untargeted `acceptance_timeout` would be -- without this guard
+    // it would fall through to closing whatever offer is latest, including
+    // one made after this timer was armed. Treat it as superseded instead of
+    // resolving it against an assignment it was never armed for.
+    if (
+      timeoutReasonCode === "matching_timeout" &&
+      !options?.targetAssignmentId &&
+      latestAssignment
+    ) {
+      return {
+        orderId,
+        status: order.status,
+        timeoutReasonCode,
+        escalationAction: "superseded" as const,
+      };
+    }
+
+    let closedPrevious: {
+      assignment: DispatchAssignmentRecord;
+      task: DriverTaskRecord | null;
+    } | null = null;
+    if (latestAssignment && this.ownedMobilityRepository?.isEnabled()) {
+      // SD §7.6: re-verify under a row lock, shared with accept's own write
+      // path, immediately before acting -- the in-memory check above can be
+      // stale (e.g. this process's cache lagging another pod's accept), and
+      // this is the authoritative fence against a timeout racing an accept.
+      // A `null` result means the row already left "assigned" (accepted, or
+      // already closed by something else) since the in-memory check above;
+      // treat it exactly like the superseded case.
+      closedPrevious = await this.ownedMobilityRepository.withTransaction(
+        (tx) =>
+          this.closeSupersededDispatchAssignment(
+            tx,
+            latestAssignment.assignmentId,
+            now,
+          ),
+      );
+      if (!closedPrevious) {
+        return {
+          orderId,
+          status: order.status,
+          timeoutReasonCode,
+          escalationAction: "superseded" as const,
+        };
+      }
+    }
+
     const latestTask = latestAssignment
       ? this.driverTasks.find(
           (task) =>
@@ -7457,10 +7940,13 @@ export class OwnedMobilityService
       {
         orders: [order],
         ...(activeJob ? { dispatchJobs: [activeJob] } : {}),
-        ...(latestAssignment
+        // Already durably persisted atomically by closeSupersededDispatchAssignment
+        // above when closedPrevious is set; re-including it here would just be a
+        // redundant (harmless, but pointless) re-upsert of identical values.
+        ...(latestAssignment && !closedPrevious
           ? { dispatchAssignments: [latestAssignment] }
           : {}),
-        ...(latestTask ? { driverTasks: [latestTask] } : {}),
+        ...(latestTask && !closedPrevious ? { driverTasks: [latestTask] } : {}),
         dispatchAttempts: [dispatchAttempt],
         dispatchTraceLogs: [traceLog],
       },
