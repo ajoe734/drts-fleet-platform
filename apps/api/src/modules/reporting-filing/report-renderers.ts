@@ -75,15 +75,17 @@ export async function recordsToXlsx(
   }
 
   // Auto-fit columns (approximate: max of header width and a sample of values).
-  sheet.columns.forEach((col, idx) => {
-    const header = columns[idx] ?? "";
-    let max = header.length;
-    for (const row of rows) {
-      const text = cellText(row[header]);
-      if (text.length > max) max = text.length;
-    }
-    col.width = Math.min(Math.max(max + 2, 10), 80);
-  });
+  if (columns.length > 0) {
+    sheet.columns.forEach((col, idx) => {
+      const header = columns[idx] ?? "";
+      let max = header.length;
+      for (const row of rows) {
+        const text = cellText(row[header]);
+        if (text.length > max) max = text.length;
+      }
+      col.width = Math.min(Math.max(max + 2, 10), 80);
+    });
+  }
 
   const arrayBuffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);
