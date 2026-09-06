@@ -25,7 +25,7 @@ Parent task `SR-MAIL-001` was marked `blocked` with waiting actor `Codex` by its
    - A three-way merge check against `origin/dev` (`40ba315e4`) succeeds with **zero** conflicts.
 
 2. **The actual blockers keeping parent `SR-MAIL-001` from completion:**
-   - **Compilation / Typecheck failure in CI test suite**: On PR #1679, GitHub Actions run `34032802257` failed on `Product smoke acceptance` (and downstream `Smoke acceptance`) because `tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts` has 7 TypeScript errors (`TS2345` / `TS2322`). In `codex2`'s session, only package-scoped `pnpm --filter @drts/api typecheck` was run, missing the repository-wide `pnpm run typecheck` (`tsc -p tsconfig.json --noEmit`) which typechecks `tests/`.
+   - **Compilation / Typecheck failure in CI test suite**: On PR #1679, GitHub Actions run `34032802257` failed on `Product smoke acceptance` (and downstream `Smoke acceptance`) because tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts has 7 TypeScript errors (`TS2345` / `TS2322`). In `codex2`'s session, only package-scoped `pnpm --filter @drts/api typecheck` was run, missing the repository-wide `pnpm run typecheck` (`tsc -p tsconfig.json --noEmit`) which typechecks `tests/`.
    - **Actor quota pause**: Original owner `Codex2` and reviewer `Codex` are currently paused due to quota/authentication constraints.
    - **Unnecessary self-block on out-of-scope concerns**: `Codex2` marked the task blocked seeking supervisor coordination for frontend acceptance web pages and shared enum additions (`sent` in `@drts/contracts`). However, `SR-MAIL-001`'s acceptance criteria specifically target backend delivery adapter and controlled receiver verification ("沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 將invitation接共用delivery；原始token只交安全transport，不寫log/response。修復重寄撤銷、過期與寄送失敗，不讓記憶體send返回就標delivered。"). The backend adapter and outbox retry implementation already fulfills the required semantics.
 
@@ -90,7 +90,7 @@ tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts(136,38): error TS232
 ```
 
 #### Mechanism
-In `tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts`:
+In tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts:
 ```typescript
 const token = new URLSearchParams(link.hash.slice(1)).get("invitationToken");
 assert(token?.startsWith("ti_"));
@@ -130,7 +130,7 @@ git rebase origin/dev
 *(Merge-tree check confirms 0 conflicts).*
 
 ### Step 3: Apply the TypeScript Narrowing Fix in `verify-mailpit.ts`
-In `tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts`, insert `assert(token);`:
+In tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts, insert `assert(token);`:
 ```typescript
     const link = new URL(received.Text.split("\n")[1]!.trim());
     const token = new URLSearchParams(link.hash.slice(1)).get(
