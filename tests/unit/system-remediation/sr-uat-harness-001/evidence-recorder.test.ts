@@ -28,9 +28,13 @@ describe("SR-UAT-HARNESS-001: UatEvidenceRecorder", () => {
     });
 
     recorder.recordRole("Platform Admin", BASELINE_PERSONAS.platform_admin);
-    recorder.recordResourceId("tenant", "10000000-0000-0000-0000-000000000201", {
-      name: "Acme",
-    });
+    recorder.recordResourceId(
+      "tenant",
+      "10000000-0000-0000-0000-000000000201",
+      {
+        name: "Acme",
+      },
+    );
     recorder.recordResourceId("driver", "10000000-0000-0000-0000-000000000381");
 
     const bundle = recorder.finalize("passed");
@@ -70,14 +74,20 @@ describe("SR-UAT-HARNESS-001: UatEvidenceRecorder", () => {
 
     expect(http.url).toContain("[REDACTED]");
     expect(http.requestHeaders?.authorization).toBe("[REDACTED]");
-    expect((http.requestBody as Record<string, string>).userEmail).toBe("o***@company.example");
-    expect((http.requestBody as Record<string, string>).phone).toBe("0912-***-678");
+    expect((http.requestBody as Record<string, string>).userEmail).toBe(
+      "o***@company.example",
+    );
+    expect((http.requestBody as Record<string, string>).phone).toBe(
+      "0912-***-678",
+    );
 
     const consoleLog = recorder.recordConsole(
       "warn",
       "Account admin@partner.example secret: topsecret123",
     );
-    expect(consoleLog.message).toBe("Account a***@partner.example secret: [REDACTED]");
+    expect(consoleLog.message).toBe(
+      "Account a***@partner.example secret: [REDACTED]",
+    );
   });
 
   it("calculates sha256 checksum and size for artifacts", () => {
@@ -106,7 +116,9 @@ describe("SR-UAT-HARNESS-001: UatEvidenceRecorder", () => {
 
     const bundle = recorder.finalize("passed");
     expect(bundle.unimplementedLiveSurfaces.length).toBe(1);
-    expect(bundle.unimplementedLiveSurfaces[0].surface).toBe("real_telecom_trunk");
+    expect(bundle.unimplementedLiveSurfaces[0]!.surface).toBe(
+      "real_telecom_trunk",
+    );
   });
 
   it("handles test failures with non-zero exit code and assertSuccess error", () => {

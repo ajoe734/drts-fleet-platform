@@ -10,9 +10,9 @@ import type { UatTenantContext } from "./namespace-manager";
 export interface AttachCollectorOptions {
   page: Page;
   recorder: UatEvidenceRecorder;
-  currentPersona?: RolePersona;
-  includeRequestBody?: boolean;
-  includeResponseBody?: boolean;
+  currentPersona?: RolePersona | undefined;
+  includeRequestBody?: boolean | undefined;
+  includeResponseBody?: boolean | undefined;
 }
 
 /**
@@ -39,7 +39,11 @@ export function attachBrowserEvidenceCollector(
   };
 
   const handlePageError = (error: Error) => {
-    recorder.recordConsole("error", `Uncaught Page Error: ${error.message}`, error.stack);
+    recorder.recordConsole(
+      "error",
+      `Uncaught Page Error: ${error.message}`,
+      error.stack,
+    );
     recorder.recordError(error);
   };
 

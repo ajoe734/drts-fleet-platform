@@ -1,8 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import {
-  UatNamespaceManager,
-  UatNamespace,
-} from "../../../e2e/system-remediation/shared/namespace-manager";
+import { UatNamespaceManager } from "../../../e2e/system-remediation/shared/namespace-manager";
 
 describe("SR-UAT-HARNESS-001: UatNamespaceManager and Shard Isolation", () => {
   let manager: UatNamespaceManager;

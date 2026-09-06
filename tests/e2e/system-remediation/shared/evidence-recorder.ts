@@ -12,18 +12,18 @@ export interface HttpEvidence {
   url: string;
   statusCode: number;
   durationMs: number;
-  requestHeaders?: Record<string, string>;
-  responseHeaders?: Record<string, string>;
+  requestHeaders?: Record<string, string> | undefined;
+  responseHeaders?: Record<string, string> | undefined;
   requestBody?: unknown;
   responseBody?: unknown;
-  actorRole?: string;
+  actorRole?: string | undefined;
 }
 
 export interface ConsoleEvidence {
   timestamp: string;
   level: "log" | "info" | "warn" | "error";
   message: string;
-  location?: string;
+  location?: string | undefined;
 }
 
 export interface ArtifactEvidence {
@@ -38,7 +38,7 @@ export interface ArtifactEvidence {
 export interface TrackedEntityId {
   type: string;
   id: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> | undefined;
 }
 
 export interface UatEvidenceBundle {
@@ -46,10 +46,10 @@ export interface UatEvidenceBundle {
   runId: string;
   shardIndex: number;
   baseSha: string;
-  candidateSha?: string;
+  candidateSha?: string | undefined;
   headSha: string;
   startTime: string;
-  endTime?: string;
+  endTime?: string | undefined;
   status: "passed" | "failed" | "in_progress";
   exitCode: number;
   roles: string[];
@@ -57,7 +57,11 @@ export interface UatEvidenceBundle {
   httpCalls: HttpEvidence[];
   consoleLogs: ConsoleEvidence[];
   artifacts: ArtifactEvidence[];
-  errors: Array<{ message: string; stack?: string; timestamp: string }>;
+  errors: Array<{
+    message: string;
+    stack?: string | undefined;
+    timestamp: string;
+  }>;
   unimplementedLiveSurfaces: Array<{ surface: string; reason: string }>;
 }
 
@@ -66,11 +70,11 @@ export interface RecordHttpOptions {
   url: string;
   statusCode: number;
   durationMs: number;
-  requestHeaders?: Record<string, string>;
-  responseHeaders?: Record<string, string>;
+  requestHeaders?: Record<string, string> | undefined;
+  responseHeaders?: Record<string, string> | undefined;
   requestBody?: unknown;
   responseBody?: unknown;
-  actorRole?: string;
+  actorRole?: string | undefined;
 }
 
 export class UatEvidenceRecorder {
@@ -78,10 +82,10 @@ export class UatEvidenceRecorder {
   private readonly runId: string;
   private readonly shardIndex: number;
   private baseSha: string;
-  private candidateSha?: string;
+  private candidateSha?: string | undefined;
   private headSha: string;
   private readonly startTime: string;
-  private endTime?: string;
+  private endTime?: string | undefined;
   private status: "passed" | "failed" | "in_progress" = "in_progress";
   private exitCode = 0;
 
@@ -92,7 +96,7 @@ export class UatEvidenceRecorder {
   private readonly artifacts: ArtifactEvidence[] = [];
   private readonly errors: Array<{
     message: string;
-    stack?: string;
+    stack?: string | undefined;
     timestamp: string;
   }> = [];
   private readonly unimplementedLiveSurfaces: Array<{
@@ -102,9 +106,9 @@ export class UatEvidenceRecorder {
 
   constructor(options: {
     taskId: string;
-    shardIndex?: number;
-    baseSha?: string;
-    candidateSha?: string;
+    shardIndex?: number | undefined;
+    baseSha?: string | undefined;
+    candidateSha?: string | undefined;
   }) {
     this.taskId = options.taskId;
     this.shardIndex = options.shardIndex ?? 0;
@@ -117,9 +121,7 @@ export class UatEvidenceRecorder {
       process.env.BASE_SHA ||
       "ea1b1b4f0359d5ca5ab00ad604d37281a74d70df";
     this.candidateSha =
-      options.candidateSha ||
-      process.env.CANDIDATE_SHA ||
-      this.headSha;
+      options.candidateSha || process.env.CANDIDATE_SHA || this.headSha;
   }
 
   private resolveGitHead(): string {
@@ -155,14 +157,16 @@ export class UatEvidenceRecorder {
   public recordResourceId(
     type: string,
     id: string,
-    metadata?: Record<string, unknown>,
+    metadata?: Record<string, unknown> | undefined,
   ): void {
     const key = `${type}:${id}`;
     if (!this.trackedResources.has(key)) {
       this.trackedResources.set(key, {
         type,
         id,
-        metadata: metadata ? (redactObject(metadata) as Record<string, unknown>) : undefined,
+        metadata: metadata
+          ? (redactObject(metadata) as Record<string, unknown>)
+          : undefined,
       });
     }
   }
@@ -212,7 +216,7 @@ export class UatEvidenceRecorder {
   public recordConsole(
     level: "log" | "info" | "warn" | "error",
     message: string,
-    location?: string,
+    location?: string | undefined,
   ): ConsoleEvidence {
     const entry: ConsoleEvidence = {
       timestamp: new Date().toISOString(),
@@ -302,7 +306,7 @@ export class UatEvidenceRecorder {
   /**
    * Finalizes the evidence collection.
    */
-  public finalize(status?: "passed" | "failed"): UatEvidenceBundle {
+  public finalize(status?: "passed" | "failed" | undefined): UatEvidenceBundle {
     this.endTime = new Date().toISOString();
 
     if (status) {

@@ -5,7 +5,6 @@ import {
   createTenantPersonas,
   generateAuthHeaders,
   UatEvidenceRecorder,
-  redactPii,
 } from "./index";
 
 test.describe("SR-UAT-HARNESS-001: Parallel Shard and Tenant Isolation Verification", () => {
@@ -76,7 +75,10 @@ test.describe("SR-UAT-HARNESS-001: Parallel Shard and Tenant Isolation Verificat
     expect(localHeaders["x-actor-type"]).toBe("tenant_admin");
     expect(localHeaders["x-tenant-id"]).toBe(ns.tenantA.tenantId);
 
-    const sandboxHeaders = generateAuthHeaders(BASELINE_PERSONAS.platform_admin, "sandbox");
+    const sandboxHeaders = generateAuthHeaders(
+      BASELINE_PERSONAS.platform_admin,
+      "sandbox",
+    );
     expect(sandboxHeaders["x-actor-type"]).toBe("platform_admin");
     expect(sandboxHeaders["x-realm"]).toBe("platform");
 
@@ -115,7 +117,10 @@ test.describe("SR-UAT-HARNESS-001: Parallel Shard and Tenant Isolation Verificat
     });
 
     // Record console log with PII
-    recorder.recordConsole("info", "User 0912-345-678 logged in with email rider@acme.example");
+    recorder.recordConsole(
+      "info",
+      "User 0912-345-678 logged in with email rider@acme.example",
+    );
 
     // Record artifact and compute SHA-256
     const sampleArtifact = recorder.recordArtifact(
@@ -141,14 +146,22 @@ test.describe("SR-UAT-HARNESS-001: Parallel Shard and Tenant Isolation Verificat
     expect(bundle.exitCode).toBe(0);
 
     // Verify PII Redaction
-    const httpCall = bundle.httpCalls[0];
+    const httpCall = bundle.httpCalls[0]!;
     expect(httpCall.url).not.toContain("secret123");
-    expect((httpCall.requestBody as Record<string, string>).password).toBe("[REDACTED]");
-    expect((httpCall.requestBody as Record<string, string>).phone).toBe("0912-***-678");
-    expect((httpCall.requestBody as Record<string, string>).email).toBe("u***@acme.example");
-    expect((httpCall.requestBody as Record<string, string>).rocId).toBe("A12***789");
+    expect((httpCall.requestBody as Record<string, string>).password).toBe(
+      "[REDACTED]",
+    );
+    expect((httpCall.requestBody as Record<string, string>).phone).toBe(
+      "0912-***-678",
+    );
+    expect((httpCall.requestBody as Record<string, string>).email).toBe(
+      "u***@acme.example",
+    );
+    expect((httpCall.requestBody as Record<string, string>).rocId).toBe(
+      "A12***789",
+    );
 
-    const consoleLog = bundle.consoleLogs[0];
+    const consoleLog = bundle.consoleLogs[0]!;
     expect(consoleLog.message).toContain("0912-***-678");
     expect(consoleLog.message).toContain("r***@acme.example");
   });

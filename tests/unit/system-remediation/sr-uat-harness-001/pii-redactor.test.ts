@@ -9,9 +9,7 @@ describe("SR-UAT-HARNESS-001: PII De-identification and Redaction", () => {
     expect(redactPii("Contact user at admin@acme.example for details")).toBe(
       "Contact user at a***@acme.example for details",
     );
-    expect(redactPii("john.doe+service@partner.org")).toBe(
-      "j***@partner.org",
-    );
+    expect(redactPii("john.doe+service@partner.org")).toBe("j***@partner.org");
   });
 
   it("redacts Taiwan mobile and landline phone numbers", () => {
@@ -68,7 +66,7 @@ describe("SR-UAT-HARNESS-001: PII De-identification and Redaction", () => {
       },
     };
 
-    const sanitized = redactObject(rawPayload);
+    const sanitized = redactObject(rawPayload) as any;
 
     expect(sanitized.email).toBe("b***@acme.example");
     expect(sanitized.admin.phone).toBe("0988-***-222");
@@ -76,6 +74,8 @@ describe("SR-UAT-HARNESS-001: PII De-identification and Redaction", () => {
     expect(sanitized.admin.password).toBe("[REDACTED]");
     expect(sanitized.admin.nestedList[0].contact).toBe("0922-***-444");
     expect(sanitized.admin.nestedList[0].token).toBe("[REDACTED]");
-    expect(sanitized.admin.nestedList[1]).toBe("Report recipient: o***@acme.example");
+    expect(sanitized.admin.nestedList[1]).toBe(
+      "Report recipient: o***@acme.example",
+    );
   });
 });

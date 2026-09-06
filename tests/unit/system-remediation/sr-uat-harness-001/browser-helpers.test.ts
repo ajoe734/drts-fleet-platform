@@ -64,7 +64,7 @@ describe("SR-UAT-HARNESS-001: Browser Helpers and Event Listeners", () => {
       location: () => ({ url: "http://localhost:3000/app.js" }),
     } as unknown as ConsoleMessage;
 
-    listeners["console"].forEach((fn) => fn(mockConsoleMsg));
+    listeners["console"]?.forEach((fn) => fn(mockConsoleMsg));
 
     // Simulate network request/response
     const mockReq = {
@@ -82,19 +82,19 @@ describe("SR-UAT-HARNESS-001: Browser Helpers and Event Listeners", () => {
       text: vi.fn().mockResolvedValue('{"status":"ok"}'),
     } as unknown as Response;
 
-    listeners["request"].forEach((fn) => fn(mockReq));
-    await Promise.all(listeners["response"].map((fn) => fn(mockRes)));
+    listeners["request"]?.forEach((fn) => fn(mockReq));
+    await Promise.all(listeners["response"]?.map((fn) => fn(mockRes)) ?? []);
 
     const bundle = recorder.finalize("passed");
 
     // Verify console log was redacted
-    expect(bundle.consoleLogs[0].level).toBe("warn");
-    expect(bundle.consoleLogs[0].message).toBe(
+    expect(bundle.consoleLogs[0]!.level).toBe("warn");
+    expect(bundle.consoleLogs[0]!.message).toBe(
       "Customer phone 0912-***-678 needs review",
     );
 
     // Verify HTTP call was redacted
-    expect(bundle.httpCalls[0].url).toContain("d***@acme.example");
+    expect(bundle.httpCalls[0]!.url).toContain("d***@acme.example");
 
     // Detach and verify off was called
     detach();
@@ -146,6 +146,8 @@ describe("SR-UAT-HARNESS-001: Browser Helpers and Event Listeners", () => {
 
     await expect(
       assertTenantIsolationOnPage(contaminatedPage, tenantA, tenantB),
-    ).rejects.toThrow(/Tenant Isolation Breach: Page contains forbidden tenant ID/);
+    ).rejects.toThrow(
+      /Tenant Isolation Breach: Page contains forbidden tenant ID/,
+    );
   });
 });

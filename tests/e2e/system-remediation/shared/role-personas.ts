@@ -21,15 +21,22 @@ export interface RolePersona {
   scopes: readonly string[];
   email: string;
   phone: string;
-  tenantId?: string;
-  partnerId?: string;
-  driverId?: string;
+  tenantId?: string | undefined;
+  partnerId?: string | undefined;
+  driverId?: string | undefined;
+}
+
+export interface BaselinePersonas {
+  platform_admin: RolePersona;
+  ops_dispatcher: RolePersona;
+  bank_finance: RolePersona;
+  partner_api: RolePersona;
 }
 
 /**
  * Baseline canonical platform personas.
  */
-export const BASELINE_PERSONAS: Record<string, RolePersona> = {
+export const BASELINE_PERSONAS: BaselinePersonas = {
   platform_admin: {
     key: "platform_admin",
     name: "Platform Administrator",
@@ -124,12 +131,18 @@ export const BASELINE_PERSONAS: Record<string, RolePersona> = {
   },
 };
 
+export interface TenantPersonas {
+  admin: RolePersona;
+  operator: RolePersona;
+  driver: RolePersona;
+  passenger: RolePersona;
+  [key: string]: RolePersona;
+}
+
 /**
  * Creates tenant-bound role personas for a given UAT tenant.
  */
-export function createTenantPersonas(
-  tenant: UatTenantContext,
-): Record<string, RolePersona> {
+export function createTenantPersonas(tenant: UatTenantContext): TenantPersonas {
   const tenantSlug = tenant.tenantCode.toLowerCase().replace(/_/g, "-");
 
   const admin: RolePersona = {
@@ -214,10 +227,7 @@ export function createTenantPersonas(
     realm: "tenant",
     roleFamilies: ["tenant"],
     roles: ["passenger"],
-    scopes: [
-      "passenger:booking:read",
-      "passenger:booking:write",
-    ],
+    scopes: ["passenger:booking:read", "passenger:booking:write"],
     email: `rider01@${tenantSlug}.example`,
     phone: "0912-999-000",
     tenantId: tenant.tenantId,
