@@ -28,6 +28,7 @@ import {
 import {
   buildAssistantActions,
   resolveAssistantActionHref,
+  resolvePlatformAdminOrigin,
   type AssistantAction,
 } from "./assistant-actions";
 import { buildTier0HelpResult, buildTier1ScopedResult } from "./help-search";
@@ -98,14 +99,20 @@ function getViewportRect() {
 }
 
 function buildDefaultState(viewport = getViewportRect()): WidgetState {
-  const width = 420;
-  const height = 360;
+  const isMobile = viewport.width < 640;
+  const edgeGap = isMobile ? 8 : EDGE_GAP;
+  const width = isMobile
+    ? Math.max(280, Math.min(360, viewport.width - edgeGap * 2))
+    : 420;
+  const height = isMobile
+    ? Math.max(240, Math.min(320, viewport.height - 120))
+    : 360;
   return {
     width,
     height,
-    x: Math.max(EDGE_GAP, viewport.width - width - EDGE_GAP),
-    y: Math.max(72, viewport.height - height - EDGE_GAP),
-    minimized: false,
+    x: Math.max(edgeGap, viewport.width - width - edgeGap),
+    y: Math.max(edgeGap, viewport.height - MINIMIZED_HEIGHT - edgeGap),
+    minimized: true,
     closed: false,
     docked: "right",
   };
@@ -115,23 +122,34 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function clampRect(rect: Rect, viewport = getViewportRect()): Rect {
-  const width = clamp(
-    rect.width,
-    WIDGET_MIN_WIDTH,
-    Math.min(WIDGET_MAX_WIDTH, viewport.width - EDGE_GAP * 2),
+function clampRect(
+  rect: Rect & { minimized?: boolean },
+  viewport = getViewportRect(),
+): Rect {
+  const isMobile = viewport.width < 640;
+  const edgeGap = isMobile ? 8 : EDGE_GAP;
+  const minWidth = Math.min(280, Math.max(200, viewport.width - edgeGap * 2));
+  const maxWidth = Math.max(
+    minWidth,
+    Math.min(WIDGET_MAX_WIDTH, viewport.width - edgeGap * 2),
   );
-  const height = clamp(
-    rect.height,
+  const width = clamp(rect.width, minWidth, maxWidth);
+  const minHeight = Math.min(
     WIDGET_MIN_HEIGHT,
-    Math.min(WIDGET_MAX_HEIGHT, viewport.height - EDGE_GAP * 2),
+    Math.max(160, viewport.height - edgeGap * 2),
   );
-  const maxX = Math.max(EDGE_GAP, viewport.width - width - EDGE_GAP);
-  const maxY = Math.max(EDGE_GAP, viewport.height - height - EDGE_GAP);
+  const maxHeight = Math.max(
+    minHeight,
+    Math.min(WIDGET_MAX_HEIGHT, viewport.height - edgeGap * 2),
+  );
+  const height = clamp(rect.height, minHeight, maxHeight);
+  const effectiveHeight = rect.minimized ? MINIMIZED_HEIGHT : height;
+  const maxX = Math.max(edgeGap, viewport.width - width - edgeGap);
+  const maxY = Math.max(edgeGap, viewport.height - effectiveHeight - edgeGap);
 
   return {
-    x: clamp(rect.x, EDGE_GAP, maxX),
-    y: clamp(rect.y, EDGE_GAP, maxY),
+    x: clamp(rect.x, edgeGap, maxX),
+    y: clamp(rect.y, edgeGap, maxY),
     width,
     height,
   };
@@ -139,17 +157,19 @@ function clampRect(rect: Rect, viewport = getViewportRect()): Rect {
 
 function resolveDockedPosition(
   docked: DockSide,
-  rect: Rect,
+  rect: Rect & { minimized?: boolean },
   viewport = getViewportRect(),
 ): Rect {
+  const isMobile = viewport.width < 640;
+  const edgeGap = isMobile ? 8 : EDGE_GAP;
   const next = clampRect(rect, viewport);
   if (docked === "left") {
-    return { ...next, x: EDGE_GAP };
+    return { ...next, x: edgeGap };
   }
   if (docked === "right") {
     return {
       ...next,
-      x: Math.max(EDGE_GAP, viewport.width - next.width - EDGE_GAP),
+      x: Math.max(edgeGap, viewport.width - next.width - edgeGap),
     };
   }
   return next;
@@ -178,7 +198,7 @@ function readStoredState(): WidgetState | null {
       y: parsed.y,
       width: parsed.width,
       height: parsed.height,
-      minimized: parsed.minimized ?? false,
+      minimized: parsed.minimized ?? true,
       closed: parsed.closed ?? false,
       docked:
         parsed.docked === "left" || parsed.docked === "right"
@@ -279,6 +299,9 @@ export function OpsAssistantWidget() {
     startY: number;
     rect: Rect;
   } | null>(null);
+  const launcherRef = useRef<HTMLButtonElement | null>(null);
+  const dragHandleRef = useRef<HTMLDivElement | null>(null);
+  const lastFocusedElementRef = useRef<HTMLElement | null>(null);
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
   const [widget, setWidget] = useState<WidgetState>(() => buildDefaultState());
   const [stream, setStream] = useState<StreamState>({
@@ -309,6 +332,7 @@ export function OpsAssistantWidget() {
   useEffect(() => {
     const node = document.createElement("div");
     node.setAttribute("data-ops-assistant-root", "true");
+    node.style.pointerEvents = "none";
     document.body.appendChild(node);
     setPortalNode(node);
 
@@ -495,6 +519,45 @@ export function OpsAssistantWidget() {
     });
   };
 
+  const handleClose = () => {
+    lastFocusedElementRef.current = document.activeElement as HTMLElement | null;
+    setWidget((current) => ({ ...current, closed: true }));
+    requestAnimationFrame(() => {
+      launcherRef.current?.focus();
+    });
+  };
+
+  const handleOpen = () => {
+    lastFocusedElementRef.current = launcherRef.current;
+    setWidget((current) => ({ ...current, closed: false }));
+    requestAnimationFrame(() => {
+      dragHandleRef.current?.focus();
+    });
+  };
+
+  const handleToggleMinimize = (forceState?: boolean) => {
+    setWidget((current) => {
+      const willMinimize = forceState ?? !current.minimized;
+      const viewport = getViewportRect();
+      const isMobile = viewport.width < 640;
+      const edgeGap = isMobile ? 8 : EDGE_GAP;
+      const nextY = willMinimize
+        ? Math.max(edgeGap, viewport.height - MINIMIZED_HEIGHT - edgeGap)
+        : Math.max(edgeGap, viewport.height - current.height - edgeGap);
+      const nextRect = resolveDockedPosition(
+        current.docked,
+        { ...current, y: nextY, minimized: willMinimize },
+        viewport,
+      );
+      return {
+        ...current,
+        ...nextRect,
+        minimized: willMinimize,
+        closed: false,
+      };
+    });
+  };
+
   const onDragPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     if (target.closest("button")) {
@@ -557,7 +620,7 @@ export function OpsAssistantWidget() {
         break;
       case "Escape":
         event.preventDefault();
-        setWidget((current) => ({ ...current, closed: true }));
+        handleClose();
         break;
       default:
         break;
@@ -802,9 +865,12 @@ export function OpsAssistantWidget() {
           actionId: receipt.actionId,
           auditId: receipt.auditId,
         }),
-        auditHref:
-          receipt.auditHref ??
-          `/audit?auditId=${encodeURIComponent(receipt.auditId)}`,
+        auditHref: receipt.auditHref
+          ? receipt.auditHref.startsWith("http://") ||
+            receipt.auditHref.startsWith("https://")
+            ? receipt.auditHref
+            : `${resolvePlatformAdminOrigin()}${receipt.auditHref.startsWith("/") ? receipt.auditHref : `/${receipt.auditHref}`}`
+          : `${resolvePlatformAdminOrigin()}/audit?auditId=${encodeURIComponent(receipt.auditId)}${receipt.resourceType ? `&resourceType=${encodeURIComponent(receipt.resourceType)}` : ""}${receipt.resourceId ? `&resourceId=${encodeURIComponent(receipt.resourceId)}` : ""}`,
       });
     },
   );
@@ -838,16 +904,16 @@ export function OpsAssistantWidget() {
       {widget.closed ? (
         <button
           type="button"
+          ref={launcherRef}
           data-testid="ops-assistant-launcher"
           aria-label={t("opsAssistant.launcher.open")}
-          onClick={() =>
-            setWidget((current) => ({ ...current, closed: false }))
-          }
+          onClick={handleOpen}
           style={{
             position: "fixed",
             right: EDGE_GAP,
             bottom: EDGE_GAP,
             zIndex: 5000,
+            pointerEvents: "auto",
             height: 48,
             padding: "0 16px",
             borderRadius: 999,
@@ -877,6 +943,7 @@ export function OpsAssistantWidget() {
         style={shellStyle}
       >
         <div
+          ref={dragHandleRef}
           data-testid="ops-assistant-drag-handle"
           tabIndex={0}
           onPointerDown={onDragPointerDown}
@@ -926,13 +993,7 @@ export function OpsAssistantWidget() {
               }
               icon="minus"
               pressed={widget.minimized}
-              onClick={() =>
-                setWidget((current) => ({
-                  ...current,
-                  minimized: !current.minimized,
-                  closed: false,
-                }))
-              }
+              onClick={() => handleToggleMinimize()}
             />
             <ActionButton
               label={t("opsAssistant.header.dockLeft")}
@@ -953,9 +1014,7 @@ export function OpsAssistantWidget() {
             <ActionButton
               label={t("opsAssistant.header.close")}
               icon="x"
-              onClick={() =>
-                setWidget((current) => ({ ...current, closed: true }))
-              }
+              onClick={handleClose}
             />
           </div>
         </div>
@@ -1452,9 +1511,7 @@ export function OpsAssistantWidget() {
               type="button"
               data-testid="ops-assistant-restore"
               aria-label={t("opsAssistant.minimized.restore")}
-              onClick={() =>
-                setWidget((current) => ({ ...current, minimized: false }))
-              }
+              onClick={() => handleToggleMinimize(false)}
               style={restoreButtonStyle}
             >
               {t("opsAssistant.minimized.restore")}
