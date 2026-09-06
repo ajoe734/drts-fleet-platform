@@ -67,7 +67,7 @@ export default async function TripPage({
     return (
       <>
         <EntPageHead
-          title="預約不存在 (404)"
+          title={tr("trip.notFound.title")}
           sub="查無此預約編號 · 非系統暫時故障"
         />
         <div
@@ -94,14 +94,14 @@ export default async function TripPage({
                     style={entBtnStyle(t, { variant: "primary" })}
                     data-testid="trip-return-list-btn"
                   >
-                    <EBtnContent iconR="arrow">返回預約列表</EBtnContent>
+                    <EBtnContent iconR="arrow">{tr("trip.notFound.returnList")}</EBtnContent>
                   </Link>
                   <Link
                     href="/"
                     style={entBtnStyle(t, { variant: "default" })}
                     data-testid="trip-return-home-btn"
                   >
-                    <EBtnContent>返回首頁</EBtnContent>
+                    <EBtnContent>{tr("trip.notFound.returnHome")}</EBtnContent>
                   </Link>
                 </div>
               }
@@ -125,7 +125,7 @@ export default async function TripPage({
             <EEmpty
               t={t}
               icon="car"
-              title="目前無進行中的行程"
+              title={tr("trip.empty.title")}
               body="您目前沒有正在進行或即將出發的接送行程。您可以至預約列表查看歷史紀錄，或立即為同仁建立新預約。"
               action={
                 <div
@@ -141,14 +141,14 @@ export default async function TripPage({
                     style={entBtnStyle(t, { variant: "default" })}
                     data-testid="trip-empty-to-bookings-btn"
                   >
-                    <EBtnContent>查看所有預約</EBtnContent>
+                    <EBtnContent>{tr("trip.empty.viewAll")}</EBtnContent>
                   </Link>
                   <Link
                     href="/bookings/new"
                     style={entBtnStyle(t, { variant: "primary" })}
                     data-testid="trip-empty-to-new-btn"
                   >
-                    <EBtnContent icon="plus">建立新預約</EBtnContent>
+                    <EBtnContent icon="plus">{tr("trip.empty.createNew")}</EBtnContent>
                   </Link>
                 </div>
               }
@@ -386,7 +386,7 @@ export default async function TripPage({
               style={{ fontSize: 12, color: t.primary, textDecoration: "none" }}
               data-testid="trip-help-center-link"
             >
-              前往企業客服與常見問題中心 →
+              {tr("trip.helpCenter.link")}
             </Link>
           </div>
 

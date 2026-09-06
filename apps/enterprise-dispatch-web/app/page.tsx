@@ -260,7 +260,7 @@ export default async function HomePage() {
               <EEmpty
                 t={t}
                 icon="cal"
-                title="目前無即將出發的預約"
+                title={tr("home.upcoming.emptyTitle")}
                 body="尚無近期預約行程。您可以隨時為自己或同仁建立新的用車預約。"
                 action={
                   <Link
