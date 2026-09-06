@@ -135,6 +135,12 @@ const MULTI_TAXI_RECORD_GOVERNANCE_SCOPES = [
   "multi_taxi_records:export",
 ] as const;
 
+const IDENTITY_BREAK_GLASS_SCOPES = [
+  "identity:break-glass:request",
+  "identity:break-glass:approve",
+  "identity:break-glass:activate",
+] as const;
+
 export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
   {
     scope: "identity:read",
@@ -441,6 +447,18 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
       "Multi-taxi P5 canonical operational-record read and controlled export.",
     resourceConstraints: [TENANT_CONSTRAINT, OBJECT_CONSTRAINT] as const,
   })),
+  ...IDENTITY_BREAK_GLASS_SCOPES.map((scope) => ({
+    scope,
+    allowedRealms: ["system", "platform", "ops"] as const,
+    description: "Break-glass privileged access request/approval/activation.",
+    resourceConstraints: [OBJECT_CONSTRAINT] as const,
+  })),
+  {
+    scope: "assistant:write",
+    allowedRealms: ["system", "platform", "ops", "tenant"] as const,
+    description: "Invoke platform assistant tools and conversations.",
+    resourceConstraints: [ACTOR_CONSTRAINT] as const,
+  },
   {
     scope: "partner:entries:read",
     allowedRealms: ["partner"],
@@ -548,6 +566,8 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         ...SANDBOX_COMPLIANCE_SCOPES,
         ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
         ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES,
+        ...IDENTITY_BREAK_GLASS_SCOPES,
+        "assistant:write",
       ],
     },
     {
@@ -584,6 +604,8 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         ...SANDBOX_COMPLIANCE_SCOPES,
         ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
         ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES,
+        ...IDENTITY_BREAK_GLASS_SCOPES,
+        "assistant:write",
       ],
     },
     {
@@ -606,6 +628,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         "billing:write",
         "reports:read",
         "reports:write",
+        "assistant:write",
       ],
     },
     {
@@ -642,6 +665,8 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         "sandbox.compliance.read",
         "sandbox.investigation.read",
         "sandbox.evidence.preview",
+        ...IDENTITY_BREAK_GLASS_SCOPES,
+        "assistant:write",
       ],
     },
     {
@@ -708,6 +733,7 @@ export const IAM_TENANT_ROLE_POLICY_DEFINITIONS: readonly IamTenantRolePolicyDef
         "tenant:billing:write",
         "reports:read",
         "reports:write",
+        "assistant:write",
       ],
     },
     {

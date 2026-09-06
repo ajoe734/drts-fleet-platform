@@ -819,6 +819,9 @@ export function BreakGlassPanel() {
     setSubmitting(true);
     setError(null);
     try {
+      const stepUp = await iamClient.createStepUpProof({
+        actionId: "platform:break-glass:request",
+      });
       const created = await iamClient.requestBreakGlass({
         requestedScopes: requestedScopes.split(",").map((s) => s.trim()).filter(Boolean),
         reasonCode: reasonCode.trim(),
@@ -827,6 +830,7 @@ export function BreakGlassPanel() {
         mutation: {
           reasonCode: "BREAK_GLASS_REQUEST",
           expectedVersion: 1,
+          stepUpReference: stepUp.stepUpReference,
         },
       });
       setGrants((prev) => [created, ...prev]);
@@ -843,10 +847,14 @@ export function BreakGlassPanel() {
     setActing(true);
     setError(null);
     try {
+      const stepUp = await iamClient.createStepUpProof({
+        actionId: "platform:break-glass:approve",
+      });
       const approved = await iamClient.approveBreakGlass(g.grantId, {
         mutation: {
           reasonCode: "BREAK_GLASS_APPROVED",
           expectedVersion: g.version ?? 1,
+          stepUpReference: stepUp.stepUpReference,
         },
       });
       setGrants((prev) => prev.map((item) => (item.grantId === approved.grantId ? approved : item)));
@@ -862,6 +870,9 @@ export function BreakGlassPanel() {
     setActing(true);
     setError(null);
     try {
+      const stepUp = await iamClient.createStepUpProof({
+        actionId: "platform:break-glass:activate",
+      });
       const result = await iamClient.activateBreakGlass(g.grantId, {
         requestId: g.grantId,
         requestedScope: g.requestedScopes,
@@ -869,6 +880,7 @@ export function BreakGlassPanel() {
         mutation: {
           reasonCode: "BREAK_GLASS_ACTIVATED",
           expectedVersion: g.version ?? 1,
+          stepUpReference: stepUp.stepUpReference,
         },
       });
       activateSession(result.grant, result.accessToken, result.expiresAt);

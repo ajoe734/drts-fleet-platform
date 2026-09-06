@@ -94,17 +94,27 @@ const STEP_UP_ROUTE_RULES: readonly StepUpRouteRule[] = [
     actionId: "platform:break-glass:request",
     description: "Break-glass request creation",
     freshnessWindowMs: 10 * MINUTE_MS,
-    enforcedRealms: ["platform"],
+    enforcedRealms: ["platform", "ops"],
     matches: exactMatch("POST", "platform-admin/break-glass/requests"),
   },
   {
     actionId: "platform:break-glass:approve",
     description: "Break-glass approval",
     freshnessWindowMs: 10 * MINUTE_MS,
-    enforcedRealms: ["platform"],
+    enforcedRealms: ["platform", "ops"],
     matches: regexMatch(
       "POST",
       /^platform-admin\/break-glass\/requests\/[^/]+\/approve$/,
+    ),
+  },
+  {
+    actionId: "platform:break-glass:activate",
+    description: "Break-glass activation",
+    freshnessWindowMs: 10 * MINUTE_MS,
+    enforcedRealms: ["platform", "ops"],
+    matches: regexMatch(
+      "POST",
+      /^platform-admin\/break-glass\/requests\/[^/]+\/activate$/,
     ),
   },
   {

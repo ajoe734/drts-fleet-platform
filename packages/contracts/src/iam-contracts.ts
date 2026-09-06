@@ -37,6 +37,7 @@ export const IAM_STEP_UP_ACTION_IDS = [
   "platform:access-reviews:decide",
   "platform:break-glass:request",
   "platform:break-glass:approve",
+  "platform:break-glass:activate",
   "platform:partner-entries:create",
   "platform:partner-entries:update",
   "platform:partner-entries:activate",

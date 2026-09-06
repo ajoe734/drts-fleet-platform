@@ -33,6 +33,18 @@ const NON_STRICT_TRUSTED_AMR = new Set([
   "tenant_bootstrap_fixture",
 ]);
 
+// Hardware-backed / phishing-resistant factors only. TOTP, push, and other
+// possession/knowledge-based OTP factors are excluded even though they count
+// as "trusted MFA" for other step-up actions.
+const PHISHING_RESISTANT_AMR = new Set(["webauthn", "fido2"]);
+
+// Hardening plan 16.1: break-glass activation requires hardware or
+// phishing-resistant MFA, not generic MFA, because it grants standing
+// emergency access rather than confirming an already-scoped action.
+const ACTIONS_REQUIRING_PHISHING_RESISTANT_MFA = new Set([
+  "platform:break-glass:activate",
+]);
+
 interface StoredStepUpProof {
   stepUpReference: string;
   actionId: NonNullable<StepUpProof["actionId"]>;
@@ -135,18 +147,30 @@ export class StepUpProofService {
     }
 
     const authTimeMs = parseTimestamp(identity.authTime);
-    if (authTimeMs === null || !this.hasTrustedMfa(identity)) {
+    const requiresPhishingResistantMfa =
+      ACTIONS_REQUIRING_PHISHING_RESISTANT_MFA.has(policy.actionId);
+    const mfaSatisfied = requiresPhishingResistantMfa
+      ? this.hasPhishingResistantMfa(identity)
+      : this.hasTrustedMfa(identity);
+
+    if (authTimeMs === null || !mfaSatisfied) {
       this.recordEvent("step_up.denied", identity, {
         actionId: policy.actionId,
         outcome: "denied",
         reasonCode:
-          authTimeMs === null ? "missing_trusted_auth_time" : "mfa_not_trusted",
+          authTimeMs === null
+            ? "missing_trusted_auth_time"
+            : requiresPhishingResistantMfa
+              ? "phishing_resistant_mfa_required"
+              : "mfa_not_trusted",
         requestId,
       });
       throw new ApiRequestError(
         403,
         "MFA_REQUIRED",
-        "Trusted multi-factor authentication is required before step-up proof can be issued.",
+        requiresPhishingResistantMfa
+          ? "Hardware or phishing-resistant multi-factor authentication is required before this step-up proof can be issued."
+          : "Trusted multi-factor authentication is required before step-up proof can be issued.",
         {
           actionId: policy.actionId,
           freshnessSeconds: Math.floor(policy.freshnessWindowMs / 1000),
@@ -397,6 +421,17 @@ export class StepUpProofService {
       : NON_STRICT_TRUSTED_AMR;
     return (identity.amr ?? []).some((method) =>
       trustedAmr.has(method.trim().toLowerCase()),
+    );
+  }
+
+  private hasPhishingResistantMfa(identity: BootstrapRequestIdentity) {
+    const normalizedAcr = identity.acr?.trim().toLowerCase() ?? null;
+    if (normalizedAcr === "aal3") {
+      return true;
+    }
+
+    return (identity.amr ?? []).some((method) =>
+      PHISHING_RESISTANT_AMR.has(method.trim().toLowerCase()),
     );
   }
 

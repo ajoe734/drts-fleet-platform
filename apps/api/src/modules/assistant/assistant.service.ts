@@ -567,7 +567,8 @@ export class AssistantService implements OnModuleInit {
     if (
       !conversation ||
       conversation.realm !== identity.realm ||
-      conversation.tenantId !== identity.tenantId
+      conversation.tenantId !== identity.tenantId ||
+      conversation.createdBy !== identity.actorId
     ) {
       throw new ApiRequestError(
         404,
