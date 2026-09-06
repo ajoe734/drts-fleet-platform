@@ -1,10 +1,7 @@
 import { EStepper } from "@/components/ent-kit";
-import { EnterpriseBookingForm } from "@/components/enterprise-booking-form";
+import { EnterpriseBookingForm } from "@/components/booking-form";
 import { EntPageHead } from "@/components/enterprise-shell";
-import {
-  createEnterpriseBookingDraft,
-  parseEnterpriseBookingDraft,
-} from "@/lib/enterprise-booking-draft";
+import { parseEnterpriseBookingDraft } from "@/lib/enterprise-booking-draft";
 import {
   getEnterpriseAddresses,
   getEnterpriseCostCenters,
@@ -28,10 +25,7 @@ export default async function NewBookingPage({
   const bookingId = Array.isArray(resolvedSearchParams.bookingId)
     ? resolvedSearchParams.bookingId[0]
     : resolvedSearchParams.bookingId;
-  const initialDraft =
-    Object.keys(resolvedSearchParams).length > 0
-      ? parseEnterpriseBookingDraft(resolvedSearchParams, locale)
-      : createEnterpriseBookingDraft(locale);
+  const initialDraft = parseEnterpriseBookingDraft(resolvedSearchParams, locale);
 
   return (
     <>

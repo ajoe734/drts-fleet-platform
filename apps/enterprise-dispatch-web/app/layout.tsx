@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { EnterpriseAppFrame } from "@/components/enterprise-app-frame";
 import { LanguageProvider } from "@/lib/i18n";
@@ -6,6 +6,13 @@ import { RuntimeConfigScript } from "@/lib/runtime-config";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import "./globals.css";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getServerLocale();
