@@ -11,8 +11,8 @@
 - Decision Ref: `docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md`
 - Functional Requirements (FRs): `UV-FR-001`, `UV-FR-003`, `UV-FR-007`, `UV-FR-010`, `UV-FR-011`, `UV-FR-018`, `UV-FR-021`, `UV-FR-024`, `UV-FR-026`, `UV-FR-027`, `UV-FR-030`, `UV-FR-031`, `UV-FR-032`
 - Acceptance Criteria (ACs): `UV-AC-002`, `UV-AC-026`, `UV-AC-030`, `UV-AC-033`
-- Last Update: `2026-09-06T12:03:00Z`
-- Re-Verification: `2026-09-06T12:03:00Z` (acceptance-phase唯讀複查，Claude2，acceptance_ready_dispatch 喚醒，距上一輪僅約 4 分鐘，三項可執行查核與 `ai-status.json` 機器真相均無變化，已連續 8 輪無新證據)
+- Last Update: `2026-09-06T13:13:00Z`
+- Re-Verification: `2026-09-06T13:13:00Z` (acceptance-phase唯讀複查，Claude2，acceptance_ready_dispatch 喚醒，連續第 12 輪，`ai-status.json` 機器真相與 GitHub secrets/variables 均無變化，7 項 required_acceptance 仍待外部證據)
 
 ---
 
@@ -195,6 +195,12 @@
 距上一輪 (12:05Z / commit `af4064869`) 再次被 dispatch，本輪為連續第 11 次複查。`git fetch origin` 確認 `origin/dev` 仍為 `2093cf7e3`（與 `merge_sha` 一致），`git ls-remote` 確認任務分支遠端 HEAD 已是 `af4064869`（與本地一致，前輪已推送）；`ai-status.json` 候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`/`merge_sha`）與 §8.1 七項 `required_acceptance` 矩陣均未變化。`gh secret list`/`gh variable list` 未重新執行（結果自 11:22Z 起連續 4 輪確認為 11 項/97 項無新增，短間隔內不預期變化）；行程環境語音憑證檢查仍被 worker 執行環境權限政策歸類為 `defer` 需人工核准，與前十輪相同。
 
 > **本輪複查結論：** 連續第 11 輪複查，機器真相與前十輪完全一致，無 regression、無新證據。**未呼叫 `record-acceptance`**，本輪以 `note` 記錄，不呼叫 `progress`。重申：本任務已合併、產出完整，唯一缺口是 7 項 `required_acceptance` 所需之真實外部供應商帳號/合約/費率證據，非本 worker 唯讀盤點權限可取得；在無人工提供該等證據前，後續固定間隔複查預期只會重複本輪結論，建議 supervisor 將 re-dispatch 條件改為證據變更觸發式。
+
+### 2.15 Acceptance 階段複查記錄 (Acceptance-Phase Re-Verification 2026-09-06T13:13Z, Claude2, acceptance_ready_dispatch 喚醒)
+
+距上一輪 (12:07Z / commit `53901afb6`) 再次被 dispatch，本輪為連續第 12 次複查。`git fetch origin` 確認 `origin/dev` 仍為 `2093cf7e3`（與 `merge_sha` 一致，無推進）；`git ls-remote` 確認任務分支遠端 HEAD 已是 `53901afb6`（與本地一致，前輪已推送）；重新執行 `gh secret list`/`gh variable list` 關鍵字比對，分別為 11 項/97 項，均無 CTI/TWM/Voice 相關新增；`ai-status.json` 候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`/`merge_sha`）與 §8.1 七項 `required_acceptance` 矩陣均未變化。行程環境語音憑證比對仍受 worker 執行環境權限政策歸類為 `defer`，與前十一輪相同。
+
+> **本輪複查結論：** 連續第 12 輪複查，機器真相與前十一輪完全一致，無 regression、無新證據。**未呼叫 `record-acceptance`**，本輪以 `note` 記錄，不呼叫 `progress`。重申前數輪建議：本任務已合併、產出完整，唯一缺口是 7 項 `required_acceptance` 所需之真實外部供應商帳號/合約/費率證據，非本 worker 唯讀盤點權限可取得；固定間隔 dispatch 在無人工提供新證據前只會重複本輪結論，建議 supervisor 改為證據變更觸發式 re-dispatch（例如監控 GitHub secrets/variables 新增符合語音關鍵字、或 `required_acceptance` 相關文件被人工更新時才喚醒）。
 
 ---
 
