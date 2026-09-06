@@ -12,6 +12,7 @@
 ## 1. 現況盤點與根因分析（fix 前）
 
 ### R18: 跨應用 Audit 與 Payments 導航 404 (C048)
+
 - **現象**：在 `ops-console-web` (預設 port 3000) 中，操作助理產生的審計與支付日誌連結採用相對路徑（例如 `/audit` 或 `/platform-admin/audit`），或者直接導航到 ops-console 自身域名。然而 `ops-console-web` 內部並未提供審計日誌與支付日誌頁面，導致點擊後出現 404 錯誤。
 - **遺漏上下文**：生成的 audit 連結未附帶具體的資源識別資訊（`auditId`, `resourceType`, `resourceId`, `module`, `actorId`），使得前往審計系統時無法定位到對應事件。
 - **根因**：
@@ -19,6 +20,7 @@
   2. `assistant-actions.ts` 內硬編碼了不正確的跨 app 相對路徑，缺少對 `platform-admin` 權威服務位址的解析。
 
 ### R19: 營運助理 Widget 預設遮擋主要控制項與可用性問題 (C048)
+
 - **現象**：
   1. 助理 widget 過去預設為展開狀態（`minimized: false`），以高層級（`z-index: 5000`）佔據右下角（420px 寬、640px 高），遮蔽了底層操作畫面右下角的關鍵控制項（如資料表格底部分頁按鈕、送出按鈕與主要 CTA）。
   2. 根容器浮層未設定 `pointer-events: none`，導致即使在未有視覺遮擋的區域，游標點擊也可能被外層全螢幕 portal 容器攔截。
@@ -27,6 +29,7 @@
   5. 視窗適應性：在行動裝置寬度（390px 視窗）下，420px 的卡片會造成水平溢出，無法正常點擊內部操作。
 
 ### 1.1 Candidate 4e0e8b82e 審查 Reopen 根因與回歸修復
+
 - **Reopen 審查發現**：
   - 在第一版 candidate `4e0e8b82e` 中，為了解決全螢幕 portal 攔截底層點擊的問題，在 `assistant-widget.tsx` 建立了 portal root 並設定 `node.style.pointerEvents = "none"`，展開面板 `shellStyle` 設定了 `pointerEvents: "auto"`。
   - **迴歸缺陷**：浮動發射器按鈕 `<button data-testid="ops-assistant-launcher">`（當 `widget.closed === true` 時呈現）的 inline style 遺漏了 `pointerEvents: "auto"` 設定。由於 CSS `pointer-events` 為繼承屬性，發射器按鈕繼承了 portal root 的 `pointer-events: none`，導致滑鼠與觸控點擊穿透按鈕，使用者一旦收合助理便無法透過滑鼠點擊重新打開（dead button）。
@@ -37,9 +40,17 @@
   3. 新增 DOM 事件層級測試，模擬 CSS 繼承特性，重現無設定時繼承 none 導致點擊無效的缺陷，並驗證加上 `auto` 後點擊觸發開關循環與 `localStorage` 持久化狀態。
   4. 在 `cross-app-url.ts` 增加防護，避免對 Cloud Run 隨機 hash 網域（`*.run.app`）執行字串替換。
 
+### 1.2 Candidate af617b4388df CI Failure 根因與型別修復
+
+- **CI Failure 現象**：在 GitHub Actions run `34021153566`（PR #1648）中，`pnpm run typecheck` (`pnpm typecheck:root` -> `tsc -p tsconfig.json --noEmit`) 報錯：
+  `tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts(473,46): error TS2353: Object literal may only specify known properties, and 'key' does not exist in type '{ type: string; defaultPrevented?: boolean; }'.`
+- **根因**：單元測試檔中的 `MockElement.dispatchEvent` 參數定義為 `{ type: string; defaultPrevented?: boolean }`，未定義 index signature；而在 line 473 測試鍵盤事件時傳入了 `{ type: "keydown", key: "Escape" }`，觸發 TypeScript strict excess property check。
+- **修復**：將 `MockElement.dispatchEvent` 的事件參數擴充為 `{ type: string; defaultPrevented?: boolean; [key: string]: any }`，允許自訂事件屬性（如 `key`），使 `pnpm typecheck:root` 與 `vitest` 全面順利通過。
+
 ## 2. 解決方案與架構設計
 
 ### 2.1 跨應用 URL 權威解析器 (`cross-app-url.ts`)
+
 1. **Origin 解析 (`resolvePlatformAdminOrigin`)**：
    - 優先讀取環境變數 `NEXT_PUBLIC_PLATFORM_ADMIN_URL`、`NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN`、`NEXT_PUBLIC_PLATFORM_ADMIN_WEB_URL` 等。
    - 支援微前端或容器環境注入的 `window.__DRTS_RUNTIME_CONFIG__`。
@@ -51,6 +62,7 @@
    - 保證新分頁開拓模式 (`target="_blank"`, `rel="noopener noreferrer"`)，避免中斷使用者的 ops-console 操作流程。
 
 ### 2.2 營運助理佈局、穿透隔離與無障礙優化 (`assistant-layout.ts`, `assistant-widget.tsx`, `ops-shell.tsx`)
+
 1. **預設縮小化 (`minimized: true`)**：
    - 初始狀態預設為收合，以右下角輕量圓形按鈕（`data-testid="ops-assistant-launcher"`）呈現，預設絕不遮擋工作區主要控制項與資料表格分頁。
 2. **雙向點擊穿透保護**：
@@ -92,13 +104,20 @@
 ## 4. 驗證指令與結果
 
 ### 4.1 Git Diff 格式檢查
+
 ```text
 $ git diff --check
 exit code: 0
 ```
 
 ### 4.2 TypeScript 型別檢查
+
 ```text
+$ pnpm run typecheck:root
+> drts-fleet-platform@0.1.0 typecheck:root /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-shell-001
+> tsc -p tsconfig.json --noEmit
+exit code: 0
+
 $ pnpm --filter @drts/ops-console-web typecheck
 > @drts/ops-console-web@0.1.0 typecheck /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-shell-001/apps/ops-console-web
 > next typegen && tsc --noEmit
@@ -109,6 +128,7 @@ exit code: 0
 ```
 
 ### 4.3 單元測試驗證
+
 ```text
 $ pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/
  RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-shell-001
@@ -124,6 +144,7 @@ exit code: 0
 ```
 
 ### 4.4 ESLint 靜態檢查
+
 ```text
 $ pnpm --filter @drts/ops-console-web lint
 > @drts/ops-console-web@0.1.0 lint /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-shell-001/apps/ops-console-web

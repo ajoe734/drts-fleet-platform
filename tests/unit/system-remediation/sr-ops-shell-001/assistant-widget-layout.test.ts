@@ -324,8 +324,15 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
       setAttribute: (name: string, value: string) => void;
       getAttribute: (name: string) => string | null;
       addEventListener: (type: string, listener: (event: any) => void) => void;
-      removeEventListener: (type: string, listener: (event: any) => void) => void;
-      dispatchEvent: (event: { type: string; defaultPrevented?: boolean }) => boolean;
+      removeEventListener: (
+        type: string,
+        listener: (event: any) => void,
+      ) => void;
+      dispatchEvent: (event: {
+        type: string;
+        defaultPrevented?: boolean;
+        [key: string]: any;
+      }) => boolean;
       click: () => void;
       focus: () => void;
       isFocused: boolean;
@@ -356,7 +363,11 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
           if (!el.listeners[type]) return;
           el.listeners[type] = el.listeners[type].filter((l) => l !== listener);
         },
-        dispatchEvent(event: { type: string; defaultPrevented?: boolean }) {
+        dispatchEvent(event: {
+          type: string;
+          defaultPrevented?: boolean;
+          [key: string]: any;
+        }) {
           const list = el.listeners[event.type] || [];
           for (const listener of list) {
             listener(event);
