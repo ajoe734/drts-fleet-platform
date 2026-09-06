@@ -1,13 +1,14 @@
 /**
- * Pure, fixture/translation-free reservation-window and passenger-identity
- * checks for the enterprise booking form (SR-ENTERPRISE-FORM-001, R20/R21).
+ * Pure, fixture-free reservation-window and passenger-identity checks for
+ * the enterprise booking form (SR-ENTERPRISE-FORM-001, R20/R21).
  *
- * This module intentionally has no "@/..." aliased imports so it can be
- * unit-tested directly under the repo-root vitest config, which pins the
- * "@" alias to a different app. `lib/enterprise-booking-draft.ts` imports
- * and re-exports these functions as the single source of truth for the
- * rest of the app.
+ * This module intentionally has no "@/..." aliased imports (it uses a
+ * relative import for translations instead) so it can be unit-tested
+ * directly under the repo-root vitest config, which pins the "@" alias to
+ * a different app. `lib/enterprise-booking-draft.ts` imports and re-exports
+ * these functions as the single source of truth for the rest of the app.
  */
+import { t as translate } from "../../lib/translations";
 
 const RESERVATION_TIMEZONE_OFFSET = "+08:00";
 const RESERVATION_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
@@ -66,9 +67,7 @@ export function getEarliestBookableLabel(
   const date = localWallClock.slice(5, 10).replace("-", "/");
   const time = localWallClock.slice(11, 16);
 
-  return locale === "zh"
-    ? `最早可預約時間：${date} ${time}（之後）`
-    : `Earliest bookable time: after ${date} ${time}`;
+  return translate("booking.earliestBookable", { date, time }, locale);
 }
 
 export function getEnterprisePassengerDisplayName(
