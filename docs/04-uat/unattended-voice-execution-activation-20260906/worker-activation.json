@@ -5,10 +5,7 @@
   "materialized_task_count": 29,
   "initial_backlog": 27,
   "initial_external_gates": 2,
-  "root_tasks": [
-    "UV-EXEC-001",
-    "UV-EXEC-027"
-  ],
+  "root_tasks": ["UV-EXEC-001", "UV-EXEC-027"],
   "cause": "All six agents omitted adapter; runtime defaults missing agent.adapter to file_inbox even when provider.delivery_mode names an automatic CLI. UV root tasks therefore reached manual_pending without a process.",
   "adapter_before": {
     "gemini": null,
@@ -81,5 +78,25 @@
     }
   ],
   "recovery": "Existing supervisor recovery reaped interrupted inbox fallbacks and dispatched task workspaces through configured automatic adapters; no task reset or direct runtime-state edit.",
-  "limits": "Point-in-time activation evidence. Worker execution is not task acceptance, successful live telephone validation, or production rollout."
+  "limits": "Point-in-time activation evidence. Worker execution is not task acceptance, successful live telephone validation, or production rollout.",
+  "codex_runtime_observation": [
+    {
+      "verified_at": "2026-09-06T03:33:46.921582+00:00",
+      "task_id": "FIX-P5-RECORDS-001",
+      "run_id": "codex-20260906T033028Z-f07996f9",
+      "pid": 1396180,
+      "mode": "codex",
+      "process_exists": true,
+      "process_executable": "/home/lupin/.local/lib/codex/0.153.0/codex",
+      "cli_version": "codex-cli 0.153.0",
+      "command_model": "gpt-6-astra",
+      "effective_codex_home": "/home/lupin/.codex",
+      "configured_reasoning_effort": "ultra",
+      "command_config_override_present": true,
+      "scope": "Read-only observation of an existing review worker; this unrelated task was not changed.",
+      "command_config_override_keys": ["ask_for_approval"],
+      "command_reasoning_effort_override_present": false
+    }
+  ],
+  "codex2_verification_limit": "Configured model/effort and account catalog verified; no live Codex2 process observed at activation."
 }
