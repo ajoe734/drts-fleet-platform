@@ -31,7 +31,6 @@ export type MapProviderConfig = {
 
 const GOOGLE_MAP_MODULE_PATH =
   "../../../../apps/ops-console-web/components/google-map-base-layer";
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const { resolveGoogleMapBaseLayerStatus, resetGoogleMapConfigCache }: any =
   await import(GOOGLE_MAP_MODULE_PATH);
 
@@ -65,7 +64,9 @@ function makeOrder(
   } as unknown as OwnedOrderRecord;
 }
 
-function makeJob(overrides: Partial<DispatchJobRecord> = {}): DispatchJobRecord {
+function makeJob(
+  overrides: Partial<DispatchJobRecord> = {},
+): DispatchJobRecord {
   return {
     dispatchJobId: "job-map-1",
     orderId: "order-map-1",
@@ -123,7 +124,9 @@ describe("SR-OPS-MAP-001: Mock Map Tiles 404 Remediation", () => {
     for (const tile of viewport.tiles) {
       const relPath = `${tile.z}/${tile.x}/${tile.y}.svg`;
       const filePath = resolve(MOCK_TILES_DIR, relPath);
-      expect(existsSync(filePath), `Tile ${relPath} must exist on disk`).toBe(true);
+      expect(existsSync(filePath), `Tile ${relPath} must exist on disk`).toBe(
+        true,
+      );
 
       const content = readFileSync(filePath, "utf8");
       expect(content).toContain("<svg");
@@ -154,7 +157,10 @@ describe("SR-OPS-MAP-001: Mock Map Tiles 404 Remediation", () => {
 
       expect(viewport.tiles.length).toBeGreaterThan(0);
       for (const tile of viewport.tiles) {
-        const filePath = resolve(MOCK_TILES_DIR, `${tile.z}/${tile.x}/${tile.y}.svg`);
+        const filePath = resolve(
+          MOCK_TILES_DIR,
+          `${tile.z}/${tile.x}/${tile.y}.svg`,
+        );
         expect(
           existsSync(filePath),
           `Zoom ${z} tile ${tile.z}/${tile.x}/${tile.y}.svg must exist`,
@@ -190,7 +196,10 @@ describe("SR-OPS-MAP-001: Mock Map Tiles 404 Remediation", () => {
 
       expect(pannedViewport.tiles.length).toBeGreaterThan(0);
       for (const tile of pannedViewport.tiles) {
-        const filePath = resolve(MOCK_TILES_DIR, `${tile.z}/${tile.x}/${tile.y}.svg`);
+        const filePath = resolve(
+          MOCK_TILES_DIR,
+          `${tile.z}/${tile.x}/${tile.y}.svg`,
+        );
         expect(
           existsSync(filePath),
           `Panned ${dir} tile ${tile.z}/${tile.x}/${tile.y}.svg must exist`,
@@ -301,10 +310,34 @@ describe("SR-OPS-MAP-001: Base-Layer Resolver & Provider Switching", () => {
   it("enforces mock/fallback can never be marked production ready (mock不可標production)", () => {
     const mockConfigs = [
       null,
-      { provider: "fallback", enabled: false, browserKey: null, mapId: null, reasonCode: "provider_not_external" },
-      { provider: "fallback", enabled: false, browserKey: "some-key", mapId: null, reasonCode: "mode_is_mock" },
-      { provider: "google", enabled: false, browserKey: null, mapId: null, reasonCode: "browser_key_missing" },
-      { provider: "google", enabled: true, browserKey: "", mapId: null, reasonCode: null },
+      {
+        provider: "fallback",
+        enabled: false,
+        browserKey: null,
+        mapId: null,
+        reasonCode: "provider_not_external",
+      },
+      {
+        provider: "fallback",
+        enabled: false,
+        browserKey: "some-key",
+        mapId: null,
+        reasonCode: "mode_is_mock",
+      },
+      {
+        provider: "google",
+        enabled: false,
+        browserKey: null,
+        mapId: null,
+        reasonCode: "browser_key_missing",
+      },
+      {
+        provider: "google",
+        enabled: true,
+        browserKey: "",
+        mapId: null,
+        reasonCode: null,
+      },
     ];
 
     for (const cfg of mockConfigs) {
