@@ -45,10 +45,10 @@
 ## 4. 下游 Migration 與任務對照 (Downstream Migration Plan)
 
 保留專屬 Migration 序號，不與既有遷移或 UV schema 衝突：
-- **SR-LEAVE-BE-001**: `infra/migrations/V0086__sr_driver_leave.sql`
-- **SR-ACADEMY-BE-001**: `infra/migrations/V0087__sr_driver_academy.sql`
-- **SR-HOST-BE-001**: `infra/migrations/V0088__sr_host_vehicle_access.sql`
-- **SR-CONTRACT-001**: 一次整合上述型別至 `@drts/contracts` 與 `@drts/api-client`，並寫入 `docs/04-uat/system-remediation-20260906/schema-allocation.json`。
+- **SR-LEAVE-BE-001**: Migration `V0086__sr_driver_leave.sql`（待下游任務建立）
+- **SR-ACADEMY-BE-001**: Migration `V0087__sr_driver_academy.sql`（待下游任務建立）
+- **SR-HOST-BE-001**: Migration `V0088__sr_host_vehicle_access.sql`（待下游任務建立）
+- **SR-CONTRACT-001**: 一次整合上述型別至 `@drts/contracts` 與 `@drts/api-client`，並寫入目標 allocation 檔案 `schema-allocation.json`。
 
 ---
 
@@ -73,8 +73,21 @@
 
    Test Files  1 passed (1)
         Tests  10 passed (10)
-     Start at  06:16:22
-     Duration  311ms (transform 64ms, setup 0ms, import 87ms, tests 12ms, environment 0ms)
+     Start at  06:30:51
+     Duration  357ms (transform 90ms, setup 0ms, import 115ms, tests 15ms, environment 0ms)
+  ```
+
+### 5.3 Canonical Consistency 規範一致性檢查
+- **Command**: `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`
+- **Working Directory**: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-design-001`
+- **Exit Code**: `0`
+- **Output**:
+  ```text
+  [consistency] l1-edit-authority: 0 finding(s)
+  [consistency] cited-paths: 0 finding(s)
+  [consistency] cited-decisions: 0 finding(s)
+  [consistency] task-claims: 0 finding(s)
+  [consistency] OK
   ```
 
 ---
