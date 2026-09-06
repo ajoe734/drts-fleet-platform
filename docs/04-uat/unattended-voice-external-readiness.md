@@ -12,7 +12,7 @@
 - Functional Requirements (FRs): `UV-FR-001`, `UV-FR-003`, `UV-FR-007`, `UV-FR-010`, `UV-FR-011`, `UV-FR-018`, `UV-FR-021`, `UV-FR-024`, `UV-FR-026`, `UV-FR-027`, `UV-FR-030`, `UV-FR-031`, `UV-FR-032`
 - Acceptance Criteria (ACs): `UV-AC-002`, `UV-AC-026`, `UV-AC-030`, `UV-AC-033`
 - Last Update: `2026-09-06T current UTC`
-- Re-Verification: `2026-09-06T current UTC` (acceptance-phase唯讀複查，Claude2，第 90 輪 acceptance_ready_dispatch 喚醒：origin/dev 仍為 `650e233bb`，無新提交；GitHub secrets/variables 計數 (11/97) 與關鍵字比對均無變化，7 項 required_acceptance 仍待外部證據，詳見 §2.87)
+- Re-Verification: `2026-09-06T current UTC` (acceptance-phase唯讀複查，Claude2，第 91 輪 acceptance_ready_dispatch 喚醒：origin/dev 仍為 `650e233bb`，無新提交；GitHub secrets/variables 計數 (11/97) 與擴充關鍵字比對均無新增供應商證據（`MIGRATION`/`migrate` 子字串誤觸發 `rate` 已排除），7 項 required_acceptance 仍待外部證據，詳見 §2.88)
 
 ---
 
@@ -672,6 +672,12 @@
 本輪 `git fetch origin` 後比對，`origin/dev` 仍為 round 89（§2.86）記錄之 `650e233bb`，**無新提交**（`git log 650e233bb..origin/dev` 為空）。`git ls-remote origin refs/heads/claude2/uv-exec-027` 回報 `22463f865`，與本地 HEAD（round 89 anchor commit）一致，無漂移。`gh secret list`／`gh variable list` 計數仍為 11/97，以擴充關鍵字 `grep -iE '(CTI|TWM|TWILIO|SIP|ASR|TTS|VOICE|PHONE|PSTN|CANDIDATE|CARRIER|DTMF)'` 分別核對兩者輸出均無命中，與先前各輪已記錄結論一致，無新增之 CTI/TWM/候選/營運/商務相關供應商項目。`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`、`ci_status`=`success`）與 `status`=`acceptance` 均未變化。第 3–9 節七項 `required_acceptance` 逐一核對仍維持 Blocker 標註與負責角色，無虛報通過。依 [[feedback_ai_status_note_vs_progress_acceptance]] 記憶教訓，本輪繼續使用 `ai-status.sh note`（而非 `progress`）記錄，以避免清空候選生命週期欄位。
 
 > **流程建議重申（第五十七次以上）：** 本任務已連續 90 次 `acceptance_ready_dispatch` 喚醒維持零證據變化，阻塞源純為外部人力（供應商帳號申請、採購、法務條款簽署），非機器可推進項。再次請求 supervisor／dispatcher 評估將此類任務改為事件觸發式重派或大幅拉長輪詢間隔；若已無新資訊來源，建議暫停對本任務的自動重派，改為等待人工提供外部證據後手動喚醒。
+
+### 2.88 Acceptance 階段複查記錄（2026-09-06T current UTC，Claude2，第 91 次連續 acceptance_ready_dispatch 喚醒，dedup 政策下之零 delta 項）
+
+本輪 `git fetch origin` 後比對，`origin/dev` 仍為 round 90（§2.87）記錄之 `650e233bb`，**無新提交**（`git log 650e233bb..origin/dev` 為空）。`git ls-remote origin refs/heads/claude2/uv-exec-027` 回報 `717972577`，與本地 HEAD（round 90 anchor commit）一致，無漂移。`gh secret list`／`gh variable list` 計數仍為 11/97，以擴充關鍵字 `grep -iE '(cti|twm|twilio|sip|asr|tts|voice|phone|pstn|vendor|candidate|queue|sla|rate|quota|contract)'` 分別核對兩者輸出：secrets 無命中；variables 命中 `DEV_GCP_MIGRATION_JOB`／`PROD_GCP_MIGRATION_JOB`／`STAGING_GCP_MIGRATION_JOB` 三筆，經檢視為既有 Cloud SQL 遷移工作變數名稱中的 `MIGRATION`/`migrate` 子字串誤觸發 `rate` 關鍵字（非 rate card/費率證據），非新增之 CTI/TWM/候選/營運/商務相關供應商項目。`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`、`ci_status`=`success`）與 `status`=`acceptance` 均未變化。第 3–9 節七項 `required_acceptance` 逐一核對仍維持 Blocker 標註與負責角色，無虛報通過。依 [[feedback_ai_status_note_vs_progress_acceptance]] 記憶教訓，本輪繼續使用 `ai-status.sh note`（而非 `progress`）記錄，以避免清空候選生命週期欄位。
+
+> **流程建議重申（第五十八次以上）：** 本任務已連續 91 次 `acceptance_ready_dispatch` 喚醒維持零證據變化，阻塞源純為外部人力（供應商帳號申請、採購、法務條款簽署），非機器可推進項。再次請求 supervisor／dispatcher 評估將此類任務改為事件觸發式重派或大幅拉長輪詢間隔；若已無新資訊來源，建議暫停對本任務的自動重派，改為等待人工提供外部證據後手動喚醒。
 
 ---
 
