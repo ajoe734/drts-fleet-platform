@@ -221,6 +221,22 @@ export class VoiceSessionService {
         session,
       };
     }
+    if (isBootstrap && command.sequence !== 1) {
+      // SD §5.4: the watermark starts at 0 (no event applied); the first
+      // event to bootstrap the session MUST be sequence 1. Any earlier
+      // sequence that arrives out of order (e.g. HTTP delivers seq 3 before
+      // seq 1) is durably stored but cannot advance the watermark -- exactly
+      // the same gap rule that applies once events are flowing. Silently
+      // applying seq N > 1 on bootstrap would permanently skip seqs 1..N-1
+      // and corrupt the ordered-event invariant.
+      return {
+        deduped: false,
+        applied: false,
+        gap: true,
+        appliedThroughSequence: session.lastAppliedControlSequence,
+        session,
+      };
+    }
     if (
       !isBootstrap &&
       command.sequence !== session.lastAppliedControlSequence + 1

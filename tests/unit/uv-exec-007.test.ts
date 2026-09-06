@@ -376,6 +376,85 @@ describe("UV-EXEC-007: voice session state machine, ordered events, persistent c
       expect(fake.insertControlEvent).not.toHaveBeenCalled();
       expect(fake.session.lastAppliedControlSequence).toBe(3);
     });
+
+    describe("bootstrap gap: first-arrival sequence > 1 on a fresh session (regression UV-EXEC-007)", () => {
+      let freshFake: FakeVoiceSessionRepository;
+      let freshService: VoiceSessionService;
+
+      beforeEach(() => {
+        // A completely fresh session: no events applied yet, watermark at 0.
+        const session = makeSessionRecord({ lastAppliedControlSequence: 0 });
+        freshFake = new FakeVoiceSessionRepository(session);
+        freshService = new VoiceSessionService(asRepository(freshFake));
+      });
+
+      it("buffers the first-arriving event as a gap when its sequence > 1 instead of applying it", async () => {
+        // Sequence 3 arrives first over HTTP on a brand-new session.
+        // Before the fix this was applied immediately, silently skipping seqs 1-2
+        // and corrupting the ordered-event invariant.
+        const result = await freshService.recordControlEvent(
+          baseEventCommand({ sequence: 3, eventType: "clear" }),
+        );
+        expect(result).toMatchObject({
+          applied: false,
+          gap: true,
+          appliedThroughSequence: 0,
+        });
+        // Watermark must remain at 0 -- the gap is open.
+        expect(freshFake.session.lastAppliedControlSequence).toBe(0);
+        // The event must have been durably stored for later replay.
+        expect(freshFake.insertControlEvent).toHaveBeenCalledOnce();
+      });
+
+      it("also buffers sequence 2 on bootstrap (still not seq 1)", async () => {
+        const result = await freshService.recordControlEvent(
+          baseEventCommand({ sequence: 2, eventType: "greeting_ack" }),
+        );
+        expect(result).toMatchObject({
+          applied: false,
+          gap: true,
+          appliedThroughSequence: 0,
+        });
+        expect(freshFake.session.lastAppliedControlSequence).toBe(0);
+      });
+
+      it("drains bootstrap gap once sequence 1 arrives, applying the full contiguous run", async () => {
+        // Buffer seq 3 and seq 2 out of order.
+        await freshService.recordControlEvent(
+          baseEventCommand({ sequence: 3, eventType: "noop" }),
+        );
+        await freshService.recordControlEvent(
+          baseEventCommand({
+            sequence: 2,
+            eventType: "speech_start",
+          }),
+        );
+        expect(freshFake.session.lastAppliedControlSequence).toBe(0);
+
+        // Now seq 1 (the real first frame) arrives -- must drain 1→2→3.
+        const result = await freshService.recordControlEvent(
+          baseEventCommand({ sequence: 1, eventType: "clear" }),
+        );
+        expect(result.applied).toBe(true);
+        expect(result.gap).toBe(false);
+        // Full contiguous run 1→2→3 applied in one shot.
+        expect(result.appliedThroughSequence).toBe(3);
+        expect(freshFake.session.lastAppliedControlSequence).toBe(3);
+        // speech_start at seq 2 must have opened a new input epoch.
+        expect(freshFake.session.pendingInput).toBe(true);
+        expect(freshFake.session.inputEpoch).toBe(1);
+      });
+
+      it("applies sequence 1 immediately when it is the first and only event (normal bootstrap path)", async () => {
+        const result = await freshService.recordControlEvent(
+          baseEventCommand({ sequence: 1, eventType: "greeting_start" }),
+        );
+        expect(result.applied).toBe(true);
+        expect(result.gap).toBe(false);
+        expect(result.appliedThroughSequence).toBe(1);
+        expect(freshFake.session.lastAppliedControlSequence).toBe(1);
+      });
+    });
   });
 
   describe("controlCutoff validation (SD §5.4, acceptance: correction-before-confirmation under HTTP reordering)", () => {
