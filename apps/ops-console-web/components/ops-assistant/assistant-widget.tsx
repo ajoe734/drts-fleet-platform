@@ -31,26 +31,20 @@ import {
   type AssistantAction,
 } from "./assistant-actions";
 import { buildTier0HelpResult, buildTier1ScopedResult } from "./help-search";
+import { resolveAssistantAuditHref } from "./audit-link";
 import type { AssistantActionReceipt } from "./context-envelope";
-
-type DockSide = "free" | "left" | "right";
-
-type WidgetState = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  minimized: boolean;
-  closed: boolean;
-  docked: DockSide;
-};
-
-type Rect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
+import {
+  EDGE_GAP,
+  buildDefaultState,
+  clamp,
+  getViewportRect,
+  readStoredState,
+  resolveDockedPosition,
+  writeStoredState,
+  type DockSide,
+  type Rect,
+  type WidgetState,
+} from "./widget-geometry";
 
 type StreamState = {
   activeIndex: number;
@@ -66,14 +60,8 @@ type ConversationEntry = {
   auditHref?: string | null;
 };
 
-const STORAGE_KEY = "ops-console.assistant-widget.v1";
-const WIDGET_MIN_WIDTH = 320;
-const WIDGET_MIN_HEIGHT = 240;
-const WIDGET_MAX_WIDTH = 560;
-const WIDGET_MAX_HEIGHT = 720;
 const HEADER_HEIGHT = 48;
 const MINIMIZED_HEIGHT = 64;
-const EDGE_GAP = 20;
 const MOVE_STEP = 24;
 const RESIZE_STEP = 24;
 const STREAM_TICK_MS = 42;
@@ -86,116 +74,6 @@ const theme = buildCanvasTheme({
   dark: true,
   density: "compact",
 });
-
-function getViewportRect() {
-  if (typeof window === "undefined") {
-    return { width: 1280, height: 720 };
-  }
-  return {
-    width: window.innerWidth,
-    height: window.innerHeight,
-  };
-}
-
-function buildDefaultState(viewport = getViewportRect()): WidgetState {
-  const width = 420;
-  const height = 360;
-  return {
-    width,
-    height,
-    x: Math.max(EDGE_GAP, viewport.width - width - EDGE_GAP),
-    y: Math.max(72, viewport.height - height - EDGE_GAP),
-    minimized: false,
-    closed: false,
-    docked: "right",
-  };
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function clampRect(rect: Rect, viewport = getViewportRect()): Rect {
-  const width = clamp(
-    rect.width,
-    WIDGET_MIN_WIDTH,
-    Math.min(WIDGET_MAX_WIDTH, viewport.width - EDGE_GAP * 2),
-  );
-  const height = clamp(
-    rect.height,
-    WIDGET_MIN_HEIGHT,
-    Math.min(WIDGET_MAX_HEIGHT, viewport.height - EDGE_GAP * 2),
-  );
-  const maxX = Math.max(EDGE_GAP, viewport.width - width - EDGE_GAP);
-  const maxY = Math.max(EDGE_GAP, viewport.height - height - EDGE_GAP);
-
-  return {
-    x: clamp(rect.x, EDGE_GAP, maxX),
-    y: clamp(rect.y, EDGE_GAP, maxY),
-    width,
-    height,
-  };
-}
-
-function resolveDockedPosition(
-  docked: DockSide,
-  rect: Rect,
-  viewport = getViewportRect(),
-): Rect {
-  const next = clampRect(rect, viewport);
-  if (docked === "left") {
-    return { ...next, x: EDGE_GAP };
-  }
-  if (docked === "right") {
-    return {
-      ...next,
-      x: Math.max(EDGE_GAP, viewport.width - next.width - EDGE_GAP),
-    };
-  }
-  return next;
-}
-
-function readStoredState(): WidgetState | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as Partial<WidgetState>;
-    if (
-      typeof parsed.x !== "number" ||
-      typeof parsed.y !== "number" ||
-      typeof parsed.width !== "number" ||
-      typeof parsed.height !== "number"
-    ) {
-      return null;
-    }
-    return {
-      x: parsed.x,
-      y: parsed.y,
-      width: parsed.width,
-      height: parsed.height,
-      minimized: parsed.minimized ?? false,
-      closed: parsed.closed ?? false,
-      docked:
-        parsed.docked === "left" || parsed.docked === "right"
-          ? parsed.docked
-          : "free",
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredState(state: WidgetState) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
 
 function isAssistantEnabled() {
   if (process.env.NEXT_PUBLIC_OPS_ASSISTANT_ENABLED === "false") {
@@ -279,6 +157,9 @@ export function OpsAssistantWidget() {
     startY: number;
     rect: Rect;
   } | null>(null);
+  const launcherButtonRef = useRef<HTMLButtonElement | null>(null);
+  const dragHandleRef = useRef<HTMLDivElement | null>(null);
+  const previousClosedRef = useRef<boolean | null>(null);
   const [portalNode, setPortalNode] = useState<HTMLElement | null>(null);
   const [widget, setWidget] = useState<WidgetState>(() => buildDefaultState());
   const [stream, setStream] = useState<StreamState>({
@@ -351,6 +232,29 @@ export function OpsAssistantWidget() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  // Keyboard focus return (SR-OPS-SHELL-001): moving the panel in/out of the
+  // DOM via `display: none` silently drops focus. Restore it to whichever
+  // trigger is now visible so keyboard/screen-reader operators keep their
+  // place instead of losing focus to <body>.
+  useEffect(() => {
+    if (!portalNode) {
+      return;
+    }
+    if (previousClosedRef.current === null) {
+      previousClosedRef.current = widget.closed;
+      return;
+    }
+    if (previousClosedRef.current === widget.closed) {
+      return;
+    }
+    if (widget.closed) {
+      launcherButtonRef.current?.focus();
+    } else {
+      dragHandleRef.current?.focus();
+    }
+    previousClosedRef.current = widget.closed;
+  }, [portalNode, widget.closed]);
 
   useEffect(() => {
     const timeout = window.setTimeout(
@@ -802,9 +706,10 @@ export function OpsAssistantWidget() {
           actionId: receipt.actionId,
           auditId: receipt.auditId,
         }),
-        auditHref:
-          receipt.auditHref ??
-          `/audit?auditId=${encodeURIComponent(receipt.auditId)}`,
+        auditHref: resolveAssistantAuditHref(
+          receipt.auditHref,
+          receipt.auditId,
+        ),
       });
     },
   );
@@ -837,6 +742,7 @@ export function OpsAssistantWidget() {
     <>
       {widget.closed ? (
         <button
+          ref={launcherButtonRef}
           type="button"
           data-testid="ops-assistant-launcher"
           aria-label={t("opsAssistant.launcher.open")}
@@ -877,6 +783,7 @@ export function OpsAssistantWidget() {
         style={shellStyle}
       >
         <div
+          ref={dragHandleRef}
           data-testid="ops-assistant-drag-handle"
           tabIndex={0}
           onPointerDown={onDragPointerDown}
