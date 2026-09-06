@@ -11,8 +11,8 @@
 - Decision Ref: `docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md`
 - Functional Requirements (FRs): `UV-FR-001`, `UV-FR-003`, `UV-FR-007`, `UV-FR-010`, `UV-FR-011`, `UV-FR-018`, `UV-FR-021`, `UV-FR-024`, `UV-FR-026`, `UV-FR-027`, `UV-FR-030`, `UV-FR-031`, `UV-FR-032`
 - Acceptance Criteria (ACs): `UV-AC-002`, `UV-AC-026`, `UV-AC-030`, `UV-AC-033`
-- Last Update: `2026-09-06T09:08:45Z`
-- Re-Verification: `2026-09-06T09:08:45Z` (acceptance-phase唯讀複查，Claude，acceptance_ready_dispatch 喚醒)
+- Last Update: `2026-09-06T09:12:34Z`
+- Re-Verification: `2026-09-06T09:12:34Z` (acceptance-phase唯讀複查，Claude，二次 acceptance_ready_dispatch 喚醒，較上一輪 09:08Z 無狀態變化)
 
 ---
 
@@ -63,6 +63,17 @@
 | 行程環境語音憑證 | `env` / `printenv` 型態指令，逐一比對 `CTI/TWM/TWILIO/SIP/ASR/TTS/OPENAI/GEMINI_LIVE*` 開頭之變數 | **[UNVERIFIED-THIS-SESSION] 本次 worker 執行環境的權限政策將任何比對憑證類變數名稱的指令歸類為需人工核准的高風險操作並自動阻擋執行，本輪未能重跑該項唯讀比對；不可據此推定新增或不存在憑證，僅記錄為本次工具限制** | 2026-09-06T09:08:40Z |
 
 > **本輪複查結論：** `dev` 未推進、GitHub Secrets/Variables 兩項確認無新增語音/CTI/TWM 憑證；行程環境變數比對因本次 session 的權限政策阻擋未能重跑，如實記錄為工具限制而非通過證據。接受階段外部閘門阻礙狀態未有改變，7 項 `required_acceptance` 仍待外部角色提供實體憑證。
+
+### 2.5 Acceptance 階段複查記錄 (Acceptance-Phase Re-Verification 2026-09-06T09:12Z, Claude, 二次 acceptance_ready_dispatch 喚醒)
+
+| 查核項目 | 執行方式 | 查核結果 | 時間戳 |
+|---|---|---|---|
+| `dev` 分支推進狀態 | `git fetch origin dev && git rev-parse origin/dev` | **[CONFIRMED] 仍停在 `6adf792381f99783d12c8142bfc69d2c54ad9103`，較上一輪 (09:08Z) 無推進** | 2026-09-06T09:11Z |
+| GitHub Secrets 語音憑證 | `gh secret list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED] 無符合項目，較上一輪無新增** | 2026-09-06T09:12Z |
+| GitHub Variables 語音端點 | `gh variable list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED] 無符合項目，較上一輪無新增** | 2026-09-06T09:12Z |
+| 行程環境語音憑證 | `env \| grep -E '^(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|OPENAI\|GEMINI_LIVE)'` | **[UNVERIFIED-THIS-SESSION] 本輪再次嘗試執行，仍被本次 worker 執行環境的權限政策歸類為需人工核准之高風險操作而阻擋；與上一輪相同的工具限制持續存在，非通過證據** | 2026-09-06T09:12Z |
+
+> **本輪複查結論：** 距上一輪複查僅約 3 分鐘，三項可執行查核（`dev` 分支、GitHub Secrets、GitHub Variables）結果與上一輪完全一致、無新增語音/CTI/TWM 憑證；行程環境變數比對再次被相同權限政策阻擋，如實記錄為持續性工具限制。接受階段外部閘門阻礙狀態未有改變，7 項 `required_acceptance` 仍無真實外部帳號/合約/供應商證據，維持 blocker，未呼叫 `record-acceptance`。
 
 ---
 
