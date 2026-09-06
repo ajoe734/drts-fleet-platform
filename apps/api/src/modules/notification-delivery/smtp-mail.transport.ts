@@ -38,7 +38,7 @@ function serializeMessage(message: TransportMessage): string {
     message.fromEmail.length > 254 ||
     !MAILBOX.test(message.recipientEmail) ||
     message.recipientEmail.length > 254 ||
-    /[\r\n\x00]/.test(message.subject) ||
+    /[\r\n\0]/.test(message.subject) ||
     !/^<[A-Za-z0-9._-]+@[A-Za-z0-9.-]+>$/.test(message.messageId)
   ) {
     throw new DeliveryTransportError("SMTP_MESSAGE_INVALID", false);

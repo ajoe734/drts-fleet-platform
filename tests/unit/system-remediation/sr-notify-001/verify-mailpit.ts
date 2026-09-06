@@ -63,6 +63,12 @@ async function verify() {
   assert.equal(received.Text.trim(), input.body);
   assert.equal(received.To[0]?.Address, input.recipientEmail);
 
+  const beforeResponse = await fetch(new URL("/api/v1/messages", http));
+  assert.equal(beforeResponse.status, 200);
+  const before = (await beforeResponse.json()) as {
+    messages: { ID: string }[];
+  };
+
   const resumed = new NotificationDeliveryService(
     new FileMailOutbox(directory),
     transport,
@@ -81,6 +87,7 @@ async function verify() {
     list.messages.filter((item) => item.ID === received.ID).length,
     1,
   );
+  assert.equal(list.messages.length, before.messages.length);
   console.log(
     JSON.stringify(
       {
