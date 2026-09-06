@@ -1,17 +1,28 @@
 import Link from "next/link";
+import type { BookingRecord } from "@drts/contracts";
 import {
+  EBanner,
   EBtnContent,
   ECard,
+  EEmpty,
   EIcon,
   EKpi,
   EPill,
   entBtnStyle,
 } from "@/components/ent-kit";
 import { EntParty, EntRoute } from "@/components/ent-screen-bits";
+import { getEnterpriseDispatchTenantClient } from "@/lib/api-client";
+import {
+  deriveBookingDisplayState,
+  formatEnterpriseReservationWindow,
+  isSelfBooking,
+  resolveEnterpriseBookingAddress,
+  resolveEnterpriseBookingFetchOutcome,
+  type EnterpriseDispatchGatewayRoute,
+} from "@/lib/dispatch-fixture-adapter";
 import {
   enterpriseQuotaSummary,
   getBookingStateMeta,
-  getEnterpriseBookings,
   getEnterpriseTenant,
   getEnterpriseUser,
   getPolicyNotes,
@@ -21,24 +32,43 @@ import { getServerLocale } from "@/lib/server-locale";
 import { type TranslationKey, t as translate } from "@/lib/translations";
 
 const POLICY_ICONS = ["bolt", "building", "clock"] as const;
+const ACTIVE_STATES = new Set(["enroute", "assigned"]);
+const UPCOMING_STATES = new Set(["assigned", "enroute", "approval", "reserved"]);
+
+async function loadHomeBookings(tenantId: string): Promise<{
+  bookings: BookingRecord[];
+  gatewayRoute: EnterpriseDispatchGatewayRoute | null;
+}> {
+  try {
+    const bookings =
+      await getEnterpriseDispatchTenantClient(tenantId).listBookings();
+    return { bookings, gatewayRoute: null };
+  } catch (error) {
+    const { gatewayRoute } = resolveEnterpriseBookingFetchOutcome(error);
+    return { bookings: [], gatewayRoute: gatewayRoute ?? "/degraded" };
+  }
+}
 
 export default async function HomePage() {
   const locale = await getServerLocale();
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
-  const bookings = getEnterpriseBookings(locale);
-  const stateMeta = getBookingStateMeta(locale);
   const user = getEnterpriseUser(locale);
   const tenant = getEnterpriseTenant(locale);
   const policyNotes = getPolicyNotes(locale);
+  const stateMeta = getBookingStateMeta(locale);
+  const { bookings, gatewayRoute } = await loadHomeBookings(tenant.id);
 
-  const active = bookings.find(
-    (b) => b.state === "enroute" || b.state === "assigned",
+  const sortedBookings = [...bookings].sort(
+    (a, b) =>
+      new Date(a.reservationWindowStart).getTime() -
+      new Date(b.reservationWindowStart).getTime(),
   );
-  const upcoming = bookings
-    .filter((b) =>
-      ["assigned", "enroute", "approval", "reserved"].includes(b.state),
-    )
+  const active = sortedBookings.find((b) =>
+    ACTIVE_STATES.has(deriveBookingDisplayState(b)),
+  );
+  const upcoming = sortedBookings
+    .filter((b) => UPCOMING_STATES.has(deriveBookingDisplayState(b)))
     .slice(0, 3);
 
   return (
@@ -119,6 +149,25 @@ export default async function HomePage() {
         style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {gatewayRoute && (
+            <EBanner
+              t={t}
+              tone="warn"
+              body={tr("bookingLifecycle.gateway.body")}
+              actions={
+                <Link
+                  href={gatewayRoute}
+                  style={entBtnStyle(t, { variant: "default", size: "sm" })}
+                  data-testid="home-bookings-gateway-action"
+                >
+                  <EBtnContent size="sm">
+                    {tr("bookingLifecycle.gateway.action")}
+                  </EBtnContent>
+                </Link>
+              }
+            />
+          )}
+
           {active && (
             <ECard
               t={t}
@@ -127,8 +176,9 @@ export default async function HomePage() {
               sub={tr("home.activeTrip.sub")}
               actions={
                 <Link
-                  href="/trip"
+                  href={`/trip/${encodeURIComponent(active.bookingId)}`}
                   style={entBtnStyle(t, { variant: "soft", size: "sm" })}
+                  data-testid="home-active-trip-link"
                 >
                   <EBtnContent iconR="arrow" size="sm">
                     {tr("home.activeTrip.cta")}
@@ -140,11 +190,11 @@ export default async function HomePage() {
                 <div style={{ flex: 1, minWidth: 200 }}>
                   <EntParty
                     t={t}
-                    passenger={active.passenger}
+                    passenger={active.passenger.name}
                     passengerLabel={tr("party.passenger")}
                     compact
                     subline={
-                      active.self ? (
+                      isSelfBooking(active) ? (
                         <div
                           style={{ fontSize: 12, color: t.muted, marginTop: 1 }}
                         >
@@ -162,7 +212,9 @@ export default async function HomePage() {
                           }}
                         >
                           <EIcon name="users" size={13} />
-                          {tr("party.delegate", { name: active.bookedBy })}
+                          {tr("party.delegate", {
+                            name: active.bookedBy?.name ?? "",
+                          })}
                         </div>
                       )
                     }
@@ -170,12 +222,14 @@ export default async function HomePage() {
                   <div style={{ marginTop: 14 }}>
                     <EntRoute
                       t={t}
-                      from={active.from}
-                      to={active.to}
-                      win={active.window}
+                      from={resolveEnterpriseBookingAddress(active.pickup)}
+                      to={resolveEnterpriseBookingAddress(active.dropoff)}
+                      win={formatEnterpriseReservationWindow(
+                        active.reservationWindowStart,
+                      )}
                       airportLabel={
-                        active.flight
-                          ? `${active.flight} · ${active.terminal}`
+                        active.flightNo
+                          ? `${active.flightNo} · ${active.terminal ?? ""}`
                           : undefined
                       }
                     />
@@ -192,8 +246,12 @@ export default async function HomePage() {
                     alignSelf: "flex-start",
                   }}
                 >
-                  <EPill t={t} tone={stateMeta[active.state].tone} dot>
-                    {stateMeta[active.state].label}
+                  <EPill
+                    t={t}
+                    tone={stateMeta[deriveBookingDisplayState(active)].tone}
+                    dot
+                  >
+                    {stateMeta[deriveBookingDisplayState(active)].label}
                   </EPill>
                   <div
                     style={{
@@ -204,7 +262,7 @@ export default async function HomePage() {
                       margin: "10px 0 0",
                     }}
                   >
-                    {active.etaMinutes ?? "—"}
+                    {"—"}
                   </div>
                   <div style={{ fontSize: 11, color: t.muted }}>
                     {tr("home.activeTrip.etaSuffix")}
@@ -218,7 +276,7 @@ export default async function HomePage() {
             t={t}
             title={tr("home.upcoming.title")}
             sub={tr("home.upcoming.sub", { count: upcoming.length })}
-            pad={0}
+            pad={upcoming.length === 0 ? undefined : 0}
             actions={
               <Link
                 href="/bookings"
@@ -230,84 +288,111 @@ export default async function HomePage() {
               </Link>
             }
           >
-            <div>
-              {upcoming.map((b, i) => (
-                <div
-                  key={b.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 14,
-                    padding: "14px 18px",
-                    borderTop: i ? "1px solid " + t.lineSoft : "none",
-                  }}
-                >
-                  <span
+            {upcoming.length === 0 ? (
+              <EEmpty
+                t={t}
+                icon="car"
+                title={tr("bookingLifecycle.history.empty")}
+              />
+            ) : (
+              <div>
+                {upcoming.map((b, i) => (
+                  <Link
+                    key={b.bookingId}
+                    href={`/bookings/${encodeURIComponent(b.bookingId)}`}
+                    data-testid="home-upcoming-row"
                     style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 14,
-                      background: b.self ? t.primaryBg : t.surfaceLo,
-                      color: b.self ? t.primary : t.muted,
-                      border: "1px solid " + (b.self ? t.primaryBd : t.line),
-                      display: "inline-flex",
+                      display: "flex",
                       alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14,
-                      fontWeight: 700,
-                      flexShrink: 0,
+                      gap: 14,
+                      padding: "14px 18px",
+                      borderTop: i ? "1px solid " + t.lineSoft : "none",
+                      textDecoration: "none",
+                      color: "inherit",
                     }}
                   >
-                    {b.passenger.slice(0, 1)}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 7 }}
+                    <span
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 14,
+                        background: isSelfBooking(b)
+                          ? t.primaryBg
+                          : t.surfaceLo,
+                        color: isSelfBooking(b) ? t.primary : t.muted,
+                        border:
+                          "1px solid " +
+                          (isSelfBooking(b) ? t.primaryBd : t.line),
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 14,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
                     >
-                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>
-                        {b.passenger}
-                      </span>
-                      {!b.self && (
-                        <span style={{ fontSize: 11, color: t.warn }}>
-                          ·{" "}
-                          {tr("home.upcoming.delegateShort", {
-                            name: b.bookedBy,
-                          })}
+                      {b.passenger.name.slice(0, 1)}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 7,
+                        }}
+                      >
+                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                          {b.passenger.name}
                         </span>
-                      )}
+                        {!isSelfBooking(b) && (
+                          <span style={{ fontSize: 11, color: t.warn }}>
+                            ·{" "}
+                            {tr("home.upcoming.delegateShort", {
+                              name: b.bookedBy?.name ?? "",
+                            })}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: t.muted,
+                          marginTop: 1,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {resolveEnterpriseBookingAddress(b.pickup)} →{" "}
+                        {resolveEnterpriseBookingAddress(b.dropoff)}
+                      </div>
                     </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: t.muted,
-                        marginTop: 1,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {b.from} → {b.to}
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 12.5,
+                          fontFamily: t.mono,
+                          color: t.ink2,
+                        }}
+                      >
+                        {formatEnterpriseReservationWindow(
+                          b.reservationWindowStart,
+                        )}
+                      </div>
+                      <div style={{ marginTop: 4 }}>
+                        <EPill
+                          t={t}
+                          tone={stateMeta[deriveBookingDisplayState(b)].tone}
+                          dot
+                        >
+                          {stateMeta[deriveBookingDisplayState(b)].label}
+                        </EPill>
+                      </div>
                     </div>
-                  </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontFamily: t.mono,
-                        color: t.ink2,
-                      }}
-                    >
-                      {b.window}
-                    </div>
-                    <div style={{ marginTop: 4 }}>
-                      <EPill t={t} tone={stateMeta[b.state].tone} dot>
-                        {stateMeta[b.state].label}
-                      </EPill>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                  </Link>
+                ))}
+              </div>
+            )}
           </ECard>
         </div>
 
