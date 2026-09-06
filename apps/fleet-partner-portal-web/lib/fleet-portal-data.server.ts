@@ -38,24 +38,248 @@ import type {
 } from "@drts/contracts";
 
 import { getServerFleetPartnerClient } from "./api-client.server";
-import {
-  FX_FLEET_DOCS,
-  FX_FLEET_QUALITY,
-  FX_FLEET_STATEMENT,
-  FX_FLEET_STATEMENTS,
-  type FleetAttentionBanner,
-  type FleetCase,
-  type FleetDashboardSupplemental,
-  type FleetDoc,
-  type FleetDriver,
-  type FleetQuality,
-  type FleetStatement,
-  type FleetTraining,
-  type FleetTrip,
-  type FleetVehicle,
-  type ServiceKey,
-  type StatementLine,
-} from "./fleet-portal-fixtures";
+export type ServiceKey =
+  | "realtime"
+  | "business"
+  | "airport"
+  | "insurance"
+  | "travel";
+
+export type FleetDriver = {
+  id: string;
+  name: string;
+  plate: string;
+  status: "available" | "on_trip" | "break" | "offline";
+  license: "valid" | "expires_30d";
+  docs: "complete" | "missing_1" | "missing_2";
+  training: "complete" | "pending";
+  trips30: number;
+  rating: number;
+  svc: ServiceKey[];
+};
+
+export type FleetVehicle = {
+  plate: string;
+  model: string;
+  year: number;
+  driver: string;
+  svc: ServiceKey[];
+  insurance: string;
+  inspection: "ok" | "due_30d";
+  status: "active" | "maintenance";
+};
+
+export type FleetTrip = {
+  id: string;
+  svc: ServiceKey;
+  driver: string;
+  tenant: string;
+  sponsorFunded?: boolean;
+  benefitReference?: string | null;
+  pickup: string;
+  fare: string;
+  commission: string;
+  reimbursement?: string | null;
+  status: "completed" | "in_progress" | "cancelled";
+  date: string;
+};
+
+export type StatementLine = {
+  key: string;
+  v: string;
+  sign: "+" | "−";
+  reimbursement?: string | null;
+};
+
+export type FleetStatement = {
+  id: string;
+  period: string;
+  trips: number;
+  sponsorFundedTrips?: number;
+  payable: string;
+  reimbursement?: string | null;
+  status: "pending_confirm" | "paid";
+  issued: string;
+};
+
+export type FleetDoc = {
+  driver: string;
+  id: string;
+  doc: string;
+  en: string;
+  status: "expires_30d" | "expires_60d" | "missing" | "pending_signature";
+  due: string;
+  owner: "fleet" | "driver";
+};
+
+export type FleetCase = {
+  id: string;
+  type: "complaint" | "incident";
+  cat: string;
+  driver: string;
+  severity: "high" | "medium" | "low";
+  responsibility: "fleet" | "shared" | "platform";
+  status: "in_review" | "open" | "pending";
+  sla: "breached" | "on_track";
+  date: string;
+};
+
+export type FleetQuality = {
+  key: string;
+  v: string;
+  tone: "success" | "warn" | "neutral";
+  delta: string;
+};
+
+export type FleetTraining = {
+  course: string;
+  en: string;
+  completed: number;
+  total: number;
+  pct: number;
+};
+
+export type FleetDashboardSupplemental = {
+  missingDocsDrivers: string;
+  openCases: string;
+  trainingCompletion: string;
+};
+
+export type FleetAttentionBanner = {
+  tone: "warn" | "danger" | "info";
+  titleKey: string;
+  bodyKey: string;
+};
+
+function getCurrentPeriodMonth(): string {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+const FX_FLEET_STATEMENT: {
+  period: string;
+  status: string;
+  payable: string;
+  lines: StatementLine[];
+} = {
+  period: getCurrentPeriodMonth(),
+  status: "pending_confirm",
+  payable: "NT$ 642,000",
+  lines: [
+    { key: "per_trip", v: "NT$ 598,400", sign: "+" },
+    { key: "recruitment", v: "NT$ 24,000", sign: "+" },
+    { key: "mgmt_fee", v: "NT$ 36,000", sign: "+" },
+    { key: "performance", v: "NT$ 12,000", sign: "+" },
+    { key: "clawback", v: "NT$ 28,400", sign: "−" },
+  ],
+};
+
+const FX_FLEET_STATEMENTS: FleetStatement[] = [
+  {
+    id: `fst_${getCurrentPeriodMonth().replace("-", "_")}`,
+    period: getCurrentPeriodMonth(),
+    trips: 14280,
+    payable: "NT$ 642,000",
+    status: "pending_confirm",
+    issued: `${getCurrentPeriodMonth()}-01`,
+  },
+  {
+    id: "fst_2026_04",
+    period: "2026-04",
+    trips: 13120,
+    payable: "NT$ 588,400",
+    status: "paid",
+    issued: "2026-05-01",
+  },
+  {
+    id: "fst_2026_03",
+    period: "2026-03",
+    trips: 12740,
+    payable: "NT$ 561,200",
+    status: "paid",
+    issued: "2026-04-01",
+  },
+];
+
+const FX_FLEET_DOCS: FleetDoc[] = [
+  {
+    driver: "黃文豪",
+    id: "d_8851",
+    doc: "職業駕照",
+    en: "pro_license",
+    status: "expires_30d",
+    due: "2026-07-04",
+    owner: "fleet",
+  },
+  {
+    driver: "吳鎮宇",
+    id: "d_8881",
+    doc: "機場接送資格證",
+    en: "airport_permit",
+    status: "missing",
+    due: "—",
+    owner: "fleet",
+  },
+  {
+    driver: "吳鎮宇",
+    id: "d_8881",
+    doc: "車輛保險",
+    en: "vehicle_insurance",
+    status: "expires_60d",
+    due: "2026-08-02",
+    owner: "fleet",
+  },
+  {
+    driver: "陳俊宏",
+    id: "d_8843",
+    doc: "保險代步服務同意書",
+    en: "insurance_consent",
+    status: "pending_signature",
+    due: "2026-06-15",
+    owner: "driver",
+  },
+];
+
+const FX_FLEET_QUALITY: FleetQuality[] = [
+  {
+    key: "avg_rating",
+    v: "4.86",
+    tone: "success",
+    delta: "↑ 0.02",
+  },
+  {
+    key: "completion_rate",
+    v: "97.4%",
+    tone: "success",
+    delta: "↑ 0.6pp",
+  },
+  {
+    key: "cancel_rate",
+    v: "1.8%",
+    tone: "neutral",
+    delta: "↓ 0.2pp",
+  },
+  {
+    key: "no_show_rate",
+    v: "0.8%",
+    tone: "neutral",
+    delta: "—",
+  },
+  {
+    key: "complaint_rate",
+    v: "0.12%",
+    tone: "warn",
+    delta: "↑ 0.01pp",
+  },
+  {
+    key: "on_time_rate",
+    v: "94.2%",
+    tone: "success",
+    delta: "↑ 1.1pp",
+  },
+];
 
 export type DataSource = "live" | "fallback";
 
@@ -425,12 +649,6 @@ function mapStatementLines(
   });
 }
 
-function getCurrentPeriodMonth(): string {
-  const now = new Date();
-  const year = now.getUTCFullYear();
-  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
-}
 
 export async function loadRevenue(): Promise<RevenueView> {
   const currentPeriod = getCurrentPeriodMonth();
