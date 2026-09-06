@@ -346,7 +346,7 @@ export class ReportingFilingService implements OnModuleInit {
       render: (job) =>
         recordsToPdf(
           (job.rows as unknown as Record<string, unknown>[]) ?? [],
-          `${job.jobType} — ${job.jobId}`,
+          `${job.jobType} - ${job.jobId}`,
         ),
     },
     zip: null,
