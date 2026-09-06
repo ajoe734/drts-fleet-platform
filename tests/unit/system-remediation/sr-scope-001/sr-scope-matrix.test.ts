@@ -282,6 +282,7 @@ describe("SR-SCOPE-001: 排除範圍與全能力追溯驗收表測試", () => {
 
         const cov = coverage[excl.id];
         expect(cov).toBeDefined();
+        if (!cov) throw new Error(`coverage[${excl.id}] is undefined`);
         expect(cov.state_at_audit).toBe("範圍排除");
         expect(cov.implementation_tasks).toEqual([]);
         expect(cov.verification_tasks).toEqual(["SR-SCOPE-001"]);
@@ -321,6 +322,7 @@ describe("SR-SCOPE-001: 排除範圍與全能力追溯驗收表測試", () => {
 
       const cov133 = coverage.C133;
       expect(cov133).toBeDefined();
+      if (!cov133) throw new Error("coverage.C133 is undefined");
       expect(cov133.state_at_audit).toBe("外部待完成");
       expect(cov133.implementation_tasks).toEqual([]);
       expect(cov133.verification_tasks).toContain("SR-READINESS-001");
@@ -336,6 +338,8 @@ describe("SR-SCOPE-001: 排除範圍與全能力追溯驗收表測試", () => {
       expect(c032?.["缺口／下一個驗收條件"]).toContain("不能以 enum 代表完成");
 
       const cov032 = coverage.C032;
+      expect(cov032).toBeDefined();
+      if (!cov032) throw new Error("coverage.C032 is undefined");
       expect(cov032.verification_tasks).toContain("SR-QA-BOOKING-001");
 
       const bookingTask = manifestTasksById.get("SR-QA-BOOKING-001");

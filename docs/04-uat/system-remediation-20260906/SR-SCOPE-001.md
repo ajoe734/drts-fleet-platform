@@ -56,7 +56,7 @@
 | **C128** | ROC／安全操作員 — AV／ODD／Tesla 接管與遠端營運 | `Phase2` | ROC candidate 與遠端車控明確劃入 Phase 2 | 保留獨立 Phase 2 驗收矩陣，嚴禁列為 Phase 1 漏做之正式商用功能；Phase 1 專注真人司機與車隊 |
 | **C129** | 監理送件承辦 — Phase1 filing PDF 主報告與 ZIP 送件包 | `metadata-only` | 架構決策 `SD-DP-20260820-012` 核定採 metadata-only 申報 | filing 不產實體 ZIP 送件包；不影響九項監理資料報表（C091–C099）；維持外部送件責任人，嚴禁造假包檔 |
 | **C130** | 監理機關使用者 — 獨立 regulator realm 與正式監理入口 | `no regulator realm` | 架構決策 `SD-DP-20260820-012` 決議由內部管理員匯出交付 | 不另建獨立 regulator realm 或專用網站；由 Platform Admin 按授權匯出資料交付主管機關 |
-| **C131** | 背景事件消費者 — 獨立事件匯流排與 13 態轉單模型 | `8-state / no event bus` | 架構決策 `SD-DP-20260820-009/010` 核定 Phase 1 採 8 態模型與 Postgres UoW | 不建獨立分散式 Event Bus；轉態測試依 8 態契約執行，禁止沿用 13 態草案差異作缺陷回報 |
+| **C131** | 背景事件消費者 — 獨立事件匯流排與 13 態轉單模型 | `8-state / no event bus` | 架構決策 `SD-DP-20260817-009`、`SD-DP-20260817-010` 核定 Phase 1 採 8 態模型與 Postgres UoW | 不建獨立分散式 Event Bus；轉態測試依 8 態契約執行，禁止沿用 13 態草案差異作缺陷回報 |
 | **C132** | 租戶簽核管理員 — 逾時自動升級 | `Phase 2 deferred` | API / OpenAPI 標註 Phase 2 deferred | Phase 1 僅支援租戶管理員手動人工升級；自動超時升級排程不開發；即將逾時郵件提醒由 N07/SR-MAIL-002 實作 |
 
 ---
