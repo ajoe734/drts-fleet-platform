@@ -4,12 +4,14 @@ import {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   type CSSProperties,
   type FormEvent,
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { useBreakGlass } from "@/components/break-glass-context";
+import { ApiClientError } from "@drts/api-client";
 import {
   createPlatformAdminIamClient,
 } from "@/lib/platform-admin-iam-client";
@@ -132,8 +134,8 @@ export function UserDetailDrawer({
   onClose: () => void;
 }) {
   const rawClient = usePlatformAdminClient();
-  const iamClient = createPlatformAdminIamClient(rawClient);
-  const { t } = useTranslation();
+  const iamClient = useMemo(() => createPlatformAdminIamClient(rawClient), [rawClient]);
+  const { t, locale } = useTranslation();
 
   const [sessions, setSessions] = useState<MaskedSessionSummary[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
@@ -147,11 +149,20 @@ export function UserDetailDrawer({
       const result = await iamClient.listSessions({ actorId: user.userId, includeRevoked: true });
       setSessions(result ?? []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load session inventory");
+      const is403 =
+        (e instanceof ApiClientError && e.statusCode === 403) ||
+        (typeof e === "object" && e !== null && "statusCode" in e && (e as { statusCode?: number }).statusCode === 403) ||
+        (e instanceof Error && (e.message.includes("403") || e.message.includes("AUTH_SCOPE_DENIED") || e.message.includes("AUTH_REALM_DENIED")));
+      const message = is403
+        ? (locale === "en"
+            ? "Access Denied (403 Forbidden): Insufficient authority to inspect user session inventory (requires identity:sessions:read)."
+            : "存取被拒 (403 權限不足)：目前角色缺乏檢視工作階段清單授權 (需具備 identity:sessions:read)。")
+        : (e instanceof Error ? e.message : "Failed to load session inventory");
+      setError(message);
     } finally {
       setLoadingSessions(false);
     }
-  }, [iamClient, user.userId]);
+  }, [iamClient, user.userId, locale]);
 
   useEffect(() => {
     void loadSessions();
@@ -167,7 +178,16 @@ export function UserDetailDrawer({
       });
       await loadSessions();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Session revoke failed");
+      const is403 =
+        (e instanceof ApiClientError && e.statusCode === 403) ||
+        (typeof e === "object" && e !== null && "statusCode" in e && (e as { statusCode?: number }).statusCode === 403) ||
+        (e instanceof Error && (e.message.includes("403") || e.message.includes("AUTH_SCOPE_DENIED") || e.message.includes("AUTH_REALM_DENIED")));
+      const message = is403
+        ? (locale === "en"
+            ? "Access Denied (403 Forbidden): Insufficient authority to revoke session (requires identity:sessions:write)."
+            : "存取被拒 (403 權限不足)：目前角色缺乏撤銷工作階段授權 (需具備 identity:sessions:write)。")
+        : (e instanceof Error ? e.message : "Session revoke failed");
+      setError(message);
     } finally {
       setRevokingSid(null);
     }
@@ -249,6 +269,15 @@ export function UserDetailDrawer({
         >
           {loadingSessions ? (
             <div style={{ padding: 16, textAlign: "center", color: theme.textMuted }}>{t("users.governance.detail.sessionsLoading")}</div>
+          ) : error ? (
+            <div style={{ padding: 16 }}>
+              <CanvasBanner
+                theme={theme}
+                tone="danger"
+                icon="warn"
+                title={error}
+              />
+            </div>
           ) : sessions.length === 0 ? (
             <div style={{ padding: 16, textAlign: "center", color: theme.textMuted }}>{t("users.governance.detail.sessionsEmpty")}</div>
           ) : (
@@ -268,7 +297,7 @@ export function UserDetailDrawer({
 
 export function RoleApprovalPanel() {
   const rawClient = usePlatformAdminClient();
-  const iamClient = createPlatformAdminIamClient(rawClient);
+  const iamClient = useMemo(() => createPlatformAdminIamClient(rawClient), [rawClient]);
   const { t } = useTranslation();
 
   const [requests, setRequests] = useState<PrivilegedRoleApprovalRequestRecord[]>([]);
@@ -582,7 +611,7 @@ export function RoleApprovalPanel() {
 
 export function AccessReviewPanel() {
   const rawClient = usePlatformAdminClient();
-  const iamClient = createPlatformAdminIamClient(rawClient);
+  const iamClient = useMemo(() => createPlatformAdminIamClient(rawClient), [rawClient]);
   const { t } = useTranslation();
 
   const [campaigns, setCampaigns] = useState<AccessReviewCampaignRecord[]>([]);
@@ -795,7 +824,7 @@ export function AccessReviewPanel() {
 
 export function BreakGlassPanel() {
   const rawClient = usePlatformAdminClient();
-  const iamClient = createPlatformAdminIamClient(rawClient);
+  const iamClient = useMemo(() => createPlatformAdminIamClient(rawClient), [rawClient]);
   const { t } = useTranslation();
   const { activateSession, isBreakGlassActive, grant: activeGrant } = useBreakGlass();
 
