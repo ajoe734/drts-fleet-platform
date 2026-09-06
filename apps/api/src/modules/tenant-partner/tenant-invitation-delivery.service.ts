@@ -125,6 +125,10 @@ export class TenantInvitationDeliveryService
     if (this.timer) clearInterval(this.timer);
   }
 
+  isConfigured() {
+    return Boolean(this.delivery && this.fromEmail && this.acceptanceUrl);
+  }
+
   async drain() {
     return this.delivery ? this.delivery.drain() : [];
   }
