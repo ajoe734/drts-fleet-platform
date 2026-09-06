@@ -2484,3 +2484,878 @@ components:
           $ref: "#/components/schemas/TenantApprovalRequestListData"
         meta:
           $ref: "#/components/schemas/ApiMeta"
+    VoiceScopeProfile:
+      type: object
+      properties:
+        resourceScopeId:
+          type: string
+          format: uuid
+        brandId:
+          type: string
+        operatingProfileId:
+          type: string
+        operatingProfileVersion:
+          type: integer
+      required:
+        - resourceScopeId
+        - brandId
+        - operatingProfileId
+        - operatingProfileVersion
+      additionalProperties: false
+    VoiceErrorCode:
+      type: string
+      enum:
+        - VOICE_LINE_NOT_BOUND
+        - VOICE_SCOPE_DENIED
+        - VOICE_SESSION_NOT_OWNER
+        - VOICE_DRAFT_STALE
+        - VOICE_CONFIRMATION_REQUIRED
+        - VOICE_CONFIRMATION_EXPIRED
+        - VOICE_RECORDING_NOT_DURABLE
+        - VOICE_LOCATION_AMBIGUOUS
+        - VOICE_SERVICE_NOT_AVAILABLE
+        - VOICE_ACTION_PAYLOAD_CONFLICT
+        - VOICE_PASSENGER_PROOF_REQUIRED
+        - VOICE_PROVIDER_CAPACITY
+        - VOICE_PROVIDER_UNAVAILABLE
+        - VOICE_INVALID_PROOF
+        - VOICE_PROOF_EXPIRED
+        - VOICE_UNAUTHORIZED_SCOPE
+        - VOICE_INVALID_ACTOR
+        - VOICE_CAPABILITY_REJECTED
+        - VOICE_UNSUPPORTED_ACTION
+    VoiceControlCutoff:
+      type: object
+      properties:
+        mediaEpoch:
+          type: integer
+        controlSequence:
+          type: integer
+      required:
+        - mediaEpoch
+        - controlSequence
+      additionalProperties: false
+    VoiceSpeechEvidence:
+      type: object
+      properties:
+        turnId:
+          type: string
+          format: uuid
+        finalEventId:
+          type: string
+          format: uuid
+      required:
+        - turnId
+        - finalEventId
+      additionalProperties: false
+    VoiceDtmfEvidence:
+      type: object
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        digit:
+          type: string
+          pattern: "^[0-9*#A-Da-d]$"
+          description: Single trusted CTI DTMF digit (0-9, *, #, A-D)
+      required:
+        - eventId
+        - digit
+      additionalProperties: false
+    VoiceSpeechProof:
+      type: object
+      properties:
+        confirmationId:
+          type: string
+          format: uuid
+        voiceSessionId:
+          type: string
+          format: uuid
+        intentId:
+          type: string
+          format: uuid
+        action:
+          type: string
+        draftVersion:
+          type: integer
+        snapshotHash:
+          type: string
+          minLength: 1
+        readbackPlaybackId:
+          type: string
+          format: uuid
+        readbackCompletedEventId:
+          type: string
+          format: uuid
+        confirmationMethod:
+          type: string
+          enum: [speech]
+        evidence:
+          $ref: "#/components/schemas/VoiceSpeechEvidence"
+        inputEpoch:
+          type: integer
+        controlCutoff:
+          $ref: "#/components/schemas/VoiceControlCutoff"
+        leaseEpoch:
+          type: integer
+        recordingCheckpointId:
+          type: string
+          format: uuid
+        confirmedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+        - confirmationId
+        - voiceSessionId
+        - intentId
+        - action
+        - draftVersion
+        - snapshotHash
+        - readbackPlaybackId
+        - readbackCompletedEventId
+        - confirmationMethod
+        - evidence
+        - inputEpoch
+        - controlCutoff
+        - leaseEpoch
+        - recordingCheckpointId
+        - confirmedAt
+        - expiresAt
+      additionalProperties: false
+    VoiceDtmfProof:
+      type: object
+      properties:
+        confirmationId:
+          type: string
+          format: uuid
+        voiceSessionId:
+          type: string
+          format: uuid
+        intentId:
+          type: string
+          format: uuid
+        action:
+          type: string
+        draftVersion:
+          type: integer
+        snapshotHash:
+          type: string
+          minLength: 1
+        readbackPlaybackId:
+          type: string
+          format: uuid
+        readbackCompletedEventId:
+          type: string
+          format: uuid
+        confirmationMethod:
+          type: string
+          enum: [dtmf]
+        evidence:
+          $ref: "#/components/schemas/VoiceDtmfEvidence"
+        inputEpoch:
+          type: integer
+        controlCutoff:
+          $ref: "#/components/schemas/VoiceControlCutoff"
+        leaseEpoch:
+          type: integer
+        recordingCheckpointId:
+          type: string
+          format: uuid
+        confirmedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+        - confirmationId
+        - voiceSessionId
+        - intentId
+        - action
+        - draftVersion
+        - snapshotHash
+        - readbackPlaybackId
+        - readbackCompletedEventId
+        - confirmationMethod
+        - evidence
+        - inputEpoch
+        - controlCutoff
+        - leaseEpoch
+        - recordingCheckpointId
+        - confirmedAt
+        - expiresAt
+      additionalProperties: false
+    VoiceProof:
+      oneOf:
+        - $ref: "#/components/schemas/VoiceSpeechProof"
+        - $ref: "#/components/schemas/VoiceDtmfProof"
+      discriminator:
+        propertyName: confirmationMethod
+        mapping:
+          speech: "#/components/schemas/VoiceSpeechProof"
+          dtmf: "#/components/schemas/VoiceDtmfProof"
+    VoiceCapabilityScope:
+      type: string
+      enum:
+        - session_execute
+        - address_resolve
+        - order_create_bound
+        - order_read_bound
+        - handoff_request
+        - cancel_bound
+    VoiceCapability:
+      type: object
+      properties:
+        iss:
+          type: string
+          minLength: 1
+          description: Issuer URL or identifier
+        aud:
+          type: string
+          enum: [voice-tool-gateway]
+        exp:
+          type: integer
+          minimum: 1
+          description: Expiry Unix epoch timestamp in seconds
+        iat:
+          type: integer
+          minimum: 1
+          description: Issued-at Unix epoch timestamp in seconds
+        nbf:
+          type: integer
+          minimum: 1
+          description: Not-before Unix epoch timestamp in seconds
+        servicePrincipalId:
+          type: string
+          minLength: 1
+        voiceSessionId:
+          type: string
+          format: uuid
+        resourceScopeId:
+          type: string
+          format: uuid
+        routeProfileVersion:
+          type: integer
+        leaseEpoch:
+          type: integer
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/VoiceCapabilityScope"
+      required:
+        - aud
+        - servicePrincipalId
+        - voiceSessionId
+        - resourceScopeId
+        - routeProfileVersion
+        - leaseEpoch
+        - scopes
+      additionalProperties: false
+    VoiceCapabilityTokenClaims:
+      type: object
+      properties:
+        iss:
+          type: string
+          minLength: 1
+          description: Issuer URL or identifier
+        aud:
+          type: string
+          enum: [voice-tool-gateway]
+        exp:
+          type: integer
+          minimum: 1
+          description: Expiry Unix epoch timestamp in seconds
+        iat:
+          type: integer
+          minimum: 1
+          description: Issued-at Unix epoch timestamp in seconds
+        nbf:
+          type: integer
+          minimum: 1
+          description: Not-before Unix epoch timestamp in seconds
+        servicePrincipalId:
+          type: string
+          minLength: 1
+        voiceSessionId:
+          type: string
+          format: uuid
+        resourceScopeId:
+          type: string
+          format: uuid
+        routeProfileVersion:
+          type: integer
+        leaseEpoch:
+          type: integer
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/VoiceCapabilityScope"
+      required:
+        - iss
+        - aud
+        - exp
+        - servicePrincipalId
+        - voiceSessionId
+        - resourceScopeId
+        - routeProfileVersion
+        - leaseEpoch
+        - scopes
+      additionalProperties: false
+    VoiceCapabilityTokenEnvelope:
+      type: object
+      properties:
+        token:
+          type: string
+          minLength: 1
+        tokenType:
+          type: string
+          enum: [Bearer]
+          default: Bearer
+        expiresIn:
+          type: integer
+          minimum: 1
+        claims:
+          $ref: "#/components/schemas/VoiceCapabilityTokenClaims"
+      required:
+        - token
+        - expiresIn
+        - claims
+      additionalProperties: false
+    VoiceDialogState:
+      type: string
+      enum:
+        - admitted
+        - greeting
+        - collecting
+        - resolving
+        - confirming
+        - committing
+        - reconciling
+        - awaiting_dispatch
+        - reporting
+        - handoff_pending
+        - human_controlled
+        - callback_pending
+        - closed
+    VoiceMediaState:
+      type: string
+      enum:
+        - connecting
+        - active
+        - reconnecting
+        - ended
+    VoiceControlOwner:
+      type: string
+      enum:
+        - ai
+        - handoff
+        - human
+        - none
+    VoiceCommitStatus:
+      type: string
+      enum:
+        - none
+        - pending
+        - succeeded
+        - rejected
+    VoiceRecordingState:
+      type: string
+      enum:
+        - starting
+        - capturing
+        - checkpoint_ready
+        - finalizing
+        - finalized
+        - failed
+        - expired
+    VoiceConfirmationState:
+      type: string
+      enum:
+        - absent
+        - readback_playing
+        - awaiting_answer
+        - accepted
+        - invalidated
+        - consumed
+    VoiceOutcome:
+      type: string
+      enum:
+        - auto_booking_created
+        - auto_no_service
+        - auto_query_completed
+        - human_handoff
+        - callback_scheduled
+        - abandoned
+        - technical_failure
+    VoiceSession:
+      type: object
+      properties:
+        voiceSessionId:
+          type: string
+          format: uuid
+        callId:
+          type: string
+          minLength: 1
+        callLegId:
+          type: string
+          format: uuid
+        scope:
+          $ref: "#/components/schemas/VoiceScopeProfile"
+        dialogState:
+          $ref: "#/components/schemas/VoiceDialogState"
+        mediaState:
+          $ref: "#/components/schemas/VoiceMediaState"
+        controlOwner:
+          $ref: "#/components/schemas/VoiceControlOwner"
+        leaseEpoch:
+          type: integer
+        sessionVersion:
+          type: integer
+        commitStatus:
+          $ref: "#/components/schemas/VoiceCommitStatus"
+        recordingState:
+          $ref: "#/components/schemas/VoiceRecordingState"
+        confirmationState:
+          $ref: "#/components/schemas/VoiceConfirmationState"
+        outcome:
+          $ref: "#/components/schemas/VoiceOutcome"
+        inputEpoch:
+          type: integer
+        pendingInput:
+          type: boolean
+        lastResolvedInputEpoch:
+          type: integer
+        lastAppliedControlSequence:
+          type: integer
+      required:
+        - voiceSessionId
+        - callId
+        - scope
+        - dialogState
+        - mediaState
+    VoiceDraftSlot:
+      type: object
+      properties:
+        rawText:
+          type: string
+        normalizedValue:
+          description: Normalized slot value per SD §6.1 (e.g. structured address object, passenger count, phone string, null)
+        sourceTurnIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        sourceSegmentIds:
+          type: array
+          items:
+            type: string
+        providerConfidence:
+          type: number
+          nullable: true
+        validationState:
+          type: string
+        confirmedByCustomerAt:
+          type: string
+          format: date-time
+          nullable: true
+    VoiceDraft:
+      type: object
+      properties:
+        intentId:
+          type: string
+          format: uuid
+        draftVersion:
+          type: integer
+        rawText:
+          type: string
+        normalizedValue:
+          description: Normalized slot value per SD §6.1 (legacy root slot representation)
+        sourceTurnIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        sourceSegmentIds:
+          type: array
+          items:
+            type: string
+        providerConfidence:
+          type: number
+          nullable: true
+        validationState:
+          type: string
+        confirmedByCustomerAt:
+          type: string
+          format: date-time
+          nullable: true
+        slots:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/VoiceDraftSlot"
+        snapshotHash:
+          type: string
+        canonicalSnapshot:
+          type: object
+        validationRefs:
+          type: array
+          items:
+            type: string
+      required:
+        - intentId
+        - draftVersion
+    VoiceDraftRevision:
+      type: object
+      properties:
+        intentId:
+          type: string
+          format: uuid
+        draftVersion:
+          type: integer
+        slots:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/VoiceDraftSlot"
+        validationRefs:
+          type: array
+          items:
+            type: string
+        canonicalSnapshot:
+          type: object
+        snapshotHash:
+          type: string
+          minLength: 1
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - intentId
+        - draftVersion
+        - slots
+        - snapshotHash
+    VoiceReceiptStatus:
+      type: string
+      enum:
+        - pending
+        - succeeded
+        - rejected
+    VoicePendingReceipt:
+      type: object
+      properties:
+        commandId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending]
+        orderId:
+          type: string
+          nullable: true
+          enum: [null]
+        nextAction:
+          type: string
+        pollAfterMs:
+          type: integer
+        actionKey:
+          type: string
+      required:
+        - commandId
+        - status
+      additionalProperties: false
+    VoiceSucceededReceipt:
+      type: object
+      properties:
+        commandId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [succeeded]
+        orderId:
+          type: string
+          format: uuid
+        nextAction:
+          type: string
+        pollAfterMs:
+          type: integer
+        actionKey:
+          type: string
+      required:
+        - commandId
+        - status
+        - orderId
+      additionalProperties: false
+    VoiceRejectedReceipt:
+      type: object
+      properties:
+        commandId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [rejected]
+        orderId:
+          type: string
+          nullable: true
+          enum: [null]
+        rejectionReason:
+          type: string
+        nextAction:
+          type: string
+        pollAfterMs:
+          type: integer
+        actionKey:
+          type: string
+      required:
+        - commandId
+        - status
+      additionalProperties: false
+    VoiceReceipt:
+      oneOf:
+        - $ref: "#/components/schemas/VoicePendingReceipt"
+        - $ref: "#/components/schemas/VoiceSucceededReceipt"
+        - $ref: "#/components/schemas/VoiceRejectedReceipt"
+      discriminator:
+        propertyName: status
+        mapping:
+          pending: "#/components/schemas/VoicePendingReceipt"
+          succeeded: "#/components/schemas/VoiceSucceededReceipt"
+          rejected: "#/components/schemas/VoiceRejectedReceipt"
+    VoicePendingReceiptRecord:
+      type: object
+      properties:
+        actionKey:
+          type: string
+          minLength: 1
+        commandId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending]
+        orderId:
+          type: string
+          nullable: true
+          enum: [null]
+        payloadHash:
+          type: string
+        resultVersion:
+          type: integer
+        rejectionReason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - actionKey
+        - commandId
+        - status
+      additionalProperties: false
+    VoiceSucceededReceiptRecord:
+      type: object
+      properties:
+        actionKey:
+          type: string
+          minLength: 1
+        commandId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [succeeded]
+        orderId:
+          type: string
+          format: uuid
+        payloadHash:
+          type: string
+        resultVersion:
+          type: integer
+        rejectionReason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - actionKey
+        - commandId
+        - status
+        - orderId
+      additionalProperties: false
+    VoiceRejectedReceiptRecord:
+      type: object
+      properties:
+        actionKey:
+          type: string
+          minLength: 1
+        commandId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [rejected]
+        orderId:
+          type: string
+          nullable: true
+          enum: [null]
+        payloadHash:
+          type: string
+        resultVersion:
+          type: integer
+        rejectionReason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - actionKey
+        - commandId
+        - status
+      additionalProperties: false
+    VoiceReceiptRecord:
+      oneOf:
+        - $ref: "#/components/schemas/VoicePendingReceiptRecord"
+        - $ref: "#/components/schemas/VoiceSucceededReceiptRecord"
+        - $ref: "#/components/schemas/VoiceRejectedReceiptRecord"
+      discriminator:
+        propertyName: status
+        mapping:
+          pending: "#/components/schemas/VoicePendingReceiptRecord"
+          succeeded: "#/components/schemas/VoiceSucceededReceiptRecord"
+          rejected: "#/components/schemas/VoiceRejectedReceiptRecord"
+    VoiceCallbackStatus:
+      type: string
+      enum:
+        - pending
+        - claimed
+        - in_progress
+        - completed
+        - cancelled
+        - unreachable
+    VoiceCallbackAttemptOutcome:
+      type: string
+      enum:
+        - answered
+        - no_answer
+        - busy
+        - failed
+        - succeeded
+    VoiceCallbackAttempt:
+      type: object
+      properties:
+        attemptId:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        attemptNumber:
+          type: integer
+          minimum: 1
+        operatorId:
+          type: string
+          minLength: 1
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+          nullable: true
+        outcome:
+          $ref: "#/components/schemas/VoiceCallbackAttemptOutcome"
+        nextAction:
+          type: string
+      required:
+        - taskId
+        - outcome
+      additionalProperties: false
+    VoiceCallback:
+      type: object
+      properties:
+        callbackId:
+          type: string
+          format: uuid
+        voiceSessionId:
+          type: string
+          format: uuid
+        contactPhone:
+          type: string
+        consentSnapshotHash:
+          type: string
+        status:
+          $ref: "#/components/schemas/VoiceCallbackStatus"
+        scheduledAt:
+          type: string
+          format: date-time
+        attemptCount:
+          type: integer
+          minimum: 0
+        lastOutcome:
+          $ref: "#/components/schemas/VoiceCallbackAttemptOutcome"
+        resourceScopeId:
+          type: string
+          format: uuid
+        contactRole:
+          type: string
+        reason:
+          type: string
+        priority:
+          type: string
+        dueAt:
+          type: string
+          format: date-time
+        ownerClaimLease:
+          type: string
+        version:
+          type: integer
+      required:
+        - callbackId
+        - voiceSessionId
+        - contactPhone
+        - consentSnapshotHash
+        - status
+    VoiceAgentBookingActor:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [voice_agent]
+        voiceSessionId:
+          type: string
+          format: uuid
+        principalId:
+          type: string
+          minLength: 1
+      required:
+        - type
+        - voiceSessionId
+        - principalId
+      additionalProperties: false
+    HumanBookingActor:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [human]
+        agentId:
+          type: string
+          minLength: 1
+      required:
+        - type
+        - agentId
+      additionalProperties: false
+    BookingActor:
+      oneOf:
+        - $ref: "#/components/schemas/VoiceAgentBookingActor"
+        - $ref: "#/components/schemas/HumanBookingActor"
