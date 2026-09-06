@@ -77,10 +77,12 @@ export default async function StatementDetailPage({
       cookieStore.get(BANK_CONSOLE_SESSION_COOKIE)?.value ||
       cookieStore.get(BANK_CONSOLE_ROLE_COOKIE)?.value;
   } catch {
-    // Fallback for test / non-HTTP contexts
+    // Missing HTTP cookie context stays unauthenticated.
   }
   const authenticated = resolveBankPageSession(
-    cookieRole, resolvedSearchParams.bank, resolvedSearchParams.role,
+    cookieRole,
+    resolvedSearchParams.bank,
+    resolvedSearchParams.role,
   );
   if (!authenticated) notFound();
   if (!authenticated.canReadStatements) {
@@ -97,9 +99,13 @@ export default async function StatementDetailPage({
   const tenant = authenticated.bank;
   const session = getBankConsoleSession(tenant, locale, authenticated.role);
   const issuerBrand = tenant.template;
-  const statementData = await loadBankStatementsData(tenant.tenantId, session.role);
+  const statementData = await loadBankStatementsData(
+    tenant.tenantId,
+    session.role,
+  );
   const statement =
-    statementData.data.statements.find((item) => item.period === period) ?? null;
+    statementData.data.statements.find((item) => item.period === period) ??
+    null;
 
   if (!statement) {
     notFound();
@@ -158,13 +164,21 @@ export default async function StatementDetailPage({
             <>
               <span
                 className="statement-link is-disabled"
-                style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+                style={{
+                  opacity: 0.5,
+                  pointerEvents: "none",
+                  cursor: "not-allowed",
+                }}
               >
                 {t("statements.actions.exportCsv", locale)}
               </span>
               <span
                 className="statement-link is-disabled"
-                style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+                style={{
+                  opacity: 0.5,
+                  pointerEvents: "none",
+                  cursor: "not-allowed",
+                }}
               >
                 {t("statements.actions.downloadSigned", locale)}
               </span>
@@ -356,7 +370,11 @@ export default async function StatementDetailPage({
                 {session.role === "bank_ops_viewer" ? (
                   <span
                     className="statement-link is-disabled"
-                    style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+                    style={{
+                      opacity: 0.5,
+                      pointerEvents: "none",
+                      cursor: "not-allowed",
+                    }}
                   >
                     {t("statements.actions.download", locale)}
                   </span>
@@ -377,7 +395,11 @@ export default async function StatementDetailPage({
                 ) : (
                   <span
                     className="statement-link is-disabled"
-                    style={{ opacity: 0.5, pointerEvents: "none", cursor: "not-allowed" }}
+                    style={{
+                      opacity: 0.5,
+                      pointerEvents: "none",
+                      cursor: "not-allowed",
+                    }}
                   >
                     {t("statements.actions.reportDispute", locale)}
                   </span>

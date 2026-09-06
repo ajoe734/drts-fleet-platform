@@ -7,10 +7,7 @@ import {
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
-import {
-  getBankTenantName,
-  resolveLocale,
-} from "@/lib/demo-tenants";
+import { getBankTenantName, resolveLocale } from "@/lib/demo-tenants";
 import {
   BANK_CONSOLE_ROLE_COOKIE,
   BANK_CONSOLE_SESSION_COOKIE,
@@ -81,10 +78,12 @@ export default async function StatementsPage({
       cookieStore.get(BANK_CONSOLE_SESSION_COOKIE)?.value ||
       cookieStore.get(BANK_CONSOLE_ROLE_COOKIE)?.value;
   } catch {
-    // Fallback for test / non-HTTP contexts
+    // Missing HTTP cookie context stays unauthenticated.
   }
   const authenticated = resolveBankPageSession(
-    cookieRole, resolvedSearchParams.bank, resolvedSearchParams.role,
+    cookieRole,
+    resolvedSearchParams.bank,
+    resolvedSearchParams.role,
   );
   if (!authenticated) notFound();
   if (!authenticated.canReadStatements) {
