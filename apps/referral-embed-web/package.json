@@ -9,7 +9,7 @@
     "lint": "eslint . --max-warnings=0",
     "start": "next start --port 3014",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "bash ../../tools/ci/next-typecheck.sh"
   },
   "dependencies": {
     "next": "^16.2.3",

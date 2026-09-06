@@ -1,5 +1,5 @@
 import type { PartnerChannelEntryRecord } from "@drts/contracts";
-import { REALM_COLORS, STATUS_TONES, SURFACE_ACCENTS } from "@drts/ui-tokens";
+import { REALM_COLORS, STATUS_TONES, SURFACE_ACCENTS } from "../../../packages/ui-tokens/src/index";
 
 const defaultEntryHost = "unknown-host";
 const pageBg = "#ECEEF3";
