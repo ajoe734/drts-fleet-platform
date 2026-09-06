@@ -15,12 +15,12 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { ActionIntent, ResourceActionDescriptor } from "@drts/contracts";
 import { buildCanvasTheme, CanvasIcon } from "@drts/ui-web";
-import { getOpsClient } from "@/lib/api-client";
-import { useTranslation } from "@/lib/i18n";
+import { getOpsClient } from "../../lib/api-client";
+import { useTranslation } from "../../lib/i18n";
 import {
   formatOpsActionLabel,
   formatOpsCodeLabel,
-} from "@/lib/localized-labels";
+} from "../../lib/localized-labels";
 import {
   useOpsAssistantActionBridge,
   useOpsAssistantContext,
@@ -32,25 +32,29 @@ import {
 } from "./assistant-actions";
 import { buildTier0HelpResult, buildTier1ScopedResult } from "./help-search";
 import type { AssistantActionReceipt } from "./context-envelope";
+import { sanitizeAuditHref } from "./cross-app-url";
 
-type DockSide = "free" | "left" | "right";
-
-type WidgetState = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  minimized: boolean;
-  closed: boolean;
-  docked: DockSide;
-};
-
-type Rect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
+import {
+  type DockSide,
+  type WidgetState,
+  type Rect,
+  HEADER_HEIGHT,
+  MINIMIZED_HEIGHT,
+  EDGE_GAP,
+  MOVE_STEP,
+  RESIZE_STEP,
+  STREAM_TICK_MS,
+  STREAM_PAUSE_MS,
+  PORTAL_ROOT_ATTR,
+  getViewportRect,
+  buildDefaultState,
+  clamp,
+  resolveDockedPosition,
+  readStoredState,
+  writeStoredState,
+  isAssistantEnabled,
+  isForcedDegraded,
+} from "./assistant-layout";
 
 type StreamState = {
   activeIndex: number;
@@ -66,156 +70,11 @@ type ConversationEntry = {
   auditHref?: string | null;
 };
 
-const STORAGE_KEY = "ops-console.assistant-widget.v1";
-const WIDGET_MIN_WIDTH = 320;
-const WIDGET_MIN_HEIGHT = 240;
-const WIDGET_MAX_WIDTH = 560;
-const WIDGET_MAX_HEIGHT = 720;
-const HEADER_HEIGHT = 48;
-const MINIMIZED_HEIGHT = 64;
-const EDGE_GAP = 20;
-const MOVE_STEP = 24;
-const RESIZE_STEP = 24;
-const STREAM_TICK_MS = 42;
-const STREAM_PAUSE_MS = 1500;
-const FORCE_DEGRADED_KEY = "ops-console.assistant.force-degraded";
-const FORCE_DISABLED_KEY = "ops-console.assistant.force-disabled";
-
 const theme = buildCanvasTheme({
   surface: "ops",
   dark: true,
   density: "compact",
 });
-
-function getViewportRect() {
-  if (typeof window === "undefined") {
-    return { width: 1280, height: 720 };
-  }
-  return {
-    width: window.innerWidth,
-    height: window.innerHeight,
-  };
-}
-
-function buildDefaultState(viewport = getViewportRect()): WidgetState {
-  const width = 420;
-  const height = 360;
-  return {
-    width,
-    height,
-    x: Math.max(EDGE_GAP, viewport.width - width - EDGE_GAP),
-    y: Math.max(72, viewport.height - height - EDGE_GAP),
-    minimized: false,
-    closed: false,
-    docked: "right",
-  };
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function clampRect(rect: Rect, viewport = getViewportRect()): Rect {
-  const width = clamp(
-    rect.width,
-    WIDGET_MIN_WIDTH,
-    Math.min(WIDGET_MAX_WIDTH, viewport.width - EDGE_GAP * 2),
-  );
-  const height = clamp(
-    rect.height,
-    WIDGET_MIN_HEIGHT,
-    Math.min(WIDGET_MAX_HEIGHT, viewport.height - EDGE_GAP * 2),
-  );
-  const maxX = Math.max(EDGE_GAP, viewport.width - width - EDGE_GAP);
-  const maxY = Math.max(EDGE_GAP, viewport.height - height - EDGE_GAP);
-
-  return {
-    x: clamp(rect.x, EDGE_GAP, maxX),
-    y: clamp(rect.y, EDGE_GAP, maxY),
-    width,
-    height,
-  };
-}
-
-function resolveDockedPosition(
-  docked: DockSide,
-  rect: Rect,
-  viewport = getViewportRect(),
-): Rect {
-  const next = clampRect(rect, viewport);
-  if (docked === "left") {
-    return { ...next, x: EDGE_GAP };
-  }
-  if (docked === "right") {
-    return {
-      ...next,
-      x: Math.max(EDGE_GAP, viewport.width - next.width - EDGE_GAP),
-    };
-  }
-  return next;
-}
-
-function readStoredState(): WidgetState | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as Partial<WidgetState>;
-    if (
-      typeof parsed.x !== "number" ||
-      typeof parsed.y !== "number" ||
-      typeof parsed.width !== "number" ||
-      typeof parsed.height !== "number"
-    ) {
-      return null;
-    }
-    return {
-      x: parsed.x,
-      y: parsed.y,
-      width: parsed.width,
-      height: parsed.height,
-      minimized: parsed.minimized ?? false,
-      closed: parsed.closed ?? false,
-      docked:
-        parsed.docked === "left" || parsed.docked === "right"
-          ? parsed.docked
-          : "free",
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredState(state: WidgetState) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
-function isAssistantEnabled() {
-  if (process.env.NEXT_PUBLIC_OPS_ASSISTANT_ENABLED === "false") {
-    return false;
-  }
-  if (typeof window === "undefined") {
-    return true;
-  }
-  return window.localStorage.getItem(FORCE_DISABLED_KEY) !== "true";
-}
-
-function isForcedDegraded() {
-  if (typeof window === "undefined") {
-    return process.env.NEXT_PUBLIC_OPS_ASSISTANT_DEGRADED === "true";
-  }
-  return (
-    process.env.NEXT_PUBLIC_OPS_ASSISTANT_DEGRADED === "true" ||
-    window.localStorage.getItem(FORCE_DEGRADED_KEY) === "true"
-  );
-}
 
 function ActionButton({
   label,
@@ -269,6 +128,9 @@ export function OpsAssistantWidget() {
   const titleId = useId();
   const instructionsId = useId();
   const liveRegionId = useId();
+  const launcherRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const dragHandleRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<{
     startX: number;
     startY: number;
@@ -302,13 +164,57 @@ export function OpsAssistantWidget() {
 
   const activeMessage = streamMessages[stream.activeIndex] ?? "";
 
+  const handleCloseWidget = () => {
+    setWidget((current) => ({ ...current, closed: true }));
+    setTimeout(() => {
+      launcherRef.current?.focus();
+    }, 0);
+  };
+
+  const handleOpenWidget = () => {
+    setWidget((current) => ({ ...current, closed: false }));
+    setTimeout(() => {
+      dragHandleRef.current?.focus();
+    }, 0);
+  };
+
+  const toggleMinimized = () => {
+    setWidget((current) => {
+      const nextMinimized = !current.minimized;
+      const viewport = getViewportRect();
+      const effectiveHeight = nextMinimized ? MINIMIZED_HEIGHT : current.height;
+      let nextY = current.y;
+      if (current.docked === "right" || current.docked === "left") {
+        nextY = Math.max(
+          EDGE_GAP,
+          viewport.height - effectiveHeight - EDGE_GAP,
+        );
+      } else {
+        const bottom =
+          current.y + (current.minimized ? MINIMIZED_HEIGHT : current.height);
+        nextY = clamp(
+          bottom - effectiveHeight,
+          EDGE_GAP,
+          viewport.height - effectiveHeight - EDGE_GAP,
+        );
+      }
+      return {
+        ...current,
+        minimized: nextMinimized,
+        y: nextY,
+        closed: false,
+      };
+    });
+  };
+
   const appendConversation = useEffectEvent((entry: ConversationEntry) => {
     setConversation((current) => [...current.slice(-9), entry]);
   });
 
   useEffect(() => {
     const node = document.createElement("div");
-    node.setAttribute("data-ops-assistant-root", "true");
+    node.setAttribute(PORTAL_ROOT_ATTR, "true");
+    node.style.pointerEvents = "none";
     document.body.appendChild(node);
     setPortalNode(node);
 
@@ -557,7 +463,7 @@ export function OpsAssistantWidget() {
         break;
       case "Escape":
         event.preventDefault();
-        setWidget((current) => ({ ...current, closed: true }));
+        handleCloseWidget();
         break;
       default:
         break;
@@ -792,6 +698,12 @@ export function OpsAssistantWidget() {
 
   const appendReceipt = useEffectEvent(
     (receipt: AssistantActionReceipt, action: string) => {
+      const sanitizedAuditHref = sanitizeAuditHref(receipt.auditHref, {
+        auditId: receipt.auditId,
+        resourceType: receipt.resourceType,
+        resourceId: receipt.resourceId,
+      });
+
       appendConversation({
         id: `${Date.now()}-${receipt.actionId}`,
         author: "assistant",
@@ -802,9 +714,7 @@ export function OpsAssistantWidget() {
           actionId: receipt.actionId,
           auditId: receipt.auditId,
         }),
-        auditHref:
-          receipt.auditHref ??
-          `/audit?auditId=${encodeURIComponent(receipt.auditId)}`,
+        auditHref: sanitizedAuditHref,
       });
     },
   );
@@ -837,12 +747,11 @@ export function OpsAssistantWidget() {
     <>
       {widget.closed ? (
         <button
+          ref={launcherRef}
           type="button"
           data-testid="ops-assistant-launcher"
           aria-label={t("opsAssistant.launcher.open")}
-          onClick={() =>
-            setWidget((current) => ({ ...current, closed: false }))
-          }
+          onClick={handleOpenWidget}
           style={{
             position: "fixed",
             right: EDGE_GAP,
@@ -859,6 +768,7 @@ export function OpsAssistantWidget() {
             alignItems: "center",
             gap: 10,
             cursor: "pointer",
+            pointerEvents: "auto",
           }}
         >
           <CanvasIcon name="callcenter" size={16} />
@@ -869,14 +779,22 @@ export function OpsAssistantWidget() {
       ) : null}
 
       <section
+        ref={panelRef}
         data-testid="ops-assistant-panel"
         role="region"
         aria-labelledby={titleId}
         aria-describedby={instructionsId}
         aria-live="off"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            handleCloseWidget();
+          }
+        }}
         style={shellStyle}
       >
         <div
+          ref={dragHandleRef}
           data-testid="ops-assistant-drag-handle"
           tabIndex={0}
           onPointerDown={onDragPointerDown}
@@ -926,13 +844,7 @@ export function OpsAssistantWidget() {
               }
               icon="minus"
               pressed={widget.minimized}
-              onClick={() =>
-                setWidget((current) => ({
-                  ...current,
-                  minimized: !current.minimized,
-                  closed: false,
-                }))
-              }
+              onClick={toggleMinimized}
             />
             <ActionButton
               label={t("opsAssistant.header.dockLeft")}
@@ -953,9 +865,7 @@ export function OpsAssistantWidget() {
             <ActionButton
               label={t("opsAssistant.header.close")}
               icon="x"
-              onClick={() =>
-                setWidget((current) => ({ ...current, closed: true }))
-              }
+              onClick={handleCloseWidget}
             />
           </div>
         </div>
@@ -1452,9 +1362,7 @@ export function OpsAssistantWidget() {
               type="button"
               data-testid="ops-assistant-restore"
               aria-label={t("opsAssistant.minimized.restore")}
-              onClick={() =>
-                setWidget((current) => ({ ...current, minimized: false }))
-              }
+              onClick={toggleMinimized}
               style={restoreButtonStyle}
             >
               {t("opsAssistant.minimized.restore")}
