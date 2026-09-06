@@ -24,15 +24,28 @@
 --      correct/null the callId field on the JSON `record` of the others via
 --      an explicit, audited, one-off data-fix migration -- not by dropping
 --      rows.
---   3. For dangling call_id / linked_order_id references: the referenced
---      row was either deleted out-of-band or the id was mistyped when
---      written. Confirm which side is wrong against `admin.audit_logs` and
---      correct the `record` JSON of the wrong side; if the counterpart
---      genuinely never existed, null the dangling reference rather than
---      fabricating a placeholder row.
---   4. Re-run `operations/database/db-apply.sh` after the data fix; this
+--   3. Re-run `operations/database/db-apply.sh` after the data fix; this
 --      migration is idempotent (guarded by IF NOT EXISTS / ADD COLUMN IF NOT
 --      EXISTS) and safe to retry.
+--
+-- No cross-table FK between ops.phase1_owned_orders.call_id and
+-- crm.phase1_call_sessions.call_id/linked_order_id: the existing
+-- call-center booking writer (OwnedMobilityService.createCallCenterOrder ->
+-- CallcenterService.linkOrderToCallSession, apps/api/src/modules/
+-- owned-mobility/owned-mobility.service.ts and
+-- apps/api/src/modules/callcenter/callcenter.service.ts) persists the order
+-- and the call-session link as two independent, unawaited
+-- (`void Promise.all(...).catch(...)`) writes, not one transaction, and does
+-- not guarantee the order row lands before the session's linkedOrderId
+-- write. A hard, immediately-checked FK across that cycle broke exactly
+-- that legacy path in CI (cross-surface-e2e / E2E-022-operations-reporting:
+-- `fk_phase1_call_sessions_linked_order` / `fk_phase1_owned_orders_call_id`
+-- violations from a real call-center order, not a test bug). Per SD §15.2
+-- writers for this domain land in later UV-EXEC-* tasks; until that writer
+-- is made transactional/ordered, this migration only keeps the UNIQUE
+-- indexes (dedup: one order per call, one call per order) and reports
+-- dangling references as a read-only NOTICE (part 2 below) instead of
+-- enforcing them with a blocking FK.
 --
 -- The same checks are also published as a standalone, non-blocking,
 -- read-only script at
@@ -79,8 +92,8 @@ BEGIN
   LIMIT 20;
 
   IF offending IS NOT NULL THEN
-    RAISE EXCEPTION
-      'ops.phase1_owned_orders has order(s) % referencing a callId with no matching crm.phase1_call_sessions row. Fix the dangling reference before this migration can add the foreign key.',
+    RAISE NOTICE
+      'voice-runtime-integrity: ops.phase1_owned_orders has order(s) % referencing a callId with no matching crm.phase1_call_sessions row. Not blocking this migration (no FK is added for this pair -- see the file header); see operations/database/voice-runtime-integrity-check.sql for the remediation runbook.',
       offending;
   END IF;
 END $$;
@@ -146,8 +159,8 @@ BEGIN
   LIMIT 20;
 
   IF offending IS NOT NULL THEN
-    RAISE EXCEPTION
-      'crm.phase1_call_sessions has call session(s) % referencing a linkedOrderId with no matching ops.phase1_owned_orders row. Fix the dangling reference before this migration can add the foreign key.',
+    RAISE NOTICE
+      'voice-runtime-integrity: crm.phase1_call_sessions has call session(s) % referencing a linkedOrderId with no matching ops.phase1_owned_orders row. Not blocking this migration (no FK is added for this pair -- see the file header); see operations/database/voice-runtime-integrity-check.sql for the remediation runbook.',
       offending;
   END IF;
 END $$;
@@ -215,13 +228,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_phase1_owned_orders_voice_intent
 -- SD §7.5: the real-runtime-table equivalent of V0082's
 -- `ops_orders_call_id_unique`, which sits on the mostly-empty canonical
 -- `ops.orders` and cannot enforce anything against what the app writes.
+--
+-- No FK to crm.phase1_call_sessions (call_id) here: see the file header --
+-- the existing call-center writer persists the order and the call-session
+-- link as two independent, unordered writes, and a hard FK on this pair
+-- broke that legacy path in CI. Dangling references are reported, not
+-- enforced (see the NOTICE check above and
+-- operations/database/voice-runtime-integrity-check.sql).
 CREATE UNIQUE INDEX IF NOT EXISTS uq_phase1_owned_orders_call_id
   ON ops.phase1_owned_orders (call_id)
   WHERE call_id IS NOT NULL;
-
-ALTER TABLE ops.phase1_owned_orders
-  ADD CONSTRAINT fk_phase1_owned_orders_call_id
-    FOREIGN KEY (call_id) REFERENCES crm.phase1_call_sessions (call_id);
 
 ALTER TABLE crm.phase1_call_sessions
   ADD COLUMN IF NOT EXISTS linked_order_id varchar(100)
@@ -235,16 +251,15 @@ ALTER TABLE crm.phase1_call_sessions
   ADD CONSTRAINT chk_phase1_call_sessions_source_channel
     CHECK (source_channel IS NULL OR source_channel IN ('voice_agent', 'human'));
 
+-- No FK to ops.phase1_owned_orders (order_id) here: see the file header and
+-- the matching note on uq_phase1_owned_orders_call_id above -- same legacy
+-- writer, same non-transactional ordering hazard.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_phase1_call_sessions_linked_order
   ON crm.phase1_call_sessions (linked_order_id)
   WHERE linked_order_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_phase1_call_sessions_voice_session
   ON crm.phase1_call_sessions (voice_session_id)
   WHERE voice_session_id IS NOT NULL;
-
-ALTER TABLE crm.phase1_call_sessions
-  ADD CONSTRAINT fk_phase1_call_sessions_linked_order
-    FOREIGN KEY (linked_order_id) REFERENCES ops.phase1_owned_orders (order_id);
 
 -- voice.session references crm.phase1_call_sessions(call_id) directly
 -- (added in V0086); voice_session_id here closes the loop so a call session

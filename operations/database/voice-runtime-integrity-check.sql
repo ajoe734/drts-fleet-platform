@@ -4,11 +4,19 @@
 -- here is a SELECT, nothing is written or locked beyond a normal read.
 --
 -- This does not replace the guard checks embedded in
--- infra/migrations/V0088__voice_runtime_identity_linkage.sql (those run once,
--- at migration time, and block the migration on violation). This script is
--- for ongoing drift detection *after* that migration has already succeeded --
--- e.g. a hand-run data fix, an out-of-band import, or a bug in a writer that
--- bypasses the generated-column invariant some other way.
+-- infra/migrations/V0088__voice_runtime_identity_linkage.sql, but the two
+-- kinds of check block differently there: duplicate call_id/voice_intent_id/
+-- linked_order_id run once, at migration time, and block the migration
+-- (they protect the UNIQUE indexes this migration adds). Dangling
+-- call_id/linked_order_id references are reported as a NOTICE only and do
+-- NOT block -- there is intentionally no FK across
+-- ops.phase1_owned_orders.call_id <-> crm.phase1_call_sessions.call_id/
+-- linked_order_id, because the existing call-center booking writer persists
+-- the two rows as independent, unordered writes (see the V0088 file header
+-- for the CI failure that showed this). This script is for ongoing drift
+-- detection *after* that migration has already succeeded -- e.g. a hand-run
+-- data fix, an out-of-band import, or a bug in a writer that bypasses the
+-- generated-column invariant some other way.
 --
 -- Remediation runbook for any row this script reports:
 --   1. Never delete or truncate the reported row to make the report go away.
@@ -18,9 +26,12 @@
 --      correction says otherwise) and null the conflicting field on the
 --      JSON `record` of the other row(s) via an audited, one-off data-fix
 --      migration.
---   3. Dangling call_id / linked_order_id: confirm which side is wrong
---      against admin.audit_logs, then correct or null the wrong side's
---      `record` JSON. Do not fabricate a placeholder row on the other side.
+--   3. Dangling call_id / linked_order_id: this can legitimately be
+--      transient (the call-center writer's two-step, non-transactional
+--      persistence -- see above) as well as a real bug; confirm which case
+--      it is against admin.audit_logs before correcting or nulling the
+--      wrong side's `record` JSON. Do not fabricate a placeholder row on the
+--      other side.
 --   4. JSON vs. real-column drift (status only, today): the typed `status`
 --      column is what indexes/FKs and most reads rely on; treat it as
 --      authoritative and correct `record->>'status'` to match, unless the
