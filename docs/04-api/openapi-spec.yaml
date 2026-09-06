@@ -2484,3 +2484,97 @@ components:
           $ref: "#/components/schemas/TenantApprovalRequestListData"
         meta:
           $ref: "#/components/schemas/ApiMeta"
+    VoiceScopeProfile:
+      type: object
+      properties:
+        resourceScopeId:
+          type: string
+          format: uuid
+        brandId:
+          type: string
+        operatingProfileId:
+          type: string
+        operatingProfileVersion:
+          type: integer
+      required:
+        - resourceScopeId
+        - brandId
+        - operatingProfileId
+        - operatingProfileVersion
+    VoiceErrorCode:
+      type: string
+      enum:
+        - VOICE_ACTION_PAYLOAD_CONFLICT
+        - VOICE_INVALID_PROOF
+        - VOICE_PROOF_EXPIRED
+        - VOICE_UNAUTHORIZED_SCOPE
+        - VOICE_INVALID_ACTOR
+        - VOICE_CAPABILITY_REJECTED
+        - VOICE_UNSUPPORTED_ACTION
+    VoiceProof:
+      type: object
+      properties:
+        confirmationId:
+          type: string
+          format: uuid
+        voiceSessionId:
+          type: string
+          format: uuid
+        intentId:
+          type: string
+          format: uuid
+        action:
+          type: string
+        draftVersion:
+          type: integer
+        snapshotHash:
+          type: string
+        readbackPlaybackId:
+          type: string
+          format: uuid
+        readbackCompletedEventId:
+          type: string
+          format: uuid
+        confirmationMethod:
+          type: string
+          enum: [speech, dtmf]
+        evidence:
+          type: object
+          description: Depends on confirmationMethod
+        inputEpoch:
+          type: integer
+        controlCutoff:
+          type: object
+          properties:
+            mediaEpoch:
+              type: integer
+            controlSequence:
+              type: integer
+        leaseEpoch:
+          type: integer
+        recordingCheckpointId:
+          type: string
+          format: uuid
+        confirmedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+      required:
+        - confirmationId
+        - voiceSessionId
+        - intentId
+        - action
+        - draftVersion
+        - snapshotHash
+        - readbackPlaybackId
+        - readbackCompletedEventId
+        - confirmationMethod
+        - evidence
+        - inputEpoch
+        - controlCutoff
+        - leaseEpoch
+        - recordingCheckpointId
+        - confirmedAt
+        - expiresAt

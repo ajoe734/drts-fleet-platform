@@ -4518,3 +4518,15 @@ export function createPlatformAdminClient(
     ...(options?.pathTransform ? { pathTransform: options.pathTransform } : {}),
   });
 }
+export type {
+  VoiceSession,
+  VoiceDraft,
+  VoiceProof,
+  VoiceReceipt,
+  VoiceCallback,
+  VoiceControlCutoff,
+  BookingActor,
+  VoiceCapability,
+  VoiceErrorCode,
+  VoiceScopeProfile,
+} from "@drts/contracts";
