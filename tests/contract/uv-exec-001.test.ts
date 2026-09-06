@@ -824,6 +824,20 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       expect(validateCapability(capability)).toBe(true);
     });
 
+    it("OpenAPI and Zod both reject empty servicePrincipalId in VoiceCapability", () => {
+      const capability = {
+        aud: "voice-tool-gateway",
+        servicePrincipalId: "",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+        routeProfileVersion: 1,
+        leaseEpoch: 2,
+        scopes: ["session_execute"],
+      };
+      expect(VoiceCapabilitySchema.safeParse(capability).success).toBe(false);
+      expect(validateCapability(capability)).toBe(false);
+    });
+
     it("OpenAPI rejects URL injection in capability (additionalProperties: false)", () => {
       const capability = {
         aud: "voice-tool-gateway",
@@ -974,6 +988,23 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         mediaState: "active",
       };
       expect(validateSession(session)).toBe(true);
+    });
+
+    it("OpenAPI and Zod both reject empty callId in VoiceSession", () => {
+      const session = {
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174000",
+        callId: "",
+        scope: {
+          resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+          brandId: "brand-1",
+          operatingProfileId: "op-1",
+          operatingProfileVersion: 1,
+        },
+        dialogState: "collecting",
+        mediaState: "active",
+      };
+      expect(VoiceSessionSchema.safeParse(session).success).toBe(false);
+      expect(validateSession(session)).toBe(false);
     });
 
     it("ensures VoiceDraft parity between Zod schema and OpenAPI Ajv validator for all slot value types", () => {

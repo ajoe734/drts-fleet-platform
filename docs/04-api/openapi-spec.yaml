@@ -2710,6 +2710,7 @@ components:
           enum: [voice-tool-gateway]
         servicePrincipalId:
           type: string
+          minLength: 1
         voiceSessionId:
           type: string
           format: uuid
@@ -2807,6 +2808,7 @@ components:
           format: uuid
         callId:
           type: string
+          minLength: 1
         callLegId:
           type: string
           format: uuid
