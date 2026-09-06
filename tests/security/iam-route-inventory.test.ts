@@ -444,7 +444,7 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
     // this guards against it (or an equivalent shortcut) reappearing.
     const uncontrolledExportRoutes = result.routesDiscovered.filter(
       (route) =>
-        route.routePath === "platform-admin/multi-taxi-trip-records/export",
+        route.routePath === "/platform-admin/multi-taxi-trip-records/export",
     );
 
     expect(uncontrolledExportRoutes).toEqual([]);
