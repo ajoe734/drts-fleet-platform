@@ -22,7 +22,7 @@
  *
  * Task-ID: SR-DRIVER-WEB-001
  * LLM-Agent: Gemini2
- * Reviewer: Claude
+ * Reviewer: Claude2
  */
 
 import { readFileSync } from "node:fs";
@@ -150,5 +150,41 @@ describe("SR-DRIVER-WEB-001: driver-trip-map web platform split", () => {
   it("web file includes StopCoordinateCard with navigation buttons", () => {
     expect(webSource).toContain("StopCoordinateCard");
     expect(webSource).toContain("Google 導航");
+  });
+
+  // -----------------------------------------------------------------------
+  // Web three routes isolation (acceptance criteria: home/onboarding/SOS)
+  // -----------------------------------------------------------------------
+  it("home route (index.tsx) does not directly import react-native-maps", () => {
+    const indexSource = readFileSync(
+      resolve(REPO_ROOT, "apps/driver-app/app/index.tsx"),
+      "utf-8",
+    );
+    expect(indexSource).not.toContain("react-native-maps");
+  });
+
+  it("onboarding route does not directly import react-native-maps", () => {
+    const onboardingSource = readFileSync(
+      resolve(REPO_ROOT, "apps/driver-app/app/onboarding.tsx"),
+      "utf-8",
+    );
+    expect(onboardingSource).not.toContain("react-native-maps");
+  });
+
+  it("SOS route does not directly import react-native-maps", () => {
+    const sosSource = readFileSync(
+      resolve(REPO_ROOT, "apps/driver-app/app/sos.tsx"),
+      "utf-8",
+    );
+    expect(sosSource).not.toContain("react-native-maps");
+  });
+
+  it("trip route imports driver-trip-map via platform alias, enabling web override", () => {
+    const tripSource = readFileSync(
+      resolve(REPO_ROOT, "apps/driver-app/app/trip.tsx"),
+      "utf-8",
+    );
+    expect(tripSource).not.toContain("react-native-maps");
+    expect(tripSource).toMatch(/from\s+['"]@\/components\/driver-trip-map['"]/);
   });
 });

@@ -5,7 +5,7 @@
 | Task ID | SR-DRIVER-WEB-001 |
 | Phase | system-remediation-20260906 |
 | Owner | Gemini2 |
-| Reviewer | Claude |
+| Reviewer | Claude2 |
 | Gap ref | R30 |
 | Capability ref | C049, C062 |
 | Status | candidate (pending review) |
@@ -44,7 +44,7 @@ iOS/Android 打包不受影響）
 
 | 項目 | 值 |
 |---|---|
-| Base SHA (origin/dev) | `6d4c47feb1c68f8b53310597da7aeffb6940cc19` |
+| Base SHA (origin/dev) | `b32ab8badb740b94cdf67212315ecfccf21f6d5d` |
 | Branch | `gemini2/sr-driver-web-001` |
 | Candidate SHA | 見 commit 後更新 |
 
@@ -65,12 +65,12 @@ pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/
 ```
 
 ```
- RUN  v4.1.4 /home/lupin/drts-fleet-platform/...
+ RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-driver-web-001
 
  Test Files  1 passed (1)
-      Tests  17 passed (17)
-   Start at  08:51:24
-   Duration  313ms (transform 43ms, setup 0ms, import 64ms, tests 12ms, environment 0ms)
+      Tests  21 passed (21)
+   Start at  15:26:28
+   Duration  316ms (transform 57ms, setup 0ms, import 83ms, tests 14ms, environment 0ms)
 ```
 
 Exit code: **0**
@@ -87,9 +87,12 @@ Exit code: **0** (no whitespace errors)
 pnpm --filter @drts/driver-app typecheck
 ```
 
-TypeScript 回報 `packages/contracts/src/unattended-voice.ts:1 – zod not found`，
-此為既有缺陷（本 branch 無相關修改，stash 驗證 base HEAD 也同樣失敗），
-非本 task 引入，不在 write_scopes 內，留給對應 task 處理。
+```
+> @drts/driver-app@0.1.0 typecheck /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-driver-web-001/apps/driver-app
+> tsc --noEmit
+```
+
+Exit code: **0** (typecheck passes cleanly on current origin/dev base)
 
 ## 未做的 live／真機部分（明列，不冒充成功）
 
