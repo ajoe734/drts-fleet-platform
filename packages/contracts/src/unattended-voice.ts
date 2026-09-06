@@ -223,7 +223,7 @@ export type VoiceOutcome = z.infer<typeof VoiceOutcomeSchema>;
 
 export const VoiceSessionSchema = z.object({
   voiceSessionId: z.string().uuid(),
-  callId: z.string().uuid(),
+  callId: z.string().min(1),
   callLegId: z.string().uuid().optional(),
   scope: VoiceScopeProfileSchema,
   dialogState: VoiceDialogStateSchema,
@@ -302,7 +302,7 @@ export type VoiceCapabilityScope = z.infer<typeof VoiceCapabilityScopeSchema>;
 export const VoiceCapabilitySchema = z
   .object({
     aud: z.literal("voice-tool-gateway"),
-    servicePrincipalId: z.string().uuid(),
+    servicePrincipalId: z.string().min(1),
     voiceSessionId: z.string().uuid(),
     resourceScopeId: z.string().uuid(),
     routeProfileVersion: z.number().int(),

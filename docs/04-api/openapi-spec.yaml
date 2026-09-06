@@ -2710,7 +2710,6 @@ components:
           enum: [voice-tool-gateway]
         servicePrincipalId:
           type: string
-          format: uuid
         voiceSessionId:
           type: string
           format: uuid
@@ -2808,7 +2807,6 @@ components:
           format: uuid
         callId:
           type: string
-          format: uuid
         callLegId:
           type: string
           format: uuid
@@ -2857,7 +2855,7 @@ components:
         rawText:
           type: string
         normalizedValue:
-          type: object
+          description: Normalized slot value per SD §6.1 (e.g. structured address object, passenger count, phone string, null)
         sourceTurnIds:
           type: array
           items:

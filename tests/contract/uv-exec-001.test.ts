@@ -118,6 +118,34 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       expect(result.success).toBe(true);
     });
 
+    it("accepts valid capability token with workload identity opaque principal ID (e.g. svc-api-runtime)", () => {
+      const capability = {
+        aud: "voice-tool-gateway",
+        servicePrincipalId: "svc-api-runtime",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+        routeProfileVersion: 1,
+        leaseEpoch: 2,
+        scopes: ["session_execute", "address_resolve"],
+      };
+      const result = VoiceCapabilitySchema.safeParse(capability);
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects empty servicePrincipalId in capability", () => {
+      const capability = {
+        aud: "voice-tool-gateway",
+        servicePrincipalId: "",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+        routeProfileVersion: 1,
+        leaseEpoch: 2,
+        scopes: ["session_execute"],
+      };
+      const result = VoiceCapabilitySchema.safeParse(capability);
+      expect(result.success).toBe(false);
+    });
+
     it("rejects URL injection in capability", () => {
       const capability = {
         aud: "voice-tool-gateway",
@@ -350,6 +378,40 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       expect(VoiceSessionSchema.safeParse(session).success).toBe(true);
     });
 
+    it("validates valid VoiceSession with real CallcenterService callId format (CALL-YYYYMMDD-XXXXXX)", () => {
+      const session = {
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174000",
+        callId: "CALL-20260410-000001",
+        scope: {
+          resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+          brandId: "brand-1",
+          operatingProfileId: "op-1",
+          operatingProfileVersion: 1,
+        },
+        dialogState: "collecting",
+        mediaState: "active",
+      };
+      const result = VoiceSessionSchema.safeParse(session);
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects empty callId in VoiceSession", () => {
+      const session = {
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174000",
+        callId: "",
+        scope: {
+          resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+          brandId: "brand-1",
+          operatingProfileId: "op-1",
+          operatingProfileVersion: 1,
+        },
+        dialogState: "collecting",
+        mediaState: "active",
+      };
+      const result = VoiceSessionSchema.safeParse(session);
+      expect(result.success).toBe(false);
+    });
+
     it("preserves commitStatus, recordingState, confirmationState, and outcome on closed+pending VoiceSession snapshot", () => {
       const closedPendingSession = {
         voiceSessionId: "123e4567-e89b-12d3-a456-426614174000",
@@ -383,19 +445,62 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       }
     });
 
-    it("validates valid VoiceDraft", () => {
-      const draft = {
+    it("validates VoiceDraft with polymorphic slot values (object, number, phone string, null, omitted) per SD §6.1", () => {
+      const baseDraft = {
         intentId: "123e4567-e89b-12d3-a456-426614174000",
         draftVersion: 3,
-        rawText: "台北車站東三門",
-        normalizedValue: { placeId: "poi-123" },
         sourceTurnIds: ["123e4567-e89b-12d3-a456-426614174001"],
         sourceSegmentIds: ["seg-1"],
         providerConfidence: 0.95,
         validationState: "validated",
         confirmedByCustomerAt: null,
       };
-      expect(VoiceDraftSchema.safeParse(draft).success).toBe(true);
+
+      // 1. Structured address object
+      expect(
+        VoiceDraftSchema.safeParse({
+          ...baseDraft,
+          rawText: "台北車站東三門",
+          normalizedValue: {
+            placeId: "poi-123",
+            formattedAddress: "台北市中正區北平西路3號",
+          },
+        }).success,
+      ).toBe(true);
+
+      // 2. Passenger count number (e.g. 3)
+      expect(
+        VoiceDraftSchema.safeParse({
+          ...baseDraft,
+          rawText: "3位",
+          normalizedValue: 3,
+        }).success,
+      ).toBe(true);
+
+      // 3. Phone string
+      expect(
+        VoiceDraftSchema.safeParse({
+          ...baseDraft,
+          rawText: "0912345678",
+          normalizedValue: "+886912345678",
+        }).success,
+      ).toBe(true);
+
+      // 4. Null normalizedValue
+      expect(
+        VoiceDraftSchema.safeParse({
+          ...baseDraft,
+          rawText: "待確認",
+          normalizedValue: null,
+        }).success,
+      ).toBe(true);
+
+      // 5. Omitted normalizedValue
+      expect(
+        VoiceDraftSchema.safeParse({
+          ...baseDraft,
+        }).success,
+      ).toBe(true);
     });
 
     it("validates valid VoiceReceipt with orderId", () => {
@@ -604,6 +709,7 @@ describe("UV-EXEC-001 Voice Contracts", () => {
     const validateActor = ajv.getSchema("#/components/schemas/BookingActor")!;
     const validateReceipt = ajv.getSchema("#/components/schemas/VoiceReceipt")!;
     const validateSession = ajv.getSchema("#/components/schemas/VoiceSession")!;
+    const validateDraft = ajv.getSchema("#/components/schemas/VoiceDraft")!;
     const validateCallback = ajv.getSchema(
       "#/components/schemas/VoiceCallback",
     )!;
@@ -701,6 +807,19 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         routeProfileVersion: 1,
         leaseEpoch: 2,
         scopes: ["session_execute", "address_resolve"],
+      };
+      expect(validateCapability(capability)).toBe(true);
+    });
+
+    it("OpenAPI accepts capability token with opaque workload servicePrincipalId (svc-api-runtime)", () => {
+      const capability = {
+        aud: "voice-tool-gateway",
+        servicePrincipalId: "svc-api-runtime",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+        routeProfileVersion: 1,
+        leaseEpoch: 2,
+        scopes: ["session_execute"],
       };
       expect(validateCapability(capability)).toBe(true);
     });
@@ -839,6 +958,90 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         lastAppliedControlSequence: 98,
       };
       expect(validateSession(closedPendingSession)).toBe(true);
+    });
+
+    it("OpenAPI accepts VoiceSession with real CallcenterService callId (CALL-20260410-000001)", () => {
+      const session = {
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174000",
+        callId: "CALL-20260410-000001",
+        scope: {
+          resourceScopeId: "123e4567-e89b-12d3-a456-426614174002",
+          brandId: "brand-1",
+          operatingProfileId: "op-1",
+          operatingProfileVersion: 1,
+        },
+        dialogState: "collecting",
+        mediaState: "active",
+      };
+      expect(validateSession(session)).toBe(true);
+    });
+
+    it("ensures VoiceDraft parity between Zod schema and OpenAPI Ajv validator for all slot value types", () => {
+      const baseDraft = {
+        intentId: "123e4567-e89b-12d3-a456-426614174000",
+        draftVersion: 2,
+        sourceTurnIds: ["123e4567-e89b-12d3-a456-426614174001"],
+        sourceSegmentIds: ["seg-1"],
+        providerConfidence: 0.95,
+        validationState: "validated",
+        confirmedByCustomerAt: null,
+      };
+
+      const testCases: Array<{
+        name: string;
+        rawText?: string;
+        normalizedValue?: unknown;
+      }> = [
+        {
+          name: "structured address object",
+          rawText: "台北車站東三門",
+          normalizedValue: {
+            placeId: "poi-123",
+            formattedAddress: "台北市中正區北平西路3號",
+          },
+        },
+        {
+          name: "passenger count number",
+          rawText: "3位",
+          normalizedValue: 3,
+        },
+        {
+          name: "phone string",
+          rawText: "0912345678",
+          normalizedValue: "+886912345678",
+        },
+        {
+          name: "null normalized value",
+          rawText: "待確認",
+          normalizedValue: null,
+        },
+        {
+          name: "omitted normalized value",
+          rawText: "未提供",
+        },
+      ];
+
+      for (const tc of testCases) {
+        const draft = {
+          ...baseDraft,
+          ...(tc.rawText !== undefined ? { rawText: tc.rawText } : {}),
+          ...(tc.normalizedValue !== undefined
+            ? { normalizedValue: tc.normalizedValue }
+            : {}),
+        };
+
+        const zodResult = VoiceDraftSchema.safeParse(draft);
+        const ajvValid = validateDraft(draft);
+
+        expect(
+          zodResult.success,
+          `Zod should accept VoiceDraft with ${tc.name}`,
+        ).toBe(true);
+        expect(
+          ajvValid,
+          `OpenAPI Ajv should accept VoiceDraft with ${tc.name}`,
+        ).toBe(true);
+      }
     });
 
     it("OpenAPI accepts VoiceCallback lifecycle statuses (claimed, in_progress, unreachable)", () => {
