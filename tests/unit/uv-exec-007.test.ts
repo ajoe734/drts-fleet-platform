@@ -355,6 +355,27 @@ describe("UV-EXEC-007: voice session state machine, ordered events, persistent c
       expect(result).toMatchObject({ applied: false, gap: true });
       expect(fake.session.lastAppliedControlSequence).toBe(3);
     });
+
+    it("fails closed on a stale lease epoch instead of letting a superseded worker advance the watermark", async () => {
+      // The session's lease has already moved on (e.g. handoff/reclaim), but
+      // a stale worker still tries to push the next contiguous frame.
+      fake.session = { ...fake.session, leaseEpoch: 2 };
+
+      await expectApiRequestError(
+        () =>
+          service.recordControlEvent(
+            baseEventCommand({
+              sequence: 4,
+              leaseEpoch: 1,
+              eventType: "clear",
+            }),
+          ),
+        "VOICE_SESSION_NOT_OWNER",
+      );
+      // Neither the durable event ledger nor the watermark may move.
+      expect(fake.insertControlEvent).not.toHaveBeenCalled();
+      expect(fake.session.lastAppliedControlSequence).toBe(3);
+    });
   });
 
   describe("controlCutoff validation (SD §5.4, acceptance: correction-before-confirmation under HTTP reordering)", () => {

@@ -149,6 +149,19 @@ export class VoiceSessionService {
   ): Promise<RecordControlEventResult> {
     const session = await this.requireSession(command.voiceSessionId);
 
+    // SD §5.3 fencing applies to control-event ingestion too: a worker whose
+    // lease has already been superseded (handoff/reclaim advanced
+    // `leaseEpoch`) must never durably insert or CAS-advance the watermark,
+    // or a stale worker could keep pushing `lastAppliedControlSequence`
+    // forward after it no longer owns the session.
+    if (command.leaseEpoch !== session.leaseEpoch) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_SESSION_NOT_OWNER",
+        "Lease epoch no longer matches the current session owner.",
+      );
+    }
+
     const { deduped } = await this.repository.insertControlEvent({
       voiceSessionId: command.voiceSessionId,
       legId: command.legId ?? null,
