@@ -1382,6 +1382,25 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       ).toBe(false);
     });
 
+    it("OpenAPI accepts valid VoiceCallback and rejects invalid callback status", () => {
+      const validCallback = {
+        callbackId: "123e4567-e89b-12d3-a456-426614174000",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        contactPhone: "+886912345678",
+        consentSnapshotHash: "hash-consent-xyz",
+        status: "pending",
+        scheduledAt: "2026-09-06T03:00:00.000Z",
+      };
+      expect(validateCallback(validCallback)).toBe(true);
+
+      const invalidCallback = {
+        ...validCallback,
+        status: "invalid_status",
+      };
+      expect(validateCallback(invalidCallback)).toBe(false);
+    });
+
+
     it("OpenAPI accepts VoiceReceipt with orderId: null or omitted without actionKey for SD §10.2 202 pending response", () => {
       const pendingReceiptNull = {
         commandId: "123e4567-e89b-12d3-a456-426614174000",
