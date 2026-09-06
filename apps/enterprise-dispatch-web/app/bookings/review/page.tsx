@@ -13,12 +13,14 @@ import {
 import { EntParty, EntRoute } from "@/components/ent-screen-bits";
 import { EntPageHead } from "@/components/enterprise-shell";
 import {
+  formatDefaultPlacard,
   getEnterpriseBookingPreview,
   getVehicleLabelFromDraft,
+  isEnterpriseDraftComplete,
   parseEnterpriseBookingDraft,
   serializeEnterpriseBookingDraft,
+  validateReservationWindow,
 } from "@/lib/enterprise-booking-draft";
-import { enterpriseDriver } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { getServerLocale } from "@/lib/server-locale";
 import { type TranslationKey, t as translate } from "@/lib/translations";
@@ -50,15 +52,33 @@ export default async function ReviewBookingPage({
   const locale = await getServerLocale();
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, locale);
-  const draft = parseEnterpriseBookingDraft((await searchParams) ?? {}, locale);
   const resolvedSearchParams = (await searchParams) ?? {};
+  const draft = parseEnterpriseBookingDraft(resolvedSearchParams, locale);
   const bookingId = Array.isArray(resolvedSearchParams.bookingId)
     ? resolvedSearchParams.bookingId[0]
     : resolvedSearchParams.bookingId;
+
   const preview = getEnterpriseBookingPreview(draft, locale);
   const vehicleLabel = getVehicleLabelFromDraft(draft, locale);
-  const airportParts = [draft.flight.trim(), draft.terminal.trim()].filter(Boolean);
-  const airportLabel = airportParts.length > 0 ? airportParts.join(" · ") : undefined;
+  const airportParts = [draft.flight.trim(), draft.terminal.trim()].filter(
+    Boolean,
+  );
+  const airportLabel =
+    airportParts.length > 0 ? airportParts.join(" · ") : undefined;
+
+  const now = new Date();
+  const timeValidation = validateReservationWindow(
+    draft.reservationDate,
+    draft.reservationTime,
+    now,
+    locale,
+  );
+  const canSubmit = timeValidation.isValid && isEnterpriseDraftComplete(draft, now);
+
+  const effectivePassenger =
+    draft.passengerMode === "self" ? draft.bookedBy : draft.passenger;
+  const effectivePlacard =
+    draft.placard?.trim() || formatDefaultPlacard(effectivePassenger);
 
   return (
     <>
@@ -79,14 +99,32 @@ export default async function ReviewBookingPage({
         />
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1.1fr",
-          gap: 18,
-          alignItems: "start",
-        }}
-      >
+      {!timeValidation.isValid ? (
+        <div style={{ marginBottom: 16 }}>
+          <EBanner
+            t={t}
+            tone="danger"
+            icon="alert"
+            title={
+              timeValidation.isPast
+                ? locale === "zh"
+                  ? "用車時間無效：預約時間不能為過去時間"
+                  : "Invalid Reservation: Time In Past"
+                : locale === "zh"
+                  ? "用車時間無效：未達最短提前時間（15分鐘）"
+                  : "Invalid Reservation: Advance Lead Time Not Met"
+            }
+            body={
+              timeValidation.errorMessage ??
+              (locale === "zh"
+                ? `最早可預約時間為 ${timeValidation.earliestAllowedDisplay}，請返回修改用車時間。`
+                : `Earliest bookable time is ${timeValidation.earliestAllowedDisplay}. Please return and modify the reservation time.`)
+            }
+          />
+        </div>
+      ) : null}
+
+      <div className="ent-review-layout">
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <ECard
             t={t}
@@ -170,7 +208,7 @@ export default async function ReviewBookingPage({
           >
             <EntParty
               t={t}
-              passenger={draft.passengerMode === "self" ? draft.bookedBy : draft.passenger}
+              passenger={effectivePassenger}
               passengerLabel={tr("party.passenger")}
               subline={
                 draft.passengerMode === "self" ? (
@@ -231,7 +269,7 @@ export default async function ReviewBookingPage({
                   {tr("review.summary.placard")}
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  {enterpriseDriver.placard}
+                  {effectivePlacard}
                 </div>
               </div>
             </div>
@@ -313,7 +351,33 @@ export default async function ReviewBookingPage({
             >
               <EBtnContent>{tr("review.back")}</EBtnContent>
             </Link>
-            <BookingSubmitButton draft={draft} {...(bookingId ? { bookingId } : {})} />
+            {canSubmit ? (
+              <BookingSubmitButton
+                draft={draft}
+                {...(bookingId ? { bookingId } : {})}
+              />
+            ) : (
+              <button
+                type="button"
+                disabled
+                style={entBtnStyle(t, {
+                  variant: "primary",
+                  block: true,
+                  disabled: true,
+                })}
+                title={timeValidation.errorMessage}
+              >
+                <EBtnContent icon="check">
+                  {preview.approvalRequired
+                    ? locale === "zh"
+                      ? "送出並送審（時間無效）"
+                      : "Submit for Approval (Invalid Time)"
+                    : locale === "zh"
+                      ? "確認送出（時間無效）"
+                      : "Confirm and Submit (Invalid Time)"}
+                </EBtnContent>
+              </button>
+            )}
           </div>
         </div>
       </div>

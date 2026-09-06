@@ -2,17 +2,122 @@
   box-sizing: border-box;
 }
 
+:root {
+  /* DRTS Realm Tokens: Tenant Realm (teal) per packages/ui-tokens */
+  --realm-tenant-fg: #0f766e;
+  --realm-tenant-bg: #f0fdfa;
+  --realm-tenant-border: #99f6e4;
+  --realm-tenant-fg-dark: #5eead4;
+  --realm-tenant-bg-dark: #0f2a28;
+  --realm-tenant-border-dark: #134e48;
+}
+
 html,
 body {
   margin: 0;
   min-height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 body {
   min-height: 100vh;
   background: transparent;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 a {
   color: inherit;
+}
+
+/* Responsive Grid / Layout Classes for Booking Form & Review */
+.ent-form-layout {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 18px;
+  align-items: start;
+  width: 100%;
+  max-width: 100%;
+}
+
+.ent-review-layout {
+  display: grid;
+  grid-template-columns: 1fr 1.1fr;
+  gap: 18px;
+  align-items: start;
+  width: 100%;
+  max-width: 100%;
+}
+
+.ent-fields-two-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  width: 100%;
+  max-width: 100%;
+}
+
+.ent-sticky-aside {
+  position: sticky;
+  top: 76px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 100%;
+}
+
+.ent-responsive-input-shell {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* 390px mobile viewport adaptation: single column, no horizontal overflow, keyboard/error-safe CTA */
+@media (max-width: 768px) {
+  .ent-form-layout,
+  .ent-review-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .ent-fields-two-cols {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* Release sticky pinning on mobile so keyboard and error banners do not obscure CTA or inputs */
+  .ent-sticky-aside {
+    position: static !important;
+    top: auto !important;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  main {
+    padding: 16px 12px !important;
+    max-width: 100vw !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  header > div {
+    padding: 8px 12px !important;
+    gap: 10px !important;
+    max-width: 100vw !important;
+    box-sizing: border-box !important;
+  }
+
+  footer {
+    padding: 8px 12px 32px !important;
+    max-width: 100vw !important;
+    box-sizing: border-box !important;
+  }
 }
