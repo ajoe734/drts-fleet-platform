@@ -6,6 +6,9 @@ import { IdempotencyModule } from "../../common/idempotency";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { BillingSettlementModule } from "../billing-settlement/billing-settlement.module";
 import { IdentityModule } from "../identity/identity.module";
+import { FileMailOutbox } from "../notification-delivery/file-mail-outbox";
+import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
+import { createMailpitSmtpTransportFromEnv } from "../notification-delivery/smtp-mail.transport";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { BankCardInlineEligibilityAdapter } from "./bank-card-inline-eligibility.adapter";
 import { PARTNER_ELIGIBILITY_ADAPTERS } from "./partner-eligibility-adapter.interface";
@@ -23,6 +26,24 @@ import {
 } from "./tenant-partner.service";
 import { WebhookDispatchService } from "./webhook-dispatch.service";
 
+/**
+ * A missing NOTIFICATION_OUTBOX_DIRECTORY degrades tenant invitation email
+ * to a disabled delivery service (TenantInvitationDeliveryService reports
+ * "unavailable" and never fabricates a sent status) instead of failing
+ * module bootstrap. Mirrors AuditNotificationModule's wiring of the same
+ * shared SR-NOTIFY-001 core.
+ */
+export function createTenantInvitationNotificationDeliveryService(): NotificationDeliveryService | null {
+  const directory = process.env.NOTIFICATION_OUTBOX_DIRECTORY?.trim();
+  if (!directory) {
+    return null;
+  }
+  return new NotificationDeliveryService(
+    new FileMailOutbox(directory),
+    createMailpitSmtpTransportFromEnv(process.env),
+  );
+}
+
 @Module({
   imports: [
     DatabaseModule,
@@ -37,6 +58,10 @@ import { WebhookDispatchService } from "./webhook-dispatch.service";
     TenantPartnerService,
     JwtAuthService,
     TenantPartnerRepository,
+    {
+      provide: NotificationDeliveryService,
+      useFactory: createTenantInvitationNotificationDeliveryService,
+    },
     TenantInvitationDeliveryService,
     PartnerUserIdentityLinkRepository,
     ReferralEmbedHandoffRepository,
