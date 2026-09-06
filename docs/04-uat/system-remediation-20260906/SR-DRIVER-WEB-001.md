@@ -2,8 +2,9 @@
 
 - Task: `SR-DRIVER-WEB-001`
 - Owner: `Claude`
-- Reviewer: `Gemini2`
-- Base SHA (`origin/dev`): `6adf792381f99783d12c8142bfc69d2c54ad9103`
+- Reviewer: `Claude2`
+- Base SHA (`origin/dev` at original fix): `6adf792381f99783d12c8142bfc69d2c54ad9103`
+- Base SHA (`origin/dev` at 本次 2026-09-06T11:51Z 重驗 dispatch): `2093cf7e38526a7a7c027600be92004f7275efd3`
 - Worktree: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/claude-sr-driver-web-001`
 - Branch: `claude/sr-driver-web-001`
 - Gap: `R30` · Capabilities: `C049`, `C062`
@@ -97,6 +98,8 @@ exit code: 0
 $ cd apps/driver-app && node ../../node_modules/typescript/bin/tsc --noEmit
 exit code: 0
 ```
+> 此結果為原始 fix 落地時（09:29 UTC）的紀錄。**本次 2026-09-06T11:51Z dispatch 重跑時，共用
+> `node_modules` symlink 已進一步劣化，無法重現此 exit code**，見 §8.3／§8.4 的誠實更新。
 
 ### 4.4 司機 App 既有單元測試全套（零回歸，38 檔／448 案例全通過）
 ```text
@@ -109,8 +112,10 @@ $ cd apps/driver-app && node ../../node_modules/vitest/dist/cli.js run
    Duration  3.72s (transform 13.41s, setup 0ms, import 20.41s, tests 4.05s, environment 10ms)
 exit code: 0
 ```
-包含既有 `tests/unit/driver-trip-map.test.ts`（native map 渲染、forwarded/degraded 文案）與
-`tests/unit/responsive-layout-and-overflow.test.ts` 均維持通過，證明既有 DRV-NAV/SOS/RWD 成果未回退。
+包含既有 `apps/driver-app/tests/unit/driver-trip-map.test.ts`（native map 渲染、forwarded/degraded 文案）與
+`apps/driver-app/tests/unit/responsive-layout-and-overflow.test.ts` 均維持通過，證明既有 DRV-NAV/SOS/RWD 成果未回退。
+> 同上，此為原始 fix 落地時的紀錄；本次 dispatch 重跑於 §8.3，因環境劣化 38 檔中 4 檔因無關的
+> `zod` symlink 損壞整檔失敗，其餘 34 檔／422 案例（含本段引用的兩個既有回歸檔）仍全數通過。
 
 ### 4.5 base SHA 重現嘗試（`expo export --platform web`，結果：環境問題，非本 fix 範圍）
 ```text
@@ -134,8 +139,8 @@ exit code: 1
 | --- | --- | --- |
 | 1. web 三路由首頁/onboarding/SOS 可開且 native map 僅 native 載入 | ⚠️ 部分達成（見 §6 誠實聲明） | 靜態原始碼守門測試確認 `driver-trip-map.web.tsx` 不 import `react-native-maps`／不呼叫 `codegenNativeComponent`，且 `app/trip.tsx` 以 bare specifier 匯入，讓 Metro 平台解析對 web build 生效；三個路由檔 (`index.tsx`/`onboarding.tsx`/`sos.tsx`) 存在性已驗證。**未能**在此沙箱以 `expo start --web`/瀏覽器 render 實測，詳見 §6。 |
 | 2. iOS/Android 打包 imports 不回退，既有導航和 SOS 仍遵循原task成果 | ✅ 達成 | `driver-trip-map.tsx` 未變更，`react-native-maps`／`<MapView>`／`Platform.OS !== "web"` 判斷全部保留；driver-app 既有 448 個單元測試（含 native map、導航、SOS 相關）全數通過，零回歸。 |
-| 3. 證據含 base/candidate SHA、實際指令結果與資源 ID；未做的 live／真機部分明列 | ✅ 達成 | 本文件 §0（SHA）、§4（完整指令與 exit code）、§6（誠實聲明）。 |
-| 4. 先 commit＋push，再 handoff；owner 不直接 done | 進行中 | 將於本文件定稿後以 `ai-status.sh handoff` 交付 reviewer `Gemini2`，不自行標記 `done`。 |
+| 3. 證據含 base/candidate SHA、實際指令結果與資源 ID；未做的 live／真機部分明列 | ✅ 達成 | 本文件標頭（SHA）、§4／§8.3（完整指令與 exit code，含本次重驗）、§6／§8.4（誠實聲明）。 |
+| 4. 先 commit＋push，再 handoff；owner 不直接 done | 進行中 | 將於本文件定稿後以 `ai-status.sh handoff` 交付 reviewer `Claude2`，不自行標記 `done`。 |
 
 ---
 
@@ -161,5 +166,103 @@ exit code: 1
   `apps/driver-app/app/sos.tsx`、`apps/driver-app/app/trip.tsx`
 - 新增檔案：`apps/driver-app/components/driver-trip-map.web.tsx`、
   `tests/unit/system-remediation/sr-driver-web-001/sr-driver-web-001.test.ts`
-- Base SHA: `6adf792381f99783d12c8142bfc69d2c54ad9103`
-- Candidate SHA: 見 handoff 記錄（`git rev-parse HEAD` at commit time）
+- Base SHA（原始 fix）: `6adf792381f99783d12c8142bfc69d2c54ad9103`
+- Base SHA（本次重驗時 `origin/dev`）: `2093cf7e38526a7a7c027600be92004f7275efd3`
+- 前一輪 candidate SHA（程式內容與本次相同，見 §8.1）: `2f8f7dd4ea0a57ea9aeb3a513ddab3ba7da65a7e`（PR #1666）、
+  `faf4fe2b4b6105520aac37d8b3d954d23c021209` / `6fe5c1776b7477f5bcdecd8b606e20351c6ec505`（PR #1667）
+- 本次 candidate SHA: 見 handoff 記錄（`git rev-parse HEAD` at commit time）
+
+---
+
+## 8. 本次 dispatch 重驗（2026-09-06T11:51Z，owner 由 Availability-first reassignment 轉回 Claude）
+
+### 8.1 承接時的任務歷史（不重做，只重驗）
+
+- 本 task 先前已有兩個內容相同的 fix candidate：
+  - `claude/sr-driver-web-001`（本分支）commit `2f8f7dd4ea0a57ea9aeb3a513ddab3ba7da65a7e`，PR
+    [#1666](https://github.com/ajoe734/drts-fleet-platform/pull/1666)：`Canonical consistency`
+    job **真實失敗**（非 flake）——`check_canonical_consistency.py` 判定本文件 §4.4 當時引用的兩個
+    既有回歸測試檔路徑缺少 `apps/driver-app/` 前綴、對應不到實際檔案（見 run
+    [34025057672](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34025057672/job/101464450170)）。
+    **本次 dispatch 已在 §4.4 修正這兩處路徑**，這是本次唯一的內容變更（文件路徑修正，未改動任何
+    `.tsx`／`.ts` 程式碼）。
+  - `claude2/sr-driver-web-001` commit `faf4fe2b4b6105520aac37d8b3d954d23c021209`（後補一個重驗
+    commit `6fe5c1776b7477f5bcdecd8b606e20351c6ec505`），PR
+    [#1667](https://github.com/ajoe734/drts-fleet-platform/pull/1667)：程式內容（`apps/driver-app/components/`
+    與 `tests/unit/system-remediation/sr-driver-web-001/`）與本分支 `git diff` 結果為**空**（逐位元組
+    相同），已修正同一個路徑引用問題，CI 於重驗 commit 全綠（`gh pr view 1667` 於 2026-09-06T11:51Z
+    複查，25 個 check 皆 `SUCCESS`/`SKIPPED`，無 `FAILURE`）。
+  - 因此兩個 candidate 是**同一個修復方向的獨立重做**，不是需要合併的不同修復；依 task brief「已由
+    其他任務修復時提交目前 SHA 的回歸證據，不重做或回退」，本次不再重新設計或改動
+    `driver-trip-map.web.tsx` 的實作，只在本分支（owner 目前指派的 `claude/sr-driver-web-001`）修正
+    文件路徑並重新執行驗證指令取得當下 SHA 的證據。
+
+### 8.2 本次環境狀態（比 §4.0 記錄的當下更劣化，需誠實更新）
+
+- 本 worktree 的 `node_modules` 為 symlink 至 canonical root `/home/lupin/drts-fleet-platform/node_modules`；
+  該 canonical `node_modules` 內多個套件的頂層 symlink（`vitest`、`typescript`、`zod` 等）目前指向另一個
+  **已被回收、不存在**的 worktree（`claude2-sr-fleet-data-001`）的 `.pnpm` store 路徑，而非同目錄下
+  `node_modules/.pnpm/<pkg>/node_modules/<pkg>` 的正確相對位置。這是本次派工期間 worktree 生命週期
+  管理造成的共用基礎設施退化，發生在本 task 原始 commit（09:29 UTC）之後、本次重驗（11:51 UTC）之前，
+  不是本 task 程式或 write scope 造成，且修好它需要改動 canonical `node_modules`（跨所有 worktree 共用），
+  不在本 task write scope 內，未嘗試修改。
+- 繞過方式：直接以 `node <NODE_PATH> <pnpm .pnpm store 內對應套件的真實入口檔>` 呼叫與
+  `pnpm exec`/`pnpm --filter` 相同的一份已安裝二進位（不是換一套驗證邏輯），沿用 §4.0 的做法。
+
+### 8.3 重新執行的驗證指令與結果（現行 SHA）
+
+```text
+$ git diff --check
+exit code: 0
+```
+
+```text
+$ node <pnpm .pnpm store 內 vitest 入口> run tests/unit/system-remediation/sr-driver-web-001/
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+exit code: 0
+```
+
+```text
+$ node <pnpm .pnpm store 內 vitest 入口> run --config apps/driver-app/vitest.config.ts \
+    apps/driver-app/tests/unit/driver-trip-map.test.ts \
+    apps/driver-app/tests/unit/responsive-layout-and-overflow.test.ts
+ Test Files  2 passed (2)
+      Tests  23 passed (23)
+```
+（§4.4 引用路徑指向的兩個既有回歸檔本身：native map 渲染／forwarded-degraded 文案／RWD 版面均維持通過，
+未回退。）
+
+```text
+$ cd apps/driver-app && node <pnpm .pnpm store 內 vitest 入口> run --config vitest.config.ts
+ Test Files  4 failed | 34 passed (38)
+      Tests  422 passed (422)
+```
+4 個失敗檔（`driver-route-guards-and-feature-entries`、`driver-workspace-cockpit`、`incident-screen`、
+`sos-screen-runtime-profile-gate`）全部因 `packages/contracts/src/unattended-voice.ts` 內
+`import { z } from "zod"` 解析不到（同 §8.2 的 `zod` symlink 損壞）而整檔失敗，與 `driver-trip-map`
+無關，本次未觸碰 `packages/contracts` 或 `zod` 依賴。
+
+```text
+$ cd apps/driver-app && node <NODE_PATH 指向 typescript 套件> <pnpm .pnpm store 內 tsc 入口> --noEmit
+exit code: 2（約 60 個錯誤）
+```
+全部錯誤位於 `packages/api-client`、`packages/contracts`、`packages/ui-tokens`（`Promise`/`Map`/`Set`/
+`Object.values`/`Number.isFinite` 等 lib 找不到），無一筆指向 `apps/driver-app` 或
+`driver-trip-map*.tsx`；根因與 §8.2 相同的 symlink 損壞讓 `tsc` 解析到錯誤/不完整的 lib
+定義檔。此結果**比 §4.3 原始記錄的 `exit code: 0` 更差**，是環境本身在本次派工期間繼續劣化，
+不是本次文件路徑修正引入的回歸；`pnpm --filter @drts/driver-app typecheck` 在此沙箱狀態下無法取得
+可信結果，如實記錄為「未做／環境阻斷」而非冒充通過。
+
+### 8.4 結論
+
+- 本 task 的程式修復（`driver-trip-map.web.tsx` 平台分流）內容已由前一輪 dispatch 完成且經
+  `git diff` 逐位元組核對未變；本次唯一變更是修正 §4.4 的文件路徑引用（`Canonical consistency`
+  CI 真實失敗的根因），不重做設計、不回退既有程式。
+- 任務專屬回歸測試與 §4.4 提及的兩個既有回歸檔均通過；driver-app 其餘既有套件測試在扣除與本 task
+  無關的環境性 `zod` 解析失敗後全數通過（422/422）。
+- `typecheck` 因與本 task 無關的 canonical `node_modules` symlink 損壞（§8.2）在此沙箱內無法可信
+  執行，如實列為未達成項目，不以先前（環境未劣化時）的舊記錄冒充本次已重跑。
+- 修正後將 commit＋push 到 `claude/sr-driver-web-001` 並 handoff 給 reviewer `Claude2`；PR #1667
+  內容與本分支相同，待本次更新的 candidate 經 review／CI／merge 後即可視為重複並關閉，不需要另外
+  重做程式修復。
