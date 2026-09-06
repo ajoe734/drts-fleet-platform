@@ -3,11 +3,6 @@ import React from "../../../../apps/bank-console-web/node_modules/react";
 import { renderToStaticMarkup } from "../../../../apps/bank-console-web/node_modules/react-dom/server";
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/session", () => import("../../../../apps/bank-console-web/lib/session"));
-vi.mock("@/lib/demo-tenants", () => import("../../../../apps/bank-console-web/lib/demo-tenants"));
-vi.mock("@/lib/translations", () => import("../../../../apps/bank-console-web/lib/translations"));
-vi.mock("@/lib/tenant-display", () => import("../../../../apps/bank-console-web/lib/tenant-display"));
-vi.mock("@/components/page-primitives", () => import("../../../../apps/bank-console-web/components/page-primitives"));
 
 const boundary = vi.hoisted(() => ({ cookie: undefined as string | undefined }));
 vi.mock("next/headers", () => ({
