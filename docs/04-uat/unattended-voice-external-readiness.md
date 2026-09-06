@@ -325,6 +325,12 @@
 
 > **本輪複查結論：** 機器真相零變化，7 項 `required_acceptance` 仍全數為 Blocker，全部待供應商/電信/candidate 帳號等真實外部證據，超出本唯讀 worker 授權範圍。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄**（依既有記憶教訓：`progress` 在 `acceptance` 狀態任務上會清除候選生命週期證據，詳見 §2.6）。已連續 36 輪 acceptance_ready_dispatch 喚醒均為零 delta 或與主題無關之 delta；再次重申建議 supervisor 將此任務改為「證據變更事件觸發」而非固定輪詢式 re-dispatch，以避免持續喚醒消耗 worker 資源卻無法產生新證據。
 
+### 2.35 Acceptance 階段複查記錄（2026-09-06T current UTC，Claude2，第 38 次連續 acceptance_ready_dispatch 喚醒，dedup 政策下之零 delta 項）
+
+本輪 `git fetch origin dev` 後比對，`origin/dev` HEAD 仍為 round 33–37（§2.30–§2.34）記錄之 `69c519702047862212bc0e4890350e6b58917062`，**無新提交**。以 `git log origin/dev --oneline | grep -c 2093cf7e3` 重新確認 `merge_sha`=`2093cf7e3` 仍存在於 `origin/dev` 歷史中（1 筆匹配，仍為祖先）。重新執行 `gh secret list`／`gh variable list`，計數仍為 11/97，與 round 37 相同，無新增秘密或變數暗示之供應商帳號到位。`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`/`ci_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`）與 `status`=`acceptance` 均未變化；本地分支 `claude2/uv-exec-027` HEAD（round 37 anchor commit `d6798f06f`）工作樹乾淨。第 3–9 節七項 `required_acceptance` 逐一核對仍維持 Blocker 標註與負責角色，無虛報通過。依 `feedback_ai_status_note_vs_progress_acceptance` 記憶教訓，本輪繼續使用 `ai-status.sh note`（而非 `progress`）記錄，以避免清空候選生命週期欄位。
+
+> **流程建議重申（第五次以上）：** 本任務已連續 38 次 `acceptance_ready_dispatch` 喚醒維持零證據變化（僅第 33 輪偵測到與主題無關之 `origin/dev` 前進）。強烈建議 supervisor 將本類「等待外部真人/採購/法務證據」的 acceptance 任務改為證據到位觸發（event-triggered）重派，而非固定時間輪詢，以降低無效喚醒成本。
+
 ---
 
 ## 3. CTI 準備度盤點 (CTI Capability Readiness)
