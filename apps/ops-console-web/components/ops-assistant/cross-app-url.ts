@@ -82,12 +82,15 @@ export function resolvePlatformAdminOrigin(): string {
         return `${protocol}//${hostname}:${targetPort}`;
       }
 
-      // If running on subdomain (e.g. ops.dev.drts.example.com -> admin.dev.drts.example.com)
-      if (hostname.startsWith("ops.")) {
-        return `${protocol}//${hostname.replace(/^ops\./, "admin.")}${port ? `:${port}` : ""}`;
-      }
-      if (hostname.includes("ops-console")) {
-        return `${protocol}//${hostname.replace("ops-console", "platform-admin")}${port ? `:${port}` : ""}`;
+      // If running on custom subdomains (e.g. ops.dev.drts.example.com -> admin.dev.drts.example.com)
+      // Skip on generated Cloud Run domains (*.run.app) where service hashes diverge.
+      if (!hostname.endsWith(".run.app")) {
+        if (hostname.startsWith("ops.")) {
+          return `${protocol}//${hostname.replace(/^ops\./, "admin.")}${port ? `:${port}` : ""}`;
+        }
+        if (hostname.includes("ops-console")) {
+          return `${protocol}//${hostname.replace("ops-console", "platform-admin")}${port ? `:${port}` : ""}`;
+        }
       }
     }
   }

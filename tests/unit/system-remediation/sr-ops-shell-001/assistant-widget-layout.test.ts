@@ -1,176 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-// Re-create the state and clamping logic to test pure viewport and storage mathematics
-// matching assistant-widget.tsx specifications.
-const STORAGE_KEY = "ops-console.assistant-widget.v1";
-const WIDGET_MIN_WIDTH = 320;
-const WIDGET_MIN_HEIGHT = 240;
-const WIDGET_MAX_WIDTH = 560;
-const WIDGET_MAX_HEIGHT = 720;
-const MINIMIZED_HEIGHT = 64;
-const EDGE_GAP = 20;
-
-type DockSide = "free" | "left" | "right";
-
-type Rect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-type WidgetState = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  minimized: boolean;
-  closed: boolean;
-  docked: DockSide;
-};
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function clampRect(
-  rect: Rect,
-  viewport: { width: number; height: number },
-  minimized = false,
-): Rect {
-  const isMobile = viewport.width < 768;
-  const minW = isMobile
-    ? Math.min(280, viewport.width - EDGE_GAP * 2)
-    : WIDGET_MIN_WIDTH;
-  const maxW = Math.max(
-    minW,
-    Math.min(WIDGET_MAX_WIDTH, viewport.width - EDGE_GAP * 2),
-  );
-  const width = clamp(rect.width, minW, maxW);
-
-  const height = minimized
-    ? MINIMIZED_HEIGHT
-    : clamp(
-        rect.height,
-        WIDGET_MIN_HEIGHT,
-        Math.min(WIDGET_MAX_HEIGHT, viewport.height - EDGE_GAP * 2),
-      );
-
-  const maxX = Math.max(EDGE_GAP, viewport.width - width - EDGE_GAP);
-  const maxY = Math.max(
-    EDGE_GAP,
-    viewport.height - (minimized ? MINIMIZED_HEIGHT : height) - EDGE_GAP,
-  );
-
-  return {
-    x: clamp(rect.x, EDGE_GAP, maxX),
-    y: clamp(rect.y, EDGE_GAP, maxY),
-    width,
-    height,
-  };
-}
-
-function resolveDockedPosition(
-  docked: DockSide,
-  rect: { x: number; y: number; width: number; height: number; minimized?: boolean },
-  viewport: { width: number; height: number },
-): Rect {
-  const minimized = rect.minimized ?? false;
-  const next = clampRect(
-    {
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      height: rect.height,
-    },
-    viewport,
-    minimized,
-  );
-  const effectiveHeight = minimized ? MINIMIZED_HEIGHT : next.height;
-  const dockedY = Math.max(
-    EDGE_GAP,
-    viewport.height - effectiveHeight - EDGE_GAP,
-  );
-
-  if (docked === "left") {
-    return { ...next, x: EDGE_GAP, y: dockedY };
-  }
-  if (docked === "right") {
-    return {
-      ...next,
-      x: Math.max(EDGE_GAP, viewport.width - next.width - EDGE_GAP),
-      y: dockedY,
-    };
-  }
-  return next;
-}
-
-function buildDefaultState(viewport: { width: number; height: number }): WidgetState {
-  const isMobile = viewport.width < 768;
-  const width = isMobile
-    ? Math.max(280, Math.min(viewport.width - EDGE_GAP * 2, 350))
-    : 420;
-  const height = 360;
-  const minimized = true; // Minimized by default (R19 / C048)
-  const effectiveHeight = minimized ? MINIMIZED_HEIGHT : height;
-  return {
-    width,
-    height,
-    x: Math.max(EDGE_GAP, viewport.width - width - EDGE_GAP),
-    y: Math.max(EDGE_GAP, viewport.height - effectiveHeight - EDGE_GAP),
-    minimized,
-    closed: false,
-    docked: "right",
-  };
-}
-
-function readStoredState(
-  storage: Storage,
-  viewport: { width: number; height: number },
-): WidgetState | null {
-  try {
-    const raw = storage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as Partial<WidgetState>;
-    if (
-      typeof parsed.x !== "number" ||
-      typeof parsed.y !== "number" ||
-      typeof parsed.width !== "number" ||
-      typeof parsed.height !== "number"
-    ) {
-      return null;
-    }
-    const minimized = parsed.minimized ?? true;
-    const closed = parsed.closed ?? false;
-    const docked: DockSide =
-      parsed.docked === "left" || parsed.docked === "right"
-        ? parsed.docked
-        : "free";
-
-    const dockedRect = resolveDockedPosition(
-      docked,
-      {
-        x: parsed.x,
-        y: parsed.y,
-        width: parsed.width,
-        height: parsed.height,
-        minimized,
-      },
-      viewport,
-    );
-
-    return {
-      ...dockedRect,
-      minimized,
-      closed,
-      docked,
-    };
-  } catch {
-    return null;
-  }
-}
+import {
+  STORAGE_KEY,
+  EDGE_GAP,
+  MINIMIZED_HEIGHT,
+  PORTAL_ROOT_ATTR,
+  buildDefaultState,
+  resolveDockedPosition,
+  readStoredState,
+  writeStoredState,
+  buildPortalRootStyle,
+  buildLauncherButtonStyle,
+  buildShellPanelStyle,
+  resolveEffectivePointerEvents,
+  toggleWidgetClosed,
+  toggleWidgetMinimized,
+  type WidgetState,
+} from "../../../../apps/ops-console-web/components/ops-assistant/assistant-layout";
 
 describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
   let mockStorage: Record<string, string>;
@@ -243,8 +88,12 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
 
       // Boundaries check
       expect(state.x).toBeGreaterThanOrEqual(EDGE_GAP);
-      expect(state.x + state.width).toBeLessThanOrEqual(mobileViewport.width - EDGE_GAP);
-      expect(state.y + MINIMIZED_HEIGHT).toBeLessThanOrEqual(mobileViewport.height - EDGE_GAP);
+      expect(state.x + state.width).toBeLessThanOrEqual(
+        mobileViewport.width - EDGE_GAP,
+      );
+      expect(state.y + MINIMIZED_HEIGHT).toBeLessThanOrEqual(
+        mobileViewport.height - EDGE_GAP,
+      );
     });
 
     it("preserves reasonable layout when expanded on mobile without overflowing width", () => {
@@ -256,17 +105,20 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
       );
 
       expect(expandedRect.width).toBeLessThanOrEqual(350);
-      expect(expandedRect.x + expandedRect.width).toBeLessThanOrEqual(mobileViewport.width);
-      expect(expandedRect.y + expandedRect.height).toBeLessThanOrEqual(mobileViewport.height);
+      expect(expandedRect.x + expandedRect.width).toBeLessThanOrEqual(
+        mobileViewport.width,
+      );
+      expect(expandedRect.y + expandedRect.height).toBeLessThanOrEqual(
+        mobileViewport.height,
+      );
     });
   });
 
   describe("Page Reload Preservation (重載保留合理版面)", () => {
     it("preserves closed and minimized state on reload", () => {
       const viewport = { width: 1440, height: 1000 };
-      storageStub.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
+      writeStoredState(
+        {
           x: 1000,
           y: 916,
           width: 420,
@@ -274,10 +126,12 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
           minimized: true,
           closed: true,
           docked: "right",
-        }),
+        },
+        storageStub,
       );
 
-      const restored = readStoredState(storageStub, viewport);
+      expect(STORAGE_KEY).toBe("ops-console.assistant-widget.v1");
+      const restored = readStoredState(viewport, storageStub);
       expect(restored).not.toBeNull();
       expect(restored!.closed).toBe(true);
       expect(restored!.minimized).toBe(true);
@@ -286,9 +140,8 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
 
     it("re-clamps safely when desktop-saved state is restored on a 390px mobile viewport", () => {
       // Saved on desktop: width 560, x: 800
-      storageStub.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
+      writeStoredState(
+        {
           x: 800,
           y: 600,
           width: 560,
@@ -296,24 +149,28 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
           minimized: false,
           closed: false,
           docked: "right",
-        }),
+        },
+        storageStub,
       );
 
       const mobileViewport = { width: 390, height: 844 };
-      const restored = readStoredState(storageStub, mobileViewport);
+      const restored = readStoredState(mobileViewport, storageStub);
 
       expect(restored).not.toBeNull();
       // Must not exceed mobile screen bounds
       expect(restored!.width).toBeLessThanOrEqual(350);
-      expect(restored!.x + restored!.width).toBeLessThanOrEqual(mobileViewport.width - EDGE_GAP);
-      expect(restored!.y + restored!.height).toBeLessThanOrEqual(mobileViewport.height - EDGE_GAP);
+      expect(restored!.x + restored!.width).toBeLessThanOrEqual(
+        mobileViewport.width - EDGE_GAP,
+      );
+      expect(restored!.y + restored!.height).toBeLessThanOrEqual(
+        mobileViewport.height - EDGE_GAP,
+      );
       expect(restored!.docked).toBe("right");
     });
 
     it("re-clamps safely when restored in minimized mode on mobile", () => {
-      storageStub.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
+      writeStoredState(
+        {
           x: 1000,
           y: 916,
           width: 420,
@@ -321,16 +178,325 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
           minimized: true,
           closed: false,
           docked: "right",
-        }),
+        },
+        storageStub,
       );
 
       const mobileViewport = { width: 390, height: 844 };
-      const restored = readStoredState(storageStub, mobileViewport);
+      const restored = readStoredState(mobileViewport, storageStub);
 
       expect(restored).not.toBeNull();
       expect(restored!.minimized).toBe(true);
-      expect(restored!.y).toBe(mobileViewport.height - MINIMIZED_HEIGHT - EDGE_GAP); // 760
-      expect(restored!.x).toBe(mobileViewport.width - restored!.width - EDGE_GAP);
+      expect(restored!.y).toBe(
+        mobileViewport.height - MINIMIZED_HEIGHT - EDGE_GAP,
+      ); // 760
+      expect(restored!.x).toBe(
+        mobileViewport.width - restored!.width - EDGE_GAP,
+      );
+    });
+  });
+
+  describe("Pointer-Events Isolation & Click-Through Protection (R19 / Acceptance #2)", () => {
+    it("configures portal root with pointerEvents: none to prevent workspace occlusion", () => {
+      const rootStyle = buildPortalRootStyle();
+      expect(rootStyle.pointerEvents).toBe("none");
+    });
+
+    it("explicitly configures launcher button with pointerEvents: auto", () => {
+      const launcherStyle = buildLauncherButtonStyle();
+      expect(launcherStyle.pointerEvents).toBe("auto");
+      expect(launcherStyle.position).toBe("fixed");
+      expect(launcherStyle.right).toBe(EDGE_GAP);
+      expect(launcherStyle.bottom).toBe(EDGE_GAP);
+      expect(launcherStyle.zIndex).toBe(5000);
+      expect(launcherStyle.cursor).toBe("pointer");
+    });
+
+    it("explicitly configures shell panel with pointerEvents: auto", () => {
+      const state = buildDefaultState();
+      const panelStyle = buildShellPanelStyle(state);
+      expect(panelStyle.pointerEvents).toBe("auto");
+      expect(panelStyle.position).toBe("fixed");
+      expect(panelStyle.zIndex).toBe(5000);
+    });
+
+    it("reproduces CSS inheritance: unstyled child in portal root inherits pointer-events: none (the bug)", () => {
+      const portalRoot = {
+        style: { pointerEvents: "none" },
+        parentElement: null,
+      };
+      // A child button WITHOUT explicit pointerEvents style inherits pointerEvents: none
+      const deadButton = {
+        style: {} as { pointerEvents?: string },
+        parentElement: portalRoot,
+      };
+
+      const effectivePointerEvents = resolveEffectivePointerEvents(deadButton);
+      expect(effectivePointerEvents).toBe("none");
+    });
+
+    it("verifies fix: launcher button with pointerEvents: auto overrides portal root none", () => {
+      const portalRoot = {
+        style: { pointerEvents: "none" },
+        parentElement: null,
+      };
+      // Fixed launcher button with explicit pointerEvents: auto
+      const fixedLauncherButton = {
+        style: buildLauncherButtonStyle() as { pointerEvents?: string },
+        parentElement: portalRoot,
+      };
+
+      const effectivePointerEvents =
+        resolveEffectivePointerEvents(fixedLauncherButton);
+      expect(effectivePointerEvents).toBe("auto");
+    });
+
+    it("verifies fix: expanded shell panel with pointerEvents: auto overrides portal root none", () => {
+      const portalRoot = {
+        style: { pointerEvents: "none" },
+        parentElement: null,
+      };
+      const state = buildDefaultState();
+      const fixedPanel = {
+        style: buildShellPanelStyle(state) as { pointerEvents?: string },
+        parentElement: portalRoot,
+      };
+
+      const effectivePointerEvents = resolveEffectivePointerEvents(fixedPanel);
+      expect(effectivePointerEvents).toBe("auto");
+    });
+  });
+
+  describe("Assistant Open/Close State Machine & Interaction Cycle (Acceptance #2)", () => {
+    it("full open -> close -> reopen lifecycle toggles state and persists correctly", () => {
+      const viewport = { width: 1440, height: 1000 };
+      let state: WidgetState = buildDefaultState(viewport);
+
+      // 1. Initial default state: closed is false, panel is visible
+      expect(state.closed).toBe(false);
+
+      // 2. User clicks header Close button -> closed becomes true
+      state = toggleWidgetClosed(state, true);
+      expect(state.closed).toBe(true);
+      writeStoredState(state, storageStub);
+
+      // Verify closed state is persisted to storage
+      const reloadedClosed = readStoredState(viewport, storageStub);
+      expect(reloadedClosed?.closed).toBe(true);
+
+      // 3. User clicks floating launcher button (with pointerEvents: auto) -> closed becomes false
+      state = toggleWidgetClosed(reloadedClosed!, false);
+      expect(state.closed).toBe(false);
+      writeStoredState(state, storageStub);
+
+      // Verify reopened state is persisted to storage
+      const reloadedOpen = readStoredState(viewport, storageStub);
+      expect(reloadedOpen?.closed).toBe(false);
+      expect(reloadedOpen?.width).toBe(420);
+      expect(reloadedOpen?.minimized).toBe(true);
+    });
+
+    it("toggleWidgetMinimized correctly toggles between minimized and expanded heights", () => {
+      const viewport = { width: 1440, height: 1000 };
+      let state = buildDefaultState(viewport);
+      expect(state.minimized).toBe(true);
+
+      // Expand
+      state = toggleWidgetMinimized(state, viewport);
+      expect(state.minimized).toBe(false);
+      expect(state.y).toBe(1000 - 360 - EDGE_GAP); // 620
+
+      // Minimize
+      state = toggleWidgetMinimized(state, viewport);
+      expect(state.minimized).toBe(true);
+      expect(state.y).toBe(1000 - MINIMIZED_HEIGHT - EDGE_GAP); // 916
+    });
+  });
+
+  describe("DOM-Level Click & Focus Management Simulation", () => {
+    type MockElement = {
+      tagName: string;
+      attributes: Record<string, string>;
+      style: Record<string, any>;
+      children: MockElement[];
+      parentElement: MockElement | null;
+      listeners: Record<string, ((event: any) => void)[]>;
+      setAttribute: (name: string, value: string) => void;
+      getAttribute: (name: string) => string | null;
+      addEventListener: (type: string, listener: (event: any) => void) => void;
+      removeEventListener: (type: string, listener: (event: any) => void) => void;
+      dispatchEvent: (event: { type: string; defaultPrevented?: boolean }) => boolean;
+      click: () => void;
+      focus: () => void;
+      isFocused: boolean;
+      appendChild: (child: MockElement) => void;
+      removeChild: (child: MockElement) => void;
+    };
+
+    function createMockElement(tagName: string): MockElement {
+      const el: MockElement = {
+        tagName,
+        attributes: {},
+        style: {},
+        children: [],
+        parentElement: null,
+        listeners: {},
+        isFocused: false,
+        setAttribute(name: string, value: string) {
+          el.attributes[name] = value;
+        },
+        getAttribute(name: string) {
+          return el.attributes[name] ?? null;
+        },
+        addEventListener(type: string, listener: (event: any) => void) {
+          el.listeners[type] = el.listeners[type] || [];
+          el.listeners[type].push(listener);
+        },
+        removeEventListener(type: string, listener: (event: any) => void) {
+          if (!el.listeners[type]) return;
+          el.listeners[type] = el.listeners[type].filter((l) => l !== listener);
+        },
+        dispatchEvent(event: { type: string; defaultPrevented?: boolean }) {
+          const list = el.listeners[event.type] || [];
+          for (const listener of list) {
+            listener(event);
+          }
+          return !event.defaultPrevented;
+        },
+        click() {
+          // Check effective pointer-events before dispatching click
+          const effective = resolveEffectivePointerEvents(el);
+          if (effective === "none") {
+            // Pointer events are ignored by mouse/touch when effective pointer-events is none
+            return;
+          }
+          el.dispatchEvent({ type: "click" });
+        },
+        focus() {
+          el.isFocused = true;
+        },
+        appendChild(child: MockElement) {
+          child.parentElement = el;
+          el.children.push(child);
+        },
+        removeChild(child: MockElement) {
+          el.children = el.children.filter((c) => c !== child);
+          child.parentElement = null;
+        },
+      };
+      return el;
+    }
+
+    it("simulates portal root creation with pointerEvents: none and attribute", () => {
+      const body = createMockElement("BODY");
+      const portalRoot = createMockElement("DIV");
+      portalRoot.setAttribute(PORTAL_ROOT_ATTR, "true");
+      Object.assign(portalRoot.style, buildPortalRootStyle());
+      body.appendChild(portalRoot);
+
+      expect(portalRoot.getAttribute(PORTAL_ROOT_ATTR)).toBe("true");
+      expect(portalRoot.style.pointerEvents).toBe("none");
+      expect(body.children).toContain(portalRoot);
+    });
+
+    it("simulates click on unstyled launcher button: click is dropped due to inherited pointerEvents: none", () => {
+      const portalRoot = createMockElement("DIV");
+      Object.assign(portalRoot.style, buildPortalRootStyle()); // pointerEvents: none
+
+      const buggyLauncher = createMockElement("BUTTON");
+      // Buggy: missing pointerEvents: auto
+      let clicked = false;
+      buggyLauncher.addEventListener("click", () => {
+        clicked = true;
+      });
+      portalRoot.appendChild(buggyLauncher);
+
+      // Attempt mouse click
+      buggyLauncher.click();
+
+      // Click did not fire!
+      expect(clicked).toBe(false);
+    });
+
+    it("simulates click on fixed launcher button: click fires and reopens widget", () => {
+      const portalRoot = createMockElement("DIV");
+      Object.assign(portalRoot.style, buildPortalRootStyle()); // pointerEvents: none
+
+      const fixedLauncher = createMockElement("BUTTON");
+      fixedLauncher.setAttribute("data-testid", "ops-assistant-launcher");
+      Object.assign(fixedLauncher.style, buildLauncherButtonStyle()); // pointerEvents: auto
+
+      let widgetClosed = true;
+      let focusReturnedToDragHandle = false;
+      const dragHandle = createMockElement("DIV");
+      dragHandle.setAttribute("data-testid", "ops-assistant-drag-handle");
+
+      fixedLauncher.addEventListener("click", () => {
+        widgetClosed = false;
+        dragHandle.focus();
+        focusReturnedToDragHandle = dragHandle.isFocused;
+      });
+      portalRoot.appendChild(fixedLauncher);
+
+      // Mouse click on launcher button
+      fixedLauncher.click();
+
+      // Successfully clicked and reopened!
+      expect(widgetClosed).toBe(false);
+      expect(focusReturnedToDragHandle).toBe(true);
+    });
+
+    it("simulates Escape key press on panel: closes widget and returns focus to launcher", () => {
+      const portalRoot = createMockElement("DIV");
+      Object.assign(portalRoot.style, buildPortalRootStyle());
+
+      const launcher = createMockElement("BUTTON");
+      launcher.setAttribute("data-testid", "ops-assistant-launcher");
+      Object.assign(launcher.style, buildLauncherButtonStyle());
+      portalRoot.appendChild(launcher);
+
+      const panel = createMockElement("SECTION");
+      panel.setAttribute("data-testid", "ops-assistant-panel");
+      const state = buildDefaultState();
+      Object.assign(panel.style, buildShellPanelStyle(state));
+      portalRoot.appendChild(panel);
+
+      let widgetClosed = false;
+      panel.addEventListener("keydown", (e: any) => {
+        if (e.key === "Escape") {
+          widgetClosed = true;
+          launcher.focus();
+        }
+      });
+
+      // User presses Escape
+      panel.dispatchEvent({ type: "keydown", key: "Escape" });
+
+      expect(widgetClosed).toBe(true);
+      expect(launcher.isFocused).toBe(true);
+    });
+
+    it("verifies underlying page CTA buttons remain clickable when assistant is mounted", () => {
+      const body = createMockElement("BODY");
+
+      // Underlying page CTA (e.g. 1440px desktop or 390px mobile action button)
+      const pageCta = createMockElement("BUTTON");
+      pageCta.setAttribute("data-testid", "dispatch-action-cta");
+      let ctaClicked = false;
+      pageCta.addEventListener("click", () => {
+        ctaClicked = true;
+      });
+      body.appendChild(pageCta);
+
+      // Assistant portal root mounted on top of body
+      const portalRoot = createMockElement("DIV");
+      portalRoot.setAttribute(PORTAL_ROOT_ATTR, "true");
+      Object.assign(portalRoot.style, buildPortalRootStyle()); // pointerEvents: none
+      body.appendChild(portalRoot);
+
+      // Clicking page CTA succeeds because portal root doesn't intercept
+      pageCta.click();
+      expect(ctaClicked).toBe(true);
     });
   });
 });
