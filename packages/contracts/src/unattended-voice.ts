@@ -148,6 +148,9 @@ export const VOICE_ERROR_CODES = [
   "VOICE_INVALID_ACTOR",
   "VOICE_CAPABILITY_REJECTED",
   "VOICE_UNSUPPORTED_ACTION",
+  // Ordered-event / control-cutoff error codes (SD §5.3/§5.4)
+  "VOICE_CONTROL_CUTOFF_NOT_REACHED",
+  "VOICE_UNRESOLVED_INPUT",
 ] as const;
 
 export const VoiceErrorCodeSchema = z.enum(VOICE_ERROR_CODES);
@@ -287,7 +290,6 @@ export const VoiceDraftRevisionSchema = z.object({
   createdAt: z.string().datetime().optional(),
 });
 export type VoiceDraftRevision = z.infer<typeof VoiceDraftRevisionSchema>;
-
 
 export const VOICE_RECEIPT_STATUSES = [
   "pending",

@@ -611,8 +611,8 @@ describe("UV-EXEC-001 Voice Contracts", () => {
   });
 
   describe("VoiceErrorCodeSchema", () => {
-    it("validates all 19 canonical and verification error codes", () => {
-      expect(VOICE_ERROR_CODES.length).toBe(19);
+    it("validates all 21 canonical and verification error codes", () => {
+      expect(VOICE_ERROR_CODES.length).toBe(21);
       for (const code of VOICE_ERROR_CODES) {
         expect(VoiceErrorCodeSchema.safeParse(code).success).toBe(true);
       }
@@ -830,7 +830,9 @@ describe("UV-EXEC-001 Voice Contracts", () => {
 
         // Roundtrip test: verify that serialization and re-parsing retains all slots and snapshot refs
         const serialized = JSON.stringify(parseResult.data);
-        const roundtripResult = VoiceDraftSchema.safeParse(JSON.parse(serialized));
+        const roundtripResult = VoiceDraftSchema.safeParse(
+          JSON.parse(serialized),
+        );
         expect(roundtripResult.success).toBe(true);
         if (roundtripResult.success) {
           expect(roundtripResult.data).toEqual(parseResult.data);
@@ -1028,9 +1030,15 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         status: "succeeded" as const,
         orderId: "123e4567-e89b-12d3-a456-426614174001",
       };
-      expect(VoiceReceiptRecordSchema.safeParse(validSucceeded).success).toBe(true);
-      expect(VoiceSucceededReceiptRecordSchema.safeParse(validSucceeded).success).toBe(true);
-      expect(VoiceActionKeyRecordSchema.safeParse(validSucceeded).success).toBe(true);
+      expect(VoiceReceiptRecordSchema.safeParse(validSucceeded).success).toBe(
+        true,
+      );
+      expect(
+        VoiceSucceededReceiptRecordSchema.safeParse(validSucceeded).success,
+      ).toBe(true);
+      expect(VoiceActionKeyRecordSchema.safeParse(validSucceeded).success).toBe(
+        true,
+      );
 
       expect(
         VoiceReceiptRecordSchema.safeParse({
@@ -1070,10 +1078,18 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         ...baseRecord,
         status: "pending" as const,
       };
-      expect(VoiceReceiptRecordSchema.safeParse(validPendingNull).success).toBe(true);
-      expect(VoicePendingReceiptRecordSchema.safeParse(validPendingNull).success).toBe(true);
-      expect(VoiceReceiptRecordSchema.safeParse(validPendingOmit).success).toBe(true);
-      expect(VoicePendingReceiptRecordSchema.safeParse(validPendingOmit).success).toBe(true);
+      expect(VoiceReceiptRecordSchema.safeParse(validPendingNull).success).toBe(
+        true,
+      );
+      expect(
+        VoicePendingReceiptRecordSchema.safeParse(validPendingNull).success,
+      ).toBe(true);
+      expect(VoiceReceiptRecordSchema.safeParse(validPendingOmit).success).toBe(
+        true,
+      );
+      expect(
+        VoicePendingReceiptRecordSchema.safeParse(validPendingOmit).success,
+      ).toBe(true);
 
       expect(
         VoiceReceiptRecordSchema.safeParse({
@@ -1102,10 +1118,18 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         status: "rejected" as const,
         rejectionReason: "VOICE_SERVICE_NOT_AVAILABLE",
       };
-      expect(VoiceReceiptRecordSchema.safeParse(validRejectedNull).success).toBe(true);
-      expect(VoiceRejectedReceiptRecordSchema.safeParse(validRejectedNull).success).toBe(true);
-      expect(VoiceReceiptRecordSchema.safeParse(validRejectedOmit).success).toBe(true);
-      expect(VoiceRejectedReceiptRecordSchema.safeParse(validRejectedOmit).success).toBe(true);
+      expect(
+        VoiceReceiptRecordSchema.safeParse(validRejectedNull).success,
+      ).toBe(true);
+      expect(
+        VoiceRejectedReceiptRecordSchema.safeParse(validRejectedNull).success,
+      ).toBe(true);
+      expect(
+        VoiceReceiptRecordSchema.safeParse(validRejectedOmit).success,
+      ).toBe(true);
+      expect(
+        VoiceRejectedReceiptRecordSchema.safeParse(validRejectedOmit).success,
+      ).toBe(true);
 
       expect(
         VoiceReceiptRecordSchema.safeParse({
@@ -1154,19 +1178,33 @@ describe("UV-EXEC-001 Voice Contracts", () => {
 
     it("validates VoiceCallbackTerminalStatus enum per SD §12.5", () => {
       for (const status of VOICE_CALLBACK_TERMINAL_STATUSES) {
-        expect(VoiceCallbackTerminalStatusSchema.safeParse(status).success).toBe(true);
+        expect(
+          VoiceCallbackTerminalStatusSchema.safeParse(status).success,
+        ).toBe(true);
       }
-      expect(VoiceCallbackTerminalStatusSchema.safeParse("pending").success).toBe(false);
-      expect(VoiceCallbackTerminalStatusSchema.safeParse("claimed").success).toBe(false);
-      expect(VoiceCallbackTerminalStatusSchema.safeParse("in_progress").success).toBe(false);
-      expect(VoiceCallbackTerminalStatusSchema.safeParse("failed").success).toBe(false);
+      expect(
+        VoiceCallbackTerminalStatusSchema.safeParse("pending").success,
+      ).toBe(false);
+      expect(
+        VoiceCallbackTerminalStatusSchema.safeParse("claimed").success,
+      ).toBe(false);
+      expect(
+        VoiceCallbackTerminalStatusSchema.safeParse("in_progress").success,
+      ).toBe(false);
+      expect(
+        VoiceCallbackTerminalStatusSchema.safeParse("failed").success,
+      ).toBe(false);
     });
 
     it("validates VoiceCallbackAttemptOutcome and VoiceCallbackAttemptSchema per SD §9.1 and §12.5", () => {
       for (const outcome of VOICE_CALLBACK_ATTEMPT_OUTCOMES) {
-        expect(VoiceCallbackAttemptOutcomeSchema.safeParse(outcome).success).toBe(true);
+        expect(
+          VoiceCallbackAttemptOutcomeSchema.safeParse(outcome).success,
+        ).toBe(true);
       }
-      expect(VoiceCallbackAttemptOutcomeSchema.safeParse("unknown_outcome").success).toBe(false);
+      expect(
+        VoiceCallbackAttemptOutcomeSchema.safeParse("unknown_outcome").success,
+      ).toBe(false);
 
       const validAttempt = {
         taskId: "123e4567-e89b-12d3-a456-426614174000",
@@ -1177,13 +1215,17 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         outcome: "failed" as const,
         nextAction: "return_to_pending",
       };
-      expect(VoiceCallbackAttemptSchema.safeParse(validAttempt).success).toBe(true);
+      expect(VoiceCallbackAttemptSchema.safeParse(validAttempt).success).toBe(
+        true,
+      );
 
       const invalidAttempt = {
         ...validAttempt,
         outcome: "nonexistent",
       };
-      expect(VoiceCallbackAttemptSchema.safeParse(invalidAttempt).success).toBe(false);
+      expect(VoiceCallbackAttemptSchema.safeParse(invalidAttempt).success).toBe(
+        false,
+      );
     });
 
     it("validates orthogonal recording, confirmation, outcome, and commit status enums per SD §5.2", () => {
@@ -1713,7 +1755,13 @@ describe("UV-EXEC-001 Voice Contracts", () => {
     });
 
     it("OpenAPI validates VoiceCallbackAttemptOutcome and VoiceCallbackAttempt schemas per SD §9.1 and §12.5", () => {
-      const validOutcomes = ["answered", "no_answer", "busy", "failed", "succeeded"];
+      const validOutcomes = [
+        "answered",
+        "no_answer",
+        "busy",
+        "failed",
+        "succeeded",
+      ];
       for (const outcome of validOutcomes) {
         expect(validateCallbackAttemptOutcome(outcome)).toBe(true);
       }
@@ -1737,7 +1785,6 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         }),
       ).toBe(false);
     });
-
 
     it("OpenAPI accepts VoiceReceipt with orderId: null or omitted without actionKey for SD §10.2 202 pending response", () => {
       const pendingReceiptNull = {
@@ -2271,10 +2318,9 @@ describe("UV-EXEC-001 Voice Contracts", () => {
           ajvValid,
           `OpenAPI Ajv validity for ${tc.name} should be ${tc.expectedValid}`,
         ).toBe(tc.expectedValid);
-        expect(
-          zodValid,
-          `Zod and OpenAPI Ajv must agree on ${tc.name}`,
-        ).toBe(ajvValid);
+        expect(zodValid, `Zod and OpenAPI Ajv must agree on ${tc.name}`).toBe(
+          ajvValid,
+        );
       }
     });
 
@@ -2384,10 +2430,9 @@ describe("UV-EXEC-001 Voice Contracts", () => {
           ajvValid,
           `OpenAPI Ajv validity for ${tc.name} should be ${tc.expectedValid}`,
         ).toBe(tc.expectedValid);
-        expect(
-          zodValid,
-          `Zod and OpenAPI Ajv must agree on ${tc.name}`,
-        ).toBe(ajvValid);
+        expect(zodValid, `Zod and OpenAPI Ajv must agree on ${tc.name}`).toBe(
+          ajvValid,
+        );
       }
     });
 
@@ -2428,27 +2473,30 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       };
       // exp: 0 rejected
       expect(
-        VoiceCapabilityTokenClaimsSchema.safeParse({ ...baseClaims, exp: 0 }).success,
+        VoiceCapabilityTokenClaimsSchema.safeParse({ ...baseClaims, exp: 0 })
+          .success,
       ).toBe(false);
-      expect(
-        validateCapabilityTokenClaims({ ...baseClaims, exp: 0 }),
-      ).toBe(false);
+      expect(validateCapabilityTokenClaims({ ...baseClaims, exp: 0 })).toBe(
+        false,
+      );
 
       // iat: 0 rejected
       expect(
-        VoiceCapabilityTokenClaimsSchema.safeParse({ ...baseClaims, iat: 0 }).success,
+        VoiceCapabilityTokenClaimsSchema.safeParse({ ...baseClaims, iat: 0 })
+          .success,
       ).toBe(false);
-      expect(
-        validateCapabilityTokenClaims({ ...baseClaims, iat: 0 }),
-      ).toBe(false);
+      expect(validateCapabilityTokenClaims({ ...baseClaims, iat: 0 })).toBe(
+        false,
+      );
 
       // nbf: 0 rejected
       expect(
-        VoiceCapabilityTokenClaimsSchema.safeParse({ ...baseClaims, nbf: 0 }).success,
+        VoiceCapabilityTokenClaimsSchema.safeParse({ ...baseClaims, nbf: 0 })
+          .success,
       ).toBe(false);
-      expect(
-        validateCapabilityTokenClaims({ ...baseClaims, nbf: 0 }),
-      ).toBe(false);
+      expect(validateCapabilityTokenClaims({ ...baseClaims, nbf: 0 })).toBe(
+        false,
+      );
 
       // valid claims accepted by both
       expect(
@@ -2463,7 +2511,10 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       };
       // expiresIn: 0 rejected
       expect(
-        VoiceCapabilityTokenEnvelopeSchema.safeParse({ ...baseEnvelope, expiresIn: 0 }).success,
+        VoiceCapabilityTokenEnvelopeSchema.safeParse({
+          ...baseEnvelope,
+          expiresIn: 0,
+        }).success,
       ).toBe(false);
       expect(
         validateCapabilityTokenEnvelope({ ...baseEnvelope, expiresIn: 0 }),
@@ -2471,7 +2522,10 @@ describe("UV-EXEC-001 Voice Contracts", () => {
 
       // expiresIn: -10 rejected
       expect(
-        VoiceCapabilityTokenEnvelopeSchema.safeParse({ ...baseEnvelope, expiresIn: -10 }).success,
+        VoiceCapabilityTokenEnvelopeSchema.safeParse({
+          ...baseEnvelope,
+          expiresIn: -10,
+        }).success,
       ).toBe(false);
       expect(
         validateCapabilityTokenEnvelope({ ...baseEnvelope, expiresIn: -10 }),
@@ -2479,7 +2533,10 @@ describe("UV-EXEC-001 Voice Contracts", () => {
 
       // expiresIn: 3600 accepted
       expect(
-        VoiceCapabilityTokenEnvelopeSchema.safeParse({ ...baseEnvelope, expiresIn: 3600 }).success,
+        VoiceCapabilityTokenEnvelopeSchema.safeParse({
+          ...baseEnvelope,
+          expiresIn: 3600,
+        }).success,
       ).toBe(true);
       expect(
         validateCapabilityTokenEnvelope({ ...baseEnvelope, expiresIn: 3600 }),
@@ -2498,12 +2555,17 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         nextAction: "return_to_pending",
       };
       // Baseline valid
-      expect(VoiceCallbackAttemptSchema.safeParse(validAttempt).success).toBe(true);
+      expect(VoiceCallbackAttemptSchema.safeParse(validAttempt).success).toBe(
+        true,
+      );
       expect(validateCallbackAttempt(validAttempt)).toBe(true);
 
       // attemptNumber = 0 rejected by both Zod and OpenAPI
       expect(
-        VoiceCallbackAttemptSchema.safeParse({ ...validAttempt, attemptNumber: 0 }).success,
+        VoiceCallbackAttemptSchema.safeParse({
+          ...validAttempt,
+          attemptNumber: 0,
+        }).success,
       ).toBe(false);
       expect(
         validateCallbackAttempt({ ...validAttempt, attemptNumber: 0 }),
@@ -2511,7 +2573,10 @@ describe("UV-EXEC-001 Voice Contracts", () => {
 
       // attemptNumber = -1 rejected by both Zod and OpenAPI
       expect(
-        VoiceCallbackAttemptSchema.safeParse({ ...validAttempt, attemptNumber: -1 }).success,
+        VoiceCallbackAttemptSchema.safeParse({
+          ...validAttempt,
+          attemptNumber: -1,
+        }).success,
       ).toBe(false);
       expect(
         validateCallbackAttempt({ ...validAttempt, attemptNumber: -1 }),
@@ -2519,11 +2584,14 @@ describe("UV-EXEC-001 Voice Contracts", () => {
 
       // operatorId = "" rejected by both Zod and OpenAPI
       expect(
-        VoiceCallbackAttemptSchema.safeParse({ ...validAttempt, operatorId: "" }).success,
+        VoiceCallbackAttemptSchema.safeParse({
+          ...validAttempt,
+          operatorId: "",
+        }).success,
       ).toBe(false);
-      expect(
-        validateCallbackAttempt({ ...validAttempt, operatorId: "" }),
-      ).toBe(false);
+      expect(validateCallbackAttempt({ ...validAttempt, operatorId: "" })).toBe(
+        false,
+      );
 
       // 2. VoiceDraftRevision
       const validRevision = {
@@ -2538,12 +2606,17 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         snapshotHash: "hash-valid-123",
       };
       // Baseline valid
-      expect(VoiceDraftRevisionSchema.safeParse(validRevision).success).toBe(true);
+      expect(VoiceDraftRevisionSchema.safeParse(validRevision).success).toBe(
+        true,
+      );
       expect(validateDraftRevision(validRevision)).toBe(true);
 
       // snapshotHash = "" rejected by both Zod and OpenAPI
       expect(
-        VoiceDraftRevisionSchema.safeParse({ ...validRevision, snapshotHash: "" }).success,
+        VoiceDraftRevisionSchema.safeParse({
+          ...validRevision,
+          snapshotHash: "",
+        }).success,
       ).toBe(false);
       expect(
         validateDraftRevision({ ...validRevision, snapshotHash: "" }),
@@ -2564,19 +2637,21 @@ describe("UV-EXEC-001 Voice Contracts", () => {
 
       // attemptCount = -1 rejected by both Zod and OpenAPI
       expect(
-        VoiceCallbackSchema.safeParse({ ...validCallback, attemptCount: -1 }).success,
+        VoiceCallbackSchema.safeParse({ ...validCallback, attemptCount: -1 })
+          .success,
       ).toBe(false);
-      expect(
-        validateCallback({ ...validCallback, attemptCount: -1 }),
-      ).toBe(false);
+      expect(validateCallback({ ...validCallback, attemptCount: -1 })).toBe(
+        false,
+      );
 
       // attemptCount = 1 accepted by both Zod and OpenAPI
       expect(
-        VoiceCallbackSchema.safeParse({ ...validCallback, attemptCount: 1 }).success,
+        VoiceCallbackSchema.safeParse({ ...validCallback, attemptCount: 1 })
+          .success,
       ).toBe(true);
-      expect(
-        validateCallback({ ...validCallback, attemptCount: 1 }),
-      ).toBe(true);
+      expect(validateCallback({ ...validCallback, attemptCount: 1 })).toBe(
+        true,
+      );
 
       // 4. VoiceSpeechProof and VoiceDtmfProof snapshotHash nonempty parity (SD §6.2)
       const validSpeechProof = {
@@ -2587,14 +2662,20 @@ describe("UV-EXEC-001 Voice Contracts", () => {
           finalEventId: "123e4567-e89b-12d3-a456-426614174007",
         },
       };
-      expect(SpeechVoiceProofSchema.safeParse(validSpeechProof).success).toBe(true);
+      expect(SpeechVoiceProofSchema.safeParse(validSpeechProof).success).toBe(
+        true,
+      );
       expect(VoiceProofSchema.safeParse(validSpeechProof).success).toBe(true);
       expect(validateSpeechProof(validSpeechProof)).toBe(true);
       expect(validateProof(validSpeechProof)).toBe(true);
 
       const emptyHashSpeechProof = { ...validSpeechProof, snapshotHash: "" };
-      expect(SpeechVoiceProofSchema.safeParse(emptyHashSpeechProof).success).toBe(false);
-      expect(VoiceProofSchema.safeParse(emptyHashSpeechProof).success).toBe(false);
+      expect(
+        SpeechVoiceProofSchema.safeParse(emptyHashSpeechProof).success,
+      ).toBe(false);
+      expect(VoiceProofSchema.safeParse(emptyHashSpeechProof).success).toBe(
+        false,
+      );
       expect(validateSpeechProof(emptyHashSpeechProof)).toBe(false);
       expect(validateProof(emptyHashSpeechProof)).toBe(false);
 
@@ -2612,8 +2693,12 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       expect(validateProof(validDtmfProof)).toBe(true);
 
       const emptyHashDtmfProof = { ...validDtmfProof, snapshotHash: "" };
-      expect(DtmfVoiceProofSchema.safeParse(emptyHashDtmfProof).success).toBe(false);
-      expect(VoiceProofSchema.safeParse(emptyHashDtmfProof).success).toBe(false);
+      expect(DtmfVoiceProofSchema.safeParse(emptyHashDtmfProof).success).toBe(
+        false,
+      );
+      expect(VoiceProofSchema.safeParse(emptyHashDtmfProof).success).toBe(
+        false,
+      );
       expect(validateDtmfProof(emptyHashDtmfProof)).toBe(false);
       expect(validateProof(emptyHashDtmfProof)).toBe(false);
 
@@ -2623,14 +2708,20 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         voiceSessionId: "123e4567-e89b-12d3-a456-426614174000",
         principalId: "principal-123",
       };
-      expect(VoiceAgentBookingActorSchema.safeParse(validVoiceAgent).success).toBe(true);
+      expect(
+        VoiceAgentBookingActorSchema.safeParse(validVoiceAgent).success,
+      ).toBe(true);
       expect(BookingActorSchema.safeParse(validVoiceAgent).success).toBe(true);
       expect(validateVoiceAgentActor(validVoiceAgent)).toBe(true);
       expect(validateActor(validVoiceAgent)).toBe(true);
 
       const emptyPrincipalAgent = { ...validVoiceAgent, principalId: "" };
-      expect(VoiceAgentBookingActorSchema.safeParse(emptyPrincipalAgent).success).toBe(false);
-      expect(BookingActorSchema.safeParse(emptyPrincipalAgent).success).toBe(false);
+      expect(
+        VoiceAgentBookingActorSchema.safeParse(emptyPrincipalAgent).success,
+      ).toBe(false);
+      expect(BookingActorSchema.safeParse(emptyPrincipalAgent).success).toBe(
+        false,
+      );
       expect(validateVoiceAgentActor(emptyPrincipalAgent)).toBe(false);
       expect(validateActor(emptyPrincipalAgent)).toBe(false);
 
@@ -2644,7 +2735,9 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       expect(validateActor(validHuman)).toBe(true);
 
       const emptyAgentHuman = { ...validHuman, agentId: "" };
-      expect(HumanBookingActorSchema.safeParse(emptyAgentHuman).success).toBe(false);
+      expect(HumanBookingActorSchema.safeParse(emptyAgentHuman).success).toBe(
+        false,
+      );
       expect(BookingActorSchema.safeParse(emptyAgentHuman).success).toBe(false);
       expect(validateHumanActor(emptyAgentHuman)).toBe(false);
       expect(validateActor(emptyAgentHuman)).toBe(false);
@@ -2829,27 +2922,17 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       const vRevision = ajv8.getSchema(
         "#/components/schemas/VoiceDraftRevision",
       )!;
-      const vCallback = ajv8.getSchema(
-        "#/components/schemas/VoiceCallback",
-      )!;
+      const vCallback = ajv8.getSchema("#/components/schemas/VoiceCallback")!;
       const vSpeechProof = ajv8.getSchema(
         "#/components/schemas/VoiceSpeechProof",
       )!;
-      const vDtmfProof = ajv8.getSchema(
-        "#/components/schemas/VoiceDtmfProof",
-      )!;
-      const vProof = ajv8.getSchema(
-        "#/components/schemas/VoiceProof",
-      )!;
+      const vDtmfProof = ajv8.getSchema("#/components/schemas/VoiceDtmfProof")!;
+      const vProof = ajv8.getSchema("#/components/schemas/VoiceProof")!;
       const vVoiceAgent = ajv8.getSchema(
         "#/components/schemas/VoiceAgentBookingActor",
       )!;
-      const vHuman = ajv8.getSchema(
-        "#/components/schemas/HumanBookingActor",
-      )!;
-      const vActor = ajv8.getSchema(
-        "#/components/schemas/BookingActor",
-      )!;
+      const vHuman = ajv8.getSchema("#/components/schemas/HumanBookingActor")!;
+      const vActor = ajv8.getSchema("#/components/schemas/BookingActor")!;
 
       expect(vAttempt).toBeDefined();
       expect(vRevision).toBeDefined();
@@ -2920,7 +3003,9 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       };
       expect(vSpeechProof(validSpeechProof)).toBe(true);
       expect(vProof(validSpeechProof)).toBe(true);
-      expect(vSpeechProof({ ...validSpeechProof, snapshotHash: "" })).toBe(false);
+      expect(vSpeechProof({ ...validSpeechProof, snapshotHash: "" })).toBe(
+        false,
+      );
       expect(vProof({ ...validSpeechProof, snapshotHash: "" })).toBe(false);
 
       const validDtmfProof = {
