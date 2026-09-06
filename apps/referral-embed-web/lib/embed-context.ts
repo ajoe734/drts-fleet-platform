@@ -7,7 +7,11 @@ import {
 } from "./embed-security";
 import { getReferralEmbedSession } from "./embed-partner-session";
 import { resolveAccent } from "./embed-presentation";
-import { getPartnerEntry } from "./embed-api";
+import {
+  consumeReferralEmbedHandoffArtifact,
+  getPartnerEntry,
+  isEmbedAuthorityError,
+} from "./embed-api";
 import {
   EMBED_TRIP_FALLBACK_SCREENS,
   type EmbedTripFallbackScreen,
@@ -70,23 +74,20 @@ function toEmbedState(
   decision: EmbedSecurityDecision,
   session: ReferralEmbedSession | null,
   issues: string[],
-  demo: boolean,
 ): EmbedState {
   if (requested === "reauth") return "reauth";
   if (requested === "consent") return "consent";
   if (requested === "fallback") return "fallback";
   if (requested === "unsupported") return "unsupported";
-  if (decision.block) return "unsupported";
+  if (decision.block || issues.some((i) => i.startsWith("unsupported:"))) {
+    return "unsupported";
+  }
   if (issues.some((issue) => issue.startsWith("reauth:"))) return "reauth";
   if (session && !session.identityActive) return "consent";
   if (session && requested === "handoff") return "handoff";
   if (session && requested === "book") return "handoff";
   if (session) return "handoff";
-  // Demo mode (dev): no property-app backend issues a real hand-off token, so
-  // a direct open would always drop to the fallback-to-web screen — which is
-  // wrong here (there is no standalone passenger site). Land on the hand-off
-  // ride flow with demo identity instead, so the embed is reviewable directly.
-  if (demo) return "handoff";
+  if (requested === "handoff") return "handoff";
   return "fallback";
 }
 
@@ -121,8 +122,14 @@ export async function resolveEmbedContext(input: {
   entryHost?: string;
   apiKey?: string;
   partnerUserRef?: string;
+  artifact?: string;
 }): Promise<EmbedContext> {
-  const requestHeaders = await headers();
+  let requestHeaders: Headers;
+  try {
+    requestHeaders = await headers();
+  } catch {
+    requestHeaders = new Headers();
+  }
   const host = requestHeaders.get("host") || "localhost:3005";
   const url = new URL(`https://${host}/embed/${input.entrySlug}`);
 
@@ -132,13 +139,42 @@ export async function resolveEmbedContext(input: {
 
   const rawDecision = buildEmbedSecurityDecision({
     allowedEntryHostsEnv: process.env.REFERRAL_EMBED_ALLOWED_HOSTS,
-    headers: new Headers(requestHeaders),
+    headers: requestHeaders,
     requestUrl: url,
   });
 
   const entry = await getPartnerEntry(input.entrySlug);
   const issues: string[] = [];
-  let session = await getReferralEmbedSession();
+  let session: ReferralEmbedSession | null = await getReferralEmbedSession();
+
+  if (!session && input.artifact) {
+    const targetHost =
+      input.entryHost ||
+      rawDecision.requestedEntryHost ||
+      entry.entryHost ||
+      "app.yuhe-living.com.tw";
+    try {
+      session = await consumeReferralEmbedHandoffArtifact({
+        artifact: input.artifact,
+        entrySlug: input.entrySlug,
+        entryHost: targetHost,
+      });
+    } catch (error) {
+      if (isEmbedAuthorityError(error)) {
+        if (error.code === "REFERRAL_HANDOFF_EXPIRED") {
+          issues.push("reauth:token_expired");
+        } else if (error.code === "REFERRAL_HANDOFF_REPLAYED") {
+          issues.push("reauth:token_replayed");
+        } else if (error.code === "REFERRAL_HANDOFF_HOST_MISMATCH") {
+          issues.push("unsupported:wrong_host");
+        } else {
+          issues.push("fallback:invalid_artifact");
+        }
+      } else {
+        issues.push("fallback:consume_failed");
+      }
+    }
+  }
 
   if (session) {
     if (session.partnerEntrySlug !== input.entrySlug) {
@@ -166,12 +202,11 @@ export async function resolveEmbedContext(input: {
         }
       : rawDecision;
 
-  if (!decision.block && !session) {
+  if (!decision.block && !session && !issues.some((i) => i.startsWith("reauth:"))) {
     issues.push("fallback:missing_embed_session");
   }
 
-  const demoMode = process.env.REFERRAL_EMBED_DEMO === "true";
-  const state = toEmbedState(input.state, decision, session, issues, demoMode);
+  const state = toEmbedState(input.state, decision, session, issues);
 
   return {
     entry,
@@ -193,3 +228,5 @@ export async function resolveEmbedContext(input: {
     issues,
   };
 }
+
+export { buildStandaloneFallbackUrl } from "./embed-fallback";

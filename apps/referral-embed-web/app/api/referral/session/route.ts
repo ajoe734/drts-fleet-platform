@@ -4,13 +4,14 @@ import type { ReferralEmbedSession } from "@drts/contracts";
 import {
   consumeReferralEmbedHandoffArtifact,
   getPartnerEntry,
+  isEmbedAuthorityError,
   recordReferralEmbedConsent,
-} from "@/lib/embed-api";
+} from "../../../../lib/embed-api";
 import {
   buildReferralEmbedConsentCommand,
   clearReferralEmbedSession,
   writeReferralEmbedSession,
-} from "@/lib/embed-partner-session";
+} from "../../../../lib/embed-partner-session";
 
 type SessionAction =
   | {
@@ -177,4 +178,58 @@ export async function POST(request: Request) {
       error instanceof Error ? error.message : "Referral session exchange failed.";
     return jsonResponse({ ok: false, message }, 400);
   }
+}
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const action = url.searchParams.get("action") || "exchange";
+  const artifact =
+    url.searchParams.get("artifact") || url.searchParams.get("token") || "";
+  const entrySlug = url.searchParams.get("entrySlug") || "";
+  const entryHost = url.searchParams.get("entryHost") || "";
+  const returnTo =
+    url.searchParams.get("returnTo") ||
+    (entrySlug ? `/embed/${encodeURIComponent(entrySlug)}` : "/");
+
+  if (action === "exchange" && artifact && entrySlug) {
+    try {
+      const session = await consumeReferralEmbedHandoffArtifact({
+        artifact,
+        entrySlug,
+        entryHost,
+      });
+      await writeReferralEmbedSession(session);
+
+      const dest = new URL(returnTo, request.url);
+      if (!session.identityActive) {
+        dest.searchParams.set("state", "consent");
+      } else {
+        dest.searchParams.set("state", "handoff");
+        if (!dest.searchParams.has("screen")) {
+          dest.searchParams.set("screen", "book");
+        }
+      }
+      return NextResponse.redirect(dest);
+    } catch (error) {
+      await clearReferralEmbedSession();
+      const code = isEmbedAuthorityError(error) ? error.code : "";
+      const dest = new URL(returnTo, request.url);
+      if (code === "REFERRAL_HANDOFF_EXPIRED") {
+        dest.searchParams.set("state", "reauth");
+        dest.searchParams.set("issue", "expired");
+      } else if (code === "REFERRAL_HANDOFF_REPLAYED") {
+        dest.searchParams.set("state", "reauth");
+        dest.searchParams.set("issue", "replayed");
+      } else if (code === "REFERRAL_HANDOFF_HOST_MISMATCH") {
+        dest.searchParams.set("state", "unsupported");
+        dest.searchParams.set("issue", "wrong_host");
+      } else {
+        dest.searchParams.set("state", "fallback");
+        dest.searchParams.set("issue", "invalid_artifact");
+      }
+      return NextResponse.redirect(dest);
+    }
+  }
+
+  return NextResponse.redirect(new URL("/", request.url));
 }

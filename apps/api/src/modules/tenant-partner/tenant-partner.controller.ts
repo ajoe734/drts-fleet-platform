@@ -348,14 +348,16 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const allowInternalBootstrap = !command.apiKey?.trim();
-    requireScopedInternalKey(
-      request ?? {},
-      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
-      {
-        header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
-        requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
-      },
-    );
+    if (allowInternalBootstrap) {
+      requireScopedInternalKey(
+        request ?? {},
+        process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY,
+        {
+          header: REFERRAL_EMBED_HANDOFF_KEY_HEADER,
+          requiredEnv: "DRTS_REFERRAL_EMBED_HANDOFF_KEY",
+        },
+      );
+    }
     const artifact: ReferralEmbedHandoffArtifact =
       await this.tenantPartnerService.issueReferralEmbedHandoffArtifact(
         command,
