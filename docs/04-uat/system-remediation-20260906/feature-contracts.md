@@ -30,9 +30,9 @@
 4. **下游任務依賴與 Migration 編號分配**:
    - `SR-CONTRACT-001` 將依據本契約產生 `@drts/contracts` 與 `@drts/api-client` 型別。
    - 後續專屬 Migration 分配：
-     - 請假服務 (SR-LEAVE-BE-001): `infra/migrations/V0086__sr_driver_leave.sql`
-     - 學院服務 (SR-ACADEMY-BE-001): `infra/migrations/V0087__sr_driver_academy.sql`
-     - Host 投影服務 (SR-HOST-BE-001): `infra/migrations/V0088__sr_host_vehicle_access.sql`
+     - 請假服務 (SR-LEAVE-BE-001): Migration `V0086__sr_driver_leave.sql`（待下游任務建立）
+     - 學院服務 (SR-ACADEMY-BE-001): Migration `V0087__sr_driver_academy.sql`（待下游任務建立）
+     - Host 投影服務 (SR-HOST-BE-001): Migration `V0088__sr_host_vehicle_access.sql`（待下游任務建立）
 
 ---
 
@@ -659,8 +659,8 @@ export interface HostVehicleCaseItem {
 
 | 關鍵考量點 | 決策落點 | 對應任務與 Migration |
 | :--- | :--- | :--- |
-| **請假與班表連動模式** | 假單核准後，自動調離該時段排班；請假生效中司機出勤打卡時阻擋 (`409 DRIVER_ON_LEAVE`)。 | `SR-LEAVE-BE-001`, `SR-LEAVE-FE-001`<br>`infra/migrations/V0086__sr_driver_leave.sql` |
-| **學院完訓率真值計算** | 全面廢止 `FX_FLEET_TRAINING` fixture，由資料庫真實作答記錄動態計算完成人數、未完訓人數與百分比。 | `SR-ACADEMY-BE-001`, `SR-ACADEMY-FE-001`<br>`infra/migrations/V0087__sr_driver_academy.sql` |
-| **Host 車主身份與入口** | 沿用 `partner` realm（對應 `individual_owner`），在 `fleet-partner-portal-web` 啟用 `/host` 專屬唯讀視角，不重啟已退場 app。 | `SR-HOST-BE-001`, `SR-HOST-FE-001`<br>`infra/migrations/V0088__sr_host_vehicle_access.sql` |
+| **請假與班表連動模式** | 假單核准後，自動調離該時段排班；請假生效中司機出勤打卡時阻擋 (`409 DRIVER_ON_LEAVE`)。 | `SR-LEAVE-BE-001`, `SR-LEAVE-FE-001`<br>Migration `V0086__sr_driver_leave.sql` |
+| **學院完訓率真值計算** | 全面廢止 `FX_FLEET_TRAINING` fixture，由資料庫真實作答記錄動態計算完成人數、未完訓人數與百分比。 | `SR-ACADEMY-BE-001`, `SR-ACADEMY-FE-001`<br>Migration `V0087__sr_driver_academy.sql` |
+| **Host 車主身份與入口** | 沿用 `partner` realm（對應 `individual_owner`），在 `fleet-partner-portal-web` 啟用 `/host` 專屬唯讀視角，不重啟已退場 app。 | `SR-HOST-BE-001`, `SR-HOST-FE-001`<br>Migration `V0088__sr_host_vehicle_access.sql` |
 | **Host 防越權與防枚舉** | 查詢非本人名下車輛直接回應 `404 HOST_VEHICLE_NOT_FOUND`，防止車輛 ID 枚舉。 | `SR-HOST-BE-001` |
 | **全局整合與統一 Wiring** | 各模組只輸出獨立 module，由 `SR-WIRE-001` 統一於 `app.module.ts` 及各 App 導航列進行總裝配線。 | `SR-WIRE-001` |
