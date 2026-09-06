@@ -10,6 +10,10 @@ At the recorded verification time, `UV-EXEC-001` and `UV-EXEC-027` were `in_prog
 
 The initial assignments place all implementation owners on Gemini/Gemini2 or Claude/Claude2 and all reviewers on Codex/Codex2. The runtime may use its supported helper/fallback routing; this is a role preference, not a newly introduced hard role restriction. Per-lane limits are Gemini/Gemini2 and Claude/Claude2 each 3, Codex/Codex2 each 2; the shared global execution cap remains 12.
 
+## Subsequent model change
+
+After the initial activation, the user requested Gemini 3.8 Flash at its highest available reasoning effort. Both agy lanes now configure `gemini-3.8-flash-high` as their primary model. Fresh account-specific diagnostics expose only `low`, `medium` and `high`, with no level above High. The original 3.1 Pro evidence below remains the historical activation snapshot; [the subsequent model-change record](agy38-model-change-20260906.json) records the new configuration and its activation checks.
+
 ## Evidence
 
 - [Worker activation](worker-activation.json): adapter change, configuration hash, supervisor restart, task counts and actual worker processes.
