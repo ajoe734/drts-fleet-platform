@@ -4,6 +4,8 @@
 
 **目前為待擴 scope 的 WIP，不是完成／部署／驗收結案。** 已普通 push 保留範圍內實作；未呼叫 handoff／done，沒有鎖定 candidate。
 
+Draft PR：[1679](https://github.com/ajoe734/drts-fleet-platform/pull/1679)。公開供 supervisor 檢視範圍內 WIP；不是 handoff。
+
 ## 版本與追溯
 
 - 初始及最後 fetch 的 `origin/dev` base：`2093cf7e38526a7a7c027600be92004f7275efd3`。
@@ -49,6 +51,7 @@ exit **1**：1 test failed，`expected 'delivered' to be 'delivery_failed'`。�
 | 命令                                                                                                                                                          | Exit | 結果                                                                                |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------- |
 | `git diff --check`                                                                                                                                            | 0    | 無 whitespace error                                                                 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/`                                                                                             | 0    | 最終必要指令：1 file，8 tests passed（571279559b5506d8f730be546913321d73d1e07d）    |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/ tests/unit/tenant-invitation-lifecycle.test.ts`                                              | 0    | 2 files，10 tests passed                                                            |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/ tests/unit/tenant-invitation-lifecycle.test.ts tests/unit/system-remediation/sr-notify-001/` | 0    | 5 files，52 tests passed；含 shared outbox 子程序 durability 與 SMTP protocol tests |
 | `pnpm --filter @drts/api typecheck`                                                                                                                           | 0    | 通過，先建好 workspace dependency                                                   |
