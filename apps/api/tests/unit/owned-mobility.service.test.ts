@@ -416,7 +416,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("routes manual-review service-area stops away from normal dispatch", () => {
+  it("routes manual-review service-area stops away from normal dispatch", async () => {
     const { service } = createOwnedMobilityService({
       serviceAreaService: new ServiceAreaService(),
       candidates: [
@@ -430,7 +430,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       ],
     });
 
-    const order = service.createCallCenterOrder({
+    const order = await service.createCallCenterOrder({
       callId: "call-map-review-001",
       agentId: "ops-agent-001",
       recordingId: "recording-map-review-001",
@@ -483,7 +483,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("keeps provider-outage call-center capture in manual review instead of normal ready", () => {
+  it("keeps provider-outage call-center capture in manual review instead of normal ready", async () => {
     const { service } = createOwnedMobilityService({
       serviceAreaService: new ServiceAreaService(),
       candidates: [
@@ -497,7 +497,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       ],
     });
 
-    const order = service.createCallCenterOrder({
+    const order = await service.createCallCenterOrder({
       callId: "call-map-provider-001",
       agentId: "ops-agent-001",
       recordingId: "recording-map-provider-001",
@@ -562,12 +562,12 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("persists service-area snapshots and emits spatial audit events for coordinate-bearing phone orders", () => {
+  it("persists service-area snapshots and emits spatial audit events for coordinate-bearing phone orders", async () => {
     const { service, auditNotificationService } = createOwnedMobilityService({
       serviceAreaService: new ServiceAreaService(),
     });
 
-    const order = service.createCallCenterOrder(
+    const order = await service.createCallCenterOrder(
       {
         callId: "call-map-audit-001",
         agentId: "ops-agent-geo-001",
@@ -6018,7 +6018,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       await createFareAnomalyAuthority(databaseService);
     const recordSpy = vi.spyOn(fareAnomalyService, "recordQuoteAnomaly");
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = createFareProducerOrder(service, { resolvedRoute: false });
+    const order = await createFareProducerOrder(service, { resolvedRoute: false });
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
 
     await expect(
@@ -6062,7 +6062,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const fareAnomalyService = await createFareAnomalyAuthority();
     const recordSpy = vi.spyOn(fareAnomalyService, "recordQuoteAnomaly");
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = createFareProducerOrder(service, {
+    const order = await createFareProducerOrder(service, {
       activeFareVersionId: " ",
     });
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
@@ -6092,7 +6092,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const fareAnomalyService = await createFareAnomalyAuthority();
     const resolveSpy = vi.spyOn(fareAnomalyService, "resolveOrderAnomalies");
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
     await fareAnomalyService.recordQuoteAnomaly({
       reason: "route_unresolved",
       snapshot: {
@@ -6151,7 +6151,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       new Error("fare anomaly store unavailable"),
     );
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
 
     await expect(
@@ -6762,7 +6762,7 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
         missingFieldCodes: ["color", "doorCount"],
       },
     });
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
 
     const error = await captureApiError(() =>
@@ -6828,7 +6828,7 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
         missingFieldCodes: ["color"],
       },
     });
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
     const outboxBefore = readOutbox(service).length;
 
@@ -6871,7 +6871,7 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
   it("rejects a stale redispatch that would replace a newer assignment", async () => {
     const fareAnomalyService = await createFareAnomalyAuthority();
     const { service } = createFleetDService({ fareAnomalyService });
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
 
     // Assignment v1. The version the passenger is told is the one the guard
     // must compare against, so read it from the disclosure snapshot rather
@@ -6949,7 +6949,7 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
   it("still redispatches unconditionally when no expected version is supplied", async () => {
     const fareAnomalyService = await createFareAnomalyAuthority();
     const { service } = createFleetDService({ fareAnomalyService });
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
 
     // Reach assignment version 2 the only way production allows: assign,
     // redispatch, assign again.

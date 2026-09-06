@@ -41,7 +41,7 @@ function createServices() {
 }
 
 describe("sandbox webhook adapter", () => {
-  it("keeps late-linked phone bookings in recording_pending until recording.ready arrives", () => {
+  it("keeps late-linked phone bookings in recording_pending until recording.ready arrives", async () => {
     const { callcenterService, ownedMobilityService, sandboxWebhookAdapter } =
       createServices();
 
@@ -52,7 +52,7 @@ describe("sandbox webhook adapter", () => {
       "req-recording-pending",
     );
 
-    const order = ownedMobilityService.createCallCenterOrder(
+    const order = await ownedMobilityService.createCallCenterOrder(
       {
         callId: sandboxFixtures.callStarted.provider_call_id,
         agentId: sandboxFixtures.callStarted.agent_extension!,
@@ -98,7 +98,7 @@ describe("sandbox webhook adapter", () => {
     expect(readySession.recordingState).toBe("ready");
   });
 
-  it("marks linked phone bookings as recording_missing when sandbox reports recording.failed", () => {
+  it("marks linked phone bookings as recording_missing when sandbox reports recording.failed", async () => {
     const { ownedMobilityService, sandboxWebhookAdapter } = createServices();
 
     sandboxWebhookAdapter.ingest(sandboxFixtures.callStarted, "req-start");
@@ -107,7 +107,7 @@ describe("sandbox webhook adapter", () => {
       "req-pending",
     );
 
-    const order = ownedMobilityService.createCallCenterOrder({
+    const order = await ownedMobilityService.createCallCenterOrder({
       callId: sandboxFixtures.callStarted.provider_call_id,
       agentId: sandboxFixtures.callStarted.agent_extension!,
       passenger: {

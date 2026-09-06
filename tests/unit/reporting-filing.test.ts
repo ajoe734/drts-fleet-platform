@@ -231,7 +231,7 @@ describe("reporting and filing service", () => {
       reportingFilingService,
     } = createServices();
 
-    const missingRecordingOrder = ownedMobilityService.createCallCenterOrder({
+    const missingRecordingOrder = await ownedMobilityService.createCallCenterOrder({
       callId: "CALL-20260411-000100",
       agentId: "AGENT-0091",
       pickup: {
@@ -246,7 +246,7 @@ describe("reporting and filing service", () => {
       },
     });
 
-    const recordingBoundOrder = ownedMobilityService.createCallCenterOrder({
+    const recordingBoundOrder = await ownedMobilityService.createCallCenterOrder({
       callId: "CALL-20260411-000101",
       agentId: "AGENT-0092",
       pickup: {
