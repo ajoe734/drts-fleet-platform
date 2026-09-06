@@ -33,7 +33,7 @@ Governance 裁決：本 task 的 registry 契約與 migration 不歸 SR-CONTRACT
 `packages/contracts/src/platform-adapter-registry.ts` 是既有專屬檔，不是本波新功能
 （leave/academy/host）契約整合範圍。核准新增下列兩檔，不新增 depends_on：
 
-- `infra/migrations/V0090__platform_adapter_registry.sql`（新檔，建立
+- 待建立：infra/migrations/V0090__platform_adapter_registry.sql（新檔，建立
   `admin.phase1_adapter_registry`，沿用 `V0033__missing_phase1_persistence_tables.sql`
   的 JSON-record 列樣式）
 - `packages/contracts/src/platform-adapter-registry.ts`（既有檔，補

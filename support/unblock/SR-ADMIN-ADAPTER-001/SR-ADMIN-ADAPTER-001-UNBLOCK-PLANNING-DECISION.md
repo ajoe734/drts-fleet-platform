@@ -18,7 +18,7 @@ existed only as an unlinked pushed commit, not machine truth). `Claude2`
 re-verified every factual claim below against the current repo state on
 `origin/dev` (the `packages/contracts/src/index.ts:7416` export, the three
 `packages/api-client/src/index.ts` adapter methods, and the absence of
-`infra/migrations/V0090__platform_adapter_registry.sql`) before adopting it
+infra/migrations/V0090__platform_adapter_registry.sql, not yet created) before adopting it
 as this task's candidate, to avoid re-deriving the same routing decision
 under a second branch. The decision and rationale are unchanged from
 `5a0707ed7`; only the owner/reviewer attribution and this provenance note are
@@ -32,7 +32,7 @@ expansion so the adapter registry can be made truthful end-to-end, without routi
 through `SR-CONTRACT-001` and without a new task/dependency:
 
 1. **Scope expansion (no new dependency):**
-   - `infra/migrations/V0090__platform_adapter_registry.sql` (new file) — a
+   - 待建立：infra/migrations/V0090__platform_adapter_registry.sql (new file) — a
      dedicated migration adding `admin.phase1_adapter_registry`, following the
      exact pattern already used for `admin.phase1_platform_tenants` /
      `admin.phase1_public_info_versions` / `admin.phase1_placard_versions` in
@@ -152,8 +152,8 @@ through `SR-CONTRACT-001` and without a new task/dependency:
 
 1. Rebase `codex/sr-admin-adapter-001` onto current `origin/dev`.
 2. Add exactly two files to the working scope (approved above, no
-   `SR-CONTRACT-001` dependency needed): a new migration
-   `infra/migrations/V0090__platform_adapter_registry.sql` creating
+   `SR-CONTRACT-001` dependency needed): a new migration, 待建立：
+   infra/migrations/V0090__platform_adapter_registry.sql, creating
    `admin.phase1_adapter_registry` (same JSON-record-row shape as
    `admin.phase1_platform_tenants`), and extend
    `packages/contracts/src/platform-adapter-registry.ts` with
@@ -178,8 +178,8 @@ through `SR-CONTRACT-001` and without a new task/dependency:
 5. Fix or isolate the `@drts/control-plane-auth` dependency resolution
    locally before relying on `pnpm --filter @drts/api typecheck` again; do
    not touch another worker's package.
-6. Re-run the parent's test commands, update
-   `docs/04-uat/system-remediation-20260906/SR-ADMIN-ADAPTER-001.md` with
+6. Re-run the parent's test commands, update 待建立：
+   docs/04-uat/system-remediation-20260906/SR-ADMIN-ADAPTER-001.md with
    real DB-backed evidence (resource IDs, HTTP results, migration applied),
    commit + push, then `handoff` — owner does not `done` directly.
 
