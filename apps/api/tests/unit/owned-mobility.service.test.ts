@@ -6028,7 +6028,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       await createFareAnomalyAuthority(databaseService);
     const recordSpy = vi.spyOn(fareAnomalyService, "recordQuoteAnomaly");
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = await createFareProducerOrder(service, { resolvedRoute: false });
+    const order = await createFareProducerOrder(service, {
+      resolvedRoute: false,
+    });
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
 
     await expect(
@@ -6350,13 +6352,17 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
 
     service.dispatchOrder(order.orderId, { mode: "auto" });
 
+    // No assignment has been made yet at this point (only `dispatchOrder`,
+    // not `assignDispatch`, has run), so this is a matching-stage timeout --
+    // `acceptance_timeout` now requires a `targetAssignmentId` (SD §7.6) and
+    // there is no assignment yet for this test to name.
     const timeoutResult = await service.handleDispatchTimeout(
       order.orderId,
-      "acceptance_timeout",
+      "matching_timeout",
     );
 
     expect(timeoutResult.status).toBe("dispatch_timeout");
-    expect(timeoutResult.timeoutReasonCode).toBe("acceptance_timeout");
+    expect(timeoutResult.timeoutReasonCode).toBe("matching_timeout");
 
     const updatedOrder = service.getOrder(order.orderId);
     expect(updatedOrder.status).toBe("dispatch_timeout");
@@ -6364,7 +6370,7 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
     expect(updatedOrder.queueEntryReason).toBe("dispatch_timeout_retry");
     expect(updatedOrder.dispatchTimeout).not.toBeNull();
     expect(updatedOrder.dispatchTimeout!.timeoutReasonCode).toBe(
-      "acceptance_timeout",
+      "matching_timeout",
     );
     expect(updatedOrder.dispatchAttemptCount).toBe(1);
   });
