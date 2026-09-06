@@ -1271,6 +1271,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         work({}),
       ),
       reportPersistenceFailure: vi.fn(),
+      reserveDispatchResources: vi.fn(async () => []),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
+      occupyDispatchResourceReservations: vi.fn(async () => 0),
     };
     const { service } = createOwnedMobilityService({
       candidates: [
@@ -3693,6 +3696,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         work({}),
       ),
       reportPersistenceFailure: vi.fn(),
+      reserveDispatchResources: vi.fn(async () => []),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
+      occupyDispatchResourceReservations: vi.fn(async () => 0),
     };
     const { service } = createOwnedMobilityService({
       candidates: [
@@ -4212,6 +4218,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         return record ? { action: "dispatch", record } : null;
       }),
       reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
     };
 
     const { service, auditNotificationService } = createOwnedMobilityService({
@@ -4392,6 +4399,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       })),
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
       reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
     };
 
     const { service } = createOwnedMobilityService({
@@ -4526,6 +4534,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
       claimNextRecoverableDriverCompletionOutbox: vi.fn(async () => null),
       reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
     };
 
     const { service } = createOwnedMobilityService({
@@ -4824,6 +4833,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       })),
       hasDriverTaskTraceRequestId: vi.fn(async () => false),
       reportPersistenceFailure: vi.fn(),
+      releaseDispatchResourceReservations: vi.fn(async () => 0),
     };
 
     const { service, auditNotificationService } = createOwnedMobilityService({
@@ -6319,7 +6329,7 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
     expect(updatedOrder.noSupplyEscalation!.resolvedAt).not.toBeNull();
   });
 
-  it("handles dispatch timeout and places order in redispatch priority queue", () => {
+  it("handles dispatch timeout and places order in redispatch priority queue", async () => {
     const { service } = createOwnedMobilityService({
       candidates: [
         {
@@ -6340,7 +6350,7 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
 
     service.dispatchOrder(order.orderId, { mode: "auto" });
 
-    const timeoutResult = service.handleDispatchTimeout(
+    const timeoutResult = await service.handleDispatchTimeout(
       order.orderId,
       "acceptance_timeout",
     );
