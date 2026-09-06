@@ -56,6 +56,22 @@ Dedicated system design supplement introduced for operational closeout:
 
 - `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`
 
+### Accepted Unattended Voice Booking Execution Supplement
+
+- [Execution authority and scoped decisions](docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md)
+- [SA: requirements and business acceptance](docs/02-architecture/phase1-unattended-voice-booking-sa-20260906.md)
+- [SD: technical states, interfaces and transaction rules](docs/02-architecture/phase1-unattended-voice-booking-sd-20260906.md)
+- [Two-pass feasibility audit](docs/02-architecture/phase1-unattended-voice-booking-two-pass-audit-20260906.md)
+- [Supervisor execution packet](docs/03-runbooks/unattended-voice-booking-execution-tasks-20260906.md)
+
+The user authorized materialization and execution after the two-pass review.
+The scoped decision establishes the v0.2 engineering baseline; live provider,
+procurement, numeric operating thresholds and rollout evidence remain gated.
+The versioned task manifest owns task definitions and traceability. The live
+`ai-status.json` owns scheduling and completion; generated summaries mirror it.
+AI handles normal bookings and humans handle exceptions. Accepted design does
+not claim implemented or deployed capability.
+
 ### L2 Execution Rules
 
 - `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/README.md`
@@ -78,23 +94,6 @@ These files are intentionally editable and reviewable. They are inputs to consen
 - `MULTI_LLM_CONSENSUS_WORKFLOW.md`
 - `PHASE1_DISCUSSION_ASSIGNMENTS.md`
 - `docs/02-architecture/consensus/phase1/*`
-
-### User-Requested Unattended Voice Booking Supplement
-
-- [SA: Phase 1 unattended voice booking](docs/02-architecture/phase1-unattended-voice-booking-sa-20260906.md)
-- [SD: Phase 1 unattended voice booking](docs/02-architecture/phase1-unattended-voice-booking-sd-20260906.md)
-
-- [Two-pass feasibility audit](docs/02-architecture/phase1-unattended-voice-booking-two-pass-audit-20260906.md)
-
-The latest explicit user instruction establishes AI as the primary operator for
-owned phone bookings, with humans handling exceptions. SA §2 records the scoped
-extension to older human-operated phone-entry wording. SA owns functional scope,
-requirements, numeric product targets and business acceptance; SD owns proposed
-technical states, data, interfaces, transaction rules and implementation design.
-Both documents are detailed v0.2 drafts. This instruction does not imply acceptance
-of every new technical choice, vendor, SLA or retention proposal, and the drafts do
-not claim runtime readiness. Implementation work enters the controlled sync path
-below when activated; this design delivery does not change the live task board.
 
 ## 4. Precedence By Scope
 

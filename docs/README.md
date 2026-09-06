@@ -61,10 +61,10 @@ Supporting repo-local orientation:
 
 ## Unattended Voice Booking Design
 
-The user confirmed that AI should complete normal owned phone bookings and humans
-should handle exceptions. These detailed v0.2 documents add that scope explicitly;
-new technical choices, numeric targets and vendor selection remain design proposals,
-not implemented capabilities or accepted procurement decisions.
+The user authorized supervisor-managed execution of the audited v0.2 design:
+AI completes normal owned phone bookings and humans handle exceptions.
+The scoped execution decision separates the engineering baseline from live
+provider, procurement, operating thresholds and rollout acceptance gates.
 
 - [Unattended Voice Booking SA](02-architecture/phase1-unattended-voice-booking-sa-20260906.md)
   Product flows, 32 requirements, language and service boundaries, human fallback,
@@ -75,6 +75,11 @@ not implemented capabilities or accepted procurement decisions.
 
 - [Two-pass feasibility audit](02-architecture/phase1-unattended-voice-booking-two-pass-audit-20260906.md)
   Source-backed findings, corrections, scenario rechecks and remaining live gates.
+
+- [Execution packet and task manifest](03-runbooks/unattended-voice-booking-execution-tasks-20260906.md)
+  Runnable dependencies, agy/Claude lane routing, FR/AC traceability and live gates.
+- [Scoped execution authority](01-decisions/SD-DP-20260906-013-unattended-voice-execution.md)
+  User authorization and the boundary between engineering delivery and live opening.
 
 ## Accepted System Design Decisions
 
