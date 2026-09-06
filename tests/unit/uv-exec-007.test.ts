@@ -236,7 +236,7 @@ function baseEventCommand(
     voiceSessionId: VOICE_SESSION_ID,
     source: "media_worker",
     providerAccountId: "provider-1",
-    sourceEventId: undefined,
+    sourceEventId: null,
     occurredAt: "2026-09-06T02:00:00.000Z",
     sequence: 1,
     mediaEpoch: 2,
