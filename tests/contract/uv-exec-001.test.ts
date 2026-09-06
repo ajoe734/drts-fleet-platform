@@ -611,8 +611,8 @@ describe("UV-EXEC-001 Voice Contracts", () => {
   });
 
   describe("VoiceErrorCodeSchema", () => {
-    it("validates all 19 canonical and verification error codes", () => {
-      expect(VOICE_ERROR_CODES.length).toBe(19);
+    it("validates all 21 canonical and verification error codes", () => {
+      expect(VOICE_ERROR_CODES.length).toBe(21);
       for (const code of VOICE_ERROR_CODES) {
         expect(VoiceErrorCodeSchema.safeParse(code).success).toBe(true);
       }

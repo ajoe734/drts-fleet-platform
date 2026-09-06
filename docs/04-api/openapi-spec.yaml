@@ -2524,6 +2524,8 @@ components:
         - VOICE_INVALID_ACTOR
         - VOICE_CAPABILITY_REJECTED
         - VOICE_UNSUPPORTED_ACTION
+        - VOICE_CONTROL_CUTOFF_NOT_REACHED
+        - VOICE_UNRESOLVED_INPUT
     VoiceControlCutoff:
       type: object
       properties:
