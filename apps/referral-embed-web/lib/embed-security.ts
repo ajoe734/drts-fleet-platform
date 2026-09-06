@@ -117,11 +117,15 @@ export function extractRequestedEntryHost(
 }
 
 export function buildEmbedSecurityDecision(input: {
-  allowedEntryHostsEnv: string | undefined;
+  allowedEntryHostsEnv?: string | undefined;
   headers: Headers;
   requestUrl: URL;
 }): EmbedSecurityDecision {
-  const allowedEntryHosts = parseAllowedEntryHosts(input.allowedEntryHostsEnv);
+  const allowedEntryHosts = parseAllowedEntryHosts(
+    input.allowedEntryHostsEnv !== undefined
+      ? input.allowedEntryHostsEnv
+      : process.env.REFERRAL_EMBED_ALLOWED_HOSTS,
+  );
   const requestedEntryHost = extractRequestedEntryHost(
     input.requestUrl,
     input.headers,

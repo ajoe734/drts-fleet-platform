@@ -16,10 +16,14 @@ import {
   buildStandaloneFallbackUrl,
 } from "../../../../apps/referral-embed-web/lib/embed-context";
 import { buildStandaloneFallbackUrl as buildStandaloneFallbackUrlDirect } from "../../../../apps/referral-embed-web/lib/embed-fallback";
+import type { ReferralEmbedSession } from "@drts/contracts";
 import { TenantPartnerController } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
 import type { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
-function buildAuthorityError(status: number, code: string): embedApi.EmbedAuthorityError {
+function buildAuthorityError(
+  status: number,
+  code: string,
+): embedApi.EmbedAuthorityError {
   return Object.assign(new Error(code), {
     name: "EmbedAuthorityError" as const,
     status,
@@ -67,23 +71,23 @@ const mockPartnerEntry = {
   },
 };
 
-const mockValidSession = {
+const mockValidSession: ReferralEmbedSession = {
   handoffId: "handoff_valid_123",
   partnerEntrySlug: "yuhe-residence",
   entryHost: "app.yuhe-living.com.tw",
   drtsPassengerId: "pax_yuhe_001",
   identityActive: true,
   consent: {
-    requiredScopes: ["trip.manage" as const, "pii.trip" as const, "identity.bind" as const],
+    requiredScopes: ["trip.manage", "pii.trip", "identity.bind"],
     bundleVersion: "referral-embed-consent-v1-2026-08-01",
     grantedAt: "2026-09-06T06:00:00Z",
   },
   identity: {
-    actorType: "referral_passenger" as const,
+    actorType: "referral_passenger",
     actorId: "yuhe_user_777",
-    realm: "partner" as const,
-    authMode: "jwt_bearer" as const,
-    roleFamilies: ["partner" as const],
+    realm: "partner",
+    authMode: "jwt_bearer",
+    roleFamilies: ["partner"],
     roles: ["referral_passenger"],
     scopes: ["trip.manage", "pii.trip", "identity.bind"],
     tenantId: "tenant_demo",
@@ -122,35 +126,47 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
         headers: new Headers({
           referer: "https://app.yuhe-living.com.tw/services/transport",
         }),
-        requestUrl: new URL("https://referral.drts.tw/embed/yuhe-residence?entryHost=app.yuhe-living.com.tw"),
+        requestUrl: new URL(
+          "https://referral.drts.tw/embed/yuhe-residence?entryHost=app.yuhe-living.com.tw",
+        ),
       });
 
       expect(decision.block).toBe(false);
       expect(decision.blockReason).toBeNull();
       expect(decision.xFrameOptions).toBeNull();
-      expect(decision.contentSecurityPolicy).toContain("frame-ancestors https://app.yuhe-living.com.tw");
+      expect(decision.contentSecurityPolicy).toContain(
+        "frame-ancestors https://app.yuhe-living.com.tw",
+      );
     });
 
     it("fails closed on unauthorized entryHost even when env var is unset", () => {
       delete process.env.REFERRAL_EMBED_ALLOWED_HOSTS;
       const decision = buildEmbedSecurityDecision({
         headers: new Headers(),
-        requestUrl: new URL("https://referral.drts.tw/embed/yuhe-residence?entryHost=unauthorized.attacker.com"),
+        requestUrl: new URL(
+          "https://referral.drts.tw/embed/yuhe-residence?entryHost=unauthorized.attacker.com",
+        ),
       });
 
       expect(decision.block).toBe(true);
       expect(decision.blockReason).toBe("entry_host_not_authorized");
       expect(decision.xFrameOptions).toBe("DENY");
-      expect(decision.contentSecurityPolicy).toContain("frame-ancestors 'none'");
+      expect(decision.contentSecurityPolicy).toContain(
+        "frame-ancestors 'none'",
+      );
     });
 
     it("middleware returns 403 on unauthorized entryHost", () => {
       delete process.env.REFERRAL_EMBED_ALLOWED_HOSTS;
-      const req = new NextRequest("https://referral.drts.tw/embed/yuhe-residence?entryHost=unauthorized.attacker.com");
+      const req = new NextRequest(
+        "https://referral.drts.tw/embed/yuhe-residence?entryHost=unauthorized.attacker.com",
+      );
       const res = middleware(req);
 
       expect(res.status).toBe(403);
-      expect(res.headers.get("x-drts-embed-block-reason")).toBe("entry_host_not_authorized");
+      expect(res.headers.get("x-drts-embed-block-reason")).toBe(
+        "entry_host_not_authorized",
+      );
     });
 
     it("middleware redirects /embed/[entrySlug] with artifact query to session exchange route", () => {
@@ -166,7 +182,9 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
       expect(location.searchParams.get("action")).toBe("exchange");
       expect(location.searchParams.get("artifact")).toBe("valid-art-123");
       expect(location.searchParams.get("entrySlug")).toBe("yuhe-residence");
-      expect(location.searchParams.get("entryHost")).toBe("app.yuhe-living.com.tw");
+      expect(location.searchParams.get("entryHost")).toBe(
+        "app.yuhe-living.com.tw",
+      );
       expect(location.searchParams.get("returnTo")).toBe(
         "/embed/yuhe-residence?entryHost=app.yuhe-living.com.tw",
       );
@@ -200,6 +218,7 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
       const result = await controller.issueReferralEmbedHandoffArtifact(
         {
           entrySlug: "yuhe-residence",
+          entryHost: "app.yuhe-living.com.tw",
           apiKey: "drts-partner-yuhe-test-key-001",
           partnerUserRef: "resident-99",
         },
@@ -231,12 +250,15 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
         {} as never,
       );
 
-      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY = "secret-handoff-internal-key";
+      process.env.DRTS_REFERRAL_EMBED_HANDOFF_KEY =
+        "secret-handoff-internal-key";
 
       await expect(
         controller.issueReferralEmbedHandoffArtifact(
           {
             entrySlug: "yuhe-residence",
+            entryHost: "app.yuhe-living.com.tw",
+            partnerUserRef: "resident-002",
           },
           { headers: {} },
           "req-test-002",
@@ -250,8 +272,13 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
 
   describe("3. Artifact Consumption & Replay / Expiration / Host Rejections", () => {
     it("successfully consumes artifact, establishes session cookie, and redirects cleanly without artifact parameter", async () => {
-      vi.spyOn(embedApi, "consumeReferralEmbedHandoffArtifact").mockResolvedValue(mockValidSession);
-      const writeSpy = vi.spyOn(embedPartnerSession, "writeReferralEmbedSession").mockResolvedValue(undefined);
+      vi.spyOn(
+        embedApi,
+        "consumeReferralEmbedHandoffArtifact",
+      ).mockResolvedValue(mockValidSession);
+      const writeSpy = vi
+        .spyOn(embedPartnerSession, "writeReferralEmbedSession")
+        .mockResolvedValue(undefined);
 
       const request = new Request(
         "https://referral.drts.tw/api/referral/session?action=exchange&artifact=art-valid&entrySlug=yuhe-residence&entryHost=app.yuhe-living.com.tw&returnTo=/embed/yuhe-residence",
@@ -267,10 +294,13 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
     });
 
     it("handles REFERRAL_HANDOFF_EXPIRED by redirecting to state=reauth&issue=expired", async () => {
-      vi.spyOn(embedApi, "consumeReferralEmbedHandoffArtifact").mockRejectedValue(
-        buildAuthorityError(410, "REFERRAL_HANDOFF_EXPIRED"),
-      );
-      const clearSpy = vi.spyOn(embedPartnerSession, "clearReferralEmbedSession").mockResolvedValue(undefined);
+      vi.spyOn(
+        embedApi,
+        "consumeReferralEmbedHandoffArtifact",
+      ).mockRejectedValue(buildAuthorityError(410, "REFERRAL_HANDOFF_EXPIRED"));
+      const clearSpy = vi
+        .spyOn(embedPartnerSession, "clearReferralEmbedSession")
+        .mockResolvedValue(undefined);
 
       const request = new Request(
         "https://referral.drts.tw/api/referral/session?action=exchange&artifact=art-expired&entrySlug=yuhe-residence&entryHost=app.yuhe-living.com.tw&returnTo=/embed/yuhe-residence",
@@ -286,10 +316,15 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
     });
 
     it("handles REFERRAL_HANDOFF_REPLAYED by redirecting to state=reauth&issue=replayed", async () => {
-      vi.spyOn(embedApi, "consumeReferralEmbedHandoffArtifact").mockRejectedValue(
+      vi.spyOn(
+        embedApi,
+        "consumeReferralEmbedHandoffArtifact",
+      ).mockRejectedValue(
         buildAuthorityError(409, "REFERRAL_HANDOFF_REPLAYED"),
       );
-      const clearSpy = vi.spyOn(embedPartnerSession, "clearReferralEmbedSession").mockResolvedValue(undefined);
+      const clearSpy = vi
+        .spyOn(embedPartnerSession, "clearReferralEmbedSession")
+        .mockResolvedValue(undefined);
 
       const request = new Request(
         "https://referral.drts.tw/api/referral/session?action=exchange&artifact=art-replayed&entrySlug=yuhe-residence&entryHost=app.yuhe-living.com.tw&returnTo=/embed/yuhe-residence",
@@ -305,10 +340,15 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
     });
 
     it("handles REFERRAL_HANDOFF_HOST_MISMATCH by redirecting to state=unsupported&issue=wrong_host", async () => {
-      vi.spyOn(embedApi, "consumeReferralEmbedHandoffArtifact").mockRejectedValue(
+      vi.spyOn(
+        embedApi,
+        "consumeReferralEmbedHandoffArtifact",
+      ).mockRejectedValue(
         buildAuthorityError(403, "REFERRAL_HANDOFF_HOST_MISMATCH"),
       );
-      const clearSpy = vi.spyOn(embedPartnerSession, "clearReferralEmbedSession").mockResolvedValue(undefined);
+      const clearSpy = vi
+        .spyOn(embedPartnerSession, "clearReferralEmbedSession")
+        .mockResolvedValue(undefined);
 
       const request = new Request(
         "https://referral.drts.tw/api/referral/session?action=exchange&artifact=art-wrong-host&entrySlug=yuhe-residence&entryHost=app.yuhe-living.com.tw&returnTo=/embed/yuhe-residence",
@@ -327,7 +367,10 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
   describe("4. Embed Context & Truthful Unauthenticated State", () => {
     it("does not declare verified signature when unauthenticated without session", async () => {
       vi.spyOn(embedApi, "getPartnerEntry").mockResolvedValue(mockPartnerEntry);
-      vi.spyOn(embedPartnerSession, "getReferralEmbedSession").mockResolvedValue(null);
+      vi.spyOn(
+        embedPartnerSession,
+        "getReferralEmbedSession",
+      ).mockResolvedValue(null);
 
       const context = await resolveEmbedContext({
         entrySlug: "yuhe-residence",
@@ -341,10 +384,14 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
 
     it("maps expired token artifact to reauth:token_expired in context", async () => {
       vi.spyOn(embedApi, "getPartnerEntry").mockResolvedValue(mockPartnerEntry);
-      vi.spyOn(embedPartnerSession, "getReferralEmbedSession").mockResolvedValue(null);
-      vi.spyOn(embedApi, "consumeReferralEmbedHandoffArtifact").mockRejectedValue(
-        buildAuthorityError(410, "REFERRAL_HANDOFF_EXPIRED"),
-      );
+      vi.spyOn(
+        embedPartnerSession,
+        "getReferralEmbedSession",
+      ).mockResolvedValue(null);
+      vi.spyOn(
+        embedApi,
+        "consumeReferralEmbedHandoffArtifact",
+      ).mockRejectedValue(buildAuthorityError(410, "REFERRAL_HANDOFF_EXPIRED"));
 
       const context = await resolveEmbedContext({
         entrySlug: "yuhe-residence",
@@ -357,8 +404,14 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
 
     it("maps replayed token artifact to reauth:token_replayed in context", async () => {
       vi.spyOn(embedApi, "getPartnerEntry").mockResolvedValue(mockPartnerEntry);
-      vi.spyOn(embedPartnerSession, "getReferralEmbedSession").mockResolvedValue(null);
-      vi.spyOn(embedApi, "consumeReferralEmbedHandoffArtifact").mockRejectedValue(
+      vi.spyOn(
+        embedPartnerSession,
+        "getReferralEmbedSession",
+      ).mockResolvedValue(null);
+      vi.spyOn(
+        embedApi,
+        "consumeReferralEmbedHandoffArtifact",
+      ).mockRejectedValue(
         buildAuthorityError(409, "REFERRAL_HANDOFF_REPLAYED"),
       );
 
@@ -373,8 +426,14 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
 
     it("maps host mismatch artifact to unsupported:wrong_host in context", async () => {
       vi.spyOn(embedApi, "getPartnerEntry").mockResolvedValue(mockPartnerEntry);
-      vi.spyOn(embedPartnerSession, "getReferralEmbedSession").mockResolvedValue(null);
-      vi.spyOn(embedApi, "consumeReferralEmbedHandoffArtifact").mockRejectedValue(
+      vi.spyOn(
+        embedPartnerSession,
+        "getReferralEmbedSession",
+      ).mockResolvedValue(null);
+      vi.spyOn(
+        embedApi,
+        "consumeReferralEmbedHandoffArtifact",
+      ).mockRejectedValue(
         buildAuthorityError(403, "REFERRAL_HANDOFF_HOST_MISMATCH"),
       );
 
@@ -424,7 +483,10 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
 
     it("verifies passenger-embed component template integrity: truthful handoff and non-looping fallback", () => {
       const source = readFileSync(
-        new URL("../../../../apps/referral-embed-web/components/passenger-embed.tsx", import.meta.url),
+        new URL(
+          "../../../../apps/referral-embed-web/components/passenger-embed.tsx",
+          import.meta.url,
+        ),
         "utf8",
       );
 
@@ -434,10 +496,14 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
       );
 
       // 1. FallbackScreen must NOT loop back to state: "fallback"
-      expect(fallbackScreenBlock).not.toContain('href={buildHref(context, { state: "fallback" })}');
+      expect(fallbackScreenBlock).not.toContain(
+        'href={buildHref(context, { state: "fallback" })}',
+      );
 
       // 2. FallbackScreen must use buildStandaloneFallbackUrl
-      expect(fallbackScreenBlock).toContain("buildStandaloneFallbackUrl(context)");
+      expect(fallbackScreenBlock).toContain(
+        "buildStandaloneFallbackUrl(context)",
+      );
 
       // 3. FallbackScreen must render source attributions
       expect(source).toContain("轉介來源資訊");
@@ -447,20 +513,30 @@ describe("SR-REFERRAL-001 Remediation Suite", () => {
       expect(source).toContain("context.strings.supportPhone");
 
       // 4. HandoffScreen must guard signature validity with isAuthenticated / context.session
-      expect(source).toContain("const isAuthenticated = Boolean(context.session);");
-      expect(source).toContain('value={isAuthenticated ? "valid" : "missing_or_invalid"}');
+      expect(source).toContain(
+        "const isAuthenticated = Boolean(context.session);",
+      );
+      expect(source).toContain(
+        'value={isAuthenticated ? "valid" : "missing_or_invalid"}',
+      );
       expect(source).toContain('label="社區簽章狀態"');
-      expect(source).toContain('unauthenticated · 未交接');
+      expect(source).toContain("unauthenticated · 未交接");
 
       // 5. ReauthScreen must differentiate replayed and expired tokens
-      expect(source).toContain('context.issues.some((i) => i.includes("replayed"))');
-      expect(source).toContain('context.issues.some((i) => i.includes("expired"))');
+      expect(source).toContain(
+        'context.issues.some((i) => i.includes("replayed"))',
+      );
+      expect(source).toContain(
+        'context.issues.some((i) => i.includes("expired"))',
+      );
       expect(source).toContain("權杖已被使用過 (Replay)");
       expect(source).toContain("單次權杖已重播");
 
       // 6. passenger-embed.tsx imports buildStandaloneFallbackUrl from client-safe module embed-fallback
       expect(source).toContain('from "../lib/embed-fallback"');
-      expect(source).not.toContain('import {\n  type EmbedContext,\n  buildStandaloneFallbackUrl,\n} from "../lib/embed-context"');
+      expect(source).not.toContain(
+        'import {\n  type EmbedContext,\n  buildStandaloneFallbackUrl,\n} from "../lib/embed-context"',
+      );
 
       // 7. embed-fallback direct function exports match re-export
       expect(buildStandaloneFallbackUrlDirect).toBe(buildStandaloneFallbackUrl);
