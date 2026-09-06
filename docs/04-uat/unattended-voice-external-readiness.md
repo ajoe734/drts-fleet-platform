@@ -11,8 +11,8 @@
 - Decision Ref: `docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md`
 - Functional Requirements (FRs): `UV-FR-001`, `UV-FR-003`, `UV-FR-007`, `UV-FR-010`, `UV-FR-011`, `UV-FR-018`, `UV-FR-021`, `UV-FR-024`, `UV-FR-026`, `UV-FR-027`, `UV-FR-030`, `UV-FR-031`, `UV-FR-032`
 - Acceptance Criteria (ACs): `UV-AC-002`, `UV-AC-026`, `UV-AC-030`, `UV-AC-033`
-- Last Update: `2026-09-06T11:41:27Z`
-- Re-Verification: `2026-09-06T11:41:27Z` (acceptance-phase唯讀複查，Claude2，acceptance_ready_dispatch 喚醒，較 11:22Z 無狀態變化；本輪額外確認候選 PR #1673 已合併 `origin/dev`)
+- Last Update: `2026-09-06T11:45:07Z`
+- Re-Verification: `2026-09-06T11:45:07Z` (acceptance-phase唯讀複查，Claude2，acceptance_ready_dispatch 喚醒，距上一輪僅約 4 分鐘，三項可執行查核與 `ai-status.json` 機器真相均無變化)
 
 ---
 
@@ -100,6 +100,20 @@
 | 行程環境語音憑證 | `env \| grep -E '^(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|OPENAI\|GEMINI_LIVE)'` | **[UNVERIFIED-THIS-SESSION] 再次被本次 worker 執行環境的權限政策歸類為需人工核准之高風險操作而阻擋，與前三輪相同的工具限制持續存在，非通過證據** | 2026-09-06T11:41Z |
 
 > **本輪複查結論：** 候選已成功合併至 `origin/dev`（`2093cf7e3`），與 `ai-status.json` 機器真相一致，未見欄位被清空之 regression。GitHub Secrets/Variables 兩項確認無新增語音/CTI/TWM 供應商憑證；行程環境變數比對再次受相同工具限制阻擋，如實記錄為工具限制而非通過證據。7 項 `required_acceptance` 仍無真實外部帳號/合約/供應商證據，維持 blocker，**未呼叫 `record-acceptance`**。本輪僅使用 `note` 記錄進度，刻意不呼叫會清空候選生命週期欄位的 `progress`（依 `command_progress` 實作，對 `acceptance` 狀態任務呼叫會將狀態打回 `in_progress` 並清除 `candidate_sha`/`reviewed_sha`/`merge_sha` 等欄位），以避免重演先前已記錄之 regression。
+
+### 2.8 Acceptance 階段複查記錄 (Acceptance-Phase Re-Verification 2026-09-06T11:45Z, Claude2, acceptance_ready_dispatch 喚醒)
+
+距上一輪 (11:41Z) 僅約 4 分鐘，本輪為緊接之短間隔複查，用以確認候選合併後機器真相持續穩定、無 regression 重演。
+
+| 查核項目 | 執行方式 | 查核結果 |
+|---|---|---|
+| `dev` 分支推進狀態 | `git fetch origin && git rev-parse origin/dev` | **[CONFIRMED]** 仍為 `2093cf7e38526a7a7c027600be92004f7275efd3`，與上一輪及 `ai-status.json` 之 `merge_sha` 一致，無推進 |
+| `ai-status.json` 候選生命週期欄位 | `ai-status.sh show UV-EXEC-027` | **[CONFIRMED]** `status: acceptance`、`candidate_sha`/`reviewed_sha`/`ci_sha` 均為 `7c3b763006784e0b3037e4c146d032011943d666`、`merge_sha: 2093cf7e3...`、`ci_status: success`，欄位完整未見清空 |
+| GitHub Secrets 語音憑證 | `gh secret list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED]** 無符合項目，較上一輪無新增 |
+| GitHub Variables 語音端點 | `gh variable list \| grep -iE '(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|VOICE\|PHONE\|PSTN)'` | **[CONFIRMED]** 無符合項目，較上一輪無新增 |
+| 行程環境語音憑證 | `env \| grep -E '^(CTI\|TWM\|TWILIO\|SIP\|ASR\|TTS\|OPENAI\|GEMINI_LIVE)'` | **[UNVERIFIED-THIS-SESSION]** 再次被本次 worker 執行環境的權限政策歸類為需人工核准之高風險操作而阻擋（分類為 `defer`），與前四輪相同的工具限制持續存在，非通過證據 |
+
+> **本輪複查結論：** 短間隔複查未發現任何新增語音/CTI/TWM 供應商憑證或營運/商務證據，`dev` 分支與 `ai-status.json` 機器真相均與上一輪一致、無 regression。7 項 `required_acceptance` 仍維持 blocker，**未呼叫 `record-acceptance`**，本輪僅以 `note` 記錄，不呼叫會清空候選生命週期欄位的 `progress`。
 
 ---
 
