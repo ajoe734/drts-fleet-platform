@@ -210,30 +210,30 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       expiresAt: "2026-09-06T02:02:00.000Z",
     };
 
-    it("validates valid speech proof", () => {
+    it("validates valid speech proof directly and via union", () => {
       const proof = {
         ...baseProof,
-        confirmationMethod: "speech",
+        confirmationMethod: "speech" as const,
         evidence: {
           turnId: "123e4567-e89b-12d3-a456-426614174006",
           finalEventId: "123e4567-e89b-12d3-a456-426614174007",
         },
       };
-      const result = VoiceProofSchema.safeParse(proof);
-      expect(result.success).toBe(true);
+      expect(SpeechVoiceProofSchema.safeParse(proof).success).toBe(true);
+      expect(VoiceProofSchema.safeParse(proof).success).toBe(true);
     });
 
-    it("validates valid DTMF proof", () => {
+    it("validates valid DTMF proof directly and via union", () => {
       const proof = {
         ...baseProof,
-        confirmationMethod: "dtmf",
+        confirmationMethod: "dtmf" as const,
         evidence: {
           eventId: "123e4567-e89b-12d3-a456-426614174008",
           digit: "1",
         },
       };
-      const result = VoiceProofSchema.safeParse(proof);
-      expect(result.success).toBe(true);
+      expect(DtmfVoiceProofSchema.safeParse(proof).success).toBe(true);
+      expect(VoiceProofSchema.safeParse(proof).success).toBe(true);
     });
 
     it("rejects speech confirmationMethod with DTMF evidence shape", () => {
@@ -475,7 +475,9 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         "consumed",
       ] as const;
       for (const state of confirmationStates) {
-        expect(VoiceConfirmationStateSchema.safeParse(state).success).toBe(true);
+        expect(VoiceConfirmationStateSchema.safeParse(state).success).toBe(
+          true,
+        );
       }
 
       const outcomes = [
@@ -491,9 +493,16 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         expect(VoiceOutcomeSchema.safeParse(outcome).success).toBe(true);
       }
 
-      const commitStatuses = ["none", "pending", "succeeded", "rejected"] as const;
+      const commitStatuses = [
+        "none",
+        "pending",
+        "succeeded",
+        "rejected",
+      ] as const;
       for (const commitStatus of commitStatuses) {
-        expect(VoiceCommitStatusSchema.safeParse(commitStatus).success).toBe(true);
+        expect(VoiceCommitStatusSchema.safeParse(commitStatus).success).toBe(
+          true,
+        );
       }
     });
   });
@@ -565,19 +574,45 @@ describe("UV-EXEC-001 Voice Contracts", () => {
     const AjvClass = Ajv.default || Ajv;
     const ajv = new AjvClass({ strict: false, allErrors: true });
 
+    function transformOpenApiToAjv(schema: any): any {
+      if (!schema || typeof schema !== "object") return schema;
+      if (Array.isArray(schema)) return schema.map(transformOpenApiToAjv);
+      const copy: any = { ...schema };
+      if (copy.nullable && copy.type && typeof copy.type === "string") {
+        copy.type = [copy.type, "null"];
+      }
+      for (const [k, v] of Object.entries(copy)) {
+        copy[k] = transformOpenApiToAjv(v);
+      }
+      return copy;
+    }
+
     const openapiDoc = YAML.parse(readFileSync(OPENAPI_PATH, "utf8"));
-    for (const [name, schema] of Object.entries(openapiDoc.components.schemas)) {
-      ajv.addSchema(schema, `#/components/schemas/${name}`);
+    for (const [name, schema] of Object.entries(
+      openapiDoc.components.schemas,
+    )) {
+      ajv.addSchema(
+        transformOpenApiToAjv(schema),
+        `#/components/schemas/${name}`,
+      );
     }
 
     const validateProof = ajv.getSchema("#/components/schemas/VoiceProof")!;
-    const validateCapability = ajv.getSchema("#/components/schemas/VoiceCapability")!;
+    const validateCapability = ajv.getSchema(
+      "#/components/schemas/VoiceCapability",
+    )!;
     const validateActor = ajv.getSchema("#/components/schemas/BookingActor")!;
     const validateReceipt = ajv.getSchema("#/components/schemas/VoiceReceipt")!;
     const validateSession = ajv.getSchema("#/components/schemas/VoiceSession")!;
-    const validateCallback = ajv.getSchema("#/components/schemas/VoiceCallback")!;
-    const validateScope = ajv.getSchema("#/components/schemas/VoiceScopeProfile")!;
-    const validateCutoff = ajv.getSchema("#/components/schemas/VoiceControlCutoff")!;
+    const validateCallback = ajv.getSchema(
+      "#/components/schemas/VoiceCallback",
+    )!;
+    const validateScope = ajv.getSchema(
+      "#/components/schemas/VoiceScopeProfile",
+    )!;
+    const validateCutoff = ajv.getSchema(
+      "#/components/schemas/VoiceControlCutoff",
+    )!;
 
     const baseProofData = {
       confirmationId: "123e4567-e89b-12d3-a456-426614174000",
