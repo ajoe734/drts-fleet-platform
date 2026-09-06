@@ -353,29 +353,27 @@ export function runDynamicRouteInventory(
 }
 
 /**
- * Known pre-existing scope defects discovered in controllers outside the 4 Wave A route groups:
- * - modules/assistant/assistant.controller.ts (assistant:write)
- * - modules/auth/break-glass.controller.ts (identity:break-glass:request/approve/activate)
+ * Known pre-existing scope defects discovered in controllers outside the 4 Wave A route groups.
  *
  * Per SD §6 and runbook execution prompt, verification tasks do not author de novo
- * authorization catalog decisions or change policies to make tests pass; these defects
+ * authorization catalog decisions or change policies to make tests pass; defects
  * are explicitly isolated and tracked here until their owning feature tasks land reviewed
  * catalog definitions and grants.
  *
- * Retired: multi_taxi_records:read/export now carry catalog definitions and
- * system/platform_admin grants (IAM_SCOPE_DEFINITIONS,
- * IAM_ACTOR_POLICY_DEFINITIONS). An allowlisted scope is unreachable in
- * production, not merely untested: every caller of the P5 operational-record
- * routes was denied by the bootstrap guard because no actor preset could hold
- * the scope. Entries here must stay paired with an owning task, and an entry
- * whose scope backs a shipped UI surface is a live outage, not a deferred one.
+ * Retired: multi_taxi_records:read/export (FIX-P5-RECORDS-001) and
+ * assistant:write / identity:break-glass:request|approve|activate
+ * (FIX-IAM-UNGRANTABLE-002) now carry catalog definitions and
+ * system/platform_admin/ops_user(/tenant_admin) grants (IAM_SCOPE_DEFINITIONS,
+ * IAM_ACTOR_POLICY_DEFINITIONS, IAM_TENANT_ROLE_POLICY_DEFINITIONS). An
+ * allowlisted scope is unreachable in production, not merely untested: every
+ * caller of the P5 operational-record routes, the break-glass approval flow,
+ * and the ops-console assistant widget was denied by the bootstrap guard
+ * because no actor preset (or, for assistant:write, no real tenant session
+ * role) could hold the scope. Entries here must stay paired with an owning
+ * task, and an entry whose scope backs a shipped UI surface is a live
+ * outage, not a deferred one.
  */
-export const KNOWN_PRE_EXISTING_SCOPE_DEFECTS: ReadonlySet<string> = new Set([
-  "assistant:write",
-  "identity:break-glass:request",
-  "identity:break-glass:approve",
-  "identity:break-glass:activate",
-]);
+export const KNOWN_PRE_EXISTING_SCOPE_DEFECTS: ReadonlySet<string> = new Set([]);
 
 describe("IAM dynamic route inventory and catalogue verification", () => {
   it("discovers every controller recursively without an allowlist", () => {
@@ -399,8 +397,10 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
     );
     expect(unexpectedUnknownScopes).toEqual([]);
 
-    // Explicitly track the 9 pre-existing defect instances across 2 controllers
-    expect(result.unknownScopes).toHaveLength(9);
+    // All previously-tracked pre-existing defects (assistant:write,
+    // identity:break-glass:request/approve/activate) now carry catalog
+    // definitions, so no unknown scopes should remain.
+    expect(result.unknownScopes).toHaveLength(0);
   });
 
   it("validates that every declared route scope is grantable to some actor", () => {
@@ -562,6 +562,28 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
       realm: "driver",
       routePath: "/test-realm-mismatch/bad-realm",
     });
+  });
+
+  it("resolves platform-admin/break-glass routes to their own scope only, not the generic platform-admin foundation:write policy", () => {
+    // Regression guard: platform-admin/break-glass/* previously matched the
+    // generic `platform-admin/` branch, which forced foundation:write onto
+    // every break-glass route in addition to the route's own
+    // identity:break-glass:* decorator scope. No break-glass grantee holds
+    // foundation:write for that purpose, so an ops_user with only the
+    // break-glass scope granted was denied. If a future edit to the generic
+    // platform-admin/ branch (or its ordering relative to this one) causes it
+    // to swallow break-glass routes again, this test must fail.
+    const policy = resolveRouteAuthPolicy(
+      "POST",
+      "/api/platform-admin/break-glass/requests",
+    );
+
+    expect(policy).not.toBeNull();
+    expect(policy?.requiredScopes).toEqual([]);
+    expect(policy?.requiredScopes).not.toContain("foundation:write");
+    expect(policy?.allowedRealms).toEqual(
+      expect.arrayContaining(["platform", "ops"]),
+    );
   });
 });
 

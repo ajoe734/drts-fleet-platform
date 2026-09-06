@@ -320,6 +320,20 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath.startsWith("platform-admin/break-glass")) {
+    return {
+      routeKey: `platform-admin:break-glass:${upperMethod}`,
+      // The route's own @RequireScopes decorator carries the specific
+      // identity:break-glass:* scope; this branch exists only to stop the
+      // generic platform-admin/ branch below from also requiring
+      // foundation:write, which no break-glass grantee holds and which would
+      // make the decorator scope alone insufficient to pass the guard.
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Break-glass privileged access request/approval/activation",
+    };
+  }
+
   if (routePath.startsWith("platform-admin/")) {
     return {
       routeKey: `platform-admin:${upperMethod}`,

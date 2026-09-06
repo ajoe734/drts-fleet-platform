@@ -78,9 +78,33 @@ const PRIVILEGED_ROUTE_FIXTURES: Array<{
   },
   {
     method: "POST",
+    path: "/api/platform-admin/break-glass/requests",
+    realm: "ops",
+    actionId: "platform:break-glass:request",
+  },
+  {
+    method: "POST",
     path: "/api/platform-admin/break-glass/requests/request-001/approve",
     realm: "platform",
     actionId: "platform:break-glass:approve",
+  },
+  {
+    method: "POST",
+    path: "/api/platform-admin/break-glass/requests/request-001/approve",
+    realm: "ops",
+    actionId: "platform:break-glass:approve",
+  },
+  {
+    method: "POST",
+    path: "/api/platform-admin/break-glass/requests/request-001/activate",
+    realm: "platform",
+    actionId: "platform:break-glass:activate",
+  },
+  {
+    method: "POST",
+    path: "/api/platform-admin/break-glass/requests/request-001/activate",
+    realm: "ops",
+    actionId: "platform:break-glass:activate",
   },
   {
     method: "POST",

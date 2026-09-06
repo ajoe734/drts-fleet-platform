@@ -153,6 +153,105 @@ describe("step-up proof policy", () => {
     );
   });
 
+  it("enforces fresh step-up proof for ops break-glass request/approve/activate, rejecting forged, missing, and stale references", () => {
+    const service = new StepUpProofService();
+    const opsIdentity = makeIdentity({
+      actorType: "ops_user",
+      actorId: "ops-001",
+      principalId: "ops-001",
+      realm: "ops",
+      tenantId: null,
+      roleFamilies: ["ops"],
+      roles: ["ops_user"],
+      scopes: ["identity:break-glass:request"],
+    });
+
+    // Missing reference is denied.
+    expect(() =>
+      service.assertRequestSatisfied(
+        opsIdentity,
+        makeRequest("/api/platform-admin/break-glass/requests", null),
+      ),
+    ).toThrowError(ApiRequestError);
+
+    // A forged/unknown reference is denied.
+    expect(() =>
+      service.assertRequestSatisfied(
+        opsIdentity,
+        makeRequest(
+          "/api/platform-admin/break-glass/requests",
+          "forged-vault-reference",
+        ),
+      ),
+    ).toThrowError(ApiRequestError);
+
+    const issued = service.createProof(
+      opsIdentity,
+      { method: "POST", path: "/api/platform-admin/break-glass/requests" },
+      "req-ops-break-glass-request",
+    );
+    expect(issued).toMatchObject({
+      required: true,
+      actionId: "platform:break-glass:request",
+      stepUpReference: expect.any(String),
+    });
+
+    const activateIssued = service.createProof(
+      opsIdentity,
+      {
+        method: "POST",
+        path: "/api/platform-admin/break-glass/requests/req-1/activate",
+      },
+      "req-ops-break-glass-activate",
+    );
+    expect(activateIssued).toMatchObject({
+      actionId: "platform:break-glass:activate",
+      stepUpReference: expect.any(String),
+    });
+
+    // Fresh, correctly-scoped proofs are accepted for both request and
+    // activate actions.
+    expect(() =>
+      service.assertRequestSatisfied(
+        opsIdentity,
+        makeRequest(
+          "/api/platform-admin/break-glass/requests",
+          issued.stepUpReference,
+        ),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      service.assertRequestSatisfied(
+        opsIdentity,
+        makeRequest(
+          "/api/platform-admin/break-glass/requests/req-1/activate",
+          activateIssued.stepUpReference,
+        ),
+      ),
+    ).not.toThrow();
+
+    // A stale proof (past the freshness window) is denied for both actions.
+    vi.advanceTimersByTime(10 * 60_000 + 1);
+    expect(() =>
+      service.assertRequestSatisfied(
+        opsIdentity,
+        makeRequest(
+          "/api/platform-admin/break-glass/requests",
+          issued.stepUpReference,
+        ),
+      ),
+    ).toThrowError(ApiRequestError);
+    expect(() =>
+      service.assertRequestSatisfied(
+        opsIdentity,
+        makeRequest(
+          "/api/platform-admin/break-glass/requests/req-1/activate",
+          activateIssued.stepUpReference,
+        ),
+      ),
+    ).toThrowError(ApiRequestError);
+  });
+
   it("returns MFA_REQUIRED when the current session lacks trusted MFA evidence", () => {
     const service = new StepUpProofService();
 
