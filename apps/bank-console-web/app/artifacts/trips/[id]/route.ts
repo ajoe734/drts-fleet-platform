@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { BANK_DEMO_TENANTS, getBankTenantName, resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
+import { BANK_DEMO_TENANTS, getBankTenantName, resolveBankDemoTenant, resolveLocale } from "../../../../lib/demo-tenants";
 import {
   BANK_CONSOLE_ROLE_COOKIE,
   BANK_CONSOLE_SESSION_COOKIE,
   resolveServerSessionRole,
-} from "@/lib/session";
-import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
+} from "../../../../lib/session";
+import { loadBankStatementsData } from "../../../../lib/bank-dev-read-models";
+import { buildSignedArtifactText } from "../../artifact-crypto";
 
 export async function GET(
   request: NextRequest,
@@ -117,7 +118,7 @@ export async function GET(
       );
     }
 
-    const textContent = [
+    const bodyLines = [
       "================================================================================",
       "DRTS TRIP SETTLEMENT RECEIPT (NON-FIXTURE ARTIFACT)",
       "================================================================================",
@@ -142,10 +143,13 @@ export async function GET(
       `Cardholder Ref     : ${matchedTripLine.cardholderReferenceMasked}`,
       `Card Ref           : ${matchedTripLine.cardReferenceMasked}`,
       `Dispute Status     : ${matchedTripLine.disputed ? "DISPUTED" : "NORMAL"}`,
-      "================================================================================",
-    ].join("\n");
+    ];
 
-    return new NextResponse(textContent, {
+    const { fullText } = buildSignedArtifactText(bodyLines.join("\n"), {
+      generatedAt: matchedTripLine.tripDate,
+    });
+
+    return new NextResponse(fullText, {
       status: 200,
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
