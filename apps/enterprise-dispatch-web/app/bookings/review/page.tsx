@@ -321,12 +321,10 @@ export default async function ReviewBookingPage({
                 icon="clock"
                 body={
                   isReservationInFuture
-                    ? locale === "zh"
-                      ? "尚有必填欄位未完成，請返回上一步修改後再送出。"
-                      : "Some required fields are still incomplete. Go back and complete them before submitting."
-                    : locale === "zh"
-                      ? `預約時間已過去或不在有效時區內，無法送出。${getEarliestBookableLabel(locale)}，請返回修改。`
-                      : `This reservation time is in the past or outside the valid window, so it cannot be submitted. ${getEarliestBookableLabel(locale)}. Go back and update it.`
+                    ? tr("review.blocked.incompleteFields")
+                    : tr("review.blocked.pastReservation", {
+                        earliest: getEarliestBookableLabel(locale),
+                      })
                 }
               />
             </div>

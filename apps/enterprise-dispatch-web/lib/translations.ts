@@ -560,6 +560,11 @@ const en = {
     "Free to cancel over 1h before; within 1h counts as 1 ride.",
   "review.policy.command":
     "Submit is a dispatch command; the system may reply 'accepted, awaiting confirmation', not instant.",
+  "review.blocked.incompleteFields":
+    "Some required fields are still incomplete. Go back and complete them before submitting.",
+  "review.blocked.pastReservation":
+    "This reservation time is in the past or outside the valid window, so it cannot be submitted. {earliest}. Go back and update it.",
+  "booking.earliestBookable": "Earliest bookable time: after {date} {time}",
   "submitted.refresh": "Refresh",
   "detail.card.driver": "Driver / vehicle",
   "detail.card.cost": "Cost & approval",
@@ -1170,6 +1175,11 @@ const zh: Record<TranslationKey, string> = {
   "help.policy.cancel": "取消窗口 1 小時",
   "help.policy.quota": "月額度 40 趟 / 部門",
   "fixture.vehicle.van": "七人座",
+  "review.blocked.incompleteFields":
+    "尚有必填欄位未完成，請返回上一步修改後再送出。",
+  "review.blocked.pastReservation":
+    "預約時間已過去或不在有效時區內，無法送出。{earliest}，請返回修改。",
+  "booking.earliestBookable": "最早可預約時間：{date} {time}（之後）",
 };
 
 export const translations: Record<Locale, Record<TranslationKey, string>> = {

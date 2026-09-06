@@ -163,7 +163,7 @@ worktree，記錄於此供其他並行任務參考；並非本任務程式碼變
   需要 supervisor 擴大 scope 或另立 task。
 - **後端最短提前時間規則未變更**：本任務僅在前端加入「不得為過去時間」的
   嚴格檢查（`> now`），未新增固定提前分鐘數門檻（例如
-  `apps/api/.../owned-mobility.service.ts` 的 15 分鐘 lead time 屬於另一個
+  `apps/api/src/modules/owned-mobility/owned-mobility.service.ts` 的 15 分鐘 lead time 屬於另一個
   完全不同的產品域——一般叫車即時派車，非企業 A→B 預約），亦未觸碰任何後端
   驗證邏輯；若需要更嚴格的「最短提前 N 分鐘」規則，依 task brief 說明由
   `SR-BOOKING-VERIFY` 處理。
