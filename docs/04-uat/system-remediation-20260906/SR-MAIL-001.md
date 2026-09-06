@@ -1,10 +1,63 @@
-# SR-MAIL-001 — 邀請傳輸修復進度與驗證
+# SR-MAIL-001 — 邀請傳輸修復與受控驗證
 
 日期：2026-09-06。Owner：Codex2。Reviewer：Codex。
 
-**目前為待擴 scope 的 WIP，不是完成／部署／驗收結案。** 已普通 push 保留範圍內實作；未呼叫 handoff／done，沒有鎖定 candidate。
+## 本次恢復執行（2026-09-06 16:42 UTC）
 
-Draft PR：[1679](https://github.com/ajoe734/drts-fleet-platform/pull/1679)。公開供 supervisor 檢視範圍內 WIP；不是 handoff。
+本節取代下方歷史 WIP 的 scope-blocker 判斷。依已合併的 [history repair 診斷](../../../support/unblock/SR-MAIL-001/SR-MAIL-001-UNBLOCK-HISTORY-REPAIR.md)，本 task 交付後端 adapter 與受控 receiver 驗證；瀏覽器頁面、共用 enum 擴充及 production inbox 驗收不屬本次 write scopes，不據此阻擋後端 candidate。未宣稱部署或整個邀請產品流程已驗收。
+
+- 最新 fetch 的 `origin/dev` base：`69c519702047862212bc0e4890350e6b58917062`。
+- 本次實作與執行檢查的 SHA：`a5e21b339916163cab688d91a5d2c01a153c61d6`，branch `codex2/sr-mail-001`。後續只更新本文；最終 candidate SHA 由 commit＋普通 push 後的 `CANDIDATE_SHA=$(git rev-parse HEAD)` 寫入 task handoff，並列於 [PR #1679](https://github.com/ajoe734/drts-fleet-platform/pull/1679) body，避免本文自引用 SHA。
+- PR #1690 只合併診斷（merge `7dccddaba7d51dca8d56da01d5320d9f22f8b68f`），不代表本 task 實作已合併。
+- 已 `git rebase origin/dev`；`git range-diff 2093cf7e38526a7a7c027600be92004f7275efd3..6895ef0a8414694584f3734b3d6baf524d8bc4a9 origin/dev..HEAD` 在 rebase 後顯示六個 patch 全部 `=`。隨後以無 tree 變更的 history bridge commit `4e335dddd` 保留舊 published tip 為 parent，普通 push 成功；未 force-push 或丟棄既有 anchor。
+- 兩個依賴的 merge SHA（下方記錄）在本次 HEAD 重新以 `git merge-base --is-ancestor` 驗證，exit 0。
+
+### 本次修正與基準重現
+
+`verify-mailpit.ts` 增加 `assert(token)`，再檢查 `token.startsWith("ti_")`，讓 receiver 擷取的 proof 在 TypeScript 中正確收窄為 string；修復原 PR 的七個 TS2345／TS2322 錯誤。
+
+以 `git show 69c519702047862212bc0e4890350e6b58917062:<path>` 暫時載入兩個 invitation service 的基準內容，執行 `pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/ -t 'does not claim delivered without a configured transport'`：exit **1**，`expected 'delivered' to be 'delivery_failed'`。資源：`invitation_7f796218-8ceb-4baa-a900-d96c63cd8f4c`，tenant `sr-mail-unavailable`。使用 finally 還原已提交內容，未 stash。這證明缺陷仍在本次 base，不使用歷史 audit 作目前真值。
+
+### 本次命令與结果
+
+| 命令                                                                                                                                                          | Exit | 結果                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------- |
+| `CI=true pnpm install --frozen-lockfile --ignore-scripts --offline`                                                                                           | 0    | 移除本 worktree 21 個 node_modules symlink 後建立獨立依賴；未動 canonical dependencies 或 lockfile |
+| `pnpm --filter @drts/control-plane-auth build`                                                                                                                | 0    | 本地 ignored build artifacts                                                                       |
+| `pnpm --filter @drts/contracts build`                                                                                                                         | 0    | 本地 ignored build artifacts                                                                       |
+| `pnpm run typecheck:root`                                                                                                                                     | 0    | 涵蓋 receiver script；七個 token 型別錯誤已清除                                                    |
+| `git diff --check`                                                                                                                                            | 0    | 無 whitespace error                                                                                |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/ tests/unit/tenant-invitation-lifecycle.test.ts tests/unit/system-remediation/sr-notify-001/` | 0    | 5 files、52 tests passed；含重啟、去重、撤銷競態及 shared outbox 子程序 durability                 |
+
+首次 root typecheck exit 2：除七個已修復 token 錯誤外，worktree 共用 canonical node_modules 造成兩份 ApiClient private identity 與 getList 型別不一致；獨立 offline install 後 root typecheck 通過。未修改 shared sources 或測試設定。
+
+### 本次真實 Mailpit receiver
+
+```bash
+NOTIFICATION_OUTBOX_DIRECTORY=/tmp/sr-mail-001-receiver-20260906-resume \
+MAILPIT_SMTP_PORT=1025 SR_MAIL_MAILPIT_HTTP=http://127.0.0.1:8025 \
+TENANT_INVITATION_FROM_EMAIL=sender@sr-mail.invalid \
+TENANT_INVITATION_ACCEPT_URL=https://acceptance.example.test/invitation \
+pnpm --filter @drts/api exec tsx --tsconfig tsconfig.seed.json \
+  ../../tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts
+```
+
+Exit **0**。Mailpit v1.30.6，實際 SMTP＋HTTP 讀回；tenant `sr-mail-001-961dc7b7-b06d-4e91-9e05-237cf3ed4723`，user `tenant_user_d0d27624-3509-409f-8298-6acf2d345bf0`。
+
+| 用途             | Invitation ID                                   | Delivery ID                          | Receiver message ID    | Attempt ID                           |
+| ---------------- | ----------------------------------------------- | ------------------------------------ | ---------------------- | ------------------------------------ |
+| 首封，被重寄取代 | invitation_45958d46-c33b-4164-8377-71e86a35f854 | c69a92a7-f713-4fb6-8f76-30ee8cc37add | 3JttExXM6STXw3QJOYJ7JK | bdec6028-5207-4c39-9525-c8ecd1c57ded |
+| 重寄，單次啟用   | invitation_f71c7cdd-5a38-4279-9969-135273054460 | b8660e3e-fcc9-4061-ab48-397d6847437b | 1y58OLY3X6sytxOGnbA5pj | ba3d7cd5-d3aa-40e6-ac70-97fba6b7986a |
+| 撤銷             | invitation_7215c08e-6502-472d-bdff-bddace45e432 | bb114168-0ccd-48e7-9f39-4b0a71614817 | 4z9IhrXGYi1AKu0btJft5e | 2ac62e9b-7c92-4221-b142-d46a15b7fb2e |
+| 過期             | invitation_47945034-6667-49c2-956a-89374aa24196 | c4abb576-ad13-4bff-a4bd-73a7cfdec457 | 425cM0ItXveUJm8Kk64spG | cd2875be-7772-4407-a017-a9457c56cc84 |
+
+Message-ID 為 `<Delivery ID@notification.drts.invalid>`，四筆 status 均為 `sent`。比對實際收件人、body、Message-ID、provider ID；由收到的 proof 驗證一次性、舊／撤銷／過期拒絕。重建 adapter 後 duplicate send 沿用 delivery ID，drain 無新 attempt。沒有輸出 token 或完整郵件內容。
+
+### 交付邊界
+
+未執行 production provider／外部 inbox、瀏覽器啟用、HTTP controller＋PostgreSQL 或整個 API crash recovery。identity 使用 repository fallback；receiver 為真實 loopback Mailpit。`https://acceptance.example.test/invitation` 只驗證 fragment proof，不是已部署頁面。Public invitation 保持 `pending_delivery`，durable outbox 記 `queued/sent/failed`；沒有把 SMTP ACK 當 `delivered`。缺設定須設定後 resend；未回填歷史假 delivered。尚須同 candidate 的獨立 review、CI、merge；owner 不呼叫 done。
+
+## 歷史 WIP 記錄（以下為前次執行，scope-blocker 判斷已由上節取代）
 
 ## 版本與追溯
 
