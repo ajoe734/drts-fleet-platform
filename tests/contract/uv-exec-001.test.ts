@@ -16,6 +16,8 @@ import {
   VOICE_ERROR_CODES,
   VoiceSessionSchema,
   VoiceDraftSchema,
+  VoiceDraftSlotSchema,
+  VoiceDraftRevisionSchema,
   VoiceReceiptSchema,
   VoiceReceiptStatusSchema,
   VOICE_RECEIPT_STATUSES,
@@ -29,6 +31,12 @@ import {
   VoiceActionKeyRecordSchema,
   VoiceCallbackSchema,
   VoiceCallbackStatusSchema,
+  VOICE_CALLBACK_STATUSES,
+  VoiceCallbackTerminalStatusSchema,
+  VOICE_CALLBACK_TERMINAL_STATUSES,
+  VoiceCallbackAttemptOutcomeSchema,
+  VOICE_CALLBACK_ATTEMPT_OUTCOMES,
+  VoiceCallbackAttemptSchema,
   VoiceRecordingStateSchema,
   VoiceConfirmationStateSchema,
   VoiceOutcomeSchema,
@@ -39,27 +47,41 @@ import {
 const OPENAPI_PATH = resolve(process.cwd(), "docs/04-api/openapi-spec.yaml");
 const requireMod = createRequire(resolve(process.cwd(), "package.json"));
 
-function resolvePnpmModule(name: string): any {
-  try {
-    return requireMod(name);
-  } catch {
-    const candidates = [
-      resolve(process.cwd(), "node_modules/.pnpm"),
-      "/home/lupin/drts-fleet-platform/node_modules/.pnpm",
-    ];
-    for (const base of candidates) {
-      if (!existsSync(base)) continue;
-      const entries = readdirSync(base);
-      const match = entries.find((e) => e.startsWith(`${name}@`));
-      if (match) {
-        const modPath = join(base, match, "node_modules", name);
-        if (existsSync(modPath)) {
-          return requireMod(modPath);
-        }
+function resolvePnpmModule(name: string, preferredVersion?: string): any {
+  if (!preferredVersion) {
+    try {
+      return requireMod(name);
+    } catch {
+      // fallback to pnpm search
+    }
+  }
+  const candidates = [
+    resolve(process.cwd(), "node_modules/.pnpm"),
+    "/home/lupin/drts-fleet-platform/node_modules/.pnpm",
+  ];
+  for (const base of candidates) {
+    if (!existsSync(base)) continue;
+    const entries = readdirSync(base);
+    if (preferredVersion) {
+      const exact = entries.find((e) =>
+        e.startsWith(`${name}@${preferredVersion}`),
+      );
+      if (exact) {
+        const modPath = join(base, exact, "node_modules", name);
+        if (existsSync(modPath)) return requireMod(modPath);
       }
     }
-    throw new Error(`Cannot find module '${name}'`);
+    const matches = entries
+      .filter((e) => e.startsWith(`${name}@`))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    for (const match of matches) {
+      const modPath = join(base, match, "node_modules", name);
+      if (existsSync(modPath)) {
+        return requireMod(modPath);
+      }
+    }
   }
+  throw new Error(`Cannot find module '${name}'`);
 }
 
 describe("UV-EXEC-001 Voice Contracts", () => {
@@ -688,6 +710,93 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       ).toBe(true);
     });
 
+    it("validates multi-slot VoiceDraft and VoiceDraftRevision preserving named slot evidence and snapshot refs without dropping slots or snapshotHash (SD §6.1, §9.1 regression)", () => {
+      const draftPayload = {
+        intentId: "123e4567-e89b-12d3-a456-426614174000",
+        draftVersion: 3,
+        rawText: "台北車站東三門，兩位",
+        normalizedValue: { placeId: "poi-123" },
+        sourceTurnIds: ["123e4567-e89b-12d3-a456-426614174001"],
+        sourceSegmentIds: ["seg-1"],
+        providerConfidence: 0.95,
+        validationState: "validated",
+        confirmedByCustomerAt: null,
+        slots: {
+          pickup: {
+            rawText: "台北車站東三門",
+            normalizedValue: {
+              placeId: "poi-123",
+              formattedAddress: "台北市中正區北平西路3號",
+            },
+            sourceTurnIds: ["123e4567-e89b-12d3-a456-426614174001"],
+            sourceSegmentIds: ["seg-1"],
+            providerConfidence: 0.95,
+            validationState: "validated",
+            confirmedByCustomerAt: null,
+          },
+          passengerCount: {
+            rawText: "兩位",
+            normalizedValue: 2,
+            sourceTurnIds: ["123e4567-e89b-12d3-a456-426614174002"],
+            sourceSegmentIds: ["seg-2"],
+            providerConfidence: 0.98,
+            validationState: "validated",
+            confirmedByCustomerAt: null,
+          },
+        },
+        snapshotHash: "sha256-canonical-business-snapshot-hash-12345",
+        canonicalSnapshot: {
+          pickup: "台北市中正區北平西路3號",
+          passengerCount: 2,
+        },
+        validationRefs: ["ref-address-v1", "ref-eligibility-v1"],
+      };
+
+      const parseResult = VoiceDraftSchema.safeParse(draftPayload);
+      expect(parseResult.success).toBe(true);
+      if (parseResult.success) {
+        expect(parseResult.data.slots).toBeDefined();
+        expect(parseResult.data.slots?.pickup).toBeDefined();
+        expect(parseResult.data.slots?.pickup.rawText).toBe("台北車站東三門");
+        expect(parseResult.data.slots?.passengerCount).toBeDefined();
+        expect(parseResult.data.slots?.passengerCount.normalizedValue).toBe(2);
+        expect(parseResult.data.snapshotHash).toBe(
+          "sha256-canonical-business-snapshot-hash-12345",
+        );
+        expect(parseResult.data.canonicalSnapshot).toEqual({
+          pickup: "台北市中正區北平西路3號",
+          passengerCount: 2,
+        });
+
+        // Roundtrip test: verify that serialization and re-parsing retains all slots and snapshot refs
+        const serialized = JSON.stringify(parseResult.data);
+        const roundtripResult = VoiceDraftSchema.safeParse(JSON.parse(serialized));
+        expect(roundtripResult.success).toBe(true);
+        if (roundtripResult.success) {
+          expect(roundtripResult.data).toEqual(parseResult.data);
+        }
+      }
+
+      // VoiceDraftRevisionSchema test per SD §9.1
+      const revisionPayload = {
+        intentId: "123e4567-e89b-12d3-a456-426614174000",
+        draftVersion: 3,
+        slots: draftPayload.slots,
+        validationRefs: draftPayload.validationRefs,
+        canonicalSnapshot: draftPayload.canonicalSnapshot,
+        snapshotHash: draftPayload.snapshotHash,
+      };
+      const revResult = VoiceDraftRevisionSchema.safeParse(revisionPayload);
+      expect(revResult.success).toBe(true);
+      if (revResult.success) {
+        expect(revResult.data.slots.pickup.rawText).toBe("台北車站東三門");
+        expect(revResult.data.slots.passengerCount.normalizedValue).toBe(2);
+        expect(revResult.data.snapshotHash).toBe(
+          "sha256-canonical-business-snapshot-hash-12345",
+        );
+      }
+    });
+
     it("validates all VoiceReceiptStatus enum values per SD §7.1 and §10.1", () => {
       for (const status of VOICE_RECEIPT_STATUSES) {
         expect(VoiceReceiptStatusSchema.safeParse(status).success).toBe(true);
@@ -960,7 +1069,6 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         "claimed",
         "in_progress",
         "completed",
-        "failed",
         "cancelled",
         "unreachable",
       ] as const;
@@ -974,9 +1082,57 @@ describe("UV-EXEC-001 Voice Contracts", () => {
           consentSnapshotHash: "hash-consent-xyz",
           status,
           scheduledAt: "2026-09-06T03:00:00.000Z",
+          attemptCount: 1,
+          lastOutcome: "failed" as const,
         };
         expect(VoiceCallbackSchema.safeParse(callback).success).toBe(true);
       }
+
+      // 'failed' is an attempt outcome, NOT a task status per SD §9.1 and §12.5
+      expect(VoiceCallbackStatusSchema.safeParse("failed").success).toBe(false);
+      expect(
+        VoiceCallbackSchema.safeParse({
+          callbackId: "123e4567-e89b-12d3-a456-426614174000",
+          voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+          contactPhone: "+886912345678",
+          consentSnapshotHash: "hash-consent-xyz",
+          status: "failed",
+        }).success,
+      ).toBe(false);
+    });
+
+    it("validates VoiceCallbackTerminalStatus enum per SD §12.5", () => {
+      for (const status of VOICE_CALLBACK_TERMINAL_STATUSES) {
+        expect(VoiceCallbackTerminalStatusSchema.safeParse(status).success).toBe(true);
+      }
+      expect(VoiceCallbackTerminalStatusSchema.safeParse("pending").success).toBe(false);
+      expect(VoiceCallbackTerminalStatusSchema.safeParse("claimed").success).toBe(false);
+      expect(VoiceCallbackTerminalStatusSchema.safeParse("in_progress").success).toBe(false);
+      expect(VoiceCallbackTerminalStatusSchema.safeParse("failed").success).toBe(false);
+    });
+
+    it("validates VoiceCallbackAttemptOutcome and VoiceCallbackAttemptSchema per SD §9.1 and §12.5", () => {
+      for (const outcome of VOICE_CALLBACK_ATTEMPT_OUTCOMES) {
+        expect(VoiceCallbackAttemptOutcomeSchema.safeParse(outcome).success).toBe(true);
+      }
+      expect(VoiceCallbackAttemptOutcomeSchema.safeParse("unknown_outcome").success).toBe(false);
+
+      const validAttempt = {
+        taskId: "123e4567-e89b-12d3-a456-426614174000",
+        attemptNumber: 1,
+        operatorId: "op-1",
+        startedAt: "2026-09-06T03:00:00.000Z",
+        endedAt: "2026-09-06T03:01:00.000Z",
+        outcome: "failed" as const,
+        nextAction: "return_to_pending",
+      };
+      expect(VoiceCallbackAttemptSchema.safeParse(validAttempt).success).toBe(true);
+
+      const invalidAttempt = {
+        ...validAttempt,
+        outcome: "nonexistent",
+      };
+      expect(VoiceCallbackAttemptSchema.safeParse(invalidAttempt).success).toBe(false);
     });
 
     it("validates orthogonal recording, confirmation, outcome, and commit status enums per SD §5.2", () => {
@@ -1060,6 +1216,8 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         "VoiceOutcome",
         "VoiceSession",
         "VoiceDraft",
+        "VoiceDraftSlot",
+        "VoiceDraftRevision",
         "VoiceReceiptStatus",
         "VoicePendingReceipt",
         "VoiceSucceededReceipt",
@@ -1070,6 +1228,8 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         "VoiceRejectedReceiptRecord",
         "VoiceReceiptRecord",
         "VoiceCallbackStatus",
+        "VoiceCallbackAttemptOutcome",
+        "VoiceCallbackAttempt",
         "VoiceCallback",
         "VoiceAgentBookingActor",
         "HumanBookingActor",
@@ -1151,8 +1311,23 @@ describe("UV-EXEC-001 Voice Contracts", () => {
     )!;
     const validateSession = ajv.getSchema("#/components/schemas/VoiceSession")!;
     const validateDraft = ajv.getSchema("#/components/schemas/VoiceDraft")!;
+    const validateDraftSlot = ajv.getSchema(
+      "#/components/schemas/VoiceDraftSlot",
+    )!;
+    const validateDraftRevision = ajv.getSchema(
+      "#/components/schemas/VoiceDraftRevision",
+    )!;
     const validateCallback = ajv.getSchema(
       "#/components/schemas/VoiceCallback",
+    )!;
+    const validateCallbackStatus = ajv.getSchema(
+      "#/components/schemas/VoiceCallbackStatus",
+    )!;
+    const validateCallbackAttemptOutcome = ajv.getSchema(
+      "#/components/schemas/VoiceCallbackAttemptOutcome",
+    )!;
+    const validateCallbackAttempt = ajv.getSchema(
+      "#/components/schemas/VoiceCallbackAttempt",
     )!;
     const validateScope = ajv.getSchema(
       "#/components/schemas/VoiceScopeProfile",
@@ -1382,22 +1557,75 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       ).toBe(false);
     });
 
-    it("OpenAPI accepts valid VoiceCallback and rejects invalid callback status", () => {
-      const validCallback = {
-        callbackId: "123e4567-e89b-12d3-a456-426614174000",
-        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
-        contactPhone: "+886912345678",
-        consentSnapshotHash: "hash-consent-xyz",
-        status: "pending",
-        scheduledAt: "2026-09-06T03:00:00.000Z",
-      };
-      expect(validateCallback(validCallback)).toBe(true);
+    it("OpenAPI accepts valid VoiceCallback and rejects invalid callback status (including failed as task status)", () => {
+      const validStatuses = [
+        "pending",
+        "claimed",
+        "in_progress",
+        "completed",
+        "cancelled",
+        "unreachable",
+      ];
+      for (const status of validStatuses) {
+        const callback = {
+          callbackId: "123e4567-e89b-12d3-a456-426614174000",
+          voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+          contactPhone: "+886912345678",
+          consentSnapshotHash: "hash-consent-xyz",
+          status,
+          scheduledAt: "2026-09-06T03:00:00.000Z",
+        };
+        expect(validateCallback(callback)).toBe(true);
+        expect(validateCallbackStatus(status)).toBe(true);
+      }
 
-      const invalidCallback = {
-        ...validCallback,
-        status: "invalid_status",
+      // 'failed' is an attempt outcome, NOT a callback task state per SD §9.1 and §12.5
+      expect(validateCallbackStatus("failed")).toBe(false);
+      expect(
+        validateCallback({
+          callbackId: "123e4567-e89b-12d3-a456-426614174000",
+          voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+          contactPhone: "+886912345678",
+          consentSnapshotHash: "hash-consent-xyz",
+          status: "failed",
+        }),
+      ).toBe(false);
+
+      expect(
+        validateCallback({
+          callbackId: "123e4567-e89b-12d3-a456-426614174000",
+          voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+          contactPhone: "+886912345678",
+          consentSnapshotHash: "hash-consent-xyz",
+          status: "invalid_status",
+        }),
+      ).toBe(false);
+    });
+
+    it("OpenAPI validates VoiceCallbackAttemptOutcome and VoiceCallbackAttempt schemas per SD §9.1 and §12.5", () => {
+      const validOutcomes = ["answered", "no_answer", "busy", "failed", "succeeded"];
+      for (const outcome of validOutcomes) {
+        expect(validateCallbackAttemptOutcome(outcome)).toBe(true);
+      }
+      expect(validateCallbackAttemptOutcome("invalid_outcome")).toBe(false);
+
+      const validAttempt = {
+        taskId: "123e4567-e89b-12d3-a456-426614174000",
+        attemptNumber: 1,
+        operatorId: "op-1",
+        startedAt: "2026-09-06T03:00:00.000Z",
+        endedAt: "2026-09-06T03:01:00.000Z",
+        outcome: "failed",
+        nextAction: "return_to_pending",
       };
-      expect(validateCallback(invalidCallback)).toBe(false);
+      expect(validateCallbackAttempt(validAttempt)).toBe(true);
+
+      expect(
+        validateCallbackAttempt({
+          ...validAttempt,
+          outcome: "nonexistent_outcome",
+        }),
+      ).toBe(false);
     });
 
 
@@ -1781,6 +2009,56 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       }
     });
 
+    it("ensures VoiceDraft and VoiceDraftRevision multi-slot parity between Zod and OpenAPI Ajv validator", () => {
+      const multiSlotDraft = {
+        intentId: "123e4567-e89b-12d3-a456-426614174000",
+        draftVersion: 3,
+        slots: {
+          pickup: {
+            rawText: "台北車站東三門",
+            normalizedValue: {
+              placeId: "poi-123",
+              formattedAddress: "台北市中正區北平西路3號",
+            },
+            sourceTurnIds: ["123e4567-e89b-12d3-a456-426614174001"],
+            sourceSegmentIds: ["seg-1"],
+            providerConfidence: 0.95,
+            validationState: "validated",
+            confirmedByCustomerAt: null,
+          },
+          passengerCount: {
+            rawText: "3位",
+            normalizedValue: 3,
+            sourceTurnIds: ["123e4567-e89b-12d3-a456-426614174002"],
+            sourceSegmentIds: ["seg-2"],
+            providerConfidence: 0.98,
+            validationState: "validated",
+            confirmedByCustomerAt: null,
+          },
+        },
+        snapshotHash: "sha256-snapshot-hash-test-456",
+        canonicalSnapshot: {
+          pickup: "台北市中正區北平西路3號",
+          passengerCount: 3,
+        },
+        validationRefs: ["ref-address-v1"],
+      };
+
+      expect(VoiceDraftSchema.safeParse(multiSlotDraft).success).toBe(true);
+      expect(validateDraft(multiSlotDraft)).toBe(true);
+
+      const revision = {
+        intentId: multiSlotDraft.intentId,
+        draftVersion: multiSlotDraft.draftVersion,
+        slots: multiSlotDraft.slots,
+        validationRefs: multiSlotDraft.validationRefs,
+        canonicalSnapshot: multiSlotDraft.canonicalSnapshot,
+        snapshotHash: multiSlotDraft.snapshotHash,
+      };
+      expect(VoiceDraftRevisionSchema.safeParse(revision).success).toBe(true);
+      expect(validateDraftRevision(revision)).toBe(true);
+    });
+
     it("ensures bidirectional parity between Zod and OpenAPI Ajv for VoiceReceipt across status matrix and orderId boundaries", () => {
       const cases: Array<{
         name: string;
@@ -2092,6 +2370,162 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       expect(
         validateCapabilityTokenEnvelope({ ...baseEnvelope, expiresIn: 3600 }),
       ).toBe(true);
+    });
+  });
+
+  describe("Explicit Ajv 8.20.0 Schema Compilation and Validation", () => {
+    it("compiles and validates OpenAPI VoiceReceipt and VoiceReceiptRecord using Ajv 8.20.0 (strict: false, validateFormats: false) without throwing", () => {
+      const YAML = resolvePnpmModule("yaml");
+      const Ajv8Class = resolvePnpmModule("ajv", "8.20.0");
+      const Ajv8 = Ajv8Class.default || Ajv8Class;
+      const ajv8 = new Ajv8({
+        strict: false,
+        validateFormats: false,
+        allErrors: true,
+      });
+
+      const openapiDoc = YAML.parse(readFileSync(OPENAPI_PATH, "utf8"));
+      for (const [name, schema] of Object.entries(
+        openapiDoc.components.schemas,
+      )) {
+        ajv8.addSchema(schema, `#/components/schemas/${name}`);
+      }
+
+      const vPending = ajv8.getSchema(
+        "#/components/schemas/VoicePendingReceipt",
+      )!;
+      const vSucceeded = ajv8.getSchema(
+        "#/components/schemas/VoiceSucceededReceipt",
+      )!;
+      const vRejected = ajv8.getSchema(
+        "#/components/schemas/VoiceRejectedReceipt",
+      )!;
+      const vReceipt = ajv8.getSchema("#/components/schemas/VoiceReceipt")!;
+      const vPendingRecord = ajv8.getSchema(
+        "#/components/schemas/VoicePendingReceiptRecord",
+      )!;
+      const vSucceededRecord = ajv8.getSchema(
+        "#/components/schemas/VoiceSucceededReceiptRecord",
+      )!;
+      const vRejectedRecord = ajv8.getSchema(
+        "#/components/schemas/VoiceRejectedReceiptRecord",
+      )!;
+      const vRecord = ajv8.getSchema(
+        "#/components/schemas/VoiceReceiptRecord",
+      )!;
+
+      expect(vPending).toBeDefined();
+      expect(vSucceeded).toBeDefined();
+      expect(vRejected).toBeDefined();
+      expect(vReceipt).toBeDefined();
+      expect(vPendingRecord).toBeDefined();
+      expect(vSucceededRecord).toBeDefined();
+      expect(vRejectedRecord).toBeDefined();
+      expect(vRecord).toBeDefined();
+
+      // Pending receipt: orderId null or omitted is valid; string uuid is invalid
+      expect(
+        vPending({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "pending",
+          orderId: null,
+        }),
+      ).toBe(true);
+      expect(
+        vPending({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "pending",
+        }),
+      ).toBe(true);
+      expect(
+        vPending({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "pending",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }),
+      ).toBe(false);
+
+      // Succeeded receipt: orderId string uuid required; null or omitted invalid
+      expect(
+        vSucceeded({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "succeeded",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }),
+      ).toBe(true);
+      expect(
+        vSucceeded({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "succeeded",
+          orderId: null,
+        }),
+      ).toBe(false);
+      expect(
+        vSucceeded({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "succeeded",
+        }),
+      ).toBe(false);
+
+      // Rejected receipt: orderId null or omitted is valid; string uuid is invalid
+      expect(
+        vRejected({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "rejected",
+          orderId: null,
+          rejectionReason: "VOICE_SERVICE_NOT_AVAILABLE",
+        }),
+      ).toBe(true);
+      expect(
+        vRejected({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "rejected",
+          rejectionReason: "VOICE_SERVICE_NOT_AVAILABLE",
+        }),
+      ).toBe(true);
+      expect(
+        vRejected({
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "rejected",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }),
+      ).toBe(false);
+
+      // Pending receipt record: orderId null or omitted is valid
+      expect(
+        vPendingRecord({
+          actionKey: "key-1",
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "pending",
+          orderId: null,
+        }),
+      ).toBe(true);
+      expect(
+        vPendingRecord({
+          actionKey: "key-1",
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "pending",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }),
+      ).toBe(false);
+
+      // Rejected receipt record: orderId null or omitted is valid
+      expect(
+        vRejectedRecord({
+          actionKey: "key-1",
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "rejected",
+          orderId: null,
+        }),
+      ).toBe(true);
+      expect(
+        vRejectedRecord({
+          actionKey: "key-1",
+          commandId: "123e4567-e89b-12d3-a456-426614174000",
+          status: "rejected",
+          orderId: "123e4567-e89b-12d3-a456-426614174001",
+        }),
+      ).toBe(false);
     });
   });
 });

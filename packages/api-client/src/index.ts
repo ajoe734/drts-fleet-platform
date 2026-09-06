@@ -4521,6 +4521,8 @@ export function createPlatformAdminClient(
 export type {
   VoiceSession,
   VoiceDraft,
+  VoiceDraftSlot,
+  VoiceDraftRevision,
   VoiceProof,
   SpeechVoiceProof,
   DtmfVoiceProof,
@@ -4536,6 +4538,10 @@ export type {
   VoiceRejectedReceiptRecord,
   VoiceActionKeyRecord,
   VoiceCallback,
+  VoiceCallbackStatus,
+  VoiceCallbackTerminalStatus,
+  VoiceCallbackAttempt,
+  VoiceCallbackAttemptOutcome,
   VoiceControlCutoff,
   VoiceSpeechEvidence,
   VoiceDtmfEvidence,
@@ -4557,7 +4563,6 @@ export type {
   VoiceRecordingState,
   VoiceConfirmationState,
   VoiceOutcome,
-  VoiceCallbackStatus,
   SpeechProof,
   DtmfProof,
 } from "@drts/contracts";

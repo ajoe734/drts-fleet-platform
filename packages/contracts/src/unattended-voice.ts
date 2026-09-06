@@ -249,18 +249,45 @@ export const VoiceSessionSchema = z.object({
 });
 export type VoiceSession = z.infer<typeof VoiceSessionSchema>;
 
+export const VoiceDraftSlotSchema = z.object({
+  rawText: z.string().optional(),
+  normalizedValue: z.unknown().optional(),
+  sourceTurnIds: z.array(z.string().uuid()).optional(),
+  sourceSegmentIds: z.array(z.string()).optional(),
+  providerConfidence: z.number().nullable().optional(),
+  validationState: z.string().optional(),
+  confirmedByCustomerAt: z.string().datetime().nullable().optional(),
+});
+export type VoiceDraftSlot = z.infer<typeof VoiceDraftSlotSchema>;
+
 export const VoiceDraftSchema = z.object({
   intentId: z.string().uuid(),
   draftVersion: z.number().int(),
   rawText: z.string().optional(),
   normalizedValue: z.unknown().optional(),
-  sourceTurnIds: z.array(z.string().uuid()),
-  sourceSegmentIds: z.array(z.string()),
-  providerConfidence: z.number().nullable(),
-  validationState: z.string(),
-  confirmedByCustomerAt: z.string().datetime().nullable(),
+  sourceTurnIds: z.array(z.string().uuid()).optional(),
+  sourceSegmentIds: z.array(z.string()).optional(),
+  providerConfidence: z.number().nullable().optional(),
+  validationState: z.string().optional(),
+  confirmedByCustomerAt: z.string().datetime().nullable().optional(),
+  slots: z.record(z.string(), VoiceDraftSlotSchema).optional(),
+  snapshotHash: z.string().optional(),
+  canonicalSnapshot: z.record(z.string(), z.unknown()).optional(),
+  validationRefs: z.array(z.string()).optional(),
 });
 export type VoiceDraft = z.infer<typeof VoiceDraftSchema>;
+
+export const VoiceDraftRevisionSchema = z.object({
+  intentId: z.string().uuid(),
+  draftVersion: z.number().int(),
+  slots: z.record(z.string(), VoiceDraftSlotSchema),
+  validationRefs: z.array(z.string()).optional(),
+  canonicalSnapshot: z.record(z.string(), z.unknown()).optional(),
+  snapshotHash: z.string().min(1),
+  createdAt: z.string().datetime().optional(),
+});
+export type VoiceDraftRevision = z.infer<typeof VoiceDraftRevisionSchema>;
+
 
 export const VOICE_RECEIPT_STATUSES = [
   "pending",
@@ -376,16 +403,59 @@ export type VoiceReceiptRecord = z.infer<typeof VoiceReceiptRecordSchema>;
 export const VoiceActionKeyRecordSchema = VoiceReceiptRecordSchema;
 export type VoiceActionKeyRecord = VoiceReceiptRecord;
 
-export const VoiceCallbackStatusSchema = z.enum([
+export const VOICE_CALLBACK_STATUSES = [
   "pending",
   "claimed",
   "in_progress",
   "completed",
-  "failed",
   "cancelled",
   "unreachable",
-]);
+] as const;
+
+export const VoiceCallbackStatusSchema = z.enum(VOICE_CALLBACK_STATUSES);
 export type VoiceCallbackStatus = z.infer<typeof VoiceCallbackStatusSchema>;
+
+export const VOICE_CALLBACK_TERMINAL_STATUSES = [
+  "completed",
+  "cancelled",
+  "unreachable",
+] as const;
+
+export const VoiceCallbackTerminalStatusSchema = z.enum(
+  VOICE_CALLBACK_TERMINAL_STATUSES,
+);
+export type VoiceCallbackTerminalStatus = z.infer<
+  typeof VoiceCallbackTerminalStatusSchema
+>;
+
+export const VOICE_CALLBACK_ATTEMPT_OUTCOMES = [
+  "answered",
+  "no_answer",
+  "busy",
+  "failed",
+  "succeeded",
+] as const;
+
+export const VoiceCallbackAttemptOutcomeSchema = z.enum(
+  VOICE_CALLBACK_ATTEMPT_OUTCOMES,
+);
+export type VoiceCallbackAttemptOutcome = z.infer<
+  typeof VoiceCallbackAttemptOutcomeSchema
+>;
+
+export const VoiceCallbackAttemptSchema = z
+  .object({
+    attemptId: z.string().uuid().optional(),
+    taskId: z.string().uuid(),
+    attemptNumber: z.number().int().positive().optional(),
+    operatorId: z.string().min(1).optional(),
+    startedAt: z.string().datetime().optional(),
+    endedAt: z.string().datetime().nullable().optional(),
+    outcome: VoiceCallbackAttemptOutcomeSchema,
+    nextAction: z.string().optional(),
+  })
+  .strict();
+export type VoiceCallbackAttempt = z.infer<typeof VoiceCallbackAttemptSchema>;
 
 export const VoiceCallbackSchema = z.object({
   callbackId: z.string().uuid(),
@@ -394,6 +464,15 @@ export const VoiceCallbackSchema = z.object({
   consentSnapshotHash: z.string(),
   status: VoiceCallbackStatusSchema,
   scheduledAt: z.string().datetime().optional(),
+  attemptCount: z.number().int().nonnegative().optional(),
+  lastOutcome: VoiceCallbackAttemptOutcomeSchema.optional(),
+  resourceScopeId: z.string().uuid().optional(),
+  contactRole: z.string().optional(),
+  reason: z.string().optional(),
+  priority: z.string().optional(),
+  dueAt: z.string().datetime().optional(),
+  ownerClaimLease: z.string().optional(),
+  version: z.number().int().optional(),
 });
 export type VoiceCallback = z.infer<typeof VoiceCallbackSchema>;
 

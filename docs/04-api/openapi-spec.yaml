@@ -2934,14 +2934,9 @@ components:
         - scope
         - dialogState
         - mediaState
-    VoiceDraft:
+    VoiceDraftSlot:
       type: object
       properties:
-        intentId:
-          type: string
-          format: uuid
-        draftVersion:
-          type: integer
         rawText:
           type: string
         normalizedValue:
@@ -2964,14 +2959,79 @@ components:
           type: string
           format: date-time
           nullable: true
+    VoiceDraft:
+      type: object
+      properties:
+        intentId:
+          type: string
+          format: uuid
+        draftVersion:
+          type: integer
+        rawText:
+          type: string
+        normalizedValue:
+          description: Normalized slot value per SD §6.1 (legacy root slot representation)
+        sourceTurnIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        sourceSegmentIds:
+          type: array
+          items:
+            type: string
+        providerConfidence:
+          type: number
+          nullable: true
+        validationState:
+          type: string
+        confirmedByCustomerAt:
+          type: string
+          format: date-time
+          nullable: true
+        slots:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/VoiceDraftSlot"
+        snapshotHash:
+          type: string
+        canonicalSnapshot:
+          type: object
+        validationRefs:
+          type: array
+          items:
+            type: string
       required:
         - intentId
         - draftVersion
-        - sourceTurnIds
-        - sourceSegmentIds
-        - providerConfidence
-        - validationState
-        - confirmedByCustomerAt
+    VoiceDraftRevision:
+      type: object
+      properties:
+        intentId:
+          type: string
+          format: uuid
+        draftVersion:
+          type: integer
+        slots:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/VoiceDraftSlot"
+        validationRefs:
+          type: array
+          items:
+            type: string
+        canonicalSnapshot:
+          type: object
+        snapshotHash:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - intentId
+        - draftVersion
+        - slots
+        - snapshotHash
     VoiceReceiptStatus:
       type: string
       enum:
@@ -2988,6 +3048,7 @@ components:
           type: string
           enum: [pending]
         orderId:
+          type: string
           nullable: true
           enum: [null]
         nextAction:
@@ -3033,6 +3094,7 @@ components:
           type: string
           enum: [rejected]
         orderId:
+          type: string
           nullable: true
           enum: [null]
         rejectionReason:
@@ -3071,6 +3133,7 @@ components:
           type: string
           enum: [pending]
         orderId:
+          type: string
           nullable: true
           enum: [null]
         payloadHash:
@@ -3136,6 +3199,7 @@ components:
           type: string
           enum: [rejected]
         orderId:
+          type: string
           nullable: true
           enum: [null]
         payloadHash:
@@ -3173,9 +3237,44 @@ components:
         - claimed
         - in_progress
         - completed
-        - failed
         - cancelled
         - unreachable
+    VoiceCallbackAttemptOutcome:
+      type: string
+      enum:
+        - answered
+        - no_answer
+        - busy
+        - failed
+        - succeeded
+    VoiceCallbackAttempt:
+      type: object
+      properties:
+        attemptId:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        attemptNumber:
+          type: integer
+        operatorId:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+          nullable: true
+        outcome:
+          $ref: "#/components/schemas/VoiceCallbackAttemptOutcome"
+        nextAction:
+          type: string
+      required:
+        - taskId
+        - outcome
+      additionalProperties: false
     VoiceCallback:
       type: object
       properties:
@@ -3194,6 +3293,26 @@ components:
         scheduledAt:
           type: string
           format: date-time
+        attemptCount:
+          type: integer
+        lastOutcome:
+          $ref: "#/components/schemas/VoiceCallbackAttemptOutcome"
+        resourceScopeId:
+          type: string
+          format: uuid
+        contactRole:
+          type: string
+        reason:
+          type: string
+        priority:
+          type: string
+        dueAt:
+          type: string
+          format: date-time
+        ownerClaimLease:
+          type: string
+        version:
+          type: integer
       required:
         - callbackId
         - voiceSessionId
