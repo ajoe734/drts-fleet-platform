@@ -232,6 +232,7 @@ export function RecordsOperationsConsole() {
   const selectedRecord =
     records.find((record) => record.recordId === selectedRecordId) ?? null;
   const recordsAvailable = canAttemptRead && !recordsLoading && !recordsError;
+  const readDenied = !canAttemptRead || recordsError?.permission === true;
   const retentionCoverage = getVisibleRetentionCoverage(
     records,
     recordsAvailable,
@@ -563,14 +564,15 @@ export function RecordsOperationsConsole() {
                     ? t("query.resultCount", { count: records.length })
                     : t("table.unavailable")}
               </CanvasPill>
-              <CanvasPill
-                theme={theme}
-                tone={canAttemptRead ? "success" : "warn"}
-              >
+              <CanvasPill theme={theme} tone={readDenied ? "warn" : "success"}>
                 {t("query.readScope")} ·{" "}
-                {featureScopesDeclared
-                  ? t(canAttemptRead ? "scope.available" : "scope.denied")
-                  : t("scope.serverChecked")}
+                {readDenied
+                  ? t("scope.denied")
+                  : t(
+                      featureScopesDeclared
+                        ? "scope.available"
+                        : "scope.serverChecked",
+                    )}
               </CanvasPill>
               <CanvasPill
                 theme={theme}

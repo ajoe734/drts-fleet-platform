@@ -89,7 +89,7 @@ describe.each(listCases)(
       new ApiClient({ baseUrl: "http://fleet-regression.test" });
 
     it("loads the canonical list envelope and preserves encoded resource IDs", async () => {
-      const fetchMock = vi.fn(async () =>
+      const fetchMock = vi.fn<typeof fetch>(async () =>
         Response.json(
           toApiSuccessEnvelope(toApiListData([row]), "sr-admin-list-request"),
         ),
