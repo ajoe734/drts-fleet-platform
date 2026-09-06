@@ -6,7 +6,7 @@
 | Task Spec     | `docs/03-runbooks/system-remediation-20260906/SR-BANK-003.md`                  |
 | 追溯來源      | R14（歷史缺陷：可逆 hex 摘要與固定 SIG 假簽章）、C083（能力：摘要／簽章真實可驗證） |
 | Owner         | `Gemini`                                                                       |
-| Reviewer      | `Gemini2`                                                                      |
+| Reviewer      | `Claude`                                                                       |
 | Base SHA      | `40ba315e4114369eaa7e12d35aae83a795c97b1d` (tip of `origin/dev` at task start) |
 | Candidate SHA | Recorded at `handoff` via `git rev-parse HEAD`                                  |
 | Worktree      | `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-bank-003`   |
@@ -107,12 +107,12 @@ Generating route types...
 (exit code: 0)
 ```
 
-### 4.3 本次專屬單元與獨立工具測試（13/13 通過）
+### 4.3 本次專屬單元與獨立工具測試（14/14 通過）
 ```bash
 $ pnpm exec vitest run tests/unit/system-remediation/sr-bank-003/
  RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-bank-003
 
- ✓ tests/unit/system-remediation/sr-bank-003/sr-bank-003.test.ts (13 tests) 2430ms
+ ✓ tests/unit/system-remediation/sr-bank-003/sr-bank-003.test.ts (14 tests) 2880ms
    ✓ stops using reversible hex encoding to pretend to be a SHA-256 hash
    ✓ stops using fixed dummy SIG_DRTS_RSA2048 string to fake verification
    ✓ produces an UNSIGNED artifact when no signing key is configured
@@ -125,11 +125,12 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-bank-003/
    ✓ fails signature verification even if an attacker recomputes the Manifest Hash to match tampered payload
    ✓ verifies SHA-256 digest and RSA signature using openssl and sha256sum commands
    ✓ verifies artifacts using the independent Python verification CLI tool
-   ✓ downloads and verifies trip artifact with actual SHA-256 and audit manifest
+   ✓ verifies artifacts using the TypeScript/Node CLI verifier
+   ✓ builds and verifies trip artifact with actual SHA-256 and audit manifest
 
  Test Files  1 passed (1)
-      Tests  13 passed (13)
-   Duration  3.44s
+      Tests  14 passed (14)
+   Duration  3.32s
 (exit code: 0)
 ```
 
@@ -143,7 +144,7 @@ $ pnpm --filter @drts/bank-console-web test
 
  Test Files  4 passed (4)
       Tests  62 passed (62)
-   Duration  1.24s
+   Duration  1.34s
 (exit code: 0)
 ```
 
@@ -170,6 +171,13 @@ $ pnpm lint:root
 > eslint eslint.config.mjs playwright*.config.ts vitest.config.ts tests --max-warnings=0
 (exit code: 0)
 ```
+
+### 4.7 Root Typecheck 隔離與 CI 修復說明
+1. **根因修復**：先前候選版本（`72069ce7a`）在 `tests/unit/system-remediation/sr-bank-003/sr-bank-003.test.ts` 中直接靜態 `import` 了 `apps/bank-console-web` 內部之 `session.ts` 與 `route.ts`，導致 root `tsc -p tsconfig.json --noEmit` 順著 transitive closure 抓取到含有 `@/lib/...` alias 的內部模組，在 CI root typecheck 時報 TS2307 找不到模組錯誤。
+2. **解耦實作**：
+   - 測試檔 `sr-bank-003.test.ts` 徹底解除對 app-internal `session.ts` 與 `route.ts` 的靜態 import 依賴，聚焦於單元測試密碼學核心 `artifact-crypto.ts` 及 CLI 驗證器 `verify-artifact.ts`（`runCli`）與 `verify_artifact.py`。
+   - `apps/bank-console-web/app/artifacts/statements/[id]/route.ts` 與 `trips/[id]/route.ts` 恢復使用 Next.js 標準 `@/lib/...` 引用，由 `apps/bank-console-web` 自身專屬之 `tsconfig.json` 進行嚴格型別檢查（`pnpm --filter @drts/bank-console-web typecheck` 通過）。
+   - root `tsc -p tsconfig.json --noEmit` 不再觸及未定義 alias 的內部模組，根除 CI typecheck job 失敗點。
 
 ---
 

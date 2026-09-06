@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { BANK_DEMO_TENANTS, getBankTenantName, resolveBankDemoTenant, resolveLocale } from "../../../../lib/demo-tenants";
+import { BANK_DEMO_TENANTS, getBankTenantName, resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
 import {
   BANK_CONSOLE_ROLE_COOKIE,
   BANK_CONSOLE_SESSION_COOKIE,
   resolveServerSessionRole,
-} from "../../../../lib/session";
-import { loadBankStatementsData } from "../../../../lib/bank-dev-read-models";
+} from "@/lib/session";
+import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
 import { buildArtifactText } from "../../artifact-crypto";
 
 export async function GET(

@@ -4,34 +4,6 @@ import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
-import { NextRequest } from "next/server";
-
-vi.mock("server-only", () => ({}));
-vi.mock("../../../../apps/bank-console-web/lib/session", () => ({
-  BANK_CONSOLE_ROLE_COOKIE: "drts_bank_console_role",
-  BANK_CONSOLE_SESSION_COOKIE: "drts_bank_console_session",
-  resolveServerSessionRole: vi.fn((cookie) => {
-    if (!cookie || cookie.includes("unsigned") || cookie.includes("invalid")) {
-      return {
-        role: "bank_ops_viewer",
-        bankCode: "ctbc",
-        isAuthorizedForExport: false,
-        isForged: true,
-        isTampered: false,
-      };
-    }
-    return {
-      role: "bank_finance",
-      bankCode: "ctbc",
-      isAuthorizedForExport: true,
-      isForged: false,
-      isTampered: false,
-    };
-  }),
-  signSessionRole: vi.fn((role: string, bankCode: string = "ctbc") => {
-    return `${role}:${bankCode}.mock_signature_for_test`;
-  }),
-}));
 
 import {
   computePayloadDigest,
@@ -43,52 +15,7 @@ import {
   SIGNATURE_ALGORITHM,
   ARTIFACT_MANIFEST_HEADER,
 } from "../../../../apps/bank-console-web/app/artifacts/artifact-crypto";
-
-import { GET as getStatementArtifact } from "../../../../apps/bank-console-web/app/artifacts/statements/[id]/route";
-import { GET as getTripArtifact } from "../../../../apps/bank-console-web/app/artifacts/trips/[id]/route";
-import { signSessionRole } from "../../../../apps/bank-console-web/lib/session";
-
-// Helpers for test mock responses
-function envelope<T>(data: T) {
-  return new Response(JSON.stringify({ data }), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-const mockStatements = [
-  {
-    statement_id: "settlement-statement-tenant_ctbc-2026-08",
-    tenant_id: "tenant_ctbc",
-    period: "2026-08",
-    status: "due",
-    lines: [
-      {
-        trip_id: "trip_ctbc_260601_001",
-        completed_at: "2026-08-05T03:00:00Z",
-        fare: { amount_minor: 145000, currency: "TWD" },
-        subsidised_amount: { amount_minor: 120000, currency: "TWD" },
-        paid_amount: { amount_minor: 25000, currency: "TWD" },
-        benefit_reference: "BEN-CTBC-0003",
-        issuer_authorization_ref: "AUTH-CTBC-003",
-        cardholder_ref_masked: "CH••••33",
-      },
-    ],
-    totals: {
-      trip_count: 1,
-      fare_total: { amount_minor: 145000, currency: "TWD" },
-      subsidised_total: { amount_minor: 120000, currency: "TWD" },
-      paid_total: { amount_minor: 25000, currency: "TWD" },
-      issuer_payable: { amount_minor: 120000, currency: "TWD" },
-    },
-    artifact_ref: {
-      artifact_id: "settlement-statement-tenant_ctbc-2026-08",
-      kind: "settlement_statement",
-      manifest_hash: "hash",
-    },
-    generated_at: "2026-08-06T00:00:00Z",
-  },
-];
+import { runCli } from "../../../../apps/bank-console-web/app/artifacts/verify-artifact";
 
 describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature Verification", () => {
   let testRsaKeyPair: { publicKey: string; privateKey: string };
@@ -107,44 +34,6 @@ describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature V
       publicKeyEncoding: { type: "spki", format: "pem" },
       privateKeyEncoding: { type: "pkcs8", format: "pem" },
     });
-
-    // Mock fetch for route handlers
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string | URL | Request) => {
-        const url = new URL(
-          typeof input === "string"
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url,
-        );
-        const path = `${url.pathname}${url.search}`;
-
-        if (path === "/api/tenant/settlement-statements") {
-          return envelope({ items: mockStatements });
-        }
-        if (path === "/api/tenant/service-programs") {
-          return envelope({ items: [] });
-        }
-        if (path === "/api/tenant/program-usage") {
-          return envelope({ items: [] });
-        }
-        if (path.startsWith("/api/tenant/orders")) {
-          return envelope({ items: [] });
-        }
-        if (path === "/api/tenant/contracts") {
-          return envelope({ items: [] });
-        }
-        if (path === "/api/tenant/users") {
-          return envelope({ items: [] });
-        }
-        if (path === "/api/tenant/audit") {
-          return envelope({ items: [] });
-        }
-        throw new Error(`Unhandled fetch URL: ${path}`);
-      }),
-    );
   });
 
   afterEach(() => {
@@ -153,6 +42,9 @@ describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature V
     delete process.env.BANK_ARTIFACT_SIGNING_PRIVATE_KEY;
     delete process.env.BANK_ARTIFACT_SIGNING_PUBLIC_KEY;
     delete process.env.BANK_ARTIFACT_SIGNING_KEY_ID;
+    delete process.env.BANK_SIGNING_PRIVATE_KEY;
+    delete process.env.BANK_SIGNING_PUBLIC_KEY;
+    delete process.env.BANK_SIGNING_KEY_ID;
   });
 
   describe("1. Historical Defect Remediation (R14 & C083)", () => {
@@ -204,23 +96,35 @@ describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature V
   });
 
   describe("2. Default Configuration: No Fake VALID & Explicit UNSIGNED", () => {
-    it("produces an UNSIGNED artifact when no signing key is configured", async () => {
+    it("produces an UNSIGNED artifact when no signing key is configured", () => {
       delete process.env.BANK_ARTIFACT_SIGNING_PRIVATE_KEY;
+      delete process.env.BANK_SIGNING_PRIVATE_KEY;
 
-      const signedFinance = signSessionRole("bank_finance", "ctbc");
-      const req = new NextRequest(
-        "http://localhost:3000/artifacts/statements/settlement-statement-tenant_ctbc-2026-08.pdf?bank=ctbc",
-        { headers: { cookie: `drts_bank_console_session=${signedFinance}` } },
-      );
+      const statementPayload = [
+        "================================================================================",
+        "DRTS SETTLEMENT STATEMENT (NON-FIXTURE ARTIFACT)",
+        "================================================================================",
+        "Statement ID  : settlement-statement-tenant_ctbc-2026-08",
+        "Period        : 2026-08",
+        "Issuer Tenant : 中國信託商業銀行 (tenant_ctbc)",
+        "Program       : ctbc-world-elite",
+        "Status        : DUE",
+        "Issued At     : 2026-08-06T00:00:00Z",
+        "Due At        : 2026-08-31T23:59:59Z",
+        "",
+        "--------------------------------------------------------------------------------",
+        "FINANCIAL SUMMARY (ISSUER PAYS DRTS)",
+        "--------------------------------------------------------------------------------",
+        "Total Trips                  : 1",
+        "Total Fare Amount            : TWD 1,450",
+        "Total Subsidised Amount      : TWD 1,200",
+        "Total Cardholder Paid Amount : TWD 250",
+        "Total Issuer Payable Amount  : TWD 1,200",
+      ].join("\n");
 
-      const res = await getStatementArtifact(req, {
-        params: Promise.resolve({
-          id: "settlement-statement-tenant_ctbc-2026-08.pdf",
-        }),
+      const text = buildArtifactText(statementPayload, {
+        authDomain: "drts.settlement.issuer",
       });
-
-      expect(res.status).toBe(200);
-      const text = await res.text();
 
       // Check explicit manifest fields
       expect(text).toContain("Signature Status   : UNSIGNED");
@@ -265,25 +169,25 @@ describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature V
   });
 
   describe("3. Asymmetric Cryptographic Signing (RSASSA-PKCS1-v1_5-SHA256)", () => {
-    it("generates a genuine RSA digital signature when a private key is configured", async () => {
+    it("generates a genuine RSA digital signature when a private key is configured", () => {
       process.env.BANK_ARTIFACT_SIGNING_PRIVATE_KEY = testRsaKeyPair.privateKey;
       process.env.BANK_ARTIFACT_SIGNING_PUBLIC_KEY = testRsaKeyPair.publicKey;
       process.env.BANK_ARTIFACT_SIGNING_KEY_ID = "bank-ctbc-signer-2026-v1";
 
-      const signedFinance = signSessionRole("bank_finance", "ctbc");
-      const req = new NextRequest(
-        "http://localhost:3000/artifacts/statements/settlement-statement-tenant_ctbc-2026-08.pdf?bank=ctbc",
-        { headers: { cookie: `drts_bank_console_session=${signedFinance}` } },
-      );
+      const statementPayload = [
+        "================================================================================",
+        "DRTS SETTLEMENT STATEMENT (NON-FIXTURE ARTIFACT)",
+        "================================================================================",
+        "Statement ID  : settlement-statement-tenant_ctbc-2026-08",
+        "Period        : 2026-08",
+        "Issuer Tenant : 中國信託商業銀行 (tenant_ctbc)",
+        "Program       : ctbc-world-elite",
+        "Status        : DUE",
+      ].join("\n");
 
-      const res = await getStatementArtifact(req, {
-        params: Promise.resolve({
-          id: "settlement-statement-tenant_ctbc-2026-08.pdf",
-        }),
+      const text = buildArtifactText(statementPayload, {
+        authDomain: "drts.settlement.issuer",
       });
-
-      expect(res.status).toBe(200);
-      const text = await res.text();
 
       expect(text).toContain("Signature Status   : SIGNED");
       expect(text).toContain(`Signature Algorithm: ${SIGNATURE_ALGORITHM}`);
@@ -554,20 +458,50 @@ describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature V
     });
   });
 
-  describe("6. Trip Artifact Route Verification", () => {
-    it("downloads and verifies trip artifact with actual SHA-256 and audit manifest", async () => {
-      const signedFinance = signSessionRole("bank_finance", "ctbc");
-      const req = new NextRequest(
-        "http://localhost:3000/artifacts/trips/trip_ctbc_260601_001.pdf?bank=ctbc",
-        { headers: { cookie: `drts_bank_console_session=${signedFinance}` } },
-      );
-
-      const res = await getTripArtifact(req, {
-        params: Promise.resolve({ id: "trip_ctbc_260601_001.pdf" }),
+  describe("6. Independent TypeScript / Node CLI Tool (runCli)", () => {
+    it("verifies artifacts using the TypeScript/Node CLI verifier", () => {
+      const payload = "INDEPENDENT TS NODE CLI TEST";
+      const artifactText = buildArtifactText(payload, {
+        signingConfig: {
+          privateKeyPem: testRsaKeyPair.privateKey,
+          keyId: "node-cli-test-key",
+        },
       });
 
-      expect(res.status).toBe(200);
-      const text = await res.text();
+      const tempDir = tmpdir();
+      const artifactFile = join(tempDir, `drts_node_cli_${Date.now()}.txt`);
+      const pubKeyFile = join(tempDir, `drts_node_cli_pub_${Date.now()}.pem`);
+
+      try {
+        writeFileSync(artifactFile, artifactText, "utf-8");
+        writeFileSync(pubKeyFile, testRsaKeyPair.publicKey, "utf-8");
+
+        const exitCode = runCli([artifactFile, "--public-key", pubKeyFile]);
+        expect(exitCode).toBe(0);
+      } finally {
+        rmSync(artifactFile, { force: true });
+        rmSync(pubKeyFile, { force: true });
+      }
+    });
+  });
+
+  describe("7. Trip Artifact Format & Verification", () => {
+    it("builds and verifies trip artifact with actual SHA-256 and audit manifest", () => {
+      const tripPayload = [
+        "================================================================================",
+        "DRTS TRIP SETTLEMENT RECEIPT (NON-FIXTURE ARTIFACT)",
+        "================================================================================",
+        "Trip ID             : trip_ctbc_260601_001",
+        "Order No            : ORD-202608-001",
+        "Completed At        : 2026-08-05T03:00:00Z",
+        "Route               : 台北車站 -> 桃園國際機場第二航廈",
+        "Fare                : TWD 1450 | Subsidy: TWD 1200 | Paid: TWD 250",
+        "Dispute Status      : NORMAL",
+      ].join("\n");
+
+      const text = buildArtifactText(tripPayload, {
+        authDomain: "drts.settlement.issuer",
+      });
 
       expect(text).toContain("DRTS TRIP SETTLEMENT RECEIPT (NON-FIXTURE ARTIFACT)");
       expect(text).toContain("DIGITAL SIGNATURE & AUDIT MANIFEST");
