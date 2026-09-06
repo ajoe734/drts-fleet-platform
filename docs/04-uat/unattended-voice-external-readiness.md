@@ -11,8 +11,8 @@
 - Decision Ref: `docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md`
 - Functional Requirements (FRs): `UV-FR-001`, `UV-FR-003`, `UV-FR-007`, `UV-FR-010`, `UV-FR-011`, `UV-FR-018`, `UV-FR-021`, `UV-FR-024`, `UV-FR-026`, `UV-FR-027`, `UV-FR-030`, `UV-FR-031`, `UV-FR-032`
 - Acceptance Criteria (ACs): `UV-AC-002`, `UV-AC-026`, `UV-AC-030`, `UV-AC-033`
-- Last Update: `2026-09-06T15:05:36Z`
-- Re-Verification: `2026-09-06T15:05:36Z` (acceptance-phase唯讀複查，Claude2，第 30 輪 acceptance_ready_dispatch 喚醒：origin/dev 新增 1 筆提交 `7dccddaba`（SR-MAIL-001 unblock history repair 文件化，與本任務主題無關），與本任務 7 項 required_acceptance 無關；GitHub secrets/variables 計數 (11/97) 與關鍵字比對均無變化，7 項 required_acceptance 仍待外部證據)
+- Last Update: `2026-09-06T15:09:00Z`
+- Re-Verification: `2026-09-06T15:09:00Z` (acceptance-phase唯讀複查，Claude2，第 31 輪 acceptance_ready_dispatch 喚醒：origin/dev 仍為 `7dccddaba`，無新提交；GitHub secrets/variables 計數 (11/97) 與關鍵字比對均無變化，7 項 required_acceptance 仍待外部證據)
 
 ---
 
@@ -278,6 +278,12 @@
 依 §2.22 dedup 政策，本輪 `git fetch origin` 後偵測到 `origin/dev` 由 round 29 記錄之 `548608e45` 推進至 `7dccddaba7d51dca8d56da01d5320d9f22f8b68f`，`git log 548608e45..origin/dev --oneline` 顯示僅新增 1 個提交：`7dccddaba`（`docs(SR-MAIL-001-UNBLOCK-HISTORY-REPAIR): identify contamination and document non-destructive repair path` #1690）。核對其內容為 SR-MAIL-001 任務歷史污染診斷與非破壞性修復文件，與 CTI/TWM/原生語音候選/營運商品/queue SLA/資料條款/費率七項主題完全無關，因此**不構成任一 `required_acceptance` 項目之可用證據**；第 3–7 節盤點與 §8.1 矩陣維持全數 `❌ 未滿足`。重新執行 `gh secret list`／`gh variable list`，計數仍為 11/97；CTI/TWM/Voice/Carrier/DTMF/Twilio/SIP/ASR/TTS/Phone/PSTN/Candidate 關鍵字比對仍為 0 筆匹配；`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`）與 `status`=`acceptance` 均未變化。本地分支 `claude2/uv-exec-027` 工作樹乾淨。
 
 > **本輪複查結論：** 機器真相僅新增 1 筆與本任務主題無關的文件化提交，7 項 `required_acceptance` 仍全數為 Blocker。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄**（依既有記憶教訓：`progress` 在 `acceptance` 狀態任務上會清除候選生命週期證據）。重申建議：本任務已合併、產出完整，唯一缺口是真實外部供應商帳號/合約/費率證據，非本 worker 唯讀盤點權限可取得；建議 supervisor 維持證據變更觸發式 re-dispatch 政策，或考慮延長 acceptance-phase re-dispatch 的輪詢間隔以降低重複喚醒頻率。
+
+### 2.28 Acceptance 階段複查記錄（2026-09-06T15:09:00Z，Claude2，第 31 次連續 acceptance_ready_dispatch 喚醒，dedup 政策下之零 delta 項）
+
+依 §2.22 dedup 政策，本輪 `git fetch origin` 後比對 `origin/dev` 仍為 round 30 §2.27 記錄之 `7dccddaba7d51dca8d56da01d5320d9f22f8b68f`，**無新提交**。重新執行 `gh secret list`／`gh variable list`，計數仍為 11/97；CTI/TWM/Voice/Carrier/DTMF/Twilio/SIP/ASR/TTS/Phone/PSTN/Candidate 關鍵字比對仍為 0 筆匹配；`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`）與 `status`=`acceptance` 均未變化。本地分支 `claude2/uv-exec-027` 工作樹乾淨。
+
+> **本輪複查結論：** 機器真相零變化，7 項 `required_acceptance` 仍全數為 Blocker（`cti_account_capability_evidence`、`twm_account_model_voice_quota_evidence`、`native_candidate_account_evidence`、`line_product_service_area_evidence`、`human_queue_callback_sla_evidence`、`provider_data_terms_evidence`、`rate_card_capacity_evidence`），全部待供應商/電信/candidate 帳號等真實外部證據，超出本唯讀 worker 授權範圍。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄。** 已連續 31 輪 acceptance_ready_dispatch 喚醒均為零 delta 或與主題無關之 delta；再次建議 supervisor 將此任務改為「證據變更事件觸發」而非固定輪詢式 re-dispatch，以避免持續喚醒消耗 worker 資源卻無法產生新證據。
 
 ---
 
