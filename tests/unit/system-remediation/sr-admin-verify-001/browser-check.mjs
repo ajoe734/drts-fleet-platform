@@ -159,6 +159,7 @@ async function scenario(name, endpoint, responseForRequest, verify) {
                   code: response.code,
                   message: response.message,
                   retryable: entry.status === 503,
+                  traceId: entry.testOnlyResponseId,
                 },
               },
         ),
@@ -201,7 +202,7 @@ async function p5Page(page) {
 }
 
 async function expectUnavailableCoverage(surface) {
-  const hero = surface.locator("header");
+  const hero = surface.locator(":scope > header");
   const statistic = hero
     .getByText("730-day coverage", { exact: true })
     .locator("..");
