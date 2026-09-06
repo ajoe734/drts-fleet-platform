@@ -2,6 +2,45 @@
 
 日期：2026-09-06。Owner：Codex2；Reviewer：Codex。
 
+## 18:52 UTC dispatch 復查：routing 尚未落盤
+
+本節為最新結果；下方 16:43 UTC 紀錄保留作歷史重現。
+
+- Fresh base：`650e233bb1c35269852c291ef892d25967380c12`。
+  `git fetch origin dev`、`git rebase origin/dev` 均 exit 0。
+- 已讀合併的
+  `support/unblock/SR-PROOF-001/SR-PROOF-001-UNBLOCK-PLANNING-DECISION.md`：
+  PR #1704 的 candidate `3068afad499a7fecd6212339dd80bb91568d4e7d`
+  是 routing decision，沒有付款實作；文件明確要求 parent 保持 blocked，
+  等 supervisor 補 scope / dependency / canvas。
+- `ai-status.sh show SR-PROOF-001`（exit 0）仍只列原五項 write scopes、
+  原兩項依賴；`show SR-CONTRACT-001`（exit 0）為 backlog。
+  repository/module/proof leaf 權限、migration/contract allocation、canvas 指派皆未落盤。
+  因此 helper done 不代表 parent 已可實作；沒有越界修改或自行更改驗收定義。
+- Rebase 後以無 tree 變更的 merge 保留已發布 anchors 的 ancestry，
+  避免 force push。`git merge --no-commit --no-ff d2488b19e3b6148b1ee2ad1f676734d467cd144a`
+  exit 0；anchor `c03fca595c3cb24d90c25f6de35a2762f02e659e` 已普通 push，exit 0。
+  Candidate SHA：尚未建立，只有診斷 anchors；不 handoff。
+
+| 實際命令                                                                                                                                         | Exit / 結果                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`（首次）                                                                       | 1；匯入失敗，worktree 缺 `zod` 連結，0 tests，不能算回歸結果                 |
+| `pnpm install --offline --frozen-lockfile --ignore-scripts`                                                                                      | 1；`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`，未強制清除共用 node_modules |
+| `mkdir -p packages/contracts/node_modules && ln -s ../../../node_modules/.pnpm/zod@3.25.76/node_modules/zod packages/contracts/node_modules/zod` | 0；僅補 ignored 本地連結，使用 lockfile 既有版本，無 manifest/lockfile 變更  |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`（補連結後）                                                                   | 1；3 tests：1 passed / 2 failed；3.90s，18:51:57 UTC 開始                    |
+| `pnpm --filter @drts/api typecheck`                                                                                                              | 2；下方歷史紀錄列出的相同 13 個 voice/owned-mobility 契約錯誤                |
+| `pnpm --filter @drts/platform-admin-web typecheck`（首次）                                                                                       | 2；`unattended-voice.ts` 無法解析 `zod`                                      |
+| `pnpm --filter @drts/platform-admin-web typecheck`（補連結後）                                                                                   | 0；route types 與 typecheck 成功                                             |
+| `git diff --check`                                                                                                                               | 0                                                                            |
+
+兩個失敗仍為 fabricated proof 被設成 `paid`，以及 persistence promise 未完成就回傳
+`paid`。未核准批次拒絕付款的案例通過。資源 ID 沿用下方四個隔離 unit inputs；
+未新增 live 資源，未執行合法 proof 上傳/掃描/回讀、真 DB 並發/receipt、瀏覽器或真機驗收。
+
+Supervisor 下一步應依已合併 decision 執行：擴 repository/module 與具名 proof leaf scope；
+加入 SR-CONTRACT-001 相依並分配 schema/API（或明記允許提前持久化的決定）；
+將既有 screen requirements 交 canvas owner 並記依賴。三項完成後才重新 dispatch 實作。
+
 本文件是未完成實作的診斷證據，不是 acceptance pass。產品程式未修改；
 新增測試保留正常失敗斷言，未使用 skip、test.fails 或 passWithNoTests。
 
@@ -89,16 +128,16 @@ PA_ReimbursementDetail，以及 Platform Admin.html 入口。
 
 ## 驗證界線與下一步
 
-| 指令 | Exit / 結果 |
-| --- | --- |
-| `git diff --check` | 0 |
-| `pnpm --filter @drts/api typecheck` | 2；13 個既有 voice/owned-mobility 契約錯誤，產品 source 未修改 |
-| `pnpm --filter @drts/platform-admin-web typecheck` | 0；route types 產生成功 |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/` | 1；上述 1 passed / 2 failed |
-| `pnpm exec prettier --write tests/unit/system-remediation/sr-proof-001/payment-gate.test.ts docs/04-uat/system-remediation-20260906/SR-PROOF-001.md` | 0 |
+| 指令                                                                                                                                                 | Exit / 結果                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `git diff --check`                                                                                                                                   | 0                                                              |
+| `pnpm --filter @drts/api typecheck`                                                                                                                  | 2；13 個既有 voice/owned-mobility 契約錯誤，產品 source 未修改 |
+| `pnpm --filter @drts/platform-admin-web typecheck`                                                                                                   | 0；route types 產生成功                                        |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`                                                                                   | 1；上述 1 passed / 2 failed                                    |
+| `pnpm exec prettier --write tests/unit/system-remediation/sr-proof-001/payment-gate.test.ts docs/04-uat/system-remediation-20260906/SR-PROOF-001.md` | 0                                                              |
 
 API typecheck 錯誤位於 voice-capability.guard/service、voice-cti.adapter、
-voice-booking-authorization.service（缺 VoiceAgentBookingActor、VoiceCapability*、
+voice-booking-authorization.service（缺 VoiceAgentBookingActor、VoiceCapability\*、
 DTMF_DIGIT_REGEX exports），以及 owned-mobility.repository/service
 （OwnedOrderRecord 缺 aggregateVersion / voiceIntentId）。不在本 task scope，未越界修正。
 
