@@ -280,7 +280,7 @@ const en = {
   "opsAssistant.bridge.openConfirmation": "Open confirmation",
   "opsAssistant.bridge.dismiss": "Dismiss",
   "opsAssistant.bridge.empty":
-    "Focus a supported detail view to let the assistant resolve `ActionIntent` against that resource's available actions.",
+    "Focus a supported detail view so the assistant can match this resource's available actions.",
   "opsAssistant.actions.title": "Assistant actions",
   "opsAssistant.actions.askLabel": "Ask assistant",
   "opsAssistant.actions.placeholder":
@@ -4810,7 +4810,7 @@ const zh: Record<keyof typeof en, string> = {
   "opsAssistant.bridge.openConfirmation": "開啟確認流程",
   "opsAssistant.bridge.dismiss": "關閉",
   "opsAssistant.bridge.empty":
-    "聚焦到支援的詳情頁後，助理才能針對該資源的可用動作解析 `ActionIntent`。",
+    "聚焦到支援的詳情頁後，助理才能判斷該資源目前有哪些可用動作。",
   "opsAssistant.actions.title": "助理動作",
   "opsAssistant.actions.askLabel": "詢問助理",
   "opsAssistant.actions.placeholder":
