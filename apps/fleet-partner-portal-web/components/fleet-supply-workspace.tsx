@@ -37,7 +37,10 @@ import type {
 import {
   formatSupplySubject,
   isEditableStatus,
+  DRAFT_GUARD_STRINGS,
+  fieldId,
 } from "@/lib/fleet-portal-supply";
+
 
 type ApiEnvelope<T> = {
   data: T;
@@ -202,6 +205,9 @@ function FieldInput(
     color: theme.text,
     fontSize: 12.5,
     fontFamily: theme.fontFamily,
+    // Ensure focus ring is visible against the dark surface (R23 contrast).
+    // We use `outline` rather than box-shadow so it respects forced-colors mode.
+    outlineOffset: 2,
   };
   if (props.multiline) {
     return (
@@ -237,6 +243,7 @@ function FieldSelect(
         background: theme.surface,
         color: theme.text,
         fontSize: 12.5,
+        outlineOffset: 2,
       }}
     >
       {props.options.map((option) => (
@@ -247,6 +254,131 @@ function FieldSelect(
     </select>
   );
 }
+
+/**
+ * Accessible form field wrapper for supply forms (R23).
+ *
+ * Unlike the shared `CanvasField` (which renders the label as a sibling of the
+ * children, not a wrapping element), this component emits:
+ *
+ *   <div>
+ *     <label htmlFor={id}>…</label>   ← explicit for/id linkage
+ *     {children}                      ← must receive the same id
+ *     <div role="alert">error</div>   ← live region for screen readers
+ *   </div>
+ *
+ * The wrapping `<label>` with `htmlFor` satisfies WCAG 1.3.1 and 4.1.2
+ * for assistive technology that relies on the label/control association.
+ */
+function FormField({
+  id,
+  label,
+  required,
+  error,
+  hint,
+  children,
+}: {
+  id: string;
+  label: string;
+  required?: boolean;
+  error?: string | null;
+  hint?: string;
+  children: ReactNode;
+}) {
+  const theme = buildFleetTheme();
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label
+        htmlFor={id}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          fontSize: 11.5,
+          fontWeight: 600,
+          // Use theme.text (not textMuted) for sufficient contrast on dark
+          // surface (#E5EAF3 on #141B2B ≈ 15.6:1 — well above WCAG AA 4.5:1).
+          color: theme.text,
+          marginBottom: 5,
+        }}
+      >
+        {label}
+        {required ? (
+          <span style={{ color: theme.danger }} aria-hidden="true">
+            *
+          </span>
+        ) : null}
+        {required ? (
+          <span className="sr-only" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}>
+            （必填）
+          </span>
+        ) : null}
+      </label>
+      {children}
+      {hint && !error ? (
+        <div
+          style={{
+            fontSize: 11,
+            color: theme.textMuted,
+            marginTop: 4,
+            lineHeight: 1.35,
+          }}
+        >
+          {hint}
+        </div>
+      ) : null}
+      {error ? (
+        <div
+          id={`${id}-error`}
+          role="alert"
+          style={{
+            fontSize: 11,
+            color: theme.danger,
+            marginTop: 4,
+            lineHeight: 1.35,
+          }}
+        >
+          {error}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Fires the browser's native beforeunload warning (R25) while the form is
+ * dirty, and exposes `confirmLeave()` for in-app navigation interception.
+ *
+ * @param dirty - whether the form has unsaved changes
+ * @returns `confirmLeave` — call before a programmatic router.push(); returns
+ *          `true` if the user confirmed they want to leave.
+ */
+function useDraftGuard(dirty: boolean): { confirmLeave: () => boolean } {
+  useEffect(() => {
+    if (!dirty) return;
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      // Modern browsers use `returnValue` for the native dialog. The value
+      // shown to the user is browser-controlled; we set it for legacy support.
+      e.returnValue = DRAFT_GUARD_STRINGS.beforeUnload;
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [dirty]);
+
+  function confirmLeave(): boolean {
+    if (!dirty) return true;
+    return window.confirm(
+      `${DRAFT_GUARD_STRINGS.confirmLeaveTitle}\n\n${DRAFT_GUARD_STRINGS.confirmLeaveBody}`,
+    );
+  }
+
+  return { confirmLeave };
+}
+
+
 
 function ProductChecklist({
   selected,
@@ -699,6 +831,7 @@ export function NewDriverSubmissionForm() {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
   const [form, setForm] = useState<DriverDraftInput>({
     name: "",
     mobile: "",
@@ -711,6 +844,16 @@ export function NewDriverSubmissionForm() {
     preferredVehicleSubmissionId: null,
   });
 
+  // Draft is "dirty" once the user has typed anything in a required field (R25).
+  const dirty =
+    !submitted &&
+    (form.name !== "" ||
+      form.mobile !== "" ||
+      form.professionalDriverLicenseNo !== "" ||
+      form.taxiDriverRegistrationNo !== "");
+
+  const { confirmLeave } = useDraftGuard(dirty);
+
   async function onCreate() {
     setSaving(true);
     setError(null);
@@ -719,6 +862,8 @@ export function NewDriverSubmissionForm() {
         "fleet-partner/supply-submissions/drivers",
         { method: "POST", body: JSON.stringify(form) },
       );
+      // Mark submitted so the beforeunload guard is lifted before navigation.
+      setSubmitted(true);
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
     } catch (err) {
@@ -734,6 +879,25 @@ export function NewDriverSubmissionForm() {
         theme={theme}
         title={t("supply.driverNew.title")}
         subtitle={t("supply.driverNew.subtitle")}
+        actions={
+          <button
+            type="button"
+            onClick={() => {
+              if (confirmLeave()) router.back();
+            }}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: theme.accent,
+              fontWeight: 600,
+              fontSize: 12,
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            {t("supply.action.backDashboard")}
+          </button>
+        }
       />
       <div style={{ padding: 24 }}>
         <DraftFormFrame
@@ -743,12 +907,13 @@ export function NewDriverSubmissionForm() {
           onSave={onCreate}
           saveLabel={t("supply.action.createDraft")}
         >
-          <DriverDraftFields form={form} setForm={setForm} />
+          <DriverDraftFields form={form} setForm={setForm} formKey="new-driver" />
         </DraftFormFrame>
       </div>
     </>
   );
 }
+
 
 export function NewVehicleSubmissionForm() {
   const router = useRouter();
@@ -756,6 +921,7 @@ export function NewVehicleSubmissionForm() {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
   const [form, setForm] = useState<VehicleDraftInput>({
     plateNo: "",
     licenseType: "taxi",
@@ -773,6 +939,13 @@ export function NewVehicleSubmissionForm() {
     color: "",
   });
 
+  // Draft is "dirty" once the user has typed anything in a key required field (R25).
+  const dirty =
+    !submitted &&
+    (form.plateNo !== "" || form.brand !== "" || form.model !== "");
+
+  const { confirmLeave } = useDraftGuard(dirty);
+
   async function onCreate() {
     setSaving(true);
     setError(null);
@@ -781,6 +954,8 @@ export function NewVehicleSubmissionForm() {
         "fleet-partner/supply-submissions/vehicles",
         { method: "POST", body: JSON.stringify(form) },
       );
+      // Mark submitted so the beforeunload guard is lifted before navigation.
+      setSubmitted(true);
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
     } catch (err) {
@@ -796,6 +971,25 @@ export function NewVehicleSubmissionForm() {
         theme={theme}
         title={t("supply.vehicleNew.title")}
         subtitle={t("supply.vehicleNew.subtitle")}
+        actions={
+          <button
+            type="button"
+            onClick={() => {
+              if (confirmLeave()) router.back();
+            }}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: theme.accent,
+              fontWeight: 600,
+              fontSize: 12,
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            {t("supply.action.backDashboard")}
+          </button>
+        }
       />
       <div style={{ padding: 24 }}>
         <DraftFormFrame
@@ -805,12 +999,13 @@ export function NewVehicleSubmissionForm() {
           onSave={onCreate}
           saveLabel={t("supply.action.createDraft")}
         >
-          <VehicleDraftFields form={form} setForm={setForm} />
+          <VehicleDraftFields form={form} setForm={setForm} formKey="new-vehicle" />
         </DraftFormFrame>
       </div>
     </>
   );
 }
+
 
 function DraftFormFrame({
   title,
@@ -867,17 +1062,24 @@ function DraftFormFrame({
 function DriverDraftFields({
   form,
   setForm,
+  formKey = "detail",
 }: {
   form: DriverDraftInput;
   setForm: Dispatch<SetStateAction<DriverDraftInput>>;
+  /** Unique key for this form instance; used as prefix for stable field IDs (R23). */
+  formKey?: string;
 }) {
   const { t } = useTranslation();
+  const fid = (field: string) => fieldId(formKey, field);
   return (
     <>
       <div style={sectionGrid()}>
-        <CanvasField label={t("supply.driverField.name")} required>
+        <FormField id={fid("name")} label={t("supply.driverField.name")} required>
           <FieldInput
+            id={fid("name")}
             value={form.name}
+            autoComplete="name"
+            inputMode="text"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -885,10 +1087,14 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.driverField.mobile")} required>
+        </FormField>
+        <FormField id={fid("mobile")} label={t("supply.driverField.mobile")} required>
           <FieldInput
+            id={fid("mobile")}
             value={form.mobile}
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -896,10 +1102,13 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.driverField.licenseNo")} required>
+        </FormField>
+        <FormField id={fid("licenseNo")} label={t("supply.driverField.licenseNo")} required>
           <FieldInput
+            id={fid("licenseNo")}
             value={form.professionalDriverLicenseNo}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -907,9 +1116,10 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.driverField.licenseExpiry")} required>
+        </FormField>
+        <FormField id={fid("licenseExpiry")} label={t("supply.driverField.licenseExpiry")} required>
           <FieldInput
+            id={fid("licenseExpiry")}
             type="date"
             value={form.professionalDriverLicenseExpiry}
             onChange={(e) =>
@@ -919,10 +1129,13 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.driverField.registrationNo")} required>
+        </FormField>
+        <FormField id={fid("registrationNo")} label={t("supply.driverField.registrationNo")} required>
           <FieldInput
+            id={fid("registrationNo")}
             value={form.taxiDriverRegistrationNo}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -930,10 +1143,13 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.driverField.registrationArea")} required>
+        </FormField>
+        <FormField id={fid("registrationArea")} label={t("supply.driverField.registrationArea")} required>
           <FieldInput
+            id={fid("registrationArea")}
             value={form.taxiDriverRegistrationArea}
+            inputMode="text"
+            autoComplete="address-level2"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -941,12 +1157,10 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField
-          label={t("supply.driverField.registrationExpiry")}
-          required
-        >
+        </FormField>
+        <FormField id={fid("registrationExpiry")} label={t("supply.driverField.registrationExpiry")} required>
           <FieldInput
+            id={fid("registrationExpiry")}
             type="date"
             value={form.taxiDriverRegistrationExpiry}
             onChange={(e) =>
@@ -956,12 +1170,16 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField
+        </FormField>
+        <FormField
+          id={fid("preferredVehicle")}
           label={t("supply.driverField.preferredVehicleSubmissionId")}
         >
           <FieldInput
+            id={fid("preferredVehicle")}
             value={form.preferredVehicleSubmissionId ?? ""}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -969,9 +1187,27 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
+        </FormField>
       </div>
-      <CanvasField label={t("supply.field.supportedProducts")} required>
+      {/* ProductChecklist renders its own <label> wrapping each <input type="checkbox">,
+          so implicit association works correctly here. The group label is announced via
+          the role="group" + aria-labelledby pattern below (R23). */}
+      <div role="group" aria-labelledby={fid("products-label")} style={{ marginBottom: 14 }}>
+        <div
+          id={fid("products-label")}
+          style={{
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: "inherit",
+            marginBottom: 5,
+          }}
+        >
+          {t("supply.field.supportedProducts")}
+          <span aria-hidden="true" style={{ color: "red" }}> *</span>
+          <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}>
+            （必填）
+          </span>
+        </div>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
           onChange={(value) =>
@@ -981,25 +1217,33 @@ function DriverDraftFields({
             }))
           }
         />
-      </CanvasField>
+      </div>
     </>
   );
 }
 
+
 function VehicleDraftFields({
   form,
   setForm,
+  formKey = "detail",
 }: {
   form: VehicleDraftInput;
   setForm: Dispatch<SetStateAction<VehicleDraftInput>>;
+  /** Unique key for this form instance; used as prefix for stable field IDs (R23). */
+  formKey?: string;
 }) {
   const { t } = useTranslation();
+  const fid = (field: string) => fieldId(formKey, field);
   return (
     <>
       <div style={sectionGrid()}>
-        <CanvasField label={t("supply.vehicleField.plateNo")} required>
+        <FormField id={fid("plateNo")} label={t("supply.vehicleField.plateNo")} required>
           <FieldInput
+            id={fid("plateNo")}
             value={form.plateNo}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -1007,9 +1251,10 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.licenseType")} required>
+        </FormField>
+        <FormField id={fid("licenseType")} label={t("supply.vehicleField.licenseType")} required>
           <FieldSelect
+            id={fid("licenseType")}
             value={form.licenseType}
             onChange={(e) =>
               setForm((current) => ({
@@ -1028,10 +1273,13 @@ function VehicleDraftFields({
               },
             ]}
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.brand")}>
+        </FormField>
+        <FormField id={fid("brand")} label={t("supply.vehicleField.brand")}>
           <FieldInput
+            id={fid("brand")}
             value={form.brand ?? ""}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -1039,10 +1287,13 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.model")}>
+        </FormField>
+        <FormField id={fid("model")} label={t("supply.vehicleField.model")}>
           <FieldInput
+            id={fid("model")}
             value={form.model ?? ""}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -1050,10 +1301,12 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.modelYear")}>
+        </FormField>
+        <FormField id={fid("modelYear")} label={t("supply.vehicleField.modelYear")}>
           <FieldInput
+            id={fid("modelYear")}
             type="number"
+            inputMode="numeric"
             value={String(form.modelYear ?? "")}
             onChange={(e) =>
               setForm((current) => ({
@@ -1064,10 +1317,12 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.seatCount")} required>
+        </FormField>
+        <FormField id={fid("seatCount")} label={t("supply.vehicleField.seatCount")} required>
           <FieldInput
+            id={fid("seatCount")}
             type="number"
+            inputMode="numeric"
             value={String(form.seatCount)}
             onChange={(e) =>
               setForm((current) => ({
@@ -1076,10 +1331,12 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.luggageCapacity")} required>
+        </FormField>
+        <FormField id={fid("luggageCapacity")} label={t("supply.vehicleField.luggageCapacity")} required>
           <FieldInput
+            id={fid("luggageCapacity")}
             type="number"
+            inputMode="numeric"
             value={String(form.luggageCapacity)}
             onChange={(e) =>
               setForm((current) => ({
@@ -1088,10 +1345,13 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.businessArea")} required>
+        </FormField>
+        <FormField id={fid("businessArea")} label={t("supply.vehicleField.businessArea")} required>
           <FieldInput
+            id={fid("businessArea")}
             value={form.businessArea}
+            inputMode="text"
+            autoComplete="address-level2"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -1099,10 +1359,13 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.currentDriverSubmissionId")}>
+        </FormField>
+        <FormField id={fid("currentDriver")} label={t("supply.vehicleField.currentDriverSubmissionId")}>
           <FieldInput
+            id={fid("currentDriver")}
             value={form.currentDriverSubmissionId ?? ""}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -1110,10 +1373,12 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.doorCount")}>
+        </FormField>
+        <FormField id={fid("doorCount")} label={t("supply.vehicleField.doorCount")}>
           <FieldInput
+            id={fid("doorCount")}
             type="number"
+            inputMode="numeric"
             value={String(form.doorCount ?? "")}
             onChange={(e) =>
               setForm((current) => ({
@@ -1124,10 +1389,13 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.color")}>
+        </FormField>
+        <FormField id={fid("color")} label={t("supply.vehicleField.color")}>
           <FieldInput
+            id={fid("color")}
             value={form.color ?? ""}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -1135,9 +1403,25 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
+        </FormField>
       </div>
-      <CanvasField label={t("supply.field.supportedProducts")} required>
+      {/* Checklist group with aria-labelledby (R23) */}
+      <div role="group" aria-labelledby={fid("products-label")} style={{ marginBottom: 14 }}>
+        <div
+          id={fid("products-label")}
+          style={{
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: "inherit",
+            marginBottom: 5,
+          }}
+        >
+          {t("supply.field.supportedProducts")}
+          <span aria-hidden="true" style={{ color: "red" }}> *</span>
+          <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}>
+            （必填）
+          </span>
+        </div>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
           onChange={(value) =>
@@ -1147,7 +1431,8 @@ function VehicleDraftFields({
             }))
           }
         />
-      </CanvasField>
+      </div>
+      {/* Boolean checkboxes — <label> wraps <input>, so implicit association is correct (no for/id needed). */}
       <div style={{ display: "flex", gap: 24 }}>
         <label>
           <input
@@ -1179,6 +1464,7 @@ function VehicleDraftFields({
     </>
   );
 }
+
 
 export function SupplySubmissionDetailView({
   initialDetail,
@@ -1628,8 +1914,9 @@ export function SupplySubmissionDetailView({
             </div>
           </CanvasCard>
           <CanvasCard theme={theme} title={t("supply.detail.uploadTitle")}>
-            <CanvasField label={t("supply.table.documentType")} required>
+            <FormField id="upload-doc-type" label={t("supply.table.documentType")} required>
               <FieldSelect
+                id="upload-doc-type"
                 value={docType}
                 onChange={(e) => setDocType(e.currentTarget.value)}
                 options={documentOptions.map((value) => ({
@@ -1637,27 +1924,30 @@ export function SupplySubmissionDetailView({
                   label: t(DOCUMENT_LABEL_KEYS[value] ?? value),
                 }))}
               />
-            </CanvasField>
-            <CanvasField label={t("supply.table.fileName")} required>
+            </FormField>
+            <FormField id="upload-file" label={t("supply.table.fileName")} required>
               <input
+                id="upload-file"
                 type="file"
                 onChange={(e) => setDocFile(e.currentTarget.files?.[0] ?? null)}
               />
-            </CanvasField>
-            <CanvasField label={t("supply.detail.effectiveFrom")}>
+            </FormField>
+            <FormField id="upload-effective-from" label={t("supply.detail.effectiveFrom")}>
               <FieldInput
+                id="upload-effective-from"
                 type="date"
                 value={docFrom}
                 onChange={(e) => setDocFrom(e.currentTarget.value)}
               />
-            </CanvasField>
-            <CanvasField label={t("supply.detail.effectiveUntil")}>
+            </FormField>
+            <FormField id="upload-effective-until" label={t("supply.detail.effectiveUntil")}>
               <FieldInput
+                id="upload-effective-until"
                 type="date"
                 value={docUntil}
                 onChange={(e) => setDocUntil(e.currentTarget.value)}
               />
-            </CanvasField>
+            </FormField>
             <ActionButton
               theme={theme}
               label={t("supply.action.uploadConfirm")}
@@ -1668,6 +1958,7 @@ export function SupplySubmissionDetailView({
               onClick={() => runAction("upload", uploadDocument)}
             />
           </CanvasCard>
+
         </div>
         <CanvasCard theme={theme} title={t("supply.detail.revisionHistory")}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
