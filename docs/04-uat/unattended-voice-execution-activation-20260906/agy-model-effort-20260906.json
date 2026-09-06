@@ -180,7 +180,7 @@
     },
     {
       "url": "https://www.antigravity.google/changelog?tab=engine",
-      "supports": "Version 1.1.15 adds read-only /model and /effort print commands without an agent turn, quota spending or a conversation; version 1.1.5 documents effort variants and stable model slugs."
+      "supports": "The changelog documents read-only /model and /effort print commands without an agent turn, quota spending or a conversation, as well as effort variants and stable model slugs."
     }
   ]
 }
