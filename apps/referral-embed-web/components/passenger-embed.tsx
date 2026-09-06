@@ -14,7 +14,10 @@ import type {
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
 } from "@drts/contracts";
-import type { EmbedContext } from "@/lib/embed-context";
+import {
+  type EmbedContext,
+  buildStandaloneFallbackUrl,
+} from "../lib/embed-context";
 import {
   EMBED_TRIP_FALLBACK_PROGRESS,
   EMBED_TRIP_FALLBACK_SCREENS,
@@ -122,11 +125,13 @@ function createIdempotencyKey(prefix: string) {
 }
 
 function buildHref(context: EmbedContext, next: Record<string, string>) {
+  const host =
+    context.decision.requestedEntryHost ||
+    context.session?.entryHost ||
+    (context.entry.entryHost ? context.entry.entryHost.trim() : null) ||
+    "app.yuhe-living.com.tw";
   const params = new URLSearchParams({
-    entryHost:
-      context.decision.requestedEntryHost ||
-      context.session?.entryHost ||
-      getEntryHost(context.entry),
+    entryHost: host,
   });
 
   for (const [key, value] of Object.entries(next)) {
@@ -135,6 +140,7 @@ function buildHref(context: EmbedContext, next: Record<string, string>) {
 
   return `/embed/${context.entry.entrySlug}?${params.toString()}`;
 }
+
 
 function toPhoneHref(phone: string) {
   const normalized = phone.replace(/[^\d+]/g, "");
@@ -948,18 +954,38 @@ function AppShell({
 
 function HandoffScreen({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
+  const isAuthenticated = Boolean(context.session);
+  const residentName =
+    context.session?.identity?.actorId ||
+    context.handoff.partnerUserRef ||
+    (isAuthenticated ? embedResident.name : "未解析");
+  const residentRef =
+    context.handoff.partnerUserRef ||
+    context.session?.drtsPassengerId ||
+    (isAuthenticated ? embedResident.ref : "未提供");
+  const residentUnit = isAuthenticated ? embedResident.unit : "未綁定";
+
   return (
     <AppShell
       context={context}
-      badgeTone="live"
+      badgeTone={isAuthenticated ? "live" : "warn"}
       footer={
-        <ActionButton
-          href={buildHref(context, { screen: "book", state: "handoff" })}
-          label="開始叫車"
-          theme={theme}
-          variant="primary"
-          iconRight="arrow"
-        />
+        isAuthenticated ? (
+          <ActionButton
+            href={buildHref(context, { screen: "book", state: "handoff" })}
+            label="開始叫車"
+            theme={theme}
+            variant="primary"
+            iconRight="arrow"
+          />
+        ) : (
+          <ActionButton
+            href={buildHref(context, { state: "reauth" })}
+            label={`回 ${context.strings.appName} 重新進入`}
+            theme={theme}
+            variant="primary"
+          />
+        )
       }
     >
       <div
@@ -979,52 +1005,59 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
         <div style={{ fontSize: 16.5, fontWeight: 800, textAlign: "center" }}>
           以 {context.strings.displayName} 身分
           <br />
-          為您準備叫車
+          {isAuthenticated ? "為您準備叫車" : "等待社區簽章權杖"}
         </div>
-        <Pill theme={theme} tone="success" dot>
-          handoff · 已交接
+        <Pill theme={theme} tone={isAuthenticated ? "success" : "warn"} dot>
+          {isAuthenticated ? "handoff · 已交接" : "unauthenticated · 未交接"}
         </Pill>
       </div>
 
       <Card
         theme={theme}
-        title="身分由社區 App 帶入"
-        subtitle="signed hand-off token"
+        title={isAuthenticated ? "身分由社區 App 帶入" : "身分尚未完成交接"}
+        subtitle={
+          isAuthenticated ? "signed hand-off token" : "missing valid signature"
+        }
       >
         <TokenRow
           theme={theme}
-          ok
-          label="社區簽章有效"
+          ok={isAuthenticated}
+          label="社區簽章狀態"
           code="partner_signature"
-          value="valid"
+          value={isAuthenticated ? "valid" : "missing_or_invalid"}
         />
         <TokenRow
           theme={theme}
-          ok
-          label="住戶身分已解析"
+          ok={isAuthenticated}
+          label="住戶身分"
           code="resident_resolved"
-          value={embedResident.name}
+          value={residentName}
         />
         <TokenRow
           theme={theme}
-          ok
+          ok={isAuthenticated}
           label="社區 / 戶別"
           code="community_unit"
-          value={embedResident.unit}
+          value={residentUnit}
         />
         <DetailRow
           theme={theme}
           label="參照"
-          value={embedResident.ref}
+          value={residentRef}
           mono
           strong
           last
         />
       </Card>
 
-      <Banner theme={theme} tone="primary" icon="bolt">
-        免再登入 · 由 {context.strings.appName}{" "}
-        安全帶入住戶身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。
+      <Banner
+        theme={theme}
+        tone={isAuthenticated ? "primary" : "warn"}
+        icon={isAuthenticated ? "bolt" : "shield"}
+      >
+        {isAuthenticated
+          ? `免再登入 · 由 ${context.strings.appName} 安全帶入住戶身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。`
+          : `尚未取得 ${context.strings.appName} 簽章授權。請由社區 App 內點擊叫車以帶入身分，或改用獨立叫車網站。`}
       </Banner>
     </AppShell>
   );
@@ -1032,6 +1065,14 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
 
 function ReauthScreen({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
+  const isReplayed = context.issues.some((i) => i.includes("replayed"));
+  const isExpired = context.issues.some((i) => i.includes("expired"));
+  const title = isReplayed
+    ? "權杖已被使用過 (Replay)"
+    : isExpired
+      ? "登入狀態已逾時"
+      : "需重新驗證社區身分";
+
   return (
     <AppShell
       context={context}
@@ -1045,7 +1086,7 @@ function ReauthScreen({ context }: { context: EmbedContext }) {
           />
           <ActionButton
             href={buildHref(context, { state: "fallback" })}
-            label="稍後再試"
+            label="改用獨立網站"
             theme={theme}
             variant="ghost"
           />
@@ -1056,23 +1097,23 @@ function ReauthScreen({ context }: { context: EmbedContext }) {
         theme={theme}
         tone="warn"
         icon="clock"
-        title="登入狀態已逾時"
-        posture="reauth_required"
+        title={title}
+        posture={isReplayed ? "token_replayed" : "reauth_required"}
       />
       <Card theme={theme} title="連線狀態">
         <TokenRow
           theme={theme}
           ok={false}
-          label="社區工作階段過期"
+          label={isReplayed ? "單次權杖已重播" : "社區工作階段過期"}
           code="partner_session"
-          value="expired"
+          value={isReplayed ? "replayed" : "expired"}
         />
         <TokenRow
           theme={theme}
           ok={false}
-          label="交付權杖逾時"
+          label="交付權杖狀態"
           code="handoff_token"
-          value="stale"
+          value={isReplayed ? "already_used" : "stale"}
         />
       </Card>
       <Banner theme={theme} tone="warn" icon="shield">
@@ -1237,49 +1278,103 @@ function ConsentScreen({ context }: { context: EmbedContext }) {
 
 function FallbackScreen({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
+  const standaloneUrl = buildStandaloneFallbackUrl(context);
+  const partnerUserRef =
+    context.handoff.partnerUserRef ||
+    context.session?.drtsPassengerId ||
+    "未提供";
+
   return (
     <AppShell
       context={context}
       badgeTone="neutral"
       footer={
-        <>
-          <ActionButton
-            href={buildHref(context, { state: "fallback" })}
-            label="前往獨立叫車網站"
-            theme={theme}
-            iconRight="ext"
-          />
-          <ActionButton
-            href={buildHref(context, { state: "handoff" })}
-            label="回社區 App"
-            theme={theme}
-            variant="ghost"
-          />
-        </>
+        standaloneUrl ? (
+          <>
+            <ActionButton
+              href={standaloneUrl}
+              label="前往獨立叫車網站"
+              theme={theme}
+              iconRight="ext"
+            />
+            <ActionButton
+              href={buildHref(context, { state: "handoff" })}
+              label="回社區 App"
+              theme={theme}
+              variant="ghost"
+            />
+          </>
+        ) : (
+          <>
+            <ActionButton
+              href={buildHref(context, { state: "handoff" })}
+              label={`回 ${context.strings.appName}`}
+              theme={theme}
+              variant="primary"
+            />
+            {context.strings.supportPhone ? (
+              <ActionButton
+                href={toPhoneHref(context.strings.supportPhone)}
+                label={`撥打客服 (${context.strings.supportPhone})`}
+                theme={theme}
+                variant="ghost"
+              />
+            ) : null}
+          </>
+        )
       }
     >
       <StateHero
         theme={theme}
         tone="neutral"
-        icon="ext"
-        title="內嵌服務暫時無法使用"
-        posture="fallback_to_web · 改用網站"
+        icon={standaloneUrl ? "ext" : "warn"}
+        title={standaloneUrl ? "內嵌服務暫時無法使用" : "轉介服務暫時無法使用"}
+        posture={
+          standaloneUrl
+            ? "fallback_to_web · 改用網站"
+            : "fallback_unavailable · 無獨立網站"
+        }
       />
-      <Card theme={theme} title="接下來">
+      <Card theme={theme} title={standaloneUrl ? "接下來" : "處理方式"}>
         <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
-          目前無法在社區 App 內完成叫車。您可改用 <b>獨立叫車網站</b>
-          ，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。
+          {standaloneUrl ? (
+            <>
+              目前無法在社區 App 內完成叫車。您可改用 <b>獨立叫車網站</b>
+              ，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。
+            </>
+          ) : (
+            <>
+              目前無法在社區 App 內完成叫車，且未設定可用的外部獨立網站。
+              請返回社區 App 重新進入，或撥打客服專線由專人為您安排行程。
+            </>
+          )}
         </div>
       </Card>
-      <Card theme={theme}>
+      <Card theme={theme} title="轉介來源資訊">
         <DetailRow
           theme={theme}
-          label="獨立網站"
-          value="ride.drts.com.tw"
+          label="轉介入口"
+          value={context.entry.entrySlug}
           mono
         />
-        <DetailRow theme={theme} label="驗證方式" value="手機簡訊 OTP" />
-        <DetailRow theme={theme} label="行程資料" value="重開後仍可找回" last />
+        <DetailRow
+          theme={theme}
+          label="合作夥伴"
+          value={context.entry.partnerCode}
+          mono
+        />
+        <DetailRow
+          theme={theme}
+          label="住戶識別"
+          value={partnerUserRef}
+          mono
+        />
+        <DetailRow
+          theme={theme}
+          label="客服電話"
+          value={context.strings.supportPhone}
+          last
+        />
       </Card>
     </AppShell>
   );
@@ -1454,14 +1549,21 @@ function BookScreen({ context }: { context: EmbedContext }) {
         />
         <div style={{ flex: 1, lineHeight: 1.25 }}>
           <div style={{ fontSize: 13.5, fontWeight: 700 }}>
-            {embedResident.name} · {embedResident.unit}
+            {context.session?.identity?.actorId ||
+              context.handoff.partnerUserRef ||
+              embedResident.name}{" "}
+            · {context.session || bootstrapped ? embedResident.unit : "未驗證"}
           </div>
           <div style={{ fontSize: 11, color: theme.muted }}>
             {context.strings.displayName}
           </div>
         </div>
-        <Pill theme={theme} tone="success" dot>
-          已驗證
+        <Pill
+          theme={theme}
+          tone={context.session || bootstrapped ? "success" : "warn"}
+          dot
+        >
+          {context.session || bootstrapped ? "已驗證" : "未驗證"}
         </Pill>
       </div>
 

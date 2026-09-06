@@ -15,7 +15,28 @@ const ORIGIN_HEADER = "origin";
 const REFERER_HEADER = "referer";
 const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
+export const CANONICAL_PARTNER_ENTRY_HOSTS = [
+  "app.yuhe-living.com.tw",
+  "app-stg.yuhe-living.com.tw",
+  "yuhe-residence.example",
+  "ride.ctbc.com.tw",
+  "ride.cathaybk.com.tw",
+  "ride.taishinbank.com.tw",
+  "ride.dbs.com.tw",
+  "claim.fubon-ins.com.tw",
+  "booking.lion-travel.com.tw",
+  "localhost:3005",
+  "localhost:3014",
+  "127.0.0.1:3199",
+  "127.0.0.1:3099",
+  "127.0.0.1:3014",
+] as const;
+
 export function parseAllowedEntryHosts(rawValue: string | undefined): string[] {
+  if (rawValue === undefined) {
+    return [...CANONICAL_PARTNER_ENTRY_HOSTS];
+  }
+
   if (!rawValue) {
     return [];
   }

@@ -111,6 +111,37 @@ export function middleware(request: NextRequest) {
     return createBlockedResponse(decision);
   }
 
+  if (isEmbedRoute) {
+    const artifact =
+      request.nextUrl.searchParams.get("artifact") ||
+      request.nextUrl.searchParams.get("token");
+    const entrySlug =
+      request.nextUrl.pathname.split("/").filter(Boolean)[1] ?? null;
+
+    if (artifact && entrySlug) {
+      const exchangeUrl = new URL("/api/referral/session", request.url);
+      exchangeUrl.searchParams.set("action", "exchange");
+      exchangeUrl.searchParams.set("artifact", artifact);
+      exchangeUrl.searchParams.set("entrySlug", entrySlug);
+      if (decision.requestedEntryHost) {
+        exchangeUrl.searchParams.set("entryHost", decision.requestedEntryHost);
+      }
+      const returnUrl = new URL(request.nextUrl.pathname, request.url);
+      for (const [k, v] of request.nextUrl.searchParams.entries()) {
+        if (k !== "artifact" && k !== "token") {
+          returnUrl.searchParams.set(k, v);
+        }
+      }
+      exchangeUrl.searchParams.set(
+        "returnTo",
+        returnUrl.pathname + returnUrl.search,
+      );
+      const redirectResponse = NextResponse.redirect(exchangeUrl);
+      applyEmbedSecurityHeaders(redirectResponse.headers, decision);
+      return redirectResponse;
+    }
+  }
+
   const response = NextResponse.next();
   applyEmbedSecurityHeaders(response.headers, decision);
   return response;
