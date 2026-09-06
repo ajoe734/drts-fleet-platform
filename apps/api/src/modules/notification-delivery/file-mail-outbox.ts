@@ -141,7 +141,8 @@ export class FileMailOutbox implements MailOutbox {
       });
       child.once("close", () => {
         clearTimeout(deadline);
-        if (!acquired) reject(new Error("notification_outbox_lock_unavailable"));
+        if (!acquired)
+          reject(new Error("notification_outbox_lock_unavailable"));
       });
       let output = "";
       child.stdout.on("data", (chunk: Buffer) => {
