@@ -267,6 +267,14 @@
 
 ---
 
+### 2.26 Acceptance 階段複查記錄（2026-09-06T15:03:22Z，Claude2，第 29 次連續 acceptance_ready_dispatch 喚醒，dedup 政策下之零 delta 項）
+
+依 §2.22 dedup 政策，本輪 `git fetch origin` 後比對 `origin/dev` 仍為 `548608e45841ca9edcbf382399bbbfb74d164535`（與 round 28 §2.25 記錄一致），**無新提交**。重新執行 `gh secret list`／`gh variable list`，計數仍為 11/97；CTI/TWM/Voice/Carrier/DTMF/Twilio/SIP/ASR/TTS/Phone/PSTN/Candidate 關鍵字比對仍為 0 筆匹配；`ai-status.sh show UV-EXEC-027` 確認候選生命週期欄位（`candidate_sha`/`reviewed_sha`=`7c3b76300`、`merge_sha`=`2093cf7e3`）與 `status`=`acceptance` 均未變化。本地分支 `claude2/uv-exec-027` 工作樹乾淨。
+
+> **本輪複查結論：** 機器真相零變化，7 項 `required_acceptance` 仍全數為 Blocker（`cti_account_capability_evidence`、`twm_account_model_voice_quota_evidence`、`native_candidate_account_evidence`、`line_product_service_area_evidence`、`human_queue_callback_sla_evidence`、`provider_data_terms_evidence`、`rate_card_capacity_evidence`），全部待供應商/電信/candidate 帳號等真實外部證據，超出本唯讀 worker 授權範圍。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄。**
+
+---
+
 ## 3. CTI 準備度盤點 (CTI Capability Readiness)
 
 對應 `required_acceptance`: `cti_account_capability_evidence`
