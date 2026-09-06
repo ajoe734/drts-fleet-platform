@@ -94,8 +94,9 @@
 ### 4.1 驗證界線與未進行之 Live / 真機項目說明
 
 - **已完成驗證範圍**:
-  - 本地 Vitest 單元/整合測試（11/11 通過），驗證資料層權威來源整合、假數據移除、空資料與異常讀取分離、未串接端點防呆、CSV 匯出筆數與篩選連動。
+  - 本地 Vitest 單元/整合測試（14/14 通過），驗證資料層權威來源整合、假數據移除、空資料與異常讀取分離、未串接端點防呆、CSV 匯出筆數與篩選連動（含 q 關鍵字搜尋與 compound 複合過濾）。
   - Next.js 靜態型別檢查（`next typegen && tsc --noEmit`），驗證所有頁面與 Route Handlers 型別安全。
+  - 解耦 `fleet-portal-data.server.ts` 與 `fleet-portal-fixtures.ts`，直接宣告純資料結構與回退常數，避免根目錄 `tsconfig.json`（無 `--jsx`）在編譯 `tests/**/*.ts` 時傳遞解析 `@drts/ui-web` TSX 模組而產生 `TS6142` 錯誤。
   - Git diff 格式檢查與 write_scopes 邊界檢查。
 - **未進行之 Live / 真機驗證界線（明列不冒充成功）**:
   - **事故/申訴與學院培訓後端**: 後端微服務尚未提供車行專屬 API，前台目前以 `connected: false` 與顯式警語展示，未進行線上即時資料連線。
@@ -107,7 +108,7 @@
 
 ### 5.1 自動化單元測試
 
-新建 Vitest 測試套件 `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts`，涵蓋 12 個核心場景：
+新建 Vitest 測試套件 `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts`，涵蓋 14 個核心場景：
 
 - **Requirement 1 & Capability C063**:
   1. `dashboard reflects live driver list counts rather than 128/96 fake stats`: 驗證總覽指標與列表真實筆數一致，完全無 128/96 假數字。
@@ -123,7 +124,9 @@
   9. `trips export with status=completed filter returns only completed trips`: 驗證狀態篩選精確對齊。
   10. `trips export with no matching rows returns only CSV header without failing`: 驗證空過濾安全產出表頭。
   11. `export handles loader errors gracefully with 500 status`: 驗證行程匯出異常回傳 500 錯誤與訊息。
-  12. `overview export handles loader errors with 500 status`: 驗證營運總覽匯出異常回傳 500 錯誤與訊息。
+  12. `trips export with q filter returns only matching trips by id, driver, or pickup`: 驗證行程匯出關鍵字（ID、司機、上車地點）過濾。
+  13. `trips export combining svc and q filters matches compound criteria`: 驗證行程匯出複合條件過濾。
+  14. `overview export handles loader errors with 500 status`: 驗證營運總覽匯出異常回傳 500 錯誤與訊息。
 
 執行結果：
 
@@ -131,9 +134,9 @@
  RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-fleet-data-001
 
  Test Files  1 passed (1)
-      Tests  12 passed (12)
-   Start at  15:01:03
-   Duration  576ms
+      Tests  14 passed (14)
+   Start at  15:13:49
+   Duration  633ms
 Exit Code:  0
 ```
 
