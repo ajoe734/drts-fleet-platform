@@ -11,8 +11,8 @@
 - Decision Ref: `docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md`
 - Functional Requirements (FRs): `UV-FR-001`, `UV-FR-003`, `UV-FR-007`, `UV-FR-010`, `UV-FR-011`, `UV-FR-018`, `UV-FR-021`, `UV-FR-024`, `UV-FR-026`, `UV-FR-027`, `UV-FR-030`, `UV-FR-031`, `UV-FR-032`
 - Acceptance Criteria (ACs): `UV-AC-002`, `UV-AC-026`, `UV-AC-030`, `UV-AC-033`
-- Last Update: `2026-09-06T13:27:10Z`
-- Re-Verification: `2026-09-06T13:27:10Z` (acceptance-phase唯讀複查，Claude2，acceptance_ready_dispatch 喚醒，連續第 18 輪，`ai-status.json` 機器真相與 GitHub secrets/variables 均無變化，7 項 required_acceptance 仍待外部證據)
+- Last Update: `2026-09-06T13:52:31Z`
+- Re-Verification: `2026-09-06T13:52:31Z` (acceptance-phase唯讀複查，Claude2，acceptance_ready_dispatch 喚醒，連續第 20 輪，origin/dev 推進 8 個提交但均與 7 項 required_acceptance 無關（含逐一核對 CTI adapter 骨架提交 UV-EXEC-008，確認 sandbox-only/未接線/無真實供應商憑證），GitHub secrets/variables 計數與關鍵字均無變化，7 項 required_acceptance 仍待外部證據)
 
 ---
 
@@ -243,6 +243,10 @@
 再次核對：`origin/dev` 仍為 `2093cf7e3`（= `merge_sha`，無推進）；`gh secret list`/`gh variable list` 計數仍為 11/97，CTI/TWM/Voice/Carrier/DTMF/Twilio/SIP/ASR/TTS/Phone/PSTN 關鍵字比對仍為 0 筆；`ai-status.json` 候選生命週期欄位與 §8.1 七項 `required_acceptance` 矩陣未變化。**未呼叫 `record-acceptance`／`progress`，本輪僅以 `note` 記錄。**
 
 > 連續 19 輪固定間隔 dispatch 產出完全相同結論，前 6 輪已在此節逐一記錄同一建議。**自本輪起，若後續喚醒仍無機器真相 delta（origin/dev SHA、gh secret/variable 計數與關鍵字、`required_acceptance` 矩陣三者皆無變化），不再新增重複子節**，僅透過 `ai-status.sh note` 更新 `next`/`last_update` 摘要，以避免此文件無限增長而不增加證據價值。本任務唯一解鎖路徑是取得真實外部供應商帳號/合約/費率證據並經人工確認後呼叫 `record-acceptance`；建議 supervisor 將 re-dispatch 條件改為證據變更觸發式。
+
+### 2.23 Acceptance 階段複查記錄（2026-09-06T13:52:31Z，Claude2，第 20 次連續 acceptance_ready_dispatch 喚醒，dedup 政策下之例外項）
+
+依 2.22 訂立之 dedup 政策，本輪僅在偵測到 `origin/dev` SHA 變化時才需要說明；本次確實偵測到變化，故簡述而非重複完整表格：`origin/dev` 已由 `2093cf7e3`（本任務 merge_sha）推進至 `a4876ac529abfb634c2b96f237116202abf3d87d`，中間新增 8 個提交，其中唯一與本任務主題相鄰者為 `2aa3cb5d8`（`UV-EXEC-008`：建立 CTI adapter 與獨立媒體 worker 骨架）。逐一核對該提交內容：其 `voice-cti.adapter.ts` 明確標註 sandbox-only、fail-closed-in-production，且「Not wired into CallcenterModule/Controller/Service」；未含任何正式/測試 CTI 供應商帳號憑證、號碼池或轉接授權，因此**不構成 `cti_account_capability_evidence` 之可用證據**，第 3 節 CTI 盤點與 §8.1 矩陣維持不變。其餘 7 個提交（發票、推薦、UV-EXEC-005/007 unblock 診斷等）與七項 `required_acceptance` 主題無關。`gh secret list`/`gh variable list` 計數仍為 11/97，關鍵字比對仍為 0 筆；`ai-status.json` 候選生命週期欄位未變。**未呼叫 `record-acceptance`／`progress`，本輪以 `note` 記錄。**
 
 ---
 
