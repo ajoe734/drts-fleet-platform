@@ -1,22 +1,19 @@
 import { CanvasPill, DataTable, Td, Tr } from "@drts/ui-web";
 import { cookies } from "next/headers";
+import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import {
   CalloutPanel,
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
-import {
-  getBankTenantName,
-  resolveBankDemoTenant,
-  resolveLocale,
-} from "@/lib/demo-tenants";
+import { getBankTenantName, resolveLocale } from "@/lib/demo-tenants";
 import {
   BANK_CONSOLE_ROLE_COOKIE,
   BANK_CONSOLE_SESSION_COOKIE,
   bankConsoleHref,
   getBankConsoleSession,
-  resolveServerSessionRole,
+  resolveBankPageSession,
 } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
@@ -74,7 +71,6 @@ export default async function StatementsPage({
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const locale = resolveLocale(resolvedSearchParams.locale);
-  const tenant = resolveBankDemoTenant(resolvedSearchParams.bank);
   let cookieRole: string | undefined;
   try {
     const cookieStore = await cookies();
@@ -82,11 +78,27 @@ export default async function StatementsPage({
       cookieStore.get(BANK_CONSOLE_SESSION_COOKIE)?.value ||
       cookieStore.get(BANK_CONSOLE_ROLE_COOKIE)?.value;
   } catch {
-    // Fallback for test / non-HTTP contexts
+    // Missing HTTP cookie context stays unauthenticated.
   }
-  const roleParam = one(resolvedSearchParams.role);
-  const sessionRole = resolveServerSessionRole(cookieRole, roleParam).role;
-  const session = getBankConsoleSession(tenant, locale, sessionRole);
+  const authenticated = resolveBankPageSession(
+    cookieRole,
+    resolvedSearchParams.bank,
+    resolvedSearchParams.role,
+  );
+  if (!authenticated) notFound();
+  if (!authenticated.canReadStatements) {
+    return (
+      <div className="page-shell bank-statements-page">
+        <CalloutPanel
+          title={t("statements.unauthorized.title", locale)}
+          description={t("users.roleCard.bank_ops_viewer", locale)}
+          tone="warning"
+        />
+      </div>
+    );
+  }
+  const tenant = authenticated.bank;
+  const session = getBankConsoleSession(tenant, locale, authenticated.role);
   const statementData = await loadBankStatementsData(
     tenant.tenantId,
     session.role,
