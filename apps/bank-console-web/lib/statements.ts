@@ -176,6 +176,33 @@ const RAW_STATEMENTS = [
       },
     ],
   },
+  {
+    period: "2026-03",
+    statementNo: "settlement-statement-tenant-demo-001-2026-03",
+    programLabel: "Airport transfer settlement",
+    issuedAt: "2026-03-01T09:00:00+08:00",
+    dueAt: "2026-03-31T23:59:00+08:00",
+    status: "due",
+    signedArtifactHref:
+      "/artifacts/statements/settlement-statement-tenant-demo-001-2026-03.pdf",
+    trips: [
+      {
+        tripId: "order-demo-032",
+        tripDate: "2026-03-18T18:20:00+08:00",
+        orderNo: "order-demo-032",
+        routeLabel: "依 API trip readback",
+        fareAmount: 800,
+        subsidisedAmount: 200,
+        paidAmount: 600,
+        benefitReference: "BEN-CTBC-202603-032",
+        cardholderReference: "CH-0032-9842",
+        cardReference: "5422-32XX-XXXX-4821",
+        artifactDownloadHref: "/artifacts/trips/order-demo-032.pdf",
+        disputeHref: "/statements/2026-03?dispute=order-demo-032",
+        disputed: false,
+      },
+    ],
+  },
 ] as const;
 
 function maskReference(value: string) {

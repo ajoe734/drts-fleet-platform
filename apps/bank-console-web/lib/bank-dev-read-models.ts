@@ -9,7 +9,7 @@ import type {
   TenantUserRoleRecord,
 } from "@drts/contracts";
 
-import { bankApiGet, bankApiGetList } from "@/lib/server-bank-api";
+import { bankApiGet, bankApiGetList } from "./server-bank-api";
 import {
   bookingDetails,
   bookingList,
@@ -20,39 +20,123 @@ import {
   type BookingProgram,
   type BookingState,
   type BookingTimelineEvent,
-} from "@/lib/bookings";
-import type { BankRole } from "@/lib/home-data";
-import type { StatementStatus } from "@/lib/statements";
-import type { BankConsoleRole } from "@/lib/session";
+} from "./bookings";
+import { ORDER_TALLIES, QUOTA_PROGRAMS, type BankRole } from "./home-data";
+import { settlementStatements, type StatementStatus } from "./statements";
+import { listContractRecords } from "./contracts-data";
+export type BankConsoleRole =
+  | "bank_program_admin"
+  | "bank_ops_viewer"
+  | "bank_finance";
 
 type ApiSettlementStatementRecord = {
-  statement_id: string;
-  tenant_id: string;
+  statement_id?: string;
+  statementId?: string;
+  tenant_id?: string;
+  tenantId?: string;
   period: string;
+  period_start?: string;
+  periodStart?: string;
+  period_end?: string;
+  periodEnd?: string;
   status: StatementStatus;
-  lines: Array<{
-    trip_id: string;
-    completed_at: string;
-    fare: { amount_minor: number; currency: string };
-    subsidised_amount: { amount_minor: number; currency: string };
-    paid_amount: { amount_minor: number; currency: string };
-    benefit_reference: string;
-    issuer_authorization_ref: string;
-    cardholder_ref_masked: string;
+  lines?: Array<{
+    trip_id?: string;
+    tripId?: string;
+    completed_at?: string;
+    completedAt?: string;
+    fare?: { amount_minor?: number; amountMinor?: number; currency?: string };
+    subsidised_amount?: {
+      amount_minor?: number;
+      amountMinor?: number;
+      currency?: string;
+    };
+    subsidisedAmount?: {
+      amount_minor?: number;
+      amountMinor?: number;
+      currency?: string;
+    };
+    paid_amount?: {
+      amount_minor?: number;
+      amountMinor?: number;
+      currency?: string;
+    };
+    paidAmount?: {
+      amount_minor?: number;
+      amountMinor?: number;
+      currency?: string;
+    };
+    benefit_reference?: string;
+    benefitReference?: string;
+    issuer_authorization_ref?: string;
+    issuerAuthorizationRef?: string;
+    cardholder_ref_masked?: string;
+    cardholderRefMasked?: string;
   }>;
-  totals: {
-    trip_count: number;
-    fare_total: { amount_minor: number; currency: string };
-    subsidised_total: { amount_minor: number; currency: string };
-    paid_total: { amount_minor: number; currency: string };
-    issuer_payable: { amount_minor: number; currency: string };
+  totals?: {
+    trip_count?: number;
+    tripCount?: number;
+    fare_total?: {
+      amount_minor?: number;
+      amountMinor?: number;
+      currency?: string;
+    };
+    fareTotal?: {
+      amount_minor?: number;
+      amountMinor?: number;
+      currency?: string;
+    };
+    subsidised_total?: {
+      amount_minor?: number;
+      amountMinor?: number;
+      currency?: string;
+    };
+    subsidisedTotal?: {
+      amount_minor?: number;
+      amountMinor?: number;
+      currency?: string;
+    };
+    paid_total?: {
+      amount_minor?: number;
+      amountMinor?: number;
+      currency?: string;
+    };
+    paidTotal?: {
+      amount_minor?: number;
+      amountMinor?: number;
+      currency?: string;
+    };
+    issuer_payable?: {
+      amount_minor?: number;
+      amountMinor?: number;
+      currency?: string;
+    };
+    issuerPayable?: {
+      amount_minor?: number;
+      amountMinor?: number;
+      currency?: string;
+    };
   };
-  artifact_ref: {
-    artifact_id: string;
-    kind: "settlement_statement";
-    manifest_hash: string;
+  artifact_ref?: {
+    artifact_id?: string;
+    artifactId?: string;
+    kind?: "settlement_statement";
+    manifest_hash?: string;
+    manifestHash?: string;
   };
-  generated_at: string;
+  artifactRef?: {
+    artifact_id?: string;
+    artifactId?: string;
+    kind?: "settlement_statement";
+    manifest_hash?: string;
+    manifestHash?: string;
+  };
+  generated_at?: string;
+  generatedAt?: string;
+  issued_at?: string;
+  issuedAt?: string;
+  due_at?: string;
+  dueAt?: string;
 };
 
 export type BankLoadState<T> = {
@@ -134,8 +218,14 @@ export type BankHomeOrderTallies = {
   cancelled: number;
 };
 
-function apiMoneyToNumber(value?: { amount_minor: number } | null) {
-  return (value?.amount_minor ?? 0) / 100;
+function apiMoneyToNumber(
+  value?: { amount_minor?: number; amountMinor?: number } | null,
+) {
+  if (!value) {
+    return 0;
+  }
+  const minor = value.amountMinor ?? value.amount_minor ?? 0;
+  return minor / 100;
 }
 
 function maskCompact(value: string | null | undefined) {
@@ -160,16 +250,94 @@ function maskSegmented(value: string | null | undefined) {
   return maskCompact(value);
 }
 
-function formatPeriodDate(period: string, end = false) {
-  const [yearPart, monthPart] = period.split("-");
+export function getTaipeiDateString(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+export function formatPeriodDate(period: string, end = false) {
+  const [yearPart, monthPart] = (period || "").split("-");
   const year = Number(yearPart);
   const month = Number(monthPart);
-  const date = new Date(Date.UTC(year, month - 1, end ? 28 : 1));
-  if (end) {
-    date.setUTCMonth(month);
-    date.setUTCDate(0);
+  if (!year || !month || Number.isNaN(year) || Number.isNaN(month)) {
+    return "";
   }
-  return date.toISOString();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (!end) {
+    return `${year}-${pad(month)}-01T00:00:00+08:00`;
+  }
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${year}-${pad(month)}-${pad(lastDay)}T23:59:59+08:00`;
+}
+
+export function deriveStatementDates(
+  periodOrRecord:
+    | string
+    | {
+        period?: string;
+        issued_at?: string;
+        issuedAt?: string;
+        due_at?: string;
+        dueAt?: string;
+        generated_at?: string;
+        generatedAt?: string;
+      },
+  rawIssuedAt?: string,
+  rawDueAt?: string,
+  rawGeneratedAt?: string,
+): { issuedAt: string; dueAt: string } {
+  const period =
+    typeof periodOrRecord === "string"
+      ? periodOrRecord
+      : periodOrRecord?.period || "2026-03";
+  const effectiveIssuedAt =
+    rawIssuedAt ??
+    (typeof periodOrRecord === "object"
+      ? periodOrRecord.issuedAt ?? periodOrRecord.issued_at
+      : undefined);
+  const effectiveDueAt =
+    rawDueAt ??
+    (typeof periodOrRecord === "object"
+      ? periodOrRecord.dueAt ?? periodOrRecord.due_at
+      : undefined);
+  const effectiveGeneratedAt =
+    rawGeneratedAt ??
+    (typeof periodOrRecord === "object"
+      ? periodOrRecord.generatedAt ?? periodOrRecord.generated_at
+      : undefined);
+
+  // Check if there is an exact seed statement record for this period
+  const seed = settlementStatements.find((s) => s.period === period);
+
+  const immutablePeriodStart = formatPeriodDate(period, false);
+  const immutablePeriodEnd = formatPeriodDate(period, true);
+
+  let issuedAt = effectiveIssuedAt || seed?.issuedAt;
+  let dueAt = effectiveDueAt || seed?.dueAt;
+
+  if (!issuedAt) {
+    if (effectiveGeneratedAt && effectiveGeneratedAt.slice(0, 7) === period) {
+      issuedAt = effectiveGeneratedAt;
+    } else {
+      issuedAt = immutablePeriodStart;
+    }
+  }
+
+  if (!dueAt) {
+    dueAt = immutablePeriodEnd;
+  }
+
+  // Guard: issuedAt must never be later than dueAt
+  if (new Date(issuedAt).getTime() > new Date(dueAt).getTime()) {
+    issuedAt = immutablePeriodStart;
+    dueAt = immutablePeriodEnd;
+  }
+
+  return { issuedAt, dueAt };
 }
 
 function formatLastActivity(value: string) {
@@ -400,40 +568,78 @@ function mapAuditEntity(record: AuditLogRecord) {
 
 async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
   const actorId = `bank-console:${tenantId}:${role}`;
-  const [programs, usage, orders, contracts, statements, users, audit] =
-    await Promise.all([
-      bankApiGetList<TenantServiceProgramRecord>(
-        "api/tenant/service-programs",
-        tenantId,
-        actorId,
-      ),
-      bankApiGetList<TenantProgramUsageRecord>(
-        "api/tenant/program-usage",
-        tenantId,
-        actorId,
-      ),
-      bankApiGetList<OwnedOrderRecord>(
-        "api/tenant/orders?serviceProduct=credit_card_airport_transfer",
-        tenantId,
-        actorId,
-      ),
-      bankApiGetList<IssuerContractStatusRecord>(
-        "api/tenant/contracts",
-        tenantId,
-        actorId,
-      ),
-      bankApiGetList<ApiSettlementStatementRecord>(
-        "api/tenant/settlement-statements",
-        tenantId,
-        actorId,
-      ),
-      bankApiGet<TenantUserRoleRecord[] | { items: TenantUserRoleRecord[] }>(
-        "api/tenant/users",
-        tenantId,
-        actorId,
-      ),
-      bankApiGetList<AuditLogRecord>("api/tenant/audit", tenantId, actorId),
-    ]);
+  const [
+    programsResult,
+    usageResult,
+    ordersResult,
+    contractsResult,
+    statementsResult,
+    usersResult,
+    auditResult,
+  ] = await Promise.allSettled([
+    bankApiGetList<TenantServiceProgramRecord>(
+      "api/tenant/service-programs",
+      tenantId,
+      actorId,
+    ),
+    bankApiGetList<TenantProgramUsageRecord>(
+      "api/tenant/program-usage",
+      tenantId,
+      actorId,
+    ),
+    bankApiGetList<OwnedOrderRecord>(
+      "api/tenant/orders?serviceProduct=credit_card_airport_transfer",
+      tenantId,
+      actorId,
+    ),
+    bankApiGetList<IssuerContractStatusRecord>(
+      "api/tenant/contracts",
+      tenantId,
+      actorId,
+    ),
+    bankApiGetList<ApiSettlementStatementRecord>(
+      "api/tenant/settlement-statements",
+      tenantId,
+      actorId,
+    ),
+    bankApiGet<TenantUserRoleRecord[] | { items: TenantUserRoleRecord[] }>(
+      "api/tenant/users",
+      tenantId,
+      actorId,
+    ),
+    bankApiGetList<AuditLogRecord>("api/tenant/audit", tenantId, actorId),
+  ]);
+
+  const failures: string[] = [];
+  if (programsResult.status === "rejected") failures.push("service-programs");
+  if (usageResult.status === "rejected") failures.push("program-usage");
+  if (ordersResult.status === "rejected") failures.push("orders");
+  if (contractsResult.status === "rejected") failures.push("contracts");
+  if (statementsResult.status === "rejected") failures.push("settlement-statements");
+  if (usersResult.status === "rejected") failures.push("users");
+  if (auditResult.status === "rejected") failures.push("audit");
+
+  const programs =
+    programsResult.status === "fulfilled" ? programsResult.value : [];
+  const usage = usageResult.status === "fulfilled" ? usageResult.value : [];
+  const orders = ordersResult.status === "fulfilled" ? ordersResult.value : [];
+  const contracts =
+    contractsResult.status === "fulfilled" ? contractsResult.value : [];
+  const statements =
+    statementsResult.status === "fulfilled" ? statementsResult.value : [];
+  const rawUsers =
+    usersResult.status === "fulfilled" ? usersResult.value : [];
+  const users = Array.isArray(rawUsers)
+    ? rawUsers
+    : rawUsers && Array.isArray((rawUsers as { items?: TenantUserRoleRecord[] }).items)
+      ? (rawUsers as { items: TenantUserRoleRecord[] }).items
+      : [];
+  const audit = auditResult.status === "fulfilled" ? auditResult.value : [];
+
+  const degradedMessage =
+    failures.length > 0
+      ? `Partially degraded: endpoints unavailable (${failures.join(", ")}).`
+      : null;
 
   return {
     programs,
@@ -441,9 +647,89 @@ async function loadCoreBankData(tenantId: string, role: BankConsoleRole) {
     orders,
     contracts,
     statements,
-    users: Array.isArray(users) ? users : users.items,
+    users,
     audit,
+    degradedMessage,
   };
+}
+
+export function mapStatementsFromApi(
+  statements: ApiSettlementStatementRecord[],
+  defaultProgramLabel: string,
+): BankStatement[] {
+  return statements.map((statement) => {
+    const period = statement.period;
+    const statementNo =
+      statement.statement_id ??
+      statement.statementId ??
+      `settlement-statement-${period}`;
+    const rawIssuedAt = statement.issued_at ?? statement.issuedAt;
+    const rawDueAt = statement.due_at ?? statement.dueAt;
+    const rawGeneratedAt = statement.generated_at ?? statement.generatedAt;
+    const { issuedAt, dueAt } = deriveStatementDates(
+      period,
+      rawIssuedAt,
+      rawDueAt,
+      rawGeneratedAt,
+    );
+    const totals = statement.totals;
+    const fareTotal = totals?.fare_total ?? totals?.fareTotal;
+    const subsidisedTotal = totals?.subsidised_total ?? totals?.subsidisedTotal;
+    const paidTotal = totals?.paid_total ?? totals?.paidTotal;
+    const issuerPayable = totals?.issuer_payable ?? totals?.issuerPayable;
+    const tripCount =
+      totals?.trip_count ?? totals?.tripCount ?? (statement.lines?.length ?? 0);
+
+    const artifactRef = statement.artifact_ref ?? statement.artifactRef;
+    const artifactId =
+      artifactRef?.artifact_id ?? artifactRef?.artifactId ?? statementNo;
+
+    const lines = statement.lines ?? [];
+    const trips = lines.map((line) => {
+      const tripId = line.trip_id ?? line.tripId ?? "trip";
+      const tripDate = line.completed_at ?? line.completedAt ?? issuedAt;
+      const subsidised = line.subsidised_amount ?? line.subsidisedAmount;
+      const paid = line.paid_amount ?? line.paidAmount;
+      const benefitRef = line.benefit_reference ?? line.benefitReference;
+      const cardholderRef =
+        line.cardholder_ref_masked ?? line.cardholderRefMasked;
+
+      return {
+        tripId,
+        tripDate,
+        orderNo: tripId,
+        routeLabel: "依 API trip readback",
+        fareAmount: apiMoneyToNumber(line.fare),
+        subsidisedAmount: apiMoneyToNumber(subsidised),
+        paidAmount: apiMoneyToNumber(paid),
+        benefitReferenceMasked: maskSegmented(benefitRef),
+        cardholderReferenceMasked: maskCompact(cardholderRef),
+        cardReferenceMasked: "••••",
+        artifactDownloadHref: `/artifacts/trips/${tripId}.pdf`,
+        disputeHref: `/statements/${period}?dispute=${tripId}`,
+        disputed: false,
+      };
+    });
+
+    return {
+      period,
+      statementNo,
+      programLabel: defaultProgramLabel,
+      issuedAt,
+      dueAt,
+      status: statement.status,
+      totalFareAmount: apiMoneyToNumber(fareTotal),
+      totalSubsidisedAmount: apiMoneyToNumber(subsidisedTotal),
+      totalPaidAmount: apiMoneyToNumber(paidTotal),
+      totalIssuerPayableAmount: apiMoneyToNumber(
+        issuerPayable || subsidisedTotal,
+      ),
+      totalTrips: tripCount,
+      signedArtifactHref: `/artifacts/statements/${artifactId}.pdf`,
+      artifactExpired: statement.status === "due",
+      trips,
+    };
+  });
 }
 
 export async function loadBankBookingsData(
@@ -458,39 +744,52 @@ export async function loadBankBookingsData(
   }>
 > {
   try {
-    const { programs, usage, orders } = await loadCoreBankData(tenantId, role);
-    const programNameMap = buildProgramNameMap(programs, usage);
-    const bookings = orders.map((order) =>
+    const core = await loadCoreBankData(tenantId, role);
+    const programNameMap = buildProgramNameMap(core.programs, core.usage);
+    const bookings = core.orders.map((order) =>
       mapBookingListItem(order, programNameMap),
     );
     const detailById = new Map(
-      orders.map((order) => [
+      core.orders.map((order) => [
         order.orderId,
         mapBookingDetail(order, programNameMap),
       ]),
     );
     const periods = [
       ...new Set(
-        orders.map((order) =>
+        core.orders.map((order) =>
           (order.reservationWindowStart ?? order.createdAt).slice(0, 7),
         ),
       ),
     ].sort((left, right) => right.localeCompare(left));
 
-    const effectiveBookings = bookings.length > 0 ? bookings : bookingList;
+    const effectiveBookings =
+      bookings.length > 0
+        ? bookings
+        : core.degradedMessage
+          ? bookingList
+          : [];
     const effectivePrograms =
-      programs.length > 0
-        ? mapBookingPrograms(programs)
-        : [
-            { code: "WE12", label: "中信機場 World Elite" },
-            { code: "SIG6", label: "中信商旅 Signature" },
-          ];
+      core.programs.length > 0
+        ? mapBookingPrograms(core.programs)
+        : core.degradedMessage
+          ? [
+              { code: "WE12", label: "中信機場 World Elite" },
+              { code: "SIG6", label: "中信商旅 Signature" },
+            ]
+          : [];
     const effectivePeriods =
-      periods.length > 0 ? periods : deriveBookingPeriods(bookingList);
+      periods.length > 0
+        ? periods
+        : core.degradedMessage
+          ? deriveBookingPeriods(bookingList)
+          : [];
     const effectiveDetailById =
       detailById.size > 0
         ? detailById
-        : new Map(bookingDetails.map((item) => [item.orderId, item]));
+        : core.degradedMessage
+          ? new Map(bookingDetails.map((item) => [item.orderId, item]))
+          : new Map();
 
     return {
       data: {
@@ -499,7 +798,7 @@ export async function loadBankBookingsData(
         periods: effectivePeriods,
         detailById: effectiveDetailById,
       },
-      degradedMessage: null,
+      degradedMessage: core.degradedMessage,
     };
   } catch (error) {
     return {
@@ -523,11 +822,17 @@ export async function loadBankContractsData(
   role: BankConsoleRole,
 ): Promise<BankLoadState<{ contracts: IssuerContractStatusRecord[] }>> {
   try {
-    const { contracts } = await loadCoreBankData(tenantId, role);
-    return { data: { contracts }, degradedMessage: null };
+    const core = await loadCoreBankData(tenantId, role);
+    const effectiveContracts =
+      core.contracts.length > 0
+        ? core.contracts
+        : core.degradedMessage
+          ? listContractRecords()
+          : [];
+    return { data: { contracts: effectiveContracts }, degradedMessage: core.degradedMessage };
   } catch (error) {
     return {
-      data: { contracts: [] },
+      data: { contracts: listContractRecords() },
       degradedMessage:
         error instanceof Error ? error.message : "Failed to load contracts.",
     };
@@ -539,51 +844,23 @@ export async function loadBankStatementsData(
   role: BankConsoleRole,
 ): Promise<BankLoadState<{ statements: BankStatement[] }>> {
   try {
-    const { statements, usage } = await loadCoreBankData(tenantId, role);
+    const core = await loadCoreBankData(tenantId, role);
     const defaultProgramLabel =
-      usage[0]?.programCode ?? "Airport transfer settlement";
+      core.usage[0]?.programCode ?? "Airport transfer settlement";
+    const mapped = mapStatementsFromApi(core.statements, defaultProgramLabel);
+    const effectiveStatements =
+      mapped.length > 0
+        ? mapped
+        : core.degradedMessage
+          ? settlementStatements
+          : [];
     return {
-      data: {
-        statements: statements.map((statement) => ({
-          period: statement.period,
-          statementNo: statement.statement_id,
-          programLabel: defaultProgramLabel,
-          issuedAt: statement.generated_at,
-          dueAt: formatPeriodDate(statement.period, true),
-          status: statement.status,
-          totalFareAmount: apiMoneyToNumber(statement.totals.fare_total),
-          totalSubsidisedAmount: apiMoneyToNumber(
-            statement.totals.subsidised_total,
-          ),
-          totalPaidAmount: apiMoneyToNumber(statement.totals.paid_total),
-          totalIssuerPayableAmount: apiMoneyToNumber(
-            statement.totals.issuer_payable,
-          ),
-          totalTrips: statement.totals.trip_count,
-          signedArtifactHref: `/artifacts/statements/${statement.artifact_ref.artifact_id}.pdf`,
-          artifactExpired: statement.status === "due",
-          trips: statement.lines.map((line) => ({
-            tripId: line.trip_id,
-            tripDate: line.completed_at,
-            orderNo: line.trip_id,
-            routeLabel: "依 API trip readback",
-            fareAmount: apiMoneyToNumber(line.fare),
-            subsidisedAmount: apiMoneyToNumber(line.subsidised_amount),
-            paidAmount: apiMoneyToNumber(line.paid_amount),
-            benefitReferenceMasked: maskSegmented(line.benefit_reference),
-            cardholderReferenceMasked: maskCompact(line.cardholder_ref_masked),
-            cardReferenceMasked: "••••",
-            artifactDownloadHref: `/artifacts/trips/${line.trip_id}.pdf`,
-            disputeHref: `/statements/${statement.period}?dispute=${line.trip_id}`,
-            disputed: false,
-          })),
-        })),
-      },
-      degradedMessage: null,
+      data: { statements: effectiveStatements },
+      degradedMessage: core.degradedMessage,
     };
   } catch (error) {
     return {
-      data: { statements: [] },
+      data: { statements: settlementStatements },
       degradedMessage:
         error instanceof Error ? error.message : "Failed to load statements.",
     };
@@ -609,22 +886,20 @@ export async function loadBankProgramsData(
   }>
 > {
   try {
-    const { programs, usage, contracts } = await loadCoreBankData(
-      tenantId,
-      role,
-    );
-    const exceptionCount = contracts.reduce(
+    const core = await loadCoreBankData(tenantId, role);
+    const exceptionCount = core.contracts.reduce(
       (sum, contract) =>
         sum +
-        contract.exceptions.filter((item) => item.status === "open").length,
+        (contract.exceptions ?? []).filter((item) => item.status === "open")
+          .length,
       0,
     );
     const byId = new Map(
-      programs.map((program) => [program.programId, program]),
+      core.programs.map((program) => [program.programId, program]),
     );
     return {
       data: {
-        programs: usage.map((record) => ({
+        programs: core.usage.map((record) => ({
           id: record.programId,
           name: byId.get(record.programId)?.displayName ?? record.programCode,
           code: record.programCode,
@@ -636,7 +911,7 @@ export async function loadBankProgramsData(
           exceptionCount,
         })),
       },
-      degradedMessage: null,
+      degradedMessage: core.degradedMessage,
     };
   } catch (error) {
     return {
@@ -652,10 +927,10 @@ export async function loadBankUsersData(
   role: BankConsoleRole,
 ): Promise<BankLoadState<{ users: BankUserRow[] }>> {
   try {
-    const { users } = await loadCoreBankData(tenantId, role);
+    const core = await loadCoreBankData(tenantId, role);
     return {
       data: {
-        users: users.map((user) => ({
+        users: core.users.map((user) => ({
           name: user.displayName,
           email: user.email,
           role: mapUserRole(user.roleCode),
@@ -663,7 +938,7 @@ export async function loadBankUsersData(
           lastActivity: formatLastActivity(user.updatedAt),
         })),
       },
-      degradedMessage: null,
+      degradedMessage: core.degradedMessage,
     };
   } catch (error) {
     return {
@@ -679,13 +954,13 @@ export async function loadBankAuditData(
   role: BankConsoleRole,
 ): Promise<BankLoadState<{ records: BankAuditRow[] }>> {
   try {
-    const { audit } = await loadCoreBankData(tenantId, role);
+    const core = await loadCoreBankData(tenantId, role);
     return {
       data: {
-        records: audit.map((record) => ({
+        records: core.audit.map((record) => ({
           id: record.auditId,
           timestamp: record.createdAt,
-          period: record.createdAt.slice(0, 7),
+          period: (record.createdAt || "").slice(0, 7),
           type: mapAuditType(record),
           actor: mapAuditActor(record),
           actorHandle: record.actorId ?? "system",
@@ -695,7 +970,7 @@ export async function loadBankAuditData(
           relatedEntity: mapAuditEntity(record),
         })),
       },
-      degradedMessage: null,
+      degradedMessage: core.degradedMessage,
     };
   } catch (error) {
     return {
@@ -720,25 +995,44 @@ export async function loadBankHomeSnapshot(
     statements: BankStatement[];
   }>
 > {
+  const todayLabel = getTaipeiDateString();
+  const currentPeriod = todayLabel.slice(0, 7);
+
   try {
-    const [
-      { data: bookingData },
-      { data: statementData },
-      { data: contractData },
-      core,
-    ] = await Promise.all([
-      loadBankBookingsData(tenantId, role),
-      loadBankStatementsData(tenantId, role),
-      loadBankContractsData(tenantId, role),
-      loadCoreBankData(tenantId, role),
-    ]);
-    const now = new Date();
-    return {
-      data: {
-        period: core.usage[0]?.period ?? now.toISOString().slice(0, 7),
-        todayLabel: now.toISOString().slice(0, 10),
-        orders: bookingData.bookings,
-        tallies: core.orders.reduce<BankHomeOrderTallies>(
+    const core = await loadCoreBankData(tenantId, role);
+    const programNameMap = buildProgramNameMap(core.programs, core.usage);
+    const mappedBookings = core.orders.map((order) =>
+      mapBookingListItem(order, programNameMap),
+    );
+    const defaultProgramLabel =
+      core.usage[0]?.programCode ?? "Airport transfer settlement";
+    const mappedStatements = mapStatementsFromApi(
+      core.statements,
+      defaultProgramLabel,
+    );
+
+    const effectiveOrders =
+      mappedBookings.length > 0
+        ? mappedBookings
+        : core.degradedMessage
+          ? bookingList
+          : [];
+    const effectiveContracts =
+      core.contracts.length > 0
+        ? core.contracts
+        : core.degradedMessage
+          ? listContractRecords()
+          : [];
+    const effectiveStatements =
+      mappedStatements.length > 0
+        ? mappedStatements
+        : core.degradedMessage
+          ? settlementStatements
+          : [];
+
+    const hasLiveOrders = core.orders.length > 0;
+    const tallies = hasLiveOrders
+      ? core.orders.reduce<BankHomeOrderTallies>(
           (sum, order) => {
             sum.total += 1;
             sum[mapHomeOrderBucket(order.status)] += 1;
@@ -751,30 +1045,55 @@ export async function loadBankHomeSnapshot(
             completed: 0,
             cancelled: 0,
           },
-        ),
-        usage: core.usage,
-        contracts: contractData.contracts,
-        statements: statementData.statements,
-      },
-      degradedMessage: null,
-    };
-  } catch (error) {
-    const now = new Date();
+        )
+      : core.degradedMessage
+        ? ORDER_TALLIES
+        : { total: 0, reserved: 0, live: 0, completed: 0, cancelled: 0 };
+
+    const effectiveUsage =
+      core.usage.length > 0
+        ? core.usage
+        : core.degradedMessage
+          ? QUOTA_PROGRAMS.filter((p) => p.program !== "all").map((p) => ({
+              programId: `prog-${p.program}`,
+              programCode:
+                p.program === "worldElite" ? "CTB-AIR-WE" : "CTB-AIR-SG",
+              period: currentPeriod,
+              quotaTotal: p.total,
+              quotaRemaining: p.total - p.used,
+              tripsConsumed: p.used,
+              cardholdersServed: p.used,
+            }))
+          : [];
+
+    const period =
+      core.usage[0]?.period ??
+      effectiveStatements[0]?.period ??
+      core.contracts[0]?.periodAttainment?.period ??
+      currentPeriod;
+
     return {
       data: {
-        period: now.toISOString().slice(0, 7),
-        todayLabel: now.toISOString().slice(0, 10),
-        orders: [],
-        tallies: {
-          total: 0,
-          reserved: 0,
-          live: 0,
-          completed: 0,
-          cancelled: 0,
-        },
+        period,
+        todayLabel,
+        orders: effectiveOrders,
+        tallies,
+        usage: effectiveUsage,
+        contracts: effectiveContracts,
+        statements: effectiveStatements,
+      },
+      degradedMessage: core.degradedMessage,
+    };
+  } catch (error) {
+    return {
+      data: {
+        period: currentPeriod,
+        todayLabel,
+        orders: bookingList,
+        tallies: ORDER_TALLIES,
         usage: [],
-        contracts: [],
-        statements: [],
+        contracts: listContractRecords(),
+        statements: settlementStatements,
       },
       degradedMessage:
         error instanceof Error ? error.message : "Failed to load home data.",
