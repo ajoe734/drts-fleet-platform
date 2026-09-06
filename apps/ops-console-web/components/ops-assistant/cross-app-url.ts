@@ -204,7 +204,7 @@ export function sanitizeAuditHref(
   // If rawHref is an absolute URL
   try {
     const parsed = new URL(trimmed);
-    let path = cleanRoutePath(parsed.pathname);
+    const path = cleanRoutePath(parsed.pathname);
     if (path === "/audit" || path.startsWith("/audit/")) {
       const url = new URL(path, origin);
       url.search = parsed.search;
