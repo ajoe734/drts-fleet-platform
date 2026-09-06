@@ -58,6 +58,7 @@ by `playwright.referral-embed.config.ts`.
 | `REFERRAL_EMBED_ALLOWED_HOSTS`      | space/comma-separated allowlist of partner `entryHost`s permitted to iframe `/embed/*` |
 | `REFERRAL_EMBED_DEMO`               | `true` enables the deterministic demo handoff for dev/preview                          |
 | `REFERRAL_EMBED_DEFAULT_ENTRY_SLUG` | optional canonical entry opened from `/`; dev uses `yuhe-residence`                    |
+| `REFERRAL_EMBED_STANDALONE_URL`     | absolute URL of a real standalone booking entry offered from the fallback screen when the embed can't complete handoff. Must resolve to a different host than the embed itself; a same-host value is treated as unset (it would recreate the fallback → embed → blocked loop this exists to fix). When unset, the fallback screen reports an honest "no alternate entry configured" state instead of linking anywhere. `ref_source` / `ref_entry_slug` / `ref_entry_host` query params are appended for source attribution. |
 
 ## Local commands
 
