@@ -5,15 +5,15 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { OwnedOrderRecord } from "@drts/contracts";
 
-import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
-import { DatabaseService } from "../../apps/api/src/common/db";
-import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
-import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
-import { OwnedMobilityRepository } from "../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
-import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
-import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
-import { VoiceBookingRepository } from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
-import { resolveVoiceOrderFence } from "../../apps/api/src/modules/voice-booking/voice-order-fence";
+import { ApiRequestError } from "../../src/common/api-envelope";
+import { DatabaseService } from "../../src/common/db";
+import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
+import { OwnedMobilityRepository } from "../../src/modules/owned-mobility/owned-mobility.repository";
+import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
+import { VoiceBookingRepository } from "../../src/modules/voice-booking/voice-booking.repository";
+import { resolveVoiceOrderFence } from "../../src/modules/voice-booking/voice-order-fence";
 
 // UV-EXEC-005: SD §7.4/§7.5/§8.4 -- the legacy callcenter/multi-taxi entry
 // points and the recording-state callback must be fenced against a voice
@@ -21,6 +21,16 @@ import { resolveVoiceOrderFence } from "../../apps/api/src/modules/voice-booking
 // the same callId. Assumes migrations V0086-V0089 have already been applied
 // to DATABASE_URL, exactly like the UV-EXEC-002/004 suites this one builds
 // on -- it is not itself a migration runner.
+//
+// Lives under apps/api/tests/integration/ (not the repo-root tests/
+// integration/), matching UV-EXEC-002/004: `@drts/api`'s test:integration
+// script (`vitest run tests/integration tests/load`, cwd apps/api) is the
+// only script that resolves this directory, and it only runs in the
+// dedicated post-migration ci-integ.yml `integration` job. The repo-root
+// tests/integration/ glob is swept into `pnpm run test:unit`, which runs
+// against a Postgres service that never gets migrated -- a DB-backed suite
+// placed there fails every "unit" job and the smoke acceptance gate before a
+// single migration is applied.
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
