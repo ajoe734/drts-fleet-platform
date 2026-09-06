@@ -40,9 +40,10 @@ export function guardInvitationTransport(
   return {
     provider: transport?.provider ?? "unavailable",
     async send(message) {
-      const match = /^Invitation proof: (ti_[A-Za-z0-9_-]+)$/m.exec(
-        message.body,
-      );
+      const match =
+        /^https:\/\/[^\s#]+#invitationToken=(ti_[A-Za-z0-9_-]+)$/m.exec(
+          message.body,
+        );
       const invitation = match
         ? await identity.findInvitationByTokenHash(
             createHash("sha256").update(match[1]!).digest("hex"),
@@ -164,7 +165,6 @@ export class TenantInvitationDeliveryService
           link.toString(),
           `有效期限：${request.expiresAt}`,
           "此邀請限使用一次；重新寄送後，舊邀請將失效。",
-          `Invitation proof: ${request.rawToken}`,
         ].join("\n"),
       });
       receipt = await this.delivery.dispatch(

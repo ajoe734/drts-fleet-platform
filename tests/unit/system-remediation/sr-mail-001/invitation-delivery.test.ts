@@ -98,7 +98,8 @@ const command = {
   roleCode: "tenant_viewer",
 };
 function proof(message: TransportMessage) {
-  return /^Invitation proof: (.+)$/m.exec(message.body)![1]!;
+  const link = new URL(message.body.split("\n")[1]!);
+  return new URLSearchParams(link.hash.slice(1)).get("invitationToken")!;
 }
 
 describe("durable invitation adapter", () => {
