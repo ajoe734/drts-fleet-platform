@@ -7,7 +7,7 @@ export const VoiceAgentBookingActorSchema = z
   .object({
     type: z.literal("voice_agent"),
     voiceSessionId: z.string().uuid(),
-    principalId: z.string(),
+    principalId: z.string().min(1),
   })
   .strict();
 export type VoiceAgentBookingActor = z.infer<
@@ -17,7 +17,7 @@ export type VoiceAgentBookingActor = z.infer<
 export const HumanBookingActorSchema = z
   .object({
     type: z.literal("human"),
-    agentId: z.string(),
+    agentId: z.string().min(1),
   })
   .strict();
 export type HumanBookingActor = z.infer<typeof HumanBookingActorSchema>;
@@ -87,7 +87,7 @@ export const BaseVoiceProofSchema = z.object({
   intentId: z.string().uuid(),
   action: z.string(),
   draftVersion: z.number().int(),
-  snapshotHash: z.string(),
+  snapshotHash: z.string().min(1),
   readbackPlaybackId: z.string().uuid(),
   readbackCompletedEventId: z.string().uuid(),
   inputEpoch: z.number().int(),

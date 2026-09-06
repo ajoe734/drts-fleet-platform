@@ -3336,6 +3336,7 @@ components:
           format: uuid
         principalId:
           type: string
+          minLength: 1
       required:
         - type
         - voiceSessionId
@@ -3349,6 +3350,7 @@ components:
           enum: [human]
         agentId:
           type: string
+          minLength: 1
       required:
         - type
         - agentId

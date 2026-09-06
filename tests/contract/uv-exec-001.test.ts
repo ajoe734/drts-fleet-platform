@@ -4,6 +4,8 @@ import { createRequire } from "node:module";
 import { describe, it, expect } from "vitest";
 import {
   BookingActorSchema,
+  VoiceAgentBookingActorSchema,
+  HumanBookingActorSchema,
   VoiceProofSchema,
   SpeechVoiceProofSchema,
   DtmfVoiceProofSchema,
@@ -136,6 +138,36 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         injected: true,
       });
       expect(result.success).toBe(false);
+    });
+
+    it("rejects empty agentId in human actor (SD §4.2, §9.1)", () => {
+      const result = BookingActorSchema.safeParse({
+        type: "human",
+        agentId: "",
+      });
+      expect(result.success).toBe(false);
+      expect(
+        HumanBookingActorSchema.safeParse({
+          type: "human",
+          agentId: "",
+        }).success,
+      ).toBe(false);
+    });
+
+    it("rejects empty principalId in voice_agent actor (SD §4.2, §9.1)", () => {
+      const result = BookingActorSchema.safeParse({
+        type: "voice_agent",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174000",
+        principalId: "",
+      });
+      expect(result.success).toBe(false);
+      expect(
+        VoiceAgentBookingActorSchema.safeParse({
+          type: "voice_agent",
+          voiceSessionId: "123e4567-e89b-12d3-a456-426614174000",
+          principalId: "",
+        }).success,
+      ).toBe(false);
     });
   });
 
@@ -523,6 +555,34 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       Reflect.deleteProperty(incompleteProof, "controlCutoff");
       const result = VoiceProofSchema.safeParse(incompleteProof);
       expect(result.success).toBe(false);
+    });
+
+    it("rejects empty snapshotHash in speech voice proof (SD §6.2)", () => {
+      const proof = {
+        ...baseProof,
+        snapshotHash: "",
+        confirmationMethod: "speech" as const,
+        evidence: {
+          turnId: "123e4567-e89b-12d3-a456-426614174006",
+          finalEventId: "123e4567-e89b-12d3-a456-426614174007",
+        },
+      };
+      expect(SpeechVoiceProofSchema.safeParse(proof).success).toBe(false);
+      expect(VoiceProofSchema.safeParse(proof).success).toBe(false);
+    });
+
+    it("rejects empty snapshotHash in DTMF voice proof (SD §6.2)", () => {
+      const proof = {
+        ...baseProof,
+        snapshotHash: "",
+        confirmationMethod: "dtmf" as const,
+        evidence: {
+          eventId: "123e4567-e89b-12d3-a456-426614174008",
+          digit: "1",
+        },
+      };
+      expect(DtmfVoiceProofSchema.safeParse(proof).success).toBe(false);
+      expect(VoiceProofSchema.safeParse(proof).success).toBe(false);
     });
   });
 
@@ -1286,6 +1346,12 @@ describe("UV-EXEC-001 Voice Contracts", () => {
     }
 
     const validateProof = ajv.getSchema("#/components/schemas/VoiceProof")!;
+    const validateSpeechProof = ajv.getSchema(
+      "#/components/schemas/VoiceSpeechProof",
+    )!;
+    const validateDtmfProof = ajv.getSchema(
+      "#/components/schemas/VoiceDtmfProof",
+    )!;
     const validateCapability = ajv.getSchema(
       "#/components/schemas/VoiceCapability",
     )!;
@@ -1296,6 +1362,12 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       "#/components/schemas/VoiceCapabilityTokenEnvelope",
     )!;
     const validateActor = ajv.getSchema("#/components/schemas/BookingActor")!;
+    const validateVoiceAgentActor = ajv.getSchema(
+      "#/components/schemas/VoiceAgentBookingActor",
+    )!;
+    const validateHumanActor = ajv.getSchema(
+      "#/components/schemas/HumanBookingActor",
+    )!;
     const validateReceipt = ajv.getSchema("#/components/schemas/VoiceReceipt")!;
     const validateReceiptRecord = ajv.getSchema(
       "#/components/schemas/VoiceReceiptRecord",
@@ -1406,6 +1478,34 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         injectedClaim: "bypass",
       };
       expect(validateProof(proof)).toBe(false);
+    });
+
+    it("OpenAPI rejects speech proof with empty snapshotHash (minLength: 1)", () => {
+      const proof = {
+        ...baseProofData,
+        snapshotHash: "",
+        confirmationMethod: "speech",
+        evidence: {
+          turnId: "123e4567-e89b-12d3-a456-426614174006",
+          finalEventId: "123e4567-e89b-12d3-a456-426614174007",
+        },
+      };
+      expect(validateProof(proof)).toBe(false);
+      expect(validateSpeechProof(proof)).toBe(false);
+    });
+
+    it("OpenAPI rejects DTMF proof with empty snapshotHash (minLength: 1)", () => {
+      const proof = {
+        ...baseProofData,
+        snapshotHash: "",
+        confirmationMethod: "dtmf",
+        evidence: {
+          eventId: "123e4567-e89b-12d3-a456-426614174008",
+          digit: "1",
+        },
+      };
+      expect(validateProof(proof)).toBe(false);
+      expect(validateDtmfProof(proof)).toBe(false);
     });
 
     it("OpenAPI accepts valid capability token", () => {
@@ -1526,6 +1626,25 @@ describe("UV-EXEC-001 Voice Contracts", () => {
           injected: true,
         }),
       ).toBe(false);
+    });
+
+    it("OpenAPI rejects empty principalId in voice_agent actor (minLength: 1)", () => {
+      const actor = {
+        type: "voice_agent",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174000",
+        principalId: "",
+      };
+      expect(validateActor(actor)).toBe(false);
+      expect(validateVoiceAgentActor(actor)).toBe(false);
+    });
+
+    it("OpenAPI rejects empty agentId in human booking actor (minLength: 1)", () => {
+      const actor = {
+        type: "human",
+        agentId: "",
+      };
+      expect(validateActor(actor)).toBe(false);
+      expect(validateHumanActor(actor)).toBe(false);
     });
 
     it("OpenAPI rejects extra fields in VoiceScopeProfile and VoiceControlCutoff", () => {
@@ -2367,7 +2486,7 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       ).toBe(true);
     });
 
-    it("ensures negative boundary parity between Zod and OpenAPI Ajv for VoiceCallbackAttempt, VoiceDraftRevision, VoiceCallback, and VoiceDraft", () => {
+    it("ensures negative boundary parity between Zod and OpenAPI Ajv for VoiceCallbackAttempt, VoiceDraftRevision, VoiceCallback, VoiceDraft, VoiceProof, and BookingActor", () => {
       // 1. VoiceCallbackAttempt
       const validAttempt = {
         taskId: "123e4567-e89b-12d3-a456-426614174000",
@@ -2458,6 +2577,77 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       expect(
         validateCallback({ ...validCallback, attemptCount: 1 }),
       ).toBe(true);
+
+      // 4. VoiceSpeechProof and VoiceDtmfProof snapshotHash nonempty parity (SD §6.2)
+      const validSpeechProof = {
+        ...baseProofData,
+        confirmationMethod: "speech" as const,
+        evidence: {
+          turnId: "123e4567-e89b-12d3-a456-426614174006",
+          finalEventId: "123e4567-e89b-12d3-a456-426614174007",
+        },
+      };
+      expect(SpeechVoiceProofSchema.safeParse(validSpeechProof).success).toBe(true);
+      expect(VoiceProofSchema.safeParse(validSpeechProof).success).toBe(true);
+      expect(validateSpeechProof(validSpeechProof)).toBe(true);
+      expect(validateProof(validSpeechProof)).toBe(true);
+
+      const emptyHashSpeechProof = { ...validSpeechProof, snapshotHash: "" };
+      expect(SpeechVoiceProofSchema.safeParse(emptyHashSpeechProof).success).toBe(false);
+      expect(VoiceProofSchema.safeParse(emptyHashSpeechProof).success).toBe(false);
+      expect(validateSpeechProof(emptyHashSpeechProof)).toBe(false);
+      expect(validateProof(emptyHashSpeechProof)).toBe(false);
+
+      const validDtmfProof = {
+        ...baseProofData,
+        confirmationMethod: "dtmf" as const,
+        evidence: {
+          eventId: "123e4567-e89b-12d3-a456-426614174008",
+          digit: "1",
+        },
+      };
+      expect(DtmfVoiceProofSchema.safeParse(validDtmfProof).success).toBe(true);
+      expect(VoiceProofSchema.safeParse(validDtmfProof).success).toBe(true);
+      expect(validateDtmfProof(validDtmfProof)).toBe(true);
+      expect(validateProof(validDtmfProof)).toBe(true);
+
+      const emptyHashDtmfProof = { ...validDtmfProof, snapshotHash: "" };
+      expect(DtmfVoiceProofSchema.safeParse(emptyHashDtmfProof).success).toBe(false);
+      expect(VoiceProofSchema.safeParse(emptyHashDtmfProof).success).toBe(false);
+      expect(validateDtmfProof(emptyHashDtmfProof)).toBe(false);
+      expect(validateProof(emptyHashDtmfProof)).toBe(false);
+
+      // 5. BookingActor nonempty identity parity (SD §4.2, §9.1)
+      const validVoiceAgent = {
+        type: "voice_agent" as const,
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174000",
+        principalId: "principal-123",
+      };
+      expect(VoiceAgentBookingActorSchema.safeParse(validVoiceAgent).success).toBe(true);
+      expect(BookingActorSchema.safeParse(validVoiceAgent).success).toBe(true);
+      expect(validateVoiceAgentActor(validVoiceAgent)).toBe(true);
+      expect(validateActor(validVoiceAgent)).toBe(true);
+
+      const emptyPrincipalAgent = { ...validVoiceAgent, principalId: "" };
+      expect(VoiceAgentBookingActorSchema.safeParse(emptyPrincipalAgent).success).toBe(false);
+      expect(BookingActorSchema.safeParse(emptyPrincipalAgent).success).toBe(false);
+      expect(validateVoiceAgentActor(emptyPrincipalAgent)).toBe(false);
+      expect(validateActor(emptyPrincipalAgent)).toBe(false);
+
+      const validHuman = {
+        type: "human" as const,
+        agentId: "human-ops-42",
+      };
+      expect(HumanBookingActorSchema.safeParse(validHuman).success).toBe(true);
+      expect(BookingActorSchema.safeParse(validHuman).success).toBe(true);
+      expect(validateHumanActor(validHuman)).toBe(true);
+      expect(validateActor(validHuman)).toBe(true);
+
+      const emptyAgentHuman = { ...validHuman, agentId: "" };
+      expect(HumanBookingActorSchema.safeParse(emptyAgentHuman).success).toBe(false);
+      expect(BookingActorSchema.safeParse(emptyAgentHuman).success).toBe(false);
+      expect(validateHumanActor(emptyAgentHuman)).toBe(false);
+      expect(validateActor(emptyAgentHuman)).toBe(false);
     });
   });
 
@@ -2642,10 +2832,34 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       const vCallback = ajv8.getSchema(
         "#/components/schemas/VoiceCallback",
       )!;
+      const vSpeechProof = ajv8.getSchema(
+        "#/components/schemas/VoiceSpeechProof",
+      )!;
+      const vDtmfProof = ajv8.getSchema(
+        "#/components/schemas/VoiceDtmfProof",
+      )!;
+      const vProof = ajv8.getSchema(
+        "#/components/schemas/VoiceProof",
+      )!;
+      const vVoiceAgent = ajv8.getSchema(
+        "#/components/schemas/VoiceAgentBookingActor",
+      )!;
+      const vHuman = ajv8.getSchema(
+        "#/components/schemas/HumanBookingActor",
+      )!;
+      const vActor = ajv8.getSchema(
+        "#/components/schemas/BookingActor",
+      )!;
 
       expect(vAttempt).toBeDefined();
       expect(vRevision).toBeDefined();
       expect(vCallback).toBeDefined();
+      expect(vSpeechProof).toBeDefined();
+      expect(vDtmfProof).toBeDefined();
+      expect(vProof).toBeDefined();
+      expect(vVoiceAgent).toBeDefined();
+      expect(vHuman).toBeDefined();
+      expect(vActor).toBeDefined();
 
       const validAttempt = {
         taskId: "123e4567-e89b-12d3-a456-426614174000",
@@ -2678,6 +2892,68 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       expect(vCallback(validCallback)).toBe(true);
       expect(vCallback({ ...validCallback, attemptCount: -1 })).toBe(false);
       expect(vCallback({ ...validCallback, attemptCount: 1 })).toBe(true);
+
+      const baseAjv8Proof = {
+        confirmationId: "123e4567-e89b-12d3-a456-426614174000",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174001",
+        intentId: "123e4567-e89b-12d3-a456-426614174002",
+        action: "create_owned_immediate_order",
+        draftVersion: 7,
+        snapshotHash: "sha256-abcdef0123456789",
+        readbackPlaybackId: "123e4567-e89b-12d3-a456-426614174003",
+        readbackCompletedEventId: "123e4567-e89b-12d3-a456-426614174004",
+        inputEpoch: 12,
+        controlCutoff: { mediaEpoch: 2, controlSequence: 98 },
+        leaseEpoch: 3,
+        recordingCheckpointId: "123e4567-e89b-12d3-a456-426614174005",
+        confirmedAt: "2026-09-06T02:00:00.000Z",
+        expiresAt: "2026-09-06T02:02:00.000Z",
+      };
+
+      const validSpeechProof = {
+        ...baseAjv8Proof,
+        confirmationMethod: "speech",
+        evidence: {
+          turnId: "123e4567-e89b-12d3-a456-426614174006",
+          finalEventId: "123e4567-e89b-12d3-a456-426614174007",
+        },
+      };
+      expect(vSpeechProof(validSpeechProof)).toBe(true);
+      expect(vProof(validSpeechProof)).toBe(true);
+      expect(vSpeechProof({ ...validSpeechProof, snapshotHash: "" })).toBe(false);
+      expect(vProof({ ...validSpeechProof, snapshotHash: "" })).toBe(false);
+
+      const validDtmfProof = {
+        ...baseAjv8Proof,
+        confirmationMethod: "dtmf",
+        evidence: {
+          eventId: "123e4567-e89b-12d3-a456-426614174008",
+          digit: "1",
+        },
+      };
+      expect(vDtmfProof(validDtmfProof)).toBe(true);
+      expect(vProof(validDtmfProof)).toBe(true);
+      expect(vDtmfProof({ ...validDtmfProof, snapshotHash: "" })).toBe(false);
+      expect(vProof({ ...validDtmfProof, snapshotHash: "" })).toBe(false);
+
+      const validVoiceAgent = {
+        type: "voice_agent",
+        voiceSessionId: "123e4567-e89b-12d3-a456-426614174000",
+        principalId: "principal-123",
+      };
+      expect(vVoiceAgent(validVoiceAgent)).toBe(true);
+      expect(vActor(validVoiceAgent)).toBe(true);
+      expect(vVoiceAgent({ ...validVoiceAgent, principalId: "" })).toBe(false);
+      expect(vActor({ ...validVoiceAgent, principalId: "" })).toBe(false);
+
+      const validHuman = {
+        type: "human",
+        agentId: "human-ops-42",
+      };
+      expect(vHuman(validHuman)).toBe(true);
+      expect(vActor(validHuman)).toBe(true);
+      expect(vHuman({ ...validHuman, agentId: "" })).toBe(false);
+      expect(vActor({ ...validHuman, agentId: "" })).toBe(false);
     });
   });
 });
