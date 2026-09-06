@@ -9,10 +9,15 @@ export default defineConfig({
     alias: {
       "@": resolve("apps/bank-console-web"),
       "@drts/contracts": resolve("packages/contracts/src/index.ts"),
-      "@drts/control-plane-auth": resolve("packages/control-plane-auth/src/index.ts"),
+      "@drts/control-plane-auth": resolve(
+        "packages/control-plane-auth/src/index.ts",
+      ),
       "@drts/ui-tokens": resolve("packages/ui-tokens/src/index.ts"),
       "@drts/ui-web": resolve("packages/ui-web/src/index.tsx"),
     },
   },
-  test: { environment: "node", include: ["tests/unit/system-remediation/sr-bank-002/*.spec.ts"] },
+  test: {
+    environment: "node",
+    include: ["tests/unit/system-remediation/sr-bank-002/*.spec.mts"],
+  },
 });
