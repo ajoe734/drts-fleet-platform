@@ -206,6 +206,31 @@ export function toHomeRole(role: BankConsoleRole): HomeRole {
   return "admin";
 }
 
+/** Resolve protected page identity from the signed cookie, never URL defaults. */
+export function resolveBankPageSession(
+  cookieValue: string | null | undefined,
+  requestedBank: string | string[] | null | undefined,
+  requestedRole: string | string[] | null | undefined,
+): { bank: BankDemoTenant; role: BankConsoleRole; canReadStatements: boolean } | null {
+  const bankCode = Array.isArray(requestedBank) ? requestedBank[0] : requestedBank;
+  const role = Array.isArray(requestedRole) ? requestedRole[0] : requestedRole;
+  const session = resolveServerSessionRole(cookieValue, role);
+  if (
+    !session.isAuthenticated || session.isForged || session.isTampered ||
+    !session.bankCode ||
+    !Object.hasOwn(BANK_DEMO_TENANTS, session.bankCode) ||
+    (bankCode != null && bankCode !== session.bankCode)
+  ) {
+    return null;
+  }
+  return {
+    bank: BANK_DEMO_TENANTS[session.bankCode as BankDemoTenantCode],
+    role: session.role,
+    // HTML uses the same policy already applied to CSV and signed downloads.
+    canReadStatements: session.isAuthorizedForExport,
+  };
+}
+
 export function getBankConsoleSession(
   bank: BankDemoTenant,
   locale: Locale,
