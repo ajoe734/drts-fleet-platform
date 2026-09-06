@@ -84,6 +84,8 @@ import {
   type ControlledDownloadMetadata,
 } from "./download-signing.util";
 import { buildSettlementMatrix } from "../billing-settlement/settlement-matrix";
+import { extractReportRecords, renderReportXlsx } from "./report-xlsx.renderer";
+import { renderReportPdf } from "./report-pdf.renderer";
 
 type ReportJobView = ReportJobRecord & {
   artifact: ReportArtifactView | null;
@@ -315,20 +317,25 @@ export class ReportingFilingService implements OnModuleInit {
    */
   private readonly reportArtifactRenderers: Record<
     ReportOutputFormat,
-    { contentType: string; render: (job: StoredReportJob) => Buffer } | null
+    {
+      contentType: string;
+      render: (job: StoredReportJob) => Promise<Buffer> | Buffer;
+    } | null
   > = {
     csv: {
       contentType: "text/csv; charset=utf-8",
       render: (job) =>
-        Buffer.from(
-          recordsToCsv(
-            (job.rows as unknown as Record<string, unknown>[]) ?? [],
-          ),
-          "utf8",
-        ),
+        Buffer.from(recordsToCsv(extractReportRecords(job)), "utf8"),
     },
-    xlsx: null,
-    pdf: null,
+    xlsx: {
+      contentType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      render: (job) => renderReportXlsx(job),
+    },
+    pdf: {
+      contentType: "application/pdf",
+      render: (job) => renderReportPdf(job),
+    },
     zip: null,
   };
 
@@ -775,7 +782,9 @@ export class ReportingFilingService implements OnModuleInit {
     requestId?: string,
     identity?: EvidenceAccessIdentity | null,
     tenantScopeId?: string | null,
-  ): { buffer: Buffer; contentType: string; fileName: string } {
+  ):
+    | { buffer: Buffer; contentType: string; fileName: string }
+    | Promise<{ buffer: Buffer; contentType: string; fileName: string }> {
     const job = this.requireGenericReportJob(jobId);
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
     if (normalizedTenantScopeId) {
@@ -808,31 +817,63 @@ export class ReportingFilingService implements OnModuleInit {
       );
     }
 
-    const buffer = renderer.render(job);
-    this.recordArtifactAccessAudit(
-      {
-        actionName: "download_report_artifact",
-        resourceType: "report_artifact",
-        resourceId: job.artifact?.artifactId ?? null,
-        newValuesSummary: {
-          jobId: job.jobId,
-          jobType: job.jobType,
-          format: job.format,
-          rowCount: job.rows.length,
-          byteLength: buffer.byteLength,
-          tenantId: normalizedTenantScopeId,
-        },
-      },
-      requestId,
-      identity,
-      normalizedTenantScopeId,
-    );
+    const rendered = renderer.render(job);
 
-    return {
-      buffer,
-      contentType: renderer.contentType,
-      fileName: `${job.jobType}-${job.jobId}.${job.format}`,
-    };
+    if (Buffer.isBuffer(rendered)) {
+      this.recordArtifactAccessAudit(
+        {
+          actionName: "download_report_artifact",
+          resourceType: "report_artifact",
+          resourceId: job.artifact?.artifactId ?? null,
+          newValuesSummary: {
+            jobId: job.jobId,
+            jobType: job.jobType,
+            format: job.format,
+            rowCount: job.rows.length,
+            byteLength: rendered.byteLength,
+            tenantId: normalizedTenantScopeId,
+          },
+        },
+        requestId,
+        identity,
+        normalizedTenantScopeId,
+      );
+
+      const artifact = {
+        buffer: rendered,
+        contentType: renderer.contentType,
+        fileName: `${job.jobType}-${job.jobId}.${job.format}`,
+      };
+
+      return Object.assign(Promise.resolve(artifact), artifact);
+    }
+
+    return rendered.then((buffer) => {
+      this.recordArtifactAccessAudit(
+        {
+          actionName: "download_report_artifact",
+          resourceType: "report_artifact",
+          resourceId: job.artifact?.artifactId ?? null,
+          newValuesSummary: {
+            jobId: job.jobId,
+            jobType: job.jobType,
+            format: job.format,
+            rowCount: job.rows.length,
+            byteLength: buffer.byteLength,
+            tenantId: normalizedTenantScopeId,
+          },
+        },
+        requestId,
+        identity,
+        normalizedTenantScopeId,
+      );
+
+      return {
+        buffer,
+        contentType: renderer.contentType,
+        fileName: `${job.jobType}-${job.jobId}.${job.format}`,
+      };
+    });
   }
 
   private assertReportFormatRenders(format: string) {

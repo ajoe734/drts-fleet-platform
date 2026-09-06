@@ -157,12 +157,12 @@ export class ReportingFilingController {
   // was nothing at the other end of it.
   @Get("reports/:jobId/artifact")
   @RequireRealms("platform", "ops")
-  downloadReportArtifact(
+  async downloadReportArtifact(
     @Param("jobId") jobId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const artifact = this.reportingFilingService.renderReportArtifact(
+    const artifact = await this.reportingFilingService.renderReportArtifact(
       jobId,
       requestId,
       identity,
@@ -175,14 +175,14 @@ export class ReportingFilingController {
 
   @Get("tenant/reports/:jobId/artifact")
   @RequireRealms("tenant", "platform", "ops")
-  downloadTenantReportArtifact(
+  async downloadTenantReportArtifact(
     @Param("jobId") jobId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const normalizedTenantId = this.requireTenantId(tenantId);
-    const artifact = this.reportingFilingService.renderReportArtifact(
+    const artifact = await this.reportingFilingService.renderReportArtifact(
       jobId,
       requestId,
       identity,
