@@ -28,7 +28,6 @@ import {
   FILING_PACKAGE_TYPES,
   OWNED_ORDER_STATUSES,
   IMPLEMENTED_REPORT_JOB_TYPES,
-  IMPLEMENTED_REPORT_OUTPUT_FORMATS,
   REGULATORY_REPORT_JOB_TYPES,
   REPORT_JOB_TYPES,
 } from "@drts/contracts";
@@ -123,6 +122,14 @@ const REGULATORY_JOB_TYPE_SET = new Set<ReportJobType>(
 const OFFERABLE_REPORT_JOB_TYPES = REPORT_JOB_TYPES.filter((jobType) =>
   (IMPLEMENTED_REPORT_JOB_TYPES as readonly ReportJobType[]).includes(jobType),
 );
+
+// General reports support CSV, XLSX, and PDF output formats (PRD 9.10.1 & C091).
+// ZIP is explicitly unrendered and rejected by the API.
+const OFFERABLE_REPORT_OUTPUT_FORMATS: readonly ReportOutputFormat[] = [
+  "csv",
+  "xlsx",
+  "pdf",
+];
 
 const pageStyle: CSSProperties = {
   minHeight: "100%",
@@ -645,7 +652,7 @@ function ReportJobComposerModal({
                 }
                 style={nativeSelectStyle}
               >
-                {IMPLEMENTED_REPORT_OUTPUT_FORMATS.map((value) => (
+                {OFFERABLE_REPORT_OUTPUT_FORMATS.map((value) => (
                   <option key={value} value={value}>
                     {value.toUpperCase()}
                   </option>
