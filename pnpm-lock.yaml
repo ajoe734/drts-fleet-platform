@@ -669,6 +669,12 @@ importers:
         specifier: ^19.2.5
         version: 19.2.5(react@19.2.5)
 
+  apps/voice-media-worker:
+    dependencies:
+      "@drts/contracts":
+        specifier: workspace:*
+        version: link:../../packages/contracts
+
   packages/api-client:
     dependencies:
       "@drts/contracts":
