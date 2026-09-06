@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { generateKeyPairSync, createHash, verify, constants } from "node:crypto";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { generateKeyPairSync, verify, constants } from "node:crypto";
+import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
@@ -10,7 +10,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("../../../../apps/bank-console-web/lib/session", () => ({
   BANK_CONSOLE_ROLE_COOKIE: "drts_bank_console_role",
   BANK_CONSOLE_SESSION_COOKIE: "drts_bank_console_session",
-  resolveServerSessionRole: vi.fn((cookie, roleParam) => {
+  resolveServerSessionRole: vi.fn((cookie) => {
     if (!cookie || cookie.includes("unsigned") || cookie.includes("invalid")) {
       return {
         role: "bank_ops_viewer",
@@ -505,15 +505,9 @@ describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature V
           execSync(opensslCommand, { encoding: "utf-8", stdio: "pipe" });
         }).toThrow();
       } finally {
-        try {
-          unlinkSync(payloadFile);
-        } catch {}
-        try {
-          unlinkSync(sigBinFile);
-        } catch {}
-        try {
-          unlinkSync(pubKeyFile);
-        } catch {}
+        rmSync(payloadFile, { force: true });
+        rmSync(sigBinFile, { force: true });
+        rmSync(pubKeyFile, { force: true });
       }
     });
 
@@ -554,12 +548,8 @@ describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature V
           );
         }).toThrow();
       } finally {
-        try {
-          unlinkSync(artifactFile);
-        } catch {}
-        try {
-          unlinkSync(pubKeyFile);
-        } catch {}
+        rmSync(artifactFile, { force: true });
+        rmSync(pubKeyFile, { force: true });
       }
     });
   });

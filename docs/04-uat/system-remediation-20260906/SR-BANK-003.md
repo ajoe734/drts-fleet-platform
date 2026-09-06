@@ -163,6 +163,14 @@ options:
 (exit code: 0)
 ```
 
+### 4.6 程式碼風格與 ESLint 嚴格檢查（零警告零錯誤）
+```bash
+$ pnpm lint:root
+> drts-fleet-platform@0.1.0 lint:root
+> eslint eslint.config.mjs playwright*.config.ts vitest.config.ts tests --max-warnings=0
+(exit code: 0)
+```
+
 ---
 
 ## 5. 資源 ID 清單
