@@ -664,17 +664,23 @@ export class OwnedMobilityController {
   }
 
   @Post("orders/:orderId/dispatch-timeout")
-  handleDispatchTimeout(
+  async handleDispatchTimeout(
     @Param("orderId") orderId: string,
     @Body()
-    command: { timeoutReasonCode: "acceptance_timeout" | "matching_timeout" },
+    command: {
+      timeoutReasonCode: "acceptance_timeout" | "matching_timeout";
+      assignmentId?: string;
+    },
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.handleDispatchTimeout(
+      await this.ownedMobilityService.handleDispatchTimeout(
         orderId,
         command.timeoutReasonCode,
         requestId,
+        command.assignmentId
+          ? { targetAssignmentId: command.assignmentId }
+          : undefined,
       ),
       requestId,
     );
