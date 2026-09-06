@@ -1,0 +1,1818 @@
+{
+  "wave_id": "unattended-voice-booking-20260906",
+  "planning_ref": "docs/02-architecture/phase1-unattended-voice-booking-sa-20260906.md",
+  "system_design_ref": "docs/02-architecture/phase1-unattended-voice-booking-sd-20260906.md",
+  "audit_ref": "docs/02-architecture/phase1-unattended-voice-booking-two-pass-audit-20260906.md",
+  "decision_ref": "docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md",
+  "execution_ref": "docs/03-runbooks/unattended-voice-booking-execution-tasks-20260906.md",
+  "design_source_commit": "512cbec48",
+  "schema_version": 1,
+  "execution_policy": {
+    "preferred_lanes": ["Gemini", "Gemini2", "Claude", "Claude2"],
+    "reviewer_must_cross_family": true,
+    "helper_preferred_lanes": ["Gemini", "Gemini2", "Claude", "Claude2"],
+    "worker_scope": "Only dependency-ready tasks; source design must be available from worker baseline. Live gates require real evidence.",
+    "migration_coordination": "UV-EXEC-002 owns initial schema/migration allocation. Later additions allocate against current head; no guessed or duplicated version numbers.",
+    "new_tests_are_deliverables": true,
+    "forbid_pass_with_no_tests": true,
+    "eligible_agents": [
+      "Gemini",
+      "Gemini2",
+      "Claude",
+      "Claude2",
+      "Codex",
+      "Codex2"
+    ],
+    "preferred_review_lanes": ["Codex", "Codex2"],
+    "routing_note_zh": "初始 owner 優先 agy（Gemini/Gemini2）與 Claude/Claude2，初始 reviewer 優先 Codex/Codex2；現有 runtime 沒有 per-role allowlist，不宣稱為不可跨越的強制角色隔離。Codex 模型與 reasoning 由控制面設定並驗證。"
+  },
+  "tasks": [
+    {
+      "id": "UV-EXEC-001",
+      "title": "建立無人語音契約、錯誤碼與能力目錄",
+      "summary_zh": "依 SD §4–10 將新 Voice session/draft/proof/receipt/callback/controlCutoff 型別正式化；IAM principal 維持 system/service，bookingActor 才增加 voice_agent。固定其他任務共用介面並維持舊 reader 相容。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini",
+      "reviewer": "Codex",
+      "depends_on": [],
+      "artifacts": [
+        "packages/contracts/src/",
+        "packages/api-client/src/",
+        "docs/04-api/openapi-spec.yaml",
+        "tests/contract/uv-exec-001.test.ts"
+      ],
+      "acceptance": [
+        "新增 Zod/契約與 OpenAPI 覆蓋 speech/DTMF proof union、scope/profile、版本及錯誤碼。",
+        "capability 不允許模型自選 URL、SQL、scope 或任意 actor；假 agentId、錯誤 proof 形狀在契約層拒絕。",
+        "後續模組可 import 已輸出型別，既有 API-client 契約回歸通過。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/contract/uv-exec-001.test.ts",
+        "pnpm --filter @drts/contracts typecheck",
+        "pnpm --filter @drts/api-client typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-007",
+        "UV-FR-010",
+        "UV-FR-012",
+        "UV-FR-017",
+        "UV-FR-020",
+        "UV-FR-024",
+        "UV-FR-032"
+      ],
+      "ac_ids": ["UV-AC-025", "UV-AC-043"],
+      "workstream": "contracts",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "contract_schema_evidence",
+        "backward_compatibility_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-002",
+      "title": "遷移真正 runtime 表與語音持久化 schema",
+      "summary_zh": "依 SD §7.5/9/15.2 盤點 runtime tables，集中規劃本 wave 初始 migration 編號與新增 schema；phase1_owned_orders/call_sessions 的約束不能錯放 canonical ops.orders。後续任務追加遷移須重新按當時 head 取未使用編號。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude",
+      "reviewer": "Codex2",
+      "depends_on": ["UV-EXEC-001"],
+      "artifacts": [
+        "infra/migrations/",
+        "apps/api/src/modules/voice-booking/voice-booking.repository.ts",
+        "operations/database/",
+        "tests/integration/uv-exec-002.integration.test.ts"
+      ],
+      "acceptance": [
+        "歷史 call-order 重複／懸空、JSON 與真實欄位不一致有唯讀檢查及明確修復策略。",
+        "voice session/event/intent/receipt、callback、scope、evidence 與共用 reservation schema 具 FK、唯一性、version 及必要 index；新增 reader 相容先於 writer。",
+        "隔離 PostgreSQL 可由舊 schema 升級；回退保留 pending receipt/evidence 的可讀性，不以 destructive down migration 丟失工作。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/integration/uv-exec-002.integration.test.ts --no-file-parallelism --maxConcurrency=1",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-009",
+        "UV-FR-011",
+        "UV-FR-012",
+        "UV-FR-017",
+        "UV-FR-020",
+        "UV-FR-022",
+        "UV-FR-023",
+        "UV-FR-024",
+        "UV-FR-027",
+        "UV-FR-032"
+      ],
+      "ac_ids": ["UV-AC-009", "UV-AC-037", "UV-AC-043"],
+      "workstream": "runtime-schema",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "runtime_table_inventory",
+        "migration_upgrade_evidence",
+        "historical_integrity_check",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-003",
+      "title": "落實 line scope、服務身份與 session capability",
+      "summary_zh": "依 SD §4.2/4.3 實作可信目的號碼至品牌、runtime、商品及授權的映射，服務身份與 session capability 兩階段驗證；以 authenticated actor 與 resource scope 約束工具。此任務固定 auth seam，legacy controller 改接由005執行。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude2",
+      "reviewer": "Codex",
+      "depends_on": ["UV-EXEC-001", "UV-EXEC-002"],
+      "artifacts": [
+        "apps/api/src/common/auth/",
+        "apps/api/src/modules/voice-booking/",
+        "packages/contracts/src/iam-policy-catalog.ts",
+        "tests/security/uv-exec-003.test.ts"
+      ],
+      "acceptance": [
+        "未綁 line、跨品牌/商品、隱藏 ANI、偽造 body.agentId、舊 token/owner epoch 均依契約拒絕。",
+        "查單驗身份與資源歸屬，拒絕回覆不洩露其他乘客資料。",
+        "proof 的 order 歸屬來自 intent/成功 receipt，不信任任意 linkedOrderId。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/security/uv-exec-003.test.ts",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-007",
+        "UV-FR-010",
+        "UV-FR-012",
+        "UV-FR-014",
+        "UV-FR-017",
+        "UV-FR-020",
+        "UV-FR-024",
+        "UV-FR-030",
+        "UV-FR-032"
+      ],
+      "ac_ids": ["UV-AC-014", "UV-AC-025", "UV-AC-043"],
+      "workstream": "voice-identity",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "scope_negative_matrix",
+        "capability_fencing_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-004",
+      "title": "改造 Owned Mobility 交易與快照一致性",
+      "summary_zh": "依 SD §7.1/7.5 抽 pure prepare、共用 PoolClient UoW 及 aggregateVersion/CAS；DB 為權威、commit 後更新/失效投影、cache miss 回 DB。列出所有 voice-related writer/reader，不把 await 多次 persist 當原子交易。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude",
+      "reviewer": "Codex2",
+      "depends_on": ["UV-EXEC-002"],
+      "artifacts": [
+        "apps/api/src/modules/owned-mobility/owned-mobility.service.ts",
+        "apps/api/src/modules/owned-mobility/owned-mobility.repository.ts",
+        "tests/integration/uv-exec-004.integration.test.ts"
+      ],
+      "acceptance": [
+        "交易失敗不預先污染 arrays、事件或 audit sink；DB unavailable 對新 voice mutation fail closed。",
+        "兩實例舊快照寫入被 CAS 擋下；DB commit 後 cache 更新失敗仍可查回訂單。",
+        "transaction 內無網路或長運算，有 lock/statement deadline；既有人工與 driver 行為回歸。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/integration/uv-exec-004.integration.test.ts --no-file-parallelism --maxConcurrency=1",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-009",
+        "UV-FR-011",
+        "UV-FR-012",
+        "UV-FR-023",
+        "UV-FR-027"
+      ],
+      "ac_ids": ["UV-AC-037"],
+      "workstream": "owned-uow",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "writer_reader_inventory",
+        "postgres_cas_rollback_evidence",
+        "legacy_domain_regression",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-005",
+      "title": "封住 Callcenter、multi-taxi 與 callback 舊入口競態",
+      "summary_zh": "依 SD §7.4/7.5/8.4 把電話建單、link-order、driver/recording listeners 接入 scope/intent/UoW fence；整通錄音 callback 保留原語義並採 manifest version，不能倒退行程真值。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude2",
+      "reviewer": "Codex",
+      "depends_on": ["UV-EXEC-003", "UV-EXEC-004"],
+      "artifacts": [
+        "apps/api/src/modules/callcenter/",
+        "apps/api/src/modules/multi-taxi/",
+        "apps/api/src/modules/owned-mobility/owned-mobility.service.ts",
+        "tests/integration/uv-exec-005.integration.test.ts",
+        "tests/unit/callcenter.test.ts",
+        "tests/integration/conf-idem-004-crm-webhook-idempotency.integration.test.ts"
+      ],
+      "acceptance": [
+        "另一電話建單入口與重綁 call 不能建立第二筆有效 intent order；caller body 不可充當認證 actor。",
+        "handleCallRecordingStateChanged 亂序或 missing 事件不清除較新有效索引、不將 on_trip 回退。",
+        "voice 與原有人工/多元計程車入口的商品授權與讀寫回歸，錯 scope 拒絕一致。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/integration/uv-exec-005.integration.test.ts",
+        "pnpm exec vitest run tests/unit/callcenter.test.ts tests/integration/conf-idem-004-crm-webhook-idempotency.integration.test.ts",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-009",
+        "UV-FR-011",
+        "UV-FR-012",
+        "UV-FR-017",
+        "UV-FR-020",
+        "UV-FR-023",
+        "UV-FR-024",
+        "UV-FR-027",
+        "UV-FR-032"
+      ],
+      "ac_ids": ["UV-AC-037", "UV-AC-043"],
+      "workstream": "legacy-integration",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "legacy_entry_inventory",
+        "recording_callback_compatibility",
+        "intent_scope_negative_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-006",
+      "title": "所有派遣入口共用司機與車輛保留",
+      "summary_zh": "依 SD §7.6/9.1 使用002 schema 實作共同資源保留；盤點實際人工、企業、多元與 scheduled activation writer 並接入，現有派遣域位於 owned-mobility，依原始碼確認其他入口再擴充精確檔案 scope。只有後端確實隔離才可保留未升級入口。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude",
+      "reviewer": "Codex2",
+      "depends_on": ["UV-EXEC-004", "UV-EXEC-005"],
+      "artifacts": [
+        "apps/api/src/modules/owned-mobility/",
+        "apps/api/src/modules/multi-taxi/",
+        "infra/migrations/",
+        "tests/integration/uv-exec-006.integration.test.ts"
+      ],
+      "acceptance": [
+        "driver+vehicle 同交易、固定鎖順序、有效占用唯一限制；兩單/兩 revision 競爭最多一個成功。",
+        "有效拒接、取消、完成、target timeout 或原子關閉舊 assignment 的改派才按 assignment/version 釋放。",
+        "未升級入口不能繞過保留占用共同供給；unknown 資源狀態可對帳而非直接釋放。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/integration/uv-exec-006.integration.test.ts --no-file-parallelism --maxConcurrency=1",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-007",
+        "UV-FR-013",
+        "UV-FR-017",
+        "UV-FR-026",
+        "UV-FR-027"
+      ],
+      "ac_ids": ["UV-AC-036", "UV-AC-048"],
+      "workstream": "shared-dispatch-resources",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "all_dispatch_writers_inventory",
+        "mixed_entry_postgres_race_evidence",
+        "old_revision_fence_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-007",
+      "title": "Session 狀態機、有序事件與持久化控制權",
+      "summary_zh": "依 SD §5 實作 input/media/control epoch、連續 controlSequence、缺號補送、pendingInput、proof/lease 狀態；closed 不抹除已接受 command。不可解析或來源可疑輸入保持 commit 阻擋。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude2",
+      "reviewer": "Codex",
+      "depends_on": ["UV-EXEC-001", "UV-EXEC-002", "UV-EXEC-003"],
+      "artifacts": [
+        "apps/api/src/modules/voice-booking/voice-session.service.ts",
+        "apps/api/src/modules/voice-booking/voice-session.repository.ts",
+        "tests/unit/uv-exec-007.test.ts"
+      ],
+      "acceptance": [
+        "更正先於確認但 HTTP 亂序時，controlCutoff 不越過 gap 或未解析輸入；明確無關已解析語句才可沿用 proof。",
+        "同一 owner/lease 下寫入；舊 session revision 與 epoch 結果不可覆蓋新 draft。",
+        "none/pending/succeeded/unknown 與 call closed 分別保留，重啟後可恢復待處理命令。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-007.test.ts",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-009",
+        "UV-FR-010",
+        "UV-FR-012",
+        "UV-FR-019",
+        "UV-FR-020",
+        "UV-FR-022",
+        "UV-FR-024",
+        "UV-FR-027"
+      ],
+      "ac_ids": ["UV-AC-007", "UV-AC-021", "UV-AC-023", "UV-AC-045"],
+      "workstream": "session-state",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "state_transition_matrix",
+        "ordered_event_gap_evidence",
+        "recovery_state_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-008",
+      "title": "建立 CTI adapter 與獨立媒體 worker 骨架",
+      "summary_zh": "依 SD §3/10/11 新建 TypeScript worker 與 provider-neutral CTI boundary，實作簽章、重播防護、可信目的號碼、call legs、DTMF、掛斷原因與轉接介面；固定 fixture，不自行決標或申請電話服務。 與005平行時只新增 voice-cti.adapter.ts，不改 callcenter 既有 service/controller/module；必要既有 wiring 由依賴005/008的010收斂。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini",
+      "reviewer": "Codex2",
+      "depends_on": ["UV-EXEC-001", "UV-EXEC-003"],
+      "artifacts": [
+        "apps/voice-media-worker/",
+        "apps/api/src/modules/callcenter/voice-cti.adapter.ts",
+        "tests/unit/uv-exec-008.test.ts"
+      ],
+      "acceptance": [
+        "正式電話 provider 與 sandbox adapter 明確區隔，production 未配置有效 adapter 時 fail closed/切已驗證備援。",
+        "signed webhook 重送去重、無效簽章拒絕；call legs/DTMF/ended 因果與 timestamp 保留。",
+        "workspace build/typecheck scripts 可實際執行；供009/010/011消費的 media 介面有契約測試。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-008.test.ts",
+        "pnpm --filter @drts/voice-media-worker typecheck",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-001",
+        "UV-FR-002",
+        "UV-FR-004",
+        "UV-FR-005",
+        "UV-FR-010",
+        "UV-FR-012",
+        "UV-FR-013",
+        "UV-FR-019",
+        "UV-FR-022",
+        "UV-FR-027"
+      ],
+      "ac_ids": ["UV-AC-001", "UV-AC-027"],
+      "workstream": "cti-foundation",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "cti_contract_fixture_evidence",
+        "webhook_auth_replay_evidence",
+        "worker_build_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-009",
+      "title": "本地停播、音訊時序與媒體控制權 fence",
+      "summary_zh": "依 SD §5.3/5.4/11.5 實作 μ-law/PCM、VAD/echo、generation/clear/mark、唯一 output owner 與 sink fencing；插話先本地 invalidate/clear/abort，不能等 API/DB。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini2",
+      "reviewer": "Codex",
+      "depends_on": ["UV-EXEC-007", "UV-EXEC-008"],
+      "artifacts": [
+        "apps/voice-media-worker/src/media/",
+        "tests/unit/uv-exec-009.test.ts"
+      ],
+      "acceptance": [
+        "API 失聯或 DB 鎖等待時 local clear 立即發出；CTI 失聯結果記 unknown，有限 buffer 不無限增長。",
+        "clear 後舊 mark 不恢復播放完成；handoff 切主前清舊 buffer、舊 AI 無法重新取得 output epoch。",
+        "播放／錄音時間精度記 measured/estimated/unknown；無供應商 cursor 時不捏造精準截斷。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-009.test.ts",
+        "pnpm --filter @drts/voice-media-worker typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-009",
+        "UV-FR-010",
+        "UV-FR-011",
+        "UV-FR-019",
+        "UV-FR-020",
+        "UV-FR-027"
+      ],
+      "ac_ids": ["UV-AC-041", "UV-AC-045"],
+      "workstream": "media-control",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "local_stop_without_api_evidence",
+        "playback_mark_clear_evidence",
+        "output_owner_fencing_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-010",
+      "title": "雙向錄音 recorder 與不可變 checkpoint",
+      "summary_zh": "依 SD §8/9 建 recorder ingest、sealed segments、object checksum/readability 與 immutable manifest；speech/DTMF checkpoint 各自驗證，整通封存與舊 callback 相容。雙向媒體不推定等於雙向錄音。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini",
+      "reviewer": "Codex2",
+      "depends_on": [
+        "UV-EXEC-002",
+        "UV-EXEC-005",
+        "UV-EXEC-008",
+        "UV-EXEC-009"
+      ],
+      "artifacts": [
+        "apps/voice-media-worker/src/recording/",
+        "apps/api/src/modules/callcenter/",
+        "apps/api/src/modules/voice-booking/voice-evidence.service.ts",
+        "tests/unit/uv-exec-010.test.ts"
+      ],
+      "acceptance": [
+        "缺片、object 不可讀、checksum 錯誤或無可信 readback evidence 時 gate 拒絕。",
+        "speech proof 綁實際音訊，DTMF proof 綁回讀音訊及可信按鍵時序；不要求不存在的 DTMF tone 錄音。",
+        "TTS 生成 bytes 不算乘客已聽；callback 亂序／部分失敗不改写已確立 evidence。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-010.test.ts",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-009",
+        "UV-FR-010",
+        "UV-FR-011",
+        "UV-FR-013",
+        "UV-FR-019",
+        "UV-FR-020",
+        "UV-FR-023",
+        "UV-FR-027",
+        "UV-FR-032"
+      ],
+      "ac_ids": ["UV-AC-011", "UV-AC-012", "UV-AC-041"],
+      "workstream": "recording-evidence",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "checkpoint_negative_matrix",
+        "recording_manifest_retrieval_evidence",
+        "callback_compatibility_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-011",
+      "title": "TWM 語音 adapter 與國台客語言路由",
+      "summary_zh": "依 SD §11 實作 ticket/token、ASR model ID、partial/final/revision、EOS drain、TTS voice/model 與 local abort；以文件及 fixture 做 adapter，正式帳號能力留給027/028驗證。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini2",
+      "reviewer": "Codex",
+      "depends_on": ["UV-EXEC-001", "UV-EXEC-008", "UV-EXEC-009"],
+      "artifacts": [
+        "apps/voice-media-worker/src/providers/twm/",
+        "apps/voice-media-worker/src/language/",
+        "tests/unit/uv-exec-011.test.ts"
+      ],
+      "acceptance": [
+        "ASR 句末、缺包、no-speech、idle/maxDuration 分開配置；斷線 diagnostic replay 不產生新確認。",
+        "純客語可透過短多語提示/DTMF 選擇，不先假定國語 ASR 能聽懂；切模型不沿用舊未提交確認。",
+        "TTS local stop 不聲稱 provider cancellation ACK 或零計費；語言/腔調未驗證不得開通。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-011.test.ts",
+        "pnpm --filter @drts/voice-media-worker typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-003",
+        "UV-FR-010",
+        "UV-FR-018",
+        "UV-FR-019",
+        "UV-FR-022",
+        "UV-FR-026",
+        "UV-FR-027",
+        "UV-FR-031"
+      ],
+      "ac_ids": ["UV-AC-002", "UV-AC-027", "UV-AC-044"],
+      "workstream": "speech-adapters",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "twm_protocol_fixture_evidence",
+        "language_switch_evidence",
+        "asr_disconnect_replay_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-012",
+      "title": "受約束對話引擎、欄位修復及工具閘道",
+      "summary_zh": "依 SD §3.5/6/12 建 typed VoiceDialogueProvider，沿用 secret/transport 而不把既有 regex/mock gateway 當正式 LLM；實作 intent、slots、有限修復、真人/投訴/安全路由。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude2",
+      "reviewer": "Codex2",
+      "depends_on": ["UV-EXEC-003", "UV-EXEC-007", "UV-EXEC-011"],
+      "artifacts": [
+        "apps/voice-media-worker/src/dialogue/",
+        "apps/api/src/modules/voice-booking/voice-tool-gateway.service.ts",
+        "apps/api/src/common/llm-gateway/",
+        "tests/unit/uv-exec-012.test.ts"
+      ],
+      "acceptance": [
+        "schema/timeout/abort/tool budget 受程式約束；LLM 不能選 driver、自造價格/座標或任意 mutation。",
+        "電話、門牌、時間數字分組讀回與更正；兩輪地址修復失敗有保留原話與候選的交接資料。",
+        "要求真人/投訴/遺失物/緊急意圖停止推銷叫車；production 不使用 synthetic gateway 回覆冒充完成。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-012.test.ts",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-004",
+        "UV-FR-005",
+        "UV-FR-007",
+        "UV-FR-008",
+        "UV-FR-010",
+        "UV-FR-018",
+        "UV-FR-020",
+        "UV-FR-021",
+        "UV-FR-023",
+        "UV-FR-024",
+        "UV-FR-025",
+        "UV-FR-030",
+        "UV-FR-032"
+      ],
+      "ac_ids": ["UV-AC-005", "UV-AC-020", "UV-AC-024", "UV-AC-025"],
+      "workstream": "dialogue-tools",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "structured_provider_contract_evidence",
+        "intent_repair_scenarios",
+        "tool_authorization_negative_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-013",
+      "title": "地址、商品、時區與乘車需求跨域落實",
+      "summary_zh": "依 SD §4.3/6.4 將地址/入口候選、service area 3-state policy、absolute time、BookingRequirements 帶入 order/candidate/assignment/driver task；006 完成後再改 shared owned service。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude",
+      "reviewer": "Codex",
+      "depends_on": [
+        "UV-EXEC-001",
+        "UV-EXEC-004",
+        "UV-EXEC-006",
+        "UV-EXEC-012"
+      ],
+      "artifacts": [
+        "apps/api/src/modules/geo/",
+        "apps/api/src/modules/service-area/",
+        "apps/api/src/modules/vehicle-eligibility/",
+        "apps/api/src/modules/owned-mobility/",
+        "apps/api/src/modules/voice-booking/voice-booking-draft.service.ts",
+        "tests/unit/uv-exec-013.test.ts"
+      ],
+      "acceptance": [
+        "同名地點／多院區須選定入口，無地址真值不猜座標；manual_review/conditional 未滿足條件不當可自動派遣。",
+        "人數、行李、輪椅等必要條件必須實際限制候選與 assignment，不只存 notes。",
+        "普通即時與 multi-taxi runtime/product/operatingAuthorization 分流；預約未開通不改成即時單。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-013.test.ts",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-004",
+        "UV-FR-005",
+        "UV-FR-006",
+        "UV-FR-007",
+        "UV-FR-008",
+        "UV-FR-010",
+        "UV-FR-016",
+        "UV-FR-018",
+        "UV-FR-026",
+        "UV-FR-030"
+      ],
+      "ac_ids": [
+        "UV-AC-003",
+        "UV-AC-004",
+        "UV-AC-017",
+        "UV-AC-018",
+        "UV-AC-038",
+        "UV-AC-039"
+      ],
+      "workstream": "booking-qualification",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "address_service_area_matrix",
+        "requirements_end_to_end_evidence",
+        "product_runtime_route_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-014",
+      "title": "回讀、明確確認與 speech/DTMF 提交 gate",
+      "summary_zh": "依 SD §5.4/6.2/8 將 deterministic 回讀、snapshot/hash/revision、controlCutoff、playback/evidence 與明確同意綁定，對未知輸入與更正先失效再重問。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude2",
+      "reviewer": "Codex2",
+      "depends_on": [
+        "UV-EXEC-007",
+        "UV-EXEC-009",
+        "UV-EXEC-010",
+        "UV-EXEC-012",
+        "UV-EXEC-013"
+      ],
+      "artifacts": [
+        "apps/api/src/modules/voice-booking/voice-confirmation.service.ts",
+        "apps/voice-media-worker/src/dialogue/confirmation/",
+        "tests/unit/uv-exec-014.test.ts"
+      ],
+      "acceptance": [
+        "回讀未完、背景電視肯定、靜音、來源可疑或缺號都不算同意。",
+        "更改目的地等 material edit 必須更新 draft 並重做 proof；pending 封存 proof 遇一般斷線不得被任意作廢或擴充。",
+        "speech/DTMF gate 均可追到實際可取回 evidence 與最新 snapshot，舊 ASR replay/mark 不復活確認。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-014.test.ts",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-009",
+        "UV-FR-010",
+        "UV-FR-011",
+        "UV-FR-018",
+        "UV-FR-019",
+        "UV-FR-020",
+        "UV-FR-023",
+        "UV-FR-027",
+        "UV-FR-032"
+      ],
+      "ac_ids": [
+        "UV-AC-007",
+        "UV-AC-008",
+        "UV-AC-011",
+        "UV-AC-041",
+        "UV-AC-045"
+      ],
+      "workstream": "confirmation-proof",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "confirmation_negative_matrix",
+        "speech_dtmf_proof_evidence",
+        "control_cutoff_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-015",
+      "title": "原子建單、命令 receipt 與掛斷後恢復",
+      "summary_zh": "依 SD §7 將 pending accept 持久化後以同交易建立 order/call/receipt/dispatch job/audit intent；未知結果查同操作，掛斷依 none/pending/succeeded 區分處理。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude",
+      "reviewer": "Codex",
+      "depends_on": [
+        "UV-EXEC-004",
+        "UV-EXEC-005",
+        "UV-EXEC-007",
+        "UV-EXEC-014"
+      ],
+      "artifacts": [
+        "apps/api/src/modules/voice-booking/voice-booking-command.service.ts",
+        "apps/api/src/modules/voice-booking/voice-command-runner.service.ts",
+        "apps/api/src/modules/owned-mobility/",
+        "tests/integration/uv-exec-015.integration.test.ts"
+      ],
+      "acceptance": [
+        "同確認重送/回覆遺失只有同一有效訂單與 receipt；同 key 不同 payload hash 拒絕。",
+        "pending、commit 前後 crash 可恢復且不重複建單；未確認先掛斷不暗中提交。",
+        "DB locks 有期限且 transaction 不含供應商呼叫；audit/outbox commit 後投遞。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/integration/uv-exec-015.integration.test.ts --no-file-parallelism --maxConcurrency=1",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-001",
+        "UV-FR-002",
+        "UV-FR-004",
+        "UV-FR-005",
+        "UV-FR-010",
+        "UV-FR-012",
+        "UV-FR-013",
+        "UV-FR-017",
+        "UV-FR-020",
+        "UV-FR-022",
+        "UV-FR-027"
+      ],
+      "ac_ids": ["UV-AC-001", "UV-AC-009", "UV-AC-010", "UV-AC-023"],
+      "workstream": "booking-transaction",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "postgres_atomic_booking_evidence",
+        "receipt_recovery_crash_matrix",
+        "hangup_command_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-016",
+      "title": "自動選車、offer、司機接拒與安全逾時",
+      "summary_zh": "依 SD §7.6 完成 deterministic owned executor：候選/保留/offer/driver task/accept/reject/retry/timeout/outbox；mode:auto 的 matching 不是完成派遣。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude2",
+      "reviewer": "Codex2",
+      "depends_on": ["UV-EXEC-006", "UV-EXEC-013", "UV-EXEC-015"],
+      "artifacts": [
+        "apps/api/src/modules/owned-mobility/",
+        "apps/api/src/modules/voice-booking/voice-dispatch-projection.service.ts",
+        "tests/integration/uv-exec-016.integration.test.ts"
+      ],
+      "acceptance": [
+        "無 ops 點選也能產生有效 offer/task；只有 driver acceptance 才說已接單，ETA 不存在如實回覆。",
+        "request/round/offer/notify/timeout 各有 operation key；side effect ACK 遺失先查結果。",
+        "timeout 綁 target assignment/version/deadline；已接受或被新 offer 取代時 no-op；釋放資源不誤傷新 assignment。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/integration/uv-exec-016.integration.test.ts --no-file-parallelism --maxConcurrency=1",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-007",
+        "UV-FR-012",
+        "UV-FR-013",
+        "UV-FR-017",
+        "UV-FR-027",
+        "UV-FR-028"
+      ],
+      "ac_ids": ["UV-AC-013", "UV-AC-035", "UV-AC-036", "UV-AC-047"],
+      "workstream": "autonomous-dispatch",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "no_ops_assignment_evidence",
+        "offer_accept_reject_retry_evidence",
+        "late_timeout_noop_evidence",
+        "dispatch_truth_projection",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-017",
+      "title": "真人轉接 coordinator 與排隊控制權移交",
+      "summary_zh": "依 SD §5.4/12.5 實作 owner lease 原子交接、最小 coordinator capability、queue/未接/接後掉線及重新分派；新語句仍可安全失效確認，但 coordinator 不得建單。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude",
+      "reviewer": "Codex",
+      "depends_on": [
+        "UV-EXEC-007",
+        "UV-EXEC-009",
+        "UV-EXEC-012",
+        "UV-EXEC-015"
+      ],
+      "artifacts": [
+        "apps/api/src/modules/voice-booking/voice-handoff.service.ts",
+        "apps/voice-media-worker/src/handoff/",
+        "apps/api/src/modules/callcenter/",
+        "tests/unit/uv-exec-017.test.ts"
+      ],
+      "acceptance": [
+        "移交時先隔離舊 AI 音訊，CTI clear/bridge 不確定時保留 pending 而非宣稱已接通。",
+        "真人與 AI 不可同時寫；舊工具結果可入 audit 不可再觸發命令，舊 AI 不可自行申請新 epoch。",
+        "handoff 摘要包含 draft/proof/真實 order/unknown receipt、原話/候選及下一責任方。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-017.test.ts",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-004",
+        "UV-FR-009",
+        "UV-FR-010",
+        "UV-FR-019",
+        "UV-FR-020",
+        "UV-FR-021",
+        "UV-FR-024",
+        "UV-FR-027",
+        "UV-FR-030"
+      ],
+      "ac_ids": ["UV-AC-021", "UV-AC-024", "UV-AC-045"],
+      "workstream": "human-handoff",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "control_owner_race_evidence",
+        "handoff_queue_drop_evidence",
+        "unknown_operation_handoff_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-018",
+      "title": "聯絡角色、經同意回撥與終態競態",
+      "summary_zh": "依 SD §6.4/12.5 分離 caller/booker/passenger/driverContact/callbackRecipient；consent 與 callback command 同交易，支援 claim/attempt/SLA/terminal version CAS，call closed 不等於工作已結案。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude2",
+      "reviewer": "Codex2",
+      "depends_on": [
+        "UV-EXEC-002",
+        "UV-EXEC-007",
+        "UV-EXEC-015",
+        "UV-EXEC-017"
+      ],
+      "artifacts": [
+        "apps/api/src/modules/voice-booking/voice-contact.service.ts",
+        "apps/api/src/modules/voice-booking/voice-callback.service.ts",
+        "apps/api/src/modules/callcenter/",
+        "tests/unit/uv-exec-018.test.ts"
+      ],
+      "acceptance": [
+        "A 代 B 叫車時 driver 聯絡 B、回撥 A；原始 assertedCallerPhone 在適用保存期間不可覆寫，其他角色更正保留 revision。",
+        "同意後 task 回覆遺失且 call.ended 先到可查同 receipt 恢復；沒有同意不能補造。",
+        "取消/完成/重送互斥且 terminal 不復活；task cancel 不假報實際電話已掛斷。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-018.test.ts",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-005",
+        "UV-FR-008",
+        "UV-FR-014",
+        "UV-FR-020",
+        "UV-FR-021",
+        "UV-FR-022",
+        "UV-FR-025",
+        "UV-FR-027",
+        "UV-FR-028"
+      ],
+      "ac_ids": ["UV-AC-006", "UV-AC-022", "UV-AC-040", "UV-AC-046"],
+      "workstream": "callback-lifecycle",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "contact_role_revision_evidence",
+        "consent_command_atomicity_evidence",
+        "closed_call_callback_terminal_race",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-019",
+      "title": "客服例外工作台、追查與回撥操作",
+      "summary_zh": "依 SA §8/9 與 SD §13 在現有 callcenter UI 增加 AI 狀態、例外摘要、控制權、receipt 真值、錄音權限及 callback 工作；正常單無需人工審批。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini2",
+      "reviewer": "Codex",
+      "depends_on": [
+        "UV-EXEC-003",
+        "UV-EXEC-015",
+        "UV-EXEC-017",
+        "UV-EXEC-018"
+      ],
+      "artifacts": [
+        "apps/ops-console-web/app/callcenter/",
+        "packages/api-client/src/",
+        "apps/ops-console-web/tests/",
+        "tests/unit/uv-exec-019.test.ts"
+      ],
+      "acceptance": [
+        "正常 AI 通話可觀察且不存在必按批准才能建單的 UI/後端 gate。",
+        "例外單顯示 unknown operation、下一責任方及已確認資料；不把 matching 或 generated TTS 當已派/已播。",
+        "closed call 仍可 claim/contact/close callback；未授權品牌或錄音資料不呈現。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-019.test.ts",
+        "pnpm --filter @drts/ops-console-web typecheck",
+        "pnpm --filter @drts/ops-console-web build"
+      ],
+      "fr_ids": [
+        "UV-FR-014",
+        "UV-FR-018",
+        "UV-FR-020",
+        "UV-FR-021",
+        "UV-FR-022",
+        "UV-FR-023",
+        "UV-FR-024",
+        "UV-FR-025",
+        "UV-FR-028",
+        "UV-FR-032"
+      ],
+      "ac_ids": ["UV-AC-020", "UV-AC-028", "UV-AC-029", "UV-AC-040"],
+      "workstream": "ops-exception-console",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "ops_normal_no_approval_evidence",
+        "ops_exception_browser_evidence",
+        "callback_closed_call_ui_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-020",
+      "title": "查單、重複來電及條件能力安全分流",
+      "summary_zh": "依 SD §12.3/12.4 建 capability registry 與查單/重複來電/多車分流；取消、改單、預約及特殊商品寫入未開通時轉例外，不能默認由建單任務附贈。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude",
+      "reviewer": "Codex2",
+      "depends_on": [
+        "UV-EXEC-003",
+        "UV-EXEC-012",
+        "UV-EXEC-013",
+        "UV-EXEC-015",
+        "UV-EXEC-017"
+      ],
+      "artifacts": [
+        "apps/api/src/modules/voice-booking/voice-operation-policy.service.ts",
+        "apps/voice-media-worker/src/dialogue/intent-routing/",
+        "tests/unit/uv-exec-020.test.ts"
+      ],
+      "acceptance": [
+        "查單身份與歸屬核對後才揭露必要資料；多車/已有單不直接重複下單。",
+        "關閉 cancel/amend/reservation 時工具層拒絕 mutation，對話不假報完成或改成普通即時單。",
+        "若接上既有可核准取消能力，需獨立 proof/fee/state race；未開通之 AC 保留 conditional evidence，不能標假通過。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-020.test.ts",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-004",
+        "UV-FR-007",
+        "UV-FR-008",
+        "UV-FR-009",
+        "UV-FR-014",
+        "UV-FR-015",
+        "UV-FR-016",
+        "UV-FR-017",
+        "UV-FR-019",
+        "UV-FR-020",
+        "UV-FR-024",
+        "UV-FR-026",
+        "UV-FR-027",
+        "UV-FR-030"
+      ],
+      "ac_ids": [
+        "UV-AC-014",
+        "UV-AC-015",
+        "UV-AC-016",
+        "UV-AC-017",
+        "UV-AC-018",
+        "UV-AC-019"
+      ],
+      "workstream": "conditional-operations",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "capability_disabled_negative_matrix",
+        "identity_duplicate_call_evidence",
+        "conditional_acceptance_matrix",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-021",
+      "title": "資料保存、存取稽核、版本與緊急停用",
+      "summary_zh": "依 SD §9/13/15 登錄新資料家族，實作告知拒絕替代、敏感遮罩、retention/hold/delete/download audit、immutable profile 與 admission kill switch。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini",
+      "reviewer": "Codex",
+      "depends_on": [
+        "UV-EXEC-003",
+        "UV-EXEC-010",
+        "UV-EXEC-015",
+        "UV-EXEC-017",
+        "UV-EXEC-018"
+      ],
+      "artifacts": [
+        "apps/api/src/modules/voice-booking/voice-policy.service.ts",
+        "apps/api/src/modules/voice-booking/voice-retention.service.ts",
+        "operations/database/",
+        "docs/03-runbooks/evidence-retention-and-evidentiary-access-policy.md",
+        "tests/unit/uv-exec-021.test.ts"
+      ],
+      "acceptance": [
+        "拒絕錄音或念卡號/密碼的流程不將敏感資料灌一般 log；告知文案/替代流程有政策版本。",
+        "到期刪除、legal hold、下載權限與結果可追查；未定義保存期限不能默認永久。",
+        "切版本/停新受理仍保留 pending 對帳、現有訂單及已驗證例外路由；供應商未核對的資料條件不能允許正式乘客資料。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-021.test.ts",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-001",
+        "UV-FR-021",
+        "UV-FR-023",
+        "UV-FR-024",
+        "UV-FR-025",
+        "UV-FR-026",
+        "UV-FR-027",
+        "UV-FR-030",
+        "UV-FR-032"
+      ],
+      "ac_ids": ["UV-AC-026", "UV-AC-028", "UV-AC-030"],
+      "workstream": "voice-governance",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "retention_hold_delete_evidence",
+        "pii_access_negative_evidence",
+        "kill_switch_pending_recovery_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-022",
+      "title": "全來電指標、完整成本 ledger 與告警",
+      "summary_zh": "依 SA §10.2、SD §13/14.3 實作共同 cohort/分母、無人受理與真實派車分離、版本/語言切分、原始 metering/rate card/估計對帳成本及人工 callback SLA。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini2",
+      "reviewer": "Codex2",
+      "depends_on": [
+        "UV-EXEC-015",
+        "UV-EXEC-016",
+        "UV-EXEC-018",
+        "UV-EXEC-019",
+        "UV-EXEC-021"
+      ],
+      "artifacts": [
+        "apps/api/src/observability/",
+        "apps/api/src/modules/voice-booking/voice-usage.service.ts",
+        "infra/monitoring/",
+        "apps/ops-console-web/app/callcenter/",
+        "tests/unit/uv-exec-022.test.ts"
+      ],
+      "acceptance": [
+        "admission 失敗、無車、掛斷、轉接與供應商失敗均按規則入分母/成本，去重可追算。",
+        "rate card 保留幣別/含稅/計費粒度/有效期與未驗證欄位，估計不覆蓋帳單。",
+        "指標測試固定資料集及觀察窗口，單位成本分受理/派車計算；告警可定位 language/profile/provider。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-022.test.ts",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": ["UV-FR-028", "UV-FR-029", "UV-FR-031"],
+      "ac_ids": ["UV-AC-032"],
+      "workstream": "metrics-cost",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "cohort_denominator_fixture",
+        "usage_cost_reconciliation_evidence",
+        "alerts_dimension_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-023",
+      "title": "獨立媒體部署、持續背景工作及回退",
+      "summary_zh": "依 SD §3.4/15 配置 media 與 API 分離部署、背景 CPU/warm instance、DB lease、跨 revision fencing、shutdown drain/WS timeout；不要求新增 Redis 或全平台 bus。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini",
+      "reviewer": "Codex",
+      "depends_on": [
+        "UV-EXEC-008",
+        "UV-EXEC-009",
+        "UV-EXEC-015",
+        "UV-EXEC-016",
+        "UV-EXEC-018"
+      ],
+      "artifacts": [
+        "apps/voice-media-worker/",
+        "infra/",
+        "operations/",
+        "apps/api/src/modules/voice-booking/voice-command-runner.service.ts",
+        "tests/integration/uv-exec-023.integration.test.ts"
+      ],
+      "acceptance": [
+        "最後一通結束仍可執行 pending receipt、司機 deadline、recording finalize/callback 工作。",
+        "兩 revision 同時跑不可重覆執行副作用；lease 接替/worker drain 有故障注入紀錄。",
+        "回退不刪新表、不丟 proof/receipt、不自動取消已存在訂單；CI 設定與部署 smoke 可重現。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/integration/uv-exec-023.integration.test.ts",
+        "pnpm --filter @drts/voice-media-worker typecheck",
+        "pnpm --filter @drts/api typecheck"
+      ],
+      "fr_ids": [
+        "UV-FR-012",
+        "UV-FR-013",
+        "UV-FR-021",
+        "UV-FR-022",
+        "UV-FR-026",
+        "UV-FR-027",
+        "UV-FR-032"
+      ],
+      "ac_ids": ["UV-AC-030", "UV-AC-042"],
+      "workstream": "voice-runtime",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "persistent_runner_idle_evidence",
+        "cross_revision_drain_recovery_evidence",
+        "deployment_rollback_plan",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-024",
+      "title": "真實 PostgreSQL 兩實例競態與故障驗收",
+      "summary_zh": "依 audit 兩輪 findings 建真實 DB fault suite，使用隔離 DB/fixtures 跑兩實例、accept/commit 前後 crash、response loss、shared resource、control gap、callback/timeout races；此工件不是既有136測試的重命名。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini2",
+      "reviewer": "Codex2",
+      "depends_on": [
+        "UV-EXEC-003",
+        "UV-EXEC-004",
+        "UV-EXEC-005",
+        "UV-EXEC-006",
+        "UV-EXEC-007",
+        "UV-EXEC-014",
+        "UV-EXEC-015",
+        "UV-EXEC-016",
+        "UV-EXEC-017",
+        "UV-EXEC-018",
+        "UV-EXEC-023"
+      ],
+      "artifacts": [
+        "tests/integration/unattended-voice-postgres.integration.test.ts",
+        "docs/04-uat/unattended-voice-postgres-evidence.md"
+      ],
+      "acceptance": [
+        "DB 未配置/連不進或 suite 無測試須明確失敗，不 skip 後聲稱通過；不連正式乘客資料。",
+        "rows/unique constraints/receipt/audit/proof 可對照且無第二有效單；涵蓋混入口與舊 revision。",
+        "late timeout、callback cancel/closed、handoff/confirm races 均記真實順序及最終狀態，可重跑。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/integration/unattended-voice-postgres.integration.test.ts --no-file-parallelism --maxConcurrency=1"
+      ],
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-007",
+        "UV-FR-009",
+        "UV-FR-010",
+        "UV-FR-011",
+        "UV-FR-012",
+        "UV-FR-013",
+        "UV-FR-017",
+        "UV-FR-019",
+        "UV-FR-020",
+        "UV-FR-021",
+        "UV-FR-022",
+        "UV-FR-023",
+        "UV-FR-024",
+        "UV-FR-025",
+        "UV-FR-026",
+        "UV-FR-027",
+        "UV-FR-032"
+      ],
+      "ac_ids": [
+        "UV-AC-009",
+        "UV-AC-010",
+        "UV-AC-021",
+        "UV-AC-023",
+        "UV-AC-037",
+        "UV-AC-043",
+        "UV-AC-045",
+        "UV-AC-046",
+        "UV-AC-047",
+        "UV-AC-048"
+      ],
+      "workstream": "postgres-acceptance",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "isolated_postgres_environment",
+        "two_instance_crash_matrix_evidence",
+        "mixed_dispatch_entry_evidence",
+        "callback_control_race_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-025",
+      "title": "情境追溯、互動電話與比較評測 harness",
+      "summary_zh": "依 SD §14/15 建 FR→AC→task→evidence manifest、ground truth、探索集/holdout、interactive sandbox 與 live/load mode。追溯檢查遍歷48 AC，不代表本任務獨占或通過所有AC；本任務直接驗收評測口徑與harness。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini",
+      "reviewer": "Codex",
+      "depends_on": [
+        "UV-EXEC-012",
+        "UV-EXEC-013",
+        "UV-EXEC-014",
+        "UV-EXEC-015",
+        "UV-EXEC-016",
+        "UV-EXEC-017",
+        "UV-EXEC-018",
+        "UV-EXEC-019",
+        "UV-EXEC-020",
+        "UV-EXEC-021",
+        "UV-EXEC-022",
+        "UV-EXEC-023"
+      ],
+      "artifacts": [
+        "tests/fixtures/unattended-voice/",
+        "tests/e2e/unattended-voice/",
+        "playwright.unattended-voice.config.ts",
+        "operations/verification/unattended-voice-eval.mjs",
+        "operations/verification/check-unattended-voice-coverage.py",
+        "docs/04-uat/unattended-voice-acceptance-manifest.json"
+      ],
+      "acceptance": [
+        "48 AC 各指派真正實作/驗收 owner，conditional/live/pending/pass 分開，32 FR 可追溯；禁止總丟入025冒充覆蓋。",
+        "固定模型/prompt/profile/codec/工具資料版本及可接受行為，涵蓋中途修正/失敗，不只回放固定錄音比較 WER。",
+        "mock/sandbox 與 live execution 分開，提供 --mode fixture/live、--load-multipliers 1,1.5、--authorization-ref 檢查；沒有 live 授權或憑證 fail closed。",
+        "live mode 可輸出031/033所需端到端指標/成本/樣本數與每語言結果，但 fixture 執行不宣稱正式電話品質。"
+      ],
+      "test_commands": [
+        "python3 operations/verification/check-unattended-voice-coverage.py",
+        "pnpm exec playwright test -c playwright.unattended-voice.config.ts",
+        "node operations/verification/unattended-voice-eval.mjs --mode fixture"
+      ],
+      "fr_ids": [
+        "UV-FR-003",
+        "UV-FR-007",
+        "UV-FR-010",
+        "UV-FR-011",
+        "UV-FR-028",
+        "UV-FR-029",
+        "UV-FR-031"
+      ],
+      "ac_ids": ["UV-AC-032", "UV-AC-033"],
+      "workstream": "evaluation-harness",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "fr_ac_task_coverage_evidence",
+        "interactive_fixture_run_evidence",
+        "holdout_dataset_manifest",
+        "live_harness_safety_evidence",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-026",
+      "title": "一個原生語音候選的公平對照 adapter",
+      "summary_zh": "依 SD §14 從已列 OpenAI Realtime/Gemini Live 等原生語音候選挑一個具可查文件接口的最小對照 adapter。以同一工具/proof/transaction gate 跑 fixture；不擴張成全供應商/全部編排框架同時實作，正式帳號門檻在027/028。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini2",
+      "reviewer": "Codex2",
+      "depends_on": [
+        "UV-EXEC-001",
+        "UV-EXEC-007",
+        "UV-EXEC-009",
+        "UV-EXEC-012",
+        "UV-EXEC-014",
+        "UV-EXEC-025"
+      ],
+      "artifacts": [
+        "apps/voice-media-worker/src/providers/native-voice/",
+        "tests/fixtures/unattended-voice/",
+        "docs/04-uat/unattended-voice-candidate-adapter.md",
+        "tests/unit/uv-exec-026.test.ts",
+        "operations/verification/unattended-voice-eval.mjs"
+      ],
+      "acceptance": [
+        "選擇依據與模型/接口版本明確；不能因缺正式帳號就偽造能力或阻止可做的 fixture 工程。",
+        "候選工具結果、取消/截斷、confirmation/receipt 全經共同 gate，不另起訂單真值。",
+        "固定資料與版本產出可比結果；台客語支援及成本未知項保留待 live 驗證。"
+      ],
+      "test_commands": [
+        "pnpm exec vitest run tests/unit/uv-exec-026.test.ts",
+        "pnpm --filter @drts/voice-media-worker typecheck",
+        "node operations/verification/unattended-voice-eval.mjs --mode fixture"
+      ],
+      "fr_ids": [
+        "UV-FR-003",
+        "UV-FR-007",
+        "UV-FR-010",
+        "UV-FR-011",
+        "UV-FR-031"
+      ],
+      "ac_ids": ["UV-AC-033"],
+      "workstream": "native-voice-comparison",
+      "initial_status": "backlog",
+      "external_gate": false,
+      "required_acceptance": [
+        "single_candidate_selection_record",
+        "shared_gate_adapter_evidence",
+        "candidate_fixture_comparison",
+        "reviewed_candidate_sha"
+      ],
+      "task_class": "implementation",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-027",
+      "title": "唯讀盤點供應商與營運準備證據",
+      "summary_zh": "立即以唯讀方式核對已授權可用 CTI/TWM/候選接口與帳號 metadata、line/brand/商品/service area、queue owner/SLA、data terms/費率/配額。準備工件可先做，但 task gate 完成要真實可取回證據；缺項留下 blocker 不能寫假通過。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini2",
+      "reviewer": "Codex",
+      "depends_on": [],
+      "artifacts": ["docs/04-uat/unattended-voice-external-readiness.md"],
+      "acceptance": [
+        "不輸出秘密、不申請付費/採購/對外聯繫；帳號/電話授權不足就記明缺哪個證據與負責角色。",
+        "逐項 readback CTI 雙向錄音/DTMF/transfer、TWM model/voice/language/quota、候選能力；官方文件與本帳號可用能力分欄。",
+        "營運商品/服務區、值班 queue/回撥 SLA、資料處理條件與預算有來源；未完成只產生準備報告，不滿足 required_acceptance。"
+      ],
+      "test_commands": ["git diff --check"],
+      "fr_ids": [
+        "UV-FR-001",
+        "UV-FR-003",
+        "UV-FR-007",
+        "UV-FR-010",
+        "UV-FR-011",
+        "UV-FR-018",
+        "UV-FR-021",
+        "UV-FR-024",
+        "UV-FR-026",
+        "UV-FR-027",
+        "UV-FR-030",
+        "UV-FR-031",
+        "UV-FR-032"
+      ],
+      "ac_ids": ["UV-AC-002", "UV-AC-026", "UV-AC-030", "UV-AC-033"],
+      "workstream": "external-readiness",
+      "initial_status": "backlog",
+      "external_gate": true,
+      "required_acceptance": [
+        "cti_account_capability_evidence",
+        "twm_account_model_voice_quota_evidence",
+        "native_candidate_account_evidence",
+        "line_product_service_area_evidence",
+        "human_queue_callback_sla_evidence",
+        "provider_data_terms_evidence",
+        "rate_card_capacity_evidence"
+      ],
+      "task_class": "verification",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-028",
+      "title": "真實 PSTN、逐語言、轉接與容量驗證",
+      "summary_zh": "在已授權測試電話與隔離 sandbox 訂單/司機資源執行025 live harness，驗證雙向錄音、實際停播、國台客/混講、DTMF、轉接/掉線、N及1.5N並發與候選比較。不可用 mock websocket 作正式證據。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Gemini2",
+      "reviewer": "Codex2",
+      "depends_on": [
+        "UV-EXEC-010",
+        "UV-EXEC-011",
+        "UV-EXEC-016",
+        "UV-EXEC-017",
+        "UV-EXEC-018",
+        "UV-EXEC-019",
+        "UV-EXEC-020",
+        "UV-EXEC-021",
+        "UV-EXEC-022",
+        "UV-EXEC-023",
+        "UV-EXEC-024",
+        "UV-EXEC-025",
+        "UV-EXEC-026",
+        "UV-EXEC-027"
+      ],
+      "artifacts": [
+        "docs/04-uat/unattended-voice-live-telephony-evidence.md",
+        "operations/verification/unattended-voice-eval.mjs"
+      ],
+      "acceptance": [
+        "解除 gate 前記錄測試電話授權、可用帳號與隔離派遣資源；未取得不撥正式電話。",
+        "各 AC 附 session/codec/timing/manifest/order/dispatch/成本可取回證據，錄音精度與未知結果如實揭露。",
+        "逐語言與腔調分開報告、背景聲誤確認及純客語入口必測；同場景比較TWM與一個native候選。",
+        "量測真實遠端停播與N/1.5N退化、無人受理/派車、錯/重複單及例外接續；未達門檻回到具體 implementation task。"
+      ],
+      "test_commands": [
+        "node operations/verification/unattended-voice-eval.mjs --mode live --load-multipliers 1,1.5 --authorization-ref \"$UV_TEST_AUTHORIZATION_REF\""
+      ],
+      "fr_ids": [
+        "UV-FR-002",
+        "UV-FR-003",
+        "UV-FR-007",
+        "UV-FR-009",
+        "UV-FR-010",
+        "UV-FR-011",
+        "UV-FR-018",
+        "UV-FR-019",
+        "UV-FR-020",
+        "UV-FR-022",
+        "UV-FR-026",
+        "UV-FR-027",
+        "UV-FR-028",
+        "UV-FR-031"
+      ],
+      "ac_ids": [
+        "UV-AC-002",
+        "UV-AC-027",
+        "UV-AC-031",
+        "UV-AC-033",
+        "UV-AC-041",
+        "UV-AC-044",
+        "UV-AC-045"
+      ],
+      "workstream": "live-telephony-acceptance",
+      "initial_status": "blocked",
+      "external_gate": true,
+      "required_acceptance": [
+        "test_telephony_authorization",
+        "sandbox_dispatch_isolation_evidence",
+        "live_bidirectional_recording_evidence",
+        "live_barge_in_dtmf_transfer_evidence",
+        "per_language_holdout_results",
+        "n_and_1_5n_load_results",
+        "same_scenario_provider_comparison",
+        "live_acceptance_candidate_sha"
+      ],
+      "task_class": "verification",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "gate_reason": "尚未有本 wave 可取回的測試電話授權、可用 CTI/TWM/native 帳號 readback、隔離 sandbox 派遣資源與前置實作證據；不得以準備報告或 mock 電話解除。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    },
+    {
+      "id": "UV-EXEC-029",
+      "title": "UAT、小量營運開通與回退驗證",
+      "summary_zh": "以完整來電分母驗收 AI 主接單、真人例外，按已實測語言/入口/商品做小量開通。task 是 verification gate，營運開通與部署依 repo 既有流程；未有授權/同SHA證據不得宣布已部署或只剩少數人工。 執行 owner 優先 agy/Claude，Codex 優先 reviewer；若 supervisor fallback 改派須如實記錄，這是偏好而非既有 per-role 強制。",
+      "owner": "Claude",
+      "reviewer": "Codex",
+      "depends_on": [
+        "UV-EXEC-024",
+        "UV-EXEC-025",
+        "UV-EXEC-027",
+        "UV-EXEC-028"
+      ],
+      "artifacts": [
+        "docs/04-uat/unattended-voice-pilot-acceptance.md",
+        "docs/03-runbooks/unattended-voice-operations.md",
+        "operations/verification/check-unattended-voice-coverage.py"
+      ],
+      "acceptance": [
+        "48 AC 按已開通能力區分適用/conditional，所有必做 gate 有本候選 SHA 證據；不得用每單真人批准試驗充當無人完成。",
+        "確認值班 owner、queue/回撥 SLA、供應商配額/資料政策、model/profile、費用與服務區版本及明確開通授權。",
+        "小量運轉語言/供應商品質惡化可停新 autonomous commit，pending 繼續對帳，無雙重建單並有真實回退演練。",
+        "按同一 SHA 記錄 PR/CI/merge/dev deploy 與營運驗收 evidence；未達門檻明確 blocker 或回派修復，不標已完成。"
+      ],
+      "test_commands": [
+        "python3 operations/verification/check-unattended-voice-coverage.py",
+        "git diff --check"
+      ],
+      "fr_ids": [
+        "UV-FR-020",
+        "UV-FR-021",
+        "UV-FR-026",
+        "UV-FR-027",
+        "UV-FR-028",
+        "UV-FR-031"
+      ],
+      "ac_ids": ["UV-AC-034"],
+      "workstream": "pilot-operational-acceptance",
+      "initial_status": "blocked",
+      "external_gate": true,
+      "required_acceptance": [
+        "pilot_operational_authorization",
+        "dev_deploy_run_url",
+        "dev_deploy_sha",
+        "operational_acceptance_run_url",
+        "operational_acceptance_sha",
+        "all_applicable_ac_evidence",
+        "human_exception_rate_full_cohort",
+        "language_route_model_profile_signoff",
+        "staffing_callback_drill_evidence",
+        "kill_switch_rollback_drill_evidence"
+      ],
+      "task_class": "verification",
+      "mutates_canonical": true,
+      "priority": "P0",
+      "prompt_zh": "本任務列出的新測試、路徑及能力是待建立的交付物，先查現有實作再新增；不得宣稱它們已存在或已通過。禁止以 --passWithNoTests、跳過真實 DB 或 mock 電話冒充驗收。只提交本任務範圍，按既有流程完成跨 family review、Task-ID/LLM-Agent/Reviewer trailers、正常 push 及 integration evidence。正常叫車不可加入逐單真人批准。程式與 fixture 準備不因尚無正式帳號而停止；缺少外部能力時留下具體 evidence blocker，不自行採購、申請付費、聯繫供應商或對真實乘客／營運車輛操作。",
+      "gate_reason": "尚未有真實 PSTN/逐語言/容量 gate 通過、小量營運開通授權、值班與回撥 SLA 演練、同 SHA 部署及全適用 AC 驗收證據；不可由 coding tasks 完成自動視為已開通。",
+      "eligible_agents": [
+        "Gemini",
+        "Gemini2",
+        "Claude",
+        "Claude2",
+        "Codex",
+        "Codex2"
+      ]
+    }
+  ]
+}
