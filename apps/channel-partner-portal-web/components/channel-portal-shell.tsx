@@ -33,7 +33,7 @@ export function ChannelPortalShell({
       brandSubLabel={brandSubLabel}
       brandMark={brandMark}
       searchPlaceholder={searchPlaceholder}
-      env="production"
+      env={process.env.NEXT_PUBLIC_APP_ENV || (process.env.NODE_ENV === "production" ? "production" : "dev")}
       avatarLabel="YU"
       sidebarFooter={<FleetPortalHealthFooter />}
       style={{ minHeight: "100dvh", height: "100dvh" }}

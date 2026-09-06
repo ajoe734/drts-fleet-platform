@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CONTROL_PLANE_IAP_EMAIL_HEADER } from "@drts/control-plane-auth";
 
-import { buildReferralPortalBootstrapContext } from "@/lib/referral-bootstrap-identity";
+import { buildReferralPortalBootstrapContext } from "../../../lib/referral-bootstrap-identity";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const METADATA_IDENTITY_TOKEN_URL =

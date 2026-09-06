@@ -1,6 +1,5 @@
 import {
   CanvasBanner,
-  CanvasBtn,
   CanvasCard,
   CanvasDL,
   CanvasIcon,
@@ -20,6 +19,7 @@ import {
 } from "@/lib/referral-portal-evidence";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
+import { DashboardPeriodFilter } from "@/components/referral-tables";
 
 export const dynamic = "force-dynamic";
 
@@ -46,11 +46,15 @@ function deltaOf(
   };
 }
 
-export default async function ReferralDashboardPage() {
+export default async function ReferralDashboardPage(props: {
+  searchParams?: Promise<{ period?: string }>;
+}) {
+  const searchParams = props.searchParams ? await props.searchParams : undefined;
+  const requestedPeriod = searchParams?.period?.trim();
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
   const [dashboard, revenue] = await Promise.all([
-    loadReferralDashboard(),
+    loadReferralDashboard(requestedPeriod),
     loadReferralRevenue(),
   ]);
   const combinedEvidence = mergeReferralPortalEvidence(
@@ -65,6 +69,7 @@ export default async function ReferralDashboardPage() {
   );
   const evidenceMarker = formatReferralPortalEvidence(combinedEvidence);
   const { summary, periods } = dashboard;
+  const currentPeriod = summary.period;
   const latestRevenue = revenue.rows[0] ?? null;
   const statementStatus =
     latestRevenue?.statementStatus ?? summary.statementStatus;
@@ -96,27 +101,45 @@ export default async function ReferralDashboardPage() {
   const gmvDelta =
     cur && prev ? deltaOf(toNumber(cur.gmv), toNumber(prev.gmv)) : null;
 
+  const availablePeriods = Array.from(
+    new Set([
+      summary.period,
+      ...(summary.latestStatementPeriod ? [summary.latestStatementPeriod] : []),
+      ...periods.map((p) => p.period),
+      ...(requestedPeriod ? [requestedPeriod] : []),
+    ]),
+  );
+
   const headerActions = (
     <>
-      <span
+      <DashboardPeriodFilter
+        currentPeriod={currentPeriod}
+        options={availablePeriods}
+        label={t("table.period", locale)}
+      />
+      <a
+        href={`/control-plane-proxy/partner/referral/statements/${encodeURIComponent(currentPeriod)}/artifact`}
+        download={`referral-statement-${currentPeriod}.csv`}
+        data-drt-operation="channel-overview-export"
+        data-drt-intent="channel-statement-download"
         style={{
-          display: "inline-flex",
           alignItems: "center",
-          gap: 6,
-          border: `1px solid ${theme.border}`,
-          borderRadius: 8,
-          padding: "5px 10px",
-          background: theme.surface,
-          fontFamily: theme.monoFamily,
-          fontSize: 12.5,
+          background: theme.accent,
+          border: `1px solid ${theme.accent}`,
+          borderRadius: 6,
+          color: "#fff",
+          display: "inline-flex",
+          fontSize: 12,
           fontWeight: 600,
-          color: theme.text,
+          height: 28,
+          padding: "5px 10px",
+          textDecoration: "none",
+          gap: 6,
         }}
       >
-        {summary.period}
-        <CanvasIcon name="chevD" size={12} style={{ color: theme.textDim }} />
-      </span>
-      <CanvasBtn theme={theme}>{t("common.export", locale)}</CanvasBtn>
+        <CanvasIcon name="reports" size={13} />
+        {t("common.export", locale)} (CSV)
+      </a>
     </>
   );
 
