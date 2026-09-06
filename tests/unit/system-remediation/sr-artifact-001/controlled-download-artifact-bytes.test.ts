@@ -7,6 +7,17 @@ import { createControlledDownloadMetadata } from "../../../../apps/api/src/commo
 import { InMemoryDocumentArtifactStore } from "../../../../apps/api/src/common/document-artifacts";
 import { ControlledDownloadController } from "../../../../apps/api/src/modules/controlled-download/controlled-download.controller";
 
+// Structural stand-in for `@nestjs/common`'s `StreamableFile`. The root
+// tsconfig's `tests/**/*.ts` compile has no path to apps/api's own
+// `node_modules/@nestjs/common` (pnpm keeps it package-local), so a type-only
+// `import("@nestjs/common")` resolves fine from apps/api but fails under the
+// root `tsc -p tsconfig.json` pass. The controller still returns a real
+// `StreamableFile` at runtime; this just avoids naming its package for typing.
+type StreamableFileLike = {
+  getStream(): NodeJS.ReadableStream;
+  getHeaders(): { type?: string };
+};
+
 function sha256(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
@@ -100,9 +111,7 @@ describe("controlled download serves real bytes for materialised artifacts", () 
     const file = resolve(controller, "tenant-invoice", "invoice-42", params);
     expect(file).toHaveProperty("getStream");
 
-    const streamable = file as InstanceType<
-      typeof import("@nestjs/common").StreamableFile
-    >;
+    const streamable = file as StreamableFileLike;
     const returnedBytes = await drain(streamable.getStream());
 
     expect(returnedBytes.equals(bytes)).toBe(true);
@@ -125,9 +134,12 @@ describe("controlled download serves real bytes for materialised artifacts", () 
       issue("placard", "placard-7", record.sha256).downloadUrl,
     );
 
-    const streamable = resolve(controller, "placard", "placard-7", params) as InstanceType<
-      typeof import("@nestjs/common").StreamableFile
-    >;
+    const streamable = resolve(
+      controller,
+      "placard",
+      "placard-7",
+      params,
+    ) as StreamableFileLike;
     expect((await drain(streamable.getStream())).equals(bytes)).toBe(true);
   });
 
@@ -163,9 +175,9 @@ describe("controlled download serves real bytes for materialised artifacts", () 
       }).downloadUrl,
     );
 
-    expect(codeOf(() => resolve(controller, "report", "report-1", params))).toBe(
-      "CONTROLLED_DOWNLOAD_EXPIRED",
-    );
+    expect(
+      codeOf(() => resolve(controller, "report", "report-1", params)),
+    ).toBe("CONTROLLED_DOWNLOAD_EXPIRED");
   });
 
   it("rejects a tampered link (subject swapped after signing) even though both subjects exist", () => {
@@ -267,13 +279,13 @@ describe("controlled download serves real bytes for materialised artifacts", () 
       "tenant-invoice",
       "invoice-stable",
       paramsOf(firstLink),
-    ) as InstanceType<typeof import("@nestjs/common").StreamableFile>;
+    ) as StreamableFileLike;
     const second = resolve(
       controller,
       "tenant-invoice",
       "invoice-stable",
       paramsOf(secondLink),
-    ) as InstanceType<typeof import("@nestjs/common").StreamableFile>;
+    ) as StreamableFileLike;
 
     const firstBytes = await drain(first.getStream());
     const secondBytes = await drain(second.getStream());
