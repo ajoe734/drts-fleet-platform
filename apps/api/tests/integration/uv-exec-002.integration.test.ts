@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { DatabaseService } from "../../apps/api/src/common/db";
-import { VoiceBookingRepository } from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
+import { DatabaseService } from "../../src/common/db";
+import { VoiceBookingRepository } from "../../src/modules/voice-booking/voice-booking.repository";
 
 // UV-EXEC-002: migrations for the voice-booking runtime schema
 // (infra/migrations/V0086, V0087, V0088). This suite assumes migrations have
