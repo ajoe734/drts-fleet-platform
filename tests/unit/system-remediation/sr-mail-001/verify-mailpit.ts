@@ -62,7 +62,8 @@ async function verify() {
     const token = new URLSearchParams(link.hash.slice(1)).get(
       "invitationToken",
     );
-    assert(token?.startsWith("ti_"));
+    assert(token);
+    assert(token.startsWith("ti_"));
     assert(
       !JSON.stringify([
         receipt,
