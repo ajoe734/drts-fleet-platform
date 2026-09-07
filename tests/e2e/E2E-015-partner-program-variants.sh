@@ -851,13 +851,13 @@ run_variant_case \
   "program-e2e-insurance-${SUFFIX}" \
   "INS_REPL_${CODE_SUFFIX}" \
   "e2e-insurance-replacement-${SUFFIX}" \
-  "Fubon Insurance Replacement Vehicle" \
-  "claim.fubon-ins.com.tw" \
+  "Tailspin Insurance Replacement Vehicle" \
+  "claim.tailspin.example" \
   "/claims/replacement-vehicle" \
   "#0072ce" \
   "insurance-policy-${SUFFIX}" \
   "benefit-insurance-${SUFFIX}" \
-  "Fubon approved repair center, Taipei" \
+  "Tailspin approved repair center, Taipei" \
   "Replacement vehicle pickup bay" \
   "E2E Insurance Passenger" \
   "policy reference and claim reference covered by replacement window"
@@ -870,13 +870,13 @@ run_variant_case \
   "program-e2e-travel-${SUFFIX}" \
   "TRAVEL_GRP_${CODE_SUFFIX}" \
   "e2e-travel-agency-${SUFFIX}" \
-  "Lion Travel Group Transfer" \
-  "booking.lion-travel.com.tw" \
+  "AdventureWorks Travel Group Transfer" \
+  "booking.adventure-works.example" \
   "/groups/transfer" \
   "#f6a800" \
   "travel-booking-${SUFFIX}" \
   "benefit-travel-${SUFFIX}" \
-  "Lion Travel Taipei branch" \
+  "AdventureWorks Travel Taipei branch" \
   "Taoyuan Airport group bus zone" \
   "E2E Travel Roster Lead" \
   "group booking reference and roster count covered by travel program"

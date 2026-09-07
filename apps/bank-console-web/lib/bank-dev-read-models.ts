@@ -774,8 +774,8 @@ export async function loadBankBookingsData(
         ? mapBookingPrograms(core.programs)
         : core.degradedMessage
           ? [
-              { code: "WE12", label: "中信機場 World Elite" },
-              { code: "SIG6", label: "中信商旅 Signature" },
+              { code: "WE12", label: "艾克米機場 Elite Demo" },
+              { code: "SIG6", label: "艾克米商旅 Signature" },
             ]
           : [];
     const effectivePeriods =
@@ -805,8 +805,8 @@ export async function loadBankBookingsData(
       data: {
         bookings: bookingList,
         programs: [
-          { code: "WE12", label: "中信機場 World Elite" },
-          { code: "SIG6", label: "中信商旅 Signature" },
+          { code: "WE12", label: "艾克米機場 Elite Demo" },
+          { code: "SIG6", label: "艾克米商旅 Signature" },
         ],
         periods: deriveBookingPeriods(bookingList),
         detailById: new Map(bookingDetails.map((item) => [item.orderId, item])),

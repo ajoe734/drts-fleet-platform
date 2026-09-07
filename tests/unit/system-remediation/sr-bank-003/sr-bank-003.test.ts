@@ -50,7 +50,7 @@ describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature V
   describe("1. Historical Defect Remediation (R14 & C083)", () => {
     it("stops using reversible hex encoding to pretend to be a SHA-256 hash", () => {
       // Prior defect: sha256: Buffer.from("statement:period:amount").toString("hex")
-      const statementNo = "settlement-statement-tenant_ctbc-2026-08";
+      const statementNo = "settlement-statement-tenant_acme-2026-08";
       const period = "2026-08";
       const payable = 1200;
       const fakeHashString = Buffer.from(
@@ -104,10 +104,10 @@ describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature V
         "================================================================================",
         "DRTS SETTLEMENT STATEMENT (NON-FIXTURE ARTIFACT)",
         "================================================================================",
-        "Statement ID  : settlement-statement-tenant_ctbc-2026-08",
+        "Statement ID  : settlement-statement-tenant_acme-2026-08",
         "Period        : 2026-08",
-        "Issuer Tenant : 中國信託商業銀行 (tenant_ctbc)",
-        "Program       : ctbc-world-elite",
+        "Issuer Tenant : 艾克米銀行商業銀行 (tenant_acme)",
+        "Program       : acme-world-elite",
         "Status        : DUE",
         "Issued At     : 2026-08-06T00:00:00Z",
         "Due At        : 2026-08-31T23:59:59Z",
@@ -172,16 +172,16 @@ describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature V
     it("generates a genuine RSA digital signature when a private key is configured", () => {
       process.env.BANK_ARTIFACT_SIGNING_PRIVATE_KEY = testRsaKeyPair.privateKey;
       process.env.BANK_ARTIFACT_SIGNING_PUBLIC_KEY = testRsaKeyPair.publicKey;
-      process.env.BANK_ARTIFACT_SIGNING_KEY_ID = "bank-ctbc-signer-2026-v1";
+      process.env.BANK_ARTIFACT_SIGNING_KEY_ID = "bank-acme-signer-2026-v1";
 
       const statementPayload = [
         "================================================================================",
         "DRTS SETTLEMENT STATEMENT (NON-FIXTURE ARTIFACT)",
         "================================================================================",
-        "Statement ID  : settlement-statement-tenant_ctbc-2026-08",
+        "Statement ID  : settlement-statement-tenant_acme-2026-08",
         "Period        : 2026-08",
-        "Issuer Tenant : 中國信託商業銀行 (tenant_ctbc)",
-        "Program       : ctbc-world-elite",
+        "Issuer Tenant : 艾克米銀行商業銀行 (tenant_acme)",
+        "Program       : acme-world-elite",
         "Status        : DUE",
       ].join("\n");
 
@@ -191,7 +191,7 @@ describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature V
 
       expect(text).toContain("Signature Status   : SIGNED");
       expect(text).toContain(`Signature Algorithm: ${SIGNATURE_ALGORITHM}`);
-      expect(text).toContain("Key ID             : bank-ctbc-signer-2026-v1");
+      expect(text).toContain("Key ID             : bank-acme-signer-2026-v1");
 
       const parsed = parseArtifact(text);
       expect(parsed.manifest.signatureStatus).toBe("SIGNED");
@@ -491,7 +491,7 @@ describe("SR-BANK-003: Bank Evidence Artifact Digest & Cryptographic Signature V
         "================================================================================",
         "DRTS TRIP SETTLEMENT RECEIPT (NON-FIXTURE ARTIFACT)",
         "================================================================================",
-        "Trip ID             : trip_ctbc_260601_001",
+        "Trip ID             : trip_acme_260601_001",
         "Order No            : ORD-202608-001",
         "Completed At        : 2026-08-05T03:00:00Z",
         "Route               : 台北車站 -> 桃園國際機場第二航廈",

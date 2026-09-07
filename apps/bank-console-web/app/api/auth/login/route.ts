@@ -28,7 +28,7 @@ const cookieOptions = {
 
 export async function POST(request: NextRequest) {
   try {
-    let bank = "ctbc";
+    let bank = "acme";
     let locale = "zh";
     let role = "bank_program_admin";
 

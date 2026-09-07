@@ -25,7 +25,7 @@ function makeEntry(
   return {
     businessDispatchSubtype: "credit_card_airport_transfer",
     eligibilityMode: "bank_card_inline",
-    entrySlug: "ctbc",
+    entrySlug: "acme",
     ...overrides,
   };
 }
@@ -40,7 +40,7 @@ describe("partner booking program form utilities", () => {
     });
 
     expect(gate.state).toBe("blocked");
-    expect(gate.actionHref).toBe("/ctbc/eligibility");
+    expect(gate.actionHref).toBe("/acme/eligibility");
   });
 
   it("localizes program labels, coverage, gates, and validation errors", () => {
@@ -106,7 +106,7 @@ describe("partner booking program form utilities", () => {
     draft.groupCode = "GRP-101";
     draft.groupSize = "18";
     draft.itineraryLink =
-      "https://booking.lion-travel.com.tw/itinerary/GRP-101";
+      "https://booking.adventure-works.example/itinerary/GRP-101";
     draft.luggageCount = "12";
     draft.meetingPoint = "North Gate coach bay";
     draft.rosterPassengers = "Tour Leader\\nPassenger A\\nPassenger B";
@@ -132,7 +132,7 @@ describe("partner booking program form utilities", () => {
     draft.passengerPhone = "0912000000";
     draft.groupCode = "GRP-101";
     draft.groupSize = "18";
-    draft.itineraryLink = "lion-itinerary";
+    draft.itineraryLink = "adventureworks-itinerary";
     draft.meetingPoint = "North Gate coach bay";
     draft.rosterPassengers = "Tour Leader";
 

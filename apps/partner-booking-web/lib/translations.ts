@@ -151,7 +151,7 @@ const en = {
   "program.embed.handoff.identity": "Cardholder identity resolved",
   "program.embed.handoff.token": "Reference token",
   "program.embed.handoff.benefit": "Benefit program",
-  "program.embed.handoff.benefitValue": "World Elite airport transfer",
+  "program.embed.handoff.benefitValue": "Elite Demo airport transfer",
   "program.embed.handoff.note":
     "No separate login needed. Skip account activation and move straight to eligibility and booking.",
   "program.embed.handoff.cta": "Start booking",
@@ -633,7 +633,7 @@ const zh = {
   "program.embed.handoff.identity": "卡友身分已解析",
   "program.embed.handoff.token": "參照權杖 · reference token",
   "program.embed.handoff.benefit": "權益方案",
-  "program.embed.handoff.benefitValue": "World Elite 機場接送",
+  "program.embed.handoff.benefitValue": "Elite Demo 機場接送",
   "program.embed.handoff.note":
     "免再登入，略過獨立啟用，直接進入資格確認與預約。",
   "program.embed.handoff.cta": "開始預約接送",

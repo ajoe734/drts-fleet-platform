@@ -1,12 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const protectedData = /CH••••98|BK-240611-018|BE••••42/;
-const ctbcVisibleLeak = /CTBC|ctbc|中信/;
+const demoBrandVisibleLeak = /ACME|acme|艾克米/;
 
 const managementRoutes = [
   "/",
   "/bookings",
-  "/bookings/ord_ctbc_240611_01",
+  "/bookings/ord_acme_240611_01",
   "/contracts",
   "/statements",
   "/statements/2026-06",
@@ -58,7 +58,7 @@ test.describe("bank console deep runtime coverage", () => {
     for (const route of managementRoutes) {
       const response = await page.goto(
         withQuery(route, {
-          bank: "fubon",
+          bank: "tailspin",
           locale: "en",
           role: "bank_finance",
         }),
@@ -68,10 +68,10 @@ test.describe("bank console deep runtime coverage", () => {
       expect(response?.status(), route).toBe(200);
       await expect(page.locator("html")).toHaveAttribute("lang", "en");
       await expect(page.locator("main"), route).toContainText(
-        /Fubon|fubon|富邦|Finance/,
+        /Tailspin|tailspin|泰思賓|Finance/,
       );
       await expect(page.locator("main"), route).not.toContainText(
-        ctbcVisibleLeak,
+        demoBrandVisibleLeak,
       );
       await expect(page.locator(".bank-account-menu summary")).toContainText(
         "Finance",
@@ -84,24 +84,24 @@ test.describe("bank console deep runtime coverage", () => {
   }) => {
     await page.goto(
       withQuery("/users", {
-        bank: "cathay",
+        bank: "contoso",
         locale: "zh",
         role: "bank_ops_viewer",
       }),
     );
 
-    await expect(page.locator("body")).toContainText("國泰世華銀行");
+    await expect(page.locator("body")).toContainText("康拓索銀行銀行");
     await expect(page.locator(".bank-account-menu summary")).toContainText(
       "營運檢視",
     );
-    await expect(page.locator("main")).not.toContainText(ctbcVisibleLeak);
+    await expect(page.locator("main")).not.toContainText(demoBrandVisibleLeak);
     await expect(
       page.getByRole("button", { name: "限管理員" }).first(),
     ).toBeDisabled();
 
     await page.locator(".bank-account-menu summary").click();
     await expect(page.locator(".bank-account-popover")).toContainText(
-      "ops-viewer@cathay.demo",
+      "ops-viewer@contoso.demo",
     );
   });
 
@@ -110,19 +110,19 @@ test.describe("bank console deep runtime coverage", () => {
   }) => {
     await page.goto(
       withQuery("/bookings", {
-        bank: "fubon",
+        bank: "tailspin",
         locale: "zh",
         role: "bank_program_admin",
       }),
       { waitUntil: "domcontentloaded" },
     );
-    await expect(page.locator("main")).toContainText("富邦銀行");
+    await expect(page.locator("main")).toContainText("泰思賓銀行");
 
     await page.locator(".bank-account-menu summary").click();
     await page.getByRole("link", { name: "登出" }).click();
 
     await expectRoute(page, "/login", {
-      bank: "fubon",
+      bank: "tailspin",
       locale: "zh",
       signedOut: "1",
     });
@@ -131,17 +131,17 @@ test.describe("bank console deep runtime coverage", () => {
 
     await page.goto(
       withQuery("/statements/2026-06", {
-        bank: "fubon",
+        bank: "tailspin",
         locale: "zh",
         role: "bank_finance",
       }),
     );
     await expectRoute(page, "/login", {
-      bank: "fubon",
+      bank: "tailspin",
       locale: "zh",
       signedOut: "1",
     });
-    await expect(page.locator("main")).not.toContainText(/STM-FUBON|應付/);
+    await expect(page.locator("main")).not.toContainText(/STM-TAILSPIN|應付/);
   });
 
   test("keeps bank switch, locale switch, and signed-out account chrome scoped", async ({
@@ -149,7 +149,7 @@ test.describe("bank console deep runtime coverage", () => {
   }) => {
     await page.goto(
       withQuery("/users", {
-        bank: "ctbc",
+        bank: "acme",
         locale: "zh",
         role: "bank_program_admin",
       }),
@@ -157,7 +157,7 @@ test.describe("bank console deep runtime coverage", () => {
     );
 
     await expect(page.locator("html")).toHaveAttribute("lang", "zh-Hant");
-    await expect(page.locator(".bank-demo-menu summary")).toContainText("中信");
+    await expect(page.locator(".bank-demo-menu summary")).toContainText("艾克米");
     await expect(page.locator(".bank-locale-switch")).toContainText("繁");
     await expect(page.locator(".bank-locale-switch")).toContainText("EN");
     await expect(page.locator(".bank-account-menu summary")).toContainText(
@@ -169,7 +169,7 @@ test.describe("bank console deep runtime coverage", () => {
 
     await openDetails(page, ".bank-account-menu");
     await expect(page.locator(".bank-account-popover")).toContainText(
-      "program-admin@ctbcbank.com",
+      "program-admin@acme.example",
     );
     await expect(page.locator(".bank-account-popover")).toContainText(
       "帳號管理",
@@ -180,7 +180,7 @@ test.describe("bank console deep runtime coverage", () => {
       .locator(".bank-locale-switch .bank-locale-link", { hasText: "EN" })
       .click();
     await expectRoute(page, "/users", {
-      bank: "ctbc",
+      bank: "acme",
       locale: "en",
       role: "bank_program_admin",
     });
@@ -197,30 +197,30 @@ test.describe("bank console deep runtime coverage", () => {
     await openDetails(page, ".bank-demo-menu");
     await page
       .locator(".bank-demo-popover .bank-demo-option", {
-        hasText: "Fubon Bank",
+        hasText: "Tailspin Insurance",
       })
       .click();
     await expectRoute(page, "/users", {
-      bank: "fubon",
+      bank: "tailspin",
       locale: "en",
       role: "bank_program_admin",
     });
     await expect(page.locator(".bank-demo-menu summary")).toContainText(
-      "Fubon",
+      "Tailspin",
     );
     await expect(page.locator(".bank-account-menu summary")).toContainText(
       "P. Chen",
     );
-    await expect(page.locator("body")).toContainText("Fubon");
-    await expect(page.locator("main")).not.toContainText("ctbcbank.com");
+    await expect(page.locator("body")).toContainText("Tailspin");
+    await expect(page.locator("main")).not.toContainText("acme.example");
 
     await openDetails(page, ".bank-account-menu");
     await expect(page.locator(".bank-account-popover")).toContainText(
-      "program-admin@fubon.demo",
+      "program-admin@tailspin.demo",
     );
     await page.getByRole("link", { name: "Sign out" }).click();
     await expectRoute(page, "/login", {
-      bank: "fubon",
+      bank: "tailspin",
       locale: "en",
       signedOut: "1",
     });
@@ -228,7 +228,7 @@ test.describe("bank console deep runtime coverage", () => {
     await expect(page.locator("main")).toContainText("You are signed out");
     await expect(page.locator("main")).not.toContainText("People & roles");
     await expect(page.locator("main")).not.toContainText("program-admin");
-    await expect(page.locator("main")).not.toContainText("fubon.demo");
+    await expect(page.locator("main")).not.toContainText("tailspin.demo");
     await expect(page.locator(".bank-account-menu summary")).toContainText(
       "Signed out",
     );
@@ -241,7 +241,7 @@ test.describe("bank console deep runtime coverage", () => {
       "Sign in",
     );
     await expect(page.locator(".bank-account-popover")).not.toContainText(
-      "program-admin@fubon.demo",
+      "program-admin@tailspin.demo",
     );
     await expect(page.locator(".bank-account-popover")).not.toContainText(
       "Account management",

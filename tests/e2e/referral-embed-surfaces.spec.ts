@@ -15,7 +15,7 @@ const deployedEntrySlug =
   (usesLocalFixture ? "yuhe-residence" : undefined);
 const allowedEmbedHost = usesLocalFixture
   ? "127.0.0.1:3199"
-  : "app.yuhe-living.com.tw";
+  : "app.fabrikam-living.example";
 const allowedEmbedOrigin = usesLocalFixture
   ? `http://${allowedEmbedHost}`
   : `https://${allowedEmbedHost}`;
@@ -54,7 +54,7 @@ test.describe("referral embed surfaces", () => {
       await expect(page.locator("body")).toContainText(
         `/embed/${deployedEntrySlug}`,
       );
-      await expect(page.locator("body")).toContainText("御和物業");
+      await expect(page.locator("body")).toContainText("法碧康物業");
       await expect(page.locator("body")).toContainText("社區叫車");
     } else {
       await expect(page.locator("body")).toContainText(
@@ -179,7 +179,7 @@ test.describe("referral embed surfaces", () => {
   }) => {
     test.skip(!usesLocalFixture, "Requires the local controllable authority.");
 
-    const pickupAddress = "御和雲峰 A 棟 1F 迎賓車道";
+    const pickupAddress = "法碧康雲峰 A 棟 1F 迎賓車道";
     const dropoffAddress = "台北榮民總醫院 第二門診大樓";
 
     await page.goto(
