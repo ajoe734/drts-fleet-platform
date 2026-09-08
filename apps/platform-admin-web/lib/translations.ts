@@ -7,6 +7,84 @@ import type {
 
 export type Locale = "en" | "zh";
 
+/**
+ * Resolves the authoritative runtime environment label for platform admin shell display.
+ * Derives strictly from runtime environment variables (DRTS_ENV, APP_ENV,
+ * NEXT_PUBLIC_DRTS_ENV, NEXT_PUBLIC_APP_ENV), rejecting URL/domain guessing
+ * and never treating NODE_ENV=production alone as proof of production.
+ */
+export function resolveAuthoritativeAdminShellEnv(locale: Locale = "zh"): string {
+  const envVar =
+    (typeof process !== "undefined" && process?.env
+      ? process.env.DRTS_ENV ||
+        process.env.APP_ENV ||
+        process.env.NEXT_PUBLIC_DRTS_ENV ||
+        process.env.NEXT_PUBLIC_APP_ENV ||
+        process.env.NEXT_PUBLIC_ENV
+      : undefined) ?? "";
+
+  const trimmed = envVar.trim().toLowerCase();
+
+  // Reject URL / domain guessing
+  if (
+    trimmed &&
+    (trimmed.includes("/") ||
+      trimmed.includes("http:") ||
+      trimmed.includes("https:") ||
+      trimmed.includes(".com") ||
+      trimmed.includes(".io") ||
+      trimmed.includes(".internal"))
+  ) {
+    return locale === "zh" ? "未知環境" : "unknown";
+  }
+
+  if (trimmed === "prod" || trimmed === "production") {
+    return locale === "zh" ? "正式環境" : "production";
+  }
+  if (trimmed === "stage" || trimmed === "staging") {
+    return locale === "zh" ? "預發環境" : "staging";
+  }
+  if (trimmed === "preview") {
+    return locale === "zh" ? "預覽環境" : "preview";
+  }
+  if (trimmed === "sandbox") {
+    return locale === "zh" ? "沙盒環境" : "sandbox";
+  }
+  if (
+    trimmed === "dev" ||
+    trimmed === "development" ||
+    trimmed === "local"
+  ) {
+    return locale === "zh" ? "開發環境" : "development";
+  }
+  if (
+    trimmed === "mock" ||
+    trimmed === "fixture" ||
+    trimmed === "test"
+  ) {
+    return locale === "zh" ? "模擬資料" : "mock data";
+  }
+
+  // If no primary env var was provided, check NODE_ENV for dev/test only
+  const nodeEnv = (
+    typeof process !== "undefined" && process?.env?.NODE_ENV
+      ? process.env.NODE_ENV
+      : ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (nodeEnv === "development" || nodeEnv === "dev" || nodeEnv === "local") {
+    return locale === "zh" ? "開發環境" : "development";
+  }
+  if (nodeEnv === "test") {
+    return locale === "zh" ? "模擬資料" : "mock data";
+  }
+
+  // NODE_ENV=production alone or missing/unrecognized resolves to unknown
+  return locale === "zh" ? "未知環境" : "unknown";
+}
+
 const supplyReviewEn = {
   // ── Supply Review Queue & Detail (S1F-ADM-001) ──
   "supplyReview.status.draft": "Draft",
@@ -2063,7 +2141,7 @@ const en = {
   "adminShell.breadcrumb.detail": "Detail",
   "adminShell.notifications": "Notifications",
   "adminShell.realm": "PLATFORM",
-  "adminShell.environment": "preview",
+  "adminShell.environment": resolveAuthoritativeAdminShellEnv("en"),
   "adminShell.environment.production": "production",
   "adminShell.environment.staging": "staging",
   "adminShell.environment.preview": "preview",
@@ -5107,7 +5185,7 @@ const zh: typeof en = {
   "adminShell.breadcrumb.detail": "詳情",
   "adminShell.notifications": "通知",
   "adminShell.realm": "平台",
-  "adminShell.environment": "預覽環境",
+  "adminShell.environment": resolveAuthoritativeAdminShellEnv("zh"),
   "adminShell.environment.production": "正式環境",
   "adminShell.environment.staging": "預發環境",
   "adminShell.environment.preview": "預覽環境",
@@ -7869,6 +7947,9 @@ export function t(
   locale: Locale,
   params?: Record<string, string | number>,
 ): string {
+  if (key === "adminShell.environment") {
+    return resolveAuthoritativeAdminShellEnv(locale);
+  }
   const dict = translations[locale] ?? translations.en;
   let value =
     (dict as Record<string, string>)[key] ??

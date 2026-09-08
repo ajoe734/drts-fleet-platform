@@ -50,23 +50,19 @@
     - 採用 Canvas Mono 語彙（`SHELL_MONO`，字級 `11px`，字重 `700`，`uppercase`，`letter-spacing: 0.04em`）。
     - 嚴格採用 `@drts/ui-tokens` 狀態階調（`STATUS_TONES` 各色階），零私自發明 hex 色碼。
 
-### B. 全面清理 6 大應用之使用者文案、修復預設環境（`apps/*/lib/translations.ts`）
+### B. 全面清理 6 大應用之使用者文案、實現動態權威環境解析（`apps/*/lib/translations.ts`）
 
-- **修復預設環境鍵（解決 Codex2 P1: tenant-shell 及各 shell 顯示正式環境之根本原因）**：
-  - `apps/tenant-console-web/lib/translations.ts`：
-    - `shell.env` 預設由 `"production"` 修正為 `"preview"`；繁中由 `"正式環境"` 修正為 `"預覽環境"`。
-    - 使 `tenant-shell.tsx:909` 在未掛載外部注入時，安全呈現「預覽環境 / preview」，徹底消除「dev/mock 畫面顯示正式環境」缺陷。
-    - 完整保留動態字典 `shell.env.production`（`"production"` / `"正式環境"`）供真值注入使用。
-  - `apps/platform-admin-web/lib/translations.ts`：
-    - `adminShell.environment` 預設由 `"production"` 修正為 `"preview"`；繁中由 `"正式環境"` 修正為 `"預覽環境"`。
-    - 使 `admin-shell.tsx:638` 安全呈現「預覽環境 / preview」。
-    - 完整保留 `adminShell.environment.production`。
-  - `apps/enterprise-dispatch-web/lib/translations.ts`：
-    - `shell.env` 預設由 `"production"` 修正為 `"preview"`；繁中由 `"正式環境"` 修正為 `"預覽環境"`。
-  - `apps/fleet-partner-portal-web/lib/translations.ts`：
-    - `shell.env` 預設由 `"production"` 修正為 `"preview"`；繁中由 `"正式環境"` 修正為 `"預覽環境"`。
-  - `apps/bank-console-web/lib/translations.ts`：
-    - 保持權威安全預設 `"shell.env": "preview"` 與 `"預覽環境"`。
+- **動態環境真值解析（徹底解決 Codex2 P1: 靜態 preview 冒充真值與 production 顯示 preview 之缺陷）**：
+  - 先前候選版本將 `shell.env` 與 `adminShell.environment` 由 `"production"` 寫死為 `"preview"`，遭 Reviewer（Codex2）提出 P1 拒絕：「將 hardcoded production 改為 hardcoded preview，導致正式部署時仍顯示 preview，違反 runtime authority acceptance」。
+  - 本次徹底消除所有靜態硬編碼字串，於 6 大應用之 `translations.ts` 內建權威執行期解析函式（`resolveAuthoritativeShellEnv` / `resolveAuthoritativeAdminShellEnv`），並將 `t("shell.env")` 與 `t("adminShell.environment")` 完全動態化：
+    - **`apps/tenant-console-web/lib/translations.ts`**：
+      - 定義 `resolveAuthoritativeShellEnv(locale)`，並在 `t(key, locale)` 中攔截 `key === "shell.env"`，動態依據 `process.env.DRTS_ENV` / `APP_ENV` / `NEXT_PUBLIC_*` 解析。
+      - 使 `tenant-shell.tsx:909`（`env={t("shell.env")}`）在生產環境部署時精確渲染「正式環境 / production」，在預發渲染「預發環境 / staging」，在預覽渲染「預覽環境 / preview」，在沙盒渲染「沙盒環境 / sandbox」，在開發渲染「開發環境 / development」，在 mock 下渲染「模擬資料 / mock data」；未提供有效信號時安全回退「未知環境 / unknown」，**絕不硬編碼為 preview，亦不預設為 production**。
+    - **`apps/platform-admin-web/lib/translations.ts`**：
+      - 定義 `resolveAuthoritativeAdminShellEnv(locale)`，並在 `t(key, locale)` 中攔截 `key === "adminShell.environment"`。
+      - 使 `admin-shell.tsx:638`（`{labelFor(locale, "adminShell.environment")}`）動態渲染執行期權威真值，徹底消除生產環境誤顯 preview 缺陷。
+    - **`apps/enterprise-dispatch-web/lib/translations.ts`**、**`apps/fleet-partner-portal-web/lib/translations.ts`**、**`apps/bank-console-web/lib/translations.ts`**：
+      - 同步實作 `resolveAuthoritativeShellEnv` 與動態 `t("shell.env")`，全庫環境標示完全統一。
 - **清理內部工程代碼與未在地化變數**：
   - **`apps/platform-admin-web/lib/translations.ts`**：
     - 替換 `submissionId` 為繁體中文業務語意：「無效的申請編號」（英文："Invalid submission ID"）。
@@ -81,32 +77,35 @@
 
 ### C. 擴充單元與回歸測試套件（`tests/unit/system-remediation/sr-env-copy-001/`）
 
-- 新增至 25 項全自動測試，全面覆蓋：
-  1. `rejects guessing environment from domain or host string alone`
-  2. `resolves environment from authoritative runtime environment variable`
-  3. `strictly suppresses production labeling when fixture mode or mock flag is active`
-  4. `correctly normalizes non-production environments`
-  5. `resolves empty, null, undefined, or unknown environments to 'unknown'`
-  6. `never marks unverified or unknown data as healthy`
-  7. `returns down immediately when network response fails`
-  8. `correctly classifies verified health statuses`
-  9. `maps environment levels to strict ui-tokens status tones`
-  10. `maps health states to correct status tones and labels`
-  11. `ensures zero user-facing occurrences of ActionIntent across all 6 applications`
-  12. `ensures zero occurrences of raw 'submissionId' in Chinese user copy across all 6 applications`
-  13. `ensures all 6 translation catalogs provide dynamic environment strings`
-  14. `resolves production from DRTS_ENV, taking precedence over APP_ENV and NODE_ENV`
-  15. `falls back to APP_ENV when DRTS_ENV is absent`
-  16. `does not trust NODE_ENV=production alone as proof of a real production deploy`
-  17. `resolves local/test tiers`
-  18. `never guesses a healthy-looking tier for unrecognized or missing signals`
-  19. `every tier has a localized label and a non-neutral-for-unknown tone`
-  20. **[新增元件回歸]** `applies source override on every path: tier=production with isFixture=true renders mock, never production`
-  21. **[新增元件回歸]** `applies source override on every path: tier=production with isMock=true renders mock, never production`
-  22. **[新增元件回歸]** `applies source override on every path: env=production with isFixture=true renders mock, never production`
-  23. **[新增元件回歸]** `renders production only when tier=production and no fixture/mock flag is present`
-  24. **[新增元件回歸]** `correctly renders non-production tiers without guessing`
-  25. **[新增字典回歸]** `ensures default shell.env and adminShell.environment never default to production or 正式環境`
+- 擴充至 28 項全自動測試，全面覆蓋：
+  1. `resolves production only from explicit authoritative runtime values`
+  2. **[Codex2 P1 修復]** `does not trust nodeEnv=production alone without authoritative env or appEnv`（驗證 `nodeEnv: "production"` 安全解析為 `unknown`）
+  3. `never infers environment by guessing from domain or hostname strings`
+  4. `never labels fixture or mock data as production ('fixture/dev不叫正式')`
+  5. `correctly normalizes non-production environments`
+  6. `resolves empty, null, undefined, or unknown environments to 'unknown'`
+  7. `never marks unverified or unknown data as healthy ('prod也不把未知資料標健康')`
+  8. `returns down immediately when network response fails`
+  9. `correctly classifies verified health statuses`
+  10. `maps environment levels to strict ui-tokens status tones`
+  11. `maps health states to correct status tones and labels`
+  12. `ensures zero user-facing occurrences of ActionIntent across all 6 applications`
+  13. `ensures zero occurrences of raw 'submissionId' in Chinese user copy across all 6 applications`
+  14. `ensures all 6 translation catalogs provide dynamic environment strings`
+  15. `resolves production from DRTS_ENV, taking precedence over APP_ENV and NODE_ENV`
+  16. `falls back to APP_ENV when DRTS_ENV is absent`
+  17. **[Codex2 P1 修復]** `does not trust NODE_ENV=production alone as proof of a real production deploy`（驗證 `NODE_ENV: "production"` 安全解析為 `unknown`，不再錯誤預期 production）
+  18. `resolves local/test tiers`
+  19. `never guesses a healthy-looking tier for unrecognized or missing signals`
+  20. `every tier has a localized label and a non-neutral-for-unknown tone`
+  21. `applies source override on every path: tier=production with isFixture=true renders mock, never production`
+  22. `applies source override on every path: tier=production with isMock=true renders mock, never production`
+  23. `applies source override on every path: env=production with isFixture=true renders mock, never production`
+  24. `renders production only when tier=production and no fixture/mock flag is present`
+  25. `correctly renders non-production tiers without guessing`
+  26. `ensures default shell.env and adminShell.environment never default to production or 正式環境，且絕無靜態硬編碼 preview`
+  27. **[Codex2 P1 新增驗證]** `dynamically resolves tenant shell.env from runtime environment variables (never static preview)`（覆蓋 production, staging, preview, sandbox, development, mock, domain-reject, build-mode nodeEnv）
+  28. **[Codex2 P1 新增驗證]** `dynamically resolves platform adminShell.environment from runtime environment variables (never static preview)`（覆蓋 production, staging, preview, sandbox, development, mock, domain-reject, build-mode nodeEnv）
 
 ## 3. 驗收條件對應
 
@@ -178,8 +177,8 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-env-copy-001
 
  Test Files  1 passed (1)
-      Tests  25 passed (25)
-(exit 0，25 項回歸、合約、元件覆蓋與字典安全測試全數通過)
+      Tests  28 passed (28)
+(exit 0，28 項回歸、合約、元件覆蓋、執行期動態真值與字典安全測試全數通過)
 
 $ pnpm --filter @drts/platform-admin-web test
  Test Files  9 passed (9)
@@ -209,11 +208,11 @@ $ pnpm --filter @drts/ops-console-web test
 
 ## 5. 未做的部分（明列，不冒充成功）與範圍說明
 
-- **正式 Cloud Run 線上環境變數注入驗證**：真實雲端容器環境中的 `DRTS_ENV=production` 等注入需待 PR 合併後之 CD pipeline（`Deploy - Dev`）部署驗證。本任務在本地端以確定性測試嚴格驗證「無權威變數安全回退 unknown」、「domain string 不得推導環境」、「mock 標籤強制降級不標 production」。
+- **正式 Cloud Run 線上環境變數注入驗證**：真實雲端容器環境中的 `DRTS_ENV=production` 等注入需待 PR 合併後之 CD pipeline（`Deploy - Dev`）部署驗證。本任務在本地端以確定性測試嚴格驗證「無權威變數安全回退 unknown」、「domain string 不得推導環境」、「mock 標籤強制降級不標 production」、「動態權威真值解析各環境標籤」。
 - **跨應用 Shell 元件置換與共用匯出（遵循 Write Scope 邊界）**：
   - 本任務嚴格遵守 `write_scopes` 與協作規範（「只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫... 不得平行修改中央 test config、lockfile、shared exports、全域 routes... scope只允許列出的translations与共用badge；其他shell改動要求supervisor加入前置與範圍」）。
   - 各應用的 root layout/shell（如 `tenant-shell.tsx`、`admin-shell.tsx` 等）與 `packages/ui-web/src/index.tsx`（中央共用匯出）均屬於 write_scopes 之外的受保護檔案。
-  - 為在合法 scope 內徹底解決「dev/mock 畫面顯示正式環境」之缺陷，本任務透過修正 6 大應用的字典真值（將預設 `shell.env` 與 `adminShell.environment` 改為 `preview` / `預覽環境`），使未改動之既有 shell 直接安全渲染非正式環境標籤。全域 shell 改由 `EnvironmentBadge` 取代之重構，留待 supervisor 擴增 scope 與依賴後進行。
+  - 針對 Codex2 提出之「先前候選版本將字典寫死為 preview，導致生產環境仍顯示 preview」缺陷，本任務並未僅做靜態字串替換，而是在合法 scope 內（`translations.ts`）徹底實作動態執行期權威真值解析（`resolveAuthoritativeShellEnv` / `resolveAuthoritativeAdminShellEnv`），使未改動之既有 shell（如 `tenant-shell.tsx:909` `env={t("shell.env")}` 與 `admin-shell.tsx:638` `{labelFor(locale, "adminShell.environment")}`）直接渲染真實權威環境標籤，在正式環境精準顯示「正式環境 / production」，完全解決靜態 preview 缺陷。全域 shell 改由 `EnvironmentBadge` 直接嵌入取代之重構，留待 supervisor 擴增 scope 與依賴後進行。
 
 ## 6. Write scope 遵守情況
 

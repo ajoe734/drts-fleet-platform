@@ -28,32 +28,52 @@ export interface RuntimeEnvironmentSource {
 export function resolveRuntimeEnvironmentTier(
   source: RuntimeEnvironmentSource,
 ): RuntimeEnvironmentTier {
-  const raw = (source.DRTS_ENV ?? source.APP_ENV ?? source.NODE_ENV)
-    ?.trim()
-    .toLowerCase();
+  const authoritative = (source.DRTS_ENV ?? source.APP_ENV)?.trim().toLowerCase();
 
-  if (raw === "prod" || raw === "production") {
-    return "production";
+  if (authoritative) {
+    // Reject URL / domain guessing
+    if (
+      authoritative.includes("/") ||
+      authoritative.includes("http:") ||
+      authoritative.includes("https:") ||
+      authoritative.includes(".com") ||
+      authoritative.includes(".io") ||
+      authoritative.includes(".internal")
+    ) {
+      return "unknown";
+    }
+
+    if (authoritative === "prod" || authoritative === "production") {
+      return "production";
+    }
+    if (authoritative === "stage" || authoritative === "staging") {
+      return "staging";
+    }
+    if (authoritative === "test" || authoritative === "testing" || authoritative === "ci") {
+      return "test";
+    }
+    if (
+      authoritative === "dev" ||
+      authoritative === "development" ||
+      authoritative === "local" ||
+      authoritative === "sandbox"
+    ) {
+      return "local";
+    }
+    // A value is present but unrecognized
+    return "unknown";
   }
-  if (raw === "stage" || raw === "staging") {
-    return "staging";
-  }
-  if (raw === "test" || raw === "testing" || raw === "ci") {
-    return "test";
-  }
-  if (
-    raw === "dev" ||
-    raw === "development" ||
-    raw === "local" ||
-    raw === "sandbox"
-  ) {
+
+  // NODE_ENV fallback:
+  // NODE_ENV is a build mode / runtime optimization flag, NOT a deployment tier.
+  // Next.js `next build` always sets NODE_ENV=production, so NODE_ENV=production alone
+  // does not establish that the runtime deployment is production. It must resolve to unknown.
+  const nodeEnv = source.NODE_ENV?.trim().toLowerCase();
+  if (nodeEnv === "development" || nodeEnv === "dev" || nodeEnv === "local") {
     return "local";
   }
-
-  if (raw) {
-    // A value is present but does not match a known tier. Do not guess —
-    // an unrecognized signal is not the same thing as a verified tier.
-    return "unknown";
+  if (nodeEnv === "test" || nodeEnv === "testing") {
+    return "test";
   }
 
   if ((source.CI ?? "").trim().toLowerCase() === "true") {

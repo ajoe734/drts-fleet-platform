@@ -31,40 +31,57 @@ export function resolveRuntimeEnvironment(
     return "mock";
   }
 
-  const rawEnv = (input.appEnv || input.env || input.nodeEnv || "").trim().toLowerCase();
-  if (!rawEnv) {
+  // Prioritize primary authoritative environment variables: appEnv or env (e.g. DRTS_ENV, APP_ENV)
+  const primaryEnv = (input.appEnv || input.env || "").trim().toLowerCase();
+  if (primaryEnv) {
+    // Rule 1: Reject URL / domain guessing: do NOT infer production from a URL or hostname
+    if (
+      primaryEnv.includes("/") ||
+      primaryEnv.includes("http:") ||
+      primaryEnv.includes("https:") ||
+      primaryEnv.includes(".com") ||
+      primaryEnv.includes(".io") ||
+      primaryEnv.includes(".internal")
+    ) {
+      return "unknown";
+    }
+
+    if (primaryEnv === "production" || primaryEnv === "prod") {
+      return "production";
+    }
+    if (primaryEnv === "staging" || primaryEnv === "stage") {
+      return "staging";
+    }
+    if (primaryEnv === "preview") {
+      return "preview";
+    }
+    if (primaryEnv === "sandbox") {
+      return "sandbox";
+    }
+    if (primaryEnv === "dev" || primaryEnv === "development" || primaryEnv === "local") {
+      return "dev";
+    }
+    if (primaryEnv === "mock" || primaryEnv === "fixture" || primaryEnv === "test") {
+      return "mock";
+    }
+
     return "unknown";
   }
 
-  // Rule 1: Reject URL / domain guessing: do NOT infer production from a URL or hostname
-  if (
-    rawEnv.includes("/") ||
-    rawEnv.includes("http:") ||
-    rawEnv.includes("https:") ||
-    rawEnv.includes(".com") ||
-    rawEnv.includes(".io") ||
-    rawEnv.includes(".internal")
-  ) {
-    return "unknown";
-  }
-
-  if (rawEnv === "production" || rawEnv === "prod") {
-    return "production";
-  }
-  if (rawEnv === "staging" || rawEnv === "stage") {
-    return "staging";
-  }
-  if (rawEnv === "preview") {
-    return "preview";
-  }
-  if (rawEnv === "sandbox") {
-    return "sandbox";
-  }
-  if (rawEnv === "dev" || rawEnv === "development" || rawEnv === "local") {
-    return "dev";
-  }
-  if (rawEnv === "mock" || rawEnv === "fixture" || rawEnv === "test") {
-    return "mock";
+  // Fallback to nodeEnv:
+  // NODE_ENV is a build mode / runtime optimization flag, NOT a deployment tier.
+  // NODE_ENV=production alone does NOT establish production deployment tier; it must resolve to unknown.
+  const nodeEnv = (input.nodeEnv || "").trim().toLowerCase();
+  if (nodeEnv) {
+    if (nodeEnv === "production" || nodeEnv === "prod") {
+      return "unknown";
+    }
+    if (nodeEnv === "dev" || nodeEnv === "development" || nodeEnv === "local") {
+      return "dev";
+    }
+    if (nodeEnv === "test" || nodeEnv === "testing" || nodeEnv === "mock" || nodeEnv === "fixture") {
+      return "mock";
+    }
   }
 
   return "unknown";

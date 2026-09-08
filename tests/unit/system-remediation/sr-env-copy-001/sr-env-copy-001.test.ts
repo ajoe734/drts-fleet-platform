@@ -38,6 +38,9 @@ import type {
   RuntimeHealthStatus,
 } from "../../../../packages/ui-web/src/environment-badge/types";
 
+import { t as tenantT } from "../../../../apps/tenant-console-web/lib/translations";
+import { t as adminT } from "../../../../apps/platform-admin-web/lib/translations";
+
 const REPO_ROOT = resolve(__dirname, "../../../..");
 
 const TRANSLATION_FILES = [
@@ -54,7 +57,11 @@ describe("SR-ENV-COPY-001: Authority-First Runtime Environment Resolver", () => 
     expect(resolveRuntimeEnvironment({ env: "production" })).toBe("production");
     expect(resolveRuntimeEnvironment({ env: "prod" })).toBe("production");
     expect(resolveRuntimeEnvironment({ appEnv: "PRODUCTION" })).toBe("production");
-    expect(resolveRuntimeEnvironment({ nodeEnv: "production" })).toBe("production");
+  });
+
+  it("does not trust nodeEnv=production alone without authoritative env or appEnv", () => {
+    expect(resolveRuntimeEnvironment({ nodeEnv: "production" })).toBe("unknown");
+    expect(resolveRuntimeEnvironment({ nodeEnv: "prod" })).toBe("unknown");
   });
 
   it("never infers environment by guessing from domain or hostname strings", () => {
@@ -271,7 +278,7 @@ describe("SR-ENV-COPY-001: Runtime Environment Tier Resolver", () => {
 
   it("does not trust NODE_ENV=production alone as proof of a real production deploy", () => {
     expect(resolveRuntimeEnvironmentTier({ NODE_ENV: "production" })).toBe(
-      "production",
+      "unknown",
     );
     expect(
       resolveRuntimeEnvironmentTier({ APP_ENV: "staging", NODE_ENV: "production" }),
@@ -394,6 +401,129 @@ describe("SR-ENV-COPY-001: Translation Catalogs Default Environment Safety", () 
         defaultShellEnvMatches,
         `File ${relPath} must not have default shell.env/adminShell.environment set to production/正式環境`,
       ).toBeNull();
+
+      // Neither shell.env nor adminShell.environment default key may be statically hardcoded to "preview" or "預覽環境"
+      const hardcodedPreviewMatches = content.match(
+        /"(shell\.env|adminShell\.environment)"\s*:\s*"(preview|預覽環境)"/g,
+      );
+      expect(
+        hardcodedPreviewMatches,
+        `File ${relPath} must not have static hardcoded preview for shell.env/adminShell.environment`,
+      ).toBeNull();
+    }
+  });
+
+  it("dynamically resolves tenant shell.env from runtime environment variables (never static preview)", () => {
+    const originalDrtsEnv = process.env.DRTS_ENV;
+    const originalAppEnv = process.env.APP_ENV;
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    try {
+      // Test production runtime
+      process.env.DRTS_ENV = "production";
+      expect(tenantT("shell.env", "en")).toBe("production");
+      expect(tenantT("shell.env", "zh")).toBe("正式環境");
+
+      // Test staging runtime
+      process.env.DRTS_ENV = "staging";
+      expect(tenantT("shell.env", "en")).toBe("staging");
+      expect(tenantT("shell.env", "zh")).toBe("預發環境");
+
+      // Test preview runtime
+      process.env.DRTS_ENV = "preview";
+      expect(tenantT("shell.env", "en")).toBe("preview");
+      expect(tenantT("shell.env", "zh")).toBe("預覽環境");
+
+      // Test sandbox runtime
+      process.env.DRTS_ENV = "sandbox";
+      expect(tenantT("shell.env", "en")).toBe("sandbox");
+      expect(tenantT("shell.env", "zh")).toBe("沙盒環境");
+
+      // Test dev runtime
+      process.env.DRTS_ENV = "development";
+      expect(tenantT("shell.env", "en")).toBe("development");
+      expect(tenantT("shell.env", "zh")).toBe("開發環境");
+
+      // Test mock runtime
+      process.env.DRTS_ENV = "mock";
+      expect(tenantT("shell.env", "en")).toBe("mock data");
+      expect(tenantT("shell.env", "zh")).toBe("模擬資料");
+
+      // Test unknown: URL / domain guessing rejected
+      process.env.DRTS_ENV = "https://tenant.drts.io";
+      expect(tenantT("shell.env", "en")).toBe("unknown");
+      expect(tenantT("shell.env", "zh")).toBe("未知環境");
+
+      // Test unknown: NODE_ENV=production alone does NOT claim production
+      delete process.env.DRTS_ENV;
+      delete process.env.APP_ENV;
+      process.env.NODE_ENV = "production";
+      expect(tenantT("shell.env", "en")).toBe("unknown");
+      expect(tenantT("shell.env", "zh")).toBe("未知環境");
+    } finally {
+      if (originalDrtsEnv !== undefined) process.env.DRTS_ENV = originalDrtsEnv;
+      else delete process.env.DRTS_ENV;
+      if (originalAppEnv !== undefined) process.env.APP_ENV = originalAppEnv;
+      else delete process.env.APP_ENV;
+      if (originalNodeEnv !== undefined) process.env.NODE_ENV = originalNodeEnv;
+      else delete process.env.NODE_ENV;
+    }
+  });
+
+  it("dynamically resolves platform adminShell.environment from runtime environment variables (never static preview)", () => {
+    const originalDrtsEnv = process.env.DRTS_ENV;
+    const originalAppEnv = process.env.APP_ENV;
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    try {
+      // Test production runtime
+      process.env.DRTS_ENV = "production";
+      expect(adminT("adminShell.environment", "en")).toBe("production");
+      expect(adminT("adminShell.environment", "zh")).toBe("正式環境");
+
+      // Test staging runtime
+      process.env.DRTS_ENV = "staging";
+      expect(adminT("adminShell.environment", "en")).toBe("staging");
+      expect(adminT("adminShell.environment", "zh")).toBe("預發環境");
+
+      // Test preview runtime
+      process.env.DRTS_ENV = "preview";
+      expect(adminT("adminShell.environment", "en")).toBe("preview");
+      expect(adminT("adminShell.environment", "zh")).toBe("預覽環境");
+
+      // Test sandbox runtime
+      process.env.DRTS_ENV = "sandbox";
+      expect(adminT("adminShell.environment", "en")).toBe("sandbox");
+      expect(adminT("adminShell.environment", "zh")).toBe("沙盒環境");
+
+      // Test dev runtime
+      process.env.DRTS_ENV = "development";
+      expect(adminT("adminShell.environment", "en")).toBe("development");
+      expect(adminT("adminShell.environment", "zh")).toBe("開發環境");
+
+      // Test mock runtime
+      process.env.DRTS_ENV = "mock";
+      expect(adminT("adminShell.environment", "en")).toBe("mock data");
+      expect(adminT("adminShell.environment", "zh")).toBe("模擬資料");
+
+      // Test unknown: URL / domain guessing rejected
+      process.env.DRTS_ENV = "https://admin.drts.internal";
+      expect(adminT("adminShell.environment", "en")).toBe("unknown");
+      expect(adminT("adminShell.environment", "zh")).toBe("未知環境");
+
+      // Test unknown: NODE_ENV=production alone does NOT claim production
+      delete process.env.DRTS_ENV;
+      delete process.env.APP_ENV;
+      process.env.NODE_ENV = "production";
+      expect(adminT("adminShell.environment", "en")).toBe("unknown");
+      expect(adminT("adminShell.environment", "zh")).toBe("未知環境");
+    } finally {
+      if (originalDrtsEnv !== undefined) process.env.DRTS_ENV = originalDrtsEnv;
+      else delete process.env.DRTS_ENV;
+      if (originalAppEnv !== undefined) process.env.APP_ENV = originalAppEnv;
+      else delete process.env.APP_ENV;
+      if (originalNodeEnv !== undefined) process.env.NODE_ENV = originalNodeEnv;
+      else delete process.env.NODE_ENV;
     }
   });
 });
