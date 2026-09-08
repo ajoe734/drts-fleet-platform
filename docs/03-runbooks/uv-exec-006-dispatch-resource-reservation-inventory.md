@@ -260,3 +260,20 @@ five related API unit suites passed **179/179**, and API typecheck passed
 after rebuilding contracts. `git diff --check` passed. This verification is
 local evidence for candidate handoff; same-SHA review, CI, merge and external
 acceptance are still pending.
+
+### Reviewer workspace prerequisite retry (2026-09-08 16:38 UTC)
+
+Codex resumed as supervisor-assigned owner after Codex2 reported that its
+workspace HEAD `dc0662558cf5069f878f3785c2072b965bde25c6` did not match locked
+candidate `079c37315b2d9a70c18ba9003c0936d83a30ad37`. That return was a review
+prerequisite failure, not a code defect finding. Supervisor must provision
+the reviewer workspace at the newly locked candidate before redispatch;
+the owner did not alter any reviewer workspace.
+
+The prescribed rebase again hit duplicate task-history conflicts and was
+aborted. A clean merge integrated origin/dev at `1cdaaa5b5`, changing only
+support/planning documents. PostgreSQL integration passed **29/29** and the
+five related API unit suites passed **179/179**. API typecheck passed after
+rebuilding contracts, and `git diff --check` passed. Assignment writer inventory
+was reconfirmed (the service table-name match is a comment). Review, CI,
+merge and external acceptance remain pending.
