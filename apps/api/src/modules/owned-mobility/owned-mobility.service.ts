@@ -4319,29 +4319,42 @@ export class OwnedMobilityService
       status: "cancelled",
       updatedAt: now,
     };
-    let closedTask: DriverTaskRecord | null = null;
-    let pendingAcceptance = false;
-    if (locked.taskId) {
-      const lockedTask =
-        await this.ownedMobilityRepository!.lockDriverTaskForUpdate(
-          tx,
-          locked.taskId,
-        );
-      pendingAcceptance = lockedTask?.status === "pending_acceptance";
-      if (
-        lockedTask &&
-        !["completed", "cancelled", "rejected"].includes(lockedTask.status)
-      ) {
-        closedTask = { ...lockedTask, status: "cancelled", completedAt: now };
-      }
+    // An active assignment alone cannot authorize releasing shared supply.
+    // Missing or inconsistent task state must retain capacity for reconciliation.
+    if (!locked.taskId) {
+      return null;
     }
+    const lockedTask =
+      await this.ownedMobilityRepository!.lockDriverTaskForUpdate(
+        tx,
+        locked.taskId,
+      );
+    if (
+      !lockedTask ||
+      lockedTask.taskId !== locked.taskId ||
+      lockedTask.assignmentId !== locked.assignmentId ||
+      lockedTask.orderId !== locked.orderId ||
+      lockedTask.dispatchJobId !== locked.dispatchJobId ||
+      lockedTask.driverId !== locked.driverId ||
+      lockedTask.vehicleId !== locked.vehicleId ||
+      !DRIVER_TASK_TRANSITIONS[lockedTask.status]?.includes("cancelled") ||
+      (locked.status === "assigned") !==
+        (lockedTask.status === "pending_acceptance")
+    ) {
+      return null;
+    }
+    const closedTask: DriverTaskRecord = {
+      ...lockedTask,
+      status: "cancelled",
+      completedAt: now,
+    };
     if (requireExpiredPendingOffer) {
       const deadline = Date.parse(locked.acceptanceDeadline ?? "");
       // Unknown deadlines and inconsistent tasks retain capacity for reconciliation.
       if (
         !Number.isFinite(deadline) ||
         Date.now() < deadline ||
-        !pendingAcceptance
+        lockedTask.status !== "pending_acceptance"
       ) {
         return null;
       }

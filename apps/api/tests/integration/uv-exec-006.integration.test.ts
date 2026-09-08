@@ -1101,6 +1101,124 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     ]);
   });
 
+  it.each(
+    [false, true].flatMap((accepted) =>
+      [
+        "no_task_id",
+        "missing_task",
+        "completed",
+        "cancelled",
+        "rejected",
+        "unknown_status",
+        "inconsistent_status",
+        "assignmentId",
+        "orderId",
+        "dispatchJobId",
+        "driverId",
+        "vehicleId",
+        "taskId",
+      ].map((corruption) => ({ accepted, corruption })),
+    ),
+  )(
+    "redispatch retains capacity for unreconciled task state: $accepted/$corruption",
+    async ({ accepted, corruption }) => {
+      const database = new DatabaseService();
+      databases.push(database);
+      const candidate = {
+        driverId: `driver-reconcile-${randomUUID()}`,
+        vehicleId: `vehicle-reconcile-${randomUUID()}`,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      };
+      const { service } = createTestService(database, [candidate]);
+      const order = service.createPassengerOrder({
+        pickup: { address: "Taipei Main Station" },
+        dropoff: { address: "Taipei 101" },
+        passenger: { name: "Reconciliation", phone: "0911001444" },
+      });
+      trackOrder(order.orderId);
+      const job = await service.dispatchOrder(order.orderId, { mode: "auto" });
+      const assignment = await service.assignDispatch({
+        dispatchJobId: job.dispatchJobId,
+        ...candidate,
+      });
+      if (accepted) {
+        await service.acceptDriverTask(assignment.taskId, {
+          acceptedAt: new Date().toISOString(),
+        });
+      }
+      // Introduce durable legacy inconsistency while the service still has its
+      // valid snapshot. The production row-lock reader must detect it.
+      if (corruption === "no_task_id") {
+        await database.query(
+          `UPDATE ops.phase1_dispatch_assignments
+        SET record = jsonb_set(record, '{taskId}', 'null'::jsonb)
+        WHERE assignment_id = $1`,
+          [assignment.assignmentId],
+        );
+      } else if (corruption === "missing_task") {
+        await database.query(
+          "DELETE FROM ops.phase1_driver_tasks WHERE task_id = $1",
+          [assignment.taskId],
+        );
+      } else {
+        const statusCorruption = [
+          "completed",
+          "cancelled",
+          "rejected",
+          "unknown_status",
+          "inconsistent_status",
+        ].includes(corruption);
+        const value =
+          corruption === "inconsistent_status"
+            ? accepted
+              ? "pending_acceptance"
+              : "accepted"
+            : statusCorruption
+              ? corruption
+              : randomUUID();
+        await database.query(
+          `UPDATE ops.phase1_driver_tasks
+        SET record = jsonb_set(record, ARRAY[$2]::text[], $3::jsonb)
+        WHERE task_id = $1`,
+          [
+            assignment.taskId,
+            statusCorruption ? "status" : corruption,
+            JSON.stringify(value),
+          ],
+        );
+      }
+      const before = await database.query(
+        `SELECT * FROM ops.dispatch_resource_reservations
+      WHERE assignment_id = $1 ORDER BY resource_type`,
+        [assignment.assignmentId],
+      );
+      expect(before.rows).toHaveLength(2);
+      expect(
+        before.rows.every(
+          (row) => row.status === (accepted ? "occupied" : "held"),
+        ),
+      ).toBe(true);
+      await expect(
+        service.redispatchOrder(order.orderId, {
+          reasonCode: "operator_redispatch",
+        }),
+      ).rejects.toMatchObject({
+        code: "REDISPATCH_ASSIGNMENT_ALREADY_CLOSED",
+      });
+      const after = await database.query(
+        `SELECT * FROM ops.dispatch_resource_reservations
+      WHERE assignment_id = $1 ORDER BY resource_type`,
+        [assignment.assignmentId],
+      );
+      expect(after.rows).toEqual(before.rows);
+      expect(
+        await readAssignmentStatus(database, assignment.assignmentId),
+      ).toBe(accepted ? "accepted" : "assigned");
+    },
+  );
+
   it("reassign waits for the old assignment before acquiring the order lock", async () => {
     const database = new DatabaseService();
     databases.push(database);
@@ -2005,9 +2123,9 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       try {
         if (scenario === "token_failure") {
           const multiTaxi = new MultiTaxiService(service, {
-              isEnabled: () => true,
-              persistAuthorization: async () => {},
-              persistRideAccessToken: async () => {
+            isEnabled: () => true,
+            persistAuthorization: async () => {},
+            persistRideAccessToken: async () => {
               throw new Error("injected token failure");
             },
           } as never);
