@@ -2,6 +2,39 @@
 
 Date: 2026-09-08. Owner: Codex2; Reviewer: Codex.
 
+## Redispatch verification — 2026-09-08 21:30 UTC
+
+This section supersedes previous execution results. Fetched base `origin/dev`:
+`5afb3e5b4bd525d59d52a5113bb60c6129100471`; tested branch head:
+`dcd8f7996af76a17fed9ad43d1acc61e0f2c1fa3`. No implementation candidate
+is nominated because acceptance remains red.
+
+- `git fetch origin`: exit 0.
+- `git rebase origin/dev`: exit 1, historical `ac1076708` add/add conflict
+  in payment-gate.test.ts. `git rebase --abort`: exit 0; published ancestry retained.
+- `git diff --quiet origin/dev HEAD -- apps/api/src/modules/billing-settlement/billing-settlement.service.ts apps/api/src/modules/billing-settlement/billing-settlement.repository.ts`:
+  exit 0; tested billing implementation matches the fetched base.
+- `pnpm --filter @drts/api typecheck`: exit 2, TS2307 for
+  `@drts/control-plane-auth` in four auth files.
+- `pnpm --filter @drts/platform-admin-web typecheck`: exit 0.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`:
+  exit 1, **3 executed, 1 passed, 2 failed**. Unapproved rejection passes;
+  fabricated proof resolves paid; pending persistence also returns paid.
+- `git diff --check`: exit 0 before evidence commit.
+
+Resource IDs are the isolated test inputs documented below; no live resource
+IDs were created. No upload/scanner/readback, PostgreSQL concurrency, durable
+receipt, browser/device, or real payment acceptance was performed.
+
+The fresh parent task slice still lists only ARTIFACT/INVOICE dependencies
+and the original five write scopes. SR-CONTRACT-001 remains todo (owner Codex).
+Reconciliation of PR #1825 did not supply the required proof authority or
+authorize repository/module/storage/scanner changes. The planning helper's
+required next-actor actions remain applicable: supervisor must allocate those
+exact scopes and dependency, route missing canvas states, and select the
+history recovery branch before implementation redispatch. This evidence-only
+anchor must not be treated as a successful implementation candidate.
+
 ## Redispatch verification — 2026-09-08 21:22 UTC
 
 This section supersedes the older command results below for this dispatch.
