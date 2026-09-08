@@ -650,7 +650,15 @@ export class VoiceConfirmationService {
     );
     const current = events.filter((e) => e.mediaEpoch === cutoff.mediaEpoch);
     requireGate(
-      events.every((e) => e.sequence <= cutoff.controlSequence) &&
+      // Sequences restart per media epoch. A durable newer-epoch event is
+      // beyond this waterline even when its sequence is only 1; ingestion
+      // may have buffered it without advancing pendingInput or the watermark.
+      events.every(
+        (e) =>
+          e.mediaEpoch < cutoff.mediaEpoch ||
+          (e.mediaEpoch === cutoff.mediaEpoch &&
+            e.sequence <= cutoff.controlSequence),
+      ) &&
         current.length >= cutoff.controlSequence &&
         current.every(
           (e, i) =>
