@@ -1,3 +1,7 @@
+import { GeoModule } from "../geo/geo.module";
+import { ServiceAreaModule } from "../service-area/service-area.module";
+import { ServiceProductModule } from "../service-product/service-product.module";
+import { VoiceBookingDraftService } from "./voice-booking-draft.service";
 import { Module } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
@@ -16,8 +20,9 @@ import { VoiceEvidenceService } from "./voice-evidence.service";
  * (SD §7.4/§7.5).
  */
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, GeoModule, ServiceAreaModule, ServiceProductModule],
   providers: [
+    VoiceBookingDraftService,
     VoiceCheckpointRepository,
     VoiceEvidenceService,
     VoiceBookingRepository,
@@ -25,6 +30,7 @@ import { VoiceEvidenceService } from "./voice-evidence.service";
     VoiceLineScopeService,
   ],
   exports: [
+    VoiceBookingDraftService,
     VoiceEvidenceService,
     VoiceBookingRepository,
     VoiceBookingAuthorizationService,

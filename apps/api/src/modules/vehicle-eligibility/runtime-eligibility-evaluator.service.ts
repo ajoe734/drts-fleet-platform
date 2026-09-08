@@ -1,3 +1,5 @@
+import { bookingRequirementFailures } from "./booking-requirements";
+import type { BookingRequirements } from "@drts/contracts";
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Optional } from "@nestjs/common";
@@ -27,6 +29,7 @@ export type OverrideSoftEligibilityCommand = {
 
 export type EvaluateRuntimeEligibilityCommand =
   ResolveRuntimeEligibilityContextCommand & {
+    bookingRequirements?: BookingRequirements;
     softReasonCodes?: string[];
     missingRequirements?: string[];
     overrideSoftEligibility?: OverrideSoftEligibilityCommand;
@@ -70,6 +73,13 @@ export class RuntimeEligibilityEvaluator {
       command.resolvedContext ??
       this.eligibilityContextResolver.resolve(command);
     const hardReasonCodes = this.collectHardReasonCodes(context);
+    if (command.bookingRequirements)
+      hardReasonCodes.push(
+        ...bookingRequirementFailures(
+          command.bookingRequirements,
+          context.vehicleCapability,
+        ),
+      );
     const locationState = this.classifyLocationState(context);
     const softReasonCodes = this.collectSoftReasonCodes(
       context,
@@ -178,7 +188,10 @@ export class RuntimeEligibilityEvaluator {
     const hardReasonCodes: string[] = [];
     if (!context.driverReadiness.ready) {
       hardReasonCodes.push(
-        ...this.normalizeReasons(context.driverReadiness.reasonCodes, "DRIVER_NOT_READY"),
+        ...this.normalizeReasons(
+          context.driverReadiness.reasonCodes,
+          "DRIVER_NOT_READY",
+        ),
       );
     }
     if (!context.vehicleReadiness.ready) {
@@ -304,7 +317,11 @@ export class RuntimeEligibilityEvaluator {
       missingRequirements.push("permit");
     }
 
-    return [...new Set(missingRequirements.map((item) => item.trim()).filter(Boolean))];
+    return [
+      ...new Set(
+        missingRequirements.map((item) => item.trim()).filter(Boolean),
+      ),
+    ];
   }
 
   private normalizeReasons(reasons: string[], fallback: string) {
