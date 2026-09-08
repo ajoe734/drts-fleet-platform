@@ -122,7 +122,7 @@ dispatch UI-HANDOFF-TN-PAGE-SETTINGS-001 Gemini Claude2 apps/tenant-console-web/
 
 echo "[PB] 6 missing pages"
 dispatch UI-HANDOFF-PB-PAGE-LANDING-001 Gemini2 Claude2 'apps/partner-booking-web/app/[tenantSlug]/(public)/page.tsx' PB_Landing partner-booking-web "$PB_DEPS" \
-  '對齊 PB_Landing (partner-screens.jsx)。CTBC CardHeader (gradient + 金色 EXCLUSIVE chip) + 卡片身份卡 + 可使用服務 list + 禮遇條款 banner。'
+  '對齊 PB_Landing (partner-screens.jsx)。ACME CardHeader (gradient + 金色 EXCLUSIVE chip) + 卡片身份卡 + 可使用服務 list + 禮遇條款 banner。'
 dispatch UI-HANDOFF-PB-PAGE-ELIGIBILITY-001 Gemini2 Claude2 'apps/partner-booking-web/app/[tenantSlug]/(public)/eligibility/page.tsx' PB_Eligibility partner-booking-web "$PB_DEPS" \
   '對齊 PB_Eligibility (partner-screens.jsx)。CardHeader 連結卡片 + 您的權益 PRow list + 授權同意 list + 確認連結 primary button。'
 dispatch UI-HANDOFF-PB-PAGE-BOOK-001 Copilot Claude2 'apps/partner-booking-web/app/[tenantSlug]/(authenticated)/book/page.tsx' PB_Book partner-booking-web "$PB_DEPS" \

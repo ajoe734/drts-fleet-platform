@@ -32,7 +32,7 @@ import {
 } from "@/lib/navigation";
 import { t } from "@/lib/translations";
 
-// Chrome uses the `bank` surface tokens — CTBC navy/gold — per the design
+// Chrome uses the `bank` surface tokens — ACME navy/gold — per the design
 // canvas (mgmt-tokens.jsx `bank` accent + BK_GOLD). The implementation
 // previously fell back to the `tenant` (teal) realm because no `bank` surface
 // existed; that is the colour mismatch this restores.
@@ -51,7 +51,7 @@ const BANK_SURFACE = "#0F1E3C";
 const BANK_BORDER = "#21376A";
 
 // CSS variables consumed by globals.css; set once on the shell wrapper so the
-// whole console (chrome + page bodies) renders CTBC navy with gold reserved for
+// whole console (chrome + page bodies) renders ACME navy with gold reserved for
 // benefit/quota emphasis — matching the canvas.
 const bankIssuerStyle = {
   "--issuer-accent": BANK_NAVY,

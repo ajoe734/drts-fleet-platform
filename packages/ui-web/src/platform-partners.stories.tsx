@@ -194,10 +194,10 @@ type StoryPartnerEntry = {
 
 const partnerEntries: StoryPartnerEntry[] = [
   {
-    entrySlug: "ctbc-elite",
-    displayName: "CTBC World Elite",
-    partnerCode: "CTBC",
-    tenantId: "tenant-ctbc-001",
+    entrySlug: "acme-elite",
+    displayName: "ACME Elite Demo",
+    partnerCode: "ACME",
+    tenantId: "tenant-acme-001",
     programId: "world_elite",
     programCode: "WE",
     businessDispatchSubtype: "credit_card_airport_transfer",
@@ -206,13 +206,13 @@ const partnerEntries: StoryPartnerEntry[] = [
     status: "active",
     statusTone: "success",
     themeAccent: "#0f6d8a",
-    entryHost: "entry.ctbc.drts.io",
+    entryHost: "entry.acme.drts.io",
     entryPath: "/elite",
     updatedAt: "2026-05-10 20:35",
-    supportEmail: "elite-card@ctbcbank.com",
+    supportEmail: "elite-card@acme.example",
     supportPhone: "+886 2 2718 8800",
     auditSource: "platform_admin.seed",
-    contractId: "elig_ctbc_world_elite_v3",
+    contractId: "elig_acme_world_elite_v3",
     adapterCode: "bank-card-inline",
     adapterVersion: "2026.05.01",
     adapterKind: "inline_verifier",
@@ -234,10 +234,10 @@ const partnerEntries: StoryPartnerEntry[] = [
     status: "inactive",
     statusTone: "warning",
     themeAccent: "#7c3aed",
-    entryHost: "arrival.ghprestige.com",
+    entryHost: "arrival.wingtip.example",
     entryPath: "/vip-arrival",
     updatedAt: "2026-05-10 18:12",
-    supportEmail: "hospitality-ops@ghprestige.com",
+    supportEmail: "hospitality-ops@wingtip.example",
     supportPhone: "+886 2 2321 6610",
     auditSource: "partner_import.seed",
     contractId: "elig_grand_hotel_v1",
@@ -334,24 +334,24 @@ const readinessItems = [
 
 const credentialRows = [
   {
-    keyId: "cred_ctbc_01",
-    maskedValue: "ctbc_live_...aE32",
+    keyId: "cred_acme_01",
+    maskedValue: "acme_live_...aE32",
     createdAt: "2026-04-12 10:03",
     lastUsedAt: "2026-05-10 18:24",
     source: "issue_partner_ingress_credential",
     revokedAt: null,
   },
   {
-    keyId: "cred_ctbc_02",
-    maskedValue: "ctbc_live_...K1yQ",
+    keyId: "cred_acme_02",
+    maskedValue: "acme_live_...K1yQ",
     createdAt: "2026-03-01 09:22",
     lastUsedAt: "2026-05-10 16:10",
     source: "rotate_partner_ingress_credential",
     revokedAt: null,
   },
   {
-    keyId: "cred_ctbc_legacy",
-    maskedValue: "ctbc_live_...8B2k",
+    keyId: "cred_acme_legacy",
+    maskedValue: "acme_live_...8B2k",
     createdAt: "2026-02-10 12:40",
     lastUsedAt: "2026-04-28 07:51",
     source: "legacy_seed",
@@ -1140,7 +1140,7 @@ function PartnerDetailBuiltView() {
                 <CalloutBanner
                   tone="info"
                   title="Plaintext credential"
-                  description="ctbc_live_01a2b3c4d5e6"
+                  description="acme_live_01a2b3c4d5e6"
                 />
                 <div style={{ display: "grid", gap: "10px" }}>
                   {credentialRows.map((credential) => (

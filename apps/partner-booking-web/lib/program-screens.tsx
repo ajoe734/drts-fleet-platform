@@ -307,7 +307,7 @@ function getLocalizedProgramTheme(
       ctaLabel: "Book airport transfer",
     },
     insurance: {
-      issuerName: "Fubon Insurance",
+      issuerName: "Tailspin Insurance",
       programLabel: "Insurance replacement mobility",
       programName: "Claim replacement ride",
       landingSubtitle: "Replacement mobility during claim handling",
@@ -315,7 +315,7 @@ function getLocalizedProgramTheme(
       ctaLabel: "Request replacement ride",
     },
     travel: {
-      issuerName: "Lion Travel",
+      issuerName: "AdventureWorks Travel",
       programLabel: "Travel agency group transfer",
       programName: "Group transfer",
       landingSubtitle: "Airport and hotel transfer for tour groups",
@@ -357,7 +357,7 @@ function programDemo(theme: PartnerProgramTheme, locale: Locale = "zh") {
         locale,
       ),
       departureTime: "2026-06-28 14:20",
-      bookingRef: "LION-TPE-0628",
+      bookingRef: "ADVENTURE-TPE-0628",
       driverName: translate("program.demo.travel.driver", undefined, locale),
       vehicle: translate("program.demo.travel.vehicle", undefined, locale),
     };
@@ -1225,8 +1225,8 @@ function renderScreen(
             <Row
               label={s("行程連結", "Itinerary link")}
               value={s(
-                "LION 日本關西 5 日 → 查看",
-                "LION Japan Kansai 5 days -> View",
+                "ADVENTURE 日本關西 5 日 → 查看",
+                "ADVENTURE Japan Kansai 5 days -> View",
               )}
             />
             <Row
@@ -1558,8 +1558,8 @@ function renderScreen(
           title: s("保單有效", "Policy valid"),
           code: "insurance_policy",
           detail: s(
-            "POL-558-22019 · 富邦產險",
-            "POL-558-22019 · Fubon Insurance",
+            "POL-558-22019 · 泰思賓產險",
+            "POL-558-22019 · Tailspin Insurance",
           ),
           note: s(
             "保單於保障期間內 · 含代步附約",
@@ -2338,10 +2338,10 @@ function renderScreen(
           [s("保障期間", "Coverage period"), "2026-01-01 ~ 2026-12-31"],
           [
             s("下一步", "Next step"),
-            s("請聯絡富邦產險承辦人", "Contact the Fubon Insurance handler"),
+            s("請聯絡泰思賓產險承辦人", "Contact the Tailspin Insurance handler"),
           ],
         ],
-        primaryLabel: s("聯絡富邦產險", "Contact Fubon Insurance"),
+        primaryLabel: s("聯絡泰思賓產險", "Contact Tailspin Insurance"),
         primaryHref: landingHref,
         secondaryLabel: s("返回入口", "Back to entry"),
         secondaryHref: landingHref,
@@ -2373,7 +2373,7 @@ function renderScreen(
           ],
           [
             s("代步期間", "Replacement period"),
-            s("待富邦產險確認", "Awaiting Fubon confirmation"),
+            s("待泰思賓產險確認", "Awaiting Tailspin confirmation"),
           ],
           [
             s("建議", "Recommendation"),
@@ -2434,8 +2434,8 @@ function renderScreen(
         tone: "warn" as const,
         glyph: "clock" as const,
         reason: s(
-          "理賠案件 CLM-2026-88142 仍在富邦產險審核流程中，代步權益需理賠核定後才能啟用。",
-          "Claim CLM-2026-88142 is still under Fubon Insurance review. Replacement mobility unlocks after the claim is approved.",
+          "理賠案件 CLM-2026-88142 仍在泰思賓產險審核流程中，代步權益需理賠核定後才能啟用。",
+          "Claim CLM-2026-88142 is still under Tailspin Insurance review. Replacement mobility unlocks after the claim is approved.",
         ),
         rows: [
           [s("理賠號", "Claim No."), "CLM-2026-88142"],
@@ -2467,8 +2467,8 @@ function renderScreen(
         tone: "danger" as const,
         glyph: "search" as const,
         reason: s(
-          "依您提供的保單號 / 理賠參照查無對應案件。請確認號碼是否正確，或聯絡富邦產險確認案件已建立。",
-          "No matching case was found for the policy / claim reference provided. Confirm the numbers or contact Fubon Insurance to verify the case has been created.",
+          "依您提供的保單號 / 理賠參照查無對應案件。請確認號碼是否正確，或聯絡泰思賓產險確認案件已建立。",
+          "No matching case was found for the policy / claim reference provided. Confirm the numbers or contact Tailspin Insurance to verify the case has been created.",
         ),
         rows: [
           [s("輸入保單號", "Entered policy No."), "POL-558-2201X"],
@@ -2484,7 +2484,7 @@ function renderScreen(
         ],
         primaryLabel: s("重新輸入", "Re-enter details"),
         primaryHref: eligibilityHref,
-        secondaryLabel: s("聯絡富邦產險", "Contact Fubon Insurance"),
+        secondaryLabel: s("聯絡泰思賓產險", "Contact Tailspin Insurance"),
         secondaryHref: landingHref,
       },
       insurance_expired: {
@@ -2518,8 +2518,8 @@ function renderScreen(
         tone: "danger" as const,
         glyph: "ban" as const,
         reason: s(
-          "理賠案件 CLM-2026-66200 已結案或取消，代步權益隨之關閉。若為誤判，請聯絡富邦產險重啟案件。",
-          "Claim CLM-2026-66200 has been closed or cancelled, so the replacement benefit is closed. If this is incorrect, contact Fubon Insurance to reopen the case.",
+          "理賠案件 CLM-2026-66200 已結案或取消，代步權益隨之關閉。若為誤判，請聯絡泰思賓產險重啟案件。",
+          "Claim CLM-2026-66200 has been closed or cancelled, so the replacement benefit is closed. If this is incorrect, contact Tailspin Insurance to reopen the case.",
         ),
         rows: [
           [s("理賠號", "Claim No."), "CLM-2026-66200"],
@@ -2530,7 +2530,7 @@ function renderScreen(
           [s("關閉日", "Closed date"), "2026-06-02"],
           [s("代步權益", "Replacement benefit"), s("已停用", "Disabled")],
         ],
-        primaryLabel: s("聯絡富邦產險", "Contact Fubon Insurance"),
+        primaryLabel: s("聯絡泰思賓產險", "Contact Tailspin Insurance"),
         primaryHref: landingHref,
         secondaryLabel: s("返回入口", "Back to entry"),
         secondaryHref: landingHref,

@@ -413,7 +413,7 @@ describe("SR-SCOPE-001: 排除範圍與全能力追溯驗收表測試", () => {
       expect(
         validatePartnerBooking({
           serviceProduct: "travel_agency_transfer",
-          details: { tourCode: "LION-TPE-2026", rosterCount: 15 },
+          details: { tourCode: "ADVENTURE-TPE-2026", rosterCount: 15 },
         }),
       ).toEqual({ valid: true });
     });

@@ -166,7 +166,7 @@ export const CANVAS_SURFACE_ACCENTS: Record<CanvasSurface, CanvasAccentScale> =
       name: "Enterprise Dispatch",
       tagline: "企業員工自助派車入口",
     },
-    // Bank Console — 發卡行方案監管台 (issuer tenant; 中信 navy/gold brand)
+    // Bank Console — 發卡行方案監管台 (issuer tenant; 艾克米 navy/gold brand)
     // mirrors the design-canvas `bank` mgmt accent (mgmt-tokens.jsx).
     bank: {
       light: "#13478F",

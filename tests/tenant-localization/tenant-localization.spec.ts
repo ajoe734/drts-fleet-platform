@@ -493,15 +493,15 @@ test.describe("partner booking localization smoke", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.locator("body")).toContainText("Pick a tenant slug");
     await expect(page.locator("body")).toContainText("繁體中文");
-    await expect(page.locator("body")).toContainText("Cathay United Bank");
-    await expect(page.locator("body")).toContainText("Taishin Bank");
-    await expect(page.locator("body")).toContainText("DBS Bank");
+    await expect(page.locator("body")).toContainText("Contoso Bank");
+    await expect(page.locator("body")).toContainText("Fabrikam Bank");
+    await expect(page.locator("body")).toContainText("Northwind Bank");
     await expect(page.locator("body")).toContainText("Grand Hotel");
-    await expect(page.locator("body")).not.toContainText("中信銀行");
-    await expect(page.locator("body")).not.toContainText("國泰世華銀行");
-    await expect(page.locator("body")).not.toContainText("台新銀行");
-    await expect(page.locator("body")).not.toContainText("星展銀行");
-    await expect(page.locator("body")).not.toContainText("凱撒飯店");
+    await expect(page.locator("body")).not.toContainText("艾克米銀行");
+    await expect(page.locator("body")).not.toContainText("康拓索銀行銀行");
+    await expect(page.locator("body")).not.toContainText("法碧康銀行");
+    await expect(page.locator("body")).not.toContainText("北風銀行");
+    await expect(page.locator("body")).not.toContainText("翼尖飯店");
     await expect(page.locator("body")).not.toContainText("信用卡機場接送");
   });
 
@@ -531,15 +531,15 @@ test.describe("partner booking localization smoke", () => {
       "en",
       String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3307"),
     );
-    await gotoAndSettle(page, "/fubon/program/site/insurance_policy");
+    await gotoAndSettle(page, "/tailspin/program/site/insurance_policy");
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.locator("body")).toContainText(
       "Policy eligibility failed",
     );
     await expect(page.locator("body")).toContainText("Policy No.");
-    await expect(page.locator("body")).toContainText("Contact Fubon Insurance");
+    await expect(page.locator("body")).toContainText("Contact Tailspin Insurance");
     await expect(page.locator("body")).not.toContainText("保單資格不符");
-    await expect(page.locator("body")).not.toContainText("聯絡富邦產險");
+    await expect(page.locator("body")).not.toContainText("聯絡泰思賓產險");
     await expect(page.locator("body")).not.toContainText("原因");
   });
 
@@ -551,7 +551,7 @@ test.describe("partner booking localization smoke", () => {
       "en",
       String(testInfo.project.use.baseURL ?? "http://127.0.0.1:3307"),
     );
-    await gotoAndSettle(page, "/lion/program/site/review");
+    await gotoAndSettle(page, "/adventureworks/program/site/review");
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.locator("body")).toContainText(
       "Group transfer · segment 1",

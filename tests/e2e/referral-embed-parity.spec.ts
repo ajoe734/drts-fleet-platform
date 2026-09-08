@@ -15,7 +15,7 @@ const usesLocalFixture = !externalBaseURL;
 const entrySlug =
   process.env.DRTS_REFERRAL_EMBED_ENTRY_SLUG?.trim() ??
   (usesLocalFixture ? "yuhe-residence" : undefined);
-const entryHost = usesLocalFixture ? "127.0.0.1:3199" : "app.yuhe-living.com.tw";
+const entryHost = usesLocalFixture ? "127.0.0.1:3199" : "app.fabrikam-living.example";
 
 type RouteSpec = {
   screenshot: string;
