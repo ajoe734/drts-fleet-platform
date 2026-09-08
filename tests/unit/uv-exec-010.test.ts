@@ -169,6 +169,120 @@ describe("CallRecorderSession (recorder ingest + sealed segments)", () => {
     );
     expect(stillReadable.readable).toBe(true);
   });
+
+  it("preserves newly arrived frames when ingest occurs while putSealedObject is awaiting (delayed-PUT regression test)", async () => {
+    let resolvePut: ((value: unknown) => void) | null = null;
+    let isDelayed = true;
+    const delayedStore = {
+      async putSealedObject(objectKey: string, payload: Uint8Array) {
+        if (isDelayed) {
+          return new Promise((resolve) => {
+            resolvePut = () => {
+              resolve({
+                objectKey,
+                objectVersion: 1,
+                checksum: "deferred-checksum",
+                byteSize: payload.byteLength,
+              });
+            };
+          });
+        }
+        return {
+          objectKey,
+          objectVersion: 1,
+          checksum: "deferred-checksum-2",
+          byteSize: payload.byteLength,
+        };
+      },
+    };
+
+    const session = new CallRecorderSession({
+      callId: CALL_ID,
+      recordingId: RECORDING_ID,
+      objectStore: delayedStore as any,
+    });
+
+    session.ingestFrame(frame({ bytes: new Uint8Array([1]), mediaOffsetMs: 0 }));
+    const seal1Promise = session.sealSegment();
+
+    // Yield to let the serialized sealQueue microtask start and invoke putSealedObject
+    await Promise.resolve();
+
+    // While PUT is pending, a new frame arrives
+    session.ingestFrame(frame({ bytes: new Uint8Array([2]), mediaOffsetMs: 100 }));
+
+    // Resolve deferred PUT for seal 1 and switch store to normal for seal 2
+    isDelayed = false;
+    resolvePut!({});
+    const seal1 = await seal1Promise;
+    expect(seal1).not.toBeNull();
+    expect(seal1!.byteSize).toBe(1);
+
+    // Second seal must NOT have lost the frame that arrived during the await
+    const seal2 = await session.sealSegment();
+    expect(seal2).not.toBeNull();
+    expect(seal2!.byteSize).toBe(1);
+    expect(seal2!.segmentSequence).toBe(2);
+    expect(seal2!.startOffsetMs).toBe(100);
+  });
+
+  it("restores the detached batch to the buffer if putSealedObject throws, preserving all frames (failure regression test)", async () => {
+    let shouldFail = true;
+    const flakyStore = {
+      async putSealedObject(objectKey: string, payload: Uint8Array) {
+        if (shouldFail) {
+          throw new Error("S3/GCS transient connection error");
+        }
+        return {
+          objectKey,
+          objectVersion: 1,
+          checksum: "checksum-flaky",
+          byteSize: payload.byteLength,
+        };
+      },
+    };
+
+    const session = new CallRecorderSession({
+      callId: CALL_ID,
+      recordingId: RECORDING_ID,
+      objectStore: flakyStore as any,
+    });
+
+    session.ingestFrame(frame({ bytes: new Uint8Array([1]), mediaOffsetMs: 0 }));
+    await expect(session.sealSegment()).rejects.toThrow("S3/GCS transient connection error");
+
+    // Frame 2 arrives after failure
+    session.ingestFrame(frame({ bytes: new Uint8Array([2]), mediaOffsetMs: 100 }));
+
+    // Retry seal with repaired store
+    shouldFail = false;
+    const retrySeal = await session.sealSegment();
+    expect(retrySeal).not.toBeNull();
+    // Both frame 1 and frame 2 are preserved and sealed together
+    expect(retrySeal!.byteSize).toBe(2);
+    expect(retrySeal!.segmentSequence).toBe(1);
+  });
+
+  it("serializes concurrent sealSegment calls without racing sequence numbers or losing frames (concurrency regression test)", async () => {
+    const store = new InMemoryRecordingObjectStore();
+    const session = new CallRecorderSession({
+      callId: CALL_ID,
+      recordingId: RECORDING_ID,
+      objectStore: store,
+    });
+
+    session.ingestFrame(frame({ bytes: new Uint8Array([1, 2]), mediaOffsetMs: 0 }));
+
+    const [res1, res2] = await Promise.all([
+      session.sealSegment(),
+      session.sealSegment(),
+    ]);
+
+    expect(res1).not.toBeNull();
+    expect(res2).toBeNull();
+    expect(session.getSealedSegments()).toHaveLength(1);
+    expect(session.getSealedSegments()[0]!.segmentSequence).toBe(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -922,6 +1036,395 @@ describe("VoiceEvidenceService", () => {
         ...baseProofFields(checkpoint.checkpointId),
         confirmationMethod: "dtmf" as const,
         evidence: { eventId: "nonexistent-dtmf-event", digit: "1" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a proof when proof.voiceSessionId belongs to a different call (cross-call negative test)", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      const callBSessionId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+      fixture.seedSession(
+        makeSession({
+          callId: "call-B",
+          voiceSessionId: callBSessionId,
+        }),
+      );
+      fixture.seedEvents(callBSessionId, [
+        sessionEvent({
+          voiceSessionId: callBSessionId,
+          eventId: "readback-event-b",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+        }),
+        sessionEvent({
+          voiceSessionId: callBSessionId,
+          eventId: "asr-event-b",
+          eventType: "asr.segment.final",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:00.600Z",
+        }),
+      ]);
+
+      const crossCallProof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        voiceSessionId: callBSessionId,
+        readbackCompletedEventId: "readback-event-b",
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-event-b" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof: crossCallProof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a proof when session events have payload callId belonging to a different call", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+          payload: { callId: "different-call-id" },
+        }),
+        sessionEvent({
+          eventId: "asr-final-event",
+          eventType: "asr.segment.final",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:00.600Z",
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a proof when readback event payload playbackId does not match proof readbackPlaybackId", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+          payload: { playbackId: "playback-actual" },
+        }),
+        sessionEvent({
+          eventId: "asr-final-event",
+          eventType: "asr.segment.final",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:00.600Z",
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        readbackPlaybackId: "playback-different",
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a proof when manifest readbackPlaybackId does not match proof readbackPlaybackId", async () => {
+      const { checkpoint } = await service.ingestSealedSegment(
+        segment({ readbackPlaybackId: "manifest-playback-123" }),
+      );
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+        }),
+        sessionEvent({
+          eventId: "asr-final-event",
+          eventType: "asr.segment.final",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:00.600Z",
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        readbackPlaybackId: "different-playback-id",
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a proof when manifest snapshotHash does not match proof snapshotHash", async () => {
+      const { checkpoint } = await service.ingestSealedSegment(
+        segment({ snapshotHash: "manifest-snapshot-hash" }),
+      );
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+        }),
+        sessionEvent({
+          eventId: "asr-final-event",
+          eventType: "asr.segment.final",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:00.600Z",
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        snapshotHash: "different-snapshot-hash",
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a DTMF proof when digit event promptPlaybackId does not match proof readbackPlaybackId", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+        }),
+        sessionEvent({
+          eventId: "dtmf-event",
+          eventType: "dtmf.received",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:00.600Z",
+          payload: { digit: "1", promptPlaybackId: "mismatched-prompt-playback" },
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "dtmf" as const,
+        evidence: { eventId: "dtmf-event", digit: "1" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a DTMF proof when digit event leg does not match readback playback leg", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          legId: "leg-customer-1",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+        }),
+        sessionEvent({
+          eventId: "dtmf-event",
+          eventType: "dtmf.received",
+          legId: "leg-agent-2",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:00.600Z",
+          payload: { digit: "1" },
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "dtmf" as const,
+        evidence: { eventId: "dtmf-event", digit: "1" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a speech proof when finalEvent payload turnId does not match proof evidence turnId", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+        }),
+        sessionEvent({
+          eventId: "asr-final-event",
+          eventType: "asr.segment.final",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:00.600Z",
+          payload: { turnId: "turn-original" },
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "turn-different-from-payload", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects speech affirmation when customer audio channel was not recorded during that window (missing-channel-window negative test)", async () => {
+      await service.ingestSealedSegment(
+        segment({
+          segmentSequence: 1,
+          channels: ["agent"],
+          startOffsetMs: 0,
+          endOffsetMs: 1000,
+          startedAtUtc: "2026-09-08T00:00:00.000Z",
+          endedAtUtc: "2026-09-08T00:00:01.000Z",
+        }),
+      );
+      const { checkpoint } = await service.ingestSealedSegment(
+        segment({
+          segmentSequence: 2,
+          channels: ["customer"],
+          startOffsetMs: 1000,
+          endOffsetMs: 2000,
+          startedAtUtc: "2026-09-08T00:00:01.000Z",
+          endedAtUtc: "2026-09-08T00:00:02.000Z",
+          objectKey: `${CALL_ID}/${RECORDING_ID}/segments/000002`,
+          checksum: "checksum-2",
+        }),
+      );
+
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+        }),
+        sessionEvent({
+          eventId: "asr-final-event",
+          eventType: "asr.segment.final",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:00.600Z",
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects readback verification when agent audio channel was not recorded during that window (missing-channel-window negative test)", async () => {
+      await service.ingestSealedSegment(
+        segment({
+          segmentSequence: 1,
+          channels: ["customer"],
+          startOffsetMs: 0,
+          endOffsetMs: 1000,
+          startedAtUtc: "2026-09-08T00:00:00.000Z",
+          endedAtUtc: "2026-09-08T00:00:01.000Z",
+        }),
+      );
+      const { checkpoint } = await service.ingestSealedSegment(
+        segment({
+          segmentSequence: 2,
+          channels: ["agent"],
+          startOffsetMs: 1000,
+          endOffsetMs: 2000,
+          startedAtUtc: "2026-09-08T00:00:01.000Z",
+          endedAtUtc: "2026-09-08T00:00:02.000Z",
+          objectKey: `${CALL_ID}/${RECORDING_ID}/segments/000002`,
+          checksum: "checksum-2",
+        }),
+      );
+
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+        }),
+        sessionEvent({
+          eventId: "asr-final-event",
+          eventType: "asr.segment.final",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:01.500Z",
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
       };
 
       await expect(

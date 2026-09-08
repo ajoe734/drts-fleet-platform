@@ -91,6 +91,8 @@ export class CallRecorderSession {
   private nextSequence = 1;
   /** The end offset of the most recently sealed segment; `null` before the first seal. */
   private lastEndOffsetMs: number | null = null;
+  /** Promise chain serializing concurrent sealSegment calls to prevent buffer races. */
+  private sealQueue: Promise<unknown> = Promise.resolve();
 
   constructor(options: RecorderSessionOptions) {
     this.callId = options.callId;
@@ -132,12 +134,31 @@ export class CallRecorderSession {
       timingPrecision: RecordingTimingPrecision;
     } = { timingSource: "unknown", timingPrecision: "unknown" },
   ): Promise<SealedRecordingSegment | null> {
+    const run = async () => this.doSealSegment(timing);
+    const queued = this.sealQueue.then(run, run);
+    this.sealQueue = queued.then(
+      () => {},
+      () => {},
+    );
+    return queued;
+  }
+
+  private async doSealSegment(timing: {
+    timingSource: RecordingTimingSource;
+    timingPrecision: RecordingTimingPrecision;
+  }): Promise<SealedRecordingSegment | null> {
     if (this.buffer.length === 0) {
       return null;
     }
 
+    // Detach the sealing batch before awaiting the object store PUT.
+    // Any frames arriving via ingestFrame during the await append to the
+    // newly reset buffer and are preserved for subsequent seals.
+    const batch = this.buffer;
+    this.buffer = [];
+
     const framesByChannel = new Map<RecordingChannelRole, BufferedFrame[]>();
-    for (const frame of this.buffer) {
+    for (const frame of batch) {
       const list = framesByChannel.get(frame.channel) ?? [];
       list.push(frame);
       framesByChannel.set(frame.channel, list);
@@ -161,30 +182,38 @@ export class CallRecorderSession {
     }
 
     const startOffsetMs = Math.min(
-      ...this.buffer.map((frame) => frame.mediaOffsetMs),
+      ...batch.map((frame) => frame.mediaOffsetMs),
     );
     const endOffsetMs = Math.max(
-      ...this.buffer.map((frame) => frame.mediaOffsetMs),
+      ...batch.map((frame) => frame.mediaOffsetMs),
     );
-    const startedAtUtc = this.buffer.reduce(
+    const startedAtUtc = batch.reduce(
       (earliest, frame) =>
         frame.occurredAtUtc < earliest ? frame.occurredAtUtc : earliest,
-      this.buffer[0]!.occurredAtUtc,
+      batch[0]!.occurredAtUtc,
     );
-    const endedAtUtc = this.buffer.reduce(
+    const endedAtUtc = batch.reduce(
       (latest, frame) =>
         frame.occurredAtUtc > latest ? frame.occurredAtUtc : latest,
-      this.buffer[0]!.occurredAtUtc,
+      batch[0]!.occurredAtUtc,
     );
 
     const sequence = this.nextSequence;
     const objectKey = `${this.callId}/${this.recordingId}/segments/${String(
       sequence,
     ).padStart(6, "0")}`;
-    const putResult = await this.objectStore.putSealedObject(
-      objectKey,
-      payload,
-    );
+
+    let putResult: Awaited<ReturnType<RecordingObjectStore["putSealedObject"]>>;
+    try {
+      putResult = await this.objectStore.putSealedObject(
+        objectKey,
+        payload,
+      );
+    } catch (error) {
+      // Restore the failed batch to the head of the buffer so no audio is lost.
+      this.buffer = [...batch, ...this.buffer];
+      throw error;
+    }
 
     const segment: SealedRecordingSegment = {
       callId: this.callId,
@@ -207,7 +236,6 @@ export class CallRecorderSession {
     this.sealedSegments.push(segment);
     this.nextSequence += 1;
     this.lastEndOffsetMs = endOffsetMs;
-    this.buffer = [];
 
     return segment;
   }
