@@ -1,5 +1,26 @@
 # SR-OPS-SHELL-001 — 本次恢復與阻塞證據
 
+## 2026-09-08 dispatch 重驗（PR #1775 後）
+
+- Fresh base `origin/dev`：`3f182f7e314b5ddb4c37f1c3f5dc214a6d0edf0e`；原 task tip：`e2ec3c1922824123f310aeb1023e805662a0c1e0`。
+- 本次受測程式 SHA：`b87e1b2fa9aa06771b066bdb5b3c6a69859d9373`。尚無 handoff candidate；本節後續 commit 僅更新證據。
+- `git fetch origin` exit 0。`git rebase origin/dev` 初次 exit 1：重播舊 implementation commit 的證據文件 add/add conflict；僅保留已重播的較新證據，`GIT_EDITOR=true git rebase --continue` exit 0。產品檔案無衝突。
+- `git merge --no-edit origin/codex2/sr-ops-shell-001` exit 0，保留已發布 tip；`git merge-base --is-ancestor e2ec3c1922824123f310aeb1023e805662a0c1e0 HEAD` exit 0。可普通 non-force push。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/` exit 0：1 file、13 tests passed，517ms。
+- `git diff --check` exit 0。
+
+### 仍需 supervisor 處理的產品前置
+
+已讀 execution_ref、本 task spec、R18/R19、C048 及 merged history-repair 記錄。PR #1775 解決的是歷史追溯，該記錄明文保留產品 scope／receiver-contract blocker；不是 audit 功能修復或擴 scope 授權。
+
+於上述 base 與受測 SHA 重新唯讀確認：dispatch `buildPlatformAdminHref` 第1226行的 fallback 仍是 `/platform-admin`；第4520行新分頁 CTA 仍只傳 `/audit`，沒有 resource context。platform-admin audit 第164行仍呼叫 `client.listAuditLogs()`，頁面沒有讀取 searchParams。這是目前原始碼證據，不是假稱實際瀏覽器已重現 404。
+
+本次 `ai-status.sh show SR-OPS-SHELL-001` 的 write_scopes 仍只有 assistant、ops-shell、task tests 與本文件，depends_on 為空。請 supervisor 依 `support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION.md` 核准 sender／必要 receiver 或 resolver scope、登錄重疊 writer 相依，並確認 audit resource ID 與 URL→query 契約。先前記錄的 complaints／incidents sender 問題亦需納入 scope 決策。未自行改動範圍外程式。
+
+未執行 live／真機／瀏覽器 CTA hit testing、popup、焦點與 reload；沒有 live 資源 ID。下文 AUD-* 僅為單元測試資料。保留既有 UI 修補，本次未新增 UI 設計；未宣稱 R18/R19 完整驗收、CI、review、merge 或 deploy 成功。
+
+## 前次恢復紀錄（歷史）
+
 - Owner：Codex2；Reviewer：Codex。
 - 本次 base：`c4c4a35f88907df6bf68e781059dde397c06ba03`（2026-09-08 `git fetch origin` 後的 origin/dev）。
 - 已檢查程式 SHA：`6a13a1006e2d0f737b8258ec1c62403208ff0b57`。後續 evidence commit 僅更新本文件；尚未鎖定 candidate，未 handoff。
