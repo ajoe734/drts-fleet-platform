@@ -1,5 +1,14 @@
 # Remediation Evidence: SR-FLEET-DATA-001
 
+## 2026-09-08 21:17 dispatch 後重新核對
+
+- 指定 worktree／branch 保持 `codex2/sr-fleet-data-001`；起始 HEAD 與 remote HEAD 同為 `6f8665edf4056bbf5fe8c2cf35e49de00db8bdac`。`git fetch origin` exit 0；fresh base `origin/dev=e97653b7ffb962a6c4d688e8706711d860fa3604`。
+- Current-release `AI_NAME=Codex2 .../ai-status.sh start SR-FLEET-DATA-001` exit 0。Task slice 仍只有原七項 write_scopes、depends_on 空；未授權 translations.ts。已讀 fresh dev 的 history/planning helper：history 修復對象仍為 Codex 分支／PR #1716，且明言 helper 不授權 scope，planning 仍要求 supervisor 落盤共享 scope、無環 ordering 和 detail visibility。
+- `git rebase origin/dev` exit 1：重播 `d5e6e6196` 時 drivers、vehicles、trips page/export、loader、tests、evidence 七檔衝突。`git rebase --abort` exit 0；HEAD 恢復上述起始 SHA，working tree clean。未 reset、stash 或 force push。
+- `pnpm run i18n:guard` exit 1：此次在載入工具時即 `ERR_MODULE_NOT_FOUND: typescript`（Node v22.23.2），沒有跑到文案檢查；不能當作歷史兩項違規的本輪執行結果。唯讀檢查 drivers/page.tsx:154、167 仍保留 locale ternary 文案。
+- 本輪沒有 implementation candidate；本文件提交僅為診斷 anchor。未重跑 unit/typecheck，未做 browser、live API、真機、部署或同 candidate CI/merge；無新增 live resource ID，歷史 mock IDs 不代表 live 驗收。
+- 仍需 supervisor 決定指定 Codex2 分支與 helper 保留 Codex 分支的接續方式，落盤所需 translations/shared scope、無環 writer ordering、detail route/resource visibility。不得只以 history helper done 視為以上裁定已完成。本輪不越界修改產品程式。
+
 ## 2026-09-08 18:44 UTC dispatch 回歸與仍未滿足的 resume gate
 
 - 實測 branch `codex2/sr-fleet-data-001` / HEAD `09ea66eceb69e8e7c783bd22472b521f5d47be04`；`git fetch origin` exit 0，當前 base `origin/dev=d4f54ef94e059a981bf2be1f7b944e815870e117`。本節後續文件 anchor 不是 implementation candidate，未 handoff。
