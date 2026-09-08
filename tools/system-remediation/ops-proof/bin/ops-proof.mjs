@@ -20,12 +20,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
-import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // ============================================================================
 // 1. Database Safety Guard (工具不碰正式DB)
@@ -846,7 +841,7 @@ async function main() {
       if (loadCheck.note) {
         console.log(`    - 說明: ${loadCheck.note}`);
       } else if (loadCheck.families) {
-        for (const [key, fam] of Object.entries(loadCheck.families)) {
+        for (const fam of Object.values(loadCheck.families)) {
           console.log(`    - ${fam.name}:`);
           console.log(`      實測樣本數: ${fam.totalRequests}, 錯誤數: ${fam.rawErrors.length}, 錯誤率: ${fam.errorRatePct}%`);
           console.log(`      實測延遲: min=${fam.statistics.minMs}ms, p50=${fam.statistics.p50Ms}ms, p95=${fam.statistics.p95Ms}ms (SLO ≤${fam.sloTargetP95Ms}ms), max=${fam.statistics.maxMs}ms`);
