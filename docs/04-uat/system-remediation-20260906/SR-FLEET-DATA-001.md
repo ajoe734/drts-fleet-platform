@@ -1,5 +1,16 @@
 # Remediation Evidence: SR-FLEET-DATA-001
 
+## 2026-09-08 resume gate 再核對（本輪最新證據）
+
+- 指定 branch `codex2/sr-fleet-data-001`，受測 HEAD / remote HEAD 均為 `e4b54283b2985e7015a138ec65f61a20abffc3ab`；fresh `origin/dev` base 為 `318f5065433ff07fba2ddf242cf1c5aef5fb1cae`。本輪沒有完成 candidate，不沿用 machine slice 的 Gemini candidate 作驗收。
+- `git fetch origin`：exit 0。`git rebase origin/dev`：exit 1，重播 `d5e6e6196` 在 drivers、vehicles、trips page/export、loader、tests、evidence 共七檔衝突。`git rebase --abort`：exit 0；完整保留指定 branch 原提交，未重置或 force push。
+- `pnpm run i18n:guard`：exit 1；519 files / 55 exempted，drivers/page.tsx:154、167 仍有兩項 `locale-ternary-copy`，要求移入 translations.ts。`git diff --check`：exit 0。
+- Current-release `ai-status.sh show SR-FLEET-DATA-001` 仍只有原七個 write_scopes，沒有 translations.ts，depends_on 為空。Owner 已用 `start` 落盤。本輪沒有越界修改 UI 或中央翻譯。
+- Helper `SR-FLEET-DATA-001-UNBLOCK-HISTORY-REPAIR` 確為 done，merge `8de85170b07ab7eb3d773e0845abebf12babc7e0`、PR #1783；但其已合併 artifact 明言「do not treat this helper as scope authorization」，且修復對象是 `codex/sr-fleet-data-001` / PR #1716，並要求保留該分支。此次 dispatch 卻指定既有 Codex2 分支；目前 `origin/codex/sr-fleet-data-001` 為 `70a53b5e0ad12b0608d60371d4730f0fc4f10a87`，不是本輪受測 HEAD。
+- 已讀該 history helper 及其 planning-decision artifact：後者要求 supervisor 授權 training/page、cases/page、portal-tables、translations 四個 scope、無環 writer ordering，並明確決定 detail surface。Helper 合併不代表這些決策已落盤。
+- **Supervisor resume gate**：先核定應保留／接續的 parent branch（解決 #1716 與本次指定 branch 的落差），落盤中央翻譯與仍需要的共享 scope／相依，確認 detail 驗收路由，再 dispatch。請勿只因 history helper done 再次自動解除此 scope blocker。
+- 本輪僅重現 gate 與保存證據；未重跑 unit/typecheck，未做 live API、browser、真機、部署或 candidate CI/merge。下方測試數字均屬歷史證據。
+
 ## 2026-09-08 Codex2 接手診斷（優先於下方歷史完成敘述）
 
 - Owner / reviewer：Codex2 / Codex；branch：`codex2/sr-fleet-data-001`。
