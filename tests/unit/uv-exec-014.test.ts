@@ -719,11 +719,48 @@ describe("UV-EXEC-014 local confirmation orchestration", () => {
   });
 });
 
-it("UV-EXEC-014 blocks an unapplied tail from a newer media epoch", async () => {
-  const h = await harness();
-  const applied = h.session.lastAppliedControlSequence;
-  const newer = h.event("speech_start");
-  newer.mediaEpoch = 2;
-  h.session.lastAppliedControlSequence = applied;
-  await expect(h.accept()).rejects.toThrow();
-});
+describe.each(["speech", "dtmf"] as const)(
+  "%s media epoch cutoff",
+  (method) => {
+    it.each([1, 99])(
+      "blocks newer epoch sequence %i at both readback and acceptance",
+      async (sequence) => {
+        const h = await harness(method);
+        const applied = h.session.lastAppliedControlSequence;
+        const newer = h.event("speech_start");
+        newer.mediaEpoch = 2;
+        newer.sequence = sequence;
+        // Ingestion durably buffers cross-epoch input without applying it.
+        h.session.lastAppliedControlSequence = applied;
+        expect(h.session.pendingInput).toBe(false);
+        h.query.mockClear();
+        await expect(
+          h.service.beginReadback("credential", h.fence()),
+        ).rejects.toMatchObject({
+          response: {
+            error: { message: "Missing, stale, or unapplied control event" },
+          },
+        });
+        await expect(h.accept()).rejects.toMatchObject({
+          response: {
+            error: { message: "Missing, stale, or unapplied control event" },
+          },
+        });
+        expect(
+          h.query.mock.calls.filter(([sql]) => /^(INSERT|UPDATE)/.test(sql)),
+        ).toEqual([]);
+      },
+    );
+
+    it("does not compare historical epoch sequences against the current cutoff", async () => {
+      const h = await harness(method);
+      h.events.unshift({
+        ...h.events[0],
+        eventId: randomUUID(),
+        mediaEpoch: 0,
+        sequence: 99,
+      });
+      await expect(h.accept()).resolves.toBeDefined();
+    });
+  },
+);
