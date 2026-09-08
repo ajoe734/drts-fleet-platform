@@ -116,7 +116,10 @@ test("C028 SLA settings readback, invalid input and tenant isolation", async ({
       });
       expect(await read(tenantB, tokenB)).toEqual(originalB);
       // A valid read session must fail authorization, not authentication, on write.
-      expect((await call(tenantA, readOnlyToken, updated)).status()).toBe(403);
+      expect(
+        (await call(tenantA, readOnlyToken, { ...updated, waitThresholdMin: 31 }))
+          .status(),
+      ).toBe(403);
       expect(await read(tenantA, tokenA)).toEqual(persisted);
       // A's session must not acquire B's authority by changing a tenant header.
       expect((await call(tenantB, tokenA, updated)).status()).toBe(403);
