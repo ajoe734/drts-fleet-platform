@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { Logger } from "@nestjs/common";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -223,6 +224,7 @@ describe("SR-MAIL-001 tenant invitation email delivery", () => {
   it("keeps arbitrary exception content (including the raw token) out of the returned delivery record", async () => {
     const service = deliveryService(acceptingTransport());
     const input = request();
+    const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
     vi.spyOn(service, "enqueue").mockRejectedValueOnce(
       new Error(`storage exploded while writing ${input.rawToken}`),
     );
@@ -234,6 +236,7 @@ describe("SR-MAIL-001 tenant invitation email delivery", () => {
     expect(record.sentAt).toBeNull();
     expect(record.errorCode).toBe("tenant_invitation_delivery_error");
     expect(JSON.stringify(record)).not.toContain(input.rawToken);
+    expect(warn.mock.calls.flat().join(" ")).not.toContain(input.rawToken);
   });
 
   it("lists deliveries most-recent first without ever exposing the raw token or leaking mutation", async () => {

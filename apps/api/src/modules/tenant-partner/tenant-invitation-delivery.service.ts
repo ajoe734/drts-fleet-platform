@@ -159,9 +159,9 @@ export class TenantInvitationDeliveryService {
           receipt.status === "sent" ? false : (lastAttempt?.retryable ?? true),
       };
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      const errorCode = toSafeErrorCode(error);
       this.logger.warn(
-        `Tenant invitation email delivery failed for invitation ${request.invitationId}: ${detail}`,
+        `Tenant invitation email delivery failed for invitation ${request.invitationId}: ${errorCode}`,
       );
       return {
         ...base,
@@ -170,7 +170,7 @@ export class TenantInvitationDeliveryService {
         status: "failed",
         sentAt: null,
         providerMessageId: null,
-        errorCode: toSafeErrorCode(error),
+        errorCode,
         retryable: true,
       };
     }
