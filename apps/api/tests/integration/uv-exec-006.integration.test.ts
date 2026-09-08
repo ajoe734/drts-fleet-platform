@@ -310,7 +310,8 @@ function getErrorCode(error: unknown): string | null {
       typeof response === "object" &&
       response !== null &&
       "error" in response &&
-      typeof (response as { error?: { code?: string } }).error?.code === "string"
+      typeof (response as { error?: { code?: string } }).error?.code ===
+        "string"
     ) {
       return (response as { error: { code: string } }).error.code;
     }
@@ -611,7 +612,12 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
     const driverId = `driver-uvexec006-${randomUUID()}`;
     const vehicleId = `vehicle-uvexec006-${randomUUID()}`;
     await repository.withTransaction(async (client) => {
-      await insertAssignment(client, { assignmentId, orderId, driverId, vehicleId });
+      await insertAssignment(client, {
+        assignmentId,
+        orderId,
+        driverId,
+        vehicleId,
+      });
       return repository.reserveDispatchResources(client, {
         orderId,
         assignmentId,
@@ -835,9 +841,7 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
     expect(await readAssignmentStatus(database, properAssignmentId)).toBe(
       "assigned",
     );
-    expect(
-      await readActiveReservations(database, "driver", driverId),
-    ).toEqual([
+    expect(await readActiveReservations(database, "driver", driverId)).toEqual([
       expect.objectContaining({
         assignment_id: properAssignmentId,
         status: "held",
@@ -1150,6 +1154,87 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     // A stale acceptance-timeout timer, armed before the accept landed,
     // fires late and still names the now-accepted assignment.
     const timeoutResult = await service.handleDispatchTimeout(
+      order.orderId,
+      "acceptance_timeout",
+      undefined,
+      { targetAssignmentId: assignment.assignmentId },
+    );
+    expect(timeoutResult.escalationAction).toBe("superseded");
+
+    // The accepted offer and its occupied reservation must be untouched.
+    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
+      "accepted",
+    );
+    expect(await readActiveReservations(database, "driver", driverId)).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "occupied",
+      }),
+    ]);
+    expect(
+      await readActiveReservations(database, "vehicle", vehicleId),
+    ).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "occupied",
+      }),
+    ]);
+  });
+
+  it("a stale service snapshot cannot time out an offer accepted by another instance", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const database = new DatabaseService();
+    databases.push(database);
+    const driverId = `driver-uvexec006-acc-${randomUUID()}`;
+    const vehicleId = `vehicle-uvexec006-acc-${randomUUID()}`;
+    const { service } = createTestService(database, [
+      {
+        driverId,
+        vehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ]);
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "UV-EXEC-006 Rider", phone: "0911000666" },
+    });
+    trackOrder(order.orderId);
+
+    const dispatchResult = await service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const assignment = await service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId,
+      driverId,
+    });
+
+    const timerDatabase = new DatabaseService();
+    databases.push(timerDatabase);
+    const { service: timerService } = createTestService(timerDatabase, []);
+    // Hydrate before acceptance, leaving the timer worker's snapshot assigned.
+    await timerService.onModuleInit();
+
+    await service.acceptDriverTask(assignment.taskId, {
+      acceptedAt: new Date().toISOString(),
+    });
+    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
+      "accepted",
+    );
+    expect(await readActiveReservations(database, "driver", driverId)).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "occupied",
+      }),
+    ]);
+
+    // A stale acceptance-timeout timer, armed before the accept landed,
+    // fires late and still names the now-accepted assignment.
+    const timeoutResult = await timerService.handleDispatchTimeout(
       order.orderId,
       "acceptance_timeout",
       undefined,
@@ -1515,17 +1600,15 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     );
     expect(timeoutResult.escalationAction).toBe("superseded");
 
-    expect(
-      await readAssignmentStatus(database, assignment.assignmentId),
-    ).toBe("assigned");
-    expect(await readActiveReservations(database, "driver", driverId)).toEqual(
-      [
-        expect.objectContaining({
-          assignment_id: assignment.assignmentId,
-          status: "held",
-        }),
-      ],
+    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
+      "assigned",
     );
+    expect(await readActiveReservations(database, "driver", driverId)).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "held",
+      }),
+    ]);
     expect(service.getOrder(order.orderId)?.status).not.toBe(
       "dispatch_timeout",
     );
@@ -1567,9 +1650,9 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       reasonCode: "driver_unavailable",
     });
 
-    expect(
-      await readAssignmentStatus(database, assignment.assignmentId),
-    ).toBe("rejected");
+    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
+      "rejected",
+    );
     expect(
       await readActiveReservations(database, "driver", driverId),
     ).toHaveLength(0);
@@ -1614,9 +1697,9 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       reason: "passenger_requested",
     });
 
-    expect(
-      await readAssignmentStatus(database, assignment.assignmentId),
-    ).toBe("cancelled");
+    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
+      "cancelled",
+    );
     expect(
       await readActiveReservations(database, "driver", driverId),
     ).toHaveLength(0);
