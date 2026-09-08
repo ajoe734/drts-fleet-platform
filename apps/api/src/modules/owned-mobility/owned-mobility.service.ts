@@ -4544,110 +4544,210 @@ export class OwnedMobilityService
     this.assertOrderCancelable(order);
 
     const now = new Date().toISOString();
-    order.status = "cancelled";
-    order.cancelledAt = now;
-    order.cancelReason = this.normalizeNullableText(command.reason);
-    order.updatedAt = now;
-
     const dispatchJob = this.findLatestOpenDispatchJob(orderId);
     const assignment = this.findLatestActiveAssignment(orderId);
     const task = assignment
       ? this.findTaskByAssignmentId(assignment.assignmentId)
       : null;
 
-    if (dispatchJob) {
-      dispatchJob.status = "closed";
-      dispatchJob.updatedAt = now;
-    }
-    if (assignment) {
-      assignment.status = "cancelled";
-      assignment.updatedAt = now;
-    }
-    if (task) {
-      task.status = "cancelled";
-    }
+    let updatedOrder: OwnedOrderRecord;
+    let closedTask: DriverTaskRecord | null = null;
 
-    const traceLogs: DispatchTraceLogRecord[] = [];
-    if (
-      order.dispatchSemantics === "reservation" &&
-      ["requested", "redispatch_queue"].includes(order.reservationHoldStatus)
-    ) {
-      this.transitionReservationHold(order, "released");
-      order.reservationHoldExpiresAt = now;
-      traceLogs.push(
-        this.appendTrace(order.orderId, "reservation.hold.released", {
-          reservationHoldId: order.reservationHoldId,
-          reason: "order_cancelled",
-        }),
-      );
-    }
-    traceLogs.push(
-      this.appendTrace(order.orderId, "order.cancelled", {
-        reason: order.cancelReason,
-      }),
-    );
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      // SD S7.1/S7.6: this pod's cached order/assignment can be stale
+      // relative to another pod -- e.g. this pod still believes the trip is
+      // "driver_accepted" while another pod already progressed it to
+      // "in_trip" (no longer cancelable), or already superseded the
+      // assignment via accept/timeout/redispatch. A blind cache overwrite
+      // could therefore cancel a live trip's assignment and release a
+      // driver/vehicle reservation that is still legitimately occupied.
+      // Re-validate order cancelability and the assignment/task status
+      // against the authoritative, row-locked DB state inside a single
+      // transaction, in the fixed lock order (assignment -> task -> order,
+      // order locked last) documented on `findOrderForUpdate`, so a
+      // rejected recheck rolls back every write together instead of
+      // stranding a partially-applied cancel.
+      const committed = await this.ownedMobilityRepository.withTransaction(
+        async (tx) => {
+          let txClosedAssignment: DispatchAssignmentRecord | null = null;
+          let txClosedTask: DriverTaskRecord | null = null;
+          if (assignment) {
+            const closed = await this.closeSupersededDispatchAssignment(
+              tx,
+              assignment.assignmentId,
+              now,
+            );
+            txClosedAssignment = closed?.assignment ?? null;
+            txClosedTask = closed?.task ?? null;
+          }
 
-    this.persistChanges(
-      {
-        orders: [order],
-        ...(dispatchJob ? { dispatchJobs: [dispatchJob] } : {}),
-        ...(task ? { driverTasks: [task] } : {}),
-        dispatchTraceLogs: traceLogs,
-      },
-      "cancel_owned_order",
-    );
-    if (assignment) {
-      if (this.ownedMobilityRepository?.isEnabled()) {
-        // SD §7.6: persist the cancelled assignment and release its shared
-        // reservation in the same transaction -- a crash between two
-        // separately-committed writes would otherwise strand a
-        // held/occupied reservation with no expiry and no path back to
-        // "released".
-        await this.ownedMobilityRepository.withTransaction(async (tx) => {
-          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
-            dispatchAssignments: [assignment],
-          });
-          await this.ownedMobilityRepository!.releaseDispatchResourceReservations(
-            assignment.assignmentId,
-            tx,
+          const current =
+            await this.ownedMobilityRepository!.findOrderForUpdate(
+              tx,
+              orderId,
+            );
+          if (!current) {
+            throw new ApiRequestError(
+              HttpStatus.NOT_FOUND,
+              "OWNED_ORDER_NOT_FOUND",
+              `Order ${orderId} was not found.`,
+              { orderId },
+            );
+          }
+          this.assertOrderCancelable(current.order);
+
+          const txUpdatedOrder: OwnedOrderRecord = {
+            ...current.order,
+            status: "cancelled",
+            cancelledAt: now,
+            cancelReason: this.normalizeNullableText(command.reason),
+            updatedAt: now,
+          };
+          const traceLogs: DispatchTraceLogRecord[] = [];
+          if (
+            txUpdatedOrder.dispatchSemantics === "reservation" &&
+            ["requested", "redispatch_queue"].includes(
+              txUpdatedOrder.reservationHoldStatus,
+            )
+          ) {
+            this.transitionReservationHold(txUpdatedOrder, "released");
+            txUpdatedOrder.reservationHoldExpiresAt = now;
+            traceLogs.push(
+              this.appendTrace(orderId, "reservation.hold.released", {
+                reservationHoldId: txUpdatedOrder.reservationHoldId,
+                reason: "order_cancelled",
+              }),
+            );
+          }
+          traceLogs.push(
+            this.appendTrace(orderId, "order.cancelled", {
+              reason: txUpdatedOrder.cancelReason,
+            }),
           );
-        });
-      } else {
-        this.persistChanges(
-          { dispatchAssignments: [assignment] },
-          "cancel_owned_order_assignment",
+
+          const txClosedDispatchJob: DispatchJobRecord | null =
+            dispatchJob && dispatchJob.status !== "closed"
+              ? { ...dispatchJob, status: "closed", updatedAt: now }
+              : null;
+
+          const aggregateVersion =
+            await this.ownedMobilityRepository!.updateOrderWithCas(
+              tx,
+              txUpdatedOrder,
+              current.aggregateVersion,
+            );
+          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+            ...(txClosedDispatchJob
+              ? { dispatchJobs: [txClosedDispatchJob] }
+              : {}),
+            dispatchTraceLogs: traceLogs,
+          });
+
+          return {
+            order: { ...txUpdatedOrder, aggregateVersion },
+            dispatchJob: txClosedDispatchJob,
+            assignment: txClosedAssignment,
+            task: txClosedTask,
+          };
+        },
+      );
+
+      updatedOrder = committed.order;
+      closedTask = committed.task;
+
+      this.applyAuthoritativeOrder(updatedOrder);
+      if (dispatchJob && committed.dispatchJob) {
+        Object.assign(dispatchJob, committed.dispatchJob);
+      }
+      if (assignment && committed.assignment) {
+        Object.assign(assignment, committed.assignment);
+      }
+      if (task && committed.task) {
+        Object.assign(task, committed.task);
+      }
+    } else {
+      updatedOrder = order;
+      updatedOrder.status = "cancelled";
+      updatedOrder.cancelledAt = now;
+      updatedOrder.cancelReason = this.normalizeNullableText(command.reason);
+      updatedOrder.updatedAt = now;
+
+      if (dispatchJob) {
+        dispatchJob.status = "closed";
+        dispatchJob.updatedAt = now;
+      }
+      if (assignment) {
+        assignment.status = "cancelled";
+        assignment.updatedAt = now;
+      }
+      if (task) {
+        task.status = "cancelled";
+        closedTask = task;
+      }
+
+      const traceLogs: DispatchTraceLogRecord[] = [];
+      if (
+        updatedOrder.dispatchSemantics === "reservation" &&
+        ["requested", "redispatch_queue"].includes(
+          updatedOrder.reservationHoldStatus,
+        )
+      ) {
+        this.transitionReservationHold(updatedOrder, "released");
+        updatedOrder.reservationHoldExpiresAt = now;
+        traceLogs.push(
+          this.appendTrace(orderId, "reservation.hold.released", {
+            reservationHoldId: updatedOrder.reservationHoldId,
+            reason: "order_cancelled",
+          }),
         );
       }
+      traceLogs.push(
+        this.appendTrace(orderId, "order.cancelled", {
+          reason: updatedOrder.cancelReason,
+        }),
+      );
+
+      this.persistChanges(
+        {
+          orders: [updatedOrder],
+          ...(dispatchJob ? { dispatchJobs: [dispatchJob] } : {}),
+          ...(assignment ? { dispatchAssignments: [assignment] } : {}),
+          ...(task ? { driverTasks: [task] } : {}),
+          dispatchTraceLogs: traceLogs,
+        },
+        "cancel_owned_order",
+      );
     }
+
     this.recordAudit(
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: order.tenantId,
+        tenantId: updatedOrder.tenantId,
         moduleName: "order",
         actionName: "cancel_owned_order",
         resourceType: "order",
         resourceId: orderId,
         newValuesSummary: {
-          status: order.status,
-          reason: order.cancelReason,
+          status: updatedOrder.status,
+          reason: updatedOrder.cancelReason,
         },
       },
       requestId,
     );
-    void this.publishTenantOrderWebhook(order, "order.cancelled", now, {
-      cancelledAt: order.cancelledAt,
-      cancelReason: order.cancelReason,
+    void this.publishTenantOrderWebhook(updatedOrder, "order.cancelled", now, {
+      cancelledAt: updatedOrder.cancelledAt,
+      cancelReason: updatedOrder.cancelReason,
     });
-    if (task) {
+    if (closedTask) {
       void this.ownedMobilityTaskEventsService.publishTaskCancelled(
-        task,
-        order,
+        closedTask,
+        updatedOrder,
         requestId,
       );
     }
-    void this.publishLatestDispatchJobUpdate(order.orderId, requestId);
-    return this.cloneOrder(order);
+    void this.publishLatestDispatchJobUpdate(orderId, requestId);
+    return this.cloneOrder(updatedOrder);
   }
 
   /**

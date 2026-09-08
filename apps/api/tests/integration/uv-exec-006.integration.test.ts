@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -822,6 +824,103 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
         assignment_id: properAssignmentId,
         status: "held",
       }),
+    ]);
+  });
+
+  it("fail_closed_migration_validation: V0090's backfill rejects when two pre-existing active assignments already double-booked the same driver/vehicle before the fence existed, and recovers once reconciled", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const database = new DatabaseService();
+    databases.push(database);
+    const repository = new OwnedMobilityRepository(database);
+
+    const orderIdA = trackOrder(`order-uvexec006-legacy-a-${randomUUID()}`);
+    const orderIdB = trackOrder(`order-uvexec006-legacy-b-${randomUUID()}`);
+    await insertOrder(repository, orderIdA);
+    await insertOrder(repository, orderIdB);
+
+    const driverId = `driver-uvexec006-legacy-${randomUUID()}`;
+    const vehicleId = `vehicle-uvexec006-legacy-${randomUUID()}`;
+    const assignmentIdA = trackAssignment(
+      `assignment-uvexec006-legacy-a-${randomUUID()}`,
+    );
+    const assignmentIdB = trackAssignment(
+      `assignment-uvexec006-legacy-b-${randomUUID()}`,
+    );
+
+    // The only way two *active* assignments can already double-book the same
+    // driver/vehicle post-fence is if they were written before V0090's
+    // trigger existed at all -- simulate exactly that "pre-fence" legacy
+    // state by disabling the trigger for this direct insert, the same way
+    // an old-revision writer's INSERT would have landed before this
+    // migration ever ran.
+    await database.query(
+      `ALTER TABLE ops.phase1_dispatch_assignments DISABLE TRIGGER trg_enforce_dispatch_assignment_reservation`,
+    );
+    try {
+      await insertAssignment(database, {
+        assignmentId: assignmentIdA,
+        orderId: orderIdA,
+        driverId,
+        vehicleId,
+      });
+      await insertAssignment(database, {
+        assignmentId: assignmentIdB,
+        orderId: orderIdB,
+        driverId,
+        vehicleId,
+      });
+    } finally {
+      await database.query(
+        `ALTER TABLE ops.phase1_dispatch_assignments ENABLE TRIGGER trg_enforce_dispatch_assignment_reservation`,
+      );
+    }
+
+    const migrationSql = readFileSync(
+      resolve(
+        __dirname,
+        "../../../../infra/migrations/V0090__dispatch_assignment_reservation_fence.sql",
+      ),
+      "utf8",
+    );
+
+    // Re-running V0090's own SQL (idempotent by construction: CREATE OR
+    // REPLACE / DROP TRIGGER IF EXISTS / ON CONFLICT DO NOTHING) simulates
+    // what db-apply.sh does at migration time. With two conflicting legacy
+    // rows present, the backfill's `ON CONFLICT ... DO NOTHING` can only
+    // reserve one of them, so the migration's own fail-closed validation
+    // must reject the whole run instead of silently leaving the other
+    // active with no reservation at all.
+    await expect(database.query(migrationSql)).rejects.toThrow(
+      /V0090 backfill left/,
+    );
+
+    // Sent as a single multi-statement message, Postgres runs it as one
+    // implicit transaction, so the rejection rolled back the trigger
+    // recreation and both backfill INSERTs together -- neither assignment
+    // ended up with a reservation from the rejected attempt.
+    expect(
+      await readActiveReservations(database, "driver", driverId),
+    ).toHaveLength(0);
+    expect(
+      await readActiveReservations(database, "vehicle", vehicleId),
+    ).toHaveLength(0);
+
+    // Once an operator reconciles the conflict (here: cancelling the loser),
+    // the same migration SQL must apply cleanly and back-fill the survivor.
+    await database.query(
+      `UPDATE ops.phase1_dispatch_assignments SET status = 'cancelled' WHERE assignment_id = $1`,
+      [assignmentIdB],
+    );
+    await database.query(migrationSql);
+    expect(
+      await readActiveReservations(database, "driver", driverId),
+    ).toEqual([
+      expect.objectContaining({ assignment_id: assignmentIdA }),
+    ]);
+    expect(
+      await readActiveReservations(database, "vehicle", vehicleId),
+    ).toEqual([
+      expect.objectContaining({ assignment_id: assignmentIdA }),
     ]);
   });
 });

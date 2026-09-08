@@ -133,3 +133,51 @@ WHERE a.status IN ('assigned', 'accepted')
       AND r.status IN ('held', 'occupied')
   )
 ON CONFLICT (resource_type, resource_id) WHERE status IN ('held', 'occupied') DO NOTHING;
+
+-- Fail closed instead of silently completing: the two backfill INSERTs
+-- above use ON CONFLICT ... DO NOTHING against the same partial unique
+-- index the fence itself relies on, so if two or more pre-existing active
+-- assignments already double-booked the same driver or vehicle before this
+-- migration ran (a bug the old, unfenced code never prevented), only the
+-- first backfilled row wins the reservation and the rest are left active
+-- with no reservation at all. That is worse than the pre-migration state:
+-- once the "winning" assignment later completes and its reservation is
+-- released, the ledger reports the driver/vehicle free even though another
+-- still-active assignment silently continues to hold it, so a brand-new
+-- order can double-book it for real. There is no automatic, safe way to
+-- pick which of the conflicting legacy assignments should keep the
+-- resource -- that is an operational decision. Abort the whole migration so
+-- it is never marked applied while any active assignment is missing either
+-- reservation, forcing that decision (cancel/reassign the loser(s), or
+-- otherwise correct the data) before the fence can be trusted.
+DO $$
+DECLARE
+  v_offending_count integer;
+  v_offending_ids text;
+BEGIN
+  SELECT count(*), string_agg(a.assignment_id, ', ' ORDER BY a.assignment_id)
+    INTO v_offending_count, v_offending_ids
+  FROM ops.phase1_dispatch_assignments a
+  WHERE a.status IN ('assigned', 'accepted')
+    AND (
+      NOT EXISTS (
+        SELECT 1 FROM ops.dispatch_resource_reservations r
+        WHERE r.assignment_id = a.assignment_id
+          AND r.resource_type = 'driver'
+          AND r.status IN ('held', 'occupied')
+      )
+      OR NOT EXISTS (
+        SELECT 1 FROM ops.dispatch_resource_reservations r
+        WHERE r.assignment_id = a.assignment_id
+          AND r.resource_type = 'vehicle'
+          AND r.status IN ('held', 'occupied')
+      )
+    );
+
+  IF v_offending_count > 0 THEN
+    RAISE EXCEPTION
+      'V0090 backfill left % active dispatch_assignments row(s) without a full driver+vehicle reservation after backfill (assignment_id(s): %) -- two or more pre-existing active assignments already double-booked the same driver/vehicle before this fence existed, so ON CONFLICT DO NOTHING could only reserve one of them. Reconcile by hand (cancel/reassign the loser(s), or otherwise correct the conflicting rows) and re-run this migration before the fence can be trusted (SD section 7.6).',
+      v_offending_count, v_offending_ids;
+  END IF;
+END;
+$$;
