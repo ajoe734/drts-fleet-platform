@@ -49,6 +49,7 @@ export type FleetDriver = {
   name: string;
   plate: string;
   status: "available" | "on_trip" | "break" | "offline";
+  dispatchEligible?: boolean;
   license: "valid" | "expires_30d";
   docs: "complete" | "missing_1" | "missing_2";
   training: "complete" | "pending";
@@ -354,6 +355,7 @@ function mapDriver(record: FleetPartnerPortalDriverRecord): FleetDriver {
     name: record.name,
     plate: record.currentVehiclePlateNo ?? "—",
     status: mapDriverStatus(record.workState),
+    dispatchEligible: record.dispatchEligible,
     license: record.licensesValid ? "valid" : "expires_30d",
     // Not yet surfaced by /api/fleet-partner/drivers — neutral defaults.
     docs: "complete",
@@ -750,18 +752,19 @@ export async function loadDashboard(
     (d) => d.status === "offline",
   ).length;
   const dispatchableDriverCount = driversView.rows.filter(
-    (d) => d.status === "available",
+    (d) => d.dispatchEligible === true,
   ).length;
   const completedTripsCount = tripsView.rows.filter(
     (t) => t.status === "completed",
   ).length;
 
+  let aggregateError: string | null = null;
   let dashboardRecord: FleetPartnerPortalDashboardRecord | null = null;
   if (client) {
     try {
       dashboardRecord = await client.listFleetPortalDashboard(currentPeriod);
-    } catch {
-      // If aggregate endpoint is unavailable, we rely on the authoritative list counts
+    } catch (err) {
+      aggregateError = err instanceof Error ? err.message : "READ_FAILED";
     }
   }
 
@@ -770,9 +773,7 @@ export async function loadDashboard(
     tripsView.source === "live" ||
     Boolean(dashboardRecord);
   const readError =
-    !isLive && (driversView.error || tripsView.error)
-      ? driversView.error || tripsView.error
-      : null;
+    driversView.error || tripsView.error || aggregateError || null;
 
   const services: ServiceKey[] = [
     "realtime",
@@ -812,38 +813,19 @@ export async function loadDashboard(
 
   const shareMoney = dashboardRecord?.shareAmount
     ? formatMoney(dashboardRecord.shareAmount)
-    : "NT$ 0";
+    : "—";
   const grossMoney = dashboardRecord?.grossEarningAmount
     ? formatMoney(dashboardRecord.grossEarningAmount)
-    : "NT$ 0";
+    : "—";
 
   return {
-    driverCount: (dashboardRecord
-      ? dashboardRecord.activeDriverCount
-      : activeDriverCount
-    ).toLocaleString("en-US"),
+    driverCount: driversView.error ? "—" : activeDriverCount.toLocaleString("en-US"),
     driverStatusSummary: {
-      online: (dashboardRecord
-        ? dashboardRecord.onlineDriverCount
-        : onlineDriverCount
-      ).toLocaleString("en-US"),
-      offline: (dashboardRecord
-        ? Math.max(
-            dashboardRecord.activeDriverCount -
-              dashboardRecord.onlineDriverCount,
-            0,
-          )
-        : offlineDriverCount
-      ).toLocaleString("en-US"),
+      online: driversView.error ? "—" : onlineDriverCount.toLocaleString("en-US"),
+      offline: driversView.error ? "—" : offlineDriverCount.toLocaleString("en-US"),
     },
-    dispatchable: (dashboardRecord
-      ? dashboardRecord.dispatchEligibleDriverCount
-      : dispatchableDriverCount
-    ).toLocaleString("en-US"),
-    completedTrips: (dashboardRecord
-      ? dashboardRecord.completedTripCount
-      : completedTripsCount
-    ).toLocaleString("en-US"),
+    dispatchable: driversView.error ? "—" : dispatchableDriverCount.toLocaleString("en-US"),
+    completedTrips: tripsView.error ? "—" : completedTripsCount.toLocaleString("en-US"),
     share: shareMoney,
     grossRevenue: grossMoney,
     supply,
