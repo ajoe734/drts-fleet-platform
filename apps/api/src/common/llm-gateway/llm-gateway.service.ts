@@ -329,7 +329,7 @@ export class LlmGatewayService {
   ): Promise<LlmGatewayChatResponse> {
     const endpoint = this.resolveOpenAiCompatibleEndpoint(provider);
     const response = await this.fetchImpl(endpoint, {
-      signal: request.signal,
+      signal: request.signal ?? null,
       method: "POST",
       headers: this.buildOpenAiCompatibleHeaders(),
       body: JSON.stringify({
@@ -377,7 +377,7 @@ export class LlmGatewayService {
         content: message.content,
       }));
     const response = await this.fetchImpl(endpoint, {
-      signal: request.signal,
+      signal: request.signal ?? null,
       method: "POST",
       headers: {
         "content-type": "application/json",
