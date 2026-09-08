@@ -18,6 +18,7 @@ import {
   getVehicleLabelFromDraft,
   isEnterpriseDraftComplete,
   parseEnterpriseBookingDraft,
+  resolveCopyByLocale,
   serializeEnterpriseBookingDraft,
   validateReservationWindow,
 } from "@/lib/enterprise-booking-draft";
@@ -107,18 +108,24 @@ export default async function ReviewBookingPage({
             icon="alert"
             title={
               timeValidation.isPast
-                ? locale === "zh"
-                  ? "用車時間無效：預約時間不能為過去時間"
-                  : "Invalid Reservation: Time In Past"
-                : locale === "zh"
-                  ? "用車時間無效：未達最短提前時間（15分鐘）"
-                  : "Invalid Reservation: Advance Lead Time Not Met"
+                ? resolveCopyByLocale(
+                    locale,
+                    "用車時間無效：預約時間不能為過去時間",
+                    "Invalid Reservation: Time In Past",
+                  )
+                : resolveCopyByLocale(
+                    locale,
+                    "用車時間無效：未達最短提前時間（15分鐘）",
+                    "Invalid Reservation: Advance Lead Time Not Met",
+                  )
             }
             body={
               timeValidation.errorMessage ??
-              (locale === "zh"
-                ? `最早可預約時間為 ${timeValidation.earliestAllowedDisplay}，請返回修改用車時間。`
-                : `Earliest bookable time is ${timeValidation.earliestAllowedDisplay}. Please return and modify the reservation time.`)
+              resolveCopyByLocale(
+                locale,
+                `最早可預約時間為 ${timeValidation.earliestAllowedDisplay}，請返回修改用車時間。`,
+                `Earliest bookable time is ${timeValidation.earliestAllowedDisplay}. Please return and modify the reservation time.`,
+              )
             }
           />
         </div>
@@ -369,12 +376,16 @@ export default async function ReviewBookingPage({
               >
                 <EBtnContent icon="check">
                   {preview.approvalRequired
-                    ? locale === "zh"
-                      ? "送出並送審（時間無效）"
-                      : "Submit for Approval (Invalid Time)"
-                    : locale === "zh"
-                      ? "確認送出（時間無效）"
-                      : "Confirm and Submit (Invalid Time)"}
+                    ? resolveCopyByLocale(
+                        locale,
+                        "送出並送審（時間無效）",
+                        "Submit for Approval (Invalid Time)",
+                      )
+                    : resolveCopyByLocale(
+                        locale,
+                        "確認送出（時間無效）",
+                        "Confirm and Submit (Invalid Time)",
+                      )}
                 </EBtnContent>
               </button>
             )}

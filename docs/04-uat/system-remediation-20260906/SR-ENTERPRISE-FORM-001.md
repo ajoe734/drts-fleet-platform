@@ -2,8 +2,8 @@
 
 - Task: `SR-ENTERPRISE-FORM-001`
 - Owner: `Gemini`
-- Reviewer: `Codex2`
-- Base SHA (`origin/dev`): `8e97268c7ec38258b393b8e8931d960009aab9fb`
+- Reviewer: `Codex`
+- Base SHA (`origin/dev`): `031cfc4c99320b79f6ad863996a43a5da8227edf`
 - Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001`
 - Branch: `gemini/sr-enterprise-form-001`
 
@@ -167,6 +167,18 @@ $ pnpm --filter @drts/enterprise-dispatch-web build
 ✓ Generating static pages using 7 workers (26/26) in 434ms
   Collecting build traces in 543ms    ✓ Collecting build traces in 543ms 
   Finalizing page optimization in 633ms    ✓ Finalizing page optimization in 633ms 
+
+exit code: 0
+```
+
+### 4.6 i18n 守衛檢查（全庫 522 檔案掃描零違規）
+```text
+$ pnpm run i18n:guard
+
+> drts-fleet-platform@0.1.0 i18n:guard /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001
+> node tools/ci/i18n-guard.mjs
+
+i18n-guard: OK (522 files scanned across 10 apps, 55 exemption(s) from i18n-guard-baseline.json)
 
 exit code: 0
 ```

@@ -3,11 +3,36 @@ import type {
   CreateTenantBookingCommand,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
-import {
-  enterpriseBookingDraft,
-  getEnterpriseBookingDraft,
-} from "./enterprise-fixtures";
 import { t as translate, type Locale } from "./translations";
+
+export function resolveCopyByLocale(
+  activeLang: Locale,
+  zhString: string,
+  enString: string,
+): string {
+  if (activeLang === "zh") {
+    return zhString;
+  }
+  return enString;
+}
+
+function getSeedEnterpriseDraft(activeLang: Locale) {
+  const costCenterName = translate("fixture.costCenter.prd07", undefined, activeLang);
+  return {
+    bookedBy: "林宜君",
+    passenger: translate("fixture.passenger.guestSato", undefined, activeLang),
+    pickup: translate("fixture.place.songshanT1Full", undefined, activeLang),
+    dropoff: translate("fixture.place.grandHyattFull", undefined, activeLang),
+    costCenterCode: "CC-PRD-07",
+    costCenter: `CC-PRD-07 · ${costCenterName}`,
+    vehicle: "business",
+    flight: "JL809",
+    terminal: "T1",
+    luggage: "3 件",
+    onsiteContact: translate("fixture.contact.zhou", undefined, activeLang),
+    notes: translate("fixture.bookingDraft.notes", undefined, activeLang),
+  };
+}
 
 export type EnterprisePassengerMode = "self" | "other";
 export type EnterpriseAirportDirection = "pickup" | "dropoff";
@@ -187,10 +212,11 @@ export function validateReservationWindow(
       earliestAllowedDate,
       earliestAllowedTime,
       earliestAllowedDisplay,
-      errorMessage:
-        locale === "zh"
-          ? "請填寫用車日期與時間。"
-          : "Please provide reservation date and time.",
+      errorMessage: resolveCopyByLocale(
+        locale,
+        "請填寫用車日期與時間。",
+        "Please provide reservation date and time.",
+      ),
     };
   }
 
@@ -209,10 +235,11 @@ export function validateReservationWindow(
       earliestAllowedDate,
       earliestAllowedTime,
       earliestAllowedDisplay,
-      errorMessage:
-        locale === "zh"
-          ? "用車日期或時間格式無效。"
-          : "Invalid reservation date or time format.",
+      errorMessage: resolveCopyByLocale(
+        locale,
+        "用車日期或時間格式無效。",
+        "Invalid reservation date or time format.",
+      ),
     };
   }
 
@@ -228,10 +255,11 @@ export function validateReservationWindow(
       earliestAllowedDate,
       earliestAllowedTime,
       earliestAllowedDisplay,
-      errorMessage:
-        locale === "zh"
-          ? `預約時間不能為過去時間。最早可預約時間為 ${earliestAllowedDisplay}（需至少提前 ${MIN_LEAD_TIME_MINUTES} 分鐘）。`
-          : `Reservation time cannot be in the past. Earliest bookable time is ${earliestAllowedDisplay} (at least ${MIN_LEAD_TIME_MINUTES} min advance notice required).`,
+      errorMessage: resolveCopyByLocale(
+        locale,
+        `預約時間不能為過去時間。最早可預約時間為 ${earliestAllowedDisplay}（需至少提前 ${MIN_LEAD_TIME_MINUTES} 分鐘）。`,
+        `Reservation time cannot be in the past. Earliest bookable time is ${earliestAllowedDisplay} (at least ${MIN_LEAD_TIME_MINUTES} min advance notice required).`,
+      ),
     };
   }
 
@@ -244,10 +272,11 @@ export function validateReservationWindow(
       earliestAllowedDate,
       earliestAllowedTime,
       earliestAllowedDisplay,
-      errorMessage:
-        locale === "zh"
-          ? `預約需至少提前 ${MIN_LEAD_TIME_MINUTES} 分鐘。最早可預約時間為 ${earliestAllowedDisplay}。`
-          : `Reservation requires at least ${MIN_LEAD_TIME_MINUTES} minutes advance notice. Earliest bookable time is ${earliestAllowedDisplay}.`,
+      errorMessage: resolveCopyByLocale(
+        locale,
+        `預約需至少提前 ${MIN_LEAD_TIME_MINUTES} 分鐘。最早可預約時間為 ${earliestAllowedDisplay}。`,
+        `Reservation requires at least ${MIN_LEAD_TIME_MINUTES} minutes advance notice. Earliest bookable time is ${earliestAllowedDisplay}.`,
+      ),
     };
   }
 
@@ -322,8 +351,8 @@ export function createEnterpriseBookingDraft(
   const options = isDate ? undefined : optionsOrNow;
   const now = isDate ? optionsOrNow : maybeNow;
 
-  const seed = getEnterpriseBookingDraft(locale);
-  const vehicle = normalizeVehicle(enterpriseBookingDraft.vehicle, "business");
+  const seed = getSeedEnterpriseDraft(locale);
+  const vehicle = normalizeVehicle(seed.vehicle, "business");
   const defaultReservation = new Date(
     now.getTime() + 2 * 24 * 60 * 60 * 1000 + DEFAULT_TIMEZONE_OFFSET_MS,
   )
@@ -349,7 +378,7 @@ export function createEnterpriseBookingDraft(
     reservationDate: defaultReservation,
     reservationTime: "10:00",
     onsiteContactPhone: seed.onsiteContact,
-    costCenterCode: enterpriseBookingDraft.costCenterCode,
+    costCenterCode: seed.costCenterCode,
     costCenterLabel: seed.costCenter,
     vehicle,
     notes: seed.notes,
