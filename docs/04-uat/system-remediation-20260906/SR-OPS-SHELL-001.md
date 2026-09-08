@@ -1,5 +1,17 @@
 # SR-OPS-SHELL-001 — 本次恢復與阻塞證據
 
+## 2026-09-08 18:33 UTC dispatch 核對
+
+- Fresh `origin/dev`：`318f5065433ff07fba2ddf242cf1c5aef5fb1cae`；原分支與本次受測程式 SHA：`9ddc8b6c065441bb5057c962523450c3e7f15c24`。尚無 handoff candidate。
+- `git fetch origin` exit 0；`git rebase origin/dev` exit 1，在重播第9/40個歷史 commit `94bf84a0a` 時本 evidence 出現 add/add conflict。`git rebase --abort` exit 0，恢復原已發布分支；未把未完成 rebase 宣稱成功，也未覆寫遠端歷史。
+- 唯讀 `git show origin/dev:apps/ops-console-web/app/dispatch/page.tsx`：第1230行仍 fallback `/platform-admin`，第4520行仍傳無 context 的 `/audit`。`git show origin/dev:apps/platform-admin-web/app/audit/page.tsx`：第164行仍 `client.listAuditLogs()`，沒有 searchParams 消費。這是最新 dev 原始碼核對，非 live popup 重現。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/` exit 0：1 file、13 tests passed，369ms；測試在上述原分支 SHA 執行，非 fresh dev。
+- `pnpm --filter @drts/ops-console-web typecheck` exit 0：`next typegen && tsc --noEmit`。`git diff --check` exit 0。
+
+已讀 task spec、execution_ref、R18/R19、C048 與 planning routing record。最新 machine slice 仍未授權 dispatch sender／必要 audit receiver，且 depends_on 為空。依 task spec 的 planning blocker route，需 supervisor 先補 scope、重疊 writer dependencies，並確認 `Q-SR-OPS-SHELL-001` resource identity 與 URL→query 契約。這項產品前置仍未解除；沒有修改 UI 或範圍外程式。
+
+未執行瀏覽器 1440/390px CTA hit testing、開關／焦點／reload、audit popup、payments context、live 或真機驗收；無 live 資源 ID，無新建業務資源。13個單元測試不代表上述驗收通過。本次只提交阻塞 evidence anchor，不能 handoff／done。
+
 ## 2026-09-08 17:39 UTC resume 核對
 
 - Fresh base `origin/dev`：`2a093872d05a7d0344adf9bb58f9e5c4c99861d1`；恢復前 tip：`81da9d0979ed0e2ab960f74840eb768e100cb679`；受測程式 SHA：`1547b73e8ff14d70ce6c87bfd5232373352f3eaa`。本次為 evidence anchor，尚無 handoff candidate。
