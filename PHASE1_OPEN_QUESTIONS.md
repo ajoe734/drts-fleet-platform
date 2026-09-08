@@ -4,7 +4,7 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`.
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-PROOF-001`.
 
 The original fifteen questions on this board were answered. Worth noting how, because the
 distribution was not what the board implied: of the fifteen, four were closed by
