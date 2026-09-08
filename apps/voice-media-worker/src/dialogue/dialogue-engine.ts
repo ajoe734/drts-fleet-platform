@@ -8,7 +8,9 @@ import {
 
 export interface VoiceDialogueTurnPorts {
   /** Must CAS against the admitted session revision and input/lease epochs.
-   * Failure blocks every tool and playback. Supplied by session coordinator. */
+   * Failure blocks every tool and playback. Supplied by session coordinator.
+   * Honor request.signal/deadline at commit; a cancelled wait does not prove
+   * rollback. Reconcile ambiguous commits against the authoritative revision. */
   persist(
     state: VoiceDialogueState,
     request: VoiceDialogueRequest,
@@ -49,7 +51,11 @@ export class VoiceDialogueEngine {
         structuredClone(state),
       );
       next.apply(output, request.turnId);
-      await ports.persist(next, request);
+      await this.boundedStage(
+        request,
+        () => currentEpoch(),
+        (bounded) => ports.persist(next, bounded),
+      );
       request.signal.throwIfAborted();
       if (
         request.inputEpoch !== currentEpoch() ||
@@ -57,7 +63,9 @@ export class VoiceDialogueEngine {
       )
         throw new Error("voice_stale_epoch");
       Object.assign(state, next);
-      const results = await ports.execute(output);
+      const results = await this.boundedStage(request, currentEpoch, () =>
+        ports.execute(output),
+      );
       request.signal.throwIfAborted();
       if (
         request.inputEpoch !== currentEpoch() ||
@@ -78,6 +86,41 @@ export class VoiceDialogueEngine {
       };
     } finally {
       this.running = false;
+    }
+  }
+
+  /** Only the race winner can resume the turn; late settlement cannot publish
+   * state, invoke the next stage, or release a newer turn's running guard. */
+  private async boundedStage<T>(
+    request: VoiceDialogueRequest,
+    currentEpoch: () => number,
+    operation: (bounded: VoiceDialogueRequest) => Promise<T>,
+  ): Promise<T> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancel = () => {};
+    try {
+      const cancelled = new Promise<never>((_, reject) => {
+        cancel = () => {
+          controller.abort();
+          reject(new Error("voice_aborted"));
+        };
+        request.signal.addEventListener("abort", cancel, { once: true });
+        timer = setTimeout(cancel, Math.max(0, request.deadline - Date.now()));
+      });
+      if (request.signal.aborted || Date.now() >= request.deadline) cancel();
+      return await Promise.race([
+        cancelled,
+        Promise.resolve().then(() => {
+          if (controller.signal.aborted) throw new Error("voice_aborted");
+          if (request.inputEpoch !== currentEpoch())
+            throw new Error("voice_stale_epoch");
+          return operation({ ...request, signal: controller.signal });
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+      request.signal.removeEventListener("abort", cancel);
     }
   }
 

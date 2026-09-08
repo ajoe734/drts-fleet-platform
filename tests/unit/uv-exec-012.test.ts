@@ -21,6 +21,99 @@ import type { VoiceBookingAuthorizationService } from "../../apps/api/src/module
 afterEach(() => vi.useRealTimers());
 
 describe("UV-EXEC-012 controlled turn entry", () => {
+  it.each([
+    ["abort", "resolve"],
+    ["abort", "reject"],
+    ["deadline", "resolve"],
+    ["deadline", "reject"],
+  ])(
+    "recovers a stalled persist after %s and fences late %s",
+    async (cause, settlement) => {
+      vi.useFakeTimers();
+      const engine = new VoiceDialogueEngine(
+        {
+          mode: "live",
+          profileVersion: "v1",
+          propose: async () => output({ slots: [slot()] }),
+        },
+        true,
+      );
+      const state = new VoiceDialogueState();
+      const before = structuredClone(state);
+      const controller = new AbortController();
+      let finish!: () => void;
+      let fail!: (error: Error) => void;
+      let persistedRequest!: VoiceDialogueRequest;
+      let entered!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const execute = vi.fn(async () => []);
+      const turn = engine.turn(
+        request({ signal: controller.signal, deadline: Date.now() + 20 }),
+        state,
+        () => 1,
+        {
+          persist: (_next, bounded) => {
+            persistedRequest = bounded;
+            entered();
+            return new Promise<void>((resolve, reject) => {
+              finish = resolve;
+              fail = reject;
+            });
+          },
+          execute,
+        },
+      );
+      const rejected = expect(turn).rejects.toThrow("voice_aborted");
+      await started;
+      if (cause === "abort") controller.abort();
+      else await vi.advanceTimersByTimeAsync(20);
+      await rejected;
+      expect(persistedRequest.signal.aborted).toBe(true);
+      expect(state).toEqual(before);
+      expect(execute).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+
+      let finishRecovery!: () => void;
+      let recoveryEntered!: () => void;
+      const recoveryStarted = new Promise<void>((resolve) => {
+        recoveryEntered = resolve;
+      });
+      const recovery = engine.turn(
+        request({ turnId: "recovery" }),
+        state,
+        () => 1,
+        {
+          persist: () => {
+            recoveryEntered();
+            return new Promise<void>((resolve) => {
+              finishRecovery = resolve;
+            });
+          },
+          execute,
+        },
+      );
+      await recoveryStarted;
+      if (settlement === "resolve") finish();
+      else fail(new Error("late CAS failure"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(state).toEqual(before);
+      expect(execute).not.toHaveBeenCalled();
+      await expect(
+        engine.turn(request(), state, () => 1, {
+          persist: async () => {},
+          execute,
+        }),
+      ).rejects.toThrow("voice_turn_in_progress");
+      finishRecovery();
+      await recovery;
+      expect(execute).toHaveBeenCalledOnce();
+      expect(state.slots.pickup).toBeDefined();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
   it("never plays fabricated success and persists before executing tools", async () => {
     const engine = new VoiceDialogueEngine(
       {
