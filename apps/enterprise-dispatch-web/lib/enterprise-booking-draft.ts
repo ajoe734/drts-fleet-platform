@@ -230,7 +230,15 @@ export function validateReservationWindow(
     `${normalizedDate}T${normalizedTime}:00${DEFAULT_TIMEZONE_OFFSET}`,
   );
 
-  if (Number.isNaN(reservationStart.getTime())) {
+  // Date normalizes impossible calendar dates and 24:00 into another day.
+  // Reject that normalization, including direct review URL parameters.
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate) ||
+    !/^([01]\d|2[0-3]):[0-5]\d$/.test(normalizedTime) ||
+    Number.isNaN(reservationStart.getTime()) ||
+    new Date(reservationStart.getTime() + DEFAULT_TIMEZONE_OFFSET_MS)
+      .toISOString().slice(0, 16) !== `${normalizedDate}T${normalizedTime}`
+  ) {
     return {
       isValid: false,
       isPast: false,

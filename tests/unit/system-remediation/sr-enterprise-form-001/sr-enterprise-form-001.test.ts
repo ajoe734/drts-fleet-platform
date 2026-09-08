@@ -249,6 +249,26 @@ describe("SR-ENTERPRISE-FORM-001 — 企業預約乘客、日期與手機表單"
   });
 
   describe("R21 & C016: 過去時間/時區邊界與最短提前規則", () => {
+    it.each([
+      ["2027-02-29", "10:00"],
+      ["2028-02-30", "10:00"],
+      ["2027-04-31", "10:00"],
+      ["2027-09-08", "24:00"],
+    ])("拒絕自動進位的日期 %s %s 及其 command", (date, time) => {
+      const draft = {
+        ...createEnterpriseBookingDraft("zh", referenceNow),
+        reservationDate: date,
+        reservationTime: time,
+      };
+      expect(validateReservationWindow(date, time, referenceNow).isValid).toBe(false);
+      expect(isEnterpriseDraftComplete(draft, referenceNow)).toBe(false);
+      expect(() => buildEnterpriseBookingCommand(draft, referenceNow)).toThrow();
+    });
+
+    it("接受實際閏日", () => {
+      expect(validateReservationWindow("2028-02-29", "10:00", referenceNow).isValid).toBe(true);
+    });
+
     it("2.1 填入過去日期（如 9/6 填 6/13）拒絕進入有效送審狀態，並給予最早可預約時間", () => {
       // referenceNow = 2026-09-06 14:12:00 (+08:00)
       const pastResult = validateReservationWindow(
