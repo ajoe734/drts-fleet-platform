@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BookingSubmitButton } from "@/components/booking-submit-button";
+import { BookingSubmitButton } from "./booking-submit-button";
 import {
   EBanner,
   EBtnContent,
@@ -361,6 +361,8 @@ export default async function ReviewBookingPage({
             {canSubmit ? (
               <BookingSubmitButton
                 draft={draft}
+                locale={locale}
+                approvalRequired={preview.approvalRequired}
                 {...(bookingId ? { bookingId } : {})}
               />
             ) : (
