@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "task_id": "SR-READINESS-001",
-  "observed_at": "2026-09-08T13:53:56.701037+00:00",
-  "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
-  "tested_code_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+  "observed_at": "2026-09-08T15:13:15.708239+00:00",
+  "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
+  "tested_code_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
   "candidate_sha": null,
   "candidate_binding": "Exact final candidate SHA is recorded by canonical ai-status.sh handoff; resolve with show SR-READINESS-001. A commit cannot embed its own hash.",
   "historical_audit_sha": "08b7a32f6fdaa00d8d1894f91569a7d72860cec2",
@@ -26,7 +26,7 @@
     "passed": 212,
     "failed": 0,
     "skipped": 0,
-    "raw_report_sha256": "0fe2ecb5a9fbef100de9cf669ae63e5fa7238d94946c96750949e4ebfcc842d5",
+    "raw_report_sha256": "c4ffc05e851c971d48c56be3a85f20f601b0e16b1051e04417ba237023214d8c",
     "suites": [
       {
         "path": "tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts",
@@ -1998,8 +1998,19 @@
       "source_scopes": [
         "tools/system-remediation/public-entry/system-remediation-endpoints.py"
       ],
-      "source_locators": [],
-      "merged_prs": [],
+      "source_locators": [
+        {
+          "path": "tools/system-remediation/public-entry/system-remediation-endpoints.py",
+          "git_blob": "fcb9ec853ec283e655069f1ca12c998286a69a71"
+        }
+      ],
+      "merged_prs": [
+        {
+          "sha": "610baa9820e627be013246afa042c81d8a42e771",
+          "subject": "SR-PUBLIC-001: prepare public-entry diagnostics and repair runbook (#1759)",
+          "pr": 1759
+        }
+      ],
       "regression_suites": [],
       "evidence_ref": "docs/03-runbooks/system-remediation-20260906/SR-PUBLIC-001.md"
     },
@@ -2194,12 +2205,17 @@
       "id": "R01",
       "title": "9個自訂網址無法建立HTTPS連線",
       "role": "全部對外角色",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-PUBLIC-001",
         "SR-READINESS-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "tools/system-remediation/public-entry/system-remediation-endpoints.py",
+          "git_blob": "fcb9ec853ec283e655069f1ca12c998286a69a71"
+        }
+      ],
       "historical_observation": "開 fleets/ops/partners/dispatch/tenant/bank/channel/refer/api.smarttransport.tw；Chromium connection closed、curl exit35，未取得HTTP回應",
       "reproduction_requirement": "修復並從公共網址驗證DNS、TLS、登入與各角色主流程；本輪尚不能確定DNS/憑證/路由哪一層為根因",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2211,11 +2227,28 @@
       "id": "R02",
       "title": "正常登入按鈕產生localhost callback並被拒絕",
       "role": "租戶管理員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-TENANT-LOGIN-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/tenant-console-web/app/api/auth/[...auth]/route.ts",
+          "git_blob": "38134a6d43a66d23a1920c049d970d6aff502f3a"
+        },
+        {
+          "path": "apps/tenant-console-web/app/login/page.tsx",
+          "git_blob": "c7c6240333776caa0d4a3782d67600a7ce3c5395"
+        },
+        {
+          "path": "apps/tenant-console-web/lib/auth/constants.ts",
+          "git_blob": "8b11bd955dee8b9f54396e09b658fe355bbeee55"
+        },
+        {
+          "path": "apps/tenant-console-web/lib/auth/index.ts",
+          "git_blob": "7a09fa5b2dbbaf312e463d96e8f60f0c6e54a4cf"
+        }
+      ],
       "historical_observation": "登入頁按透過OIDC登入，400 AUTH_SESSION_EXCHANGE_DENIED，localhost:3104不被允許",
       "reproduction_requirement": "從公開origin產生正確callback，完成IdP往返與回原頁；失敗保留登入UI及重試",
       "current_result": "local_regression_passed_live_missing",
@@ -2229,12 +2262,45 @@
       "id": "R03",
       "title": "P5營運紀錄缺授權",
       "role": "平台管理員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ADMIN-VERIFY-001",
         "SR-IAM-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/platform-admin-web/app/fleet-partners/[fleetPartnerId]/page.tsx",
+          "git_blob": "12d5ffda6e86e9d3dbd36a41b5e2255f6e03f08b"
+        },
+        {
+          "path": "apps/platform-admin-web/app/fleet-partners/fleet-partner-shared.ts",
+          "git_blob": "7a4b870ae9ac76aa9cea01ada544e23f699b58d7"
+        },
+        {
+          "path": "apps/platform-admin-web/app/fleet-partners/page.tsx",
+          "git_blob": "e84057362f596228d17cb4ea65bc8ae5c151ac64"
+        },
+        {
+          "path": "apps/platform-admin-web/app/platform-admin/p5/records/page.tsx",
+          "git_blob": "2e018e9f36159eacc1e6bd9ec3babc1d7c5ef6d0"
+        },
+        {
+          "path": "apps/api/src/common/auth/auth.constants.ts",
+          "git_blob": "1be7c5bf99a52a8af07f0a3074247eb9c496473a"
+        },
+        {
+          "path": "apps/api/src/common/auth/auth.decorators.ts",
+          "git_blob": "d3b7ffd9df46cfc3cd4d7be30337ace7b98437df"
+        },
+        {
+          "path": "apps/api/src/common/auth/auth.extractor.ts",
+          "git_blob": "4202c749bba294bd8581fb730aca9317cac776d3"
+        },
+        {
+          "path": "apps/api/src/common/auth/auth.matrix.ts",
+          "git_blob": "e63f510e4275be25f126fc8f991459326560c21e"
+        }
+      ],
       "historical_observation": "P5行程紀錄→執行查詢，403缺multi_taxi_records:read；再查仍同樣",
       "reproduction_requirement": "配置可取得合法scope的操作角色，驗證正常查詢/受控匯出及未授權拒絕",
       "current_result": "local_regression_passed_live_missing",
@@ -2251,11 +2317,28 @@
       "id": "R04",
       "title": "車隊夥伴清單程式錯誤",
       "role": "平台管理員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ADMIN-VERIFY-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/platform-admin-web/app/fleet-partners/[fleetPartnerId]/page.tsx",
+          "git_blob": "12d5ffda6e86e9d3dbd36a41b5e2255f6e03f08b"
+        },
+        {
+          "path": "apps/platform-admin-web/app/fleet-partners/fleet-partner-shared.ts",
+          "git_blob": "7a4b870ae9ac76aa9cea01ada544e23f699b58d7"
+        },
+        {
+          "path": "apps/platform-admin-web/app/fleet-partners/page.tsx",
+          "git_blob": "e84057362f596228d17cb4ea65bc8ae5c151ac64"
+        },
+        {
+          "path": "apps/platform-admin-web/app/platform-admin/p5/records/page.tsx",
+          "git_blob": "2e018e9f36159eacc1e6bd9ec3babc1d7c5ef6d0"
+        }
+      ],
       "historical_observation": "車隊夥伴→重新整理，.map is not a function",
       "reproduction_requirement": "依API清單封套解析資料，失敗狀態與真正0筆分開",
       "current_result": "local_regression_passed_live_missing",
@@ -2270,11 +2353,28 @@
       "id": "R05",
       "title": "人員工作階段403無限重試",
       "role": "平台管理員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-IAM-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/api/src/common/auth/auth.constants.ts",
+          "git_blob": "1be7c5bf99a52a8af07f0a3074247eb9c496473a"
+        },
+        {
+          "path": "apps/api/src/common/auth/auth.decorators.ts",
+          "git_blob": "d3b7ffd9df46cfc3cd4d7be30337ace7b98437df"
+        },
+        {
+          "path": "apps/api/src/common/auth/auth.extractor.ts",
+          "git_blob": "4202c749bba294bd8581fb730aca9317cac776d3"
+        },
+        {
+          "path": "apps/api/src/common/auth/auth.matrix.ts",
+          "git_blob": "e63f510e4275be25f126fc8f991459326560c21e"
+        }
+      ],
       "historical_observation": "平台人員→Ops Operator詳情；等待7秒錄得31個403，仍顯示載入中",
       "reproduction_requirement": "補正讀取scope並停止對不可重試403輪詢；顯示明確權限錯誤",
       "current_result": "local_regression_passed_live_missing",
@@ -2289,11 +2389,28 @@
       "id": "R06",
       "title": "首頁與合約頁服務端崩潰",
       "role": "銀行營運／財務／方案管理員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-BANK-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/bank-console-web/app/contracts/[contractId]/page.tsx",
+          "git_blob": "ca57f99c3c7cdae7f725a5ac2a281cd616081570"
+        },
+        {
+          "path": "apps/bank-console-web/app/contracts/page.tsx",
+          "git_blob": "6eb623200892ad598be893925fe19603eb456d32"
+        },
+        {
+          "path": "apps/bank-console-web/app/page.tsx",
+          "git_blob": "7bd29627e93596603e62dcdbbe1969c34bbed95d"
+        },
+        {
+          "path": "apps/bank-console-web/lib/bank-dev-read-models.ts",
+          "git_blob": "4214fafd2b75cd7aea54838cf4e1d701069569dd"
+        }
+      ],
       "historical_observation": "正常登入財務或方案管理員，首頁ERROR3850347426；合約ERROR683994165",
       "reproduction_requirement": "三種persona登入到首頁/合約完整渲染；資料錯誤局部降級並保留導覽",
       "current_result": "local_regression_passed_live_missing",
@@ -2307,11 +2424,28 @@
       "id": "R07",
       "title": "開始叫車與替代入口都到403白頁",
       "role": "社區乘客",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-REFERRAL-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/api/src/modules/tenant-partner/tenant-partner.controller.ts",
+          "git_blob": "6d7b77f9a9269ff895efffd0e263f46f91317671"
+        },
+        {
+          "path": "apps/api/src/modules/tenant-partner/tenant-partner.service.ts",
+          "git_blob": "fad30455a1667961dbe06736dc6e95fcc41f4da3"
+        },
+        {
+          "path": "apps/referral-embed-web/Dockerfile",
+          "git_blob": "9e7e1fb6be3baf5247d926d2ef5a209f8cdd86a6"
+        },
+        {
+          "path": "apps/referral-embed-web/README.md",
+          "git_blob": "b18bfa26b308dcd41eba178654bbdf049cc8ae4c"
+        }
+      ],
       "historical_observation": "入口宣稱簽章有效，按開始叫車→403；fallback前往獨立網站仍導回同站→403",
       "reproduction_requirement": "未完成handoff不顯示已登入成功；有效handoff可到表單；fallback連至存活入口且保留返回",
       "current_result": "local_regression_passed_live_missing",
@@ -2326,11 +2460,28 @@
       "id": "R08",
       "title": "首頁與行程顯示示意資料，詳情查無該筆",
       "role": "企業員工／行政代訂",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ENTERPRISE-DATA-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/enterprise-dispatch-web/app/page.tsx",
+          "git_blob": "8ef5ea279e3903aba30123a2677aa059e1a55e1e"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/trip/page.tsx",
+          "git_blob": "4c9aa0b1e908977a1bc4990ada388959bfa38b65"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/lib/dispatch-fixture-adapter.ts",
+          "git_blob": "3166321223db444b83c30b22355ad08b686c6f40"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/lib/enterprise-fixtures.ts",
+          "git_blob": "c20bbf0c3f36bfb639d642df3a4607b779dd756a"
+        }
+      ],
       "historical_observation": "API正常但六月行程仍9分鐘抵達；行程→詳情EB-7K2E1D→404 BOOKING_NOT_FOUND，卻說服務暫時不穩定",
       "reproduction_requirement": "首頁/行程/列表/詳情共用真實booking；不存在狀態正確顯示並回列表",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2342,11 +2493,28 @@
       "id": "R09",
       "title": "聯絡司機與企業客服按鈕沒有動作",
       "role": "企業乘客",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ENTERPRISE-DATA-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/enterprise-dispatch-web/app/page.tsx",
+          "git_blob": "8ef5ea279e3903aba30123a2677aa059e1a55e1e"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/trip/page.tsx",
+          "git_blob": "4c9aa0b1e908977a1bc4990ada388959bfa38b65"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/lib/dispatch-fixture-adapter.ts",
+          "git_blob": "3166321223db444b83c30b22355ad08b686c6f40"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/lib/enterprise-fixtures.ts",
+          "git_blob": "c20bbf0c3f36bfb639d642df3a4607b779dd756a"
+        }
+      ],
       "historical_observation": "在行程頁分別點兩個按鈕；無電話連結、彈窗或導航",
       "reproduction_requirement": "接可用聯絡入口或標示不可用原因與替代方式",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2358,11 +2526,28 @@
       "id": "R10",
       "title": "總覽示意數字與已連線清單混用",
       "role": "車行營運",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-FLEET-DATA-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/fleet-partner-portal-web/app/drivers/page.tsx",
+          "git_blob": "fdfb2fb47e81054ea9b126879489221d0dad1bb9"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/page.tsx",
+          "git_blob": "950d201dcdaa1ca802c4846e6864eb2b677e93b7"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/trips/page.tsx",
+          "git_blob": "140521f2cae14d7368825afb686e1a0d013e89bf"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/vehicles/page.tsx",
+          "git_blob": "157a693bd301fbb5daf026505134b959701dc350"
+        }
+      ],
       "historical_observation": "首頁128位司機/96可接單；司機清單2位/1可接單；外框API健康且PRODUCTION",
       "reproduction_requirement": "所有營運模組統一資料來源，示範資料明確隔離",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2374,11 +2559,28 @@
       "id": "R11",
       "title": "主要按鈕可點但未接線",
       "role": "車行營運",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-FLEET-DATA-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/fleet-partner-portal-web/app/drivers/page.tsx",
+          "git_blob": "fdfb2fb47e81054ea9b126879489221d0dad1bb9"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/page.tsx",
+          "git_blob": "950d201dcdaa1ca802c4846e6864eb2b677e93b7"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/trips/page.tsx",
+          "git_blob": "140521f2cae14d7368825afb686e1a0d013e89bf"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/vehicles/page.tsx",
+          "git_blob": "157a693bd301fbb5daf026505134b959701dc350"
+        }
+      ],
       "historical_observation": "總覽匯出、車輛新增按後觀察5秒；URL/內容不變、無request/download；供給總覽另有可用新增表單",
       "reproduction_requirement": "將新增按鈕導向既有表單；匯出確實產檔；尚未實作的動作提供原因",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2390,11 +2592,28 @@
       "id": "R12",
       "title": "事故申訴要求回覆卻未提供流程",
       "role": "車行案件處理",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-FLEET-CASE-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/api/src/modules/fleet-partner/fleet-partner.controller.ts",
+          "git_blob": "0c04a2cc875ccd50e3c42e4c6c8f2d2f4490bdf0"
+        },
+        {
+          "path": "apps/api/src/modules/fleet-partner/fleet-partner.module.ts",
+          "git_blob": "fc2af449ec4b70277d278318bae52f0b2f9c6227"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/cases/page.tsx",
+          "git_blob": "6225b367142a457e145bf6ea13819df644a3758d"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts",
+          "git_blob": "caf054f47af44378d3ff7ea654303f6ff04fbbbe"
+        }
+      ],
       "historical_observation": "事故/申訴頁顯示逾SLA，回覆disabled並註明流程尚未接線",
       "reproduction_requirement": "提供案件詳情、回覆、附件及歷程；以測試案件驗收完整閉環",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2406,11 +2625,28 @@
       "id": "R13",
       "title": "對帳狀態自相矛盾",
       "role": "車行財務",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-FLEET-SETTLE-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/api/src/modules/billing-settlement/billing-settlement.service.ts",
+          "git_blob": "916a6e3049524fa1c699e8f28f296d8fad67a9e7"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/revenue/page.tsx",
+          "git_blob": "a6effc830b496e2f071faa113f7522896f924c4d"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/statements/page.tsx",
+          "git_blob": "85796566f65978fc2b08c8f09e1c2dd6c679412b"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts",
+          "git_blob": "caf054f47af44378d3ff7ea654303f6ff04fbbbe"
+        }
+      ],
       "historical_observation": "分潤頁同時說本期對帳單已產生及沒有可操作對帳單；對帳清單空白",
       "reproduction_requirement": "由同一單據狀態驅動提示，無單據時提供原因及下一步",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2422,11 +2658,28 @@
       "id": "R14",
       "title": "下載簽名檔使用假摘要與固定簽名字串",
       "role": "銀行財務",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-BANK-003"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/bank-console-web/app/artifacts/artifact-crypto.ts",
+          "git_blob": "86b8e49fbd688a59f9ada88694796c6f2e10fa30"
+        },
+        {
+          "path": "apps/bank-console-web/app/artifacts/statements/[id]/route.ts",
+          "git_blob": "a9e1ea0dc7b74c39e8965bc39144d79d1175138a"
+        },
+        {
+          "path": "apps/bank-console-web/app/artifacts/trips/[id]/route.ts",
+          "git_blob": "97dc233c368b3c87938d812bf5765b87d1c17022"
+        },
+        {
+          "path": "apps/bank-console-web/app/artifacts/verify-artifact.ts",
+          "git_blob": "458f82f08490515ee07b57b3f2057f3ce78c7dd5"
+        }
+      ],
       "historical_observation": "財務demo登入→對帳單下載；sha256欄位112字元hex可逆解碼，Signature為固定SIG_DRTS_RSA2048字串",
       "reproduction_requirement": "未簽署時如實標示；實作後由獨立驗證器驗原檔成功、竄改/錯公鑰失敗",
       "current_result": "local_regression_passed_live_missing",
@@ -2440,12 +2693,45 @@
       "id": "R15",
       "title": "結算金額可見性違反頁面角色定義",
       "role": "銀行營運檢視",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-BANK-002",
         "SR-IAM-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/bank-console-web/app/statements/[period]/page.tsx",
+          "git_blob": "d95a84b07ec84184bf8733466f12513e90254195"
+        },
+        {
+          "path": "apps/bank-console-web/app/statements/page.tsx",
+          "git_blob": "6bcb85420f41846e8173fa458c8d6486dd87eca5"
+        },
+        {
+          "path": "apps/bank-console-web/app/users/page.tsx",
+          "git_blob": "14cc75ad1fa3fb12fe3847feb347edb718def768"
+        },
+        {
+          "path": "apps/bank-console-web/lib/server-bank-api.ts",
+          "git_blob": "e85509d11d18482f8f774ddc3abdadafc2ca1e80"
+        },
+        {
+          "path": "apps/api/src/common/auth/auth.constants.ts",
+          "git_blob": "1be7c5bf99a52a8af07f0a3074247eb9c496473a"
+        },
+        {
+          "path": "apps/api/src/common/auth/auth.decorators.ts",
+          "git_blob": "d3b7ffd9df46cfc3cd4d7be30337ace7b98437df"
+        },
+        {
+          "path": "apps/api/src/common/auth/auth.extractor.ts",
+          "git_blob": "4202c749bba294bd8581fb730aca9317cac776d3"
+        },
+        {
+          "path": "apps/api/src/common/auth/auth.matrix.ts",
+          "git_blob": "e63f510e4275be25f126fc8f991459326560c21e"
+        }
+      ],
       "historical_observation": "人員頁寫OPS_VIEWER無結算金額；同role對帳清單卻顯示$200",
       "reproduction_requirement": "先明確訂定讀金額規則，再統一首頁/清單/明細/API；以真實session驗權限",
       "current_result": "local_regression_passed_live_missing",
@@ -2460,12 +2746,45 @@
       "id": "R16",
       "title": "資料讀取失敗仍呈現可信統計",
       "role": "管理員／銀行營運",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-BANK-001",
         "SR-ENTERPRISE-DATA-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/bank-console-web/app/contracts/[contractId]/page.tsx",
+          "git_blob": "ca57f99c3c7cdae7f725a5ac2a281cd616081570"
+        },
+        {
+          "path": "apps/bank-console-web/app/contracts/page.tsx",
+          "git_blob": "6eb623200892ad598be893925fe19603eb456d32"
+        },
+        {
+          "path": "apps/bank-console-web/app/page.tsx",
+          "git_blob": "7bd29627e93596603e62dcdbbe1969c34bbed95d"
+        },
+        {
+          "path": "apps/bank-console-web/lib/bank-dev-read-models.ts",
+          "git_blob": "4214fafd2b75cd7aea54838cf4e1d701069569dd"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/page.tsx",
+          "git_blob": "8ef5ea279e3903aba30123a2677aa059e1a55e1e"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/trip/page.tsx",
+          "git_blob": "4c9aa0b1e908977a1bc4990ada388959bfa38b65"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/lib/dispatch-fixture-adapter.ts",
+          "git_blob": "3166321223db444b83c30b22355ad08b686c6f40"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/lib/enterprise-fixtures.ts",
+          "git_blob": "c20bbf0c3f36bfb639d642df3a4607b779dd756a"
+        }
+      ],
       "historical_observation": "銀行timeout顯示NaN%、0% SLA未達；P5被拒仍寫100%730日保存覆蓋率",
       "reproduction_requirement": "區分載入/錯誤/無資料/真實0；無資料不計算或宣稱指標",
       "current_result": "local_regression_passed_live_missing",
@@ -2479,11 +2798,28 @@
       "id": "R17",
       "title": "空間派車看板地圖圖磚404",
       "role": "調度員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-OPS-MAP-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/ops-console-web/components/google-map-base-layer.tsx",
+          "git_blob": "732624ff269c25dc24a2b2960f7e61e121228b2f"
+        },
+        {
+          "path": "apps/ops-console-web/public/mock-map-tiles/0/0/0.svg",
+          "git_blob": "4626ae26e15d9f77a938a97b91590161e1df347e"
+        },
+        {
+          "path": "apps/ops-console-web/public/mock-map-tiles/10/851/437.svg",
+          "git_blob": "4626ae26e15d9f77a938a97b91590161e1df347e"
+        },
+        {
+          "path": "apps/ops-console-web/public/mock-map-tiles/10/851/438.svg",
+          "git_blob": "4626ae26e15d9f77a938a97b91590161e1df347e"
+        }
+      ],
       "historical_observation": "派車調度地圖載入9張mock-map-tiles SVG皆404，重訪仍然",
       "reproduction_requirement": "即使mock地圖也要有可用底圖；驗路線/位置/載入失敗提示",
       "current_result": "local_regression_passed_live_missing",
@@ -2497,11 +2833,28 @@
       "id": "R18",
       "title": "跨系統稽核連結導至錯誤位置",
       "role": "調度員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-OPS-SHELL-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/ops-console-web/components/ops-assistant/assistant-actions.ts",
+          "git_blob": "a3ffe12087b664c93ec345b4da404d729797fa1a"
+        },
+        {
+          "path": "apps/ops-console-web/components/ops-assistant/assistant-context-provider.tsx",
+          "git_blob": "04f4a7c6517ebff2fe15420746ba6aed803f892a"
+        },
+        {
+          "path": "apps/ops-console-web/components/ops-assistant/assistant-widget.tsx",
+          "git_blob": "a3692218b3e18e59b0d444d67deb2b77bb0de475"
+        },
+        {
+          "path": "apps/ops-console-web/components/ops-assistant/context-envelope.ts",
+          "git_blob": "b0dc9d528e41dd0be1b4e57b0ecbe3d05e7939f6"
+        }
+      ],
       "historical_observation": "關閉助理後點跨app audit，新視窗到ops域/platform-admin/audit，404",
       "reproduction_requirement": "連到platform-admin有效/audit並攜帶上下文",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2513,11 +2866,28 @@
       "id": "R19",
       "title": "預設助理遮擋工作控制項",
       "role": "調度員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-OPS-SHELL-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/ops-console-web/components/ops-assistant/assistant-actions.ts",
+          "git_blob": "a3ffe12087b664c93ec345b4da404d729797fa1a"
+        },
+        {
+          "path": "apps/ops-console-web/components/ops-assistant/assistant-context-provider.tsx",
+          "git_blob": "04f4a7c6517ebff2fe15420746ba6aed803f892a"
+        },
+        {
+          "path": "apps/ops-console-web/components/ops-assistant/assistant-widget.tsx",
+          "git_blob": "a3692218b3e18e59b0d444d67deb2b77bb0de475"
+        },
+        {
+          "path": "apps/ops-console-web/components/ops-assistant/context-envelope.ts",
+          "git_blob": "b0dc9d528e41dd0be1b4e57b0ecbe3d05e7939f6"
+        }
+      ],
       "historical_observation": "助理開啟時audit連結點擊10秒皆被pointer事件攔截；正常關閉後可點",
       "reproduction_requirement": "縮小或停放助理面板，確保主要操作不被遮住",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2529,11 +2899,28 @@
       "id": "R20",
       "title": "自訂情境與乘客資料未一致帶入",
       "role": "企業員工／代訂",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ENTERPRISE-FORM-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/enterprise-dispatch-web/app/bookings/new/page.tsx",
+          "git_blob": "3bbbc92a97ae4b4b26cac9c37cc44fb80d9548c1"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/bookings/review/page.tsx",
+          "git_blob": "b30f3cb3c6a1cf4d23aefebfffe80bb47e1ca3f4"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/globals.css",
+          "git_blob": "3378e367d78a5bf7fbac51ee3c364ad49c9bad46"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/layout.tsx",
+          "git_blob": "02d50d49b5121b9e358869fdcf0a7aa1a5ee8991"
+        }
+      ],
       "historical_observation": "為自己預約卻預選other/Sato；改乘客進review仍舉牌Sato様",
       "reproduction_requirement": "self/other/airport入口帶正確預設，乘客和舉牌同步或可明確編輯",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2545,11 +2932,28 @@
       "id": "R21",
       "title": "過去日期可進最後確認頁",
       "role": "企業預約者",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ENTERPRISE-FORM-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/enterprise-dispatch-web/app/bookings/new/page.tsx",
+          "git_blob": "3bbbc92a97ae4b4b26cac9c37cc44fb80d9548c1"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/bookings/review/page.tsx",
+          "git_blob": "b30f3cb3c6a1cf4d23aefebfffe80bb47e1ca3f4"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/globals.css",
+          "git_blob": "3378e367d78a5bf7fbac51ee3c364ad49c9bad46"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/layout.tsx",
+          "git_blob": "02d50d49b5121b9e358869fdcf0a7aa1a5ee8991"
+        }
+      ],
       "historical_observation": "9/6填6/13並等hydration完成；可進review且顯示送出按鈕",
       "reproduction_requirement": "欄位與確認頁拒絕過去時間並說明最早可約時間",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2561,11 +2965,28 @@
       "id": "R22",
       "title": "行動版橫向溢出",
       "role": "手機企業使用者",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ENTERPRISE-FORM-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/enterprise-dispatch-web/app/bookings/new/page.tsx",
+          "git_blob": "3bbbc92a97ae4b4b26cac9c37cc44fb80d9548c1"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/bookings/review/page.tsx",
+          "git_blob": "b30f3cb3c6a1cf4d23aefebfffe80bb47e1ca3f4"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/globals.css",
+          "git_blob": "3378e367d78a5bf7fbac51ee3c364ad49c9bad46"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/app/layout.tsx",
+          "git_blob": "02d50d49b5121b9e358869fdcf0a7aa1a5ee8991"
+        }
+      ],
       "historical_observation": "390px viewport：首页寬743px、表單694px，文字擠壓與卡片超出",
       "reproduction_requirement": "窄螢幕單欄、收斂header；主要controls不溢出",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2577,11 +2998,28 @@
       "id": "R23",
       "title": "新增表單暗色文字難以閱讀且缺欄位關聯",
       "role": "車行建檔者",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-FLEET-FORM-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/fleet-partner-portal-web/app/supply/drivers/new/page.tsx",
+          "git_blob": "ba1e1c6074dcc81cc1b77c6f06f552061032534b"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/supply/page.tsx",
+          "git_blob": "6f6dd1c1fb20068591a71324c77382c690dc87f0"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/supply/submissions/[submissionId]/page.tsx",
+          "git_blob": "0204e1e2a285b32d3c52b75794a099fbd362435c"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/supply/submissions/page.tsx",
+          "git_blob": "2f6bdab3dd51a6f48f6698649e849a06690365cb"
+        }
+      ],
       "historical_observation": "新增司機/車輛label暗字暗底對比約1.09:1，輸入無對應label/id",
       "reproduction_requirement": "修正主題文字/按鈕顏色，label與input建立關聯",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2593,12 +3031,33 @@
       "id": "R24",
       "title": "查詢工具不足、頁籤不會篩選",
       "role": "車行／企業查詢者",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ENTERPRISE-SEARCH-001",
         "SR-FLEET-DATA-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/enterprise-dispatch-web/app/bookings/page.tsx",
+          "git_blob": "98309205295974a31ebb3323cca349649100274a"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/drivers/page.tsx",
+          "git_blob": "fdfb2fb47e81054ea9b126879489221d0dad1bb9"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/page.tsx",
+          "git_blob": "950d201dcdaa1ca802c4846e6864eb2b677e93b7"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/trips/page.tsx",
+          "git_blob": "140521f2cae14d7368825afb686e1a0d013e89bf"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/vehicles/page.tsx",
+          "git_blob": "157a693bd301fbb5daf026505134b959701dc350"
+        }
+      ],
       "historical_observation": "趟次機場接送點後仍6列；司機可接單點後仍2位；企業歷史缺日期/乘客/狀態搜尋",
       "reproduction_requirement": "實作篩選與搜尋並保留條件；純統計不要偽裝互動頁籤",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2610,11 +3069,28 @@
       "id": "R25",
       "title": "未儲存輸入離頁直接丟失",
       "role": "車行建檔者",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-FLEET-FORM-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/fleet-partner-portal-web/app/supply/drivers/new/page.tsx",
+          "git_blob": "ba1e1c6074dcc81cc1b77c6f06f552061032534b"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/supply/page.tsx",
+          "git_blob": "6f6dd1c1fb20068591a71324c77382c690dc87f0"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/supply/submissions/[submissionId]/page.tsx",
+          "git_blob": "0204e1e2a285b32d3c52b75794a099fbd362435c"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/app/supply/submissions/page.tsx",
+          "git_blob": "2f6bdab3dd51a6f48f6698649e849a06690365cb"
+        }
+      ],
       "historical_observation": "新增表單填audit字串→供給總覽→上一頁，欄位歸空，無提醒",
       "reproduction_requirement": "提供未存提醒或安全暫存，回頁還原",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2626,11 +3102,28 @@
       "id": "R26",
       "title": "總覽匯出未接線，但對帳CSV可下載",
       "role": "通路財務",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-CHANNEL-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/channel-partner-portal-web/Dockerfile",
+          "git_blob": "24520ac84cf2c4e55a8844b698092be6ef07590f"
+        },
+        {
+          "path": "apps/channel-partner-portal-web/app/control-plane-proxy/[...path]/route.ts",
+          "git_blob": "d2633b89d992d8ed52c458f4e614beb7189a523f"
+        },
+        {
+          "path": "apps/channel-partner-portal-web/app/dashboard/page.tsx",
+          "git_blob": "1a52d9467c27a86a6c68b9dbe2e03465c4d58ed0"
+        },
+        {
+          "path": "apps/channel-partner-portal-web/app/globals.css",
+          "git_blob": "0335e4746c6388b8c0aa27106c03502564f3776c"
+        }
+      ],
       "historical_observation": "總覽匯出後5秒無任何request/download；對帳明細下載200且225分潤對上",
       "reproduction_requirement": "連到可用匯出或既有CSV，下載鈕標明內容及格式",
       "current_result": "local_regression_passed_live_missing",
@@ -2644,11 +3137,28 @@
       "id": "R27",
       "title": "環境標示與使用者文案混入工程資訊",
       "role": "各角色",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ENV-COPY-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/bank-console-web/lib/translations.ts",
+          "git_blob": "e8ab5099894bd9f1efcc9f18327b902dbf057bb4"
+        },
+        {
+          "path": "apps/enterprise-dispatch-web/lib/translations.ts",
+          "git_blob": "2a5ee746c0bdfa9597fb8147ed3f6ddae893d6a1"
+        },
+        {
+          "path": "apps/fleet-partner-portal-web/lib/translations.ts",
+          "git_blob": "f19f5546e3ac94fca97c789d6f1b81c04c01fb86"
+        },
+        {
+          "path": "apps/ops-console-web/lib/translations.ts",
+          "git_blob": "b4aa8e719179672f85aa8375587f97af1f0c30d2"
+        }
+      ],
       "historical_observation": "dev/mock畫面顯示正式環境或PRODUCTION；多頁顯示ActionIntent、submissionId、dispatch_timeout等",
       "reproduction_requirement": "由部署設定產生環境標記；狀態繁中化、下一步明確，技術詳情放診斷區",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2660,11 +3170,28 @@
       "id": "R28",
       "title": "對帳開立日晚於到期日",
       "role": "銀行財務",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-BANK-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/bank-console-web/app/contracts/[contractId]/page.tsx",
+          "git_blob": "ca57f99c3c7cdae7f725a5ac2a281cd616081570"
+        },
+        {
+          "path": "apps/bank-console-web/app/contracts/page.tsx",
+          "git_blob": "6eb623200892ad598be893925fe19603eb456d32"
+        },
+        {
+          "path": "apps/bank-console-web/app/page.tsx",
+          "git_blob": "7bd29627e93596603e62dcdbbe1969c34bbed95d"
+        },
+        {
+          "path": "apps/bank-console-web/lib/bank-dev-read-models.ts",
+          "git_blob": "4214fafd2b75cd7aea54838cf4e1d701069569dd"
+        }
+      ],
       "historical_observation": "2026/03對帳單開立日顯示9/6、到期3/31，下載內容亦同",
       "reproduction_requirement": "釐清樣本/日期fallback，使用原始開立日，未知不補今天",
       "current_result": "local_regression_passed_live_missing",
@@ -2678,12 +3205,17 @@
       "id": "R29",
       "title": "文件入口與實際部署版本不一致",
       "role": "維運／驗收人員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-PUBLIC-001",
         "SR-READINESS-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "tools/system-remediation/public-entry/system-remediation-endpoints.py",
+          "git_blob": "fcb9ec853ec283e655069f1ca12c998286a69a71"
+        }
+      ],
       "historical_observation": "文件4t7rg6fmeq服務URL404；需從9/3成功部署日誌取lyo6ra57fq入口",
       "reproduction_requirement": "部署自動輸出單一服務清單與SHA，健康檢查使用真實角色旅程",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2695,11 +3227,16 @@
       "id": "R30",
       "title": "司機web預覽在載入時崩潰",
       "role": "司機／開發驗證",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-DRIVER-WEB-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/driver-app/components/driver-trip-map.tsx",
+          "git_blob": "6e65be4f145bd63ea4de0f90601025d1e036d896"
+        }
+      ],
       "historical_observation": "既有expo web在390px開首頁/onboarding/SOS，codegenNativeComponent is not a function，stack指native地圖import",
       "reproduction_requirement": "若仍支援web preview須隔離native地圖；原生流程另做裝置驗收",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2711,7 +3248,7 @@
       "id": "N01",
       "title": "請假申請沒有完整工作流程",
       "role": "司機／排班主管",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-CONTRACT-001",
         "SR-DESIGN-001",
@@ -2736,7 +3273,7 @@
       "id": "N02",
       "title": "學院、測驗、完訓證據未落地",
       "role": "司機／車行訓練管理員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ACADEMY-BE-001",
         "SR-ACADEMY-FE-001",
@@ -2761,7 +3298,7 @@
       "id": "N03",
       "title": "車主的受限自助入口尚未產品化",
       "role": "車主 Host",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-CONTRACT-001",
         "SR-DESIGN-001",
@@ -2769,7 +3306,32 @@
         "SR-HOST-FE-001",
         "SR-WIRE-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "packages/api-client/src/index.ts",
+          "git_blob": "669ae118119f51affe23c2c08fe65933d05dea7b"
+        },
+        {
+          "path": "packages/contracts/src/index.ts",
+          "git_blob": "56188d91004a5b57356630779111668c43cf84e7"
+        },
+        {
+          "path": "apps/api/src/app.module.ts",
+          "git_blob": "5ea33c3318df5cca5cac529260573dbbcd900cc5"
+        },
+        {
+          "path": "apps/api/src/modules/fleet-partner/supply-readiness.service.ts",
+          "git_blob": "b76d1e80b294a4c18fa2d433728da85afea41760"
+        },
+        {
+          "path": "apps/api/src/modules/shift-attendance/shift-attendance.service.ts",
+          "git_blob": "80f6dcb333eda1fae8fc031808f2f9b4d30d089b"
+        },
+        {
+          "path": "apps/driver-app/app/_layout.tsx",
+          "git_blob": "654d872e08e96e75bf23967a71380b927b69894b"
+        }
+      ],
       "historical_observation": "PRD 12.6／維保條款；角色矩陣明列 partial / not productized；啟用 app 與 IAM 未見完整 Host 落點；不推論完全沒有車輛所有權欄位",
       "reproduction_requirement": "兩位車主只看自己車輛，無法以 ID 或下載 URL 讀他人資料",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2781,7 +3343,7 @@
       "id": "N04",
       "title": "帳單建立了下載中繼資料，但沒有真正帳單檔案",
       "role": "租戶財務",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ARTIFACT-001",
         "SR-INVOICE-001"
@@ -2812,7 +3374,7 @@
       "id": "N05",
       "title": "一般報表沒有 PDF／Excel renderer",
       "role": "營運／租戶報表使用者",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-DEPS-001",
         "SR-REPORT-001"
@@ -2834,7 +3396,7 @@
       "id": "N06",
       "title": "邀請寄送只有記憶體紀錄，卻標示 delivered",
       "role": "租戶人員管理員／受邀者",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-MAIL-001",
         "SR-NOTIFY-001"
@@ -2863,7 +3425,7 @@
       "id": "N07",
       "title": "簽核 Email 沒有真正送出，但紀錄已送達人員",
       "role": "租戶簽核人／申請人",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-MAIL-002",
         "SR-NOTIFY-001"
@@ -2893,7 +3455,7 @@
       "id": "N08",
       "title": "牌貼下載無可用檔案，連結也過期",
       "role": "車行／法遵／公開資訊管理員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ARTIFACT-001",
         "SR-PLACARD-001"
@@ -2922,7 +3484,7 @@
       "id": "N09",
       "title": "匯款證明缺少上傳、存在性與關聯查驗",
       "role": "出納／覆核人",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-PROOF-001"
       ],
@@ -2947,7 +3509,7 @@
       "id": "N10",
       "title": "派車／到達推播 provider 尚未接通",
       "role": "P5 乘客",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-PUSH-001",
         "SR-READINESS-001"
@@ -2973,11 +3535,28 @@
       "id": "N11",
       "title": "轉接器管理頁的資料 API 404",
       "role": "平臺轉接器管理員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ADMIN-ADAPTER-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/api/src/modules/platform-admin/platform-admin.controller.ts",
+          "git_blob": "ec9aad34959f551ee7a1e2b073e13fe832c7ca72"
+        },
+        {
+          "path": "apps/api/src/modules/platform-admin/platform-admin.service.ts",
+          "git_blob": "ee10610cdb749ee7dcab17e00f98756d06d4225b"
+        },
+        {
+          "path": "apps/platform-admin-web/app/adapter-registry/components/AdapterList.tsx",
+          "git_blob": "18e15d0f002308def919ea9a8e18715d818bcbfc"
+        },
+        {
+          "path": "apps/platform-admin-web/app/adapter-registry/components/EditAdapterModal.tsx",
+          "git_blob": "7eb1686162c736a4b0bc480c20a57f59714033c7"
+        }
+      ],
       "historical_observation": "正常 /adapter-registry 頁面在兩次操作均請求 /control-plane-proxy/platform-admin/adapters 得404；其他 health頁可列2個stub，不能替代此管理頁",
       "reproduction_requirement": "列表正確載入；管理表單與回讀一致；無權角色被適當拒絕",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -2989,11 +3568,28 @@
       "id": "N12",
       "title": "憑證到期警告使用過期固定資料",
       "role": "轉接器管理員",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-ADMIN-ADAPTER-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/api/src/modules/platform-admin/platform-admin.controller.ts",
+          "git_blob": "ec9aad34959f551ee7a1e2b073e13fe832c7ca72"
+        },
+        {
+          "path": "apps/api/src/modules/platform-admin/platform-admin.service.ts",
+          "git_blob": "ee10610cdb749ee7dcab17e00f98756d06d4225b"
+        },
+        {
+          "path": "apps/platform-admin-web/app/adapter-registry/components/AdapterList.tsx",
+          "git_blob": "18e15d0f002308def919ea9a8e18715d818bcbfc"
+        },
+        {
+          "path": "apps/platform-admin-web/app/adapter-registry/components/EditAdapterModal.tsx",
+          "git_blob": "7eb1686162c736a4b0bc480c20a57f59714033c7"
+        }
+      ],
       "historical_observation": "9/6 畫面仍顯示6天後到期、2026-05-31前輪替，且資料 API unavailable",
       "reproduction_requirement": "調整測試時間前後會正確切換未到期／即將到期／已到期",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -3005,11 +3601,24 @@
       "id": "N13",
       "title": "合約列表仍停用詳情入口",
       "role": "營運合約查詢者",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-OPS-CONTRACT-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "apps/ops-console-web/app/contracts/[contractId]/page.tsx",
+          "git_blob": "70b5f5ab079ed32fc71be4cda1f2f33286417ff4"
+        },
+        {
+          "path": "apps/ops-console-web/app/contracts/contracts-tables.tsx",
+          "git_blob": "8df112ab4d5e1b3cdf127e5c7e2515bd38fa6300"
+        },
+        {
+          "path": "apps/ops-console-web/app/contracts/page.tsx",
+          "git_blob": "26320bd9ec009198903b2a83281fe7290654c0fd"
+        }
+      ],
       "historical_observation": "本輪3筆合約均顯示後續交付；synthesizeAvailableActions 固定 enabled:false／contract_detail_pending，但 /contracts/[contractId] 檔案已存在；直接導航現有合約詳情已成功，確認是列表接線缺口。",
       "reproduction_requirement": "由列表直接進同一合約詳情並返回原篩選，不依賴手打 URL",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -3021,13 +3630,42 @@
       "id": "N14",
       "title": "合約詳情缺少執行派車所需營運條款",
       "role": "調度員／營運合約查詢者",
-      "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+      "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
       "task_ids": [
         "SR-CONTRACT-001",
         "SR-CONTRACT-READ-001",
         "SR-OPS-CONTRACT-001"
       ],
-      "current_source_locators": [],
+      "current_source_locators": [
+        {
+          "path": "packages/api-client/src/index.ts",
+          "git_blob": "669ae118119f51affe23c2c08fe65933d05dea7b"
+        },
+        {
+          "path": "packages/contracts/src/index.ts",
+          "git_blob": "56188d91004a5b57356630779111668c43cf84e7"
+        },
+        {
+          "path": "apps/api/src/modules/regulatory-registry/regulatory-registry.controller.ts",
+          "git_blob": "d9a73ec6e02fd341b7398ad4c5541bfb48502f35"
+        },
+        {
+          "path": "apps/api/src/modules/regulatory-registry/regulatory-registry.module.ts",
+          "git_blob": "243fea1895a323143501dd73530d24e47b354b25"
+        },
+        {
+          "path": "apps/ops-console-web/app/contracts/[contractId]/page.tsx",
+          "git_blob": "70b5f5ab079ed32fc71be4cda1f2f33286417ff4"
+        },
+        {
+          "path": "apps/ops-console-web/app/contracts/contracts-tables.tsx",
+          "git_blob": "8df112ab4d5e1b3cdf127e5c7e2515bd38fa6300"
+        },
+        {
+          "path": "apps/ops-console-web/app/contracts/page.tsx",
+          "git_blob": "26320bd9ec009198903b2a83281fe7290654c0fd"
+        }
+      ],
       "historical_observation": "直接進既有 contract-demo-001 詳情可成功，但修改時窗、憑證、等候、no-show、SLA、生效版本、授權模式等皆顯示 read model 未提供；不表示全後端資料庫一定沒有",
       "reproduction_requirement": "同一合約可查到實際條款與版本；派車限制及費用引用同一權威值",
       "current_result": "current_version_indexed_reproduction_missing",
@@ -7090,18 +7728,18 @@
       "id": "SR-PUBLIC-001",
       "owner": "Codex2",
       "reviewer": "Codex",
-      "status": "in_progress",
-      "last_update": "2026-09-08T13:47:40Z",
-      "next": "讀取追溯來源、確認 origin/dev 並重現九個公開入口；僅準備診斷與 live gate runbook。",
+      "status": "done",
+      "last_update": "2026-09-08T14:05:42Z",
+      "next": "GitHub reconciled candidate 0199e70be262 from PR #1759.",
       "required_acceptance": []
     },
     {
       "id": "SR-DRIVER-WEB-001",
-      "owner": "Codex2",
+      "owner": "Gemini",
       "reviewer": "Codex",
-      "status": "blocked",
-      "last_update": "2026-09-08T12:41:12Z",
-      "next": "已普通push anchor b148247c7dac43d29e58a4da36992f94e8a318a1；base 3b60a3757238663572f16f010c94f446f2c71eaa。typecheck、5項平台測試、11檔91項既有回歸通過；iOS/Android Hermes export exit 0並保留native map imports。web export exit 1：expo-sqlite/web/worker.ts無法解析wa-sqlite.wasm（檔案存在）；三路由browser未驗。需supervisor擴scope至apps/driver-app/metro.config.js或指派producer並加入必要相依。證據docs/04-uat/system-remediation-20260906/SR-DRIVER-WEB-001.md。未鎖candidate、未handoff、未做live/真機。",
+      "status": "todo",
+      "last_update": "2026-09-08T15:01:48Z",
+      "next": "Availability-first reassignment: Gemini claimed SR-DRIVER-WEB-001 while Codex2 was unavailable or occupied.",
       "required_acceptance": []
     }
   ],

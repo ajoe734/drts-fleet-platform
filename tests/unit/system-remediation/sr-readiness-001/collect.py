@@ -25,7 +25,27 @@ def read(path):
     return json.loads(path.read_text())
 
 
+def regression_state(paths, suites):
+    selected = [s for s in suites if s['path'] in paths]
+    if not selected:
+        return 'current_version_indexed_reproduction_missing'
+    if any(s['status'] == 'failed' or any(a['status'] == 'failed' for a in s['assertions']) for s in selected):
+        return 'local_regression_failed_live_missing'
+    if any(s['status'] != 'passed' or not s['assertions'] or any(a['status'] != 'passed' for a in s['assertions']) for s in selected):
+        return 'local_regression_incomplete_live_missing'
+    return 'local_regression_passed_live_missing'
+
+
 def collect(report_path, base):
+    base = git('rev-parse', base)
+    # The supplied baseline must actually describe the checked-out product code.
+    changed = git('diff', '--name-only', base).splitlines()
+    owned = ('docs/04-uat/system-remediation-20260906/readiness.json',
+             'docs/04-uat/system-remediation-20260906/current-state.md',
+             'docs/04-uat/system-remediation-20260906/SR-READINESS-001.md',
+             'tests/unit/system-remediation/sr-readiness-001/')
+    if any(not any(p == s or (s.endswith('/') and p.startswith(s)) for s in owned) for p in changed):
+        raise ValueError('Checked-out code differs from requested baseline outside readiness scope')
     manifest = read(ROOT / 'tools/task-dispatch/manifests/system-remediation-20260906.json')
     coverage = read(DOC / 'coverage.json')
     findings = read(DOC / 'source/findings.json') + read(DOC / 'source/new-gaps.json')
@@ -73,13 +93,17 @@ def collect(report_path, base):
                 path = row['file']
                 locators.append({'path': path, 'git_blob': git('rev-parse', f'{base}:{path}')})
         regressions = sorted({s for t in linked for s in task_evidence[t]['regression_suites']})
+        if not locators:
+            locators = list({s['path']: s for t in linked for s in task_evidence[t]['source_locators']}.values())
+        if not locators:
+            locators = [{'path': tasks[t]['task_spec_ref'], 'git_blob': git('rev-parse', f"{base}:{tasks[t]['task_spec_ref']}")} for t in linked]
         issues.append({
             'id': issue_id, 'title': source.get('不足', source.get('問題')),
             'role': source.get('角色', source.get('受影響角色')),
             'base_sha': base, 'task_ids': linked, 'current_source_locators': locators,
             'historical_observation': source.get('重現步驟與實際結果', source.get('證據與限制')),
             'reproduction_requirement': source.get('建議修正及驗收', source.get('驗收條件')),
-            'current_result': 'local_regression_passed_live_missing' if regressions else 'current_version_indexed_reproduction_missing',
+            'current_result': regression_state(regressions, suites),
             'regression_suites': regressions,
             'live_status': 'missing',
             'missing': '目前部署 SHA、合法角色與同資源跨端讀回；本機測試不代表完整 issue 已驗收。',
@@ -176,4 +200,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     result = collect(args.report, args.base)
     (DOC / 'readiness.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
-    print(f"44 issue / 134 capability inventory written; {result['regression']['passed']} local tests; all live gates missing")
+    print(f"{len(result['issues'])} issue / {len(result['capabilities'])} capability inventory written; {result['regression']['passed']} local tests; all live gates missing")
