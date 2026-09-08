@@ -192,6 +192,27 @@ EXIT=0
   僅供 supervisor / reviewer 參考比較，本任務未對它們做任何寫入或關閉動作，
   避免越權操作非本任務擁有的分支/PR。
 
+## 5.5 交接前重新驗證（against 目前 origin/dev）
+
+candidate（`b7a4e2a4e`）建立後 supervisor 隊列前進，`origin/dev` 已從
+`3b60a3757` 推進至 `38173c781`（`docs(SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION)`，
+中間另含 SR-MAIL-001／SR-PROOF-001 unblock 兩個文件型 commit）。交接前重新確認：
+
+- `git log --oneline 3b60a3757..origin/dev -- apps/enterprise-dispatch-web tests/unit/system-remediation/sr-enterprise-form-001`
+  → 無輸出（這三個新 commit 皆未觸及本任務相關檔案），故本 candidate 不需 rebase，
+  base SHA 沿用 `3b60a3757`，未重做/未回退。
+- `git diff --check` → `EXIT=0`
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/`
+  → `Test Files 1 passed (1)` / `Tests 13 passed (13)`，`EXIT=0`
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck` → `tsc --noEmit`，`EXIT=0`
+- `git ls-remote --heads origin claude/sr-enterprise-form-001` → `b7a4e2a4e...`
+  （與本地 HEAD 一致，先前已 push，非本輪新增 commit）
+- Design contract 自查：`git show b7a4e2a4e -- apps/enterprise-dispatch-web/app/globals.css`
+  僅新增 `@media (max-width: 640px)` layout 規則（grid 欄數/`position: sticky`
+  覆寫），未新增任何 hex 色碼或 `@drts/ui-tokens` realm token 以外的顏色定義。
+
+時間：2026-09-08T13:25:00Z
+
 ## 5. 資源 ID / 影響範圍
 
 - 本任務未呼叫任何真實後端 API（無建立/更新真實 booking 資源 ID）；
