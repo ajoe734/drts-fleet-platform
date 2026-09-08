@@ -35,12 +35,14 @@ returns the following exact mapping (`=` means unchanged patch/message):
 | none | `3cc88024f` | added current-base evidence |
 
 This is published-history divergence, not an observed foreign-file patch.
-The diff against current dev contains exactly four parent-scoped files:
+At the initial audit, the parent diff against dev contained exactly four
+parent-scoped files. The evidence and test files exist on the retained parent
+commit, not on this helper branch; their links below pin that historical tree:
 
 - `apps/fleet-partner-portal-web/components/fleet-supply-workspace.tsx`
 - `apps/fleet-partner-portal-web/lib/fleet-portal-supply.ts`
-- `docs/04-uat/system-remediation-20260906/SR-FLEET-FORM-001.md`
-- `tests/unit/system-remediation/sr-fleet-form-001/sr-fleet-form-001.test.ts`
+- [Parent UAT evidence](https://github.com/ajoe734/drts-fleet-platform/blob/3cc88024f755e6a104a18b72bbd604c087c6c4e1/docs/04-uat/system-remediation-20260906/SR-FLEET-FORM-001.md)
+- [Parent regression tests](https://github.com/ajoe734/drts-fleet-platform/blob/3cc88024f755e6a104a18b72bbd604c087c6c4e1/tests/unit/system-remediation/sr-fleet-form-001/sr-fleet-form-001.test.ts)
 
 `git worktree list --porcelain` finds no checkout of the parent branch.
 The assigned helper worktree is initially clean on
@@ -122,3 +124,25 @@ are recorded in helper handoff/PR metadata, avoiding a self-referential SHA here
 The parent receives a canonical status note directing supervisor routing/resume
 and owner recovery from `3cc88024f`. It remains blocked pending that execution;
 this documented path does not claim the fleet feature or its CI is complete.
+
+## Follow-up: helper CI repair
+
+PR #1752 candidate `6b99283b63d6874d34c139b7b7da399a5bf6ab50`
+failed Canonical consistency. Local reproduction with
+`python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`
+identified exactly two missing-path citations: the parent evidence and test
+files above. Both were verified with `git cat-file -e` against retained parent
+commit `3cc88024f` (exit 0). They are now commit-pinned historical links rather
+than assertions that those files exist on the helper branch.
+
+Fresh dev was `38173c781`; it was merged normally into this already published
+helper branch to preserve the remote candidate as an ancestor. This is a
+non-destructive exception to the usual rebase refresh: rebasing the published
+helper would recreate the non-fast-forward blocker this task diagnoses.
+No old refs were reset and no force push was used.
+
+Validation after the citation repair: canonical consistency (all four checks,
+zero findings), `git diff --check`, and commit trailer validation all exit 0.
+No product code changed; parent tests and live acceptance remain for the
+replacement implementation candidate. The updated helper head requires fresh
+same-SHA review and CI on the existing PR #1752.
