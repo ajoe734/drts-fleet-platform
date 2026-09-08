@@ -127,6 +127,18 @@ satisfy that gate. See the [evidence, routing decision and resume gate](support/
 This is an explicit follow-up on the existing parent, not authorization to edit
 shared files or a claim that a new producer task already exists.
 
+### Q-SR-OPS-PROOF-001 — preparation handoff and live resource sequencing pending
+
+Supervisor/Chairman must record the preparation-versus-live acceptance boundary
+for SR-OPS-PROOF-001 (Codex / Codex2) and route isolated resource preparation
+through Gemini, owner of SR-LIVE-OPS-001. LIVE-OPS already depends on OPS-PROOF;
+do not add the reverse dependency or require completed live receipts to begin
+resource coordination. Preserve both acceptance sets until the supervisor records
+a reviewed allocation; no preparation-only scope cut is approved by this helper.
+The parent remains blocked pending that decision and retrievable authorized
+inputs. This is follow-up on the existing parent, not a new unregistered task.
+See the [decision route and resume gate](support/unblock/SR-OPS-PROOF-001/SR-OPS-PROOF-001-UNBLOCK-PLANNING-DECISION.md).
+
 ## Resolved Items
 
 
