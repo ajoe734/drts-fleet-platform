@@ -1,5 +1,32 @@
 # SR-ENTERPRISE-SEARCH-001 — 企業歷史查詢條件與結果一致
 
+## 2026-09-08 dispatch（18:45 resume）核實
+
+- `git fetch origin` exit 0；本次最新 base `origin/dev` 為
+  `d4f54ef94e059a981bf2be1f7b944e815870e117`。開始時 local / remote task head
+  均為 `31f511cf67f8a047e730d713742ee568f754502e`。
+- `git rebase origin/dev` exit 1：重播 `f20c35e97` 時本檔 add/add conflict；
+  `git rebase --abort` exit 0，保留原有提交，沒有強推或完成 rebase。
+- 直接 `git show origin/dev:<path>` 核對 controller、service、client（exit 0）：
+  `owned-mobility.controller.ts` 的 `listTenantBookings` 只接兩個 headers；
+  `owned-mobility.service.ts` 只依 tenant 篩選，回傳固定 page 1 與全量
+  items.length；`packages/api-client/src/index.ts:1192` 的
+  `listTenantBookings()` 仍無參數，回傳 `BookingRecord[]`。
+- current-release `ai-status.sh show SR-BOOKING-VERIFY` exit 1，
+  `Task not found: SR-BOOKING-VERIFY`；parent show exit 0，depends_on 仍為 []。
+  history helper show exit 0、狀態 done，只證明其文件已合併。
+- `git show origin/dev:support/unblock/SR-ENTERPRISE-SEARCH-001/SR-ENTERPRISE-SEARCH-001-UNBLOCK-HISTORY-REPAIR.md`
+  exit 0：交接仍要求 supervisor 登錄 backend producer、補 parent dependencies
+  及 shared contract/client/wrapper scopes；producer merge/acceptance 後指定
+  乾淨 replacement worktree。此次 dispatch 未提供上述前置。
+- 資源仍為 GET `/api/tenant/bookings`，程式 tenant ID
+  `10000000-0000-0000-0000-000000000201`；沒有 live 請求、booking ID 或
+  真實 filtered total 證據。本次沒有 UI 變更，未執行 typecheck、Vitest、
+  browser 或真機測試；歷史測試結果不代表本次 acceptance。
+
+這是阻擋證據更新，沒有可 handoff 的 candidate。需 supervisor 完成上述
+producer 規劃與相依後再派工；只解除 history helper 不會補足 API 能力。
+
 ## 2026-09-08 resumed dispatch：history helper 完成不等於後端前置完成
 
 - 本次 `git fetch origin` exit 0；核實 base `origin/dev` =
