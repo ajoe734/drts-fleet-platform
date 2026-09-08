@@ -106,6 +106,7 @@ NODE
       [[ "$target_host" == "localhost" || "$target_host" == "127.0.0.1" || "$target_host" == "::1" ]] || die "$workload load target must be loopback; authorized cloud load belongs to SR-LIVE-OPS-001"
     done
     : > "$output"
+    load_failed=0
     for workload in booking dispatch report; do
       url_var="${workload}_url"; url="${!url_var}"
       for ((i=1; i<=requests; i++)); do
@@ -114,14 +115,24 @@ NODE
         set +e
         raw="$(curl "${curl_args[@]}" "$url" 2>&1)"; exit_code=$?
         set -e
-        node - "$output" "$workload" "$i" "$url" "$raw" "$exit_code" <<'NODE'
+        if ! node - "$output" "$workload" "$i" "$url" "$raw" "$exit_code" "$base_sha" "$candidate_sha" "$now" <<'NODE'
 const fs = require("node:fs");
-const [output, workload, sequence, url, raw, exitCode] = process.argv.slice(2);
+const [output, workload, sequence, url, raw, exitCode, baseSha, candidateSha, observedAt] = process.argv.slice(2);
 const match = raw.match(/(\d{3})\s+([0-9.]+)$/);
-fs.appendFileSync(output, JSON.stringify({workload, sequence:Number(sequence), url, rawCurl:raw, curlExitCode:Number(exitCode), httpStatus:match ? Number(match[1]) : null, latencyMs:match ? Number(match[2]) * 1000 : null, error: Number(exitCode) === 0 ? null : raw}) + "\n");
+const httpStatus = match ? Number(match[1]) : null;
+const latencyMs = match ? Number(match[2]) * 1000 : null;
+const error = Number(exitCode) !== 0 ? raw
+  : !match || !Number.isFinite(latencyMs) ? "Invalid curl measurement"
+  : httpStatus < 200 || httpStatus >= 300 ? `HTTP ${httpStatus}` : null;
+fs.appendFileSync(output, JSON.stringify({taskId:"SR-OPS-PROOF-001", kind:"load_probe", baseSha, candidateSha, observedAt, workload, sequence:Number(sequence), url, rawCurl:raw, curlExitCode:Number(exitCode), httpStatus, latencyMs, error}) + "\n");
+process.exitCode = error === null ? 0 : 1;
 NODE
+        then
+          load_failed=1
+        fi
       done
     done
+    exit "$load_failed"
     ;;
   *) usage >&2; exit 2 ;;
 esac

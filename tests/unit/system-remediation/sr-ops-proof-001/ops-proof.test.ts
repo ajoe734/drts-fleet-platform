@@ -17,6 +17,68 @@ const script = resolve(
 
 describe("SR-OPS-PROOF-001 isolated ops proof harness", () => {
   it.each([
+    ["200 0.125", 0, 0, null],
+    ["500 0.125", 0, 1, "HTTP 500"],
+    ["302 0.125", 0, 1, "HTTP 302"],
+    ["connection refused 000 0.001", 7, 1, "connection refused"],
+    ["invalid measurement", 0, 1, "Invalid curl measurement"],
+  ])(
+    "retains all workload records for curl result %s",
+    (raw, curlExit, expectedExit, error) => {
+      const directory = mkdtempSync(resolve(tmpdir(), "ops-proof-"));
+      try {
+        // A command spy verifies recording mechanics, never API/capacity success.
+        writeFileSync(
+          resolve(directory, "curl"),
+          `#!/bin/sh\nprintf '%s' '${raw}'\nexit ${curlExit}\n`,
+          { mode: 0o755 },
+        );
+        const output = resolve(directory, "load.jsonl");
+        const result = spawnSync(
+          "bash",
+          [
+            script,
+            "load",
+            "--booking-url",
+            "http://127.0.0.1:9/booking",
+            "--dispatch-url",
+            "http://127.0.0.1:9/dispatch",
+            "--report-url",
+            "http://127.0.0.1:9/report",
+            "--output",
+            output,
+          ],
+          {
+            encoding: "utf8",
+            env: { ...process.env, PATH: `${directory}:${process.env.PATH}` },
+          },
+        );
+        expect(result.status).toBe(expectedExit);
+        const records = readFileSync(output, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line));
+        expect(records.map((record) => record.workload)).toEqual([
+          "booking",
+          "dispatch",
+          "report",
+        ]);
+        for (const record of records) {
+          expect(record.kind).toBe("load_probe");
+          expect(record.baseSha).toMatch(/^[a-f0-9]{40}$/);
+          expect(record.candidateSha).toMatch(/^[a-f0-9]{40}$/);
+          expect(record.rawCurl).toBe(raw);
+          expect(record.curlExitCode).toBe(curlExit);
+          if (error === null) expect(record.error).toBeNull();
+          else expect(record.error).toContain(error);
+        }
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
     "postgresql://127.0.0.1/drts_ops_proof_test?host=production.invalid",
     "postgresql://127.0.0.1/drts_ops_proof_test?dbname=production",
     "postgresql://127.0.0.1/drts_ops_proof_test?service=production",
