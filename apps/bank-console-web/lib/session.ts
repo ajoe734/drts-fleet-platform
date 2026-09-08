@@ -41,7 +41,7 @@ function getSessionSecret(): string {
 
 export function signSessionRole(
   role: BankConsoleRole,
-  bankCode: string = "ctbc",
+  bankCode: string = "acme",
 ): string {
   const payload = `${role}:${bankCode}`;
   const hmac = createHmac("sha256", getSessionSecret())
@@ -83,7 +83,7 @@ export function verifySessionRole(
   if (!role) {
     return null;
   }
-  return { role, bankCode: bankCode || "ctbc" };
+  return { role, bankCode: bankCode || "acme" };
 }
 
 type ActorProfile = {
@@ -107,31 +107,31 @@ const ACTOR_PROFILES: Record<BankConsoleRole, ActorProfile> = {
   bank_program_admin: {
     emailLocal: "program-admin",
     nameKeys: {
-      ctbc: "session.actor.bank_program_admin.ctbc",
-      cathay: "session.actor.bank_program_admin.cathay",
-      taishin: "session.actor.bank_program_admin.taishin",
-      dbs: "session.actor.bank_program_admin.dbs",
-      fubon: "session.actor.bank_program_admin.fubon",
+      acme: "session.actor.bank_program_admin.acme",
+      contoso: "session.actor.bank_program_admin.contoso",
+      fabrikam: "session.actor.bank_program_admin.fabrikam",
+      northwind: "session.actor.bank_program_admin.northwind",
+      tailspin: "session.actor.bank_program_admin.tailspin",
     },
   },
   bank_ops_viewer: {
     emailLocal: "ops-viewer",
     nameKeys: {
-      ctbc: "session.actor.bank_ops_viewer.ctbc",
-      cathay: "session.actor.bank_ops_viewer.cathay",
-      taishin: "session.actor.bank_ops_viewer.taishin",
-      dbs: "session.actor.bank_ops_viewer.dbs",
-      fubon: "session.actor.bank_ops_viewer.fubon",
+      acme: "session.actor.bank_ops_viewer.acme",
+      contoso: "session.actor.bank_ops_viewer.contoso",
+      fabrikam: "session.actor.bank_ops_viewer.fabrikam",
+      northwind: "session.actor.bank_ops_viewer.northwind",
+      tailspin: "session.actor.bank_ops_viewer.tailspin",
     },
   },
   bank_finance: {
     emailLocal: "finance",
     nameKeys: {
-      ctbc: "session.actor.bank_finance.ctbc",
-      cathay: "session.actor.bank_finance.cathay",
-      taishin: "session.actor.bank_finance.taishin",
-      dbs: "session.actor.bank_finance.dbs",
-      fubon: "session.actor.bank_finance.fubon",
+      acme: "session.actor.bank_finance.acme",
+      contoso: "session.actor.bank_finance.contoso",
+      fabrikam: "session.actor.bank_finance.fabrikam",
+      northwind: "session.actor.bank_finance.northwind",
+      tailspin: "session.actor.bank_finance.tailspin",
     },
   },
 };
@@ -214,8 +214,8 @@ export function getBankConsoleSession(
   const role = resolveBankConsoleRole(rawRole) ?? "bank_ops_viewer";
   const profile = ACTOR_PROFILES[role];
   const emailDomain =
-    bank.code === "ctbc"
-      ? "ctbcbank.com"
+    bank.code === "acme"
+      ? "acme.example"
       : `${bank.issuerCode.toLowerCase()}.demo`;
 
   return {
@@ -242,11 +242,11 @@ export function deriveBankCodeFromIdentity(
 
   if (email?.trim()) {
     const rawEmail = email.trim().toLowerCase();
-    if (rawEmail.includes("ctbc")) return "ctbc";
-    if (rawEmail.includes("cathay")) return "cathay";
-    if (rawEmail.includes("taishin")) return "taishin";
-    if (rawEmail.includes("dbs")) return "dbs";
-    if (rawEmail.includes("fubon")) return "fubon";
+    if (rawEmail.includes("acme")) return "acme";
+    if (rawEmail.includes("contoso")) return "contoso";
+    if (rawEmail.includes("fabrikam")) return "fabrikam";
+    if (rawEmail.includes("northwind")) return "northwind";
+    if (rawEmail.includes("tailspin")) return "tailspin";
   }
 
   return null;

@@ -13,7 +13,7 @@ export const embedVehicles = [
 ] as const;
 
 export const embedSavedPlaces = [
-  { label: "社區大廳", addr: "御和雲峰 A 棟 1F 大廳", tag: "住家" },
+  { label: "社區大廳", addr: "法碧康雲峰 A 棟 1F 大廳", tag: "住家" },
   { label: "台北車站", addr: "台北市中正區忠孝西路一段", tag: "常用" },
   { label: "榮總醫院", addr: "台北市北投區石牌路二段201號", tag: "就醫" },
 ] as const;
@@ -22,7 +22,7 @@ export const embedTrip = {
   id: "PT-9F20K7",
   orderId: "ord_77310",
   state: "enroute",
-  from: "御和雲峰 A 棟 1F 大廳",
+  from: "法碧康雲峰 A 棟 1F 大廳",
   to: "台北榮民總醫院 · 門診大樓",
   win: "今日 09:20",
   vehicle: "舒適車",
@@ -74,7 +74,7 @@ export const embedReceipt = {
   date: "2026-06-12 14:05",
   completedAt: "14:41",
   from: "台北車站 · 東三門",
-  to: "御和雲峰 A 棟 1F 大廳",
+  to: "法碧康雲峰 A 棟 1F 大廳",
   vehicle: "標準車",
   driver: "吳明翰",
   plate: "BKR-2208",
