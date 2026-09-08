@@ -4,6 +4,7 @@ import {
   TwmAsrFixtureAdapter,
   TwmTtsFixtureAdapter,
   VoiceLanguageRouter,
+  VoiceMediaProviderRegistry,
   type TwmAsrRouteProfile,
 } from "../../apps/voice-media-worker/src";
 
@@ -147,5 +148,33 @@ describe("UV-EXEC-011 protocol regression evidence", () => {
     for (const unverified of [{ ...hak, asrCapabilityVerified: false }, { ...hak, accent: undefined }, { ...hak, selectionPrompt: { assetId: "x", verified: false } }]) {
       expect(() => new VoiceLanguageRouter(new Map([["hak-TW", unverified]]), "hak-TW")).toThrow("capability evidence");
     }
+  });
+});
+
+
+describe("UV-EXEC-011 deployment boundaries", () => {
+  it("never enables production from fixture capability flags", () => {
+    const registry = new VoiceMediaProviderRegistry({
+      productionMode: true,
+      asrProviders: [new TwmAsrFixtureAdapter({ ...profile, accountCapabilityVerified: true }, [])],
+      ttsProviders: [new TwmTtsFixtureAdapter([])],
+    });
+    expect(() => registry.resolveAsr("twm")).toThrow("production-capable");
+    expect(() => registry.resolveTts("twm")).toThrow("production-capable");
+  });
+
+  it("does not treat an unchecked Hakka accent as a verified voice", async () => {
+    const tts = new TwmTtsFixtureAdapter([{ model: "fixture", name: "fixture", languageCode: "hak-TW", textType: "common", capabilityVerified: true }]);
+    await expect(tts.synthesize({ sessionId: "s", text: "fixture", languageCode: "hak-TW", generation: 1 })).rejects.toThrow("No verified");
+  });
+
+  it("records unknown playback on clear failure while still attempting abort", async () => {
+    const abort = vi.fn();
+    const tts = new TwmTtsFixtureAdapter([{ model: "fixture", name: "fixture", languageCode: "cmn-TW", textType: "common", capabilityVerified: true }], {
+      clear: () => { throw new Error("CTI unavailable"); }, abort,
+    });
+    const handle = await tts.synthesize({ sessionId: "s", text: "fixture", languageCode: "cmn-TW", generation: 1 });
+    expect(tts.localStop(handle.playbackId)).toMatchObject({ playbackCancellation: "unknown", billingOutcome: "unverified" });
+    expect(abort).toHaveBeenCalledOnce();
   });
 });
