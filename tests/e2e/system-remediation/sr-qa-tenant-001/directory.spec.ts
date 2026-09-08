@@ -12,17 +12,13 @@ function required(name: string): string {
 test("C027/C008/C009 passenger-address writes, readback and tenant isolation", async ({
   playwright,
 }, testInfo) => {
-  const baseURL = required("DRTS_TENANT_UAT_API_URL");
-  const tenantA = required("DRTS_TENANT_UAT_TENANT_A");
-  const tenantB = required("DRTS_TENANT_UAT_TENANT_B");
-  expect(tenantA).not.toBe(tenantB);
   // Supply provisioned disposable tenants and real bearer credentials. No fake roles.
   const contexts: APIRequestContext[] = [];
-  async function context(tenantId: string, tokenName: string) {
+  async function context(baseURL: string, tenantId: string, token: string) {
     const result = await playwright.request.newContext({
       baseURL: `${baseURL.replace(/\/$/, "")}/`,
       extraHTTPHeaders: {
-        authorization: `Bearer ${required(tokenName)}`,
+        authorization: `Bearer ${token}`,
         "x-tenant-id": tenantId,
       },
     });
@@ -46,9 +42,17 @@ test("C027/C008/C009 passenger-address writes, readback and tenant isolation", a
     return body.data.items as Record<string, unknown>[];
   }
   try {
-    const a = await context(tenantA, "DRTS_TENANT_UAT_TOKEN_A");
-    const b = await context(tenantB, "DRTS_TENANT_UAT_TOKEN_B");
-    const reader = await context(tenantA, "DRTS_TENANT_UAT_TOKEN_READONLY");
+    // Keep preflight inside the evidence boundary, before creating any client.
+    const baseURL = required("DRTS_TENANT_UAT_API_URL");
+    const tenantA = required("DRTS_TENANT_UAT_TENANT_A");
+    const tenantB = required("DRTS_TENANT_UAT_TENANT_B");
+    expect(tenantA).not.toBe(tenantB);
+    const tokenA = required("DRTS_TENANT_UAT_TOKEN_A");
+    const tokenB = required("DRTS_TENANT_UAT_TOKEN_B");
+    const tokenReader = required("DRTS_TENANT_UAT_TOKEN_READONLY");
+    const a = await context(baseURL, tenantA, tokenA);
+    const b = await context(baseURL, tenantB, tokenB);
+    const reader = await context(baseURL, tenantA, tokenReader);
     const passenger = { fullName: `UAT ${runId}`, employeeNo: runId };
     const created = await post(a, "tenant/passengers", passenger);
     expect(created.status()).toBe(201);
