@@ -2,8 +2,8 @@
 
 Owner Codex2 / Reviewer Codex。2026-09-08。
 
-Base / tested product SHA：`408679a7041bce027209222a68fc95b1f5f93141`，本次 fetch 後 rebase 至 origin/dev。
-Tested anchor：`c5d3d51aa85918247bab5c9f97abb0c789776d78`，已普通 push 至 `origin/codex2/sr-qa-tenant-001`。
+Base / tested product SHA：`6f6f418fdd6c7fa0811765710f66a5608e0b8ad0`，本次 fetch 後 rebase 至 origin/dev。
+Tested anchor：`d485d97d87a29b8dd40fded8ee315f74fef7a597`，已普通 push 至 `origin/codex2/sr-qa-tenant-001`。
 Candidate SHA：尚未 handoff；anchor 不是審查 candidate。完成後才由 machine truth 鎖定 candidate。
 
 ## 來源與界線
@@ -23,10 +23,34 @@ Candidate SHA：尚未 handoff；anchor 不是審查 candidate。完成後才由
 | users / invites   | 建立使用者、邀請啟用後身份及角色回讀        | 過期、撤銷、重用與 delivery unavailable                          | 新增 users HTTP 建立／角色修改／停用回讀、重複 email／跨租戶修改／空白角色拒絕；缺環境未發請求，邀請啟用／DB／真收件未驗                              |
 | cost centres      | 新增、更新、訂單引用及停用                  | 外租戶引用、停用後使用                                           | 已補 HTTP 新增／更新／停用回讀、跨租戶讀取／停用拒絕、空白名稱拒絕及 activeOnly 排除；訂單／owner 關聯與 DB 待補                  |
 | quota             | 保留、取消返還、月結與使用量回讀            | 額度不足、跨月／時區、並發超額                                   | 既有 governance 回歸非完整配額驗收；HTTP／Postgres 並發待補              |
-| rules / approvals | 規則評估、核准／拒絕後訂單狀態與 audit 回讀 | 非核准者、無權限、重複決策                                       | 既有 governance/mail service 回歸已跑；HTTP／DB spec 待補                |
+| rules / approvals | 規則評估、核准／拒絕後訂單狀態與 audit 回讀 | 非核准者、無權限、重複決策                                       | 已補規則 CRUD／dry-run 匹配／停用／跨租戶拒絕 HTTP spec；實際訂單決策、權限與 DB 待補                |
 | SLA               | 修改設定、違約摘要與手動升級回讀            | 未授權修改、無效設定                                             | 既有 governance service 回歸非完整 SLA 驗收；HTTP／DB spec 待補          |
 | feature flags     | 指定租戶啟停及實際能力回讀                  | 其他租戶不受影響、無權限                                         | 尚未實作本 task 的驗收                                                   |
 | tenant lifecycle  | 合法新增／停用與治理記錄回讀                | 被停用租戶寫入、未授權管理                                       | 既有 governance rollback_hold 回歸非完整生命週期驗收；HTTP／DB spec 待補 |
+
+## 18:25 UTC dispatch 實際結果
+
+本次新增 `approval-rules.spec.ts`，依 contracts `UpsertTenantApprovalRuleCommand` 與現行 tenant controller/service，驗證建立及更新後獨立 GET、跨租戶 GET／disable 的 404、空白名稱 400、拒絕後完整原值不變、清單隔離、停用回讀與 activeOnly 排除。以唯一 passenger ID 字串作明確 dry-run 輸入，確認此規則匹配／不匹配與停用後不匹配；此字串不是實際 passenger 資源，亦未主張完成實際 booking 審批。正常結束停用規則，失敗保留 ID 供隔離環境 owner 清理。
+
+```sh
+pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001 --max-warnings=0
+# exit 0
+git diff --check
+# exit 0
+BASE_SHA=6f6f418fdd6c7fa0811765710f66a5608e0b8ad0 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001
+# exit 1；4 shared harness passed / 4 tenant HTTP failed；1.6s
+# 四例均 Missing required DRTS_UAT_ENV; HTTP acceptance did not run
+pnpm exec vitest run apps/api/tests/unit/tenant-approval-rule-evaluator.test.ts apps/api/tests/unit/tenant-approval-workflow.test.ts
+# exit 1；root config 未包含 apps/api，No test files found
+pnpm exec vitest run --root apps/api tests/unit/tenant-approval-rule-evaluator.test.ts tests/unit/tenant-approval-workflow.test.ts
+# exit 0；2 files / 32 tests passed；892ms
+```
+
+另以 Python `tempfile.TemporaryDirectory` 產生 scoped tsconfig，`extends=<worktree>/tsconfig.json`、`compilerOptions.typeRoots=[<worktree>/node_modules/@types]`、`include=[<worktree>/tests/e2e/system-remediation/sr-qa-tenant-001/*.ts]`，執行 `pnpm exec tsc --project <temp>/tsconfig.json --noEmit`：exit 0。臨時設定隨檢查移除，未修改 shared config。
+
+四份 `test-results/sr-qa-tenant-001-*/tenant-evidence.json` 實際回讀：base=`6f6f418fdd6c7fa0811765710f66a5608e0b8ad0`、head=`d485d97d87a29b8dd40fded8ee315f74fef7a597`、status=failed、exitCode=1，各 0 HTTP、`trackedResources=[]`。新增規則證據為 `test-results/sr-qa-tenant-001-approval--dc218-uation-and-tenant-isolation/tenant-evidence.json`。未取得 live 資源 ID、server deployment SHA 或 DB 證據；不能據此宣稱產品正常或存在新的產品失敗。
+
+fetch/rebase 遇已上游合併的歷史 evidence add/add 衝突，保留較新的上游文件後成功 rebase；接回已發布 task branch 的 ancestry merge 無 tree diff。新增測試 anchor 普通 push exit 0，未 force push。仍需 quota、SLA、feature flags、tenant lifecycle、實際 approval/booking 關聯案例及 provisioning；本次維持 in_progress，不 handoff。
 
 ## 18:12 UTC dispatch 實際結果
 
