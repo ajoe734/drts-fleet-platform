@@ -1,5 +1,14 @@
 # SR-BANK-002 — 銀行角色金額／PII／匯出一致隔離
 
+## 2026-09-08T18:51Z resumed dispatch
+
+- Fetch base `origin/dev`：`d4f54ef94e059a981bf2be1f7b944e815870e117`；受測 checkpoint `81f04a90b406a6494e8ec67616d4fa992577d008`，尚無 candidate。task slice 仍指定原 branch／六項 scopes／兩項 dependencies。
+- `git rebase origin/dev`：exit 1，`dbec26678` 六處重複 patch 衝突；`git rebase --abort`：exit 0。helper 文件交付修復方案，明確仍需 replacement delivery branch 與產品修復，並未消除本次阻礙。
+- 本次注入的 dependency symlinks 指向 canonical root／其他 worktree，首次 Vitest exit 1（mock/module resolution 失敗），typecheck exit 2（`ERR_PNPM_UNEXPECTED_VIRTUAL_STORE`／缺失型別），不作產品回歸證據。只刪除此 isolated cwd 的 `node_modules` symlinks，`pnpm install --offline --frozen-lockfile --ignore-scripts` exit 0、下載 0、tracked files 未變。
+- 修復本地依賴後 `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`：exit 1，49 passed／5 failed；仍為兩條 settlement financial scope、兩條上游 403 seed fallback、Contoso CSV 上游失效返回 ACME rows。`pnpm --filter @drts/bank-console-web typecheck`：exit 0；`git diff --check`：exit 0。
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`：exit 0。缺陷来源仍與本次 base 相同。資源：`tenant-demo-001`、`tenant-contoso-001`、period `2026-03`、`STM-ACME-202606`；沿用下文 synthetic／真實簽章與上游替身界線，未做 live、真機、CI、merge。
+- 請 supervisor 實際更新 replacement delivery branch、擴 `bank-dev-read-models.ts` scope 與重疊 writer 相依，並安排 canonical IAM producer 相依。未修改越界產品檔，未 handoff；本次只有可恢復 evidence anchor。
+
 ## 2026-09-08T18:42Z dispatch 前置條件重驗
 
 - 最新 fetch base `origin/dev`：`d4f54ef94e059a981bf2be1f7b944e815870e117`；受測 checkpoint／遠端 task head：`15cfac17fcee78cd85782feec7e7505cef75efdc`。尚無 candidate。
