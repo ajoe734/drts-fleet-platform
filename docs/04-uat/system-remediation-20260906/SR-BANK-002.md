@@ -1,5 +1,15 @@
 # SR-BANK-002 — 銀行角色金額／PII／匯出一致隔離
 
+## 2026-09-08T18:42Z dispatch 前置條件重驗
+
+- 最新 fetch base `origin/dev`：`d4f54ef94e059a981bf2be1f7b944e815870e117`；受測 checkpoint／遠端 task head：`15cfac17fcee78cd85782feec7e7505cef75efdc`。尚無 candidate。
+- `git rebase origin/dev`：exit 1，重複 patch `dbec26678` 仍產生六處衝突；`git rebase --abort`：exit 0。所有下列測試均在 abort 後執行。未改寫遠端歷史。
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`：exit 0，三個缺陷來源與最新 base 相同。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`：exit 1，內層 49 passed／5 failed，root wrapper 如實失敗。兩條 settlement API 缺財務 scope、兩個上游 403 seed fallback、Contoso 上游失效 CSV 含 `STM-ACME-202606` 等問題仍在。資源 IDs：`tenant-demo-001`、`tenant-contoso-001`、period `2026-03`；測試替身與 live 界線沿用本文，沒有正式資料驗收。
+- `pnpm --filter @drts/bank-console-web typecheck`：exit 0；`git diff --check`：exit 0。
+- 本輪 task slice 仍為原 delivery branch、原六項 write scopes、原兩項 dependencies。History repair 合併沒有授權 replacement rail 或共用來源修改。須 supervisor 落實 replacement delivery branch、`bank-dev-read-models.ts` scope／重疊 writer 相依，以及 canonical IAM 修復 producer 相依，再恢復產品實作；不能只把 parent 改回 todo。
+- 本輪只保存證據，未改產品／UI，未做 live、真機、CI、merge，未 handoff。checkpoint 提交與普通 push 結果另由 machine blocker 記錄。
+
 ## 2026-09-08T18:03Z dispatch 重驗
 
 - Base `origin/dev` 仍為 `fa0fd8257950764526a522d091be9d97effa82b9`；受測 checkpoint `a8f62274abc6ef5c1ac411da6dbb0dd80818a6ce` 與遠端 task branch 相同。Candidate 尚未建立。
