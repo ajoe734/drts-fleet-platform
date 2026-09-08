@@ -25,7 +25,7 @@ PR or its approval alone must not resume implementation.
   isolation. `phase1_service_contracts_v1.md` §3.1 owns authentication and
   principals; §3.2 owns tenant API keys and tenant user-role mapping.
 - `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/02_acceptance_scenarios_gherkin.md`
-  SC-038 requires one-time plaintext disclosure. Its “Tenant A API key cannot
+  SC-038 requires one-time plaintext disclosure. SC-045’s “Tenant A API key cannot
   access tenant B resources” scenario prohibits cross-tenant exposure. That
   API-key authentication scenario supports isolation but is not a substitute
   for the parent's specific JWT/header 403 regression.
