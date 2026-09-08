@@ -1,5 +1,19 @@
 # SR-ENTERPRISE-FORM-001 — 2026-09-08 owner recovery evidence
 
+## Resumed dispatch at 22:42 UTC — fresh verification, still blocked
+
+- Fetched base `origin/dev`: `eb684f176b1d3b46553a0f6f0556c79452fbac3c`; tested implementation HEAD and remote task head: `71b8325a181deb30cb97bb36e754c23d3f3a2337`. Candidate SHA: none; the new documentation anchor is not a delivery candidate.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1 at historical `93d7f83a7`, with six conflicts in task-owned files. The branch already contains original and rebased patch series joined by `c0e02eb0f`; replaying them again produces duplicate-application conflicts. `git rebase --abort`: exit 0, restoring the clean original branch and published history. No conflict resolution or product changes were retained.
+- Read merged helper `support/unblock/SR-ENTERPRISE-FORM-001/SR-ENTERPRISE-FORM-001-UNBLOCK-HISTORY-REPAIR.md`; ancestry check for `7d1272fc85a7f4d2a20f4ccd2d01716e873cca5e` against fetched dev exits 0. That audit covers `codex2/sr-enterprise-form-001` at `b97be8a00`, not this dispatch's `codex/sr-enterprise-form-001`. Its continuation step 4 requires supervisor routing of an unpublished replacement branch when dev advances. No replacement branch is assigned here. The helper is history evidence, not proof that this branch's policy/identity issues are resolved.
+- Source recheck: frontend still defines `MIN_LEAD_TIME_MINUTES = 15` and seeds `bookedBy` with 林宜君. Owned-mobility's configurable minimum is specific backend evidence, not proof of an authoritative enterprise policy endpoint. `ai-status.sh show SR-BOOKING-VERIFY`: exit 1, Task not found. `show SR-ENTERPRISE-DATA-001`: exit 0, now in_progress, not completed; its listed scope still does not deliver authenticated form identity. Supervisor must identify the enterprise policy/identity producers and register the corresponding dependency/scope decisions.
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/`: exit 1, zero tests. Vite resolves ui-tokens into retired `codex-sr-qa-webhook-001/packages/ui-tokens/src/index.ts` and cannot load its tsconfig.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/ --config tests/unit/system-remediation/sr-enterprise-form-001/vitest.config.ts`: exit 0, one file / 30 tests passed. Existing task-local configuration only; no dependency installation or shared configuration mutation.
+- `git diff --check`: exit 0 before this evidence update; rerun before commit.
+- No product/dev/browser server or Docker infrastructure started (dispatch VM restriction). No 390px browser or physical-device keyboard/CTA acceptance; no live API booking and no bookingId/orderId/resource IDs. No new review, candidate CI, merge, or deployment evidence. Only this scoped evidence document changed; normal push and machine blocker record identify the resulting anchor.
+
+The sections below are historical dispatch records; their base and status observations are superseded by this section.
+
 Owner: Codex. Reviewer: Codex2. Status: implementation incomplete; no candidate handoff.
 
 ## Git evidence
