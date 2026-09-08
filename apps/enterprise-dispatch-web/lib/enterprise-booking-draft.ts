@@ -8,6 +8,19 @@ import {
   getEnterpriseBookingDraft,
 } from "@/lib/enterprise-fixtures";
 import { t as translate, type Locale } from "@/lib/translations";
+import {
+  getEarliestBookableLabel,
+  getEnterprisePassengerDisplayName,
+  isEnterpriseDraftComplete,
+  isReservationWindowInFuture,
+} from "@/components/booking-form/enterprise-booking-validation";
+
+export {
+  getEarliestBookableLabel,
+  getEnterprisePassengerDisplayName,
+  isEnterpriseDraftComplete,
+  isReservationWindowInFuture,
+};
 
 export type EnterprisePassengerMode = "self" | "other";
 export type EnterpriseAirportDirection = "pickup" | "dropoff";
@@ -366,8 +379,7 @@ export function buildEnterpriseBookingCommand(
   );
   const preview = getEnterpriseBookingPreview(draft, "zh");
   const luggageCount = Number.parseInt(draft.luggageCount, 10);
-  const passengerName =
-    draft.passengerMode === "self" ? draft.bookedBy : draft.passenger;
+  const passengerName = getEnterprisePassengerDisplayName(draft);
   const onsiteContactPhone = draft.onsiteContactPhone.trim();
 
   return {
@@ -450,20 +462,6 @@ function inferAddressName(address: string) {
   const trimmed = address.trim();
   const [head] = trimmed.split("·");
   return head?.trim() || trimmed;
-}
-
-export function isEnterpriseDraftComplete(draft: EnterpriseBookingDraftForm) {
-  return [
-    draft.passengerMode === "self" ? draft.bookedBy : draft.passenger,
-    draft.bookedBy,
-    draft.pickup,
-    draft.dropoff,
-    draft.reservationDate,
-    draft.reservationTime,
-    draft.onsiteContactPhone,
-    draft.costCenterCode,
-    draft.costCenterLabel,
-  ].every((value) => value.trim().length > 0);
 }
 
 export function getVehicleLabelFromDraft(
