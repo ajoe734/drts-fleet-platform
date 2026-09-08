@@ -15,6 +15,18 @@
 
 ## 0. Recovery Note (2026-09-08)
 
+### Codex re-verification (2026-09-08)
+
+The task-owned Playwright wrapper was corrected after recovery review: it no
+longer manufactures a signed `fetch` request or a delivery record.  It invokes
+the task's 23-case Vitest lifecycle suite, which constructs the real
+`TenantPartnerService` and `WebhookDispatchService` and drives them through its
+controlled local HTTP receiver.  That suite performs the write-then-read
+checks for issued/rotated API keys, endpoint promotion, 503/timeout queueing,
+non-retryable disablement, secret rotation, and outbox/restart deduplication.
+The Playwright run is therefore a non-zero failing wrapper around real-service
+verification, not an alternate mock implementation.
+
 The original `Gemini` lane became auth-unavailable after landing commit `75138b3cbadbaf4e6508cc5c5b6513fddea5a640`
 ("SR-QA-WEBHOOK-001: verify api keys and webhook recovery lifecycle") on top of an
 older `origin/dev` base (`b32ab8bad...`). Per user-authorized parallel-dispatch
