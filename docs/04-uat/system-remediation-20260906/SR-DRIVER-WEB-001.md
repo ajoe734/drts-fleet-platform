@@ -323,3 +323,41 @@ exit 1
 未完成：瀏覽器 390px 首頁/onboarding/SOS 開啟、iOS/Android bundle imports、真機導航、
 真實 SOS 送達、live onboarding。單元測試含 mocks，不代表這些 live 行為成功。
 因此本次只記 progress/blocker，不 handoff 或 done。
+
+## 10. 2026-09-08 18:24 UTC 再派工回歸（最新）
+
+Base `origin/dev`: `6f6f418fdd6c7fa0811765710f66a5608e0b8ad0`。
+檢查程式樹 HEAD: `f92dde26884f0622937cc7b6617f9cce76611086`；後續僅補此證據。
+本次 fetch、rebase 成功；證據文件衝突保留原分支完整紀錄，再 merge 已發布 task
+branch 保留普通 push ancestry。UI/native/test 內容未更改，沒有新 handoff candidate。
+
+`gh pr view 1806 --json state,headRefOid,mergeCommit,url` exit 0：PR #1806
+為 MERGED，head `a3bb7ed9839fd606d5cb70a9759a152695111c9b`，merge 為上述 base。
+它交付的是 `support/unblock/SR-DRIVER-WEB-001/SR-DRIVER-WEB-001-UNBLOCK-MANUAL-UNBLOCK.md`，
+明確指出 parent implementation **仍未解鎖**；不是地圖修復已合併或 Metro gate 通過。
+目前 task slice 仍只有原四項 write scopes、空 dependencies，尚未授權 Metro 設定。
+
+本次實際指令與結果：
+
+```text
+git diff --check origin/dev...HEAD
+exit 0
+pnpm --filter @drts/driver-app typecheck
+exit 0
+pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/
+1 file / 5 tests passed; exit 0
+pnpm --filter @drts/driver-app exec vitest run tests/unit/driver-trip-map.test.ts tests/unit/driver-navigation.test.ts tests/unit/driver-root-navigator.test.ts tests/unit/driver-auth-token-lifecycle.test.ts tests/unit/driver-auth-states.test.ts tests/unit/driver-sos-no-os-dialer.test.ts tests/unit/driver-sos-end-to-end-platform.test.ts tests/unit/responsive-layout-and-overflow.test.ts tests/unit/keyboard-avoiding-container.test.ts
+9 files / 71 tests passed; exit 0
+pnpm --filter @drts/driver-app exec expo export --platform web --output-dir /tmp/sr-driver-web-001-dispatch-web-1825
+exit 1: Unable to resolve module ../../../../node_modules/.pnpm/.../expo-router/entry.js
+```
+
+Metro 在入口解析即失敗，沒有可供瀏覽器三路由驗收的 bundle。此次未重跑
+iOS/Android export（§9 已記錄相同入口失敗），未執行瀏覽器、真機、live SOS 或
+live onboarding；無新增 tenant/order/incident/EAS 資源 ID。
+資源追溯仍為 Task SR-DRIVER-WEB-001、R30、C049、C062 及 PR #1806。
+
+Supervisor 下一步：提供可打包的隔離依賴環境，或增加
+`apps/driver-app/metro.config.js` write scope 並核對重疊 writer、必要相依和 runbook。
+不能再僅因診斷 helper 合併而重新認定 scope gate 已解除。證據 commit 普通 push
+後記錄 blocker，驗收未達成前不 handoff、不 done。
