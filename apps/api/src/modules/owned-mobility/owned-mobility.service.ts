@@ -4292,6 +4292,10 @@ export class OwnedMobilityService
     tx: OwnedMobilityQueryExecutor,
     assignmentId: string,
     now: string,
+    allowedStatuses: readonly DispatchAssignmentRecord["status"][] = [
+      "assigned",
+      "accepted",
+    ],
   ): Promise<{
     assignment: DispatchAssignmentRecord;
     task: DriverTaskRecord | null;
@@ -4301,7 +4305,7 @@ export class OwnedMobilityService
         tx,
         assignmentId,
       );
-    if (!locked || !["assigned", "accepted"].includes(locked.status)) {
+    if (!locked || !allowedStatuses.includes(locked.status)) {
       return null;
     }
     const closedAssignment: DispatchAssignmentRecord = {
@@ -5327,11 +5331,19 @@ export class OwnedMobilityService
             tx,
           );
 
-          return { updatedTask, updatedAssignment, updatedOrder, dispatchAttempt };
+          return {
+            updatedTask,
+            updatedAssignment,
+            updatedOrder,
+            dispatchAttempt,
+          };
         },
       );
 
-      this.dispatchAttempts = [committed.dispatchAttempt, ...this.dispatchAttempts];
+      this.dispatchAttempts = [
+        committed.dispatchAttempt,
+        ...this.dispatchAttempts,
+      ];
       Object.assign(task, committed.updatedTask);
       Object.assign(assignment, committed.updatedAssignment);
       Object.assign(order, committed.updatedOrder);
@@ -7876,6 +7888,7 @@ export class OwnedMobilityService
             tx,
             latestAssignment.assignmentId,
             now,
+            ["assigned"],
           ),
       );
       if (!closedPrevious) {
