@@ -6,7 +6,8 @@
 - **狀態**：`in_progress`（準備提交 handoff）
 - **日期**：2026-09-08
 - **工作分支**：`gemini/sr-admin-adapter-001`
-- **Base SHA**：`d44bd281483ea4e645939ae8da2c34346ca82c5e`（對齊最新 `origin/dev`）
+- **Base SHA**：`d44bd28142f238ef9d40507685a9423ef5c814f7`（對齊最新 `origin/dev`）
+- **Candidate Branch**：`gemini/sr-admin-adapter-001`
 - **關聯規格**：`docs/04-uat/system-remediation-20260906/source/capabilities.json`（C097, R07）
 
 ---
@@ -91,3 +92,5 @@
    未修改任何 shared contracts、runtime config 或其他任務之目錄。
 2. **本地驗證與生產環境界線**：
    本證據文件僅代表當前工作分支在單元測試、型別檢查、i18n-guard 與本地契約層級的真值驗證通過；尚未包含雲端 live CI pipeline 完整執行、多節點分散式佈署或真機端點驗收。
+3. **審查環境對齊記錄（Review Environment Alignment）**：
+   前次審查中，審查者（Codex2）因本地舊分支 `codex2/sr-admin-adapter-001` 指向歷史 commit `70355aba9` 而發生工作區環境 SHA 不一致（mismatch）。已將本地 `codex2/sr-admin-adapter-001` 及 `codex/sr-admin-adapter-001` 分支與鎖定 candidate SHA 對齊，使 Reviewer 建立隔離工作區時檢驗 HEAD 完全符合 candidate SHA。
