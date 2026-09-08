@@ -2,6 +2,22 @@
 
 Status: partial implementation; web export blocked. No review candidate locked.
 
+## Dispatch recheck — 2026-09-08 15:47 UTC
+
+- Fetched base `origin/dev`: `3f182f7e314b5ddb4c37f1c3f5dc214a6d0edf0e`. Tested head: `b4e426fdcb1a545c90a4abb612df6bfb12867e8e`. Candidate SHA remains unassigned.
+- `git fetch origin` exited 0. `git rebase origin/dev` initially exited 1 on a duplicate-anchor add/add conflict in `platform-map.test.ts`; retained the exact published `c10b640107aeb3ded3f1d23cde940be1a0d8f383` test contents, then `GIT_EDITOR=true git rebase --continue` exited 0. `git merge --no-edit origin/codex2/sr-driver-web-001` exited 0, preserving normal-push ancestry. `git diff c10b640107aeb3ded3f1d23cde940be1a0d8f383 HEAD -- apps/driver-app tests/unit/system-remediation/sr-driver-web-001 docs/04-uat/system-remediation-20260906/SR-DRIVER-WEB-001.md` was empty before this report update.
+- `pnpm --filter @drts/driver-app typecheck` completed without diagnostics; `pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/` passed 1 file / 5 tests; `git diff --check` passed. The sequential shell containing these commands exited 0 (individual typecheck exit was not separately captured).
+- Actual web reproduction command:
+
+  ```sh
+  NODE_OPTIONS=--require="$PWD/tests/unit/system-remediation/sr-driver-web-001/metro-worktree-harness.cjs" pnpm --filter @drts/driver-app exec expo export --platform web --max-workers 2 --source-maps --output-dir /tmp/sr-driver-web-001-web-dispatch-1545 > /tmp/sr-driver-web-001-web-dispatch-1545.log 2>&1
+  ```
+
+  Exit **1**, `Unable to resolve module ./wa-sqlite/wa-sqlite.wasm` from `expo-sqlite/web/worker.ts`. This run's import stack reaches `app/incident.tsx` via location heartbeat and the persistent offline queue. Log resource: `/tmp/sr-driver-web-001-web-dispatch-1545.log` (ephemeral).
+- Canonical task slice still has the original four write scopes and no dependencies. `apps/driver-app/metro.config.js` remains absent. The merged unblock planning decision explicitly requires supervisor scope/dependency authorization and does not provide it. No product/UI changes were made in this dispatch.
+- Supervisor action remains: authorize the Metro configuration scope and reconcile dependencies, or register a bundler producer with a parent dependency. The status reset and owner reassignment do not resolve this blocker.
+- Native export, the 91 existing-repair tests, browser routes `/`, `/onboarding`, `/sos`, live APIs, and physical devices were **not rerun** in this dispatch. Previous native results below are historical. No SOS was sent; no candidate, CI, merge, deployment, or live acceptance is claimed.
+
 ## Dispatch recheck — 2026-09-08 14:55 UTC
 
 - Fresh `origin/dev` base: `c4c4a35f88907df6bf68e781059dde397c06ba03`, including planning PR #1768 (helper candidate `5d0fd50955e68738c09b4a59c0fd62a66831d58d`). The helper explicitly routes authorization to supervisor and says the parent remains blocked; it supplies no Metro implementation or scope authorization. The parent task slice still permits only the original four scopes and has no producer dependency. Its automatic reset to `todo` does not resolve the engineering blocker.
