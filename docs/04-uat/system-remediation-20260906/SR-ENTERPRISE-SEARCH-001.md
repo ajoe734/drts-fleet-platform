@@ -1,5 +1,37 @@
 # SR-ENTERPRISE-SEARCH-001 — 企業歷史查詢條件與結果一致
 
+## 2026-09-08 resumed dispatch：history helper 完成不等於後端前置完成
+
+- 本次 `git fetch origin` exit 0；核實 base `origin/dev` =
+  `a44ea852eabe0c88e54d8124802eccf86ebc1dc6`，既有 task head / remote head =
+  `4eecfd0065d982cc5d03ddc7ea19d8eaf965ca07`。
+- `git rebase origin/dev` exit 1：重播 `f20c35e97` 時本證據檔 add/add
+  conflict；`git rebase --abort` exit 0，還原乾淨既有 task branch。
+  本次沒有 rebase 完成或新 candidate；不強推既有歷史。
+- 以 `git show origin/dev:support/unblock/SR-ENTERPRISE-SEARCH-001/SR-ENTERPRISE-SEARCH-001-UNBLOCK-HISTORY-REPAIR.md`
+  與同目錄 `SR-ENTERPRISE-SEARCH-001-UNBLOCK-PLANNING-DECISION.md`（各 exit 0）
+  讀取已合併交接。History helper PR #1792 / merge
+  `e2df37f821ce76d8a3639ceaac6d253299c0a31c` 的文件明確寫明：
+  parent remains blocked on backend capability planning；應於 producer 完成後由
+  supervisor 指定乾淨 replacement branch/worktree，保留舊分支與 PR。
+- 目前 base 的 controller `listTenantBookings` 仍只接 tenant/request headers；
+  service `listTenantBookings(tenantId: string)` 仍只篩 tenant，固定 page 1、
+  pageSize/totalItems = items.length；client `listTenantBookings()` 無 query
+  參數且回傳 BookingRecord[]。上述三個 `git show origin/dev:<path>` 搭配
+  `rg` 的 source checks 均 exit 0（路徑見下方歷史核實）。
+- current-release `AI_NAME=Codex2 .../ai-status.sh show SR-BOOKING-VERIFY`
+  exit 1：`Task not found: SR-BOOKING-VERIFY`。Parent show exit 0，depends_on
+  仍為 []，write_scopes 仍不含 API、shared client 或 enterprise lib wrapper。
+- 權威端點為 `GET /api/tenant/bookings`；既有 enterprise tenant resource ID
+  `10000000-0000-0000-0000-000000000201` 僅為程式追溯，非本次 live 查詢證據。
+  本次未執行 live query、總數驗收、瀏覽器或真機檢查；未修改 UI、未重跑舊
+  fixture 測試來冒充後端能力。這是阻擋證據提交，不是 acceptance candidate。
+
+下一步：supervisor 登錄真正 backend producer 並補 parent depends_on，協調
+contract/client/wrapper scopes；producer merge/acceptance 後指定 history helper
+所述乾淨 replacement branch/worktree，再接續前端與實際 query/total 驗證。
+僅因 helper done 自動重新派工，無法消除以上未解前置。
+
 ## 2026-09-08 17:44 dispatch 再核實：後端前置仍缺
 
 - `git fetch origin` exit 0；目前 base `origin/dev` =
