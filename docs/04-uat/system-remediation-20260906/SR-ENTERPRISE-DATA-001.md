@@ -114,3 +114,31 @@ these blockers remain. Supervisor must record shared-file scopes/dependencies
 and resolve the authorized contact source before redispatch. No product/UI
 changes were made. Browser/live API/device calls, independent review,
 candidate CI, merge and deployment remain unverified.
+
+## Redispatch verification — 2026-09-08 16:04 UTC
+
+- Fetched `origin/dev` base: `3fb9b06461dc2bf92043144974eedbbc9f69d0f3`.
+- Tested WIP revision: `f8cc3794b31bb1fafed92589fcf14008c80a5891`.
+  Candidate SHA: none; acceptance remains incomplete.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: initially exit 1
+  on duplicate historical evidence patches. Preserved the complete pre-rebase
+  evidence document; `git -c core.editor=true rebase --continue` eventually
+  exited 0. `git merge --no-edit origin/codex2/sr-enterprise-data-001`:
+  exit 0, preserving published ancestry for ordinary push.
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`:
+  exit 0; 1 file / 17 tests passed, duration 296 ms.
+- `git diff --check`: exit 0. Resource IDs remain the unit inputs above;
+  no live resource was verified.
+
+The current task slice still has the original write scopes and no dependencies.
+The shared detail catch, raw theme palette, fixture support number and trip
+fixtures remain present at this revision. `BookingRecord` still has no driver
+contact/ETA. `PartnerEntryBrandingMetadata.supportPhone` exists in contracts,
+but that alone does not establish an authorized enterprise support source.
+The history-repair report explicitly requires supervisor scope/dependency
+adjudication before parent continuation; its completion does not resolve these
+product blockers. Supervisor must assign/authorize the three shared files above
+and establish the permitted contact source or unavailable-contact behavior.
+No UI changes were made. Live API/browser/device checks, independent review,
+candidate CI, merge and deployment remain unverified.
