@@ -26,7 +26,7 @@ function recordEvidence(label: string, resourceJson: string) {
       process.env.DRTS_WEBHOOK_DB_EVIDENCE,
       JSON.stringify(
         {
-          baseSha: execFileSync("git", ["rev-parse", "origin/dev"], {
+          baseSha: execFileSync("git", ["merge-base", "HEAD", "origin/dev"], {
             encoding: "utf8",
           }).trim(),
           executionSha: execFileSync("git", ["rev-parse", "HEAD"], {
@@ -47,6 +47,14 @@ function recordEvidence(label: string, resourceJson: string) {
 const databases: DatabaseService[] = [];
 const services: TenantPartnerService[] = [];
 const servers: http.Server[] = [];
+
+function killProcessGroup(pid: number) {
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
 
 function createService() {
   // Only a disposable task database is allowed: init may bootstrap demo rows.
@@ -358,11 +366,7 @@ it("C112: SIGKILL writer then a new OS process restores retry and outbox dedupli
     );
   } finally {
     for (const child of children) {
-      try {
-        process.kill(-child.pid!, "SIGKILL");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-      }
+      killProcessGroup(child.pid!);
     }
     rmSync(directory, { recursive: true, force: true });
   }

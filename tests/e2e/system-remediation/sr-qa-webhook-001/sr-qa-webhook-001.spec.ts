@@ -9,7 +9,7 @@ test("SR-QA-WEBHOOK-001: controlled HTTP service regression", async () => {
   test.setTimeout(150_000);
   const recorder = new UatEvidenceRecorder({
     taskId: "SR-QA-WEBHOOK-001",
-    baseSha: execFileSync("git", ["rev-parse", "origin/dev"], {
+    baseSha: execFileSync("git", ["merge-base", "HEAD", "origin/dev"], {
       encoding: "utf8",
     }).trim(),
   });
