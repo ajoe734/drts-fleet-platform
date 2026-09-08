@@ -4571,14 +4571,32 @@ export class OwnedMobilityService
         async (tx) => {
           let txClosedAssignment: DispatchAssignmentRecord | null = null;
           let txClosedTask: DriverTaskRecord | null = null;
-          if (assignment) {
+          // The `assignment` this pod cached for `orderId` can be a
+          // different offer than what's actually open now -- a concurrent
+          // reassign on another pod may have already closed it (in which
+          // case `closeSupersededDispatchAssignment(assignment.assignmentId)`
+          // would correctly no-op with `null`, but the *new* assignment it
+          // opened would never even be looked at) or this pod may have no
+          // cached assignment at all while the DB has one. Resolve the
+          // order's currently-open assignment(s) straight from the locked
+          // DB row instead of trusting the cache, so a stale/absent cache
+          // entry can never leave an active assignment (and its driver/
+          // vehicle reservation) orphaned by a cancel that reports success.
+          const activeAssignments =
+            await this.ownedMobilityRepository!.lockActiveDispatchAssignmentsForOrder(
+              tx,
+              orderId,
+            );
+          for (const activeAssignment of activeAssignments) {
             const closed = await this.closeSupersededDispatchAssignment(
               tx,
-              assignment.assignmentId,
+              activeAssignment.assignmentId,
               now,
             );
-            txClosedAssignment = closed?.assignment ?? null;
-            txClosedTask = closed?.task ?? null;
+            if (closed && !txClosedAssignment) {
+              txClosedAssignment = closed.assignment;
+              txClosedTask = closed.task;
+            }
           }
 
           const current =
@@ -4659,11 +4677,28 @@ export class OwnedMobilityService
       if (dispatchJob && committed.dispatchJob) {
         Object.assign(dispatchJob, committed.dispatchJob);
       }
-      if (assignment && committed.assignment) {
-        Object.assign(assignment, committed.assignment);
+      // `committed.assignment`/`committed.task` are whatever the DB-locked
+      // read actually found open for this order, which may not be the same
+      // row this pod had cached (see the resolution above) -- upsert by id
+      // into the pod caches instead of mutating the possibly-unrelated
+      // cached `assignment`/`task` object in place.
+      if (committed.assignment) {
+        const closedAssignment = committed.assignment;
+        this.dispatchAssignments = [
+          { ...closedAssignment },
+          ...this.dispatchAssignments.filter(
+            (cached) => cached.assignmentId !== closedAssignment.assignmentId,
+          ),
+        ];
       }
-      if (task && committed.task) {
-        Object.assign(task, committed.task);
+      if (committed.task) {
+        const closedTaskRecord = committed.task;
+        this.driverTasks = [
+          this.cloneTask(closedTaskRecord),
+          ...this.driverTasks.filter(
+            (cached) => cached.taskId !== closedTaskRecord.taskId,
+          ),
+        ];
       }
     } else {
       updatedOrder = order;

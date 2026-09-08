@@ -694,6 +694,40 @@ export class OwnedMobilityRepository {
   }
 
   /**
+   * SD §7.6/§7.1: resolve the order's *currently open* dispatch
+   * assignment(s) straight from the authoritative row-locked table, not a
+   * caller's possibly-stale in-memory cache. A cross-pod reassign can close
+   * one assignment and open another for the same order between this pod's
+   * last read and now; keying a close/cancel decision off a cached
+   * assignment id would then either miss the real open assignment entirely
+   * (stale id already terminal) or never look at all (cache had none).
+   * Locks every row still in `assigned`/`accepted` for the order so the
+   * caller can close each of them atomically in the same transaction.
+   */
+  async lockActiveDispatchAssignmentsForOrder(
+    executor: OwnedMobilityQueryExecutor,
+    orderId: string,
+  ): Promise<DispatchAssignmentRecord[]> {
+    const result = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_dispatch_assignments
+        WHERE order_id = $1
+          AND status IN ('assigned', 'accepted')
+        ORDER BY updated_at DESC, created_at DESC
+        FOR UPDATE
+      `,
+      [orderId],
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<DispatchAssignmentRecord>(
+        row.record,
+        "ops.phase1_dispatch_assignments",
+      ),
+    );
+  }
+
+  /**
    * SD §7.6: companion lock for the driver task tied to an assignment being
    * closed, so its terminal-state check and update share the same
    * transaction and row lock as the assignment above.

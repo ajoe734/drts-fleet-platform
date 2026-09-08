@@ -1819,4 +1819,186 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       await readActiveReservations(database, "vehicle", vehicleId),
     ).toHaveLength(0);
   });
+
+  it("a stale-cache pod's cancel closes the *current* assignment a concurrent reassign opened, not just the superseded one it still has cached", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const databaseA = new DatabaseService();
+    const databaseB = new DatabaseService();
+    databases.push(databaseA, databaseB);
+    const oldDriverId = `driver-uvexec006-cxl-stale-old-${randomUUID()}`;
+    const oldVehicleId = `vehicle-uvexec006-cxl-stale-old-${randomUUID()}`;
+    const newDriverId = `driver-uvexec006-cxl-stale-new-${randomUUID()}`;
+    const newVehicleId = `vehicle-uvexec006-cxl-stale-new-${randomUUID()}`;
+    const candidates = [
+      {
+        driverId: oldDriverId,
+        vehicleId: oldVehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+      {
+        driverId: newDriverId,
+        vehicleId: newVehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ];
+
+    // Pod A dispatches and assigns the order -- its in-memory cache now
+    // holds the old assignment and never learns otherwise.
+    const { service: serviceA } = createTestService(databaseA, candidates);
+    const order = serviceA.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "UV-EXEC-006 Rider", phone: "0911001555" },
+    });
+    trackOrder(order.orderId);
+    const dispatchResult = await serviceA.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const oldAssignment = await serviceA.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: oldVehicleId,
+      driverId: oldDriverId,
+    });
+
+    // Pod B independently loaded the same order/job/assignment/task rows,
+    // then reassigns through the real (DB-backed) write path -- this closes
+    // the old assignment and opens a new one in the authoritative DB, but
+    // Pod A's cache never observes any of it.
+    const { service: serviceB } = createTestService(databaseB, candidates);
+    type InternalServiceState = {
+      orders: Array<Record<string, unknown>>;
+      dispatchJobs: Array<Record<string, unknown>>;
+      dispatchAssignments: Array<Record<string, unknown>>;
+      driverTasks: Array<Record<string, unknown>>;
+    };
+    const serviceAState = serviceA as unknown as InternalServiceState;
+    const serviceBState = serviceB as unknown as InternalServiceState;
+    serviceBState.orders.push({
+      ...serviceAState.orders.find((o) => o.orderId === order.orderId),
+    });
+    serviceBState.dispatchJobs.push({
+      ...serviceAState.dispatchJobs.find(
+        (j) => j.dispatchJobId === dispatchResult.dispatchJobId,
+      ),
+    });
+    serviceBState.dispatchAssignments.push({
+      ...serviceAState.dispatchAssignments.find(
+        (a) => a.assignmentId === oldAssignment.assignmentId,
+      ),
+    });
+    serviceBState.driverTasks.push({
+      ...serviceAState.driverTasks.find(
+        (t) => t.taskId === oldAssignment.taskId,
+      ),
+    });
+
+    const newAssignment = await serviceB.reassignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: newVehicleId,
+      driverId: newDriverId,
+      reasonCode: "operator_redispatch",
+    });
+    expect(
+      await readAssignmentStatus(databaseA, oldAssignment.assignmentId),
+    ).toBe("cancelled");
+    expect(
+      await readAssignmentStatus(databaseA, newAssignment.assignmentId),
+    ).toBe("assigned");
+
+    // Pod A's own cache is still stale (old assignment, "assigned") and
+    // passes its in-memory guard, so this exercises the authoritative
+    // under-lock resolution in `cancelOwnedOrder`, not just the cache.
+    await serviceA.cancelOwnedOrder(order.orderId, {
+      reason: "passenger_requested",
+    });
+
+    // Both the already-superseded old assignment and the live new
+    // assignment the stale pod never even knew about must end up closed,
+    // and neither driver/vehicle pair may be left holding a reservation
+    // for a cancelled order.
+    expect(
+      await readAssignmentStatus(databaseA, oldAssignment.assignmentId),
+    ).toBe("cancelled");
+    expect(
+      await readAssignmentStatus(databaseA, newAssignment.assignmentId),
+    ).toBe("cancelled");
+    expect(
+      await readActiveReservations(databaseA, "driver", oldDriverId),
+    ).toHaveLength(0);
+    expect(
+      await readActiveReservations(databaseA, "vehicle", oldVehicleId),
+    ).toHaveLength(0);
+    expect(
+      await readActiveReservations(databaseA, "driver", newDriverId),
+    ).toHaveLength(0);
+    expect(
+      await readActiveReservations(databaseA, "vehicle", newVehicleId),
+    ).toHaveLength(0);
+  });
+
+  it("a pod with no cached assignment at all still closes the DB's open assignment and releases its reservation on cancel", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const databaseA = new DatabaseService();
+    const databaseC = new DatabaseService();
+    databases.push(databaseA, databaseC);
+    const driverId = `driver-uvexec006-cxl-nocache-${randomUUID()}`;
+    const vehicleId = `vehicle-uvexec006-cxl-nocache-${randomUUID()}`;
+    const candidates = [
+      {
+        driverId,
+        vehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ];
+
+    const { service: serviceA } = createTestService(databaseA, candidates);
+    const order = serviceA.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "UV-EXEC-006 Rider", phone: "0911001666" },
+    });
+    trackOrder(order.orderId);
+    const dispatchResult = await serviceA.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const assignment = await serviceA.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId,
+      driverId,
+    });
+
+    // Pod C only ever loaded the order itself (e.g. the cancel request was
+    // routed to a pod that never handled this order's dispatch/assignment
+    // events) -- its dispatch-assignment cache is empty for this order, not
+    // merely stale.
+    const { service: serviceC } = createTestService(databaseC, candidates);
+    type InternalServiceState = {
+      orders: Array<Record<string, unknown>>;
+    };
+    const serviceAState = serviceA as unknown as InternalServiceState;
+    const serviceCState = serviceC as unknown as InternalServiceState;
+    serviceCState.orders.push({
+      ...serviceAState.orders.find((o) => o.orderId === order.orderId),
+    });
+
+    await serviceC.cancelOwnedOrder(order.orderId, {
+      reason: "passenger_requested",
+    });
+
+    expect(
+      await readAssignmentStatus(databaseA, assignment.assignmentId),
+    ).toBe("cancelled");
+    expect(
+      await readActiveReservations(databaseA, "driver", driverId),
+    ).toHaveLength(0);
+    expect(
+      await readActiveReservations(databaseA, "vehicle", vehicleId),
+    ).toHaveLength(0);
+  });
 });
