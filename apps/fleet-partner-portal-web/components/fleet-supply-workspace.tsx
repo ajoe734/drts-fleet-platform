@@ -12,11 +12,9 @@ import type {
 } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type {
-  DriverSupplyDraft,
   SupplyDocumentRecord,
   SupplyReadinessReasonCode,
   SupplySubmissionStatus,
-  VehicleSupplyDraft,
 } from "@drts/contracts";
 import {
   ActionButton,
@@ -38,6 +36,19 @@ import {
   isEditableStatus,
   DRAFT_GUARD_STRINGS,
   fieldId,
+  INITIAL_DRIVER_DRAFT,
+  INITIAL_VEHICLE_DRAFT,
+  isDriverFormDirty,
+  isVehicleFormDirty,
+  saveDriverDraft,
+  loadDriverDraft,
+  clearDriverDraft,
+  saveVehicleDraft,
+  loadVehicleDraft,
+  clearVehicleDraft,
+  shouldInterceptNavigation,
+  type DriverDraftInput,
+  type VehicleDraftInput,
 } from "@/lib/fleet-portal-supply";
 
 
@@ -46,8 +57,6 @@ type ApiEnvelope<T> = {
   meta: { requestId: string; timestamp: string };
 };
 
-type DriverDraftInput = Omit<DriverSupplyDraft, "submissionId">;
-type VehicleDraftInput = Omit<VehicleSupplyDraft, "submissionId">;
 
 const DRIVER_DOC_TYPES = [
   "professional_driver_license",
@@ -341,33 +350,60 @@ function FormField({
 
 /**
  * Fires the browser's native beforeunload warning (R25) while the form is
- * dirty, and exposes `confirmLeave()` for in-app navigation interception.
+ * dirty, intercepts in-app link clicks (including Next.js <Link> components),
+ * and exposes `confirmLeave()` for programmatic router navigation.
  *
  * @param dirty - whether the form has unsaved changes
  * @returns `confirmLeave` — call before a programmatic router.push(); returns
  *          `true` if the user confirmed they want to leave.
  */
-function useDraftGuard(dirty: boolean): { confirmLeave: () => boolean } {
-  useEffect(() => {
-    if (!dirty) return;
-    function handleBeforeUnload(e: BeforeUnloadEvent) {
-      e.preventDefault();
-      // Modern browsers use `returnValue` for the native dialog. The value
-      // shown to the user is browser-controlled; we set it for legacy support.
-      e.returnValue = DRAFT_GUARD_STRINGS.beforeUnload;
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, [dirty]);
-
+export function useDraftGuard(dirty: boolean): { confirmLeave: () => boolean } {
   function confirmLeave(): boolean {
     if (!dirty) return true;
     return window.confirm(
       `${DRAFT_GUARD_STRINGS.confirmLeaveTitle}\n\n${DRAFT_GUARD_STRINGS.confirmLeaveBody}`,
     );
   }
+
+  useEffect(() => {
+    if (!dirty) return;
+
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      // Modern browsers use `returnValue` for the native dialog. The value
+      // shown to the user is browser-controlled; we set it for legacy support.
+      e.returnValue = DRAFT_GUARD_STRINGS.beforeUnload;
+    }
+
+    function handleDocumentClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      const anchor = target?.closest?.("a");
+      if (!anchor) return;
+
+      const href =
+        typeof anchor.href === "string" ? anchor.href : anchor.getAttribute("href");
+      const anchorTarget = anchor.getAttribute("target") ?? anchor.target;
+
+      if (!shouldInterceptNavigation(href, anchorTarget, window.location)) {
+        return;
+      }
+
+      const confirmed = confirmLeave();
+      if (!confirmed) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleDocumentClick, true);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleDocumentClick, true);
+    };
+  }, [dirty]);
 
   return { confirmLeave };
 }
@@ -826,27 +862,41 @@ export function NewDriverSubmissionForm() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const [form, setForm] = useState<DriverDraftInput>({
-    name: "",
-    mobile: "",
-    professionalDriverLicenseNo: "",
-    professionalDriverLicenseExpiry: "",
-    taxiDriverRegistrationNo: "",
-    taxiDriverRegistrationArea: "",
-    taxiDriverRegistrationExpiry: "",
-    supportedServiceProductCodes: ["taxi_realtime"],
-    preferredVehicleSubmissionId: null,
-  });
+  const [form, setForm] = useState<DriverDraftInput>(INITIAL_DRIVER_DRAFT);
+  const [restored, setRestored] = useState(false);
 
-  // Draft is "dirty" once the user has typed anything in a required field (R25).
-  const dirty =
-    !submitted &&
-    (form.name !== "" ||
-      form.mobile !== "" ||
-      form.professionalDriverLicenseNo !== "" ||
-      form.taxiDriverRegistrationNo !== "");
+  // Restore saved draft on mount if available (R25)
+  useEffect(() => {
+    const saved = loadDriverDraft();
+    if (saved && isDriverFormDirty(saved)) {
+      setForm(saved);
+      setRestored(true);
+    }
+  }, []);
+
+  // Track all changes against initial draft (R25)
+  const dirty = !submitted && isDriverFormDirty(form);
+
+  // Persist draft to storage on change; clear if clean or submitted
+  useEffect(() => {
+    if (submitted) return;
+    if (isDriverFormDirty(form)) {
+      saveDriverDraft(form);
+    } else {
+      clearDriverDraft();
+      setRestored(false);
+    }
+  }, [form, submitted]);
 
   const { confirmLeave } = useDraftGuard(dirty);
+
+  function handleDiscard() {
+    if (window.confirm(DRAFT_GUARD_STRINGS.confirmDiscard)) {
+      clearDriverDraft();
+      setForm(INITIAL_DRIVER_DRAFT);
+      setRestored(false);
+    }
+  }
 
   async function onCreate() {
     setSaving(true);
@@ -856,8 +906,9 @@ export function NewDriverSubmissionForm() {
         "fleet-partner/supply-submissions/drivers",
         { method: "POST", body: JSON.stringify(form) },
       );
-      // Mark submitted so the beforeunload guard is lifted before navigation.
+      // Mark submitted and clear persisted draft so guard is lifted before navigation
       setSubmitted(true);
+      clearDriverDraft();
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
     } catch (err) {
@@ -874,26 +925,79 @@ export function NewDriverSubmissionForm() {
         title={t("supply.driverNew.title")}
         subtitle={t("supply.driverNew.subtitle")}
         actions={
-          <button
-            type="button"
-            onClick={() => {
-              if (confirmLeave()) router.back();
-            }}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: theme.accent,
-              fontWeight: 600,
-              fontSize: 12,
-              cursor: "pointer",
-              padding: 0,
-            }}
-          >
-            {t("supply.action.backDashboard")}
-          </button>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            {dirty && (
+              <button
+                type="button"
+                onClick={handleDiscard}
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 4,
+                  color: theme.danger,
+                  fontWeight: 600,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  padding: "4px 8px",
+                }}
+              >
+                {DRAFT_GUARD_STRINGS.discardDraft}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (confirmLeave()) router.back();
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: theme.accent,
+                fontWeight: 600,
+                fontSize: 12,
+                cursor: "pointer",
+                padding: 0,
+              }}
+            >
+              {t("supply.action.backDashboard")}
+            </button>
+          </div>
         }
       />
       <div style={{ padding: 24 }}>
+        {restored && (
+          <div
+            role="status"
+            style={{
+              padding: "10px 14px",
+              marginBottom: 16,
+              borderRadius: 6,
+              backgroundColor: theme.surfaceLo,
+              border: `1px solid ${theme.accentBorder}`,
+              color: theme.text,
+              fontSize: 12,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>{DRAFT_GUARD_STRINGS.restoredNotice}</span>
+            <button
+              type="button"
+              onClick={handleDiscard}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: theme.danger,
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {DRAFT_GUARD_STRINGS.discardDraft}
+            </button>
+          </div>
+        )}
         <DraftFormFrame
           title={t("supply.driverNew.cardTitle")}
           error={error}
@@ -916,29 +1020,41 @@ export function NewVehicleSubmissionForm() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const [form, setForm] = useState<VehicleDraftInput>({
-    plateNo: "",
-    licenseType: "taxi",
-    brand: "",
-    model: "",
-    modelYear: 2024,
-    seatCount: 5,
-    luggageCapacity: 2,
-    businessArea: "台北市",
-    supportedServiceProductCodes: ["taxi_realtime"],
-    airportTransferEligible: false,
-    fixedFareAllowed: false,
-    currentDriverSubmissionId: null,
-    doorCount: 4,
-    color: "",
-  });
+  const [form, setForm] = useState<VehicleDraftInput>(INITIAL_VEHICLE_DRAFT);
+  const [restored, setRestored] = useState(false);
 
-  // Draft is "dirty" once the user has typed anything in a key required field (R25).
-  const dirty =
-    !submitted &&
-    (form.plateNo !== "" || form.brand !== "" || form.model !== "");
+  // Restore saved draft on mount if available (R25)
+  useEffect(() => {
+    const saved = loadVehicleDraft();
+    if (saved && isVehicleFormDirty(saved)) {
+      setForm(saved);
+      setRestored(true);
+    }
+  }, []);
+
+  // Track all changes against initial draft (R25)
+  const dirty = !submitted && isVehicleFormDirty(form);
+
+  // Persist draft to storage on change; clear if clean or submitted
+  useEffect(() => {
+    if (submitted) return;
+    if (isVehicleFormDirty(form)) {
+      saveVehicleDraft(form);
+    } else {
+      clearVehicleDraft();
+      setRestored(false);
+    }
+  }, [form, submitted]);
 
   const { confirmLeave } = useDraftGuard(dirty);
+
+  function handleDiscard() {
+    if (window.confirm(DRAFT_GUARD_STRINGS.confirmDiscard)) {
+      clearVehicleDraft();
+      setForm(INITIAL_VEHICLE_DRAFT);
+      setRestored(false);
+    }
+  }
 
   async function onCreate() {
     setSaving(true);
@@ -948,8 +1064,9 @@ export function NewVehicleSubmissionForm() {
         "fleet-partner/supply-submissions/vehicles",
         { method: "POST", body: JSON.stringify(form) },
       );
-      // Mark submitted so the beforeunload guard is lifted before navigation.
+      // Mark submitted and clear persisted draft so guard is lifted before navigation
       setSubmitted(true);
+      clearVehicleDraft();
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
     } catch (err) {
@@ -966,26 +1083,79 @@ export function NewVehicleSubmissionForm() {
         title={t("supply.vehicleNew.title")}
         subtitle={t("supply.vehicleNew.subtitle")}
         actions={
-          <button
-            type="button"
-            onClick={() => {
-              if (confirmLeave()) router.back();
-            }}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: theme.accent,
-              fontWeight: 600,
-              fontSize: 12,
-              cursor: "pointer",
-              padding: 0,
-            }}
-          >
-            {t("supply.action.backDashboard")}
-          </button>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            {dirty && (
+              <button
+                type="button"
+                onClick={handleDiscard}
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 4,
+                  color: theme.danger,
+                  fontWeight: 600,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  padding: "4px 8px",
+                }}
+              >
+                {DRAFT_GUARD_STRINGS.discardDraft}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (confirmLeave()) router.back();
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: theme.accent,
+                fontWeight: 600,
+                fontSize: 12,
+                cursor: "pointer",
+                padding: 0,
+              }}
+            >
+              {t("supply.action.backDashboard")}
+            </button>
+          </div>
         }
       />
       <div style={{ padding: 24 }}>
+        {restored && (
+          <div
+            role="status"
+            style={{
+              padding: "10px 14px",
+              marginBottom: 16,
+              borderRadius: 6,
+              backgroundColor: theme.surfaceLo,
+              border: `1px solid ${theme.accentBorder}`,
+              color: theme.text,
+              fontSize: 12,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>{DRAFT_GUARD_STRINGS.restoredNotice}</span>
+            <button
+              type="button"
+              onClick={handleDiscard}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: theme.danger,
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {DRAFT_GUARD_STRINGS.discardDraft}
+            </button>
+          </div>
+        )}
         <DraftFormFrame
           title={t("supply.vehicleNew.cardTitle")}
           error={error}
@@ -1500,6 +1670,35 @@ export function SupplySubmissionDetailView({
     ? DRIVER_DOC_TYPES
     : VEHICLE_DOC_TYPES;
   const subject = useMemo(() => formatSupplySubject(detail), [detail]);
+
+  const detailDirty =
+    !busy &&
+    editable &&
+    (driverForm
+      ? isDriverFormDirty(
+          driverForm,
+          detail.driverDraft
+            ? {
+                ...detail.driverDraft,
+                preferredVehicleSubmissionId:
+                  detail.driverDraft.preferredVehicleSubmissionId ?? null,
+              }
+            : null,
+        )
+      : vehicleForm
+        ? isVehicleFormDirty(
+            vehicleForm,
+            detail.vehicleDraft
+              ? {
+                  ...detail.vehicleDraft,
+                  currentDriverSubmissionId:
+                    detail.vehicleDraft.currentDriverSubmissionId ?? null,
+                }
+              : null,
+          )
+        : false);
+
+  useDraftGuard(Boolean(detailDirty));
 
   useEffect(() => {
     setHydrated(true);
