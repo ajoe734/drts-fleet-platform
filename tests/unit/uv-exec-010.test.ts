@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { VoiceEvidenceService } from "../../apps/api/src/modules/voice-booking/voice-evidence.service";
+import { VoiceCheckpointRepository } from "../../apps/api/src/modules/voice-booking/voice-checkpoint.repository";
+import type { VoiceBookingRepository } from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import { ConfirmedRecordingManifests } from "../../apps/voice-media-worker/src/recording/confirmed-manifest";
 import {
   assertConfirmationCoverage,
@@ -97,6 +100,121 @@ describe("UV-EXEC-010 confirmation audio coverage", () => {
         expect(f.receipt.confirmation).not.toHaveProperty("affirmation");
     },
   );
+
+  it.each(["speech", "dtmf"] as const)(
+    "API journals verified %s evidence and rejects subsequent object loss",
+    async (method) => {
+      const f = await proofFixture(method);
+      const confirmed = new ConfirmedRecordingManifests(
+        new ImmutableRecordingManifests(f.store),
+        { resolve: async () => f.receipt },
+      );
+      const ref = await confirmed.seal("credential", f.manifest, f.binding);
+      const journal = new VoiceCheckpointRepository();
+      const append = vi
+        .spyOn(journal, "appendVerified")
+        .mockImplementation(async (input) => ({
+          ...input,
+          checkpointId: "checkpoint",
+          verifiedAt: "2026-09-08T12:00:00Z",
+        }));
+      const lookup = vi.fn();
+      const access = {
+        resolve: vi.fn(async () => ({
+          binding: f.binding,
+          policyVersion: "policy-1",
+        })),
+      };
+      const service = new VoiceEvidenceService(
+        journal,
+        {
+          findRecordingCheckpointById: lookup,
+        } as unknown as VoiceBookingRepository,
+        access,
+        confirmed,
+      );
+      const request = {
+        callId: scope.callId,
+        recordingId: scope.recordingId,
+        manifestVersion: 1,
+        manifest: ref,
+      };
+      const row = await service.checkpoint("credential", request);
+      expect(row.manifestHash).toBe(ref.checksum);
+      expect(row.coverage).toMatchObject({
+        snapshotHash: f.binding.snapshotHash,
+      });
+      lookup.mockResolvedValue(row);
+      expect(
+        await service.requireCheckpoint(
+          "credential",
+          scope.callId,
+          row.checkpointId,
+        ),
+      ).toEqual(row);
+      await expect(
+        service.requireCheckpoint("credential", "other-call", row.checkpointId),
+      ).rejects.toThrow("unavailable");
+      access.resolve.mockResolvedValueOnce({
+        binding: { ...f.binding, snapshotHash: "b".repeat(64) },
+        policyVersion: "policy-1",
+      });
+      await expect(
+        service.requireCheckpoint("credential", scope.callId, row.checkpointId),
+      ).rejects.toThrow("verification failed");
+      f.objects.delete(f.manifest.segments[0]!.objectKey);
+      await expect(
+        service.requireCheckpoint("credential", scope.callId, row.checkpointId),
+      ).rejects.toThrow("verification failed");
+      await expect(service.checkpoint("credential", request)).rejects.toThrow(
+        "verification failed",
+      );
+      expect(append).toHaveBeenCalledTimes(1);
+      expect(row.manifestHash).toBe(ref.checksum);
+    },
+  );
+
+  it("API fails closed without configured recorder authentication and storage", async () => {
+    const journal = new VoiceCheckpointRepository();
+    const append = vi.spyOn(journal, "appendVerified");
+    const service = new VoiceEvidenceService(
+      journal,
+      {} as VoiceBookingRepository,
+    );
+    await expect(
+      service.checkpoint("credential", {
+        callId: scope.callId,
+        recordingId: scope.recordingId,
+        manifestVersion: 1,
+        manifest: {
+          objectKey: "claimed",
+          objectVersion: "v1",
+          checksum: "a".repeat(64),
+          byteLength: 1,
+          durableAt: "2026-09-08T12:00:00Z",
+        },
+      }),
+    ).rejects.toThrow("verification failed");
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it("API reader rejects a checksummed receipt that differs from the trusted ledger", async () => {
+    const f = await proofFixture();
+    const manifests = new ImmutableRecordingManifests(f.store);
+    const ref = await manifests.seal({
+      ...f.manifest,
+      confirmationReceipt: f.receipt,
+    });
+    const confirmed = new ConfirmedRecordingManifests(manifests, {
+      resolve: async () => ({
+        ...f.receipt,
+        confirmation: { ...f.receipt.confirmation, eventId: "different-event" },
+      }),
+    });
+    await expect(
+      confirmed.readTrusted("credential", f.binding, ref),
+    ).rejects.toThrow("ledger mismatch");
+  });
 
   it.each(["speech", "dtmf"] as const)(
     "seals and retrieves %s receipt with its audio",
