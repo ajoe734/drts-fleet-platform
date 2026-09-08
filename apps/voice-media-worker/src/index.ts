@@ -4,3 +4,5 @@ export * from "./media/audio-codec";
 export * from "./media/output-fence";
 export * from "./providers/twm/twm-adapter";
 export * from "./language/language-router";
+export * from "./dialogue/voice-dialogue-provider";
+export * from "./dialogue/dialogue-state";
