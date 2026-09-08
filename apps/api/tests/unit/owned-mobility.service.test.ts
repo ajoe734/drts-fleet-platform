@@ -1287,9 +1287,13 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
 
   it("uses repository transactions for assignment-time recheck when persistence is enabled", async () => {
     let vehicleDispatchable = true;
+    let finishPendingWrites!: () => void;
+    const pendingWrites = new Promise<void>((resolve) => {
+      finishPendingWrites = resolve;
+    });
     const repository = {
       isEnabled: () => true,
-      persistChanges: vi.fn(async () => undefined),
+      persistChanges: vi.fn(() => pendingWrites),
       persistOrderWorkflow: vi.fn(async () => undefined),
       withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
         work({}),
@@ -1323,13 +1327,15 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
     vehicleDispatchable = false;
 
-    await expect(
-      service.assignDispatch({
-        dispatchJobId: dispatchResult.dispatchJobId,
-        vehicleId: "vehicle-001",
-        driverId: "driver-001",
-      }),
-    ).rejects.toMatchObject({
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    await Promise.resolve();
+    expect(repository.withTransaction).not.toHaveBeenCalled();
+    finishPendingWrites();
+    await expect(assignment).rejects.toMatchObject({
       response: {
         error: {
           code: "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",

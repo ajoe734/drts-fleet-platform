@@ -177,3 +177,43 @@ the controller and multi-taxi suites passed **35/35** at 15:32 UTC, including
 API transaction failure propagation and failed compensating cancellation.
 API typecheck passed again. These checks used the same isolated database and
 commands described above; candidate review/CI/merge/acceptance remain pending.
+
+## Lock order and deadline follow-up (2026-09-08)
+
+Codex continued ownership by supervisor fallback; Codex2 remains reviewer.
+Assignment and reassignment now acquire the existing assignment, task, job
+and order locks before any workflow upsert, using the same acquisition path
+as cancellation/completion. They recheck the current assignment under those
+locks. Legacy creation/matching writes already pending on the service are
+awaited before acquiring locks, preventing an immediate assignment from racing
+its own order/job persistence.
+
+New offers persist `acceptanceDeadline` in their assignment record. The
+acceptance timeout checks the durable deadline and pending task while holding
+the assignment/task locks. Early timers, missing/invalid deadlines and tasks
+outside pending acceptance retain capacity. `DISPATCH_ACCEPTANCE_TIMEOUT_MS`
+configures new deadlines (positive integer milliseconds, default 60000);
+legacy records without a deadline require reconciliation.
+
+At 15:49 UTC the PostgreSQL suite passed **26/26**, including an explicit
+blocking transaction proving reassignment waits for its old assignment before
+locking the order, an early-versus-expired deadline check, and missing/invalid
+durable deadline checks. The five related unit suites passed **179/179**.
+The new lock reader initially exposed an intermittent order-write race in
+three PostgreSQL cases; the pending-write boundary fixed that failure. Three
+unit mocks were updated to supply the new locked workflow reader. API
+checking requires `pnpm --filter @drts/contracts build` first because the API
+tsconfig consumes generated contract declarations.
+
+The required plain rebase onto advancing dev was attempted and aborted on
+replayed duplicate task-history conflicts. A non-destructive merge of
+`origin/dev` preserved the already-pushed ancestry and incorporated its two
+new support documents; all subsequent pushes used normal non-force push.
+These are local candidate checks; review, CI, merge and external acceptance
+remain separate lifecycle gates.
+
+Final API typecheck passed after rebuilding contracts. At 15:50 UTC the
+owned-mobility service unit suite passed **112/112** after strengthening its
+assignment recheck test with a deferred persistence promise: no transaction
+starts until the prior creation/matching writes finish. `git diff --check`
+also passed.
