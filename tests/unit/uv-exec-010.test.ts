@@ -483,18 +483,22 @@ function fixture() {
         durableAt: "2026-09-08T00:00:10Z",
       };
     }),
-    readVersion: vi.fn(async (_scope, key, version) => {
-      const bytes = objects.get(key);
-      if (!bytes) throw new Error("storage unavailable");
-      return {
-        bytes: Uint8Array.from(bytes),
-        objectVersion: version,
-        recordingMetadata: metadata.get(key),
-      };
-    }),
+    readVersion: vi.fn<RecorderObjectStore["readVersion"]>(
+      async (_scope, key, version) => {
+        const bytes = objects.get(key);
+        if (!bytes) throw new Error("storage unavailable");
+        return {
+          bytes: Uint8Array.from(bytes),
+          objectVersion: version,
+          ...(metadata.has(key)
+            ? { recordingMetadata: metadata.get(key)! }
+            : {}),
+        };
+      },
+    ),
   };
   const ingress: RecorderIngress = {
-    authorize: vi.fn(async () => ({
+    authorize: vi.fn<RecorderIngress["authorize"]>(async () => ({
       source: "recording_fork",
       channels: ["inbound", "outbound"],
     })),

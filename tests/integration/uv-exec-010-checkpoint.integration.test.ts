@@ -7,8 +7,7 @@ import { VoiceCheckpointRepository } from "../../apps/api/src/modules/voice-book
 const require = createRequire(
   new URL("../../apps/api/package.json", import.meta.url),
 );
-const { Pool } =
-  require("pg") as typeof import("../../apps/api/node_modules/pg");
+const { Pool } = require("pg") as typeof import("pg");
 // Opt-in admin connection. Tests create and drop ONLY their own random database.
 const connectionString = process.env.UV_RECORDER_TEST_DATABASE_URL;
 
