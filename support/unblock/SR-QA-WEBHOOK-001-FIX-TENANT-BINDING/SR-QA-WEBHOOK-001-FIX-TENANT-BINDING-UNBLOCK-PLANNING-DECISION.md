@@ -18,7 +18,7 @@ PR or its approval alone must not resume implementation.
 
 ## Cited contract and evidence
 
-- `phase1_prd_detailed_v1.md` §12.8 defines tenant API-key management and role
+- `phase1_prd_detailed_v1.md` §9.1.2 defines tenant API-key management and role
   restrictions on sensitive API/Webhook modules; it does not grant cross-tenant
   access through caller-supplied headers.
 - `phase1_system_analysis_v1.md` §11.1 requires tenant/platform permission
