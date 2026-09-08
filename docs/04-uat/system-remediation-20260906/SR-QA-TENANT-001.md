@@ -54,3 +54,20 @@ Playwright 的 CLI regex 在含 task ID 的 worktree 絕對路徑亦會匹配 sh
 | integration settings（C111）        | API key 輪替/撤銷/遮罩與使用回讀；失效 key 與超出 scope 拒絕                          |
 
 尚缺可用 URL、合法測試身份與可拋棄租戶配置；沒有使用假 header 或 fixture 代替驗收。瀏覽器登入、真收件、DB 持久性與上述未新增案例仍待執行。沒有已確認的新產品缺陷，因此本次未建立修復子任務；發現後須透過 canonical task command 建立並追溯。
+
+## 2026-09-08 15:52 UTC dispatch 續作
+
+本輪 fetch / rebase exit 0，最新 base 為 `f372e4a6a0dd16204ccbd660f23013601357c224`。rebase 後 merge 原遠端 anchor ancestry（exit 0，無內容衝突），保留既有提交並允許普通 non-force push。新增測試 anchor / 本輪實跑 SHA：`89bec9f4eaba30ac9c9d3d541f75b8a5705b0bc9`；普通 push exit 0。尚未鎖定 candidate 或 handoff。
+
+新增 `tests/e2e/system-remediation/sr-qa-tenant-001/cost-centers.spec.ts`，依目前 tenant-partner controller/service 的成本中心契約，驗證建立與更新後 detail/list 回讀、同 code 唯一性、停用原因與時間及 activeOnly 過濾；跨租戶讀取/停用 404、唯讀更新/停用 403、空白名稱 400 後再次回讀原資料。沿用前述六項環境變數，缺前置即失敗；finally evidence 即使前置失敗仍記錄 SHA 與空 calls/resources。成本中心使用者/訂單引用、配額影響、DB 重啟仍待驗收，不能把新增案例視為 C027 全部完成。
+
+本輪實際指令結果：
+
+| 指令 | exit | 結果 |
+| --- | --- | --- |
+| `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001` | 1 | 2 task failed / 4 shared passed；兩個 task 均缺 `DRTS_TENANT_UAT_API_URL`，零 HTTP 寫入、零資源 ID |
+| `pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001/ --max-warnings=0` | 0 | 兩個 task spec lint 通過 |
+| `pnpm exec vitest run tests/integ/tenant-governance-negative.test.ts tests/unit/system-remediation/sr-mail-001/ tests/unit/system-remediation/sr-mail-002/ tests/unit/system-remediation/sr-tenant-login-001/` | 0 | 7 files / 55 tests passed；本輪重新執行，仍非 live/DB/mail 證據 |
+| `git diff --check` | 0 | 無空白錯誤 |
+
+API typecheck 是前輪結果，本輪未重跑。最新 dev 的 SR-READINESS-001 報告亦明列真實 HTTP、DB tenant provision、收信等尚未執行，未提供本 task 的可用身份。仍需 provisioner 提供可拋棄 A/B 租戶、API URL 與合法可寫/唯讀 bearer；其餘矩陣的案例仍待補齊。維持 in_progress，不交接不完整驗收。
