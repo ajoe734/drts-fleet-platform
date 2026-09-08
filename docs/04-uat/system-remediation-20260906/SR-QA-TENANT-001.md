@@ -1,5 +1,27 @@
 # SR-QA-TENANT-001 — 驗收進度（未完成）
 
+## 19:02 UTC dispatch（最新結果）
+
+Base：`f1289326af009864ef699db47ea6388d58bba0a1`；tested anchor：`5acc61a5cce60c385b812f744246b684e6e51b1a`。以下歷史段落的頁首 SHA 不代表本次執行。尚無 handoff candidate 或 server deployment SHA。
+
+已讀 PR #1805 合併的 planning-decision artifact：只釐清 provisioning 分類，沒有縮減 acceptance 或提供身分。依該 follow-up 繼續 scope 內開發，新增 SLA 合法唯讀 session 的 GET 成功、POST 403、管理員 GET 原值不變案例；拒絕請求使用不同門檻，避免無變化的寫入掩蓋缺陷。新增必要環境變數 `DRTS_UAT_TOKEN_READONLY_A`：綁定 A、具有 `tenant:sla:read`、沒有 `tenant:sla:write` 的真實 session，不得使用管理員 token 或假 actor headers。
+
+```sh
+BASE_SHA=f1289326af009864ef699db47ea6388d58bba0a1 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001
+# exit 1；4 shared harness passed / 5 tenant HTTP failed；2.4s
+# 全部 Missing required DRTS_UAT_ENV；沒有執行 HTTP acceptance。
+pnpm exec vitest run tests/unit/tenant-partner-foundation.test.ts tests/integ/tenant-governance-negative.test.ts
+# exit 0；2 files / 36 passed；3.04s（vitest/config resolution warning）
+pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001 --max-warnings=0
+# exit 2；ERR_MODULE_NOT_FOUND: @eslint/js，未完成 lint。
+git diff --check
+# exit 0
+```
+
+實際解析並斷言五份 `test-results/sr-qa-tenant-001-*/tenant-evidence.json`：全部 tested HEAD 如上、failed、exitCode 1、HTTP calls 0、resource IDs `[]`。無 DB、live mail、browser 或真機證據；service tests 不代替它們。尚餘 quota、flags、lifecycle、完整 invite/approval 關聯與整合驗收矩陣。
+
+rebase 完成，歷史文件衝突保留已提交的累積證據；merge 接回已發布 task branch ancestry，merge tree diff 為空。普通 push 保存 anchors，未 force push。維持 in_progress：Supervisor/Gemini 需協調隔離 API、A/B/admin/唯讀 sessions、收件地址、server SHA 與 DB teardown；本次另遇 worktree lint 依賴缺失，尚未 handoff。
+
 Owner Codex2 / Reviewer Codex。2026-09-08。
 
 Base / tested product source SHA：`3b82fba0fabba3328e3443de3d602780f852d724`，本次 fetch 後 rebase 至 origin/dev；不是 live server deployment SHA。
