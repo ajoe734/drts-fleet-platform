@@ -31,6 +31,11 @@
    - `layout.tsx` 未聲明 `viewport` metadata，導致行動瀏覽器以桌面縮放尺寸渲染。
    - 右側或底部 CTA 面板使用 `position: "sticky"`，在行動裝置虛擬鍵盤開啟或錯誤提示展開時遮擋輸入欄位與主要按鈕。
 
+4. **UI Design Contract: Tenant Realm Tokens 引用與 raw hex 違規修復（Codex Round 3 審查意見）**
+   - 前次 candidate 在 `apps/enterprise-dispatch-web/app/globals.css:5-13` 宣告了 6 個硬編碼之 raw hex `--realm-tenant-*` 變數，但 git grep 確認無任何元件消費該 CSS 變數，違反了「不得於 globals.css 或元件中硬編碼 raw hex palette」之 UI Design Contract。
+   - 前次表單與確認頁元件直接引用 `enterpriseTheme`，其 `buildEnt` 預設 accent 為 `#2457D6`（藍色），導致 Tenant Realm Tokens（teal `#0F766E`）未實際作用於 UI 上。
+   - 本次在 `components/booking-form/theme.ts` 中直接匯入並消費權威 `@drts/ui-tokens` 之 `REALM_COLORS.tenant`（`fg: #0F766E`, `bg: #F0FDFA`, `border: #99F6E4`），透過 `buildTenantEnterpriseTheme` 注入 scoped UI 元件（表單、確認按鈕、步驟指示器、確認頁卡片與提示），完全不複製或硬編碼 palette；同時自 `globals.css` 徹底移除未消費的 raw hex CSS 變數，並以單元測試鎖定守衛。
+
 ---
 
 ## 2. 核心修復說明
@@ -80,7 +85,17 @@
     - 設定 `word-break: break-word` 與 `overflow-wrap: anywhere`，確保長文字不撐開視窗。
 
 ### 2.4 UI Design Contract 與 Realm Token 遵循
-- 所有元件與色彩樣式嚴格沿用 `packages/ui-tokens` 規範之 Tenant Realm Tokens（`--realm-tenant-fg: #0F766E`、`--realm-tenant-bg: #F0FDFA`、`--realm-tenant-border: #99F6E4`）與 `lib/enterprise-theme.ts`，不引入任何未定義之任意 hex 色彩。
+- **直接消費 canonical `@drts/ui-tokens`**：
+  - 新增 `components/booking-form/theme.ts`，直接 `import { REALM_COLORS } from "@drts/ui-tokens"`，導出 `tenantEnterpriseTheme` 與 `buildTenantEnterpriseTheme`。
+  - 將 Tenant Realm 權威色彩注入主題：
+    - `primary`: `REALM_COLORS.tenant.light.fg` (`#0F766E`)
+    - `primaryBg`: `REALM_COLORS.tenant.light.bg` (`#F0FDFA`)
+    - `primaryBd`: `REALM_COLORS.tenant.light.border` (`#99F6E4`)
+    - 暗色模式支援：`REALM_COLORS.tenant.dark` (`#5EEAD4`, `#0F2A28`, `#134E48`)
+  - 嚴格應用於 scoped UI（`enterprise-booking-form.tsx`、`booking-submit-button.tsx`、`review/page.tsx`、`new/page.tsx`），使表單 Primary 按鈕、Review 頁費用與審批卡片、Segmented Control 啟用態及 EStepper 步驟指示器全數呈現權威 Tenant Realm teal 色系。
+- **清除 `globals.css` raw hex 違規**：
+  - 徹底移除 `globals.css` 中未消費之 6 個 raw hex CSS 變數（`--realm-tenant-*`），不引入任何未受 `@drts/ui-tokens` 管轄的任意硬編碼 hex palette。
+  - 執行 `python3 tools/ci/check_ui_realm_tokens.py --enforce` 檢查全庫通過（0 違規）。
 - 遵循設計畫布（`docs/05-ui/drts-design-canvas/Enterprise Dispatch.html` 及 `ent-screens-1.jsx`）之元件佈局與階層結構。
 
 ---
@@ -119,16 +134,16 @@ $ pnpm --filter @drts/enterprise-dispatch-web typecheck
 exit code: 0
 ```
 
-### 4.3 本次專屬迴歸單元測試（22/22 全部通過，含 Round 2 Codex P2 迴歸）
+### 4.3 本次專屬迴歸單元測試（25/25 全部通過，含 Round 2 P2 迴歸與 Round 3 Realm Token 遵循）
 ```text
 $ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/
 
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001
 
  Test Files  1 passed (1)
-      Tests  22 passed (22)
-   Start at  17:17:45
-   Duration  338ms (transform 108ms, setup 0ms, import 137ms, tests 35ms, environment 0ms)
+      Tests  25 passed (25)
+   Start at  17:28:03
+   Duration  499ms (transform 222ms, setup 0ms, import 278ms, tests 41ms, environment 0ms)
 
 exit code: 0
 ```
@@ -197,7 +212,7 @@ exit code: 0
 
 ### 4.7 UI Realm Token 守衛檢查
 ```text
-$ python3 tools/ci/check_ui_realm_tokens.py
+$ python3 tools/ci/check_ui_realm_tokens.py --enforce
 ui-realm-token guard: OK (2 canonical hexes; no off-token brand colors)
 
 exit code: 0
@@ -208,6 +223,7 @@ exit code: 0
 ## 5. 驗證界限與未施作部分說明
 
 - **已完成驗證範圍**：
+  - UI Design Contract 與 Realm Token 遵循：直接自 `@drts/ui-tokens` 引用 `REALM_COLORS.tenant`（teal `#0F766E` / `#F0FDFA` / `#99F6E4`），透過 `components/booking-form/theme.ts` 之 `tenantEnterpriseTheme` 提供 scoped UI，不硬編碼或複製 raw hex palette；徹底移除 `globals.css` 內未消費之 6 個 raw hex `--realm-tenant-*` 變數。
   - 自訂（self）、代訂（other）、機場（airport）各入口模式的預設資料建立與欄位一致性。
   - 乘客姓名修改與舉牌同步連動、使用者自訂客製舉牌跨頁往返序列化之持久性。
   - 自訂舉牌（如「自訂 VIP 田中董事長」或選用代訂舉牌「訪客 · Sato Kenji 様」後切換至 self mode）在 `buildEnterpriseBookingCommand` 中正確持久合併至 `command.notes`，徹底解決 Round 1 與 Round 2 審查指出的 command notes 遺失與 fixture suppression 缺陷。

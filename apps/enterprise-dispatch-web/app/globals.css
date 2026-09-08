@@ -2,16 +2,6 @@
   box-sizing: border-box;
 }
 
-:root {
-  /* DRTS Realm Tokens: Tenant Realm (teal) per packages/ui-tokens */
-  --realm-tenant-fg: #0f766e;
-  --realm-tenant-bg: #f0fdfa;
-  --realm-tenant-border: #99f6e4;
-  --realm-tenant-fg-dark: #5eead4;
-  --realm-tenant-bg-dark: #0f2a28;
-  --realm-tenant-border-dark: #134e48;
-}
-
 html,
 body {
   margin: 0;

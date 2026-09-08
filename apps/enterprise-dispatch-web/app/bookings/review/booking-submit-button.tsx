@@ -12,7 +12,7 @@ import {
   type Locale,
 } from "@/lib/enterprise-booking-draft";
 import { enterpriseTenant } from "@/lib/enterprise-fixtures";
-import { enterpriseTheme as theme } from "@/lib/enterprise-theme";
+import { tenantEnterpriseTheme as theme } from "@/components/booking-form/theme";
 import { getEnterpriseDispatchTenantClient } from "@/lib/api-client";
 import { createIdempotencyKey } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";

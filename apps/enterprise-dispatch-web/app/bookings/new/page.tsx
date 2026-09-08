@@ -10,7 +10,7 @@ import {
   getEnterpriseCostCenters,
   getEnterprisePassengers,
 } from "@/lib/enterprise-fixtures";
-import { enterpriseTheme as t } from "@/lib/enterprise-theme";
+import { tenantEnterpriseTheme as t } from "@/components/booking-form/theme";
 import { getServerLocale } from "@/lib/server-locale";
 import { type TranslationKey, t as translate } from "@/lib/translations";
 
