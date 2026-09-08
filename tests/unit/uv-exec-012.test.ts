@@ -114,6 +114,51 @@ describe("UV-EXEC-012 controlled turn entry", () => {
     },
   );
 
+  it("bounds stalled tool delivery and allows recovery without returning late playback", async () => {
+    vi.useFakeTimers();
+    const engine = new VoiceDialogueEngine(
+      { mode: "live", profileVersion: "v1", propose: async () => output() },
+      true,
+    );
+    const state = new VoiceDialogueState();
+    let entered!: () => void;
+    let finish!: (results: unknown[]) => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const turn = engine.turn(
+      request({ deadline: Date.now() + 20 }),
+      state,
+      () => 1,
+      {
+        persist: async () => {},
+        execute: () => {
+          entered();
+          return new Promise<unknown[]>((resolve) => {
+            finish = resolve;
+          });
+        },
+      },
+    );
+    const rejected = expect(turn).rejects.toThrow("voice_aborted");
+    await started;
+    await vi.advanceTimersByTimeAsync(20);
+    await rejected;
+    const recovery = await engine.turn(
+      request({ turnId: "recovery" }),
+      state,
+      () => 1,
+      {
+        persist: async () => {},
+        execute: async () => [],
+      },
+    );
+    finish(["late result"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recovery.results).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("never plays fabricated success and persists before executing tools", async () => {
     const engine = new VoiceDialogueEngine(
       {

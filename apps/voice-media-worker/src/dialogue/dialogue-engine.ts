@@ -51,10 +51,8 @@ export class VoiceDialogueEngine {
         structuredClone(state),
       );
       next.apply(output, request.turnId);
-      await this.boundedStage(
-        request,
-        () => currentEpoch(),
-        (bounded) => ports.persist(next, bounded),
+      await this.boundedStage(request, currentEpoch, (bounded) =>
+        ports.persist(next, bounded),
       );
       request.signal.throwIfAborted();
       if (
