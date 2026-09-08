@@ -17,6 +17,7 @@ export interface VoiceLanguageRoute {
 
 export interface LanguageSwitchResult {
   language: VoiceLanguage;
+  asrModelName: string;
   source: LanguageSelectionSource;
   providerEpoch: number;
   drainOldStream: true;
@@ -73,7 +74,7 @@ export class VoiceLanguageRouter {
     this.assertEnabled(language);
     this.providerEpoch += 1;
     this.current = language;
-    return { language, source, providerEpoch: this.providerEpoch, drainOldStream: true, invalidateUncommittedConfirmation: true, preserveConfirmedDraft: true };
+    return { language, asrModelName: this.routes.get(language)!.asrModelName, source, providerEpoch: this.providerEpoch, drainOldStream: true, invalidateUncommittedConfirmation: true, preserveConfirmedDraft: true };
   }
 
   private assertEnabled(language: VoiceLanguage): void {
