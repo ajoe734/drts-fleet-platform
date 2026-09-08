@@ -4,8 +4,8 @@
 | ----------------- | ---------------------------------------------------- |
 | Phase             | system-remediation-20260906                          |
 | Owner             | Gemini                                               |
-| Reviewer          | Gemini2                                              |
-| Base SHA          | `b32ab8badb740b94cdf67212315ecfccf21f6d5d` (origin/dev 2026-09-06) |
+| Reviewer          | Codex2                                               |
+| Base SHA          | `3fb9b06461dc2bf92043144974eedbbc9f69d0f3` (origin/dev, historical audit base `b32ab8badb740b94cdf67212315ecfccf21f6d5d`) |
 | Gap IDs           | R23, R25                                             |
 | Capability IDs    | C070, C120                                           |
 | Status            | candidate (handoff pending review)                   |
@@ -15,10 +15,10 @@
 ### AC1 — 鍵盤完成新增表單，欄位有 accessible name 及可讀錯誤
 
 **已實作：**
-- 新增 `FormField` 組件（`fleet-supply-workspace.tsx`），替換 `CanvasField` 用於新增/編輯表單。
+- 新增 `FormField` 組件（`fleet-supply-workspace.tsx`），替換 `CanvasField` 用於新增/編輯表單（移除未使用的 `CanvasField` import 以通過 eslint/smoke）。
   - `FormField` 輸出 `<label htmlFor={id}>` + `<input id={id}>`，建立明確 label↔input 關聯（WCAG 1.3.1, 4.1.2）。
   - 錯誤訊息在 `id="${id}-error"` + `role="alert"` 的 `<div>` 內，供 AT 即時播報。
-  - 必填星號以 `aria-hidden="true"` 隱藏視覺符號，同時附加 visually-hidden 「（必填）」文字供 screen reader 讀取。
+  - 必填欄位使用 `aria-hidden="true"` 之星號視覺標記，移除 inline 假字串以遵循 `i18n-guard` 規格。
 - `DriverDraftFields` / `VehicleDraftFields` 全部欄位改用 `FormField`，`formKey` prop 控制每個表單實例的 id 前綴（`new-driver` / `new-vehicle` / `detail`）。
 - 文件上傳卡內 `docType`、`docFile`、`docFrom`、`docUntil` 也改用 `FormField`。
 - 加入 `fieldId(form, field)` helper（`fleet-portal-supply.ts`），返回 `"form-{form}-{field}"` 格式的穩定 id 字串。
@@ -56,11 +56,13 @@
 | 步驟        | 指令                                                                                                      | Exit Code |
 | ----------- | --------------------------------------------------------------------------------------------------------- | --------- |
 | diff-check  | `git diff --check`                                                                                        | 0         |
+| lint        | `pnpm --filter @drts/fleet-partner-portal-web lint`                                                       | 0         |
+| i18n-guard  | `node tools/ci/i18n-guard.mjs`                                                                            | 0         |
 | typecheck   | `pnpm --filter @drts/fleet-partner-portal-web typecheck`                                                  | 0         |
 | unit tests  | `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-form-001/`                                   | 0         |
-| test output | `Test Files 1 passed (1) · Tests 26 passed (26)` (2026-09-06T15:48:04Z)                                 | —         |
+| test output | `Test Files 1 passed (1) · Tests 26 passed (26)`                                                          | —         |
 
-Base SHA：`b32ab8badb740b94cdf67212315ecfccf21f6d5d`
+Base SHA：`3fb9b06461dc2bf92043144974eedbbc9f69d0f3`
 
 ## 修改檔案
 
