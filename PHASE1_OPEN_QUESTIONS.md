@@ -4,7 +4,7 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`.
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`.
 
 The original fifteen questions on this board were answered. Worth noting how, because the
 distribution was not what the board implied: of the fifteen, four were closed by
@@ -33,6 +33,18 @@ state. Do not broaden all roles to bypass 403 or return seed statements after AP
 failure. The existing completed `SR-IAM-001` and `SR-BANK-001` are provenance,
 not authorization to edit their shared files under the parent.
 See [decision and executable follow-up](support/unblock/SR-BANK-002/SR-BANK-002-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-ENTERPRISE-SEARCH-001 — producer and contract routing pending
+
+This question remains **open**: Supervisor/Chairman must register or identify the
+missing booking-filter producer, authorize backend and shared contract/client
+scopes with dependency ordering, and route exact date/passenger/status/pagination
+semantics to contract review. Parent owner Codex2 and reviewer Codex retain the
+full acceptance; no scope cut or frontend-only substitute is approved. The parent
+stays blocked until the producer is accepted and merged. See the
+[decision routing record](support/unblock/SR-ENTERPRISE-SEARCH-001/SR-ENTERPRISE-SEARCH-001-UNBLOCK-PLANNING-DECISION.md)
+for evidence, named follow-ups, and the resume gate. This is tracked follow-up on
+the existing parent, not a claim that a new producer is already on the task board.
 
 ## Resolved Items
 
