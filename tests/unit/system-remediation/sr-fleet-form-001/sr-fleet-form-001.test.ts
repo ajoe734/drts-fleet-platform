@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   fieldId,
+  restoreSupplyDraft,
   hasUnsavedDraftChanges,
   shouldConfirmDraftNavigation,
   DRAFT_GUARD_STRINGS,
@@ -103,21 +104,23 @@ describe("SR-FLEET-FORM-001 / in-app draft navigation guard (R25)", () => {
   const current = "https://fleet.example.test/supply/drivers/new";
 
   it("confirms a dirty draft before a same-origin shell navigation", () => {
-    expect(
-      shouldConfirmDraftNavigation(true, current, "/supply"),
-    ).toBe(true);
+    expect(shouldConfirmDraftNavigation(true, current, "/supply")).toBe(true);
   });
 
   it("does not intercept same-document anchors or an unchanged route", () => {
     expect(shouldConfirmDraftNavigation(true, current, current)).toBe(false);
-    expect(
-      shouldConfirmDraftNavigation(true, current, "#field-name"),
-    ).toBe(false);
+    expect(shouldConfirmDraftNavigation(true, current, "#field-name")).toBe(
+      false,
+    );
   });
 
   it("leaves external navigation to the native beforeunload guard", () => {
     expect(
-      shouldConfirmDraftNavigation(true, current, "https://other.example.test/"),
+      shouldConfirmDraftNavigation(
+        true,
+        current,
+        "https://other.example.test/",
+      ),
     ).toBe(false);
   });
 
@@ -267,9 +270,7 @@ describe("SR-FLEET-FORM-001 / dirty-state invariants (R25)", () => {
   };
 
   it("driver form is not dirty on initial empty state", () => {
-    expect(
-      hasUnsavedDraftChanges(initialDriver, initialDriver),
-    ).toBe(false);
+    expect(hasUnsavedDraftChanges(initialDriver, initialDriver)).toBe(false);
   });
 
   it("driver form is dirty once name is typed", () => {
@@ -293,7 +294,10 @@ describe("SR-FLEET-FORM-001 / dirty-state invariants (R25)", () => {
 
   it("vehicle form is dirty once plateNo is typed", () => {
     expect(
-      hasUnsavedDraftChanges({ ...initialVehicle, plateNo: "KAB-001" }, initialVehicle),
+      hasUnsavedDraftChanges(
+        { ...initialVehicle, plateNo: "KAB-001" },
+        initialVehicle,
+      ),
     ).toBe(true);
   });
 
@@ -304,5 +308,45 @@ describe("SR-FLEET-FORM-001 / dirty-state invariants (R25)", () => {
         initialVehicle,
       ),
     ).toBe(true);
+  });
+});
+
+describe("browser draft restoration", () => {
+  const initial = {
+    name: "",
+    count: 2,
+    allowed: false,
+    products: ["taxi_realtime"],
+    related: null,
+  };
+  it("restores every field including optional choices", () => {
+    const draft = {
+      name: "test",
+      count: 3,
+      allowed: true,
+      products: [],
+      related: "submission-test",
+    };
+    expect(restoreSupplyDraft(JSON.stringify(draft), initial)).toEqual(draft);
+  });
+  it.each([
+    null,
+    "bad JSON",
+    "null",
+    "[]",
+    "{}",
+    '{"name":false}',
+    JSON.stringify({ ...initial, count: "2" }),
+    JSON.stringify({ ...initial, products: [1] }),
+  ])("ignores corrupt or incompatible stored state: %s", (raw) => {
+    expect(restoreSupplyDraft(raw, initial)).toEqual(initial);
+  });
+  it("does not send unknown stored properties to the API", () => {
+    expect(
+      restoreSupplyDraft(
+        JSON.stringify({ ...initial, fleetPartnerId: "injected" }),
+        initial,
+      ),
+    ).toEqual(initial);
   });
 });
