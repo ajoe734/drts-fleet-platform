@@ -1,5 +1,42 @@
 # SR-OPS-PROOF-001 — isolated restore and workload-proof preparation
 
+## 2026-09-08 18:27 UTC dispatch — resume gate still unsatisfied
+
+Fetched `origin/dev`: `318f5065433ff07fba2ddf242cf1c5aef5fb1cae`.
+Inspected the merged PR #1808 planning artifact directly with
+`git show origin/dev:support/unblock/SR-OPS-PROOF-001/SR-OPS-PROOF-001-UNBLOCK-PLANNING-DECISION.md`
+(exit 0). Its resume gate explicitly says helper merge alone does not resume or
+accept the parent. `origin/dev:PHASE1_OPEN_QUESTIONS.md`, Q-SR-OPS-PROOF-001,
+still requires Supervisor/Chairman to record the boundary and coordinate
+authorized isolated inputs with Gemini. The helper's machine status is done,
+but no approved preparation-only scope allocation or resource receipt is in
+that artifact. The automatically restored parent todo status is not evidence
+that these prerequisites have been supplied.
+
+`git fetch origin` succeeded. `git rebase origin/dev` exited 1 at historical
+commit `e2aef3803` with add/add conflicts in the task document, shell harness
+and shell tests. `git rebase --abort` exited 0 and restored the clean published
+branch at `02522d8051f0805d02eebb25636065ed5d4d74a0`. No conflict resolution,
+force push or rollback of current dev was performed. Consequently the following
+regression is explicitly on that existing implementation SHA, **not** on the
+newly fetched dev base or a final candidate:
+
+| Actual command | Exit / result |
+| --- | --- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-ops-proof-001` | 0; 4 files, 35 tests passed |
+| `bash -n tools/system-remediation/ops-proof/ops-proof.sh` | 0 |
+| `git diff --check` before this evidence addition | 0 |
+| `command -v psql` / `command -v pg_restore` | 1 each; unavailable |
+
+No trusted snapshot/independent manifest, authorized isolated DB/API identifiers,
+authenticated workload plan or cloud observation target was supplied or exercised.
+No new live, restore, capacity, deployment, rollback or physical-device success
+is claimed. No candidate is locked and no handoff is submitted. Supervisor must
+record the route and retrievable inputs specified in the merged resume gate;
+then the owner can resolve the historical rebase and verify the resulting base.
+This evidence-only continuation is committed and normally pushed before recording
+the unresolved input gate through the canonical blocker command.
+
 ## Evidence provenance
 
 - Base SHA refreshed on 2026-09-08: `c4c4a35f88907df6bf68e781059dde397c06ba03` (`origin/dev`). Previous `70355aba…` evidence is historical.
