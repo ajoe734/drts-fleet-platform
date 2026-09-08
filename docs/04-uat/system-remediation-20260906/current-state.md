@@ -17,10 +17,13 @@ This is a repository-only readback. No browser, product/E2E server, Docker infra
 
 ## Executed repository evidence
 
-| Command                                          | Exit | Result                                                                                |
-| ------------------------------------------------ | ---: | ------------------------------------------------------------------------------------- |
-| git fetch origin and git rev-parse origin/dev    |    0 | 70355aba97c23dd1cd592b71f1d3dfe6315d91ff                                              |
-| jq length over findings/gaps/capabilities source |    0 | 30 + 14 = 44 items; 134 capabilities                                                  |
-| git log --oneline -15 origin/dev                 |    0 | Current merged remediation evidence was enumerated; it does not replace a live check. |
+| Command                                                              | Exit | Result                                                                                |
+| -------------------------------------------------------------------- | ---: | ------------------------------------------------------------------------------------- |
+| git fetch origin and git rev-parse origin/dev                        |    0 | 70355aba97c23dd1cd592b71f1d3dfe6315d91ff                                              |
+| jq length over findings/gaps/capabilities source                     |    0 | 30 + 14 = 44 items; 134 capabilities                                                  |
+| git log --oneline -15 origin/dev                                     |    0 | Current merged remediation evidence was enumerated; it does not replace a live check. |
+| pnpm exec vitest run tests/unit/system-remediation/sr-readiness-001/ |    0 | 1 test file; 4 tests passed                                                           |
+| pnpm exec prettier --check (the four SR-READINESS-001 artifacts)     |    0 | All matched files use Prettier code style                                             |
+| git diff --check                                                     |    0 | No whitespace errors                                                                  |
 
 Resource IDs: none were accessed or created in this repository-only inspection. Missing evidence remains missing.
