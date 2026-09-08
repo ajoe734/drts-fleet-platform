@@ -2,7 +2,18 @@
 
 本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Gemini（本次 dispatch）。未 handoff、未完成 review/CI/merge。
 
-## 2026-09-08 16:45 UTC 預設 transport 停滯觀察（最新）
+## 2026-09-08 16:50 UTC C111 身分驗證前置回歸（最新）
+
+- base `890548b4f357542968c8b14f33f23e0685be007a`；執行 SHA `9cf47045c75f0bc657fd52ae91e137246f979db6`，尚非 lifecycle candidate。fetch 後確認 base 已是 HEAD 祖先（`git merge-base --is-ancestor origin/dev HEAD` exit 0）。一般 rebase 重播舊提交遇到 add/add 衝突，已 abort，原已發布歷史保留。
+- 追溯 C111 `source/capabilities.json`：管理 API 為 `tenant/api-keys`；`auth.policy.ts` 要求 GET `tenant:read`、寫入 `tenant:write`；`step-up.policy.ts` 的 issue/rotate/revoke 要求 tenant/platform 的 15 分鐘 freshness。這是程式追查，不能當作 HTTP 權限驗收。
+- `pnpm --filter @drts/api exec vitest run tests/integration/jwt-session-claims.integration.test.ts tests/integration/int-iam-prt-001-partner-credential-lifecycle.test.ts` → exit 1，9 passed / 5 failed；5 個失敗皆因未配置 `DATABASE_URL`，不是已重現產品缺陷。
+- 新增可重跑入口：`bash tests/unit/system-remediation/sr-qa-webhook-001/run-auth-prerequisites.sh` → exit 0，2 files / 14 tests passed，Vitest 5.91s。沿用 schema-only 本機隔離 DB，未修改來源 DB。資料庫資源 ID `sr_qa_webhook_001_1788886189_3389223`；結束後查 `pg_database` 同名計數為 0，確認清理。
+- 此入口實際執行既有 durable JWT session 的發行／驗證、過期版本／principal suspension／membership 變更失效、簽章演算法負向案例，以及 tenant credential controller lifecycle 回歸。測試沒有經過 HTTP listener；不宣稱 C111 authenticated 管理 API、tenant key 消費與使用量已通過。個別 session/key ID 未另存證據包，此次只記錄隔離 DB ID。
+- `bash -n tests/unit/system-remediation/sr-qa-webhook-001/run-auth-prerequisites.sh`、`git diff --check` → exit 0。runner anchor 已普通 push；本輪未改產品碼或 UI。
+
+下一步以 durable session 加 step-up proof 建立 authenticated 管理 API 的正向與權限負向測試；tenant key 消費路由／使用量仍需確認。C112 default deadline、C113 sandbox、C114 provider、C115 部署排程告警證據仍未完備，維持 in_progress，不 handoff。
+
+## 2026-09-08 16:45 UTC 預設 transport 停滯觀察（歷史）
 
 本節優先於歷史紀錄。base `890548b4f357542968c8b14f33f23e0685be007a`；執行 anchor `b52204d602e91056a381d86f160b991b1ec1f113`，非 lifecycle candidate。一般 rebase 重播 a119ec0bb 再次遇到四個 task 檔 add/add 衝突，已 abort；以 merge 納入 dev 保留發布歷史，普通 push 成功，未覆蓋新版產品碼。
 
