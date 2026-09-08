@@ -84,6 +84,7 @@ import {
   type ControlledDownloadMetadata,
 } from "./download-signing.util";
 import { buildSettlementMatrix } from "../billing-settlement/settlement-matrix";
+import { recordsToXlsx, recordsToPdf } from "./report-renderers";
 
 type ReportJobView = ReportJobRecord & {
   artifact: ReportArtifactView | null;
@@ -309,13 +310,17 @@ export class ReportingFilingService implements OnModuleInit {
    * compile, and `null` is an explicit "declared, not rendered" that
    * `createReportJob` rejects rather than silently ignoring.
    *
-   * xlsx and zip would need a new dependency; pdf needs a generic table writer
-   * rather than the certificate-shaped one in `certificate-support`. None of
-   * them is hard, and none of them is done, so none of them is offered.
+   * csv: synchronous Buffer (same as before).
+   * xlsx: async via exceljs (SR-REPORT-001, N05 gap closure).
+   * pdf: async via pdfkit (SR-REPORT-001, N05 gap closure).
+   * zip: not offered (filing ZIP is explicitly out of scope for general reports).
    */
   private readonly reportArtifactRenderers: Record<
     ReportOutputFormat,
-    { contentType: string; render: (job: StoredReportJob) => Buffer } | null
+    {
+      contentType: string;
+      render: (job: StoredReportJob) => Buffer | Promise<Buffer>;
+    } | null
   > = {
     csv: {
       contentType: "text/csv; charset=utf-8",
@@ -327,8 +332,23 @@ export class ReportingFilingService implements OnModuleInit {
           "utf8",
         ),
     },
-    xlsx: null,
-    pdf: null,
+    xlsx: {
+      contentType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      render: (job) =>
+        recordsToXlsx(
+          (job.rows as unknown as Record<string, unknown>[]) ?? [],
+          job.jobType,
+        ),
+    },
+    pdf: {
+      contentType: "application/pdf",
+      render: (job) =>
+        recordsToPdf(
+          (job.rows as unknown as Record<string, unknown>[]) ?? [],
+          `${job.jobType} - ${job.jobId}`,
+        ),
+    },
     zip: null,
   };
 
@@ -770,12 +790,12 @@ export class ReportingFilingService implements OnModuleInit {
    * act than describing it, not a weaker one, and the audit trail records the
    * download rather than the intent to download.
    */
-  renderReportArtifact(
+  async renderReportArtifact(
     jobId: string,
     requestId?: string,
     identity?: EvidenceAccessIdentity | null,
     tenantScopeId?: string | null,
-  ): { buffer: Buffer; contentType: string; fileName: string } {
+  ): Promise<{ buffer: Buffer; contentType: string; fileName: string }> {
     const job = this.requireGenericReportJob(jobId);
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
     if (normalizedTenantScopeId) {
@@ -808,7 +828,7 @@ export class ReportingFilingService implements OnModuleInit {
       );
     }
 
-    const buffer = renderer.render(job);
+    const buffer = await renderer.render(job);
     this.recordArtifactAccessAudit(
       {
         actionName: "download_report_artifact",
