@@ -2,7 +2,7 @@
 
 - Owner: `Codex`；independent reviewer: `Claude`。
 - Branch: `codex/sr-mail-001`。
-- Base（`git fetch origin` 後 `origin/dev` HEAD，round 2 rebase 後）: `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`（round 1 原始 base：`650e233bb1c35269852c291ef892d25967380c12`）。
+- Base（`git fetch origin` 後本輪 rebase 的 `origin/dev` HEAD）: `b5c3774e5e62fab7cf43b67a7e69fae7e0ca91ef`（round 2 base：`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`；round 1 原始 base：`650e233bb1c35269852c291ef892d25967380c12`）。
 - 依賴：`SR-NOTIFY-001`（`NotificationDeliveryService` 共用耐久郵件核心，已 merge）、`SR-REFERRAL-001`（皆已 done）。
 
 ## 基準重現（修復前語義）
@@ -54,6 +54,10 @@
 ### Codex handoff verification — 2026-09-08 UTC（base `70355aba9`）
 
 在指定 worktree、`codex/sr-mail-001` 上重新执行：`git diff --check`（exit 0）、`pnpm --filter @drts/api typecheck`（exit 0）、`pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/`（exit 0；2 files / 13 tests passed）、以及 `pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts`（exit 0；2 files / 77 tests passed）。本轮还新增断言：储存／transport 任意异常即使包含 raw token，返回 record 和 warning log 都不会包含该 token；provider 从 unavailable 恢复后，重建 delivery adapter 并重寄会得到受控 receiver acknowledgement，且旧 invitation 被撤销。
+
+### Candidate subject remediation — 2026-09-08 UTC（base `b5c3774e5`）
+
+`origin/dev` 前进后，分支已无冲突 rebase 至 `b5c3774e5e62fab7cf43b67a7e69fae7e0ca91ef`。原 candidate 顶层 commit 的 `test(SR-MAIL-001)` subject 不符合 CI `Commit trailers` 的允许前缀，已改为 `fix(SR-MAIL-001): prove delivery recovery after provider restart`，并保留 `LLM-Agent`、`Task-ID`、`Reviewer` trailers。此轮本地实测：`git diff --check` exit 0；`pnpm --filter @drts/api typecheck` exit 0；`pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/` exit 0（2 files / 13 tests）；`python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` exit 0（6 commits）。此项只修正 candidate metadata，不改变功能行为。
 
 ## 未做的 live／真机部分
 
