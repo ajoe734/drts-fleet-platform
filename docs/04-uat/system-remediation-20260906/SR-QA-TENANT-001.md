@@ -71,3 +71,17 @@ Playwright 的 CLI regex 在含 task ID 的 worktree 絕對路徑亦會匹配 sh
 | `git diff --check` | 0 | 無空白錯誤 |
 
 API typecheck 是前輪結果，本輪未重跑。最新 dev 的 SR-READINESS-001 報告亦明列真實 HTTP、DB tenant provision、收信等尚未執行，未提供本 task 的可用身份。仍需 provisioner 提供可拋棄 A/B 租戶、API URL 與合法可寫/唯讀 bearer；其餘矩陣的案例仍待補齊。維持 in_progress，不交接不完整驗收。
+
+## 2026-09-08 本次 dispatch：approval rules API 案例
+
+最新 fetch / rebase base：`3fb9b06461dc2bf92043144974eedbbc9f69d0f3`，exit 0。rebase 後 merge 原遠端 anchor ancestry，無內容衝突，普通 push exit 0。實跑測試 anchor SHA：`d76e0f1300e8551eb7c2f7390514a5433d0b3f99`；尚無鎖定 candidate。
+
+新增 `approval-rules.spec.ts`，追溯 C028 與目前 tenant-partner controller/service、contracts 的 approval rule 契約：建立 inactive 規則、PUT 同 ID 更新、GET detail/list 回讀唯一性；跨租戶讀取/停用 404、唯讀更新/停用 403、空白名稱 400 後回讀不變；停用後確認時間及 activeOnly 過濾。使用已列出的六項環境變數，不建立假身份。規則啟用→停用轉移、evaluation、訂單/簽核人關聯、reorder、quota/SLA 與 DB 重啟仍待測；此新增案例不代表 C028 通過。
+
+| 實際指令 | exit | 結果 |
+| --- | --- | --- |
+| `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001` | 1 | 3 task failed / 4 shared passed；三個 task 均缺 DRTS_TENANT_UAT_API_URL |
+| `pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001/ --max-warnings=0` | 0 | 三個 spec lint 通過 |
+| `git diff --check` | 0 | 無空白錯誤 |
+
+本輪資源 ID：無；HTTP calls：0；live/DB/mail/瀏覽器驗收未完成。shared pass 不算本 task 通過，前輪 55 unit tests 與 API typecheck 本輪未重跑。需要 provisioner 提供 API URL、可拋棄 A/B 租戶與各租戶可寫及 A 唯讀合法 bearer。其餘矩陣仍需補案例並實跑；維持 in_progress，未 handoff。
