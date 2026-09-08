@@ -2,17 +2,22 @@
 
 - Status: candidate handed off for review (see `ai-status.json` for machine truth)
 - Owner: Claude
-- Reviewer: Codex
+- Reviewer: Gemini
 - Base SHA (`origin/dev` at task start after rebase): `0dd392894e455a3b50da80851155c71315c15a8`
 - Candidate branch: `claude/sr-tenant-login-001`
-- Candidate SHA: `76cc6c5be23ca80cd9ce3686b849c5e4ce26f0a3` (recorded at handoff via `CANDIDATE_SHA=$(git rev-parse HEAD)`)
+- Candidate SHA: recorded at handoff via `CANDIDATE_SHA=$(git rev-parse HEAD)` (see §2.6 for this
+  session's SHA; supersedes the `76cc6c5be2` / `21e342382` SHAs referenced by earlier drafts of
+  this document, both of which had a CI-failing test file — see §2.6)
 
 Note: an earlier draft of this document was written before the `ai-status.sh
 handoff` call actually landed in machine truth (the task remained
 `in_progress`, reassigned back to `Claude` on 2026-09-08 per
-`ai-status.json`'s `next` field). This session re-verified the same evidence
-below still holds at current `HEAD` (no drift from `origin/dev`, which only
-gained unrelated commits — see §2.5) and is issuing the real handoff now.
+`ai-status.json`'s `next` field). A later session re-verified the same
+evidence below still held at that `HEAD` (no drift from `origin/dev`, which
+only gained unrelated commits — see §2.5) and issued a handoff — but GitHub
+CI on PR #1674 (candidate `21e342382`) then failed `typecheck` /
+`Canonical consistency` / `Product smoke acceptance`. This session fixes
+those CI failures without touching the underlying auth behavior — see §2.6.
 
 ## 1. Audit finding vs. current code (regression check, not a redo)
 
@@ -65,8 +70,9 @@ same pinned `packageManager` version declared in the root `package.json`).
 
 This worktree's `node_modules` was only partially linked (`react` was
 missing from both the root and `apps/tenant-console-web` `node_modules`,
-failing `tests/unit/api-client.test.ts` and
-`tests/unit/tenant-av-fallback.test.ts` with `Cannot find package 'react'`).
+failing `apps/tenant-console-web/tests/unit/api-client.test.ts` and
+`apps/tenant-console-web/tests/unit/tenant-av-fallback.test.ts` with
+`Cannot find package 'react'`).
 Fixed by relinking the existing pnpm content-addressable store into this
 worktree:
 
@@ -168,6 +174,95 @@ re-verification above and issuing the actual `ai-status.sh handoff` call
 that the prior session's document described but machine truth shows never
 landed.
 
+### 2.6 CI-failure fix, no auth-behavior change (2026-09-08, session 3)
+
+`ai-status.sh show SR-TENANT-LOGIN-001` on re-dispatch showed candidate
+`21e3423825ef` (PR #1674) with `ci_status: failure`. `gh pr view 1674
+--json statusCheckRollup` showed real (non-flaky) failures in `typecheck`,
+`Canonical consistency`, and `Product smoke acceptance` (the last is a
+downstream gate on the first two; `Smoke acceptance` failed only because it
+gates on `Product smoke acceptance`). Root causes, both confined to this
+task's own artifacts — no production auth code was touched:
+
+1. **`typecheck` (CI job log, `tsc --noEmit`)**: the new test file
+   (`tests/unit/system-remediation/sr-tenant-login-001/tenant-login-callback-recovery.test.ts`)
+   imported the app's route/middleware/constants modules via the `@/...`
+   path alias. That alias is registered only in
+   `apps/tenant-console-web/tsconfig.json`; the root `tsconfig.json` used by
+   `pnpm typecheck:root` (which `pnpm run typecheck` — the actual CI
+   `typecheck` job — runs first) has no such mapping, so `tsc -p
+   tsconfig.json` failed with `TS2307: Cannot find module '@/...'` the
+   moment it tried to type the test file, plus five `TS7006` implicit-`any`
+   errors on `(c) =>` cookie-header callbacks whose element type couldn't be
+   inferred once the import failed. Fixed by switching the test's own
+   imports to relative paths (`../../../../apps/tenant-console-web/...`),
+   matching the convention already used by `tests/unit/system-remediation/sr-referral-001/*.test.ts`,
+   and adding explicit `(c: string) =>` annotations. That still left one
+   transitive failure: `apps/tenant-console-web/middleware.ts` (which the
+   test now reaches via a real relative import, per this task's "drives the
+   real route handlers/middleware, no fixtures" evidence standard) itself
+   imports `@/lib/auth/constants` internally. `middleware.ts` is **not**
+   in this task's `write_scopes`
+   (`apps/tenant-console-web/app/login/`, `apps/tenant-console-web/app/api/auth/`,
+   `apps/tenant-console-web/lib/auth/`, the task's own `tests/unit/...`
+   dir, and this doc), so it was not edited. Instead, an ambient module
+   shim — `tests/unit/system-remediation/sr-tenant-login-001/tenant-console-web-path-alias.d.ts`
+   — re-declares the three names `middleware.ts` imports from
+   `@/lib/auth/constants` for the root `tsc` program only; it changes no
+   runtime behavior (vitest already resolves `@` via `vitest.config.ts`'s
+   own alias, and the app's own build/typecheck resolve `@/*` natively via
+   its own tsconfig — verified unaffected in §2.6 command output below).
+2. **`Canonical consistency` (CI job log,
+   `tools/ci/git/check_canonical_consistency.py --ci`)**: this document's
+   §2.1 originally cited the two `api-client.test.ts` /
+   `tenant-av-fallback.test.ts` files without their real
+   `apps/tenant-console-web/tests/unit/` prefix (see the corrected paths in
+   §2.1 above). Fixed by adding that prefix so the citation matches the
+   real on-disk location.
+
+Commands re-run from the isolated task worktree
+(`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude-sr-tenant-login-001`,
+branch `claude/sr-tenant-login-001`), `origin/dev` at `b5c3774e5e`:
+
+```
+$ git diff --check
+(no output — clean, exit 0)
+
+$ pnpm --filter @drts/tenant-console-web typecheck
+✓ Types generated successfully
+
+$ pnpm typecheck:root        # what CI's `typecheck` job actually runs first
+(no output for this task's files — exit 0. Pre-existing unrelated failures
+remain for tests/unit/fleet-partner-list-envelope.test.ts and
+tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts: a
+duplicate-module-identity TS2345 on ApiClient's private `baseUrl`, caused by
+this *isolated worktree* holding its own copy of packages/api-client
+alongside the canonical checkout's copy. Confirmed environment-only: the
+actual GitHub CI typecheck log for PR #1674 shows only this task's own file
+failing, never those two files, since CI runs from a single clean checkout
+with no duplicate worktree copy. Out of this task's write_scopes regardless.)
+
+$ pnpm exec vitest run tests/unit/system-remediation/sr-tenant-login-001/
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+
+$ pnpm --filter @drts/tenant-console-web exec vitest run   # full app suite, non-regression check
+ Test Files  12 passed (12)
+      Tests  73 passed (73)
+
+$ python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD
+[consistency] l1-edit-authority: 0 finding(s)
+[consistency] cited-paths: 0 finding(s)
+[consistency] cited-decisions: 0 finding(s)
+[consistency] task-claims: 0 finding(s)
+[consistency] OK
+```
+
+No production auth code changed in this session (`apps/tenant-console-web/app/api/auth/`,
+`apps/tenant-console-web/app/login/`, and `apps/tenant-console-web/lib/auth/`
+are all untouched — confirm via `git diff origin/dev...HEAD --stat`, which
+shows only this doc, the test file, and the new `.d.ts` shim).
+
 ## 3. Acceptance criteria mapping
 
 | 驗收條件                                                | 狀態          | 證據                                                          |
@@ -197,7 +292,12 @@ landed.
 
 ## 4. Files touched
 
-- `tests/unit/system-remediation/sr-tenant-login-001/tenant-login-callback-recovery.test.ts` (new)
-- `docs/04-uat/system-remediation-20260906/SR-TENANT-LOGIN-001.md` (this file, new)
+- `tests/unit/system-remediation/sr-tenant-login-001/tenant-login-callback-recovery.test.ts` (edited in §2.6: relative imports instead of `@/...`, explicit `(c: string)` annotations)
+- `tests/unit/system-remediation/sr-tenant-login-001/tenant-console-web-path-alias.d.ts` (new in §2.6: ambient type-only shim, see rationale there)
+- `docs/04-uat/system-remediation-20260906/SR-TENANT-LOGIN-001.md` (this file)
 
 No files outside this task's `write_scopes` were modified.
+`apps/tenant-console-web/middleware.ts` was considered but deliberately
+**not** edited — it is outside `write_scopes` and has no declared
+`read_dependencies` entry for this task; see §2.6 for the in-scope
+workaround used instead.

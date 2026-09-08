@@ -3,14 +3,14 @@ import { NextRequest } from "next/server";
 import {
   GET as authGet,
   POST as authPost,
-} from "@/app/api/auth/[...auth]/route";
-import { middleware } from "@/middleware";
+} from "../../../../apps/tenant-console-web/app/api/auth/[...auth]/route";
+import { middleware } from "../../../../apps/tenant-console-web/middleware";
 import {
   TENANT_SESSION_COOKIE_NAME,
   TENANT_OIDC_STATE_COOKIE_NAME,
   TENANT_CSRF_COOKIE_NAME,
   TENANT_CSRF_HEADER_NAME,
-} from "@/lib/auth/constants";
+} from "../../../../apps/tenant-console-web/lib/auth/constants";
 
 // SR-TENANT-LOGIN-001 regression suite.
 //
@@ -169,7 +169,7 @@ describe("SR-TENANT-LOGIN-001: tenant login callback + error recovery", () => {
 
     const clearedStateCookie = firstResponse.headers
       .getSetCookie()
-      .find((c) => c.startsWith(`${TENANT_OIDC_STATE_COOKIE_NAME}=`));
+      .find((c: string) => c.startsWith(`${TENANT_OIDC_STATE_COOKIE_NAME}=`));
     expect(clearedStateCookie).toBeTruthy();
     expect(clearedStateCookie).toMatch(/Max-Age=0|Expires=Thu, 01 Jan 1970/i);
 
@@ -249,7 +249,7 @@ describe("SR-TENANT-LOGIN-001: tenant login callback + error recovery", () => {
     expect(sessionResponse.status).toBe(401);
     const clearedCookies = sessionResponse.headers.getSetCookie();
     expect(
-      clearedCookies.some((c) =>
+      clearedCookies.some((c: string) =>
         c.startsWith(`${TENANT_SESSION_COOKIE_NAME}=;`),
       ),
     ).toBe(true);
@@ -291,13 +291,15 @@ describe("SR-TENANT-LOGIN-001: tenant login callback + error recovery", () => {
     expect(response.status).toBe(200);
     const cookies = response.headers.getSetCookie();
     expect(
-      cookies.some((c) => c.startsWith(`${TENANT_SESSION_COOKIE_NAME}=;`)),
+      cookies.some((c: string) => c.startsWith(`${TENANT_SESSION_COOKIE_NAME}=;`)),
     ).toBe(true);
     expect(
-      cookies.some((c) => c.startsWith(`${TENANT_CSRF_COOKIE_NAME}=;`)),
+      cookies.some((c: string) => c.startsWith(`${TENANT_CSRF_COOKIE_NAME}=;`)),
     ).toBe(true);
     expect(
-      cookies.some((c) => c.startsWith(`${TENANT_OIDC_STATE_COOKIE_NAME}=;`)),
+      cookies.some((c: string) =>
+        c.startsWith(`${TENANT_OIDC_STATE_COOKIE_NAME}=;`),
+      ),
     ).toBe(true);
   });
 });
