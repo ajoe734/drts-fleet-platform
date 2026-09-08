@@ -47,13 +47,13 @@
 | `pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/` | **0** | **2 files passed / 13 tests passed**——round 1 无法加载的 `tenant-invitation-delivery-status.test.ts` 这次**完整执行且全数通过**，因为 `packages/contracts/package.json` 现已声明 `zod` 依赖，phantom-dependency 缺口已由其他任务修复 |
 | `pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts`（write_scopes 外，仅作回归证据，未修改这两个档案） | 0 | 77 tests passed——确认 `GCP-TOS-REMEDIATION-20260907` 对 `tenant-partner.service.ts` 的大改动与本任务改动共存后，既有 tenant-partner 行为未被破坏 |
 
-`tenant-invitation-delivery-status.test.ts`（本次首次执行验证，10→13 顆全部含在上表 13 tests 内）覆盖：`createTenantUser` 真正送达后才标 `delivered`、旧（已使用）token 拒绝重放、已接受的 invitation 拒绝 resend、provider 不可用时标 `delivery_failed` 且后续 resend 能真正送达、resend 会撤销前一笔未接受的 invitation、过期 token 即使曾经真实送达也被拒绝——round 1 文档中「未经执行验证，等其他任务修复 zod 缺口后需重新执行」的待办，本 round 已完成。
+`tenant-invitation-delivery-status.test.ts`（本次首次执行验证，10→13 顆全部含在上表 13 tests 内）覆盖：`createTenantUser` 真正送达后才标 `delivered`、旧（已使用）token 拒绝重放、已接受的 invitation 拒绝 resend、provider 不可用时标 `delivery_failed`、恢复 provider 配置后以同一耐久 outbox 重建 adapter 再 resend 会真正送达、resend 会撤销前一笔未接受的 invitation、过期 token 即使曾经真实送达也被拒绝——round 1 文档中「未经执行验证，等其他任务修复 zod 缺口后需重新执行」的待办，本 round 已完成。
 
 `tenant-invitation-delivery.service.test.ts`（10 tests，round 1／round 2 均通过）覆盖：真正送达并回报 `sent`＋`providerMessageId`＋token 只出现在 transport payload、进程重启后的幂等重试不重新调用 transport、幂等 key 按 tenant 隔离、provider 未设定时回报 `unavailable`／默认建构子回报 `unavailable`、provider 永久拒绝回报 `failed` 且停止重试、无效收件地址回报有界 error code 且不调用 transport、任意例外内容（含 raw token）不会外泄进 delivery record、`listDeliveries()` 回传的是拷贝且最新在前。
 
 ### Codex handoff verification — 2026-09-08 UTC（base `70355aba9`）
 
-在指定 worktree、`codex/sr-mail-001` 上重新执行：`git diff --check`（exit 0）、`pnpm --filter @drts/api typecheck`（exit 0）、`pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/`（exit 0；2 files / 13 tests passed）、以及 `pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts`（exit 0；2 files / 77 tests passed）。本轮还新增断言：储存／transport 任意异常即使包含 raw token，返回 record 和 warning log 都不会包含该 token。
+在指定 worktree、`codex/sr-mail-001` 上重新执行：`git diff --check`（exit 0）、`pnpm --filter @drts/api typecheck`（exit 0）、`pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/`（exit 0；2 files / 13 tests passed）、以及 `pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts`（exit 0；2 files / 77 tests passed）。本轮还新增断言：储存／transport 任意异常即使包含 raw token，返回 record 和 warning log 都不会包含该 token；provider 从 unavailable 恢复后，重建 delivery adapter 并重寄会得到受控 receiver acknowledgement，且旧 invitation 被撤销。
 
 ## 未做的 live／真机部分
 
