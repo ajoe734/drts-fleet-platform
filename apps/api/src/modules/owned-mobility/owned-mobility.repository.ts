@@ -416,7 +416,9 @@ export class OwnedMobilityRepository {
       return;
     }
 
-    await this.persistChangesWithExecutor(this.databaseService!, changes);
+    await this.persistChangesWithExecutor(this.databaseService!, changes, {
+      withinTransaction: false,
+    });
   }
 
   async withTransaction<T>(work: (executor: PoolClient) => Promise<T>) {
@@ -459,7 +461,9 @@ export class OwnedMobilityRepository {
     executor: OwnedMobilityQueryExecutor,
     changes: PersistOwnedMobilityChanges,
   ) {
-    await this.persistChangesWithExecutor(executor, changes);
+    await this.persistChangesWithExecutor(executor, changes, {
+      withinTransaction: true,
+    });
   }
 
   /**
@@ -1218,15 +1222,35 @@ export class OwnedMobilityRepository {
     return (result.rowCount ?? 0) > 0;
   }
 
-  private async persistChangesWithExecutor(
+  /**
+   * `phase1_owned_orders` has two writers that both keep this row current:
+   * the fire-and-forget shadow write `persistChanges` fires (unawaited) at
+   * order-creation time to keep `createPassengerOrder`/`createMultiTaxiRide`
+   * synchronous, and the authoritative write `persistOrderWorkflow` does
+   * inside `createDispatchAssignment`'s transaction (SD §7.6). Both upsert
+   * on `ON CONFLICT (order_id) DO UPDATE`, but Postgres's conflict-target
+   * arbiter only protects that one index -- if the two writers' INSERTs for
+   * the *same brand-new row* (same `order_id` *and* `order_no`) race each
+   * other concurrently, the loser can still hit a hard `23505` on the
+   * `order_no` unique constraint instead of resolving to the DO UPDATE, even
+   * though both statements carry identical values. The race is self-healing
+   * within milliseconds (single-row insert, no external calls in between),
+   * so retry rather than surface it. Inside a transaction, a plain retry
+   * would run against an already-aborted transaction after the first error,
+   * so this uses a savepoint to undo just the failed statement.
+   */
+  private async upsertOwnedOrderWithRetry(
     executor: OwnedMobilityQueryExecutor,
-    changes: PersistOwnedMobilityChanges,
+    order: OwnedOrderRecord,
+    withinTransaction: boolean,
   ) {
-    const writes: Array<() => Promise<unknown>> = [];
-
-    for (const order of changes.orders ?? []) {
-      writes.push(() =>
-        executor.query(
+    const maxAttempts = 4;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (withinTransaction) {
+        await executor.query("SAVEPOINT owned_order_upsert");
+      }
+      try {
+        const result = await executor.query(
           `
             INSERT INTO ops.phase1_owned_orders (
               order_id,
@@ -1281,6 +1305,43 @@ export class OwnedMobilityRepository {
             order.updatedAt,
             JSON.stringify(order),
           ],
+        );
+        if (withinTransaction) {
+          await executor.query("RELEASE SAVEPOINT owned_order_upsert");
+        }
+        return result;
+      } catch (error) {
+        const pgError = error as { code?: string; constraint?: string };
+        const isOrderNoRace =
+          pgError?.code === "23505" &&
+          pgError?.constraint === "phase1_owned_orders_order_no_key";
+        if (!isOrderNoRace || attempt === maxAttempts) {
+          throw error;
+        }
+        if (withinTransaction) {
+          await executor.query("ROLLBACK TO SAVEPOINT owned_order_upsert");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 15 * attempt));
+      }
+    }
+    throw new Error(
+      "unreachable: upsertOwnedOrderWithRetry exhausted attempts without returning or throwing",
+    );
+  }
+
+  private async persistChangesWithExecutor(
+    executor: OwnedMobilityQueryExecutor,
+    changes: PersistOwnedMobilityChanges,
+    options: { withinTransaction: boolean },
+  ) {
+    const writes: Array<() => Promise<unknown>> = [];
+
+    for (const order of changes.orders ?? []) {
+      writes.push(() =>
+        this.upsertOwnedOrderWithRetry(
+          executor,
+          order,
+          options.withinTransaction,
         ),
       );
     }
