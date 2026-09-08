@@ -1,3 +1,4 @@
+import { VoiceLocationService } from "./voice-location.service";
 import { Module } from "@nestjs/common";
 
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
@@ -26,7 +27,8 @@ import { MockGeoProvider } from "./mock-geo.provider";
       ) => (config.useGoogleProvider() ? googleProvider : mockProvider),
     },
     GeoService,
+    VoiceLocationService,
   ],
-  exports: [GeoService],
+  exports: [GeoService, VoiceLocationService],
 })
 export class GeoModule {}
