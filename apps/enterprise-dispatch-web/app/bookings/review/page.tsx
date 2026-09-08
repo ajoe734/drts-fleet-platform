@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BookingSubmitButton } from "@/components/booking-submit-button";
+import { EnterpriseBookingSubmitGate } from "@/components/booking-form/enterprise-booking-submit-gate";
 import {
   EBanner,
   EBtnContent,
@@ -337,9 +337,12 @@ export default async function ReviewBookingPage({
               <EBtnContent>{tr("review.back")}</EBtnContent>
             </Link>
             {isSubmittable ? (
-              <BookingSubmitButton
+              <EnterpriseBookingSubmitGate
                 draft={draft}
                 {...(bookingId ? { bookingId } : {})}
+                blockedLabel={tr("review.blocked.pastReservation", {
+                  earliest: getEarliestBookableLabel(locale),
+                })}
               />
             ) : null}
           </div>

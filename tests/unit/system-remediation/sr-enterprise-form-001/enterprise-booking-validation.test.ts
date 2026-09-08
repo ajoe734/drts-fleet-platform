@@ -169,3 +169,54 @@ describe("SR-ENTERPRISE-FORM-001 (R20): passenger name / placard consistency acr
     ).toBe("");
   });
 });
+
+describe("SR-ENTERPRISE-FORM-001 (P1 reopen): submission-time revalidation after review render", () => {
+  // Reviewer repro: review/page.tsx evaluates isSubmittable once, during
+  // server render. If the visitor sits on the review page until the
+  // reservation window passes and then clicks submit, a check that only ran
+  // at render time can never catch it. The fix
+  // (EnterpriseBookingSubmitGate, components/booking-form/) re-evaluates
+  // this same predicate at click time and on a short interval using the
+  // *current* clock rather than the render-time snapshot. These tests prove
+  // the underlying predicate actually flips from submittable to blocked as
+  // the clock advances past the reservation window between render and
+  // submit, which is the property that re-evaluation-at-submit-time depends
+  // on to be a real fix rather than a no-op.
+  const draft = completeDraft({
+    reservationDate: "2026-09-08",
+    reservationTime: "14:00",
+  });
+  const renderTime = new Date("2026-09-08T05:59:00.000Z"); // 13:59 +08:00 — still future
+  const submitTimeAfterExpiry = new Date("2026-09-08T06:01:00.000Z"); // 14:01 +08:00 — now past
+
+  it("is submittable when first rendered on the review page, before the reservation window passes", () => {
+    expect(isReservationWindowInFuture(draft, renderTime)).toBe(true);
+    expect(isEnterpriseDraftComplete(draft, renderTime)).toBe(true);
+  });
+
+  it("flips to not-submittable once re-evaluated against a later clock after the window has passed", () => {
+    expect(isReservationWindowInFuture(draft, submitTimeAfterExpiry)).toBe(
+      false,
+    );
+    expect(isEnterpriseDraftComplete(draft, submitTimeAfterExpiry)).toBe(
+      false,
+    );
+  });
+
+  it("re-evaluating with a fresh Date() at submit time (no now argument) reflects the live clock rather than a cached render-time result", () => {
+    // A stale reservation window one minute in the past must never read as
+    // submittable, regardless of when the draft object was constructed.
+    // reservationDate/reservationTime are +08:00 wall-clock values (see the
+    // module's RESERVATION_TIMEZONE_OFFSET), so shift the target instant by
+    // +8h before slicing, the same way getReservationWallClockFields does.
+    const targetInstant = new Date(Date.now() - 60_000);
+    const localWallClock = new Date(
+      targetInstant.getTime() + 8 * 60 * 60 * 1000,
+    ).toISOString();
+    const staleDraft = completeDraft({
+      reservationDate: localWallClock.slice(0, 10),
+      reservationTime: localWallClock.slice(11, 16),
+    });
+    expect(isReservationWindowInFuture(staleDraft)).toBe(false);
+  });
+});

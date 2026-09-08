@@ -220,3 +220,149 @@ candidate（`b7a4e2a4e`）建立後 supervisor 隊列前進，`origin/dev` 已�
 - 受影響檔案：見「本輪修復」章節列表，皆在 write_scopes 內
   （新增 `components/booking-form/enterprise-booking-validation.ts` 屬於
   write_scopes 內先前不存在的新增目標）。
+
+## 6. Codex reopen（P1/P2/390px 證據缺口）回應（本輪，candidate `5b08dc5b4`→本次修改）
+
+`ai-activity-log.jsonl` 2026-09-08T13:27:21Z，`Codex` 以 `reopen` 將任務退回：
+
+> P1: review/page.tsx:70,339 evaluates isSubmittable only during server
+> render; enter review just before reservation time, wait until it passes,
+> then submit: unchanged booking-submit-button.tsx:33-58 checks only
+> hydration/submitting and buildEnterpriseBookingCommand (...) does not
+> revalidate current time, so expired draft still invokes create/update
+> API. […] P2: lib/translations.ts was modified but is absent from
+> canonical write_scopes/read_dependencies […]. Acceptance evidence gap:
+> 390px keyboard/error CTA visibility is only statically inferred, no
+> browser measurement […]
+
+### 6.1 P1 修復：送出當下重新驗證，而非只依賴 render 當下的快照
+
+**根因確認**：`review/page.tsx` 是 Next.js Server Component，`isSubmittable =
+isEnterpriseDraftComplete(draft)`（含 `isReservationWindowInFuture`）只在該次
+HTTP request 的伺服器端 render 執行一次；使用者停留在 review 頁直到預約時間
+過去後才點送出，`components/booking-submit-button.tsx`（不在本任務
+write_scopes）的 `submitBooking()` 只檢查 `isHydrated`/`isSubmitting`，不會
+重新檢查時間，`buildEnterpriseBookingCommand` 也不會擋下過去時間 —— 過期草稿
+仍會呼叫 create/update API。與 reviewer 的重現路徑一致。
+
+**修復（僅動 write_scopes 內檔案，未修改 `booking-submit-button.tsx` 本身）**：
+新增 `components/booking-form/enterprise-booking-submit-gate.tsx`
+（`EnterpriseBookingSubmitGate`，client component），以一個外層 `<div>`
+包住既有的 `<BookingSubmitButton>`：
+
+1. `onClickCapture`（capture 階段，保證早於 `<button>` 自身的 `onClick`
+   於 bubble 階段觸發）在每次點擊當下用目前時鐘重新呼叫
+   `isReservationWindowInFuture(draft)`；若已過期，`preventDefault` +
+   `stopPropagation` 攔截點擊（`submitBooking()` 永遠不會被呼叫到），並切換為
+   `EBanner` 過期提示，取代按鈕。
+2. 額外每 15 秒（`REVALIDATE_INTERVAL_MS`）背景重新檢查一次，讓使用者不需要
+   真的點擊也能看到 CTA 主動換成過期提示，而不是留著一個「看起來可點但點了
+   會被攔截」的按鈕。
+3. `review/page.tsx` 改為渲染 `<EnterpriseBookingSubmitGate>` 而非直接渲染
+   `<BookingSubmitButton>`；`blockedLabel` 沿用既有的
+   `review.blocked.pastReservation` 翻譯 key（R21 既有文案，未新增新 key）。
+
+**單元測試**（`tests/unit/system-remediation/sr-enterprise-form-001/enterprise-booking-validation.test.ts`
+新增 `describe("... (P1 reopen): submission-time revalidation ..."`，3 個測試）：
+證明同一份 `isReservationWindowInFuture`/`isEnterpriseDraftComplete` 在
+render 當下的 `now` 回傳可送出、在稍後（模擬送出當下）的 `now` 回傳不可送出
+——這正是 gate 元件在點擊當下與週期性重新檢查所依賴的性質。元件層級的完整
+DOM 互動測試（模擬「render 時有效、等待過期、點擊被攔截」全流程）**未**以
+`@testing-library/react` 撰寫，因為 repo 內（root 與
+`apps/enterprise-dispatch-web` 的 `vitest.config.ts`）皆無
+`jsdom`/`@testing-library/react` 依賴（`grep` 全 repo 確認），新增會動到
+`package.json`/lockfile，超出本任務 write_scopes 與
+`integration_notes`（「不得平行修改中央 test config、lockfile」）的限制。
+
+**改以真實瀏覽器手動驗證彌補（非 committed test，僅本輪驗證證據）**：
+本機啟動 `pnpm --filter @drts/enterprise-dispatch-web dev`（連同
+`@drts/contracts`/`@drts/ui-tokens`/`@drts/ui-web` build），以
+`@playwright/test`（repo 既有 root devDependency，未新增套件）在 scratch
+spec 中：
+
+1. 建置一筆完整、合法的 draft，`date`/`time` 設定為「導覽當下起算約 70 秒後」
+   （+08:00 wall clock）。
+2. 導覽至 `/bookings/review?...`：確認 `enterprise-booking-submit`
+   testid 的送出按鈕存在（render 當下時間仍未過，SSR `isSubmittable=true`）。
+3. 監聽所有 `POST` request；等待真實時間跨過該預約時刻（含緩衝，約 83 秒）。
+4. 斷言：`enterprise-booking-blocked-at-submit`（gate 的過期 banner）出現、
+   頁面未導向 `/bookings/submitted`、期間 `postRequestCount === 0`。
+
+實際執行結果（本輪即時輸出，測試腳本執行後已刪除，非 repo 一部分）：
+
+```
+WAITING_MS 83366
+AFTER_WAIT_SUBMIT_VISIBLE false
+✓ submission-time revalidation blocks an expired draft instead of calling the booking API (1.4m)
+1 passed (1.4m)
+```
+
+即：15 秒週期性重新檢查已先於使用者點擊把 CTA 換成過期提示，全程未送出任何
+POST，未導向送出成功頁 —— 證實 P1 修復在真實瀏覽器行為下成立，而非只在單元
+測試層級成立。
+
+### 6.2 P2：`lib/translations.ts` scope 缺口 —— 維持現狀並明確請求 supervisor 擴 scope
+
+`lib/translations.ts` 的三個新增 key（`review.blocked.incompleteFields`、
+`review.blocked.pastReservation`、`booking.earliestBookable`）在前一輪
+（`b7a4e2a4e`）已加入，**本輪未撤銷**，原因：
+
+- 這是全站單一翻譯字典，R21 的過期/缺欄位提示與 P1 gate 的過期 banner 都
+  依賴這些既有 key；撤銷會讓 review 頁面在缺欄位/過去時間/本輪 P1 gate
+  三種情境下退回無文案（或需要在 write_scopes 內另建第二套翻譯來源，
+  造成同一文案兩處維護、與「沿用權威 API／資料模型」的任務前提衝突）。
+- 純附加（未修改任何既有 key），與 `claude2`/`codex2` 姊妹分支的既有作法
+  一致。
+- Reviewer 已正確指出「CI Change scope 通過」不等於 supervisor 授權；本節
+  明確記錄此缺口，**請求 supervisor 將
+  `apps/enterprise-dispatch-web/lib/translations.ts` 加入本任務
+  write_scopes 或 read_dependencies**，而非由 owner 自行認定範圍。若
+  supervisor 認定不可接受，需另外安排移除/替代方案的後續 task，而非在本輪
+  單方面回退已被依賴的修復。
+
+### 6.3 390px 證據缺口：已補上真實瀏覽器量測
+
+延續 6.1 的本地 dev server，另以 `@playwright/test`（390×844 viewport）量測
+`/bookings/new`、`/bookings/review`：
+
+```
+METRICS /bookings/new    {"scrollWidth":390,"clientWidth":390,"bodyScrollWidth":390}
+METRICS /bookings/review {"scrollWidth":390,"clientWidth":390,"bodyScrollWidth":390}
+CTA_VISIBLE /bookings/review true
+SUBMIT_BOX /bookings/review {"x":246,"y":1762.125,"width":118,"height":42}
+```
+
+- `scrollWidth === clientWidth === 390`：兩頁在 390px viewport 下皆無橫向
+  捲動（`hasHorizontalOverflow` 斷言通過）。
+- `/bookings/review` 的送出 CTA（`enterprise-booking-submit`）可見，
+  bounding box 右緣 `246 + 118 = 364 ≤ 390`，未超出視窗、未被裁切。
+- 未驗證項目（誠實列出）：未實際喚出手機鍵盤（headless Chromium 無真實
+  IME/virtual keyboard，僅能驗證版面本身無橫向溢出與 CTA 幾何位置），
+  首頁 743px 溢出（非本任務 write_scopes）仍未修，見既有第 4 節。
+
+以上量測腳本為本輪臨時 scratch 檔案（`scratch-390.config.ts` /
+`scratch-390.spec.ts`，經 `@playwright/test` 執行取得上述真實輸出後已刪除，
+不在 write_scopes 內、未提交），僅作為本次 candidate 的一次性驗證證據，
+不是取代真機測試的新增自動化測試套件。
+
+### 6.4 本輪指令與結果彙總（本 worktree）
+
+```
+$ git diff --check
+EXIT=0
+
+$ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+EXIT=0
+
+$ pnpm --filter @drts/enterprise-dispatch-web typecheck
+> tsc --noEmit
+EXIT=0
+
+$ pnpm --filter @drts/enterprise-dispatch-web lint
+> eslint . --max-warnings=0
+EXIT=0
+```
+
+時間：2026-09-08T13:45:00Z
