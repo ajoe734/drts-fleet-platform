@@ -880,11 +880,19 @@ def _git_capture(repo_root: Path, args: list[str], *, timeout: float = 30.0) -> 
 
 
 def _execution_branch(repo_root: Path, request: DeliveryRequest) -> str:
-    """Prefer a task-scoped branch override only when Git accepts it."""
+    """Prefer a task-scoped branch override only when Git accepts it.
+
+    A reviewer must inspect the immutable candidate branch. Review dispatch
+    events carry that branch as ``candidate_branch``; using the lane's default
+    branch here would provision a review worktree from an unrelated baseline.
+    """
     default_branch = _task_branch(request.agent_id, request.task_id or "")
     metadata = request.metadata if isinstance(request.metadata, dict) else {}
     task = metadata.get("task") if isinstance(metadata.get("task"), dict) else {}
-    configured_branch = task.get("execution_branch")
+    if str(request.reason or "").strip().lower() == "review_ready_dispatch":
+        configured_branch = task.get("candidate_branch") or task.get("execution_branch")
+    else:
+        configured_branch = task.get("execution_branch")
     if not isinstance(configured_branch, str) or not configured_branch.strip():
         return default_branch
 

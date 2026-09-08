@@ -673,6 +673,35 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(base_branch, "dev")
             self.assertEqual(source, "existing_worktree")
 
+    def test_review_dispatch_uses_candidate_branch_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            candidate = root / ".artifacts/worktrees/auto/codex2-uv-exec-013"
+            _git(root, "worktree", "add", "-b", "codex2/uv-exec-013", str(candidate), "dev")
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="review",
+                task_id="UV-EXEC-013",
+                reason="review_ready_dispatch",
+                metadata={
+                    "mode": "execution",
+                    "task": {"candidate_branch": "codex2/uv-exec-013"},
+                },
+            )
+            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root), request, supervisor.route_task("UV-EXEC-013")
+            )
+
+            self.assertEqual(workspace, candidate.resolve())
+            self.assertEqual(branch, "codex2/uv-exec-013")
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "existing_worktree")
+
     def test_does_not_reuse_unmanaged_worktree_for_task_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "repo"
