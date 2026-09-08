@@ -1,5 +1,83 @@
 export type Locale = "en" | "zh";
 
+/**
+ * Resolves the authoritative runtime environment label for shell display.
+ * Derives strictly from runtime environment variables (DRTS_ENV, APP_ENV,
+ * NEXT_PUBLIC_DRTS_ENV, NEXT_PUBLIC_APP_ENV), rejecting URL/domain guessing
+ * and never treating NODE_ENV=production alone as proof of production.
+ */
+export function resolveAuthoritativeShellEnv(locale: Locale = "zh"): string {
+  const envVar =
+    (typeof process !== "undefined" && process?.env
+      ? process.env.DRTS_ENV ||
+        process.env.APP_ENV ||
+        process.env.NEXT_PUBLIC_DRTS_ENV ||
+        process.env.NEXT_PUBLIC_APP_ENV ||
+        process.env.NEXT_PUBLIC_ENV
+      : undefined) ?? "";
+
+  const trimmed = envVar.trim().toLowerCase();
+
+  // Reject URL / domain guessing
+  if (
+    trimmed &&
+    (trimmed.includes("/") ||
+      trimmed.includes("http:") ||
+      trimmed.includes("https:") ||
+      trimmed.includes(".com") ||
+      trimmed.includes(".io") ||
+      trimmed.includes(".internal"))
+  ) {
+    return locale === "zh" ? "未知環境" : "unknown";
+  }
+
+  if (trimmed === "prod" || trimmed === "production") {
+    return locale === "zh" ? "正式環境" : "production";
+  }
+  if (trimmed === "stage" || trimmed === "staging") {
+    return locale === "zh" ? "預發環境" : "staging";
+  }
+  if (trimmed === "preview") {
+    return locale === "zh" ? "預覽環境" : "preview";
+  }
+  if (trimmed === "sandbox") {
+    return locale === "zh" ? "沙盒環境" : "sandbox";
+  }
+  if (
+    trimmed === "dev" ||
+    trimmed === "development" ||
+    trimmed === "local"
+  ) {
+    return locale === "zh" ? "開發環境" : "development";
+  }
+  if (
+    trimmed === "mock" ||
+    trimmed === "fixture" ||
+    trimmed === "test"
+  ) {
+    return locale === "zh" ? "模擬資料" : "mock data";
+  }
+
+  // If no primary env var was provided, check NODE_ENV for dev/test only
+  const nodeEnv = (
+    typeof process !== "undefined" && process?.env?.NODE_ENV
+      ? process.env.NODE_ENV
+      : ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (nodeEnv === "development" || nodeEnv === "dev" || nodeEnv === "local") {
+    return locale === "zh" ? "開發環境" : "development";
+  }
+  if (nodeEnv === "test") {
+    return locale === "zh" ? "模擬資料" : "mock data";
+  }
+
+  // NODE_ENV=production alone or missing/unrecognized resolves to unknown
+  return locale === "zh" ? "未知環境" : "unknown";
+}
+
 const en = {
   "app.title": "Tenant Console",
   "app.description": "Tenant administration workspace for DRTS Phase 1.",
@@ -7,7 +85,21 @@ const en = {
   "shell.search": "Search bookings, passengers, statements, reports...",
   "shell.brand.sub": "TENANT CONSOLE",
   "shell.context": "YAMATO Business Group",
-  "shell.env": "production",
+  "shell.env": resolveAuthoritativeShellEnv("en"),
+  "shell.env.production": "production",
+  "shell.env.staging": "staging",
+  "shell.env.preview": "preview",
+  "shell.env.sandbox": "sandbox",
+  "shell.env.dev": "development",
+  "shell.env.mock": "mock data",
+  "shell.env.unknown": "unknown",
+  "app.environment.production": "production",
+  "app.environment.staging": "staging",
+  "app.environment.preview": "preview",
+  "app.environment.sandbox": "sandbox",
+  "app.environment.dev": "development",
+  "app.environment.mock": "mock data",
+  "app.environment.unknown": "unknown",
   "shell.identity.actor": "Yamato",
   "shell.language.en": "English",
   "shell.language.zh": "繁體中文",
@@ -18,7 +110,13 @@ const en = {
   "shell.health.healthy": "API healthy",
   "shell.health.degraded": "API degraded",
   "shell.health.down": "API down",
+  "shell.health.unknown": "unknown",
   "shell.health.lastChecked": "last checked",
+  "status.order.dispatch_timeout": "Dispatch timeout",
+  "status.order.dispatch_failed": "Dispatch failed",
+  "status.order.exception_hold": "Exception hold",
+  "status.order.no_supply": "No available vehicle",
+  "status.order.redispatch_required": "Redispatch required",
   "shell.nav.aria": "Tenant Console navigation",
   "shell.nav.workspace": "Workspace",
   "shell.nav.directory": "Directory",
@@ -4056,7 +4154,21 @@ const zh: Record<keyof typeof en, string> = {
   "shell.search": "搜尋叫車、乘客、對帳單、報表…",
   "shell.brand.sub": "租戶後台",
   "shell.context": "YAMATO 大和商務集團",
-  "shell.env": "production",
+  "shell.env": resolveAuthoritativeShellEnv("zh"),
+  "shell.env.production": "正式環境",
+  "shell.env.staging": "預發環境",
+  "shell.env.preview": "預覽環境",
+  "shell.env.sandbox": "沙盒環境",
+  "shell.env.dev": "開發環境",
+  "shell.env.mock": "模擬資料",
+  "shell.env.unknown": "未知環境",
+  "app.environment.production": "正式環境",
+  "app.environment.staging": "預發環境",
+  "app.environment.preview": "預覽環境",
+  "app.environment.sandbox": "沙盒環境",
+  "app.environment.dev": "開發環境",
+  "app.environment.mock": "模擬資料",
+  "app.environment.unknown": "未知環境",
   "shell.identity.actor": "大和",
   "shell.language.en": "English",
   "shell.language.zh": "繁體中文",
@@ -4067,7 +4179,13 @@ const zh: Record<keyof typeof en, string> = {
   "shell.health.healthy": "API 正常",
   "shell.health.degraded": "API 降級",
   "shell.health.down": "API 中斷",
+  "shell.health.unknown": "API 未知",
   "shell.health.lastChecked": "最近檢查",
+  "status.order.dispatch_timeout": "派車逾時",
+  "status.order.dispatch_failed": "派車失敗",
+  "status.order.exception_hold": "異常暫留",
+  "status.order.no_supply": "無可用運能",
+  "status.order.redispatch_required": "需重新派車",
   "shell.nav.aria": "租戶後台導覽",
   "shell.nav.workspace": "工作面",
   "shell.nav.directory": "資料維護",
@@ -7841,6 +7959,9 @@ export function t(
   locale: Locale = "zh",
   params?: Record<string, string | number>,
 ): string {
+  if (key === "shell.env") {
+    return resolveAuthoritativeShellEnv(locale);
+  }
   const scoped = translations[locale] as Record<string, string>;
   const fallback = en as Record<string, string>;
   const template = scoped[key] ?? fallback[key] ?? key;
