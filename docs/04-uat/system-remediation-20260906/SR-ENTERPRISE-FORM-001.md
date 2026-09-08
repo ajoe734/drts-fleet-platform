@@ -1,5 +1,17 @@
 # SR-ENTERPRISE-FORM-001 — 驗收證據
 
+## 2026-09-08 21:19 UTC dispatch — resume prerequisites remain unresolved
+
+- Task `start` exit 0；fresh `git fetch origin` exit 0，observed base `e97653b7ffb962a6c4d688e8706711d860fa3604`；tested retained head `0eb79e81a427f784b1cd88c65049b027741c5b76`。本輪沒有 implementation candidate；後續 evidence anchor SHA/push 由 machine blocker 記錄。
+- 讀取 task slice、execution rules、R20/R21/R22、C015/C016/C019/C120 及已合併 helper 的 continuation。helper done / PR #1774 / merge `7d1272fc85a7f4d2a20f4ccd2d01716e873cca5e` 不代表 scope 已擴充。Parent `depends_on=[]`，write scopes 仍缺 `lib/enterprise-theme.ts` 與 `lib/translations.ts`。
+- `git show origin/dev:apps/enterprise-dispatch-web/lib/enterprise-theme.ts` exit 0：仍以 `#2457D6` 為 accent，與 `packages/ui-tokens/src/realms.ts` tenant light `#0F766E` / dark `#5EEAD4` 不符；theme 與 retained head 無 diff。`git diff origin/dev...HEAD -- apps/enterprise-dispatch-web/lib/translations.ts` exit 0，歷史三個 en/zh keys 仍在 branch diff、未獲 scope 授權。本輪沒有修改這些檔案。
+- `git cat-file -e origin/dev:apps/enterprise-dispatch-web/components/booking-form/enterprise-booking-validation.ts` exit 128：最新 base 尚未含此表單 helper，不能宣稱已由其他任務合併修復。
+- `git rebase origin/dev` exit 1：第 11/38 個 patch `921a371df` 重播既有表單修復，review、validation、draft、evidence、test 發生衝突。`git rebase --abort` exit 0，恢復 retained head，`git status --short` 無輸出；`git rev-list --left-right --count HEAD...origin/codex2/sr-enterprise-form-001` exit 0、結果 `0 0`。未新增另一輪 duplicate merge。依 helper continuation §4，若採 unpublished replacement 路徑，需 supervisor 明確指定替代 branch；本次 dispatch 仍指定原 published branch。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/` exit 1：15 tests passed，但 browser suite import 失敗，缺 `@playwright/test`，另有 `vitest/config` unresolved warning。不是完整套件通過。
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck` exit 2：TS2688，缺 `vitest/globals` type definition。`git diff --check` exit 0。root/app node_modules 均 symlink 至 canonical workspace；未改共享依賴安裝或 lockfile。
+- 未啟動 dev/browser server、未做 live API 或真機鍵盤/錯誤遮 CTA 驗證，未建立 booking/order，因此無資源 ID；歷史 browser 成功不作本輪證據。
+- **Resume route**：supervisor 先授權 translations/theme scope 並加入 shared-writer dependencies，或交付已合併的等效 producer；再依 helper 指定不需 force-push 的 replacement branch 路由並修復測試依賴解析。不能僅重開 todo 或重跑 history helper 就視為解除阻礙。本輪只提交此 evidence，維持未完成，沒有 handoff/done。
+
 ## 2026-09-08 18:46 UTC dispatch — history repair 與 scope 分別核對
 
 - Fresh `origin/dev` base：`d4f54ef94e059a981bf2be1f7b944e815870e117`；起始 head：`56beeaa0b210a2ab831ce56c71edc3f595825e8f`。
