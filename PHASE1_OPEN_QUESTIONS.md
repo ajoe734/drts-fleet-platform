@@ -73,6 +73,21 @@ The parent remains blocked until authorization. See the
 for source evidence, exact proposed path and validation gates. No new product
 semantics or acceptance scope cut is approved.
 
+### Q-SR-PROOF-001 — proof contract and scope routing pending
+
+Supervisor/Chairman must authorize repository/module/proof storage-scanner
+scopes, record SR-CONTRACT-001 ordering or an explicit reviewed alternative,
+route the missing proof UI states, and select an unused recovery branch.
+Parent owner Codex and reviewer Gemini retain all proof validation, readback,
+concurrency and durable receipt acceptance. PRD §9.8.4 and service contracts
+§3.11 already establish product ownership; this open item concerns the missing
+implementation allocation, not permission to accept arbitrary proof IDs.
+SR-CONTRACT-001 is currently todo; its owner Gemini must supply the reviewed
+contract/persistence allocation before dependent implementation. Parent stays
+blocked until the [resume gate](support/unblock/SR-PROOF-001/SR-PROOF-001-UNBLOCK-PLANNING-DECISION.md)
+is satisfied. This follow-up is tracked on the existing parent; any separate
+producer must first be registered by the supervisor in machine truth.
+
 ## Resolved Items
 
 
