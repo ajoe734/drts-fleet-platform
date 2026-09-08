@@ -112,12 +112,18 @@ export class VoiceToolGatewayService {
               if (
                 !session ||
                 session.resourceScopeId !== claims.resourceScopeId ||
+                session.routeProfileVersion !== claims.routeProfileVersion ||
                 session.leaseEpoch !== claims.leaseEpoch ||
                 session.inputEpoch !== this.turn.inputEpoch ||
                 session.controlOwner !== "ai" ||
                 session.dialogState === "closed"
               )
                 throw new Error("voice_tool_stale_session");
+              const scope = await this.repository.findResourceScopeById(
+                claims.resourceScopeId,
+              );
+              if (!scope || scope.status !== "active")
+                throw new Error("voice_tool_scope_revoked");
               controller.signal.throwIfAborted();
             };
             await assertCurrent();

@@ -24,6 +24,10 @@ export class VoiceDialogueState {
   readonly slots: Partial<
     Record<VoiceDialogueOutput["slots"][number]["field"], SlotEvidence>
   > = {};
+  readonly slotHistory: Array<{
+    field: VoiceDialogueOutput["slots"][number]["field"];
+    evidence: SlotEvidence;
+  }> = [];
   readonly addressRepairs: Record<"pickup" | "dropoff", number> = {
     pickup: 0,
     dropoff: 0,
@@ -62,6 +66,11 @@ export class VoiceDialogueState {
       const old = this.slots[slot.field];
       if (old?.candidate === slot.candidate && old.rawText === slot.rawText)
         continue;
+      if (old)
+        this.slotHistory.push({
+          field: slot.field,
+          evidence: structuredClone(old),
+        });
       this.slots[slot.field] = {
         rawText: slot.rawText,
         candidate: slot.candidate,
@@ -107,6 +116,7 @@ export class VoiceDialogueState {
         ([, s]) => !s?.confirmedByCustomerAt,
       ),
       addresses: this.addressHistory,
+      revisions: this.slotHistory,
     });
   }
 }
@@ -140,7 +150,10 @@ export function voiceNumericReadback(
     return `${part("year")} 年 ${part("month")} 月 ${part("day")} 日 ${part("hour")} 點 ${part("minute")} 分`;
   }
   if (kind === "phone") {
-    if (!/^\+?[0-9 -]{8,20}$/.test(value))
+    if (
+      !/^\+?[0-9 -]{8,20}$/.test(value) ||
+      !/^\+?\d{8,15}$/.test(value.replace(/[ -]/g, ""))
+    )
       throw new Error("voice_phone_invalid");
     return value
       .replace(/[ -]/g, "")
