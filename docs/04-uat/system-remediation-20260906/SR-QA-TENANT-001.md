@@ -2,8 +2,8 @@
 
 Owner Codex2 / Reviewer Codex。2026-09-08。
 
-Base / tested product SHA：`6f6f418fdd6c7fa0811765710f66a5608e0b8ad0`，本次 fetch 後 rebase 至 origin/dev。
-Tested anchor：`d485d97d87a29b8dd40fded8ee315f74fef7a597`，已普通 push 至 `origin/codex2/sr-qa-tenant-001`。
+Base / tested product source SHA：`318f5065433ff07fba2ddf242cf1c5aef5fb1cae`，本次 fetch 後 rebase 至 origin/dev；不是 live server deployment SHA。
+Tested anchor：`269b8cfbe438c13437bced542cdd251cd8bda2c0`，已普通 push 至 `origin/codex2/sr-qa-tenant-001`。
 Candidate SHA：尚未 handoff；anchor 不是審查 candidate。完成後才由 machine truth 鎖定 candidate。
 
 ## 來源與界線
@@ -27,6 +27,28 @@ Candidate SHA：尚未 handoff；anchor 不是審查 candidate。完成後才由
 | SLA               | 修改設定、違約摘要與手動升級回讀            | 未授權修改、無效設定                                             | 既有 governance service 回歸非完整 SLA 驗收；HTTP／DB spec 待補          |
 | feature flags     | 指定租戶啟停及實際能力回讀                  | 其他租戶不受影響、無權限                                         | 尚未實作本 task 的驗收                                                   |
 | tenant lifecycle  | 合法新增／停用與治理記錄回讀                | 被停用租戶寫入、未授權管理                                       | 既有 governance rollback_hold 回歸非完整生命週期驗收；HTTP／DB spec 待補 |
+
+## 18:33 UTC dispatch 實際結果
+
+新增 `sla.spec.ts`，依 `UpdateTenantSlaProfileCommand`、`TenantSlaProfile` 及現行 `/api/tenant/sla` 路由，覆蓋三個門檻更新及獨立 GET 回讀、另一租戶原值不變、A session 搭配 B tenant header 的 403、未登入 401、每個門檻負值 400 及拒絕後原值不變。HTTP 尚未執行，因此這些是待執行 assertions，並非產品已通過或已重現缺陷。
+
+SLA 使用專用、無並行設定 writer 的兩個隔離租戶；`finally` 透過合法 API 恢復兩租戶原門檻並回讀，更新時間及 audit 不會回退。恢復請求失敗仍使案例失敗，需依記錄的 tenant SLA ID 清理。此測試不證明訂單違約計算、重算背景工作、手動升級或 DB 耐久性。
+
+```sh
+pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001 --max-warnings=0
+# exit 0
+git diff --check
+# exit 0
+BASE_SHA=318f5065433ff07fba2ddf242cf1c5aef5fb1cae pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001
+# exit 1；4 shared harness passed / 5 tenant HTTP failed；5.2s
+# 五例均 Missing required DRTS_UAT_ENV; HTTP acceptance did not run
+pnpm exec vitest run tests/unit/tenant-partner-foundation.test.ts tests/integ/tenant-governance-negative.test.ts
+# exit 0；2 files / 36 tests passed；7.94s
+```
+
+scoped TypeScript 檢查沿用下方 TemporaryDirectory tsconfig 方法，`pnpm exec tsc --project <temp>/tsconfig.json --noEmit` exit 0。五份 `test-results/sr-qa-tenant-001-*/tenant-evidence.json` 已回讀：base/head 為頁首 SHA、status failed、exitCode 1、每份 0 HTTP、資源 IDs `[]`。新增 SLA 證據位於 `test-results/sr-qa-tenant-001-sla-C028--87f01--input-and-tenant-isolation/tenant-evidence.json`。無 live 資源、部署 SHA 或 DB 證據。
+
+fetch/rebase 的衝突僅為已合併的歷史驗收文件，保留較新上游版本後成功；接回已發布 task branch ancestry 的 merge 無 tree diff，普通 push exit 0。只新增 scope 內驗收測試及本文件，未修改產品程式。仍須 quota、flags、tenant lifecycle、實際 approval-booking、SLA 違約／升級與真實邀請矩陣；Supervisor／環境 owner 尚需提供 API、雙租戶 sessions、全新收件地址、部署 SHA 及 DB teardown。維持 in_progress，尚未 handoff。
 
 ## 18:25 UTC dispatch 實際結果
 
