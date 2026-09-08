@@ -619,9 +619,15 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         const sigHeader = req.headers["x-drts-webhook-signature"] as string;
         const sig = verifyHmacSignature(sigHeader, rawBody, "whsec_replay_001");
 
-        // Timestamp check (within 300 seconds)
+        // This controlled receiver policy is test-owned, not a deployed receiver.
+        if (!sig.valid) {
+          res.writeHead(401);
+          res.end();
+          return;
+        }
+        // Timestamp check (within 300 seconds), including invalid dates.
         const tsDiffMs = Math.abs(Date.now() - Date.parse(sig.timestamp));
-        if (tsDiffMs > 300_000) {
+        if (!Number.isFinite(tsDiffMs) || tsDiffMs > 300_000) {
           res.writeHead(400, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: "Timestamp expired" }));
           return;
@@ -663,13 +669,96 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
 
       // Simulate replaying the exact same request directly to receiver
       const firstReq = receiver.requests[0]!;
+      const signedHeader = (timestamp: string, body: string) =>
+        `v=1;t=${timestamp};sig=${createHmac("sha256", "whsec_replay_001")
+          .update(`${timestamp}.${body}`)
+          .digest("hex")}`;
+      const signature = firstReq.headers["x-drts-webhook-signature"] as string;
+      const negativeCases = [
+        {
+          name: "tampered body",
+          body: `${firstReq.rawBody} `,
+          signature,
+          status: 401,
+        },
+        {
+          name: "wrong signature",
+          body: firstReq.rawBody,
+          signature: signature.replace(/sig=./, "sig=z"),
+          status: 401,
+        },
+        {
+          name: "missing signature",
+          body: firstReq.rawBody,
+          signature: "",
+          status: 401,
+        },
+        ...[
+          {
+            name: "expired timestamp",
+            timestamp: new Date(Date.now() - 600_000).toISOString(),
+          },
+          {
+            name: "future timestamp",
+            timestamp: new Date(Date.now() + 600_000).toISOString(),
+          },
+          { name: "invalid timestamp", timestamp: "not-a-date" },
+        ].map(({ name, timestamp }) => ({
+          name,
+          body: firstReq.rawBody,
+          signature: signedHeader(timestamp, firstReq.rawBody),
+          status: 400,
+        })),
+      ];
+      for (const negative of negativeCases) {
+        const response = await fetch(receiver.url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-drts-webhook-delivery-id": firstReq.headers[
+              "x-drts-webhook-delivery-id"
+            ] as string,
+            "x-drts-webhook-signature": negative.signature,
+          },
+          body: negative.body,
+        });
+        expect(response.status, negative.name).toBe(negative.status);
+        await response.text();
+        expect(seenDeliveryIds.size, negative.name).toBe(1);
+        expect(replayRejected, negative.name).toBe(false);
+      }
       const replayRes = await fetch(receiver.url, {
         method: "POST",
         headers: firstReq.headers as Record<string, string>,
         body: firstReq.rawBody,
       });
       expect(replayRes.status).toBe(409);
+      await replayRes.text();
       expect(replayRejected).toBe(true);
+      const [persistedDelivery] = service.listWebhookDeliveriesByWebhook(
+        "tenant-demo-001",
+        endpoint.webhookId,
+      );
+      expect(persistedDelivery.deliveryId).toBe(result1.deliveryId);
+      expect(persistedDelivery.status).toBe("delivered");
+      expect(receiver.requests).toHaveLength(8);
+      process.stdout.write(
+        "SR-QA-WEBHOOK-001 replay resources " +
+          JSON.stringify({
+            tenantId: "tenant-demo-001",
+            webhookId: endpoint.webhookId,
+            deliveryId: result1.deliveryId,
+            receiverRequests: receiver.requests.length,
+            negativeCases: negativeCases.map(({ name, status }) => ({
+              name,
+              status,
+            })),
+            replayStatus: replayRes.status,
+            policy:
+              "test-owned receiver; 300s freshness, HMAC then deduplication",
+          }) +
+          "\n",
+      );
     });
 
     it("C112-7 (Normal): Webhook secret rotation advances version to v=2 and updates signature without leaking secret", async () => {
