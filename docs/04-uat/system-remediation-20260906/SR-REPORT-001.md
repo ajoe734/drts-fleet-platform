@@ -7,6 +7,14 @@
 - 本次已驗證的 implementation anchor：`73b91900d3617ccabebea12f76590c10e8f4755c`，已普通 push 到 origin。
 - 新 candidate SHA：**尚未鎖定**。本次是可恢復的 WIP，未 handoff，不能當作完成或已部署。
 
+## 2026-09-08 rebase 與重驗證
+
+- 已對最新 `origin/dev` rebase；本輪 base 為 `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`，rebase 後本地 WIP head 為 `d62e0a50bbd0a50c74213730b945b63ea482431f`。它尚未 push 或 handoff，故不是 candidate。
+- `pnpm --filter @drts/api typecheck`、`pnpm --filter @drts/ops-console-web typecheck`、task Vitest（9 passed）和 task-owned ESLint 都是 exit 0；`git diff --check` 也為 exit 0。
+- `pnpm exec vitest run tests/unit/reporting-filing.test.ts` 為 exit 1（26 passed、4 failed、2 unhandled rejections）。失敗的共用測試仍假設 `renderReportArtifact` 同步、XLSX/PDF 必須拒絕，與本 task 的 async renderer 行為衝突；它不在 write scope，未被修改或掩蓋。
+- task test 在 `/tmp/sr-report-001-evidence-20260908` 產生的 in-memory IDs：CSV `JOB-e9e36deb-5a2d-41c2-8529-538dfdf20720` / `ART-23143f53-0c56-4e78-aee1-fc66b6aef893`，XLSX `JOB-a2e3f2cf-a1d2-4732-bb37-eff9f570723e` / `ART-f76c00f4-ee51-4559-8061-8d2169d2fe5d`，PDF `JOB-381b49d5-b4bf-428a-a5c2-4eeb6fee1c7f` / `ART-ad520b71-764b-4bf1-a79d-eb63527c848e`。三者 filters 均為 `{from:"2026-09-01",to:"2026-09-30"}`，相同一筆 `general` row。
+- 外部暫存 venv 的 `pypdf` 解析（exit 0）讀回 filtered.pdf 1 page / 1 record 與 wide.pdf 35 pages / 55 records；CSV 亦逐欄讀回。XLSX 則由 task Vitest 的 ExcelJS load 逐欄驗證。這些都是本機 in-memory 證據，不是 live HTTP、資料庫或瀏覽器驗收。
+
 ## 來源與起點重現
 
 依 `docs/03-runbooks/system-remediation-execution-tasks-20260906.md` 及其 SR-REPORT-001 leaf task 執行。追溯 `source/capabilities.json` C091、`source/new-gaps.json` N05。產品依據是 `phase1_prd_detailed_v1.md` §9.5.6（CSV/XLSX/PDF）與 §9.10.2（filing 只保留中繼資料，明確不產生 PDF/ZIP）。
