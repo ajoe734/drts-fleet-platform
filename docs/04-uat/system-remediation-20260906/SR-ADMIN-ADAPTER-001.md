@@ -1,6 +1,15 @@
 # SR-ADMIN-ADAPTER-001 — 執行證據與 scope 缺口
 
-## 2026-09-08 16:10 dispatch continuation（最新結果）
+## 2026-09-08 16:24 dispatch gate recheck（最新結果）
+
+- `git fetch origin`: exit 0; base `5cff9b36082998a0295f2550039306dc1f84c3d2`, inspected HEAD `7d1566f2ced4b699574e9ed16210fde8febf8529`.
+- Canonical task remains backlog with the chairman's product gate; shared scope/dependencies and registration/configuration/credential form canvas are still absent. Existing screen requirements below remain applicable. The assigned branch is still the preserved historical branch, not the clean recovery branch required by the merged history helper.
+- `git rebase origin/dev`: exit 1, duplicate-history add/add conflicts in registry-notice.ts and this evidence file. `git rebase --abort`: exit 0; published history preserved. No force push or ancestry merge attempted.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/modules/platform-admin/platform-admin.controller.ts apps/api/src/modules/platform-admin/platform-admin.service.ts packages/contracts/src/platform-adapter-registry.ts`: exit 0. Inspected API sources match the fetched base.
+- `NODE_ENV=test pnpm --filter @drts/api exec tsx --tsconfig ../../tests/unit/system-remediation/sr-admin-adapter-001/registry-api-reproduction.tsconfig.json ../../tests/unit/system-remediation/sr-admin-adapter-001/registry-api-reproduction.ts`: exit 0, observed `2026-09-08T16:24:49.346Z`. Loopback port 40829: GET public-info 200 (existing seed `public-info-demo-001`, request ID `2c313cf8-7f5c-4296-9a48-60fa7c104574`); GET adapters, GET adapters/grab_taiwan and PATCH adapters/grab_taiwan each 404. Resource `grab_taiwan` was requested, not created. Host closed; diagnostic exit 0 is not acceptance.
+- No product changes or acceptance candidate in this dispatch. Live/deployed API, authentication, DB writes/readback, provider credentials, expiry four-state acceptance and candidate CI/merge were not exercised. Supervisor must reconcile clean-branch routing and authorize shared scope/dependencies plus missing canonical forms before full implementation can proceed.
+
+## 2026-09-08 16:10 dispatch continuation（歷史結果）
 
 - Fetched base: `f2727a88e086d9b057324f0e6ce1de0aa11c3ce0`; inspected source HEAD: `47dd8e5c55fb54f1cb755a93125b19a3cd17e6da`.
 - Read the merged history-repair report at `support/unblock/SR-ADMIN-ADAPTER-001/SR-ADMIN-ADAPTER-001-UNBLOCK-HISTORY-REPAIR.md` in origin/dev. It explicitly excludes parent implementation/acceptance and requires supervisor assignment of a clean branch. This dispatch still assigns the preserved historical branch. `git rebase origin/dev` exited 1 on duplicate add/add conflicts in registry-notice.ts and this evidence file; `git rebase --abort` exited 0 and preserved all published history. No reset, force push, or historical ancestry merge was performed.
