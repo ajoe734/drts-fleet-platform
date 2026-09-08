@@ -119,6 +119,10 @@ export async function verifyRecordedObject(
   scope: RecordingScope,
   segment: RecorderSegment,
 ): Promise<void> {
+  // Readback must verify the version requested at entry even if the caller
+  // reuses mutable metadata while the object store request is in flight.
+  scope = Object.freeze({ ...scope });
+  segment = Object.freeze({ ...segment });
   validateSegment(segment);
   for (const key of ["brandId", "callId", "recordingId", "legId"] as const) {
     requireEvidence(scope[key] === segment[key], "Recording scope mismatch");
@@ -170,12 +174,12 @@ export class SealedRecorder {
     // change the sealed payload or its binding while I/O is outstanding.
     const { bytes: original, ...metadata } = input;
     const bytes = Uint8Array.from(original);
-    const scope: RecordingScope = {
+    const scope: RecordingScope = Object.freeze({
       brandId: metadata.brandId,
       callId: metadata.callId,
       recordingId: metadata.recordingId,
       legId: metadata.legId,
-    };
+    });
     const grant = await this.ingress.authorize(credential, scope);
     requireEvidence(
       grant.source === "recording_fork" &&
@@ -218,11 +222,18 @@ export function assertBidirectionalCoverage(
       endMs > startMs,
     "Invalid coverage window",
   );
+  let utcOrigin: number | undefined;
   for (const segment of segments) {
     validateSegment(segment);
     for (const key of ["brandId", "callId", "recordingId", "legId"] as const) {
       requireEvidence(scope[key] === segment[key], "Recording scope mismatch");
     }
+    const origin = Date.parse(segment.utcStart) - segment.startMs;
+    requireEvidence(
+      utcOrigin === undefined || utcOrigin === origin,
+      "Discontinuous UTC mapping",
+    );
+    utcOrigin = origin;
   }
   for (const channel of ["inbound", "outbound"] as const) {
     const track = segments
@@ -234,7 +245,6 @@ export function assertBidirectionalCoverage(
       )
       .sort((a, b) => a.startMs - b.startMs);
     let cursor = startMs;
-    let utcOrigin: number | undefined;
     for (const segment of track) {
       requireEvidence(
         segment.startMs <= cursor && segment.endMs > cursor,
@@ -245,12 +255,6 @@ export function assertBidirectionalCoverage(
           segment.startMs === cursor,
           "Overlapping recording segments",
         );
-      const origin = Date.parse(segment.utcStart) - segment.startMs;
-      requireEvidence(
-        utcOrigin === undefined || utcOrigin === origin,
-        "Discontinuous UTC mapping",
-      );
-      utcOrigin = origin;
       cursor = segment.endMs;
     }
     requireEvidence(cursor >= endMs, `Missing ${channel} recording coverage`);
