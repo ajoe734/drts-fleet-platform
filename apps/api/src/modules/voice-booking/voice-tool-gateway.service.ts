@@ -58,13 +58,18 @@ export class VoiceToolGatewayService {
       reservation: "service_unsupported",
     };
     const reason = handoffReasons[output.intent];
+    const requestedHandoff = output.tools.find(
+      (tool) => tool.name === "request_handoff",
+    );
     const proposals: VoiceToolProposal[] =
-      reason || output.terminal === "handoff"
+      reason || requestedHandoff || output.terminal === "handoff"
         ? [
             {
               name: "request_handoff",
               args: {
-                reason: (reason ?? "customer_requested") as
+                reason: (reason ??
+                  requestedHandoff?.args.reason ??
+                  "customer_requested") as
                   | "customer_requested"
                   | "urgent_safety"
                   | "service_unsupported",
@@ -153,6 +158,7 @@ export class VoiceToolGatewayService {
             )
               throw new Error("voice_tool_order_mismatch");
             collected.push(parsed);
+            if (this.stopped) break;
           }
           return collected;
         })(),

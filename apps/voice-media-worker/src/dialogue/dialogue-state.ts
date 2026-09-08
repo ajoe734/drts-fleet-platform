@@ -47,9 +47,12 @@ export class VoiceDialogueState {
       reservation: "service_unsupported",
     };
     const reason = reasons[output.intent];
-    if (reason || output.terminal === "handoff") {
+    const requestedHandoff = output.tools.find(
+      (tool) => tool.name === "request_handoff",
+    );
+    if (reason || requestedHandoff || output.terminal === "handoff") {
       this.handoff = {
-        reason: reason ?? "customer_requested",
+        reason: reason ?? requestedHandoff?.args.reason ?? "customer_requested",
         intent: output.intent,
       };
       this.confirmationId = null;
