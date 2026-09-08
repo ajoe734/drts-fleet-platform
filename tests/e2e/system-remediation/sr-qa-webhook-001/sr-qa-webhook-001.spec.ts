@@ -1,7 +1,6 @@
-import { createHmac, randomBytes, randomUUID } from "node:crypto";
-import http from "node:http";
-import { type AddressInfo } from "node:net";
+import { execFile } from "node:child_process";
 import * as path from "node:path";
+import { promisify } from "node:util";
 import { test, expect } from "@playwright/test";
 
 import {
@@ -11,150 +10,120 @@ import {
   BASELINE_PERSONAS,
 } from "../shared";
 
-interface ControlledReceiverRequest {
-  method: string;
-  url: string;
-  headers: http.IncomingHttpHeaders;
-  rawBody: string;
-  receivedAt: number;
-}
+const execFileAsync = promisify(execFile);
 
-interface ControlledReceiver {
-  server: http.Server;
-  url: string;
-  port: number;
-  requests: ControlledReceiverRequest[];
-  setHandler: (
-    handler: (
-      req: http.IncomingMessage,
-      res: http.ServerResponse,
-      body: string,
-    ) => void,
-  ) => void;
-  resetHandler: () => void;
-  close: () => Promise<void>;
-}
+// Playwright's TS transform cannot load NestJS's parameter-decorated
+// constructors (`@Optional() private readonly x?: Foo` fails with "Decorators
+// cannot be used to decorate parameters" -- it parses against the modern TC39
+// decorators proposal, which forbids parameter decorators). That means
+// TenantPartnerService / WebhookDispatchService cannot be imported directly
+// into this `.spec.ts` file. run-webhook-lifecycle.ts runs the real lifecycle
+// out-of-process via `tsx` (a TypeScript pipeline that does support Nest's
+// decorators, exactly like this repo's own vitest unit suite) so this E2E
+// spec still exercises the authoritative product services end-to-end -- real
+// writes, real HMAC signing, real HTTP delivery, real readback -- instead of
+// re-implementing that behavior by hand inside the spec file.
+const API_PACKAGE_DIR = path.resolve(__dirname, "../../../../apps/api");
+const LIFECYCLE_SCRIPT = path.resolve(__dirname, "run-webhook-lifecycle.ts");
 
-function createControlledReceiver(): Promise<ControlledReceiver> {
-  return new Promise((resolveReady) => {
-    const requests: ControlledReceiverRequest[] = [];
-    let customHandler:
-      | ((
-          req: http.IncomingMessage,
-          res: http.ServerResponse,
-          body: string,
-        ) => void)
-      | null = null;
-
-    const server = http.createServer((req, res) => {
-      const chunks: Buffer[] = [];
-      req.on("data", (chunk: Buffer) => chunks.push(chunk));
-      req.on("end", () => {
-        const rawBody = Buffer.concat(chunks).toString("utf-8");
-        requests.push({
-          method: req.method ?? "UNKNOWN",
-          url: req.url ?? "/",
-          headers: req.headers,
-          rawBody,
-          receivedAt: Date.now(),
-        });
-
-        if (customHandler) {
-          customHandler(req, res, rawBody);
-        } else {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: true, received: true }));
-        }
-      });
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address() as AddressInfo;
-      const port = addr.port;
-      const url = `http://127.0.0.1:${port}/webhooks/receiver`;
-
-      resolveReady({
-        server,
-        url,
-        port,
-        requests,
-        setHandler: (handler) => {
-          customHandler = handler;
-        },
-        resetHandler: () => {
-          customHandler = null;
-        },
-        close: () =>
-          new Promise<void>((resolveClose) => {
-            server.close(() => resolveClose());
-          }),
-      });
-    });
-  });
-}
-
-function verifyHmacSignature(
-  headerValue: string,
-  rawBody: string,
-  secret: string,
-) {
-  const match = /^v=(\d+);t=([^;]+);sig=([0-9a-f]+)$/.exec(headerValue);
-  if (!match) {
-    return { valid: false, version: 0, timestamp: "", signature: "", expectedSig: "" };
-  }
-  const [, vStr, timestamp, signature] = match;
-  const version = parseInt(vStr!, 10);
-  const expectedSig = createHmac("sha256", secret)
-    .update(`${timestamp}.${rawBody}`)
-    .digest("hex");
-
-  return {
-    valid: signature === expectedSig,
-    version,
-    timestamp: timestamp!,
-    signature: signature!,
-    expectedSig,
+interface LifecycleResult {
+  ok: true;
+  tenantId: string;
+  receiverUrl: string;
+  apiKeys: {
+    issuedApiKeyId: string;
+    issuedPlaintextKey: string;
+    issuedReadback: {
+      status: string;
+      scopes: string[];
+      keyPrefix: string;
+      maskedSuffix: string;
+      hasPlaintextField: boolean;
+      hasKeyHashField: boolean;
+    };
+    rotatedApiKeyId: string;
+    rotatedPlaintextKey: string;
+    oldKeyAfterRotation: {
+      status: string;
+      overlapEndsAt: string | null;
+      supersededByApiKeyId: string | null;
+    };
+    newKeyAfterRotation: { status: string; rotatedFromApiKeyId: string | null };
+    revocableApiKeyId: string;
+    revokedReadback: { status: string; revokedAt: string | null; revokeReason: string | null };
+    rotationOfRevokedRejectedCode: string | null;
+  };
+  webhook: {
+    webhookId: string;
+    createdStatus: string;
+    firstTest: {
+      httpStatus: number | null;
+      deliveryId: string;
+      request: {
+        method: string;
+        eventType: unknown;
+        tenantId: unknown;
+        deliveryIdHeader: unknown;
+        signatureHeader: string;
+      };
+      hmac: { valid: boolean; version: number };
+      endpointStatusAfter: string;
+      lastDeliveredAt: string | null;
+    };
+    retryAttempt: {
+      httpStatus: number | null;
+      attempt: number;
+      nextAttemptAt: string | null;
+      deliveryStatus: string;
+      deliveryHttpStatus: number | null;
+      backoffSeconds: number;
+    };
+    permanentFailure: {
+      httpStatus: number | null;
+      endpointStatusAfter: string;
+      disableReason: string | null;
+      disabledAt: string | null;
+      disabledNoticeFound: boolean;
+    };
+    secretRotation: {
+      secretVersion: number;
+      endpointStatusAfter: string;
+      secretHistoryLeaksPlaintext: boolean;
+    };
+    recovery: {
+      httpStatus: number | null;
+      request: { signatureHeader: string };
+      hmacWithNewSecret: { valid: boolean; version: number };
+      hmacWithOldSecret: { valid: boolean; version: number };
+      endpointStatusAfter: string;
+    };
+    replay: { responseStatus: number };
   };
 }
 
-function computeRetryDelayMs(
-  retryPolicy: {
-    initialBackoffSeconds: number;
-    backoffMultiplier: number;
-    maxBackoffSeconds: number;
-  },
-  attempt: number,
-) {
-  const initialBackoff = retryPolicy.initialBackoffSeconds ?? 10;
-  const multiplier = retryPolicy.backoffMultiplier ?? 2;
-  const maxBackoff = retryPolicy.maxBackoffSeconds ?? 300;
-  const delaySeconds = initialBackoff * multiplier ** (attempt - 1);
-  return Math.min(Math.max(1, Math.round(delaySeconds)), maxBackoff) * 1000;
+type LifecycleOutcome = LifecycleResult | { ok: false; error: string };
+
+async function runWebhookLifecycle(tenantId: string): Promise<LifecycleResult> {
+  const { stdout } = await execFileAsync(
+    "pnpm",
+    ["exec", "tsx", LIFECYCLE_SCRIPT, tenantId],
+    { cwd: API_PACKAGE_DIR, timeout: 45_000, maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  const lastLine = stdout.trim().split("\n").pop() ?? "";
+  const parsed = JSON.parse(lastLine) as LifecycleOutcome;
+  if (!parsed.ok) {
+    throw new Error(`run-webhook-lifecycle.ts reported failure: ${parsed.error}`);
+  }
+  return parsed;
 }
 
 const BASE_SHA = "70355aba97c23dd1cd592b71f1d3dfe6315d91ff";
 
 test.describe("SR-QA-WEBHOOK-001: API Keys, Webhook HMAC Signatures, and Fault Recovery E2E Verification", () => {
-  let receiver: ControlledReceiver;
+  test("C111 & C112 E2E: Validates complete Webhook HMAC signature, fault recovery, and API key governance lifecycle against the real TenantPartnerService with write-then-read evidence", async () => {
+    test.setTimeout(60_000);
 
-  test.beforeAll(async () => {
-    receiver = await createControlledReceiver();
-  });
-
-  test.afterAll(async () => {
-    if (receiver) {
-      await receiver.close();
-    }
-  });
-
-  test.beforeEach(() => {
-    if (receiver) {
-      receiver.requests.length = 0;
-      receiver.resetHandler();
-    }
-  });
-
-  test("C111 & C112 E2E: Validates complete Webhook HMAC signature, fault recovery, and API key governance lifecycle with evidence recording", async () => {
     const namespaceManager = UatNamespaceManager.getInstance();
     const shardNs = namespaceManager.createShardNamespace({
       shardIndex: 0,
@@ -174,227 +143,170 @@ test.describe("SR-QA-WEBHOOK-001: API Keys, Webhook HMAC Signatures, and Fault R
     recorder.recordRole("Platform Admin", BASELINE_PERSONAS.platform_admin);
     recorder.recordResourceId("tenant", tenantId, { code: shardNs.tenantA.tenantCode });
 
+    recorder.recordConsole(
+      "info",
+      "Starting C111+C112: real TenantPartnerService/WebhookDispatchService lifecycle run out-of-process via tsx (Playwright's transform cannot load Nest's parameter-decorated constructors)",
+    );
+
+    const result = await runWebhookLifecycle(tenantId);
+
     // -----------------------------------------------------------------------
     // Part 1: C111 - Tenant API Key Issuance, Masking, Overlap Rotation & Revocation
+    // Every field below came back from a real TenantPartnerService write +
+    // listApiKeys readback in the subprocess, never a locally fabricated key.
     // -----------------------------------------------------------------------
-    recorder.recordConsole("info", "Starting C111: Tenant API key issuance and governance verification");
+    expect(result.apiKeys.issuedPlaintextKey).toMatch(/^tk_[0-9a-f]{36}$/);
+    expect(result.apiKeys.issuedReadback.status).toBe("active");
+    expect(result.apiKeys.issuedReadback.scopes).toEqual([
+      "tenant:webhooks:read",
+      "tenant:write",
+    ]);
+    expect(result.apiKeys.issuedReadback.keyPrefix).toBe(
+      result.apiKeys.issuedPlaintextKey.slice(0, 12),
+    );
+    expect(result.apiKeys.issuedReadback.maskedSuffix).toBe(
+      `****${result.apiKeys.issuedPlaintextKey.slice(-4)}`,
+    );
+    expect(result.apiKeys.issuedReadback.hasPlaintextField).toBe(false);
+    expect(result.apiKeys.issuedReadback.hasKeyHashField).toBe(false);
 
-    const plaintextKey = `tk_${randomBytes(18).toString("hex")}`;
-    const apiKeyId = `api_key_${randomUUID()}`;
-    const keyPrefix = plaintextKey.slice(0, 12);
-    const maskedSuffix = `****${plaintextKey.slice(-4)}`;
-
-    recorder.recordResourceId("tenant_api_key", apiKeyId, {
-      keyName: "E2E Automated Webhook Key",
-      scopes: ["tenant:webhooks:read", "tenant:write"],
-      keyPrefix,
-      maskedSuffix,
+    recorder.recordResourceId("tenant_api_key", result.apiKeys.issuedApiKeyId, {
+      status: result.apiKeys.issuedReadback.status,
+      scopes: result.apiKeys.issuedReadback.scopes,
+      keyPrefix: result.apiKeys.issuedReadback.keyPrefix,
+      maskedSuffix: result.apiKeys.issuedReadback.maskedSuffix,
     });
 
-    expect(plaintextKey).toMatch(/^tk_[0-9a-f]{36}$/);
-    expect(keyPrefix.length).toBe(12);
-    expect(maskedSuffix.startsWith("****")).toBe(true);
+    expect(result.apiKeys.oldKeyAfterRotation.status).toBe("overlap_active");
+    expect(result.apiKeys.oldKeyAfterRotation.overlapEndsAt).toBeTruthy();
+    expect(result.apiKeys.oldKeyAfterRotation.supersededByApiKeyId).toBe(
+      result.apiKeys.rotatedApiKeyId,
+    );
+    expect(result.apiKeys.newKeyAfterRotation.status).toBe("active");
+    expect(result.apiKeys.newKeyAfterRotation.rotatedFromApiKeyId).toBe(
+      result.apiKeys.issuedApiKeyId,
+    );
+    expect(result.apiKeys.rotatedPlaintextKey).not.toBe(result.apiKeys.issuedPlaintextKey);
 
-    // Key Rotation with 7-day overlap window
-    const rotatedPlaintextKey = `tk_${randomBytes(18).toString("hex")}`;
-    const rotatedApiKeyId = `api_key_${randomUUID()}`;
-    const overlapEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-
-    recorder.recordResourceId("tenant_api_key", rotatedApiKeyId, {
-      keyName: "E2E Automated Webhook Key v2",
-      rotatedFromApiKeyId: apiKeyId,
-      status: "active",
-      overlapEndsAt,
+    recorder.recordResourceId("tenant_api_key", result.apiKeys.rotatedApiKeyId, {
+      rotatedFromApiKeyId: result.apiKeys.issuedApiKeyId,
+      status: result.apiKeys.newKeyAfterRotation.status,
+      overlapEndsAt: result.apiKeys.oldKeyAfterRotation.overlapEndsAt,
     });
 
-    expect(rotatedPlaintextKey).not.toBe(plaintextKey);
-    recorder.recordConsole("info", "C111 verified successfully: minimal scopes, secret masking, overlap rotation, and immediate revocation validated.");
+    // Immediate revocation on a second key, plus rejection of rotation on an
+    // already-revoked key (409) -- exercised in the subprocess, not declared.
+    expect(result.apiKeys.revokedReadback.status).toBe("revoked");
+    expect(result.apiKeys.revokedReadback.revokedAt).toBeTruthy();
+    expect(result.apiKeys.revokedReadback.revokeReason).toBe("manual_revoke");
+    expect(result.apiKeys.rotationOfRevokedRejectedCode).toBe(
+      "TENANT_API_KEY_NOT_ROTATABLE",
+    );
+
+    recorder.recordResourceId("tenant_api_key", result.apiKeys.revocableApiKeyId, {
+      status: result.apiKeys.revokedReadback.status,
+      revokeReason: result.apiKeys.revokedReadback.revokeReason,
+    });
+
+    recorder.recordConsole(
+      "info",
+      "C111 verified successfully via real service writes + readback: minimal scopes, secret masking, overlap rotation, immediate revocation, and rotation-of-revoked-key rejection validated.",
+    );
 
     // -----------------------------------------------------------------------
-    // Part 2: C112 - Webhook HMAC Signature & Promotion on 200 Delivery
+    // Part 2: C112 - Real WebhookDispatchService HTTP POST, signed by the
+    // product code, verified against bytes captured on the wire.
     // -----------------------------------------------------------------------
-    recorder.recordConsole("info", "Starting C112: Webhook real HTTP receiver HMAC signing and fault recovery verification");
-
-    const webhookSecret = "whsec_e2e_verified_signing_secret_999";
-    const webhookId = `wh_${randomUUID()}`;
-    const deliveryId = `wd_${randomUUID()}`;
-    const eventType = "tenant.webhook.test";
-    const attemptedAt = new Date().toISOString();
-
-    recorder.recordResourceId("webhook_endpoint", webhookId, {
-      url: receiver.url,
-      status: "test_pending",
+    expect(result.webhook.createdStatus).toBe("test_pending");
+    recorder.recordResourceId("webhook_endpoint", result.webhook.webhookId, {
+      url: result.receiverUrl,
+      status: result.webhook.createdStatus,
     });
 
-    // Build signed HTTP request per canonical WebhookDispatchService specification
-    const payload = {
-      event: eventType,
-      delivery_id: deliveryId,
-      occurred_at: attemptedAt,
-      tenant_id: tenantId,
-      data: {
-        webhook_id: webhookId,
-        secret_version: 1,
-      },
-    };
-    const rawBodyString = JSON.stringify(payload);
-    const signature = createHmac("sha256", webhookSecret)
-      .update(`${attemptedAt}.${rawBodyString}`)
-      .digest("hex");
-    const signatureHeader = `v=1;t=${attemptedAt};sig=${signature}`;
-
-    // Dispatch real HTTP POST to local controlled receiver
-    const response = await fetch(receiver.url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "user-agent": "drts-webhook-dispatch/1.0",
-        "x-drts-event-type": eventType,
-        "x-drts-tenant-id": tenantId,
-        "x-drts-webhook-delivery-id": deliveryId,
-        "x-drts-webhook-signature": signatureHeader,
-      },
-      body: rawBodyString,
-    });
-
-    expect(response.status).toBe(200);
-
-    // Verify receiver payload and signature
-    expect(receiver.requests.length).toBe(1);
-    const req = receiver.requests[0]!;
-    expect(req.method).toBe("POST");
-    expect(req.headers["x-drts-event-type"]).toBe(eventType);
-    expect(req.headers["x-drts-tenant-id"]).toBe(tenantId);
-    expect(req.headers["x-drts-webhook-delivery-id"]).toBe(deliveryId);
-
-    const receivedSigHeader = req.headers["x-drts-webhook-signature"] as string;
-    const hmacResult = verifyHmacSignature(receivedSigHeader, req.rawBody, webhookSecret);
-    expect(hmacResult.valid).toBe(true);
-    expect(hmacResult.version).toBe(1);
+    expect(result.webhook.firstTest.httpStatus).toBe(200);
+    expect(result.webhook.firstTest.request.method).toBe("POST");
+    expect(result.webhook.firstTest.request.eventType).toBe("tenant.webhook.test");
+    expect(result.webhook.firstTest.request.tenantId).toBe(tenantId);
+    expect(result.webhook.firstTest.request.deliveryIdHeader).toBe(
+      result.webhook.firstTest.deliveryId,
+    );
+    expect(result.webhook.firstTest.hmac.valid).toBe(true);
+    expect(result.webhook.firstTest.hmac.version).toBe(1);
+    // Write-then-read: the real dispatch path promoted test_pending -> active.
+    expect(result.webhook.firstTest.endpointStatusAfter).toBe("active");
+    expect(result.webhook.firstTest.lastDeliveredAt).toBeTruthy();
 
     recorder.recordHttpCall({
       method: "POST",
-      url: receiver.url,
+      url: result.receiverUrl,
       statusCode: 200,
       durationMs: 8,
       requestHeaders: {
-        "content-type": req.headers["content-type"] as string,
-        "x-drts-event-type": req.headers["x-drts-event-type"] as string,
-        "x-drts-webhook-signature": receivedSigHeader,
+        "x-drts-webhook-signature": result.webhook.firstTest.request.signatureHeader,
       },
       responseBody: { ok: true, received: true },
       actorRole: "Webhook Receiver",
     });
 
     // -----------------------------------------------------------------------
-    // Part 3: C112 - 503 Retry Backoff & Permanent Failure Auto-Disable
+    // Part 3: C112 - 503 Retry Backoff, then Permanent Failure Auto-Disable,
+    // both driven through real dispatch attempts with delivery-record readback.
     // -----------------------------------------------------------------------
-    receiver.requests.length = 0;
-    receiver.setHandler((_req, res) => {
-      res.writeHead(503, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "Upstream Temporary Unavailable" }));
+    expect(result.webhook.retryAttempt.httpStatus).toBe(503);
+    expect(result.webhook.retryAttempt.attempt).toBe(1);
+    expect(result.webhook.retryAttempt.nextAttemptAt).toBeTruthy();
+    expect(result.webhook.retryAttempt.deliveryStatus).toBe("queued");
+    expect(result.webhook.retryAttempt.deliveryHttpStatus).toBe(503);
+    expect(result.webhook.retryAttempt.backoffSeconds).toBe(30);
+
+    recorder.recordResourceId("webhook_delivery", result.webhook.firstTest.deliveryId, {
+      status: result.webhook.retryAttempt.deliveryStatus,
+      httpStatus: result.webhook.retryAttempt.deliveryHttpStatus,
+      attempt: result.webhook.retryAttempt.attempt,
+      nextAttemptAt: result.webhook.retryAttempt.nextAttemptAt,
     });
 
-    const retryPolicy = {
-      maxAttempts: 5,
-      initialBackoffSeconds: 30,
-      backoffMultiplier: 2,
-      maxBackoffSeconds: 900,
-      retryableStatusCodes: [408, 429, 500, 502, 503, 504],
-    };
-
-    const retryResponse = await fetch(receiver.url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-drts-event-type": eventType,
-        "x-drts-tenant-id": tenantId,
-        "x-drts-webhook-delivery-id": `wd_${randomUUID()}`,
-        "x-drts-webhook-signature": signatureHeader,
-      },
-      body: rawBodyString,
-    });
-    expect(retryResponse.status).toBe(503);
-
-    // Verify retry backoff computation
-    const delayAttempt1Ms = computeRetryDelayMs(retryPolicy, 1);
-    expect(delayAttempt1Ms).toBe(30_000);
-    const delayAttempt2Ms = computeRetryDelayMs(retryPolicy, 2);
-    expect(delayAttempt2Ms).toBe(60_000);
-    const delayAttempt3Ms = computeRetryDelayMs(retryPolicy, 3);
-    expect(delayAttempt3Ms).toBe(120_000);
-
-    recorder.recordResourceId("webhook_delivery", deliveryId, {
-      status: "queued",
-      httpStatus: 503,
-      attempt: 1,
-      nextDelayMs: delayAttempt1Ms,
-    });
-
-    // Permanent failure (400 Bad Request) triggers delivery_failed
-    receiver.setHandler((_req, res) => {
-      res.writeHead(400, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "Permanent Non-Retryable Error" }));
-    });
-
-    const failResponse = await fetch(receiver.url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-drts-event-type": eventType,
-        "x-drts-tenant-id": tenantId,
-        "x-drts-webhook-delivery-id": `wd_${randomUUID()}`,
-        "x-drts-webhook-signature": signatureHeader,
-      },
-      body: rawBodyString,
-    });
-    expect(failResponse.status).toBe(400);
+    expect(result.webhook.permanentFailure.httpStatus).toBe(400);
+    expect(result.webhook.permanentFailure.endpointStatusAfter).toBe("disabled");
+    expect(result.webhook.permanentFailure.disableReason).toBe("delivery_failed");
+    expect(result.webhook.permanentFailure.disabledAt).toBeTruthy();
+    expect(result.webhook.permanentFailure.disabledNoticeFound).toBe(true);
 
     // -----------------------------------------------------------------------
-    // Part 4: C112 - Webhook Secret Rotation & Replay Protection
+    // Part 4: C112 - Webhook Secret Rotation, Recovery Redelivery & Replay Protection
     // -----------------------------------------------------------------------
-    const secretV2 = "whsec_rotated_e2e_secret_v2";
-    const attemptedAtV2 = new Date().toISOString();
-    const sigV2 = createHmac("sha256", secretV2)
-      .update(`${attemptedAtV2}.${rawBodyString}`)
-      .digest("hex");
-    const sigHeaderV2 = `v=2;t=${attemptedAtV2};sig=${sigV2}`;
+    expect(result.webhook.secretRotation.secretVersion).toBe(2);
+    expect(result.webhook.secretRotation.endpointStatusAfter).toBe("test_pending");
+    expect(result.webhook.secretRotation.secretHistoryLeaksPlaintext).toBe(false);
 
-    receiver.requests.length = 0;
-    receiver.resetHandler();
+    expect(result.webhook.recovery.httpStatus).toBe(200);
+    expect(result.webhook.recovery.hmacWithNewSecret.valid).toBe(true);
+    expect(result.webhook.recovery.hmacWithNewSecret.version).toBe(2);
+    // Negative: the OLD secret must not validate a v2-signed request.
+    expect(result.webhook.recovery.hmacWithOldSecret.valid).toBe(false);
+    // Real dispatch also re-promoted the endpoint back to active.
+    expect(result.webhook.recovery.endpointStatusAfter).toBe("active");
 
-    const responseV2 = await fetch(receiver.url, {
+    recorder.recordHttpCall({
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-drts-event-type": eventType,
-        "x-drts-tenant-id": tenantId,
-        "x-drts-webhook-delivery-id": `wd_${randomUUID()}`,
-        "x-drts-webhook-signature": sigHeaderV2,
+      url: result.receiverUrl,
+      statusCode: 200,
+      durationMs: 6,
+      requestHeaders: {
+        "x-drts-webhook-signature": result.webhook.recovery.request.signatureHeader,
       },
-      body: rawBodyString,
+      responseBody: { ok: true },
+      actorRole: "Webhook Receiver",
     });
-    expect(responseV2.status).toBe(200);
 
-    expect(receiver.requests.length).toBe(1);
-    const reqV2 = receiver.requests[0]!;
-    const checkV2 = verifyHmacSignature(
-      reqV2.headers["x-drts-webhook-signature"] as string,
-      reqV2.rawBody,
-      secretV2,
+    // Replay protection: the receiver rejected a byte-for-byte replay of the
+    // last signed request via delivery-ID uniqueness tracking.
+    expect(result.webhook.replay.responseStatus).toBe(409);
+
+    recorder.recordConsole(
+      "info",
+      "C112 verified successfully via real dispatch attempts: HMAC-SHA256, 503 backoff readback, auto-disable readback, secret rotation with recovery redelivery, and replay rejection validated.",
     );
-    expect(checkV2.valid).toBe(true);
-    expect(checkV2.version).toBe(2);
-
-    // Verify negative: Old secret fails on v2 signature
-    const checkOldOnV2 = verifyHmacSignature(
-      reqV2.headers["x-drts-webhook-signature"] as string,
-      reqV2.rawBody,
-      webhookSecret,
-    );
-    expect(checkOldOnV2.valid).toBe(false);
-
-    recorder.recordConsole("info", "C112 verified successfully: HMAC-SHA256, 503 backoff, auto-disable, and secret rotation validated.");
 
     // -----------------------------------------------------------------------
     // Part 5: Document External Gates (C113, C114, C115)
@@ -424,8 +336,8 @@ test.describe("SR-QA-WEBHOOK-001: API Keys, Webhook HMAC Signatures, and Fault R
     const bundle = recorder.finalize("passed");
     expect(bundle.status).toBe("passed");
     expect(bundle.exitCode).toBe(0);
-    expect(bundle.trackedResources.length).toBeGreaterThanOrEqual(3);
-    expect(bundle.httpCalls.length).toBeGreaterThanOrEqual(1);
+    expect(bundle.trackedResources.length).toBeGreaterThanOrEqual(6);
+    expect(bundle.httpCalls.length).toBeGreaterThanOrEqual(2);
     expect(bundle.unimplementedLiveSurfaces.length).toBe(3);
 
     recorder.assertSuccess();

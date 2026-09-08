@@ -26,8 +26,75 @@ no shared files touched) were carried forward byte-for-byte onto a fresh
 pass against current canonical code (no rewrite, no regression skip). Only the
 hardcoded `BASE_SHA` constant in `sr-qa-webhook-001.spec.ts` was updated from
 the stale 9/6 value to the new rebase base SHA so evidence stays internally
-consistent; no test assertions or business-code behavior were changed. Section
-4 below reflects the re-run against the current base, not the original 9/6 run.
+consistent; no test assertions or business-code behavior were changed.
+
+## 0.1 Review Remediation Note (2026-09-08, second pass)
+
+`Codex2` rejected candidate `024c4b0ad1a7de7ce3b4d3a7d1b124c127f4d52a` with four
+findings, addressed as follows (no product/business code touched — only the
+three `write_scopes` files plus this doc):
+
+1. **E2E spec fabricated keys/signatures locally instead of exercising the
+   product.** `sr-qa-webhook-001.spec.ts` previously generated plaintext keys,
+   IDs, and HMAC signatures with local `crypto` calls and never called
+   `TenantPartnerService` / `WebhookDispatchService`. Root cause for *why* it
+   was written that way: Playwright's TS transform parses class constructors
+   against the modern TC39 decorators proposal and rejects NestJS's
+   parameter-decorated constructors (`@Optional() private readonly x?: Foo`)
+   with "Decorators cannot be used to decorate parameters" — confirmed by
+   directly importing `TenantPartnerService` into the `.spec.ts` file and
+   reproducing the failure. The fix keeps the real services in play without
+   forking product code: `run-webhook-lifecycle.ts` (new, inside this task's
+   `tests/e2e/.../sr-qa-webhook-001/` write scope) runs the full C111/C112
+   lifecycle out-of-process via `tsx` — the same TypeScript pipeline this
+   repo's own vitest unit suite already relies on for these decorated classes
+   — against a real local HTTP receiver, and prints one JSON result line. The
+   Playwright spec spawns that script, parses its JSON, and asserts on it;
+   every fact asserted (key masking, rotation overlap, revocation, HMAC
+   validity, 503 backoff, auto-disable, secret-rotation recovery, replay
+   rejection) now traces to a real `TenantPartnerService`/`WebhookDispatchService`
+   write + readback, not a local fabrication.
+2. **C111 "revocation" was declared without exercising it.** The E2E lifecycle
+   now issues a second key, calls `revokeApiKey`, reads back `status: "revoked"`
+   via `listApiKeys`, and asserts that a subsequent `rotateApiKey` on the
+   revoked key throws `TENANT_API_KEY_NOT_ROTATABLE` (409).
+3. **Unit suite's timeout case destroyed the socket immediately (not a real
+   timeout); the queued 503 case was never retried to recovery; the outbox-key
+   dedup case only reused one live service instance.** `sr-qa-webhook-001.test.ts`
+   gained three cases:
+   - `C112-3` rewritten: the receiver now holds the connection open and never
+     responds; a `WebhookFetch` wrapping real `fetch()` with an
+     `AbortController` on a 150 ms timer is injected into `WebhookDispatchService`,
+     and the test asserts real elapsed wall-clock time (`>= 130ms`) before the
+     abort is caught as a queued retry — a genuine timeout, not an instant
+     `res.destroy()`.
+   - `C112-2b` (new): after a 503 puts a delivery in `queued`, the receiver is
+     switched to 200 and the test waits out the service's own real,
+     unmodified `setTimeout`-scheduled retry (default 30 s backoff, no fake
+     timers, no manual re-dispatch call) until the delivery reads back as
+     `delivered` and the endpoint is promoted back to `active`.
+   - `C112-9` (new): two independently-constructed `TenantPartnerService`
+     instances share one in-memory repository double that implements the same
+     `isEnabled`/`loadState`/`persistChanges` contract as the real
+     Postgres-backed `TenantPartnerRepository` (keyed by `webhookId`/`deliveryId`,
+     exactly like its SQL upserts). The second instance only ever sees state
+     that passed through `persistChanges()` — never the first instance's live
+     JS object graph — reproducing a process restart. Publishing the same
+     `outboxKey` against the restarted instance returns the same `deliveryId`
+     and the receiver still shows exactly one request, proving the dedup is
+     backed by the repository contract, not merely by same-instance state.
+4. **`git diff --check` trailing-whitespace exit 2 on this doc; evidence/doc
+   SHA inconsistency.** Trailing whitespace on the two Mermaid lines removed.
+   `origin/dev` has since advanced to `6f4ac8c74...`; a `git rebase origin/dev`
+   was attempted per branch-strategy guardrails but the harness deferred the
+   command in this session (destructive-git-op confirmation gate). The branch's
+   merge-base with `origin/dev` is still `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`
+   (verified via `git merge-base HEAD origin/dev`) — the same commit already
+   recorded as `BASE_SHA` — so base/candidate/evidence provenance stays
+   internally consistent even though `dev` has moved further ahead; the branch
+   contains no content that conflicts with those later commits (only this
+   task's own `write_scopes` files changed). Section 4 below reflects a fresh
+   re-run of all three test commands against this candidate.
 
 ---
 
@@ -62,11 +129,11 @@ flowchart TD
         WH_CREATE[1. 建立 Webhook 端點] -->|初始狀態: test_pending| WH_PENDING[test_pending]
         WH_PENDING -->|發送 tenant.webhook.test| WH_DISPATCH[WebhookDispatchService 真 HTTP POST]
         WH_DISPATCH -->|帶簽章 v=1;t=...;sig=...| HTTP_RECEIVER[本機受控 HTTP 接收器 127.0.0.1:port]
-        
+
         HTTP_RECEIVER -->|驗證 HMAC-SHA256 成功並回傳 200 OK| WH_ACTIVATE[2. 晉升狀態: active, 更新 lastDeliveredAt]
         HTTP_RECEIVER -->|回傳 503 Service Unavailable| WH_BACKOFF[3. 指數退避排程: queued, attempt+1, delay=30s]
         HTTP_RECEIVER -->|回傳 400 或超過重試上限| WH_DISABLE[4. 自動停用: disabled, disableReason: delivery_failed]
-        
+
         WH_ACTIVATE -->|呼叫 rotateWebhookSecret| WH_ROTATE[5. 密鑰輪替: v=2, 狀態回退 test_pending]
         WH_ROTATE -->|以新密鑰驗簽通過 / 舊密鑰失效| WH_V2_DELIVERY[v=2 簽章交付驗證]
     end
@@ -85,16 +152,17 @@ flowchart TD
 ## 3. Write Scopes 遵循檢查
 
 嚴格遵守任務指派之 3 處可寫入範圍，未修改未指派之共用檔案：
-1. `tests/unit/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.test.ts`（全新單元／整合規格，23 項測試案例）
-2. `tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts`（全新 Playwright E2E 規格，附證據收集器與 SHA 追蹤）
-3. `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-sr-qa-webhook-001.json`（自動化執行所產生之機器證據包）
-4. `docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md`（本證據文件）
+1. `tests/unit/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.test.ts`（單元／整合規格，25 項測試案例，含本輪新增 C112-2b／C112-3 重寫／C112-9）
+2. `tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts`（Playwright E2E 規格，改為 spawn 下方 runner 並斷言其 JSON 結果，附證據收集器與 SHA 追蹤）
+3. `tests/e2e/system-remediation/sr-qa-webhook-001/run-webhook-lifecycle.ts`（本輪新增：以 `tsx` 於子行程執行真實 `TenantPartnerService` / `WebhookDispatchService` 生命週期，詳見 0.1 節理由）
+4. `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-sr-qa-webhook-001.json`（自動化執行所產生之機器證據包）
+5. `docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md`（本證據文件）
 
 ---
 
 ## 4. 驗證指令與執行日誌（附 Exit Code）
 
-以下為 recovery 後在 base SHA `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`（`origin/dev`）重跑之結果，取代 9/6 舊 worktree 之過期日誌。
+以下為本輪 review-remediation 在候選分支（merge-base `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`）上重跑之結果，取代 recovery 輪之過期日誌。C112-2b 案例刻意等待服務內部真實 30 秒排程重試（未使用 fake timer 或手動觸發），因此本輪單元測試整體耗時明顯增加，屬預期行為。
 
 ### 4.1 Git Diff 格式檢查
 ```text
@@ -102,36 +170,36 @@ $ git diff --check
 exit code: 0
 ```
 
-### 4.2 本次專屬全套單元／整合測試（23/23 通過）
+### 4.2 本次專屬全套單元／整合測試（25/25 通過）
 ```text
 $ pnpm exec vitest run tests/unit/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.test.ts
 
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude-sr-qa-webhook-001
 
  Test Files  1 passed (1)
-      Tests  23 passed (23)
-   Start at  11:09:04
-   Duration  3.38s (transform 2.21s, setup 0ms, import 3.05s, tests 140ms, environment 0ms)
+      Tests  25 passed (25)
+   Start at  14:03:21
+   Duration  35.23s (transform 3.40s, setup 0ms, import 4.57s, tests 30.45s, environment 0ms)
 exit code: 0
 ```
 
-### 4.3 Playwright 系統驗收測試（5/5 通過，附受控 HTTP Receiver 與證據落盤）
+### 4.3 Playwright 系統驗收測試（5/5 通過，spawn 真實服務 runner，附受控 HTTP Receiver 與證據落盤）
 ```text
 $ pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001
 
 Running 5 tests using 4 workers
 
-  ✓  1 …ation › generates role personas and enforces live fakeheaders guardrails (42ms)
-  ✓  4 …ntains complete data and namespace isolation between two parallel shards (65ms)
-  ✓  3 …evidence with SHA, HTTP/console logs, artifact hashes, and PII redaction (64ms)
-  ✓  2 …olation Verification › handles execution failure with non-zero exit code (46ms)
-  ✓  5 …fault recovery, and API key governance lifecycle with evidence recording (103ms)
+  ✓  1 …ation › records evidence with SHA, HTTP/console logs, artifact hashes, and PII redaction (80ms)
+  ✓  3 …ntains complete data and namespace isolation between two parallel shards (62ms)
+  ✓  2 …ation › generates role personas and enforces live fakeheaders guardrails (47ms)
+  ✓  4 …olation Verification › handles execution failure with non-zero exit code (53ms)
+  ✓  5 …the real TenantPartnerService with write-then-read evidence (1.7s)
 
-  5 passed (1.8s)
+  5 passed (3.1s)
 exit code: 0
 ```
 
-證據檔 `evidence-sr-qa-webhook-001.json` 於此次重跑後重新落盤，`baseSha` / `candidateSha` / `headSha` 三者一致為 `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`（見該檔案）。
+證據檔 `evidence-sr-qa-webhook-001.json` 於此次重跑後重新落盤；`baseSha` 為 `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`，`candidateSha` / `headSha` 為本次重跑時 worktree 的實際 `git rev-parse HEAD`（見該檔案，並見下方 §6.2 記錄之落盤時刻值）。
 
 ### 4.4 既有 Webhook 派發核心單元測試（2/2 通過，回歸驗證未破壞既有派發邏輯）
 ```text
@@ -141,8 +209,8 @@ $ pnpm --filter @drts/api exec vitest run tests/unit/webhook-dispatch.service.te
 
  Test Files  1 passed (1)
       Tests  2 passed (2)
-   Start at  11:09:09
-   Duration  464ms (transform 75ms, setup 0ms, import 273ms, tests 16ms, environment 0ms)
+   Start at  14:04:01
+   Duration  560ms (transform 96ms, setup 0ms, import 354ms, tests 16ms, environment 0ms)
 exit code: 0
 ```
 
@@ -152,33 +220,35 @@ exit code: 0
 
 | 能力編號 | 角色 | 驗收項目與能力 | 測試案例與證明依據 | 驗收結果 |
 | --- | --- | --- | --- | --- |
-| **C111** | 租戶技術管理員 | 最小 scope、到期時間、輪替重疊窗、立即撤銷、密鑰遮罩 | `C111-1` 驗證 `tenant:webhooks:read` 最小 scope 與相容別名正規化。<br>`C111-2` 驗證明文金鑰僅發行回傳一次，API 回讀 `keyPrefix` 前 12 碼與 `maskedSuffix`（`****xxxx`），庫存不存明文。<br>`C111-3` 驗證預設 60 天到期，超過 90 天拋出錯誤拒絕。<br>`C111-4` 驗證輪替後舊 key 進入 `overlap_active` 並設定 `overlapEndsAt`。<br>`C111-5` 驗證重疊期滿後自動轉為 `auto_revoked`，原因為 `rotation_overlap_elapsed`。<br>`C111-6` 驗證手動即時撤銷（`status: "revoked"`）並拒絕旋轉已撤銷金鑰（409 Conflict）。 | ✅ 通過 |
-| **C112** | Webhook 接收平臺 | 簽章、重試、停用、回放與密鑰輪替（本機受控 Receiver） | `C112-1` 啟動本機真 HTTP server，驗證請求 header `x-drts-webhook-signature` 之 HMAC-SHA256 簽名正確無誤，200 成功後端點由 `test_pending` 晉升為 `active`。<br>`C112-2` 接收器模擬 503，驗證狀態為 `queued` 並精準計算指數退避延遲（30s）。<br>`C112-3` 接收器模擬中斷，服務捕獲為重試失敗而不連鎖崩潰。<br>`C112-4` 接收器回傳非重試 400，端點自動停用為 `disabled`（原因 `delivery_failed`）並寫入營運告警通知。<br>`C112-5` 驗證非活躍端點完全隔離於生產事件派發。<br>`C112-6` 接收端驗證 Timestamp 時效性與 Delivery ID 唯一性，重複重放回傳 409 拒絕。<br>`C112-7` 密鑰輪替至 `v=2`，端點退回待測，新簽名以新密鑰驗簽通過、以舊密鑰驗簽失敗。<br>`C112-8` 驗證相同 outboxKey 幂等去重，重複派發不重複投遞。 | ✅ 通過 |
-| **C113** | 租戶／外部系統 | ERP／企業 SSO／銀行帳本同步（外部門禁 GATE） | `C113-1` 走訪 `listTenantSettlementStatements` 與對帳單模型，驗證期別、收支總額與不可變日期。<br>`C113-2` 驗證無效期別查詢拋出 `VALIDATION_ERROR`。<br>`C113-3` 明確宣告實體銀行專線與企業 SSO 為外部門禁。 | ✅ 通過 (含門禁申報) |
-| **C114** | 地圖／定位提供者 | 真地圖、地理編碼、路由／ETA（外部門禁 MAP,GATE） | `C114-1` 走訪地理編碼服務，驗證台北市地址解析落在台灣合法經緯度範圍內。<br>`C114-2` 驗證空白無效地址安全拋出防護例外。<br>`C114-3` 明確宣告正式 Google Maps Platform 配額憑證為外部門禁。 | ✅ 通過 (含門禁申報) |
-| **C115** | 錄音與證照保存 | 背景補件、到期掃描與告警回執（驗收缺口） | `C115-1` 走訪電話叫車錄音生命週期：`recordingPending` 保留於 `recording_pending`，`recordingReady` 到達後晉升為 `ready_for_dispatch` 並綁定 `recording_bound` 旗標。<br>`C115-2` `recordingFailed` 到達後訂單合規標記為 `recording_missing`。<br>`C115-3` 明確宣告實體 PBX 語音硬體與 Cloud Run 持久排程為環境限制。 | ✅ 通過 (含限制申報) |
+| **C111** | 租戶技術管理員 | 最小 scope、到期時間、輪替重疊窗、立即撤銷、密鑰遮罩 | `C111-1` 驗證 `tenant:webhooks:read` 最小 scope 與相容別名正規化。<br>`C111-2` 驗證明文金鑰僅發行回傳一次，API 回讀 `keyPrefix` 前 12 碼與 `maskedSuffix`（`****xxxx`），庫存不存明文。<br>`C111-3` 驗證預設 60 天到期，超過 90 天拋出錯誤拒絕。<br>`C111-4` 驗證輪替後舊 key 進入 `overlap_active` 並設定 `overlapEndsAt`。<br>`C111-5` 驗證重疊期滿後自動轉為 `auto_revoked`，原因為 `rotation_overlap_elapsed`。<br>`C111-6` 驗證手動即時撤銷（`status: "revoked"`）並拒絕旋轉已撤銷金鑰（409 Conflict）。<br>E2E `run-webhook-lifecycle.ts` 額外以獨立第二把 key 實跑 `revokeApiKey` → `listApiKeys` 回讀 `revoked` → `rotateApiKey` 拋出 `TENANT_API_KEY_NOT_ROTATABLE`，取代先前僅宣告未實跑的撤銷案例。 | ✅ 通過 |
+| **C112** | Webhook 接收平臺 | 簽章、重試、停用、回放與密鑰輪替（本機受控 Receiver） | `C112-1` 啟動本機真 HTTP server，驗證請求 header `x-drts-webhook-signature` 之 HMAC-SHA256 簽名正確無誤，200 成功後端點由 `test_pending` 晉升為 `active`。<br>`C112-2` 接收器模擬 503，驗證狀態為 `queued` 並精準計算指數退避延遲（30s）。<br>`C112-2b`（新增）：接收器恢復 200 後，**等待服務內部真實 `setTimeout` 排程重試（無 fake timer、無手動觸發）**，驗證送達記錄回讀為 `delivered` 且端點回晉升 `active`。<br>`C112-3`（重寫）：接收器保持連線開啟永不回應，透過注入的 `WebhookFetch`（真 `fetch` + `AbortController`，150ms）驗證服務等待真實逾時（量測實際耗時 ≥130ms）後才捕獲為 queued，而非先前的立即 `res.destroy()`。<br>`C112-4` 接收器回傳非重試 400，端點自動停用為 `disabled`（原因 `delivery_failed`）並寫入營運告警通知。<br>`C112-5` 驗證非活躍端點完全隔離於生產事件派發。<br>`C112-6` 接收端驗證 Timestamp 時效性與 Delivery ID 唯一性，重複重放回傳 409 拒絕。<br>`C112-7` 密鑰輪替至 `v=2`，端點退回待測，新簽名以新密鑰驗簽通過、以舊密鑰驗簽失敗。<br>`C112-8` 驗證相同 outboxKey 於同一服務實例幂等去重，重複派發不重複投遞。<br>`C112-9`（新增）：兩個各自建構的 `TenantPartnerService` 實例共用同一個實作 `isEnabled`/`loadState`/`persistChanges` 契約（比照真實 `TenantPartnerRepository` SQL upsert 之 `webhookId`/`deliveryId` 鍵）的記憶體 repository double，模擬行程重啟；重啟後第二實例以相同 outboxKey 發布，回傳相同 `deliveryId` 且 receiver 僅收到一次請求，證明去重來自 repository 持久層而非同一實例的記憶體物件。 | ✅ 通過 |
+| **C113** | 租戶／外部系統 | ERP／企業 SSO／銀行帳本同步（外部門禁 GATE） | `C113-1` 走訪 `listTenantSettlementStatements` 與對帳單模型，驗證期別、收支總額與不可變日期。<br>`C113-2` 驗證無效期別查詢拋出 `VALIDATION_ERROR`。<br>`C113-3` 明確宣告實體銀行專線與企業 SSO 為外部門禁。 | ⚠️ 部分驗收：僅涵蓋對帳單資料模型與門禁申報，**未涵蓋** capability-source sandbox mapping、resend、reconciliation 深度能力（見 §6.4 未竟事項），不宣稱完整通過 |
+| **C114** | 地圖／定位提供者 | 真地圖、地理編碼、路由／ETA（外部門禁 MAP,GATE） | `C114-1` 走訪地理編碼服務，驗證台北市地址解析落在台灣合法經緯度範圍內。<br>`C114-2` 驗證空白無效地址安全拋出防護例外。<br>`C114-3` 明確宣告正式 Google Maps Platform 配額憑證為外部門禁。 | ⚠️ 部分驗收：僅涵蓋地理編碼邊界，**未涵蓋** 路由／ETA 失敗案例（見 §6.4），不宣稱完整通過 |
+| **C115** | 錄音與證照保存 | 背景補件、到期掃描與告警回執（驗收缺口） | `C115-1` 走訪電話叫車錄音生命週期：`recordingPending` 保留於 `recording_pending`，`recordingReady` 到達後晉升為 `ready_for_dispatch` 並綁定 `recording_bound` 旗標。<br>`C115-2` `recordingFailed` 到達後訂單合規標記為 `recording_missing`。<br>`C115-3` 明確宣告實體 PBX 語音硬體與 Cloud Run 持久排程為環境限制。 | ⚠️ 部分驗收：僅涵蓋錄音回調狀態機，**未涵蓋** scheduler backlog／restart／catch-up（見 §6.4），不宣稱完整通過 |
 
 ---
 
 ## 6. 資源 ID 清單與環境邊界聲明
 
-### 6.1 自動化測試追蹤之資源 ID（recovery 重跑，取自 base SHA `70355aba9` 之 `evidence-sr-qa-webhook-001.json`）
-- **Tenant ID**: `4c9e457c-254d-4cce-a7cd-0a6a69f9746d`（Code: `TEN_A_S0_96FF1558`）
+### 6.1 自動化測試追蹤之資源 ID（本輪重跑，取自 `evidence-sr-qa-webhook-001.json`）
+- **Tenant ID**: `106ad9c7-b632-4de6-bba0-1409d3d98447`（Code: `TEN_A_S0_E2F447C2`）
 - **租戶 API Keys**:
-  - `api_key_028ad92b-c5af-452e-84bf-568f2f034f52`（Prefix: `tk_ba1a1f36d`, Suffix: `****2069`, Scopes: `tenant:webhooks:read`, `tenant:write`）
-  - `api_key_4394336f-ac9c-4c97-afe8-9653c3ef6559`（Rotated Key v2, Overlap Window: 7 days, Overlap Ends: `2026-09-15T11:08:49.838Z`）
+  - `api_key_34a887d0-e25a-4ba0-9299-45f349224a11`（Prefix: `tk_b4d03c346`, Suffix: `****8987`, Scopes: `tenant:webhooks:read`, `tenant:write`）
+  - `api_key_82826d4d-1916-4312-94b4-d4cbe4bb13d6`（Rotated Key v2, Overlap Window: 7 days, Overlap Ends: `2026-09-15T14:04:11.916Z`）
+  - `api_key_cab5e8ff-3c1f-493c-837b-811058f0245b`（Revocation target key, Status: `revoked`, Reason: `manual_revoke` — 本輪新增，實跑撤銷＋拒絕旋轉）
 - **Webhook 端點**:
-  - `wh_672a4c42-9cab-447b-80e2-2d3835677e8d`（URL: `http://127.0.0.1:41767/webhooks/receiver`）
+  - `wh_9031585e-70b9-41ef-86a2-7e36f66cef02`（URL: `http://127.0.0.1:39991/webhooks/receiver`）
 - **Webhook 送達記錄 (Delivery ID)**:
-  - `wd_3df5d336-2c5f-4634-8674-eb0112b31354`（Status: `queued`, HTTP Status: 503, Delay: 30000ms）
-- **對帳單 ID**: `settlement-statement-tenant-demo-001-2026-03`
-- **電話進件與錄音 Session ID**: `provider-call-rec-001`（Recording: `rec_wire_ready_001`）
+  - `wd_4fe18c90-b904-4602-9d30-9bc429f67925`（Status: `queued`, HTTP Status: 503, Delay: 30000ms）
+- **對帳單 ID**: `settlement-statement-tenant-demo-001-2026-03`（既有未變更）
+- **電話進件與錄音 Session ID**: `provider-call-rec-001`（Recording: `rec_wire_ready_001`，既有未變更）
 
-單元測試（`sr-qa-webhook-001.test.ts`）中每個 case 各自透過 `TenantPartnerService` / `WebhookDispatchService` 產生獨立的 tenant/apiKey/webhookEndpoint/delivery 實例並以 `listApiKeys` / `listWebhookEndpoints` / `listWebhookDeliveriesByWebhook` 寫入後回讀驗證；上列 ID 僅為 E2E Playwright 單一案例之追蹤樣本，非全部 23 個單元案例的完整清單。
+單元測試（`sr-qa-webhook-001.test.ts`）中每個 case 各自透過 `TenantPartnerService` / `WebhookDispatchService` 產生獨立的 tenant/apiKey/webhookEndpoint/delivery 實例並以 `listApiKeys` / `listWebhookEndpoints` / `listWebhookDeliveriesByWebhook` 寫入後回讀驗證；上列 ID 僅為 E2E Playwright 單一案例之追蹤樣本，非全部 25 個單元案例的完整清單。E2E 案例本身已改為透過 `run-webhook-lifecycle.ts` 子行程呼叫真實服務產生（見 §0.1），Playwright spec 僅解析其 JSON 結果並記錄至 evidence。
 
 ### 6.2 機器證據包檔案
 - 路徑: `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-sr-qa-webhook-001.json`
-- 內容包含: Base SHA、Head SHA、測試狀態（`passed`）、退出碼（`0`）、HTTP 呼叫記錄、控制台日誌、實體資源 ID 追蹤以及外部門禁清單。
+- 內容包含: Base SHA、Candidate/Head SHA（皆取自落盤當下 `git rev-parse HEAD`）、測試狀態（`passed`）、退出碼（`0`）、HTTP 呼叫記錄、控制台日誌、實體資源 ID 追蹤以及外部門禁清單。
+- Base SHA 固定為 merge-base `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`；Candidate/Head SHA 會隨每次落盤時的 `HEAD` 變動（自動化寫入，非手填）——handoff 前最後一次重跑會落在本任務最終 commit 上，故此欄位與 handoff 時的 `CANDIDATE_SHA` 一致。
 
 ### 6.3 Live／真機未做部分明列（誠實申報，不冒充完成）
 1. **GATE-C113-ERP-SSO-BANK (外部門禁)**:
@@ -187,3 +257,13 @@ exit code: 0
    - Google Maps Platform 正式授權金鑰與臺灣地址計費配額需正式雲端專案設定；本次以 MockGeoProvider 與坐標邊界防護完成驗收。
 3. **LIMITATION-C115-CTI-CRON (真機環境限制)**:
    - 實體電信業者 SIP Trunking 語音 PBX 總機錄音設備與 Cloud Run 無伺服器持久計時排程（Scale-to-zero 環境需依賴 Cloud Scheduler / Cloud Tasks 外部觸發）；本次以 SandboxWebhookAdapter 語音回調配對生命週期完成驗收。
+
+### 6.4 未竟驗收事項（reviewer 指出，誠實記錄為未關閉，不冒充完整通過）
+
+`Codex2` 的 review 指出 C113–C115 目前的測試僅是 fixture／mock／常數宣告層級，未覆蓋以下深度能力；本輪未新增這些案例（超出本任務標題「API keys／Webhook簽章與故障恢复驗收」核心範圍，且需要更大規模的 sandbox/route/scheduler 測試建置），如實列出而非宣稱已通過：
+
+1. **C113 — capability-source sandbox mapping／resend／reconciliation**：目前只驗證 `listTenantSettlementStatements`／`getTenantSettlementStatement` 的資料結構與無效期別防護，未驗證銀行對帳來源的 sandbox 對映、補送（resend）與對帳差異調解（reconciliation）流程。
+2. **C114 — 路由／ETA 失敗案例**：目前只驗證地理編碼（geocoding）邊界與空白輸入防護，未驗證路由規劃（routing）或 ETA 計算失敗時的降級／重試行為。
+3. **C115 — scheduler backlog／restart／catch-up**：目前只驗證單次 webhook 回調驅動的訂單狀態機，未驗證背景排程器在待辦堆積（backlog）、服務重啟、或補做（catch-up）情境下的行為。
+
+以上三項為本任務已知、明確記錄的未關閉缺口；若後續 wave 需要關閉，應由 supervisor 以 canonical task command 建立具追溯來源的新驗收子任務，而非在本任務範圍內默默補測或逕稱已完成。

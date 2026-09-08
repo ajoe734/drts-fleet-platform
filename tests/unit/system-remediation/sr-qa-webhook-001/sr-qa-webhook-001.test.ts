@@ -17,8 +17,17 @@ import { MockGeoProvider } from "../../../../apps/api/src/modules/geo/mock-geo.p
 import { OwnedMobilityTaskEventsService } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import type {
+  PersistTenantPartnerChanges,
+  StoredWebhookDeliveryRecord,
+  StoredWebhookEndpointRecord,
+  TenantPartnerState,
+} from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
-import { WebhookDispatchService } from "../../../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
+import {
+  WebhookDispatchService,
+  type WebhookFetch,
+} from "../../../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
 
 interface ControlledReceiverRequest {
   method: string;
@@ -132,6 +141,82 @@ function verifyHmacSignature(
     timestamp: timestamp!,
     signature: signature!,
     expectedSig,
+  };
+}
+
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs: number,
+  intervalMs = 200,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  if (!predicate()) {
+    throw new Error(`waitFor: condition not met within ${timeoutMs}ms`);
+  }
+}
+
+// A repository double that implements the same isEnabled/loadState/persistChanges
+// contract TenantPartnerService uses against the real Postgres-backed
+// TenantPartnerRepository, keyed and merged exactly like that repository's SQL
+// upserts (webhookId / deliveryId primary keys). Sharing one instance across two
+// separately-constructed TenantPartnerService objects (each running its own
+// onModuleInit() hydration) reproduces a process restart without touching a real
+// database: the second instance only ever sees state that passed through
+// persistChanges(), never the first instance's live JS object graph.
+function createInMemoryWebhookRepository() {
+  let webhookEndpoints: StoredWebhookEndpointRecord[] = [];
+  let webhookDeliveries: StoredWebhookDeliveryRecord[] = [];
+
+  function snapshot(): TenantPartnerState {
+    return {
+      notificationPreferences: [],
+      webhookEndpoints: [...webhookEndpoints],
+      webhookDeliveries: [...webhookDeliveries],
+      slaProfiles: [],
+      partnerEntries: [],
+      partnerIngressCredentials: [],
+      partnerEligibilityVerifications: [],
+      approvalRules: [],
+      approvalRequests: [],
+      approvalDecisions: [],
+      passengers: [],
+      addresses: [],
+      costCenters: [],
+      quotaPolicies: [],
+      quotaLedger: [],
+      quotaMonthlySnapshots: [],
+      userRoles: [],
+      apiKeys: [],
+    };
+  }
+
+  return {
+    isEnabled: () => true,
+    loadState: async () => snapshot(),
+    persistChanges: async (changes: PersistTenantPartnerChanges) => {
+      if (changes.webhookEndpoints?.length) {
+        const byId = new Map(webhookEndpoints.map((e) => [e.webhookId, e]));
+        for (const endpoint of changes.webhookEndpoints) {
+          byId.set(endpoint.webhookId, endpoint);
+        }
+        webhookEndpoints = [...byId.values()];
+      }
+      if (changes.webhookDeliveries?.length) {
+        const byId = new Map(
+          webhookDeliveries.map((d) => [d.deliveryId, d]),
+        );
+        for (const delivery of changes.webhookDeliveries) {
+          byId.set(delivery.deliveryId, delivery);
+        }
+        webhookDeliveries = [...byId.values()];
+      }
+    },
   };
 }
 
@@ -414,14 +499,116 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(delaySec).toBe(30);
     });
 
-    it("C112-3 (Negative): Handles network timeout / connection drop gracefully without throwing uncaught error", async () => {
+    it(
+      "C112-2b (Normal): A queued 503 delivery automatically retries after its real scheduled backoff and recovers to delivered, promoting the endpoint back to active",
+      async () => {
+        // Dedicated receiver: this test spans the real ~30s backoff window, and
+        // a sibling test's own dangling scheduleWebhookRetry timer (fired
+        // against the shared suite-level receiver) could otherwise land here
+        // and pollute the request count.
+        const dedicatedReceiver = await createControlledReceiver();
+        try {
+          dedicatedReceiver.setHandler((_req, res) => {
+            res.writeHead(503, { "content-type": "application/json" });
+            res.end(JSON.stringify({ error: "Service Temporarily Unavailable" }));
+          });
+
+          const auditNotificationService = new AuditNotificationService();
+          const webhookDispatchService = new WebhookDispatchService();
+          const service = new TenantPartnerService(
+            auditNotificationService,
+            undefined,
+            webhookDispatchService,
+            [],
+          );
+
+          const created = service.createWebhookEndpoint("tenant-demo-001", {
+            url: dedicatedReceiver.url,
+            secret: "whsec_retry_recovery_001",
+            events: ["tenant.webhook.test"],
+          });
+
+          const first = await service.sendTestWebhook("tenant-demo-001", {
+            webhookId: created.webhookId,
+          });
+          expect(first.httpStatus).toBe(503);
+          expect(first.nextAttemptAt).not.toBeNull();
+
+          const [queued] = service.listWebhookDeliveriesByWebhook(
+            "tenant-demo-001",
+            created.webhookId,
+          );
+          expect(queued!.status).toBe("queued");
+          const deliveryId = queued!.deliveryId;
+
+          // Recovery: receiver comes back healthy well before the scheduled retry fires.
+          dedicatedReceiver.requests.length = 0;
+          dedicatedReceiver.setHandler((_req, res) => {
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ ok: true }));
+          });
+
+          // No manual re-dispatch call here: this waits out the service's own
+          // internally-scheduled setTimeout (default 30s exponential backoff,
+          // attempt 1) so the recovery is exercised through the real retry
+          // pathway, not simulated by calling an internal method directly.
+          await waitFor(() => {
+            const [delivery] = service.listWebhookDeliveriesByWebhook(
+              "tenant-demo-001",
+              created.webhookId,
+            );
+            return (
+              delivery?.deliveryId === deliveryId && delivery.status === "delivered"
+            );
+          }, 33_000);
+
+          const [recovered] = service.listWebhookDeliveriesByWebhook(
+            "tenant-demo-001",
+            created.webhookId,
+          );
+          expect(recovered!.status).toBe("delivered");
+          expect(recovered!.httpStatus).toBe(200);
+          expect(dedicatedReceiver.requests.length).toBe(1);
+
+          const [endpointAfterRecovery] = service.listWebhookEndpoints("tenant-demo-001");
+          expect(endpointAfterRecovery.status).toBe("active");
+        } finally {
+          await dedicatedReceiver.close();
+        }
+      },
+      35_000,
+    );
+
+    it("C112-3 (Negative): A real network timeout (AbortController firing after the response never arrives) is caught as a queued retry, not a thrown error", async () => {
+      const timeoutMs = 150;
+
+      // The receiver accepts the TCP connection and reads the request but never
+      // calls res.end()/res.write() -- a genuine stalled upstream, not an
+      // immediate socket teardown, so the dispatcher must actually wait out a
+      // timer before it can classify this as a failure. A safety-net destroy
+      // guards suite teardown in case the client-side abort ever fails to
+      // propagate to this socket.
       receiver.setHandler((_req, res) => {
-        // Destroy connection immediately to simulate socket drop / ECONNRESET
-        res.destroy();
+        const safetyNet = setTimeout(() => {
+          if (!res.writableEnded) {
+            res.destroy();
+          }
+        }, timeoutMs + 2_000);
+        safetyNet.unref();
       });
 
+      const timeoutFetch: WebhookFetch = async (input, init) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          return await fetch(input, { ...init, signal: controller.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+
       const auditNotificationService = new AuditNotificationService();
-      const webhookDispatchService = new WebhookDispatchService();
+      const webhookDispatchService = new WebhookDispatchService(timeoutFetch);
       const service = new TenantPartnerService(
         auditNotificationService,
         undefined,
@@ -435,11 +622,16 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         events: ["tenant.webhook.test"],
       });
 
-      // Dispatch should catch the network error and return a queued result
+      const startedAt = Date.now();
+      // Dispatch should catch the real AbortError once the timeout elapses and
+      // return a queued result, never throwing out of sendTestWebhook.
       const result = await service.sendTestWebhook("tenant-demo-001", {
         webhookId: created.webhookId,
       });
+      const elapsedMs = Date.now() - startedAt;
 
+      // Proves an actual timer elapsed rather than an instant socket destroy.
+      expect(elapsedMs).toBeGreaterThanOrEqual(timeoutMs - 20);
       expect(result.httpStatus).toBeNull();
       expect(result.attempt).toBe(1);
       expect(result.nextAttemptAt).not.toBeNull();
@@ -696,6 +888,69 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       // Deterministic deliveryId means second dispatch recognized existing record
       expect(deliveryId1).toBe(deliveryId2);
       expect(receiver.requests.length).toBe(1); // Receiver only received it once!
+    });
+
+    it("C112-9 (Normal): Outbox-key deduplication survives a simulated process restart via a fresh service instance sharing only the persisted repository", async () => {
+      const repository = createInMemoryWebhookRepository();
+
+      const serviceA = new TenantPartnerService(
+        new AuditNotificationService(),
+        repository as never,
+        new WebhookDispatchService(),
+        [],
+      );
+      await serviceA.onModuleInit();
+
+      const endpoint = serviceA.createWebhookEndpoint("tenant-demo-001", {
+        url: receiver.url,
+        secret: "whsec_restart_dedup_001",
+        events: ["dispatch.assigned"],
+      });
+
+      // Activate the endpoint with a real test dispatch, then clear the log.
+      await serviceA.sendTestWebhook("tenant-demo-001", { webhookId: endpoint.webhookId });
+      receiver.requests.length = 0;
+
+      const outboxKey = "outbox-restart-dedup-key-01";
+      const first = await serviceA.publishWebhookEvent("tenant-demo-001", {
+        eventType: "dispatch.assigned",
+        data: { orderId: "ord-restart-dedup-01", status: "assigned" },
+        outboxKey,
+      });
+      expect(first.length).toBe(1);
+      expect(first[0]!.status).toBe("delivered");
+      expect(receiver.requests.length).toBe(1);
+      const deliveryIdBeforeRestart = first[0]!.deliveryId;
+
+      // Simulate a process restart: a brand-new TenantPartnerService instance
+      // that shares nothing with serviceA except the persisted repository. Its
+      // in-memory endpoint/delivery arrays start empty and are rehydrated only
+      // through onModuleInit() -> repository.loadState(), the same lifecycle
+      // hook Nest invokes on real process boot.
+      const serviceB = new TenantPartnerService(
+        new AuditNotificationService(),
+        repository as never,
+        new WebhookDispatchService(),
+        [],
+      );
+      await serviceB.onModuleInit();
+
+      const [reloadedEndpoint] = serviceB.listWebhookEndpoints("tenant-demo-001");
+      expect(reloadedEndpoint.webhookId).toBe(endpoint.webhookId);
+      expect(reloadedEndpoint.status).toBe("active");
+
+      const second = await serviceB.publishWebhookEvent("tenant-demo-001", {
+        eventType: "dispatch.assigned",
+        data: { orderId: "ord-restart-dedup-01", status: "assigned" },
+        outboxKey,
+      });
+
+      expect(second.length).toBe(1);
+      expect(second[0]!.deliveryId).toBe(deliveryIdBeforeRestart);
+      expect(second[0]!.status).toBe("delivered");
+      // The restarted instance recognized the persisted delivery and never
+      // re-dispatched: the receiver still shows exactly one request.
+      expect(receiver.requests.length).toBe(1);
     });
   });
 
