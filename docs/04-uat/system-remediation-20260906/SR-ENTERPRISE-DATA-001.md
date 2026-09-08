@@ -1,5 +1,14 @@
 # SR-ENTERPRISE-DATA-001 — baseline and screen requirements
 
+## Latest redispatch verification (2026-09-08, resumed at 21:17:58Z)
+
+- Recorded `start` through the canonical release. Task slice still has six original write scopes, no dependencies, and no supplied screen/contact decision. The history-helper report explicitly preserves the shared lifecycle/theme/help/contact decision requirement.
+- `git fetch origin` and `git rebase origin/dev`: exit 0. Fresh base: `e97653b7ffb962a6c4d688e8706711d860fa3604`; rebased head: `1139d95e72aea028bef825b9a53cc290d6c82624`. Preserved published ancestry via `git merge --no-ff origin/codex/sr-enterprise-data-001` with task trailers, exit 0; resulting head `5480692c767608822a97a0cb3f67535abbd651ec`. Merge introduced no file changes.
+- Re-read R08/R09/R16, C013/C017/C018/C093/C108/C119, ENT_Home, ENT_Trip, ENT_GATES, EEmpty and tenant realm tokens. Source still has fixture selection, `/trip` without a booking ID, `active={2}`, inert contact buttons, shared 404-to-degraded fallback and blue shared theme. Missing canonical not-found/unavailable-contact states and shared write authorizations remain as described below. No UI was edited under the explicit dispatch STOP rule.
+- Resource `EB-7K2E1D` remains a fixture reference, not a verified live booking. No authorized driver contact or real support delivery is asserted.
+- `git diff --check`: exit 0. `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 2, TS2688 cannot find `vitest/globals` in this workspace. `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`: exit 1, no test files found (also unresolved `vitest/config` warning). Neither check is reported as passing; these current results supersede prior typecheck success for this dispatch.
+- Implementation candidate: none. Documentation anchor SHA and normal push outcome are recorded in machine truth. No live/browser/telephone/true-device validation, CI, merge acceptance or deployment was performed. Supervisor must supply canonical missing states and resolve the listed shared scope/dependency/contact decisions before the next implementation dispatch.
+
 ## Redispatch verification (2026-09-08, after history-helper completion)
 
 - Fresh `git fetch origin && git rebase origin/dev`: exit 0. Base `origin/dev` is `d4f54ef94e059a981bf2be1f7b944e815870e117`; rebased evidence head was `cfc2575b9a6cd3edadbde6e820d6bafee24f3563`.
