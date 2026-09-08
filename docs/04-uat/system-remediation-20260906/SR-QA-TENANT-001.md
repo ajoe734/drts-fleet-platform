@@ -1,5 +1,15 @@
 # SR-QA-TENANT-001 — 租戶驗收進度證據
 
+## 2026-09-08 dispatch：history helper 後的實際阻塞
+
+本輪 fetch 的 `origin/dev` 為 `d44bd28142f238ef9d40507685a9423ef5c814f7`；測試執行 SHA 為 `f860556973ea31dc4c7945db7a27632abeb18d0d`，未鎖定 candidate。`git fetch origin` exit 0；`git rebase origin/dev` exit 1，重播 53 筆提交至第 12 筆 `f2e49cdf5` 時 directory.spec.ts 發生 add/add 衝突。`git rebase --abort` exit 0，恢復已發布分支；`git rev-list --left-right --count HEAD...origin/codex/sr-qa-tenant-001` exit 0，結果 `0 0`。未強推或合併舊 ancestry。
+
+讀取目前 dev 的 `support/unblock/SR-QA-TENANT-001/SR-QA-TENANT-001-UNBLOCK-HISTORY-REPAIR.md`：helper 明示保留 parent blocked / waiting_for Gemini；dev 前進後若需要重播重複歷史，由 supervisor 安排從 current dev 建立 recovery branch，套用經核對的 task cumulative patch。請先完成此分支路由；本轮不自行更換指定 branch 或重播整串歷史。
+
+`pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001` exit 1：4 task failed，均在前置檢查缺少 `DRTS_TENANT_UAT_API_URL`；4 shared harness passed 不算本 task 驗收。僅檢查環境變數名稱，未發現任何 `DRTS_TENANT_UAT_*` 設定。未發出 HTTP 寫入，資源 ID 無；live / DB / mail / 瀏覽器仍未執行。既有能力矩陣仍不完整，本次不 handoff。
+
+需 Gemini/provisioner 配置 API URL、可拋棄租戶 A/B、A/B 可寫及 A 唯讀 bearer 共六項設定，提供非機密來源、有效期與 teardown 責任；supervisor 另安排 recovery branch。helper merge 的 todo dispatch 不是上述前置完成證據。
+
 2026-09-08，owner Codex，reviewer Codex2。狀態：in_progress；尚未 handoff。
 
 ## 版本與來源
