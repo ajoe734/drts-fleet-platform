@@ -516,3 +516,38 @@ Logs are retained locally at `/tmp/uv006-cancel-migrations.log`,
 PR #1822 remains the recovered candidate PR; original PR #1721 is preserved.
 These are owner checks; exact-candidate review, CI, merge and acceptance remain
 supervisor lifecycle gates.
+
+### Rejection reconciliation correction (2026-09-08)
+
+Review of candidate `0f9a0ee4c2c4a3ea634449d3f62d81604e4c9498` found that
+driver rejection checked the locked task status without checking its relationship
+to the locked assignment. A durable driverId mismatch could therefore release
+both resources. Rejection now uses the shared reconciliation predicate before
+any rejection write or release, checking taskId, assignmentId, orderId,
+dispatchJobId, driverId, vehicleId and coherent task/assignment statuses. It also
+checks that the locked assignment belongs to the order being updated. Missing or
+inconsistent task state returns `ASSIGNMENT_TASK_RECONCILIATION_REQUIRED` (409).
+An assignment no longer awaiting acceptance keeps its existing conflict response.
+
+The PostgreSQL corruption matrix now includes rejection for all 13 corruption
+variants in both assigned and accepted states (26 additional cases). Each command
+must leave both reservation rows byte-for-byte unchanged and the assignment
+active. The existing valid-rejection test still verifies atomic rejection and
+release of both resources; stale rejection and mixed-entry race tests also pass.
+
+Fresh owner verification on isolated database `uv006_reject_20260908`:
+
+- All migrations through V0091 applied with `operations/database/db-apply.sh`.
+- From `apps/api`, `pnpm exec vitest run
+tests/integration/uv-exec-006.integration.test.ts
+tests/integration/stage1-uat-pg-gate.integration.test.ts
+--no-file-parallelism --maxConcurrency=1`: **117/117 passed**
+  (114 reservation cases and three stage1 cases).
+- Owned-mobility service/repository unit suites: **119/119 passed**.
+- API typecheck, ESLint on the changed source/test, and `git diff --check`: passed.
+
+Local logs: `/tmp/uv006-reject-migrations.log`,
+`/tmp/uv006-reject-integration.log`, `/tmp/uv006-reject-unit.log` and
+`/tmp/uv006-reject-typecheck.log`. PR #1822 remains the recovered candidate PR;
+original PR #1721 remains open and preserved. These are owner checks; the new
+candidate still requires same-SHA review, CI, merge and acceptance evidence.
