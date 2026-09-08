@@ -55,6 +55,23 @@ export type RecordingTimingPrecision =
   | "estimated"
   | "unknown";
 
+export interface ChannelCoverageInterval {
+  startOffsetMs: number;
+  endOffsetMs: number;
+  startedAtUtc: string;
+  endedAtUtc: string;
+}
+
+export interface SegmentChannelCoverage {
+  channel: RecordingSegmentChannel;
+  startOffsetMs: number;
+  endOffsetMs: number;
+  startedAtUtc: string;
+  endedAtUtc: string;
+  hasGaps: boolean;
+  intervals: ChannelCoverageInterval[];
+}
+
 export interface SealedRecordingSegmentInput {
   callId: string;
   recordingId: string;
@@ -73,6 +90,8 @@ export interface SealedRecordingSegmentInput {
   timingPrecision: RecordingTimingPrecision;
   readbackPlaybackId?: string | null;
   snapshotHash?: string | null;
+  /** Detailed per-channel coverage, intervals, and gap tracking (SD §8.2). */
+  channelCoverage?: SegmentChannelCoverage[];
 }
 
 /**
@@ -891,8 +910,7 @@ export class VoiceEvidenceService {
   ): void {
     const manifest = checkpoint.manifest as RecordingManifest;
     const segments = manifest.segments ?? [];
-    const channelSegments = segments.filter((s) => s.channels.includes(channel));
-    if (channelSegments.length === 0) {
+    if (segments.length === 0) {
       throw new ApiRequestError(
         409,
         "VOICE_RECORDING_NOT_DURABLE",
@@ -911,34 +929,91 @@ export class VoiceEvidenceService {
       );
     }
 
-    const startSegmentIndex = segments.findIndex(
-      (s) =>
-        new Date(s.startedAtUtc).getTime() <= reqStartMs &&
-        reqStartMs <= new Date(s.endedAtUtc).getTime(),
-    );
-    const endSegmentIndex = segments.findIndex(
-      (s) =>
-        new Date(s.startedAtUtc).getTime() <= reqEndMs &&
-        reqEndMs <= new Date(s.endedAtUtc).getTime(),
-    );
-
-    if (startSegmentIndex === -1 || endSegmentIndex === -1) {
+    const channelSegments = segments.filter((s) => {
+      if (s.channelCoverage && s.channelCoverage.length > 0) {
+        return s.channelCoverage.some((c) => c.channel === channel);
+      }
+      return s.channels.includes(channel);
+    });
+    if (channelSegments.length === 0) {
       throw new ApiRequestError(
         409,
         "VOICE_RECORDING_NOT_DURABLE",
-        `The ${label} event window falls outside durable recording coverage for channel '${channel}'.`,
+        `Recording checkpoint has no segments covering required channel '${channel}' for ${label}.`,
       );
     }
 
-    for (let i = startSegmentIndex; i <= endSegmentIndex; i++) {
-      const seg = segments[i]!;
-      if (!seg.channels.includes(channel)) {
-        throw new ApiRequestError(
-          409,
-          "VOICE_RECORDING_NOT_DURABLE",
-          `Segment ${seg.segmentSequence} in the ${label} window is missing required channel '${channel}'.`,
-        );
+    interface ChannelInterval {
+      startMs: number;
+      endMs: number;
+      startOffsetMs: number;
+      endOffsetMs: number;
+    }
+
+    const channelIntervals: ChannelInterval[] = [];
+
+    for (const seg of segments) {
+      if (seg.channelCoverage && seg.channelCoverage.length > 0) {
+        const cov = seg.channelCoverage.find((c) => c.channel === channel);
+        if (cov) {
+          if (cov.intervals && cov.intervals.length > 0) {
+            for (const iv of cov.intervals) {
+              channelIntervals.push({
+                startMs: new Date(iv.startedAtUtc).getTime(),
+                endMs: new Date(iv.endedAtUtc).getTime(),
+                startOffsetMs: iv.startOffsetMs,
+                endOffsetMs: iv.endOffsetMs,
+              });
+            }
+          } else {
+            channelIntervals.push({
+              startMs: new Date(cov.startedAtUtc).getTime(),
+              endMs: new Date(cov.endedAtUtc).getTime(),
+              startOffsetMs: cov.startOffsetMs,
+              endOffsetMs: cov.endOffsetMs,
+            });
+          }
+        }
+      } else if (seg.channels.includes(channel)) {
+        channelIntervals.push({
+          startMs: new Date(seg.startedAtUtc).getTime(),
+          endMs: new Date(seg.endedAtUtc).getTime(),
+          startOffsetMs: seg.startOffsetMs,
+          endOffsetMs: seg.endOffsetMs,
+        });
       }
+    }
+
+    channelIntervals.sort(
+      (a, b) => a.startMs - b.startMs || a.startOffsetMs - b.startOffsetMs,
+    );
+
+    const mergedIntervals: ChannelInterval[] = [];
+    for (const iv of channelIntervals) {
+      if (mergedIntervals.length === 0) {
+        mergedIntervals.push({ ...iv });
+      } else {
+        const last = mergedIntervals[mergedIntervals.length - 1]!;
+        // Overlapping or contiguous interval (allow <= 1ms timestamp rounding difference)
+        if (iv.startMs <= last.endMs + 1 && iv.startOffsetMs <= last.endOffsetMs) {
+          last.endMs = Math.max(last.endMs, iv.endMs);
+          last.endOffsetMs = Math.max(last.endOffsetMs, iv.endOffsetMs);
+        } else {
+          mergedIntervals.push({ ...iv });
+        }
+      }
+    }
+
+    const coveringInterval = mergedIntervals.find(
+      (iv) => iv.startMs <= reqStartMs && reqEndMs <= iv.endMs,
+    );
+
+    if (!coveringInterval) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_RECORDING_NOT_DURABLE",
+        `The ${label} event window falls outside contiguous recording coverage for channel '${channel}'.`,
+      );
     }
 
     if (
@@ -946,11 +1021,9 @@ export class VoiceEvidenceService {
       offsetRange.startOffsetMs !== undefined &&
       offsetRange.endOffsetMs !== undefined
     ) {
-      const segStart = segments[startSegmentIndex]!;
-      const segEnd = segments[endSegmentIndex]!;
       if (
-        offsetRange.startOffsetMs < segStart.startOffsetMs ||
-        offsetRange.endOffsetMs > segEnd.endOffsetMs
+        offsetRange.startOffsetMs < coveringInterval.startOffsetMs ||
+        offsetRange.endOffsetMs > coveringInterval.endOffsetMs
       ) {
         throw new ApiRequestError(
           409,

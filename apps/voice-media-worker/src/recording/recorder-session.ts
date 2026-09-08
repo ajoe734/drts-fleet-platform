@@ -29,12 +29,33 @@ export type RecordingTimingPrecision =
   | "estimated"
   | "unknown";
 
+export const DEFAULT_FRAME_DURATION_MS = 20;
+
 export interface RecordingFrameInput {
   channel: RecordingChannelRole;
   bytes: Uint8Array;
   /** Media-clock offset (ms) since the recording started, monotonic per channel. */
   mediaOffsetMs: number;
+  /** Duration of this audio frame in ms; defaults to DEFAULT_FRAME_DURATION_MS (20ms). */
+  durationMs?: number;
   occurredAtUtc: string;
+}
+
+export interface ChannelCoverageInterval {
+  startOffsetMs: number;
+  endOffsetMs: number;
+  startedAtUtc: string;
+  endedAtUtc: string;
+}
+
+export interface SegmentChannelCoverage {
+  channel: RecordingChannelRole;
+  startOffsetMs: number;
+  endOffsetMs: number;
+  startedAtUtc: string;
+  endedAtUtc: string;
+  hasGaps: boolean;
+  intervals: ChannelCoverageInterval[];
 }
 
 export interface SealedRecordingSegment {
@@ -56,6 +77,8 @@ export interface SealedRecordingSegment {
   durableAt: string;
   timingSource: RecordingTimingSource;
   timingPrecision: RecordingTimingPrecision;
+  /** Detailed per-channel coverage, intervals, and gap tracking (SD §8.2). */
+  channelCoverage: SegmentChannelCoverage[];
 }
 
 export interface RecorderSessionOptions {
@@ -70,6 +93,7 @@ interface BufferedFrame {
   channel: RecordingChannelRole;
   bytes: Uint8Array;
   mediaOffsetMs: number;
+  durationMs: number;
   occurredAtUtc: string;
 }
 
@@ -105,10 +129,16 @@ export class CallRecorderSession {
     if (frame.bytes.byteLength === 0) {
       return;
     }
+    const durationMs =
+      frame.durationMs !== undefined && frame.durationMs >= 0
+        ? frame.durationMs
+        : DEFAULT_FRAME_DURATION_MS;
+
     this.buffer.push({
       channel: frame.channel,
       bytes: frame.bytes,
       mediaOffsetMs: frame.mediaOffsetMs,
+      durationMs,
       occurredAtUtc: frame.occurredAtUtc,
     });
   }
@@ -181,22 +211,91 @@ export class CallRecorderSession {
       cursor += frame.bytes.byteLength;
     }
 
+    // SD §8.2: Track actual per-channel coverage windows, contiguous intervals, and gaps.
+    const channelCoverage: SegmentChannelCoverage[] = channels.map((role) => {
+      const channelFrames = framesByChannel.get(role) ?? [];
+      const sorted = [...channelFrames].sort(
+        (a, b) => a.mediaOffsetMs - b.mediaOffsetMs,
+      );
+      const intervals: ChannelCoverageInterval[] = [];
+      let currentInterval: ChannelCoverageInterval | null = null;
+
+      for (const frame of sorted) {
+        const frameStart = frame.mediaOffsetMs;
+        const frameEnd = frame.mediaOffsetMs + frame.durationMs;
+        const frameStartUtc = frame.occurredAtUtc;
+        const frameEndUtc = new Date(
+          new Date(frame.occurredAtUtc).getTime() + frame.durationMs,
+        ).toISOString();
+
+        if (!currentInterval) {
+          currentInterval = {
+            startOffsetMs: frameStart,
+            endOffsetMs: frameEnd,
+            startedAtUtc: frameStartUtc,
+            endedAtUtc: frameEndUtc,
+          };
+        } else if (frameStart <= currentInterval.endOffsetMs) {
+          currentInterval.endOffsetMs = Math.max(
+            currentInterval.endOffsetMs,
+            frameEnd,
+          );
+          if (
+            new Date(frameEndUtc).getTime() >
+            new Date(currentInterval.endedAtUtc).getTime()
+          ) {
+            currentInterval.endedAtUtc = frameEndUtc;
+          }
+        } else {
+          intervals.push(currentInterval);
+          currentInterval = {
+            startOffsetMs: frameStart,
+            endOffsetMs: frameEnd,
+            startedAtUtc: frameStartUtc,
+            endedAtUtc: frameEndUtc,
+          };
+        }
+      }
+
+      if (currentInterval) {
+        intervals.push(currentInterval);
+      }
+
+      const startOffsetMs = intervals[0]?.startOffsetMs ?? 0;
+      const endOffsetMs = intervals[intervals.length - 1]?.endOffsetMs ?? 0;
+      const startedAtUtc = intervals[0]?.startedAtUtc ?? batch[0]!.occurredAtUtc;
+      const endedAtUtc =
+        intervals[intervals.length - 1]?.endedAtUtc ?? batch[0]!.occurredAtUtc;
+      const hasGaps = intervals.length > 1;
+
+      return {
+        channel: role,
+        startOffsetMs,
+        endOffsetMs,
+        startedAtUtc,
+        endedAtUtc,
+        hasGaps,
+        intervals,
+      };
+    });
+
     const startOffsetMs = Math.min(
       ...batch.map((frame) => frame.mediaOffsetMs),
     );
     const endOffsetMs = Math.max(
-      ...batch.map((frame) => frame.mediaOffsetMs),
+      ...batch.map((frame) => frame.mediaOffsetMs + frame.durationMs),
     );
     const startedAtUtc = batch.reduce(
       (earliest, frame) =>
         frame.occurredAtUtc < earliest ? frame.occurredAtUtc : earliest,
       batch[0]!.occurredAtUtc,
     );
-    const endedAtUtc = batch.reduce(
-      (latest, frame) =>
-        frame.occurredAtUtc > latest ? frame.occurredAtUtc : latest,
-      batch[0]!.occurredAtUtc,
-    );
+    const endedAtUtc = batch.reduce((latest, frame) => {
+      const frameEndUtc = new Date(
+        new Date(frame.occurredAtUtc).getTime() + frame.durationMs,
+      ).toISOString();
+      return frameEndUtc > latest ? frameEndUtc : latest;
+    }, batch[0]!.occurredAtUtc);
 
     const sequence = this.nextSequence;
     const objectKey = `${this.callId}/${this.recordingId}/segments/${String(
@@ -231,6 +330,7 @@ export class CallRecorderSession {
       durableAt: this.now().toISOString(),
       timingSource: timing.timingSource,
       timingPrecision: timing.timingPrecision,
+      channelCoverage,
     };
 
     this.sealedSegments.push(segment);

@@ -37,6 +37,7 @@ describe("CallRecorderSession (recorder ingest + sealed segments)", () => {
       channel: "customer",
       bytes: new Uint8Array([1, 2, 3]),
       mediaOffsetMs: 0,
+      durationMs: 20,
       occurredAtUtc: "2026-09-08T00:00:00.000Z",
       ...overrides,
     };
@@ -76,7 +77,9 @@ describe("CallRecorderSession (recorder ingest + sealed segments)", () => {
     expect(sealed!.channels.sort()).toEqual(["agent", "customer"]);
     expect(sealed!.segmentSequence).toBe(1);
     expect(sealed!.startOffsetMs).toBe(0);
-    expect(sealed!.endOffsetMs).toBe(500);
+    // Exclusive end boundary: frame at 500ms with duration 20ms ends at 520ms
+    expect(sealed!.endOffsetMs).toBe(520);
+    expect(sealed!.channelCoverage).toHaveLength(2);
 
     const readback = await store.verifyReadback(
       sealed!.objectKey,
@@ -106,23 +109,29 @@ describe("CallRecorderSession (recorder ingest + sealed segments)", () => {
     expect(await session.sealSegment()).toBeNull();
   });
 
-  it("reports contiguous coverage across consecutive sealed segments", async () => {
+  it("reports contiguous coverage across consecutive sealed segments with nonduplicated frames", async () => {
     const store = new InMemoryRecordingObjectStore();
     const session = new CallRecorderSession({
       callId: CALL_ID,
       recordingId: RECORDING_ID,
       objectStore: store,
     });
-    session.ingestFrame(frame({ mediaOffsetMs: 0 }));
-    session.ingestFrame(frame({ mediaOffsetMs: 200 }));
-    await session.sealSegment();
+    // Segment 1: frames [0, 20) and [20, 40)
+    session.ingestFrame(frame({ mediaOffsetMs: 0, durationMs: 20 }));
+    session.ingestFrame(frame({ mediaOffsetMs: 20, durationMs: 20 }));
+    const seg1 = await session.sealSegment();
+    expect(seg1!.startOffsetMs).toBe(0);
+    expect(seg1!.endOffsetMs).toBe(40);
 
-    session.ingestFrame(frame({ mediaOffsetMs: 200 }));
-    session.ingestFrame(frame({ mediaOffsetMs: 400 }));
-    await session.sealSegment();
+    // Segment 2: consecutive nonduplicated frames [40, 60) and [60, 80)
+    session.ingestFrame(frame({ mediaOffsetMs: 40, durationMs: 20 }));
+    session.ingestFrame(frame({ mediaOffsetMs: 60, durationMs: 20 }));
+    const seg2 = await session.sealSegment();
+    expect(seg2!.startOffsetMs).toBe(40);
+    expect(seg2!.endOffsetMs).toBe(80);
 
     expect(session.hasContiguousCoverage()).toBe(true);
-    expect(session.getLastSealedEndOffsetMs()).toBe(400);
+    expect(session.getLastSealedEndOffsetMs()).toBe(80);
   });
 
   it("honestly reports a gap instead of pretending offsets are contiguous", async () => {
@@ -132,20 +141,108 @@ describe("CallRecorderSession (recorder ingest + sealed segments)", () => {
       recordingId: RECORDING_ID,
       objectStore: store,
     });
-    session.ingestFrame(frame({ mediaOffsetMs: 0 }));
-    session.ingestFrame(frame({ mediaOffsetMs: 200 }));
+    // Segment 1: [0, 20) and [20, 40) -> endOffsetMs = 40
+    session.ingestFrame(frame({ mediaOffsetMs: 0, durationMs: 20 }));
+    session.ingestFrame(frame({ mediaOffsetMs: 20, durationMs: 20 }));
     await session.sealSegment();
 
-    // Buffered audio was lost (e.g. a restart); the next seal picks up well
-    // past the previous segment's end offset instead of continuing from it.
-    session.ingestFrame(frame({ mediaOffsetMs: 900 }));
-    session.ingestFrame(frame({ mediaOffsetMs: 1100 }));
+    // Buffered audio was lost (e.g. restart); frame [40, 900) missing.
+    // Segment 2: [900, 920) and [920, 940) -> startOffsetMs = 900
+    session.ingestFrame(frame({ mediaOffsetMs: 900, durationMs: 20 }));
+    session.ingestFrame(frame({ mediaOffsetMs: 920, durationMs: 20 }));
     await session.sealSegment();
 
     expect(session.hasContiguousCoverage()).toBe(false);
     // The recorder still preserves both sealed segments -- a gap does not
     // erase the evidence that does exist.
     expect(session.getSealedSegments()).toHaveLength(2);
+  });
+
+  it("tracks per-channel coverage and gaps when channels have asymmetric frame ranges (SD §8.2)", async () => {
+    const store = new InMemoryRecordingObjectStore();
+    const session = new CallRecorderSession({
+      callId: CALL_ID,
+      recordingId: RECORDING_ID,
+      objectStore: store,
+    });
+
+    // Customer frames span 0 to 1000ms (frames at 0, 200, 400, 600, 800, duration 200ms each)
+    for (let offset = 0; offset < 1000; offset += 200) {
+      session.ingestFrame(
+        frame({
+          channel: "customer",
+          mediaOffsetMs: offset,
+          durationMs: 200,
+          occurredAtUtc: new Date(new Date("2026-09-08T00:00:00.000Z").getTime() + offset).toISOString(),
+        }),
+      );
+    }
+    // Agent has only one frame at 0ms (0 to 20ms)
+    session.ingestFrame(
+      frame({
+        channel: "agent",
+        mediaOffsetMs: 0,
+        durationMs: 20,
+        occurredAtUtc: "2026-09-08T00:00:00.000Z",
+      }),
+    );
+
+    const sealed = await session.sealSegment();
+    expect(sealed).not.toBeNull();
+    expect(sealed!.channels.sort()).toEqual(["agent", "customer"]);
+    expect(sealed!.startOffsetMs).toBe(0);
+    expect(sealed!.endOffsetMs).toBe(1000);
+
+    const custCov = sealed!.channelCoverage.find((c) => c.channel === "customer");
+    const agentCov = sealed!.channelCoverage.find((c) => c.channel === "agent");
+
+    expect(custCov).toBeDefined();
+    expect(custCov!.startOffsetMs).toBe(0);
+    expect(custCov!.endOffsetMs).toBe(1000);
+    expect(custCov!.hasGaps).toBe(false);
+
+    expect(agentCov).toBeDefined();
+    expect(agentCov!.startOffsetMs).toBe(0);
+    expect(agentCov!.endOffsetMs).toBe(20);
+    expect(agentCov!.hasGaps).toBe(false);
+  });
+
+  it("detects internal gaps in a channel when frames are non-contiguous within a sealed segment (SD §8.2)", async () => {
+    const store = new InMemoryRecordingObjectStore();
+    const session = new CallRecorderSession({
+      callId: CALL_ID,
+      recordingId: RECORDING_ID,
+      objectStore: store,
+    });
+
+    // Agent has a frame at 0..20ms and another frame at 800..820ms (gap from 20ms to 800ms)
+    session.ingestFrame(
+      frame({
+        channel: "agent",
+        mediaOffsetMs: 0,
+        durationMs: 20,
+        occurredAtUtc: "2026-09-08T00:00:00.000Z",
+      }),
+    );
+    session.ingestFrame(
+      frame({
+        channel: "agent",
+        mediaOffsetMs: 800,
+        durationMs: 20,
+        occurredAtUtc: "2026-09-08T00:00:00.800Z",
+      }),
+    );
+
+    const sealed = await session.sealSegment();
+    expect(sealed).not.toBeNull();
+    const agentCov = sealed!.channelCoverage.find((c) => c.channel === "agent");
+    expect(agentCov).toBeDefined();
+    expect(agentCov!.hasGaps).toBe(true);
+    expect(agentCov!.intervals).toHaveLength(2);
+    expect(agentCov!.intervals[0]!.startOffsetMs).toBe(0);
+    expect(agentCov!.intervals[0]!.endOffsetMs).toBe(20);
+    expect(agentCov!.intervals[1]!.startOffsetMs).toBe(800);
+    expect(agentCov!.intervals[1]!.endOffsetMs).toBe(820);
   });
 
   it("never overwrites an already-sealed object key across seals", async () => {
@@ -459,6 +556,29 @@ function makeSession(overrides: Partial<VoiceSessionRecord> = {}): VoiceSessionR
 function segment(
   overrides: Partial<SealedRecordingSegmentInput> = {},
 ): SealedRecordingSegmentInput {
+  const channels = overrides.channels ?? ["customer", "agent"];
+  const startOffsetMs = overrides.startOffsetMs ?? 0;
+  const endOffsetMs = overrides.endOffsetMs ?? 1000;
+  const startedAtUtc = overrides.startedAtUtc ?? "2026-09-08T00:00:00.000Z";
+  const endedAtUtc = overrides.endedAtUtc ?? "2026-09-08T00:00:01.000Z";
+
+  const defaultChannelCoverage = channels.map((ch) => ({
+    channel: ch,
+    startOffsetMs,
+    endOffsetMs,
+    startedAtUtc,
+    endedAtUtc,
+    hasGaps: false,
+    intervals: [
+      {
+        startOffsetMs,
+        endOffsetMs,
+        startedAtUtc,
+        endedAtUtc,
+      },
+    ],
+  }));
+
   return {
     callId: CALL_ID,
     recordingId: RECORDING_ID,
@@ -467,14 +587,15 @@ function segment(
     objectVersion: 1,
     checksum: "checksum-1",
     byteSize: 100,
-    channels: ["customer", "agent"],
-    startOffsetMs: 0,
-    endOffsetMs: 1000,
-    startedAtUtc: "2026-09-08T00:00:00.000Z",
-    endedAtUtc: "2026-09-08T00:00:01.000Z",
+    channels,
+    startOffsetMs,
+    endOffsetMs,
+    startedAtUtc,
+    endedAtUtc,
     durableAt: "2026-09-08T00:00:01.100Z",
     timingSource: "provider",
     timingPrecision: "exact",
+    channelCoverage: defaultChannelCoverage,
     ...overrides,
   };
 }
@@ -1743,6 +1864,388 @@ describe("VoiceEvidenceService", () => {
           proof,
         }),
       ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects readback proof when agent audio is missing within a sealed segment despite customer frames (Codex2 review probe negative test, SD §8.2)", async () => {
+      // Customer frames span 0-1000ms, but agent only has 1 frame at 0ms (0-20ms).
+      // Segment lists both channels, but agent audio is absent at 500-900ms.
+      const checkpoint = await seedVerifiedCheckpoint({
+        channels: ["customer", "agent"],
+        startOffsetMs: 0,
+        endOffsetMs: 1000,
+        startedAtUtc: "2026-09-08T00:00:00.000Z",
+        endedAtUtc: "2026-09-08T00:00:01.000Z",
+        channelCoverage: [
+          {
+            channel: "customer",
+            startOffsetMs: 0,
+            endOffsetMs: 1000,
+            startedAtUtc: "2026-09-08T00:00:00.000Z",
+            endedAtUtc: "2026-09-08T00:00:01.000Z",
+            hasGaps: false,
+            intervals: [
+              {
+                startOffsetMs: 0,
+                endOffsetMs: 1000,
+                startedAtUtc: "2026-09-08T00:00:00.000Z",
+                endedAtUtc: "2026-09-08T00:00:01.000Z",
+              },
+            ],
+          },
+          {
+            channel: "agent",
+            startOffsetMs: 0,
+            endOffsetMs: 20,
+            startedAtUtc: "2026-09-08T00:00:00.000Z",
+            endedAtUtc: "2026-09-08T00:00:00.020Z",
+            hasGaps: false,
+            intervals: [
+              {
+                startOffsetMs: 0,
+                endOffsetMs: 20,
+                startedAtUtc: "2026-09-08T00:00:00.000Z",
+                endedAtUtc: "2026-09-08T00:00:00.020Z",
+              },
+            ],
+          },
+        ],
+      });
+
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent({
+          occurredAt: "2026-09-08T00:00:00.900Z",
+          payload: {
+            playbackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            promptPlaybackId: "playback-1",
+            promptId: "prompt-confirm-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.500Z",
+              endUtc: "2026-09-08T00:00:00.900Z",
+              startOffsetMs: 500,
+              endOffsetMs: 900,
+            },
+          },
+        }),
+        validAsrFinalEvent(),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects readback proof when agent audio has an internal gap within a sealed segment (SD §8.2)", async () => {
+      // Agent has frames at 0-20ms and 950-970ms, but has an internal gap at 20-950ms.
+      const checkpoint = await seedVerifiedCheckpoint({
+        channels: ["customer", "agent"],
+        startOffsetMs: 0,
+        endOffsetMs: 1000,
+        startedAtUtc: "2026-09-08T00:00:00.000Z",
+        endedAtUtc: "2026-09-08T00:00:01.000Z",
+        channelCoverage: [
+          {
+            channel: "customer",
+            startOffsetMs: 0,
+            endOffsetMs: 1000,
+            startedAtUtc: "2026-09-08T00:00:00.000Z",
+            endedAtUtc: "2026-09-08T00:00:01.000Z",
+            hasGaps: false,
+            intervals: [
+              {
+                startOffsetMs: 0,
+                endOffsetMs: 1000,
+                startedAtUtc: "2026-09-08T00:00:00.000Z",
+                endedAtUtc: "2026-09-08T00:00:01.000Z",
+              },
+            ],
+          },
+          {
+            channel: "agent",
+            startOffsetMs: 0,
+            endOffsetMs: 970,
+            startedAtUtc: "2026-09-08T00:00:00.000Z",
+            endedAtUtc: "2026-09-08T00:00:00.970Z",
+            hasGaps: true,
+            intervals: [
+              {
+                startOffsetMs: 0,
+                endOffsetMs: 20,
+                startedAtUtc: "2026-09-08T00:00:00.000Z",
+                endedAtUtc: "2026-09-08T00:00:00.020Z",
+              },
+              {
+                startOffsetMs: 950,
+                endOffsetMs: 970,
+                startedAtUtc: "2026-09-08T00:00:00.950Z",
+                endedAtUtc: "2026-09-08T00:00:00.970Z",
+              },
+            ],
+          },
+        ],
+      });
+
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent({
+          occurredAt: "2026-09-08T00:00:00.400Z",
+          payload: {
+            playbackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            promptPlaybackId: "playback-1",
+            promptId: "prompt-confirm-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.100Z",
+              endUtc: "2026-09-08T00:00:00.400Z",
+              startOffsetMs: 100,
+              endOffsetMs: 400,
+            },
+          },
+        }),
+        validAsrFinalEvent(),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects speech affirmation when customer audio is missing within a sealed segment (SD §8.2)", async () => {
+      // Agent frames span 0-1000ms, but customer only has 1 frame at 0ms (0-20ms).
+      // ASR final event requires customer audio at 500-700ms.
+      const checkpoint = await seedVerifiedCheckpoint({
+        channels: ["customer", "agent"],
+        startOffsetMs: 0,
+        endOffsetMs: 1000,
+        startedAtUtc: "2026-09-08T00:00:00.000Z",
+        endedAtUtc: "2026-09-08T00:00:01.000Z",
+        channelCoverage: [
+          {
+            channel: "agent",
+            startOffsetMs: 0,
+            endOffsetMs: 1000,
+            startedAtUtc: "2026-09-08T00:00:00.000Z",
+            endedAtUtc: "2026-09-08T00:00:01.000Z",
+            hasGaps: false,
+            intervals: [
+              {
+                startOffsetMs: 0,
+                endOffsetMs: 1000,
+                startedAtUtc: "2026-09-08T00:00:00.000Z",
+                endedAtUtc: "2026-09-08T00:00:01.000Z",
+              },
+            ],
+          },
+          {
+            channel: "customer",
+            startOffsetMs: 0,
+            endOffsetMs: 20,
+            startedAtUtc: "2026-09-08T00:00:00.000Z",
+            endedAtUtc: "2026-09-08T00:00:00.020Z",
+            hasGaps: false,
+            intervals: [
+              {
+                startOffsetMs: 0,
+                endOffsetMs: 20,
+                startedAtUtc: "2026-09-08T00:00:00.000Z",
+                endedAtUtc: "2026-09-08T00:00:00.020Z",
+              },
+            ],
+          },
+        ],
+      });
+
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent({
+          occurredAt: "2026-09-08T00:00:00.400Z",
+          payload: {
+            playbackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            promptPlaybackId: "playback-1",
+            promptId: "prompt-confirm-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.100Z",
+              endUtc: "2026-09-08T00:00:00.400Z",
+              startOffsetMs: 100,
+              endOffsetMs: 400,
+            },
+          },
+        }),
+        validAsrFinalEvent({
+          occurredAt: "2026-09-08T00:00:00.700Z",
+          payload: {
+            turnId: "55555555-5555-4555-8555-555555555555",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.500Z",
+              endUtc: "2026-09-08T00:00:00.700Z",
+              startOffsetMs: 500,
+              endOffsetMs: 700,
+            },
+          },
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects proof when nonduplicated 20ms frames had an omitted frame causing segment boundary discontinuity", async () => {
+      // Segment 1 covers [0, 40ms)
+      await service.ingestSealedSegment(
+        segment({
+          segmentSequence: 1,
+          startOffsetMs: 0,
+          endOffsetMs: 40,
+          startedAtUtc: "2026-09-08T00:00:00.000Z",
+          endedAtUtc: "2026-09-08T00:00:00.040Z",
+        }),
+      );
+
+      // Frame [40, 60ms) was omitted; Segment 2 starts at 60ms instead of 40ms
+      const { checkpoint: brokenCheckpoint } = await service.ingestSealedSegment(
+        segment({
+          segmentSequence: 2,
+          objectKey: `${CALL_ID}/${RECORDING_ID}/segments/000002`,
+          checksum: "checksum-seg-2",
+          startOffsetMs: 60,
+          endOffsetMs: 100,
+          startedAtUtc: "2026-09-08T00:00:00.060Z",
+          endedAtUtc: "2026-09-08T00:00:00.100Z",
+        }),
+      );
+
+      const gate = await service.evaluateRecordingGate(CALL_ID, RECORDING_ID);
+      expect(gate.allowed).toBe(false);
+      expect(gate).toEqual({ allowed: false, reason: "continuity_broken" });
+
+      const proof = {
+        ...baseProofFields(brokenCheckpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("accepts speech proof when consecutive nonduplicated frames across segments fully cover both channels", async () => {
+      // Segment 1 covers [0, 500ms) for both channels
+      await service.ingestSealedSegment(
+        segment({
+          segmentSequence: 1,
+          startOffsetMs: 0,
+          endOffsetMs: 500,
+          startedAtUtc: "2026-09-08T00:00:00.000Z",
+          endedAtUtc: "2026-09-08T00:00:00.500Z",
+        }),
+      );
+
+      // Segment 2 starts at exactly 500ms and covers [500, 1000ms) for both channels
+      const { checkpoint } = await service.ingestSealedSegment(
+        segment({
+          segmentSequence: 2,
+          objectKey: `${CALL_ID}/${RECORDING_ID}/segments/000002`,
+          checksum: "checksum-seg-2-good",
+          startOffsetMs: 500,
+          endOffsetMs: 1000,
+          startedAtUtc: "2026-09-08T00:00:00.500Z",
+          endedAtUtc: "2026-09-08T00:00:01.000Z",
+          readbackPlaybackId: "playback-1",
+          snapshotHash: "snapshot-hash",
+        }),
+      );
+
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent({
+          occurredAt: "2026-09-08T00:00:00.400Z",
+          payload: {
+            playbackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            promptPlaybackId: "playback-1",
+            promptId: "prompt-confirm-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.100Z",
+              endUtc: "2026-09-08T00:00:00.400Z",
+              startOffsetMs: 100,
+              endOffsetMs: 400,
+            },
+          },
+        }),
+        validAsrFinalEvent({
+          occurredAt: "2026-09-08T00:00:00.700Z",
+          payload: {
+            turnId: "55555555-5555-4555-8555-555555555555",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.550Z",
+              endUtc: "2026-09-08T00:00:00.750Z",
+              startOffsetMs: 550,
+              endOffsetMs: 750,
+            },
+          },
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      const result = await service.assertProofIsRecordingBacked({
+        callId: CALL_ID,
+        recordingId: RECORDING_ID,
+        proof,
+      });
+
+      expect(result).toBeDefined();
+      expect(result.checkpointId).toBe(checkpoint.checkpointId);
     });
   });
 
