@@ -4,6 +4,20 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-SR-ENV-COPY-001 — runtime source and integration scope routing
+
+Supervisor/Chairman must authorize the runtime badge wiring scopes and sequence
+overlapping shell/deployment work for parent `SR-ENV-COPY-001` (Codex / Codex2).
+The existing task contract already requires authoritative runtime environment,
+no domain guessing, and no production/healthy claim for unknown data. Retain
+that acceptance. The parent can resume authorized catalog cleanup and scoped
+resolver work; full acceptance still requires actual render integration.
+Before wiring, record the existing deployment configuration producer, its
+server/client delivery boundary and allowed values; unresolved source selection
+returns to Supervisor/Chairman, not an invented environment variable.
+This is a follow-up on the existing parent, not a new implementation task or
+scope grant. See [decision, paths and resume gate](support/unblock/SR-ENV-COPY-001/SR-ENV-COPY-001-UNBLOCK-PLANNING-DECISION.md).
+
 Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-ENTERPRISE-FORM-001`, `Q-SR-ENTERPRISE-DATA-001`, `Q-SR-PROOF-001`, `Q-SR-REPORT-001`.
 
 ### Q-SR-ENTERPRISE-FORM-001 — theme precedence and shared scope authorization
