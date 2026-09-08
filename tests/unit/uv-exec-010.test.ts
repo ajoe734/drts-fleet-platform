@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ConfirmedRecordingManifests } from "../../apps/voice-media-worker/src/recording/confirmed-manifest";
 import {
   assertConfirmationCoverage,
   type RecordedConfirmationReceipt,
@@ -96,6 +97,93 @@ describe("UV-EXEC-010 confirmation audio coverage", () => {
         expect(f.receipt.confirmation).not.toHaveProperty("affirmation");
     },
   );
+
+  it.each(["speech", "dtmf"] as const)(
+    "seals and retrieves %s receipt with its audio",
+    async (method) => {
+      const f = await proofFixture(method);
+      const resolve = vi.fn(async () => f.receipt);
+      const confirmed = new ConfirmedRecordingManifests(
+        new ImmutableRecordingManifests(f.store),
+        { resolve },
+      );
+      const ref = await confirmed.seal("credential", f.manifest, f.binding);
+      expect(resolve).toHaveBeenCalledWith("credential", f.binding);
+      const read = await confirmed.read(f.binding, ref);
+      expect(read.confirmationReceipt).toEqual(f.receipt);
+      expect(Object.isFrozen(read.confirmationReceipt?.readback)).toBe(true);
+      expect(Object.isFrozen(read.confirmationReceipt?.confirmation)).toBe(
+        true,
+      );
+      f.receipt.readback.outcome = "cleared";
+      expect(
+        (await confirmed.read(f.binding, ref)).confirmationReceipt?.readback
+          .outcome,
+      ).toBe("completed");
+      await expect(
+        confirmed.read({ ...f.binding, snapshotHash: "b".repeat(64) }, ref),
+      ).rejects.toThrow("snapshot mismatch");
+      f.objects.delete(f.manifest.segments[0]!.objectKey);
+      await expect(confirmed.read(f.binding, ref)).rejects.toThrow(
+        "unreadable",
+      );
+    },
+  );
+
+  it("snapshots coverage and binding before awaiting the trusted ledger", async () => {
+    const f = await proofFixture();
+    const input = {
+      ...f.manifest,
+      scope: { ...scope },
+      segments: [...f.manifest.segments],
+    };
+    const binding = { ...f.binding, scope: { ...scope } };
+    const confirmed = new ConfirmedRecordingManifests(
+      new ImmutableRecordingManifests(f.store),
+      { resolve: async () => f.receipt },
+    );
+    const pending = confirmed.seal("credential", input, binding);
+    input.scope.callId = "other";
+    input.segments.pop();
+    binding.scope.callId = "other";
+    binding.snapshotHash = "b".repeat(64);
+    const ref = await pending;
+    expect((await confirmed.read(f.binding, ref)).segments).toHaveLength(2);
+  });
+
+  it("rejects plain manifests and does not store without a trusted receipt", async () => {
+    const f = await proofFixture();
+    const manifests = new ImmutableRecordingManifests(f.store);
+    const confirmed = new ConfirmedRecordingManifests(manifests, {
+      resolve: async () => null,
+    });
+    const plain = await manifests.seal(f.manifest);
+    await expect(confirmed.read(f.binding, plain)).rejects.toThrow(
+      "Missing trusted",
+    );
+    vi.mocked(f.store.putImmutable).mockClear();
+    await expect(
+      confirmed.seal("credential", f.manifest, f.binding),
+    ).rejects.toThrow("Missing trusted");
+    expect(f.store.putImmutable).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes ledger failure and does not persist evidence", async () => {
+    const f = await proofFixture();
+    const confirmed = new ConfirmedRecordingManifests(
+      new ImmutableRecordingManifests(f.store),
+      {
+        resolve: async () => {
+          throw new Error("secret credential");
+        },
+      },
+    );
+    vi.mocked(f.store.putImmutable).mockClear();
+    await expect(
+      confirmed.seal("credential", f.manifest, f.binding),
+    ).rejects.toThrow("Trusted confirmation ledger unavailable");
+    expect(f.store.putImmutable).not.toHaveBeenCalled();
+  });
 
   it.each([
     "missing",
