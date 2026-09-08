@@ -477,3 +477,42 @@ These results are fresh owner evidence, not independent review or deployment
 acceptance. The final commit is handed off by exact SHA through ai-status.sh;
 same-SHA reviewer approval, CI, merge and required acceptance remain lifecycle
 gates. No `done`, force push, stash, PR closure or merge is performed here.
+
+### Cancellation reconciliation correction (2026-09-08)
+
+Review of candidate `d0a6a3d64df8a7366c2cc6d9abd65382b2aa70f7` found
+that passenger cancellation could release shared capacity after a persisted
+driver task's driverId changed, even though redispatch rejected that state.
+Cancellation now validates the locked assignment/task relationship and coherent
+statuses before any cancellation write or reservation release. It shares the
+same predicate with superseded-assignment closure, checking taskId,
+assignmentId, orderId, dispatchJobId, driverId and vehicleId. Cancellation also
+checks that the assignment belongs to the locked order. Unknown or inconsistent
+state returns a conflict and keeps capacity available for reconciliation only.
+
+The PostgreSQL corruption matrix now exercises both redispatch and cancellation
+for assigned and accepted offers: missing task references/rows, terminal and
+unknown task states, incoherent acceptance state and all six relationship IDs.
+Each rejected command must leave both reservation rows byte-for-byte unchanged
+and the assignment active. The successful cancellation case also covers an
+accepted offer, proving that occupied resources can still be released legally.
+
+Fresh owner verification on isolated database `uv006_cancel_20260908`:
+
+- All migrations through V0091 applied with `operations/database/db-apply.sh`.
+- From `apps/api`, the reservation integration suite
+  (`apps/api/tests/integration/uv-exec-006.integration.test.ts`) and stage1
+  PostgreSQL gate (`apps/api/tests/integration/stage1-uat-pg-gate.integration.test.ts`),
+  using API-relative paths and `--no-file-parallelism --maxConcurrency=1`:
+  **91/91 passed** (88 reservation cases plus three stage1 cases).
+- The eight API regression suites listed above: **180/180 passed**.
+- Root owned-mobility unit suite: **39/39 passed**.
+- Contracts/control-plane-auth builds, API typecheck and changed-source ESLint:
+  passed after installing frozen-lockfile dependencies in the isolated worktree.
+
+Logs are retained locally at `/tmp/uv006-cancel-migrations.log`,
+`/tmp/uv006-cancel-integration.log`, `/tmp/uv006-cancel-api.log`,
+`/tmp/uv006-cancel-root.log` and `/tmp/uv006-cancel-typecheck.log`.
+PR #1822 remains the recovered candidate PR; original PR #1721 is preserved.
+These are owner checks; exact-candidate review, CI, merge and acceptance remain
+supervisor lifecycle gates.
