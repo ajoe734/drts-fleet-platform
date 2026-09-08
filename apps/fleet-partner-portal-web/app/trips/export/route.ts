@@ -33,9 +33,21 @@ export async function GET(request: NextRequest) {
   if (exportType === "summary" || exportType === "overview") {
     try {
       const dashboard = await loadDashboard(period);
-      if (dashboard.error) {
+      if (
+        dashboard.error ||
+        dashboard.driverCount === "—" ||
+        dashboard.completedTrips === "—" ||
+        dashboard.grossRevenue === "—" ||
+        dashboard.share === "—"
+      ) {
+        const errorMsg =
+          dashboard.error ||
+          dashboard.driversError ||
+          dashboard.tripsError ||
+          dashboard.aggregateError ||
+          "Overview operational data is unavailable";
         return NextResponse.json(
-          { ok: false, error: { message: dashboard.error } },
+          { ok: false, error: { message: errorMsg } },
           { status: 500 },
         );
       }

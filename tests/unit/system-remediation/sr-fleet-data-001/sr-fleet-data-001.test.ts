@@ -170,8 +170,12 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       const failedDashboard = await loadDashboard("2026-09");
       expect(failedDashboard.source).toBe("fallback");
       expect(failedDashboard.error).toBe("503 Service Unavailable");
-      expect(failedDashboard.driverCount).toBe("0");
+      expect(failedDashboard.driverCount).toBe("—");
+      expect(failedDashboard.driverCount).not.toBe("0");
       expect(failedDashboard.driverCount).not.toBe("128");
+      expect(failedDashboard.completedTrips).toBe("—");
+      expect(failedDashboard.share).toBe("—");
+      expect(failedDashboard.grossRevenue).toBe("—");
     });
   });
 
@@ -511,6 +515,200 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       const dashboard = await loadDashboard("2026-09");
       // Even though 2 drivers have workState 'available', only 1 has dispatchEligible: true
       expect(dashboard.dispatchable).toBe("1");
+    });
+
+    it("partial failure: drivers API failure preserves driversError, marks driver counts unavailable, and rejects summary export", async () => {
+      mockDrivers.mockRejectedValue(new Error("503 Drivers Unavailable"));
+      mockTrips.mockResolvedValue([
+        {
+          orderId: "ord-001",
+          driverName: "張駕駛",
+          grossEarning: { amountMinor: 120000, currency: "TWD" },
+          fleetShareAmount: { amountMinor: 24000, currency: "TWD" },
+          status: "completed",
+          completedAt: "2026-09-01T10:00:00Z",
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          pickupAddress: "桃園機場第一航廈",
+        },
+      ]);
+      mockDashboard.mockRejectedValue(new Error("Aggregate unavailable"));
+
+      const dashboard = await loadDashboard("2026-09");
+      // Per-source failure tracking
+      expect(dashboard.driversError).toBe("503 Drivers Unavailable");
+      expect(dashboard.tripsError).toBeNull();
+      expect(dashboard.error).toContain("503 Drivers Unavailable");
+
+      // Distinguish unavailable from legitimate zero
+      expect(dashboard.driverCount).toBe("—");
+      expect(dashboard.driverCount).not.toBe("0");
+      expect(dashboard.driverStatusSummary.online).toBe("—");
+      expect(dashboard.driverStatusSummary.offline).toBe("—");
+      expect(dashboard.dispatchable).toBe("—");
+      expect(dashboard.supply).toEqual([]);
+
+      // Trips succeeded and reflect in dashboard
+      expect(dashboard.completedTrips).toBe("1");
+      expect(dashboard.grossRevenue).toBe("NT$ 1,200");
+      expect(dashboard.share).toBe("NT$ 240");
+
+      // Summary export MUST reject partial failure with 500 status rather than accepting 0 drivers
+      const req = new NextRequest(
+        "http://localhost:3000/trips/export?type=summary",
+      );
+      const res = await exportHandler(req);
+      expect(res.status).toBe(500);
+      const data = await res.json();
+      expect(data.ok).toBe(false);
+      expect(data.error.message).toContain("503 Drivers Unavailable");
+    });
+
+    it("partial failure: trips API failure preserves tripsError, marks trips and revenue unavailable, and rejects summary export", async () => {
+      mockDrivers.mockResolvedValue([
+        {
+          driverId: "drv-01",
+          name: "張駕駛",
+          workState: "available",
+          licensesValid: true,
+          supportedServiceBuckets: ["standard_taxi"],
+          dispatchEligible: true,
+        },
+      ]);
+      mockTrips.mockRejectedValue(new Error("503 Trips Unavailable"));
+      mockDashboard.mockRejectedValue(new Error("Aggregate unavailable"));
+
+      const dashboard = await loadDashboard("2026-09");
+      expect(dashboard.driversError).toBeNull();
+      expect(dashboard.tripsError).toBe("503 Trips Unavailable");
+      expect(dashboard.error).toContain("503 Trips Unavailable");
+
+      // Drivers succeeded
+      expect(dashboard.driverCount).toBe("1");
+      expect(dashboard.dispatchable).toBe("1");
+
+      // Trips and revenue are unavailable, NOT "0" or "NT$ 0"
+      expect(dashboard.completedTrips).toBe("—");
+      expect(dashboard.completedTrips).not.toBe("0");
+      expect(dashboard.share).toBe("—");
+      expect(dashboard.share).not.toBe("NT$ 0");
+      expect(dashboard.grossRevenue).toBe("—");
+      expect(dashboard.grossRevenue).not.toBe("NT$ 0");
+
+      // Summary export rejects with 500
+      const req = new NextRequest(
+        "http://localhost:3000/trips/export?type=summary",
+      );
+      const res = await exportHandler(req);
+      expect(res.status).toBe(500);
+      const data = await res.json();
+      expect(data.ok).toBe(false);
+      expect(data.error.message).toContain("503 Trips Unavailable");
+    });
+
+    it("aggregate-only failure with nonzero trips derives revenue from authoritative trip records and exports successfully", async () => {
+      mockDrivers.mockResolvedValue([
+        {
+          driverId: "drv-01",
+          name: "張駕駛",
+          workState: "available",
+          licensesValid: true,
+          supportedServiceBuckets: ["standard_taxi"],
+          dispatchEligible: true,
+        },
+      ]);
+      mockTrips.mockResolvedValue([
+        {
+          orderId: "ord-001",
+          driverName: "張駕駛",
+          grossEarning: { amountMinor: 120000, currency: "TWD" },
+          fleetShareAmount: { amountMinor: 24000, currency: "TWD" },
+          status: "completed",
+          completedAt: "2026-09-01T10:00:00Z",
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          pickupAddress: "桃園機場第一航廈",
+        },
+        {
+          orderId: "ord-002",
+          driverName: "張駕駛",
+          grossEarning: { amountMinor: 50000, currency: "TWD" },
+          fleetShareAmount: { amountMinor: 10000, currency: "TWD" },
+          status: "completed",
+          completedAt: "2026-09-02T11:00:00Z",
+          businessDispatchSubtype: "standard_taxi",
+          pickupAddress: "台北市信義區松仁路",
+        },
+      ]);
+      mockDashboard.mockRejectedValue(new Error("Aggregate endpoint unavailable"));
+
+      const dashboard = await loadDashboard("2026-09");
+      // Aggregate error is preserved
+      expect(dashboard.aggregateError).toBe("Aggregate endpoint unavailable");
+      // But dashboard error is null because revenue is authoritatively derived from live trips
+      expect(dashboard.error).toBeNull();
+      expect(dashboard.driverCount).toBe("1");
+      expect(dashboard.completedTrips).toBe("2");
+
+      // Derived revenue from authoritative trip records: 120,000 + 50,000 = 170,000 minor = NT$ 1,700
+      expect(dashboard.grossRevenue).toBe("NT$ 1,700");
+      expect(dashboard.grossRevenue).not.toBe("NT$ 0");
+      // Derived share: 24,000 + 10,000 = 34,000 minor = NT$ 340
+      expect(dashboard.share).toBe("NT$ 340");
+      expect(dashboard.share).not.toBe("NT$ 0");
+
+      // Export endpoint exports the derived values as valid data with 200 status
+      const req = new NextRequest(
+        "http://localhost:3000/trips/export?type=summary&period=2026-09",
+      );
+      const res = await exportHandler(req);
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain("Fleet Share,NT$ 340");
+      expect(body).toContain('Gross Revenue,"NT$ 1,700"');
+      expect(body).not.toContain("NT$ 0");
+    });
+
+    it("aggregate-only failure with legitimate zero trips returns zero revenue", async () => {
+      mockDrivers.mockResolvedValue([]);
+      mockTrips.mockResolvedValue([]);
+      mockDashboard.mockRejectedValue(new Error("Aggregate endpoint unavailable"));
+
+      const dashboard = await loadDashboard("2026-09");
+      expect(dashboard.aggregateError).toBe("Aggregate endpoint unavailable");
+      expect(dashboard.error).toBeNull();
+      expect(dashboard.driverCount).toBe("0");
+      expect(dashboard.completedTrips).toBe("0");
+      expect(dashboard.grossRevenue).toBe("NT$ 0");
+      expect(dashboard.share).toBe("NT$ 0");
+
+      const req = new NextRequest(
+        "http://localhost:3000/trips/export?type=summary&period=2026-09",
+      );
+      const res = await exportHandler(req);
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain("Active Drivers,0");
+      expect(body).toContain("Completed Trips,0");
+    });
+
+    it("aggregate and trips failure marks revenue as unavailable and rejects summary export", async () => {
+      mockDrivers.mockResolvedValue([]);
+      mockTrips.mockRejectedValue(new Error("503 Trips Down"));
+      mockDashboard.mockRejectedValue(new Error("503 Dashboard Down"));
+
+      const dashboard = await loadDashboard("2026-09");
+      expect(dashboard.tripsError).toBe("503 Trips Down");
+      expect(dashboard.aggregateError).toBe("503 Dashboard Down");
+      expect(dashboard.error).toContain("503 Trips Down");
+      expect(dashboard.share).toBe("—");
+      expect(dashboard.share).not.toBe("NT$ 0");
+      expect(dashboard.grossRevenue).toBe("—");
+      expect(dashboard.grossRevenue).not.toBe("NT$ 0");
+
+      const req = new NextRequest(
+        "http://localhost:3000/trips/export?type=summary",
+      );
+      const res = await exportHandler(req);
+      expect(res.status).toBe(500);
     });
   });
 });
