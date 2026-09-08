@@ -4292,6 +4292,16 @@ export class OwnedMobilityService
     tx: OwnedMobilityQueryExecutor,
     assignmentId: string,
     now: string,
+    // SD §7.6: callers that are only allowed to supersede a *pending*
+    // offer (a timeout timer armed for one specific "assigned" row) must be
+    // able to narrow this to exactly that status, so the authoritative
+    // under-lock check -- not just the caller's possibly-stale in-memory
+    // read -- rejects an offer that has since moved to "accepted". Operator
+    // redispatch/reassign paths intentionally keep the wider default, since
+    // superseding an already-accepted offer is a legitimate outcome there.
+    expectedStatuses: ReadonlyArray<
+      DispatchAssignmentRecord["status"]
+    > = ["assigned", "accepted"],
   ): Promise<{
     assignment: DispatchAssignmentRecord;
     task: DriverTaskRecord | null;
@@ -4301,7 +4311,7 @@ export class OwnedMobilityService
         tx,
         assignmentId,
       );
-    if (!locked || !["assigned", "accepted"].includes(locked.status)) {
+    if (!locked || !expectedStatuses.includes(locked.status)) {
       return null;
     }
     const closedAssignment: DispatchAssignmentRecord = {
@@ -7870,6 +7880,14 @@ export class OwnedMobilityService
             tx,
             latestAssignment.assignmentId,
             now,
+            // A timeout timer is only ever armed for -- and only ever
+            // passes the in-memory guard above for -- a row that was still
+            // "assigned" when the timer's target was checked. Narrow the
+            // authoritative under-lock check to that same status so a row
+            // that has since moved to "accepted" (another pod's accept
+            // beat this stale timeout) is treated as superseded instead of
+            // being cancelled out from under the driver who accepted it.
+            ["assigned"],
           ),
       );
       if (!closedPrevious) {

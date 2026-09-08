@@ -1157,6 +1157,122 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     ]);
   });
 
+  it("a stale-cache pod's acceptance_timeout does not undo another pod's accept of the same assignment (two-instance DB fence)", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const databaseA = new DatabaseService();
+    const databaseB = new DatabaseService();
+    databases.push(databaseA, databaseB);
+    const driverId = `driver-uvexec006-podfence-${randomUUID()}`;
+    const vehicleId = `vehicle-uvexec006-podfence-${randomUUID()}`;
+    const candidates = [
+      {
+        driverId,
+        vehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ];
+
+    // Pod A dispatches and assigns the order -- its in-memory cache now
+    // holds the assignment as "assigned" and never learns otherwise.
+    const { service: serviceA } = createTestService(databaseA, candidates);
+    const order = serviceA.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "UV-EXEC-006 Rider", phone: "0911000668" },
+    });
+    trackOrder(order.orderId);
+    const dispatchResult = await serviceA.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const assignment = await serviceA.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId,
+      driverId,
+    });
+
+    // Pod B independently loaded the same order/job/assignment/task rows
+    // before Pod A's cache went stale. Seed Pod B's in-memory cache with
+    // clones of exactly what Pod A produced, then let Pod B accept through
+    // the real (DB-backed) write path -- this is what actually moves the
+    // authoritative row to "accepted" and occupies the reservation.
+    const { service: serviceB } = createTestService(databaseB, candidates);
+    type InternalServiceState = {
+      orders: Array<Record<string, unknown>>;
+      dispatchJobs: Array<Record<string, unknown>>;
+      dispatchAssignments: Array<Record<string, unknown>>;
+      driverTasks: Array<Record<string, unknown>>;
+    };
+    const serviceAState = serviceA as unknown as InternalServiceState;
+    const serviceBState = serviceB as unknown as InternalServiceState;
+    serviceBState.orders.push({
+      ...serviceAState.orders.find((o) => o.orderId === order.orderId),
+    });
+    serviceBState.dispatchJobs.push({
+      ...serviceAState.dispatchJobs.find(
+        (j) => j.dispatchJobId === dispatchResult.dispatchJobId,
+      ),
+    });
+    serviceBState.dispatchAssignments.push({
+      ...serviceAState.dispatchAssignments.find(
+        (a) => a.assignmentId === assignment.assignmentId,
+      ),
+    });
+    serviceBState.driverTasks.push({
+      ...serviceAState.driverTasks.find((t) => t.taskId === assignment.taskId),
+    });
+
+    await serviceB.acceptDriverTask(assignment.taskId, {
+      acceptedAt: new Date().toISOString(),
+    });
+    expect(
+      await readAssignmentStatus(databaseA, assignment.assignmentId),
+    ).toBe("accepted");
+    expect(
+      await readActiveReservations(databaseA, "driver", driverId),
+    ).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "occupied",
+      }),
+    ]);
+
+    // Pod A's own cache is still stale ("assigned") and passes its
+    // in-memory guard, so this exercises the authoritative under-lock
+    // fence in `closeSupersededDispatchAssignment`, not just the cache
+    // check above it.
+    const timeoutResult = await serviceA.handleDispatchTimeout(
+      order.orderId,
+      "acceptance_timeout",
+      undefined,
+      { targetAssignmentId: assignment.assignmentId },
+    );
+    expect(timeoutResult.escalationAction).toBe("superseded");
+
+    // The accepted offer and its occupied reservation, committed by Pod B,
+    // must survive Pod A's stale timeout untouched.
+    expect(
+      await readAssignmentStatus(databaseA, assignment.assignmentId),
+    ).toBe("accepted");
+    expect(
+      await readActiveReservations(databaseA, "driver", driverId),
+    ).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "occupied",
+      }),
+    ]);
+    expect(
+      await readActiveReservations(databaseA, "vehicle", vehicleId),
+    ).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "occupied",
+      }),
+    ]);
+  });
+
   it("rejects an acceptance_timeout call that omits its target assignment", async () => {
     expect(DATABASE_URL).toBeTruthy();
     const database = new DatabaseService();
