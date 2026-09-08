@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -98,7 +99,7 @@ describe("SR-OPS-PROOF-001 isolated ops proof harness", () => {
       directory = mkdtempSync(resolve(tmpdir(), "ops-proof-bypass-"));
       fakeBin = resolve(directory, "bin");
       invokedMarker = resolve(directory, "pg_restore.invoked");
-      require("node:fs").mkdirSync(fakeBin);
+      mkdirSync(fakeBin);
       writeFileSync(
         resolve(fakeBin, "pg_restore"),
         `#!/usr/bin/env bash\ntouch "${invokedMarker}"\nexit 0\n`,
@@ -173,7 +174,7 @@ describe("SR-OPS-PROOF-001 isolated ops proof harness", () => {
     function setUp(psqlCounts: string): void {
       directory = mkdtempSync(resolve(tmpdir(), "ops-proof-restore-"));
       fakeBin = resolve(directory, "bin");
-      require("node:fs").mkdirSync(fakeBin);
+      mkdirSync(fakeBin);
       restoreEnvFile = resolve(directory, "pg_restore.env");
       psqlEnvFile = resolve(directory, "psql.env");
       snapshotPath = resolve(directory, "snapshot.dump");
@@ -299,7 +300,7 @@ describe("SR-OPS-PROOF-001 isolated ops proof harness", () => {
     it("sends contract-shaped POST writes and records base/candidate SHA per request", () => {
       const directory = mkdtempSync(resolve(tmpdir(), "ops-proof-load-"));
       const fakeBin = resolve(directory, "bin");
-      require("node:fs").mkdirSync(fakeBin);
+      mkdirSync(fakeBin);
       const curlLog = resolve(directory, "curl.invocations.jsonl");
       writeFileSync(
         resolve(fakeBin, "curl"),
@@ -370,7 +371,7 @@ describe("SR-OPS-PROOF-001 isolated ops proof harness", () => {
           expect(args).toContain("--data");
         }
         const bookingInvocation = invocations.find((args) => args.at(-1)?.includes("/api/tenant/bookings"))!;
-        const bookingBody = JSON.parse(bookingInvocation[bookingInvocation.indexOf("--data") + 1]);
+        const bookingBody = JSON.parse(bookingInvocation[bookingInvocation.indexOf("--data") + 1]!);
         expect(bookingBody.bookingType).toBe("oneway");
       } finally {
         rmSync(directory, { recursive: true, force: true });
