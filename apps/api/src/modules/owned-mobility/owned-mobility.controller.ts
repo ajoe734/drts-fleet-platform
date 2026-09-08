@@ -524,14 +524,14 @@ export class OwnedMobilityController {
   }
 
   @Post("tenant/bookings/:bookingId/cancel")
-  cancelTenantBooking(
+  async cancelTenantBooking(
     @Param("bookingId") bookingId: string,
     @Body() command: CancelOwnedOrderCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.cancelTenantBooking(
+      await this.ownedMobilityService.cancelTenantBooking(
         this.requireTenantId(tenantId),
         bookingId,
         command,
@@ -884,10 +884,7 @@ export class OwnedMobilityController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const task = this.assertDriverTaskAccess(taskId, identity);
-    return toApiSuccessEnvelope(
-      task,
-      requestId,
-    );
+    return toApiSuccessEnvelope(task, requestId);
   }
 
   @Post("driver/tasks/:taskId/accept")

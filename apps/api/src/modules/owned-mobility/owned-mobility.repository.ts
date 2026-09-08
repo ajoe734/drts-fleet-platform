@@ -734,37 +734,64 @@ export class OwnedMobilityRepository {
     const assignments = await executor.query<JsonRecordRow>(
       `SELECT record FROM ops.phase1_dispatch_assignments
        WHERE order_id = $1 AND status IN ('assigned', 'accepted')
-       ORDER BY assignment_id FOR UPDATE`, [orderId],
+       ORDER BY assignment_id FOR UPDATE`,
+      [orderId],
     );
     const assignment = assignments.rows[0]
-      ? this.parseRecord<DispatchAssignmentRecord>(assignments.rows[0].record, "ops.phase1_dispatch_assignments")
+      ? this.parseRecord<DispatchAssignmentRecord>(
+          assignments.rows[0].record,
+          "ops.phase1_dispatch_assignments",
+        )
       : null;
-    if (assignments.rows.length > 1) throw new Error("Multiple active assignments require reconciliation");
-    const tasks = assignment ? await executor.query<JsonRecordRow>(
-      `SELECT record FROM ops.phase1_driver_tasks WHERE assignment_id = $1
-       ORDER BY task_id FOR UPDATE`, [assignment.assignmentId],
-    ) : { rows: [] };
-    if (assignment && tasks.rows.length !== 1) throw new Error("Active assignment task requires reconciliation");
+    if (assignments.rows.length > 1)
+      throw new Error("Multiple active assignments require reconciliation");
+    const tasks = assignment
+      ? await executor.query<JsonRecordRow>(
+          `SELECT record FROM ops.phase1_driver_tasks WHERE assignment_id = $1
+       ORDER BY task_id FOR UPDATE`,
+          [assignment.assignmentId],
+        )
+      : { rows: [] };
+    if (assignment && tasks.rows.length !== 1)
+      throw new Error("Active assignment task requires reconciliation");
     const task = tasks.rows[0]
-      ? this.parseRecord<DriverTaskRecord>(tasks.rows[0].record, "ops.phase1_driver_tasks")
+      ? this.parseRecord<DriverTaskRecord>(
+          tasks.rows[0].record,
+          "ops.phase1_driver_tasks",
+        )
       : null;
     const jobs = await executor.query<JsonRecordRow>(
       `SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1 AND status <> 'closed'
-       ORDER BY dispatch_job_id FOR UPDATE`, [orderId],
+       ORDER BY dispatch_job_id FOR UPDATE`,
+      [orderId],
     );
     const current = await this.findOrderForUpdate(executor, orderId);
     if (!current) throw new Error(`Owned order ${orderId} missing`);
     const latest = await executor.query<{ assignment_id: string }>(
       `SELECT assignment_id FROM ops.phase1_dispatch_assignments
-       WHERE order_id = $1 AND status IN ('assigned', 'accepted') ORDER BY assignment_id`, [orderId],
+       WHERE order_id = $1 AND status IN ('assigned', 'accepted') ORDER BY assignment_id`,
+      [orderId],
     );
-    if (latest.rows.length !== assignments.rows.length ||
-        (latest.rows[0]?.assignment_id ?? null) !== (assignment?.assignmentId ?? null)) {
-      throw new OwnedOrderVersionConflictError(orderId, current.aggregateVersion);
+    if (
+      latest.rows.length !== assignments.rows.length ||
+      (latest.rows[0]?.assignment_id ?? null) !==
+        (assignment?.assignmentId ?? null)
+    ) {
+      throw new OwnedOrderVersionConflictError(
+        orderId,
+        current.aggregateVersion,
+      );
     }
     return {
-      order: current.order, assignment, task,
-      dispatchJobs: jobs.rows.map(row => this.parseRecord<DispatchJobRecord>(row.record, "ops.phase1_dispatch_jobs")),
+      order: current.order,
+      assignment,
+      task,
+      dispatchJobs: jobs.rows.map((row) =>
+        this.parseRecord<DispatchJobRecord>(
+          row.record,
+          "ops.phase1_dispatch_jobs",
+        ),
+      ),
     };
   }
 
@@ -967,45 +994,27 @@ export class OwnedMobilityRepository {
     executor: OwnedMobilityQueryExecutor,
     taskId: string,
   ): Promise<DriverTaskCompletionBundleRecord | null> {
-    const taskResult = await executor.query<JsonRecordRow>(
-      `
-        SELECT record
-        FROM ops.phase1_driver_tasks
-        WHERE task_id = $1
-        LIMIT 1
-        FOR UPDATE
-      `,
+    // Match accept/reject/cancel: assignment -> task -> job -> order.
+    // The subquery discovers the immutable assignment link without locking
+    // the task first (which would invert the shared close lock order).
+    const assignmentResult = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_dispatch_assignments
+       WHERE assignment_id = (
+         SELECT assignment_id FROM ops.phase1_driver_tasks WHERE task_id = $1
+       ) FOR UPDATE`,
       [taskId],
     );
-    const taskRow = taskResult.rows[0];
-    if (!taskRow) {
-      return null;
-    }
-    const task = this.parseRecord<DriverTaskRecord>(
-      taskRow.record,
-      "ops.phase1_driver_tasks",
-    );
-
-    const assignmentResult = await executor.query<JsonRecordRow>(
-      `
-        SELECT record
-        FROM ops.phase1_dispatch_assignments
-        WHERE assignment_id = $1
-        LIMIT 1
-        FOR UPDATE
-      `,
-      [task.assignmentId],
-    );
-    const assignmentRow = assignmentResult.rows[0];
-    if (!assignmentRow) {
-      throw new Error(
-        `Dispatch assignment ${task.assignmentId} missing for driver task ${taskId}.`,
-      );
-    }
+    if (!assignmentResult.rows[0]) return null;
     const assignment = this.parseRecord<DispatchAssignmentRecord>(
-      assignmentRow.record,
+      assignmentResult.rows[0].record,
       "ops.phase1_dispatch_assignments",
     );
+    const task = await this.lockDriverTaskForUpdate(executor, taskId);
+    if (!task || task.assignmentId !== assignment.assignmentId) {
+      throw new Error(
+        `Driver task ${taskId} assignment changed during completion`,
+      );
+    }
 
     const dispatchJobResult = await executor.query<JsonRecordRow>(
       `

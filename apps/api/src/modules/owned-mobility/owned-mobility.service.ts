@@ -2737,7 +2737,7 @@ export class OwnedMobilityService
     );
   }
 
-  cancelTenantBooking(
+  async cancelTenantBooking(
     tenantId: string,
     bookingId: string,
     command: CancelOwnedOrderCommand,
@@ -2745,8 +2745,12 @@ export class OwnedMobilityService
   ) {
     this.assertNonBlank(tenantId, "tenantId");
     const order = this.requireBookingOrder(bookingId, tenantId);
-    this.cancelOwnedOrder(order.orderId, command, requestId);
-    return this.mapOrderToBooking(order);
+    const cancelled = await this.cancelOwnedOrder(
+      order.orderId,
+      command,
+      requestId,
+    );
+    return this.mapOrderToBooking(cancelled);
   }
 
   applyManualFareOverride(
@@ -4561,34 +4565,52 @@ export class OwnedMobilityService
         assignment.updatedAt = now;
       }
       if (task) task.status = "cancelled";
-      const dispatchJobs = bundle.dispatchJobs.map(job => ({
-        ...job, status: "closed" as const, updatedAt: now,
+      const dispatchJobs = bundle.dispatchJobs.map((job) => ({
+        ...job,
+        status: "closed" as const,
+        updatedAt: now,
       }));
       const traceLogs: DispatchTraceLogRecord[] = [];
-      if (order.dispatchSemantics === "reservation" &&
-          ["requested", "redispatch_queue"].includes(order.reservationHoldStatus)) {
+      if (
+        order.dispatchSemantics === "reservation" &&
+        ["requested", "redispatch_queue"].includes(order.reservationHoldStatus)
+      ) {
         this.transitionReservationHold(order, "released");
         order.reservationHoldExpiresAt = now;
-        traceLogs.push(this.buildTraceLog(orderId, "reservation.hold.released", {
-          reservationHoldId: order.reservationHoldId, reason: "order_cancelled",
-        }));
+        traceLogs.push(
+          this.buildTraceLog(orderId, "reservation.hold.released", {
+            reservationHoldId: order.reservationHoldId,
+            reason: "order_cancelled",
+          }),
+        );
       }
-      traceLogs.push(this.buildTraceLog(orderId, "order.cancelled", { reason: order.cancelReason }));
+      traceLogs.push(
+        this.buildTraceLog(orderId, "order.cancelled", {
+          reason: order.cancelReason,
+        }),
+      );
       return { order, assignment, task, dispatchJobs, traceLogs };
     };
     const repository = this.ownedMobilityRepository;
     const committed = repository?.isEnabled()
-      ? await repository.withTransaction(async tx => {
-          const prepared = prepare(await repository.loadOrderCancellationForUpdate(tx, orderId));
+      ? await repository.withTransaction(async (tx) => {
+          const prepared = prepare(
+            await repository.loadOrderCancellationForUpdate(tx, orderId),
+          );
           await repository.persistOrderWorkflow(tx, {
             orders: [prepared.order],
             dispatchJobs: prepared.dispatchJobs,
-            dispatchAssignments: prepared.assignment ? [prepared.assignment] : [],
+            dispatchAssignments: prepared.assignment
+              ? [prepared.assignment]
+              : [],
             driverTasks: prepared.task ? [prepared.task] : [],
             dispatchTraceLogs: prepared.traceLogs,
           });
           if (prepared.assignment) {
-            await repository.releaseDispatchResourceReservations(prepared.assignment.assignmentId, tx);
+            await repository.releaseDispatchResourceReservations(
+              prepared.assignment.assignmentId,
+              tx,
+            );
           }
           return prepared;
         })
@@ -4596,16 +4618,35 @@ export class OwnedMobilityService
           order: this.requireOrder(orderId),
           assignment: this.findLatestActiveAssignment(orderId),
           task: this.findLatestActiveAssignment(orderId)
-            ? this.findTaskByAssignmentId(this.findLatestActiveAssignment(orderId)!.assignmentId) : null,
-          dispatchJobs: this.dispatchJobs.filter(job => job.orderId === orderId && job.status !== "closed"),
+            ? this.findTaskByAssignmentId(
+                this.findLatestActiveAssignment(orderId)!.assignmentId,
+              )
+            : null,
+          dispatchJobs: this.dispatchJobs.filter(
+            (job) => job.orderId === orderId && job.status !== "closed",
+          ),
         });
     const { order, assignment, task, dispatchJobs, traceLogs } = committed;
     this.applyAuthoritativeOrder(order);
-    if (assignment) this.dispatchAssignments = this.dispatchAssignments.map(item =>
-      item.assignmentId === assignment.assignmentId ? assignment : item);
-    if (task) this.driverTasks = this.driverTasks.map(item => item.taskId === task.taskId ? task : item);
-    for (const job of dispatchJobs) this.dispatchJobs = this.dispatchJobs.map(item =>
-      item.dispatchJobId === job.dispatchJobId ? job : item);
+    if (assignment)
+      this.dispatchAssignments = [
+        assignment,
+        ...this.dispatchAssignments.filter(
+          (item) => item.assignmentId !== assignment.assignmentId,
+        ),
+      ];
+    if (task)
+      this.driverTasks = [
+        task,
+        ...this.driverTasks.filter((item) => item.taskId !== task.taskId),
+      ];
+    for (const job of dispatchJobs)
+      this.dispatchJobs = [
+        job,
+        ...this.dispatchJobs.filter(
+          (item) => item.dispatchJobId !== job.dispatchJobId,
+        ),
+      ];
     this.dispatchTraceLogs = [...traceLogs, ...this.dispatchTraceLogs];
     this.recordAudit(
       {
