@@ -99,3 +99,17 @@ API typecheck 是前輪結果，本輪未重跑。最新 dev 的 SR-READINESS-00
 | `git diff --check` | 0 | 無空白錯誤 |
 
 讀取 `test-results/system-remediation-report.json` 中三個 `tenant-*-evidence` 附件，確認每個附件的 baseSha/testedSha 均為上述 SHA，HTTP calls 與 resources 均為 0；新增的目錄前置失敗 evidence 已實際產出。此為測試診斷修復，並非產品缺陷或 live 通過。環境中沒有 DRTS_TENANT_UAT 變數；readiness 文件仍未提供 provisioned 身份。其餘能力矩陣、live HTTP/DB/mail/瀏覽器驗收仍待完成，需 provisioner 提供前述六項設定；維持 in_progress，不 handoff。
+
+## 2026-09-08 dispatch：SLA profile API 案例
+
+本輪 fetch 後 base：`f2727a88e086d9b057324f0e6ce1de0aa11c3ce0`。rebase 的重複歷史 evidence 衝突核對後保留較完整版本，continue exit 0；merge 原遠端 ancestry exit 0，合併後 task 既有檔案與遠端內容一致。新增 SLA 測試 anchor／實跑 SHA：`5f25410a7f313ffca2d9b8650490b73058692d74`，普通 push exit 0；尚無鎖定 candidate。
+
+新增 `tests/e2e/system-remediation/sr-qa-tenant-001/sla.spec.ts`，追溯 C028、`phase1_service_contracts_v1.md` §3.2、目前 contracts 的 `UpdateTenantSlaProfileCommand` 及 tenant-partner controller/service/auth policy。正常案例 POST 三項門檻後，以 receipt 的 tenant resource ID 對照 GET profile 與 view；再部分更新 wait 門檻，回讀確認 arrival/completion 保留。負向案例驗唯讀 POST profile/recalculate 403、空白重算理由 400，回讀設定與 lastRecalculationAt 不變；B 租戶設定前後相同。使用既有六項 provisioner 配置與可拋棄租戶，未使用 fixture 或假身份。
+
+| 實際指令 | exit | 結果 |
+| --- | --- | --- |
+| `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001` | 1 | 4 task failed，均缺 DRTS_TENANT_UAT_API_URL；4 shared passed 不列為本 task 通過 |
+| `pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001/ --max-warnings=0` | 0 | 四個 spec lint 通過 |
+| `git diff --check` | 0 | 無空白錯誤 |
+
+讀取 `test-results/system-remediation-report.json` 四個 tenant evidence 附件，逐一確認 baseSha/testedSha 為上述版本，calls/resources 皆空；本輪零 HTTP 呼叫、無實際資源 ID。环境未配置任何 DRTS_TENANT_UAT 變數。SLA 非法門檻、訂單重算實際效果、audit/收信及 DB 重啟仍待驗，不能因 receipt 或 profile readback 案例已建立便宣稱能力完成。其他待完成矩陣維持；unit/API typecheck 本輪未重跑。仍需 provisioner 提供 API URL、可拋棄 A/B 租戶及 A/B 可寫和 A 唯讀 bearer；維持 in_progress，未 handoff。
