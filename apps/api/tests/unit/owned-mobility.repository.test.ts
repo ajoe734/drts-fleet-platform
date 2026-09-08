@@ -109,8 +109,14 @@ describe("OwnedMobilityRepository", () => {
       ["ops.phase1_owned_orders", { orderId: "order-complete-1" }],
     ]);
     const query = vi.fn(async (sql: string) => {
-      const entry = [...recordsByTable.entries()].find(([table]) =>
-        sql.includes(table),
+      const entry = [...recordsByTable.entries()].find(
+        ([table]) =>
+          sql.indexOf(table) ===
+          Math.min(
+            ...[...recordsByTable.keys()]
+              .map((name) => sql.indexOf(name))
+              .filter((index) => index >= 0),
+          ),
       );
       return { rows: entry ? [{ record: entry[1] }] : [] };
     });
@@ -132,6 +138,10 @@ describe("OwnedMobilityRepository", () => {
     });
 
     expect(query).toHaveBeenCalledTimes(4);
+    expect(query.mock.calls[0][0]).toContain(
+      "FROM ops.phase1_dispatch_assignments",
+    );
+    expect(query.mock.calls[1][0]).toContain("FROM ops.phase1_driver_tasks");
     for (const [sql] of query.mock.calls) {
       expect(sql).toContain("FOR UPDATE");
     }

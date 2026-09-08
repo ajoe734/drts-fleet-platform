@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { OwnedOrderRecord } from "@drts/contracts";
 
@@ -1844,4 +1844,113 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       await readActiveReservations(database, "vehicle", vehicleId),
     ).toHaveLength(0);
   });
+  it.each(["stale_trip", "write_failure"])(
+    "cancellation preserves live state on %s",
+    async (scenario) => {
+      expect(DATABASE_URL).toBeTruthy();
+      const database = new DatabaseService();
+      const staleDatabase = new DatabaseService();
+      databases.push(database, staleDatabase);
+      const driverId = `driver-cancel-${randomUUID()}`;
+      const vehicleId = `vehicle-cancel-${randomUUID()}`;
+      const candidates = [
+        {
+          driverId,
+          vehicleId,
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ];
+      const { service } = createTestService(database, candidates);
+      const { service: stale, ownedMobilityRepository: staleRepository } =
+        createTestService(staleDatabase, candidates);
+      const order = service.createPassengerOrder({
+        pickup: { address: "Taipei Main Station" },
+        dropoff: { address: "Taipei 101" },
+        passenger: { name: "Cancellation regression", phone: "0911001444" },
+      });
+      trackOrder(order.orderId);
+      const job = await service.dispatchOrder(order.orderId, { mode: "auto" });
+      const assignment = await service.assignDispatch({
+        dispatchJobId: job.dispatchJobId,
+        driverId,
+        vehicleId,
+      });
+      await stale.onModuleInit();
+      if (scenario === "stale_trip") {
+        const now = new Date().toISOString();
+        await service.acceptDriverTask(assignment.taskId, { acceptedAt: now });
+        await service.departDriverTask(assignment.taskId, { departedAt: now });
+        await service.arrivedPickup(assignment.taskId, { arrivedAt: now });
+        await service.startDriverTask(assignment.taskId, { startedAt: now });
+      }
+      const readState = async () => ({
+        order: (
+          await database.query(
+            `SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1`,
+            [order.orderId],
+          )
+        ).rows,
+        job: (
+          await database.query(
+            `SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1`,
+            [order.orderId],
+          )
+        ).rows,
+        task: (
+          await database.query(
+            `SELECT record FROM ops.phase1_driver_tasks WHERE order_id = $1`,
+            [order.orderId],
+          )
+        ).rows,
+        assignment: await readAssignmentStatus(
+          database,
+          assignment.assignmentId,
+        ),
+        driver: await readActiveReservations(database, "driver", driverId),
+        vehicle: await readActiveReservations(database, "vehicle", vehicleId),
+        traces: (
+          await database.query(
+            `SELECT record FROM ops.phase1_dispatch_trace_logs WHERE order_id = $1 ORDER BY record::text`,
+            [order.orderId],
+          )
+        ).rows,
+      });
+      const before = await readState();
+      const cachedTask = stale.getDriverTask(assignment.taskId);
+      // Fail after every cancellation write and both releases executed: the
+      // transaction must roll all of them back and keep the cache unchanged.
+      const original =
+        staleRepository.releaseDispatchResourceReservations.bind(
+          staleRepository,
+        );
+      const failure =
+        scenario === "write_failure"
+          ? vi
+              .spyOn(staleRepository, "releaseDispatchResourceReservations")
+              .mockImplementation(async (...args) => {
+                await original(...args);
+                throw new Error("injected cancellation persistence failure");
+              })
+          : null;
+      try {
+        await expect(
+          stale.cancelOwnedOrder(order.orderId, {
+            reason: "passenger_requested",
+          }),
+        ).rejects.toMatchObject(
+          scenario === "stale_trip"
+            ? { code: "ORDER_NOT_CANCELABLE" }
+            : { message: "injected cancellation persistence failure" },
+        );
+        expect(await readState()).toEqual(before);
+        expect(stale.getDriverTask(assignment.taskId)).toEqual(cachedTask);
+        expect(before.driver).toHaveLength(1);
+        expect(before.vehicle).toHaveLength(1);
+      } finally {
+        failure?.mockRestore();
+      }
+    },
+  );
 });
