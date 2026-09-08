@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import * as path from "node:path";
 import { test, expect } from "@playwright/test";
-import { UatEvidenceRecorder } from "../shared";
+import { UatEvidenceRecorder } from "../shared/evidence-recorder";
 
 // This runner verifies local services. It is not deployed API or DB acceptance.
 test("SR-QA-WEBHOOK-001: controlled HTTP service regression", async () => {

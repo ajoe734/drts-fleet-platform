@@ -1,57 +1,62 @@
 {
   "taskId": "SR-QA-WEBHOOK-001",
-  "runId": "uat-SR-QA-WEBHOOK-001-4ba1e880",
+  "runId": "uat-SR-QA-WEBHOOK-001-c57b8c4e",
   "shardIndex": 0,
-  "baseSha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
-  "candidateSha": "3be3d5f8dc0291544cec27b294d65e01a00eff75",
-  "headSha": "3be3d5f8dc0291544cec27b294d65e01a00eff75",
-  "startTime": "2026-09-08T11:20:10.333Z",
-  "endTime": "2026-09-08T11:20:14.628Z",
+  "baseSha": "3b60a3757238663572f16f010c94f446f2c71eaa",
+  "candidateSha": "f08c8bc94e491cf3c90c5c6f50331ab2d01b7574",
+  "headSha": "f08c8bc94e491cf3c90c5c6f50331ab2d01b7574",
+  "startTime": "2026-09-08T12:30:57.779Z",
+  "endTime": "2026-09-08T12:31:01.838Z",
   "status": "passed",
   "exitCode": 0,
-  "roles": [
-    "Tenant Admin (tenant_admin)",
-    "Platform Admin (platform_admin)"
-  ],
+  "roles": [],
   "trackedResources": [
     {
-      "type": "tenant",
-      "id": "c64e22db-105f-4906-aeba-ed6ffebd0c48",
+      "type": "webhook",
+      "id": "wh_2b008dfd-a3a0-47fc-b97f-d7c5c218c271",
       "metadata": {
-        "code": "TEN_A_S0_955F4386"
+        "tenantId": "tenant-demo-001"
       }
     },
     {
-      "type": "verification_suite",
-      "id": "sr-qa-webhook-001-real-service-lifecycle",
+      "type": "delivery",
+      "id": "wd_ea8af4e4-6955-4591-a358-6d70ec77a7f2",
       "metadata": {
-        "testCount": 23,
-        "execution": "vitest"
+        "webhookId": "wh_2b008dfd-a3a0-47fc-b97f-d7c5c218c271"
       }
     }
   ],
   "httpCalls": [],
   "consoleLogs": [
     {
-      "timestamp": "2026-09-08T11:20:14.628Z",
+      "timestamp": "2026-09-08T12:31:01.838Z",
       "level": "info",
-      "message": "Executed real TenantPartnerService/WebhookDispatchService lifecycle suite (23 cases): HTTP/HMAC, 2xx/5xx/timeout, disable, secret rotation and restart deduplication."
+      "message": "\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\nSR-QA-WEBHOOK-001 timeout resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_2b008dfd-a3a0-47fc-b97f-d7c5c218c271\",\"deliveryId\":\"wd_ea8af4e4-6955-4591-a358-6d70ec77a7f2\",\"transport\":\"real fetch with test-injected 100ms deadline\"}\n[Nest] 1110821  - 09/08/2026, 12:31:01 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (6b19c1ce-c92c-4729-a86c-fdfdccfb0fae)\n[Nest] 1110821  - 09/08/2026, 12:31:01 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (194ffc3e-b159-4192-a3fa-944e4a7073d3)\n\n Test Files  1 passed (1)\n      Tests  24 passed (24)\n   Start at  12:30:58\n   Duration  3.08s (transform 1.92s, setup 0ms, import 2.69s, tests 228ms, environment 0ms)\n\n"
+    },
+    {
+      "timestamp": "2026-09-08T12:31:01.838Z",
+      "level": "info",
+      "message": "Local in-memory service readback; timeout uses a test-injected fetch deadline. No deployed API or PostgreSQL acceptance."
     }
   ],
   "artifacts": [],
   "errors": [],
   "unimplementedLiveSurfaces": [
     {
-      "surface": "GATE-C113-ERP-SSO-BANK",
-      "reason": "Live enterprise ERP SSO (SAML 2.0 / Azure AD) and Bank Host-to-Host (H2H) leased lines are external gates requiring production corporate credentials; in-memory statement ledgers verified."
+      "surface": "C111-C112",
+      "reason": "Authenticated HTTP API, DB readback/restart deduplication, automatic retry worker and default transport timeout remain unverified."
     },
     {
-      "surface": "GATE-C114-GOOGLE-MAPS",
-      "reason": "Official Google Maps Platform API key and Taiwan quota credentials are an external gate; geocoding boundary fallback verified."
+      "surface": "C113",
+      "reason": "ERP/SSO/bank sandbox mapping, permissions, retransmission and reconciliation remain unverified; fixture ledger tests are local smoke only."
     },
     {
-      "surface": "LIMITATION-C115-CTI-CRON",
-      "reason": "Carrier voice telephony SIP trunk PBX hardware and Cloud Run persistent cron jobs are physical/infra limitations; recording lifecycle adapter callbacks verified."
+      "surface": "C114",
+      "reason": "Real geocoding/routes/ETA, quota failures and stale location remain unverified; MockGeoProvider is local smoke only."
+    },
+    {
+      "surface": "C115",
+      "reason": "Persistent scheduler deployment, backlog, restart and catch-up remain unverified; callback fixtures are local smoke only."
     }
   ]
 }
