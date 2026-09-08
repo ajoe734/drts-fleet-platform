@@ -1,5 +1,30 @@
 # SR-REPORT-001 — baseline and scope dependency
 
+## Dispatch verification — 2026-09-08 22:43 UTC
+
+- Fetched origin/dev base: `eb684f176b1d3b46553a0f6f0556c79452fbac3c`;
+  inspected/tested dispatched HEAD: `3c31968b9a8a0ad109ee432f8c5fae4c794ef44b`.
+- Parent still grants four original scopes and two dependencies. The merged
+  planning decision's parent resume gate remains unmet: supervisor must authorize
+  `packages/contracts/src/index.ts` and `tests/unit/reporting-filing.test.ts`,
+  record writer sequencing/dependencies and synchronize the task specification,
+  or deliver a coordinated producer. History repair does not grant these writes.
+- N05/C091, PRD 9.5.6/9.10.2 and execution shared-file rule 4 rechecked.
+  PDF/XLSX renderers remain null, implemented formats remain CSV-only, and
+  central tests require rejection. Reporting module and central test have no
+  differences between dispatched HEAD and fetched origin/dev.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1 at step 9/46
+  on an add/add conflict in this evidence file replaying `85b005b48`.
+  `git rebase --abort`: exit 0; published history preserved without another
+  rebase/merge cycle. This branch is not claimed rebased to current dev.
+- `pnpm exec vitest run tests/unit/reporting-filing.test.ts`: exit 0;
+  30 tests / 1 file passed in 2.61s. In-memory order event resource:
+  `23ad2209-765a-4343-a31a-e141654cf6b8`. This reproduces missing formats on
+  dispatched HEAD, not successful PDF/XLSX acceptance or a test on origin/dev.
+- No product/UI changes, live resources, browser/device checks, deployment,
+  typechecks or renderer parsing acceptance claimed. No implementation candidate
+  exists. This evidence anchor's ordinary-pushed SHA is recorded in machine truth.
+
 ## Dispatch verification — 2026-09-08 22:25 UTC
 
 - Owner/reviewer: Codex/Codex2. Fetched origin/dev:
