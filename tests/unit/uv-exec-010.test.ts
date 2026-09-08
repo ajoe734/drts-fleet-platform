@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  assertConfirmationCoverage,
+  type RecordedConfirmationReceipt,
+} from "../../apps/voice-media-worker/src/recording/confirmation-coverage";
 import { ImmutableRecordingManifests } from "../../apps/voice-media-worker/src/recording/immutable-manifest";
 import {
   SealedRecorder,
@@ -15,6 +19,157 @@ const scope = {
   recordingId: "rec",
   legId: "leg",
 };
+
+describe("UV-EXEC-010 confirmation audio coverage", () => {
+  async function proofFixture(method: "speech" | "dtmf" = "speech") {
+    const f = fixture();
+    const segments = await Promise.all([
+      f.recorder.seal("authenticated", f.input),
+      f.recorder.seal("authenticated", { ...f.input, channel: "outbound" }),
+    ]);
+    const manifests = new ImmutableRecordingManifests(f.store);
+    const ref = await manifests.seal({
+      schemaVersion: 1,
+      scope,
+      segments,
+      startMs: 0,
+      endMs: 1000,
+    });
+    const manifest = await manifests.read(scope, ref);
+    const binding = {
+      scope,
+      snapshotHash: "a".repeat(64),
+      readbackPlaybackId: "playback",
+      mediaEpoch: 1,
+    };
+    const timing = {
+      timingSource: "provider" as const,
+      timingPrecision: "bounded" as const,
+    };
+    const common = {
+      eventId: "confirmation",
+      readbackPlaybackId: binding.readbackPlaybackId,
+      snapshotHash: binding.snapshotHash,
+      mediaEpoch: 1,
+      sequence: 11,
+    };
+    const receipt: RecordedConfirmationReceipt = {
+      ...binding,
+      disclosure: { ...timing, startMs: 0, endMs: 100 },
+      corrections: [{ ...timing, startMs: 100, endMs: 200 }],
+      readback: {
+        ...timing,
+        startMs: 200,
+        endMs: 700,
+        completedEventId: "complete",
+        outcome: "completed",
+        completionSource: "provider_playback",
+        sequence: 10,
+      },
+      confirmation:
+        method === "speech"
+          ? {
+              ...common,
+              method,
+              affirmation: { ...timing, startMs: 700, endMs: 900 },
+            }
+          : {
+              ...common,
+              method,
+              digit: "1",
+              expectedDigit: "1",
+              timingSource: "provider",
+              timingPrecision: "event_order",
+            },
+    };
+    return { ...f, manifest, receipt, binding };
+  }
+
+  it.each(["speech", "dtmf"] as const)(
+    "accepts recorded %s proof without inventing tone offsets",
+    async (method) => {
+      const f = await proofFixture(method);
+      expect(() =>
+        assertConfirmationCoverage(f.manifest, f.receipt, f.binding),
+      ).not.toThrow();
+      if (method === "dtmf")
+        expect(f.receipt.confirmation).not.toHaveProperty("affirmation");
+    },
+  );
+
+  it.each([
+    "missing",
+    "cleared",
+    "unknown",
+    "local_send",
+    "scope",
+    "snapshot",
+    "playback",
+    "epoch",
+    "order",
+    "missing_audio",
+    "outside_manifest",
+    "late_correction",
+    "early_speech",
+  ])("rejects %s evidence", async (failure) => {
+    const f = await proofFixture();
+    const { receipt, binding } = f;
+    let manifest = f.manifest;
+    if (failure === "cleared" || failure === "unknown")
+      receipt.readback.outcome = failure;
+    if (failure === "local_send")
+      receipt.readback.completionSource = "local_send";
+    if (failure === "scope") receipt.scope = { ...scope, legId: "other" };
+    if (failure === "snapshot")
+      receipt.confirmation.snapshotHash = "b".repeat(64);
+    if (failure === "playback")
+      receipt.confirmation.readbackPlaybackId = "other";
+    if (failure === "epoch") receipt.confirmation.mediaEpoch = 2;
+    if (failure === "order")
+      receipt.confirmation.sequence = receipt.readback.sequence;
+    if (failure === "missing_audio")
+      manifest = {
+        ...manifest,
+        segments: manifest.segments.filter((s) => s.channel === "inbound"),
+      };
+    if (failure === "outside_manifest") manifest = { ...manifest, endMs: 800 };
+    if (failure === "late_correction")
+      receipt.corrections = [
+        { ...receipt.disclosure, startMs: 400, endMs: 500 },
+      ];
+    if (failure === "early_speech" && receipt.confirmation.method === "speech")
+      receipt.confirmation.affirmation.startMs = 600;
+    expect(() =>
+      assertConfirmationCoverage(
+        manifest,
+        failure === "missing" ? null : receipt,
+        binding,
+      ),
+    ).toThrow();
+  });
+
+  it("rejects a digit that does not match its recorded prompt", async () => {
+    const f = await proofFixture("dtmf");
+    if (f.receipt.confirmation.method === "dtmf")
+      f.receipt.confirmation.digit = "2";
+    expect(() =>
+      assertConfirmationCoverage(f.manifest, f.receipt, f.binding),
+    ).toThrow("Untrusted DTMF");
+  });
+
+  it("does not claim exact timing from local utterance estimates", async () => {
+    const f = await proofFixture();
+    f.receipt.readback.timingSource = "local_utterance";
+    f.receipt.readback.timingPrecision = "exact";
+    expect(() =>
+      assertConfirmationCoverage(f.manifest, f.receipt, f.binding),
+    ).toThrow("timing precision");
+    f.receipt.readback.timingPrecision = "bounded";
+    expect(() =>
+      assertConfirmationCoverage(f.manifest, f.receipt, f.binding),
+    ).not.toThrow();
+  });
+});
 function fixture() {
   const objects = new Map<string, Uint8Array>();
   const store: RecorderObjectStore = {

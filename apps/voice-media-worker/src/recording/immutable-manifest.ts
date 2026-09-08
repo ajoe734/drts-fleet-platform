@@ -7,6 +7,10 @@ import {
   type RecorderSegment,
   type RecordingScope,
 } from "./sealed-recorder";
+import {
+  assertConfirmationCoverage,
+  type RecordedConfirmationReceipt,
+} from "./confirmation-coverage";
 
 export interface RecordingManifest {
   schemaVersion: 1;
@@ -14,6 +18,8 @@ export interface RecordingManifest {
   startMs: number;
   endMs: number;
   segments: readonly RecorderSegment[];
+  /** Present only after resolving the receipt through a trusted event ledger. */
+  confirmationReceipt?: RecordedConfirmationReceipt;
 }
 
 export interface RecordingManifestRef {
@@ -129,6 +135,13 @@ export class ImmutableRecordingManifests {
     );
     for (const segment of manifest.segments)
       await verifyRecordedObject(this.store, manifest.scope, segment);
+    if (manifest.confirmationReceipt) {
+      assertConfirmationCoverage(
+        manifest,
+        manifest.confirmationReceipt,
+        manifest.confirmationReceipt,
+      );
+    }
   }
 }
 
@@ -140,6 +153,33 @@ function snapshot(input: RecordingManifest): Readonly<RecordingManifest> {
     endMs: input.endMs,
     segments: Object.freeze(
       input.segments.map((segment) => Object.freeze({ ...segment })),
+    ),
+    ...(input.confirmationReceipt
+      ? {
+          confirmationReceipt: freezeReceipt(input.confirmationReceipt),
+        }
+      : {}),
+  });
+}
+
+function freezeReceipt(
+  input: RecordedConfirmationReceipt,
+): RecordedConfirmationReceipt {
+  return Object.freeze({
+    ...input,
+    scope: Object.freeze({ ...input.scope }),
+    disclosure: Object.freeze({ ...input.disclosure }),
+    corrections: Object.freeze(
+      input.corrections.map((window) => Object.freeze({ ...window })),
+    ),
+    readback: Object.freeze({ ...input.readback }),
+    confirmation: Object.freeze(
+      input.confirmation.method === "speech"
+        ? {
+            ...input.confirmation,
+            affirmation: Object.freeze({ ...input.confirmation.affirmation }),
+          }
+        : { ...input.confirmation },
     ),
   });
 }

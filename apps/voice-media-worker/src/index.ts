@@ -5,3 +5,4 @@ export * from "./media/output-fence";
 export * from "./recording/sealed-recorder";
 export * from "./recording/immutable-manifest";
 export * from "./recording/confirmation-coverage";
+export * from "./recording/confirmed-manifest";
