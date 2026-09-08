@@ -120,7 +120,7 @@ produce orders in `OwnedMobilityService`; each uses `dispatchOrder` then
 on separate service instances and separate PostgreSQL pools. Multi-taxi
 `MultiTaxiService` calls `createMultiTaxiRide`, including scheduled rides;
 enterprise and scheduled orders use the same assignment writer when they
-are dispatched. Queue retry (`resolveNoSupply` / `redispatchOrder`) creates
+are dispatched. Queue retry (`resolveNoSupplyOrder` / `redispatchOrder`) creates
 a matching job via `dispatchOrder`, without assigning capacity itself.
 The inventory describes current writers, not delivery of the separate
 unattended executor.
@@ -144,3 +144,12 @@ valid reject/cancel/target timeout, and held-to-occupied transitions.
 The test uses an isolated `uv_exec_006_codex` database with migrations
 through V0091. API typecheck is run with `pnpm --filter @drts/api typecheck`.
 Review, CI, merge and external acceptance remain candidate lifecycle gates.
+
+Local results on 2026-09-08: PostgreSQL suite **21/21 passed** at 15:19 UTC;
+API typecheck passed. Related API unit suites (`owned-mobility.service`,
+`owned-mobility.repository`, `owned-mobility.controller`,
+`owned-mobility-durable-sinks`, `multi-taxi.service`) **177/177 passed**.
+The targeted timeout assertion was corrected to the persisted `cancelled`
+terminal status; timeout is not a driver rejection. The earlier attempt
+from repository root selected no tests; the successful run used `apps/api`.
+These are local implementation checks, not external acceptance results.
