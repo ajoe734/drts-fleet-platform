@@ -1,5 +1,14 @@
 # SR-BANK-002 — 銀行角色金額／PII／匯出一致隔離
 
+## 2026-09-08T18:03Z dispatch 重驗
+
+- Base `origin/dev` 仍為 `fa0fd8257950764526a522d091be9d97effa82b9`；受測 checkpoint `a8f62274abc6ef5c1ac411da6dbb0dd80818a6ce` 與遠端 task branch 相同。Candidate 尚未建立。
+- `git rebase origin/dev`：exit 1，仍在 `dbec26678` 重複 patch 的六個 task 檔衝突；`git rebase --abort`：exit 0。首次測試與 rebase 重疊而讀到衝突標記（Vitest exit 1、typecheck exit 2），不作產品驗證證據；abort 後在乾淨 checkpoint 完整重跑如下。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`：exit 1，49 passed／5 failed，仍為下列五項 canonical IAM／loader fallback 缺陷。Contoso `tenant-contoso-001` CSV 仍含 `STM-ACME-202606`。`pnpm --filter @drts/bank-console-web typecheck`：exit 0。`git diff --check`：exit 0。
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`：exit 0，缺陷來源與本次 base 一致。
+- Helper #1734 的 done 僅證明 history repair 文件合併；文件要求 replacement branch，明列產品 blocker 未修。最新 task slice 仍指定原 branch、原 scopes、原兩項 dependencies。需 supervisor 更新 delivery branch，授權 loader scope 並記錄重疊 writer 相依，以及安排 canonical IAM producer；反覆將 parent 改回 todo 無法消除這些阻礙。
+- 本次只新增重驗證據，未修改產品、未執行 live／真機／CI／merge 驗收。沿用下文 synthetic 資源與限制，不能 handoff 或宣稱隔離完成。
+
 ## 2026-09-08T17:56Z resumed dispatch（最新）
 
 - Fetch 的最新 base `origin/dev`：`fa0fd8257950764526a522d091be9d97effa82b9`；受測 branch checkpoint：`3b316d27c45d28af7b186cd02241880a9fa411e8`，不是 candidate。
