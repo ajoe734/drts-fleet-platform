@@ -7,7 +7,7 @@ function buildRecord(overrides: Partial<Record<string, unknown>> = {}) {
     handoffId: "ref_handoff_001",
     artifactHash: "hash-001",
     entrySlug: "yuhe-residence",
-    entryHost: "app.yuhe-living.com.tw",
+    entryHost: "app.fabrikam-living.example",
     partnerUserRef: "resident-001",
     drtsPassengerId: "passenger_001",
     tenantId: "tenant-demo-001",
@@ -43,7 +43,7 @@ describe("ReferralEmbedHandoffRepository", () => {
     const result = await repository.consume({
       artifact: "opaque-artifact",
       entrySlug: "yuhe-residence",
-      entryHost: "app.yuhe-living.com.tw",
+      entryHost: "app.fabrikam-living.example",
     });
 
     expect(result).toMatchObject({
@@ -51,7 +51,7 @@ describe("ReferralEmbedHandoffRepository", () => {
       session: {
         handoffId: "ref_handoff_001",
         partnerEntrySlug: "yuhe-residence",
-        entryHost: "app.yuhe-living.com.tw",
+        entryHost: "app.fabrikam-living.example",
         identityActive: false,
       },
     });
@@ -84,7 +84,7 @@ describe("ReferralEmbedHandoffRepository", () => {
       repository.consume({
         artifact: "opaque-artifact",
         entrySlug: "yuhe-residence",
-        entryHost: "app.yuhe-living.com.tw",
+        entryHost: "app.fabrikam-living.example",
       }),
     ).resolves.toEqual({ outcome: "replayed" });
   });
@@ -113,7 +113,7 @@ describe("ReferralEmbedHandoffRepository", () => {
       repository.consume({
         artifact: "opaque-artifact",
         entrySlug: "yuhe-residence",
-        entryHost: "app.yuhe-living.com.tw",
+        entryHost: "app.fabrikam-living.example",
       }),
     ).resolves.toEqual({ outcome: "expired" });
   });
@@ -128,7 +128,7 @@ describe("ReferralEmbedHandoffRepository", () => {
       }
       if (sql.includes("WHERE artifact_hash = $1")) {
         return {
-          rows: [{ record: buildRecord({ entryHost: "app.yuhe-living.com.tw" }) }],
+          rows: [{ record: buildRecord({ entryHost: "app.fabrikam-living.example" }) }],
         };
       }
       return { rows: [] };

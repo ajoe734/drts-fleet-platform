@@ -36,6 +36,44 @@ export type OwnedMobilityQueryExecutor = {
   ): Promise<QueryResult<T>>;
 };
 
+/**
+ * Thrown when a compare-and-swap write against `ops.phase1_owned_orders`
+ * does not match the caller's `expectedVersion` (SD §7.5: "voice aggregate
+ * 以 DB row 與單調 aggregateVersion 為權威"). Covers both a genuinely stale
+ * snapshot (someone else committed in between) and the order simply not
+ * existing -- callers that need to tell those apart should re-read the row.
+ */
+export class OwnedOrderVersionConflictError extends Error {
+  constructor(
+    public readonly orderId: string,
+    public readonly expectedVersion: number,
+  ) {
+    super(
+      `Owned order ${orderId} was not at expected aggregate version ${expectedVersion} (stale snapshot or missing row).`,
+    );
+    this.name = "OwnedOrderVersionConflictError";
+  }
+}
+
+/**
+ * Thrown when creating a voice-linked order collides with an existing
+ * `voice_intent_id` or `call_id` (SD §7.2/§7.5 unique constraints on
+ * `ops.phase1_owned_orders`). Distinguishes "another writer already handled
+ * this exact intent/call" from a generic DB error.
+ */
+export class OwnedOrderDuplicateVoiceLinkError extends Error {
+  constructor(
+    public readonly orderId: string,
+    cause: unknown,
+  ) {
+    super(
+      `Owned order ${orderId} conflicts with an existing voice_intent_id or call_id.`,
+    );
+    this.name = "OwnedOrderDuplicateVoiceLinkError";
+    this.cause = cause;
+  }
+}
+
 export type DriverCompletionOutboxEffectType =
   | "tenant_order_completed_webhook"
   | "owned_mobility_trip_completed"
@@ -342,6 +380,13 @@ export class OwnedMobilityRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
+      // SD §7.1/§7.5: "transaction 內無網路或長運算...DB transaction 設
+      // lock／statement deadline". Every owned-mobility transaction only ever
+      // does row locks and short reads/writes against Postgres itself, so a
+      // stuck lock or a runaway statement is always a bug, never expected
+      // load -- fail fast instead of holding row locks indefinitely.
+      await client.query("SET LOCAL lock_timeout = '3s'");
+      await client.query("SET LOCAL statement_timeout = '8s'");
       const result = await work(client);
       await client.query("COMMIT");
       return result;
@@ -368,6 +413,176 @@ export class OwnedMobilityRepository {
     changes: PersistOwnedMobilityChanges,
   ) {
     await this.persistChangesWithExecutor(executor, changes);
+  }
+
+  /**
+   * Locks and returns the current authoritative row for CAS-protected order
+   * mutations (SD §7.1 fixed lock order: "...→ order" is the last lock taken
+   * before commit). Must be called inside a transaction opened by
+   * `withTransaction`; the `FOR UPDATE` lock is held until that transaction
+   * commits or rolls back.
+   */
+  async findOrderForUpdate(
+    executor: OwnedMobilityQueryExecutor,
+    orderId: string,
+  ): Promise<{ order: OwnedOrderRecord; aggregateVersion: number } | null> {
+    const result = await executor.query<
+      JsonRecordRow & { aggregate_version: number }
+    >(
+      `
+        SELECT record, aggregate_version
+        FROM ops.phase1_owned_orders
+        WHERE order_id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+    const order = this.parseRecord<OwnedOrderRecord>(
+      row.record,
+      "ops.phase1_owned_orders",
+    );
+    return {
+      order: { ...order, aggregateVersion: row.aggregate_version },
+      aggregateVersion: row.aggregate_version,
+    };
+  }
+
+  /**
+   * Inserts a brand-new order row for the pure-prepare voice command path.
+   * Unlike `persistOrderWorkflow`'s blind `ON CONFLICT ... DO UPDATE` upsert
+   * (used by legacy fire-and-forget writers), this never overwrites an
+   * existing `order_id` -- a collision there, or on the partial unique
+   * `voice_intent_id`/`call_id` indexes from V0088, means another writer
+   * already handled this exact intent and this call must not clobber it.
+   */
+  async insertVoiceOrder(
+    executor: OwnedMobilityQueryExecutor,
+    order: OwnedOrderRecord,
+  ): Promise<number> {
+    const record = { ...order, aggregateVersion: order.aggregateVersion ?? 1 };
+    try {
+      const result = await executor.query<{ aggregate_version: number }>(
+        `
+          INSERT INTO ops.phase1_owned_orders (
+            order_id,
+            order_no,
+            status,
+            order_source,
+            service_bucket,
+            dispatch_semantics,
+            runtime_profile_code,
+            service_product_code,
+            acquisition_mode,
+            timing_mode,
+            operating_authorization_id,
+            queue_mode,
+            created_at,
+            updated_at,
+            record
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+            $13, $14, $15::jsonb
+          )
+          ON CONFLICT (order_id) DO NOTHING
+          RETURNING aggregate_version
+        `,
+        [
+          record.orderId,
+          record.orderNo,
+          record.status,
+          record.orderSource,
+          record.serviceBucket,
+          record.dispatchSemantics,
+          record.runtimeProfileCode ?? null,
+          record.serviceProductCode ?? null,
+          record.acquisitionMode ?? null,
+          record.timingMode ?? null,
+          record.operatingAuthorizationId ?? null,
+          record.queueMode ?? null,
+          record.createdAt,
+          record.updatedAt,
+          JSON.stringify(record),
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) {
+        throw new OwnedOrderVersionConflictError(record.orderId, 0);
+      }
+      return row.aggregate_version;
+    } catch (error) {
+      if ((error as { code?: string })?.code === "23505") {
+        throw new OwnedOrderDuplicateVoiceLinkError(record.orderId, error);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Compare-and-swap update of an existing order row. Fails closed
+   * (`OwnedOrderVersionConflictError`) when `expectedVersion` no longer
+   * matches the stored `aggregate_version` -- either the row does not exist
+   * or someone else committed a newer snapshot first (SD §7.5: two instances
+   * writing the same stale snapshot must have one of them rejected). Callers
+   * must have obtained `expectedVersion` from `findOrderForUpdate` in the
+   * same transaction so the row lock and the version check agree.
+   */
+  async updateOrderWithCas(
+    executor: OwnedMobilityQueryExecutor,
+    order: OwnedOrderRecord,
+    expectedVersion: number,
+  ): Promise<number> {
+    const record = {
+      ...order,
+      aggregateVersion: expectedVersion + 1,
+    };
+    const result = await executor.query<{ aggregate_version: number }>(
+      `
+        UPDATE ops.phase1_owned_orders SET
+          order_no = $2,
+          status = $3,
+          order_source = $4,
+          service_bucket = $5,
+          dispatch_semantics = $6,
+          runtime_profile_code = $7,
+          service_product_code = $8,
+          acquisition_mode = $9,
+          timing_mode = $10,
+          operating_authorization_id = $11,
+          queue_mode = $12,
+          updated_at = $13,
+          record = $14::jsonb
+        WHERE order_id = $1
+          AND aggregate_version = $15
+        RETURNING aggregate_version
+      `,
+      [
+        record.orderId,
+        record.orderNo,
+        record.status,
+        record.orderSource,
+        record.serviceBucket,
+        record.dispatchSemantics,
+        record.runtimeProfileCode ?? null,
+        record.serviceProductCode ?? null,
+        record.acquisitionMode ?? null,
+        record.timingMode ?? null,
+        record.operatingAuthorizationId ?? null,
+        record.queueMode ?? null,
+        record.updatedAt,
+        JSON.stringify(record),
+        expectedVersion,
+      ],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      throw new OwnedOrderVersionConflictError(record.orderId, expectedVersion);
+    }
+    return row.aggregate_version;
   }
 
   async isActiveMultiTaxiAuthorizedVehicle(

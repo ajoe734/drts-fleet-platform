@@ -66,7 +66,16 @@ export interface ServerReferralPartnerClient {
 
 export async function getServerReferralPartnerClient(): Promise<ServerReferralPartnerClient> {
   const apiUrl = resolveServerApiBaseUrl();
-  const requestHeaders = await nextHeaders();
+  // Server components have request headers; direct data-layer verification does
+  // not. The referral bootstrap headers below remain authoritative in either
+  // case, while an absent request scope simply means IAP/request IDs cannot be
+  // forwarded.
+  let requestHeaders: Headers;
+  try {
+    requestHeaders = await nextHeaders();
+  } catch {
+    requestHeaders = new Headers();
+  }
   const { defaultHeaders, partnerId, partnerEntrySlug, requestEvidence } =
     buildReferralPortalBootstrapContext();
 

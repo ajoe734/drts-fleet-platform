@@ -423,7 +423,9 @@ export default function FleetPartnersPage() {
         {loading ? (
           <div>{t("fleetPartners.loading")}</div>
         ) : filteredPartners.length === 0 ? (
-          <div>{t("fleetPartners.empty")}</div>
+          error ? null : (
+            <div>{t("fleetPartners.empty")}</div>
+          )
         ) : (
           <CanvasTable
             columns={columns}

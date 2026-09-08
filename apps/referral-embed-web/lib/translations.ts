@@ -1455,7 +1455,7 @@ const zh: Record<keyof typeof en, string> = {
   "embed.book.subtitle": "{name} · {unit}",
   "embed.book.identity": "已綁定 referral handoff session：{id}",
   "embed.book.now": "現在出發",
-  "embed.book.pickup": "御和雲峰 A 棟 1F 大廳",
+  "embed.book.pickup": "法碧康雲峰 A 棟 1F 大廳",
   "embed.book.dropoff": "台北榮民總醫院 · 門診大樓",
   "embed.book.negative.nosupply": "無供給",
   "embed.book.negative.ineligible": "資格不符",

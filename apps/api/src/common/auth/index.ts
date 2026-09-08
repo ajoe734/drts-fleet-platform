@@ -14,3 +14,5 @@ export * from "./jwt-auth.service";
 export * from "./signing-key-ring";
 export * from "./step-up.policy";
 export * from "./step-up-proof.service";
+export * from "./voice-capability.service";
+export * from "./voice-capability.guard";

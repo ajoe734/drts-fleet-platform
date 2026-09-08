@@ -1,13 +1,13 @@
 import type { AccentRamp, TokenMode } from "./colors";
 
 export type PartnerBrandCode =
-  | "CTBC"
-  | "CATHAY"
-  | "TAISHIN"
-  | "DBS"
-  | "GRAND"
-  | "FUBON"
-  | "LION";
+  | "ACME"
+  | "CONTOSO"
+  | "FABRIKAM"
+  | "NORTHWIND"
+  | "WINGTIP"
+  | "TAILSPIN"
+  | "ADVENTURE";
 
 export interface PartnerBrandHotline {
   readonly label: string;
@@ -153,7 +153,7 @@ function createPartnerBrandTemplate(
 }
 
 export const PARTNER_BRAND_TOKENS = {
-  CTBC: {
+  ACME: {
     light: createMode(
       "#13478F",
       "#0B2D5C",
@@ -197,7 +197,7 @@ export const PARTNER_BRAND_TOKENS = {
       },
     ),
   },
-  CATHAY: {
+  CONTOSO: {
     light: createMode(
       "#0F5132",
       "#0A3621",
@@ -241,7 +241,7 @@ export const PARTNER_BRAND_TOKENS = {
       },
     ),
   },
-  TAISHIN: {
+  FABRIKAM: {
     light: createMode(
       "#B0335F",
       "#7C2241",
@@ -285,7 +285,7 @@ export const PARTNER_BRAND_TOKENS = {
       },
     ),
   },
-  DBS: {
+  NORTHWIND: {
     light: createMode(
       "#D72631",
       "#9B1B22",
@@ -329,7 +329,7 @@ export const PARTNER_BRAND_TOKENS = {
       },
     ),
   },
-  GRAND: {
+  WINGTIP: {
     light: createMode(
       "#7C2D12",
       "#4A1908",
@@ -373,7 +373,7 @@ export const PARTNER_BRAND_TOKENS = {
       },
     ),
   },
-  FUBON: {
+  TAILSPIN: {
     light: createMode(
       "#0E6E50",
       "#063D2C",
@@ -417,7 +417,7 @@ export const PARTNER_BRAND_TOKENS = {
       },
     ),
   },
-  LION: {
+  ADVENTURE: {
     light: createMode(
       "#B0420E",
       "#6E2806",
@@ -467,25 +467,25 @@ export const PARTNER_BRAND_TOKENS = {
 >;
 
 export const BRAND_TEMPLATES = {
-  CTBC: createPartnerBrandTemplate({
-    code: "CTBC",
-    slug: "ctbc",
-    displayName: "CTBC World Elite",
-    bankName: "中信銀行",
-    programName: "World Elite",
-    tenantCode: "CTBC_BIZ",
-    host: "ride.ctbc.com.tw",
+  ACME: createPartnerBrandTemplate({
+    code: "ACME",
+    slug: "acme",
+    displayName: "ACME Elite Demo",
+    bankName: "艾克米銀行",
+    programName: "Elite Demo",
+    tenantCode: "ACME_BIZ",
+    host: "ride.acme.example",
     tagline: "卡友禮賓接送 · 行動銀行內嵌 · 7 步驟漏斗",
-    tokens: PARTNER_BRAND_TOKENS.CTBC,
+    tokens: PARTNER_BRAND_TOKENS.ACME,
     hotline: {
       label: "24 小時禮賓專線",
-      phone: "0800-024-365",
-      note: "您將被轉接至中信銀行 World Elite 客服專員",
+      phone: "0800-000-101",
+      note: "您將被轉接至艾克米銀行 Elite Demo 客服專員",
     },
     cardArt: {
-      issuerLabel: "CTBC · 中信銀行",
-      programLabel: "World Elite",
-      networkLabel: "VISA",
+      issuerLabel: "ACME · 艾克米銀行",
+      programLabel: "Elite Demo",
+      networkLabel: "DEMO",
       lastFour: "8842",
       badgeText: "C",
       badgeBackground: "#A8771B",
@@ -494,25 +494,25 @@ export const BRAND_TEMPLATES = {
       gradientTo: "#13478F",
     },
   }),
-  CATHAY: createPartnerBrandTemplate({
-    code: "CATHAY",
-    slug: "cathay",
-    displayName: "Cathay CUBE World",
-    bankName: "國泰世華銀行",
-    programName: "CUBE 世界卡",
-    tenantCode: "CATHAY_CARD",
-    host: "ride.cathaybk.com.tw",
-    tagline: "CUBE 世界卡機場接送 · white-label booking demo",
-    tokens: PARTNER_BRAND_TOKENS.CATHAY,
+  CONTOSO: createPartnerBrandTemplate({
+    code: "CONTOSO",
+    slug: "contoso",
+    displayName: "Contoso Prism World",
+    bankName: "康拓索銀行銀行",
+    programName: "Prism 世界卡",
+    tenantCode: "CONTOSO_CARD",
+    host: "ride.contoso.example",
+    tagline: "Prism 世界卡機場接送 · white-label booking demo",
+    tokens: PARTNER_BRAND_TOKENS.CONTOSO,
     hotline: {
       label: "信用卡服務專線",
-      phone: "0800-818-001",
-      note: "您將被轉接至國泰世華 CUBE 世界卡客服專員。",
+      phone: "0800-000-102",
+      note: "您將被轉接至康拓索銀行 Prism 世界卡客服專員。",
     },
     cardArt: {
-      issuerLabel: "Cathay · 國泰世華",
-      programLabel: "CUBE 世界卡",
-      networkLabel: "World Card",
+      issuerLabel: "Contoso · 康拓索銀行",
+      programLabel: "Prism 世界卡",
+      networkLabel: "Demo Network",
       lastFour: "6071",
       badgeText: "C",
       badgeBackground: "#B7C98B",
@@ -521,25 +521,25 @@ export const BRAND_TEMPLATES = {
       gradientTo: "#0F5132",
     },
   }),
-  TAISHIN: createPartnerBrandTemplate({
-    code: "TAISHIN",
-    slug: "taishin",
-    displayName: "Taishin Infinite",
-    bankName: "台新銀行",
-    programName: "太陽無限卡",
-    tenantCode: "TAISHIN_CARD",
-    host: "ride.taishinbank.com.tw",
-    tagline: "太陽無限卡機場接送 · white-label booking demo",
-    tokens: PARTNER_BRAND_TOKENS.TAISHIN,
+  FABRIKAM: createPartnerBrandTemplate({
+    code: "FABRIKAM",
+    slug: "fabrikam",
+    displayName: "Fabrikam Signature",
+    bankName: "法碧康銀行",
+    programName: "星軌無限卡",
+    tenantCode: "FABRIKAM_CARD",
+    host: "ride.fabrikam.example",
+    tagline: "星軌無限卡機場接送 · white-label booking demo",
+    tokens: PARTNER_BRAND_TOKENS.FABRIKAM,
     hotline: {
       label: "尊榮信用卡專線",
-      phone: "0800-023-123",
-      note: "您將被轉接至台新銀行太陽無限卡客服專員。",
+      phone: "0800-000-103",
+      note: "您將被轉接至法碧康銀行星軌無限卡客服專員。",
     },
     cardArt: {
-      issuerLabel: "Taishin · 台新銀行",
-      programLabel: "太陽無限卡",
-      networkLabel: "Infinite",
+      issuerLabel: "Fabrikam · 法碧康銀行",
+      programLabel: "星軌無限卡",
+      networkLabel: "Signature",
       lastFour: "3308",
       badgeText: "新",
       badgeBackground: "#C7A06A",
@@ -548,50 +548,50 @@ export const BRAND_TEMPLATES = {
       gradientTo: "#B0335F",
     },
   }),
-  DBS: createPartnerBrandTemplate({
-    code: "DBS",
-    slug: "dbs",
-    displayName: "DBS Insignia",
-    bankName: "星展銀行",
-    programName: "DBS Insignia 御璽卡",
-    tenantCode: "DBS_CARD",
-    host: "ride.dbs.com.tw",
-    tagline: "DBS Insignia 機場接送 · white-label booking demo",
-    tokens: PARTNER_BRAND_TOKENS.DBS,
+  NORTHWIND: createPartnerBrandTemplate({
+    code: "NORTHWIND",
+    slug: "northwind",
+    displayName: "Northwind Signature",
+    bankName: "北風銀行",
+    programName: "Northwind Signature 尊榮卡",
+    tenantCode: "NORTHWIND_CARD",
+    host: "ride.northwind.example",
+    tagline: "Northwind Signature 機場接送 · white-label booking demo",
+    tokens: PARTNER_BRAND_TOKENS.NORTHWIND,
     hotline: {
-      label: "DBS 禮賓服務專線",
+      label: "NORTHWIND 禮賓服務專線",
       phone: "0800-808-889",
-      note: "您將被轉接至星展銀行 Insignia 禮賓客服專員。",
+      note: "您將被轉接至北風銀行 Signature 禮賓客服專員。",
     },
     cardArt: {
-      issuerLabel: "DBS · 星展銀行",
-      programLabel: "DBS Insignia",
-      networkLabel: "Insignia",
+      issuerLabel: "NORTHWIND · 北風銀行",
+      programLabel: "Northwind Signature",
+      networkLabel: "Signature",
       lastFour: "1205",
-      badgeText: "DBS",
+      badgeText: "NORTHWIND",
       badgeBackground: "#D72631",
       badgeForeground: "#FFFFFF",
       gradientFrom: "#9B1B22",
       gradientTo: "#D72631",
     },
   }),
-  GRAND: createPartnerBrandTemplate({
-    code: "GRAND",
+  WINGTIP: createPartnerBrandTemplate({
+    code: "WINGTIP",
     slug: "grand",
-    displayName: "Grand Concierge",
-    bankName: "凱撒飯店",
+    displayName: "Wingtip Concierge",
+    bankName: "翼尖飯店",
     programName: "Concierge",
     tenantCode: "TPE_HOTEL_GRP",
-    host: "ride.grand-hotels.tw",
+    host: "ride.wingtip.example",
     tagline: "飯店禮賓接送 · concierge token demo",
-    tokens: PARTNER_BRAND_TOKENS.GRAND,
+    tokens: PARTNER_BRAND_TOKENS.WINGTIP,
     hotline: {
       label: "Concierge Desk",
-      phone: "02-7701-9000",
+      phone: "02-0000-0106",
       note: "示範品牌 metadata；實際飯店櫃台專線待 cutover policy 決定。",
     },
     cardArt: {
-      issuerLabel: "Grand Hotels",
+      issuerLabel: "Wingtip Hotels",
       programLabel: "Concierge Access",
       networkLabel: "Hospitality",
       lastFour: "3208",
@@ -602,23 +602,23 @@ export const BRAND_TEMPLATES = {
       gradientTo: "#7C2D12",
     },
   }),
-  FUBON: createPartnerBrandTemplate({
-    code: "FUBON",
-    slug: "fubon",
-    displayName: "Fubon Claim Mobility",
-    bankName: "富邦產險",
+  TAILSPIN: createPartnerBrandTemplate({
+    code: "TAILSPIN",
+    slug: "tailspin",
+    displayName: "Tailspin Claim Mobility",
+    bankName: "泰思賓產險",
     programName: "理賠代步",
-    tenantCode: "FUBON_CLAIM",
-    host: "claim.fubon-ins.com.tw",
+    tenantCode: "TAILSPIN_CLAIM",
+    host: "claim.tailspin.example",
     tagline: "保險理賠代步 · claim-driven allowance funnel",
-    tokens: PARTNER_BRAND_TOKENS.FUBON,
+    tokens: PARTNER_BRAND_TOKENS.TAILSPIN,
     hotline: {
       label: "理賠代步服務專線",
-      phone: "0800-073-588",
-      note: "您將被轉接至富邦產險理賠代步服務專員。",
+      phone: "0800-000-104",
+      note: "您將被轉接至泰思賓產險理賠代步服務專員。",
     },
     cardArt: {
-      issuerLabel: "Fubon · 富邦產險",
+      issuerLabel: "Tailspin · 泰思賓產險",
       programLabel: "理賠代步",
       networkLabel: "Insurance",
       lastFour: "8814",
@@ -629,23 +629,23 @@ export const BRAND_TEMPLATES = {
       gradientTo: "#0E6E50",
     },
   }),
-  LION: createPartnerBrandTemplate({
-    code: "LION",
-    slug: "lion",
-    displayName: "Lion Group Transfer",
-    bankName: "雄獅旅遊",
+  ADVENTURE: createPartnerBrandTemplate({
+    code: "ADVENTURE",
+    slug: "adventureworks",
+    displayName: "Adventure Works Transfer",
+    bankName: "探索旅遊",
     programName: "團體接送",
-    tenantCode: "LION_TRAVEL",
-    host: "booking.lion-travel.com.tw",
+    tenantCode: "ADVENTURE_WORKS",
+    host: "booking.adventure-works.example",
     tagline: "旅行社團體接送 · roster / batching funnel",
-    tokens: PARTNER_BRAND_TOKENS.LION,
+    tokens: PARTNER_BRAND_TOKENS.ADVENTURE,
     hotline: {
-      label: "雄獅團體服務專線",
-      phone: "0800-090-068",
-      note: "您將被轉接至雄獅旅遊團體接送服務專員。",
+      label: "探索團體服務專線",
+      phone: "0800-000-105",
+      note: "您將被轉接至探索旅遊團體接送服務專員。",
     },
     cardArt: {
-      issuerLabel: "Lion · 雄獅旅遊",
+      issuerLabel: "AdventureWorks · 探索旅遊",
       programLabel: "團體接送",
       networkLabel: "Travel",
       lastFour: "0628",
@@ -659,13 +659,13 @@ export const BRAND_TEMPLATES = {
 } as const satisfies Record<PartnerBrandCode, PartnerBrandTemplate>;
 
 export const PARTNER_BRAND_CODES = [
-  "CTBC",
-  "CATHAY",
-  "TAISHIN",
-  "DBS",
-  "GRAND",
-  "FUBON",
-  "LION",
+  "ACME",
+  "CONTOSO",
+  "FABRIKAM",
+  "NORTHWIND",
+  "WINGTIP",
+  "TAILSPIN",
+  "ADVENTURE",
 ] as const satisfies readonly PartnerBrandCode[];
 
 export function listPartnerBrandTemplates(): ReadonlyArray<PartnerBrandTemplate> {

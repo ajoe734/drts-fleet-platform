@@ -1237,18 +1237,23 @@ function ConsentScreen({ context }: { context: EmbedContext }) {
 
 function FallbackScreen({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
+  const fallbackEntry = context.fallbackEntry;
+  const sourceLabel = `${context.strings.displayName} · ${context.entry.entrySlug}`;
+
   return (
     <AppShell
       context={context}
       badgeTone="neutral"
       footer={
         <>
-          <ActionButton
-            href={buildHref(context, { state: "fallback" })}
-            label="前往獨立叫車網站"
-            theme={theme}
-            iconRight="ext"
-          />
+          {fallbackEntry ? (
+            <ActionButton
+              href={fallbackEntry.url}
+              label="前往獨立叫車網站"
+              theme={theme}
+              iconRight="ext"
+            />
+          ) : null}
           <ActionButton
             href={buildHref(context, { state: "handoff" })}
             label="回社區 App"
@@ -1263,23 +1268,49 @@ function FallbackScreen({ context }: { context: EmbedContext }) {
         tone="neutral"
         icon="ext"
         title="內嵌服務暫時無法使用"
-        posture="fallback_to_web · 改用網站"
+        posture={
+          fallbackEntry
+            ? "fallback_to_web · 改用網站"
+            : "fallback_unavailable · 尚無替代入口"
+        }
       />
-      <Card theme={theme} title="接下來">
-        <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
-          目前無法在社區 App 內完成叫車。您可改用 <b>獨立叫車網站</b>
-          ，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。
-        </div>
-      </Card>
+      {fallbackEntry ? (
+        <>
+          <Card theme={theme} title="接下來">
+            <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
+              目前無法在社區 App 內完成叫車。您可改用 <b>獨立叫車網站</b>
+              ，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。
+            </div>
+          </Card>
+          <Card theme={theme}>
+            <DetailRow
+              theme={theme}
+              label="獨立網站"
+              value={fallbackEntry.hostLabel}
+              mono
+            />
+            <DetailRow theme={theme} label="驗證方式" value="手機簡訊 OTP" />
+            <DetailRow theme={theme} label="來源" value={sourceLabel} last />
+          </Card>
+        </>
+      ) : (
+        <Card theme={theme} title="目前沒有可用的替代入口">
+          <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
+            此入口尚未設定可用的獨立叫車網站，暫時無法在此完成叫車。請透過{" "}
+            <b>{context.strings.displayName}</b> 的社區窗口協助，或稍後點選「回社區
+            App」再試一次。
+          </div>
+          <DetailRow theme={theme} label="來源入口" value={sourceLabel} mono last />
+        </Card>
+      )}
       <Card theme={theme}>
         <DetailRow
           theme={theme}
-          label="獨立網站"
-          value="ride.drts.com.tw"
+          label="客服專線"
+          value={context.strings.supportPhone}
           mono
+          last
         />
-        <DetailRow theme={theme} label="驗證方式" value="手機簡訊 OTP" />
-        <DetailRow theme={theme} label="行程資料" value="重開後仍可找回" last />
       </Card>
     </AppShell>
   );

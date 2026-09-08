@@ -12,6 +12,12 @@ import {
   EMBED_TRIP_FALLBACK_SCREENS,
   type EmbedTripFallbackScreen,
 } from "./embed-fixtures";
+import {
+  resolveStandaloneFallbackEntry,
+  type FallbackEntry,
+} from "./embed-fallback-entry";
+
+export { resolveStandaloneFallbackEntry, type FallbackEntry };
 
 export type EmbedState =
   | "handoff"
@@ -51,6 +57,7 @@ export type EmbedContext = {
     supportPhone: string;
   };
   issues: string[];
+  fallbackEntry: FallbackEntry | null;
 };
 
 function resolveDisplayName(entry: PartnerChannelEntryRecord) {
@@ -172,6 +179,11 @@ export async function resolveEmbedContext(input: {
 
   const demoMode = process.env.REFERRAL_EMBED_DEMO === "true";
   const state = toEmbedState(input.state, decision, session, issues, demoMode);
+  const fallbackEntry = resolveStandaloneFallbackEntry({
+    entrySlug: input.entrySlug,
+    entryHost: rawDecision.requestedEntryHost ?? session?.entryHost ?? null,
+    currentHost: host,
+  });
 
   return {
     entry,
@@ -191,5 +203,6 @@ export async function resolveEmbedContext(input: {
       supportPhone: resolveSupportPhone(entry),
     },
     issues,
+    fallbackEntry,
   };
 }
