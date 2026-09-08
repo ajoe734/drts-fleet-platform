@@ -1,6 +1,15 @@
 # SR-ENTERPRISE-DATA-001 — baseline and screen requirements
 
-## Latest redispatch verification (2026-09-08, resumed at 21:17:58Z)
+## Latest redispatch verification (2026-09-08, checked at 21:43:33Z)
+
+- Canonical `start` recorded for Codex. The current task still supplies the original six write scopes and no dependencies. The completed history helper explicitly leaves the scope/contact decisions to the supervisor; its completion has not resolved those decisions.
+- `git fetch origin`: exit 0; fresh base `a24045986ac29231d34657df3a343b02d9fbb770`. `git rebase origin/dev` initially exited 1 on duplicate historical add/add evidence patches. Resolved only this task document, retaining the already-replayed content; final `GIT_EDITOR=true git rebase --continue`: exit 0. `git merge --no-ff origin/codex/sr-enterprise-data-001` with task trailers: exit 0, preserved published ancestry without product edits; verification head `36030ef22b10347ae281d08afae4f8f989eec04d`.
+- Re-read execution rules, R08/R09/R16 and the six capability records, helper report, tenant tokens and enterprise canvas. Current code still selects fixture bookings, links home to `/trip` without an ID, uses fixed trip progress and inert contact controls. Shared detail still maps a normal 404 to `degraded`; shared theme still defaults to blue. The canvas still lacks the trip not-found and unavailable-contact states identified below. The explicit dispatch design STOP remains applicable.
+- `git diff --check`: exit 0. `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0 (`tsc --noEmit`). `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`: exit 1 (`No test files found`). Typecheck now passes; no regression-suite success is claimed.
+- Resource `EB-7K2E1D` is still a fixture reference, not a live-verified booking. No live/API/browser/contact/true-device checks were performed. Implementation candidate SHA: none; final evidence anchor SHA and ordinary push are recorded in machine truth. No handoff, review, CI, merge acceptance or deployment is claimed.
+- Supervisor next action: supply canonical missing states and authorize/assign shared lifecycle/theme/help fixes with dependencies, plus the permitted contact source or unavailable-contact decision. Resume after those decisions are recorded, rather than treating history-helper completion as product unblock.
+
+## Previous redispatch verification (2026-09-08, resumed at 21:17:58Z)
 
 - Recorded `start` through the canonical release. Task slice still has six original write scopes, no dependencies, and no supplied screen/contact decision. The history-helper report explicitly preserves the shared lifecycle/theme/help/contact decision requirement.
 - `git fetch origin` and `git rebase origin/dev`: exit 0. Fresh base: `e97653b7ffb962a6c4d688e8706711d860fa3604`; rebased head: `1139d95e72aea028bef825b9a53cc290d6c82624`. Preserved published ancestry via `git merge --no-ff origin/codex/sr-enterprise-data-001` with task trailers, exit 0; resulting head `5480692c767608822a97a0cb3f67535abbd651ec`. Merge introduced no file changes.
