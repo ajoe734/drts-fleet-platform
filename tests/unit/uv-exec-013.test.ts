@@ -166,7 +166,7 @@ function draftHarness() {
     findResourceScopeById: vi.fn(async () => scope),
   };
   const areas = new ServiceAreaService();
-  const products = new ServiceProductService();
+  const products = new ServiceProductService(new AuditNotificationService());
   products.upsertRuntimeProfilePolicy({
     runtimeProfileCode: "ordinary_taxi",
     serviceProductCode: "taxi_realtime",
