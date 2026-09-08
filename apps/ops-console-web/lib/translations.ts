@@ -280,7 +280,7 @@ const en = {
   "opsAssistant.bridge.openConfirmation": "Open confirmation",
   "opsAssistant.bridge.dismiss": "Dismiss",
   "opsAssistant.bridge.empty":
-    "Focus a supported detail view to let the assistant resolve `ActionIntent` against that resource's available actions.",
+    "Open a supported detail page to see the actions the assistant can help you perform.",
   "opsAssistant.actions.title": "Assistant actions",
   "opsAssistant.actions.askLabel": "Ask assistant",
   "opsAssistant.actions.placeholder":
@@ -4810,7 +4810,7 @@ const zh: Record<keyof typeof en, string> = {
   "opsAssistant.bridge.openConfirmation": "開啟確認流程",
   "opsAssistant.bridge.dismiss": "關閉",
   "opsAssistant.bridge.empty":
-    "聚焦到支援的詳情頁後，助理才能針對該資源的可用動作解析 `ActionIntent`。",
+    "請開啟支援的詳情頁，查看助理可協助執行的操作。",
   "opsAssistant.actions.title": "助理動作",
   "opsAssistant.actions.askLabel": "詢問助理",
   "opsAssistant.actions.placeholder":
@@ -8879,7 +8879,7 @@ const zh: Record<keyof typeof en, string> = {
     "駕駛尚未補充文字說明；值班端仍可依現有 incident context 先行處置。",
   "sos.detail.attachmentsTitle": "附件",
   "sos.detail.noAttachments":
-    "目前尚未收到照片或語音附件 read model。若後端後續補上附件路徑，這個區塊可直接改成 live attachment list。",
+    "目前沒有可顯示的照片或語音附件。",
   "sos.detail.linkedIncidentTitle": "關聯案件",
 };
 

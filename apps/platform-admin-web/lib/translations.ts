@@ -103,7 +103,7 @@ const supplyReviewEn = {
   "supplyReview.detail.confirmApproveTitle":
     "Confirm Approval and Provision Canonical?",
   "supplyReview.detail.confirmApproveIntro":
-    "This action will approve submission ({submissionId}) and within a single transaction:",
+    "Approving application ({submissionId}) will also complete the following steps:",
   "supplyReview.detail.confirmApproveStep1":
     "1. Provision / update canonical record",
   "supplyReview.detail.confirmApproveStep2":
@@ -198,7 +198,7 @@ const supplyReviewEn = {
 
   // Errors & Banners
   "supplyReview.err.defaultFailed": "Operation failed. Please try again later.",
-  "supplyReview.err.invalidId": "Invalid submissionId",
+  "supplyReview.err.invalidId": "Invalid application ID. Open the application again from the review list.",
   "supplyReview.err.notFound": "Supply submission record not found",
   "supplyReview.err.startReviewFailed":
     "Failed to start review for submission {id}: {msg}",
@@ -350,7 +350,7 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.detail.auditReceiptTitle": "審核憑證 · audit receipt",
   "supplyReview.detail.confirmApproveTitle": "確認核可並寫入 canonical？",
   "supplyReview.detail.confirmApproveIntro":
-    "此動作將把該筆 submission ({submissionId}) 核可，並在單一交易內：",
+    "核可申請（{submissionId}）時，將一併完成以下步驟：",
   "supplyReview.detail.confirmApproveStep1":
     "1. Provision / 更新 canonical 紀錄",
   "supplyReview.detail.confirmApproveStep2": "2. 綁定車行 affiliation 關係",
@@ -442,7 +442,7 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
 
   // Errors & Banners
   "supplyReview.err.defaultFailed": "操作失敗，請稍後重試。",
-  "supplyReview.err.invalidId": "無效的 submissionId",
+  "supplyReview.err.invalidId": "申請編號無效，請從審核清單重新開啟申請。",
   "supplyReview.err.notFound": "找不到該筆 supply submission 紀錄",
   "supplyReview.err.startReviewFailed": "無法開始審核 submission {id}: {msg}",
   "supplyReview.err.loadQueueFailed": "載入佇列失敗: {msg}",
