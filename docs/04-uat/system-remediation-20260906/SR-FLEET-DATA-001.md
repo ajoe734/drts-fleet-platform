@@ -1,5 +1,22 @@
 # Remediation Evidence: SR-FLEET-DATA-001
 
+## 2026-09-08 Codex2 接手診斷（優先於下方歷史完成敘述）
+
+- Owner / reviewer：Codex2 / Codex；branch：`codex2/sr-fleet-data-001`。
+- 本次 fetch 的 origin/dev：`9fbd213685e1c1ab367f8e0a2d03781a1e7c0f81`。
+- 實際檢查的既有 candidate：`df1c135b74afa080f131bf522cf1cb6c4a60cf6e`；本次尚未產生可 handoff 的新 candidate。
+- 追溯已讀：execution task、task spec、source README、R10/R11/R24 及 C013/C063/C064/C069。歷史 audit 不作當前成功證據。
+- `git fetch origin`：exit 0。
+- `git rebase origin/dev`：exit 1；重播 `d5e6e6196` 時 drivers、vehicles、trips、export、loader、test、evidence 出現重疊衝突。`git rebase --abort`：exit 0，保留接手時全部已提交工作；目前尚未完成與上述 dev 的整合，未覆蓋新 trunk 修復。
+- `git diff --check`：exit 0。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-data-001/`：exit 0，1 file / 31 tests passed；Duration 765ms。這些為 mock API 回歸，資源 `fp-test-001`、`ord-001`、`ord-002`、`ord-003` 並非 live 租戶／行程驗收。
+- `pnpm --filter @drts/fleet-partner-portal-web typecheck`：成功生成路由型別，tsc 通過。
+- `pnpm run i18n:guard`：exit 1，519 files / 55 exempted，drivers/page.tsx:154、167 兩項 `locale-ternary-copy`。
+- `gh run view 34257680633 --log-failed`：exit 0；既有 PR #1637 的 CI 同樣在這兩項 i18n 違規失敗，ci-integ aggregate 因 required product check failure 失敗。CI 資源：https://github.com/ajoe734/drts-fleet-platform/actions/runs/34257680633 。
+- **Scope blocker**：guard 要求文案進中央 `apps/fleet-partner-portal-web/lib/translations.ts`；現有翻譯無對應的訓練／文件尚未串接說明。此檔不在 write_scopes，須 supervisor 擴 scope 並登錄必要相依後才可新增翻譯。未以 guard exemption、刪除未知資料提示或其他繞過方式掩蓋失敗。
+- 後續：擴 scope 後整合 origin/dev、修正中央翻譯、重跑檢查、普通 push，才 handoff 鎖定新 candidate。此診斷提交不是實作完成或 review 通過證據。
+- 本次未做 live API、瀏覽器／真機、部署、同 candidate CI、merge 驗收；下方先前 worker 的完成敘述僅保留為歷史記錄。
+
 ## 1. 任務資訊 (Task Metadata)
 
 - **Task ID**: `SR-FLEET-DATA-001`
