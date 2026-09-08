@@ -129,8 +129,13 @@ export async function runPlan(plan, output, provenance) {
     const overloaded = active.size >= plan.maxInFlight;
     const launchedMs = performance.now() - start;
     const job = (async () => {
-      const result = overloaded ? { latencyMs: null, httpStatus: null, error: "Load generator maxInFlight exhausted; request not sent" }
-        : await measure(plan.origin, entry.item);
+      let result;
+      try {
+        result = overloaded ? { latencyMs: null, httpStatus: null, error: "Load generator maxInFlight exhausted; request not sent" }
+          : await measure(plan.origin, entry.item);
+      } catch (error) {
+        result = { latencyMs: null, httpStatus: null, error: error.message };
+      }
       const record = { taskId: "SR-OPS-PROOF-001", kind: "capacity_request", ...provenance,
         isolatedResourceId: plan.isolatedResourceId, baselinePath, baselineSha256,
         observedAt: new Date().toISOString(), workload: entry.family, sequence: entry.sequence,
