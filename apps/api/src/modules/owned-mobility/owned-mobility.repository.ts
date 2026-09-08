@@ -1041,9 +1041,19 @@ export class OwnedMobilityRepository {
       "ops.phase1_dispatch_assignments",
     );
     const task = await this.lockDriverTaskForUpdate(executor, taskId);
-    if (!task || task.assignmentId !== assignment.assignmentId) {
-      throw new Error(
-        `Driver task ${taskId} assignment changed during completion`,
+    if (
+      !task || task.taskId !== taskId ||
+      task.taskId !== assignment.taskId ||
+      task.assignmentId !== assignment.assignmentId ||
+      task.orderId !== assignment.orderId ||
+      task.dispatchJobId !== assignment.dispatchJobId ||
+      task.driverId !== assignment.driverId ||
+      task.vehicleId !== assignment.vehicleId
+    ) {
+      throw new ApiRequestError(
+        409,
+        "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+        "Completion assignment task requires reconciliation.",
       );
     }
 
@@ -1089,6 +1099,17 @@ export class OwnedMobilityRepository {
       "ops.phase1_owned_orders",
     );
 
+    if (
+      order.orderId !== assignment.orderId ||
+      dispatchJob.dispatchJobId !== assignment.dispatchJobId ||
+      dispatchJob.orderId !== assignment.orderId
+    ) {
+      throw new ApiRequestError(
+        409,
+        "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+        "Completion order and dispatch job require reconciliation.",
+      );
+    }
     return { order, dispatchJob, assignment, task };
   }
 

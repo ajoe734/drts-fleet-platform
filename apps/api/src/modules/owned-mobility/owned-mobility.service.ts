@@ -4421,7 +4421,7 @@ export class OwnedMobilityService
     );
   }
 
-  /** SD §7.6: shared rejection/cancellation/replacement reconciliation fence. */
+  /** SD §7.6: shared completion/rejection/cancellation/replacement fence. */
   private isReconciledAssignmentTask(
     assignment: DispatchAssignmentRecord,
     task: DriverTaskRecord | null,
@@ -6094,6 +6094,16 @@ export class OwnedMobilityService
     const dispatchJob = { ...params.bundle.dispatchJob };
     const assignment = { ...params.bundle.assignment };
     const task = this.cloneTask(params.bundle.task);
+
+    // A terminal replay may return its prior result, but every new completion
+    // (including proof_pending writes) must reconcile before changing capacity.
+    if (task.status !== "completed" && !this.isReconciledAssignmentTask(assignment, task)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+        "Completion assignment task requires reconciliation.",
+      );
+    }
 
     if (params.requestId) {
       const replayedTask = await this.replayDriverCompletionFromRepository(
