@@ -34,6 +34,28 @@ readiness.json 保存 Vitest 的所有 suite/assertion 名稱、結果與原始�
 
 owner 先 commit、普通 push，再 handoff Codex2；本文件不宣告 done / 已部署 / live acceptance。
 
+## 2026-09-08 CI discovery 修復
+
+接續 candidate `d3d4a245c991eec994d86e1299d3ded9bec5af16` / PR #1773，重新 `git fetch origin`（exit 0）後 origin/dev 仍是上述 base，無需 rebase。
+[changes job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34243680729/job/102120334700) 的 coverage guard 指出 `test_inventory.py` 不在 CI 的 unittest discovery root；[e2e job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34243680729/job/102120700752) 因 changes gate failed 連帶失敗，沒有執行產品 E2E。
+
+沿用 SR-PUBLIC-001 的 Vitest subprocess 做法：Python 檢查改名 `inventory_checks.py`，新增 `inventory.test.ts` 讓現有 unit CI 執行並傳遞非零退出碼。沒有修改 shared workflow/config。歷史 blob 與 merge ancestry 分成第四項檢查；CI shallow checkout 缺歷史時明列 skipped，其他三項仍執行。本機完整 worktree 四項均通過，不把 shallow skip 宣稱歷史證據 pass。
+
+本次實際命令與結果：
+
+```bash
+pnpm exec vitest run tests/unit/system-remediation/sr-readiness-001/
+# exit 0; 1 Vitest test passed, invokes all 4 Python checks
+python3 tests/unit/system-remediation/sr-readiness-001/inventory_checks.py -v
+# exit 0; 4 passed, 0 skipped in the full worker worktree
+python3 tools/ci/check_test_coverage.py
+# exit 0; all 61 tracked Python test files yield tests CI runs
+git diff --check
+# exit 0
+```
+
+上方先前的 unittest discovery 命令是舊 candidate 的執行紀錄；目前重跑使用此處 Vitest 或直接 Python 命令。212 項產品回歸沿用同 base 的既有證據，本次沒有重跑或改寫其時間。新 candidate 由 handoff 讀回；遠端 CI 尚待同 candidate 結果，所有 live 缺項不變。
+
 最後格式與差異檢查：
 
 ```bash

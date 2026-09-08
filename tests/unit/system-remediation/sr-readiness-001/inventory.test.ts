@@ -5,10 +5,14 @@ import { expect, it } from "vitest";
 it("validates readiness coverage, source evidence and missing live gates", () => {
   const result = spawnSync(
     "python3",
-    [resolve("tests/unit/system-remediation/sr-readiness-001/inventory_checks.py")],
+    [
+      resolve(
+        "tests/unit/system-remediation/sr-readiness-001/inventory_checks.py",
+      ),
+    ],
     { encoding: "utf8", timeout: 20_000 },
   );
   expect(result.error).toBeUndefined();
   expect(result.status, result.stdout + result.stderr).toBe(0);
-  expect(result.stderr).toContain("Ran 3 tests");
+  expect(result.stderr).toContain("Ran 4 tests");
 }, 25_000);
