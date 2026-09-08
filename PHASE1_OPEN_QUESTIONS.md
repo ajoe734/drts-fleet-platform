@@ -4,7 +4,21 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`.
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-DRIVER-WEB-001`.
+
+### Q-SR-DRIVER-WEB-001 — Metro scope authorization pending
+
+Owner: Codex2 (parent); reviewer: Codex; decision route: supervisor scope review.
+The parent reports SQLite WASM resolution failure after native-map isolation.
+Authorize the smallest driver Metro configuration scope, after checking overlapping
+writers and recording necessary dependencies in machine truth, or register a
+separate producer with a parent dependency. This entry does not grant that scope.
+Preserve all three web-route checks and native import regression acceptance;
+do not replace the offline queue or waive browser checks to obtain a green export.
+The parent remains blocked until authorization. See the
+[decision and continuation record](support/unblock/SR-DRIVER-WEB-001/SR-DRIVER-WEB-001-UNBLOCK-PLANNING-DECISION.md)
+for source evidence, exact proposed path and validation gates. No new product
+semantics or acceptance scope cut is approved.
 
 The original fifteen questions on this board were answered. Worth noting how, because the
 distribution was not what the board implied: of the fifteen, four were closed by
