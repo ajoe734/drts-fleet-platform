@@ -4,7 +4,19 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`.
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-ENTERPRISE-FORM-001`.
+
+### Q-SR-ENTERPRISE-FORM-001 — theme precedence and shared scope authorization
+
+Supervisor/Chairman must confirm whether enterprise canvas branding or tenant
+realm tokens govern the shared enterprise theme, then authorize the theme and
+three existing translation keys with overlap/dependency sequencing. Parent owner
+Codex2 and reviewer Codex preserve full acceptance and the blocked state until
+that authorization or an accepted, merged shared-theme producer exists.
+`SR-DESIGN-001` covers leave/academy/Host contracts and is not an established
+theme dependency. This is an explicit follow-up on the existing parent, not a
+scope grant or a new registered implementation task. See the
+[decision routing and resume gate](support/unblock/SR-ENTERPRISE-FORM-001/SR-ENTERPRISE-FORM-001-UNBLOCK-PLANNING-DECISION.md).
 
 The original fifteen questions on this board were answered. Worth noting how, because the
 distribution was not what the board implied: of the fifteen, four were closed by
