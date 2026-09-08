@@ -113,3 +113,17 @@ API typecheck 是前輪結果，本輪未重跑。最新 dev 的 SR-READINESS-00
 | `git diff --check` | 0 | 無空白錯誤 |
 
 讀取 `test-results/system-remediation-report.json` 四個 tenant evidence 附件，逐一確認 baseSha/testedSha 為上述版本，calls/resources 皆空；本輪零 HTTP 呼叫、無實際資源 ID。环境未配置任何 DRTS_TENANT_UAT 變數。SLA 非法門檻、訂單重算實際效果、audit/收信及 DB 重啟仍待驗，不能因 receipt 或 profile readback 案例已建立便宣稱能力完成。其他待完成矩陣維持；unit/API typecheck 本輪未重跑。仍需 provisioner 提供 API URL、可拋棄 A/B 租戶及 A/B 可寫和 A 唯讀 bearer；維持 in_progress，未 handoff。
+
+## 2026-09-08 dispatch：重新確認環境阻礙
+
+fetch 後 base：`5cff9b36082998a0295f2550039306dc1f84c3d2`。rebase 重複歷史提交的衝突經核對，保留已修正 directory preflight 與較完整歷史 evidence，continue 成功；merge 原遠端 ancestry exit 0。以 `git diff --exit-code origin/codex/sr-qa-tenant-001 -- tests/e2e/system-remediation/sr-qa-tenant-001 docs/04-uat/system-remediation-20260906/SR-QA-TENANT-001.md` 確認既有 task 內容一致（exit 0）。本輪實跑 SHA：`c67d8b1d12068171afe899c9816933111382bf26`，尚無鎖定 candidate。
+
+| 實際指令 | exit | 結果 |
+| --- | --- | --- |
+| `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001` | 1 | 4 task failed，皆缺 DRTS_TENANT_UAT_API_URL；4 shared passed 不算租戶驗收 |
+| `pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001/ --max-warnings=0` | 0 | 四個 spec 通過 |
+| `git diff --check` | 0 | 無空白錯誤 |
+
+實際讀取 JSON report 的四個 tenant evidence 附件，baseSha/testedSha 均與上述相符，calls/resources 均空。環境變數名稱檢查未發現任何 DRTS_TENANT_UAT 設定；未輸出任何憑證。本輪零 HTTP 呼叫，無資源 ID，未驗 live、DB、mail 或瀏覽器，也未重跑 unit/typecheck。
+
+重複 dispatch 未解除環境阻礙，請 supervisor/provisioner 配置既述六項設定（API URL、可拋棄 A/B 租戶、A/B 可寫 bearer、A 唯讀 bearer）後再執行。待完成能力矩陣及未補齊案例仍保留，不宣稱已完成實作或驗收；本輪將環境阻礙寫入 canonical blocker，不 handoff。
