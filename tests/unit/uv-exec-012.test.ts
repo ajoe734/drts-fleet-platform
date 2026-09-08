@@ -292,6 +292,7 @@ function gateway() {
     voiceSessionId: "s",
     resourceScopeId: "r",
     leaseEpoch: 1,
+    routeProfileVersion: 1,
     scopes: [
       "session_execute",
       "address_resolve",
@@ -302,10 +303,12 @@ function gateway() {
   const session = {
     resourceScopeId: "r",
     leaseEpoch: 1,
+    routeProfileVersion: 1,
     inputEpoch: 1,
     controlOwner: "ai",
     dialogState: "collecting",
   };
+  const scope = { status: "active" };
   const authenticate = vi.fn(async () => claims);
   const execute = vi.fn(async (_proposal: unknown, _context: unknown) => {
     void _proposal;
@@ -316,6 +319,7 @@ function gateway() {
     { authenticate } as unknown as VoiceCapabilityGuard,
     {
       findSessionById: async () => session,
+      findResourceScopeById: async () => scope,
     } as unknown as VoiceBookingRepository,
     {
       getBoundBookingStatus: async () => ({ orderId: "owned" }),
@@ -328,12 +332,35 @@ function gateway() {
       signal: new AbortController().signal,
     },
   );
-  return { service, session, claims, execute, authenticate };
+  return { service, session, scope, claims, execute, authenticate };
 }
 const resolve = output({
   tools: [{ name: "resolve_location", args: { query: "台北" } }],
 });
 describe("UV-EXEC-012 tool authorization", () => {
+  it("rejects revoked resources even when authentication used a verifier without a repository", async () => {
+    const g = gateway();
+    g.scope.status = "revoked";
+    await expect(g.service.execute(resolve)).rejects.toThrow("scope_revoked");
+    expect(g.execute).not.toHaveBeenCalled();
+  });
+  it("prioritizes explicit handoff over earlier booking tools", async () => {
+    const g = gateway();
+    g.execute.mockResolvedValue({ status: "unavailable", handoffId: null });
+    await g.service.execute(
+      output({
+        tools: [
+          resolve.tools[0]!,
+          { name: "request_handoff", args: { reason: "location_unresolved" } },
+        ],
+      }),
+    );
+    expect(g.execute).toHaveBeenCalledOnce();
+    expect(g.execute.mock.calls[0]?.[0]).toEqual({
+      name: "request_handoff",
+      args: { reason: "location_unresolved" },
+    });
+  });
   it("shares a three-call budget across loop retries", async () => {
     const g = gateway();
     for (let i = 0; i < 3; i++) await g.service.execute(resolve);
