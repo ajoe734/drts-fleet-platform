@@ -551,3 +551,43 @@ Local logs: `/tmp/uv006-reject-migrations.log`,
 `/tmp/uv006-reject-typecheck.log`. PR #1822 remains the recovered candidate PR;
 original PR #1721 remains open and preserved. These are owner checks; the new
 candidate still requires same-SHA review, CI, merge and acceptance evidence.
+
+### Completion reconciliation correction (2026-09-08)
+
+Owner Codex2 continues under supervisor fallback; reviewer Codex. Candidate
+`d4fb222e5eaf1106b535836faf3641ed1d3fd181` allowed completion to release disputed
+capacity when the durable task disagreed with its assignment. The completion
+loader now checks taskId, assignmentId, orderId, dispatchJobId, driverId and
+vehicleId under the existing assignment/task/job/order lock order. It also
+checks the loaded job and order identities. The transactional completion path
+uses the shared reconciliation predicate before replay of an active task,
+proof-pending writes, quota effects, completion writes, outbox writes or release.
+Incoherent active task/assignment status returns
+`ASSIGNMENT_TASK_RECONCILIATION_REQUIRED` (409). Completed-task replay retains
+its existing behavior and does not release capacity again.
+
+The PostgreSQL suite adds 18 cases: on_trip and proof_pending each exercise
+six mismatched task identities, missing assignment taskId, incoherent assignment
+status and a valid completion. All 16 corruption cases compare full durable
+order/job/assignment/task/trace/reservation/outbox rows before and after the
+conflict. Both valid cases complete the assignment and release both resources.
+The fixture cleanup now removes completion outbox entries before driver tasks.
+
+Fresh owner verification using isolated database `uv006_completion_20260908`
+(cloned from the previously migrated `uv006_reject_20260908`):
+
+- From `apps/api`, `DATABASE_URL=<isolated-url> pnpm exec vitest run
+tests/integration/uv-exec-006.integration.test.ts --no-file-parallelism
+--maxConcurrency=1`: **132/132 passed**.
+- From `apps/api`, `pnpm exec vitest run
+tests/unit/owned-mobility.service.test.ts
+tests/unit/owned-mobility.repository.test.ts --no-file-parallelism`:
+  **119/119 passed**.
+- Contracts/control-plane-auth builds, API typecheck, changed-file ESLint and
+  `git diff --check`: passed. Dependencies restored with frozen-lockfile install.
+
+Local logs: `/tmp/uv006-completion-integration.log`,
+`/tmp/uv006-completion-unit.log`, `/tmp/uv006-completion-typecheck.log`.
+Original PR #1721 is preserved; updates use the recovered branch associated
+with PR #1822. These owner checks do not replace same-SHA review, CI, merge or
+external acceptance evidence.
