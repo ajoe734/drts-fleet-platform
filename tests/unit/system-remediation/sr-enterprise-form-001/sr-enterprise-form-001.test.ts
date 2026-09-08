@@ -7,6 +7,7 @@ import {
   formatDefaultPlacard,
   formatReservationWindowLabel,
   getEnterpriseBookingPreview,
+  isCustomPlacard,
   isEnterpriseDraftComplete,
   parseEnterpriseBookingDraft,
   serializeEnterpriseBookingDraft,
@@ -191,6 +192,52 @@ describe("SR-ENTERPRISE-FORM-001 — 企業預約乘客、日期與手機表單"
       expect(formatBookingNotesWithPlacard("", "Sato 様")).toBe("需舉牌「Sato 様」");
       expect(formatBookingNotesWithPlacard("僅備註", "")).toBe("僅備註");
       expect(formatBookingNotesWithPlacard("", "")).toBeUndefined();
+    });
+
+    it("1.11 [Codex P2 迴歸] 自訂或保留代訂舉牌（如「訪客 · Sato Kenji 様」）切換至 self mode 時，舉牌為客製舉牌且正確寫入 command.notes", () => {
+      // 模擬代訂或明確自訂「訪客 · Sato Kenji 様」後切換為自己預約（passengerMode: self, passenger: 林宜君）
+      const selfWithDelegatePlacardDraft: EnterpriseBookingDraftForm = {
+        ...createEnterpriseBookingDraft("zh", { entry: "self" }, referenceNow),
+        passengerMode: "self",
+        passenger: "林宜君",
+        bookedBy: "林宜君",
+        placard: "訪客 · Sato Kenji 様",
+        reservationDate: "2026-09-08",
+        reservationTime: "10:00",
+        onsiteContactPhone: "0912-345-678",
+        notes: "",
+      };
+
+      expect(isCustomPlacard(selfWithDelegatePlacardDraft)).toBe(true);
+      const cmd = buildEnterpriseBookingCommand(
+        selfWithDelegatePlacardDraft,
+        referenceNow,
+      );
+      expect(cmd.passenger.name).toBe("林宜君");
+      expect(cmd.notes).toBe("需舉牌「訪客 · Sato Kenji 様」");
+
+      // 若原有 notes 存在，則合併附加舉牌需求
+      const cmdWithExistingNotes = buildEnterpriseBookingCommand(
+        { ...selfWithDelegatePlacardDraft, notes: "需準備礦泉水" },
+        referenceNow,
+      );
+      expect(cmdWithExistingNotes.notes).toBe(
+        "需準備礦泉水 · 需舉牌「訪客 · Sato Kenji 様」",
+      );
+    });
+
+    it("1.12 [Codex P2 迴歸] formatBookingNotesWithPlacard 備註包含舉牌子字串（如 VIP）時不被誤判為已存在，精準編碼舉牌需求", () => {
+      // notes 包含 "VIP passenger, call on arrival"，placard 為 "VIP"
+      // 過去以 cleanNotes.includes(cleanPlacard) 判定會漏掉舉牌需求
+      const notesWithSubstring = "VIP passenger, call on arrival";
+      const result = formatBookingNotesWithPlacard(notesWithSubstring, "VIP");
+      expect(result).toBe("VIP passenger, call on arrival · 需舉牌「VIP」");
+
+      // 只有在已具備完整結構化舉牌指令「需舉牌「VIP」」時才進行去重
+      const alreadyHasInstruction = "VIP passenger, call on arrival · 需舉牌「VIP」";
+      expect(formatBookingNotesWithPlacard(alreadyHasInstruction, "VIP")).toBe(
+        alreadyHasInstruction,
+      );
     });
   });
 

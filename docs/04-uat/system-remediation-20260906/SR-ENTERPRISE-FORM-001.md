@@ -3,7 +3,7 @@
 - Task: `SR-ENTERPRISE-FORM-001`
 - Owner: `Gemini`
 - Reviewer: `Codex`
-- Base SHA (`origin/dev`): `890548b4f357542968c8b14f33f23e0685be007a`
+- Base SHA (`origin/dev`): `e2df37f821ce76d8a3639ceaac6d253299c0a31c`
 - Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001`
 - Branch: `gemini/sr-enterprise-form-001`
 
@@ -11,13 +11,15 @@
 
 ## 1. 問題根因盤點（Fix 前與 Codex 審查回饋）
 
-本次修復針對 2026-09-06 UAT 觀察與系統修復任務清單中指出的三大核心缺口（R20、R21、R22）與四項能力來源（C015、C016、C019、C120），並完整解決 Codex 於前次 candidate（`eddba0fd7`）審查提出的 2 項 P1 與 1 項 P2 意見：
+本次修復針對 2026-09-06 UAT 觀察與系統修復任務清單中指出的三大核心缺口（R20、R21、R22）與四項能力來源（C015、C016、C019、C120），並完整解決 Codex 於 candidate（`08faac423`）審查提出的 2 項 P2 意見與證據限制：
 
-1. **R20 / C015: 自訂情境與乘客資料未一致帶入、舉牌硬編碼與 Command 遺失（P1）**
+1. **R20 / C015: 自訂情境與乘客資料未一致帶入、舉牌客製化保留與 Command 整合（P1 / P2）**
    - 過去新增預約表單 `createEnterpriseBookingDraft` 預設直接寫死 `passengerMode: "other"` 與 `guestSato`（Sato Kenji），導致使用者選擇「為自己預約」進入時，表單仍預選他人外賓。
    - `parseEnterpriseBookingDraft` 僅辨識特定單一參數 `pm`，未支援 `entry=self`、`entry=airport`、`mode=self` 等首頁與導航入口情境。
    - 在 Review 確認頁（`app/bookings/review/page.tsx`）中，現場舉牌文字過去被硬編碼為 `{enterpriseDriver.placard}`（"Sato 様"），即使在表單中修改乘客為自己（林宜君）或其他同事（陳思妤），進到 Review 仍一律顯示 "Sato 様"，引發嚴重接機舉牌資訊混淆。
    - **Codex P1 審查意見**：前次 candidate 在 `buildEnterpriseBookingCommand` 未使用 `draft.placard`，使用者自訂的舉牌（如「自訂 VIP 田中董事長」）在 Review 顯示但產生 command 時完全遺失。
+   - **Codex P2 審查意見（Round 2）**：`isCustomPlacard` 過去排除了種子姓名舉牌（`seedEn`/`seedZh`），導致使用者選擇代訂預設舉牌（「訪客 · Sato Kenji 様」）後切換為自己預約時，Review 頁面雖然保留了該舉牌，但 `buildEnterpriseBookingCommand` 卻將其視為非客製舉牌而自 `notes` 中丟棄。必須徹底移除 fixture-specific suppression，回歸 `trimmed !== defaultPlacard` 純粹語意判斷。
+   - **Codex P2 審查意見（Round 2）**：`formatBookingNotesWithPlacard` 過去使用 `cleanNotes.includes(cleanPlacard)` 子字串檢查，當 `placard` 為 "VIP" 而 `notes` 為 "VIP passenger, call on arrival" 時，舉牌文字被誤判為已包含而未附加指令，導致期望顯示之舉牌文字未被編碼。必須改為僅針對完整結構化指令（`需舉牌「${cleanPlacard}」`）進行去重。
 
 2. **R21 / C016: 過去日期與未達最短提前時間、Click 重驗與向上取整（P1 / P2）**
    - 原前端表單對用車日期與時間缺乏合法性驗證，填入過去日期或過小提前時間仍能進入 Review 頁。
@@ -37,8 +39,12 @@
 - `lib/enterprise-booking-draft.ts`:
   - `EnterpriseBookingDraftForm` 擴充 `placard?: string` 欄位與對應 `QUERY_KEYS.placard = "placard"`。
   - 新增 `formatDefaultPlacard(passenger)` 智能敬稱格式化函式：當姓名已有「様／先生／女士／小姐」時不重複附加，其餘自動格式化為 `${name} 様`。
-  - 新增 `isCustomPlacard(draft)` 與 `formatBookingNotesWithPlacard(notes, placard)`：當使用者明確自訂舉牌（`draft.placard` 異於預設敬稱）時，`buildEnterpriseBookingCommand` 自動將舉牌需求完整合併至 `command.notes`（格式如 `原備註 · 需舉牌「自訂舉牌文字」`），嚴格確保「自訂 VIP 田中董事長」等重要資訊持久送達後端派車指令。
+  - 新增 `isCustomPlacard(draft)` 與 `formatBookingNotesWithPlacard(notes, placard)`：
+    - 當使用者明確自訂舉牌（`draft.placard` 異於當前有效乘客預設敬稱）時，`buildEnterpriseBookingCommand` 自動將舉牌需求完整合併至 `command.notes`（格式如 `原備註 · 需舉牌「自訂舉牌文字」`），嚴格確保客製舉牌資訊持久送達後端派車指令。
+    - **移除 fixture-specific 抑制**：徹底移除對 `seedEn`/`seedZh` 假資料姓名的排除邏輯，當使用者選用代訂預設舉牌（如「訪客 · Sato Kenji 様」）並切換回為自己預約（self mode）時，舉牌視為客製舉牌並正確編碼寫入 `command.notes`。
+    - **精準結構化舉牌指令去重**：`formatBookingNotesWithPlacard` 僅在 `cleanNotes` 內已包含完整指令 `需舉牌「${cleanPlacard}」` 時去重，避免一般文字內包含「VIP」等關鍵字時造成舉牌指令遺漏。
   - `createEnterpriseBookingDraft` 支援 `options?: { mode, entry }`：
+    - 嚴格遵守 `exactOptionalPropertyTypes: true`，僅在帶有明確 `entry` 入口時設定初始 `placard: defaultPlacard`，未帶 options 時保持 optional 不干擾 mock / spread 測試情境。
     - `entry: "self"` 或 `mode: "self"`：預設 `passengerMode: "self"`，乘客與舉牌自動同步為登入使用者（`林宜君`、`林宜君 様`）。
     - `entry: "delegate"` 或 `mode: "other"`：預設代訂模式與外賓資料。
     - `entry: "airport"`：預設入境接機（`pickup`）、航班號（`JL809`）、航廈（`T1`）與行李件數。
@@ -113,16 +119,16 @@ $ pnpm --filter @drts/enterprise-dispatch-web typecheck
 exit code: 0
 ```
 
-### 4.3 本次專屬迴歸單元測試（20/20 全部通過）
+### 4.3 本次專屬迴歸單元測試（22/22 全部通過，含 Round 2 Codex P2 迴歸）
 ```text
 $ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/
 
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001
 
  Test Files  1 passed (1)
-      Tests  20 passed (20)
-   Start at  17:05:12
-   Duration  333ms (transform 118ms, setup 0ms, import 145ms, tests 30ms, environment 0ms)
+      Tests  22 passed (22)
+   Start at  17:17:45
+   Duration  338ms (transform 108ms, setup 0ms, import 137ms, tests 35ms, environment 0ms)
 
 exit code: 0
 ```
@@ -138,8 +144,8 @@ $ pnpm --filter @drts/enterprise-dispatch-web test
 
  Test Files  8 passed (8)
       Tests  24 passed (24)
-   Start at  17:05:07
-   Duration  658ms (transform 1.01s, setup 0ms, import 1.56s, tests 219ms, environment 2ms)
+   Start at  17:17:50
+   Duration  742ms (transform 1.40s, setup 0ms, import 1.95s, tests 239ms, environment 2ms)
 
 exit code: 0
 ```
@@ -154,12 +160,12 @@ $ pnpm --filter @drts/enterprise-dispatch-web build
 ▲ Next.js 16.2.3 (webpack)
 
   Creating an optimized production build ...
-✓ Compiled successfully in 13.4s
-  Finished TypeScript in 7.1s
-  Collecting page data using 7 workers in 828ms
-✓ Generating static pages using 7 workers (26/26) in 366ms
-  Collecting build traces in 591ms
-  Finalizing page optimization in 676ms
+✓ Compiled successfully in 10.8s
+  Finished TypeScript in 7.3s
+  Collecting page data using 7 workers in 772ms
+✓ Generating static pages using 7 workers (26/26) in 349ms
+  Collecting build traces in 346ms
+  Finalizing page optimization in 403ms
 
 Route (app)
 ┌ ƒ /
@@ -204,10 +210,12 @@ exit code: 0
 - **已完成驗證範圍**：
   - 自訂（self）、代訂（other）、機場（airport）各入口模式的預設資料建立與欄位一致性。
   - 乘客姓名修改與舉牌同步連動、使用者自訂客製舉牌跨頁往返序列化之持久性。
-  - 自訂舉牌（如「自訂 VIP 田中董事長」）在 `buildEnterpriseBookingCommand` 中正確持久合併至 `command.notes`，解決前次 review P1 指出的 command 遺失缺陷。
+  - 自訂舉牌（如「自訂 VIP 田中董事長」或選用代訂舉牌「訪客 · Sato Kenji 様」後切換至 self mode）在 `buildEnterpriseBookingCommand` 中正確持久合併至 `command.notes`，徹底解決 Round 1 與 Round 2 審查指出的 command notes 遺失與 fixture suppression 缺陷。
+  - `formatBookingNotesWithPlacard` 精準以完整結構化舉牌指令去重，杜絕因備註包含子字串關鍵字（如 VIP）導致舉牌指令被漏編碼的問題。
   - 過去日期／時區跨日邊界／最短提前時間（15分鐘）前端拒絕邏輯。最早可約時間向上取整至下一分鐘，消除秒數誤差造成的 `isTooSoon` 誤判。
   - `buildEnterpriseBookingCommand` 主動拒絕失效/過期時間；Review 頁面送出按鈕在點擊當下即時重新執行時間驗證，徹底防禦過期訂單送出。
-  - 390px 行動版窄螢幕單欄收斂排版規則與解除 sticky 防遮擋機制。
-  - 型別安全（TypeScript `strict` + `exactOptionalPropertyTypes`）、i18n 規範與全套件單元測試迴歸。
-- **未施作／需真實環境之項目**：
+  - 390px 行動版窄螢幕單欄收斂排版規則（CSS `@media (max-width: 768px)` 收斂為單欄、移除橫向捲軸）與解除 sticky 防遮擋機制（`.ent-sticky-aside` 改為 `position: static !important`）。
+  - 型別安全（TypeScript `strict` + `exactOptionalPropertyTypes`）、i18n 規範、全套件單元測試迴歸與 Next.js production build。
+- **未施作／需真實環境之項目（Explicit Limitations）**：
+  - **390px 視覺鍵盤與真機驗證限制**：390px browser/keyboard, real device and live API persistence not verified; evidence currently provides no visual keyboard verification and must explicitly state this limitation. 本次已於 `globals.css` 完成 CSS 響應式斷點與 sticky 解除機制，但無實際行動裝置物理螢幕／虛擬鍵盤彈出之真機視覺截圖與 live API 下單持久化驗證。
   - 本次任務限定於前端表單與確認頁面（`apps/enterprise-dispatch-web`），真實 PostgreSQL 資料庫持久化與後端下單 API 接受／拒絕由後續排程驗證與 E2E 驗收任務執行。

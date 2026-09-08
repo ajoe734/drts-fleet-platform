@@ -373,6 +373,10 @@ export function createEnterpriseBookingDraft(
   const passenger = isSelf ? seed.bookedBy : seed.passenger;
   const defaultPlacard = formatDefaultPlacard(passenger);
 
+  const hasExplicitEntry = Boolean(
+    options && options.entry !== undefined,
+  );
+
   return {
     passengerMode,
     passenger,
@@ -390,7 +394,7 @@ export function createEnterpriseBookingDraft(
     terminal: isAirport ? seed.terminal : "",
     flight: isAirport ? seed.flight : "",
     luggageCount: isAirport ? "3" : "",
-    placard: defaultPlacard,
+    ...(hasExplicitEntry ? { placard: defaultPlacard } : {}),
   } satisfies EnterpriseBookingDraftForm;
 }
 
@@ -445,9 +449,11 @@ export function parseEnterpriseBookingDraft(
   }
 
   const defaultPlacard = formatDefaultPlacard(passenger);
-  const placard =
-    parseEditableText(params, QUERY_KEYS.placard, defaultPlacard) ||
-    defaultPlacard;
+  const placard = hasQueryKey(params, QUERY_KEYS.placard)
+    ? parseEditableText(params, QUERY_KEYS.placard, defaultPlacard) || defaultPlacard
+    : entry
+      ? fallback.placard
+      : undefined;
 
   const draft: EnterpriseBookingDraftForm = {
     passengerMode,
@@ -496,7 +502,7 @@ export function parseEnterpriseBookingDraft(
       QUERY_KEYS.luggageCount,
       fallback.luggageCount,
     ),
-    placard,
+    ...(placard ? { placard } : {}),
   };
 
   return draft;
@@ -585,11 +591,11 @@ export function formatBookingNotesWithPlacard(
     return cleanNotes || undefined;
   }
 
-  if (cleanNotes && cleanNotes.includes(cleanPlacard)) {
+  const placardText = `需舉牌「${cleanPlacard}」`;
+  if (cleanNotes && cleanNotes.includes(placardText)) {
     return cleanNotes;
   }
 
-  const placardText = `需舉牌「${cleanPlacard}」`;
   if (!cleanNotes) {
     return placardText;
   }
@@ -606,23 +612,7 @@ export function isCustomPlacard(draft: EnterpriseBookingDraftForm): boolean {
   const defaultPlacard = formatDefaultPlacard(effectivePassenger);
   const trimmed = draft.placard.trim();
 
-  if (trimmed === defaultPlacard) {
-    return false;
-  }
-
-  // In test/mock objects where passengerMode is switched to "self" without updating placard,
-  // the stale default from seeds shouldn't be considered custom
-  const seedEn = getSeedEnterpriseDraft("en");
-  const seedZh = getSeedEnterpriseDraft("zh");
-  if (
-    draft.passengerMode === "self" &&
-    (trimmed === formatDefaultPlacard(seedEn.passenger) ||
-      trimmed === formatDefaultPlacard(seedZh.passenger))
-  ) {
-    return false;
-  }
-
-  return true;
+  return trimmed !== defaultPlacard;
 }
 
 export function buildEnterpriseBookingCommand(
