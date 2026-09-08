@@ -1,45 +1,28 @@
+"use client";
+
 import Link from "next/link";
 import {
   EBtnContent,
   ECard,
-  EIcon,
   EKpi,
   EPill,
   entBtnStyle,
 } from "@/components/ent-kit";
 import { EntParty, EntRoute } from "@/components/ent-screen-bits";
-import {
-  enterpriseQuotaSummary,
-  getBookingStateMeta,
-  getEnterpriseBookings,
-  getEnterpriseTenant,
-  getEnterpriseUser,
-  getPolicyNotes,
-} from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
-import { getServerLocale } from "@/lib/server-locale";
+import { useTranslation } from "@/lib/i18n";
+import { useBookings, BookingReadState } from "./trip/use-bookings";
+import { homeBookings, tripHref, bookingHref } from "./trip/booking-data";
 import { type TranslationKey, t as translate } from "@/lib/translations";
 
-const POLICY_ICONS = ["bolt", "building", "clock"] as const;
-
-export default async function HomePage() {
-  const locale = await getServerLocale();
-  const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
-    translate(key, params, locale);
-  const bookings = getEnterpriseBookings(locale);
-  const stateMeta = getBookingStateMeta(locale);
-  const user = getEnterpriseUser(locale);
-  const tenant = getEnterpriseTenant(locale);
-  const policyNotes = getPolicyNotes(locale);
-
-  const active = bookings.find(
-    (b) => b.state === "enroute" || b.state === "assigned",
-  );
-  const upcoming = bookings
-    .filter((b) =>
-      ["assigned", "enroute", "approval", "reserved"].includes(b.state),
-    )
-    .slice(0, 3);
+export default function HomePage() {
+  const { locale } = useTranslation();
+  const tr = (key: TranslationKey, params?: Record<string, string | number>) => translate(key, params, locale);
+  const zh = locale === "zh";
+  const { data, error } = useBookings("home");
+  if (error || data === null) return <BookingReadState error={error} />;
+  const { active, upcoming } = homeBookings(data);
+  const stateLabel = (b: typeof data[number]) => b.status === "active" ? b.orderStatus : b.status;
 
   return (
     <>
@@ -56,7 +39,7 @@ export default async function HomePage() {
       >
         <div>
           <div style={{ fontSize: 13, color: t.muted, marginBottom: 6 }}>
-            {tr("home.greeting.line", { tenant: tenant.name, dept: user.dept })}
+            {zh ? "企業派車" : "Enterprise dispatch"}
           </div>
           <h1
             style={{
@@ -66,10 +49,10 @@ export default async function HomePage() {
               margin: 0,
             }}
           >
-            {tr("home.title", { name: user.name })}
+            {zh ? "要去哪裡？" : "Where are you going?"}
           </h1>
           <p style={{ fontSize: 14.5, color: t.muted, margin: "8px 0 0" }}>
-            {tr("home.subtitle", { tenant: tenant.name })}
+            {zh ? "查看預約與目前行程" : "View bookings and your current trip"}
           </p>
         </div>
         <Link
@@ -95,23 +78,23 @@ export default async function HomePage() {
           t={t}
           label={tr("home.kpi.quota")}
           en="quota"
-          value={enterpriseQuotaSummary.rides}
-          sub={enterpriseQuotaSummary.amount}
+          value={"—"}
+          sub={zh ? "尚無額度資料" : "Quota unavailable"}
         />
         <EKpi
           t={t}
           label={tr("home.kpi.approval")}
           en="approval"
-          value={tr("home.kpi.approvalValue")}
-          sub={tr("home.kpi.approvalSub")}
+          value={data.filter((b) => b.status === "active" && b.approvalState === "pending").length}
+          sub={zh ? "目前列表待審預約" : "Pending bookings in this list"}
           tone="warn"
         />
         <EKpi
           t={t}
           label={tr("home.kpi.trips")}
           en="trips"
-          value={tr("home.kpi.tripsValue")}
-          sub={tr("home.kpi.tripsSub")}
+          value={"—"}
+          sub={zh ? "尚無月用車統計" : "Monthly usage unavailable"}
         />
       </div>
 
@@ -127,7 +110,7 @@ export default async function HomePage() {
               sub={tr("home.activeTrip.sub")}
               actions={
                 <Link
-                  href="/trip"
+                  href={tripHref(active.bookingId)}
                   style={entBtnStyle(t, { variant: "soft", size: "sm" })}
                 >
                   <EBtnContent iconR="arrow" size="sm">
@@ -140,42 +123,20 @@ export default async function HomePage() {
                 <div style={{ flex: 1, minWidth: 200 }}>
                   <EntParty
                     t={t}
-                    passenger={active.passenger}
+                    passenger={active.passenger.name}
                     passengerLabel={tr("party.passenger")}
                     compact
-                    subline={
-                      active.self ? (
-                        <div
-                          style={{ fontSize: 12, color: t.muted, marginTop: 1 }}
-                        >
-                          {tr("party.self")}
-                        </div>
-                      ) : (
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: t.warn,
-                            marginTop: 1,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 5,
-                          }}
-                        >
-                          <EIcon name="users" size={13} />
-                          {tr("party.delegate", { name: active.bookedBy })}
-                        </div>
-                      )
-                    }
+                    subline={active.bookedBy ? <span>{active.bookedBy.name}</span> : undefined}
                   />
                   <div style={{ marginTop: 14 }}>
                     <EntRoute
                       t={t}
-                      from={active.from}
-                      to={active.to}
-                      win={active.window}
+                      from={active.pickup.address}
+                      to={active.dropoff.address}
+                      win={active.reservationWindowStart}
                       airportLabel={
-                        active.flight
-                          ? `${active.flight} · ${active.terminal}`
+                        active.flightNo
+                          ? `${active.flightNo} · ${active.terminal}`
                           : undefined
                       }
                     />
@@ -192,8 +153,8 @@ export default async function HomePage() {
                     alignSelf: "flex-start",
                   }}
                 >
-                  <EPill t={t} tone={stateMeta[active.state].tone} dot>
-                    {stateMeta[active.state].label}
+                  <EPill t={t} tone="primary" dot>
+                    {stateLabel(active)}
                   </EPill>
                   <div
                     style={{
@@ -204,7 +165,7 @@ export default async function HomePage() {
                       margin: "10px 0 0",
                     }}
                   >
-                    {active.etaMinutes ?? "—"}
+                    {"—"}
                   </div>
                   <div style={{ fontSize: 11, color: t.muted }}>
                     {tr("home.activeTrip.etaSuffix")}
@@ -231,9 +192,10 @@ export default async function HomePage() {
             }
           >
             <div>
+              {upcoming.length === 0 && <p style={{ padding: 18, color: t.muted }}>{tr("bookingLifecycle.history.empty")}</p>}
               {upcoming.map((b, i) => (
                 <div
-                  key={b.id}
+                  key={b.bookingId}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -247,9 +209,9 @@ export default async function HomePage() {
                       width: 36,
                       height: 36,
                       borderRadius: 14,
-                      background: b.self ? t.primaryBg : t.surfaceLo,
-                      color: b.self ? t.primary : t.muted,
-                      border: "1px solid " + (b.self ? t.primaryBd : t.line),
+                      background: !b.bookedBy ? t.primaryBg : t.surfaceLo,
+                      color: !b.bookedBy ? t.primary : t.muted,
+                      border: "1px solid " + (!b.bookedBy ? t.primaryBd : t.line),
                       display: "inline-flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -258,20 +220,20 @@ export default async function HomePage() {
                       flexShrink: 0,
                     }}
                   >
-                    {b.passenger.slice(0, 1)}
+                    {b.passenger.name.slice(0, 1)}
                   </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div
                       style={{ display: "flex", alignItems: "center", gap: 7 }}
                     >
-                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>
-                        {b.passenger}
-                      </span>
-                      {!b.self && (
+                      <Link href={bookingHref(b.bookingId)} style={{ fontSize: 13.5, fontWeight: 600, color: t.primary }}>
+                        {b.passenger.name} · {b.bookingId}
+                      </Link>
+                      {!!b.bookedBy && (
                         <span style={{ fontSize: 11, color: t.warn }}>
                           ·{" "}
                           {tr("home.upcoming.delegateShort", {
-                            name: b.bookedBy,
+                            name: b.bookedBy?.name ?? "—",
                           })}
                         </span>
                       )}
@@ -286,7 +248,7 @@ export default async function HomePage() {
                         textOverflow: "ellipsis",
                       }}
                     >
-                      {b.from} → {b.to}
+                      {b.pickup.address} → {b.dropoff.address}
                     </div>
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -297,11 +259,11 @@ export default async function HomePage() {
                         color: t.ink2,
                       }}
                     >
-                      {b.window}
+                      {b.reservationWindowStart}
                     </div>
                     <div style={{ marginTop: 4 }}>
-                      <EPill t={t} tone={stateMeta[b.state].tone} dot>
-                        {stateMeta[b.state].label}
+                      <EPill t={t} tone="primary" dot>
+                        {stateLabel(b)}
                       </EPill>
                     </div>
                   </div>
@@ -341,51 +303,8 @@ export default async function HomePage() {
             </div>
           </ECard>
 
-          <ECard
-            t={t}
-            title={tr("home.policy.title")}
-            sub={tr("card.sub.enterprisePolicy")}
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-              {policyNotes.map((note, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    gap: 10,
-                    fontSize: 12.5,
-                    color: t.ink2,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  <span
-                    style={{ color: t.primary, flexShrink: 0, marginTop: 1 }}
-                  >
-                    <EIcon name={POLICY_ICONS[i] ?? "info"} size={15} />
-                  </span>
-                  {note}
-                </div>
-              ))}
-            </div>
-            <div
-              style={{
-                marginTop: 14,
-                paddingTop: 12,
-                borderTop: "1px solid " + t.lineSoft,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <EIcon name="phone" size={14} style={{ color: t.muted }} />
-              <span style={{ fontSize: 12, color: t.muted }}>
-                {translate(
-                  "state.supportLine",
-                  { phone: tenant.supportPhone },
-                  locale,
-                )}
-              </span>
-            </div>
+          <ECard t={t} title={tr("home.policy.title")}>
+            <p style={{ color: t.muted }}>{zh ? "尚無可用的企業政策與客服聯絡資料，請洽企業管理員。" : "Policy and support contacts are unavailable. Contact your enterprise administrator."}</p>
           </ECard>
         </div>
       </div>
