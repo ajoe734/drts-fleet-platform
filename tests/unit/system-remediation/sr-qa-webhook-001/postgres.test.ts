@@ -1,6 +1,14 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, expect, it } from "vitest";
@@ -26,7 +34,7 @@ function recordEvidence(label: string, resourceJson: string) {
           }).trim(),
           recordedAt: new Date().toISOString(),
           scope:
-            "Local PostgreSQL and real HTTP; service instance reinitialization, not OS process restart or deployed authentication",
+            "Local PostgreSQL and real HTTP; service reinitialization and SIGKILL/new OS process recovery; deployed authentication remains unverified",
           evidence,
         },
         null,
@@ -246,3 +254,116 @@ it("C112: PostgreSQL queued delivery resumes automatically after service restart
     }),
   );
 }, 45_000);
+
+it("C112: SIGKILL writer then a new OS process restores retry and outbox deduplication", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "sr-qa-webhook-process-"));
+  const contextPath = join(directory, "context.json");
+  const secret = randomUUID();
+  const requests: { body: string; signature: string }[] = [];
+  let recovering = false;
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      requests.push({
+        body,
+        signature: String(req.headers["x-drts-webhook-signature"]),
+      });
+      res
+        .writeHead(
+          recovering ||
+            req.headers["x-drts-event-type"] === "tenant.webhook.test"
+            ? 200
+            : 503,
+        )
+        .end();
+    });
+  });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const children: ReturnType<typeof spawn>[] = [];
+  const launch = (phase: string) => {
+    const child = spawn(
+      "pnpm",
+      [
+        "exec",
+        "vitest",
+        "run",
+        "tests/unit/system-remediation/sr-qa-webhook-001/process-worker.test.ts",
+      ],
+      {
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          DRTS_WEBHOOK_PROCESS_PHASE: phase,
+          DRTS_WEBHOOK_PROCESS_CONTEXT: contextPath,
+          DRTS_WEBHOOK_PROCESS_RECEIVER: `http://127.0.0.1:${(server.address() as AddressInfo).port}/receiver`,
+          DRTS_WEBHOOK_PROCESS_SECRET: secret,
+        },
+      },
+    );
+    children.push(child);
+    let output = "";
+    child.stdout!.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.stderr!.on("data", (chunk) => {
+      output += chunk;
+    });
+    const completion = new Promise<{
+      code: number | null;
+      signal: string | null;
+    }>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", (code, signal) => resolve({ code, signal }));
+    });
+    return { child, completion, output: () => output };
+  };
+  try {
+    const writer = launch("write");
+    await expect
+      .poll(() => existsSync(contextPath), { timeout: 20_000 })
+      .toBe(true);
+    process.kill(-writer.child.pid!, "SIGKILL");
+    expect((await writer.completion).signal).toBe("SIGKILL");
+    recovering = true;
+    const recovery = launch("recover");
+    const result = await recovery.completion;
+    expect(result.code, recovery.output()).toBe(0);
+    const resource = JSON.parse(
+      readFileSync(`${contextPath}.recovered`, "utf8"),
+    );
+    expect(resource.recoveryPid).not.toBe(resource.writerPid);
+    expect(resource.status).toBe("delivered");
+    expect(requests).toHaveLength(3);
+    const received = requests[2];
+    const match = /^v=1;t=([^;]+);sig=([0-9a-f]+)$/.exec(received.signature)!;
+    expect(match).not.toBeNull();
+    expect(
+      createHmac("sha256", secret)
+        .update(`${match[1]}.${received.body}`)
+        .digest("hex"),
+    ).toBe(match[2]);
+    expect(JSON.parse(received.body).delivery_id).toBe(resource.deliveryId);
+    recordEvidence(
+      "SR-QA-WEBHOOK-001 OS process recovery",
+      JSON.stringify({
+        ...resource,
+        requests: requests.length,
+        terminationSignal: "SIGKILL",
+      }),
+    );
+  } finally {
+    for (const child of children) {
+      try {
+        process.kill(-child.pid!, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 75_000);

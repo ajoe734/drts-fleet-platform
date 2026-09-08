@@ -6,7 +6,7 @@ import { UatEvidenceRecorder } from "../shared/evidence-recorder";
 
 // Local PostgreSQL and HTTP acceptance; deployed authentication remains separate.
 test("SR-QA-WEBHOOK-001: controlled HTTP service regression", async () => {
-  test.setTimeout(90_000);
+  test.setTimeout(150_000);
   const recorder = new UatEvidenceRecorder({
     taskId: "SR-QA-WEBHOOK-001",
     baseSha: execFileSync("git", ["rev-parse", "origin/dev"], {
@@ -22,7 +22,7 @@ test("SR-QA-WEBHOOK-001: controlled HTTP service regression", async () => {
   try {
     if (process.env.DRTS_WEBHOOK_LIVE === "1") {
       throw new Error(
-        "Live acceptance unavailable: deployed authenticated API, OS process restart, C113/C114 providers and C115 scheduler evidence have not been collected.",
+        "Live acceptance unavailable: deployed authenticated API, C113/C114 providers and C115 scheduler evidence have not been collected.",
       );
     }
     const result = await new Promise<{ stdout: string; stderr: string }>(
@@ -66,13 +66,13 @@ test("SR-QA-WEBHOOK-001: controlled HTTP service regression", async () => {
       ["tests/unit/system-remediation/sr-qa-webhook-001/run-postgres.sh"],
       {
         cwd: process.cwd(),
-        timeout: 60_000,
+        timeout: 120_000,
         encoding: "utf8",
         env: { ...process.env, DRTS_WEBHOOK_DB_EVIDENCE: dbEvidencePath },
       },
     );
     const dbEvidence = JSON.parse(readFileSync(dbEvidencePath, "utf8"));
-    expect(dbEvidence.evidence).toHaveLength(2);
+    expect(dbEvidence.evidence).toHaveLength(3);
     for (const entry of dbEvidence.evidence) {
       recorder.recordResourceId(
         "postgres_acceptance",
@@ -84,11 +84,11 @@ test("SR-QA-WEBHOOK-001: controlled HTTP service regression", async () => {
 
     recorder.recordConsole(
       "info",
-      "Local PostgreSQL key readback and automatic webhook retry after service reinitialization passed. Timeout uses a test-injected deadline; deployed API and OS process restart remain unverified.",
+      "Local PostgreSQL key readback and automatic webhook retry after service reinitialization passed. Timeout uses a test-injected deadline; SIGKILL/new OS process recovery passed; deployed API remains unverified.",
     );
     recorder.recordLiveLimitation(
       "C111-C112",
-      "Authenticated HTTP API, OS process restart and default transport timeout remain unverified. Local DB readback, service reinitialization, automatic retry and outbox deduplication passed.",
+      "Authenticated HTTP API and default transport timeout remain unverified. SIGKILL/new OS process recovery passed. Local DB readback, service reinitialization, automatic retry and outbox deduplication passed.",
     );
     recorder.recordLiveLimitation(
       "C113",
