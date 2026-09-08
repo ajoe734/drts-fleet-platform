@@ -444,33 +444,33 @@ export class VoiceEvidenceService {
       }
     }
 
-    // 2. Checkpoint manifest binding for readbackPlaybackId and snapshotHash
+    // 2. Checkpoint manifest binding for readbackPlaybackId and snapshotHash (SD §8.2)
     const manifest = gate.checkpoint.manifest as RecordingManifest;
     if (
-      manifest.readbackPlaybackId &&
+      !manifest.readbackPlaybackId ||
       manifest.readbackPlaybackId !== proof.readbackPlaybackId
     ) {
       throw new ApiRequestError(
         409,
         "VOICE_INVALID_PROOF",
-        "Proof readbackPlaybackId does not match checkpoint manifest readbackPlaybackId.",
+        "Checkpoint manifest is missing readbackPlaybackId or does not match proof readbackPlaybackId.",
         {
-          expected: manifest.readbackPlaybackId,
-          actual: proof.readbackPlaybackId,
+          expected: proof.readbackPlaybackId,
+          actual: manifest.readbackPlaybackId ?? null,
         },
       );
     }
     if (
-      manifest.snapshotHash &&
+      !manifest.snapshotHash ||
       manifest.snapshotHash !== proof.snapshotHash
     ) {
       throw new ApiRequestError(
         409,
         "VOICE_INVALID_PROOF",
-        "Proof snapshotHash does not match checkpoint manifest snapshotHash.",
+        "Checkpoint manifest is missing snapshotHash or does not match proof snapshotHash.",
         {
-          expected: manifest.snapshotHash,
-          actual: proof.snapshotHash,
+          expected: proof.snapshotHash,
+          actual: manifest.snapshotHash ?? null,
         },
       );
     }
@@ -497,7 +497,9 @@ export class VoiceEvidenceService {
       );
     }
 
-    const readbackPayload = readbackEvent.payload as {
+    const readbackPayload = (readbackEvent.payload && typeof readbackEvent.payload === "object"
+      ? readbackEvent.payload
+      : null) as {
       playbackId?: string;
       readbackPlaybackId?: string;
       snapshotHash?: string;
@@ -506,13 +508,23 @@ export class VoiceEvidenceService {
       callId?: string;
       callLegId?: string;
       audioRegion?: { startUtc?: string; endUtc?: string; startOffsetMs?: number; endOffsetMs?: number };
+      audioStartUtc?: string;
+      audioEndUtc?: string;
       startedAtUtc?: string;
       endedAtUtc?: string;
       startOffsetMs?: number;
       endOffsetMs?: number;
     } | null;
 
-    if (readbackPayload?.callId && readbackPayload.callId !== input.callId) {
+    if (!readbackPayload) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_INVALID_PROOF",
+        "Readback completed event is missing payload with trusted playback and snapshot bindings.",
+      );
+    }
+
+    if (readbackPayload.callId && readbackPayload.callId !== input.callId) {
       throw new ApiRequestError(
         409,
         "VOICE_INVALID_PROOF",
@@ -521,54 +533,65 @@ export class VoiceEvidenceService {
     }
 
     const eventPlaybackId =
-      readbackPayload?.playbackId ??
-      readbackPayload?.readbackPlaybackId ??
-      readbackPayload?.promptPlaybackId;
-    if (eventPlaybackId && eventPlaybackId !== proof.readbackPlaybackId) {
+      readbackPayload.playbackId ??
+      readbackPayload.readbackPlaybackId ??
+      readbackPayload.promptPlaybackId;
+    if (!eventPlaybackId || eventPlaybackId !== proof.readbackPlaybackId) {
       throw new ApiRequestError(
         409,
         "VOICE_INVALID_PROOF",
-        "Readback completed event playbackId does not match proof readbackPlaybackId.",
+        "Readback completed event is missing playbackId or does not match proof readbackPlaybackId.",
         {
           expected: proof.readbackPlaybackId,
-          actual: eventPlaybackId,
+          actual: eventPlaybackId ?? null,
         },
       );
     }
 
     if (
-      readbackPayload?.snapshotHash &&
+      !readbackPayload.snapshotHash ||
       readbackPayload.snapshotHash !== proof.snapshotHash
     ) {
       throw new ApiRequestError(
         409,
         "VOICE_INVALID_PROOF",
-        "Readback completed event snapshotHash does not match proof snapshotHash.",
+        "Readback completed event is missing snapshotHash or does not match proof snapshotHash.",
         {
           expected: proof.snapshotHash,
-          actual: readbackPayload.snapshotHash,
+          actual: readbackPayload.snapshotHash ?? null,
         },
       );
     }
 
+    const readbackLegId = readbackEvent.legId ?? readbackPayload.callLegId ?? null;
+
     this.assertWithinCoverage(readbackEvent, gate.checkpoint, "readback");
     const readbackStartUtc =
-      readbackPayload?.audioRegion?.startUtc ??
-      readbackPayload?.startedAtUtc ??
-      readbackEvent.occurredAt;
+      readbackPayload.audioRegion?.startUtc ??
+      readbackPayload.audioStartUtc ??
+      readbackPayload.startedAtUtc;
     const readbackEndUtc =
-      readbackPayload?.audioRegion?.endUtc ??
-      readbackPayload?.endedAtUtc ??
-      readbackEvent.occurredAt;
+      readbackPayload.audioRegion?.endUtc ??
+      readbackPayload.audioEndUtc ??
+      readbackPayload.endedAtUtc;
+
+    if (!readbackStartUtc || !readbackEndUtc) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_RECORDING_NOT_DURABLE",
+        "Readback completed event lacks conservative recorded audio region or playback window evidence.",
+      );
+    }
+
     const readbackOffsets =
-      readbackPayload?.audioRegion?.startOffsetMs !== undefined &&
-      readbackPayload?.audioRegion?.endOffsetMs !== undefined
+      readbackPayload.audioRegion?.startOffsetMs !== undefined &&
+      readbackPayload.audioRegion?.endOffsetMs !== undefined
         ? {
             startOffsetMs: readbackPayload.audioRegion.startOffsetMs,
             endOffsetMs: readbackPayload.audioRegion.endOffsetMs,
           }
-        : readbackPayload?.startOffsetMs !== undefined &&
-            readbackPayload?.endOffsetMs !== undefined
+        : readbackPayload.startOffsetMs !== undefined &&
+            readbackPayload.endOffsetMs !== undefined
           ? {
               startOffsetMs: readbackPayload.startOffsetMs,
               endOffsetMs: readbackPayload.endOffsetMs,
@@ -602,7 +625,9 @@ export class VoiceEvidenceService {
         );
       }
 
-      const finalPayload = finalEvent.payload as {
+      const finalPayload = (finalEvent.payload && typeof finalEvent.payload === "object"
+        ? finalEvent.payload
+        : null) as {
         turnId?: string;
         callId?: string;
         callLegId?: string;
@@ -615,7 +640,15 @@ export class VoiceEvidenceService {
         endOffsetMs?: number;
       } | null;
 
-      if (finalPayload?.callId && finalPayload.callId !== input.callId) {
+      if (!finalPayload) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_INVALID_PROOF",
+          "Speech finalEvent is missing payload with turnId and audio region.",
+        );
+      }
+
+      if (finalPayload.callId && finalPayload.callId !== input.callId) {
         throw new ApiRequestError(
           409,
           "VOICE_INVALID_PROOF",
@@ -623,14 +656,27 @@ export class VoiceEvidenceService {
         );
       }
 
-      if (finalPayload?.turnId && finalPayload.turnId !== proof.evidence.turnId) {
+      if (!finalPayload.turnId || finalPayload.turnId !== proof.evidence.turnId) {
         throw new ApiRequestError(
           409,
           "VOICE_INVALID_PROOF",
-          "Speech proof turnId does not match finalEvent payload turnId.",
+          "Speech proof turnId is missing from ASR payload or does not match finalEvent payload turnId.",
           {
             expected: proof.evidence.turnId,
-            actual: finalPayload.turnId,
+            actual: finalPayload.turnId ?? null,
+          },
+        );
+      }
+
+      const speechLegId = finalEvent.legId ?? finalPayload.callLegId ?? null;
+      if (readbackLegId && speechLegId && readbackLegId !== speechLegId) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_INVALID_PROOF",
+          "Speech affirmation event is on a different leg than the readback playback.",
+          {
+            readbackLegId,
+            speechLegId,
           },
         );
       }
@@ -644,24 +690,31 @@ export class VoiceEvidenceService {
       }
 
       const speechStartUtc =
-        finalPayload?.audioRegion?.startUtc ??
-        finalPayload?.audioStartUtc ??
-        finalPayload?.startedAtUtc ??
-        finalEvent.occurredAt;
+        finalPayload.audioRegion?.startUtc ??
+        finalPayload.audioStartUtc ??
+        finalPayload.startedAtUtc;
       const speechEndUtc =
-        finalPayload?.audioRegion?.endUtc ??
-        finalPayload?.audioEndUtc ??
-        finalPayload?.endedAtUtc ??
-        finalEvent.occurredAt;
+        finalPayload.audioRegion?.endUtc ??
+        finalPayload.audioEndUtc ??
+        finalPayload.endedAtUtc;
+
+      if (!speechStartUtc || !speechEndUtc) {
+        throw new ApiRequestError(
+          409,
+          "VOICE_RECORDING_NOT_DURABLE",
+          "Speech affirmation event lacks conservative recorded audio region or utterance timing evidence.",
+        );
+      }
+
       const speechOffsets =
-        finalPayload?.audioRegion?.startOffsetMs !== undefined &&
-        finalPayload?.audioRegion?.endOffsetMs !== undefined
+        finalPayload.audioRegion?.startOffsetMs !== undefined &&
+        finalPayload.audioRegion?.endOffsetMs !== undefined
           ? {
               startOffsetMs: finalPayload.audioRegion.startOffsetMs,
               endOffsetMs: finalPayload.audioRegion.endOffsetMs,
             }
-          : finalPayload?.startOffsetMs !== undefined &&
-              finalPayload?.endOffsetMs !== undefined
+          : finalPayload.startOffsetMs !== undefined &&
+              finalPayload.endOffsetMs !== undefined
             ? {
                 startOffsetMs: finalPayload.startOffsetMs,
                 endOffsetMs: finalPayload.endOffsetMs,
@@ -697,7 +750,9 @@ export class VoiceEvidenceService {
       );
     }
 
-    const digitPayload = digitEvent.payload as {
+    const digitPayload = (digitEvent.payload && typeof digitEvent.payload === "object"
+      ? digitEvent.payload
+      : null) as {
       digit?: string;
       callId?: string;
       callLegId?: string;
@@ -711,7 +766,15 @@ export class VoiceEvidenceService {
       endOffsetMs?: number;
     } | null;
 
-    if (digitPayload?.callId && digitPayload.callId !== input.callId) {
+    if (!digitPayload) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_INVALID_PROOF",
+        "DTMF digit event is missing payload with digit, leg, and prompt bindings.",
+      );
+    }
+
+    if (digitPayload.callId && digitPayload.callId !== input.callId) {
       throw new ApiRequestError(
         409,
         "VOICE_INVALID_PROOF",
@@ -719,68 +782,51 @@ export class VoiceEvidenceService {
       );
     }
 
-    if (
-      digitEvent.legId !== null &&
-      readbackEvent.legId !== null &&
-      digitEvent.legId !== readbackEvent.legId
-    ) {
+    // 1. Positive same-leg binding for DTMF (SD §8.2: "可信同一 call/leg 的 digit event")
+    const digitLegId = digitEvent.legId ?? digitPayload.callLegId ?? null;
+    if (!readbackLegId || !digitLegId || readbackLegId !== digitLegId) {
       throw new ApiRequestError(
         409,
         "VOICE_INVALID_PROOF",
-        "DTMF digit event is on a different leg than the readback playback.",
+        "DTMF digit event lacks positive same-leg binding to the readback playback.",
         {
-          readbackLegId: readbackEvent.legId,
-          digitLegId: digitEvent.legId,
+          readbackLegId,
+          digitLegId,
         },
-      );
-    }
-    if (
-      digitPayload?.callLegId &&
-      readbackPayload?.callLegId &&
-      digitPayload.callLegId !== readbackPayload.callLegId
-    ) {
-      throw new ApiRequestError(
-        409,
-        "VOICE_INVALID_PROOF",
-        "DTMF digit event payload callLegId does not match readback payload callLegId.",
       );
     }
 
+    // 2. Positive prompt binding for DTMF (SD §8.2: "prompt binding")
     const digitPromptPlaybackId =
-      digitPayload?.promptPlaybackId ??
-      digitPayload?.playbackId ??
-      digitPayload?.readbackPlaybackId;
-    if (
-      digitPromptPlaybackId &&
-      digitPromptPlaybackId !== proof.readbackPlaybackId
-    ) {
+      digitPayload.promptPlaybackId ??
+      digitPayload.playbackId ??
+      digitPayload.readbackPlaybackId;
+
+    const matchesPlaybackPrompt =
+      digitPromptPlaybackId !== undefined &&
+      digitPromptPlaybackId === proof.readbackPlaybackId;
+
+    const matchesPromptId =
+      digitPayload.promptId !== undefined &&
+      readbackPayload.promptId !== undefined &&
+      digitPayload.promptId === readbackPayload.promptId;
+
+    if (!matchesPlaybackPrompt && !matchesPromptId) {
       throw new ApiRequestError(
         409,
         "VOICE_INVALID_PROOF",
-        "DTMF digit prompt binding does not match proof readbackPlaybackId.",
+        "DTMF digit event lacks positive prompt binding to the readback playback.",
         {
-          expected: proof.readbackPlaybackId,
-          actual: digitPromptPlaybackId,
+          expectedPlaybackId: proof.readbackPlaybackId,
+          digitPromptPlaybackId: digitPromptPlaybackId ?? null,
+          readbackPromptId: readbackPayload.promptId ?? null,
+          digitPromptId: digitPayload.promptId ?? null,
         },
       );
     }
+
     if (
-      digitPayload?.promptId &&
-      readbackPayload?.promptId &&
-      digitPayload.promptId !== readbackPayload.promptId
-    ) {
-      throw new ApiRequestError(
-        409,
-        "VOICE_INVALID_PROOF",
-        "DTMF digit prompt binding does not match readback promptId.",
-        {
-          readbackPromptId: readbackPayload.promptId,
-          digitPromptId: digitPayload.promptId,
-        },
-      );
-    }
-    if (
-      digitPayload?.snapshotHash &&
+      digitPayload.snapshotHash &&
       digitPayload.snapshotHash !== proof.snapshotHash
     ) {
       throw new ApiRequestError(
@@ -790,12 +836,16 @@ export class VoiceEvidenceService {
       );
     }
 
-    const recordedDigit = digitPayload?.digit;
-    if (recordedDigit !== proof.evidence.digit) {
+    const recordedDigit = digitPayload.digit;
+    if (!recordedDigit || recordedDigit !== proof.evidence.digit) {
       throw new ApiRequestError(
         409,
         "VOICE_INVALID_PROOF",
-        "DTMF proof digit does not match the durably recorded digit event.",
+        "DTMF proof digit is missing or does not match the durably recorded digit event.",
+        {
+          expected: proof.evidence.digit,
+          actual: recordedDigit ?? null,
+        },
       );
     }
 
@@ -816,12 +866,12 @@ export class VoiceEvidenceService {
       gate.checkpoint,
       "customer",
       {
-        startUtc: digitPayload?.audioRegion?.startUtc ?? digitEvent.occurredAt,
-        endUtc: digitPayload?.audioRegion?.endUtc ?? digitEvent.occurredAt,
+        startUtc: digitPayload.audioRegion?.startUtc ?? digitEvent.occurredAt,
+        endUtc: digitPayload.audioRegion?.endUtc ?? digitEvent.occurredAt,
       },
       "DTMF digit",
-      digitPayload?.audioRegion?.startOffsetMs !== undefined &&
-      digitPayload?.audioRegion?.endOffsetMs !== undefined
+      digitPayload.audioRegion?.startOffsetMs !== undefined &&
+      digitPayload.audioRegion?.endOffsetMs !== undefined
         ? {
             startOffsetMs: digitPayload.audioRegion.startOffsetMs,
             endOffsetMs: digitPayload.audioRegion.endOffsetMs,

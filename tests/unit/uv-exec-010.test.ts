@@ -678,8 +678,16 @@ describe("VoiceEvidenceService", () => {
   });
 
   describe("proof binding (SD §8.2: speech/DTMF proofs must reference real recorded evidence)", () => {
-    async function seedVerifiedCheckpoint(): Promise<VoiceRecordingCheckpointRecord> {
-      const { checkpoint } = await service.ingestSealedSegment(segment());
+    async function seedVerifiedCheckpoint(
+      overrides: Partial<SealedRecordingSegmentInput> = {},
+    ): Promise<VoiceRecordingCheckpointRecord> {
+      const { checkpoint } = await service.ingestSealedSegment(
+        segment({
+          readbackPlaybackId: "playback-1",
+          snapshotHash: "snapshot-hash",
+          ...overrides,
+        }),
+      );
       return checkpoint;
     }
 
@@ -702,21 +710,82 @@ describe("VoiceEvidenceService", () => {
       };
     }
 
+    function validReadbackEvent(
+      overrides: Partial<VoiceSessionEventRecord> = {},
+    ): VoiceSessionEventRecord {
+      return sessionEvent({
+        eventId: "readback-event",
+        eventType: "tts.playback.completed",
+        sequence: 1,
+        legId: "leg-customer-1",
+        occurredAt: "2026-09-08T00:00:00.400Z",
+        payload: {
+          playbackId: "playback-1",
+          snapshotHash: "snapshot-hash",
+          callId: CALL_ID,
+          callLegId: "leg-customer-1",
+          promptPlaybackId: "playback-1",
+          promptId: "prompt-confirm-1",
+          audioRegion: {
+            startUtc: "2026-09-08T00:00:00.100Z",
+            endUtc: "2026-09-08T00:00:00.400Z",
+            startOffsetMs: 100,
+            endOffsetMs: 400,
+          },
+        },
+        ...overrides,
+      });
+    }
+
+    function validAsrFinalEvent(
+      overrides: Partial<VoiceSessionEventRecord> = {},
+    ): VoiceSessionEventRecord {
+      return sessionEvent({
+        eventId: "asr-final-event",
+        eventType: "asr.segment.final",
+        sequence: 2,
+        legId: "leg-customer-1",
+        occurredAt: "2026-09-08T00:00:00.700Z",
+        payload: {
+          turnId: "55555555-5555-4555-8555-555555555555",
+          callId: CALL_ID,
+          callLegId: "leg-customer-1",
+          audioRegion: {
+            startUtc: "2026-09-08T00:00:00.500Z",
+            endUtc: "2026-09-08T00:00:00.700Z",
+            startOffsetMs: 500,
+            endOffsetMs: 700,
+          },
+        },
+        ...overrides,
+      });
+    }
+
+    function validDtmfEvent(
+      overrides: Partial<VoiceSessionEventRecord> = {},
+    ): VoiceSessionEventRecord {
+      return sessionEvent({
+        eventId: "dtmf-event",
+        eventType: "dtmf.received",
+        sequence: 2,
+        legId: "leg-customer-1",
+        occurredAt: "2026-09-08T00:00:00.600Z",
+        payload: {
+          digit: "1",
+          callId: CALL_ID,
+          callLegId: "leg-customer-1",
+          promptPlaybackId: "playback-1",
+          snapshotHash: "snapshot-hash",
+        },
+        ...overrides,
+      });
+    }
+
     it("accepts a speech proof bound to a real finalized ASR event and a real completed playback", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-        }),
-        sessionEvent({
-          eventId: "asr-final-event",
-          eventType: "asr.segment.final",
-          sequence: 2,
-          occurredAt: "2026-09-08T00:00:00.600Z",
-        }),
+        validReadbackEvent(),
+        validAsrFinalEvent(),
       ]);
 
       const proof = {
@@ -736,16 +805,12 @@ describe("VoiceEvidenceService", () => {
     it("rejects a speech proof whose readback event is only 'started', not 'completed' -- synthesized TTS bytes are not evidence of listening", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
+        validReadbackEvent({
           eventId: "readback-event",
           eventType: "tts.playback.started",
           sequence: 1,
         }),
-        sessionEvent({
-          eventId: "asr-final-event",
-          eventType: "asr.segment.final",
-          sequence: 2,
-        }),
+        validAsrFinalEvent(),
       ]);
 
       const proof = {
@@ -766,8 +831,8 @@ describe("VoiceEvidenceService", () => {
     it("rejects a proof that references a stale (non-current) checkpoint", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({ eventId: "readback-event", eventType: "tts.playback.completed", sequence: 1 }),
-        sessionEvent({ eventId: "asr-final-event", eventType: "asr.segment.final", sequence: 2 }),
+        validReadbackEvent(),
+        validAsrFinalEvent(),
       ]);
       void checkpoint;
 
@@ -789,19 +854,8 @@ describe("VoiceEvidenceService", () => {
     it("accepts a DTMF proof bound to a real digit event ordered after playback completion, without requiring DTMF tone audio", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-        }),
-        sessionEvent({
-          eventId: "dtmf-event",
-          eventType: "dtmf.received",
-          sequence: 2,
-          occurredAt: "2026-09-08T00:00:00.600Z",
-          payload: { digit: "1" },
-        }),
+        validReadbackEvent(),
+        validDtmfEvent(),
       ]);
 
       const proof = {
@@ -823,16 +877,11 @@ describe("VoiceEvidenceService", () => {
       fixture.seedEvents(VOICE_SESSION_ID, [
         // Digit arrives (sequence 1) *before* the readback completion (sequence 2) --
         // cannot be trusted as the passenger's response to that specific readback.
-        sessionEvent({
-          eventId: "dtmf-event",
-          eventType: "dtmf.received",
+        validDtmfEvent({
           sequence: 1,
           occurredAt: "2026-09-08T00:00:00.300Z",
-          payload: { digit: "1" },
         }),
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
+        validReadbackEvent({
           sequence: 2,
           occurredAt: "2026-09-08T00:00:00.400Z",
         }),
@@ -856,12 +905,15 @@ describe("VoiceEvidenceService", () => {
     it("rejects a DTMF proof whose digit does not match the durably recorded payload", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({ eventId: "readback-event", eventType: "tts.playback.completed", sequence: 1 }),
-        sessionEvent({
-          eventId: "dtmf-event",
-          eventType: "dtmf.received",
-          sequence: 2,
-          payload: { digit: "9" },
+        validReadbackEvent(),
+        validDtmfEvent({
+          payload: {
+            digit: "9",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            promptPlaybackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+          },
         }),
       ]);
 
@@ -899,18 +951,20 @@ describe("VoiceEvidenceService", () => {
     it("rejects a speech proof whose ASR final event occurred outside the coverage window", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-        }),
-        sessionEvent({
-          eventId: "asr-final-event",
-          eventType: "asr.segment.final",
-          sequence: 2,
-          // Outside coverage window ("2026-09-08T00:00:00.000Z" to "2026-09-08T00:00:01.000Z")
+        validReadbackEvent(),
+        validAsrFinalEvent({
           occurredAt: "2026-09-08T00:00:05.000Z",
+          payload: {
+            turnId: "55555555-5555-4555-8555-555555555555",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:04.500Z",
+              endUtc: "2026-09-08T00:00:05.000Z",
+              startOffsetMs: 4500,
+              endOffsetMs: 5000,
+            },
+          },
         }),
       ]);
 
@@ -932,19 +986,22 @@ describe("VoiceEvidenceService", () => {
     it("rejects a speech proof whose readback completed event occurred outside the coverage window", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          // Before coverage start
+        validReadbackEvent({
           occurredAt: "2026-09-07T23:59:59.000Z",
+          payload: {
+            playbackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            audioRegion: {
+              startUtc: "2026-09-07T23:59:58.000Z",
+              endUtc: "2026-09-07T23:59:59.000Z",
+              startOffsetMs: 0,
+              endOffsetMs: 1000,
+            },
+          },
         }),
-        sessionEvent({
-          eventId: "asr-final-event",
-          eventType: "asr.segment.final",
-          sequence: 2,
-          occurredAt: "2026-09-08T00:00:00.600Z",
-        }),
+        validAsrFinalEvent(),
       ]);
 
       const proof = {
@@ -965,18 +1022,9 @@ describe("VoiceEvidenceService", () => {
     it("rejects a DTMF proof whose digit event occurred outside the coverage window", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-        }),
-        sessionEvent({
-          eventId: "dtmf-event",
-          eventType: "dtmf.received",
-          sequence: 2,
+        validReadbackEvent(),
+        validDtmfEvent({
           occurredAt: "2026-09-08T00:00:02.500Z",
-          payload: { digit: "1" },
         }),
       ]);
 
@@ -998,12 +1046,7 @@ describe("VoiceEvidenceService", () => {
     it("rejects a speech proof when the ASR final event is not found in session events", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-        }),
+        validReadbackEvent(),
       ]);
 
       const proof = {
@@ -1024,12 +1067,7 @@ describe("VoiceEvidenceService", () => {
     it("rejects a DTMF proof when the digit event is not found in session events", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-        }),
+        validReadbackEvent(),
       ]);
 
       const proof = {
@@ -1057,19 +1095,13 @@ describe("VoiceEvidenceService", () => {
         }),
       );
       fixture.seedEvents(callBSessionId, [
-        sessionEvent({
+        validReadbackEvent({
           voiceSessionId: callBSessionId,
           eventId: "readback-event-b",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
         }),
-        sessionEvent({
+        validAsrFinalEvent({
           voiceSessionId: callBSessionId,
           eventId: "asr-event-b",
-          eventType: "asr.segment.final",
-          sequence: 2,
-          occurredAt: "2026-09-08T00:00:00.600Z",
         }),
       ]);
 
@@ -1093,19 +1125,19 @@ describe("VoiceEvidenceService", () => {
     it("rejects a proof when session events have payload callId belonging to a different call", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-          payload: { callId: "different-call-id" },
+        validReadbackEvent({
+          payload: {
+            playbackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+            callId: "different-call-id",
+            callLegId: "leg-customer-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.100Z",
+              endUtc: "2026-09-08T00:00:00.400Z",
+            },
+          },
         }),
-        sessionEvent({
-          eventId: "asr-final-event",
-          eventType: "asr.segment.final",
-          sequence: 2,
-          occurredAt: "2026-09-08T00:00:00.600Z",
-        }),
+        validAsrFinalEvent(),
       ]);
 
       const proof = {
@@ -1126,19 +1158,19 @@ describe("VoiceEvidenceService", () => {
     it("rejects a proof when readback event payload playbackId does not match proof readbackPlaybackId", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-          payload: { playbackId: "playback-actual" },
+        validReadbackEvent({
+          payload: {
+            playbackId: "playback-actual",
+            snapshotHash: "snapshot-hash",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.100Z",
+              endUtc: "2026-09-08T00:00:00.400Z",
+            },
+          },
         }),
-        sessionEvent({
-          eventId: "asr-final-event",
-          eventType: "asr.segment.final",
-          sequence: 2,
-          occurredAt: "2026-09-08T00:00:00.600Z",
-        }),
+        validAsrFinalEvent(),
       ]);
 
       const proof = {
@@ -1159,21 +1191,14 @@ describe("VoiceEvidenceService", () => {
 
     it("rejects a proof when manifest readbackPlaybackId does not match proof readbackPlaybackId", async () => {
       const { checkpoint } = await service.ingestSealedSegment(
-        segment({ readbackPlaybackId: "manifest-playback-123" }),
+        segment({
+          readbackPlaybackId: "manifest-playback-123",
+          snapshotHash: "snapshot-hash",
+        }),
       );
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-        }),
-        sessionEvent({
-          eventId: "asr-final-event",
-          eventType: "asr.segment.final",
-          sequence: 2,
-          occurredAt: "2026-09-08T00:00:00.600Z",
-        }),
+        validReadbackEvent(),
+        validAsrFinalEvent(),
       ]);
 
       const proof = {
@@ -1194,21 +1219,14 @@ describe("VoiceEvidenceService", () => {
 
     it("rejects a proof when manifest snapshotHash does not match proof snapshotHash", async () => {
       const { checkpoint } = await service.ingestSealedSegment(
-        segment({ snapshotHash: "manifest-snapshot-hash" }),
+        segment({
+          readbackPlaybackId: "playback-1",
+          snapshotHash: "manifest-snapshot-hash",
+        }),
       );
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-        }),
-        sessionEvent({
-          eventId: "asr-final-event",
-          eventType: "asr.segment.final",
-          sequence: 2,
-          occurredAt: "2026-09-08T00:00:00.600Z",
-        }),
+        validReadbackEvent(),
+        validAsrFinalEvent(),
       ]);
 
       const proof = {
@@ -1230,18 +1248,14 @@ describe("VoiceEvidenceService", () => {
     it("rejects a DTMF proof when digit event promptPlaybackId does not match proof readbackPlaybackId", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-        }),
-        sessionEvent({
-          eventId: "dtmf-event",
-          eventType: "dtmf.received",
-          sequence: 2,
-          occurredAt: "2026-09-08T00:00:00.600Z",
-          payload: { digit: "1", promptPlaybackId: "mismatched-prompt-playback" },
+        validReadbackEvent(),
+        validDtmfEvent({
+          payload: {
+            digit: "1",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            promptPlaybackId: "mismatched-prompt-playback",
+          },
         }),
       ]);
 
@@ -1263,20 +1277,15 @@ describe("VoiceEvidenceService", () => {
     it("rejects a DTMF proof when digit event leg does not match readback playback leg", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          legId: "leg-customer-1",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-        }),
-        sessionEvent({
-          eventId: "dtmf-event",
-          eventType: "dtmf.received",
+        validReadbackEvent({ legId: "leg-customer-1" }),
+        validDtmfEvent({
           legId: "leg-agent-2",
-          sequence: 2,
-          occurredAt: "2026-09-08T00:00:00.600Z",
-          payload: { digit: "1" },
+          payload: {
+            digit: "1",
+            callId: CALL_ID,
+            callLegId: "leg-agent-2",
+            promptPlaybackId: "playback-1",
+          },
         }),
       ]);
 
@@ -1298,18 +1307,17 @@ describe("VoiceEvidenceService", () => {
     it("rejects a speech proof when finalEvent payload turnId does not match proof evidence turnId", async () => {
       const checkpoint = await seedVerifiedCheckpoint();
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-        }),
-        sessionEvent({
-          eventId: "asr-final-event",
-          eventType: "asr.segment.final",
-          sequence: 2,
-          occurredAt: "2026-09-08T00:00:00.600Z",
-          payload: { turnId: "turn-original" },
+        validReadbackEvent(),
+        validAsrFinalEvent({
+          payload: {
+            turnId: "turn-original",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.500Z",
+              endUtc: "2026-09-08T00:00:00.700Z",
+            },
+          },
         }),
       ]);
 
@@ -1349,22 +1357,14 @@ describe("VoiceEvidenceService", () => {
           endedAtUtc: "2026-09-08T00:00:02.000Z",
           objectKey: `${CALL_ID}/${RECORDING_ID}/segments/000002`,
           checksum: "checksum-2",
+          readbackPlaybackId: "playback-1",
+          snapshotHash: "snapshot-hash",
         }),
       );
 
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
-        }),
-        sessionEvent({
-          eventId: "asr-final-event",
-          eventType: "asr.segment.final",
-          sequence: 2,
-          occurredAt: "2026-09-08T00:00:00.600Z",
-        }),
+        validReadbackEvent(),
+        validAsrFinalEvent(),
       ]);
 
       const proof = {
@@ -1403,21 +1403,39 @@ describe("VoiceEvidenceService", () => {
           endedAtUtc: "2026-09-08T00:00:02.000Z",
           objectKey: `${CALL_ID}/${RECORDING_ID}/segments/000002`,
           checksum: "checksum-2",
+          readbackPlaybackId: "playback-1",
+          snapshotHash: "snapshot-hash",
         }),
       );
 
       fixture.seedEvents(VOICE_SESSION_ID, [
-        sessionEvent({
-          eventId: "readback-event",
-          eventType: "tts.playback.completed",
-          sequence: 1,
-          occurredAt: "2026-09-08T00:00:00.400Z",
+        validReadbackEvent({
+          payload: {
+            playbackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.100Z",
+              endUtc: "2026-09-08T00:00:00.400Z",
+              startOffsetMs: 100,
+              endOffsetMs: 400,
+            },
+          },
         }),
-        sessionEvent({
-          eventId: "asr-final-event",
-          eventType: "asr.segment.final",
-          sequence: 2,
+        validAsrFinalEvent({
           occurredAt: "2026-09-08T00:00:01.500Z",
+          payload: {
+            turnId: "55555555-5555-4555-8555-555555555555",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:01.200Z",
+              endUtc: "2026-09-08T00:00:01.500Z",
+              startOffsetMs: 1200,
+              endOffsetMs: 1500,
+            },
+          },
         }),
       ]);
 
@@ -1425,6 +1443,297 @@ describe("VoiceEvidenceService", () => {
         ...baseProofFields(checkpoint.checkpointId),
         confirmationMethod: "speech" as const,
         evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    // -------------------------------------------------------------------------
+    // Dedicated review findings regression test suite (Codex2 negative probes)
+    // -------------------------------------------------------------------------
+
+    it("rejects when checkpoint manifest completely lacks readbackPlaybackId (review probe 1 negative test)", async () => {
+      const { checkpoint } = await service.ingestSealedSegment(
+        segment({ readbackPlaybackId: null, snapshotHash: "snapshot-hash" }),
+      );
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent(),
+        validAsrFinalEvent(),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects when checkpoint manifest completely lacks snapshotHash (review probe 1 negative test)", async () => {
+      const { checkpoint } = await service.ingestSealedSegment(
+        segment({ readbackPlaybackId: "playback-1", snapshotHash: null }),
+      );
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent(),
+        validAsrFinalEvent(),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects when readback playback completed event has empty payload {} (review probe 1 negative test)", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+          payload: {},
+        }),
+        validAsrFinalEvent(),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects when readback playback completed event lacks conservative audio region or timing (review probe 2 negative test)", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          legId: "leg-customer-1",
+          occurredAt: "2026-09-08T00:00:00.400Z",
+          payload: {
+            playbackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            // Missing audioRegion, startedAtUtc, and endedAtUtc
+          },
+        }),
+        validAsrFinalEvent(),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects speech proof when ASR final event has empty payload {} and arbitrary turnId (review probe 2 negative test)", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent(),
+        sessionEvent({
+          eventId: "asr-final-event",
+          eventType: "asr.segment.final",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:00.600Z",
+          payload: {},
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects speech proof when ASR final event lacks conservative recorded audio region or utterance timing (review probe 2 negative test)", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent(),
+        sessionEvent({
+          eventId: "asr-final-event",
+          eventType: "asr.segment.final",
+          sequence: 2,
+          legId: "leg-customer-1",
+          occurredAt: "2026-09-08T00:00:00.600Z",
+          payload: {
+            turnId: "55555555-5555-4555-8555-555555555555",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            // Missing audioRegion, startedAtUtc, and endedAtUtc
+          },
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects speech proof when affirmation event is on a different leg than readback playback", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent({ legId: "leg-customer-1" }),
+        validAsrFinalEvent({ legId: "leg-agent-2" }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects DTMF proof when digit payload is merely { digit: '1' } with null legs and no prompt binding (review probe 1 negative test)", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent({ legId: null }),
+        sessionEvent({
+          eventId: "dtmf-event",
+          eventType: "dtmf.received",
+          sequence: 2,
+          legId: null,
+          occurredAt: "2026-09-08T00:00:00.600Z",
+          payload: { digit: "1" },
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "dtmf" as const,
+        evidence: { eventId: "dtmf-event", digit: "1" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects DTMF proof when digit event lacks positive leg association (null legId on readback or digit)", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent({
+          legId: null,
+          payload: {
+            playbackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+            callId: CALL_ID,
+            callLegId: undefined,
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.100Z",
+              endUtc: "2026-09-08T00:00:00.400Z",
+            },
+          },
+        }),
+        validDtmfEvent({ legId: "leg-customer-1" }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "dtmf" as const,
+        evidence: { eventId: "dtmf-event", digit: "1" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects DTMF proof when digit prompt binding does not match readback playback or promptId", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent(),
+        validDtmfEvent({
+          payload: {
+            digit: "1",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            promptPlaybackId: "unrelated-playback-999",
+          },
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "dtmf" as const,
+        evidence: { eventId: "dtmf-event", digit: "1" },
       };
 
       await expect(
