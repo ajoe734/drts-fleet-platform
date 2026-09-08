@@ -5,7 +5,7 @@
 | Phase             | system-remediation-20260906                          |
 | Owner             | Codex2                                              |
 | Reviewer          | Codex                                               |
-| Base SHA          | `70355aba9b8f9dd034f73e87e57a34a39a1c3701` (fresh `origin/dev`, 2026-09-08) |
+| Base SHA          | `70355aba97c23dd1cd592b71f1d3dfe6315d91ff` (fresh `origin/dev`, 2026-09-08) |
 | Gap IDs           | R23, R25                                             |
 | Capability IDs    | C070, C120                                           |
 | Status            | implementation verified; handoff pending review      |
@@ -61,7 +61,7 @@
 | unit tests  | `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-form-001/`                                   | 0         |
 | test output | `Test Files 1 passed (1) · Tests 26 passed (26)` (2026-09-08T11:08:24Z)                                 | —         |
 
-Base SHA：`70355aba9b8f9dd034f73e87e57a34a39a1c3701`。前一輪 `b32ab8bad`／`37e898923` 僅為歷史觀察與存活分支來源；本輪已將實作 rebase 至此 fresh base 後重跑上述指令。Candidate SHA 由本輪普通 push 後的 `ai-status.sh handoff` 以 exact `HEAD` 寫入 machine truth。
+Base SHA：`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`。前一輪 `b32ab8bad`／`37e898923` 僅為歷史觀察與存活分支來源；本輪已將實作 rebase 至此 fresh base 後重跑上述指令。Candidate SHA 由本輪普通 push 後的 `ai-status.sh handoff` 以 exact `HEAD` 寫入 machine truth。
 
 ## 修改檔案
 
