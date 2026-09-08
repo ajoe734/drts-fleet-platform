@@ -16,7 +16,6 @@ import {
 } from "../../../../tools/system-remediation/ops-proof/src/snapshot-schema";
 
 import {
-  IsolatedDataStore,
   IsolatedSnapshotRestoreEngine,
 } from "../../../../tools/system-remediation/ops-proof/src/snapshot-restore-engine";
 
