@@ -250,3 +250,37 @@ immutable deployed build provenance, health and rollback. Cloud restore/load
 and physical-device work remain under SR-LIVE-OPS-001 authorization. No RPO/RTO,
 real resource ID, CI, merge or live success is claimed. Status remains
 `in_progress`; supervisor should supply/route these inputs before final handoff.
+
+## 2026-09-08 16:39 UTC dispatch — resource blocker
+
+Fetched base: `1cdaaa5b5e5301de2da0a692c78c4cc29b0c10a9`.
+Rebase replayed duplicate historical task commits; conflicts were resolved with
+the published `133bfccd61530c3be7e82e9a9988bfd9e6a92756` task contents.
+The final task directories and evidence document were byte-identical to that
+published head before this evidence update. Published ancestry was merged to
+retain normal non-force push. Tested anchor:
+`f631527de93b7e168559d8f44e91c0786d307fb6`; this is not a handoff candidate.
+
+| Actual command on the rebased anchor | Exit / result |
+| --- | --- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-ops-proof-001` | 0; 4 files, 35 tests |
+| `pnpm exec eslint tests/unit/system-remediation/sr-ops-proof-001` | 0 |
+| `bash -n tools/system-remediation/ops-proof/ops-proof.sh` | 0 |
+| `git diff --check` | 0 |
+| `bash tools/system-remediation/ops-proof/ops-proof.sh inventory --output /tmp/SR-OPS-PROOF-001-inventory-resumed.json` | 0; local observations only, host PostgreSQL tools still ENOENT |
+
+Durable receipt: `tools/system-remediation/ops-proof/evidence/inventory-20260908T163858Z.json`.
+Its `candidateSha` field identifies the tested anchor, not a locked review candidate.
+No cloud resource was requested or observed.
+
+Canonical `show SR-LIVE-OPS-001` still reports blocked, with this task among its
+dependencies and no authorized isolated ops target. Supervisor must supply a
+trusted dump and independently exported same-snapshot manifest, isolated DB/API
+resource IDs and authenticated workload plan, and cloud project/region/service
+IDs. Supervisor must also clarify preparation handoff versus live acceptance:
+requiring LIVE-OPS completion before this task can hand off would conflict with
+LIVE-OPS depending on this task. Do not silently weaken either acceptance set.
+Until those inputs/boundaries are resolved, record this task as blocked instead
+of repeatedly presenting tool regressions as progress toward real acceptance.
+No real restore, capacity, health, rollback, RPO/RTO, CI or merge acceptance is
+established. Final anchor/push result is recorded through canonical status.
