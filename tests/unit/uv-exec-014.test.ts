@@ -722,9 +722,14 @@ describe("UV-EXEC-014 local confirmation orchestration", () => {
 describe.each(["speech", "dtmf"] as const)(
   "%s media epoch cutoff",
   (method) => {
-    it.each([1, 99])(
-      "blocks newer epoch sequence %i at both readback and acceptance",
-      async (sequence) => {
+    it.each([
+      [1, "readback"],
+      [1, "accept"],
+      [99, "readback"],
+      [99, "accept"],
+    ] as const)(
+      "blocks newer epoch sequence %i at %s",
+      async (sequence, gate) => {
         const h = await harness(method);
         const applied = h.session.lastAppliedControlSequence;
         const newer = h.event("speech_start");
@@ -735,13 +740,10 @@ describe.each(["speech", "dtmf"] as const)(
         expect(h.session.pendingInput).toBe(false);
         h.query.mockClear();
         await expect(
-          h.service.beginReadback("credential", h.fence()),
+          gate === "readback"
+            ? h.service.beginReadback("credential", h.fence())
+            : h.accept(),
         ).rejects.toMatchObject({
-          response: {
-            error: { message: "Missing, stale, or unapplied control event" },
-          },
-        });
-        await expect(h.accept()).rejects.toMatchObject({
           response: {
             error: { message: "Missing, stale, or unapplied control event" },
           },
