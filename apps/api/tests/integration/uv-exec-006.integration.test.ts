@@ -1118,7 +1118,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
         "vehicleId",
         "taskId",
       ].flatMap((corruption) =>
-        ["redispatch", "cancel"].map((action) => ({
+        ["redispatch", "cancel", "reject"].map((action) => ({
           accepted,
           corruption,
           action,
@@ -1211,11 +1211,20 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
           ? service.redispatchOrder(order.orderId, {
               reasonCode: "operator_redispatch",
             })
-          : service.cancelOwnedOrder(order.orderId, {
-              reason: "passenger_requested",
-            }),
+          : action === "reject"
+            ? service.rejectDriverTask(assignment.taskId, {
+                reasonCode: "driver_unavailable",
+              })
+            : service.cancelOwnedOrder(order.orderId, {
+                reason: "passenger_requested",
+              }),
       ).rejects.toMatchObject({
-        code: "REDISPATCH_ASSIGNMENT_ALREADY_CLOSED",
+        code:
+          action === "reject"
+            ? accepted
+              ? "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE"
+              : "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED"
+            : "REDISPATCH_ASSIGNMENT_ALREADY_CLOSED",
       });
       const after = await database.query(
         `SELECT * FROM ops.dispatch_resource_reservations

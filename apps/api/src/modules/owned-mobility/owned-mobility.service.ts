@@ -4421,7 +4421,7 @@ export class OwnedMobilityService
     );
   }
 
-  /** SD §7.6: shared cancellation/replacement reconciliation fence. */
+  /** SD §7.6: shared rejection/cancellation/replacement reconciliation fence. */
   private isReconciledAssignmentTask(
     assignment: DispatchAssignmentRecord,
     task: DriverTaskRecord | null,
@@ -5544,11 +5544,14 @@ export class OwnedMobilityService
               tx,
               taskId,
             );
-          if (!lockedTask) {
+          if (
+            lockedAssignment.orderId !== order.orderId ||
+            !this.isReconciledAssignmentTask(lockedAssignment, lockedTask)
+          ) {
             throw new ApiRequestError(
-              HttpStatus.NOT_FOUND,
-              "DRIVER_TASK_NOT_FOUND",
-              `Driver task ${taskId} was not found.`,
+              HttpStatus.CONFLICT,
+              "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+              "Active assignment task requires reconciliation.",
               { taskId },
             );
           }
