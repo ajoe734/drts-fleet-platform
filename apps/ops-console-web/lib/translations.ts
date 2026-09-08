@@ -4576,7 +4576,7 @@ const en = {
     "The driver has not added a written description yet; duty staff can still act on the existing incident context.",
   "sos.detail.attachmentsTitle": "Attachments",
   "sos.detail.noAttachments":
-    "No photo or voice attachment read model has been received yet. Once the backend supplies attachment paths, this section can switch to a live attachment list.",
+    "There are currently no photo or voice attachments to display.",
   "sos.detail.linkedIncidentTitle": "Linked case",
 };
 
