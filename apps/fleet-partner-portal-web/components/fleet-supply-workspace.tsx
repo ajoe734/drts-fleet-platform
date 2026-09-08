@@ -23,7 +23,6 @@ import {
   CanvasBanner,
   CanvasCard,
   CanvasEmptyState,
-  CanvasField,
   CanvasPageHeader,
   CanvasPill,
 } from "@drts/ui-web";
@@ -306,11 +305,6 @@ function FormField({
         {required ? (
           <span style={{ color: theme.danger }} aria-hidden="true">
             *
-          </span>
-        ) : null}
-        {required ? (
-          <span className="sr-only" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}>
-            （必填）
           </span>
         ) : null}
       </label>
@@ -1204,9 +1198,6 @@ function DriverDraftFields({
         >
           {t("supply.field.supportedProducts")}
           <span aria-hidden="true" style={{ color: "red" }}> *</span>
-          <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}>
-            （必填）
-          </span>
         </div>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
@@ -1418,9 +1409,6 @@ function VehicleDraftFields({
         >
           {t("supply.field.supportedProducts")}
           <span aria-hidden="true" style={{ color: "red" }}> *</span>
-          <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}>
-            （必填）
-          </span>
         </div>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
