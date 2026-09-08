@@ -994,7 +994,6 @@ describe("VoiceEvidenceService", () => {
     function createMockCallcenterService(): CallcenterService {
       const mockAuditService: Partial<AuditNotificationService> = {
         recordAuditLog: vi.fn(),
-        notifyEvent: vi.fn(),
       };
       return new CallcenterService(mockAuditService as AuditNotificationService);
     }
@@ -1003,7 +1002,7 @@ describe("VoiceEvidenceService", () => {
       const callcenter = createMockCallcenterService();
       const legacySession = callcenter.openCallSession({
         callerPhone: "0912345678",
-        callType: "inbound",
+        callType: "booking",
         agentId: "agent-test",
       });
 
@@ -1023,7 +1022,7 @@ describe("VoiceEvidenceService", () => {
       const callcenter = createMockCallcenterService();
       const legacySession = callcenter.openCallSession({
         callerPhone: "0912345678",
-        callType: "inbound",
+        callType: "booking",
         agentId: "agent-test",
       });
 
@@ -1051,7 +1050,7 @@ describe("VoiceEvidenceService", () => {
       const callcenter = createMockCallcenterService();
       const legacySession = callcenter.openCallSession({
         callerPhone: "0912345678",
-        callType: "inbound",
+        callType: "booking",
         agentId: "agent-test",
       });
 
