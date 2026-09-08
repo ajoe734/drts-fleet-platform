@@ -9,3 +9,6 @@ export * from "./recording/confirmed-manifest";
 export * from "./recording/final-manifest";
 export * from "./providers/twm/twm-adapter";
 export * from "./language/language-router";
+export * from "./dialogue/voice-dialogue-provider";
+export * from "./dialogue/dialogue-state";
+export * from "./dialogue/dialogue-engine";
