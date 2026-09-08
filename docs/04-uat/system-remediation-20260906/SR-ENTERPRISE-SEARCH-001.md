@@ -8,7 +8,7 @@
 | Depends on    | 無 (`[]`)                                                                                         |
 | Gap ID        | `R24`                                                                                             |
 | Capability ID | `C013`, `C069`                                                                                    |
-| Base SHA      | `031cfc4c99320b79f6ad863996a43a5da8227edf` (current `origin/dev`), original `7dccddaba7d51dca8d56da01d5320d9f22f8b68f` |
+| Base SHA      | `c4c4a35f88907df6bf68e781059dde397c06ba03` (current `origin/dev`), prior `031cfc4c99320b79f6ad863996a43a5da8227edf`, initial `7dccddaba7d51dca8d56da01d5320d9f22f8b68f` |
 | Candidate SHA | 於 `handoff` 時以 `git rev-parse HEAD` 記錄（見 task board）                                       |
 | Branch        | `gemini/sr-enterprise-search-001`                                                                  |
 
@@ -27,7 +27,7 @@
 
 ### 1.2 Base SHA 重現與後端 API 核實
 
-在 Base SHA (`031cfc4c99320b79f6ad863996a43a5da8227edf` 及初始 `7dccddaba7d51dca8d56da01d5320d9f22f8b68f`) 檢查現狀：
+在 Base SHA (`c4c4a35f88907df6bf68e781059dde397c06ba03` 及初始 `7dccddaba7d51dca8d56da01d5320d9f22f8b68f`) 檢查現狀：
 
 1. **前端現況**：`apps/enterprise-dispatch-web/app/bookings/page.tsx` 原先僅 6 行，直接渲染 `<EnterpriseBookingHistory />`。該元件無任何乘客關鍵字搜尋、無起訖日期篩選、無狀態過濾、無本人/代訂範圍頁籤，亦無翻頁分頁與篩選空狀態。
 2. **後端 API 核實**：
@@ -113,8 +113,8 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/
 
  Test Files  1 passed (1)
       Tests  41 passed (41)
-   Start at  14:31:44
-   Duration  345ms (transform 133ms, setup 0ms, import 166ms, tests 17ms, environment 0ms)
+   Start at  15:26:11
+   Duration  526ms (transform 195ms, setup 0ms, import 235ms, tests 18ms, environment 0ms)
 # exit code 0
 
 $ pnpm --filter @drts/enterprise-dispatch-web test
@@ -123,8 +123,8 @@ $ pnpm --filter @drts/enterprise-dispatch-web test
 
  Test Files  8 passed (8)
       Tests  24 passed (24)
-   Start at  14:31:46
-   Duration  683ms
+   Start at  15:26:20
+   Duration  751ms (transform 1.22s, setup 0ms, import 1.81s, tests 221ms, environment 2ms)
 # exit code 0
 ```
 
