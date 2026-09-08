@@ -2,6 +2,16 @@
 
 本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Gemini（本次 dispatch）。未 handoff、未完成 review/CI/merge。
 
+## 2026-09-08 21:40 UTC history repair 後重驗（最新，仍阻擋）
+
+- fetch 時 base `c71b66ebed6d6948dbb9eca99ce9efea3ede9218` 已是執行 HEAD `a95931f57687f26abcfb340df9e00a65448740fe` 祖先。依指示 rebase 重播歷史 a119ec0bb 出現四檔 add/add 衝突，已 abort；本轮沒有另做 merge 或回退產品碼，尚無 lifecycle candidate。
+- 首次指定 Playwright 命令 exit 1（1 failed / 4 passed，42.8s）：執行期间 cwd 短暫不存在，PostgreSQL 子程序 ENOENT/uv_cwd，trace 亦遺失。此為環境中斷，不當成產品失敗或成功；同路徑恢復後重新執行。
+- 獨立 `DRTS_WEBHOOK_AUTH_EVIDENCE=tests/e2e/system-remediation/sr-qa-webhook-001/evidence-auth-http.json bash tests/unit/system-remediation/sr-qa-webhook-001/run-auth-http.sh` → exit 1，1 failed，3.29s。跨租戶 GET 仍200（預期403），exposedVictimKeyId=true；同租戶 issue/rotate/revoke 各201，SQL revoked 回讀與拒絕寫入 DB 不變仍通過。
+- 獨立受害 tenant `qa-http-b022d49a-0612-4e35-be7c-f49376c8cd0f`、外洩 key `api_key_de9c2431-e1ae-441a-b9a1-f8ea0d115a59`；隔離 DB `sr_qa_webhook_001_1788903625_919155`。後續整合重跑會更新 JSON 資源，以上保留獨立執行追溯。
+- `pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/*.ts tests/e2e/system-remediation/sr-qa-webhook-001/*.ts --max-warnings=0` 重試 exit 0（首次同樣因 cwd 消失 exit 1）；`git diff --check` exit 0。
+- canonical show 確認 P0 `SR-QA-WEBHOOK-001-FIX-TENANT-BINDING` 仍 blocked、write_scopes=[]、waiting_for=Claude。父任務仍未列此修復相依。需 supervisor 授權最小產品 scope 與 IAM/tenant 排序並補父依賴，不能僅由 planning PR 通過就解除阻擋。
+- 完整 AppModule、部署登入/MFA、API key 使用量、C112 deadline 契約與 C113–C115 外部證據仍未驗收；只修改本 task 證據，未修改產品/UI。不 handoff。
+
 ## 2026-09-08 18:43 UTC 解阻派工後重驗（最新，仍阻擋）
 
 - base `3b82fba0fabba3328e3443de3d602780f852d724`；執行 SHA `55334bae5229d38c6254331c58dfdc35d3e91ae9`。rebase 在歷史 a119ec0bb 的四檔 add/add 衝突後 abort，以 merge 納入 dev 保留已發布歷史。尚無 lifecycle candidate。
