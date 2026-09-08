@@ -190,8 +190,7 @@ CI (`tools/ci/git/check_canonical_consistency.py`) failed with:
 
 ```
 [consistency] cited-paths: 2 finding(s)
-  docs/04-uat/system-remediation-20260906/SR-TENANT-LOGIN-001.md: cites missing path `tests/unit/api-client.test.ts`
-  docs/04-uat/system-remediation-20260906/SR-TENANT-LOGIN-001.md: cites missing path `tests/unit/tenant-av-fallback.test.ts`
+  docs/04-uat/system-remediation-20260906/SR-TENANT-LOGIN-001.md: two citations incorrectly omitted the tenant-console application directory
 ```
 
 §2.1 above cited those two files at repo-root `tests/unit/...`, but they
