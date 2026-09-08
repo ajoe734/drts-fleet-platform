@@ -1,5 +1,14 @@
 # SR-BANK-002 — 銀行角色金額／PII／匯出一致隔離
 
+## 2026-09-08T21:43Z resumed dispatch verification
+
+- Fetched base `origin/dev`: `a24045986ac29231d34657df3a343b02d9fbb770`; tested checkpoint: `fb2e26e04b092676991e14a6215e870bad1949aa`. Candidate remains unset.
+- `git rebase origin/dev`: exit 1, duplicate `dbec26678` conflicts in six task files; `git rebase --abort`: exit 0. Original published history preserved.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0; defect sources match this fetched base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1, inner matrix 49 passed / 5 failed. Both settlement routes lack financial scope; both upstream-403 cases return seed statements; Contoso CSV on upstream failure contains ACME records. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0 before evidence commit.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, seed sentinel `STM-ACME-202606`. Existing synthetic upstream and actual cookie-signing test boundaries apply; no live/device/CI/merge/deployment acceptance performed.
+- Current dispatch still specifies the original branch, six original scopes, and two original dependencies. History/planning helpers have not supplied machine-truth authorization for the replacement delivery branch, shared loader scope with overlapping-writer dependencies, or canonical IAM producer dependency. Supervisor must record these changes before redispatch; another todo transition alone cannot resolve the failures. No product edits or handoff in this dispatch.
+
 ## 2026-09-08T21:19Z resumed dispatch verification
 
 - Fetched base `origin/dev`: `e97653b7ffb962a6c4d688e8706711d860fa3604`; tested checkpoint: `cb67ee8fa8de3099feb2c2845e65ab4f17d6b3cd`. No candidate established.
