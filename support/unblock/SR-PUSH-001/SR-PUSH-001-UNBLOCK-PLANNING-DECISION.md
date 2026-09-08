@@ -30,8 +30,9 @@ Canonical question: `PHASE1_OPEN_QUESTIONS.md` Q-SR-PUSH-001.
   `MultiTaxiRepository.updateConsumerNotificationOutboxDelivery` updates by ID
   without a claim/fence or receipt columns. These observations support the
   parent's scope request; they do not authorize edits by this helper.
-- `docs/04-uat/system-remediation-20260906/schema-allocation.json` does not
-  exist at this base. No migration number is reserved by this packet.
+- No schema-allocation manifest exists in the system-remediation UAT directory
+  at this base. This is an absence observation, not a reference to an existing
+  artifact. No migration number is reserved by this packet.
 
 ## Recorded decision
 
@@ -76,3 +77,14 @@ field with this packet and the routing request.
 - Recoverability anchor `e7d40a5ad` committed and ordinary branch push exited 0.
 - Helper commit/push/PR and final validation are recorded in the exact-SHA
   handoff and PR. Helper review does not complete parent implementation.
+
+## CI repair on redispatch
+
+- PR #1828's Canonical consistency failure was reproduced with
+  `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`:
+  exit 1, one cited-paths finding. The checker interpreted the absent allocation
+  manifest's literal path as a citation to an existing artifact.
+- Reworded that absence observation without a dangling citation. Routing,
+  acceptance and parent resume gates are unchanged.
+- Fetched and rebased onto `5afb3e5b4` before this repair. The original inspected
+  base and parent test results above remain historical evidence.
