@@ -2,6 +2,23 @@
 
 Status: partial implementation; web export blocked. No review candidate locked.
 
+## Dispatch recheck — 2026-09-08 14:55 UTC
+
+- Fresh `origin/dev` base: `c4c4a35f88907df6bf68e781059dde397c06ba03`, including planning PR #1768 (helper candidate `5d0fd50955e68738c09b4a59c0fd62a66831d58d`). The helper explicitly routes authorization to supervisor and says the parent remains blocked; it supplies no Metro implementation or scope authorization. The parent task slice still permits only the original four scopes and has no producer dependency. Its automatic reset to `todo` does not resolve the engineering blocker.
+- Ran `git fetch origin` and `git rebase origin/dev` (both exit 0). Then `git merge --no-edit origin/codex2/sr-driver-web-001` (exit 0, clean merge) retained published anchor ancestry so this rebased rail can be pushed normally without force. Tested head: `8e5ceae86ac1ab8454503d568be668380b512160`. Candidate remains unassigned.
+- `pnpm --filter @drts/driver-app typecheck`: exit 0.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/`: exit 0, one file / five tests.
+- `git diff --check`: exit 0.
+- Actual web reproduction command, from the assigned worktree:
+
+  ```sh
+  NODE_OPTIONS=--require="$PWD/tests/unit/system-remediation/sr-driver-web-001/metro-worktree-harness.cjs" pnpm --filter @drts/driver-app exec expo export --platform web --max-workers 2 --source-maps --output-dir /tmp/sr-driver-web-001-web-dispatch-1452 > /tmp/sr-driver-web-001-web-dispatch-1452.log 2>&1
+  ```
+
+  Exit 1: `Unable to resolve module ./wa-sqlite/wa-sqlite.wasm` from `expo-sqlite/web/worker.ts`. The import chain still reaches the app root through the persistent location queue. Log resource: `/tmp/sr-driver-web-001-web-dispatch-1452.log` (ephemeral); the exact failure and command are preserved here.
+- No application code changed in this dispatch. Native export and the 91 existing repair tests below are historical checks, not rerun results at this head. Web browser routes, live services, and physical devices remain unverified. No SOS was sent.
+- Required next action: supervisor must authorize `apps/driver-app/metro.config.js` and reconcile reviewed scopes/dependencies, or register a bundler producer and parent dependency. See `support/unblock/SR-DRIVER-WEB-001/SR-DRIVER-WEB-001-UNBLOCK-PLANNING-DECISION.md`. Do not redispatch solely because the planning helper merged.
+
 ## Revisions and scope
 
 - Freshly fetched `origin/dev` base: `3b60a3757238663572f16f010c94f446f2c71eaa`.
