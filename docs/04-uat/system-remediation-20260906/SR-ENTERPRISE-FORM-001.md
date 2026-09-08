@@ -186,3 +186,32 @@ worktree，記錄於此供其他並行任務參考；並非本任務程式碼變
 - 受影響檔案：見「本輪修復」章節列表，皆在 write_scopes 內
   （新增 `components/booking-form/enterprise-booking-validation.ts` 屬於
   write_scopes 內先前不存在的新增目標）。
+
+## 6. Dispatch recovery verification（2026-09-08）
+
+- **Base SHA**：`70355aba9`（fresh `origin/dev`）；重建來源為
+  `origin/claude2/sr-enterprise-form-001` 的 `a3dbd1a96`（其前置修復
+  `a54e2d19e`）。兩個既有修復已 clean cherry-pick 到本 task branch，沒有
+  回退已存在的修復。
+- **新增回歸**：日期／時間格式雖符合欄位形狀但不存在（`2026-02-30`）或超出
+  時間範圍（`24:00`）時，JavaScript 不再將它自動正規化成未來的有效時間；兩者
+  均不可進入可送出的確認狀態。
+- **實際指令結果（此 worktree）**：
+
+  ```text
+  $ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/
+   Test Files  1 passed (1)
+        Tests  13 passed (13)
+  EXIT=0
+
+  $ pnpm --filter @drts/enterprise-dispatch-web typecheck
+  > tsc --noEmit
+  EXIT=0
+
+  $ git diff --check
+  EXIT=0
+  ```
+
+- **資源／環境界線**：未建立或更新任何 live booking，因此沒有 booking resource
+  ID；本 dispatch 仍未啟動產品 dev/browser/E2E server 或 Docker。390px 真機／
+  瀏覽器量測仍是未完成的外部驗證，不將靜態 CSS 檢查描述為成功的實機測試。
