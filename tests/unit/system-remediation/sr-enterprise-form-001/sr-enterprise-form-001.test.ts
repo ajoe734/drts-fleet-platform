@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildEnterpriseBookingCommand,
+  buildEnterpriseBookingUpdateCommand,
   createEnterpriseBookingDraft,
+  formatBookingNotesWithPlacard,
   formatDefaultPlacard,
   formatReservationWindowLabel,
   getEnterpriseBookingPreview,
@@ -151,6 +153,45 @@ describe("SR-ENTERPRISE-FORM-001 — 企業預約乘客、日期與手機表單"
       expect(otherCmd.onsiteContact?.phone).toBe("0988-765-432");
       expect(otherCmd.bookedBy?.name).toBe("林宜君");
     });
+
+    it("1.8 buildEnterpriseBookingCommand 保留自訂舉牌（如自訂 VIP 田中董事長一行）並正確合併至 notes", () => {
+      const customPlacardDraft: EnterpriseBookingDraftForm = {
+        ...createEnterpriseBookingDraft("zh", { entry: "other" }, referenceNow),
+        passenger: "田中 健一郎",
+        placard: "VIP 日本總部 田中董事長一行",
+        reservationDate: "2026-09-08",
+        reservationTime: "10:00",
+        notes: "需準備礦泉水與迎賓禮品",
+      };
+
+      const cmd = buildEnterpriseBookingCommand(customPlacardDraft, referenceNow);
+      expect(cmd.passenger.name).toBe("田中 健一郎");
+      expect(cmd.notes).toContain("VIP 日本總部 田中董事長一行");
+      expect(cmd.notes).toContain("需準備礦泉水與迎賓禮品");
+      expect(cmd.notes).toBe("需準備礦泉水與迎賓禮品 · 需舉牌「VIP 日本總部 田中董事長一行」");
+    });
+
+    it("1.9 buildEnterpriseBookingCommand 在 draft.notes 為空時，仍將自訂舉牌寫入 notes", () => {
+      const emptyNotesDraft: EnterpriseBookingDraftForm = {
+        ...createEnterpriseBookingDraft("zh", { entry: "other" }, referenceNow),
+        passenger: "田中 健一郎",
+        placard: "VIP 田中董事長",
+        reservationDate: "2026-09-08",
+        reservationTime: "10:00",
+        notes: "",
+      };
+
+      const cmd = buildEnterpriseBookingCommand(emptyNotesDraft, referenceNow);
+      expect(cmd.notes).toBe("需舉牌「VIP 田中董事長」");
+    });
+
+    it("1.10 formatBookingNotesWithPlacard 已有相同舉牌時不重複附加", () => {
+      const notes = "接機 · 需舉牌「VIP 田中董事長」";
+      expect(formatBookingNotesWithPlacard(notes, "VIP 田中董事長")).toBe(notes);
+      expect(formatBookingNotesWithPlacard("", "Sato 様")).toBe("需舉牌「Sato 様」");
+      expect(formatBookingNotesWithPlacard("僅備註", "")).toBe("僅備註");
+      expect(formatBookingNotesWithPlacard("", "")).toBeUndefined();
+    });
   });
 
   describe("R21 & C016: 過去時間/時區邊界與最短提前規則", () => {
@@ -256,6 +297,42 @@ describe("SR-ENTERPRISE-FORM-001 — 企業預約乘客、日期與手機表單"
       expect(enPastResult.errorMessage).toContain(
         "Reservation time cannot be in the past",
       );
+    });
+
+    it("2.7 最早預約時間秒數向上取整至下一分鐘（解決 now 帶秒數時提示時間被判定為 isTooSoon）", () => {
+      // now = 2026-09-06T06:12:30.000Z (Taipei: 14:12:30)
+      const nowWithSeconds = new Date("2026-09-06T06:12:30.000Z");
+      const res = validateReservationWindow("2026-09-06", "14:28", nowWithSeconds, "zh");
+
+      expect(res.earliestAllowedTime).toBe("14:28"); // 向上取整至 14:28，而非截斷至 14:27
+      expect(res.isValid).toBe(true);
+      expect(res.isTooSoon).toBe(false);
+
+      // 輸入 14:27 則確實因小於 15 分鐘被判定為 isTooSoon
+      const res27 = validateReservationWindow("2026-09-06", "14:27", nowWithSeconds, "zh");
+      expect(res27.isValid).toBe(false);
+      expect(res27.isTooSoon).toBe(true);
+      expect(res27.errorMessage).toContain("14:28");
+    });
+
+    it("2.8 buildEnterpriseBookingCommand 在用車時間已過期或小於提前時間時拋出錯誤，拒絕產生 command", () => {
+      // draft 時間為 2026-09-08 10:00:00+08:00 (2026-09-08T02:00:00.000Z)
+      const draft: EnterpriseBookingDraftForm = {
+        ...createEnterpriseBookingDraft("zh", { entry: "self" }, referenceNow),
+        reservationDate: "2026-09-08",
+        reservationTime: "10:00",
+      };
+
+      // 在 2026-09-08T02:01:00.000Z 時（已過期 1 分鐘）嘗試 build command
+      const expiredNow = new Date("2026-09-08T02:01:00.000Z");
+      expect(() => buildEnterpriseBookingCommand(draft, expiredNow)).toThrowError(
+        /預約時間不能為過去時間|past/,
+      );
+
+      // buildEnterpriseBookingUpdateCommand 在 validateTime: true 時亦應同樣拋出錯誤
+      expect(() =>
+        buildEnterpriseBookingUpdateCommand(draft, expiredNow, { validateTime: true }),
+      ).toThrowError(/預約時間不能為過去時間|past/);
     });
   });
 

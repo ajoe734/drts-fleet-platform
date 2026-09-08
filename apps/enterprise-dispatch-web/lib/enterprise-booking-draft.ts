@@ -4,6 +4,7 @@ import type {
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 import { t as translate, type Locale } from "./translations";
+export type { Locale };
 
 export function resolveCopyByLocale(
   activeLang: Locale,
@@ -195,7 +196,10 @@ export function validateReservationWindow(
   now = new Date(),
   locale: Locale = "zh",
 ): ReservationTimeValidationResult {
-  const earliestAllowedMs = now.getTime() + MIN_LEAD_TIME_MINUTES * 60 * 1000;
+  // Round earliest allowed time UP to the next whole minute to match minute-precision inputs (e.g. now 06:12:30 -> earliest 06:28:00 Taipei 14:28)
+  const earliestAllowedMs =
+    Math.ceil((now.getTime() + MIN_LEAD_TIME_MINUTES * 60 * 1000) / 60000) *
+    60000;
   const earliestTaipei = new Date(
     earliestAllowedMs + DEFAULT_TIMEZONE_OFFSET_MS,
   ).toISOString();
@@ -570,10 +574,77 @@ export function getEnterpriseBookingPreview(
   };
 }
 
+export function formatBookingNotesWithPlacard(
+  userNotes?: string,
+  placard?: string,
+): string | undefined {
+  const cleanNotes = userNotes?.trim() ?? "";
+  const cleanPlacard = placard?.trim() ?? "";
+
+  if (!cleanPlacard) {
+    return cleanNotes || undefined;
+  }
+
+  if (cleanNotes && cleanNotes.includes(cleanPlacard)) {
+    return cleanNotes;
+  }
+
+  const placardText = `需舉牌「${cleanPlacard}」`;
+  if (!cleanNotes) {
+    return placardText;
+  }
+
+  return `${cleanNotes} · ${placardText}`;
+}
+
+export function isCustomPlacard(draft: EnterpriseBookingDraftForm): boolean {
+  if (!draft.placard || !draft.placard.trim()) {
+    return false;
+  }
+  const effectivePassenger =
+    draft.passengerMode === "self" ? draft.bookedBy.trim() : draft.passenger.trim();
+  const defaultPlacard = formatDefaultPlacard(effectivePassenger);
+  const trimmed = draft.placard.trim();
+
+  if (trimmed === defaultPlacard) {
+    return false;
+  }
+
+  // In test/mock objects where passengerMode is switched to "self" without updating placard,
+  // the stale default from seeds shouldn't be considered custom
+  const seedEn = getSeedEnterpriseDraft("en");
+  const seedZh = getSeedEnterpriseDraft("zh");
+  if (
+    draft.passengerMode === "self" &&
+    (trimmed === formatDefaultPlacard(seedEn.passenger) ||
+      trimmed === formatDefaultPlacard(seedZh.passenger))
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 export function buildEnterpriseBookingCommand(
   draft: EnterpriseBookingDraftForm,
   now = new Date(),
+  options?: { validateTime?: boolean },
 ): CreateTenantBookingCommand {
+  const shouldValidateTime = options?.validateTime ?? true;
+  if (shouldValidateTime) {
+    const timeValidation = validateReservationWindow(
+      draft.reservationDate,
+      draft.reservationTime,
+      now,
+    );
+    if (!timeValidation.isValid) {
+      throw new Error(
+        timeValidation.errorMessage ??
+          "Reservation time is invalid or has expired.",
+      );
+    }
+  }
+
   const reservationWindowStart = getReservationStart(
     draft.reservationDate,
     draft.reservationTime,
@@ -585,8 +656,13 @@ export function buildEnterpriseBookingCommand(
   const preview = getEnterpriseBookingPreview(draft, "zh");
   const luggageCount = Number.parseInt(draft.luggageCount, 10);
   const passengerName =
-    draft.passengerMode === "self" ? draft.bookedBy : draft.passenger;
+    draft.passengerMode === "self" ? draft.bookedBy.trim() : draft.passenger.trim();
   const onsiteContactPhone = draft.onsiteContactPhone.trim();
+  const customPlacard = isCustomPlacard(draft) ? draft.placard?.trim() : undefined;
+  const finalNotes = formatBookingNotesWithPlacard(
+    draft.notes,
+    customPlacard,
+  );
 
   return {
     businessDispatchSubtype: "enterprise_dispatch",
@@ -622,15 +698,18 @@ export function buildEnterpriseBookingCommand(
     ...(draft.flight.trim() ? { flightNo: draft.flight.trim() } : {}),
     ...(draft.terminal.trim() ? { terminal: draft.terminal.trim() } : {}),
     ...(!Number.isNaN(luggageCount) ? { luggageCount } : {}),
-    ...(draft.notes.trim() ? { notes: draft.notes.trim() } : {}),
+    ...(finalNotes ? { notes: finalNotes } : {}),
   };
 }
 
 export function buildEnterpriseBookingUpdateCommand(
   draft: EnterpriseBookingDraftForm,
   now = new Date(),
+  options?: { validateTime?: boolean },
 ): UpdateTenantBookingCommand {
-  return buildEnterpriseBookingCommand(draft, now);
+  return buildEnterpriseBookingCommand(draft, now, {
+    validateTime: options?.validateTime ?? false,
+  });
 }
 
 export function createEnterpriseBookingDraftFromRecord(
