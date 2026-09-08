@@ -17,6 +17,10 @@ import {
 } from "@drts/ui-web";
 import { EditAdapterModal } from "./components/EditAdapterModal";
 import {
+  RegisterAdapterModal,
+  type RegisterAdapterInput,
+} from "./components/RegisterAdapterModal";
+import {
   evaluateCredentialExpiry,
   type CredentialExpiryState,
 } from "./credential-expiry";
@@ -397,6 +401,7 @@ export default function AdapterRegistryPage() {
   const [editingAdapter, setEditingAdapter] = useState<PlatformAdapter | null>(
     null,
   );
+  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
 
   const localT =
     ADAPTER_REGISTRY_LOCAL_TRANSLATIONS[
@@ -644,6 +649,41 @@ export default function AdapterRegistryPage() {
     }
   }
 
+  async function handleRegisterAdapter(input: RegisterAdapterInput) {
+    setFlash(null);
+    try {
+      const payload = {
+        id: input.id,
+        platformCode: input.platformCode,
+        name: input.name,
+        description: input.description,
+        adapterType: input.adapterType,
+        environment: input.environment,
+        rolloutStage: input.rolloutStage,
+        credentialExpiresAt: input.credentialExpiresAt,
+        policies: input.serviceBuckets
+          ? {
+              serviceBuckets: input.serviceBuckets,
+            }
+          : undefined,
+      };
+      const created = await client.post<PlatformAdapter>(
+        "/api/platform-admin/adapters",
+        { body: payload },
+      );
+      setAdapters((current) => [...current, created]);
+      setFlash({
+        tone: "success",
+        message: `${localT.registerSuccess}: ${created.name}`,
+      });
+      setIsRegisterOpen(false);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setFlash({ tone: "danger", message });
+      throw err;
+    }
+  }
+
   async function toggleEnabled(adapter: PlatformAdapter) {
     const nextEnabled = !adapter.config.isEnabled;
     const needsReason =
@@ -716,12 +756,7 @@ export default function AdapterRegistryPage() {
             theme={theme}
             variant="primary"
             icon="plus"
-            onClick={() =>
-              setFlash({
-                tone: "info",
-                message: copy.registerInfo,
-              })
-            }
+            onClick={() => setIsRegisterOpen(true)}
           >
             {copy.registerAction}
           </CanvasBtn>
@@ -1082,6 +1117,11 @@ export default function AdapterRegistryPage() {
         isOpen={Boolean(editingAdapter)}
         onClose={() => setEditingAdapter(null)}
         onSave={(cmd) => void handleSaveAdapter(cmd)}
+      />
+      <RegisterAdapterModal
+        isOpen={isRegisterOpen}
+        onClose={() => setIsRegisterOpen(false)}
+        onRegister={handleRegisterAdapter}
       />
     </>
   );

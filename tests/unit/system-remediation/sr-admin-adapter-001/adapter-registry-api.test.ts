@@ -95,11 +95,22 @@ describe("SR-ADMIN-ADAPTER-001 — Platform Admin Adapter Registry API & Service
       expect(ids).toContain("grab_taiwan");
     });
 
-    it("seeds mof-bgmt with a valid ISO credentialExpiresAt timestamp", () => {
+    it("unconfigured adapters have credentialExpiresAt: null without fake fixture dates", () => {
       const mof = service.getPlatformAdapter("mof-bgmt");
       expect(mof).toBeDefined();
-      expect(mof?.credentialExpiresAt).toBeTruthy();
-      expect(isNaN(new Date(mof!.credentialExpiresAt!).getTime())).toBe(false);
+      expect(mof?.credentialExpiresAt).toBeNull();
+      expect(mof?.credentialStatus).toBe("NOT_CONFIGURED");
+
+      const srx = service.getPlatformAdapter("srx-v3");
+      expect(srx).toBeDefined();
+      expect(srx?.credentialExpiresAt).toBeNull();
+    });
+
+    it("native dispatch has valid credential status and null expiry", () => {
+      const owned = service.getPlatformAdapter("owned-dispatch");
+      expect(owned).toBeDefined();
+      expect(owned?.credentialStatus).toBe("VALID");
+      expect(owned?.credentialExpiresAt).toBeNull();
     });
   });
 
@@ -133,6 +144,19 @@ describe("SR-ADMIN-ADAPTER-001 — Platform Admin Adapter Registry API & Service
       } catch (err: any) {
         expect(err.getStatus()).toBe(403);
         expect(err.code).toBe("PLATFORM_ADMIN_FORBIDDEN");
+      }
+    });
+
+    it("rejects unauthenticated requests (null identity) with 401 PLATFORM_ADMIN_IDENTITY_REQUIRED", () => {
+      expect(() =>
+        controller.listPlatformAdapters(null, "req-no-identity"),
+      ).toThrowError(ApiRequestError);
+
+      try {
+        controller.listPlatformAdapters(null, "req-no-identity");
+      } catch (err: any) {
+        expect(err.getStatus()).toBe(401);
+        expect(err.code).toBe("PLATFORM_ADMIN_IDENTITY_REQUIRED");
       }
     });
 
@@ -301,6 +325,73 @@ describe("SR-ADMIN-ADAPTER-001 — Platform Admin Adapter Registry API & Service
           "req-rogue",
         ),
       ).toThrowError(ApiRequestError);
+    });
+  });
+
+  describe("Multi-Instance Synchronization & Persistence", () => {
+    it("synchronizes adapter updates across independent service instances within process", () => {
+      const serviceA = new PlatformAdminService(mockAuditNotificationService as any);
+      const controllerA = new PlatformAdminController(serviceA);
+
+      const serviceB = new PlatformAdminService(mockAuditNotificationService as any);
+      const controllerB = new PlatformAdminController(serviceB);
+
+      // Mutate via controllerA
+      controllerA.updatePlatformAdapter(
+        "cityride-forwarder",
+        {
+          config: { isEnabled: false },
+          policies: {
+            serviceBuckets: ["express-sync-test"],
+            maxCandidates: 8,
+            acceptTimeoutSeconds: 30,
+            manualFallbackThresholdSeconds: 60,
+            financeAuthorityMode: "OWNED" as const,
+          },
+        },
+        platformAdminIdentity,
+        "req-sync-1",
+      );
+
+      // Read back via controllerB / serviceB
+      const readbackB = controllerB.getPlatformAdapter(
+        "cityride-forwarder",
+        platformAdminIdentity,
+        "req-sync-readback",
+      );
+      expect(readbackB.data.config.isEnabled).toBe(false);
+      expect(readbackB.data.policies.serviceBuckets).toEqual(["express-sync-test"]);
+
+      const listB = serviceB.listPlatformAdapters();
+      const cityrideInB = listB.find((a) => a.id === "cityride-forwarder");
+      expect(cityrideInB?.config.isEnabled).toBe(false);
+    });
+
+    it("persists created adapter and preserves it across onModuleInit reloads", async () => {
+      const service1 = new PlatformAdminService(mockAuditNotificationService as any);
+      const controller1 = new PlatformAdminController(service1);
+
+      const newId = "kura-bus-adapter";
+      controller1.createPlatformAdapter(
+        {
+          id: newId,
+          platformCode: "KURA_BUS",
+          name: "Kura Bus Fleet Adapter",
+          version: "1.0.0",
+          credentialExpiresAt: "2026-12-31T00:00:00.000Z",
+        },
+        platformAdminIdentity,
+        "req-persist-create",
+      );
+
+      // Create service2 and simulate module reload
+      const service2 = new PlatformAdminService(mockAuditNotificationService as any);
+      await service2.onModuleInit();
+
+      const retrieved = service2.getPlatformAdapter(newId);
+      expect(retrieved).toBeDefined();
+      expect(retrieved?.platformCode).toBe("KURA_BUS");
+      expect(retrieved?.credentialExpiresAt).toBe("2026-12-31T00:00:00.000Z");
     });
   });
 });
