@@ -1,5 +1,17 @@
 # SR-OPS-SHELL-001 — 本次恢復與阻塞證據
 
+## 2026-09-08 18:42 UTC dispatch 核對
+
+- Fresh `origin/dev` base：`d4f54ef94e059a981bf2be1f7b944e815870e117`；本次受測分支 SHA：`0e7d0043efe6205516eab85a14bf05d3071e5cdf`。尚無 handoff candidate。
+- `git fetch origin` exit 0；`git rebase origin/dev` exit 1，第9/41個歷史 commit `94bf84a0a` 在本 evidence 發生 add/add conflict；`git rebase --abort` exit 0，保留已發布歷史。未完成 fresh dev rebase。
+- 唯讀 `git show origin/dev:apps/ops-console-web/app/dispatch/page.tsx` 確認第1230行仍 fallback `/platform-admin`、第4520行仍使用無 context 的 `/audit`；`git show origin/dev:apps/platform-admin-web/app/audit/page.tsx` 第164行仍呼叫無參數 `client.listAuditLogs()`，未找到 searchParams。此為 fresh dev 原始碼證據，非瀏覽器重現。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/` exit 0：1 file、13 tests passed、313ms。
+- `pnpm --filter @drts/ops-console-web typecheck` exit 0：`next typegen && tsc --noEmit`。以上測試在原分支 SHA 執行，不是 fresh dev。
+
+Machine slice 的 write_scopes 仍僅含 assistant、ops-shell、task tests 與本文件，depends_on 為空；`Q-SR-OPS-SHELL-001` 仍 open。已核對 execution_ref、R18/R19、C048 與 planning/history routing record。History repair done 不構成 sender／receiver 擴 scope 或 resource identity／URL→query 契約授權。請 supervisor 落實既有 planning record 的範圍與 writer 相依、確認 receiver 契約後才恢復產品實作；勿僅因 history helper done 再清除本 blocker。
+
+本輪只追加 evidence，保留既有修補。未執行 1440/390px 瀏覽器 CTA hit testing、開關／焦點／reload、audit popup、payments context、live 或真機驗收；沒有 live 資源 ID，沒有建立業務資源。單元測試資料不代表完整驗收，不能 handoff 或 done。
+
 ## 2026-09-08 18:33 UTC dispatch 核對
 
 - Fresh `origin/dev`：`318f5065433ff07fba2ddf242cf1c5aef5fb1cae`；原分支與本次受測程式 SHA：`9ddc8b6c065441bb5057c962523450c3e7f15c24`。尚無 handoff candidate。
