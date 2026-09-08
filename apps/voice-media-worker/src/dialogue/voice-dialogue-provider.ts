@@ -1,4 +1,7 @@
-import { voiceDialogueOutputSchema, type VoiceDialogueOutput } from "@drts/contracts";
+import {
+  voiceDialogueOutputSchema,
+  type VoiceDialogueOutput,
+} from "@drts/contracts";
 
 export interface VoiceDialogueRequest {
   sessionId: string;
@@ -24,16 +27,22 @@ export async function runVoiceDialogue(
   currentEpoch: () => number,
   production: boolean,
 ): Promise<VoiceDialogueOutput> {
-  if (production && provider.mode !== "live") throw new Error("voice_fixture_forbidden");
-  if (!provider.profileVersion.trim()) throw new Error("voice_profile_required");
+  if (production && provider.mode !== "live")
+    throw new Error("voice_fixture_forbidden");
+  if (!provider.profileVersion.trim())
+    throw new Error("voice_profile_required");
   const remaining = request.deadline - Date.now();
-  if (!Number.isFinite(remaining) || remaining <= 0 || remaining > 30_000) throw new Error("voice_deadline_invalid");
+  if (!Number.isFinite(remaining) || remaining <= 0 || remaining > 30_000)
+    throw new Error("voice_deadline_invalid");
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let cancel = () => {};
   try {
     const cancelled = new Promise<never>((_, reject) => {
-      cancel = () => { controller.abort(); reject(new Error("voice_aborted")); };
+      cancel = () => {
+        controller.abort();
+        reject(new Error("voice_aborted"));
+      };
       request.signal.addEventListener("abort", cancel, { once: true });
       timer = setTimeout(cancel, remaining);
     });
@@ -45,10 +54,14 @@ export async function runVoiceDialogue(
         return provider.propose({ ...request, signal: controller.signal });
       }),
     ]);
-    if (controller.signal.aborted || request.inputEpoch !== currentEpoch()) throw new Error("voice_stale_epoch");
+    if (controller.signal.aborted || request.inputEpoch !== currentEpoch())
+      throw new Error("voice_stale_epoch");
     const output = voiceDialogueOutputSchema.parse(result);
     for (const slot of output.slots) {
-      if (slot.sourceSegmentIds.some(id => !request.segmentIds.includes(id)) || !request.transcript.includes(slot.rawText)) {
+      if (
+        slot.sourceSegmentIds.some((id) => !request.segmentIds.includes(id)) ||
+        !request.transcript.includes(slot.rawText)
+      ) {
         throw new Error("voice_slot_evidence_invalid");
       }
     }
