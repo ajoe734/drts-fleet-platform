@@ -9,6 +9,12 @@
 - Candidate：尚未 handoff；本文件所述為部分修正，完整驗收未達成。
 - 追溯：`source/new-gaps.json` N11/N12、`source/capabilities.json` C104/C105；歷史 audit 不作為目前程式真值。
 
+### 2026-09-08 candidate 復核
+
+- 現行 `origin/dev` base：`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`；已登錄 candidate：`cd5ef2a9682c8f3f9dcf09c52ea626a75a9e0c42`（PR #1640）。
+- 在此 isolated worktree 重新執行 task Vitest（9 passed）、platform-admin-web typecheck、API typecheck 與 `git diff --check origin/dev...HEAD`，均為 exit 0。
+- PR 的 `i18n guard` 不是可忽略的舊失敗：它精確指出 `registry-notice.ts:5:37` 新增的 inline bilingual map。guard 規定 copy 必須置於 `apps/platform-admin-web/lib/translations.ts`，但該共享檔不在本 task write scope；既有 key 又帶有不實的固定「6 天／2026-05-31」到期文案，不可重用。必須由 supervisor 擴 scope 或由該檔案 owner 提供新 key，才能產生可通過 CI 的 candidate。
+
 ## 當前程式重現與權威來源
 
 1. `packages/api-client/src/index.ts:4014` 的列表／單筆／更新呼叫 `/api/platform-admin/adapters`，但 `platform-admin.controller.ts` 與 `platform-admin.service.ts` 沒有相應 route、管理方法或儲存。
