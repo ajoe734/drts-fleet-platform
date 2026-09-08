@@ -133,8 +133,8 @@ const RETIRED_OR_PAUSED_DOMAINS: RetiredDomainDefinition[] = [
 ];
 
 const KNOWN_CLOUD_RUN_SUFFIXES = {
-  active: "lyo6ra57fq-uc.a.run.app",
-  staleDocumentation: "4t7rg6fmeq-uc.a.run.app",
+  declaredCurrent: "4t7rg6fmeq-uc.a.run.app",
+  historicalAuditObservation: "lyo6ra57fq-uc.a.run.app",
 };
 
 const STALE_DNS_A_RECORD = "8.233.119.14";
@@ -216,25 +216,25 @@ describe("SR-PUBLIC-001: Layered Diagnostics & Defect Classification", () => {
     expect(classifyTlsStatus(0, "")).toBe("TLS_HANDSHAKE_OK");
   });
 
-  it("classifies R29 Cloud Run URL drift: 4t7rg6fmeq (stale 404) vs lyo6ra57fq (active healthy)", () => {
-    expect(KNOWN_CLOUD_RUN_SUFFIXES.active).toBe("lyo6ra57fq-uc.a.run.app");
-    expect(KNOWN_CLOUD_RUN_SUFFIXES.staleDocumentation).toBe("4t7rg6fmeq-uc.a.run.app");
+  it("keeps the current repo inventory separate from the historical audit suffix", () => {
+    expect(KNOWN_CLOUD_RUN_SUFFIXES.declaredCurrent).toBe("4t7rg6fmeq-uc.a.run.app");
+    expect(KNOWN_CLOUD_RUN_SUFFIXES.historicalAuditObservation).toBe("lyo6ra57fq-uc.a.run.app");
 
     const classifyCloudRunUrl = (url: string, httpStatus: number) => {
-      if (url.includes(KNOWN_CLOUD_RUN_SUFFIXES.staleDocumentation)) {
-        return httpStatus === 404 ? "R29_STALE_DOCUMENTATION_URL_DEAD" : "UNEXPECTED_STALE_ALIVE";
+      if (url.includes(KNOWN_CLOUD_RUN_SUFFIXES.historicalAuditObservation)) {
+        return httpStatus === 404 ? "HISTORICAL_AUDIT_URL_UNHEALTHY" : "HISTORICAL_AUDIT_URL_OBSERVED";
       }
-      if (url.includes(KNOWN_CLOUD_RUN_SUFFIXES.active)) {
-        return [200, 307].includes(httpStatus) ? "ACTIVE_DEPLOYMENT_HEALTHY" : "ACTIVE_DEPLOYMENT_UNHEALTHY";
+      if (url.includes(KNOWN_CLOUD_RUN_SUFFIXES.declaredCurrent)) {
+        return [200, 307].includes(httpStatus) ? "DECLARED_CURRENT_URL_HEALTHY" : "DECLARED_CURRENT_URL_UNHEALTHY";
       }
       return "UNKNOWN_SUFFIX";
     };
 
-    expect(classifyCloudRunUrl("https://drts-dev-api-4t7rg6fmeq-uc.a.run.app/api/health", 404)).toBe(
-      "R29_STALE_DOCUMENTATION_URL_DEAD",
+    expect(classifyCloudRunUrl("https://drts-dev-api-lyo6ra57fq-uc.a.run.app/api/health", 404)).toBe(
+      "HISTORICAL_AUDIT_URL_UNHEALTHY",
     );
-    expect(classifyCloudRunUrl("https://drts-dev-api-lyo6ra57fq-uc.a.run.app/api/health", 200)).toBe(
-      "ACTIVE_DEPLOYMENT_HEALTHY",
+    expect(classifyCloudRunUrl("https://drts-dev-api-4t7rg6fmeq-uc.a.run.app/api/health", 200)).toBe(
+      "DECLARED_CURRENT_URL_HEALTHY",
     );
   });
 

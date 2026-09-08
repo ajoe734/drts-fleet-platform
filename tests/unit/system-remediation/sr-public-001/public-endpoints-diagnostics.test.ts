@@ -352,9 +352,9 @@ describe("SR-PUBLIC-001: Repair Runbook & Rollback Specification", () => {
     expect(content).toContain("fleets.smarttransport.tw");
     expect(content).toContain("api.smarttransport.tw");
 
-    // Must specify active Cloud Run suffix
-    expect(content).toContain("lyo6ra57fq-uc.a.run.app");
+    // Must distinguish the current repo inventory from the historical audit suffix.
     expect(content).toContain("4t7rg6fmeq-uc.a.run.app");
+    expect(content).toContain("lyo6ra57fq-uc.a.run.app");
 
     // Must specify DNS target ghs.googlehosted.com. and stale IP 8.233.119.14
     expect(content).toContain("ghs.googlehosted.com");

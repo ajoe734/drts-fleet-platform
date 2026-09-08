@@ -6,7 +6,7 @@ SR-PUBLIC-001: 公開入口／callback／版本清單診斷與分層評估工具
 - 診斷 9 個正式公開入口之 DNS、TLS、HTTP 與 Cloud Run 降級 URL
 - 核驗已退休／暫停網域（book, ride, concierge）未混入現行 active inventory
 - 分層檢驗根因：DNS A 紀錄（8.233.119.14 逾時／重設）vs CNAME（ghs.googlehosted.com.）
-- 檢驗 Cloud Run 現行部署 URL（lyo6ra57fq）vs 陳舊文件 URL（4t7rg6fmeq）
+- 將目前 repo 宣告的 Cloud Run URL inventory 與歷史 audit observation 分開記錄；live probe 不會把任一 suffix 視為成功的預設值
 - 追蹤並記錄有界重新導向鏈（bounded redirect chain）、實際最終 URL 與最終 HTTP 狀態
 - 嚴格區分「缺陷重現（diagnosis reproduction）」與「修復驗收（recovery acceptance）」
 - 遵守 DNS 錯誤安全邊界：socket.EAI_AGAIN (-3) 等解析器逾時失敗維持 fail-closed，不誤判為 clean NXDOMAIN
@@ -153,10 +153,12 @@ EXCLUDED_ENTRIES = [
     },
 ]
 
+# `docs/03-runbooks/smarttransport-tw-custom-domains.md` is the current repo
+# inventory.  The lyo suffix is a 2026-09-06 audit observation only; it is not
+# promoted to a current deployment fact by this diagnostic.
 KNOWN_CLOUD_RUN_SUFFIXES = {
-    "active": "lyo6ra57fq-uc.a.run.app",
-    "stale_documentation": "4t7rg6fmeq-uc.a.run.app",
-    "legacy_suspended": "waji3fer3a-uc.a.run.app",
+    "declared_current": "4t7rg6fmeq-uc.a.run.app",
+    "historical_audit_observation": "lyo6ra57fq-uc.a.run.app",
 }
 
 STALE_DNS_A_RECORD = "8.233.119.14"
@@ -590,17 +592,18 @@ def check_cloud_run_fallback(
     mock: bool = False,
 ) -> Dict[str, Any]:
     """
-    Probe current active (lyo6ra57fq) and stale (4t7rg6fmeq) Cloud Run URLs.
-    Captures redirect chain, final URL and final status for fallback verification.
+    Probe the current repo-declared and historical-audit Cloud Run URL suffixes.
+    A live result is evidence, not a deployment assertion.  Captures redirect
+    chains, final URLs and statuses for the operator to compare with `gcloud`.
     """
-    active_suffix = KNOWN_CLOUD_RUN_SUFFIXES["active"]
-    stale_suffix = KNOWN_CLOUD_RUN_SUFFIXES["stale_documentation"]
+    active_suffix = KNOWN_CLOUD_RUN_SUFFIXES["declared_current"]
+    stale_suffix = KNOWN_CLOUD_RUN_SUFFIXES["historical_audit_observation"]
 
     active_url = f"https://{service}-{active_suffix}{path}"
     stale_url = f"https://{service}-{stale_suffix}{path}"
 
     if mock:
-        # Mock simulation matching verified live Cloud Run probe truth
+        # Offline contract simulation only; it is never emitted as live evidence.
         if service in ["drts-dev-ops-console-web", "drts-dev-fleet-partner-portal-web", "drts-channel-partner-portal-web"]:
             loc = "/dashboard"
             target = f"https://{service}-{active_suffix}{loc}"
@@ -712,13 +715,13 @@ def diagnose_public_entries(
         # Diagnose layer root cause
         layer_root_causes = []
         if dns_info.get("has_stale_a"):
-            layer_root_causes.append(f"DNS_LAYER: GoDaddy authoritative A record points to stale IP {STALE_DNS_A_RECORD} instead of CNAME {CANONICAL_CNAME_TARGET}")
+            layer_root_causes.append(f"DNS_LAYER_OBSERVATION: resolver returned deprecated IP {STALE_DNS_A_RECORD}; authoritative DNS ownership must be read back at the live gate")
         if not tls_direct["success"]:
-            layer_root_causes.append(f"TLS_LAYER_DIRECT: TCP/TLS reset on stale IP {STALE_DNS_A_RECORD} (curl exit 35, SSL_ERROR_SYSCALL)")
+            layer_root_causes.append(f"TLS_LAYER_OBSERVATION: direct TLS failed (curl exit {http_direct.get('exit_code')}); no root cause is inferred")
         if tls_via_ghs["success"] and http_via_ghs.get("http_code") == 404:
-            layer_root_causes.append(f"ROUTING_LAYER_GHS: GFE SSL valid but Cloud Run domain mapping for {sub} -> {svc} is not routed (HTTP 404)")
-        if cr_info.get("stale_status") == 404:
-            layer_root_causes.append(f"DOC_LAYER_R29: Stale Cloud Run URL ({KNOWN_CLOUD_RUN_SUFFIXES['stale_documentation']}) returns 404; active URL is on {KNOWN_CLOUD_RUN_SUFFIXES['active']}")
+            layer_root_causes.append(f"ROUTING_LAYER_OBSERVATION: GFE TLS succeeded but forced-host HTTP returned 404; inspect the domain mapping with authorized gcloud before changing it")
+        if cr_info.get("active_status") != cr_info.get("stale_status"):
+            layer_root_causes.append("VERSION_LAYER_OBSERVATION: declared and historical URL inventories differ; record both results and confirm the current revision with authorized gcloud")
 
         # Detection of broken login redirects
         broken_redirect = False
@@ -732,7 +735,7 @@ def diagnose_public_entries(
                 broken_redirect = True
 
         # Layer repair criteria
-        repaired_dns = (not dns_info.get("has_stale_a")) and (dns_info.get("cname") == CANONICAL_CNAME_TARGET or dns_info.get("resolved", False))
+        repaired_dns = (not dns_info.get("has_stale_a")) and dns_info.get("cname") == CANONICAL_CNAME_TARGET
         repaired_tls = tls_direct.get("success", False)
         repaired_http = (
             http_direct.get("http_code") in entry["expected_direct_status"]
@@ -812,8 +815,8 @@ def diagnose_public_entries(
         "recovery_passed": recovery_passed,
         "canonical_cname_target": CANONICAL_CNAME_TARGET,
         "stale_a_ip": STALE_DNS_A_RECORD,
-        "active_cloud_run_suffix": KNOWN_CLOUD_RUN_SUFFIXES["active"],
-        "stale_cloud_run_suffix": KNOWN_CLOUD_RUN_SUFFIXES["stale_documentation"],
+        "declared_current_cloud_run_suffix": KNOWN_CLOUD_RUN_SUFFIXES["declared_current"],
+        "historical_audit_cloud_run_suffix": KNOWN_CLOUD_RUN_SUFFIXES["historical_audit_observation"],
     }
 
     return {
@@ -873,7 +876,7 @@ def verify_diagnostics(diag: Dict[str, Any], target: str = "auto") -> Tuple[bool
 def format_markdown_table(diagnostic_data: Dict[str, Any]) -> str:
     """Render diagnostic data as clean Markdown table."""
     lines = [
-        "| Subdomain | Target Service | Path | Public DNS (A / CNAME) | Direct TLS / HTTP | Final URL & Status | GHS Anycast TLS / HTTP | Active Cloud Run (`lyo6ra57fq`) | Stale URL (`4t7rg6fmeq`) |",
+        "| Subdomain | Target Service | Path | Public DNS (A / CNAME) | Direct TLS / HTTP | Final URL & Status | GHS Anycast TLS / HTTP | Declared URL (`4t7rg6fmeq`) | Historical audit URL (`lyo6ra57fq`) |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
     for r in diagnostic_data["active_entries"]:
@@ -950,7 +953,7 @@ def main():
         print(f"Target phase: {args.target}")
         print(f"Active entries count: {summary['active_entries_count']} (expected: 9)")
         print(f"R01 reproduced (exit 35 on direct A record): {summary['r01_reproduced_all_entries']}")
-        print(f"R29 reproduced (stale URL 404, active lyo6ra57fq healthy): {summary['r29_reproduced_all_entries']}")
+        print(f"R29 reproduced (historical URL 404, declared URL healthy): {summary['r29_reproduced_all_entries']}")
         print(f"Diagnosis reproduction passed: {summary['diagnosis_passed']}")
         print(f"Recovery acceptance passed: {summary['recovery_passed']}")
         print(f"Retired domains clean NXDOMAIN: {summary['all_retired_clean_nxdomain']}")
