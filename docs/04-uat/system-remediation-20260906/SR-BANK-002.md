@@ -1,5 +1,14 @@
 # SR-BANK-002 — 銀行角色金額／PII／匯出一致隔離
 
+## 2026-09-08T22:43Z resumed dispatch verification
+
+- Fetched `origin/dev` base: `eb684f176b1d3b46553a0f6f0556c79452fbac3c`; tested checkpoint: `564f434edd3428a6c86ecff034fc3d532194793e`. Candidate remains unset.
+- `git rebase origin/dev`: exit 1 at duplicate `dbec26678`, six task-file conflicts; `git rebase --abort`: exit 0, published history preserved. All checks below ran after abort.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0. Defect sources match the fetched base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1, inner matrix 49 passed / 5 failed. Both settlement routes lack financial scope; both upstream-403 loads return seed statements; Contoso CSV outage returns ACME rows. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, leaked seed sentinel `STM-ACME-202606`. These are synthetic upstream regressions using actual cookie signing and application handlers, not live financial-data evidence. No live/device/server/CI/merge/deployment acceptance performed.
+- Read both merged unblock plans. Current task slice still grants the original six scopes and two dependencies, and dispatch still specifies the original branch. Supervisor must record the replacement delivery branch, shared loader/export scope with overlapping-writer dependencies, and canonical IAM producer/dependency (or reviewed policy scope) before implementation can proceed. The history helper explicitly does not resolve these product failures; its done status alone is insufficient. No out-of-scope edits or handoff in this dispatch.
+
 ## 2026-09-08T21:43Z resumed dispatch verification
 
 - Fetched base `origin/dev`: `a24045986ac29231d34657df3a343b02d9fbb770`; tested checkpoint: `fb2e26e04b092676991e14a6215e870bad1949aa`. Candidate remains unset.
