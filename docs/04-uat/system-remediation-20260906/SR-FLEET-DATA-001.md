@@ -183,6 +183,6 @@ Exit Code:  0
 - **Commands executed locally (all exit code 0)**:
   - `git diff --check origin/dev...HEAD`
   - `pnpm --filter @drts/fleet-partner-portal-web typecheck`
-  - `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-data-001/` — 1 test file, 14 tests passed.
+  - `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-data-001/` — final rerun at 11:09 UTC: 1 test file, 14 tests passed in 447 ms.
 - **Test resource IDs**: fleet partner `fp-test-001`; trip records `ord-001`, `ord-002`, `ord-003`.
 - **Not performed**: no product dev server, browser/E2E, Cloud Run, live API, or physical-device validation was run in this VM-restricted dispatch. Training and cases remain explicitly unintegrated (`connected: false`) rather than being represented by fixture rows.
