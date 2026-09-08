@@ -4,17 +4,16 @@
 // `/api/fleet-partner/*` endpoints exposed by `@drts/api-client`. Each page
 // calls one `load*()` accessor here; the accessor fetches partner-scoped data
 // through `getServerFleetPartnerClient()`, maps the contract records into the
-// display shapes the pages already render, and — only when the endpoint is
-// unavailable or errors — gracefully falls back to the design fixtures (the
-// ops-detail fallback pattern). A reachable endpoint that returns an empty
-// list is legitimate zero data and is rendered live (empty), not replaced with
-// demo rows. The `source` flag lets a page show the "design data" notice only
-// when it is actually showing fixtures.
+// display shapes the pages already render. A reachable endpoint that returns
+// an empty list is legitimate zero data and is rendered live (empty), not
+// replaced with demo rows. A read error returns no operational rows plus an
+// error value, so callers never render fabricated operational statistics.
 //
 // Endpoint coverage (DH-FLP-BE-CLIENT): dashboard, drivers, vehicles, trips,
 // quality-metrics, statements (+ revenue, derived from the latest statement).
-// The cases / documents / training views have no fleet-partner endpoint yet,
-// so their loaders return fixtures with `source: "fallback"` until a
+// The cases / documents / training views have no fleet-partner endpoint yet.
+// Cases and training therefore explicitly return an unintegrated empty state;
+// the documents view remains a separate legacy design-fixture surface until a
 // dedicated endpoint ships.
 //
 // Field gaps: the portal contracts intentionally do not yet surface every
