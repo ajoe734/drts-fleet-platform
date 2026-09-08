@@ -1,5 +1,15 @@
 # SR-OPS-SHELL-001 — 本次恢復與阻塞證據
 
+## 2026-09-08 22:42 UTC resume 核對
+
+- `git fetch origin` exit 0；fresh `origin/dev` base：`eb684f176b1d3b46553a0f6f0556c79452fbac3c`；受測 task SHA：`bf7281f38f649be9f1c2f3e888cebf56e82efce1`。本輪沒有 handoff candidate。
+- `git rebase origin/dev` exit 1：第9/45個歷史 commit `94bf84a0a` 在本文件 add/add conflict；`git rebase --abort` exit 0，保留原已發布分支。未完成 rebase，未 reset 或 force push。
+- 唯讀 fresh dev：dispatch:1230 仍 fallback `/platform-admin`、dispatch:4520 仍傳無 resource context 的 `/audit`；audit:164 仍呼叫無參數 `client.listAuditLogs()`，搜尋未找到 searchParams。這是原始碼證據，非 live popup 重現。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/` exit 0：1 file / 13 tests passed，288ms；適用上述 task SHA，不是 fresh dev。
+- 本輪沒有產品修改，未重跑 typecheck。VM 禁止啟動產品／browser test server；未做 1440/390px 瀏覽器 CTA、focus/reload、audit popup、payments context 或 live／真機驗收。沒有 live 資源 ID，未建立業務資源；既有 AUD-* 僅為測試輸入。
+
+已重新核對 execution_ref、R18/R19、C048 與 planning/history routing records。Machine slice 的 write_scopes 仍未含 dispatch sender／audit receiver，depends_on 仍空；history repair 明文保留產品 scope／receiver-contract 阻塞。需要 supervisor 落實既有 planning record 的 sender／必要 receiver scope、重疊 writer dependencies，並確認 `Q-SR-OPS-SHELL-001` 的 resource identity／URL→query 契約後再恢復 parent。單純依 history helper done 重派不能解除上述前置。本輪只提交 evidence anchor，不 handoff／done。
+
 ## 2026-09-08 21:43 UTC resume 核對
 
 - `git fetch origin` exit 0；fresh `origin/dev` base：`a24045986ac29231d34657df3a343b02d9fbb770`；本次受測 task SHA：`055f5a829982c8a5837313db93c35586b40a3e89`，無新 handoff candidate。
