@@ -6,6 +6,7 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 const base = process.env.FLEET_TEST_URL ?? "http://127.0.0.1:3317";
+page.on("pageerror", error => console.log("PAGEERROR", error.message));
 let dialogs = 0;
 page.on("dialog", async (dialog) => {
   dialogs++;
@@ -43,8 +44,8 @@ try {
     accessibility.find((field) => field.id.endsWith("-name")).required,
   ).toBe(true);
   const colors = await name.evaluate((el) => ({
-    text: getComputedStyle(el.labels[0]).color,
-    surface: getComputedStyle(el).backgroundColor,
+    text: window.getComputedStyle(el.labels[0]).color,
+    surface: window.getComputedStyle(el).backgroundColor,
   }));
   await page.reload();
   await expect(name).toHaveValue("SR-FLEET keyboard test");
@@ -52,7 +53,9 @@ try {
   await page.goto(`${base}/supply/vehicles/new`);
   await expect(page.locator("#form-new-vehicle-plateNo")).toBeVisible();
   await page.locator("#form-new-vehicle-color").fill("optional-only");
+  console.log("before back", await page.evaluate(() => ({...sessionStorage})));
   await page.goBack();
+  console.log("after back", await page.evaluate(() => ({ storage: {...sessionStorage}, ready: document.readyState, name: document.querySelector("#form-new-driver-name")?.outerHTML })));
   await expect(name).toHaveValue("SR-FLEET keyboard test");
   let requests = 0;
   await page.route(

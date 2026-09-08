@@ -105,10 +105,10 @@ export function isEditableStatus(status: SupplySubmissionStatus) {
  */
 export const DRAFT_GUARD_STRINGS = {
   /** Shown in the browser's native beforeunload dialog (plain text only). */
-  beforeUnload: "您有尚未儲存的草稿內容。確定要離開嗎？離開後資料將會遺失。",
+  beforeUnload: "您有尚未儲存至伺服器的草稿內容。確定要離開嗎？",
   /** Shown in the in-app navigation confirmation dialog. */
   confirmLeaveTitle: "尚未儲存的草稿",
-  confirmLeaveBody: "表單中有尚未儲存的內容，確定離開嗎？離開後資料將會遺失。",
+  confirmLeaveBody: "表單中有尚未儲存至伺服器的內容，確定離開嗎？",
   confirmLeaveCancel: "繼續填寫",
   confirmLeaveOk: "確定離開",
 } as const;

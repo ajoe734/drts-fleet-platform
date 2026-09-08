@@ -905,15 +905,27 @@ const supplyDraftMemory = new Map<string, string>();
 function useSupplyDraft<T extends object>(key: string, initial: T) {
   const [form, updateForm] = useState(initial);
   const current = useRef(initial);
+  const [restoreVersion, setRestoreVersion] = useState(0);
   useEffect(() => {
-    let raw = supplyDraftMemory.get(key) ?? null;
-    try {
-      raw = window.sessionStorage.getItem(key) ?? raw;
-    } catch {
-      /* Memory fallback. */
+    function restore() {
+      let raw = supplyDraftMemory.get(key) ?? null;
+      try {
+        raw = window.sessionStorage.getItem(key) ?? raw;
+      } catch {
+        /* Memory fallback. */
+      }
+      current.current = restoreSupplyDraft(raw, initial);
+      updateForm(current.current);
+      setRestoreVersion((version) => version + 1);
     }
-    current.current = restoreSupplyDraft(raw, initial);
-    updateForm(current.current);
+    restore();
+    // BFCache restores a document without remounting React. Reapply the saved
+    // draft when it becomes visible again, including after successful creation.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) restore();
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
   }, [key, initial]);
   const setForm: Dispatch<SetStateAction<T>> = (next) => {
     const value =
@@ -938,7 +950,7 @@ function useSupplyDraft<T extends object>(key: string, initial: T) {
       /* Storage unavailable. */
     }
   };
-  return { form, setForm, clearDraft };
+  return { form, setForm, clearDraft, restoreVersion };
 }
 
 export function NewDriverSubmissionForm({
@@ -952,7 +964,7 @@ export function NewDriverSubmissionForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const { form, setForm, clearDraft } = useSupplyDraft(
+  const { form, setForm, clearDraft, restoreVersion } = useSupplyDraft(
     `supply-draft:v1:${draftScope}:driver`,
     NEW_DRIVER_INITIAL_FORM,
   );
@@ -1011,6 +1023,7 @@ export function NewDriverSubmissionForm({
       />
       <div style={{ padding: 24 }}>
         <DraftFormFrame
+          key={restoreVersion}
           title={t("supply.driverNew.cardTitle")}
           error={error}
           saving={saving}
@@ -1039,7 +1052,7 @@ export function NewVehicleSubmissionForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const { form, setForm, clearDraft } = useSupplyDraft(
+  const { form, setForm, clearDraft, restoreVersion } = useSupplyDraft(
     `supply-draft:v1:${draftScope}:vehicle`,
     NEW_VEHICLE_INITIAL_FORM,
   );
@@ -1098,6 +1111,7 @@ export function NewVehicleSubmissionForm({
       />
       <div style={{ padding: 24 }}>
         <DraftFormFrame
+          key={restoreVersion}
           title={t("supply.vehicleNew.cardTitle")}
           error={error}
           saving={saving}
