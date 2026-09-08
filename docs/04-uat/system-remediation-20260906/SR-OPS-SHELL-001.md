@@ -3,17 +3,17 @@
 | 欄位          | 內容                                                                  |
 | ------------- | --------------------------------------------------------------------- |
 | Task spec     | `docs/03-runbooks/system-remediation-20260906/SR-OPS-SHELL-001.md`     |
-| Owner         | Claude2（原 Gemini2，因 quota_terminal failure-streak 由 Chairman 改派）|
+| Owner         | Codex2（從 Claude2 保存的遠端候選恢復）                                  |
 | Reviewer      | Claude                                                                 |
-| Base SHA      | `feaf5c7f260970955a63389cb45f8f863577c214`（= `origin/dev` tip at task start） |
-| Candidate SHA | recorded at `handoff` via `git rev-parse HEAD`（見 task board）        |
+| Base SHA      | `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`（本次 recovery 時的 `origin/dev` tip） |
+| Candidate SHA | 以 `ai-status.sh handoff` 鎖定的 exact `git rev-parse HEAD`（task board machine truth） |
 
 ## 1. 重現與基準
 
 - **追溯來源**：
   - 問題來源：`findings.json` 之 **R18**（「跨系統稽核連結導至錯誤位置：關閉助理後點跨app audit，新視窗到ops域/platform-admin/audit，404」）與 **R19**（「預設助理遮擋工作控制項：助理開啟時audit連結點擊10秒皆被pointer事件攔截；正常關閉後可點」）。
   - 能力來源：`capabilities.json` 之 **C048**。
-- **Base SHA**：`feaf5c7f260970955a63389cb45f8f863577c214`（當前 `origin/dev`）。此 SHA 下本任務所述缺陷仍可由原始碼靜態重現（非歷史觀察，見下）；未被其他任務修復。
+- **Base SHA**：`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`（本次 recovery 時的 `origin/dev`）。此 SHA 下本任務所述缺陷仍可由原始碼靜態重現（非歷史觀察，見下）；未被其他任務修復。
 
 ### R19（預設遮擋）根因
 
@@ -60,27 +60,22 @@ $ git diff --check
 (exit 0，無 trailing whitespace 或格式錯誤)
 
 $ pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/
- RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/claude2-sr-ops-shell-001
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-sr-ops-shell-001
 
  Test Files  1 passed (1)
       Tests  13 passed (13)
    Duration  344ms
 (exit 0，13 個單元測試全數通過：R19 預設關閉與 390/1440px clamp 各 6 項、R18 audit href fallback 與 env override 各 5 項、localStorage round-trip 2 項)
+
+$ pnpm --filter @drts/ops-console-web typecheck
+> next typegen && tsc --noEmit
+Generating route types...
+✓ Types generated successfully
+(exit 0)
 ```
-
-**`pnpm --filter @drts/ops-console-web typecheck`：無法取得有效結果（環境阻塞，非本任務程式碼問題）。**
-
-執行 `next typegen && tsc --noEmit` 時，`tsc` 對**整個** `ops-console-web` app（包含與本任務完全無關的 `app/av-fallback/*`、`app/approval-requests/*` 等數十個檔案）大量報 `Cannot find module 'react'` / `'next/navigation'` / `'next/server'` / `Cannot find name 'process'` 等錯誤（約 5,900 行）。經排查：
-
-- 本 worktree（以及目前所有其他 worker worktree）的 `node_modules` 皆為指向 canonical root `node_modules` 的 symlink；canonical root 下 `node_modules/react`、`node_modules/next`、`node_modules/typescript` 等**頂層 symlink** 目前全部懸空指向已經被移除的另一個任務 worktree `.artifacts/worktrees/auto/claude-sr-invoice-001/node_modules/.pnpm/...`（該 worktree 已不存在）。
-- 這是**共用、跨任務的環境層問題**，發生在 `2026-09-06 09:43`（symlink mtime）之後、本任務讀取 base SHA 之後，且早於本任務對 write_scopes 的任何修改；不是本次變更引入的回歸（同一批錯誤同時出現在完全未觸碰的檔案中可佐證）。
-- 依規範本任務不得修改中央 test config、lockfile 或執行可能影響共用 canonical 安裝的 `pnpm install`；已避免任何會寫入共用 `node_modules`/lockfile 的操作。曾以 `NODE_PATH` 指向 canonical `.pnpm` 內仍然完整存在的 `vitest@4.1.4` 條目，成功繞過壞掉的頂層 symlink 執行 §4 的 vitest 測試（純相對匯入、無 `react`/`next` 依賴，故不受影響）；但 `tsc`／`next typegen` 的 node 模組解析（而非可執行檔路徑）需要真正的 `node_modules/react`、`node_modules/next` 目錄結構，NODE_PATH 對此無效，故無法同樣繞過。
-- 誠實佐證：在上述環境阻塞下，`tsc` 對本任務新增/修改的三個檔案報出的錯誤**全部**是同一類「Cannot find module 'react' / 'next/navigation'」（即環境缺陷），**沒有**任何屬於本任務新增邏輯本身的型別錯誤（例如 `widget-geometry.ts`、`audit-link.ts` 的簽名/回傳型別皆為顯式標註的基本型別與已由 `@drts/contracts` 定義之型別，未見特有錯誤）。
-- 建議：回報 supervisor/chair 修復 canonical `node_modules` 頂層 symlink（重新指向任一目前仍存在、且該 `.pnpm` hash 已存在的 worktree，或直接 `pnpm install` 於 canonical root 重建），此為影響**所有**並行 worker 的環境阻塞，不僅限本任務。
 
 ## 5. 未做的部分（明列，不冒充成功）
 
-- **`pnpm --filter @drts/ops-console-web typecheck` 未能取得乾淨通過結果**：見 §4，環境層（canonical `node_modules` 懸空 symlink）阻塞，非本任務程式邏輯問題；已提供繞過驗證（vitest 純函式測試）與錯誤分類佐證。
 - **dispatch/complaints/incidents 三頁各自的 audit／platform-admin 連結重複實作**：`app/dispatch/page.tsx`（`buildPlatformAdminHref`，預設 base 為 `/platform-admin` 而非 `_apps/platform-admin`）、`app/complaints/page.tsx`、`app/incidents/[incidentId]/page.tsx`（`buildCrossAppHref`，無 base URL 環境變數時退回裸相對路徑）皆有與本任務修復的 widget fallback 相同類別的缺陷，但都不在本任務 `write_scopes` 內，未修改。建議另立 task 或由 supervisor 擴大 scope，集中到單一共用的 cross-app link 解析模組。
 - **真機／瀏覽器手動驗證**（實際开启 1440px/390px 瀏覽器視窗、目視確認 launcher 與 audit 連結互不遮擋）：未執行，僅有純函式層級（geometry clamp、href 解析）之單元回歸測試佐證；无法在此環境啟動瀏覽器做視覺驗證。
 
