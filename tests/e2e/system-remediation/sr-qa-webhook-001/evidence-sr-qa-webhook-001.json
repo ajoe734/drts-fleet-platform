@@ -1,89 +1,146 @@
 {
   "taskId": "SR-QA-WEBHOOK-001",
-  "runId": "uat-SR-QA-WEBHOOK-001-f9819f3e",
+  "runId": "uat-SR-QA-WEBHOOK-001-a1ca11aa",
   "shardIndex": 0,
-  "baseSha": "890548b4f357542968c8b14f33f23e0685be007a",
-  "candidateSha": "b52204d602e91056a381d86f160b991b1ec1f113",
-  "headSha": "b52204d602e91056a381d86f160b991b1ec1f113",
-  "startTime": "2026-09-08T16:43:51.741Z",
-  "endTime": "2026-09-08T16:45:08.282Z",
+  "baseSha": "c171ea5126c1a7c19fa090429b2965bbac106768",
+  "candidateSha": "1e09eb890870138842c71fabfa74e071817a4caf",
+  "headSha": "1e09eb890870138842c71fabfa74e071817a4caf",
+  "startTime": "2026-09-08T17:01:02.890Z",
+  "endTime": "2026-09-08T17:02:37.265Z",
   "status": "passed",
   "exitCode": 0,
   "roles": [],
   "trackedResources": [
     {
       "type": "webhook",
-      "id": "wh_4dd19801-66f7-4101-a197-a1723db1b2b7",
+      "id": "wh_b7947f45-6275-4494-8dcc-7399f01c8307",
       "metadata": {
         "tenantId": "tenant-demo-001"
       }
     },
     {
       "type": "delivery",
-      "id": "wd_022a2385-8ba8-4578-acbe-2a4ebf49aab5",
+      "id": "wd_62436324-b294-432c-a743-28665247a994",
       "metadata": {
-        "webhookId": "wh_4dd19801-66f7-4101-a197-a1723db1b2b7"
+        "webhookId": "wh_b7947f45-6275-4494-8dcc-7399f01c8307"
       }
     },
     {
       "type": "postgres_acceptance",
-      "id": "qa-webhook-674973d8-1fd5-4bab-9978-9fa006717919",
+      "id": "qa-webhook-bf15e182-ed80-4e7d-8a9a-2072902c62e3",
       "metadata": {
-        "tenantId": "qa-webhook-674973d8-1fd5-4bab-9978-9fa006717919",
-        "apiKeyId": "api_key_f704799d-46c6-4fef-80c5-afc7f36ef1b8",
-        "rotatedApiKeyId": "api_key_70e61b04-6ff7-498b-b967-88d7ee569e25",
-        "otherTenantId": "qa-webhook-13b81ddb-015f-41a6-bd6a-1a7b3b486107",
+        "tenantId": "qa-webhook-bf15e182-ed80-4e7d-8a9a-2072902c62e3",
+        "apiKeyId": "api_key_e1d2b8ca-9959-43a2-9c49-110bec809093",
+        "rotatedApiKeyId": "api_key_4bea5667-406b-4c2a-a33c-43e39f6ccfa2",
+        "otherTenantId": "qa-webhook-c7924089-8337-4a25-bf18-a97d577e4498",
         "crossTenantMutationError": "API_KEY_NOT_FOUND",
         "persistedRowsUnchangedAfterDeniedMutation": true
       }
     },
     {
       "type": "postgres_acceptance",
-      "id": "qa-webhook-1731e70f-5aa2-47bb-97c5-0fe3cef1a94a",
+      "id": "qa-webhook-e7341d23-ba42-4c2e-853d-1f0585fe90c2",
       "metadata": {
-        "tenantId": "qa-webhook-1731e70f-5aa2-47bb-97c5-0fe3cef1a94a",
-        "webhookId": "wh_a5294faa-4761-49bf-ab61-1478bcfdbb93",
-        "deliveryId": "wd_f8514c58-13dd-4249-a01c-af8a2dfd4026",
-        "outboxKey": "7d372b71-0e05-4f0c-b31f-b7dc13afd33f",
+        "tenantId": "qa-webhook-e7341d23-ba42-4c2e-853d-1f0585fe90c2",
+        "webhookId": "wh_9a9ae3f8-716c-4d31-a47a-945f18ed101b",
+        "deliveryId": "wd_54bf99c9-82d0-4556-a8fb-2bb3230ba74d",
+        "outboxKey": "d020b819-01b0-406e-bf43-6cc0149e644e",
         "requests": 3
       }
     },
     {
       "type": "postgres_acceptance",
-      "id": "qa-webhook-6a6e51b4-e777-4e5f-ba61-3abbb04cf4ad",
+      "id": "qa-webhook-20f54d9a-6d4b-44b5-afe8-de6f5b28d81e",
       "metadata": {
-        "tenantId": "qa-webhook-6a6e51b4-e777-4e5f-ba61-3abbb04cf4ad",
-        "webhookId": "wh_22b03389-41c6-438d-98df-c5b4fdaef624",
-        "deliveryId": "wd_9fd6dea1-9ec4-4e98-a452-60a2cf322b2c",
+        "tenantId": "qa-webhook-20f54d9a-6d4b-44b5-afe8-de6f5b28d81e",
+        "webhookId": "wh_12795272-a937-4645-a5b3-f4d99f7ef4b4",
+        "deliveryId": "wd_899ee7d4-e2da-4578-a54d-c1db246ad3d4",
         "command": {
           "eventType": "dispatch.assigned",
           "data": {
-            "orderId": "6f7d994d-47b6-476f-a901-ae8dfcb63328"
+            "orderId": "41d17a00-47d6-4458-bcad-031a862d2631"
           },
-          "outboxKey": "ca6a1f72-9865-4340-bc69-285bf5a67910"
+          "outboxKey": "89975d1d-dfae-48f1-93f1-80d3fa18e174"
         },
-        "writerPid": 3355855,
-        "recoveryPid": 3356276,
+        "writerPid": 3484676,
+        "recoveryPid": 3484911,
         "status": "delivered",
         "requests": 3,
         "terminationSignal": "SIGKILL"
+      }
+    },
+    {
+      "type": "auth_http_acceptance",
+      "id": "api_key_fec6eb86-0b5d-466b-a3df-47861ffb5bdf",
+      "metadata": {
+        "baseSha": "c171ea5126c1a7c19fa090429b2965bbac106768",
+        "executionSha": "1e09eb890870138842c71fabfa74e071817a4caf",
+        "recordedAt": "2026-09-08T17:02:36.249Z",
+        "scope": "Local inherited production controller routes, real auth guard/JWT and PostgreSQL. Key seeded through service; HTTP successful writes, full AppModule middleware and deployed MFA not verified.",
+        "tenantId": "qa-http-6ee3b5e9-5f94-428e-a98e-ccf47b1041f4",
+        "principalId": "qa-http-principal-33078e51-ac27-4b8a-a94f-7121f01d9a08",
+        "sessionId": "sid_476b6d5aa2c848c5993d9fb6f9532b93",
+        "writerSessionId": "sid_ef59765a28a74c8892c4b6da3ce8f160",
+        "apiKeyId": "api_key_fec6eb86-0b5d-466b-a3df-47861ffb5bdf",
+        "isolatedDatabase": "sr_qa_webhook_001_1788886940_3486035",
+        "anonymousStatus": 401,
+        "readStatus": 200,
+        "deniedWriteStatus": 403,
+        "failure": {
+          "error": {
+            "code": "AUTH_SCOPE_DENIED",
+            "message": "Bootstrap identity is missing one or more required scopes.",
+            "details": {
+              "route": "/api/tenant/api-keys",
+              "method": "POST",
+              "required_scopes": [
+                "tenant:write"
+              ],
+              "granted_scopes": [
+                "tenant:read"
+              ]
+            },
+            "retryable": false,
+            "trace_id": "472e6310-5fb0-4f29-bdc9-115ae390fc06"
+          }
+        },
+        "missingProofStatus": 403,
+        "proofFailure": {
+          "error": {
+            "code": "STEP_UP_REQUIRED",
+            "message": "A fresh step-up verification is required for this privileged action.",
+            "details": {
+              "action_id": "tenant:api-keys:issue",
+              "freshness_seconds": 900,
+              "step_up_reference_header": "x-drts-step-up-reference"
+            },
+            "retryable": false,
+            "trace_id": "aed479c8-04b8-4e3d-9319-e331a5507693"
+          }
+        },
+        "databaseUnchanged": true
       }
     }
   ],
   "httpCalls": [],
   "consoleLogs": [
     {
-      "timestamp": "2026-09-08T16:43:57.009Z",
+      "timestamp": "2026-09-08T17:01:08.911Z",
       "level": "info",
-      "message": "\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\nSR-QA-WEBHOOK-001 timeout resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_4dd19801-66f7-4101-a197-a1723db1b2b7\",\"deliveryId\":\"wd_022a2385-8ba8-4578-acbe-2a4ebf49aab5\",\"transport\":\"real fetch with test-injected 100ms deadline\"}\nSR-QA-WEBHOOK-001 default transport resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_1bd62d95-5b69-4c16-adf1-4eff78ef4635\",\"deliveryId\":\"wd_78431702-9409-4467-b904-7c239fb93177\",\"observationMs\":1000,\"settledBeforePeerDisconnect\":false,\"recoveryTrigger\":\"receiver closed TCP connection\",\"limitation\":\"A bounded observation does not establish a default deadline or its absence\"}\nSR-QA-WEBHOOK-001 replay resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_109a37f8-2e7b-4aa0-97f7-d7b5faec0f07\",\"deliveryId\":\"wd_a4ad8e6d-108d-40b4-b724-de9793ea24ec\",\"receiverRequests\":8,\"negativeCases\":[{\"name\":\"tampered body\",\"status\":401},{\"name\":\"wrong signature\",\"status\":401},{\"name\":\"missing signature\",\"status\":401},{\"name\":\"expired timestamp\",\"status\":400},{\"name\":\"future timestamp\",\"status\":400},{\"name\":\"invalid timestamp\",\"status\":400}],\"replayStatus\":409,\"policy\":\"test-owned receiver; 300s freshness, HMAC then deduplication\"}\n[Nest] 3353217  - 09/08/2026, 4:43:56 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (15c8eb3e-abef-4397-a418-d36439b1adc8)\n[Nest] 3353217  - 09/08/2026, 4:43:56 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (48ed32dc-d5aa-491e-a19b-a8253e83b131)\n\n Test Files  1 passed (1)\n      Tests  25 passed (25)\n   Start at  16:43:52\n   Duration  4.22s (transform 1.87s, setup 0ms, import 2.73s, tests 1.32s, environment 0ms)\n\n"
+      "message": "\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\nSR-QA-WEBHOOK-001 timeout resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_b7947f45-6275-4494-8dcc-7399f01c8307\",\"deliveryId\":\"wd_62436324-b294-432c-a743-28665247a994\",\"transport\":\"real fetch with test-injected 100ms deadline\"}\nSR-QA-WEBHOOK-001 default transport resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_bef24318-0891-4f8a-af97-b8648eb8d55e\",\"deliveryId\":\"wd_5c64d5b8-87d6-41bd-8753-0f11832b49c7\",\"observationMs\":1001,\"settledBeforePeerDisconnect\":false,\"recoveryTrigger\":\"receiver closed TCP connection\",\"limitation\":\"A bounded observation does not establish a default deadline or its absence\"}\nSR-QA-WEBHOOK-001 replay resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_f26c02d5-7460-4015-bc9a-566c9f0974b9\",\"deliveryId\":\"wd_49e5fc9a-5748-4434-b96a-7bf737720f39\",\"receiverRequests\":8,\"negativeCases\":[{\"name\":\"tampered body\",\"status\":401},{\"name\":\"wrong signature\",\"status\":401},{\"name\":\"missing signature\",\"status\":401},{\"name\":\"expired timestamp\",\"status\":400},{\"name\":\"future timestamp\",\"status\":400},{\"name\":\"invalid timestamp\",\"status\":400}],\"replayStatus\":409,\"policy\":\"test-owned receiver; 300s freshness, HMAC then deduplication\"}\n[Nest] 3478364  - 09/08/2026, 5:01:08 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (b7f728b4-0875-45f4-ae59-73ea257dfe50)\n[Nest] 3478364  - 09/08/2026, 5:01:08 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (a35382e6-363b-49ad-abe6-261efe94e725)\n\n Test Files  1 passed (1)\n      Tests  25 passed (25)\n   Start at  17:01:03\n   Duration  4.85s (transform 2.40s, setup 0ms, import 3.30s, tests 1.37s, environment 0ms)\n\n"
     },
     {
-      "timestamp": "2026-09-08T16:45:08.282Z",
+      "timestamp": "2026-09-08T17:02:20.889Z",
       "level": "info",
-      "message": "base_sha=890548b4f357542968c8b14f33f23e0685be007a\nexecution_sha=b52204d602e91056a381d86f160b991b1ec1f113\nisolated_database=sr_qa_webhook_001_1788885837_3353427 (schema-only clone of local drts_fleet_platform)\n\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\n[Nest] 3353814  - 09/08/2026, 4:44:04 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 3353814  - 09/08/2026, 4:44:04 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 3353814  - 09/08/2026, 4:44:04 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 3353814  - 09/08/2026, 4:44:34 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 3353814  - 09/08/2026, 4:44:34 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n\n Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Start at  16:44:03\n   Duration  64.94s (transform 687ms, setup 0ms, import 1.05s, tests 63.72s, environment 0ms)\n\n"
+      "message": "base_sha=c171ea5126c1a7c19fa090429b2965bbac106768\nexecution_sha=1e09eb890870138842c71fabfa74e071817a4caf\nisolated_database=sr_qa_webhook_001_1788886868_3479366 (schema-only clone of local drts_fleet_platform)\n\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\n[Nest] 3480327  - 09/08/2026, 5:01:17 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 3480327  - 09/08/2026, 5:01:17 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 3480327  - 09/08/2026, 5:01:17 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 3480327  - 09/08/2026, 5:01:47 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 3480327  - 09/08/2026, 5:01:47 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n\n Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Start at  17:01:15\n   Duration  65.07s (transform 902ms, setup 0ms, import 1.37s, tests 63.52s, environment 0ms)\n\n"
     },
     {
-      "timestamp": "2026-09-08T16:45:08.282Z",
+      "timestamp": "2026-09-08T17:02:37.265Z",
+      "level": "info",
+      "message": "base_sha=c171ea5126c1a7c19fa090429b2965bbac106768\nexecution_sha=1e09eb890870138842c71fabfa74e071817a4caf\nisolated_database=sr_qa_webhook_001_1788886940_3486035\n\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\n\n Test Files  1 passed (1)\n      Tests  1 passed (1)\n   Start at  17:02:29\n   Duration  6.65s (transform 3.98s, setup 0ms, import 5.48s, tests 773ms, environment 0ms)\n\n"
+    },
+    {
+      "timestamp": "2026-09-08T17:02:37.265Z",
       "level": "info",
       "message": "Local PostgreSQL key readback and automatic webhook retry after service reinitialization passed. Timeout uses a test-injected deadline; SIGKILL/new OS process recovery passed; deployed API remains unverified."
     }
@@ -93,7 +150,7 @@
   "unimplementedLiveSurfaces": [
     {
       "surface": "C111-C112",
-      "reason": "Authenticated HTTP API and default transport timeout remain unverified. SIGKILL/new OS process recovery passed. Local DB readback, service reinitialization, automatic retry and outbox deduplication passed."
+      "reason": "Local HTTP bearer read, anonymous/scope/missing-step-up rejection and unchanged DB passed. Successful HTTP mutation, full AppModule tenant middleware, deployed authentication and default transport timeout remain unverified. SIGKILL/new OS process recovery passed."
     },
     {
       "surface": "C113",

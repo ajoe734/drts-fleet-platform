@@ -1,0 +1,48 @@
+{
+  "baseSha": "c171ea5126c1a7c19fa090429b2965bbac106768",
+  "executionSha": "1e09eb890870138842c71fabfa74e071817a4caf",
+  "recordedAt": "2026-09-08T17:02:36.249Z",
+  "scope": "Local inherited production controller routes, real auth guard/JWT and PostgreSQL. Key seeded through service; HTTP successful writes, full AppModule middleware and deployed MFA not verified.",
+  "tenantId": "qa-http-6ee3b5e9-5f94-428e-a98e-ccf47b1041f4",
+  "principalId": "qa-http-principal-33078e51-ac27-4b8a-a94f-7121f01d9a08",
+  "sessionId": "sid_476b6d5aa2c848c5993d9fb6f9532b93",
+  "writerSessionId": "sid_ef59765a28a74c8892c4b6da3ce8f160",
+  "apiKeyId": "api_key_fec6eb86-0b5d-466b-a3df-47861ffb5bdf",
+  "isolatedDatabase": "sr_qa_webhook_001_1788886940_3486035",
+  "anonymousStatus": 401,
+  "readStatus": 200,
+  "deniedWriteStatus": 403,
+  "failure": {
+    "error": {
+      "code": "AUTH_SCOPE_DENIED",
+      "message": "Bootstrap identity is missing one or more required scopes.",
+      "details": {
+        "route": "/api/tenant/api-keys",
+        "method": "POST",
+        "required_scopes": [
+          "tenant:write"
+        ],
+        "granted_scopes": [
+          "tenant:read"
+        ]
+      },
+      "retryable": false,
+      "trace_id": "472e6310-5fb0-4f29-bdc9-115ae390fc06"
+    }
+  },
+  "missingProofStatus": 403,
+  "proofFailure": {
+    "error": {
+      "code": "STEP_UP_REQUIRED",
+      "message": "A fresh step-up verification is required for this privileged action.",
+      "details": {
+        "action_id": "tenant:api-keys:issue",
+        "freshness_seconds": 900,
+        "step_up_reference_header": "x-drts-step-up-reference"
+      },
+      "retryable": false,
+      "trace_id": "aed479c8-04b8-4e3d-9319-e331a5507693"
+    }
+  },
+  "databaseUnchanged": true
+}
