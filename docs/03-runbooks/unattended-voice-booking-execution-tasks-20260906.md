@@ -24,6 +24,15 @@
 
 ## 3. 任務定義與追溯
 
+### UV-EXEC-013 blocker routing clarification
+
+The [planning-disposition record](../../support/unblock/UV-EXEC-013/UV-EXEC-013-UNBLOCK-PLANNING-DECISION.md)
+routes the observed stale-trip Product smoke failure to engineering investigation
+on the existing parent. SD §4.3/§6.4 remain the execution baseline; no product
+scope cut or acceptance waiver is introduced. The parent owner must reproduce
+the PostgreSQL fixture/loading failure, repair the demonstrated cause and submit
+same-SHA review/CI evidence. Live status and ownership remain in machine truth.
+
 完整任務列於 manifest；其 `test_commands` 指向任務需新增或修改的驗證交付物，不宣稱那些檔案今天已存在。`fr_ids`／`ac_ids` 是覆蓋義務，驗證通過與可取回 evidence 必須另記錄。
 
 <!-- TASK_TABLE_START -->
