@@ -27,9 +27,9 @@ describe("BLOCKED: canonical IAM policy and bank-dev-read-models need supervisor
 
   for (const [tenantId, role] of [
     ["tenant-demo-001", "bank_ops_viewer"],
-    ["tenant-cathay-001", "bank_finance"],
+    ["tenant-contoso-001", "bank_finance"],
   ] as const) {
-    it(`${tenantId}/${role}: upstream denial must not return CTBC seed statements`, async () => {
+    it(`${tenantId}/${role}: upstream denial must not return ACME seed statements`, async () => {
       vi.stubGlobal(
         "fetch",
         vi.fn(async () => new Response("Forbidden", { status: 403 })),
@@ -39,21 +39,21 @@ describe("BLOCKED: canonical IAM policy and bank-dev-read-models need supervisor
     });
   }
 
-  it("Cathay CSV must not publish CTBC seed rows when its upstream is unavailable", async () => {
+  it("Contoso CSV must not publish ACME seed rows when its upstream is unavailable", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response("Unavailable", { status: 503 })),
     );
     const request = new NextRequest(
-      "http://bank.test/api/statements/export?bank=cathay&role=bank_finance",
+      "http://bank.test/api/statements/export?bank=contoso&role=bank_finance",
       {
         headers: {
-          cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${signSessionRole("bank_finance", "cathay")}`,
+          cookie: `${BANK_CONSOLE_SESSION_COOKIE}=${signSessionRole("bank_finance", "contoso")}`,
         },
       },
     );
     const response = await exportAll(request);
     const body = await response.text();
-    expect(body).not.toContain("STM-CTBC");
+    expect(body).not.toContain("STM-ACME");
   });
 });

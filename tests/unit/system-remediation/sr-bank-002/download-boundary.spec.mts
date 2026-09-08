@@ -101,7 +101,7 @@ const endpoints = [
 function request(
   role: BankConsoleRole,
   bank: string,
-  token = signSessionRole(role, "ctbc"),
+  token = signSessionRole(role, "acme"),
 ) {
   return new NextRequest(
     `http://bank.test/download?bank=${bank}&role=${role}`,
@@ -115,7 +115,7 @@ for (const role of roles) {
   describe(role, () => {
     for (const [name, get] of endpoints) {
       it(`${name}: same-tenant authorization and PII masking`, async () => {
-        const response = await get(request(role, "ctbc"));
+        const response = await get(request(role, "acme"));
         const body = await response.text();
         expect(response.status).toBe(role === "bank_ops_viewer" ? 403 : 200);
         if (role === "bank_ops_viewer") {
@@ -137,7 +137,7 @@ for (const role of roles) {
         }
       });
       it(`${name}: cross-tenant denial occurs before fetching`, async () => {
-        const response = await get(request(role, "cathay"));
+        const response = await get(request(role, "contoso"));
         expect(response.status).toBe(403);
         expect(fetchMock).not.toHaveBeenCalled();
         expect(await response.text()).not.toContain("sr-bank-002-statement");
@@ -150,9 +150,9 @@ for (const [name, get] of endpoints) {
   it(`${name}: forged cookie and query-role escalation are rejected`, async () => {
     for (const token of [
       "forged.cookie",
-      signSessionRole("bank_ops_viewer", "ctbc"),
+      signSessionRole("bank_ops_viewer", "acme"),
     ]) {
-      const response = await get(request("bank_finance", "ctbc", token));
+      const response = await get(request("bank_finance", "acme", token));
       expect(response.status).toBe(403);
       expect(fetchMock).not.toHaveBeenCalled();
     }

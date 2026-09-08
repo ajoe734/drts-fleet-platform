@@ -19,7 +19,7 @@
 
 ## 已修正的範圍
 
-1. `session.ts` 新增保護頁面共用 resolver：必須有已驗章 cookie；URL 只能與 cookie 的 role／bank 一致，不能授權。省略 bank 時使用 cookie 中的租戶，不回退 CTBC。
+1. `session.ts` 新增保護頁面共用 resolver：必須有已驗章 cookie；URL 只能與 cookie 的 role／bank 一致，不能授權。省略 bank 時使用 cookie 中的租戶，不回退預設租戶。
 2. 對帳清單、明細在讀資料前驗證 session／tenant。OPS 只收到既有角色限制提示，完全不呼叫對帳 loader，HTML 無總额、逐趟金額或 artifact 資源參照。
 3. 人員頁不再信任 query role。無 session、偽造 cookie、跨 tenant 或角色竄改均在讀取 directory PII 前 `notFound()`；管理按鈕依已驗證角色判斷。
 4. 人員 email 保留權威 API 值，不再依 URL 租戶改寫網域，把另一筆資料偽装成本租戶人員。
@@ -49,9 +49,9 @@ Root Vitest 的 `@` 屬於 tenant console，無法直接載入 bank SSR。task �
 
 1. `GET /api/tenant/settlement-statements` 的 canonical policy 只有 `tenant:read`，没有財務權限要求。
 2. `GET /api/tenant/settlement-statements/2026-03` 同上。實際 assertion：`expected ['tenant:read'] to include 'tenant:billing:read'`。
-3. CTBC OPS 遇上游 403 時，`loadBankStatementsData` 回傳四份 seed statements，而非拒絕／空資料。
-4. Cathay finance 遇上游 403 時亦回傳 CTBC seed statements。
-5. Cathay finance 的全期 CSV 遇上游 503 時仍回傳 200，內容包含 `STM-CTBC-202606` 等 CTBC seed rows。這是重現出的錯誤行為，不是成功跨租戶資料驗收。
+3. ACME OPS 遇上游 403 時，`loadBankStatementsData` 回傳四份 seed statements，而非拒絕／空資料。
+4. Contoso finance 遇上游 403 時亦回傳 ACME seed statements。
+5. Contoso finance 的全期 CSV 遇上游 503 時仍回傳 200，內容包含 `STM-ACME-202606` 等 ACME seed rows。這是重現出的錯誤行為，不是成功跨租戶資料驗收。
 
 需要 supervisor：
 
@@ -62,7 +62,15 @@ Root Vitest 的 `@` 屬於 tenant console，無法直接載入 bank SSR。task �
 
 ## 資源與驗證界線
 
-- Tenant IDs：`tenant-demo-001`（CTBC）、`tenant-cathay-001`（Cathay）。
+- Tenant IDs：`tenant-demo-001`（ACME）、`tenant-contoso-001`（Contoso）。
 - Synthetic disclosure sentinels：`sr-bank-002-statement`、`sr-bank-002-trip`、period `2026-03`、amount `987654`。上游測試資料刻意包含未遮罩 PII sentinel，以確認 mapper／CSV／artifact 不洩漏；不是正式銀行帳務資料。
-- 既有程式 seed 重現：`STM-CTBC-202606`、`STM-CTBC-202605`、`STM-CTBC-202604` 及 `settlement-statement-tenant-demo-001-2026-03`。
+- 既有程式 seed 重現：`STM-ACME-202606`、`STM-ACME-202605`、`STM-ACME-202604` 及 `settlement-statement-tenant-demo-001-2026-03`。
 - 未執行 live Cloud Run、真實 IAP 登入、正式銀行帳務、瀏覽器畫面／真機、部署、CI 或 merge 驗收。SSR 用實際 React server rendering，cookie 用實際簽章／驗章函式，HTTP context 與上游 API 使用測試替身。沒有宣稱 live 成功、正式資料外洩或真正送達。
+
+## 2026-09-08 rebase 重驗
+
+- 新 base `origin/dev`：`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`；從 `origin/codex2/sr-bank-002@07273996ad39046e0cfdfc124ab26ac3e80a5758` rebase 成功。使用者頁衝突保留 `dev` 的匿名租戶／email 表示，並重套本 task 的已驗章頁面邊界。
+- 因 `dev` 已移除真實金融機構識別字，測試矩陣改以 ACME（`tenant-demo-001`）與 Contoso（`tenant-contoso-001`）表示同租戶與跨租戶；沒有改產品政策或擴大 scope。
+- `pnpm --filter @drts/bank-console-web typecheck`：exit 0。
+- `pnpm exec vitest run --config tests/unit/system-remediation/sr-bank-002/vitest.bank.config.ts`：49 passed、5 failed，exit 1。49 項涵蓋三角色 HTML／CSV／artifact 同租戶正向與跨租戶、偽造 cookie、role escalation、PII serialization；5 項為上列尚未獲 scope 的 IAM／fallback blocker。
+- `git diff --check`：exit 0。尚未建立 candidate 或 handoff；此 task 仍不可宣稱 HTML／JSON／CSV 完整隔離。
