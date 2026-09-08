@@ -3,13 +3,13 @@ import {
   verifyIapJwtAssertion,
   type IapJwtPayload,
 } from "@drts/control-plane-auth";
-import type { BankRole as HomeRole } from "@/lib/home-data";
+import type { BankRole as HomeRole } from "./home-data";
 import {
   BANK_DEMO_TENANTS,
   type BankDemoTenant,
   type BankDemoTenantCode,
-} from "@/lib/demo-tenants";
-import { t, type Locale, type TranslationKey } from "@/lib/translations";
+} from "./demo-tenants";
+import { t, type Locale, type TranslationKey } from "./translations";
 
 export type BankConsoleRole =
   | "bank_program_admin"
@@ -204,6 +204,17 @@ export function toHomeRole(role: BankConsoleRole): HomeRole {
     return "ops";
   }
   return "admin";
+}
+
+// Settlement amounts (statement totals, per-trip fare/subsidy/paid figures)
+// are finance data, not operational data. Ops viewers get read-only
+// operational monitoring (bookings, exceptions, statement metadata) but no
+// amount visibility, mirroring roleView(...).seeFinance in home-data.ts and
+// the users.roleCard.bank_ops_viewer policy copy. Keep this the single
+// source of truth for amount visibility across statements HTML, CSV export,
+// and artifact downloads so the three surfaces cannot diverge (R15).
+export function canViewSettlementAmounts(role: BankConsoleRole): boolean {
+  return role === "bank_program_admin" || role === "bank_finance";
 }
 
 export function getBankConsoleSession(
