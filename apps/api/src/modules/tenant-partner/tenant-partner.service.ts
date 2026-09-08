@@ -14458,28 +14458,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const stored =
       await this.identityRepository.upsertInvitationRecord(invitation);
 
-    try {
-      await this.tenantInvitationDelivery.send({
-        invitationId: stored.invitationId,
-        tenantId: userRole.tenantId,
-        recipientEmail: userRole.email,
-        displayName: userRole.displayName,
-        expiresAt: stored.expiresAt,
-        rawToken,
-      });
-      return await this.identityRepository.upsertInvitationRecord({
-        ...stored,
-        deliveryStatus: "delivered",
-        updatedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      await this.identityRepository.upsertInvitationRecord({
-        ...stored,
-        deliveryStatus: "delivery_failed",
-        updatedAt: new Date().toISOString(),
-      });
-      throw error;
-    }
+    // The delivery adapter never throws; only its reported status may ever
+    // be treated as a real, provider-acknowledged send. A failed/unavailable
+    // outcome still leaves the invitation resendable, never fabricated as
+    // delivered.
+    const delivery = await this.tenantInvitationDelivery.send({
+      invitationId: stored.invitationId,
+      tenantId: userRole.tenantId,
+      recipientEmail: userRole.email,
+      displayName: userRole.displayName,
+      expiresAt: stored.expiresAt,
+      rawToken,
+    });
+    return await this.identityRepository.upsertInvitationRecord({
+      ...stored,
+      deliveryStatus:
+        delivery.status === "sent" ? "delivered" : "delivery_failed",
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   private toTenantInvitationView(
