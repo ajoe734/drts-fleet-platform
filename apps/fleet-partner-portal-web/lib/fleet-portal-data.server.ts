@@ -155,7 +155,7 @@ export type FleetAttentionBanner = {
   bodyKey: string;
 };
 
-function getCurrentPeriodMonth(): string {
+export function getCurrentPeriodMonth(): string {
   const now = new Date();
   const year = now.getUTCFullYear();
   const month = String(now.getUTCMonth() + 1).padStart(2, "0");
@@ -495,9 +495,10 @@ function mapTrip(record: FleetPartnerPortalTripRecord): FleetTrip {
 }
 
 export async function loadTrips(periodMonth?: string): Promise<TripsView> {
+  const currentPeriod = periodMonth ?? getCurrentPeriodMonth();
   try {
     const { client } = await getServerFleetPartnerClient();
-    const records = await client.listFleetPortalTrips(periodMonth);
+    const records = await client.listFleetPortalTrips(currentPeriod);
     // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapTrip), source: "live", error: null };
   } catch (err) {
@@ -570,9 +571,10 @@ function mapQualityMetrics(
 }
 
 export async function loadQuality(periodMonth?: string): Promise<QualityView> {
+  const currentPeriod = periodMonth ?? getCurrentPeriodMonth();
   try {
     const { client } = await getServerFleetPartnerClient();
-    const record = await client.getFleetPortalQualityMetrics(periodMonth);
+    const record = await client.getFleetPortalQualityMetrics(currentPeriod);
     return { metrics: mapQualityMetrics(record), source: "live" };
   } catch (err) {
     if (isConfigError(err)) {

@@ -34,7 +34,7 @@ export default async function FleetPortalIndex({
         actions={
           <>
             <a
-              href={`/trips/export?type=summary${params.period ? `&period=${params.period}` : ""}`}
+              href={`/trips/export?type=summary&period=${encodeURIComponent(dashboard.periodMonth)}`}
               download
               style={{ textDecoration: "none" }}
             >
@@ -256,7 +256,10 @@ export default async function FleetPortalIndex({
           title={t("dashboard.recentTrips", locale)}
           padding={0}
           actions={
-            <Link href="/trips" style={{ textDecoration: "none" }}>
+            <Link
+              href={`/trips?period=${encodeURIComponent(dashboard.periodMonth)}`}
+              style={{ textDecoration: "none" }}
+            >
               <CanvasBtn theme={theme} variant="ghost">
                 {t("dashboard.gotoTrips", locale)}
               </CanvasBtn>

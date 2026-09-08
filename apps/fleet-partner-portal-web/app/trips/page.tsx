@@ -6,7 +6,7 @@ import {
   CanvasPageHeader,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { loadTrips } from "@/lib/fleet-portal-data.server";
+import { getCurrentPeriodMonth, loadTrips } from "@/lib/fleet-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { TripsTable } from "@/components/portal-tables";
 import { getServerLocale } from "@/lib/server-locale";
@@ -27,7 +27,8 @@ export default async function FleetTripsPage({
   const params = searchParams ? await searchParams : {};
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
-  const { rows, source, error } = await loadTrips(params.period);
+  const currentPeriod = params.period ?? getCurrentPeriodMonth();
+  const { rows, source, error } = await loadTrips(currentPeriod);
 
   const currentSvc = params.svc && params.svc !== "all" ? params.svc : "all";
 
@@ -88,12 +89,12 @@ export default async function FleetTripsPage({
     const isSelected = currentSvc === tab.id;
     const query = new URLSearchParams();
     if (tab.id !== "all") query.set("svc", tab.id);
-    if (params.period) query.set("period", params.period);
+    if (currentPeriod) query.set("period", currentPeriod);
     if (params.status && params.status !== "all") {
       query.set("status", params.status);
     }
     if (params.q) query.set("q", params.q);
-    const href = query.toString() ? `?${query.toString()}` : "/trips";
+    const href = query.toString() ? `?${query.toString()}` : `/trips?period=${encodeURIComponent(currentPeriod)}`;
 
     return (
       <Link
@@ -127,7 +128,7 @@ export default async function FleetTripsPage({
 
   const exportQuery = new URLSearchParams();
   if (currentSvc !== "all") exportQuery.set("svc", currentSvc);
-  if (params.period) exportQuery.set("period", params.period);
+  if (currentPeriod) exportQuery.set("period", currentPeriod);
   if (params.status && params.status !== "all") {
     exportQuery.set("status", params.status);
   }
@@ -186,8 +187,8 @@ export default async function FleetTripsPage({
           {currentSvc !== "all" ? (
             <input type="hidden" name="svc" value={currentSvc} />
           ) : null}
-          {params.period ? (
-            <input type="hidden" name="period" value={params.period} />
+          {currentPeriod ? (
+            <input type="hidden" name="period" value={currentPeriod} />
           ) : null}
           {params.status && params.status !== "all" ? (
             <input type="hidden" name="status" value={params.status} />

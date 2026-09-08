@@ -31,6 +31,7 @@ vi.mock(
 );
 
 import {
+  getCurrentPeriodMonth,
   loadCases,
   loadDashboard,
   loadDrivers,
@@ -709,6 +710,154 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       );
       const res = await exportHandler(req);
       expect(res.status).toBe(500);
+    });
+  });
+
+  describe("Review Remediation P1: Default period unification and cross-month empty data regression", () => {
+    it("loadTrips(undefined) defaults to current UTC month and never calls API with undefined", async () => {
+      mockTrips.mockResolvedValue([]);
+      const currentPeriod = getCurrentPeriodMonth();
+
+      // Call without argument
+      await loadTrips();
+      expect(mockTrips).toHaveBeenCalledWith(currentPeriod);
+      expect(mockTrips).not.toHaveBeenCalledWith(undefined);
+
+      // Call with explicit undefined
+      mockTrips.mockClear();
+      await loadTrips(undefined);
+      expect(mockTrips).toHaveBeenCalledWith(currentPeriod);
+      expect(mockTrips).not.toHaveBeenCalledWith(undefined);
+    });
+
+    it("cross-month empty data: dashboard and trips list both return 0 trips when current month has no data but previous month has trips", async () => {
+      const currentPeriod = getCurrentPeriodMonth();
+      const previousPeriod = "2026-08";
+
+      // Mock backend simulating resolvePeriodMonth(undefined) fallback behavior
+      mockDrivers.mockResolvedValue([]);
+      mockVehicles.mockResolvedValue([]);
+      mockTrips.mockImplementation(async (periodMonth?: string) => {
+        if (periodMonth === currentPeriod) {
+          return [];
+        }
+        if (!periodMonth || periodMonth === previousPeriod) {
+          return [
+            {
+              orderId: "ord-previous-month",
+              driverName: "上月司機",
+              grossEarning: { amountMinor: 100000, currency: "TWD" },
+              fleetShareAmount: { amountMinor: 20000, currency: "TWD" },
+              reimbursementAmount: { amountMinor: 0, currency: "TWD" },
+              status: "completed",
+              completedAt: "2026-08-15T10:00:00Z",
+              businessDispatchSubtype: "standard_taxi",
+              pickupAddress: "上月地點",
+            },
+          ];
+        }
+        return [];
+      });
+
+      mockDashboard.mockImplementation(async (periodMonth?: string) => {
+        if (periodMonth === currentPeriod) {
+          return {
+            fleetPartnerId: "fp-test-001",
+            periodMonth: currentPeriod,
+            activeDriverCount: 0,
+            onlineDriverCount: 0,
+            dispatchEligibleDriverCount: 0,
+            totalVehicleCount: 0,
+            dispatchableVehicleCount: 0,
+            completedTripCount: 0,
+            inFlightTripCount: 0,
+            proofPendingTripCount: 0,
+            pendingStatementCount: 0,
+            latestStatementPeriodMonth: null,
+            grossEarningAmount: { amountMinor: 0, currency: "TWD" },
+            shareAmount: { amountMinor: 0, currency: "TWD" },
+          };
+        }
+        return null;
+      });
+
+      // 1. Dashboard called without period defaults to currentPeriod
+      const dashboard = await loadDashboard();
+      expect(dashboard.periodMonth).toBe(currentPeriod);
+      expect(dashboard.completedTrips).toBe("0");
+      expect(dashboard.recentTrips).toEqual([]);
+
+      // 2. Trips loader called without period defaults to currentPeriod (NOT undefined)
+      const tripsView = await loadTrips();
+      expect(tripsView.rows).toEqual([]);
+      // Must NOT contain ord-previous-month
+      expect(tripsView.rows.some((r) => r.id === "ord-previous-month")).toBe(false);
+
+      // Verify exact API calls: both used currentPeriod, neither passed undefined
+      expect(mockTrips).toHaveBeenCalledWith(currentPeriod);
+      expect(mockTrips).not.toHaveBeenCalledWith(undefined);
+
+      // 3. Export default scope matches current month: 0 completed trips
+      const summaryReq = new NextRequest("http://localhost:3000/trips/export?type=summary");
+      const summaryRes = await exportHandler(summaryReq);
+      expect(summaryRes.status).toBe(200);
+      const summaryBody = await summaryRes.text();
+      expect(summaryBody).toContain(`Completed Trips,0,${currentPeriod}`);
+
+      const tripsReq = new NextRequest("http://localhost:3000/trips/export");
+      const tripsRes = await exportHandler(tripsReq);
+      expect(tripsRes.status).toBe(200);
+      const tripsBody = await tripsRes.text();
+      const lines = tripsBody.trim().split("\n");
+      // Header only, no trip rows
+      expect(lines).toHaveLength(1);
+      expect(tripsBody).not.toContain("ord-previous-month");
+    });
+
+    it("explicit previous period returns previous month data consistently across dashboard, trips, and export", async () => {
+      const previousPeriod = "2026-08";
+      mockDrivers.mockResolvedValue([]);
+      mockVehicles.mockResolvedValue([]);
+      mockTrips.mockImplementation(async (periodMonth?: string) => {
+        if (periodMonth === previousPeriod) {
+          return [
+            {
+              orderId: "ord-previous-month",
+              driverName: "上月司機",
+              grossEarning: { amountMinor: 100000, currency: "TWD" },
+              fleetShareAmount: { amountMinor: 20000, currency: "TWD" },
+              reimbursementAmount: { amountMinor: 0, currency: "TWD" },
+              status: "completed",
+              completedAt: "2026-08-15T10:00:00Z",
+              businessDispatchSubtype: "standard_taxi",
+              pickupAddress: "上月地點",
+            },
+          ];
+        }
+        return [];
+      });
+      mockDashboard.mockResolvedValue(null); // Will derive from trips
+
+      // Explicit period on dashboard
+      const dashboard = await loadDashboard(previousPeriod);
+      expect(dashboard.periodMonth).toBe(previousPeriod);
+      expect(dashboard.completedTrips).toBe("1");
+      expect(dashboard.recentTrips).toHaveLength(1);
+      expect(dashboard.recentTrips[0].id).toBe("ord-previous-month");
+
+      // Explicit period on trips loader
+      const tripsView = await loadTrips(previousPeriod);
+      expect(tripsView.rows).toHaveLength(1);
+      expect(tripsView.rows[0].id).toBe("ord-previous-month");
+
+      // Explicit period on export
+      const req = new NextRequest(
+        `http://localhost:3000/trips/export?period=${previousPeriod}`,
+      );
+      const res = await exportHandler(req);
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain("ord-previous-month");
     });
   });
 });

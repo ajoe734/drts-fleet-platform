@@ -104,21 +104,35 @@
      - 捕捉 `aggregateError`。當 aggregate 端點不可用但行程 API（`tripsView`）成功時，自真實已完成行程紀錄（`completedTrips`）即時加總 `grossAmountMinor` 與 `shareAmountMinor`，計算權威營收與車行分潤，不再填塞 `"NT$ 0"`。
      - 若行程與 aggregate 均失敗，營收指標明確標註為無法取得（`share: "—"`, `grossRevenue: "—"`），由匯出端點拒絕匯出並回報 500。
 
+### 3.5 審查回饋修復二 (Codex2 Candidate 271c0af87 Remediation)
+
+針對 Codex2 審查候選版本 `271c0af87` 所提出的 P1 預設月份 scope 不一致進行專項修正：
+
+1. **預設月份統一與避免觸發後端回溯 (Default Period Month Unification)**:
+   - 原邏輯中 `loadDashboard()` 預設 `getCurrentPeriodMonth()`（當月 UTC 月份，如 `2026-09`），但 `loadTrips()` 與 `loadQuality()` 若未傳入參數時為 `undefined`，直接呼叫 `client.listFleetPortalTrips(undefined)`。後端 API `resolvePeriodMonth(undefined)` 在當月無結算趟次時會回溯最近 12 個月內有資料的月份（如 `2026-08` 1 筆 `ord-previous-month`），導致本月無資料時首頁顯示 0 筆，行程清單卻顯示上月 1 筆。
+   - 修復方案：
+     - 匯出 `getCurrentPeriodMonth()`，並在 `loadTrips(periodMonth?: string)` 與 `loadQuality(periodMonth?: string)` 統一預設為 `periodMonth ?? getCurrentPeriodMonth()`，保證呼叫後端 API 時一律帶入明確月份，絕不傳遞 `undefined` 觸發後端未預期的回溯。
+     - 在當月合法空資料時，首頁、行程列表、總覽 CSV 與行程 CSV 均一致回傳 0 筆。
+2. **導航保留明確營運月份 (Preserve Navigation Period)**:
+   - 修復方案：
+     - `app/page.tsx`：總覽「查看行程」連結更新為 `href={`/trips?period=${encodeURIComponent(dashboard.periodMonth)}`}`，確保從總覽跳轉至行程頁時完整保留月份上下文；總覽匯出按鈕同樣帶入 `period=${encodeURIComponent(dashboard.periodMonth)}`。
+     - `app/trips/page.tsx`：預設 `currentPeriod = params.period ?? getCurrentPeriodMonth()`，在所有服務頁籤（tabs）、搜尋表單 hidden input 與 CSV 匯出按鈕均保留 `period`，防止操作篩選時遺失期間。
+
 ---
 
 ## 4. 驗收標準對照與驗證證據 (Acceptance Criteria Mapping & Evidence)
 
 | 驗收條件 | 實作現況與驗證結果 | 相關資源 ID / 檔案 |
 | :--- | :--- | :--- |
-| **首頁/list/detail/CSV數量與scope相同** | `loadDashboard()` 直接聚合 `loadDrivers()` 與 `loadTrips()` 真實筆數；aggregate 端點異常時自動由行程權威筆數加總推導營收；`/trips/export?type=summary` 產出與總覽同 scope 數據；`/trips/export?svc=...` 產出 CSV 行數與過濾後清單精確一致；Canvas 規範未定義獨立 trip detail screen，清單與匯出筆數嚴格對齊，未自創非規範畫面 | `apps/fleet-partner-portal-web/app/trips/export/route.ts`, `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` (測試資源: `fp-test-001`, `ord-001`, `ord-002`, `ord-003`) |
+| **首頁/list/detail/CSV數量與scope相同** | `loadDashboard()` 與 `loadTrips()` 統一預設月份為 `getCurrentPeriodMonth()`，完全杜絕跨月回溯差異；首頁/列表/總覽 CSV/行程 CSV 預設與指定月份 scope 均精確對齊（當月無資料時一致為 0 筆）；導航連結與篩選保留明確 `period`；Canvas 規範未定義獨立 trip detail screen，清單與匯出筆數嚴格對齊，未自創非規範畫面 | `apps/fleet-partner-portal-web/app/trips/export/route.ts`, `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` (測試資源: `fp-test-001`, `ord-001`, `ord-002`, `ord-003`, `ord-previous-month`) |
 | **filter改變query與結果，空資料與讀取失敗分開** | 司機/車輛/行程頁籤與搜尋均寫入 URL query string，並過濾列表 rows；司機可接單頁籤對齊 `dispatchEligible` 資格；行程頁籤支援 `svc`, `status`, `q`, `period`；正常 0 筆空資料渲染中性提示卡與數字 "0"，API 錯誤渲染 Danger 警告橫幅與 "—" 無法取得標記，保留各來源錯誤原因 | `apps/fleet-partner-portal-web/app/drivers/page.tsx`, `apps/fleet-partner-portal-web/app/vehicles/page.tsx`, `apps/fleet-partner-portal-web/app/trips/page.tsx` |
-| **無效按鈕接線與未串接標記** | 首頁與車輛頁「新增車輛」導向 `/supply/vehicles/new`；首頁與司機頁「招募司機」導向 `/supply/drivers/new`；匯出按鈕導向 `/trips/export`；未串接之教育訓練與案件回傳 `connected: false` 並顯式註明未接線 | `apps/fleet-partner-portal-web/app/page.tsx`, `apps/fleet-partner-portal-web/app/vehicles/page.tsx`, `apps/fleet-partner-portal-web/app/drivers/page.tsx` |
+| **無效按鈕接線與未串接標記** | 首頁與車輛頁「新增車輛」導向 `/supply/vehicles/new`；首頁與司機頁「招募司機」導向 `/supply/drivers/new`；首頁「查看行程」導向 `/trips?period=...`；匯出按鈕導向 `/trips/export`；未串接之教育訓練與案件回傳 `connected: false` 並顯式註明未接線 | `apps/fleet-partner-portal-web/app/page.tsx`, `apps/fleet-partner-portal-web/app/vehicles/page.tsx`, `apps/fleet-partner-portal-web/app/drivers/page.tsx` |
 | **證據包含 SHA、測試結果、界線說明** | 記錄完整 Base SHA、Candidate SHA、測試 Exit Code 與邊界說明 | `docs/04-uat/system-remediation-20260906/SR-FLEET-DATA-001.md` |
 
 ### 4.1 驗證界線與未進行之 Live / 真機項目說明
 
 - **已完成驗證範圍**:
-  - 本地 Vitest 單元/整合測試（21/21 通過），驗證資料層權威來源整合、假數據移除、空資料與異常讀取分離、未串接端點防呆、CSV 匯出筆數與篩選連動（含 q 關鍵字搜尋與 compound 複合過濾）、千分位分組數值引號包裹防護（防止欄位數錯置）、司機 `dispatchEligible` 資格與狀態分離、個別來源異常獨立追蹤、部分失敗防護及 aggregate 異常時即時推導營收。
+  - 本地 Vitest 單元/整合測試（24/24 通過），驗證資料層權威來源整合、假數據移除、空資料與異常讀取分離、未串接端點防呆、CSV 匯出筆數與篩選連動（含 q 關鍵字搜尋與 compound 複合過濾）、千分位分組數值引號包裹防護（防止欄位數錯置）、司機 `dispatchEligible` 資格與狀態分離、個別來源異常獨立追蹤、部分失敗防護及 aggregate 異常時即時推導營收，以及最新候選版本修復之預設月份 scope 統一與跨月空資料回歸。
   - Next.js 靜態型別檢查（`next typegen && tsc --noEmit`），驗證所有頁面與 Route Handlers 型別安全。
   - 解耦 `fleet-portal-data.server.ts` 與 `fleet-portal-fixtures.ts`，直接宣告純資料結構與回退常數，避免根目錄 `tsconfig.json`（無 `--jsx`）在編譯 `tests/**/*.ts` 時傳遞解析 `@drts/ui-web` TSX 模組而產生 `TS6142` 錯誤。
   - Git diff 格式檢查與 write_scopes 邊界檢查。
@@ -135,7 +149,7 @@
 
 ### 5.1 自動化單元測試
 
-新建 Vitest 測試套件 `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts`，涵蓋 21 個核心場景：
+新建 Vitest 測試套件 `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts`，涵蓋 24 個核心場景：
 
 - **Requirement 1 & Capability C063**:
   1. `dashboard reflects live driver list counts rather than 128/96 fake stats`: 驗證總覽指標與列表真實筆數一致，完全無 128/96 假數字。
@@ -156,12 +170,16 @@
   14. `overview export handles loader errors with 500 status`: 驗證營運總覽匯出異常回傳 500 錯誤與訊息。
   15. `overview export properly quotes grouped numbers containing commas to preserve column count`: 驗證千分位分組數字引號包裹，確保欄位數量固定為 4 欄。
   16. `drivers loader maps dispatchEligible and separates available status from eligibility`: 驗證司機資料載入器正確對應 `dispatchEligible` 資格，並與儀表板 dispatchable 聯動。
-- **Review Remediation (Codex2 Feedback Coverage)**:
+- **Review Remediation (Codex2 Feedback Coverage - Round 1)**:
   17. `partial failure: drivers API failure preserves driversError, marks driver counts unavailable, and rejects summary export`: 驗證司機 API 異常時獨立保留 `driversError`，司機數標註為 `"—"`，且總覽匯出拒絕假 0 筆並回傳 500。
   18. `partial failure: trips API failure preserves tripsError, marks trips and revenue unavailable, and rejects summary export`: 驗證行程 API 異常時獨立保留 `tripsError`，行程數與營收標註為 `"—"`，總覽匯出回傳 500。
   19. `aggregate-only failure with nonzero trips derives revenue from authoritative trip records and exports successfully`: 驗證 aggregate 異常時自同期間有效行程權威推導營收與分潤（如 NT$ 1,700 / NT$ 340），不填塞 NT$ 0，且匯出成功產出推導金額。
   20. `aggregate-only failure with legitimate zero trips returns zero revenue`: 驗證 aggregate 異常且真實行程為 0 筆時，正常顯示 NT$ 0 與 0 筆。
   21. `aggregate and trips failure marks revenue as unavailable and rejects summary export`: 驗證 aggregate 與行程皆失敗時標註 `"—"` 並拒絕匯出。
+- **Review Remediation (Codex2 Feedback Coverage - Round 2 Candidate 271c0af87)**:
+  22. `loadTrips(undefined) defaults to current UTC month and never calls API with undefined`: 驗證 `loadTrips()` 與 `loadTrips(undefined)` 預設使用當前 UTC 月份，不傳遞 undefined 避免後端回溯。
+  23. `cross-month empty data: dashboard and trips list both return 0 trips when current month has no data but previous month has trips`: 驗證當月無行程而上月有資料時，dashboard 與 trips list 同步回傳 0 筆，summary CSV 與 trips CSV 數量與 scope 完全一致。
+  24. `explicit previous period returns previous month data consistently across dashboard, trips, and export`: 驗證明確指定上月時，dashboard、trips list 與 CSV 匯出一致回傳上月真實行程。
 
 執行結果：
 
@@ -169,9 +187,9 @@
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-fleet-data-001
 
  Test Files  1 passed (1)
-      Tests  21 passed (21)
-   Start at  16:48:45
-   Duration  960ms (transform 328ms, setup 0ms, import 503ms, tests 136ms, environment 0ms)
+      Tests  24 passed (24)
+   Start at  16:56:22
+   Duration  693ms (transform 274ms, setup 0ms, import 392ms, tests 68ms, environment 0ms)
 Exit Code:  0
 ```
 
@@ -199,7 +217,7 @@ Exit Code:  0
 
 ## 6. 變更檔案清單 (Modified Files Summary)
 
-- `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` (移除假資料、整合權威來源、錯誤/空資料分離、未接線標記、對齊 `dispatchEligible` 資格欄位、各來源錯誤獨立追蹤、營收權威推導)
+- `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` (移除假資料、整合權威來源、錯誤/空資料分離、未接線標記、對齊 `dispatchEligible` 資格欄位、各來源錯誤獨立追蹤、營收權威推導、預設月份統一)
 - `apps/fleet-partner-portal-web/app/trips/export/route.ts` (新增 CSV 匯出 API Route，實作 `escapeCsvCell` 防護分組數字與特殊字元，阻擋 partial failure 與無法取得狀態之偽造匯出)
 - `apps/fleet-partner-portal-web/app/page.tsx` (權威總覽頁、按鈕串接、時間維度、未串接提示、錯誤橫幅)
 - `apps/fleet-partner-portal-web/app/trips/page.tsx` (頁籤/關鍵字/狀態篩選、CSV 匯出按鈕串接、錯誤處理)
