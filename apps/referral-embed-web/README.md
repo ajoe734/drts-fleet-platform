@@ -23,7 +23,7 @@ https://<referral-embed-host>/embed/<entrySlug>
 - **formal partner entry on the dev acceptance rail:** `https://refer.smarttransport.tw/embed/yuhe-residence`
 - **dev Cloud Run fallback:** `https://drts-dev-referral-embed-web-4t7rg6fmeq-uc.a.run.app/embed/yuhe-residence`
 - `<entrySlug>` is the partner channel entry slug provisioned in platform-admin
-  (`/partners`). `yuhe-residence` is the formal non-demo entry for 御和物業 on
+  (`/partners`). `yuhe-residence` is the formal non-demo entry for 法碧康物業 on
   the current dev acceptance authority. The legacy `referral-demo-community`
   seed remains test data only and is not the default or a partner-facing URL.
 - The `refer.smarttransport.tw` URL above is still a **dev acceptance URL**. It

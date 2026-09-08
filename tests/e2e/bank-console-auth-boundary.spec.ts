@@ -23,7 +23,7 @@ test.describe("bank console auth boundary", () => {
   test("sign-out blocks direct management deep links until a demo persona signs in", async ({
     page,
   }) => {
-    await page.goto("/bookings?bank=ctbc&locale=zh", {
+    await page.goto("/bookings?bank=acme&locale=zh", {
       waitUntil: "domcontentloaded",
     });
 
@@ -34,7 +34,7 @@ test.describe("bank console auth boundary", () => {
     await page.getByRole("link", { name: "登出" }).click();
 
     await expectRoute(page, "/login", {
-      bank: "ctbc",
+      bank: "acme",
       locale: "zh",
       signedOut: "1",
     });
@@ -47,7 +47,7 @@ test.describe("bank console auth boundary", () => {
     expect(signedOutCookie?.value).toBe("1");
 
     const prefetchResponse = await page.request.get(
-      "/login?bank=fubon&locale=zh&_rsc=auth-boundary",
+      "/login?bank=tailspin&locale=zh&_rsc=auth-boundary",
       {
         headers: {
           "next-router-prefetch": "1",
@@ -60,12 +60,12 @@ test.describe("bank console auth boundary", () => {
     expect(prefetchResponse.status()).toBe(307);
     expect(prefetchResponse.headers()["set-cookie"]).toBeUndefined();
 
-    await page.goto("/bookings?bank=ctbc&locale=zh", {
+    await page.goto("/bookings?bank=acme&locale=zh", {
       waitUntil: "domcontentloaded",
     });
 
     await expectRoute(page, "/login", {
-      bank: "ctbc",
+      bank: "acme",
       locale: "zh",
       signedOut: "1",
     });
@@ -78,7 +78,7 @@ test.describe("bank console auth boundary", () => {
           const url = typeof rawUrl === "string" ? new URL(rawUrl) : rawUrl;
           return (
             url.pathname === "/" &&
-            url.searchParams.get("bank") === "ctbc" &&
+            url.searchParams.get("bank") === "acme" &&
             url.searchParams.get("role") === "bank_program_admin"
           );
         },
@@ -89,7 +89,7 @@ test.describe("bank console auth boundary", () => {
         .click(),
     ]);
 
-    await page.goto("/bookings?bank=ctbc&locale=zh", {
+    await page.goto("/bookings?bank=acme&locale=zh", {
       waitUntil: "domcontentloaded",
     });
     await expect(page.locator("main")).toContainText("CH••••98");
@@ -101,8 +101,8 @@ test.describe("bank console auth boundary", () => {
     const iapSecret = "drts_bank_test_iap_jwt_secret_key_2026";
     const iapToken = jwt.sign(
       {
-        sub: "auditor@ctbcbank.com",
-        tenant: "ctbc",
+        sub: "auditor@acme.example",
+        tenant: "acme",
         role: "auditor",
         iss: "https://cloud.google.com/iap",
       },
@@ -114,7 +114,7 @@ test.describe("bank console auth boundary", () => {
         "x-goog-iap-jwt-assertion": iapToken,
       },
       data: {
-        bank: "ctbc",
+        bank: "acme",
         locale: "zh",
       },
     });
@@ -124,7 +124,7 @@ test.describe("bank console auth boundary", () => {
     expect(loginResponseBody.ok).toBe(false);
     expect(loginResponseBody.error.code).toBe("FORBIDDEN");
 
-    const exportResponse = await request.get("/api/statements/export?bank=ctbc", {
+    const exportResponse = await request.get("/api/statements/export?bank=acme", {
       headers: {
         "x-goog-iap-jwt-assertion": iapToken,
       },
@@ -132,7 +132,7 @@ test.describe("bank console auth boundary", () => {
     expect(exportResponse.status()).toBe(403);
 
     const exportQueryResponse = await request.get(
-      "/api/statements/export?bank=ctbc&role=auditor",
+      "/api/statements/export?bank=acme&role=auditor",
     );
     expect(exportQueryResponse.status()).toBe(403);
   });

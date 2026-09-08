@@ -455,10 +455,10 @@ describe("TenantPartnerService sensitive-data governance", () => {
   afterEach(() => {
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT;
-    delete process.env.PARTNER_INGRESS_KEY_CTBC;
-    delete process.env.PARTNER_INGRESS_KEY_CATHAY;
-    delete process.env.PARTNER_INGRESS_KEY_TAISHIN;
-    delete process.env.PARTNER_INGRESS_KEY_DBS;
+    delete process.env.PARTNER_INGRESS_KEY_ACME;
+    delete process.env.PARTNER_INGRESS_KEY_CONTOSO;
+    delete process.env.PARTNER_INGRESS_KEY_FABRIKAM;
+    delete process.env.PARTNER_INGRESS_KEY_NORTHWIND;
     if (originalDrtsEnv === undefined) {
       delete process.env.DRTS_ENV;
     } else {
@@ -482,35 +482,35 @@ describe("TenantPartnerService sensitive-data governance", () => {
 
     await service.onModuleInit();
 
-    expect(service.getPartnerEntry("ctbc")).toMatchObject({
-      entrySlug: "ctbc",
+    expect(service.getPartnerEntry("acme")).toMatchObject({
+      entrySlug: "acme",
       businessDispatchSubtype: "credit_card_airport_transfer",
       auditMetadata: {
         source: "dev_seed_partner_booking_surface",
-        requestId: "seed-partner-booking-ctbc",
+        requestId: "seed-partner-booking-acme",
       },
     });
-    expect(service.getPartnerEntry("cathay")).toMatchObject({
-      entrySlug: "cathay",
-      bankCode: "CATHAY",
+    expect(service.getPartnerEntry("contoso")).toMatchObject({
+      entrySlug: "contoso",
+      bankCode: "CONTOSO",
       businessDispatchSubtype: "credit_card_airport_transfer",
     });
-    expect(service.getPartnerEntry("taishin")).toMatchObject({
-      entrySlug: "taishin",
-      bankCode: "TAISHIN",
+    expect(service.getPartnerEntry("fabrikam")).toMatchObject({
+      entrySlug: "fabrikam",
+      bankCode: "FABRIKAM",
       businessDispatchSubtype: "credit_card_airport_transfer",
     });
-    expect(service.getPartnerEntry("dbs")).toMatchObject({
-      entrySlug: "dbs",
-      bankCode: "DBS",
+    expect(service.getPartnerEntry("northwind")).toMatchObject({
+      entrySlug: "northwind",
+      bankCode: "NORTHWIND",
       businessDispatchSubtype: "credit_card_airport_transfer",
     });
-    expect(service.getPartnerEntry("fubon")).toMatchObject({
-      entrySlug: "fubon",
+    expect(service.getPartnerEntry("tailspin")).toMatchObject({
+      entrySlug: "tailspin",
       businessDispatchSubtype: "insurance_replacement_vehicle",
     });
-    expect(service.getPartnerEntry("lion")).toMatchObject({
-      entrySlug: "lion",
+    expect(service.getPartnerEntry("adventureworks")).toMatchObject({
+      entrySlug: "adventureworks",
       businessDispatchSubtype: "travel_agency_transfer",
     });
 
@@ -519,12 +519,12 @@ describe("TenantPartnerService sensitive-data governance", () => {
       .map((entry) => entry.entrySlug);
     expect(persistedPartnerEntries).toEqual(
       expect.arrayContaining([
-        "ctbc",
-        "cathay",
-        "taishin",
-        "dbs",
-        "fubon",
-        "lion",
+        "acme",
+        "contoso",
+        "fabrikam",
+        "northwind",
+        "tailspin",
+        "adventureworks",
       ]),
     );
     expect(
@@ -565,8 +565,8 @@ describe("TenantPartnerService sensitive-data governance", () => {
           apiKeyHash: "a".repeat(64),
         },
         {
-          entrySlug: "ctbc",
-          keyId: "partner-key-ctbc-dev",
+          entrySlug: "acme",
+          keyId: "partner-key-acme-dev",
           apiKeyHash: "b".repeat(64),
         },
       ],
@@ -581,8 +581,8 @@ describe("TenantPartnerService sensitive-data governance", () => {
           entrySlug: "bank-demo-alpha-airport",
         }),
         expect.objectContaining({
-          keyId: "partner-key-ctbc-dev",
-          entrySlug: "ctbc",
+          keyId: "partner-key-acme-dev",
+          entrySlug: "acme",
           source: "env_bootstrap",
         }),
       ]),
@@ -590,17 +590,17 @@ describe("TenantPartnerService sensitive-data governance", () => {
     await expect(
       service.issuePartnerIngressHandoff(
         {
-          entrySlug: "ctbc",
-          partnerUserRef: "ctbc-user-001",
+          entrySlug: "acme",
+          partnerUserRef: "acme-user-001",
         },
-        "req-ctbc-handoff-001",
+        "req-acme-handoff-001",
         { allowInternalBootstrap: true },
       ),
     ).resolves.toMatchObject({
-      partnerEntry: { entrySlug: "ctbc" },
+      partnerEntry: { entrySlug: "acme" },
       identity: {
         actorType: "referral_passenger",
-        partnerEntrySlug: "ctbc",
+        partnerEntrySlug: "acme",
       },
     });
   });
@@ -639,11 +639,11 @@ describe("TenantPartnerService sensitive-data governance", () => {
         updatedAt: "2026-08-01T00:00:00.000Z",
       },
     ];
-    persistedState.partnerEntries = [localSeedService.getPartnerEntry("ctbc")];
+    persistedState.partnerEntries = [localSeedService.getPartnerEntry("acme")];
     persistedState.partnerIngressCredentials = [
       {
-        keyId: "partner-key-ctbc-dev",
-        entrySlug: "ctbc",
+        keyId: "partner-key-acme-dev",
+        entrySlug: "acme",
         keyPrefix: "env_bootstrap",
         maskedSuffix: "configured",
         source: "env_bootstrap",
@@ -682,7 +682,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(service.listCostCenters("tenant-demo-001")).toEqual([]);
     expect(service.listTenantUsers("tenant-demo-001")).toEqual([]);
     expect(service.listApiKeys("tenant-demo-001")).toEqual([]);
-    expect(() => service.getPartnerEntry("ctbc")).toThrow(ApiRequestError);
+    expect(() => service.getPartnerEntry("acme")).toThrow(ApiRequestError);
     expect(service.getNotificationPreferences("tenant-acme")).toMatchObject({
       tenantId: "tenant-acme",
     });
@@ -695,8 +695,8 @@ describe("TenantPartnerService sensitive-data governance", () => {
           expect.objectContaining({ tenantId: "tenant-acme" }),
         ],
         deletedTenantIds: ["tenant-demo-001"],
-        deletedPartnerEntrySlugs: ["ctbc"],
-        deletedPartnerIngressCredentialIds: ["partner-key-ctbc-dev"],
+        deletedPartnerEntrySlugs: ["acme"],
+        deletedPartnerIngressCredentialIds: ["partner-key-acme-dev"],
         partnerEntries: [],
         userRoles: [],
       }),
@@ -712,8 +712,8 @@ describe("TenantPartnerService sensitive-data governance", () => {
     const persistedState = createEmptyRepositoryState();
     persistedState.partnerIngressCredentials = [
       {
-        keyId: "partner-key-ctbc-revoked",
-        entrySlug: "ctbc",
+        keyId: "partner-key-acme-revoked",
+        entrySlug: "acme",
         keyPrefix: "pk_revoked",
         maskedSuffix: "0001",
         source: "platform_issued",
@@ -727,8 +727,8 @@ describe("TenantPartnerService sensitive-data governance", () => {
         keyHash: "c".repeat(64),
       },
       {
-        keyId: "partner-key-cathay-rotated",
-        entrySlug: "cathay",
+        keyId: "partner-key-contoso-rotated",
+        entrySlug: "contoso",
         keyPrefix: "pk_rotated",
         maskedSuffix: "0002",
         source: "platform_issued",
@@ -749,13 +749,13 @@ describe("TenantPartnerService sensitive-data governance", () => {
       undefined,
       [
         {
-          entrySlug: "ctbc",
-          keyId: "partner-key-ctbc-dev",
+          entrySlug: "acme",
+          keyId: "partner-key-acme-dev",
           apiKeyHash: "e".repeat(64),
         },
         {
-          entrySlug: "cathay",
-          keyId: "partner-key-cathay-dev",
+          entrySlug: "contoso",
+          keyId: "partner-key-contoso-dev",
           apiKeyHash: "f".repeat(64),
         },
       ],
@@ -796,23 +796,23 @@ describe("TenantPartnerService sensitive-data governance", () => {
   });
 
   it("loads canonical airport issuer ingress credentials from environment secrets", () => {
-    process.env.PARTNER_INGRESS_KEY_CATHAY = "pk_test_cathay_ingress_secret";
+    process.env.PARTNER_INGRESS_KEY_CONTOSO = "pk_test_contoso_ingress_secret";
 
     const service = new TenantPartnerService(new AuditNotificationService());
     const resolution = service.authenticatePartnerBootstrap(
       {
-        entrySlug: "cathay",
-        apiKey: "pk_test_cathay_ingress_secret",
+        entrySlug: "contoso",
+        apiKey: "pk_test_contoso_ingress_secret",
       },
-      "req-partner-cathay-001",
+      "req-partner-contoso-001",
     );
 
     expect(resolution.identity).toMatchObject({
       actorType: "partner_api_key",
-      actorId: "partner-key-cathay-dev",
+      actorId: "partner-key-contoso-dev",
       realm: "partner",
       tenantId: "tenant-demo-001",
-      partnerEntrySlug: "cathay",
+      partnerEntrySlug: "contoso",
     });
   });
 
@@ -3931,7 +3931,7 @@ describe("TenantPartnerService tenant business ops views", () => {
       expect.arrayContaining([
         expect.objectContaining({ programId: "program-airport-alpha" }),
         expect.objectContaining({ programId: "program-airport-beta" }),
-        expect.objectContaining({ programId: "program-ctbc-world-elite" }),
+        expect.objectContaining({ programId: "program-acme-world-elite" }),
       ]),
     );
 

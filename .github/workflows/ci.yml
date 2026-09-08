@@ -155,6 +155,15 @@ jobs:
       - name: Verify internal key exception registry and documentation
         run: python3 operations/security/verify-internal-key-exceptions.py
 
+  no-real-institutions:
+    name: No real financial-institution identifiers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if real bank/insurer names or corporate domains appear in deployable source
+        run: ./scripts/ci/check-no-real-institutions.sh
+
   runtime-mirror-guard:
     name: Runtime mirror guard
     runs-on: ubuntu-latest

@@ -28,7 +28,7 @@ describe("SR-REFERRAL-001: referral embed fallback entry resolution", () => {
 
     const entry = resolveStandaloneFallbackEntry({
       entrySlug: "yuhe-residence",
-      entryHost: "app.yuhe-living.com.tw",
+      entryHost: "app.fabrikam-living.example",
       currentHost: "refer.smarttransport.tw",
     });
 
@@ -40,7 +40,7 @@ describe("SR-REFERRAL-001: referral embed fallback entry resolution", () => {
 
     const entry = resolveStandaloneFallbackEntry({
       entrySlug: "yuhe-residence",
-      entryHost: "app.yuhe-living.com.tw",
+      entryHost: "app.fabrikam-living.example",
       currentHost: "refer.smarttransport.tw",
     });
 
@@ -53,7 +53,7 @@ describe("SR-REFERRAL-001: referral embed fallback entry resolution", () => {
     expect(url.searchParams.get("ref_source")).toBe("referral_embed_fallback");
     expect(url.searchParams.get("ref_entry_slug")).toBe("yuhe-residence");
     expect(url.searchParams.get("ref_entry_host")).toBe(
-      "app.yuhe-living.com.tw",
+      "app.fabrikam-living.example",
     );
   });
 
@@ -63,7 +63,7 @@ describe("SR-REFERRAL-001: referral embed fallback entry resolution", () => {
 
     const entry = resolveStandaloneFallbackEntry({
       entrySlug: "yuhe-residence",
-      entryHost: "app.yuhe-living.com.tw",
+      entryHost: "app.fabrikam-living.example",
       currentHost: "refer.smarttransport.tw",
     });
 
