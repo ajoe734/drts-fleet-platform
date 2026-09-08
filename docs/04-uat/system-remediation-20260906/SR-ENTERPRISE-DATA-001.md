@@ -1,5 +1,14 @@
 # SR-ENTERPRISE-DATA-001 — baseline and screen requirements
 
+## Redispatch verification (2026-09-08T22:25:51Z)
+
+- Canonical `start` recorded. Fresh `git fetch origin`: exit 0; base remains `a24045986ac29231d34657df3a343b02d9fbb770`. Task still has the original six write scopes, no dependencies and no new design/contact decision.
+- Required `git rebase origin/dev` encountered duplicate historical evidence patches (exit 1). Resolved only this task document by retaining already-replayed evidence; final `GIT_EDITOR=true git rebase --continue`: exit 0. Normal `git merge --no-ff origin/codex/sr-enterprise-data-001` with task trailers: exit 0, verification head `336b06f24f1f731b9160afb053bd4c90a648ed9c`. `git diff 189ef1e29 --stat` is empty: history reconciliation changed no files.
+- Re-read execution/spec, R08/R09/R16 and all six capability records, helper report, tenant realm tokens, ENT_Home/ENT_Trip, ENT_GATES and EEmpty. The helper explicitly does not clear product scope blockers. Current trip still calls `getEnterpriseBookings`, renders `active={2}`, and has inert contact buttons. Shared booking detail still falls back to `degraded` for 404. Canonical trip not-found and unavailable-contact screens remain absent; the dispatch's explicit design STOP still applies.
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0 (`tsc --noEmit`). `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`: exit 1 (`No test files found`). `git diff --check`: exit 0 before anchor. No passing regression suite is claimed.
+- Resource `EB-7K2E1D` remains fixture-only, without current live API verification. Implementation candidate SHA: none. Evidence anchor/push SHA is recorded in machine truth. No product edits, live/browser/telephone/true-device checks, review, CI, acceptance or deployment are claimed.
+- Supervisor must resolve the screen requirements and scope/dependency/contact decisions below before redispatch. History-helper completion alone supplies none of these prerequisites.
+
 ## Latest redispatch verification (2026-09-08, checked at 21:43:33Z)
 
 - Canonical `start` recorded for Codex. The current task still supplies the original six write scopes and no dependencies. The completed history helper explicitly leaves the scope/contact decisions to the supervisor; its completion has not resolved those decisions.
