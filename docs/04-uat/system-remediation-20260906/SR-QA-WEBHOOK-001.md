@@ -2,7 +2,20 @@
 
 本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Gemini（本次 dispatch）。未 handoff、未完成 review/CI/merge。
 
-## 2026-09-08 16:32 UTC 跨租戶負向續驗（最新）
+## 2026-09-08 16:38 UTC replay 接收器負向續驗（最新）
+
+本節優先於歷史紀錄。已納入 base `8de85170b07ab7eb3d773e0845abebf12babc7e0`；執行 anchor `3e4d30f4c98b3d7b7ac06a27a27cf1d646b8c0e7`，非 lifecycle candidate。按指示 rebase 再次於歷史提交 a119ec0bb 出現 task 檔 add/add 衝突，已 abort 並 merge dev，保留已發布歷史且普通 push 成功。
+
+- 修正測試接收器漏判 `sig.valid` 與無效 timestamp 的缺陷。真服務送出第一筆 HTTP/HMAC 後，以實際 bytes 測六種負向：body 追加空白、錯誤／缺少 signature（401），有效 HMAC 但過期／未來／無效 timestamp（400），最後原始 request 重送（409）。驗證拒絕前後 dedup set 不變，並由 service 按 webhook ID 回讀原 delivery 仍 delivered。共 8 次真 HTTP；300 秒 freshness 是測試接收器政策，不宣稱部署接收器已採用。
+- 原 24 個案例數不變，C112-6 擴充六個負向子案例；stdout 的 `SR-QA-WEBHOOK-001 replay resources` 保存實際 webhook/delivery ID、負向結果及政策，收錄於 `evidence-sr-qa-webhook-001.json`。這是測試缺陷修正，未發現或修改產品缺陷，未改 UI。
+- `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 0，5 passed / 1.4m，含 24 local、3 PostgreSQL（含 SIGKILL／新 OS process 恢復）及 4 shared harness 案例。
+- `DRTS_WEBHOOK_LIVE=1 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 1，1 failed / 4 passed / 1.6s；缺部署認證與外部證據時失敗，另存 live unavailable artifact。
+- `pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/*.ts tests/e2e/system-remediation/sr-qa-webhook-001/*.ts --max-warnings=0` → exit 0；`git diff --check` → exit 0。
+- PostgreSQL key `api_key_6bd259cd-b790-452c-8328-b48393b3b2e1`；恢復 delivery `wd_6dd4ea7a-34b2-4b3b-a2dc-f49779cffe3b`。其租戶／webhook 關聯及其他資源見 `evidence-postgres.json`。
+
+仍 in_progress，未 handoff。C112 受控接收器 replay 負向已補驗；產品預設 dispatch 沒有傳 AbortSignal，權威 governance runbook 定義 retry 但未定義 deadline，仍需確認契約並驗證，不能以注入 100ms deadline 宣稱預設行為完成。C111 authenticated API 最小權限／使用量仍待驗；C113 ERP/SSO/bank sandbox、C114 真 provider、C115 部署排程與告警回執需 supervisor 協調外部證據。
+
+## 2026-09-08 16:32 UTC 跨租戶負向續驗（歷史）
 
 本節優先於以下歷史紀錄。base `5cff9b36082998a0295f2550039306dc1f84c3d2`；執行 SHA `936e5e136286d43b64359a3a28094fec920475a6`（已普通 push 的測試 anchor，非 lifecycle candidate）。rebase 再次在歷史提交 a119ec0bb 發生 task 檔 add/add 衝突，已 abort，使用 merge 納入 dev 並保留已發布歷史。
 

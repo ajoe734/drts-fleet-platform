@@ -1,16 +1,16 @@
 {
-  "baseSha": "5cff9b36082998a0295f2550039306dc1f84c3d2",
-  "executionSha": "936e5e136286d43b64359a3a28094fec920475a6",
-  "recordedAt": "2026-09-08T16:31:22.282Z",
+  "baseSha": "8de85170b07ab7eb3d773e0845abebf12babc7e0",
+  "executionSha": "3e4d30f4c98b3d7b7ac06a27a27cf1d646b8c0e7",
+  "recordedAt": "2026-09-08T16:37:53.472Z",
   "scope": "Local PostgreSQL and real HTTP; service reinitialization and SIGKILL/new OS process recovery; deployed authentication remains unverified",
   "evidence": [
     {
       "label": "SR-QA-WEBHOOK-001 DB keys",
       "resource": {
-        "tenantId": "qa-webhook-0e24e4d1-7b66-4507-b003-f6d8d7e1b29d",
-        "apiKeyId": "api_key_2ebd8946-1c5c-4831-9fcf-d5eee11ff2e7",
-        "rotatedApiKeyId": "api_key_22a05a5e-ab4c-4b78-910f-ed5f54ca3996",
-        "otherTenantId": "qa-webhook-0dda62d1-799f-461f-a8e7-9ec1e311498f",
+        "tenantId": "qa-webhook-8bf7e2ed-b2d5-4de4-8b7d-51982d1ddda2",
+        "apiKeyId": "api_key_6bd259cd-b790-452c-8328-b48393b3b2e1",
+        "rotatedApiKeyId": "api_key_1400448a-91b7-487f-b8d5-07aaa9da7c4f",
+        "otherTenantId": "qa-webhook-63993f7a-c800-4413-926f-607c58774989",
         "crossTenantMutationError": "API_KEY_NOT_FOUND",
         "persistedRowsUnchangedAfterDeniedMutation": true
       }
@@ -18,28 +18,28 @@
     {
       "label": "SR-QA-WEBHOOK-001 DB delivery",
       "resource": {
-        "tenantId": "qa-webhook-af0107b8-86e1-47f2-9a6f-d7cdccc00f96",
-        "webhookId": "wh_252f6234-3d72-4d23-acb2-984ae8de9220",
-        "deliveryId": "wd_83b2d169-7f24-4086-a4bb-d6c030b84fea",
-        "outboxKey": "21577cd2-9b18-4999-8b7f-58e0663e748c",
+        "tenantId": "qa-webhook-22d07034-01c2-4b2a-8476-18b2f0376be9",
+        "webhookId": "wh_531d988a-bc44-4bd0-8425-03b58d875d84",
+        "deliveryId": "wd_fcd25b2a-38a8-479c-ac38-8dab20ca1cc4",
+        "outboxKey": "817d35b7-9694-4724-9f9e-d0cfe964e964",
         "requests": 3
       }
     },
     {
       "label": "SR-QA-WEBHOOK-001 OS process recovery",
       "resource": {
-        "tenantId": "qa-webhook-fe4c9c7f-2375-44b5-b147-0d1321dc25a1",
-        "webhookId": "wh_a1529a5d-5ead-496b-8e51-b61413571a14",
-        "deliveryId": "wd_8eee8295-f9d6-4805-afbe-8240f94b7bd6",
+        "tenantId": "qa-webhook-029431b3-6fad-460a-a42b-c8dff71691a0",
+        "webhookId": "wh_b7ca7f47-9d2f-4e97-ac85-713d4798c98a",
+        "deliveryId": "wd_6dd4ea7a-34b2-4b3b-a2dc-f49779cffe3b",
         "command": {
           "eventType": "dispatch.assigned",
           "data": {
-            "orderId": "448bc633-e5cc-4eaa-9e57-c41bc3a9353c"
+            "orderId": "0115cbaa-3dc9-4b05-a230-bfe8933aff05"
           },
-          "outboxKey": "9ace512a-9b3a-4271-b401-d2cbd374532e"
+          "outboxKey": "40182eb9-2008-4907-bb3b-96cea9903427"
         },
-        "writerPid": 3244385,
-        "recoveryPid": 3244668,
+        "writerPid": 3296079,
+        "recoveryPid": 3296427,
         "status": "delivered",
         "requests": 3,
         "terminationSignal": "SIGKILL"
