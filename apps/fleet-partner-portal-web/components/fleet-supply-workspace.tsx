@@ -24,13 +24,13 @@ import {
   CanvasPageHeader,
   CanvasPill,
 } from "@drts/ui-web";
-import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { useTranslation } from "@/lib/i18n";
+import { buildFleetTheme } from "../lib/fleet-portal-theme";
+import { useTranslation } from "../lib/i18n";
 import type {
   SupplyDashboardView,
   SupplyDocumentsView,
   SupplySubmissionDetail,
-} from "@/lib/fleet-portal-supply";
+} from "../lib/fleet-portal-supply";
 import {
   formatSupplySubject,
   isEditableStatus,
@@ -49,7 +49,7 @@ import {
   shouldInterceptNavigation,
   type DriverDraftInput,
   type VehicleDraftInput,
-} from "@/lib/fleet-portal-supply";
+} from "../lib/fleet-portal-supply";
 
 
 type ApiEnvelope<T> = {
@@ -396,12 +396,25 @@ export function useDraftGuard(dirty: boolean): { confirmLeave: () => boolean } {
       }
     }
 
+    function handlePopState() {
+      const confirmed = confirmLeave();
+      if (!confirmed) {
+        try {
+          window.history.pushState(null, "", window.location.href);
+        } catch {
+          // Ignore history API errors in restricted environments
+        }
+      }
+    }
+
     window.addEventListener("beforeunload", handleBeforeUnload);
     document.addEventListener("click", handleDocumentClick, true);
+    window.addEventListener("popstate", handlePopState);
 
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       document.removeEventListener("click", handleDocumentClick, true);
+      window.removeEventListener("popstate", handlePopState);
     };
   }, [dirty]);
 
@@ -1672,7 +1685,6 @@ export function SupplySubmissionDetailView({
   const subject = useMemo(() => formatSupplySubject(detail), [detail]);
 
   const detailDirty =
-    !busy &&
     editable &&
     (driverForm
       ? isDriverFormDirty(

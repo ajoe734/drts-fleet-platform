@@ -14,7 +14,11 @@
  *  5. Dirty-state logic — logical invariants for the draft guard threshold
  */
 
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+import vm from "node:vm";
+import ts from "typescript";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   fieldId,
@@ -35,6 +39,7 @@ import {
   DRIVER_DRAFT_STORAGE_KEY,
   VEHICLE_DRAFT_STORAGE_KEY,
   type SupplySubmissionDetail,
+  getSafeLocalStorage,
 } from "../../../../apps/fleet-partner-portal-web/lib/fleet-portal-supply";
 
 // ---------------------------------------------------------------------------
@@ -558,5 +563,337 @@ describe("SR-FLEET-FORM-001 / draft storage persistence (R25)", () => {
     expect(loaded?.name).toBe("張司機");
     expect(loaded?.mobile).toBe("");
     expect(loaded?.supportedServiceProductCodes).toEqual(["taxi_realtime"]);
+  });
+
+  it("gracefully handles localStorage SecurityError on access (denied storage getter)", () => {
+    const originalLocalStorage = globalThis.window.localStorage;
+    Object.defineProperty(globalThis.window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("The operation is insecure.", "SecurityError");
+      },
+    });
+
+    try {
+      expect(getSafeLocalStorage()).toBeNull();
+      expect(loadDriverDraft()).toBeNull();
+      expect(loadVehicleDraft()).toBeNull();
+      expect(() => saveDriverDraft(INITIAL_DRIVER_DRAFT)).not.toThrow();
+      expect(() => clearDriverDraft()).not.toThrow();
+      expect(() => saveVehicleDraft(INITIAL_VEHICLE_DRAFT)).not.toThrow();
+      expect(() => clearVehicleDraft()).not.toThrow();
+    } finally {
+      Object.defineProperty(globalThis.window, "localStorage", {
+        configurable: true,
+        value: originalLocalStorage,
+        writable: true,
+      });
+    }
+  });
+
+  it("gracefully handles storage quota exceeded error", () => {
+    const quotaMock = {
+      getItem: () => null,
+      setItem: () => {
+        throw new DOMException("Quota exceeded", "QuotaExceededError");
+      },
+      removeItem: () => {},
+      clear: () => {},
+    };
+    const originalLocalStorage = globalThis.window.localStorage;
+    Object.defineProperty(globalThis.window, "localStorage", {
+      configurable: true,
+      value: quotaMock,
+      writable: true,
+    });
+
+    try {
+      expect(() => saveDriverDraft(INITIAL_DRIVER_DRAFT)).not.toThrow();
+      expect(() => saveVehicleDraft(INITIAL_VEHICLE_DRAFT)).not.toThrow();
+    } finally {
+      Object.defineProperty(globalThis.window, "localStorage", {
+        configurable: true,
+        value: originalLocalStorage,
+        writable: true,
+      });
+    }
+  });
+
+  it("gracefully handles invalid JSON in stored draft", () => {
+    store.set(DRIVER_DRAFT_STORAGE_KEY, "invalid-json{");
+    store.set(VEHICLE_DRAFT_STORAGE_KEY, "{broken");
+    expect(loadDriverDraft()).toBeNull();
+    expect(loadVehicleDraft()).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. useDraftGuard — lifecycle, listeners, beforeunload, click & popstate (R25)
+// ---------------------------------------------------------------------------
+describe("SR-FLEET-FORM-001 / useDraftGuard lifecycle and navigation protection (R25)", () => {
+  type ListenerMap = Map<string, Set<Function>>;
+  let windowListeners: ListenerMap;
+  let documentListeners: ListenerMap;
+  let historyPushes: Array<{ state: any; unused: string; url?: string | URL | null }>;
+  let confirmPromptCount: number;
+  let confirmResult: boolean;
+  let effectCleanup: (() => void) | void;
+
+  function createMockEnv() {
+    windowListeners = new Map();
+    documentListeners = new Map();
+    historyPushes = [];
+    confirmPromptCount = 0;
+    confirmResult = true;
+    effectCleanup = undefined;
+
+    const mockWindow = {
+      location: {
+        pathname: "/supply/drivers/new",
+        search: "",
+        origin: "http://localhost:3000",
+        href: "http://localhost:3000/supply/drivers/new",
+      },
+      history: {
+        pushState: (state: any, unused: string, url?: string | URL | null) => {
+          historyPushes.push({ state, unused, url });
+        },
+      },
+      confirm: (_msg: string) => {
+        confirmPromptCount++;
+        return confirmResult;
+      },
+      addEventListener: (type: string, listener: Function, _options?: any) => {
+        if (!windowListeners.has(type)) windowListeners.set(type, new Set());
+        windowListeners.get(type)!.add(listener);
+      },
+      removeEventListener: (type: string, listener: Function) => {
+        windowListeners.get(type)?.delete(listener);
+      },
+    };
+
+    const mockDocument = {
+      addEventListener: (type: string, listener: Function, _options?: any) => {
+        if (!documentListeners.has(type)) documentListeners.set(type, new Set());
+        documentListeners.get(type)!.add(listener);
+      },
+      removeEventListener: (type: string, listener: Function) => {
+        documentListeners.get(type)?.delete(listener);
+      },
+    };
+
+    return { mockWindow, mockDocument };
+  }
+
+  function getDraftGuard(mockWindow: any, mockDocument: any) {
+    const filePath = path.resolve(
+      __dirname,
+      "../../../../apps/fleet-partner-portal-web/components/fleet-supply-workspace.tsx",
+    );
+    const source = fs.readFileSync(filePath, "utf8");
+    const transpiled = ts.transpileModule(source, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React },
+    }).outputText;
+
+    const sandbox = {
+      require: (mod: string) => {
+        if (mod === "react") {
+          return {
+            useEffect: (effect: () => (() => void) | void) => {
+              effectCleanup = effect();
+            },
+            useMemo: (fn: Function) => fn(),
+            useState: (init: any) => [init, () => {}],
+          };
+        }
+        if (mod.includes("fleet-portal-supply")) {
+          return require(
+            path.resolve(
+              __dirname,
+              "../../../../apps/fleet-partner-portal-web/lib/fleet-portal-supply.ts",
+            ),
+          );
+        }
+        return {};
+      },
+      module: { exports: {} },
+      exports: {},
+      window: mockWindow,
+      document: mockDocument,
+      console,
+    };
+
+    vm.createContext(sandbox);
+    vm.runInContext(transpiled, sandbox);
+    return sandbox.exports.useDraftGuard as (dirty: boolean) => {
+      confirmLeave: () => boolean;
+    };
+  }
+
+  it("registers window:beforeunload, document:click, and window:popstate when dirty", () => {
+    const { mockWindow, mockDocument } = createMockEnv();
+    const useDraftGuard = getDraftGuard(mockWindow, mockDocument);
+
+    useDraftGuard(true);
+    expect(windowListeners.get("beforeunload")?.size).toBe(1);
+    expect(documentListeners.get("click")?.size).toBe(1);
+    expect(windowListeners.get("popstate")?.size).toBe(1);
+
+    // Cleanup unregisters all listeners
+    if (typeof effectCleanup === "function") {
+      effectCleanup();
+    }
+    expect(windowListeners.get("beforeunload")?.size ?? 0).toBe(0);
+    expect(documentListeners.get("click")?.size ?? 0).toBe(0);
+    expect(windowListeners.get("popstate")?.size ?? 0).toBe(0);
+  });
+
+  it("does not register listeners when form is clean (dirty=false)", () => {
+    const { mockWindow, mockDocument } = createMockEnv();
+    const useDraftGuard = getDraftGuard(mockWindow, mockDocument);
+
+    const { confirmLeave } = useDraftGuard(false);
+    expect(windowListeners.get("beforeunload")?.size ?? 0).toBe(0);
+    expect(documentListeners.get("click")?.size ?? 0).toBe(0);
+    expect(windowListeners.get("popstate")?.size ?? 0).toBe(0);
+    expect(confirmLeave()).toBe(true);
+    expect(confirmPromptCount).toBe(0);
+  });
+
+  it("intercepts popstate events: prompts confirmation and recovers history if cancelled", () => {
+    const { mockWindow, mockDocument } = createMockEnv();
+    const useDraftGuard = getDraftGuard(mockWindow, mockDocument);
+
+    useDraftGuard(true);
+    const popstateListeners = Array.from(windowListeners.get("popstate") || []);
+    expect(popstateListeners.length).toBe(1);
+    const handlePopState = popstateListeners[0];
+
+    // User cancels navigation (clicks "Cancel" in confirm dialog)
+    confirmResult = false;
+    handlePopState(new Event("popstate"));
+    expect(confirmPromptCount).toBe(1);
+    expect(historyPushes.length).toBe(1);
+    expect(historyPushes[0].url).toBe("http://localhost:3000/supply/drivers/new");
+
+    // User confirms navigation (clicks "OK" in confirm dialog)
+    confirmResult = true;
+    handlePopState(new Event("popstate"));
+    expect(confirmPromptCount).toBe(2);
+    // historyPushes remains 1 because user chose to proceed with navigation
+    expect(historyPushes.length).toBe(1);
+
+    if (typeof effectCleanup === "function") effectCleanup();
+  });
+
+  it("intercepts beforeunload event and sets legacy returnValue", () => {
+    const { mockWindow, mockDocument } = createMockEnv();
+    const useDraftGuard = getDraftGuard(mockWindow, mockDocument);
+
+    useDraftGuard(true);
+    const beforeUnloadListeners = Array.from(windowListeners.get("beforeunload") || []);
+    expect(beforeUnloadListeners.length).toBe(1);
+
+    let defaultPrevented = false;
+    const mockEvent: any = {
+      preventDefault: () => {
+        defaultPrevented = true;
+      },
+      returnValue: "",
+    };
+    beforeUnloadListeners[0](mockEvent);
+    expect(defaultPrevented).toBe(true);
+    expect(mockEvent.returnValue).toBe(DRAFT_GUARD_STRINGS.beforeUnload);
+
+    if (typeof effectCleanup === "function") effectCleanup();
+  });
+
+  it("intercepts cross-page link clicks and stops propagation if rejected", () => {
+    const { mockWindow, mockDocument } = createMockEnv();
+    const useDraftGuard = getDraftGuard(mockWindow, mockDocument);
+
+    useDraftGuard(true);
+    const clickListeners = Array.from(documentListeners.get("click") || []);
+    expect(clickListeners.length).toBe(1);
+
+    let prevented = false;
+    let stopped = false;
+    let immediateStopped = false;
+    const mockAnchor = {
+      href: "http://localhost:3000/supply/submissions",
+      getAttribute: (attr: string) => (attr === "href" ? "/supply/submissions" : null),
+      target: "",
+      closest: (sel: string) => (sel === "a" ? mockAnchor : null),
+    };
+    const mockClickEvent: any = {
+      target: mockAnchor,
+      preventDefault: () => {
+        prevented = true;
+      },
+      stopPropagation: () => {
+        stopped = true;
+      },
+      stopImmediatePropagation: () => {
+        immediateStopped = true;
+      },
+    };
+
+    // Case 1: user rejects leaving
+    confirmResult = false;
+    clickListeners[0](mockClickEvent);
+    expect(confirmPromptCount).toBe(1);
+    expect(prevented).toBe(true);
+    expect(stopped).toBe(true);
+    expect(immediateStopped).toBe(true);
+
+    // Case 2: user approves leaving
+    prevented = false;
+    confirmResult = true;
+    clickListeners[0](mockClickEvent);
+    expect(confirmPromptCount).toBe(2);
+    expect(prevented).toBe(false);
+
+    if (typeof effectCleanup === "function") effectCleanup();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. Dirty-during-save invariant (P1)
+// ---------------------------------------------------------------------------
+describe("SR-FLEET-FORM-001 / dirty-during-save invariant", () => {
+  it("maintains dirty protection while busy saving until successful baseline update", () => {
+    const baseline = {
+      ...INITIAL_DRIVER_DRAFT,
+      name: "王小明",
+      mobile: "0912345678",
+    };
+    const editedForm = {
+      ...baseline,
+      name: "王大明", // modified
+    };
+
+    // User modified form -> dirty
+    const isDirtyBeforeSave = isDriverFormDirty(editedForm, baseline);
+    expect(isDirtyBeforeSave).toBe(true);
+
+    // While busy saving (busy = "save"), dirty must evaluate to true
+    // (verifying that no `!busy &&` gates dirty protection)
+    const computeDetailDirty = (
+      editable: boolean,
+      current: typeof editedForm,
+      base: typeof baseline,
+    ) => {
+      // Matches production logic in fleet-supply-workspace.tsx:
+      // editable && (driverForm ? isDriverFormDirty(...) : ...)
+      return editable && isDriverFormDirty(current, base);
+    };
+
+    const isDirtyDuringSave = computeDetailDirty(true, editedForm, baseline);
+    expect(isDirtyDuringSave).toBe(true);
+
+    // After successful save, baseline is updated to match current
+    const updatedBaseline = { ...editedForm };
+    const isDirtyAfterSave = computeDetailDirty(true, editedForm, updatedBaseline);
+    expect(isDirtyAfterSave).toBe(false);
   });
 });

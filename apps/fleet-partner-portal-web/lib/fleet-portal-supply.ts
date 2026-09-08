@@ -202,19 +202,30 @@ export function isVehicleFormDirty(
 export const DRIVER_DRAFT_STORAGE_KEY = "drts:fleet:supply:driver_draft";
 export const VEHICLE_DRAFT_STORAGE_KEY = "drts:fleet:supply:vehicle_draft";
 
-export function saveDriverDraft(draft: DriverDraftInput): void {
-  if (typeof window === "undefined" || !window.localStorage) return;
+export function getSafeLocalStorage(): Storage | null {
   try {
-    window.localStorage.setItem(DRIVER_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    if (typeof window === "undefined") return null;
+    return window.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveDriverDraft(draft: DriverDraftInput): void {
+  try {
+    const storage = getSafeLocalStorage();
+    if (!storage) return;
+    storage.setItem(DRIVER_DRAFT_STORAGE_KEY, JSON.stringify(draft));
   } catch {
     // Ignore quota or disabled storage error
   }
 }
 
 export function loadDriverDraft(): DriverDraftInput | null {
-  if (typeof window === "undefined" || !window.localStorage) return null;
   try {
-    const raw = window.localStorage.getItem(DRIVER_DRAFT_STORAGE_KEY);
+    const storage = getSafeLocalStorage();
+    if (!storage) return null;
+    const raw = storage.getItem(DRIVER_DRAFT_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return { ...INITIAL_DRIVER_DRAFT, ...parsed };
@@ -224,27 +235,30 @@ export function loadDriverDraft(): DriverDraftInput | null {
 }
 
 export function clearDriverDraft(): void {
-  if (typeof window === "undefined" || !window.localStorage) return;
   try {
-    window.localStorage.removeItem(DRIVER_DRAFT_STORAGE_KEY);
+    const storage = getSafeLocalStorage();
+    if (!storage) return;
+    storage.removeItem(DRIVER_DRAFT_STORAGE_KEY);
   } catch {
     // Ignore disabled storage error
   }
 }
 
 export function saveVehicleDraft(draft: VehicleDraftInput): void {
-  if (typeof window === "undefined" || !window.localStorage) return;
   try {
-    window.localStorage.setItem(VEHICLE_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    const storage = getSafeLocalStorage();
+    if (!storage) return;
+    storage.setItem(VEHICLE_DRAFT_STORAGE_KEY, JSON.stringify(draft));
   } catch {
     // Ignore quota or disabled storage error
   }
 }
 
 export function loadVehicleDraft(): VehicleDraftInput | null {
-  if (typeof window === "undefined" || !window.localStorage) return null;
   try {
-    const raw = window.localStorage.getItem(VEHICLE_DRAFT_STORAGE_KEY);
+    const storage = getSafeLocalStorage();
+    if (!storage) return null;
+    const raw = storage.getItem(VEHICLE_DRAFT_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return { ...INITIAL_VEHICLE_DRAFT, ...parsed };
@@ -254,9 +268,10 @@ export function loadVehicleDraft(): VehicleDraftInput | null {
 }
 
 export function clearVehicleDraft(): void {
-  if (typeof window === "undefined" || !window.localStorage) return;
   try {
-    window.localStorage.removeItem(VEHICLE_DRAFT_STORAGE_KEY);
+    const storage = getSafeLocalStorage();
+    if (!storage) return;
+    storage.removeItem(VEHICLE_DRAFT_STORAGE_KEY);
   } catch {
     // Ignore disabled storage error
   }
