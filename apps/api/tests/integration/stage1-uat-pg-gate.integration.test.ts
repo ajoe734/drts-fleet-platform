@@ -528,10 +528,9 @@ async function cleanup(seed: Seed) {
     try {
       await client.query("BEGIN");
       await client.query("SET LOCAL audit.allow_retention_archival = 'on'");
-      await client.query(
-        "DELETE FROM admin.audit_logs WHERE request_id = $1",
-        [seed.requestId],
-      );
+      await client.query("DELETE FROM admin.audit_logs WHERE request_id = $1", [
+        seed.requestId,
+      ]);
       await client.query("COMMIT");
     } catch {
       await client.query("ROLLBACK").catch(() => {});
@@ -549,6 +548,10 @@ async function cleanup(seed: Seed) {
     await database.query(
       "DELETE FROM ops.phase1_driver_tasks WHERE task_id = $1",
       [seed.task.taskId],
+    );
+    await database.query(
+      "UPDATE ops.phase1_dispatch_assignments SET status = 'cancelled' WHERE assignment_id = $1",
+      [seed.assignment.assignmentId],
     );
     await database.query(
       "DELETE FROM ops.dispatch_resource_reservations WHERE assignment_id = $1",
