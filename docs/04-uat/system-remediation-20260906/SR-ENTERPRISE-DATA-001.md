@@ -1,5 +1,15 @@
 # SR-ENTERPRISE-DATA-001 — baseline and screen requirements
 
+## Redispatch after 22:41:52Z resume (2026-09-08)
+
+- Current fetched base: `eb684f176b1d3b46553a0f6f0556c79452fbac3c`. `git fetch origin`: exit 0. `git rebase origin/dev`: initially exit 1 on repeated historical evidence conflicts; retained already-replayed content in this task document only. Final `GIT_EDITOR=true git rebase --continue`: exit 0. Rebased head: `1465165f174008c41c8baeaf024ff7d5e80163d8`.
+- `git merge --no-ff origin/codex/sr-enterprise-data-001` with task trailers: exit 0, no file changes, verification head `c6be23b8761fcf9d828497f3c7d2267c60b24b2e`. Published ancestry is retained for ordinary push. Task diff against base contains only this evidence document.
+- Canonical `start`: exit 0. Re-read current task slice, execution rules, R08/R09/R16, C013/C017/C018/C093/C108/C119 and completed history-helper report. The task still has the original six scopes and no dependencies. The helper explicitly requires supervisor scope/dependency adjudication before product edits; its merge alone is not that authorization.
+- Rechecked ENT_Home, ENT_Trip, ENT_GATES and tenant realm tokens. Missing trip-not-found and unavailable-driver/support states below remain unspecified, so the dispatch's explicit design STOP applies. Current home/trip still read fixtures; trip has `active={2}` and inert contact buttons. Shared booking detail still classifies 404 as degraded, and shared theme still defaults to blue. BookingRecord supplies passenger/onsite contact, not authorized driver contact; these must not be substituted.
+- Actual checks: `git diff --check` exit 0; `pnpm --filter @drts/enterprise-dispatch-web typecheck` exit 0 (`tsc --noEmit`); `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/` exit 1 (`No test files found`). No passing regression suite is claimed.
+- Resource `EB-7K2E1D` remains a source fixture ID, not a live-verified booking. No product server, browser server or Docker infrastructure was started, per VM restriction. Live/API/contact/true-device checks were not performed. Implementation candidate SHA: none; evidence anchor SHA and ordinary push are recorded in the canonical blocker note.
+- Required next action: supervisor supplies canonical missing screens and records scope/dependencies for shared lifecycle/theme/help corrections plus the permitted contact source or unavailable-contact decision. Preserve blocked status until those decisions exist; do not redispatch solely because the history helper is done. No implementation handoff, review, CI, acceptance or deployment is claimed.
+
 ## Redispatch verification (2026-09-08T22:25:51Z)
 
 - Canonical `start` recorded. Fresh `git fetch origin`: exit 0; base remains `a24045986ac29231d34657df3a343b02d9fbb770`. Task still has the original six write scopes, no dependencies and no new design/contact decision.
