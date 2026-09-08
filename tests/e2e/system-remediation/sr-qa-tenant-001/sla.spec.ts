@@ -34,8 +34,12 @@ test("C028 SLA settings readback, invalid input and tenant isolation", async ({
     const tenantB = required("DRTS_UAT_TENANT_B");
     const tokenA = required("DRTS_UAT_TOKEN_A");
     const tokenB = required("DRTS_UAT_TOKEN_B");
+    // Provision a real A session with tenant:sla:read, without tenant:sla:write.
+    const readOnlyToken = required("DRTS_UAT_TOKEN_READONLY_A");
     expect(tenantA).not.toBe(tenantB);
     expect(tokenA).not.toBe(tokenB);
+    expect(readOnlyToken).not.toBe(tokenA);
+    expect(readOnlyToken).not.toBe(tokenB);
     const client = await playwright.request.newContext();
     const run = `sr-qa-tenant-${randomUUID()}`;
     const call = async (
@@ -85,6 +89,8 @@ test("C028 SLA settings readback, invalid input and tenant isolation", async ({
       evidence.recordRole("tenant_admin:B");
       originalA = await read(tenantA, tokenA);
       originalB = await read(tenantB, tokenB);
+      evidence.recordRole("tenant_sla_readonly:A");
+      expect(await read(tenantA, readOnlyToken)).toEqual(originalA);
       evidence.recordResourceId("tenant_sla", originalA.tenantId);
       evidence.recordResourceId("tenant_sla", originalB.tenantId);
       const updated = {
@@ -109,6 +115,9 @@ test("C028 SLA settings readback, invalid input and tenant isolation", async ({
         completionThresholdMin: updated.completionThresholdMin,
       });
       expect(await read(tenantB, tokenB)).toEqual(originalB);
+      // A valid read session must fail authorization, not authentication, on write.
+      expect((await call(tenantA, readOnlyToken, updated)).status()).toBe(403);
+      expect(await read(tenantA, tokenA)).toEqual(persisted);
       // A's session must not acquire B's authority by changing a tenant header.
       expect((await call(tenantB, tokenA, updated)).status()).toBe(403);
       expect(await read(tenantB, tokenB)).toEqual(originalB);
