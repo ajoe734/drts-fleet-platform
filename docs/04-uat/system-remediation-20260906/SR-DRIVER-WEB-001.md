@@ -2,6 +2,22 @@
 
 Status: partial implementation; web export blocked. No review candidate locked.
 
+## Dispatch recheck — 2026-09-08 18:47 UTC
+
+- Fresh fetched `origin/dev` base: `d4f54ef94e059a981bf2be1f7b944e815870e117`; tested head: `6664e1fa99af4a6b8c50184f33c98f9dd4bbd3ed`. Candidate remains unassigned.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: initially exit 1 on duplicate-anchor conflicts. First attempt was aborted successfully; the second retained the published `d5e947acb` report/test contents for each conflict, and final `GIT_EDITOR=true git rebase --continue` exited 0. `git merge --no-edit origin/codex2/sr-driver-web-001`: exit 0, preserving ordinary-push ancestry.
+- `git diff d5e947acb HEAD -- apps/driver-app tests/unit/system-remediation/sr-driver-web-001/ docs/04-uat/system-remediation-20260906/SR-DRIVER-WEB-001.md`: exit 0, empty before this evidence update. No app or test changes in this dispatch.
+- `pnpm --filter @drts/driver-app typecheck`: exit 0. `pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/`: exit 0, 1 file / 5 tests. `git diff --check`: exit 0. `git diff --exit-code origin/dev -- apps/driver-app/components/driver-trip-map.tsx`: exit 0, unchanged native implementation.
+- Actual web export command:
+
+  ```sh
+  NODE_OPTIONS=--require="$PWD/tests/unit/system-remediation/sr-driver-web-001/metro-worktree-harness.cjs" pnpm --filter @drts/driver-app exec expo export --platform web --max-workers 2 --source-maps --output-dir /tmp/sr-driver-web-001-web-dispatch-1845 > /tmp/sr-driver-web-001-web-dispatch-1845.log 2>&1
+  ```
+
+  Exit **1**, 1,197 modules, unresolved `./wa-sqlite/wa-sqlite.wasm` in `expo-sqlite/web/worker.ts`. Import stack: `_layout.tsx` → heartbeat → offline queue → SQLite web worker. Ephemeral log resource: `/tmp/sr-driver-web-001-web-dispatch-1845.log`.
+- Canonical `show SR-DRIVER-WEB-001` still lists only the four original write scopes and no dependencies. `git ls-tree origin/dev apps/driver-app/metro.config.js` returns no entry. The history helper explicitly does not authorize this scope. Supervisor must authorize the configuration scope and reconcile dependencies/runbook, or assign a bundler producer with a parent dependency. Redispatch alone cannot resolve the blocker.
+- Browser `/`, `/onboarding`, `/sos`, native exports, the prior 91 repair tests, live APIs, signed builds and physical devices were not run in this dispatch. No SOS sent. No handoff, CI, merge, deployment or acceptance success claimed; historical results below remain historical.
+
 ## History-repair redispatch — 2026-09-08 16:43 UTC
 
 - Fresh base `origin/dev`: `890548b4f357542968c8b14f33f23e0685be007a`, including history helper PR #1781 (helper candidate `56a120338301`, not the parent candidate). Parent candidate remains unassigned.
