@@ -3,7 +3,7 @@
 - Task: `SR-ENTERPRISE-FORM-001`
 - Owner: `Gemini`
 - Reviewer: `Codex`
-- Base SHA (`origin/dev`): `031cfc4c99320b79f6ad863996a43a5da8227edf`
+- Base SHA (`origin/dev`): `890548b4f357542968c8b14f33f23e0685be007a`
 - Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001`
 - Branch: `gemini/sr-enterprise-form-001`
 
@@ -179,6 +179,14 @@ $ pnpm run i18n:guard
 > node tools/ci/i18n-guard.mjs
 
 i18n-guard: OK (522 files scanned across 10 apps, 55 exemption(s) from i18n-guard-baseline.json)
+
+exit code: 0
+```
+
+### 4.7 UI Realm Token 守衛檢查
+```text
+$ python3 tools/ci/check_ui_realm_tokens.py
+ui-realm-token guard: OK (2 canonical hexes; no off-token brand colors)
 
 exit code: 0
 ```
