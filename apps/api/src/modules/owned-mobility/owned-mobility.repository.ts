@@ -723,6 +723,51 @@ export class OwnedMobilityRepository {
     );
   }
 
+  /** Cancellation uses the same assignment -> task lock order as accept/timeout.
+   * Discover from durable rows, then fence discovery again under the order lock.
+   * A concurrent replacement must cause rollback, never release a stale offer.
+   */
+  async loadOrderCancellationForUpdate(
+    executor: OwnedMobilityQueryExecutor,
+    orderId: string,
+  ) {
+    const assignments = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_dispatch_assignments
+       WHERE order_id = $1 AND status IN ('assigned', 'accepted')
+       ORDER BY assignment_id FOR UPDATE`, [orderId],
+    );
+    const assignment = assignments.rows[0]
+      ? this.parseRecord<DispatchAssignmentRecord>(assignments.rows[0].record, "ops.phase1_dispatch_assignments")
+      : null;
+    if (assignments.rows.length > 1) throw new Error("Multiple active assignments require reconciliation");
+    const tasks = assignment ? await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_driver_tasks WHERE assignment_id = $1
+       ORDER BY task_id FOR UPDATE`, [assignment.assignmentId],
+    ) : { rows: [] };
+    if (assignment && tasks.rows.length !== 1) throw new Error("Active assignment task requires reconciliation");
+    const task = tasks.rows[0]
+      ? this.parseRecord<DriverTaskRecord>(tasks.rows[0].record, "ops.phase1_driver_tasks")
+      : null;
+    const jobs = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1 AND status <> 'closed'
+       ORDER BY dispatch_job_id FOR UPDATE`, [orderId],
+    );
+    const current = await this.findOrderForUpdate(executor, orderId);
+    if (!current) throw new Error(`Owned order ${orderId} missing`);
+    const latest = await executor.query<{ assignment_id: string }>(
+      `SELECT assignment_id FROM ops.phase1_dispatch_assignments
+       WHERE order_id = $1 AND status IN ('assigned', 'accepted') ORDER BY assignment_id`, [orderId],
+    );
+    if (latest.rows.length !== assignments.rows.length ||
+        (latest.rows[0]?.assignment_id ?? null) !== (assignment?.assignmentId ?? null)) {
+      throw new OwnedOrderVersionConflictError(orderId, current.aggregateVersion);
+    }
+    return {
+      order: current.order, assignment, task,
+      dispatchJobs: jobs.rows.map(row => this.parseRecord<DispatchJobRecord>(row.record, "ops.phase1_dispatch_jobs")),
+    };
+  }
+
   /**
    * Inserts a brand-new order row for the pure-prepare voice command path.
    * Unlike `persistOrderWorkflow`'s blind `ON CONFLICT ... DO UPDATE` upsert

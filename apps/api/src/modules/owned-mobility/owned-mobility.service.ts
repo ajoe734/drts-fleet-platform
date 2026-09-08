@@ -4540,85 +4540,73 @@ export class OwnedMobilityService
     command: CancelOwnedOrderCommand,
     requestId?: string,
   ) {
-    const order = this.requireOrder(orderId);
-    this.assertOrderCancelable(order);
-
     const now = new Date().toISOString();
-    order.status = "cancelled";
-    order.cancelledAt = now;
-    order.cancelReason = this.normalizeNullableText(command.reason);
-    order.updatedAt = now;
-
-    const dispatchJob = this.findLatestOpenDispatchJob(orderId);
-    const assignment = this.findLatestActiveAssignment(orderId);
-    const task = assignment
-      ? this.findTaskByAssignmentId(assignment.assignmentId)
-      : null;
-
-    if (dispatchJob) {
-      dispatchJob.status = "closed";
-      dispatchJob.updatedAt = now;
-    }
-    if (assignment) {
-      assignment.status = "cancelled";
-      assignment.updatedAt = now;
-    }
-    if (task) {
-      task.status = "cancelled";
-    }
-
-    const traceLogs: DispatchTraceLogRecord[] = [];
-    if (
-      order.dispatchSemantics === "reservation" &&
-      ["requested", "redispatch_queue"].includes(order.reservationHoldStatus)
-    ) {
-      this.transitionReservationHold(order, "released");
-      order.reservationHoldExpiresAt = now;
-      traceLogs.push(
-        this.appendTrace(order.orderId, "reservation.hold.released", {
-          reservationHoldId: order.reservationHoldId,
-          reason: "order_cancelled",
-        }),
-      );
-    }
-    traceLogs.push(
-      this.appendTrace(order.orderId, "order.cancelled", {
-        reason: order.cancelReason,
-      }),
-    );
-
-    this.persistChanges(
-      {
-        orders: [order],
-        ...(dispatchJob ? { dispatchJobs: [dispatchJob] } : {}),
-        ...(task ? { driverTasks: [task] } : {}),
-        dispatchTraceLogs: traceLogs,
-      },
-      "cancel_owned_order",
-    );
-    if (assignment) {
-      if (this.ownedMobilityRepository?.isEnabled()) {
-        // SD §7.6: persist the cancelled assignment and release its shared
-        // reservation in the same transaction -- a crash between two
-        // separately-committed writes would otherwise strand a
-        // held/occupied reservation with no expiry and no path back to
-        // "released".
-        await this.ownedMobilityRepository.withTransaction(async (tx) => {
-          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
-            dispatchAssignments: [assignment],
-          });
-          await this.ownedMobilityRepository!.releaseDispatchResourceReservations(
-            assignment.assignmentId,
-            tx,
-          );
-        });
-      } else {
-        this.persistChanges(
-          { dispatchAssignments: [assignment] },
-          "cancel_owned_order_assignment",
-        );
+    const prepare = (bundle: {
+      order: OwnedOrderRecord;
+      assignment: DispatchAssignmentRecord | null | undefined;
+      task: DriverTaskRecord | null;
+      dispatchJobs: DispatchJobRecord[];
+    }) => {
+      const order = this.cloneOrder(bundle.order);
+      this.assertOrderCancelable(order);
+      const assignment = bundle.assignment ? { ...bundle.assignment } : null;
+      const task = bundle.task ? this.cloneTask(bundle.task) : null;
+      if (task) this.assertDriverTaskTransition(task, "cancelled");
+      order.status = "cancelled";
+      order.cancelledAt = now;
+      order.cancelReason = this.normalizeNullableText(command.reason);
+      order.updatedAt = now;
+      if (assignment) {
+        assignment.status = "cancelled";
+        assignment.updatedAt = now;
       }
-    }
+      if (task) task.status = "cancelled";
+      const dispatchJobs = bundle.dispatchJobs.map(job => ({
+        ...job, status: "closed" as const, updatedAt: now,
+      }));
+      const traceLogs: DispatchTraceLogRecord[] = [];
+      if (order.dispatchSemantics === "reservation" &&
+          ["requested", "redispatch_queue"].includes(order.reservationHoldStatus)) {
+        this.transitionReservationHold(order, "released");
+        order.reservationHoldExpiresAt = now;
+        traceLogs.push(this.buildTraceLog(orderId, "reservation.hold.released", {
+          reservationHoldId: order.reservationHoldId, reason: "order_cancelled",
+        }));
+      }
+      traceLogs.push(this.buildTraceLog(orderId, "order.cancelled", { reason: order.cancelReason }));
+      return { order, assignment, task, dispatchJobs, traceLogs };
+    };
+    const repository = this.ownedMobilityRepository;
+    const committed = repository?.isEnabled()
+      ? await repository.withTransaction(async tx => {
+          const prepared = prepare(await repository.loadOrderCancellationForUpdate(tx, orderId));
+          await repository.persistOrderWorkflow(tx, {
+            orders: [prepared.order],
+            dispatchJobs: prepared.dispatchJobs,
+            dispatchAssignments: prepared.assignment ? [prepared.assignment] : [],
+            driverTasks: prepared.task ? [prepared.task] : [],
+            dispatchTraceLogs: prepared.traceLogs,
+          });
+          if (prepared.assignment) {
+            await repository.releaseDispatchResourceReservations(prepared.assignment.assignmentId, tx);
+          }
+          return prepared;
+        })
+      : prepare({
+          order: this.requireOrder(orderId),
+          assignment: this.findLatestActiveAssignment(orderId),
+          task: this.findLatestActiveAssignment(orderId)
+            ? this.findTaskByAssignmentId(this.findLatestActiveAssignment(orderId)!.assignmentId) : null,
+          dispatchJobs: this.dispatchJobs.filter(job => job.orderId === orderId && job.status !== "closed"),
+        });
+    const { order, assignment, task, dispatchJobs, traceLogs } = committed;
+    this.applyAuthoritativeOrder(order);
+    if (assignment) this.dispatchAssignments = this.dispatchAssignments.map(item =>
+      item.assignmentId === assignment.assignmentId ? assignment : item);
+    if (task) this.driverTasks = this.driverTasks.map(item => item.taskId === task.taskId ? task : item);
+    for (const job of dispatchJobs) this.dispatchJobs = this.dispatchJobs.map(item =>
+      item.dispatchJobId === job.dispatchJobId ? job : item);
+    this.dispatchTraceLogs = [...traceLogs, ...this.dispatchTraceLogs];
     this.recordAudit(
       {
         actorId: null,
