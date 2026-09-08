@@ -1,6 +1,6 @@
 # SR-ENV-COPY-001 — partial implementation and scope blocker
 
-Owner: Codex. Reviewer: Gemini. Updated: 2026-09-08.
+Owner: Codex. Reviewer: Codex2. Updated: 2026-09-08.
 
 ## Reproduction and commit evidence
 
@@ -51,3 +51,28 @@ No live deployment, browser screenshots, E2E, or device validation performed. No
 - `rg -n 'availableActions|read-side projection' apps/enterprise-dispatch-web/lib/translations.ts` exited 0 and returned only the two locale copies of the internal translation key `card.sub.availableActions`; no matching display value remains in this catalog.
 - `git diff --check` exited 0; `pnpm --filter @drts/enterprise-dispatch-web typecheck` exited 0; `pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/sr-env-copy-001.test.ts` exited 0, 7 tests passed. Other five app typechecks and the known failing legacy badge test were not repeated in this dispatch because their implementation did not change.
 - Supervisor has not expanded write scopes or dependencies. Runtime app wiring and the contradictory out-of-scope test remain blocked as listed above. Ops/tenant technical copy still needs cleanup. No live/browser/device validation or business resource changes in this dispatch; PR resource remains #1738. Acceptance is incomplete.
+
+## Follow-up dispatch, 2026-09-08 13:47 UTC
+
+- Fresh fetched base SHA: `6f4ac8c74ae3618b6109efd010014365a85d36d8`.
+- Tested implementation anchor SHA: `291f6ff3d150e128d080ef5efaf5fe0a2dee07bc`. Candidate SHA: none; acceptance remains incomplete and no handoff was attempted.
+- `git fetch origin` exited 0. Rebase initially exited 1 while replaying duplicate historical task commits; aborted (exit 0), inspected ancestry and retried. `git rebase --skip` skipped the duplicate add/add patch while retaining the already replayed production-signal correction; rebase completed, exit 0. `git merge --no-edit origin/codex/sr-env-copy-001` exited 0 to retain published ancestry, with no content conflicts. Ordinary `git push -u origin codex/sr-env-copy-001` exited 0 (`48448964e..291f6ff3d`). No force push.
+- Correction to any impression of prior integration: current origin/dev still contains the ActionIntent display copy; the fixes are on the task branch, not merged into this base. Existing branch work is reused.
+- Read Tenant Console canvas and realm tokens; changed three tenant translation values (English reason label and bilingual unavailable description). Keys, interpolation, layout, and styling are unchanged.
+- Fresh render scan additionally found `apps/fleet-partner-portal-web/components/fleet-portal-shell.tsx:36` hardcoding `env="production"`; bank uses `BANK_CONSOLE_ENV` from `apps/bank-console-web/lib/navigation.ts:8`, hardcoded `preview`, via `components/bank-shell.tsx:137`. These are not runtime-authoritative either. Supervisor must expand shell/configuration scopes and add dependencies with their owners before runtime integration. Existing ops/admin/tenant wiring blockers and the out-of-scope legacy test remain. Remaining ops/tenant engineering copy also needs further work within the existing catalogs.
+
+Fresh commands on the tested anchor:
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `git diff --check` | 0 | clean |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/sr-env-copy-001.test.ts` | 0 | 7 passed |
+| `pnpm --filter @drts/ui-web exec vitest run tests/unit/environment-badge.test.ts` | 1 | 5 passed, 1 failed: line 32 expects production for NODE_ENV alone, actual unknown |
+| `pnpm --filter @drts/bank-console-web typecheck` | 0 | passed |
+| `pnpm --filter @drts/enterprise-dispatch-web typecheck` | 0 | passed |
+| `pnpm --filter @drts/fleet-partner-portal-web typecheck` | 0 | passed |
+| `pnpm --filter @drts/ops-console-web typecheck` | 0 | passed |
+| `pnpm --filter @drts/platform-admin-web typecheck` | 0 | passed |
+| `pnpm --filter @drts/tenant-console-web typecheck` | 0 | passed |
+
+Resource IDs: task SR-ENV-COPY-001, finding R27, capability C110, existing PR #1738 (not revalidated remotely in this dispatch). No live/API business resources were created or modified. Browser, live deployment, device checks, fresh CI, independent review, and merge verification were not performed; no success claimed for them. Evidence-only commit after this tested anchor is recorded in task machine truth.
