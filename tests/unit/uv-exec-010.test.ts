@@ -200,14 +200,11 @@ class EvidenceFixture {
     return this.eventsBySession.get(voiceSessionId) ?? [];
   }
 
-  findLatest(
-    callId: string,
-    recordingId: string | null,
-  ): VoiceRecordingCheckpointRecord | null {
+  findLatest(callId: string): VoiceRecordingCheckpointRecord | null {
+    // Matches the real VoiceBookingRepository.findLatestRecordingCheckpointForCall:
+    // keyed by call_id alone, ordered by manifest_version DESC (see V0086).
     const rows = this.checkpoints.filter(
-      (checkpoint) =>
-        checkpoint.callId === callId &&
-        (checkpoint.recordingId ?? null) === (recordingId ?? null),
+      (checkpoint) => checkpoint.callId === callId,
     );
     if (rows.length === 0) return null;
     return rows.reduce((a, b) => (a.manifestVersion > b.manifestVersion ? a : b));
@@ -275,9 +272,8 @@ function asBookingRepository(fixture: EvidenceFixture): VoiceBookingRepository {
     listSessionEvents: vi.fn(async (voiceSessionId: string) =>
       fixture.listSessionEvents(voiceSessionId),
     ),
-    findLatestRecordingCheckpointForCall: vi.fn(
-      async (callId: string, recordingId: string | null) =>
-        fixture.findLatest(callId, recordingId),
+    findLatestRecordingCheckpointForCall: vi.fn(async (callId: string) =>
+      fixture.findLatest(callId),
     ),
   };
   return fake as unknown as VoiceBookingRepository;
