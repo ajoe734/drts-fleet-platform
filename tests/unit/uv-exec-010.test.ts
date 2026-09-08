@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ImmutableRecordingManifests } from "../../apps/voice-media-worker/src/recording/immutable-manifest";
 import {
   SealedRecorder,
   assertBidirectionalCoverage,
@@ -188,14 +189,100 @@ describe("UV-EXEC-010 sealed recorder", () => {
 
   it("does not allow metadata mutation to bless corrupt asynchronous readback", async () => {
     const f = fixture();
-    const segment = { ...await f.recorder.seal("authenticated", f.input) };
-    let complete!: (value: { bytes: Uint8Array; objectVersion: string }) => void;
+    const segment = { ...(await f.recorder.seal("authenticated", f.input)) };
+    let complete!: (value: {
+      bytes: Uint8Array;
+      objectVersion: string;
+    }) => void;
     vi.mocked(f.store.readVersion).mockImplementationOnce(
-      () => new Promise((resolve) => { complete = resolve; }),
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
     );
     const pending = verifyRecordedObject(f.store, scope, segment);
     segment.objectVersion = "v2";
     complete({ bytes: new Uint8Array([1, 2, 3]), objectVersion: "v2" });
     await expect(pending).rejects.toThrow("Object version mismatch");
+  });
+});
+
+describe("UV-EXEC-010 immutable manifest storage", () => {
+  async function manifestFixture() {
+    const f = fixture();
+    const inbound = await f.recorder.seal("authenticated", f.input);
+    const outbound = await f.recorder.seal("authenticated", {
+      ...f.input,
+      channel: "outbound",
+    });
+    const manifests = new ImmutableRecordingManifests(f.store);
+    const input = {
+      schemaVersion: 1 as const,
+      scope: { ...scope },
+      startMs: 0,
+      endMs: 1000,
+      segments: [inbound, outbound],
+    };
+    return { ...f, manifests, input };
+  }
+
+  it("retrieves an immutable manifest and rechecks its actual audio", async () => {
+    const f = await manifestFixture();
+    const ref = await f.manifests.seal(f.input);
+    const read = await f.manifests.read(scope, ref);
+    expect(read).toEqual(f.input);
+    expect(Object.isFrozen(read)).toBe(true);
+    expect(Object.isFrozen(read.scope)).toBe(true);
+    expect(Object.isFrozen(read.segments)).toBe(true);
+    expect(Object.isFrozen(read.segments[0])).toBe(true);
+    f.objects.delete(f.input.segments[0]!.objectKey);
+    await expect(f.manifests.read(scope, ref)).rejects.toThrow(
+      "Recording object unreadable",
+    );
+  });
+
+  it("snapshots the manifest before awaiting audio validation", async () => {
+    const f = await manifestFixture();
+    const pending = f.manifests.seal(f.input);
+    f.input.scope.callId = "other";
+    f.input.segments.pop();
+    const ref = await pending;
+    const read = await f.manifests.read(scope, ref);
+    expect(read.scope.callId).toBe("call");
+    expect(read.segments).toHaveLength(2);
+  });
+
+  it.each(["manifest", "audio", "scope", "version"])(
+    "rejects %s tampering on retrieval",
+    async (failure) => {
+      const f = await manifestFixture();
+      const ref = await f.manifests.seal(f.input);
+      if (failure === "manifest")
+        f.objects.set(ref.objectKey, new Uint8Array([1]));
+      if (failure === "audio")
+        f.objects.set(
+          f.input.segments[0]!.objectKey,
+          new Uint8Array([9, 9, 9]),
+        );
+      if (failure === "version")
+        vi.mocked(f.store.readVersion).mockResolvedValueOnce({
+          bytes: f.objects.get(ref.objectKey)!,
+          objectVersion: "other",
+        });
+      await expect(
+        f.manifests.read(
+          failure === "scope" ? { ...scope, brandId: "other" } : scope,
+          ref,
+        ),
+      ).rejects.toMatchObject({ code: "VOICE_RECORDING_NOT_DURABLE" });
+    },
+  );
+
+  it("does not store a manifest with missing outbound coverage", async () => {
+    const f = await manifestFixture();
+    f.input.segments.pop();
+    vi.mocked(f.store.putImmutable).mockClear();
+    await expect(f.manifests.seal(f.input)).rejects.toThrow("Missing outbound");
+    expect(f.store.putImmutable).not.toHaveBeenCalled();
   });
 });
