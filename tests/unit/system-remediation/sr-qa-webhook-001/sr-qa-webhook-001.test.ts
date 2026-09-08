@@ -2,7 +2,15 @@ import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
 import http from "node:http";
 import { type AddressInfo } from "node:net";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -118,7 +126,13 @@ function verifyHmacSignature(
 ) {
   const match = /^v=(\d+);t=([^;]+);sig=([0-9a-f]+)$/.exec(headerValue);
   if (!match) {
-    return { valid: false, version: 0, timestamp: "", signature: "", expectedSig: "" };
+    return {
+      valid: false,
+      version: 0,
+      timestamp: "",
+      signature: "",
+      expectedSig: "",
+    };
   }
   const [, vStr, timestamp, signature] = match;
   const version = parseInt(vStr!, 10);
@@ -200,8 +214,12 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       const record = keys.find((k) => k.apiKeyId === issued.apiKey.apiKeyId)!;
       expect(record.keyPrefix).toBe(issued.plaintextKey.slice(0, 12));
       expect(record.maskedSuffix).toBe(`****${issued.plaintextKey.slice(-4)}`);
-      expect((record as unknown as Record<string, unknown>).plaintextKey).toBeUndefined();
-      expect((record as unknown as Record<string, unknown>).keyHash).toBeUndefined();
+      expect(
+        (record as unknown as Record<string, unknown>).plaintextKey,
+      ).toBeUndefined();
+      expect(
+        (record as unknown as Record<string, unknown>).keyHash,
+      ).toBeUndefined();
     });
 
     it("C111-3 (Normal & Negative): Enforces default 60-day expiry and rejects expiry exceeding 90 days", () => {
@@ -241,10 +259,14 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
 
       // Rotate after 2 days with a 7-day overlap window
       vi.setSystemTime(new Date("2026-08-03T00:00:00.000Z"));
-      const rotated = service.rotateApiKey("tenant-demo-001", first.apiKey.apiKeyId, {
-        keyName: "Rotated Primary Key v2",
-        overlapDays: 7,
-      });
+      const rotated = service.rotateApiKey(
+        "tenant-demo-001",
+        first.apiKey.apiKeyId,
+        {
+          keyName: "Rotated Primary Key v2",
+          overlapDays: 7,
+        },
+      );
 
       // New key is active
       expect(rotated.apiKey.status).toBe("active");
@@ -277,7 +299,9 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
 
       // Reconcile and inspect
       const keys = service.listApiKeys("tenant-demo-001");
-      const reconciledOldKey = keys.find((k) => k.apiKeyId === original.apiKey.apiKeyId)!;
+      const reconciledOldKey = keys.find(
+        (k) => k.apiKeyId === original.apiKey.apiKeyId,
+      )!;
       expect(reconciledOldKey.status).toBe("auto_revoked");
       expect(reconciledOldKey.revokeReason).toBe("rotation_overlap_elapsed");
     });
@@ -292,10 +316,16 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       });
 
       // Immediate revocation
-      service.revokeApiKey("tenant-demo-001", issued.apiKey.apiKeyId, "req-revoke-001");
+      service.revokeApiKey(
+        "tenant-demo-001",
+        issued.apiKey.apiKeyId,
+        "req-revoke-001",
+      );
 
       const keys = service.listApiKeys("tenant-demo-001");
-      const revokedKey = keys.find((k) => k.apiKeyId === issued.apiKey.apiKeyId)!;
+      const revokedKey = keys.find(
+        (k) => k.apiKeyId === issued.apiKey.apiKeyId,
+      )!;
       expect(revokedKey.status).toBe("revoked");
       expect(revokedKey.revokedAt).not.toBeNull();
       expect(revokedKey.revokeReason).toBe("manual_revoke");
@@ -356,12 +386,18 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(req.method).toBe("POST");
       expect(req.headers["x-drts-event-type"]).toBe("tenant.webhook.test");
       expect(req.headers["x-drts-tenant-id"]).toBe("tenant-demo-001");
-      expect(req.headers["x-drts-webhook-delivery-id"]).toBe(testResult.deliveryId);
+      expect(req.headers["x-drts-webhook-delivery-id"]).toBe(
+        testResult.deliveryId,
+      );
 
       // Check HMAC signature calculation
       const sigHeader = req.headers["x-drts-webhook-signature"] as string;
       expect(sigHeader).toBeDefined();
-      const sigVerification = verifyHmacSignature(sigHeader, req.rawBody, sharedSecret);
+      const sigVerification = verifyHmacSignature(
+        sigHeader,
+        req.rawBody,
+        sharedSecret,
+      );
       expect(sigVerification.valid).toBe(true);
       expect(sigVerification.version).toBe(1);
 
@@ -401,7 +437,10 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(result.nextAttemptAt).not.toBeNull();
 
       // Verify delivery record in service is queued
-      const deliveries = service.listWebhookDeliveriesByWebhook("tenant-demo-001", created.webhookId);
+      const deliveries = service.listWebhookDeliveriesByWebhook(
+        "tenant-demo-001",
+        created.webhookId,
+      );
       expect(deliveries.length).toBeGreaterThanOrEqual(1);
       const delivery = deliveries[0]!;
       expect(delivery.status).toBe("queued");
@@ -414,7 +453,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(delaySec).toBe(30);
     });
 
-    it("C112-3 (Negative): Handles network timeout / connection drop gracefully without throwing uncaught error", async () => {
+    it("C112-3 (Negative): Handles connection drop gracefully without throwing uncaught error", async () => {
       receiver.setHandler((_req, res) => {
         // Destroy connection immediately to simulate socket drop / ECONNRESET
         res.destroy();
@@ -444,15 +483,65 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(result.attempt).toBe(1);
       expect(result.nextAttemptAt).not.toBeNull();
 
-      const deliveries = service.listWebhookDeliveriesByWebhook("tenant-demo-001", created.webhookId);
+      const deliveries = service.listWebhookDeliveriesByWebhook(
+        "tenant-demo-001",
+        created.webhookId,
+      );
       expect(deliveries[0]!.status).toBe("queued");
+    });
+
+    it("C112-timeout: real fetch deadline queues a stalled receiver delivery and reads it back", async () => {
+      receiver.setHandler(() => {
+        // Keep the TCP connection open without sending response headers.
+      });
+      const service = new TenantPartnerService(
+        new AuditNotificationService(),
+        undefined,
+        new WebhookDispatchService((url, init) =>
+          fetch(url, { ...init, signal: AbortSignal.timeout(100) }),
+        ),
+        [],
+      );
+      const endpoint = service.createWebhookEndpoint("tenant-demo-001", {
+        url: receiver.url,
+        secret: "whsec_controlled_timeout",
+        events: ["tenant.webhook.test"],
+      });
+      try {
+        const result = await service.sendTestWebhook("tenant-demo-001", {
+          webhookId: endpoint.webhookId,
+        });
+        expect(receiver.requests).toHaveLength(1);
+        expect(result.httpStatus).toBeNull();
+        const deliveries = service.listWebhookDeliveriesByWebhook(
+          "tenant-demo-001",
+          endpoint.webhookId,
+        );
+        expect(deliveries).toHaveLength(1);
+        expect(deliveries[0]!.status).toBe("queued");
+        expect(deliveries[0]!.nextAttemptAt).not.toBeNull();
+        process.stdout.write(
+          "SR-QA-WEBHOOK-001 timeout resources " +
+            JSON.stringify({
+              tenantId: "tenant-demo-001",
+              webhookId: endpoint.webhookId,
+              deliveryId: deliveries[0]!.deliveryId,
+              transport: "real fetch with test-injected 100ms deadline",
+            }) +
+            "\n",
+        );
+      } finally {
+        receiver.server.closeAllConnections();
+      }
     });
 
     it("C112-4 (Negative): Auto-disables endpoint after non-retryable response / delivery failure", async () => {
       receiver.setHandler((_req, res) => {
         // 400 Bad Request is non-retryable in retryPolicy.retryableStatusCodes ([408, 429, 500, 502, 503, 504])
         res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: "Permanent Non-Retryable Client Error" }));
+        res.end(
+          JSON.stringify({ error: "Permanent Non-Retryable Client Error" }),
+        );
       });
 
       const auditNotificationService = new AuditNotificationService();
@@ -477,13 +566,18 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       // Verify endpoint is auto-disabled
       const [updatedEndpoint] = service.listWebhookEndpoints("tenant-demo-001");
       expect(updatedEndpoint.status).toBe("disabled");
-      expect(updatedEndpoint.runtimeMetadata.disableReason).toBe("delivery_failed");
+      expect(updatedEndpoint.runtimeMetadata.disableReason).toBe(
+        "delivery_failed",
+      );
       expect(updatedEndpoint.runtimeMetadata.disabledAt).not.toBeNull();
 
       // Verify ops notice notification recorded in audit notification service
-      const notices = auditNotificationService.listNotifications("tenant-demo-001");
+      const notices =
+        auditNotificationService.listNotifications("tenant-demo-001");
       const disabledNotice = notices.find((n) =>
-        n.title.includes("Tenant webhook disabled after repeated delivery failures"),
+        n.title.includes(
+          "Tenant webhook disabled after repeated delivery failures",
+        ),
       );
       expect(disabledNotice).toBeDefined();
     });
@@ -624,11 +718,14 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       });
 
       // Check endpoint reverted to test_pending and secret history has no plaintext
-      const [endpointAfterRotation] = service.listWebhookEndpoints("tenant-demo-001");
+      const [endpointAfterRotation] =
+        service.listWebhookEndpoints("tenant-demo-001");
       expect(endpointAfterRotation.status).toBe("test_pending");
       expect(endpointAfterRotation.secretVersion).toBe(2);
       for (const hist of endpointAfterRotation.secretHistory) {
-        expect((hist as unknown as Record<string, unknown>).secretValue).toBeUndefined();
+        expect(
+          (hist as unknown as Record<string, unknown>).secretValue,
+        ).toBeUndefined();
       }
 
       // Validate v2
@@ -671,7 +768,9 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       });
 
       // Activate endpoint first
-      await service.sendTestWebhook("tenant-demo-001", { webhookId: endpoint.webhookId });
+      await service.sendTestWebhook("tenant-demo-001", {
+        webhookId: endpoint.webhookId,
+      });
       receiver.requests.length = 0;
 
       // Publish with an outboxKey
@@ -705,9 +804,12 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
   describe("C113: ERP & Bank Ledger Settlement Matrix (External Gate Verification)", () => {
     it("C113-1 (Normal): Retrieves settlement statement records and verifies financial data structure", async () => {
       const auditNotificationService = new AuditNotificationService();
-      const billingService = new BillingSettlementService(auditNotificationService);
+      const billingService = new BillingSettlementService(
+        auditNotificationService,
+      );
 
-      const statements = await billingService.listTenantSettlementStatements("tenant-demo-001");
+      const statements =
+        await billingService.listTenantSettlementStatements("tenant-demo-001");
       expect(statements.length).toBeGreaterThanOrEqual(1);
 
       const statement = statements[0]!;
@@ -716,15 +818,22 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(statement.periodStart).toBeDefined();
       expect(statement.periodEnd).toBeDefined();
       expect(statement.totals.fareTotal.amountMinor).toBeGreaterThanOrEqual(0);
-      expect(Date.parse(statement.periodStart)).toBeLessThanOrEqual(Date.parse(statement.periodEnd));
+      expect(Date.parse(statement.periodStart)).toBeLessThanOrEqual(
+        Date.parse(statement.periodEnd),
+      );
     });
 
     it("C113-2 (Negative): Querying invalid settlement statement period throws VALIDATION_ERROR", async () => {
       const auditNotificationService = new AuditNotificationService();
-      const billingService = new BillingSettlementService(auditNotificationService);
+      const billingService = new BillingSettlementService(
+        auditNotificationService,
+      );
 
       try {
-        await billingService.getTenantSettlementStatement("tenant-demo-001", "invalid-period");
+        await billingService.getTenantSettlementStatement(
+          "tenant-demo-001",
+          "invalid-period",
+        );
         expect.unreachable();
       } catch (err: any) {
         const code = err?.errorCode ?? err?.getResponse?.()?.error?.code;
@@ -737,12 +846,15 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         externalGateId: "GATE-C113-ERP-SSO-BANK",
         bankingH2H: "Dedicated MPLS leased line / SWIFT MT940 statement sync",
         enterpriseSso: "SAML 2.0 / OIDC IdP federation with Azure AD / Okta",
-        simulatedEnvironment: "dev/demo in-memory read models and seeded bank statements",
+        simulatedEnvironment:
+          "dev/demo in-memory read models and seeded bank statements",
         status: "external_gate_pending_live_credentials",
       };
 
       expect(prerequisites.externalGateId).toBe("GATE-C113-ERP-SSO-BANK");
-      expect(prerequisites.status).toBe("external_gate_pending_live_credentials");
+      expect(prerequisites.status).toBe(
+        "external_gate_pending_live_credentials",
+      );
     });
   });
 
@@ -786,8 +898,14 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
     it("C114-3 (External Gate Declaration): Documents Google Maps Platform API key and quota prerequisites", () => {
       const prerequisites = {
         externalGateId: "GATE-C114-GOOGLE-MAPS",
-        requiredServices: ["Geocoding API", "Directions API", "Distance Matrix API", "Maps JavaScript API"],
-        taiwanAddressQuota: "Requires production Google Cloud Billing account and restricted API key",
+        requiredServices: [
+          "Geocoding API",
+          "Directions API",
+          "Distance Matrix API",
+          "Maps JavaScript API",
+        ],
+        taiwanAddressQuota:
+          "Requires production Google Cloud Billing account and restricted API key",
         status: "external_gate_mock_verified",
       };
 
@@ -803,8 +921,12 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
     function createMobilityAndCallServices() {
       const auditService = new AuditNotificationService();
       const callcenterService = new CallcenterService(auditService);
-      const sandboxWebhookAdapter = new SandboxWebhookAdapter(callcenterService);
-      const opsDispatchEventsService = new OpsDispatchEventsService(new EventEmitter() as never);
+      const sandboxWebhookAdapter = new SandboxWebhookAdapter(
+        callcenterService,
+      );
+      const opsDispatchEventsService = new OpsDispatchEventsService(
+        new EventEmitter() as never,
+      );
       const regulatoryRegistryService = new RegulatoryRegistryService(
         opsDispatchEventsService,
         auditService,
@@ -833,7 +955,10 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
 
       sandboxWebhookAdapter.ingest(sandboxFixtures.callStarted, "req-start");
       sandboxWebhookAdapter.ingest(sandboxFixtures.callEnded, "req-end");
-      sandboxWebhookAdapter.ingest(sandboxFixtures.recordingPending, "req-recording-pending");
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingPending,
+        "req-recording-pending",
+      );
 
       const order = await ownedMobilityService.createCallCenterOrder({
         callId: sandboxFixtures.callStarted.provider_call_id,
@@ -850,19 +975,28 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(order.complianceFlags).toContain("recording_pending");
 
       // Ingest recording.ready
-      sandboxWebhookAdapter.ingest(sandboxFixtures.recordingReady, "req-recording-ready");
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingReady,
+        "req-recording-ready",
+      );
 
       const readyOrder = ownedMobilityService.getOrder(order.orderId);
       expect(readyOrder.status).toBe("ready_for_dispatch");
-      expect(readyOrder.recordingId).toBe(sandboxFixtures.recordingReady.recording_id);
+      expect(readyOrder.recordingId).toBe(
+        sandboxFixtures.recordingReady.recording_id,
+      );
       expect(readyOrder.complianceFlags).toContain("recording_bound");
     });
 
     it("C115-2 (Negative): Ingesting recording.failed callback flags order as recording_missing", async () => {
-      const { ownedMobilityService, sandboxWebhookAdapter } = createMobilityAndCallServices();
+      const { ownedMobilityService, sandboxWebhookAdapter } =
+        createMobilityAndCallServices();
 
       sandboxWebhookAdapter.ingest(sandboxFixtures.callStarted, "req-start");
-      sandboxWebhookAdapter.ingest(sandboxFixtures.recordingPending, "req-pending");
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingPending,
+        "req-pending",
+      );
 
       const order = await ownedMobilityService.createCallCenterOrder({
         callId: sandboxFixtures.callStarted.provider_call_id,
@@ -875,7 +1009,10 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         dropoff: { address: "台中市大安區興安路378號" },
       });
 
-      sandboxWebhookAdapter.ingest(sandboxFixtures.recordingFailed, "req-recording-failed");
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.recordingFailed,
+        "req-recording-failed",
+      );
 
       const failedOrder = ownedMobilityService.getOrder(order.orderId);
       expect(failedOrder.status).toBe("recording_pending");
@@ -886,13 +1023,17 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
     it("C115-3 (Live Limitation Declaration): Documents live CTI telephony and Cloud Run persistent scheduler", () => {
       const liveLimitation = {
         limitationId: "LIMITATION-C115-CTI-CRON",
-        telephonyCarrier: "Requires physical SIP trunking / PBX hardware for carrier audio ingestion",
-        persistentTimer: "Cloud Run containers scale to zero; requires Cloud Scheduler / Cloud Tasks for durable cron",
+        telephonyCarrier:
+          "Requires physical SIP trunking / PBX hardware for carrier audio ingestion",
+        persistentTimer:
+          "Cloud Run containers scale to zero; requires Cloud Scheduler / Cloud Tasks for durable cron",
         status: "adapter_tested_live_infrastructure_deferred",
       };
 
       expect(liveLimitation.limitationId).toBe("LIMITATION-C115-CTI-CRON");
-      expect(liveLimitation.status).toBe("adapter_tested_live_infrastructure_deferred");
+      expect(liveLimitation.status).toBe(
+        "adapter_tested_live_infrastructure_deferred",
+      );
     });
   });
 });
