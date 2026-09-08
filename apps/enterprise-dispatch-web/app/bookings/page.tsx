@@ -1,22 +1,19 @@
 "use client";
 
-import type { BookingRecord } from "@drts/contracts";
-import { ApiClientError } from "@drts/api-client";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import {
-  EBtnContent,
-  ECard,
-  EIcon,
-  EPill,
-  entBtnStyle,
-  type EntTone,
-} from "@/components/ent-kit";
-import { EntPageHead } from "@/components/enterprise-shell";
-import { getEnterpriseDispatchTenantClient } from "@/lib/api-client";
-import { enterpriseTenant, enterpriseUser } from "@/lib/enterprise-fixtures";
-import { enterpriseTheme as t } from "@/lib/enterprise-theme";
-import { useTranslation } from "@/lib/i18n";
+import type { BookingRecord } from "@drts/contracts";
+import { enterpriseTenant, enterpriseUser } from "../../lib/enterprise-fixtures";
+import { enterpriseTheme as t, type EntTheme } from "../../lib/enterprise-theme";
+import { t as translate, type TranslationKey } from "../../lib/translations";
+
+const h = React.createElement;
 
 export type GatewayState = "quota-blocked" | "no-supply" | "degraded";
 
@@ -31,6 +28,15 @@ export type EnterpriseBookingStatusFilter =
   | "completed"
   | "cancelled"
   | "nosupply";
+
+export interface EnterpriseUserIdentity {
+  id?: string | null;
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}
+
+export type EnterpriseCurrentUser = string | EnterpriseUserIdentity;
 
 export interface EnterpriseBookingFilterCriteria {
   scope: EnterpriseSearchScope;
@@ -51,18 +57,21 @@ export const DEFAULT_BOOKING_FILTER_CRITERIA: EnterpriseBookingFilterCriteria = 
 };
 
 export function gatewayHref(error: unknown): string | null {
-  if (!(error instanceof ApiClientError)) return "/degraded";
-  const code = (error.code ?? "").toLowerCase();
+  if (!error || typeof error !== "object") return "/degraded";
+  const err = error as { code?: string; statusCode?: number; name?: string };
+  const code = (err.code ?? "").toLowerCase();
   if (code.includes("quota") || code.includes("policy")) return "/quota-blocked";
   if (code.includes("supply") || code.includes("vehicle_unavailable"))
     return "/no-supply";
-  return error.statusCode >= 500 ? "/degraded" : null;
+  return typeof err.statusCode === "number" && err.statusCode >= 500
+    ? "/degraded"
+    : err.name === "ApiClientError" ? null : "/degraded";
 }
 
 export function getBookingStateMeta(record: BookingRecord): {
   key: EnterpriseBookingStatusFilter;
   label: string;
-  tone: EntTone;
+  tone: "neutral" | "primary" | "success" | "warn" | "danger" | "info";
 } {
   if (record.status === "cancelled" || record.orderStatus === "cancelled") {
     return { key: "cancelled", label: "已取消", tone: "neutral" };
@@ -105,6 +114,62 @@ export function getBookingStateMeta(record: BookingRecord): {
   };
 }
 
+export function isSamePassenger(
+  passenger: BookingRecord["passenger"] | null | undefined,
+  user: EnterpriseCurrentUser | null | undefined,
+): boolean {
+  if (!passenger || !user) return false;
+  if (typeof user === "string") {
+    const u = user.trim().toLowerCase();
+    if (!u) return false;
+    if (passenger.passengerId && passenger.passengerId.toLowerCase() === u) {
+      return true;
+    }
+    if (passenger.phone && passenger.phone.toLowerCase() === u) {
+      return true;
+    }
+    return Boolean(passenger.name && passenger.name.toLowerCase() === u);
+  }
+
+  // Object identity:
+  // 1. If both have an ID, comparing IDs is authoritative and overrides name
+  if (user.id && passenger.passengerId) {
+    return user.id === passenger.passengerId;
+  }
+  // 2. Check phone if both available
+  if (user.phone && passenger.phone) {
+    return user.phone === passenger.phone;
+  }
+  // 3. Compare name only when neither ID nor phone is present to disambiguate
+  if (user.name && passenger.name) {
+    return user.name === passenger.name;
+  }
+  return false;
+}
+
+export function isSameBookedBy(
+  bookedBy: BookingRecord["bookedBy"] | null | undefined,
+  user: EnterpriseCurrentUser | null | undefined,
+): boolean {
+  if (!bookedBy || !user) return false;
+  if (typeof user === "string") {
+    const u = user.trim().toLowerCase();
+    if (!u) return false;
+    if (bookedBy.email && bookedBy.email.toLowerCase() === u) {
+      return true;
+    }
+    return Boolean(bookedBy.name && bookedBy.name.toLowerCase() === u);
+  }
+
+  if (user.email && bookedBy.email) {
+    return user.email.toLowerCase() === bookedBy.email.toLowerCase();
+  }
+  if (user.name && bookedBy.name) {
+    return user.name === bookedBy.name;
+  }
+  return false;
+}
+
 export function matchesBookingSearch(
   record: BookingRecord,
   query: string,
@@ -129,6 +194,24 @@ export function matchesBookingSearch(
   return haystack.includes(needle);
 }
 
+function parseLocalDateStart(dateStr: string): number {
+  const parts = dateStr.split("-").map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return Number.NaN;
+  const y = parts[0]!;
+  const m = parts[1]!;
+  const d = parts[2]!;
+  return new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+}
+
+function parseLocalDateEnd(dateStr: string): number {
+  const parts = dateStr.split("-").map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return Number.NaN;
+  const y = parts[0]!;
+  const m = parts[1]!;
+  const d = parts[2]!;
+  return new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+}
+
 export function matchesBookingDateRange(
   record: BookingRecord,
   dateFrom: string,
@@ -145,12 +228,12 @@ export function matchesBookingDateRange(
   if (Number.isNaN(timestamp)) return false;
 
   if (dateFrom) {
-    const fromTime = new Date(`${dateFrom}T00:00:00Z`).getTime();
-    if (timestamp < fromTime) return false;
+    const fromTime = parseLocalDateStart(dateFrom);
+    if (!Number.isNaN(fromTime) && timestamp < fromTime) return false;
   }
   if (dateTo) {
-    const toTime = new Date(`${dateTo}T23:59:59.999Z`).getTime();
-    if (timestamp > toTime) return false;
+    const toTime = parseLocalDateEnd(dateTo);
+    if (!Number.isNaN(toTime) && timestamp > toTime) return false;
   }
   return true;
 }
@@ -170,20 +253,17 @@ export function hasActiveFilters(
 export function filterEnterpriseBookings(
   bookings: BookingRecord[],
   criteria: EnterpriseBookingFilterCriteria,
-  currentUser: string = enterpriseUser.name,
+  currentUser: EnterpriseCurrentUser = enterpriseUser.name,
 ): BookingRecord[] {
   return bookings
     .filter((record) => {
       // 1. Scope filter
       if (criteria.scope === "mine") {
-        if (record.passenger.name !== currentUser) return false;
+        if (!isSamePassenger(record.passenger, currentUser)) return false;
       } else if (criteria.scope === "byme") {
-        const isByMe = Boolean(
-          record.bookedBy &&
-            record.bookedBy.name === currentUser &&
-            record.passenger.name !== currentUser,
-        );
-        if (!isByMe) return false;
+        const isBookedByMe = isSameBookedBy(record.bookedBy, currentUser);
+        const isPassengerMe = isSamePassenger(record.passenger, currentUser);
+        if (!isBookedByMe || isPassengerMe) return false;
       }
 
       // 2. Status filter
@@ -266,6 +346,148 @@ export function formatBookingTime(isoString: string): string {
   }
 }
 
+const ENT_ICONS: Record<string, string> = {
+  car: "M3 13l2-5.5A2 2 0 017 6h10a2 2 0 011.9 1.5L21 13M5 13h14v4H5zM7 17v2M17 17v2",
+  cal: "M4 6h16v15H4zM4 10h16M8 3v4M16 3v4",
+  clock: "M12 7v5l3 2M12 21a9 9 0 100-18 9 9 0 000 18z",
+  pin: "M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11zM12 12a2 2 0 100-4 2 2 0 000 4z",
+  user: "M12 12a4 4 0 100-8 4 4 0 000 8zM5 21c0-4 3.2-6 7-6s7 2 7 6",
+  users: "M9 12a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM2.5 20c0-3.4 2.7-5 6.5-5s6.5 1.6 6.5 5M16 11a3 3 0 100-6M21.5 20c0-3-1.8-4.6-4.5-4.9",
+  arrow: "M5 12h14M12 5l7 7-7 7",
+  plus: "M12 5v14M5 12h14",
+  x: "M6 6l12 12M18 6L6 18",
+  search: "M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.35-4.35",
+  refresh: "M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15",
+  flag: "M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7",
+};
+
+export function entBtnStyle(
+  th: EntTheme,
+  opts: {
+    variant?: "primary" | "default" | "soft" | "ghost" | "danger";
+    size?: "xs" | "sm" | "md" | "lg";
+    disabled?: boolean;
+  } = {},
+): CSSProperties {
+  const { variant = "default", size = "md", disabled } = opts;
+  const pad =
+    size === "lg" ? "13px 24px" : size === "sm" ? "7px 13px" : "10px 18px";
+  const fs = size === "lg" ? 15 : size === "sm" ? 13 : 14;
+  let bg = th.surface;
+  let color = th.ink;
+  let border = "1px solid " + th.line;
+  let boxShadow = "none";
+  if (variant === "primary") {
+    bg = th.primary;
+    color = "#fff";
+    border = "1px solid " + th.primary;
+    boxShadow = th.dark ? "none" : "0 6px 16px -8px " + th.primary;
+  } else if (variant === "soft") {
+    bg = th.primaryBg;
+    color = th.primary;
+    border = "1px solid " + th.primaryBd;
+  }
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    padding: pad,
+    fontSize: fs,
+    fontFamily: th.sans,
+    fontWeight: 600,
+    borderRadius: th.radiusSm,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.5 : 1,
+    textDecoration: "none",
+    background: bg,
+    color,
+    border,
+    boxShadow,
+  };
+}
+
+function renderPill(
+  th: EntTheme,
+  label: string,
+  tone: "neutral" | "primary" | "success" | "warn" | "danger" | "info" = "neutral",
+  dot = true,
+) {
+  const TONES: Record<typeof tone, { fg: string; bg: string; bd: string }> = {
+    neutral: { fg: th.muted, bg: th.surfaceLo, bd: th.line },
+    primary: { fg: th.primary, bg: th.primaryBg, bd: th.primaryBd },
+    success: { fg: th.success, bg: th.successBg, bd: th.successBd },
+    warn: { fg: th.warn, bg: th.warnBg, bd: th.warnBd },
+    danger: { fg: th.danger, bg: th.dangerBg, bd: th.dangerBd },
+    info: { fg: th.info, bg: th.infoBg, bd: th.infoBd },
+  };
+  const m = TONES[tone];
+  return h(
+    "span",
+    {
+      style: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "3px 9px",
+        borderRadius: 999,
+        fontSize: 11.5,
+        fontWeight: 600,
+        background: m.bg,
+        color: m.fg,
+        border: "1px solid " + m.bd,
+        whiteSpace: "nowrap",
+      },
+    },
+    dot &&
+      h("span", {
+        style: {
+          width: 6,
+          height: 6,
+          borderRadius: 3,
+          background: m.fg,
+          flexShrink: 0,
+        },
+      }),
+    label,
+  );
+}
+
+function renderIcon(name: string, size = 16, style?: CSSProperties) {
+  const path = ENT_ICONS[name] || ENT_ICONS.car;
+  return h(
+    "svg",
+    {
+      width: size,
+      height: size,
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      strokeWidth: 2,
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      style: { flexShrink: 0, ...style },
+    },
+    h("path", { d: path }),
+  );
+}
+
+function renderCard(th: EntTheme, children: ReactNode, accent?: string) {
+  return h(
+    "div",
+    {
+      style: {
+        background: th.surface,
+        border: "1px solid " + (accent || th.line),
+        borderRadius: th.radius,
+        boxShadow: th.shadowSm,
+        overflow: "hidden",
+      },
+    },
+    children,
+  );
+}
+
 const SEARCH_COPY = {
   pageHeadSub: "前台歷史檢視 · 非派遣看板 · 支援組合搜尋與全域分頁",
   scopeAria: "預約對象篩選",
@@ -315,32 +537,47 @@ const SEARCH_COPY = {
 
 function errorContent(
   state: GatewayState,
-  tr: ReturnType<typeof useTranslation>["t"],
+  tr: (key: TranslationKey, params?: Record<string, string | number>) => string,
 ) {
   const href = `/${state}`;
-  return (
-    <ECard t={t} accent={state === "no-supply" ? t.danger : t.warn}>
-      <div data-testid="enterprise-booking-api-state">
-        <strong>
-          {state === "quota-blocked"
-            ? tr("gate.quotaBlocked.title")
-            : state === "no-supply"
-              ? tr("gate.noSupply.title")
-              : tr("gate.degraded.title")}
-        </strong>
-        <p style={{ color: t.muted, lineHeight: 1.6 }}>
-          {tr("bookingLifecycle.gateway.body")}
-        </p>
-        <Link href={href} style={entBtnStyle(t, { variant: "default" })}>
-          <EBtnContent>{tr("bookingLifecycle.gateway.action")}</EBtnContent>
-        </Link>
-      </div>
-    </ECard>
+  return renderCard(
+    t,
+    h(
+      "div",
+      {
+        "data-testid": "enterprise-booking-api-state",
+        style: { padding: 24 },
+      },
+      h(
+        "strong",
+        null,
+        state === "quota-blocked"
+          ? tr("gate.quotaBlocked.title")
+          : state === "no-supply"
+            ? tr("gate.noSupply.title")
+            : tr("gate.degraded.title"),
+      ),
+      h("p", { style: { color: t.muted, lineHeight: 1.6 } }, tr("bookingLifecycle.gateway.body")),
+      h(
+        Link as any,
+        { href, style: entBtnStyle(t, { variant: "default" }) },
+        tr("bookingLifecycle.gateway.action"),
+      ),
+    ),
+    state === "no-supply" ? t.danger : t.warn,
   );
 }
 
-export default function BookingsHistoryPage() {
-  const { t: tr } = useTranslation();
+export interface BookingsHistoryPageProps {
+  currentUser?: EnterpriseCurrentUser;
+}
+
+export default function BookingsHistoryPage({
+  currentUser = enterpriseUser.name,
+}: BookingsHistoryPageProps = {}) {
+  const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
+    translate(key, params, "zh");
+
   const [bookings, setBookings] = useState<BookingRecord[] | null>(null);
   const [state, setState] = useState<GatewayState | null>(null);
 
@@ -351,8 +588,10 @@ export default function BookingsHistoryPage() {
   const [pageSize, setPageSize] = useState(10);
 
   useEffect(() => {
-    getEnterpriseDispatchTenantClient(enterpriseTenant.id)
-      .listBookings()
+    import("../../lib/api-client")
+      .then(({ getEnterpriseDispatchTenantClient }) =>
+        getEnterpriseDispatchTenantClient(enterpriseTenant.id).listBookings(),
+      )
       .then(setBookings)
       .catch((error: unknown) =>
         setState(
@@ -364,8 +603,8 @@ export default function BookingsHistoryPage() {
 
   const filteredBookings = useMemo(() => {
     if (!bookings) return [];
-    return filterEnterpriseBookings(bookings, criteria);
-  }, [bookings, criteria]);
+    return filterEnterpriseBookings(bookings, criteria, currentUser);
+  }, [bookings, criteria, currentUser]);
 
   const pagination = useMemo(() => {
     return paginateEnterpriseBookings(filteredBookings, page, pageSize);
@@ -416,102 +655,142 @@ export default function BookingsHistoryPage() {
     { value: "byme", label: tr("bookings.filter.byme") },
   ];
 
-  return (
-    <>
-      <EntPageHead
-        title={tr("bookings.title")}
-        sub={SEARCH_COPY.pageHeadSub}
-        actions={
-          <Link
-            href="/bookings/new"
-            style={entBtnStyle(t, { variant: "primary" })}
-          >
-            <EBtnContent icon="plus">{tr("bookings.create")}</EBtnContent>
-          </Link>
-        }
-      />
+  return h(
+    React.Fragment,
+    null,
+    // Page Header
+    h(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 16,
+          marginBottom: 20,
+        },
+      },
+      h(
+        "div",
+        null,
+        h(
+          "h1",
+          {
+            style: {
+              fontSize: 22,
+              fontWeight: 800,
+              letterSpacing: -0.4,
+              margin: "0 0 4px",
+              color: t.ink,
+            },
+          },
+          tr("bookings.title"),
+        ),
+        h("p", { style: { fontSize: 13, color: t.muted, margin: 0 } }, SEARCH_COPY.pageHeadSub),
+      ),
+      h(
+        Link as any,
+        {
+          href: "/bookings/new",
+          style: entBtnStyle(t, { variant: "primary" }),
+        },
+        renderIcon("plus", 14),
+        tr("bookings.create"),
+      ),
+    ),
 
-      {/* Filter and Search Bar */}
-      <div
-        style={{
+    // Filter and Search Bar
+    h(
+      "div",
+      {
+        style: {
           display: "flex",
           flexDirection: "column",
           gap: 12,
           marginBottom: 16,
-        }}
-      >
-        <div
-          style={{
+        },
+      },
+      h(
+        "div",
+        {
+          style: {
             display: "flex",
             gap: 10,
             flexWrap: "wrap",
             alignItems: "center",
-          }}
-        >
-          {/* Scope Segmented Control */}
-          <div
-            role="tablist"
-            aria-label={SEARCH_COPY.scopeAria}
-            style={{
+          },
+        },
+        // Scope Segmented Control
+        h(
+          "div",
+          {
+            role: "tablist",
+            "aria-label": SEARCH_COPY.scopeAria,
+            style: {
               display: "inline-flex",
               background: t.surfaceLo,
               border: "1px solid " + t.line,
               borderRadius: t.radiusSm,
               padding: 3,
               gap: 2,
-            }}
-          >
-            {scopeOptions.map((opt) => {
-              const selected = criteria.scope === opt.value;
-              return (
-                <button
-                  type="button"
-                  key={opt.value}
-                  onClick={() => handleScopeChange(opt.value)}
-                  role="tab"
-                  aria-selected={selected}
-                  data-testid={`enterprise-scope-${opt.value}`}
-                  style={{
-                    border: "none",
-                    cursor: "pointer",
-                    background: selected ? t.surface : "transparent",
-                    color: selected ? t.primary : t.muted,
-                    fontWeight: 600,
-                    fontSize: 13,
-                    padding: "8px 14px",
-                    borderRadius: t.radiusSm - 3,
-                    boxShadow: selected ? t.shadowSm : "none",
-                    fontFamily: t.sans,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 6,
-                  }}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
+            },
+          },
+          scopeOptions.map((opt) => {
+            const selected = criteria.scope === opt.value;
+            return h(
+              "button",
+              {
+                type: "button",
+                key: opt.value,
+                onClick: () => handleScopeChange(opt.value),
+                role: "tab",
+                "aria-selected": selected,
+                "data-testid": `enterprise-scope-${opt.value}`,
+                style: {
+                  border: "none",
+                  cursor: "pointer",
+                  background: selected ? t.surface : "transparent",
+                  color: selected ? t.primary : t.muted,
+                  fontWeight: 600,
+                  fontSize: 13,
+                  padding: "8px 14px",
+                  borderRadius: t.radiusSm - 3,
+                  boxShadow: selected ? t.shadowSm : "none",
+                  fontFamily: t.sans,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                },
+              },
+              opt.label,
+            );
+          }),
+        ),
 
-          {/* Status Dropdown */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <label
-              htmlFor="booking-status-filter"
-              style={{ fontSize: 12, color: t.muted, fontWeight: 500 }}
-            >
-              {SEARCH_COPY.statusLabel}
-            </label>
-            <select
-              id="booking-status-filter"
-              data-testid="enterprise-status-select"
-              value={criteria.status}
-              onChange={(e) =>
+        // Status Dropdown
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: 6 } },
+          h(
+            "label",
+            {
+              htmlFor: "booking-status-filter",
+              style: { fontSize: 12, color: t.muted, fontWeight: 500 },
+            },
+            SEARCH_COPY.statusLabel,
+          ),
+          h(
+            "select",
+            {
+              id: "booking-status-filter",
+              "data-testid": "enterprise-status-select",
+              value: criteria.status,
+              onChange: (e: React.ChangeEvent<HTMLSelectElement>) =>
                 handleStatusChange(
                   e.target.value as EnterpriseBookingStatusFilter,
-                )
-              }
-              style={{
+                ),
+              style: {
                 height: 36,
                 padding: "0 10px",
                 borderRadius: t.radiusSm,
@@ -522,25 +801,26 @@ export default function BookingsHistoryPage() {
                 fontFamily: t.sans,
                 cursor: "pointer",
                 outline: "none",
-              }}
-            >
-              <option value="all">{SEARCH_COPY.statusAll}</option>
-              <option value="reserved">{SEARCH_COPY.statusReserved}</option>
-              <option value="approval">{SEARCH_COPY.statusApproval}</option>
-              <option value="assigned">{SEARCH_COPY.statusAssigned}</option>
-              <option value="enroute">{SEARCH_COPY.statusEnroute}</option>
-              <option value="completed">{SEARCH_COPY.statusCompleted}</option>
-              <option value="cancelled">{SEARCH_COPY.statusCancelled}</option>
-              <option value="nosupply">{SEARCH_COPY.statusNosupply}</option>
-            </select>
-          </div>
+              },
+            },
+            h("option", { value: "all" }, SEARCH_COPY.statusAll),
+            h("option", { value: "reserved" }, SEARCH_COPY.statusReserved),
+            h("option", { value: "approval" }, SEARCH_COPY.statusApproval),
+            h("option", { value: "assigned" }, SEARCH_COPY.statusAssigned),
+            h("option", { value: "enroute" }, SEARCH_COPY.statusEnroute),
+            h("option", { value: "completed" }, SEARCH_COPY.statusCompleted),
+            h("option", { value: "cancelled" }, SEARCH_COPY.statusCancelled),
+            h("option", { value: "nosupply" }, SEARCH_COPY.statusNosupply),
+          ),
+        ),
 
-          {/* Spacer */}
-          <div style={{ flex: 1 }} />
+        h("div", { style: { flex: 1 } }),
 
-          {/* Search Box */}
-          <div
-            style={{
+        // Search Box
+        h(
+          "div",
+          {
+            style: {
               display: "flex",
               alignItems: "center",
               gap: 8,
@@ -550,50 +830,51 @@ export default function BookingsHistoryPage() {
               border: "1px solid " + t.line,
               borderRadius: t.radiusSm,
               minWidth: 240,
-            }}
-          >
-            <span style={{ color: t.faint, display: "flex" }}>
-              <EIcon name="search" size={15} />
-            </span>
-            <input
-              type="text"
-              aria-label={SEARCH_COPY.searchInputAria}
-              data-testid="enterprise-search-input"
-              value={criteria.q}
-              onChange={(e) => handleSearchChange(e.target.value)}
-              placeholder={SEARCH_COPY.searchPlaceholder}
-              style={{
-                border: "none",
-                background: "transparent",
-                outline: "none",
-                fontSize: 13,
-                fontFamily: t.sans,
-                color: t.ink,
-                width: "100%",
-              }}
-            />
-            {criteria.q && (
-              <button
-                type="button"
-                onClick={() => handleSearchChange("")}
-                aria-label={SEARCH_COPY.clearQueryAria}
-                style={{
+            },
+          },
+          h("span", { style: { color: t.faint, display: "flex" } }, renderIcon("search", 15)),
+          h("input", {
+            type: "text",
+            "aria-label": SEARCH_COPY.searchInputAria,
+            "data-testid": "enterprise-search-input",
+            value: criteria.q,
+            onChange: (e: React.ChangeEvent<HTMLInputElement>) => handleSearchChange(e.target.value),
+            placeholder: SEARCH_COPY.searchPlaceholder,
+            style: {
+              border: "none",
+              background: "transparent",
+              outline: "none",
+              fontSize: 13,
+              fontFamily: t.sans,
+              color: t.ink,
+              width: "100%",
+            },
+          }),
+          criteria.q &&
+            h(
+              "button",
+              {
+                type: "button",
+                onClick: () => handleSearchChange(""),
+                "aria-label": SEARCH_COPY.clearQueryAria,
+                style: {
                   border: "none",
                   background: "transparent",
                   color: t.muted,
                   cursor: "pointer",
                   padding: 2,
                   display: "flex",
-                }}
-              >
-                <EIcon name="x" size={14} />
-              </button>
-            )}
-          </div>
+                },
+              },
+              renderIcon("x", 14),
+            ),
+        ),
 
-          {/* Date Filter Range */}
-          <div
-            style={{
+        // Date Filter Range
+        h(
+          "div",
+          {
+            style: {
               display: "flex",
               alignItems: "center",
               gap: 6,
@@ -602,51 +883,51 @@ export default function BookingsHistoryPage() {
               borderRadius: t.radiusSm,
               padding: "0 8px",
               height: 36,
-            }}
-          >
-            <span style={{ color: t.faint, display: "flex" }}>
-              <EIcon name="cal" size={15} />
-            </span>
-            <input
-              type="date"
-              aria-label={SEARCH_COPY.dateFromAria}
-              data-testid="enterprise-date-from"
-              value={criteria.dateFrom}
-              onChange={(e) => handleDateFromChange(e.target.value)}
-              style={{
-                border: "none",
-                background: "transparent",
-                color: t.ink,
-                fontSize: 12.5,
-                fontFamily: t.sans,
-                outline: "none",
-              }}
-            />
-            <span style={{ color: t.muted, fontSize: 12 }}>–</span>
-            <input
-              type="date"
-              aria-label={SEARCH_COPY.dateToAria}
-              data-testid="enterprise-date-to"
-              value={criteria.dateTo}
-              onChange={(e) => handleDateToChange(e.target.value)}
-              style={{
-                border: "none",
-                background: "transparent",
-                color: t.ink,
-                fontSize: 12.5,
-                fontFamily: t.sans,
-                outline: "none",
-              }}
-            />
-          </div>
+            },
+          },
+          h("span", { style: { color: t.faint, display: "flex" } }, renderIcon("cal", 15)),
+          h("input", {
+            type: "date",
+            "aria-label": SEARCH_COPY.dateFromAria,
+            "data-testid": "enterprise-date-from",
+            value: criteria.dateFrom,
+            onChange: (e: React.ChangeEvent<HTMLInputElement>) => handleDateFromChange(e.target.value),
+            style: {
+              border: "none",
+              background: "transparent",
+              color: t.ink,
+              fontSize: 12.5,
+              fontFamily: t.sans,
+              outline: "none",
+            },
+          }),
+          h("span", { style: { color: t.muted, fontSize: 12 } }, "–"),
+          h("input", {
+            type: "date",
+            "aria-label": SEARCH_COPY.dateToAria,
+            "data-testid": "enterprise-date-to",
+            value: criteria.dateTo,
+            onChange: (e: React.ChangeEvent<HTMLInputElement>) => handleDateToChange(e.target.value),
+            style: {
+              border: "none",
+              background: "transparent",
+              color: t.ink,
+              fontSize: 12.5,
+              fontFamily: t.sans,
+              outline: "none",
+            },
+          }),
+        ),
 
-          {/* Reset Filters Button */}
-          {active && (
-            <button
-              type="button"
-              onClick={handleClearFilters}
-              data-testid="enterprise-clear-filters"
-              style={{
+        // Reset Filters Button
+        active &&
+          h(
+            "button",
+            {
+              type: "button",
+              onClick: handleClearFilters,
+              "data-testid": "enterprise-clear-filters",
+              style: {
                 height: 36,
                 padding: "0 12px",
                 border: "1px solid " + t.line,
@@ -660,318 +941,367 @@ export default function BookingsHistoryPage() {
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 5,
-              }}
-            >
-              <EIcon name="refresh" size={13} />
-              {SEARCH_COPY.clearFilters}
-            </button>
-          )}
-        </div>
+              },
+            },
+            renderIcon("refresh", 13),
+            SEARCH_COPY.clearFilters,
+          ),
+      ),
 
-        {/* Query Summary and Count */}
-        <div
-          data-testid="enterprise-result-count"
-          style={{
+      // Query Summary and Count
+      h(
+        "div",
+        {
+          "data-testid": "enterprise-result-count",
+          style: {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             fontSize: 12.5,
             color: t.muted,
             padding: "2px 4px",
-          }}
-        >
-          <span>
-            {bookings === null ? (
-              SEARCH_COPY.loadingList
-            ) : active ? (
-              <>
-                {SEARCH_COPY.matchingCriteria}
-                <strong style={{ color: t.primary }}>
-                  {filteredBookings.length}
-                </strong>{" "}
-                {SEARCH_COPY.itemsTotal} {bookings.length} {SEARCH_COPY.totalItemsUnit}
-              </>
-            ) : (
-              <>
-                {SEARCH_COPY.totalPrefix}{" "}
-                <strong style={{ color: t.ink }}>{bookings.length}</strong>{" "}
-                {SEARCH_COPY.totalSuffix}
-              </>
-            )}
-          </span>
-          {pagination.total > 0 && (
-            <span>
-              {SEARCH_COPY.showingRange} {pagination.startIndex + 1}–{pagination.endIndex} {SEARCH_COPY.itemsOf}{" "}
-              {pagination.totalPages} {SEARCH_COPY.pagesUnit}
-            </span>
-          )}
-        </div>
-      </div>
+          },
+        },
+        h(
+          "span",
+          null,
+          bookings === null
+            ? SEARCH_COPY.loadingList
+            : active
+              ? h(
+                  React.Fragment,
+                  null,
+                  SEARCH_COPY.matchingCriteria,
+                  h("strong", { style: { color: t.primary } }, filteredBookings.length),
+                  " ",
+                  SEARCH_COPY.itemsTotal,
+                  " ",
+                  bookings.length,
+                  " ",
+                  SEARCH_COPY.totalItemsUnit,
+                )
+              : h(
+                  React.Fragment,
+                  null,
+                  SEARCH_COPY.totalPrefix,
+                  " ",
+                  h("strong", { style: { color: t.ink } }, bookings.length),
+                  " ",
+                  SEARCH_COPY.totalSuffix,
+                ),
+        ),
+        pagination.total > 0 &&
+          h(
+            "span",
+            null,
+            SEARCH_COPY.showingRange,
+            " ",
+            pagination.startIndex + 1,
+            "–",
+            pagination.endIndex,
+            " ",
+            SEARCH_COPY.itemsOf,
+            " ",
+            pagination.totalPages,
+            " ",
+            SEARCH_COPY.pagesUnit,
+          ),
+      ),
+    ),
 
-      {/* Bookings Table / Cards */}
-      <ECard t={t} pad={0}>
-        {bookings === null ? (
-          <div style={{ padding: 24, textAlign: "center", color: t.muted }}>
-            <div
-              style={{
-                marginBottom: 8,
-                display: "flex",
-                justifyContent: "center",
-              }}
-            >
-              <EIcon name="refresh" size={24} />
-            </div>
-            {tr("bookingLifecycle.history.loading")}
-          </div>
-        ) : bookings.length === 0 ? (
-          /* Total Empty State */
-          <div
-            data-testid="enterprise-empty-state"
-            style={{
-              padding: "48px 24px",
-              textAlign: "center",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 12,
-            }}
-          >
-            <div
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 24,
-                background: t.surfaceLo,
-                color: t.faint,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <EIcon name="car" size={24} />
-            </div>
-            <strong style={{ fontSize: 16, color: t.ink }}>
-              {tr("bookingLifecycle.history.empty")}
-            </strong>
-            <p
-              style={{
-                color: t.muted,
-                fontSize: 13,
-                maxWidth: 360,
-                margin: 0,
-              }}
-            >
-              {SEARCH_COPY.emptyTotalSub}
-            </p>
-            <div style={{ marginTop: 8 }}>
-              <Link
-                href="/bookings/new"
-                style={entBtnStyle(t, { variant: "primary", size: "sm" })}
-              >
-                <EBtnContent icon="plus">{tr("bookings.create")}</EBtnContent>
-              </Link>
-            </div>
-          </div>
-        ) : filteredBookings.length === 0 ? (
-          /* Filter Empty State */
-          <div
-            data-testid="enterprise-filtered-empty-state"
-            style={{
-              padding: "48px 24px",
-              textAlign: "center",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 12,
-            }}
-          >
-            <div
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 24,
-                background: t.surfaceLo,
-                color: t.warn,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <EIcon name="search" size={24} />
-            </div>
-            <strong style={{ fontSize: 16, color: t.ink }}>
-              {SEARCH_COPY.emptyFilteredTitle}
-            </strong>
-            <p
-              style={{
-                color: t.muted,
-                fontSize: 13,
-                maxWidth: 380,
-                margin: 0,
-              }}
-            >
-              {SEARCH_COPY.emptyFilteredSub}
-            </p>
-            <button
-              type="button"
-              onClick={handleClearFilters}
-              data-testid="enterprise-filter-empty-clear"
-              style={entBtnStyle(t, { variant: "default", size: "sm" })}
-            >
-              <EBtnContent icon="refresh">{SEARCH_COPY.emptyFilteredClear}</EBtnContent>
-            </button>
-          </div>
-        ) : (
-          <>
-            {/* Header row */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "110px 1.1fr 1.5fr 110px 130px 110px",
-                gap: 12,
-                padding: "11px 18px",
-                borderBottom: "1px solid " + t.line,
-                background: t.surfaceLo,
-                fontSize: 11,
-                fontWeight: 700,
-                color: t.muted,
-                letterSpacing: 0.3,
-              }}
-            >
-              <span>{SEARCH_COPY.colId}</span>
-              <span>{SEARCH_COPY.colPassenger}</span>
-              <span>{SEARCH_COPY.colRoute}</span>
-              <span>{SEARCH_COPY.colTime}</span>
-              <span>{SEARCH_COPY.colCostCenter}</span>
-              <span>{SEARCH_COPY.colState}</span>
-            </div>
-
-            {/* List rows */}
-            {pagination.items.map((booking, index) => {
-              const display = getBookingStateMeta(booking);
-              const isSelf =
-                !booking.bookedBy ||
-                booking.bookedBy.name === booking.passenger.name;
-              const isAirport =
-                booking.businessDispatchSubtype ===
-                  "credit_card_airport_transfer" ||
-                booking.pickup.address.includes("機場") ||
-                booking.dropoff.address.includes("機場") ||
-                Boolean(booking.flightNo);
-
-              return (
-                <Link
-                  key={booking.bookingId}
-                  href={`/bookings/${encodeURIComponent(booking.bookingId)}`}
-                  data-testid={`enterprise-booking-row-${booking.bookingId}`}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "110px 1.1fr 1.5fr 110px 130px 110px",
-                    gap: 12,
+    // Bookings Table / Cards
+    renderCard(
+      t,
+      bookings === null
+        ? h(
+            "div",
+            { style: { padding: 24, textAlign: "center", color: t.muted } },
+            h(
+              "div",
+              {
+                style: {
+                  marginBottom: 8,
+                  display: "flex",
+                  justifyContent: "center",
+                },
+              },
+              renderIcon("refresh", 24),
+            ),
+            tr("bookingLifecycle.history.loading"),
+          )
+        : bookings.length === 0
+          ? h(
+              "div",
+              {
+                "data-testid": "enterprise-empty-state",
+                style: {
+                  padding: "48px 24px",
+                  textAlign: "center",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 12,
+                },
+              },
+              h(
+                "div",
+                {
+                  style: {
+                    width: 48,
+                    height: 48,
+                    borderRadius: 24,
+                    background: t.surfaceLo,
+                    color: t.faint,
+                    display: "flex",
                     alignItems: "center",
-                    padding: "13px 18px",
-                    borderTop: index ? `1px solid ${t.lineSoft}` : "none",
-                    textDecoration: "none",
-                    color: t.ink,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontFamily: t.mono,
-                      fontSize: 12,
-                      color: t.primary,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {booking.bookingId}
-                  </span>
-                  <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 600,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {booking.passenger.name}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: isSelf ? t.muted : t.warn,
-                      }}
-                    >
-                      {isSelf
-                        ? tr("common.self")
-                        : tr("common.bookedByDelegate", {
-                            name: booking.bookedBy?.name ?? "同仁",
-                          })}
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 12, color: t.ink2, minWidth: 0 }}>
-                    <span
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {booking.pickup.address}{" "}
-                      <EIcon
-                        name="arrow"
-                        size={11}
-                        style={{ color: t.faint, flexShrink: 0 }}
-                      />{" "}
-                      {booking.dropoff.address}
-                      {isAirport && (
-                        <EIcon
-                          name="flag"
-                          size={12}
-                          style={{ color: t.info, flexShrink: 0 }}
-                        />
-                      )}
-                    </span>
-                  </div>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontFamily: t.mono,
-                      color: t.ink2,
-                    }}
-                  >
-                    {formatBookingTime(booking.reservationWindowStart)}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 11.5,
-                      fontFamily: t.mono,
+                    justifyContent: "center",
+                  },
+                },
+                renderIcon("car", 24),
+              ),
+              h("strong", { style: { fontSize: 16, color: t.ink } }, tr("bookingLifecycle.history.empty")),
+              h(
+                "p",
+                {
+                  style: {
+                    color: t.muted,
+                    fontSize: 13,
+                    maxWidth: 360,
+                    margin: 0,
+                  },
+                },
+                SEARCH_COPY.emptyTotalSub,
+              ),
+              h(
+                "div",
+                { style: { marginTop: 8 } },
+                h(
+                  Link as any,
+                  {
+                    href: "/bookings/new",
+                    style: entBtnStyle(t, { variant: "primary", size: "sm" }),
+                  },
+                  renderIcon("plus", 13),
+                  tr("bookings.create"),
+                ),
+              ),
+            )
+          : filteredBookings.length === 0
+            ? h(
+                "div",
+                {
+                  "data-testid": "enterprise-filtered-empty-state",
+                  style: {
+                    padding: "48px 24px",
+                    textAlign: "center",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 12,
+                  },
+                },
+                h(
+                  "div",
+                  {
+                    style: {
+                      width: 48,
+                      height: 48,
+                      borderRadius: 24,
+                      background: t.surfaceLo,
+                      color: t.warn,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    },
+                  },
+                  renderIcon("search", 24),
+                ),
+                h("strong", { style: { fontSize: 16, color: t.ink } }, SEARCH_COPY.emptyFilteredTitle),
+                h(
+                  "p",
+                  {
+                    style: {
                       color: t.muted,
-                    }}
-                  >
-                    {booking.costCenter || "-"}
-                  </span>
-                  <div>
-                    <EPill t={t} tone={display.tone} dot>
-                      {display.label}
-                    </EPill>
-                  </div>
-                </Link>
-              );
-            })}
-          </>
-        )}
-      </ECard>
+                      fontSize: 13,
+                      maxWidth: 380,
+                      margin: 0,
+                    },
+                  },
+                  SEARCH_COPY.emptyFilteredSub,
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: handleClearFilters,
+                    "data-testid": "enterprise-filter-empty-clear",
+                    style: entBtnStyle(t, { variant: "default", size: "sm" }),
+                  },
+                  renderIcon("refresh", 13),
+                  SEARCH_COPY.emptyFilteredClear,
+                ),
+              )
+            : h(
+                React.Fragment,
+                null,
+                // Header row
+                h(
+                  "div",
+                  {
+                    style: {
+                      display: "grid",
+                      gridTemplateColumns:
+                        "110px 1.1fr 1.5fr 110px 130px 110px",
+                      gap: 12,
+                      padding: "11px 18px",
+                      borderBottom: "1px solid " + t.line,
+                      background: t.surfaceLo,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: t.muted,
+                      letterSpacing: 0.3,
+                    },
+                  },
+                  h("span", null, SEARCH_COPY.colId),
+                  h("span", null, SEARCH_COPY.colPassenger),
+                  h("span", null, SEARCH_COPY.colRoute),
+                  h("span", null, SEARCH_COPY.colTime),
+                  h("span", null, SEARCH_COPY.colCostCenter),
+                  h("span", null, SEARCH_COPY.colState),
+                ),
 
-      {/* Pagination Bar */}
-      {bookings !== null && filteredBookings.length > 0 && (
-        <div
-          data-testid="enterprise-pagination"
-          style={{
+                // List rows
+                pagination.items.map((booking, index) => {
+                  const display = getBookingStateMeta(booking);
+                  const isSelf = isSamePassenger(booking.passenger, currentUser);
+                  const isAirport =
+                    booking.businessDispatchSubtype ===
+                      "credit_card_airport_transfer" ||
+                    booking.pickup.address.includes("機場") ||
+                    booking.dropoff.address.includes("機場") ||
+                    Boolean(booking.flightNo);
+
+                  return h(
+                    Link as any,
+                    {
+                      key: booking.bookingId,
+                      href: `/bookings/${encodeURIComponent(booking.bookingId)}`,
+                      "data-testid": `enterprise-booking-row-${booking.bookingId}`,
+                      style: {
+                        display: "grid",
+                        gridTemplateColumns:
+                          "110px 1.1fr 1.5fr 110px 130px 110px",
+                        gap: 12,
+                        alignItems: "center",
+                        padding: "13px 18px",
+                        borderTop: index ? `1px solid ${t.lineSoft}` : "none",
+                        textDecoration: "none",
+                        color: t.ink,
+                      },
+                    },
+                    h(
+                      "span",
+                      {
+                        style: {
+                          fontFamily: t.mono,
+                          fontSize: 12,
+                          color: t.primary,
+                          fontWeight: 600,
+                        },
+                      },
+                      booking.bookingId,
+                    ),
+                    h(
+                      "div",
+                      { style: { minWidth: 0 } },
+                      h(
+                        "div",
+                        {
+                          style: {
+                            fontSize: 13,
+                            fontWeight: 600,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          },
+                        },
+                        booking.passenger.name,
+                      ),
+                      h(
+                        "div",
+                        {
+                          style: {
+                            fontSize: 11,
+                            color: isSelf ? t.muted : t.warn,
+                          },
+                        },
+                        isSelf
+                          ? tr("common.self")
+                          : tr("common.bookedByDelegate", {
+                              name: booking.bookedBy?.name ?? "同仁",
+                            }),
+                      ),
+                    ),
+                    h(
+                      "div",
+                      { style: { fontSize: 12, color: t.ink2, minWidth: 0 } },
+                      h(
+                        "span",
+                        {
+                          style: {
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          },
+                        },
+                        booking.pickup.address,
+                        " ",
+                        renderIcon("arrow", 11, { color: t.faint }),
+                        " ",
+                        booking.dropoff.address,
+                        isAirport &&
+                          renderIcon("flag", 12, { color: t.info }),
+                      ),
+                    ),
+                    h(
+                      "span",
+                      {
+                        style: {
+                          fontSize: 12,
+                          fontFamily: t.mono,
+                          color: t.ink2,
+                        },
+                      },
+                      formatBookingTime(booking.reservationWindowStart),
+                    ),
+                    h(
+                      "span",
+                      {
+                        style: {
+                          fontSize: 11.5,
+                          fontFamily: t.mono,
+                          color: t.muted,
+                        },
+                      },
+                      booking.costCenter || "-",
+                    ),
+                    h("div", null, renderPill(t, display.label, display.tone, true)),
+                  );
+                }),
+              ),
+    ),
+
+    // Pagination Bar
+    bookings !== null &&
+      filteredBookings.length > 0 &&
+      h(
+        "div",
+        {
+          "data-testid": "enterprise-pagination",
+          style: {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -979,17 +1309,22 @@ export default function BookingsHistoryPage() {
             gap: 12,
             marginTop: 16,
             padding: "8px 4px",
-          }}
-        >
-          {/* Page size picker */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: t.muted }}>{SEARCH_COPY.pageSizeLabel}</span>
-            <select
-              aria-label={SEARCH_COPY.pageSizeAria}
-              data-testid="enterprise-page-size"
-              value={pageSize}
-              onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-              style={{
+          },
+        },
+        // Page size picker
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: 8 } },
+          h("span", { style: { fontSize: 12, color: t.muted } }, SEARCH_COPY.pageSizeLabel),
+          h(
+            "select",
+            {
+              "aria-label": SEARCH_COPY.pageSizeAria,
+              "data-testid": "enterprise-page-size",
+              value: pageSize,
+              onChange: (e: React.ChangeEvent<HTMLSelectElement>) =>
+                handlePageSizeChange(Number(e.target.value)),
+              style: {
                 height: 32,
                 padding: "0 8px",
                 borderRadius: t.radiusSm,
@@ -1000,28 +1335,26 @@ export default function BookingsHistoryPage() {
                 fontFamily: t.sans,
                 cursor: "pointer",
                 outline: "none",
-              }}
-            >
-              <option value={5}>{SEARCH_COPY.pageSize5}</option>
-              <option value={10}>{SEARCH_COPY.pageSize10}</option>
-              <option value={20}>{SEARCH_COPY.pageSize20}</option>
-            </select>
-          </div>
+              },
+            },
+            h("option", { value: 5 }, SEARCH_COPY.pageSize5),
+            h("option", { value: 10 }, SEARCH_COPY.pageSize10),
+            h("option", { value: 20 }, SEARCH_COPY.pageSize20),
+          ),
+        ),
 
-          {/* Page navigation */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={pagination.page <= 1}
-              data-testid="enterprise-page-prev"
-              style={{
+        // Page navigation
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: 8 } },
+          h(
+            "button",
+            {
+              type: "button",
+              onClick: () => setPage((p) => Math.max(1, p - 1)),
+              disabled: pagination.page <= 1,
+              "data-testid": "enterprise-page-prev",
+              style: {
                 ...entBtnStyle(t, {
                   variant: "default",
                   size: "sm",
@@ -1029,43 +1362,44 @@ export default function BookingsHistoryPage() {
                 }),
                 cursor: pagination.page <= 1 ? "not-allowed" : "pointer",
                 opacity: pagination.page <= 1 ? 0.5 : 1,
-              }}
-            >
-              <span
-                style={{
+              },
+            },
+            h(
+              "span",
+              {
+                style: {
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 4,
-                }}
-              >
-                <EIcon
-                  name="arrow"
-                  size={13}
-                  style={{ transform: "rotate(180deg)" }}
-                />
-                {SEARCH_COPY.pagePrev}
-              </span>
-            </button>
+                },
+              },
+              renderIcon("arrow", 13, { transform: "rotate(180deg)" }),
+              SEARCH_COPY.pagePrev,
+            ),
+          ),
 
-            <span
-              style={{
+          h(
+            "span",
+            {
+              style: {
                 fontSize: 13,
                 fontFamily: t.mono,
                 color: t.ink2,
                 padding: "0 6px",
-              }}
-            >
-              {pagination.page} / {pagination.totalPages}
-            </span>
+              },
+            },
+            `${pagination.page} / ${pagination.totalPages}`,
+          ),
 
-            <button
-              type="button"
-              onClick={() =>
-                setPage((p) => Math.min(pagination.totalPages, p + 1))
-              }
-              disabled={pagination.page >= pagination.totalPages}
-              data-testid="enterprise-page-next"
-              style={{
+          h(
+            "button",
+            {
+              type: "button",
+              onClick: () =>
+                setPage((p) => Math.min(pagination.totalPages, p + 1)),
+              disabled: pagination.page >= pagination.totalPages,
+              "data-testid": "enterprise-page-next",
+              style: {
                 ...entBtnStyle(t, {
                   variant: "default",
                   size: "sm",
@@ -1076,22 +1410,22 @@ export default function BookingsHistoryPage() {
                     ? "not-allowed"
                     : "pointer",
                 opacity: pagination.page >= pagination.totalPages ? 0.5 : 1,
-              }}
-            >
-              <span
-                style={{
+              },
+            },
+            h(
+              "span",
+              {
+                style: {
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 4,
-                }}
-              >
-                {SEARCH_COPY.pageNext}
-                <EIcon name="arrow" size={13} />
-              </span>
-            </button>
-          </div>
-        </div>
-      )}
-    </>
+                },
+              },
+              SEARCH_COPY.pageNext,
+              renderIcon("arrow", 13),
+            ),
+          ),
+        ),
+      ),
   );
 }
