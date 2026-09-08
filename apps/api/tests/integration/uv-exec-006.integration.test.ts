@@ -1977,9 +1977,14 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     ).toHaveLength(0);
   });
 
-  it.each(["rollback", "cancel"])(
-    "target timeout is atomic across resource release: %s",
-    async (scenario) => {
+  it.each([
+    ["timeout", "rollback"],
+    ["timeout", "cancel"],
+    ["redispatch", "rollback"],
+    ["redispatch", "cancel"],
+  ])(
+    "%s is atomic across resource release: %s",
+    async (operation, scenario) => {
       expect(DATABASE_URL).toBeTruthy();
       const database = new DatabaseService();
       databases.push(database);
@@ -2050,12 +2055,17 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
           return result;
         });
       try {
-        const timeout = service.handleDispatchTimeout(
-          order.orderId,
-          "acceptance_timeout",
-          undefined,
-          { targetAssignmentId: assignment.assignmentId },
-        );
+        const timeout =
+          operation === "redispatch"
+            ? service.redispatchOrder(order.orderId, {
+                reasonCode: "operator_redispatch",
+              })
+            : service.handleDispatchTimeout(
+                order.orderId,
+                "acceptance_timeout",
+                undefined,
+                { targetAssignmentId: assignment.assignmentId },
+              );
         if (scenario === "rollback") {
           await expect(timeout).rejects.toThrow("timeout release fault");
           expect(await readState()).toEqual(before);
@@ -2111,6 +2121,19 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
               )
             ).rows[0].record.status,
           ).toBe("cancelled");
+          expect(
+            (
+              await database.query(
+                `SELECT status FROM ops.phase1_dispatch_jobs WHERE order_id = $1 AND status <> 'closed'`,
+                [order.orderId],
+              )
+            ).rows,
+          ).toHaveLength(0);
+          await expect(
+            service.redispatchOrder(order.orderId, {
+              reasonCode: "stale_cache",
+            }),
+          ).rejects.toMatchObject({ code: "ORDER_NOT_READY_FOR_DISPATCH" });
           expect(
             await readAssignmentStatus(database, assignment.assignmentId),
           ).toBe("cancelled");

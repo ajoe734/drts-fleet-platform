@@ -782,8 +782,13 @@ export class OwnedMobilityRepository {
         current.aggregateVersion,
       );
     }
+    const versions = await executor.query<{ count: string }>(
+      `SELECT count(*) FROM ops.phase1_dispatch_assignments WHERE order_id = $1`,
+      [orderId],
+    );
     return {
       order: current.order,
+      assignmentVersion: Number(versions.rows[0].count),
       assignment,
       task,
       dispatchJobs: jobs.rows.map((row) =>
