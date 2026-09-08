@@ -2,6 +2,39 @@
 
 Date: 2026-09-08. Owner: Codex2; Reviewer: Codex.
 
+## Redispatch verification — 2026-09-08 22:43 UTC
+
+Fetched base: `eb684f176b1d3b46553a0f6f0556c79452fbac3c`.
+Tested HEAD: `fd32c168588362df36d183e6f2add6beedb3b837`.
+Candidate SHA: none; this is failing-regression evidence only.
+
+- `git fetch origin`: exit 0.
+- `git rebase origin/dev`: exit 1 at historical `ac1076708`, add/add conflict
+  in payment-gate.test.ts. `git rebase --abort`: exit 0; published history preserved.
+- `git diff --quiet origin/dev HEAD -- apps/api/src/modules/billing-settlement/billing-settlement.service.ts apps/api/src/modules/billing-settlement/billing-settlement.repository.ts`:
+  exit 0, confirming the tested billing implementation matches fetched dev.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`: exit 1;
+  3 executed, 1 passed, 2 failed. Fabricated proof returns paid; unresolved
+  persistence returns paid. Unapproved rejection passes.
+- `pnpm --filter @drts/api typecheck`: exit 2, four TS2307 errors for
+  `@drts/control-plane-auth` in auth files.
+- `pnpm --filter @drts/platform-admin-web typecheck`: exit 0.
+- `git diff --check`: exit 0.
+
+The fresh task slice still grants only the original five write scopes and
+ARTIFACT/INVOICE dependencies. Read the merged history helper from origin/dev:
+its recovery is documented, not applied to this branch, and its remaining
+scope/dependency/canvas routing prerequisites are explicit. Supervisor must
+allocate repository/module and proof storage/scanner scopes, add the proof
+contract dependency or reviewed exception, route the missing canvas states,
+and select the recovery branch before another implementation dispatch.
+Completing that documentation helper alone does not clear these blockers.
+
+Resource IDs: `sr-proof-001-batch-a`, `sr-proof-001-driver-a`,
+`sr-proof-001-statement-a`, `sr-proof-001-nonexistent-proof` are isolated test
+inputs only. No live resources, upload/scanning/readback, PostgreSQL concurrency,
+durable receipts, browser/device checks, or real payments were verified.
+
 ## Redispatch verification — 2026-09-08 22:25 UTC
 
 Base remains `a24045986ac29231d34657df3a343b02d9fbb770`; tested HEAD is
