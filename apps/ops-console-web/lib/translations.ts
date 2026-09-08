@@ -4809,8 +4809,7 @@ const zh: Record<keyof typeof en, string> = {
   "opsAssistant.bridge.working": "處理中...",
   "opsAssistant.bridge.openConfirmation": "開啟確認流程",
   "opsAssistant.bridge.dismiss": "關閉",
-  "opsAssistant.bridge.empty":
-    "請開啟支援的詳情頁，查看助理可協助執行的操作。",
+  "opsAssistant.bridge.empty": "請開啟支援的詳情頁，查看助理可協助執行的操作。",
   "opsAssistant.actions.title": "助理動作",
   "opsAssistant.actions.askLabel": "詢問助理",
   "opsAssistant.actions.placeholder":
@@ -8878,8 +8877,7 @@ const zh: Record<keyof typeof en, string> = {
   "sos.detail.noSupplement":
     "駕駛尚未補充文字說明；值班端仍可依現有 incident context 先行處置。",
   "sos.detail.attachmentsTitle": "附件",
-  "sos.detail.noAttachments":
-    "目前沒有可顯示的照片或語音附件。",
+  "sos.detail.noAttachments": "目前沒有可顯示的照片或語音附件。",
   "sos.detail.linkedIncidentTitle": "關聯案件",
 };
 

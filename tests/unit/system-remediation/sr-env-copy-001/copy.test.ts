@@ -7,12 +7,18 @@ import { translations as tenant } from "../../../../apps/tenant-console-web/lib/
 describe("SR-ENV-COPY-001 user-facing copy", () => {
   for (const locale of ["en", "zh"] as const) {
     it(`${locale}: keeps the real application ID while removing implementation names`, () => {
-      const rendered = admin("supplyReview.detail.confirmApproveIntro", locale, {
-        submissionId: "application-123",
-      });
+      const rendered = admin(
+        "supplyReview.detail.confirmApproveIntro",
+        locale,
+        {
+          submissionId: "application-123",
+        },
+      );
       expect(rendered).toContain("application-123");
       expect(rendered).not.toContain("submissionId");
-      expect(admin("supplyReview.err.invalidId", locale)).not.toContain("submissionId");
+      expect(admin("supplyReview.err.invalidId", locale)).not.toContain(
+        "submissionId",
+      );
       for (const value of Object.values(fleet[locale])) {
         expect(value).not.toContain("submissionId");
       }
@@ -24,7 +30,9 @@ describe("SR-ENV-COPY-001 user-facing copy", () => {
       expect(tenant[locale]["users.identity.actorChip"]).toBe(
         "{actor} / {realm} / {tenantId}",
       );
-      expect(ops[locale]["sos.detail.noAttachments"]).not.toMatch(/read model|live attachment/);
+      expect(ops[locale]["sos.detail.noAttachments"]).not.toMatch(
+        /read model|live attachment/,
+      );
     });
   }
 });

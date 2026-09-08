@@ -198,7 +198,8 @@ const supplyReviewEn = {
 
   // Errors & Banners
   "supplyReview.err.defaultFailed": "Operation failed. Please try again later.",
-  "supplyReview.err.invalidId": "Invalid application ID. Open the application again from the review list.",
+  "supplyReview.err.invalidId":
+    "Invalid application ID. Open the application again from the review list.",
   "supplyReview.err.notFound": "Supply submission record not found",
   "supplyReview.err.startReviewFailed":
     "Failed to start review for submission {id}: {msg}",
