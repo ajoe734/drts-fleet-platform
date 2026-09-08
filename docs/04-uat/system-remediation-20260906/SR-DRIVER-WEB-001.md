@@ -2,7 +2,7 @@
 
 - Task: `SR-DRIVER-WEB-001`
 - Owner: `Claude`
-- Reviewer: `Claude2`
+- Reviewer: `Codex`（本次 dispatch 之 owner；見 §9，取代 §8 記錄時的 `Claude2`）
 - Base SHA (`origin/dev` at original fix): `6adf792381f99783d12c8142bfc69d2c54ad9103`
 - Base SHA (`origin/dev` at 本次 2026-09-06T11:51Z 重驗 dispatch): `2093cf7e38526a7a7c027600be92004f7275efd3`
 - Worktree: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/claude-sr-driver-web-001`
@@ -266,3 +266,74 @@ exit code: 2（約 60 個錯誤）
 - 修正後將 commit＋push 到 `claude/sr-driver-web-001` 並 handoff 給 reviewer `Claude2`；PR #1667
   內容與本分支相同，待本次更新的 candidate 經 review／CI／merge 後即可視為重複並關閉，不需要另外
   重做程式修復。
+
+---
+
+## 9. 本次 dispatch 重驗（2026-09-08，owner 由 Availability-first reassignment 再次轉回 Claude；worker cwd 曾被外部清除後重建）
+
+### 9.1 承接狀態
+
+- `ai-status.sh show SR-DRIVER-WEB-001` 於承接時 `status: "todo"`、`reviewer: "Codex"`（非 §8 記錄的
+  `Claude2`），且工作樹沿用同一 branch `claude/sr-driver-web-001`，HEAD 仍為 §8 完成的
+  `dbe943cf312a8875252fce66fd0512eddb8242bd`，working tree clean、`git diff origin/dev...HEAD --stat`
+  僅本 task 既有的 3 個新增檔案（`driver-trip-map.web.tsx`、任務回歸測試、本文件），origin/dev 自
+  base 起前進的 17 個 commit 均未觸碰這 3 個路徑，無 merge 衝突風險。判定：§8 的程式修復與文件內容
+  仍是本次唯一需要交付的 candidate，本次不重做設計，只重新在當下環境執行驗證指令並誠實更新結果。
+- 承接過程中，supervisor 指派的 worker cwd
+  (`.artifacts/worktrees/auto/claude-sr-driver-web-001`) 一度被外部程序刪除（可能是並行派工的
+  worktree 生命週期清理），`git worktree add` 重建後 `git worktree list`／`git log` 確認分支與 HEAD
+  未變、無資料遺失。
+
+### 9.2 環境狀態：§8.2 記錄的 `node_modules` symlink 損壞已不存在
+
+本次重驗時 `node_modules` 為直接 symlink 到 canonical root
+（`node_modules -> /home/lupin/workspace/drts-fleet-platform/node_modules`），不再指向
+§8.2 描述的、已回收的另一個 worktree 路徑。`pnpm exec` / `pnpm --filter` 可直接執行，不需要
+§4.0／§8.2 的 `node <入口檔>` 繞路。
+
+### 9.3 重新執行的驗證指令與結果（現行 SHA `dbe943cf312a8875252fce66fd0512eddb8242bd`，全部乾淨通過）
+
+```text
+$ git diff --check
+exit code: 0
+```
+
+```text
+$ pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+exit code: 0
+```
+
+```text
+$ pnpm --filter @drts/driver-app typecheck
+> tsc --noEmit
+exit code: 0
+```
+（取代 §4.3／§8.3 記錄的環境性失敗／未做；本次乾淨通過，`apps/driver-app` 無任何型別錯誤。）
+
+```text
+$ cd apps/driver-app && pnpm exec vitest run
+ Test Files  38 passed (38)
+      Tests  448 passed (448)
+exit code: 0
+```
+（取代 §8.3 記錄的「4 檔因 `zod` symlink 失敗」；本次 38 檔／448 案例全數通過，含
+`driver-trip-map.test.ts`、`responsive-layout-and-overflow.test.ts` 及先前失敗的
+`driver-route-guards-and-feature-entries`、`driver-workspace-cockpit`、`incident-screen`、
+`sos-screen-runtime-profile-gate`，零回歸。）
+
+### 9.4 結論
+
+- 本 task 的程式修復（`driver-trip-map.web.tsx` 平台分流）內容與 §8 記錄的 candidate 完全相同
+  （本次未修改任何 `.tsx`／`.ts` 檔案，`git diff origin/dev...HEAD` 僅本文件本節新增），不重做設計。
+- §4.3／§8.3 記錄的 typecheck／測試環境性失敗，本次環境下已不可重現——`node_modules` symlink 問題
+  是先前派工期間的暫時性基礎設施狀態，非本 task 程式缺陷；本次以乾淨環境重跑，`test_commands` 三項
+  （`git diff --check`、`pnpm --filter @drts/driver-app typecheck`、
+  `pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/`）與既有 driver-app 全套
+  單元測試均 exit code 0。
+- **仍未做**（沿用 §6 誠實聲明，本次未新增手段補上）：未在真實瀏覽器或 `expo start --web` 開啟
+  首頁/onboarding/SOS 三路由做視覺驗證；未做 iOS/Android 真機／`eas build` 驗證。這兩項需要瀏覽器
+  /真機環境，不在本次沙箱可執行範圍內，如實列為未做，不以靜態測試結果冒充。
+- 下一步：commit＋push 本節更新到 `claude/sr-driver-web-001`，並以 `ai-status.sh handoff` 交付
+  reviewer `Codex`（目前 task board 指派），不自行標記 `done`。
