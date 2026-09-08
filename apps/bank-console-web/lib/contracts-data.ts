@@ -15,17 +15,17 @@ type ContractRecord = IssuerContractStatusRecord & {
 
 const contractRecords: ContractRecord[] = [
   {
-    contractId: "ctr_ctbc_world_elite_2026",
-    tenantId: "tenant-ctbc-001",
-    programId: "prog-ctbc-world-elite",
-    programCode: "CTBC_WORLD_ELITE",
-    displayName: "中信鼎極卡機場接送",
+    contractId: "ctr_acme_world_elite_2026",
+    tenantId: "tenant-acme-001",
+    programId: "prog-acme-world-elite",
+    programCode: "ACME_WORLD_ELITE",
+    displayName: "艾克米鼎極卡機場接送",
     term: {
       startsAt: "2026-01-01T00:00:00.000Z",
       endsAt: "2026-12-31T23:59:59.000Z",
       billingCycle: "monthly",
       serviceProduct: "credit_card_airport_transfer",
-      issuerTenantId: "tenant-ctbc-001",
+      issuerTenantId: "tenant-acme-001",
     },
     slaTargets: [
       {
@@ -68,17 +68,17 @@ const contractRecords: ContractRecord[] = [
     bookingIds: ["BK-240611-0081"],
   },
   {
-    contractId: "ctr_ctbc_infinite_2026",
-    tenantId: "tenant-ctbc-001",
-    programId: "prog-ctbc-infinite",
-    programCode: "CTBC_INFINITE",
-    displayName: "中信無限卡機場接送",
+    contractId: "ctr_acme_infinite_2026",
+    tenantId: "tenant-acme-001",
+    programId: "prog-acme-infinite",
+    programCode: "ACME_INFINITE",
+    displayName: "艾克米無限卡機場接送",
     term: {
       startsAt: "2026-01-01T00:00:00.000Z",
       endsAt: "2026-12-31T23:59:59.000Z",
       billingCycle: "monthly",
       serviceProduct: "credit_card_airport_transfer",
-      issuerTenantId: "tenant-ctbc-001",
+      issuerTenantId: "tenant-acme-001",
     },
     slaTargets: [
       {
@@ -131,17 +131,17 @@ const contractRecords: ContractRecord[] = [
     bookingIds: ["BK-240611-0104", "BK-240611-0112"],
   },
   {
-    contractId: "ctr_ctbc_legacy_prestige_2026",
-    tenantId: "tenant-ctbc-001",
-    programId: "prog-ctbc-legacy-prestige",
-    programCode: "CTBC_PRESTIGE",
-    displayName: "中信尊榮卡機場接送",
+    contractId: "ctr_acme_legacy_prestige_2026",
+    tenantId: "tenant-acme-001",
+    programId: "prog-acme-legacy-prestige",
+    programCode: "ACME_PRESTIGE",
+    displayName: "艾克米尊榮卡機場接送",
     term: {
       startsAt: "2026-01-01T00:00:00.000Z",
       endsAt: "2026-09-30T23:59:59.000Z",
       billingCycle: "monthly",
       serviceProduct: "credit_card_airport_transfer",
-      issuerTenantId: "tenant-ctbc-001",
+      issuerTenantId: "tenant-acme-001",
     },
     slaTargets: [
       {
@@ -208,7 +208,7 @@ export function getContractRecord(contractId: string) {
       const pId = record.programId.toLowerCase();
       const pCode = record.programCode.toLowerCase();
       const pCodeDash = pCode.replace(/_/g, "-");
-      const pCodeNoPrefix = pCode.replace(/^ctbc_/, "");
+      const pCodeNoPrefix = pCode.replace(/^acme_/, "");
       const pCodeNoPrefixDash = pCodeNoPrefix.replace(/_/g, "-");
 
       return (

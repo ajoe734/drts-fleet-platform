@@ -16,7 +16,7 @@ on:
       allow_unauthenticated:
         description: "Expose the Cloud Run service publicly"
         required: true
-        default: "true"
+        default: "false"
         type: choice
         options:
           - "true"

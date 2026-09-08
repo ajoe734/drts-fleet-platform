@@ -17,12 +17,12 @@ function requestFor(
 describe("bank-console proxy auth boundary", () => {
   it("redirects signed-out demo access away from management data routes", () => {
     const response = proxy(
-      requestFor("/programs?bank=fubon&locale=zh&signedOut=1"),
+      requestFor("/programs?bank=tailspin&locale=zh&signedOut=1"),
     );
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://bank-console.test/login?bank=fubon&locale=zh&signedOut=1",
+      "https://bank-console.test/login?bank=tailspin&locale=zh&signedOut=1",
     );
     expect(response.headers.get("set-cookie")).toContain(
       "drts_bank_console_signed_out=1",
@@ -32,7 +32,7 @@ describe("bank-console proxy auth boundary", () => {
 
   it("allows the signed-out login page to render", () => {
     const response = proxy(
-      requestFor("/login?bank=fubon&locale=zh&signedOut=1"),
+      requestFor("/login?bank=tailspin&locale=zh&signedOut=1"),
     );
 
     expect(response.status).toBe(200);
@@ -42,7 +42,7 @@ describe("bank-console proxy auth boundary", () => {
   });
 
   it("allows normal signed-in demo routes", () => {
-    const response = proxy(requestFor("/programs?bank=fubon&locale=zh"));
+    const response = proxy(requestFor("/programs?bank=tailspin&locale=zh"));
 
     expect(response.status).toBe(200);
   });
@@ -66,35 +66,35 @@ describe("bank-console proxy auth boundary", () => {
   it("keeps deep links blocked after sign-out even when the query param is gone", () => {
     const response = proxy(
       requestFor(
-        "/bookings?bank=ctbc&locale=zh",
+        "/bookings?bank=acme&locale=zh",
         "drts_bank_console_signed_out=1",
       ),
     );
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://bank-console.test/login?bank=ctbc&locale=zh&signedOut=1",
+      "https://bank-console.test/login?bank=acme&locale=zh&signedOut=1",
     );
   });
 
   it("normalizes signed-out login URLs when only the cookie is present", () => {
     const response = proxy(
       requestFor(
-        "/login?bank=cathay&locale=en",
+        "/login?bank=contoso&locale=en",
         "drts_bank_console_signed_out=1",
       ),
     );
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://bank-console.test/login?bank=cathay&locale=en&signedOut=1",
+      "https://bank-console.test/login?bank=contoso&locale=en&signedOut=1",
     );
   });
 
   it("does not refresh sign-out state from a cookie-only RSC prefetch", () => {
     const response = proxy(
       requestFor(
-        "/login?bank=cathay&locale=en",
+        "/login?bank=contoso&locale=en",
         "drts_bank_console_signed_out=1",
         {
           rsc: "1",
@@ -106,7 +106,7 @@ describe("bank-console proxy auth boundary", () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://bank-console.test/login?bank=cathay&locale=en&signedOut=1",
+      "https://bank-console.test/login?bank=contoso&locale=en&signedOut=1",
     );
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store, max-age=0");
@@ -114,7 +114,7 @@ describe("bank-console proxy auth boundary", () => {
 
   it("regression: GET /?role=bank_finance cannot mint drts_bank_console_role session cookie", () => {
     const response = proxy(
-      requestFor("/?bank=ctbc&locale=zh&role=bank_finance"),
+      requestFor("/?bank=acme&locale=zh&role=bank_finance"),
     );
 
     expect(response.status).toBe(200);
@@ -123,18 +123,18 @@ describe("bank-console proxy auth boundary", () => {
 
   it("does not write or mutate drts_bank_console_role cookie on any GET route when ?role= is present", () => {
     const responseHome = proxy(
-      requestFor("/?bank=ctbc&locale=zh&role=bank_finance"),
+      requestFor("/?bank=acme&locale=zh&role=bank_finance"),
     );
     expect(responseHome.headers.get("set-cookie")).toBeNull();
 
     const responseStmt = proxy(
-      requestFor("/statements?bank=ctbc&locale=zh&role=bank_finance"),
+      requestFor("/statements?bank=acme&locale=zh&role=bank_finance"),
     );
     expect(responseStmt.headers.get("set-cookie")).toBeNull();
 
     const responseApi = proxy(
       requestFor(
-        "/api/statements/export?bank=ctbc&role=bank_finance",
+        "/api/statements/export?bank=acme&role=bank_finance",
         "drts_bank_console_role=bank_ops_viewer",
       ),
     );

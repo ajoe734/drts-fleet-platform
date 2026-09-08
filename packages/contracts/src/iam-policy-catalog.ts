@@ -188,6 +188,17 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
     ],
   },
   {
+    scope: "identity:sessions:write",
+    allowedRealms: ["system", "platform", "tenant", "ops"],
+    description:
+      "Revoke active sessions within the resolved authority boundary.",
+    resourceConstraints: [
+      TENANT_CONSTRAINT,
+      ACTOR_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
+  },
+  {
     scope: "foundation:read",
     allowedRealms: ["system", "platform", "ops"],
     description: "Read platform foundation configuration and master data.",
@@ -557,6 +568,8 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
       defaultRoles: [],
       scopes: [
         "identity:read",
+        "identity:sessions:read",
+        "identity:sessions:write",
         "foundation:read",
         "foundation:write",
         "audit:read",
@@ -607,6 +620,8 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
       defaultRoles: ["platform_admin"],
       scopes: [
         "identity:read",
+        "identity:sessions:read",
+        "identity:sessions:write",
         "foundation:read",
         "foundation:write",
         "audit:read",
@@ -644,6 +659,8 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
       defaultRoles: ["tenant_admin"],
       scopes: [
         "identity:read",
+        "identity:sessions:read",
+        "identity:sessions:write",
         "audit:read",
         "tenant:read",
         "tenant:write",
@@ -749,6 +766,8 @@ export const IAM_TENANT_ROLE_POLICY_DEFINITIONS: readonly IamTenantRolePolicyDef
       roleFamily: "tenant",
       scopes: [
         "identity:read",
+        "identity:sessions:read",
+        "identity:sessions:write",
         "audit:read",
         "tenant:read",
         "tenant:write",

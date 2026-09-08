@@ -70,8 +70,8 @@ function getActionHref(
 function emailForTenant(email: string, tenant: BankDemoTenant) {
   const [local] = email.split("@");
   const domain =
-    tenant.code === "ctbc"
-      ? "ctbcbank.com"
+    tenant.code === "acme"
+      ? "acme.example"
       : `${tenant.issuerCode.toLowerCase()}.demo`;
   return `${local}@${domain}`;
 }

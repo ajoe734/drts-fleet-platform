@@ -9,13 +9,13 @@ import { getServerLocale } from "@/lib/server-locale";
 import { type Locale, t } from "@/lib/translations";
 
 const ENGLISH_BRAND_NAMES = {
-  CTBC: { bankName: "CTBC Bank", displayName: "CTBC World Elite" },
-  CATHAY: { bankName: "Cathay United Bank", displayName: "Cathay CUBE World" },
-  TAISHIN: { bankName: "Taishin Bank", displayName: "Taishin Infinite" },
-  DBS: { bankName: "DBS Bank", displayName: "DBS Insignia" },
-  GRAND: { bankName: "Grand Hotel", displayName: "Grand Concierge" },
-  FUBON: { bankName: "Fubon Insurance", displayName: "Fubon Claim Mobility" },
-  LION: { bankName: "Lion Travel", displayName: "Lion Group Transfer" },
+  ACME: { bankName: "Acme Bank", displayName: "ACME Elite Demo" },
+  CONTOSO: { bankName: "Contoso Bank", displayName: "Contoso Prism World" },
+  FABRIKAM: { bankName: "Fabrikam Bank", displayName: "Fabrikam Signature" },
+  NORTHWIND: { bankName: "Northwind Bank", displayName: "Northwind Signature" },
+  WINGTIP: { bankName: "Grand Hotel", displayName: "Wingtip Concierge" },
+  TAILSPIN: { bankName: "Tailspin Insurance", displayName: "Tailspin Claim Mobility" },
+  ADVENTURE: { bankName: "AdventureWorks Travel", displayName: "Adventure Works Transfer" },
 } as const;
 
 function getRootBrandDisplay(
@@ -32,11 +32,11 @@ function getRootBrandDisplay(
 
   const names = ENGLISH_BRAND_NAMES[brand.code];
   const programName =
-    brand.code === "FUBON"
+    brand.code === "TAILSPIN"
       ? "Insurance replacement mobility"
-      : brand.code === "LION"
+      : brand.code === "ADVENTURE"
         ? "Travel agency group transfer"
-        : brand.code === "GRAND"
+        : brand.code === "WINGTIP"
           ? "Concierge booking"
           : "Credit-card airport transfer";
 
@@ -77,11 +77,11 @@ export default async function RootIndex() {
           </h2>
           <ul className="mt-4 grid gap-3">
             {brands.map((brand) => {
-              // Hotel (GRAND) and travel agency (LION) book through their own
+              // Hotel (WINGTIP) and travel agency (ADVENTURE) book through their own
               // channel, not a standalone DRTS white-label website, so they
               // expose no "website" entry.
               const hasWebsite =
-                brand.code !== "GRAND" && brand.code !== "LION";
+                brand.code !== "WINGTIP" && brand.code !== "ADVENTURE";
               return (
               <li
                 key={brand.code}

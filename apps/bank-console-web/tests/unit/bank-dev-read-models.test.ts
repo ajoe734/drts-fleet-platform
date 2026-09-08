@@ -24,10 +24,10 @@ function envelope<T>(data: T) {
 
 const servicePrograms: TenantServiceProgramRecord[] = [
   {
-    programId: "ctbc-world-elite",
-    tenantId: "tenant_ctbc",
+    programId: "acme-world-elite",
+    tenantId: "tenant_acme",
     programType: "credit_card_airport_transfer",
-    displayName: "中信機場 World Elite",
+    displayName: "艾克米機場 Elite Demo",
     active: true,
     billingMode: "partner_settlement",
     pricingPlanId: "price_we",
@@ -39,7 +39,7 @@ const servicePrograms: TenantServiceProgramRecord[] = [
 
 const usage: TenantProgramUsageRecord[] = [
   {
-    programId: "ctbc-world-elite",
+    programId: "acme-world-elite",
     programCode: "CTB-AIR-WE",
     period: "2026-08",
     quotaTotal: 120,
@@ -54,12 +54,12 @@ const orders: OwnedOrderRecord[] = [
     orderId: "ord_reserved",
     orderNo: "BK-202608-001",
     orderDomain: "owned",
-    tenantId: "tenant_ctbc",
+    tenantId: "tenant_acme",
     partnerId: null,
-    partnerProgramId: "ctbc-world-elite",
+    partnerProgramId: "acme-world-elite",
     partnerEntrySlug: null,
     eligibilityVerificationId: null,
-    issuerAuthorizationRef: "AUTH-CTBC-001",
+    issuerAuthorizationRef: "AUTH-ACME-001",
     passengerDisclosure: null,
     serviceBucket: "business_dispatch",
     dispatchSemantics: "reserved",
@@ -87,7 +87,7 @@ const orders: OwnedOrderRecord[] = [
     onsiteContact: null,
     costCenter: null,
     vehiclePreference: null,
-    benefitReference: "BEN-CTBC-0001",
+    benefitReference: "BEN-ACME-0001",
     direction: "dropoff",
     flightNo: "BR198",
     terminal: "T2",
@@ -123,12 +123,12 @@ const orders: OwnedOrderRecord[] = [
     orderId: "ord_live",
     orderNo: "BK-202608-002",
     orderDomain: "owned",
-    tenantId: "tenant_ctbc",
+    tenantId: "tenant_acme",
     partnerId: null,
-    partnerProgramId: "ctbc-world-elite",
+    partnerProgramId: "acme-world-elite",
     partnerEntrySlug: null,
     eligibilityVerificationId: null,
-    issuerAuthorizationRef: "AUTH-CTBC-002",
+    issuerAuthorizationRef: "AUTH-ACME-002",
     passengerDisclosure: null,
     serviceBucket: "business_dispatch",
     dispatchSemantics: "reserved",
@@ -156,7 +156,7 @@ const orders: OwnedOrderRecord[] = [
     onsiteContact: null,
     costCenter: null,
     vehiclePreference: null,
-    benefitReference: "BEN-CTBC-0002",
+    benefitReference: "BEN-ACME-0002",
     direction: "pickup",
     flightNo: "JL809",
     terminal: "T1",
@@ -192,12 +192,12 @@ const orders: OwnedOrderRecord[] = [
     orderId: "ord_done",
     orderNo: "BK-202608-003",
     orderDomain: "owned",
-    tenantId: "tenant_ctbc",
+    tenantId: "tenant_acme",
     partnerId: null,
-    partnerProgramId: "ctbc-world-elite",
+    partnerProgramId: "acme-world-elite",
     partnerEntrySlug: null,
     eligibilityVerificationId: null,
-    issuerAuthorizationRef: "AUTH-CTBC-003",
+    issuerAuthorizationRef: "AUTH-ACME-003",
     passengerDisclosure: null,
     serviceBucket: "business_dispatch",
     dispatchSemantics: "reserved",
@@ -225,7 +225,7 @@ const orders: OwnedOrderRecord[] = [
     onsiteContact: null,
     costCenter: null,
     vehiclePreference: null,
-    benefitReference: "BEN-CTBC-0003",
+    benefitReference: "BEN-ACME-0003",
     direction: "dropoff",
     flightNo: "CI103",
     terminal: "T2",
@@ -261,12 +261,12 @@ const orders: OwnedOrderRecord[] = [
     orderId: "ord_cancelled",
     orderNo: "BK-202608-004",
     orderDomain: "owned",
-    tenantId: "tenant_ctbc",
+    tenantId: "tenant_acme",
     partnerId: null,
-    partnerProgramId: "ctbc-world-elite",
+    partnerProgramId: "acme-world-elite",
     partnerEntrySlug: null,
     eligibilityVerificationId: null,
-    issuerAuthorizationRef: "AUTH-CTBC-004",
+    issuerAuthorizationRef: "AUTH-ACME-004",
     passengerDisclosure: null,
     serviceBucket: "business_dispatch",
     dispatchSemantics: "reserved",
@@ -294,7 +294,7 @@ const orders: OwnedOrderRecord[] = [
     onsiteContact: null,
     costCenter: null,
     vehiclePreference: null,
-    benefitReference: "BEN-CTBC-0004",
+    benefitReference: "BEN-ACME-0004",
     direction: "pickup",
     flightNo: "JX802",
     terminal: "T1",
@@ -330,17 +330,17 @@ const orders: OwnedOrderRecord[] = [
 
 const contracts: IssuerContractStatusRecord[] = [
   {
-    contractId: "CTR-CTBC-WE-2026",
-    tenantId: "tenant_ctbc",
-    programId: "ctbc-world-elite",
+    contractId: "CTR-ACME-WE-2026",
+    tenantId: "tenant_acme",
+    programId: "acme-world-elite",
     programCode: "CTB-AIR-WE",
-    displayName: "中信機場 World Elite",
+    displayName: "艾克米機場 Elite Demo",
     term: {
       startsAt: "2026-01-01T00:00:00Z",
       endsAt: null,
       billingCycle: "monthly",
       serviceProduct: "credit_card_airport_transfer",
-      issuerTenantId: "tenant_ctbc",
+      issuerTenantId: "tenant_acme",
     },
     slaTargets: [
       {
@@ -384,8 +384,8 @@ const contracts: IssuerContractStatusRecord[] = [
 const users: TenantUserRoleRecord[] = [
   {
     userId: "user_1",
-    tenantId: "tenant_ctbc",
-    email: "program-admin@ctbcbank.com",
+    tenantId: "tenant_acme",
+    email: "program-admin@acme.example",
     displayName: "周敬文",
     roleCode: "bank_program_admin",
     status: "active",
@@ -400,7 +400,7 @@ const auditLogs: AuditLogRecord[] = [];
 const statements = [
   {
     statement_id: "stmt_2026_08",
-    tenant_id: "tenant_ctbc",
+    tenant_id: "tenant_acme",
     period: "2026-08",
     status: "due",
     lines: [
@@ -410,8 +410,8 @@ const statements = [
         fare: { amount_minor: 120000, currency: "TWD" },
         subsidised_amount: { amount_minor: 100000, currency: "TWD" },
         paid_amount: { amount_minor: 20000, currency: "TWD" },
-        benefit_reference: "BEN-CTBC-0003",
-        issuer_authorization_ref: "AUTH-CTBC-003",
+        benefit_reference: "BEN-ACME-0003",
+        issuer_authorization_ref: "AUTH-ACME-003",
         cardholder_ref_masked: "CH••••33",
       },
     ],
@@ -479,13 +479,13 @@ describe("bank dev read models", () => {
 
   it("maps scoped booking records from the tenant API", async () => {
     const result = await loadBankBookingsData(
-      "tenant_ctbc",
+      "tenant_acme",
       "bank_program_admin",
     );
 
     expect(result.degradedMessage).toBeNull();
     expect(result.data.programs).toEqual([
-      { code: "ctbc-world-elite", label: "中信機場 World Elite" },
+      { code: "acme-world-elite", label: "艾克米機場 Elite Demo" },
     ]);
     expect(result.data.periods).toEqual(["2026-08"]);
     expect(result.data.bookings).toHaveLength(4);
@@ -498,7 +498,7 @@ describe("bank dev read models", () => {
 
   it("derives home tallies from live tenant API data", async () => {
     const result = await loadBankHomeSnapshot(
-      "tenant_ctbc",
+      "tenant_acme",
       "bank_program_admin",
     );
 
@@ -516,7 +516,7 @@ describe("bank dev read models", () => {
 
   it("maps canonical snake-case settlement responses into bank statements", async () => {
     const result = await loadBankStatementsData(
-      "tenant_ctbc",
+      "tenant_acme",
       "bank_program_admin",
     );
 

@@ -2,11 +2,11 @@ import { BRAND_TEMPLATES, type PartnerBrandTemplate } from "@drts/ui-tokens";
 import { t, type Locale, type TranslationKey } from "@/lib/translations";
 
 export type BankDemoTenantCode =
-  | "ctbc"
-  | "cathay"
-  | "taishin"
-  | "dbs"
-  | "fubon";
+  | "acme"
+  | "contoso"
+  | "fabrikam"
+  | "northwind"
+  | "tailspin";
 export type BankProgramSeed = "premium" | "business" | "starter";
 
 export type BankDemoTenant = {
@@ -23,94 +23,94 @@ export type BankDemoTenant = {
   programSeedKeys: Record<BankProgramSeed, TranslationKey>;
 };
 
-export const DEFAULT_BANK_DEMO_TENANT: BankDemoTenantCode = "ctbc";
+export const DEFAULT_BANK_DEMO_TENANT: BankDemoTenantCode = "acme";
 
 export const BANK_DEMO_TENANTS: Record<BankDemoTenantCode, BankDemoTenant> = {
-  ctbc: {
-    code: "ctbc",
-    issuerCode: "CTBC",
-    nameKey: "tenant.ctbc.name",
-    shortNameKey: "tenant.ctbc.shortName",
-    contextKey: "tenant.ctbc.context",
+  acme: {
+    code: "acme",
+    issuerCode: "ACME",
+    nameKey: "tenant.acme.name",
+    shortNameKey: "tenant.acme.shortName",
+    contextKey: "tenant.acme.context",
     avatar: "周",
-    actorEmail: "cw.chou@ctbcbank.com",
+    actorEmail: "cw.chou@acme.example",
     roleCode: "bank_program_admin",
-    // This is the canonical CTBC issuer ledger configured by the Dev API.
+    // This is the canonical ACME issuer ledger configured by the Dev API.
     // The former display-only identifier returned an empty, valid response.
     tenantId: "tenant-demo-001",
-    template: BRAND_TEMPLATES.CTBC,
+    template: BRAND_TEMPLATES.ACME,
     programSeedKeys: {
-      premium: "tenant.program.ctbc.premium",
-      business: "tenant.program.ctbc.business",
-      starter: "tenant.program.ctbc.starter",
+      premium: "tenant.program.acme.premium",
+      business: "tenant.program.acme.business",
+      starter: "tenant.program.acme.starter",
     },
   },
-  cathay: {
-    code: "cathay",
-    issuerCode: "CATHAY",
-    nameKey: "tenant.cathay.name",
-    shortNameKey: "tenant.cathay.shortName",
-    contextKey: "tenant.cathay.context",
-    avatar: "國泰",
-    actorEmail: "kh.lin@cathaybk.com.tw",
+  contoso: {
+    code: "contoso",
+    issuerCode: "CONTOSO",
+    nameKey: "tenant.contoso.name",
+    shortNameKey: "tenant.contoso.shortName",
+    contextKey: "tenant.contoso.context",
+    avatar: "康拓索",
+    actorEmail: "kh.lin@contoso.example",
     roleCode: "bank_program_admin",
-    tenantId: "tenant-cathay-001",
-    template: BRAND_TEMPLATES.CATHAY,
+    tenantId: "tenant-contoso-001",
+    template: BRAND_TEMPLATES.CONTOSO,
     programSeedKeys: {
-      premium: "tenant.program.cathay.premium",
-      business: "tenant.program.cathay.business",
-      starter: "tenant.program.cathay.starter",
+      premium: "tenant.program.contoso.premium",
+      business: "tenant.program.contoso.business",
+      starter: "tenant.program.contoso.starter",
     },
   },
-  taishin: {
-    code: "taishin",
-    issuerCode: "TAISHIN",
-    nameKey: "tenant.taishin.name",
-    shortNameKey: "tenant.taishin.shortName",
-    contextKey: "tenant.taishin.context",
-    avatar: "台新",
-    actorEmail: "ys.wang@taishinbank.com.tw",
+  fabrikam: {
+    code: "fabrikam",
+    issuerCode: "FABRIKAM",
+    nameKey: "tenant.fabrikam.name",
+    shortNameKey: "tenant.fabrikam.shortName",
+    contextKey: "tenant.fabrikam.context",
+    avatar: "法碧康",
+    actorEmail: "ys.wang@fabrikam.example",
     roleCode: "bank_program_admin",
-    tenantId: "tenant-taishin-001",
-    template: BRAND_TEMPLATES.TAISHIN,
+    tenantId: "tenant-fabrikam-001",
+    template: BRAND_TEMPLATES.FABRIKAM,
     programSeedKeys: {
-      premium: "tenant.program.taishin.premium",
-      business: "tenant.program.taishin.business",
-      starter: "tenant.program.taishin.starter",
+      premium: "tenant.program.fabrikam.premium",
+      business: "tenant.program.fabrikam.business",
+      starter: "tenant.program.fabrikam.starter",
     },
   },
-  dbs: {
-    code: "dbs",
-    issuerCode: "DBS",
-    nameKey: "tenant.dbs.name",
-    shortNameKey: "tenant.dbs.shortName",
-    contextKey: "tenant.dbs.context",
-    avatar: "星展",
-    actorEmail: "wt.koh@dbs.com",
+  northwind: {
+    code: "northwind",
+    issuerCode: "NORTHWIND",
+    nameKey: "tenant.northwind.name",
+    shortNameKey: "tenant.northwind.shortName",
+    contextKey: "tenant.northwind.context",
+    avatar: "北風",
+    actorEmail: "wt.koh@northwind.example",
     roleCode: "bank_program_admin",
-    tenantId: "tenant-dbs-001",
-    template: BRAND_TEMPLATES.DBS,
+    tenantId: "tenant-northwind-001",
+    template: BRAND_TEMPLATES.NORTHWIND,
     programSeedKeys: {
-      premium: "tenant.program.dbs.premium",
-      business: "tenant.program.dbs.business",
-      starter: "tenant.program.dbs.starter",
+      premium: "tenant.program.northwind.premium",
+      business: "tenant.program.northwind.business",
+      starter: "tenant.program.northwind.starter",
     },
   },
-  fubon: {
-    code: "fubon",
-    issuerCode: "FUBON",
-    nameKey: "tenant.fubon.name",
-    shortNameKey: "tenant.fubon.shortName",
-    contextKey: "tenant.fubon.context",
-    avatar: "富邦",
-    actorEmail: "py.chen@fubon.com",
+  tailspin: {
+    code: "tailspin",
+    issuerCode: "TAILSPIN",
+    nameKey: "tenant.tailspin.name",
+    shortNameKey: "tenant.tailspin.shortName",
+    contextKey: "tenant.tailspin.context",
+    avatar: "泰思賓",
+    actorEmail: "py.chen@tailspin.example",
     roleCode: "bank_program_admin",
-    tenantId: "tenant-fubon-001",
-    template: BRAND_TEMPLATES.FUBON,
+    tenantId: "tenant-tailspin-001",
+    template: BRAND_TEMPLATES.TAILSPIN,
     programSeedKeys: {
-      premium: "tenant.program.fubon.premium",
-      business: "tenant.program.fubon.business",
-      starter: "tenant.program.fubon.starter",
+      premium: "tenant.program.tailspin.premium",
+      business: "tenant.program.tailspin.business",
+      starter: "tenant.program.tailspin.starter",
     },
   },
 };

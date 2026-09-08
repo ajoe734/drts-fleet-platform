@@ -20,7 +20,7 @@ describe("SR-REFERRAL-001: referral embed handoff artifact lifecycle", () => {
     return {
       artifact: "test-issuer-artifact-001",
       entrySlug: "yuhe-residence",
-      entryHost: "app.yuhe-living.com.tw",
+      entryHost: "app.fabrikam-living.example",
       partnerUserRef: "resident-001",
       drtsPassengerId: "referral-yuhe-resident-001",
       tenantId: "tenant-yuhe",
@@ -47,14 +47,14 @@ describe("SR-REFERRAL-001: referral embed handoff artifact lifecycle", () => {
     const result = await repository.consume({
       artifact: "test-issuer-artifact-001",
       entrySlug: "yuhe-residence",
-      entryHost: "app.yuhe-living.com.tw",
+      entryHost: "app.fabrikam-living.example",
     });
 
     expect(result.outcome).toBe("consumed");
     if (result.outcome === "consumed") {
       expect(result.session.handoffId).toBe(record.handoffId);
       expect(result.session.partnerEntrySlug).toBe("yuhe-residence");
-      expect(result.session.entryHost).toBe("app.yuhe-living.com.tw");
+      expect(result.session.entryHost).toBe("app.fabrikam-living.example");
       expect(result.session.drtsPassengerId).toBe(
         "referral-yuhe-resident-001",
       );
@@ -69,14 +69,14 @@ describe("SR-REFERRAL-001: referral embed handoff artifact lifecycle", () => {
     const first = await repository.consume({
       artifact: "test-issuer-artifact-001",
       entrySlug: "yuhe-residence",
-      entryHost: "app.yuhe-living.com.tw",
+      entryHost: "app.fabrikam-living.example",
     });
     expect(first.outcome).toBe("consumed");
 
     const replay = await repository.consume({
       artifact: "test-issuer-artifact-001",
       entrySlug: "yuhe-residence",
-      entryHost: "app.yuhe-living.com.tw",
+      entryHost: "app.fabrikam-living.example",
     });
     expect(replay.outcome).toBe("replayed");
   });
@@ -108,7 +108,7 @@ describe("SR-REFERRAL-001: referral embed handoff artifact lifecycle", () => {
     const result = await repository.consume({
       artifact: "test-issuer-artifact-001",
       entrySlug: "yuhe-residence",
-      entryHost: "app.yuhe-living.com.tw",
+      entryHost: "app.fabrikam-living.example",
     });
 
     expect(result.outcome).toBe("expired");
@@ -120,7 +120,7 @@ describe("SR-REFERRAL-001: referral embed handoff artifact lifecycle", () => {
     const result = await repository.consume({
       artifact: "never-issued",
       entrySlug: "yuhe-residence",
-      entryHost: "app.yuhe-living.com.tw",
+      entryHost: "app.fabrikam-living.example",
     });
 
     expect(result.outcome).toBe("missing");

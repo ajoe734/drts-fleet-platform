@@ -6,6 +6,7 @@ import {
   resolveServerSessionRole,
 } from "@/lib/session";
 import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
+import { buildArtifactText } from "../../artifact-crypto";
 
 export async function GET(
   request: NextRequest,
@@ -117,7 +118,7 @@ export async function GET(
       );
     }
 
-    const textContent = [
+    const payloadContent = [
       "================================================================================",
       "DRTS TRIP SETTLEMENT RECEIPT (NON-FIXTURE ARTIFACT)",
       "================================================================================",
@@ -142,8 +143,11 @@ export async function GET(
       `Cardholder Ref     : ${matchedTripLine.cardholderReferenceMasked}`,
       `Card Ref           : ${matchedTripLine.cardReferenceMasked}`,
       `Dispute Status     : ${matchedTripLine.disputed ? "DISPUTED" : "NORMAL"}`,
-      "================================================================================",
     ].join("\n");
+
+    const textContent = buildArtifactText(payloadContent, {
+      authDomain: "drts.settlement.issuer",
+    });
 
     return new NextResponse(textContent, {
       status: 200,

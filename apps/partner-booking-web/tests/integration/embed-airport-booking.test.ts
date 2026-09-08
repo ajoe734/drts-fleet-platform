@@ -13,24 +13,24 @@ import { PartnerAuthorityError } from "@/lib/api-client";
 
 const activeEntry = {
   partnerId: "partner-001",
-  partnerCode: "ctbc",
+  partnerCode: "acme",
   partnerType: "bank",
   programId: "program-001",
   programCode: "WORLD_ELITE",
   tenantId: "tenant-001",
-  bankCode: "CTBC",
-  entrySlug: "ctbc",
-  displayName: "CTBC World Elite",
+  bankCode: "ACME",
+  entrySlug: "acme",
+  displayName: "ACME Elite Demo",
   businessDispatchSubtype: "credit_card_airport_transfer",
   authMode: "partner_api_key",
   eligibilityMode: "bank_card_inline",
-  entryHost: "ride.ctbc.com.tw",
+  entryHost: "ride.acme.example",
   entryPath: "/partner",
   themeAccent: "#0047AB",
   brandingMetadata: {
-    displayName: "CTBC Premier Ride",
+    displayName: "ACME Premier Ride",
     themeAccent: "#0047AB",
-    supportEmail: "vip@ctbc.example",
+    supportEmail: "vip@acme.example",
     supportPhone: "0800-000-001",
   },
   eligibilityContract: null,
@@ -53,7 +53,7 @@ const handoff = {
   accessToken: "handoff-token",
   tokenType: "Bearer" as const,
   expiresIn: "15m",
-  partnerEntrySlug: "ctbc",
+  partnerEntrySlug: "acme",
   drtsPassengerId: "passenger-001",
   identity: {
     actorType: "referral_passenger" as const,
@@ -66,7 +66,7 @@ const handoff = {
     tenantId: "tenant-001",
     partnerId: "partner-001",
     partnerProgramId: "program-001",
-    partnerEntrySlug: "ctbc",
+    partnerEntrySlug: "acme",
     drtsPassengerId: "passenger-001",
   },
 };
@@ -138,7 +138,7 @@ describe("submitEmbeddedAirportBooking", () => {
 
     const result = await submitEmbeddedAirportBooking(
       {
-        tenantSlug: "ctbc",
+        tenantSlug: "acme",
         partnerUserRef: "user-001",
         locale: "zh",
         referenceToken: "token-001",
@@ -171,9 +171,9 @@ describe("submitEmbeddedAirportBooking", () => {
       },
     );
 
-    expect(getPartnerRouteContext).toHaveBeenCalledWith("ctbc");
+    expect(getPartnerRouteContext).toHaveBeenCalledWith("acme");
     expect(createPartnerIngressHandoff).toHaveBeenCalledWith({
-      entrySlug: "ctbc",
+      entrySlug: "acme",
       partnerUserRef: "user-001",
     });
     expect(verifyPartnerEligibility).toHaveBeenCalledWith(
@@ -202,7 +202,7 @@ describe("submitEmbeddedAirportBooking", () => {
         partnerEntry: activeEntry,
       }),
       expect.objectContaining({
-        partnerEntrySlug: "ctbc",
+        partnerEntrySlug: "acme",
         eligibilityVerificationId: "elig-001",
         reservationWindowStart: "2026-07-27T21:30:00.000Z",
         reservationWindowEnd: "2026-07-27T23:30:00.000Z",
@@ -252,7 +252,7 @@ describe("submitEmbeddedAirportBooking", () => {
 
     await submitEmbeddedAirportBooking(
       {
-        tenantSlug: "ctbc",
+        tenantSlug: "acme",
         partnerUserRef: "user-001",
         locale: "zh",
         referenceToken: null,
@@ -309,7 +309,7 @@ describe("submitEmbeddedAirportBooking", () => {
     await expect(
       submitEmbeddedAirportBooking(
         {
-          tenantSlug: "ctbc",
+          tenantSlug: "acme",
           partnerUserRef: "user-001",
           locale: "zh",
           referenceToken: "token-001",

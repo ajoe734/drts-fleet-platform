@@ -38,13 +38,13 @@ describe("partner-booking per-program theming", () => {
     expect(resolveProgramKind("insurance")).toBe("insurance");
     expect(resolveProgramKind("travel")).toBe("travel");
 
-    expect(resolveProgramKind("ride.ctbc.com.tw")).toBe("card");
-    expect(resolveProgramKind("claim.fubon-ins.com.tw")).toBe("insurance");
-    expect(resolveProgramKind("booking.lion-travel.com.tw")).toBe("travel");
+    expect(resolveProgramKind("ride.acme.example")).toBe("card");
+    expect(resolveProgramKind("claim.tailspin.example")).toBe("insurance");
+    expect(resolveProgramKind("booking.adventure-works.example")).toBe("travel");
 
-    expect(resolveProgramKind("ctbc-elite")).toBe("card");
-    expect(resolveProgramKind("fubon-claim-mobility")).toBe("insurance");
-    expect(resolveProgramKind("lion-group-airport")).toBe("travel");
+    expect(resolveProgramKind("acme-elite")).toBe("card");
+    expect(resolveProgramKind("tailspin-claim-mobility")).toBe("insurance");
+    expect(resolveProgramKind("adventureworks-group-airport")).toBe("travel");
 
     expect(resolveProgramKind("信用卡機場接送")).toBe("card");
     expect(resolveProgramKind("保險理賠代步")).toBe("insurance");
@@ -60,58 +60,58 @@ describe("partner-booking per-program theming", () => {
   });
 
   it("maps slugs to the matching theme", () => {
-    expect(getProgramThemeForSlug("claim-fubon-ins").kind).toBe("insurance");
-    expect(getProgramThemeForSlug("ride-ctbc").kind).toBe("card");
-    expect(getProgramThemeForSlug("booking-lion-travel").kind).toBe("travel");
+    expect(getProgramThemeForSlug("claim-tailspin-ins").kind).toBe("insurance");
+    expect(getProgramThemeForSlug("ride-acme").kind).toBe("card");
+    expect(getProgramThemeForSlug("booking-adventure-works").kind).toBe("travel");
   });
 
   it("keeps card airport-transfer tenant themes on the bank issuer brand", () => {
-    const cathay = getProgramThemeForTenantSlug(
-      "cathay",
-      BRAND_TEMPLATES.CATHAY,
+    const contoso = getProgramThemeForTenantSlug(
+      "contoso",
+      BRAND_TEMPLATES.CONTOSO,
     );
-    const taishin = getProgramThemeForTenantSlug(
-      "taishin",
-      BRAND_TEMPLATES.TAISHIN,
+    const fabrikam = getProgramThemeForTenantSlug(
+      "fabrikam",
+      BRAND_TEMPLATES.FABRIKAM,
     );
-    const dbs = getProgramThemeForTenantSlug("dbs", BRAND_TEMPLATES.DBS);
+    const northwind = getProgramThemeForTenantSlug("northwind", BRAND_TEMPLATES.NORTHWIND);
 
-    expect(cathay.kind).toBe("card");
-    expect(cathay.issuerName).toBe("國泰世華銀行");
-    expect(cathay.primary).toBe(BRAND_TEMPLATES.CATHAY.primary);
-    expect(cathay.host).toBe("ride.cathaybk.com.tw");
+    expect(contoso.kind).toBe("card");
+    expect(contoso.issuerName).toBe("康拓索銀行銀行");
+    expect(contoso.primary).toBe(BRAND_TEMPLATES.CONTOSO.primary);
+    expect(contoso.host).toBe("ride.contoso.example");
 
-    expect(taishin.kind).toBe("card");
-    expect(taishin.issuerName).toBe("台新銀行");
-    expect(taishin.primary).toBe("#B0335F");
+    expect(fabrikam.kind).toBe("card");
+    expect(fabrikam.issuerName).toBe("法碧康銀行");
+    expect(fabrikam.primary).toBe("#B0335F");
 
-    expect(dbs.kind).toBe("card");
-    expect(dbs.issuerName).toBe("星展銀行");
-    expect(dbs.primary).toBe("#D72631");
+    expect(northwind.kind).toBe("card");
+    expect(northwind.issuerName).toBe("北風銀行");
+    expect(northwind.primary).toBe("#D72631");
   });
 
   it("does not treat insurance and travel tenant brands as card issuers", () => {
-    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.CTBC)).toBe(true);
-    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.CATHAY)).toBe(true);
-    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.TAISHIN)).toBe(true);
-    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.DBS)).toBe(true);
-    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.FUBON)).toBe(false);
-    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.LION)).toBe(false);
-    expect(isPartnerProgramSurfaceBrand(BRAND_TEMPLATES.GRAND)).toBe(false);
-    expect(isPartnerProgramSurfaceBrand(BRAND_TEMPLATES.FUBON)).toBe(true);
-    expect(isPartnerProgramSurfaceBrand(BRAND_TEMPLATES.LION)).toBe(true);
+    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.ACME)).toBe(true);
+    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.CONTOSO)).toBe(true);
+    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.FABRIKAM)).toBe(true);
+    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.NORTHWIND)).toBe(true);
+    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.TAILSPIN)).toBe(false);
+    expect(isCardAirportIssuerBrand(BRAND_TEMPLATES.ADVENTURE)).toBe(false);
+    expect(isPartnerProgramSurfaceBrand(BRAND_TEMPLATES.WINGTIP)).toBe(false);
+    expect(isPartnerProgramSurfaceBrand(BRAND_TEMPLATES.TAILSPIN)).toBe(true);
+    expect(isPartnerProgramSurfaceBrand(BRAND_TEMPLATES.ADVENTURE)).toBe(true);
 
     expect(
-      getProgramThemeForTenantSlug("fubon", BRAND_TEMPLATES.FUBON).kind,
+      getProgramThemeForTenantSlug("tailspin", BRAND_TEMPLATES.TAILSPIN).kind,
     ).toBe("insurance");
     expect(
-      getProgramThemeForTenantSlug("lion", BRAND_TEMPLATES.LION).kind,
+      getProgramThemeForTenantSlug("adventureworks", BRAND_TEMPLATES.ADVENTURE).kind,
     ).toBe("travel");
   });
 
-  it("reuses the canonical CTBC brand tokens for the card program", () => {
+  it("reuses the canonical ACME brand tokens for the card program", () => {
     const theme = getProgramTheme("card");
-    const brand = BRAND_TEMPLATES.CTBC;
+    const brand = BRAND_TEMPLATES.ACME;
 
     expect(theme.primary).toBe("#13478F");
     expect(theme.accent).toBe("#A8771B");
@@ -123,9 +123,9 @@ describe("partner-booking per-program theming", () => {
     expect(theme.chrome.accentText).toBe(brand.theme.accentText);
   });
 
-  it("reuses the canonical Fubon brand tokens for the insurance program", () => {
+  it("reuses the canonical Tailspin brand tokens for the insurance program", () => {
     const theme = getProgramTheme("insurance");
-    const brand = BRAND_TEMPLATES.FUBON;
+    const brand = BRAND_TEMPLATES.TAILSPIN;
 
     expect(theme.primary).toBe("#0E6E50");
     expect(theme.accent).toBe("#2FA37A");
@@ -140,14 +140,14 @@ describe("partner-booking per-program theming", () => {
   it("resolves a theme from a partner entry, preferring specific identifiers", () => {
     expect(
       getProgramThemeForEntry({
-        programCode: "FUBON_CLAIM",
+        programCode: "TAILSPIN_CLAIM",
         entrySlug: "generic",
       }).kind,
     ).toBe("insurance");
 
     expect(
       getProgramThemeForEntry({
-        entryHost: "booking.lion-travel.com.tw",
+        entryHost: "booking.adventure-works.example",
       }).kind,
     ).toBe("travel");
 
@@ -165,7 +165,7 @@ describe("partner-booking per-program theming", () => {
 
   it("keeps the travel palette aligned with the canvas theme", () => {
     const theme = getProgramTheme("travel");
-    const brand = BRAND_TEMPLATES.LION;
+    const brand = BRAND_TEMPLATES.ADVENTURE;
     expect(theme.primary).toBe("#B0420E");
     expect(theme.primaryDark).toBe("#6E2806");
     expect(theme.accent).toBe("#E07B3A");

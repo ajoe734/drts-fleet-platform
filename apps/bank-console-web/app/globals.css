@@ -1992,9 +1992,9 @@ body {
 
 /* ── Home / overview (BK_Home) ───────────────────────────────────────────────
  * Body styling for the role-cut posture dashboard. Window chrome stays tenant
- * realm (teal, from BankShell); the issuer (CTBC navy + gold) only accents the
+ * realm (teal, from BankShell); the issuer (ACME navy + gold) only accents the
  * card-benefit data and is consumed via the `--issuer-*` custom properties set
- * inline on `.bank-home` from BRAND_TEMPLATES.CTBC.tokens.dark — never a raw
+ * inline on `.bank-home` from BRAND_TEMPLATES.ACME.tokens.dark — never a raw
  * brand hex here, so scripts/check_ui_realm_tokens.py stays green. Status colors
  * (success/danger/warn/info) are UI feedback semantics, not brand identity. */
 .page-shell.bank-home {
