@@ -1,5 +1,23 @@
 # SR-OPS-SHELL-001 — 營運助理遮擋與跨app導航
 
+## 2026-09-08 18:19 UTC 再派工核對（最新狀態）
+
+- Owner Codex / Reviewer Codex2。完整 acceptance 仍受 scope／receiver 契約阻塞，未建立 handoff candidate。
+- 本次 `git fetch origin` exit 0；base `origin/dev` = `9fbd213685e1c1ab367f8e0a2d03781a1e7c0f81`；起始 branch head = `63eb47177b87df7ee13cf708044894eb1cb61086`。
+- `git rebase origin/dev` exit 0；`git merge --no-edit origin/codex/sr-ops-shell-001` exit 0，保留已發布 ancestry 以普通 push。受測程式 SHA = `f0decc1c9f327719311fad375d737c6fca56fdea`。後續本輪修改僅此證據文件。
+- `gh pr view 1804 --json state,headRefOid,mergeCommit,url` exit 0：PR #1804 已合併，helper candidate `03ae017dd5853d9ecc3f86ec325730e540979139`，merge `ab15cc21e0e3807f14462017273c27f94971f7f5`。這是 helper SHA，並非 parent candidate。
+- 合併的 [manual diagnosis](../../../support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-MANUAL-UNBLOCK.md) 明文指出 scope／receiver blocker 尚未解除，且合併文件不得被視為 prerequisite 已滿足。本次 dispatch 的「Unblock resolution complete」與該內容不一致。
+- 當前原始碼仍在 dispatch:1226 使用 `/platform-admin` fallback，:4520 audit CTA 僅傳 `/audit`；platform-admin audit:164 仍呼叫無參數 `client.listAuditLogs()`，未消費 URL resource context。complaints:653 仍產生裸 `/audit?auditId=...`。以上為原始碼觀察，未冒充 live 404 重現。
+- 當前 machine slice 仍只授權 assistant、shell、task tests 與此 evidence；未授權上述 sender／receiver。請 supervisor 擴精確 scope、加入重疊 writer 相依，並確認 URL resource context 與既有 audit API 的接收契約後再派工。此次保留既有 assistant 修正，未改 scope 外產品檔案。
+
+| 本輪實際命令 | 結果 |
+| --- | --- |
+| `git diff --check` | exit 0 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/` | exit 0；1 file，13 tests passed；321ms |
+| `pnpm --filter @drts/ops-console-web typecheck` | exit 0；next typegen + tsc --noEmit |
+
+資源 ID 僅為既有單元測試輸入：`AUD-1`、`AUD-42`、`AUD-7`、`AUD-9`、`AUD/with space`；未取得 live receipt/resource ID。未執行 live 新分頁、1440/390px CTA hit testing、開關／焦點／重載瀏覽器測試或真機測試，未啟動 dev server。完整 UI acceptance 未宣稱成功。提交此 evidence 並普通 push 後，以 canonical `ai-status.sh blocker` 記錄阻塞，不 handoff 或直接 done。
+
 ## 2026-09-08 dispatch 重驗（本節取代下方歷史交付狀態）
 
 - Owner Codex / Reviewer Codex2。狀態：blocked，尚未 handoff 或鎖定 candidate。
