@@ -102,6 +102,7 @@ function createOwnedMobilityService(options?: {
     persistDriverCompletionOutbox?: (...args: any[]) => Promise<unknown>;
     withTransaction: <T>(work: (tx: unknown) => Promise<T>) => Promise<T>;
     loadState?: (...args: any[]) => Promise<unknown>;
+    loadOrderCancellationForUpdate?: (...args: any[]) => Promise<unknown>;
     loadDriverTaskCompletionBundleForUpdate?: (
       ...args: any[]
     ) => Promise<unknown>;
@@ -243,6 +244,29 @@ function createOwnedMobilityService(options?: {
     options?.serviceAreaService,
     options?.fareAnomalyService,
   );
+
+  if (
+    options?.repository &&
+    !options.repository.loadOrderCancellationForUpdate
+  ) {
+    options.repository.loadOrderCancellationForUpdate = vi.fn(
+      async (_tx, orderId) => {
+        const snapshot = service.getReportingSnapshot();
+        return {
+          order: service.getOrder(orderId),
+          assignment:
+            snapshot.dispatchAssignments.find(
+              (assignment) =>
+                assignment.orderId === orderId &&
+                ["assigned", "accepted"].includes(assignment.status),
+            ) ?? null,
+          dispatchJobs: snapshot.dispatchJobs.filter(
+            (job) => job.orderId === orderId,
+          ),
+        };
+      },
+    );
+  }
 
   return {
     service,

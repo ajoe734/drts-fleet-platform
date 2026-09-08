@@ -423,6 +423,7 @@ export class OwnedMobilityService
     OnApplicationShutdown
 {
   private readonly logger = new Logger(OwnedMobilityService.name);
+  private readonly pendingWorkflowWrites = new Set<Promise<void>>();
 
   private orders: OwnedOrderRecord[] = [];
 
@@ -4366,8 +4367,10 @@ export class OwnedMobilityService
     options?: CreateDispatchAssignmentOptions,
   ): MaybePromise<DispatchAssignmentResult> {
     if (this.ownedMobilityRepository?.isEnabled()) {
-      return this.ownedMobilityRepository
-        .withTransaction(async (tx) => {
+      // Legacy creation/matching entry points return before their writes finish.
+      // Drain those writes before taking locks so they cannot race this snapshot.
+      return Promise.all([...this.pendingWorkflowWrites]).then(() =>
+        this.ownedMobilityRepository!.withTransaction(async (tx) => {
           // All assignment writers take assignment -> task -> job -> order
           // before any upsert, matching cancellation and completion.
           const current =
@@ -4546,11 +4549,11 @@ export class OwnedMobilityService
             throw error;
           }
           return bundle;
-        })
-        .then(async (bundle) => {
+        }).then(async (bundle) => {
           await this.resolveSuccessfulFareQuoteAnomalies(bundle);
           return this.applyDispatchAssignmentBundle(bundle, requestId, false);
-        });
+        }),
+      );
     }
 
     this.assertAssignmentEligibilityRecheck(
@@ -9354,11 +9357,15 @@ export class OwnedMobilityService
       );
     }
 
-    void this.ownedMobilityRepository
-      .persistChanges(persistPayload)
-      .catch((error: unknown) => {
+    const pending = this.ownedMobilityRepository.persistChanges(persistPayload);
+    this.pendingWorkflowWrites.add(pending);
+    void pending.then(
+      () => this.pendingWorkflowWrites.delete(pending),
+      (error: unknown) => {
+        this.pendingWorkflowWrites.delete(pending);
         this.ownedMobilityRepository!.reportPersistenceFailure(error, context);
-      });
+      },
+    );
   }
 
   private async persistChangesRequired(
