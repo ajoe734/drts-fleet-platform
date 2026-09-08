@@ -397,7 +397,7 @@ describe("UV-EXEC-012 repair and handoff", () => {
     );
     expect(state.handoff?.reason).toBe("location_unresolved");
     expect(state.handoffSummary().addresses).toHaveLength(3);
-    expect(state.handoffSummary().addresses[0].rawText).toBe("台北一二三號");
+    expect(state.handoffSummary().addresses[0]?.rawText).toBe("台北一二三號");
   });
   it.each([
     "human",
