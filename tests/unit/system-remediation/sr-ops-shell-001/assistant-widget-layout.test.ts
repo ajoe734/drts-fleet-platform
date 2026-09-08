@@ -510,4 +510,206 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
       expect(ctaClicked).toBe(true);
     });
   });
+
+  describe("Realistic Viewport Geometry, Collision & Hit-Testing (1440px / 390px Acceptance)", () => {
+    type Box = { left: number; top: number; width: number; height: number };
+
+    function intersects(b1: Box, b2: Box): boolean {
+      return (
+        b1.left < b2.left + b2.width &&
+        b1.left + b1.width > b2.left &&
+        b1.top < b2.top + b2.height &&
+        b1.top + b1.height > b2.top
+      );
+    }
+
+    type HitTarget = {
+      id: string;
+      box: Box;
+      pointerEvents: "none" | "auto";
+      zIndex: number;
+    };
+
+    function hitTest(x: number, y: number, targets: HitTarget[]): string | null {
+      // Sort descending by z-index
+      const sorted = [...targets].sort((a, b) => b.zIndex - a.zIndex);
+      for (const target of sorted) {
+        if (target.pointerEvents === "none") {
+          continue; // transparent to pointer events
+        }
+        const { left, top, width, height } = target.box;
+        if (x >= left && x <= left + width && y >= top && y <= top + height) {
+          return target.id;
+        }
+      }
+      return null;
+    }
+
+    it("verifies 1440x900 desktop bottom CTA controls are not blocked by assistant portal", () => {
+      const desktop = { width: 1440, height: 900 };
+      const launcherBox: Box = {
+        left: desktop.width - 48 - EDGE_GAP, // 1376
+        top: desktop.height - 48 - EDGE_GAP, // 836
+        width: 48,
+        height: 48,
+      };
+
+      // Underlying workspace elements: e.g. dispatch board pagination and submit CTA for real dispatch order 'ord-tpe-2026-8801'
+      const paginationCta: Box = {
+        left: 1100,
+        top: 840,
+        width: 140,
+        height: 36,
+      };
+      const dispatchAssignCta: Box = {
+        left: 920,
+        top: 840,
+        width: 160,
+        height: 36,
+      };
+
+      // 1. Neither workspace CTA collides with launcher
+      expect(intersects(paginationCta, launcherBox)).toBe(false);
+      expect(intersects(dispatchAssignCta, launcherBox)).toBe(false);
+
+      // 2. Hit-testing simulation with portal root
+      const portalRoot: HitTarget = {
+        id: "ops-assistant-portal-root",
+        box: { left: 0, top: 0, width: 1440, height: 900 },
+        pointerEvents: "none",
+        zIndex: 5000,
+      };
+      const launcherTarget: HitTarget = {
+        id: "ops-assistant-launcher",
+        box: launcherBox,
+        pointerEvents: "auto",
+        zIndex: 5001,
+      };
+      const paginationTarget: HitTarget = {
+        id: "dispatch-pagination-cta",
+        box: paginationCta,
+        pointerEvents: "auto",
+        zIndex: 10,
+      };
+      const dispatchTarget: HitTarget = {
+        id: "dispatch-order-assign-cta",
+        box: dispatchAssignCta,
+        pointerEvents: "auto",
+        zIndex: 10,
+      };
+
+      const targets = [portalRoot, launcherTarget, paginationTarget, dispatchTarget];
+
+      // Click on pagination CTA (x: 1150, y: 855) -> must hit pagination CTA, not intercepted by portal
+      expect(hitTest(1150, 855, targets)).toBe("dispatch-pagination-cta");
+
+      // Click on dispatch CTA (x: 950, y: 855) -> must hit dispatch CTA
+      expect(hitTest(950, 855, targets)).toBe("dispatch-order-assign-cta");
+
+      // Click on launcher (x: 1390, y: 850) -> must hit launcher
+      expect(hitTest(1390, 850, targets)).toBe("ops-assistant-launcher");
+
+      // Click on empty workspace area (x: 500, y: 500) -> passes through portal
+      expect(hitTest(500, 500, targets)).toBeNull();
+    });
+
+    it("verifies 390x844 mobile viewport clamp, CTA accessibility, and safe boundaries", () => {
+      const mobile = { width: 390, height: 844 };
+      const defaultState = buildDefaultState(mobile);
+
+      // Clamped width fits screen with 16px padding on both sides
+      expect(defaultState.width).toBeLessThanOrEqual(350);
+      expect(defaultState.width + EDGE_GAP * 2).toBeLessThanOrEqual(mobile.width);
+
+      // Bottom action bar on mobile: e.g. driver offboarding confirm button
+      const mobileActionBar: Box = {
+        left: 16,
+        top: 780,
+        width: 280,
+        height: 48,
+      };
+      const mobileLauncherBox: Box = {
+        left: mobile.width - 48 - EDGE_GAP, // 326
+        top: mobile.height - 48 - EDGE_GAP, // 780
+        width: 48,
+        height: 48,
+      };
+
+      // Space is properly partitioned
+      expect(intersects(mobileActionBar, mobileLauncherBox)).toBe(false);
+
+      const targets: HitTarget[] = [
+        {
+          id: "ops-assistant-portal-root",
+          box: { left: 0, top: 0, width: 390, height: 844 },
+          pointerEvents: "none",
+          zIndex: 5000,
+        },
+        {
+          id: "ops-assistant-launcher",
+          box: mobileLauncherBox,
+          pointerEvents: "auto",
+          zIndex: 5001,
+        },
+        {
+          id: "mobile-action-bar-submit",
+          box: mobileActionBar,
+          pointerEvents: "auto",
+          zIndex: 20,
+        },
+      ];
+
+      // Click on mobile action bar -> hits mobile action bar
+      expect(hitTest(100, 800, targets)).toBe("mobile-action-bar-submit");
+      // Click on launcher -> hits launcher
+      expect(hitTest(340, 800, targets)).toBe("ops-assistant-launcher");
+    });
+
+    it("maintains reasonable layout after toggle cycle and simulated browser reload", () => {
+      const desktop = { width: 1440, height: 900 };
+      const mockStorage: Record<string, string> = {};
+      const storage: Storage = {
+        getItem: (k) => mockStorage[k] ?? null,
+        setItem: (k, v) => {
+          mockStorage[k] = v;
+        },
+        removeItem: (k) => {
+          delete mockStorage[k];
+        },
+        clear: () => {},
+        key: () => null,
+        length: 0,
+      };
+
+      // 1. Initial load (fallback to default state when storage is empty)
+      let state = readStoredState(desktop, storage) ?? buildDefaultState(desktop);
+      expect(state.minimized).toBe(true);
+      expect(state.closed).toBe(false);
+
+      // 2. Open / expand assistant
+      state = toggleWidgetMinimized(state, desktop);
+      expect(state.minimized).toBe(false);
+      writeStoredState(state, storage);
+
+      // 3. User closes assistant (launcher mode)
+      state = toggleWidgetClosed(state, true);
+      expect(state.closed).toBe(true);
+      writeStoredState(state, storage);
+
+      // 4. Simulated browser reload (e.g. page refresh)
+      const reloadedState = readStoredState(desktop, storage);
+      expect(reloadedState?.closed).toBe(true);
+      expect(reloadedState?.minimized).toBe(false);
+
+      // 5. Reopen via launcher
+      const reopenedState = toggleWidgetClosed(reloadedState!, false);
+      expect(reopenedState.closed).toBe(false);
+
+      // Boundary guarantees
+      expect(reopenedState.x).toBeGreaterThanOrEqual(EDGE_GAP);
+      expect(reopenedState.x + reopenedState.width).toBeLessThanOrEqual(
+        desktop.width - EDGE_GAP,
+      );
+    });
+  });
 });

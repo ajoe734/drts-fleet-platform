@@ -235,4 +235,98 @@ describe("SR-OPS-SHELL-001: Audit and Cross-App Links", () => {
       }
     });
   });
+
+  describe("Real DRTS Domain ActionReceipt & Contextual Audit Links (R18 / C048 Acceptance)", () => {
+    it("serializes dispatch order action receipt with real domain IDs into runtime platform-admin audit URL", () => {
+      process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL = "http://localhost:3002";
+
+      const realDispatchReceipt = {
+        actionId: "act-disp-assign-20260908-01",
+        auditId: "aud-disp-log-20260908-991",
+        resourceType: "dispatch_order",
+        resourceId: "ord-tpe-2026-8801",
+        status: "completed",
+        message: "Assigned driver drv-north-0108 to order ord-tpe-2026-8801",
+        auditHref: "/audit?auditId=aud-disp-log-20260908-991",
+      };
+
+      const resolvedAuditHref = sanitizeAuditHref(realDispatchReceipt.auditHref, {
+        auditId: realDispatchReceipt.auditId,
+        resourceType: realDispatchReceipt.resourceType,
+        resourceId: realDispatchReceipt.resourceId,
+      });
+
+      expect(resolvedAuditHref.startsWith("http://localhost:3002/audit?")).toBe(true);
+      expect(resolvedAuditHref).not.toContain("localhost:3000"); // Never stays on ops console port 3000
+      expect(resolvedAuditHref).not.toContain("/platform-admin/audit"); // No nested 404 path
+
+      const parsed = new URL(resolvedAuditHref);
+      expect(parsed.searchParams.get("auditId")).toBe("aud-disp-log-20260908-991");
+      expect(parsed.searchParams.get("resourceType")).toBe("dispatch_order");
+      expect(parsed.searchParams.get("resourceId")).toBe("ord-tpe-2026-8801");
+    });
+
+    it("serializes safety incident action receipt with real domain IDs into runtime audit URL", () => {
+      process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL = "http://localhost:3002";
+
+      const realIncidentReceipt = {
+        actionId: "act-inc-escalate-20260908-0042",
+        auditId: "aud-inc-log-20260908-0042",
+        resourceType: "incident",
+        resourceId: "inc-tpe-2026-0042",
+        status: "completed",
+        message: "Incident inc-tpe-2026-0042 escalated to supervisor review",
+        auditHref: "/platform-admin/audit?auditId=aud-inc-log-20260908-0042",
+      };
+
+      const resolvedAuditHref = sanitizeAuditHref(realIncidentReceipt.auditHref, {
+        auditId: realIncidentReceipt.auditId,
+        resourceType: realIncidentReceipt.resourceType,
+        resourceId: realIncidentReceipt.resourceId,
+      });
+
+      expect(resolvedAuditHref.startsWith("http://localhost:3002/audit?")).toBe(true);
+      const parsed = new URL(resolvedAuditHref);
+      expect(parsed.searchParams.get("auditId")).toBe("aud-inc-log-20260908-0042");
+      expect(parsed.searchParams.get("resourceType")).toBe("incident");
+      expect(parsed.searchParams.get("resourceId")).toBe("inc-tpe-2026-0042");
+    });
+
+    it("ensures all cross-app links mandate new_tab openMode to prevent disrupting operator session", () => {
+      process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL = "http://localhost:3002";
+
+      const routes = ["/dispatch", "/vehicles", "/revenue", "/contracts", "/incidents"] as const;
+      for (const route of routes) {
+        const context: OpsAssistantContext = {
+          route,
+          locale: "zh",
+          identity: {
+            actorType: "ops_user",
+            realm: "ops",
+            env: "development",
+          },
+          health: {
+            status: "healthy",
+            degradedServices: [],
+            lastCheckedAt: "2026-09-08T14:00:00Z",
+          },
+          selectedEntity: {
+            kind: route === "/incidents" ? "incident" : "order",
+            id: route === "/incidents" ? "inc-tpe-2026-0042" : "ord-tpe-2026-8801",
+          },
+        };
+
+        const actions = buildAssistantActions(context);
+        const crossAppActions = actions.filter((a) => a.kind === "cross_app");
+        for (const action of crossAppActions) {
+          if (action.kind === "cross_app") {
+            expect(action.link.openMode).toBe("new_tab");
+            const resolved = resolveAssistantActionHref(action);
+            expect(resolved.startsWith("http://localhost:3002/")).toBe(true);
+            expect(resolved).not.toContain("localhost:3000");
+          }
+        }
+      }
+    });
+  });
 });
