@@ -1,5 +1,16 @@
 # SR-BANK-002 — 銀行角色金額／PII／匯出一致隔離
 
+## 2026-09-08T21:19Z resumed dispatch verification
+
+- Fetched base `origin/dev`: `e97653b7ffb962a6c4d688e8706711d860fa3604`; tested checkpoint: `cb67ee8fa8de3099feb2c2845e65ab4f17d6b3cd`. No candidate established.
+- Current task slice still grants six original scopes and only SR-BANK-001 / SR-IAM-001 dependencies. Reviewed both unblock helper documents: history repair supplies a replacement-branch plan; planning decision explicitly requires supervisor scope and overlapping-writer dependency updates before shared edits. Dispatch still assigns `codex2/sr-bank-002`.
+- `git rebase origin/dev`: exit 1, duplicate `dbec26678` conflicts in six task files; `git rebase --abort`: exit 0. No shared history rewritten.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0. Defect sources are identical to fetched dev.
+- Initial Vitest exit 1 (missing next/server / module resolution), typecheck exit 2 (unexpected virtual store / missing types). Removed only this isolated worktree's node_modules symlinks; `pnpm install --offline --frozen-lockfile --ignore-scripts`: exit 0, tracked files unchanged.
+- After dependency repair, `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1, inner matrix **49 passed / 5 failed**. Two settlement scope checks, two upstream-403 seed fallbacks, and Contoso CSV outage returning ACME rows remain reproducible. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, leaked seed sentinel `STM-ACME-202606`. Tests use the synthetic upstream and signed-cookie boundaries documented below; no live, device, CI, merge or deployment acceptance was performed.
+- Required resume action remains: supervisor records replacement delivery branch, extends loader scope with overlapping-writer dependencies, and registers canonical IAM producer/dependency. No out-of-scope product edit or handoff; this is an evidence anchor only.
+
 ## 2026-09-08T18:51Z resumed dispatch
 
 - Fetch base `origin/dev`：`d4f54ef94e059a981bf2be1f7b944e815870e117`；受測 checkpoint `81f04a90b406a6494e8ec67616d4fa992577d008`，尚無 candidate。task slice 仍指定原 branch／六項 scopes／兩項 dependencies。
