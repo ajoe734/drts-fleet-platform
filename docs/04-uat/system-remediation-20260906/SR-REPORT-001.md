@@ -184,3 +184,32 @@ This update is an evidence anchor, not a review handoff.
 - No live resource, browser/device, deployment, API/ops typecheck, or new
   renderer parsing verification was performed. There is no implementation
   candidate; this evidence anchor SHA is recorded in the machine blocker note.
+
+## Planning-helper redispatch verification — 2026-09-08 17:34 UTC
+
+- Fresh base: `7785a9e292fe94a875a355268432453e0af6a4cd`; dispatched
+  HEAD: `0929104f9a730bbe9e9972f021ecaf55266557be`.
+- PR #1793/helper candidate `5b65f99ce8b59934c8461b0fa9b3441131d985be`
+  is integrated at this base. Its decision explicitly grants no shared-file
+  authorization and requires the parent remain blocked until supervisor records
+  scopes and writer sequencing (or delivers a coordinated producer).
+- Canonical `show SR-REPORT-001` still has the original four scopes and two
+  dependencies, despite its automatic todo reopening. Supervisor must add the
+  focused `packages/contracts/src/index.ts` and
+  `tests/unit/reporting-filing.test.ts` scopes with necessary writer dependencies
+  and synchronize the task specification, or supply the coordinated producer.
+- Current code still advertises CSV only and has null PDF/XLSX renderers;
+  the central test still expects both formats to fail. No production/UI changes.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: initial exit 1 for
+  repeated historical evidence conflicts; preserved the complete dispatched
+  evidence document through each conflict; final continuation exit 0.
+- `git merge --no-ff origin/codex/sr-report-001` with task trailers: exit 0,
+  preserving published history for ordinary push.
+- `pnpm exec vitest run tests/unit/reporting-filing.test.ts`: exit 0;
+  30 tests / 1 file passed, duration 3.12s. In-memory order resource observed:
+  `6105d18a-08a9-4bd0-a414-96445895d3fc`. This reproduces format rejection,
+  not successful PDF/XLSX generation.
+- No live resource, browser/device test, deployment, API/ops typecheck, or
+  task-local renderer parsing run is claimed. Implementation remains gated on
+  supervisor scope coordination. This commit is an evidence anchor, not a
+  review candidate; its pushed SHA is recorded in canonical blocker status.
