@@ -1,14 +1,14 @@
 {
-  "baseSha": "c171ea5126c1a7c19fa090429b2965bbac106768",
-  "executionSha": "1e09eb890870138842c71fabfa74e071817a4caf",
-  "recordedAt": "2026-09-08T17:02:36.249Z",
-  "scope": "Local inherited production controller routes, real auth guard/JWT and PostgreSQL. Key seeded through service; HTTP successful writes, full AppModule middleware and deployed MFA not verified.",
-  "tenantId": "qa-http-6ee3b5e9-5f94-428e-a98e-ccf47b1041f4",
-  "principalId": "qa-http-principal-33078e51-ac27-4b8a-a94f-7121f01d9a08",
-  "sessionId": "sid_476b6d5aa2c848c5993d9fb6f9532b93",
-  "writerSessionId": "sid_ef59765a28a74c8892c4b6da3ce8f160",
-  "apiKeyId": "api_key_fec6eb86-0b5d-466b-a3df-47861ffb5bdf",
-  "isolatedDatabase": "sr_qa_webhook_001_1788886940_3486035",
+  "baseSha": "d44bd28142f238ef9d40507685a9423ef5c814f7",
+  "executionSha": "5ff69a26c4e5f98d9195cf5e1fc1862f67bb6da5",
+  "recordedAt": "2026-09-08T17:11:33.203Z",
+  "scope": "Local inherited production controller routes, real auth guard/JWT and PostgreSQL. HTTP issue/rotate/revoke with product-issued local session and proof; full AppModule middleware and deployed MFA not verified.",
+  "tenantId": "qa-http-ec4faa52-2f54-4822-96d1-da7d709abe82",
+  "principalId": "qa-http-principal-688e2b40-a69f-408a-b0a3-84faf0271ce5",
+  "sessionId": "sid_12f172c076a0472a9a9b1b402dc84b96",
+  "writerSessionId": "sid_898387717d254ae2a15f817c947b4a79",
+  "apiKeyId": "api_key_bee67a0f-bbd8-4982-9c14-7b3f67070acf",
+  "isolatedDatabase": "sr_qa_webhook_001_1788887482_3552518",
   "anonymousStatus": 401,
   "readStatus": 200,
   "deniedWriteStatus": 403,
@@ -27,7 +27,7 @@
         ]
       },
       "retryable": false,
-      "trace_id": "472e6310-5fb0-4f29-bdc9-115ae390fc06"
+      "trace_id": "9391b80f-078e-43cb-8fda-089c96bd00f9"
     }
   },
   "missingProofStatus": 403,
@@ -41,8 +41,16 @@
         "step_up_reference_header": "x-drts-step-up-reference"
       },
       "retryable": false,
-      "trace_id": "aed479c8-04b8-4e3d-9319-e331a5507693"
+      "trace_id": "1eb756ea-3634-4732-83b9-179fb19d18f7"
     }
   },
-  "databaseUnchanged": true
+  "rejectedWritesDatabaseUnchanged": true,
+  "httpCreatedApiKeyId": "api_key_39017ce1-e5df-476c-9f03-6550e58f4cf9",
+  "httpRotatedApiKeyId": "api_key_baba7510-f995-4362-a9e1-175cbabe41e7",
+  "httpLifecycleStatuses": [
+    201,
+    201,
+    201
+  ],
+  "persistedRevoked": true
 }

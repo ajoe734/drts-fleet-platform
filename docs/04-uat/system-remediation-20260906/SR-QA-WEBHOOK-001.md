@@ -2,6 +2,17 @@
 
 本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Gemini（本次 dispatch）。未 handoff、未完成 review/CI/merge。
 
+## 2026-09-08 17:13 UTC C111 HTTP lifecycle 續驗（最新）
+
+- base `d44bd28142f238ef9d40507685a9423ef5c814f7`；最後執行 SHA `5ff69a26c`，尚非 lifecycle candidate。按指示 rebase 重播歷史 a119ec0bb 再遇四檔 add/add 衝突，已 abort，以 merge 納入 dev 保留已發布歷史；兩個測試 anchor 均已普通 push。
+- 真 Nest HTTP issue/rotate/revoke 各返回 201；PostgreSQL 回讀原 key 的 supersededByApiKeyId 指向新 key，新 key 最終 revoked，該 tenant 共三筆 record 且不含兩次回傳的明文密鑰；HTTP GET 再確認撤銷 key 可見及明文遮罩。匿名401、缺scope403、缺proof403後 DB 不變的既有案例保留。
+- 限制：JWT由產品 service 本機簽發，預設 AMR 是 `tenant_bootstrap_fixture`，proof 由真 StepUpProofService 對 verified durable session 建立。這是本機管理 API regression，**不是實際登入／MFA 驗收**；未用此測試取代部署認證。未修改產品、共用設定或 UI。
+- 獨立命令 `DRTS_WEBHOOK_AUTH_EVIDENCE=tests/e2e/system-remediation/sr-qa-webhook-001/evidence-auth-http.json bash tests/unit/system-remediation/sr-qa-webhook-001/run-auth-http.sh` → exit 0，1 passed / 3.56s（首次執行時程式尚為 dirty diff，故以後述 anchor 整合重驗為正式證據）。
+- 整合首輪 exit 1：wrapper 仍讀舊 databaseUnchanged 欄位；已改讀 rejectedWritesDatabaseUnchanged 並核對 persistedRevoked 及三次 201。最後 `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 0，5 passed / 1.5m，含25 local、3 PostgreSQL與1 auth HTTP，另4 shared harness。
+- 最後 HTTP key `api_key_39017ce1-e5df-476c-9f03-6550e58f4cf9`，輪替 key `api_key_baba7510-f995-4362-a9e1-175cbabe41e7`；完整 SHA、tenant/session/DB ID與stdout見同 task evidence-auth-http.json、evidence-postgres.json、evidence-sr-qa-webhook-001.json。結束後查 pg_database 本 task prefix 計數 0。
+- `DRTS_WEBHOOK_LIVE=1 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 1，1 failed / 4 passed / 1.5s；缺部署認證及外部證據明確失敗。`pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/auth-http.test.ts tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts --max-warnings=0`、`bash -n tests/unit/system-remediation/sr-qa-webhook-001/run-auth-http.sh`、`git diff --check` → exit 0。
+- 維持 in_progress，不 handoff。仍需完整 AppModule middleware 跨租戶負向、tenant key消費／使用量、真登入MFA；C112 deadline契約、C113 sandbox、C114 provider、C115部署排程／告警回執需 supervisor 協調。未發現新產品缺陷，不在本驗收 scope 改業務碼。
+
 ## 2026-09-08 17:00 UTC C111 本機 HTTP 身分驗證續驗（最新）
 
 - base `c171ea5126c1a7c19fa090429b2965bbac106768`；測試入口 anchor `4a6bd78006babeeed6969821688540d79a56b14d`，不是 lifecycle candidate。依指示 rebase 重播歷史 a119ec0bb 時遇四個 task 檔 add/add 衝突，已 abort，再 merge dev 保留已發布歷史；普通 push 成功。
