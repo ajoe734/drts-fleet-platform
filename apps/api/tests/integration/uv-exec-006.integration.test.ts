@@ -1747,6 +1747,57 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     ).toHaveLength(0);
   });
 
+  it("a targeted timeout closes the pending offer and releases both resources", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const database = new DatabaseService();
+    databases.push(database);
+    const driverId = `driver-uvexec006-rej-ok-${randomUUID()}`;
+    const vehicleId = `vehicle-uvexec006-rej-ok-${randomUUID()}`;
+    const { service } = createTestService(database, [
+      {
+        driverId,
+        vehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ]);
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "UV-EXEC-006 Rider", phone: "0911001333" },
+    });
+    trackOrder(order.orderId);
+
+    const dispatchResult = await service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const assignment = await service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId,
+      driverId,
+    });
+
+    const result = await service.handleDispatchTimeout(
+      order.orderId,
+      "acceptance_timeout",
+      undefined,
+      { targetAssignmentId: assignment.assignmentId },
+    );
+    expect(result.escalationAction).toBe("retry_dispatch");
+
+    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
+      "rejected",
+    );
+    expect(
+      await readActiveReservations(database, "driver", driverId),
+    ).toHaveLength(0);
+    expect(
+      await readActiveReservations(database, "vehicle", vehicleId),
+    ).toHaveLength(0);
+  });
+
   it("a valid cancel atomically persists the cancellation and releases the reservation", async () => {
     expect(DATABASE_URL).toBeTruthy();
     const database = new DatabaseService();
