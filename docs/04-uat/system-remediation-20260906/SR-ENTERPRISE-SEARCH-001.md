@@ -1,5 +1,54 @@
 # SR-ENTERPRISE-SEARCH-001 — 企業歷史查詢條件與結果一致
 
+## 2026-09-08 本次 dispatch 核實：blocked，尚未達到 handoff 條件
+
+本節取代下方歷史紀錄中的完成判定。fresh `origin/dev` base 為
+`3b60a3757238663572f16f010c94f446f2c71eaa`；本次先 rebase，恢復實作 SHA 為
+`641af0c6d`，恢復證據 SHA 為 `9b2528e24`。為保留已發布 branch ancestry 並允許
+普通 non-force push，再 merge `origin/codex2/sr-enterprise-search-001`
+（原 head `c40fd8a5d09e4082976e8ddda8cc2d642d480467`），無檔案衝突。
+本次沒有合格 candidate，沒有 handoff；最終 blocker/commit SHA 由 task board 記錄。
+
+重新讀取 R24、C013、C069 及 task execution prompt 後確認：
+
+- base 的 bookings/page.tsx 仍只渲染 `EnterpriseBookingHistory`；歷史分支的
+  搜尋實作尚不能視為 dev 已修復。
+- `owned-mobility.controller.ts:459–472` 的 GET tenant/bookings 僅接收
+  `x-tenant-id` / `x-request-id`，沒有 query DTO，也未傳遞查詢條件。
+- `owned-mobility.service.ts:2048–2063` 僅依 tenantId 篩 orders，再回傳
+  `page: 1, pageSize: items.length, totalItems: items.length`；沒有條件式總數或分頁。
+- 現有頁面 `.listBookings()` 無參數，日期、乘客、狀態全在前端處理。
+  這不滿足明示的「若 API 缺 filter 必須在 SR-BOOKING-VERIFY 取得後端能力後才結案」。
+- `enterpriseUser.name` 來自 fixture，不能稱為已驗證的登入者身分。
+- 41 項測試匯入測試目錄內 `enterprise-search-logic.ts` 邏輯副本；它們通過
+  不代表 production component、登入者 scope 或 API query 已通過整合驗證。
+
+實際執行（rebase 後 SHA `9b2528e24`，2026-09-08 12:26 UTC）：
+
+```text
+pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/
+Test Files 1 passed (1); Tests 41 passed (41); exit 0
+pnpm --filter @drts/enterprise-dispatch-web typecheck
+tsc --noEmit; exit 0
+git diff --check
+無輸出; exit 0
+ai-status.sh show SR-BOOKING-VERIFY-001
+Task not found: SR-BOOKING-VERIFY-001; exit 1
+```
+
+資源路徑仍為 GET `/api/tenant/bookings`，頁面指定 tenant ID
+`10000000-0000-0000-0000-000000000201`。本次未送 live query，沒有實際
+live booking ID、filtered total、瀏覽器或真機證據，不能把測試 fixture 的
+`EB-7K2001` 等 ID 當成 live 資源。
+
+請 supervisor 登錄／確認 SR-BOOKING-VERIFY 的實際 task ID，補上本 task 的
+depends_on，協調 API／contract／client scopes 後提供日期、乘客、狀態及分頁
+能力。本 owner 僅有頁面、專屬測試及本證據的 write scope，不能修改共用後端。
+取得權威契約後才能替換前端全量篩選、補 production component 與 API 整合測試，
+取得同條件 query/總數證據，再建立 candidate 供 Codex 獨立 review。
+
+以下為歷史紀錄，成功宣稱不適用於本次 dispatch。
+
 | 欄位          | 內容                                                                                              |
 | ------------- | ------------------------------------------------------------------------------------------------- |
 | Task spec     | `docs/03-runbooks/system-remediation-20260906/SR-ENTERPRISE-SEARCH-001.md`                        |
@@ -156,4 +205,4 @@ $ pnpm --filter @drts/enterprise-dispatch-web test
 2. **本任務未執行的 Live/真機部分（交由後續 QA/E2E 驗收任務驗證）**：
    - 尚未對已部署之 GCP Cloud Run Dev 環境進行真實瀏覽器實機手動驗證。
    - 尚未在真機 iOS / Android Webview 進行觸控與手勢操作測試。
-   - 後端若未來在 `SR-BOOKING-VERIFY` / `SR-QA-BOOKING-001` 新增伺服器端 Query DTO 支援，前端可進一步升級為 server-side query，但在目前後端僅支援全量清單回傳時，前端全域先篩後切之行為已滿足本任務之規範。
+   - 更正：後端缺 Query DTO 是本次明示的結案阻擋；前端全量先篩後切不能取代所需後端能力與實際 query／總數證據。
