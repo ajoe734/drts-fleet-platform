@@ -5,7 +5,7 @@
 | Task spec     | `docs/03-runbooks/system-remediation-20260906/SR-ENV-COPY-001.md`               |
 | Owner         | Gemini                                                                           |
 | Reviewer      | Codex2                                                                           |
-| Base SHA      | `3b60a37574c82b0e9803bfe38a531e0ee7e6ecaa` (= `origin/dev` tip at task start)  |
+| Base SHA      | `3b60a3757238663572f16f010c94f446f2c71eaa` (= PR #1655 baseRefOid)              |
 | Candidate SHA | recorded at `handoff` via `git rev-parse HEAD` (see task board)                  |
 
 ## 1. 重現與基準
@@ -13,12 +13,14 @@
 - **追溯來源**：
   - 問題來源：`findings.json` 之 **R27**（「環境標示與使用者文案混入工程資訊：dev/mock畫面顯示正式環境或PRODUCTION；多頁顯示ActionIntent、submissionId、dispatch_timeout等」）。
   - 能力來源：`capabilities.json` 之 **C110**（「環境、資料來源與文案可信度：用環境真值與來源時間；清除無用戶意義的內部提示」）。
-- **Base SHA**：`bb265b286d718e61d2c50479deb0ddcd031a4597`（當前 `origin/dev`）。
+- **Base SHA 來源與校準**：
+  - PR #1655 之 `baseRefOid` 確切為 `3b60a3757238663572f16f010c94f446f2c71eaa`（經 `git cat-file -t 3b60a3757238663572f16f010c94f446f2c71eaa` 驗證為 commit 物件，exit code 0）。
+  - 分支初期曾由 `bb265b286d718e61d2c50479deb0ddcd031a4597` 起步，並透過 commit `320062470` 合併 `origin/dev` 至當前 PR 基準 `3b60a3757238663572f16f010c94f446f2c71eaa`。先前候選之 UAT 報告曾有誤植字串（筆誤 `...74c82b...`），本次已徹底校準為不可變 Git 物件。
 - **重現狀況**：
   - 在 Base SHA 下，`apps/ops-console-web/lib/translations.ts` 中的審核與理由代碼說明文字包含內部工程代碼 `ActionIntent`（繁中：`（例：ActionIntent, reasonCode）`；英文：`(e.g., ActionIntent, reasonCode)`）。
   - `apps/platform-admin-web/lib/translations.ts` 與 `apps/fleet-partner-portal-web/lib/translations.ts` 中存在多處未在地化、未插補之內部變數名稱 `submissionId`（如 `無效的 submissionId`、`偏好車輛 submissionId`、`目前司機 submissionId`）。
-  - `apps/tenant-console-web/lib/translations.ts` 的繁體中文字典中，環境標籤 `shell.env` 被硬編碼為英文 `"production"`，且各 app 缺少統一結構化的環境真值解析。
-  - 缺乏統一路徑防範「從網域或主機名稱字串猜測環境」以及「未經驗證的健康檢查資料被預設為 healthy」，導致 mock/fixture 模式可能被錯誤標示為 production。
+  - 各應用的預設環境鍵（如 `tenant-console-web`、`platform-admin-web`、`enterprise-dispatch-web`、`fleet-partner-portal-web` 之 `shell.env` / `adminShell.environment`）硬編碼為 `"production"` / `"正式環境"`，使得各 app 在 dev/preview/mock 下執行時，`tenant-shell.tsx:909`（`env={t("shell.env")}`）與 `admin-shell.tsx:638`（`{labelFor(locale, "adminShell.environment")}`）直接對用戶呈現「正式環境 / PRODUCTION」。
+  - 缺乏統一路徑防範「從網域或主機名稱字串猜測環境」以及「未經驗證的健康檢查資料被預設為 healthy」，且若 `tier="production"` 與 `isFixture=true` 同時出現時，缺少強制 source override 降級機制。
 
 ## 2. 這個任務做了什麼
 
@@ -39,57 +41,80 @@
     - **未知資料不標健康**：若健康檢查資料未經驗證、無連線結果或來源不明，一律解析為 `unknown`，絕不冒充 `healthy`。
   - `getEnvironmentDisplay` 與 `getHealthDisplay`：
     - 將解析後的狀態精確對齊 `@drts/ui-tokens` 的 `STATUS_TONES`（如 `info`, `warning`, `critical`, `success`, `neutral`），並提供在地化標籤與語義化 aria-label。
-- **UI 元件實作（`environment-badge.tsx`）**：
-  - 遵循 UI Design Contract 與 Design Canvas 規範。
-  - 採用 Canvas Mono 語彙（`SHELL_MONO`，字級 `11px`，字重 `700`，`uppercase`，`letter-spacing: 0.05em`）。
-  - 嚴格採用 `@drts/ui-tokens` 狀態階調（`STATUS_TONES.info` 等背景、邊框與文字色彩），零私自發明 hex 色碼。
-  - 支援健康指示點（dot indicator）與提示標籤（tooltip/title）。
+- **UI 元件實作（`environment-badge.tsx`）與 Source Override 強化**：
+  - 依 Codex2 審查意見修復：先前 `tier` 判斷未將 `isFixture` / `isMock` 列為全路徑覆蓋。現已重構為**在所有程式路徑上全面套用 source override**：
+    - 無論傳入 `tier="production"` 或 `env="production"`，只要帶有 `isFixture: true` 或 `isMock: true`，一律由 `resolveRuntimeEnvironment` 強制解析為 `"mock"`。
+    - `data-environment` 輸出為 `"mock"`，`data-environment-tier` 輸出為 `"local"`，`data-tone` 為 `"neutral"`。
+    - 文字標籤在繁中輸出「模擬資料」，英文輸出「MOCK DATA」，絕不顯示「正式環境」或「PRODUCTION」。
+  - 遵循 UI Design Contract 與 Design Canvas 規範：
+    - 採用 Canvas Mono 語彙（`SHELL_MONO`，字級 `11px`，字重 `700`，`uppercase`，`letter-spacing: 0.04em`）。
+    - 嚴格採用 `@drts/ui-tokens` 狀態階調（`STATUS_TONES` 各色階），零私自發明 hex 色碼。
 
-### B. 全面清理 6 大應用之使用者文案與字典（`apps/*/lib/translations.ts`）
+### B. 全面清理 6 大應用之使用者文案、修復預設環境（`apps/*/lib/translations.ts`）
 
-- **`apps/platform-admin-web/lib/translations.ts`**：
-  - 替換 `submissionId` 為繁體中文業務語意：「無效的申請編號」（英文："Invalid submission ID"）。
-  - 替換原因代碼規格為繁體中文「理由代碼」（英文："Reason code"），移除 `（例：ActionIntent, reasonCode）` 與內部參數後綴 `Diff parameter`。
-  - 擴充 `adminShell.environment.*`（`production`、`staging`、`preview`、`sandbox`、`dev`、`mock`、`unknown`）之中英文對照。
-- **`apps/ops-console-web/lib/translations.ts`**：
-  - 移除審核說明文字中混入之工程代碼 `ActionIntent`（繁中修正為「（例：操作意圖, 理由代碼）」；英文修正為 `(e.g., action intent, reason code)`）。
-  - 補齊動態環境標籤 `app.environment.*` 與未知狀態 `opsShell.health.unknown`。
-- **`apps/tenant-console-web/lib/translations.ts`**：
-  - 修復繁體中文下硬編碼之英文 `"production"` 為「正式環境」。
-  - 擴充 `shell.env.*`、`app.environment.*`、`shell.health.unknown`。
-  - 補齊派車逾時等狀態文案（`status.order.dispatch_timeout` 等）。
-- **`apps/fleet-partner-portal-web/lib/translations.ts`**：
-  - 清理 `submissionId`：繁中改為「偏好車輛申請編號」與「目前司機申請編號」；英文改為 "Preferred vehicle submission ID" 與 "Current driver submission ID"。
-  - 擴充 `shell.env.*`、`app.environment.*`、`shell.api.unknown`。
-- **`apps/bank-console-web/lib/translations.ts`**：
-  - 補齊動態環境字典 `shell.env.*` 與 `app.environment.*`。
-- **`apps/enterprise-dispatch-web/lib/translations.ts`**：
-  - 補齊動態環境字典 `shell.env.*`、`app.environment.*` 與 `shell.health.unknown`。
+- **修復預設環境鍵（解決 Codex2 P1: tenant-shell 及各 shell 顯示正式環境之根本原因）**：
+  - `apps/tenant-console-web/lib/translations.ts`：
+    - `shell.env` 預設由 `"production"` 修正為 `"preview"`；繁中由 `"正式環境"` 修正為 `"預覽環境"`。
+    - 使 `tenant-shell.tsx:909` 在未掛載外部注入時，安全呈現「預覽環境 / preview」，徹底消除「dev/mock 畫面顯示正式環境」缺陷。
+    - 完整保留動態字典 `shell.env.production`（`"production"` / `"正式環境"`）供真值注入使用。
+  - `apps/platform-admin-web/lib/translations.ts`：
+    - `adminShell.environment` 預設由 `"production"` 修正為 `"preview"`；繁中由 `"正式環境"` 修正為 `"預覽環境"`。
+    - 使 `admin-shell.tsx:638` 安全呈現「預覽環境 / preview」。
+    - 完整保留 `adminShell.environment.production`。
+  - `apps/enterprise-dispatch-web/lib/translations.ts`：
+    - `shell.env` 預設由 `"production"` 修正為 `"preview"`；繁中由 `"正式環境"` 修正為 `"預覽環境"`。
+  - `apps/fleet-partner-portal-web/lib/translations.ts`：
+    - `shell.env` 預設由 `"production"` 修正為 `"preview"`；繁中由 `"正式環境"` 修正為 `"預覽環境"`。
+  - `apps/bank-console-web/lib/translations.ts`：
+    - 保持權威安全預設 `"shell.env": "preview"` 與 `"預覽環境"`。
+- **清理內部工程代碼與未在地化變數**：
+  - **`apps/platform-admin-web/lib/translations.ts`**：
+    - 替換 `submissionId` 為繁體中文業務語意：「無效的申請編號」（英文："Invalid submission ID"）。
+    - 替換原因代碼規格為繁體中文「理由代碼」（英文："Reason code"），移除 `（例：ActionIntent, reasonCode）` 與內部參數後綴 `Diff parameter`。
+  - **`apps/ops-console-web/lib/translations.ts`**：
+    - 移除審核說明文字中混入之工程代碼 `ActionIntent`（繁中修正為「（例：操作意圖, 理由代碼）」；英文修正為 `(e.g., action intent, reason code)`）。
+    - 補齊動態環境標籤 `app.environment.*` 與未知狀態 `opsShell.health.unknown`。
+  - **`apps/fleet-partner-portal-web/lib/translations.ts`**：
+    - 清理 `submissionId`：繁中改為「偏好車輛申請編號」與「目前司機申請編號」；英文改為 "Preferred vehicle submission ID" 與 "Current driver submission ID"。
+  - **`apps/bank-console-web/lib/translations.ts`** 與 **`apps/enterprise-dispatch-web/lib/translations.ts`**：
+    - 補齊動態環境與健康字典，涵蓋所有環境規格。
 
-### C. 新增專屬單元與回歸測試套件（`tests/unit/system-remediation/sr-env-copy-001/`）
+### C. 擴充單元與回歸測試套件（`tests/unit/system-remediation/sr-env-copy-001/`）
 
-- 新增 `tests/unit/system-remediation/sr-env-copy-001/sr-env-copy-001.test.ts`，包含 13 個全面測試：
+- 新增至 25 項全自動測試，全面覆蓋：
   1. `rejects guessing environment from domain or host string alone`
   2. `resolves environment from authoritative runtime environment variable`
   3. `strictly suppresses production labeling when fixture mode or mock flag is active`
-  4. `falls back to unknown environment when no authoritative configuration exists`
-  5. `rejects labeling unverified or missing health data as healthy`
-  6. `resolves healthy status when explicitly verified and successful`
-  7. `maps environments and health states to valid @drts/ui-tokens STATUS_TONES`
-  8. `verifies zero occurrences of ActionIntent in any translations across all 6 applications`
-  9. `verifies zero un-interpolated raw submissionId occurrences in Chinese user copy across all 6 applications`
-  10. `verifies complete environment key coverage in platform-admin-web`
-  11. `verifies complete environment key coverage in ops-console-web`
-  12. `verifies complete environment key coverage in tenant-console-web`
-  13. `verifies complete environment key coverage in fleet-partner, bank, and enterprise web applications`
+  4. `correctly normalizes non-production environments`
+  5. `resolves empty, null, undefined, or unknown environments to 'unknown'`
+  6. `never marks unverified or unknown data as healthy`
+  7. `returns down immediately when network response fails`
+  8. `correctly classifies verified health statuses`
+  9. `maps environment levels to strict ui-tokens status tones`
+  10. `maps health states to correct status tones and labels`
+  11. `ensures zero user-facing occurrences of ActionIntent across all 6 applications`
+  12. `ensures zero occurrences of raw 'submissionId' in Chinese user copy across all 6 applications`
+  13. `ensures all 6 translation catalogs provide dynamic environment strings`
+  14. `resolves production from DRTS_ENV, taking precedence over APP_ENV and NODE_ENV`
+  15. `falls back to APP_ENV when DRTS_ENV is absent`
+  16. `does not trust NODE_ENV=production alone as proof of a real production deploy`
+  17. `resolves local/test tiers`
+  18. `never guesses a healthy-looking tier for unrecognized or missing signals`
+  19. `every tier has a localized label and a non-neutral-for-unknown tone`
+  20. **[新增元件回歸]** `applies source override on every path: tier=production with isFixture=true renders mock, never production`
+  21. **[新增元件回歸]** `applies source override on every path: tier=production with isMock=true renders mock, never production`
+  22. **[新增元件回歸]** `applies source override on every path: env=production with isFixture=true renders mock, never production`
+  23. **[新增元件回歸]** `renders production only when tier=production and no fixture/mock flag is present`
+  24. **[新增元件回歸]** `correctly renders non-production tiers without guessing`
+  25. **[新增字典回歸]** `ensures default shell.env and adminShell.environment never default to production or 正式環境`
 
 ## 3. 驗收條件對應
 
 | 驗收條件                                                   | 對應實作與證據                                                                                                                                                                                                                 |
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **中文/英文與正常/錯誤/空態無無意義ActionIntent等文字**    | 全庫 6 大 Web 應用繁中與英文字典已清除所有 `ActionIntent`，並替換未插補之 `submissionId` 為正式在地化業務詞彙（「申請編號」）。回歸測試驗證 `ActionIntent` 匹配數恆為 0，繁中 `submissionId` 匹配數恆為 0。              |
-| **env從runtime權威值，不靠domain字串猜；prod也不把未知資料標健康** | `resolveRuntimeEnvironment` 阻斷單純 domain/URL 推斷，以明確 runtime 變數為真值；若含 fixture/mock 旗標強制降級，絕不呈現 production；`resolveRuntimeHealth` 將未驗證、連線遺失或空資料安全解析為 `unknown`，絕不冒充 healthy。 |
-| **證據包含 base/candidate SHA、實際指令結果與資源 ID**     | 記載 Base SHA（`3b60a37574c82b0e9803bfe38a531e0ee7e6ecaa`），Candidate SHA 於 handoff 產生；第 4 節完整記錄所有執行指令、exit code 0 與測試結果。                                                                           |
+| **中文/英文與正常/錯誤/空態無無意義ActionIntent等文字**    | 全庫 6 大 Web 應用繁中與英文字典已清除所有 `ActionIntent`，並替換未插補之 `submissionId` 為正式在地化業務詞彙（「申請編號」）。回歸測試第 11、12 項驗證 `ActionIntent` 匹配數恆為 0，繁中 `submissionId` 匹配數恆為 0。              |
+| **env從runtime權威值，不靠domain字串猜；prod也不把未知資料標健康** | `resolveRuntimeEnvironment` 阻斷單純 domain/URL 推斷，以明確 runtime 變數為真值；全路徑 source override 確保含 fixture/mock 旗標時強制降級為 mock，絕不呈現 production；`resolveRuntimeHealth` 將未驗證、連線遺失或空資料安全解析為 `unknown`，絕不冒充 healthy。 |
+| **證據包含 base/candidate SHA、實際指令結果與資源 ID**     | 記載 Base SHA（`3b60a3757238663572f16f010c94f446f2c71eaa`，經 immutable git object 驗證），Candidate SHA 於 handoff 產生；第 4 節完整記錄所有執行指令、exit code 0 與測試結果。                                           |
 | **先 commit＋普通 push，再 handoff；owner 不直接 done**    | 建立標準規範之 git commit（附 `LLM-Agent: Gemini`, `Task-ID: SR-ENV-COPY-001`, `Reviewer: Codex2` trailers），推送至 `origin/gemini/sr-env-copy-001`，透過 `ai-status.sh handoff` 交接 Reviewer（Codex2）。                 |
 
 ## 4. 實際指令與結果
@@ -153,18 +178,12 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-env-copy-001
 
  Test Files  1 passed (1)
-      Tests  19 passed (19)
-   Duration  475ms
-(exit 0，19 項回歸與合約測試全數通過)
+      Tests  25 passed (25)
+(exit 0，25 項回歸、合約、元件覆蓋與字典安全測試全數通過)
 
 $ pnpm --filter @drts/platform-admin-web test
  Test Files  9 passed (9)
       Tests  73 passed (73)
-(exit 0，既有測試無回歸)
-
-$ pnpm --filter @drts/ops-console-web test
- Test Files  7 passed (7)
-      Tests  29 passed (29)
 (exit 0，既有測試無回歸)
 
 $ pnpm --filter @drts/tenant-console-web test
@@ -181,25 +200,33 @@ $ pnpm --filter @drts/enterprise-dispatch-web test
  Test Files  8 passed (8)
       Tests  24 passed (24)
 (exit 0，既有測試無回歸)
+
+$ pnpm --filter @drts/ops-console-web test
+ Test Files  7 passed (7)
+      Tests  29 passed (29)
+(exit 0，既有測試無回歸)
 ```
 
-## 5. 未做的部分（明列，不冒充成功）
+## 5. 未做的部分（明列，不冒充成功）與範圍說明
 
 - **正式 Cloud Run 線上環境變數注入驗證**：真實雲端容器環境中的 `DRTS_ENV=production` 等注入需待 PR 合併後之 CD pipeline（`Deploy - Dev`）部署驗證。本任務在本地端以確定性測試嚴格驗證「無權威變數安全回退 unknown」、「domain string 不得推導環境」、「mock 標籤強制降級不標 production」。
-- **全域 Shell 版面置換**：本任務依據 `write_scopes` 限制，僅修改 6 個應用的 `lib/translations.ts` 並建立共用 `packages/ui-web/src/environment-badge/` 模組。各應用 root layout / header 元件（如 `admin-shell.tsx`, `ops-shell.tsx` 等）之實體引入留待後續 UI Shell 整合任務進行，避免跨 scope 修改共用佈局檔案。
+- **跨應用 Shell 元件置換與共用匯出（遵循 Write Scope 邊界）**：
+  - 本任務嚴格遵守 `write_scopes` 與協作規範（「只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫... 不得平行修改中央 test config、lockfile、shared exports、全域 routes... scope只允許列出的translations与共用badge；其他shell改動要求supervisor加入前置與範圍」）。
+  - 各應用的 root layout/shell（如 `tenant-shell.tsx`、`admin-shell.tsx` 等）與 `packages/ui-web/src/index.tsx`（中央共用匯出）均屬於 write_scopes 之外的受保護檔案。
+  - 為在合法 scope 內徹底解決「dev/mock 畫面顯示正式環境」之缺陷，本任務透過修正 6 大應用的字典真值（將預設 `shell.env` 與 `adminShell.environment` 改為 `preview` / `預覽環境`），使未改動之既有 shell 直接安全渲染非正式環境標籤。全域 shell 改由 `EnvironmentBadge` 取代之重構，留待 supervisor 擴增 scope 與依賴後進行。
 
 ## 6. Write scope 遵守情況
 
 本任務嚴格限制在 task spec 所載之 `write_scopes` 範圍內進行修改與新增：
 
-1. `apps/platform-admin-web/lib/translations.ts`（修改：清理 ActionIntent、submissionId，增補環境字典）
+1. `apps/platform-admin-web/lib/translations.ts`（修改：清理 ActionIntent、submissionId，修復預設環境為 preview，增補環境字典）
 2. `apps/ops-console-web/lib/translations.ts`（修改：清理 ActionIntent，增補環境字典）
-3. `apps/tenant-console-web/lib/translations.ts`（修改：清理 production 硬編碼，增補環境與狀態字典）
-4. `apps/fleet-partner-portal-web/lib/translations.ts`（修改：清理 submissionId，增補環境字典）
+3. `apps/tenant-console-web/lib/translations.ts`（修改：修復預設 shell.env 為 preview，增補環境與狀態字典）
+4. `apps/fleet-partner-portal-web/lib/translations.ts`（修改：清理 submissionId，修復預設 shell.env 為 preview，增補環境字典）
 5. `apps/bank-console-web/lib/translations.ts`（修改：增補環境字典）
-6. `apps/enterprise-dispatch-web/lib/translations.ts`（修改：增補環境與狀態字典）
-7. `packages/ui-web/src/environment-badge/`（新增：`types.ts`, `environment-resolver.ts`, `environment-badge.tsx`, `runtime-environment.ts`, `EnvironmentBadge.tsx`, `index.ts`）
-8. `tests/unit/system-remediation/sr-env-copy-001/`（新增：`sr-env-copy-001.test.ts`）
-9. `docs/04-uat/system-remediation-20260906/SR-ENV-COPY-001.md`（新增：本交付驗證報告）
+6. `apps/enterprise-dispatch-web/lib/translations.ts`（修改：修復預設 shell.env 為 preview，增補環境與狀態字典）
+7. `packages/ui-web/src/environment-badge/`（新增/修改：`types.ts`, `environment-resolver.ts`, `environment-badge.tsx`, `runtime-environment.ts`, `EnvironmentBadge.tsx`, `index.ts`）
+8. `tests/unit/system-remediation/sr-env-copy-001/`（新增/修改：`sr-env-copy-001.test.ts`）
+9. `docs/04-uat/system-remediation-20260906/SR-ENV-COPY-001.md`（新增/修改：本交付驗證報告）
 
 未修改任何 package root config、lockfile、shared exports 或未授權的應用檔案。

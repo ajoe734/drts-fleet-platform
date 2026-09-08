@@ -2,6 +2,7 @@
 
 import type { CSSProperties, ReactElement } from "react";
 import type { EnvironmentBadgeProps } from "./types";
+import type { RuntimeEnvironmentTier } from "./runtime-environment";
 import {
   getEnvironmentDisplay,
   getHealthDisplay,
@@ -28,17 +29,24 @@ export function EnvironmentBadge({
   style,
   children,
 }: EnvironmentBadgeProps): ReactElement {
-  const resolvedEnv = tier
-    ? tier === "local"
-      ? "dev"
-      : tier === "test"
-        ? "preview"
-        : tier
-    : resolveRuntimeEnvironment({
-        env,
-        isFixture,
-        isMock,
-      });
+  const resolvedEnv = resolveRuntimeEnvironment({
+    env: tier === "local" ? "dev" : tier === "test" ? "preview" : (tier ?? env),
+    isFixture,
+    isMock,
+  });
+  const effectiveTier: RuntimeEnvironmentTier =
+    isFixture || isMock || resolvedEnv === "mock"
+      ? "local"
+      : tier ??
+        (resolvedEnv === "dev"
+          ? "local"
+          : resolvedEnv === "preview"
+            ? "test"
+            : resolvedEnv === "staging"
+              ? "staging"
+              : resolvedEnv === "production"
+                ? "production"
+                : "unknown");
   const envMeta = getEnvironmentDisplay(resolvedEnv, mode);
   const isZh = locale.startsWith("zh");
   const envText = isZh ? envMeta.labelZhTW : envMeta.labelEn;
@@ -99,16 +107,7 @@ export function EnvironmentBadge({
     <div
       data-testid="environment-badge"
       data-environment={resolvedEnv}
-      data-environment-tier={
-        tier ??
-        (resolvedEnv === "dev"
-          ? "local"
-          : resolvedEnv === "mock"
-            ? "local"
-            : resolvedEnv === "preview"
-              ? "test"
-              : resolvedEnv)
-      }
+      data-environment-tier={effectiveTier}
       data-tone={envMeta.tone}
       className={className}
       style={chipStyle}

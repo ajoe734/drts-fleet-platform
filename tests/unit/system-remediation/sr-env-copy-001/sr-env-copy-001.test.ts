@@ -25,6 +25,7 @@ import {
   resolveRuntimeEnvironment,
   resolveRuntimeHealth,
 } from "../../../../packages/ui-web/src/environment-badge/environment-resolver";
+import { EnvironmentBadge } from "../../../../packages/ui-web/src/environment-badge/environment-badge";
 
 import {
   resolveRuntimeEnvironmentTier,
@@ -305,5 +306,94 @@ describe("SR-ENV-COPY-001: Runtime Environment Tier Resolver", () => {
     expect(RUNTIME_ENVIRONMENT_TIER_TONE.unknown).not.toBe("neutral");
     expect(RUNTIME_ENVIRONMENT_TIER_TONE.unknown).not.toBe("success");
     expect(RUNTIME_ENVIRONMENT_TIER_TONE.production).toBe("danger");
+  });
+});
+
+describe("SR-ENV-COPY-001: EnvironmentBadge Component Regression Tests", () => {
+  it("applies source override on every path: tier=production with isFixture=true renders mock, never production", () => {
+    const elZh = EnvironmentBadge({ tier: "production", isFixture: true, locale: "zh-TW" });
+    expect(elZh.props["data-environment"]).toBe("mock");
+    expect(elZh.props["data-environment-tier"]).toBe("local");
+    expect(elZh.props["data-tone"]).toBe("neutral");
+    // Verify children text contains 模擬資料, not 正式環境
+    const textChild = elZh.props.children[1];
+    expect(textChild.props.children).toBe("模擬資料");
+
+    const elEn = EnvironmentBadge({ tier: "production", isFixture: true, locale: "en" });
+    expect(elEn.props["data-environment"]).toBe("mock");
+    expect(elEn.props["data-environment-tier"]).toBe("local");
+    expect(elEn.props["data-tone"]).toBe("neutral");
+    const textChildEn = elEn.props.children[1];
+    expect(textChildEn.props.children).toBe("MOCK DATA");
+  });
+
+  it("applies source override on every path: tier=production with isMock=true renders mock, never production", () => {
+    const el = EnvironmentBadge({ tier: "production", isMock: true, locale: "zh-TW" });
+    expect(el.props["data-environment"]).toBe("mock");
+    expect(el.props["data-environment-tier"]).toBe("local");
+    expect(el.props["data-tone"]).toBe("neutral");
+    const textChild = el.props.children[1];
+    expect(textChild.props.children).toBe("模擬資料");
+  });
+
+  it("applies source override on every path: env=production with isFixture=true renders mock, never production", () => {
+    const el = EnvironmentBadge({ env: "production", isFixture: true, locale: "zh-TW" });
+    expect(el.props["data-environment"]).toBe("mock");
+    expect(el.props["data-environment-tier"]).toBe("local");
+    expect(el.props["data-tone"]).toBe("neutral");
+    const textChild = el.props.children[1];
+    expect(textChild.props.children).toBe("模擬資料");
+  });
+
+  it("renders production only when tier=production and no fixture/mock flag is present", () => {
+    const elZh = EnvironmentBadge({ tier: "production", locale: "zh-TW" });
+    expect(elZh.props["data-environment"]).toBe("production");
+    expect(elZh.props["data-environment-tier"]).toBe("production");
+    expect(elZh.props["data-tone"]).toBe("success");
+    const textChild = elZh.props.children[1];
+    expect(textChild.props.children).toBe("正式環境");
+
+    const elEn = EnvironmentBadge({ env: "production", locale: "en" });
+    expect(elEn.props["data-environment"]).toBe("production");
+    expect(elEn.props["data-environment-tier"]).toBe("production");
+    expect(elEn.props["data-tone"]).toBe("success");
+    const textChildEn = elEn.props.children[1];
+    expect(textChildEn.props.children).toBe("PRODUCTION");
+  });
+
+  it("correctly renders non-production tiers without guessing", () => {
+    const elLocal = EnvironmentBadge({ tier: "local", locale: "zh-TW" });
+    expect(elLocal.props["data-environment"]).toBe("dev");
+    expect(elLocal.props["data-environment-tier"]).toBe("local");
+
+    const elTest = EnvironmentBadge({ tier: "test", locale: "zh-TW" });
+    expect(elTest.props["data-environment"]).toBe("preview");
+    expect(elTest.props["data-environment-tier"]).toBe("test");
+
+    const elUnknown = EnvironmentBadge({ tier: "unknown", locale: "zh-TW" });
+    expect(elUnknown.props["data-environment"]).toBe("unknown");
+    expect(elUnknown.props["data-environment-tier"]).toBe("unknown");
+
+    const elEmpty = EnvironmentBadge({});
+    expect(elEmpty.props["data-environment"]).toBe("unknown");
+    expect(elEmpty.props["data-environment-tier"]).toBe("unknown");
+  });
+});
+
+describe("SR-ENV-COPY-001: Translation Catalogs Default Environment Safety", () => {
+  it("ensures default shell.env and adminShell.environment never default to production or 正式環境", () => {
+    for (const relPath of TRANSLATION_FILES) {
+      const fullPath = resolve(REPO_ROOT, relPath);
+      const content = readFileSync(fullPath, "utf-8");
+
+      // Neither shell.env nor adminShell.environment default key may be "production" or "正式環境"
+      const defaultShellEnvMatches = content.match(
+        /"(shell\.env|adminShell\.environment)"\s*:\s*"(production|正式環境)"/g,
+      );
+      expect(
+        defaultShellEnvMatches,
+        `File ${relPath} must not have default shell.env/adminShell.environment set to production/正式環境`,
+      ).toBeNull();
+    }
   });
 });
