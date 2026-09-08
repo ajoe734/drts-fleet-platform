@@ -42,7 +42,11 @@ Codex remains the independent reviewer.
 - TTS request fixtures retain provider model/name/textType independently of ASR
   model IDs. Hakka requires an explicit verified accent. Playback hooks execute
   clear before best-effort abort without waiting on an ACK. Clear failure is
-  unknown; provider cancellation and billing always remain unverified. Dummy
+  unknown. Without a playback controller, local stop only retires the active ID:
+  playback cancellation is `unknown` and synthesis cancellation is `not_requested`.
+  It cannot clear chunks already returned to the caller. With a controller,
+  `abort_requested` records an attempted hook call, including a throwing or
+  rejected call; provider cancellation and billing always remain unverified. Dummy
   PCM chunks are not meaningful synthesized speech or pronunciation evidence.
 
 ## Repeatable evidence
@@ -50,7 +54,8 @@ Codex remains the independent reviewer.
 `tests/unit/uv-exec-011.test.ts` covers protocol ticket/readiness/frame limits,
 revision finality, drain expiry, all disconnect codes, isolated diagnostic replay,
 independent timer validation, DTMF/epoch switching, verified prompt/accent gates,
-TTS request mapping, clear/abort failure paths and production rejection.
+TTS request mapping, absent-controller cancellation evidence, clear/abort failure
+paths and production rejection.
 
 Run:
 
