@@ -29,7 +29,7 @@ describe("SR-READINESS-001 repository-only readiness inventory", () => {
     expect(readiness.inspection.candidate_sha_evidence).toContain("handoff");
   });
 
-  it("accounts for each of the 30 findings and 14 gaps without calling an unrun check a pass", () => {
+  it("accounts for each of the 30 findings and 14 gaps with reproducible evidence or specific blocking reason", () => {
     const expected = [
       ...findings.map((item) => item.編號),
       ...gaps.map((item) => item.ID),
@@ -49,29 +49,52 @@ describe("SR-READINESS-001 repository-only readiness inventory", () => {
       ]).toContain(item.status);
       expect(item.status).not.toBe("passed");
       if (item.status === "current_evidence_merged") {
-        expect(item.evidence).toBeTruthy();
-        for (const taskId of item.evidence.match(/SR-[A-Z-]+-\d+/g) ?? []) {
-          expect(readiness.merged_task_evidence[taskId]).toMatch(
-            /^[0-9a-f]{40}$/,
-          );
+        expect(item.commit_sha).toMatch(/^[0-9a-f]{40}$/);
+        expect(item.regression_test).toBeTruthy();
+        expect(item.test_command).toBeTruthy();
+        expect(item.result).toBeTruthy();
+        const testFiles = item.regression_test
+          .split(";")
+          .map((f: string) => f.trim())
+          .filter(Boolean);
+        for (const file of testFiles) {
+          expect(fs.existsSync(path.join(root, file))).toBe(true);
         }
+      } else {
+        expect(item.repro_command_or_evidence).toBeTruthy();
+        expect(item.repro_command_or_evidence.length).toBeGreaterThan(15);
+        expect(item.blocking_reason).toBeTruthy();
+        expect(item.next_task).toBeTruthy();
       }
     }
   });
 
-  it("sets a role, isolated data, and live-evidence rule for all 134 source capabilities", () => {
+  it("defines concrete role, persona, tenant namespace, domain records, and missing evidence for all 134 capabilities", () => {
     expect(capabilities).toHaveLength(134);
-    expect(
-      capabilities.every(
-        (capability) => capability.ID && capability.角色.trim(),
-      ),
-    ).toBe(true);
-    expect(readiness.capability_role_test_data_requirement.selection).toBe(
-      "C001-C134 inclusive; derive the role string for each capability directly from source/capabilities.json at test execution",
+    const capItems = readiness.capability_role_test_data_requirement.items;
+    expect(capItems).toHaveLength(134);
+
+    const itemsById = new Map<string, any>(
+      capItems.map((item: any) => [item.id, item]),
     );
-    expect(
-      readiness.capability_role_test_data_requirement.requirement,
-    ).toContain("isolated persona");
+
+    for (const cap of capabilities) {
+      const item = itemsById.get(cap.ID);
+      expect(item).toBeDefined();
+      expect(item.role).toBe(cap.角色);
+      expect(item.required_persona).toBeTruthy();
+      expect(typeof item.required_persona).toBe("string");
+      expect(item.tenant_namespace).toBeTruthy();
+      expect(typeof item.tenant_namespace).toBe("string");
+      expect(Array.isArray(item.required_records)).toBe(true);
+      expect(item.required_records.length).toBeGreaterThanOrEqual(1);
+      expect(item.missing_evidence).toBeTruthy();
+      expect(typeof item.missing_evidence).toBe("string");
+    }
+
+    expect(readiness.capability_role_test_data_requirement.policy).toContain(
+      "isolated persona",
+    );
   });
 
   it("keeps all unprovided live gates missing and assigns owner, readback, and resource requirements", () => {
