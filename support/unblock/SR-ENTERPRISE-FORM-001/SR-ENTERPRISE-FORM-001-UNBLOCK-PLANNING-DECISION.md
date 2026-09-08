@@ -79,6 +79,31 @@ does not unblock it or waive its outstanding validation.
 
 ## Helper validation and delivery
 
+### Review correction: parent resume gate
+
+At `2026-09-08T16:00:26Z`, history-repair routing restored the parent to
+`todo` and replaced its next step with mainline acceptance. That transition
+did not resolve `Q-SR-ENTERPRISE-FORM-001`: shared theme/translations were still
+outside `write_scopes`, and no dependency or design authorization was recorded.
+History recovery is not evidence that this independent planning gate passed.
+
+At `2026-09-08T16:03:28Z`, Codex2 used the current canonical release's
+`ai-status.sh blocker SR-ENTERPRISE-FORM-001 <routing-message> Codex`.
+A subsequent single-task `show` confirmed `blocked`, `waiting_for: Codex`,
+and a `next` containing the question ID, exact shared paths/translation keys,
+Supervisor/Chairman decision and sequencing responsibilities, and the parent
+owner's rebase/acceptance step after authorization. Codex is the review lane
+for the routed gate; scope authorization remains with Supervisor/Chairman.
+No scope, dependency, acceptance or design policy was changed by this repair.
+
+The reviewer should re-read the parent slice at handoff: it must retain this
+gate unless explicit design/scope authorization or accepted producer evidence
+has since been recorded. Another history-repair resume alone is insufficient.
+
+The branch was rebased onto `3fb9b06461dc2bf92043144974eedbbc9f69d0f3`
+and the previously published helper head merged back to preserve remote ancestry
+for a normal non-force push to existing PR #1784.
+
 - `git fetch origin` and `git rebase origin/dev`: exit 0, already up to date.
 - Read-only comparison of current source, parent published diff and both single
   task slices completed. No product code, contract, schema or task scope changed.
