@@ -2,6 +2,42 @@
 
 ## 2026-09-08 Codex2 dispatch audit — blocked, no candidate
 
+### Resumed dispatch at 18:49 UTC — history resolved; planning still pending
+
+This rerun supersedes the earlier passing typecheck results for this workspace.
+Fetched base remains `d4f54ef94e059a981bf2be1f7b944e815870e117`;
+inspected local and remote task head is `ee40871501f3235d58b781963aa1ca650d164a93`.
+`git fetch origin` and `git merge-base --is-ancestor origin/dev HEAD` exited 0.
+There is no new product candidate and no rebase is needed for this unchanged base.
+
+The history helper is `done` via PR #1779, but its committed recovery report
+explicitly excludes product acceptance and preserves the planning/scope gate.
+Canonical `show SR-ADMIN-ADAPTER-001-UNBLOCK-PLANNING-DECISION` now succeeds:
+that helper exists, owner Codex/reviewer Codex2, status `in_progress`, updated
+`2026-09-08T18:49:28Z`. Parent write scopes still exclude migrations and contracts.
+Route the remaining authority/migration/credential decision through that existing
+helper; do not reopen history repair or create another duplicate history helper.
+Supervisor must record the approved scope/dependencies before shared-file writes.
+
+Fresh source inspection confirms the three authority/governance gaps below remain:
+runtime DDL with swallowed persistence errors, process-static read authority,
+and credential actions that only set a flash message. No product changes were made.
+
+| Command in assigned worktree | Exit | Actual result |
+| --- | --- | --- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-admin-adapter-001/` | 0 | 3 files / 38 tests passed; unresolved `vitest/config` warning |
+| `pnpm --filter @drts/api typecheck` | 2 | TS2688: missing `node` type definitions |
+| `pnpm --filter @drts/platform-admin-web typecheck` | 2 | Missing React/Node types; Next attempted dependency installation and hit `ERR_PNPM_UNEXPECTED_VIRTUAL_STORE`; subsequent TypeScript errors |
+| `node tools/ci/i18n-guard.mjs` | 1 | Cannot resolve package `typescript` |
+| `git diff --check` | 0 | No whitespace errors |
+
+`node_modules` is a symlink to the canonical root dependency tree. pnpm reports
+that tree's virtual store belongs to the `codex-uv-exec-010` worktree. No shared
+dependency tree, package manifest, lockfile or out-of-scope file was changed.
+The test resource IDs and local-only limitations stated below still apply.
+No live database/browser/credential/provider, CI, merge or deployment validation
+was performed. This evidence is an anchor, not a handoff or completion claim.
+
 This section supersedes the historical completion claims below. Owner: Codex2;
 reviewer: Codex. Traceability: N11/N12, C104/C105 (the older C097/R07 reference is incorrect).
 
