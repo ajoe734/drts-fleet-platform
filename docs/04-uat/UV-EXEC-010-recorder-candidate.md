@@ -45,3 +45,26 @@ rerun after that merge, including all four PostgreSQL integration tests against
 a fresh task-owned PostgreSQL 16 container. No product-code change was needed.
 Candidate SHA is recorded by the task lifecycle at handoff; CI, review, merge and
 external acceptance remain lifecycle responsibilities.
+
+## CI typecheck repair (18:48 UTC resume)
+
+PR #1807 candidate `771fb0336` failed root typechecking in both CI workflows:
+the PostgreSQL test imported an untyped runtime path, and recorder mocks widened
+literal types or supplied an explicit undefined optional metadata property.
+The root now declares `@types/pg` (using the existing locked version), the test
+uses the public `pg` type module, and mocks use their actual adapter signatures
+while omitting absent metadata. Runtime negative cases remain unchanged.
+
+Dev `d4f54ef94` was synchronized in `4410e46fb` using the approved additive
+history-repair route after safely aborting a rebase conflict. Repair anchor
+`fa6823820` was pushed normally.
+
+- Recorder, checkpoint, owned mobility, callcenter, sandbox callback and real
+  PostgreSQL integration suites: 125 passed across six files (including all four
+  PostgreSQL cases). The disposable PostgreSQL 16 container was removed.
+- Root `pnpm typecheck:root` passed after fixing local worktree dependency links
+  that initially resolved workspace packages through the canonical checkout.
+- Changed test ESLint, four changed files' Prettier checks, frozen lockfile
+  validation and `git diff --check` passed.
+
+New candidate CI, same-SHA review and acceptance remain pending lifecycle checks.
