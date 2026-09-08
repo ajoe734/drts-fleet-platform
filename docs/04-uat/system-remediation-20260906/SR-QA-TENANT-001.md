@@ -127,3 +127,17 @@ fetch 後 base：`5cff9b36082998a0295f2550039306dc1f84c3d2`。rebase 重複歷�
 實際讀取 JSON report 的四個 tenant evidence 附件，baseSha/testedSha 均與上述相符，calls/resources 均空。環境變數名稱檢查未發現任何 DRTS_TENANT_UAT 設定；未輸出任何憑證。本輪零 HTTP 呼叫，無資源 ID，未驗 live、DB、mail 或瀏覽器，也未重跑 unit/typecheck。
 
 重複 dispatch 未解除環境阻礙，請 supervisor/provisioner 配置既述六項設定（API URL、可拋棄 A/B 租戶、A/B 可寫 bearer、A 唯讀 bearer）後再執行。待完成能力矩陣及未補齊案例仍保留，不宣稱已完成實作或驗收；本輪將環境阻礙寫入 canonical blocker，不 handoff。
+
+## 2026-09-08 dispatch：unblock merge 未解除 provisioning 阻礙
+
+本輪 base `c171ea5126c1a7c19fa090429b2965bbac106768`；實跑 SHA `91d5880deddbc55a9c4cde1d20ebf15a8738b568`，尚無 handoff candidate。fetch / rebase / merge 原遠端 ancestry 均完成；rebase 重複歷史衝突保留原 branch 最新 task 內容。`git diff --exit-code bee34ad80 -- tests/e2e/system-remediation/sr-qa-tenant-001 docs/04-uat/system-remediation-20260906/SR-QA-TENANT-001.md` 在新增本段前 exit 0。
+
+已讀 `support/unblock/SR-QA-TENANT-001/SR-QA-TENANT-001-UNBLOCK-MANUAL-UNBLOCK.md`：該 helper 明確要求 parent 保持 blocked / waiting_for Gemini，且說明 merge 的預設 todo 不能視為 provisioning 完成。本輪 worker 仍沒有任何 DRTS_TENANT_UAT 環境變數（僅檢查名稱，未輸出憑證）。
+
+| 實際指令 | exit | 結果 |
+| --- | --- | --- |
+| `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001` | 1 | 4 task failed，全部缺 DRTS_TENANT_UAT_API_URL；4 shared passed 不算租戶驗收 |
+| `pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001/ --max-warnings=0` | 0 | 四個 spec lint 通過 |
+| `git diff --check` | 0 | 無空白錯誤 |
+
+逐一解碼 report 中四個 tenant evidence 附件，確認 baseSha/testedSha 為上述版本，calls/resources 均為空；無實際資源 ID。未執行 live HTTP、DB、mail 或瀏覽器验收；未重跑 unit/typecheck。既有未完成矩陣仍待補齊，不 handoff。請 Gemini/provisioner 注入六項既述設定並提供環境來源及有效期／更新方式，負責可拋棄租戶 teardown，再恢復派工。此為環境阻礙，未重現新產品缺陷。
