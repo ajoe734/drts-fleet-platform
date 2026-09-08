@@ -1,5 +1,16 @@
 # SR-ENV-COPY-001 — partial implementation and scope blocker
 
+## Follow-up dispatch, 2026-09-08 16:38 UTC — prerequisites still absent
+
+- Fresh fetched base `origin/dev`: `1cdaaa5b5e5301de2da0a692c78c4cc29b0c10a9`; tested implementation anchor: `2ad10d1e23c266023e7ea8217e7c939d0244af78`. Candidate SHA: none. The evidence-only anchor is recorded in machine truth after ordinary push.
+- Canonical `show SR-ENV-COPY-001` still assigns the old branch/worktree, original write scopes and no dependencies. The merged recovery document requires replacement routing before selective recovery; that prerequisite has not been supplied.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1 while replaying duplicate `13bce75ab`, with add/add conflicts in the evidence, resolver and scoped regression. `git rebase --abort`: exit 0; `git status --short`: exit 0, empty; original HEAD restored. No history discarded or force push used.
+- Current-base reproduction, each pipeline exit 0: `git show origin/dev:apps/fleet-partner-portal-web/components/fleet-portal-shell.tsx | rg -n 'env='` returns line 36, hardcoded production; `git show origin/dev:apps/bank-console-web/lib/navigation.ts | rg -n 'BANK_CONSOLE_ENV'` returns line 8, hardcoded preview; `git show origin/dev:apps/ops-console-web/lib/translations.ts | rg -n 'ActionIntent'` returns English/Chinese display values at lines 283/4813. Historical repairs have not resolved these on this base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/sr-env-copy-001.test.ts`: exit 0, 7 passed. `pnpm --filter @drts/ui-web exec vitest run tests/unit/environment-badge.test.ts`: exit 1, 5 passed / 1 failed; line 32 still expects production for NODE_ENV alone, actual unknown. The failing legacy file remains outside write scopes.
+- `gh pr view 1770 --json state,headRefOid,mergeCommit,url`: exit 0; MERGED, head `f0badf6eb738a2b3b931c63764a17b9e195c484d`, merge `52e8096e4441386901e57415ba06f6a2aabe4d0e`, resource https://github.com/ajoe734/drts-fleet-platform/pull/1770 . This is documentation delivery only.
+- Required supervisor action: dispatch the replacement branch/worktree described in the merged recovery document, then assign app runtime wiring/deployment-value scopes and owner dependencies; authorize handling the legacy test if needed. Resume catalog cleanup after recovery. No product files changed in this dispatch.
+- Six app typechecks, browser/live/device verification, fresh candidate CI, independent review, deployment and business-resource verification were not performed for this evidence-only update. No completion handoff or success claim for those checks.
+
 ## Follow-up dispatch, 2026-09-08 15:39 UTC — recovery routing missing
 
 - Fresh fetched `origin/dev`: `7d1272fc85a7f4d2a20f4ccd2d01716e873cca5e`; tested task implementation: `3a1024973d86fe0bee5e1d5879bcdeca7edf14d3`. No acceptance candidate or handoff. This evidence-only anchor SHA is recorded in machine truth after ordinary push.
