@@ -1,5 +1,43 @@
 # SR-OPS-SHELL-001 — 營運助理遮擋與跨app導航
 
+## 2026-09-08 dispatch 重驗（本節取代下方歷史交付狀態）
+
+- Owner Codex / Reviewer Codex2。狀態：blocked，尚未 handoff 或鎖定 candidate。
+- 最新 fetch 的 base `origin/dev`: `fa0fd8257950764526a522d091be9d97effa82b9`。
+- 起始 task branch: `7308cc2802278d3c381c18eac4a420c4d9e2ed41`。
+- `git rebase origin/dev` exit 0，既有 task 修正重放為 `8cc7eb4e1`。為遵守普通 non-force push，`git merge --no-edit origin/codex/sr-ops-shell-001` exit 0，保留已發布 ancestry，無程式內容衝突。
+- 本輪受測程式 SHA: `54ad6a6fc08be7623fadc4ae0e9718642cf2a7fd`；後續提交僅更新本 evidence。Candidate SHA：未建立，完整驗收仍有 scope 阻塞。
+- 直接讀 execution_ref、task spec、findings R18/R19、capabilities C048。R18 原證據為 `admin-ops/ops-audit-link-popup-results.json`，R19 為 `admin-ops/ops-audit-deeplink.png`；歷史 audit 不能當目前成功證據。
+
+### 當前 base 與阻塞
+
+`git show origin/dev:apps/ops-console-web/components/ops-assistant/assistant-widget.tsx` 顯示 base 仍有 `closed: false` 及裸 `/audit?auditId=...` fallback；既有 task branch 修正仍有必要，本輪沿用而未重造。
+
+目前 dispatch 的 `buildPlatformAdminHref` 在無 URL 環境變數時仍回退 `/platform-admin`，與 R18 原始失敗路徑相同。complaints receipt 仍輸出裸 `/audit?auditId=...`，incidents `buildCrossAppHref` 無設定時仍回傳 `link.route`。Assistant 接收到 explicit auditHref 時原樣使用，故目前 fallback 修正不能證明跨頁導航已修好。
+
+需要 supervisor 擴 scope 並補相依：
+
+- `apps/ops-console-web/app/dispatch/page.tsx`
+- `apps/ops-console-web/app/complaints/page.tsx`
+- `apps/ops-console-web/app/incidents/[incidentId]/page.tsx`
+- 若統一 runtime origin 解析，另需 `apps/ops-console-web/lib/ops-cross-app-links.ts`，並確認部署所用 runtime origin 來源。
+
+以上檔案本輪均未修改。沒有以 shell 全域攔截連結繞過 write scope。
+
+### 本轮實際檢查
+
+| 命令 | 結果 |
+| --- | --- |
+| `git diff --check` | exit 0 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/` | exit 0；1 file / 13 tests passed；479ms |
+| `pnpm --filter @drts/ops-console-web typecheck` | exit 0；next typegen 與 tsc --noEmit 通過 |
+
+測試資源 ID：`AUD-1`、`AUD-42`、`AUD-7`、`AUD-9`、`AUD/with space`，均為單元測試輸入，並非 live API receipt。沒有取得 live 資源 ID；未執行 live 新分頁、1440/390px 瀏覽器 CTA hit testing、鍵盤焦點與重載或真機測試。純函式幾何測試通過不等於上述 UI acceptance 通過。未啟動 dev server。
+
+本輪僅更新 evidence，commit 與普通 push 後以 canonical ai-status.sh 記錄 blocker；不 handoff 未完成的 acceptance，也不直接 done。
+
+## 歷史實作紀錄（以下 SHA、reviewer 與驗證僅屬前次 session）
+
 | 欄位          | 內容                                                                  |
 | ------------- | --------------------------------------------------------------------- |
 | Task spec     | `docs/03-runbooks/system-remediation-20260906/SR-OPS-SHELL-001.md`     |
