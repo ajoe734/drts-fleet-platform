@@ -1,66 +1,69 @@
 {
   "taskId": "SR-QA-WEBHOOK-001",
-  "runId": "uat-SR-QA-WEBHOOK-001-b0a9f778",
+  "runId": "uat-SR-QA-WEBHOOK-001-2f7055ea",
   "shardIndex": 0,
-  "baseSha": "40c231ba6718dbf7a7ee6662e446d44e48eabcb3",
-  "candidateSha": "b7f046ea1cd1f7f562782c794fe769161355e70e",
-  "headSha": "b7f046ea1cd1f7f562782c794fe769161355e70e",
-  "startTime": "2026-09-08T15:37:38.563Z",
-  "endTime": "2026-09-08T15:39:00.377Z",
+  "baseSha": "5cff9b36082998a0295f2550039306dc1f84c3d2",
+  "candidateSha": "936e5e136286d43b64359a3a28094fec920475a6",
+  "headSha": "936e5e136286d43b64359a3a28094fec920475a6",
+  "startTime": "2026-09-08T16:30:00.241Z",
+  "endTime": "2026-09-08T16:31:22.621Z",
   "status": "passed",
   "exitCode": 0,
   "roles": [],
   "trackedResources": [
     {
       "type": "webhook",
-      "id": "wh_9c6db164-d310-473d-b2cc-9420cdc0eec5",
+      "id": "wh_a89e0a9f-1361-43a9-a75e-c44eeb1fc8fb",
       "metadata": {
         "tenantId": "tenant-demo-001"
       }
     },
     {
       "type": "delivery",
-      "id": "wd_8792024a-a5bb-4682-bd3e-f31b3969b24a",
+      "id": "wd_e3733e82-927e-48f6-a6e7-2566af3803f2",
       "metadata": {
-        "webhookId": "wh_9c6db164-d310-473d-b2cc-9420cdc0eec5"
+        "webhookId": "wh_a89e0a9f-1361-43a9-a75e-c44eeb1fc8fb"
       }
     },
     {
       "type": "postgres_acceptance",
-      "id": "qa-webhook-3e5d3b57-83fc-4769-93ff-5bd29ac0ebda",
+      "id": "qa-webhook-0e24e4d1-7b66-4507-b003-f6d8d7e1b29d",
       "metadata": {
-        "tenantId": "qa-webhook-3e5d3b57-83fc-4769-93ff-5bd29ac0ebda",
-        "apiKeyId": "api_key_50eb06b8-498e-49a3-b660-5edfc8231386",
-        "rotatedApiKeyId": "api_key_c5d5b7d2-34cc-439b-8abf-a02776833197"
+        "tenantId": "qa-webhook-0e24e4d1-7b66-4507-b003-f6d8d7e1b29d",
+        "apiKeyId": "api_key_2ebd8946-1c5c-4831-9fcf-d5eee11ff2e7",
+        "rotatedApiKeyId": "api_key_22a05a5e-ab4c-4b78-910f-ed5f54ca3996",
+        "otherTenantId": "qa-webhook-0dda62d1-799f-461f-a8e7-9ec1e311498f",
+        "crossTenantMutationError": "API_KEY_NOT_FOUND",
+        "persistedRowsUnchangedAfterDeniedMutation": true
       }
     },
     {
       "type": "postgres_acceptance",
-      "id": "qa-webhook-dea489fe-9f76-48b1-ba8a-75b7f4c1eb89",
+      "id": "qa-webhook-af0107b8-86e1-47f2-9a6f-d7cdccc00f96",
       "metadata": {
-        "tenantId": "qa-webhook-dea489fe-9f76-48b1-ba8a-75b7f4c1eb89",
-        "webhookId": "wh_415c110b-fb47-48a7-824f-5016770a28ae",
-        "deliveryId": "wd_a3713388-ef57-41f0-a62a-038f84a26f5f",
-        "outboxKey": "79c3bacb-b48f-4ff9-9228-0368044b3c3c",
+        "tenantId": "qa-webhook-af0107b8-86e1-47f2-9a6f-d7cdccc00f96",
+        "webhookId": "wh_252f6234-3d72-4d23-acb2-984ae8de9220",
+        "deliveryId": "wd_83b2d169-7f24-4086-a4bb-d6c030b84fea",
+        "outboxKey": "21577cd2-9b18-4999-8b7f-58e0663e748c",
         "requests": 3
       }
     },
     {
       "type": "postgres_acceptance",
-      "id": "qa-webhook-5cca01d1-1f3c-44cb-9209-88e0f44ad486",
+      "id": "qa-webhook-fe4c9c7f-2375-44b5-b147-0d1321dc25a1",
       "metadata": {
-        "tenantId": "qa-webhook-5cca01d1-1f3c-44cb-9209-88e0f44ad486",
-        "webhookId": "wh_86d657ff-4cf3-4e40-bbbd-d74521f3dcc5",
-        "deliveryId": "wd_6efe5509-dfbb-4ee6-ac27-37d0cf7bdda2",
+        "tenantId": "qa-webhook-fe4c9c7f-2375-44b5-b147-0d1321dc25a1",
+        "webhookId": "wh_a1529a5d-5ead-496b-8e51-b61413571a14",
+        "deliveryId": "wd_8eee8295-f9d6-4805-afbe-8240f94b7bd6",
         "command": {
           "eventType": "dispatch.assigned",
           "data": {
-            "orderId": "6ad070fa-3164-425a-82e1-60d6b564ff66"
+            "orderId": "448bc633-e5cc-4eaa-9e57-c41bc3a9353c"
           },
-          "outboxKey": "399158b3-9096-47b9-b8a1-a84e3ae02c96"
+          "outboxKey": "9ace512a-9b3a-4271-b401-d2cbd374532e"
         },
-        "writerPid": 2564273,
-        "recoveryPid": 2564529,
+        "writerPid": 3244385,
+        "recoveryPid": 3244668,
         "status": "delivered",
         "requests": 3,
         "terminationSignal": "SIGKILL"
@@ -70,17 +73,17 @@
   "httpCalls": [],
   "consoleLogs": [
     {
-      "timestamp": "2026-09-08T15:37:44.935Z",
+      "timestamp": "2026-09-08T16:30:06.777Z",
       "level": "info",
-      "message": "\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\nSR-QA-WEBHOOK-001 timeout resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_9c6db164-d310-473d-b2cc-9420cdc0eec5\",\"deliveryId\":\"wd_8792024a-a5bb-4682-bd3e-f31b3969b24a\",\"transport\":\"real fetch with test-injected 100ms deadline\"}\n[Nest] 2553479  - 09/08/2026, 3:37:44 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (b56c3c30-0c25-4f38-abc8-faa6b6a67b7f)\n[Nest] 2553479  - 09/08/2026, 3:37:44 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (1d1c2bad-96e2-4432-ad0b-897db789a03d)\n\n Test Files  1 passed (1)\n      Tests  24 passed (24)\n   Start at  15:37:39\n   Duration  4.99s (transform 3.29s, setup 0ms, import 4.35s, tests 400ms, environment 0ms)\n\n"
+      "message": "\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\nSR-QA-WEBHOOK-001 timeout resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_a89e0a9f-1361-43a9-a75e-c44eeb1fc8fb\",\"deliveryId\":\"wd_e3733e82-927e-48f6-a6e7-2566af3803f2\",\"transport\":\"real fetch with test-injected 100ms deadline\"}\n[Nest] 3235939  - 09/08/2026, 4:30:06 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (43fbcd81-3064-4dff-a14b-76b356a02a4f)\n[Nest] 3235939  - 09/08/2026, 4:30:06 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (3251f563-6906-4a80-a0ee-684cde3b8d36)\n\n Test Files  1 passed (1)\n      Tests  24 passed (24)\n   Start at  16:30:01\n   Duration  5.02s (transform 3.33s, setup 0ms, import 4.46s, tests 330ms, environment 0ms)\n\n"
     },
     {
-      "timestamp": "2026-09-08T15:39:00.376Z",
+      "timestamp": "2026-09-08T16:31:22.620Z",
       "level": "info",
-      "message": "base_sha=40c231ba6718dbf7a7ee6662e446d44e48eabcb3\nexecution_sha=b7f046ea1cd1f7f562782c794fe769161355e70e\nisolated_database=sr_qa_webhook_001_1788881864_2554605 (schema-only clone of local drts_fleet_platform)\n\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\n[Nest] 2557673  - 09/08/2026, 3:37:56 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 2557673  - 09/08/2026, 3:37:56 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 2557673  - 09/08/2026, 3:37:56 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 2557673  - 09/08/2026, 3:38:26 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 2557673  - 09/08/2026, 3:38:26 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n\n Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Start at  15:37:53\n   Duration  66.48s (transform 1.46s, setup 0ms, import 2.12s, tests 64.12s, environment 0ms)\n\n"
+      "message": "base_sha=5cff9b36082998a0295f2550039306dc1f84c3d2\nexecution_sha=936e5e136286d43b64359a3a28094fec920475a6\nisolated_database=sr_qa_webhook_001_1788885006_3236950 (schema-only clone of local drts_fleet_platform)\n\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\n[Nest] 3238851  - 09/08/2026, 4:30:19 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 3238851  - 09/08/2026, 4:30:19 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 3238851  - 09/08/2026, 4:30:19 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 3238851  - 09/08/2026, 4:30:49 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 3238851  - 09/08/2026, 4:30:49 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n\n Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Start at  16:30:16\n   Duration  65.50s (transform 1.24s, setup 0ms, import 1.81s, tests 63.46s, environment 0ms)\n\n"
     },
     {
-      "timestamp": "2026-09-08T15:39:00.376Z",
+      "timestamp": "2026-09-08T16:31:22.621Z",
       "level": "info",
       "message": "Local PostgreSQL key readback and automatic webhook retry after service reinitialization passed. Timeout uses a test-injected deadline; SIGKILL/new OS process recovery passed; deployed API remains unverified."
     }

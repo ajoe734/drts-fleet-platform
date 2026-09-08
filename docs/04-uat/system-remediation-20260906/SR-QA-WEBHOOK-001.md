@@ -1,6 +1,18 @@
 # SR-QA-WEBHOOK-001 — 驗收進度（未完成）
 
-本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Codex2。未 handoff、未完成 review/CI/merge。
+本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Gemini（本次 dispatch）。未 handoff、未完成 review/CI/merge。
+
+## 2026-09-08 16:32 UTC 跨租戶負向續驗（最新）
+
+本節優先於以下歷史紀錄。base `5cff9b36082998a0295f2550039306dc1f84c3d2`；執行 SHA `936e5e136286d43b64359a3a28094fec920475a6`（已普通 push 的測試 anchor，非 lifecycle candidate）。rebase 再次在歷史提交 a119ec0bb 發生 task 檔 add/add 衝突，已 abort，使用 merge 納入 dev 並保留已發布歷史。
+
+- C111 新增 service 層跨租戶 list 空結果、rotate/revoke 拒絕並核對 `API_KEY_NOT_FOUND`；SQL 比對拒絕前後原租戶兩筆完整 record 相同，再確認合法租戶撤銷仍能持久化。未用此結果替代 authenticated HTTP scope 驗收。
+- 真實 key `api_key_2ebd8946-1c5c-4831-9fcf-d5eee11ff2e7`、輪替後 key `api_key_22a05a5e-ab4c-4b78-910f-ed5f54ca3996`；兩個租戶與 webhook/process recovery 資源 ID 見 `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-postgres.json`。
+- `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 0，5 passed / 1.4m；24 個本機 regression、3 個 PostgreSQL 案例（包含 SIGKILL writer 後新程序自動重試）及 4 個 shared harness 案例。
+- `DRTS_WEBHOOK_LIVE=1 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 1，1 failed / 4 passed，3.1s。缺部署認證／外部證據時明確失敗，另存 live unavailable artifact。
+- `pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/*.ts tests/e2e/system-remediation/sr-qa-webhook-001/*.ts --max-warnings=0` → exit 0；`git diff --check` → exit 0。
+
+維持 in_progress，不 handoff。尚需 C111 authenticated API 最小權限／使用量、C112 預設 deadline／replay 接收策略；請 supervisor 協調 C113 ERP/SSO/bank sandbox、C114 真 provider、C115 部署排程與告警回執。此次未發現新的產品缺陷，未修改產品或 UI；以下表格與環境下一步是歷史紀錄，DB 與 OS process 恢復缺口已由後續章節補證據。
 
 ## 2026-09-08 15:39 UTC OS process 恢復續驗（最新）
 
