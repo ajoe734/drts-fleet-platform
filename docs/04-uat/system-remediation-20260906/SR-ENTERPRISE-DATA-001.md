@@ -89,3 +89,28 @@ above with recorded dependencies, and identify the authorized contact source.
 Do not redispatch solely because history repair is done. No UI edits were made in
 this verification. Browser, authenticated live API, real-device calls, independent
 review, candidate CI, merge, and deployment have not been verified.
+
+## Redispatch verification — 2026-09-08 15:50 UTC
+
+- Fetched base: `f372e4a6a0dd16204ccbd660f23013601357c224`.
+- Tested WIP: `bf4f3f1f6737e95e436e39ced6064fbae2ca2ee6`.
+  Candidate SHA: none; acceptance remains incomplete.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: initially exit 1
+  on duplicate historical evidence patches; preserved the full pre-rebase
+  document and completed `GIT_EDITOR=true git rebase --continue`: exit 0.
+  `git merge --no-edit origin/codex2/sr-enterprise-data-001`: exit 0,
+  retaining published ancestry for normal push.
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`:
+  exit 0; 1 file / 17 tests passed, duration 1.07 s.
+- `git diff --check`: exit 0. Resource IDs remain the unit inputs above;
+  no live resource was verified.
+
+Current source still confirms the shared detail catch defaults to `degraded`,
+the shared theme contains raw colors, help uses the fixture support phone with
+no button action, and trip imports the fixture driver. The task slice retains
+the original write scopes and no dependencies. History repair explicitly says
+these blockers remain. Supervisor must record shared-file scopes/dependencies
+and resolve the authorized contact source before redispatch. No product/UI
+changes were made. Browser/live API/device calls, independent review,
+candidate CI, merge and deployment remain unverified.
