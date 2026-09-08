@@ -17,6 +17,7 @@ import {
 } from "@/components/booking-form/enterprise-booking-validation";
 
 export {
+  requireFutureReservationStart,
   getEarliestBookableLabel,
   getEnterprisePassengerDisplayName,
   isEnterpriseDraftComplete,
