@@ -60,3 +60,32 @@ shared-file gaps above remain, and trip still imports fixture bookings/driver.
 Supervisor must adjudicate those scopes/dependencies and the authorized contact
 source before UI completion. No new UI was written during this redispatch.
 The live/device/CI/review/merge/deployment exclusions above remain applicable.
+
+## Redispatch verification — 2026-09-08 15:42 UTC
+
+- Fresh `origin/dev` base: `3f182f7e314b5ddb4c37f1c3f5dc214a6d0edf0e`.
+- Tested WIP revision: `1247a3b414d0d91e3ac242cebd4ef96546cb7f7f`.
+  Candidate SHA: none; trip integration and contact acceptance remain incomplete.
+- `git fetch origin`: exit 0; `git rebase origin/dev`: exit 0;
+  `git merge --no-edit origin/codex2/sr-enterprise-data-001`: exit 0.
+  The merge retains published ancestry for ordinary non-force push.
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`:
+  exit 0, 1 file / 17 tests passed, duration 341 ms.
+- `git diff --check`: exit 0.
+- Resource IDs remain the unit inputs documented above; no live IDs verified.
+
+Read-back of the current task slice still shows the original write scopes and
+`depends_on: []`. Inspection confirms the shared detail component still maps
+unclassified errors, including missing bookings, to `degraded`; the shared theme
+still hardcodes its palette; help still renders the fixture support phone and
+buttons without contact actions. Trip still reads fixture bookings and driver.
+The merged history-repair report explicitly preserves these scope/dependency
+blockers. The dispatch statement that history repair resolved the parent blocker
+does not supply the scope expansion required by the task's explicit guardrail.
+
+Supervisor action required: authorize or assign the three shared-file fixes listed
+above with recorded dependencies, and identify the authorized contact source.
+Do not redispatch solely because history repair is done. No UI edits were made in
+this verification. Browser, authenticated live API, real-device calls, independent
+review, candidate CI, merge, and deployment have not been verified.
