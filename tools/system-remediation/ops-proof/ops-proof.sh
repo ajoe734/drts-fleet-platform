@@ -7,6 +7,7 @@ usage() {
 Usage:
   ops-proof.sh inventory --output FILE [--project ID --region REGION --service NAME]
   ops-proof.sh restore --snapshot FILE --expected-manifest FILE --isolated-database-url URL --output FILE
+  ops-proof.sh capacity --plan FILE --output FILE
   ops-proof.sh load --booking-url URL --dispatch-url URL --report-url URL --output FILE [--requests N] [--header 'Name: value']
 
 The restore command intentionally has no source-database option. It will only
@@ -20,10 +21,11 @@ command_name="${1:-}"; shift || true
 expected_manifest=""; helper="$(dirname "${BASH_SOURCE[0]}")/reconcile.mjs"
 output=""; snapshot=""; isolated_database_url=""; booking_url=""; dispatch_url=""; report_url=""; requests=1
 headers=()
-project=""; region=""; service=""
+project=""; region=""; service=""; plan=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --plan) plan="${2:-}"; shift 2 ;;
     --project) project="${2:-}"; shift 2 ;;
     --region) region="${2:-}"; shift 2 ;;
     --service) service="${2:-}"; shift 2 ;;
@@ -89,6 +91,10 @@ console.log(JSON.stringify({taskId:"SR-OPS-PROOF-001",kind:"isolated_restore",ob
 NODE
 )"
     exit "$reconciliation_status"
+    ;;
+  capacity)
+    [[ -f "$plan" ]] || die "--plan must name an operator-supplied workload plan"
+    node "$(dirname "${BASH_SOURCE[0]}")/capacity.mjs" "$plan" "$output" "$base_sha" "$candidate_sha"
     ;;
   load)
     [[ "$requests" =~ ^[1-9][0-9]*$ ]] || die "--requests must be a positive integer"

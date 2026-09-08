@@ -56,7 +56,10 @@ if (project || region || service) {
           throw new Error("Cloud Run response lacks service identity/revision/conditions/traffic");
         }
         receipt.deployment.state = "observed";
-        receipt.deployment.ready = status.conditions.find((item) => item.type === "Ready")?.status === "True";
+        receipt.deployment.ready = status.conditions.find((item) => item.type === "Ready")?.status === "True"
+          && data.metadata.generation != null
+          && String(status.observedGeneration) === String(data.metadata.generation)
+          && status.latestCreatedRevisionName === status.latestReadyRevisionName;
         receipt.deployment.latestReadyRevision = status.latestReadyRevisionName;
         receipt.deployment.traffic = status.traffic;
         // Revision names and Ready are observations, not immutable source/health proof.
