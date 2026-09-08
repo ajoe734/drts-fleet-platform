@@ -89,6 +89,9 @@ describe("OwnedMobilityRepository", () => {
           taskId: "task-complete-1",
           assignmentId: "assignment-complete-1",
           orderId: "order-complete-1",
+          dispatchJobId: "job-complete-1",
+          driverId: "driver-complete-1",
+          vehicleId: "vehicle-complete-1",
         },
       ],
       [
@@ -96,6 +99,10 @@ describe("OwnedMobilityRepository", () => {
         {
           assignmentId: "assignment-complete-1",
           dispatchJobId: "job-complete-1",
+          taskId: "task-complete-1",
+          orderId: "order-complete-1",
+          driverId: "driver-complete-1",
+          vehicleId: "vehicle-complete-1",
         },
       ],
       [

@@ -203,6 +203,10 @@ async function readAssignmentStatus(
 }
 
 async function purgeOrderCascade(database: DatabaseService, orderId: string) {
+  await database.query(
+    `DELETE FROM ops.driver_completion_outbox WHERE order_id = $1`,
+    [orderId],
+  );
   // FK-safe order: `dispatch_resource_reservations` has real (non-deferrable)
   // FKs to both `phase1_owned_orders` and `phase1_dispatch_assignments`
   // (V0087); the other runtime-snapshot tables (V0011) are plain varchar

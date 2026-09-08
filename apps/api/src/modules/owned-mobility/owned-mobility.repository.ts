@@ -1042,7 +1042,8 @@ export class OwnedMobilityRepository {
     );
     const task = await this.lockDriverTaskForUpdate(executor, taskId);
     if (
-      !task || task.taskId !== taskId ||
+      !task ||
+      task.taskId !== taskId ||
       task.taskId !== assignment.taskId ||
       task.assignmentId !== assignment.assignmentId ||
       task.orderId !== assignment.orderId ||

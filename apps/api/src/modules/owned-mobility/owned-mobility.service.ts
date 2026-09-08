@@ -6097,7 +6097,10 @@ export class OwnedMobilityService
 
     // A terminal replay may return its prior result, but every new completion
     // (including proof_pending writes) must reconcile before changing capacity.
-    if (task.status !== "completed" && !this.isReconciledAssignmentTask(assignment, task)) {
+    if (
+      task.status !== "completed" &&
+      !this.isReconciledAssignmentTask(assignment, task)
+    ) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
