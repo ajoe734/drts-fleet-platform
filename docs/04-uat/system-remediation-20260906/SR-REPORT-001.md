@@ -108,3 +108,27 @@ dependencies, or assign coordinated integration children. Keep the task blocked
 on that scope decision, rather than reopening solely on history repair.
 The commit containing this section is evidence only, not a handoff candidate;
 its pushed SHA is recorded in the task blocker note.
+
+## Redispatch verification — 2026-09-08 15:47 UTC
+
+- Dispatch again cites history repair; the canonical task still has the same
+  four write scopes and two dependencies. The repair document's procedure §7
+  explicitly requires supervisor expansion for shared contracts/central tests.
+- Fresh base: `3f182f7e314b5ddb4c37f1c3f5dc214a6d0edf0e`; dispatched HEAD:
+  `92215f9fd` (evidence only). No implementation candidate is claimed.
+- `git fetch origin` and `git rebase origin/dev`: exit 0. Published evidence
+  was preserved with `git merge --no-ff origin/codex/sr-report-001` (exit 0),
+  allowing an ordinary push without rewriting published history.
+- Current service still declares null XLSX/PDF renderers; shared contracts
+  declare CSV only; the central test still requires XLSX/PDF/ZIP rejection.
+- `pnpm exec vitest run tests/unit/reporting-filing.test.ts`: exit 0,
+  30 tests in one file passed, duration 3.33s. Example in-memory order event:
+  `921df141-c3d7-47b3-a10a-574f725fff0d`. This reproduces the missing formats,
+  not PDF/XLSX acceptance. No live resource or browser/device check was run.
+- API/ops typechecks and renderer parsing suite were not run; production code
+  remains unchanged pending the required shared-file coordination.
+
+Supervisor action remains: add focused write scopes for the authoritative
+format list and central regression updates plus writer dependencies, or assign
+coordinated children. History repair alone does not satisfy that prerequisite.
+This update is an evidence anchor, not a review handoff.
