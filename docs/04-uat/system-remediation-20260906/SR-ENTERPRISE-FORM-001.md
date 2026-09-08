@@ -1,5 +1,41 @@
 # SR-ENTERPRISE-FORM-001 — 驗收證據
 
+## 2026-09-08 15:44 UTC Codex2 dispatch — 回歸完成，scope blocker 尚存
+
+- 本輪 base：fresh `origin/dev` = `3f182f7e314b5ddb4c37f1c3f5dc214a6d0edf0e`；起始 branch head `b97be8a00ff42bda340e40aa029e3b912b5203fd`。
+- `gh pr view 1774 --json state,headRefOid,mergeCommit,url` exit 0：PR <https://github.com/ajoe734/drts-fleet-platform/pull/1774> 已合併，歷史 candidate `10ccb5f6522eb0d95d8d4f1349df2ef30d9b7b10`，merge `7d1272fc85a7f4d2a20f4ccd2d01716e873cca5e`。該 history repair 不代表本表單修復已進 dev；`git show origin/dev:apps/enterprise-dispatch-web/components/booking-form/enterprise-booking-validation.ts` 仍回報 path 不存在。
+- `git fetch origin` exit 0；`git rebase origin/dev` 遇重複歷史 patch 的 add/add 衝突；確認修復已由前面的重播 commit 保留後，`git rebase --skip` exit 0，Git 同時略過兩個內容重複的 patch。`git merge --no-edit origin/codex2/sr-enterprise-form-001` exit 0，保留已發布歷史以容許普通 push，未 force push。
+- 程式／測試驗證 SHA：`8f28e1add1ede9ab42fd3d818af9b08a7d69c9c2`。此文件後續 commit 僅補證據；最終發布 head 由 machine blocker 記錄，**未 handoff、未鎖定 review candidate**。
+- 新增 `ReservationExpiryGate`：hydrate 前不開放送出，確認頁到期撤除送出元件、顯示既有警示；每秒／精確到期／視窗重新聚焦及 visibility change 重查。API command 邊界仍使用既有嚴格未來時間檢查，保護計時器暫停或事件競態。沿用 canvas 的按鈕、警示與版面，未新增色票。
+
+實際指令與結果：
+
+```text
+pnpm --filter @drts/enterprise-dispatch-web exec next dev --webpack --hostname 127.0.0.1 --port 3317
+Ready; isolated local server; 檢查後以 Ctrl-C 停止
+ENTERPRISE_FORM_TEST_URL=http://127.0.0.1:3317 pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/
+首次 exit 1：2 failed / 16 passed，測試錯用 reservationDate/onsiteContactPhone 等 URL keys
+修正為既有 query contract 的 pm/date/time/contact/cc/ccLabel 後：exit 0；2 files / 18 tests passed
+最後重跑 exit 0；2 files / 18 tests passed；Duration 7.39s
+pnpm --filter @drts/enterprise-dispatch-web typecheck
+exit 0；tsc --noEmit
+pnpm --filter @drts/enterprise-dispatch-web exec eslint components/booking-form/reservation-expiry-gate.tsx app/bookings/review/page.tsx --max-warnings=0
+exit 0
+git diff --check
+exit 0
+git push origin codex2/sr-enterprise-form-001
+exit 0：b97be8a00..9b62954f8；exit 0：9b62954f8..5bff0086d
+```
+
+Chromium headless 真正開啟兩個頁面：姓名改為 `Renamed Visitor` 後乘客／舉牌均顯示新名、聯絡電話保留；self 模式兩處均顯示 `Booker Name`；過去日期沒有 submit；以 browser clock 推進至到期後顯示 expired banner 且 submit 不存在。`390×844` 下 new/review 的 `documentElement.scrollWidth <= innerWidth` 斷言均通過。這是本地瀏覽器回歸，測試資料僅用於頁面查詢，沒有送出 API；未設定 `ENTERPRISE_FORM_TEST_URL` 時三項 browser tests 明確 skip，15 項純邏輯 tests 仍執行。
+
+剩餘阻礙與資源界線：
+
+- **需要 supervisor 擴 scope 並建立必要相依**：`apps/enterprise-dispatch-web/lib/enterprise-theme.ts` 仍使用 `accent = "#2457D6"` 及自訂色票，與指定 tenant realm tokens 不符，且不在 write_scopes。已讀 `packages/ui-tokens/src/realms.ts`、`ent-screens-1.jsx` New/Review，未以局部 CSS 蓋色規避規範。
+- 歷史 task commit 已含 `lib/translations.ts` 變更（本次未新改該檔），也需 supervisor 核對 scope；沒有自行回退既有翻譯。Next dev 自動改動的 `next-env.d.ts` 已恢復。
+- 未做真機軟鍵盤、API 錯誤與 CTA 遮擋、live backend、CI、merge 或 deploy 驗收；未建立 booking/order 資源，因此無 live 資源 ID。頁面 health proxy 曾回 503，不據此宣稱 backend 可用。
+- 不將 fixture 金額／固定審批推估作為完成證據；最短提前時間 policy 仍由 SR-BOOKING-VERIFY 負責。本 task 尚未可 handoff 或結案。
+
 ## 2026-09-08 Codex2 dispatch — 最新進度（未 handoff）
 
 - Owner / reviewer：Codex2 / Codex，以本次 machine task slice 為準；下方歷史紀錄不代表目前狀態。
