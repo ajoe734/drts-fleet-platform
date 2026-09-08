@@ -453,8 +453,10 @@ successfully using `operations/database/db-apply.sh`:
 - `pnpm --filter @drts/contracts build`, control-plane-auth build, and
   `pnpm --filter @drts/api typecheck`: passed. The initial shared dependency
   links lacked Node types; isolated installation resolved that prerequisite.
-- From `apps/api`, Vitest on `tests/integration/uv-exec-006.integration.test.ts`
-  and `tests/integration/stage1-uat-pg-gate.integration.test.ts`, with
+- From `apps/api`, Vitest on the repository files
+  `apps/api/tests/integration/uv-exec-006.integration.test.ts` and
+  `apps/api/tests/integration/stage1-uat-pg-gate.integration.test.ts`
+  (pass paths relative to that working directory), with
   `--no-file-parallelism --maxConcurrency=1` and DATABASE_URL set to the new
   database: **64/64 passed** (61 reservation cases plus three stage1 cases).
   This exercises mixed-entry PostgreSQL races, legacy writer fences,
