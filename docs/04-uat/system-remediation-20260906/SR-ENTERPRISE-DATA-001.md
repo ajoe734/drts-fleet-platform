@@ -142,3 +142,38 @@ product blockers. Supervisor must assign/authorize the three shared files above
 and establish the permitted contact source or unavailable-contact behavior.
 No UI changes were made. Live API/browser/device checks, independent review,
 candidate CI, merge and deployment remain unverified.
+
+## Redispatch verification — 2026-09-08 16:09 UTC
+
+- Fresh fetched base: `c07d24e021aea847a988646427cdc534ccf4e496`.
+- Tested WIP revision: `cd7146c7d4365cee4ba80ef9eca1d2eb4a62a183`.
+  Candidate SHA: none; actionable contact and trip integration remain incomplete.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: initially exit 1
+  on repeated historical evidence patches. Preserved the complete pre-rebase
+  task evidence and resolved only that document; final
+  `GIT_EDITOR=true git rebase --continue`: exit 0.
+- `git merge --no-edit origin/codex2/sr-enterprise-data-001`: exit 0;
+  preserves published ancestry for ordinary non-force push.
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`:
+  exit 0; 1 file / 17 tests passed, duration 243 ms.
+- `git diff --check`: exit 0. Resource IDs are the unit inputs listed above;
+  no live resource was verified.
+
+The newly merged planning decision from PR #1777 is now available at
+`support/unblock/SR-ENTERPRISE-DATA-001/SR-ENTERPRISE-DATA-001-UNBLOCK-PLANNING-DECISION.md`.
+Its resume gate explicitly says to keep the parent blocked pending supervisor
+scope/dependency adjudication and contract source confirmation. It grants no
+scope expansion or acceptance reduction. `Q-SR-ENTERPRISE-DATA-001` also remains
+in `PHASE1_OPEN_QUESTIONS.md`. Thus the dispatch's “unblock resolution complete”
+is inconsistent with the actual merged decision. Current task read-back still
+has original write scopes and no dependencies. Current source still contains
+the shared detail degraded fallback, raw shared theme palette, fixture support
+phone with no action, and fixture driver in trip.
+
+Supervisor must execute the planning decision's routing steps (shared detail,
+help and theme scope/dependencies plus authorized contact source or an explicitly
+accepted unavailable-contact path) before redispatch. No UI/product changes were
+made. Live authenticated API, browser, real-device calls, independent review,
+candidate CI, merge and deployment remain unverified. This evidence is WIP,
+not a handoff or completion claim.
