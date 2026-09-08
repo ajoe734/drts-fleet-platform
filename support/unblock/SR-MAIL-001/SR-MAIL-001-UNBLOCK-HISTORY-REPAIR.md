@@ -10,12 +10,12 @@ candidate handoff are performed by this helper.
 
 After successful `git fetch origin`:
 
-| Ref | SHA |
-| --- | --- |
+| Ref                                 | SHA                                        |
+| ----------------------------------- | ------------------------------------------ |
 | `origin/dev` / helper starting HEAD | `3b60a3757238663572f16f010c94f446f2c71eaa` |
-| local `codex/sr-mail-001` | `25fc24ab7d12b0aeb833bb868586afb1c1953d30` |
-| remote `origin/codex/sr-mail-001` | `a1924736aadb434521504725c11420517700f759` |
-| local parent's rebase base | `b5c3774e5e62fab7cf43b67a7e69fae7e0ca91ef` |
+| local `codex/sr-mail-001`           | `25fc24ab7d12b0aeb833bb868586afb1c1953d30` |
+| remote `origin/codex/sr-mail-001`   | `a1924736aadb434521504725c11420517700f759` |
+| local parent's rebase base          | `b5c3774e5e62fab7cf43b67a7e69fae7e0ca91ef` |
 
 [Parent PR #1719](https://github.com/ajoe734/drts-fleet-platform/pull/1719)
 is OPEN, targets dev, and still has remote head `a1924736a…`.
@@ -40,15 +40,15 @@ new evidence commit `25fc24ab7`.
 `git range-diff 70355aba9..origin/codex/sr-mail-001 b5c3774e5..codex/sr-mail-001`
 identifies the exact old/new mapping:
 
-| Published commit | Rewritten commit | Change |
-| --- | --- | --- |
-| `31bc3f02e` | `93acae845` | Same patch/message |
-| `e811696a8` | `49d624873` | Same patch/message |
-| `1e3a58094` | `92cae7c90` | Same patch/message |
-| `99018c13a` | `d6b689cef` | Same patch/message |
-| `04d9c7768` | `808fbbad2` | Same patch/message |
-| `a1924736a` | `b9c8135ae` | Same patch; subject test → fix, agent trailer case changed |
-| none | `25fc24ab7` | Added candidate subject remediation record |
+| Published commit | Rewritten commit | Change                                                     |
+| ---------------- | ---------------- | ---------------------------------------------------------- |
+| `31bc3f02e`      | `93acae845`      | Same patch/message                                         |
+| `e811696a8`      | `49d624873`      | Same patch/message                                         |
+| `1e3a58094`      | `92cae7c90`      | Same patch/message                                         |
+| `99018c13a`      | `d6b689cef`      | Same patch/message                                         |
+| `04d9c7768`      | `808fbbad2`      | Same patch/message                                         |
+| `a1924736a`      | `b9c8135ae`      | Same patch; subject test → fix, agent trailer case changed |
+| none             | `25fc24ab7`      | Added candidate subject remediation record                 |
 
 All seven commits above origin/dev carry Task-ID SR-MAIL-001. The six changed
 files are the three approved tenant-partner service/module files, the parent
@@ -93,6 +93,7 @@ Supervisor/parent owner procedure (not executed by this helper):
    without switching that root's branch. If upstream has moved, inspect any
    conflicts against the parent's write scopes; do not blindly take either
    side. Rebase is safe here because the replacement branch is unpublished.
+
 3. Run `git diff --check`, `pnpm typecheck:root`,
    `pnpm --filter @drts/api typecheck`,
    `pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/`, and
