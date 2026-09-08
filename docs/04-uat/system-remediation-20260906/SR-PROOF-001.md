@@ -24,6 +24,19 @@ The focused regression test uses the isolated IDs
 `sr-proof-001-statement-a`, and `sr-proof-001-nonexistent-proof`. It does not
 upload bytes, call a live scanner, or execute a real payment.
 
+## Reproduction commands (2026-09-08)
+
+Base inspected: `origin/dev` at
+`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`. The task branch head is the
+already-pushed evidence anchor `1a58e13060f7b1ec1e58f74481153b834b31d884`.
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| `git diff --check` | 0 | No whitespace errors. |
+| `pnpm --filter @drts/api typecheck` | 0 | Passed. |
+| `pnpm --filter @drts/platform-admin-web typecheck` | 0 | Passed. |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/ --reporter=verbose` | 1 | One intended guard regression passes; two intended red regressions fail: fabricated `sr-proof-001-nonexistent-proof` is accepted and paid returns before persistence resolves. |
+
 ## Scope and design boundary
 
 The current write scope permits only the billing service/controller,
