@@ -447,6 +447,51 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       expect(linesNoMatch).toHaveLength(1);
     });
 
+    it("uses the same current UTC month for dashboard, list and CSV", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-01T00:00:00Z"));
+      try {
+        mockDrivers.mockResolvedValue([]);
+        mockDashboard.mockResolvedValue(null);
+        const dashboard = await loadDashboard();
+        await loadTrips();
+        await exportHandler(new NextRequest("http://localhost:3000/trips/export"));
+        expect(dashboard.periodMonth).toBe("2026-10");
+        expect(mockTrips.mock.calls.slice(-3)).toEqual([
+          ["2026-10"], ["2026-10"], ["2026-10"],
+        ]);
+        await loadTrips("2026-08");
+        expect(mockTrips).toHaveBeenLastCalledWith("2026-08");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("quotes grouped summary counts as a single CSV field", async () => {
+      mockDrivers.mockResolvedValue(Array.from({ length: 1000 }, (_, i) => ({
+        driverId: `drv-large-${i}`, name: "Driver", workState: "available",
+        licensesValid: true, supportedServiceBuckets: [], dispatchEligible: true,
+      })));
+      mockDashboard.mockResolvedValue(null);
+      const response = await exportHandler(new NextRequest(
+        "http://localhost:3000/trips/export?type=summary&period=2026-09",
+      ));
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('Active Drivers,"1,000",2026-09,');
+    });
+
+    it("escapes delimiters, quotes and newlines in every trip CSV field", async () => {
+      const records = await mockTrips();
+      mockTrips.mockResolvedValue([{ ...records[0], orderId: 'ord,"quoted"',
+        pickupAddress: 'First line\nSecond, "line"',
+      }]);
+      const response = await exportHandler(new NextRequest("http://localhost:3000/trips/export"));
+      expect(response.status).toBe(200);
+      const csv = await response.text();
+      expect(csv).toContain('"ord,""quoted""",airport,');
+      expect(csv).toContain('"First line\nSecond, ""line"""');
+    });
+
     it("overview export handles loader errors with 500 status", async () => {
       mockDrivers.mockRejectedValue(new Error("Fleet service down"));
       mockVehicles.mockRejectedValue(new Error("Fleet service down"));
