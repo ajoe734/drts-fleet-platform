@@ -1,5 +1,33 @@
 # SR-PUSH-001 — current-dev reproduction and scope blocker
 
+## Redispatch verification — 2026-09-08 after PR #1828
+
+- Fresh `origin/dev` base: `a24045986ac29231d34657df3a343b02d9fbb770`.
+  `git fetch origin` and `git rebase origin/dev`: exit 0.
+- Inspected/tested code SHA: `26f862e9d` (rebased reproduction anchors).
+  Published anchor ancestry was subsequently retained by a normal merge at
+  `2d10084d9dbef57468ca4acfd7316c139e327749`; it changes no task code.
+  Implementation candidate SHA remains null.
+- The merged planning helper candidate `9ae18d49e1951e784dfb474ac1d878bc66c216a2`
+  in PR #1828 explicitly routes follow-up and says product implementation remains
+  blocked. Its merged packet and `PHASE1_OPEN_QUESTIONS.md` Q-SR-PUSH-001 do not
+  approve a provider protocol, expand parent write scopes, or allocate claim/receipt
+  contracts. The redispatched parent task slice still lists the original five
+  write scopes and only UV-EXEC-006 as a dependency. A helper status of done is
+  therefore insufficient to satisfy the documented parent resume gates.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-push-001/`: exit 0,
+  4 passed and 2 expected failures, 6 total, 3.27 seconds. Both defects below
+  still reproduce; expected failures are not completed acceptance.
+- Initial `pnpm --filter @drts/api typecheck`: exit 2 because generated
+  `@drts/control-plane-auth` declarations were missing; dependency build and
+  rerun: `pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api typecheck`
+  exited 0. `git diff --check`: exit 0.
+- Resource IDs and live/receiver limitations below remain unchanged. No real
+  provider, controlled receiver, PostgreSQL integration, or device test was run.
+- Next action remains Supervisor/Chairman scope and contract routing as specified
+  in `support/unblock/SR-PUSH-001/SR-PUSH-001-UNBLOCK-PLANNING-DECISION.md`.
+  No shared product writes or implementation handoff are justified yet.
+
 ## Baseline and traceability
 
 - Owner: Codex2; reviewer: Codex. Task branch: `codex2/sr-push-001`.
