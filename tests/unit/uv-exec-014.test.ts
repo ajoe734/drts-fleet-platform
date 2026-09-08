@@ -404,7 +404,13 @@ describe("UV-EXEC-014 speech/DTMF durable confirmation", () => {
         .map((c) => c[0])
         .filter((sql) => sql.includes("FOR UPDATE"));
       expect(
-        locks.slice(-3).map((sql) => sql.split("FROM ")[1].split(" WHERE")[0]),
+        locks.slice(-3).map((sql) => {
+          const fromClause = sql.split("FROM ")[1];
+          if (fromClause === undefined) {
+            throw new Error(`Lock query is missing FROM: ${sql}`);
+          }
+          return fromClause.split(" WHERE")[0];
+        }),
       ).toEqual(["voice.session", "voice.intent", "voice.confirmation"]);
       await expect(h.accept()).rejects.toThrow();
     },
