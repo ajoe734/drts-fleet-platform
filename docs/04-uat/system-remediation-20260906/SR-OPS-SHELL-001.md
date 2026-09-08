@@ -1,5 +1,18 @@
 # SR-OPS-SHELL-001 — 本次恢復與阻塞證據
 
+## 2026-09-08 18:54 UTC dispatch 核對
+
+- `git fetch origin` exit 0；fresh base `d4f54ef94e059a981bf2be1f7b944e815870e117`；受測 task SHA `c2fb67d37b83f5c30017d0877fa6fa2c4d71bc40`，尚無 handoff candidate。
+- `git rebase origin/dev` exit 1：第9/42個歷史 commit `94bf84a0a` 在本文件 add/add conflict；`git rebase --abort` exit 0，恢復乾淨原分支，未完成 rebase。
+- fresh dev 原始碼仍為 dispatch:1230 fallback `/platform-admin`、dispatch:4520 無 context `/audit`；audit:164 無參數 `client.listAuditLogs()`，未找到 searchParams。唯讀核對，不是 live 重現。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/` exit 0，1 file / 13 tests passed，292ms；有 `vitest/config` unresolved import warning。
+- **本輪 typecheck 未通過**：`pnpm --filter @drts/ops-console-web typecheck` exit 2。Next 嘗試補 TypeScript dependencies 遭 `ERR_PNPM_UNEXPECTED_VIRTUAL_STORE`；目前 node_modules virtual store 指向另一 worktree `codex-uv-exec-010`，隨後 tsc 報缺 React declarations / JSX types。未重裝共享依賴或修改 lockfile；`git status --short` 為空。先前通過紀錄不代表本輪通過。
+- `git diff --check` exit 0（追加本文前）。
+
+已核對 execution_ref、R18/R19、C048、history/planning helper。Machine slice 仍未擴 sender／receiver scope，depends_on 空白，`Q-SR-OPS-SHELL-001` 仍 open。History helper 明文保留產品 scope/receiver-contract blocker。需要 supervisor 落實 planning routing record 的 scope、writer dependencies 與 resource identity／URL→query 契約；不能僅以 history repair done 清除此阻塞。
+
+本輪只更新證據，未修改產品。未執行 1440/390px 瀏覽器 CTA、開關／focus／reload、audit popup、payments context 或 live／真機；無 live 資源 ID、無新建業務資源。既有單元測試輸入不代表 live 驗收。不 handoff／done。
+
 ## 2026-09-08 18:42 UTC dispatch 核對
 
 - Fresh `origin/dev` base：`d4f54ef94e059a981bf2be1f7b944e815870e117`；本次受測分支 SHA：`0e7d0043efe6205516eab85a14bf05d3071e5cdf`。尚無 handoff candidate。
