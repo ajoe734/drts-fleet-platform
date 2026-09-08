@@ -153,3 +153,27 @@ The targeted timeout assertion was corrected to the persisted `cancelled`
 terminal status; timeout is not a driver rejection. The earlier attempt
 from repository root selected no tests; the successful run used `apps/api`.
 These are local implementation checks, not external acceptance results.
+
+## P1 cancellation follow-up (2026-09-08)
+
+Supervisor fallback assigned implementation to Codex; reviewer remains Codex2.
+Cancellation now discovers durable assignment/task/job rows under locks in
+assignment → task → job → order order, rechecks active assignment discovery
+after acquiring the order lock, and validates cancellation against that
+authoritative order/task state. Order, jobs, assignment, task, trace and both
+resource releases commit in one transaction. Cache updates and cancellation
+notifications occur only after commit. Completion uses the same lock order.
+Tenant and passenger controllers await cancellation before wrapping responses;
+multi-taxi token-creation compensation awaits cancellation and preserves the
+original token persistence error if cancellation fails.
+
+At 15:31 UTC the PostgreSQL task suite passed **23/23**, including a stale
+service attempting cancellation after a different service starts the trip,
+and an injected failure after cancellation writes and both resource releases.
+Both regressions verify unchanged durable order/job/task/assignment/reservations
+and traces, plus unchanged cached task state. The five related unit suites
+passed **177/177** before the final caller corrections. After those corrections,
+the controller and multi-taxi suites passed **35/35** at 15:32 UTC, including
+API transaction failure propagation and failed compensating cancellation.
+API typecheck passed again. These checks used the same isolated database and
+commands described above; candidate review/CI/merge/acceptance remain pending.
