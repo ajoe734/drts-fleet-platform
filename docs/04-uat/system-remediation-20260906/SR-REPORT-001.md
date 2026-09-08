@@ -1,5 +1,17 @@
 # SR-REPORT-001 — 接手實作與阻塞證據
 
+## 2026-09-08 18:01 UTC history-repair resume（最新）
+
+- Owner Codex2 / reviewer Codex。`git fetch origin` 與 `git rebase origin/dev` exit 0；base `fa0fd8257950764526a522d091be9d97effa82b9`，受驗 implementation HEAD `5017b7bcc09e1e5f9c6489b5e51555417a0b4827`。本輪只補證據，candidate 尚未鎖定，未 handoff。
+- `git diff --check origin/dev...HEAD`、`pnpm --filter @drts/api typecheck`、`pnpm --filter @drts/ops-console-web typecheck` 均 exit 0。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-report-001/` exit 0，9 passed。
+- `SR_REPORT_EVIDENCE_DIR=/tmp/sr-report-001-resume-1800 pnpm exec vitest run tests/unit/system-remediation/sr-report-001/ tests/unit/reporting-filing.test.ts` exit 1：35 passed / 4 failed / 2 unhandled rejections。中央測試仍同步讀 async download、同步斷言 rejection，並要求 PDF/XLSX 拒絕；本輪未越 scope 修改。
+- `/tmp/sr-report-001-dispatch-venv/bin/python tests/unit/system-remediation/sr-report-001/verify-artifacts.py /tmp/sr-report-001-resume-1800` exit 0；filtered PDF 1 頁 / 1 筆、wide PDF 35 頁 / 55 筆，CSV 與來源一致；XLSX 由 Vitest ExcelJS 解析。另一次嘗試讀取 manifest.json exit 1（檔名不存在），資源資料以 parser 實際輸出為準。
+- 本輪 in-memory 資源：CSV `JOB-ad300e52-06c9-435c-8083-d356cdce0e1f` / `ART-0fd77a6a-a02a-4e98-8a74-05f2b9f8dec6`；XLSX `JOB-1debc4c8-9efb-41ac-9bab-e692a92340a1` / `ART-e29f8db4-c8de-4d78-8c34-f703a28c41c8`；PDF `JOB-2794c02a-4e89-48b3-99f7-c13853e194e5` / `ART-d166b740-cd99-4ae2-818b-841124522254`。共同篩選 2026-09-01 至 2026-09-30，皆一筆 general row。
+- 已讀合併的 history repair 與 planning decision：前者提供普通 push 到 codex2/sr-report-001-rebased 的 continuation rail，後者明示它不授權共用檔案。保持 assigned cwd / task branch，將本輪 anchor 推到該 continuation remote branch，保留原遠端歷史；push 結果與 SHA 寫 machine truth。
+- **仍需 supervisor 處理**：把 packages/contracts/src/index.ts 的格式常數及 tests/unit/reporting-filing.test.ts 的相關 assertions 納入 reviewed write scopes 並加入 writer dependencies，或安排已登錄的共用 producer。本輪 task slice 仍沒有此授權。共享宣告仍 CSV-only，UI 仍引用該常數；history repair 不能解決此 acceptance blocker。
+- 未執行 Unicode 字型部署、live HTTP、DB、瀏覽器、真機、CI 或 merge/deploy 驗收，不宣稱已完成。
+
 ## 2026-09-08 17:49 UTC dispatch 重驗（最新）
 
 - 本輪 owner Codex2 / reviewer **Codex**，取代下方歷史 reviewer；依賴 SR-ARTIFACT-001、SR-DEPS-001 machine status 均為 done。
