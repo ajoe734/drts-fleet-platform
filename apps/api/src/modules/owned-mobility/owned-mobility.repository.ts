@@ -615,10 +615,10 @@ export class OwnedMobilityRepository {
    * late timer for an assignment a reassign already superseded) a safe
    * no-op instead of releasing a newer assignment's occupation of the same
    * driver/vehicle. Defaults to the bare pool for callers outside an
-   * existing transaction (accept/reject/cancel/timeout today all persist
-   * their own state with separate statements); pass the transaction's
-   * `PoolClient` when releasing atomically alongside another write (e.g.
-   * reassign, completion).
+   * existing transaction. Live assignments must be closed using the same
+   * transaction's `PoolClient`: V0091 rejects a standalone release while
+   * the assignment is still active. All service terminal transitions pass
+   * their transaction here.
    */
   async releaseDispatchResourceReservations(
     assignmentId: string,

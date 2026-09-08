@@ -1788,7 +1788,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     expect(result.escalationAction).toBe("retry_dispatch");
 
     expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
-      "rejected",
+      "cancelled",
     );
     expect(
       await readActiveReservations(database, "driver", driverId),

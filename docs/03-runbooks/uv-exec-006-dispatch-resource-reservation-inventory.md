@@ -61,7 +61,16 @@ needing a per-entry-point retrofit.
 - `infra/migrations/V0087__dispatch_resource_reservations.sql` (already
   landed by UV-EXEC-002): the ledger table and its
   `UNIQUE (resource_type, resource_id) WHERE status IN ('held','occupied')`
-  active-occupation constraint. This task did not need a new migration.
+  active-occupation constraint.
+- `V0090__dispatch_assignment_reservation_fence.sql` rejects active
+  assignments without reservations at transaction commit, including writes
+  from older application revisions, and backfills historical assignments.
+- `V0091__dispatch_reservation_commit_invariant.sql` checks the reverse
+  write direction too: releasing or deleting a reservation cannot leave an
+  active assignment without its driver/vehicle pair. Both resources must
+  match the assignment, order and reservation group. Migration takes table
+  locks and checks historical active assignments; ambiguous or conflicting
+  occupancy aborts rollout for reconciliation rather than freeing capacity.
 - `OwnedMobilityRepository`:
   - `reserveDispatchResources(executor, params)` -- inserts a `held` row for
     driver then vehicle (fixed order, independent of resource IDs) inside
@@ -95,10 +104,43 @@ needing a per-entry-point retrofit.
 ## What this task did not change
 
 - The non-DB in-memory fallback path (`OwnedMobilityRepository.isEnabled()`
-  false, used only when `DATABASE_URL` is not configured, e.g. plain unit
-  tests) has no reservation table to share and is single-process by
-  construction -- SD §7.6's "只有後端確實隔離才可保留未升級入口" allows
-  leaving it as-is.
+  false, used when `DATABASE_URL` is not configured, e.g. plain unit tests)
+  has no shared reservation table. This fallback is not evidence of a
+  production supply isolation boundary; shared-supply deployments require
+  PostgreSQL and the reservation migrations.
 - `_executeDispatchOrder` (`request_dispatch` / matching-job creation) does
   not reserve anything -- SD §7.6 step 1 vs step 2: the matching job only
   lists candidates, the reservation happens at the actual assign step.
+
+## Verified entry paths and local evidence (2026-09-08)
+
+Passenger `createPassengerOrder` and telephone `createCallCenterOrder`
+produce orders in `OwnedMobilityService`; each uses `dispatchOrder` then
+`assignDispatch`. The integration race invokes these actual creation paths
+on separate service instances and separate PostgreSQL pools. Multi-taxi
+`MultiTaxiService` calls `createMultiTaxiRide`, including scheduled rides;
+enterprise and scheduled orders use the same assignment writer when they
+are dispatched. Queue retry (`resolveNoSupply` / `redispatchOrder`) creates
+a matching job via `dispatchOrder`, without assigning capacity itself.
+The inventory describes current writers, not delivery of the separate
+unattended executor.
+
+Repository-wide search of `phase1_dispatch_assignments` and
+`reserveDispatchResources` confirms the repository writer and service
+transaction above; reporting only reads assignment state. Repository bulk
+workflow/state persistence also writes assignments and is subject to the
+same database commit constraints.
+
+Run the task suite from `apps/api` (root Vitest excludes `apps/api/tests`):
+
+```sh
+DATABASE_URL=<isolated-postgres-url> pnpm exec vitest run tests/integration/uv-exec-006.integration.test.ts --no-file-parallelism --maxConcurrency=1
+```
+
+The 21 checks cover transaction rollback, two competing resource claims,
+passenger/telephone contention, old-writer rejection, reverse reservation
+release/deletion rejection, stale accept/reject/reassign/timeout fences,
+valid reject/cancel/target timeout, and held-to-occupied transitions.
+The test uses an isolated `uv_exec_006_codex` database with migrations
+through V0091. API typecheck is run with `pnpm --filter @drts/api typecheck`.
+Review, CI, merge and external acceptance remain candidate lifecycle gates.
