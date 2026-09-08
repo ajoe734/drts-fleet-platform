@@ -524,14 +524,14 @@ export class OwnedMobilityController {
   }
 
   @Post("tenant/bookings/:bookingId/cancel")
-  cancelTenantBooking(
+  async cancelTenantBooking(
     @Param("bookingId") bookingId: string,
     @Body() command: CancelOwnedOrderCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.cancelTenantBooking(
+      await this.ownedMobilityService.cancelTenantBooking(
         this.requireTenantId(tenantId),
         bookingId,
         command,
@@ -542,13 +542,13 @@ export class OwnedMobilityController {
   }
 
   @Post("passenger/orders/:orderId/cancel")
-  cancelOwnedOrder(
+  async cancelOwnedOrder(
     @Param("orderId") orderId: string,
     @Body() command: CancelOwnedOrderCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.cancelOwnedOrder(orderId, command, requestId),
+      await this.ownedMobilityService.cancelOwnedOrder(orderId, command, requestId),
       requestId,
     );
   }
@@ -664,17 +664,23 @@ export class OwnedMobilityController {
   }
 
   @Post("orders/:orderId/dispatch-timeout")
-  handleDispatchTimeout(
+  async handleDispatchTimeout(
     @Param("orderId") orderId: string,
     @Body()
-    command: { timeoutReasonCode: "acceptance_timeout" | "matching_timeout" },
+    command: {
+      timeoutReasonCode: "acceptance_timeout" | "matching_timeout";
+      assignmentId?: string;
+    },
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.handleDispatchTimeout(
+      await this.ownedMobilityService.handleDispatchTimeout(
         orderId,
         command.timeoutReasonCode,
         requestId,
+        command.assignmentId
+          ? { targetAssignmentId: command.assignmentId }
+          : undefined,
       ),
       requestId,
     );
@@ -878,10 +884,7 @@ export class OwnedMobilityController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const task = this.assertDriverTaskAccess(taskId, identity);
-    return toApiSuccessEnvelope(
-      task,
-      requestId,
-    );
+    return toApiSuccessEnvelope(task, requestId);
   }
 
   @Post("driver/tasks/:taskId/accept")

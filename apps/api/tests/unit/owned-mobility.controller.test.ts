@@ -5,6 +5,21 @@ import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-
 import type { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 
 describe("OwnedMobilityController tenant booking routes", () => {
+  it("awaits passenger cancellation and propagates transaction failures", async () => {
+    const cancelOwnedOrder = vi.fn().mockResolvedValue({
+      orderId: "order-cancel", status: "cancelled",
+    });
+    const controller = new OwnedMobilityController(
+      { cancelOwnedOrder } as unknown as OwnedMobilityService, {} as never,
+    );
+    expect((await controller.cancelOwnedOrder("order-cancel", {})).data)
+      .toEqual({ orderId: "order-cancel", status: "cancelled" });
+    const failure = new Error("transaction rolled back");
+    cancelOwnedOrder.mockRejectedValueOnce(failure);
+    await expect(controller.cancelOwnedOrder("order-cancel", {}))
+      .rejects.toBe(failure);
+  });
+
   it("awaits referral ratings before wrapping the API envelope", async () => {
     const service = {
       submitReferralPassengerRating: vi.fn().mockResolvedValue({
