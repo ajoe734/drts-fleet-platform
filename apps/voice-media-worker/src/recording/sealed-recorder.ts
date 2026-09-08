@@ -27,8 +27,26 @@ export interface RecordingScope {
   legId: string;
 }
 
+export type RecorderObjectMetadata = Readonly<
+  RecorderSegment & {
+    source: "recording_fork";
+  }
+>;
+
 /** Implementations must use immutable versions and enforce retention/access policy. */
 export interface RecorderObjectStore {
+  /** Recorder-only write capability. Atomically persist bytes and authenticated
+   * ingest metadata, including the returned object identity and durability time.
+   * Generic uploads/manifests/TTS writers must not have this capability. Metadata
+   * is immutable per version and read from storage, never echoed from a manifest.
+   */
+  putRecordingImmutable(
+    metadata: Omit<
+      RecorderObjectMetadata,
+      "objectKey" | "objectVersion" | "durableAt"
+    >,
+    bytes: Uint8Array,
+  ): Promise<{ objectKey: string; objectVersion: string; durableAt: string }>;
   putImmutable(
     scope: RecordingScope,
     bytes: Uint8Array,
@@ -37,7 +55,11 @@ export interface RecorderObjectStore {
     scope: RecordingScope,
     objectKey: string,
     objectVersion: string,
-  ): Promise<{ bytes: Uint8Array; objectVersion: string }>;
+  ): Promise<{
+    bytes: Uint8Array;
+    objectVersion: string;
+    recordingMetadata?: RecorderObjectMetadata;
+  }>;
 }
 
 /** Resolved by an authenticated recording-fork adapter, not webhook body claims. */
@@ -142,6 +164,32 @@ export async function verifyRecordedObject(
         recordingChecksum(object.bytes) === segment.checksum,
       "Object checksum mismatch",
     );
+    const recorded = object.recordingMetadata;
+    requireEvidence(
+      recorded?.source === "recording_fork",
+      "Missing trusted recorder metadata",
+    );
+    for (const key of [
+      "brandId",
+      "callId",
+      "recordingId",
+      "legId",
+      "channel",
+      "startMs",
+      "endMs",
+      "utcStart",
+      "utcEnd",
+      "objectKey",
+      "objectVersion",
+      "checksum",
+      "byteLength",
+      "durableAt",
+    ] as const) {
+      requireEvidence(
+        recorded[key] === segment[key],
+        "Recorder metadata mismatch",
+      );
+    }
   } catch (error) {
     if (error instanceof RecordingEvidenceError) throw error;
     // Do not surface object URLs, credentials, or storage-provider error payloads.
@@ -198,7 +246,10 @@ export class SealedRecorder {
       objectVersion: "pending",
       durableAt: metadata.utcEnd,
     });
-    const stored = await this.store.putImmutable(scope, bytes);
+    const stored = await this.store.putRecordingImmutable(
+      Object.freeze({ ...metadata, ...integrity, source: "recording_fork" }),
+      bytes,
+    );
     const segment: RecorderSegment = { ...metadata, ...integrity, ...stored };
     await verifyRecordedObject(this.store, scope, segment);
     return Object.freeze(segment);

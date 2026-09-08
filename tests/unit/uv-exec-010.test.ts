@@ -11,10 +11,12 @@ import {
 import { ImmutableRecordingManifests } from "../../apps/voice-media-worker/src/recording/immutable-manifest";
 import {
   SealedRecorder,
+  recordingChecksum,
   assertBidirectionalCoverage,
   verifyRecordedObject,
   type RecorderIngress,
   type RecorderObjectStore,
+  type RecorderObjectMetadata,
   type RecorderSegment,
 } from "../../apps/voice-media-worker/src/recording/sealed-recorder";
 
@@ -216,6 +218,39 @@ describe("UV-EXEC-010 confirmation audio coverage", () => {
       confirmed.readTrusted("credential", f.binding, ref),
     ).rejects.toThrow("ledger mismatch");
   });
+
+  it.each(["speech", "dtmf"] as const)(
+    "rejects relabelled inbound audio at %s seal and trusted retrieval",
+    async (method) => {
+      const f = await proofFixture(method);
+      const inbound = f.manifest.segments[0]!;
+      f.objects.delete(f.manifest.segments[1]!.objectKey);
+      const forged = {
+        ...f.manifest,
+        segments: [inbound, { ...inbound, channel: "outbound" as const }],
+        confirmationReceipt: f.receipt,
+      };
+      const confirmed = new ConfirmedRecordingManifests(
+        new ImmutableRecordingManifests(f.store),
+        { resolve: async () => f.receipt },
+      );
+      await expect(
+        confirmed.seal("credential", forged, f.binding),
+      ).rejects.toThrow("Recorder metadata mismatch");
+      // Bypass manifest sealing to model an attacker uploading valid JSON with
+      // a correct checksum and an independently valid confirmation receipt.
+      const bytes = Buffer.from(JSON.stringify(forged));
+      const stored = await f.store.putImmutable(scope, bytes);
+      const ref = {
+        ...stored,
+        checksum: recordingChecksum(bytes),
+        byteLength: bytes.byteLength,
+      };
+      await expect(
+        confirmed.readTrusted("credential", f.binding, ref),
+      ).rejects.toThrow("Recorder metadata mismatch");
+    },
+  );
 
   it("finalizes full-call audio without replacing checkpoint proof on late failure", async () => {
     const f = await proofFixture();
@@ -432,7 +467,13 @@ describe("UV-EXEC-010 confirmation audio coverage", () => {
 });
 function fixture() {
   const objects = new Map<string, Uint8Array>();
+  const metadata = new Map<string, RecorderObjectMetadata>();
   const store: RecorderObjectStore = {
+    putRecordingImmutable: vi.fn(async (input, bytes) => {
+      const stored = await store.putImmutable(input, bytes);
+      metadata.set(stored.objectKey, Object.freeze({ ...input, ...stored }));
+      return stored;
+    }),
     putImmutable: vi.fn(async (_scope, bytes) => {
       const key = `segment-${objects.size}`;
       objects.set(key, Uint8Array.from(bytes));
@@ -445,7 +486,11 @@ function fixture() {
     readVersion: vi.fn(async (_scope, key, version) => {
       const bytes = objects.get(key);
       if (!bytes) throw new Error("storage unavailable");
-      return { bytes: Uint8Array.from(bytes), objectVersion: version };
+      return {
+        bytes: Uint8Array.from(bytes),
+        objectVersion: version,
+        recordingMetadata: metadata.get(key),
+      };
     }),
   };
   const ingress: RecorderIngress = {
@@ -464,7 +509,7 @@ function fixture() {
     utcEnd: "2026-09-08T00:00:01Z",
     bytes: new Uint8Array([1, 2, 3]),
   };
-  return { objects, store, ingress, recorder, input };
+  return { objects, metadata, store, ingress, recorder, input };
 }
 
 describe("UV-EXEC-010 sealed recorder", () => {
@@ -480,6 +525,45 @@ describe("UV-EXEC-010 sealed recorder", () => {
     await expect(
       verifyRecordedObject(f.store, scope, segment),
     ).resolves.toBeUndefined();
+  });
+
+  it.each([
+    { channel: "outbound" as const },
+    { brandId: "other" },
+    { callId: "other" },
+    { recordingId: "other" },
+    { legId: "other" },
+    { startMs: 1000, endMs: 2000 },
+    { utcStart: "2026-09-08T00:00:01Z", utcEnd: "2026-09-08T00:00:02Z" },
+    { durableAt: "2026-09-08T00:00:11Z" },
+  ])("rejects relabelled ingest metadata %j", async (changes) => {
+    const f = fixture();
+    const original = await f.recorder.seal("authenticated", f.input);
+    const forged = { ...original, ...changes };
+    await expect(verifyRecordedObject(f.store, forged, forged)).rejects.toThrow(
+      "Recorder metadata mismatch",
+    );
+  });
+
+  it("rejects synthesized or generic uploaded bytes with matching integrity", async () => {
+    const f = fixture();
+    const segment = await f.recorder.seal("authenticated", f.input);
+    const uploaded = await f.store.putImmutable(scope, f.input.bytes);
+    await expect(
+      verifyRecordedObject(f.store, scope, { ...segment, ...uploaded }),
+    ).rejects.toThrow("Missing trusted recorder metadata");
+  });
+
+  it("requires persisted provenance on subsequent reads by a new reader", async () => {
+    const f = fixture();
+    const segment = await f.recorder.seal("authenticated", f.input);
+    await expect(
+      verifyRecordedObject({ ...f.store }, scope, segment),
+    ).resolves.toBeUndefined();
+    f.metadata.delete(segment.objectKey);
+    await expect(
+      verifyRecordedObject({ ...f.store }, scope, segment),
+    ).rejects.toThrow("Missing trusted recorder metadata");
   });
 
   it("snapshots bytes and metadata before asynchronous authentication", async () => {
