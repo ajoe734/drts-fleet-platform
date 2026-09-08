@@ -1,6 +1,10 @@
+import { assertAutonomousServiceArea } from "../service-area/autonomous-service-area";
 import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
-import { z } from "zod";
+import {
+  voiceAbsoluteTimeSchema,
+  voiceOrdinaryRuntimeMappingSchema,
+} from "@drts/contracts";
 import type {
   BookingQualification,
   BookingRequirements,
@@ -14,14 +18,6 @@ import { ServiceAreaService } from "../service-area/service-area.service";
 import { ServiceProductService } from "../service-product/service-product.service";
 import { validateBookingRequirements } from "../vehicle-eligibility/booking-requirements";
 import { VoiceBookingRepository } from "./voice-booking.repository";
-
-const absoluteTime = z.string().datetime({ offset: true });
-const runtimeMapping = z
-  .object({
-    runtimeProfileCode: z.literal("ordinary_taxi"),
-    serviceProductCode: z.literal("taxi_realtime"),
-  })
-  .passthrough();
 
 export interface QualifyVoiceBookingCommand {
   pickup: VoiceLocationSelection;
@@ -68,7 +64,9 @@ export class VoiceBookingDraftService {
     const scope = await this.repository.findResourceScopeById(
       session.resourceScopeId,
     );
-    const mapping = runtimeMapping.safeParse(scope?.runtimeMapping);
+    const mapping = voiceOrdinaryRuntimeMappingSchema.safeParse(
+      scope?.runtimeMapping,
+    );
     // SD §4.3: multi_taxi_direct has its own authorization/acquisition/queue
     // semantics. v0.2 routes it to the operator, never the ordinary command.
     if (
@@ -88,7 +86,7 @@ export class VoiceBookingDraftService {
         "VOICE_RESERVATION_NOT_ENABLED",
         "Reservation must retain its requested time and be handed off.",
       );
-    const parsedTime = absoluteTime.safeParse(command.requestedAt);
+    const parsedTime = voiceAbsoluteTimeSchema.safeParse(command.requestedAt);
     const requestedMs = parsedTime.success ? Date.parse(parsedTime.data) : NaN;
     if (
       !Number.isFinite(requestedMs) ||
@@ -126,19 +124,7 @@ export class VoiceBookingDraftService {
       dropoff: dropoff.address,
       requestedAt,
     });
-    if (
-      serviceArea.decision !== "serviceable" ||
-      serviceArea.stops.some((stop) => stop.decision !== "serviceable")
-    )
-      throw new ApiRequestError(
-        409,
-        "VOICE_SERVICE_AREA_REVIEW_REQUIRED",
-        "Service-area review must be resolved before autonomous booking.",
-        {
-          decision: serviceArea.decision,
-          reasonCodes: serviceArea.reasonCodes,
-        },
-      );
+    assertAutonomousServiceArea(serviceArea);
     const validUntil = new Date(
       Math.min(
         Date.parse(pickup.validUntil),

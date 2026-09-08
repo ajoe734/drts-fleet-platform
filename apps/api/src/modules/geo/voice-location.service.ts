@@ -49,6 +49,10 @@ export class VoiceLocationService {
         : null;
     if (
       (candidate.metadata?.requiresEntranceSelection === true ||
+        (Array.isArray(candidate.metadata?.types) &&
+          candidate.metadata.types.some((type) =>
+            ["hospital", "university", "airport"].includes(String(type)),
+          )) ||
         candidate.metadata?.campusId ||
         entranceId ||
         selection.entranceId) &&
@@ -67,8 +71,8 @@ export class VoiceLocationService {
       );
     const resolved = await this.geo.resolve({
       candidateId: candidate.candidateId,
-      placeId: candidate.placeId,
-      providerCandidateId: candidate.providerCandidateId,
+      placeId: candidate.placeId ?? null,
+      providerCandidateId: candidate.providerCandidateId ?? null,
       addressText: candidate.address,
       surface: "callcenter",
     });
