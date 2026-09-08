@@ -321,6 +321,88 @@ describe("UV-EXEC-011 TWM ASR streaming adapter (SD §11.1)", () => {
     });
     const secondResult = await secondCall;
     expect(secondResult.segmentId).toBe("seg-2");
+    // SD §11.4 `supportsResumeCursor=false/unverified`: the automatic resend
+    // after a reconnect must never look like an ordinary confirmable final;
+    // only the reconnect-triggered retry carries the flag.
+    expect(secondResult.requiresReconfirmation).toBe(true);
+  });
+
+  it("recovers from a pre-ready reconnect-class error (486) instead of hanging ensureConnected forever", async () => {
+    const { fixture, session } = buildSession();
+    const pending = session.transcribeChunk(new Uint8Array([9]));
+    await flush();
+    expect(fixture.sockets).toHaveLength(1);
+    // No status 180 was ever sent -- this error arrives while still pre-ready.
+    fixture.sockets[0]!.emit({ type: "error", code: "486", message: "resource full" });
+    await flush();
+    expect(fixture.sockets[0]!.closeCount).toBe(1);
+    // The pre-ready failure must trigger a reconnect with a fresh ticket,
+    // never leave `transcribeChunk` unresolved.
+    expect(fixture.sockets).toHaveLength(2);
+    fixture.sockets[1]!.emit({ type: "status", code: "180" });
+    await flush();
+    expect(fixture.sockets[1]!.sentFrames).toHaveLength(1);
+    fixture.sockets[1]!.emit({
+      type: "segment",
+      segmentId: "seg-after-pre-ready-486",
+      revision: 1,
+      text: "recovered",
+      final: true,
+      language: "cmn-TW",
+    });
+    const result = await pending;
+    expect(result.segmentId).toBe("seg-after-pre-ready-486");
+    expect(result.requiresReconfirmation).toBe(true);
+  });
+
+  it("fences a late message from a socket discarded by switchModel so it cannot resolve the new model's waiter", async () => {
+    const { fixture, session } = buildSession("myVoca");
+    const firstCall = session.transcribeChunk(new Uint8Array([1]));
+    await flush();
+    fixture.sockets[0]!.emit({ type: "status", code: "180" });
+    await flush();
+    fixture.sockets[0]!.emit({
+      type: "segment",
+      segmentId: "seg-1",
+      revision: 1,
+      text: "ok",
+      final: true,
+      language: "cmn-TW",
+    });
+    await firstCall;
+
+    const switchPromise = session.switchModel("bronci-b3-model-hakka-20260518");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const newSocket = fixture.sockets[fixture.sockets.length - 1]!;
+    newSocket.emit({ type: "status", code: "180" });
+    await switchPromise;
+
+    const oldSocket = fixture.sockets[0]!;
+    const nextCall = session.transcribeChunk(new Uint8Array([7]));
+    await flush();
+    // A late event from the discarded old-model socket must never resolve
+    // the new model's waiter or seed its segment state.
+    oldSocket.emit({
+      type: "segment",
+      segmentId: "stale-old-segment",
+      revision: 1,
+      text: "late-old",
+      final: true,
+      language: "cmn-TW",
+    });
+    await flush();
+    expect(session.getSegmentSnapshot("stale-old-segment")).toBeNull();
+
+    newSocket.emit({
+      type: "segment",
+      segmentId: "seg-new-model",
+      revision: 1,
+      text: "genuinely new",
+      final: true,
+      language: "cmn-TW",
+    });
+    const result = await nextCall;
+    expect(result.segmentId).toBe("seg-new-model");
   });
 
   it("isolates diagnostic replay from the confirmation-producing stream", async () => {

@@ -104,6 +104,8 @@ export interface TwmAsrStreamSessionOptions {
   /** Window to keep collecting final results after EOS before returning (SD §11.1 step 6). */
   drainTimeoutMs?: number;
   maxFrameBytes?: number;
+  /** Bound on waiting for status `180` after connecting; a stuck/pre-ready failure must never hang forever. */
+  readyTimeoutMs?: number;
 }
 
 /**
@@ -115,22 +117,35 @@ export class TwmAsrStreamSession {
   private token: string | null = null;
   private socket: TwmAsrSocket | null = null;
   private ready = false;
-  private readyWaiters: Array<() => void> = [];
+  private readyWaiters: Array<{
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  }> = [];
   private readonly queuedFrames: Uint8Array[] = [];
   private readonly segments = new Map<string, TrackedSegment>();
   private segmentWaiters: Array<{
     resolve: (message: TwmAsrSegmentMessage) => void;
     reject: (error: unknown) => void;
   }> = [];
+  /**
+   * Incremented every time the physical socket is opened or discarded so a
+   * stale connection's `onMessage` callback can be fenced out: closing a
+   * socket does not guarantee no more events fire on it (e.g. an in-flight
+   * message from before `close()` took effect), and those must never mutate
+   * state or resolve waiters that belong to a newer connection/model epoch.
+   */
+  private connectionSeq = 0;
   private asrEpoch = 1;
   private modelName: string;
   private readonly maxFrameBytes: number;
   private readonly drainTimeoutMs: number;
+  private readonly readyTimeoutMs: number;
 
   constructor(private readonly options: TwmAsrStreamSessionOptions) {
     this.modelName = options.modelName;
     this.maxFrameBytes = options.maxFrameBytes ?? TWM_ASR_MAX_FRAME_BYTES;
     this.drainTimeoutMs = options.drainTimeoutMs ?? 1_500;
+    this.readyTimeoutMs = options.readyTimeoutMs ?? 8_000;
   }
 
   getAsrEpoch(): number {
@@ -170,14 +185,41 @@ export class TwmAsrStreamSession {
     const socket = await this.options.transport.connect(accessInfo, params);
     this.socket = socket;
     this.ready = false;
-    socket.onMessage((message) => this.handleServerMessage(message));
+    this.connectionSeq += 1;
+    const connectionSeq = this.connectionSeq;
+    socket.onMessage((message) => {
+      // Fence out events from a socket this session has already discarded
+      // (reconnect/switchModel/error teardown) so they can never resolve a
+      // newer connection's waiters or resurrect stale segment state.
+      if (connectionSeq !== this.connectionSeq) return;
+      this.handleServerMessage(message);
+    });
     await this.waitUntilReady();
   }
 
   private waitUntilReady(): Promise<void> {
     if (this.ready) return Promise.resolve();
-    return new Promise((resolve) => {
-      this.readyWaiters.push(resolve);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const index = this.readyWaiters.findIndex((w) => w.resolve === onResolve);
+        if (index >= 0) this.readyWaiters.splice(index, 1);
+        onReject(
+          new VoiceMediaProviderError(
+            "TWM_ASR_READY_TIMEOUT",
+            `TWM ASR did not reach ready (180) within readyTimeoutMs=${this.readyTimeoutMs}ms.`,
+            { sessionId: this.options.sessionId },
+          ),
+        );
+      }, this.readyTimeoutMs);
+      const onResolve = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const onReject = (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      };
+      this.readyWaiters.push({ resolve: onResolve, reject: onReject });
     });
   }
 
@@ -186,18 +228,25 @@ export class TwmAsrStreamSession {
       if (message.code === "180") {
         this.ready = true;
         this.flushQueuedFrames();
-        for (const resolve of this.readyWaiters.splice(0)) resolve();
+        for (const waiter of this.readyWaiters.splice(0)) waiter.resolve();
       }
       // `100` is preparing-only; nothing to do yet.
       return;
     }
     if (message.type === "error") {
       if (isTwmAsrReconnectErrorCode(message.code)) {
+        // SD §11.1 step 7 / §11.5: a reconnect-class error can arrive before
+        // ready (pre-ready 408/440/486) or between chunks with no in-flight
+        // segment waiter. Reject whatever is pending -- ready or segment --
+        // and discard the connection so the next call reconnects instead of
+        // silently treating the broken socket as still usable.
         const error = new TwmAsrReconnectRequiredError(
           message.code,
           `TWM ASR requires reconnect (${message.code}): ${message.message}`,
         );
         for (const waiter of this.segmentWaiters.splice(0)) waiter.reject(error);
+        for (const waiter of this.readyWaiters.splice(0)) waiter.reject(error);
+        this.closeSocket();
       }
       return;
     }
@@ -252,21 +301,32 @@ export class TwmAsrStreamSession {
     });
   }
 
-  /** SD §11.1 steps 4-5: send one audio chunk and await the next partial/final update. */
+  /**
+   * SD §11.1 steps 4-5: send one audio chunk and await the next partial/final
+   * update. A reconnect-class failure -- whether it happens while still
+   * establishing readiness or mid-transcription -- triggers exactly one
+   * resend on the fresh connection, but per §11.4/§11.5
+   * (`supportsResumeCursor=false/unverified`, no frame ACK/resume cursor)
+   * that resend's result is tagged `requiresReconfirmation` so it can never
+   * be silently accepted as an ordinary confirmation.
+   */
   async transcribeChunk(chunk: Uint8Array): Promise<VoiceAsrSegmentResult> {
-    await this.ensureConnected();
     try {
+      await this.ensureConnected();
       return await this.sendAndAwait(chunk);
     } catch (error) {
       if (error instanceof TwmAsrReconnectRequiredError) {
         await this.reconnect();
-        return await this.sendAndAwait(chunk);
+        return await this.sendAndAwait(chunk, { requiresReconfirmation: true });
       }
       throw error;
     }
   }
 
-  private async sendAndAwait(chunk: Uint8Array): Promise<VoiceAsrSegmentResult> {
+  private async sendAndAwait(
+    chunk: Uint8Array,
+    options?: { requiresReconfirmation?: boolean },
+  ): Promise<VoiceAsrSegmentResult> {
     this.sendFramed(chunk);
     const timeoutMs = this.options.timing.noSpeechTimeoutSec * 1_000;
     const message = await this.waitForNextSegment(timeoutMs);
@@ -283,6 +343,7 @@ export class TwmAsrStreamSession {
       text: message.text,
       final: message.final,
       language: message.language,
+      ...(options?.requiresReconfirmation ? { requiresReconfirmation: true } : {}),
     };
   }
 
@@ -344,6 +405,17 @@ export class TwmAsrStreamSession {
     this.socket = null;
     this.ready = false;
     this.queuedFrames.length = 0;
+    // Bump even when there was no socket to close: this also fences out a
+    // connection attempt that is being abandoned before it opened a socket.
+    this.connectionSeq += 1;
+    if (this.readyWaiters.length > 0) {
+      const error = new VoiceMediaProviderError(
+        "TWM_ASR_CONNECTION_CLOSED",
+        "TWM ASR connection was closed before reaching ready (180).",
+        { sessionId: this.options.sessionId },
+      );
+      for (const waiter of this.readyWaiters.splice(0)) waiter.reject(error);
+    }
   }
 
   /**
@@ -413,6 +485,7 @@ export interface TwmSpeechToTextAdapterOptions {
   timing: TwmAsrTimingConfig;
   saveResult?: 0 | 1;
   drainTimeoutMs?: number;
+  readyTimeoutMs?: number;
 }
 
 /**
@@ -442,6 +515,9 @@ export class TwmSpeechToTextAdapter implements VoiceSpeechToTextAdapter {
           : {}),
         ...(this.options.drainTimeoutMs !== undefined
           ? { drainTimeoutMs: this.options.drainTimeoutMs }
+          : {}),
+        ...(this.options.readyTimeoutMs !== undefined
+          ? { readyTimeoutMs: this.options.readyTimeoutMs }
           : {}),
       });
       this.sessions.set(sessionId, session);
