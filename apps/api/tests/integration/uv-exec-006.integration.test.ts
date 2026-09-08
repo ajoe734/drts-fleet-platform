@@ -1747,7 +1747,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     ).toHaveLength(0);
   });
 
-  it("a targeted timeout closes the pending offer and releases both resources", async () => {
+  it("a targeted timeout preserves early offers and releases both resources only after the durable deadline", async () => {
     expect(DATABASE_URL).toBeTruthy();
     const database = new DatabaseService();
     databases.push(database);
@@ -1779,6 +1779,22 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       driverId,
     });
 
+    const early = await service.handleDispatchTimeout(
+      order.orderId, "acceptance_timeout", undefined,
+      { targetAssignmentId: assignment.assignmentId },
+    );
+    expect(early.escalationAction).toBe("superseded");
+    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe("assigned");
+    expect(await readActiveReservations(database, "driver", driverId)).toHaveLength(1);
+    expect(await readActiveReservations(database, "vehicle", vehicleId)).toHaveLength(1);
+    const durable = await database.query<{ record: { acceptanceDeadline: string } }>(
+      `SELECT record FROM ops.phase1_dispatch_assignments WHERE assignment_id = $1`,
+      [assignment.assignmentId],
+    );
+    const deadline = Date.parse(durable.rows[0].record.acceptanceDeadline);
+    expect(Number.isFinite(deadline)).toBe(true);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(deadline + 1);
+    try {
     const result = await service.handleDispatchTimeout(
       order.orderId,
       "acceptance_timeout",
@@ -1796,6 +1812,9 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     expect(
       await readActiveReservations(database, "vehicle", vehicleId),
     ).toHaveLength(0);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("a valid cancel atomically persists the cancellation and releases the reservation", async () => {

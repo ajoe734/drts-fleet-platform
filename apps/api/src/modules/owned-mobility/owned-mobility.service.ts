@@ -4300,6 +4300,7 @@ export class OwnedMobilityService
       "assigned",
       "accepted",
     ],
+    requireExpiredPendingOffer = false,
   ): Promise<{
     assignment: DispatchAssignmentRecord;
     task: DriverTaskRecord | null;
@@ -4318,17 +4319,26 @@ export class OwnedMobilityService
       updatedAt: now,
     };
     let closedTask: DriverTaskRecord | null = null;
+    let pendingAcceptance = false;
     if (locked.taskId) {
       const lockedTask =
         await this.ownedMobilityRepository!.lockDriverTaskForUpdate(
           tx,
           locked.taskId,
         );
+      pendingAcceptance = lockedTask?.status === "pending_acceptance";
       if (
         lockedTask &&
         !["completed", "cancelled", "rejected"].includes(lockedTask.status)
       ) {
         closedTask = { ...lockedTask, status: "cancelled", completedAt: now };
+      }
+    }
+    if (requireExpiredPendingOffer) {
+      const deadline = Date.parse(locked.acceptanceDeadline ?? "");
+      // Unknown deadlines and inconsistent tasks retain capacity for reconciliation.
+      if (!Number.isFinite(deadline) || Date.now() < deadline || !pendingAcceptance) {
+        return null;
       }
     }
     await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
@@ -7940,6 +7950,7 @@ export class OwnedMobilityService
             latestAssignment.assignmentId,
             now,
             ["assigned"],
+            true,
           ),
       );
       if (!closedPrevious) {
@@ -7959,6 +7970,15 @@ export class OwnedMobilityService
             !["completed", "cancelled", "rejected"].includes(task.status),
         )
       : null;
+
+    if (latestAssignment && !this.ownedMobilityRepository?.isEnabled()) {
+      const deadline = Date.parse(latestAssignment.acceptanceDeadline ?? "");
+      if (!Number.isFinite(deadline) || Date.now() < deadline ||
+          latestTask?.status !== "pending_acceptance") {
+        return { orderId, status: order.status, timeoutReasonCode,
+          escalationAction: "superseded" as const };
+      }
+    }
 
     if (latestAssignment) {
       latestAssignment.status = "cancelled";
@@ -8534,6 +8554,10 @@ export class OwnedMobilityService
     const nextDispatchJob = { ...dispatchJob };
     const taskId = randomUUID();
     const serviceProductCode = this.resolveServiceProductCodeForOrder(order);
+    const acceptanceTimeoutMs = Number(process.env.DISPATCH_ACCEPTANCE_TIMEOUT_MS ?? 60_000);
+    if (!Number.isSafeInteger(acceptanceTimeoutMs) || acceptanceTimeoutMs <= 0) {
+      throw new Error("DISPATCH_ACCEPTANCE_TIMEOUT_MS must be a positive integer");
+    }
     const assignment: DispatchAssignmentRecord = {
       assignmentId: randomUUID(),
       dispatchJobId: dispatchJob.dispatchJobId,
@@ -8544,6 +8568,7 @@ export class OwnedMobilityService
       driverId,
       assignmentType: order.fixedPrice ? "fixed_price" : "metered",
       status: "assigned",
+      acceptanceDeadline: new Date(Date.parse(now) + acceptanceTimeoutMs).toISOString(),
       acceptedAt: null,
       rejectedAt: null,
       rejectReasonCode: null,
