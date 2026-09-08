@@ -272,3 +272,33 @@ This update is an evidence anchor, not a review handoff.
 - Supervisor must record the exact shared scopes and writer dependencies and
   synchronize the task specification, or deliver a coordinated producer.
   Keep this scope blocker distinct from the completed history helper.
+
+## Dispatch verification — 2026-09-08 18:43 UTC
+
+- Owner/reviewer: Codex/Codex2. Fresh origin/dev base:
+  `d4f54ef94e059a981bf2be1f7b944e815870e117`; dispatched HEAD:
+  `f619284df9efcbd62a20eac6f1f9a93f97540b83`.
+- Parent machine truth still contains only four original write scopes and two
+  dependencies. The history helper is done, but its procedure §7 and the merged
+  planning decision still require supervisor authorization and writer sequencing
+  for `packages/contracts/src/index.ts` and `tests/unit/reporting-filing.test.ts`.
+  The canonical task specification has not gained those scopes either.
+- Rechecked execution rule 4, N05/C091, PRD §9.5.6 and §9.10.2. Current
+  renderers remain null for PDF/XLSX; the authoritative declaration is CSV-only;
+  central tests require rejection. No production/UI changes made.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: initial exit 1 on
+  repeated historical evidence conflicts; preserved the complete dispatched
+  document in each conflict, final continuation exit 0.
+  `git merge --no-ff origin/codex/sr-report-001` with task trailers: exit 0,
+  preserving published history for ordinary push. Only this evidence document
+  differs from the inspected base.
+- `pnpm exec vitest run tests/unit/reporting-filing.test.ts`: exit 0;
+  30 tests / 1 file passed in 3.03s. In-memory order event resource:
+  `4778f493-8e3e-41e7-aaf4-6057e14bd76e`. This reproduces unsupported-format
+  rejection, not PDF/XLSX acceptance. `git diff --check`: exit 0.
+- No live resources, browser/device checks, deployment, typechecks or renderer
+  parsing suite run is claimed. No implementation candidate exists; this
+  evidence anchor's ordinary-pushed SHA is recorded in machine blocker status.
+- Required supervisor action remains the exact shared scope expansion plus
+  writer dependencies and task-spec synchronization, or a coordinated producer.
+  Reopening on history-helper completion alone does not meet this resume gate.
