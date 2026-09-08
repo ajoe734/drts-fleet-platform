@@ -34,7 +34,7 @@ function createService(options?: {
     getOrder: vi.fn(() => ({ ...order })),
     listOrders: vi.fn(() => [{ ...order }]),
     findPassengerAssignmentDisclosure: vi.fn(() => options?.assignment ?? null),
-    cancelOwnedOrder: vi.fn((_orderId, command) => {
+    cancelOwnedOrder: vi.fn(async (_orderId, command) => {
       order.status = "cancelled";
       order.cancelledAt = "2026-07-23T00:01:00.000Z";
       return { ...order, cancelReason: command.reason };
@@ -367,9 +367,12 @@ describe("MultiTaxiService passenger ride authority", () => {
     });
   });
 
-  it("fails closed in production when passenger tokens cannot be persisted", async () => {
+  it.each([false, true])("fails closed when passenger tokens cannot be persisted (cancellation failure: %s)", async (cancellationFails) => {
     vi.stubEnv("NODE_ENV", "production");
     const { service, ownedMobilityService } = createService();
+    if (cancellationFails) ownedMobilityService.cancelOwnedOrder.mockRejectedValueOnce(
+      new Error("compensating cancellation failed"),
+    );
     createAndActivateAuthorization(service);
 
     await expect(
