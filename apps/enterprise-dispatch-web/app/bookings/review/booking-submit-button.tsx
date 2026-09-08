@@ -143,12 +143,24 @@ export function BookingSubmitButton({
           {isSubmitting
             ? tr("review.submit.submitting")
             : isTimeExpired
-              ? resolveCopyByLocale(
-                  locale,
-                  "確認送出（時間已過期）",
-                  "Submit (Time Expired)",
-                )
-              : tr("review.submit")}
+              ? approvalRequired
+                ? resolveCopyByLocale(
+                    locale,
+                    "送出並送審（時間已過期）",
+                    "Submit for Approval (Time Expired)",
+                  )
+                : resolveCopyByLocale(
+                    locale,
+                    "確認送出（時間已過期）",
+                    "Submit (Time Expired)",
+                  )
+              : approvalRequired
+                ? resolveCopyByLocale(
+                    locale,
+                    "送出並送審",
+                    "Submit for Approval",
+                  )
+                : tr("review.submit")}
         </EBtnContent>
       </button>
       {error ? (

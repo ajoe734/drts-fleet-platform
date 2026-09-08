@@ -36,6 +36,10 @@
    - 前次表單與確認頁元件直接引用 `enterpriseTheme`，其 `buildEnt` 預設 accent 為 `#2457D6`（藍色），導致 Tenant Realm Tokens（teal `#0F766E`）未實際作用於 UI 上。
    - 本次在 `components/booking-form/theme.ts` 中直接匯入並消費權威 `@drts/ui-tokens` 之 `REALM_COLORS.tenant`（`fg: #0F766E`, `bg: #F0FDFA`, `border: #99F6E4`），透過 `buildTenantEnterpriseTheme` 注入 scoped UI 元件（表單、確認按鈕、步驟指示器、確認頁卡片與提示），完全不複製或硬編碼 palette；同時自 `globals.css` 徹底移除未消費的 raw hex CSS 變數，並以單元測試鎖定守衛。
 
+5. **CI Lint 與審批按鈕狀態守衛修復（Round 4 CI 修復）**
+   - Candidate `7ff140019` 在 CI lint 階段因 `booking-submit-button.tsx` 宣告未使用的 `approvalRequired` 參數而失敗（`@typescript-eslint/no-unused-vars`）。
+   - 本次將 `approvalRequired` 正式套用於確認送出按鈕之文案解析：當審批需求為 true 時，在正常態顯示「送出並送審（Submit for Approval）」，在時間失效態顯示「送出並送審（時間已過期）（Submit for Approval (Time Expired)）」，與 `review/page.tsx` 之停用態按鈕語意完全一致，同時徹底解決 ESLint 警示並強化按鈕狀態可讀性。
+
 ---
 
 ## 2. 核心修復說明
@@ -214,6 +218,16 @@ exit code: 0
 ```text
 $ python3 tools/ci/check_ui_realm_tokens.py --enforce
 ui-realm-token guard: OK (2 canonical hexes; no off-token brand colors)
+
+exit code: 0
+```
+
+### 4.8 ESLint 程式碼品質與未宣告變數守衛檢查
+```text
+$ pnpm --filter @drts/enterprise-dispatch-web lint
+
+> @drts/enterprise-dispatch-web@0.1.0 lint /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001/apps/enterprise-dispatch-web
+> eslint . --max-warnings=0
 
 exit code: 0
 ```
