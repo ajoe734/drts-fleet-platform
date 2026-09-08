@@ -30,7 +30,7 @@ Reviewer: Codex2. Design: unattended voice SD sections 3.5, 6 and 12.
   query and candidate history for handoff. Phone/door digits and Taipei
   date/time use grouped readback helpers.
 
-## Executable evidence
+## Original branch executable evidence
 
 On 2026-09-08:
 
@@ -57,3 +57,27 @@ The transport test uses an injected HTTP fixture; no production model account,
 spoken-language quality, live CTI transfer or booking completion is asserted.
 Same-SHA review, CI, merge and external acceptance remain candidate lifecycle
 responsibilities, not conclusions of these local tests.
+
+## Recovery branch verification (2026-09-08)
+
+Supervisor assigned Codex to `codex/uv-exec-012-recovered` following accepted
+history-repair helper PR #1819. Applied the net implementation patch from
+`65186b22c066da9eeca1266d6af2f9ee77be95a1` once onto dev
+`d07bad8d7`. Original branch and PR #1811 are preserved. The only patch-context
+conflict was the worker index; retained dev's recorder exports and added the
+three dialogue exports. Anchor `fc224b650` was pushed normally.
+
+Fresh verification on the recovered implementation:
+
+- The four-suite command above passed **106 tests across 4 files**.
+- Contracts and control-plane-auth builds passed before API typecheck.
+- API, voice-media-worker and root typechecks passed.
+- Scoped ESLint passed with zero warnings; scoped Prettier check passed.
+
+Initial dependency links pointed outside this worktree, yielding missing Node
+types, stale contracts and a missing JWT dependency. Removed only this
+worktree's dependency symlinks and installed with
+`pnpm install --frozen-lockfile --ignore-scripts`, then built local prerequisite
+packages and reran verification. No tracked dependency or lockfile change was
+needed. Recovery results replace reliance on original-branch checks; review,
+CI, merge and acceptance must bind to the new candidate supplied at handoff.
