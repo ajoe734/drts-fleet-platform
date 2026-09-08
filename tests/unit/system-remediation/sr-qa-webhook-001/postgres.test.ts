@@ -132,6 +132,25 @@ it("C111: persisted key rotation and revocation survive new service initializati
       .listApiKeys(tenantId)
       .find((key) => key.apiKeyId === issued.apiKey.apiKeyId)?.status,
   ).toBe("overlap_active");
+  const otherTenantId = `qa-webhook-${randomUUID()}`;
+  const beforeDenied = await second.db.query(
+    "SELECT record FROM admin.phase1_tenant_api_keys WHERE tenant_id = $1 ORDER BY record->>'apiKeyId'",
+    [tenantId],
+  );
+  expect(second.service.listApiKeys(otherTenantId)).toEqual([]);
+  await expect(async () =>
+    second.service.rotateApiKey(otherTenantId, rotated.apiKey.apiKeyId, {
+      keyName: "cross-tenant forbidden",
+    }),
+  ).rejects.toMatchObject({ code: "API_KEY_NOT_FOUND" });
+  await expect(async () =>
+    second.service.revokeApiKey(otherTenantId, rotated.apiKey.apiKeyId),
+  ).rejects.toMatchObject({ code: "API_KEY_NOT_FOUND" });
+  const afterDenied = await second.db.query(
+    "SELECT record FROM admin.phase1_tenant_api_keys WHERE tenant_id = $1 ORDER BY record->>'apiKeyId'",
+    [tenantId],
+  );
+  expect(afterDenied.rows).toEqual(beforeDenied.rows);
   await second.service.revokeApiKey(tenantId, rotated.apiKey.apiKeyId);
   await expect
     .poll(
@@ -159,6 +178,9 @@ it("C111: persisted key rotation and revocation survive new service initializati
       tenantId,
       apiKeyId: issued.apiKey.apiKeyId,
       rotatedApiKeyId: rotated.apiKey.apiKeyId,
+      otherTenantId,
+      crossTenantMutationError: "API_KEY_NOT_FOUND",
+      persistedRowsUnchangedAfterDeniedMutation: true,
     }),
   );
 });
