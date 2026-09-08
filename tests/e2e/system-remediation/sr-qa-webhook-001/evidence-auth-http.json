@@ -1,14 +1,14 @@
 {
-  "baseSha": "d44bd28142f238ef9d40507685a9423ef5c814f7",
-  "executionSha": "5ff69a26c4e5f98d9195cf5e1fc1862f67bb6da5",
-  "recordedAt": "2026-09-08T17:11:33.203Z",
+  "baseSha": "e2df37f821ce76d8a3639ceaac6d253299c0a31c",
+  "executionSha": "6b9de8287abb48e5770524c3addf5e5e41f8f663",
+  "recordedAt": "2026-09-08T17:19:24.354Z",
   "scope": "Local inherited production controller routes, real auth guard/JWT and PostgreSQL. HTTP issue/rotate/revoke with product-issued local session and proof; full AppModule middleware and deployed MFA not verified.",
-  "tenantId": "qa-http-ec4faa52-2f54-4822-96d1-da7d709abe82",
-  "principalId": "qa-http-principal-688e2b40-a69f-408a-b0a3-84faf0271ce5",
-  "sessionId": "sid_12f172c076a0472a9a9b1b402dc84b96",
-  "writerSessionId": "sid_898387717d254ae2a15f817c947b4a79",
-  "apiKeyId": "api_key_bee67a0f-bbd8-4982-9c14-7b3f67070acf",
-  "isolatedDatabase": "sr_qa_webhook_001_1788887482_3552518",
+  "tenantId": "qa-http-a978dbf5-228f-46d2-9882-359f3ad2b4eb",
+  "principalId": "qa-http-principal-a5bbb58b-2692-48a0-9311-b30bcf229114",
+  "sessionId": "sid_65fed84bda224c71850f0754f71b6efe",
+  "writerSessionId": "sid_3ac08b04f5db42b4ab6eeefb3501fc3b",
+  "apiKeyId": "api_key_aea5f019-57ed-44fd-bf0c-b34493567b30",
+  "isolatedDatabase": "sr_qa_webhook_001_1788887954_3615349",
   "anonymousStatus": 401,
   "readStatus": 200,
   "deniedWriteStatus": 403,
@@ -27,7 +27,7 @@
         ]
       },
       "retryable": false,
-      "trace_id": "9391b80f-078e-43cb-8fda-089c96bd00f9"
+      "trace_id": "bfcf570a-a51e-43b0-90fd-597d9f5617fe"
     }
   },
   "missingProofStatus": 403,
@@ -41,16 +41,23 @@
         "step_up_reference_header": "x-drts-step-up-reference"
       },
       "retryable": false,
-      "trace_id": "1eb756ea-3634-4732-83b9-179fb19d18f7"
+      "trace_id": "6951be2a-3e18-462e-9431-2007f69d6cde"
     }
   },
   "rejectedWritesDatabaseUnchanged": true,
-  "httpCreatedApiKeyId": "api_key_39017ce1-e5df-476c-9f03-6550e58f4cf9",
-  "httpRotatedApiKeyId": "api_key_baba7510-f995-4362-a9e1-175cbabe41e7",
+  "httpCreatedApiKeyId": "api_key_2b51a43a-c888-47d9-9827-2a28aacf6035",
+  "httpRotatedApiKeyId": "api_key_53ad1e0a-190a-4e38-96e8-dc8ca5cd999c",
   "httpLifecycleStatuses": [
     201,
     201,
     201
   ],
-  "persistedRevoked": true
+  "persistedRevoked": true,
+  "crossTenant": {
+    "authenticatedTenantId": "qa-http-other-c98522f2-b364-45a3-ba8a-ba0d89d9fa39",
+    "requestedTenantId": "qa-http-a978dbf5-228f-46d2-9882-359f3ad2b4eb",
+    "sessionId": "sid_2be57c3bfd3c48eaaafacde5746c2b5b",
+    "status": 200,
+    "exposedVictimKeyId": true
+  }
 }

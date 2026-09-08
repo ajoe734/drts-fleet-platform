@@ -2,6 +2,18 @@
 
 本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Gemini（本次 dispatch）。未 handoff、未完成 review/CI/merge。
 
+## 2026-09-08 17:19 UTC C111 跨租戶讀取失敗（最新，阻擋驗收）
+
+- base `e2df37f821ce76d8a3639ceaac6d253299c0a31c`；執行 anchor `6b9de8287abb48e5770524c3addf5e5e41f8f663`，已普通 push，尚無 lifecycle candidate。依指示 rebase 遇歷史 a119ec0bb 四檔 add/add 衝突後 abort，再 merge dev 保留已發布歷史。
+- `auth-http.test.ts` 接入產品 `InternalKeyMiddleware`，以另一 tenant 的產品服務簽發 JWT，送出受害 tenant 的 `x-tenant-id` 到 `GET /api/tenant/api-keys`。預期 403，實際 **200 且包含受害 key ID**。測試保留失敗斷言，不改成接受錯誤結果。
+- 這是窄 Nest module 的真 controller／BootstrapAuthGuard／InternalKeyMiddleware／PostgreSQL 重現，**未啟動完整 AppModule、未驗部署登入或 MFA**。AppModule 的其他 guard、interceptor 與部署路徑仍需修復 owner 確認。沒有讀到明文 key；已證明的是跨租戶 key metadata 外洩。
+- `DRTS_WEBHOOK_AUTH_EVIDENCE=tests/e2e/system-remediation/sr-qa-webhook-001/evidence-auth-http.json bash tests/unit/system-remediation/sr-qa-webhook-001/run-auth-http.sh` → exit 1，1 failed / 3.84s。同租戶 GET 200、issue/rotate/revoke 各201、撤銷及遮罩 SQL 回讀與既有401/403負向均先通過，最後跨租戶斷言失敗。
+- 獨立執行受害 tenant `qa-http-0e321a43-4806-4548-a7ad-8462137209a7`；另一 tenant `qa-http-other-95d08643-78b7-4c5b-a2a5-cade4e903a10`；外洩 key ID `api_key_73010a4e-23c3-4f81-b998-c22095ad9b81`。整合重跑會覆寫 JSON 為該次資源，以上保留獨立執行追溯。隔離 DB `sr_qa_webhook_001_1788887845_3597321` 清理後 pg_database 同名計數0。
+- `pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/auth-http.test.ts --max-warnings=0`、`git diff --check` → exit 0。
+- 指定整合命令 `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 1，1 failed / 4 passed / 1.5m；25 local及3 PostgreSQL案例先通過，auth HTTP 再次重現200而非403。整合證據已標記 failed，詳見同task evidence-sr-qa-webhook-001.json；最新真資源見 evidence-auth-http.json、evidence-postgres.json。
+- 已用 canonical `ai-status.sh assign` 建立 **SR-QA-WEBHOOK-001-FIX-TENANT-BINDING**，P0、來源 C111及本次SHA，並以 blocker 落盤；write_scopes 暫空，待 supervisor 指定產品碼範圍、IAM/tenant必要相依及父驗收依賴。首次 waiting_for=`supervisor` 被命令拒絕（Unknown agent），改用治理lane `Claude` 後成功，已 show 回讀 blocked。未自行擴 scope、未修改產品碼。
+- 父任務不能 handoff。C111 跨租戶讀取修復及其他寫入隔離待驗；API key使用量、真MFA、C112 deadline契約與C113–C115外部證據仍缺。先前本機綠燈紀錄是歷史結果，不能代表目前驗收通過。
+
 ## 2026-09-08 17:13 UTC C111 HTTP lifecycle 續驗（最新）
 
 - base `d44bd28142f238ef9d40507685a9423ef5c814f7`；最後執行 SHA `5ff69a26c`，尚非 lifecycle candidate。按指示 rebase 重播歷史 a119ec0bb 再遇四檔 add/add 衝突，已 abort，以 merge 納入 dev 保留已發布歷史；兩個測試 anchor 均已普通 push。
