@@ -1,42 +1,67 @@
 {
   "taskId": "SR-QA-WEBHOOK-001",
-  "runId": "uat-SR-QA-WEBHOOK-001-c57b8c4e",
+  "runId": "uat-SR-QA-WEBHOOK-001-1f3a6fdc",
   "shardIndex": 0,
-  "baseSha": "3b60a3757238663572f16f010c94f446f2c71eaa",
-  "candidateSha": "f08c8bc94e491cf3c90c5c6f50331ab2d01b7574",
-  "headSha": "f08c8bc94e491cf3c90c5c6f50331ab2d01b7574",
-  "startTime": "2026-09-08T12:30:57.779Z",
-  "endTime": "2026-09-08T12:31:01.838Z",
+  "baseSha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
+  "candidateSha": "aa6f9295a32da6c8c1fea8d65f5d2c80c7bcfaee",
+  "headSha": "aa6f9295a32da6c8c1fea8d65f5d2c80c7bcfaee",
+  "startTime": "2026-09-08T15:24:59.175Z",
+  "endTime": "2026-09-08T15:25:47.736Z",
   "status": "passed",
   "exitCode": 0,
   "roles": [],
   "trackedResources": [
     {
       "type": "webhook",
-      "id": "wh_2b008dfd-a3a0-47fc-b97f-d7c5c218c271",
+      "id": "wh_bedd219f-0938-466a-b6ff-a069ba55cbcc",
       "metadata": {
         "tenantId": "tenant-demo-001"
       }
     },
     {
       "type": "delivery",
-      "id": "wd_ea8af4e4-6955-4591-a358-6d70ec77a7f2",
+      "id": "wd_4e6601f3-c46f-41a8-a502-9174cc6baaf6",
       "metadata": {
-        "webhookId": "wh_2b008dfd-a3a0-47fc-b97f-d7c5c218c271"
+        "webhookId": "wh_bedd219f-0938-466a-b6ff-a069ba55cbcc"
+      }
+    },
+    {
+      "type": "postgres_acceptance",
+      "id": "qa-webhook-6d7bbbb3-e1e5-4e24-9819-b8cec0a6f5f9",
+      "metadata": {
+        "tenantId": "qa-webhook-6d7bbbb3-e1e5-4e24-9819-b8cec0a6f5f9",
+        "apiKeyId": "api_key_d7796438-7e34-4092-8879-8b32676823d2",
+        "rotatedApiKeyId": "api_key_add83444-c2df-426e-8f91-1aee1e884059"
+      }
+    },
+    {
+      "type": "postgres_acceptance",
+      "id": "qa-webhook-42121040-0790-4840-a7b7-312a0eeab09c",
+      "metadata": {
+        "tenantId": "qa-webhook-****-****-****-****-a7b7-312a0eeab09c",
+        "webhookId": "wh_c04b755d-02cf-4502-b612-964ebb8c0379",
+        "deliveryId": "wd_06cbe21a-4c5a-4bdb-a714-97aa6b26de46",
+        "outboxKey": "712d8960-73ca-4b6c-9ce6-9d126a18d733",
+        "requests": 3
       }
     }
   ],
   "httpCalls": [],
   "consoleLogs": [
     {
-      "timestamp": "2026-09-08T12:31:01.838Z",
+      "timestamp": "2026-09-08T15:25:05.982Z",
       "level": "info",
-      "message": "\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\nSR-QA-WEBHOOK-001 timeout resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_2b008dfd-a3a0-47fc-b97f-d7c5c218c271\",\"deliveryId\":\"wd_ea8af4e4-6955-4591-a358-6d70ec77a7f2\",\"transport\":\"real fetch with test-injected 100ms deadline\"}\n[Nest] 1110821  - 09/08/2026, 12:31:01 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (6b19c1ce-c92c-4729-a86c-fdfdccfb0fae)\n[Nest] 1110821  - 09/08/2026, 12:31:01 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (194ffc3e-b159-4192-a3fa-944e4a7073d3)\n\n Test Files  1 passed (1)\n      Tests  24 passed (24)\n   Start at  12:30:58\n   Duration  3.08s (transform 1.92s, setup 0ms, import 2.69s, tests 228ms, environment 0ms)\n\n"
+      "message": "\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\nSR-QA-WEBHOOK-001 timeout resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_bedd219f-0938-466a-b6ff-a069ba55cbcc\",\"deliveryId\":\"wd_4e6601f3-c46f-41a8-a502-9174cc6baaf6\",\"transport\":\"real fetch with test-injected 100ms deadline\"}\n[Nest] 2462447  - 09/08/2026, 3:25:05 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (73543483-d837-4926-a056-559b5c2437d7)\n[Nest] 2462447  - 09/08/2026, 3:25:05 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (dcd6b5f2-1d9f-4453-a417-b0d95a4d3cf1)\n\n Test Files  1 passed (1)\n      Tests  24 passed (24)\n   Start at  15:25:00\n   Duration  5.35s (transform 3.68s, setup 0ms, import 4.87s, tests 274ms, environment 0ms)\n\n"
     },
     {
-      "timestamp": "2026-09-08T12:31:01.838Z",
+      "timestamp": "2026-09-08T15:25:47.736Z",
       "level": "info",
-      "message": "Local in-memory service readback; timeout uses a test-injected fetch deadline. No deployed API or PostgreSQL acceptance."
+      "message": "base_sha=c4c4a35f88907df6bf68e781059dde397c06ba03\nexecution_sha=aa6f9295a32da6c8c1fea8d65f5d2c80c7bcfaee\nisolated_database=sr_qa_webhook_001_1788881105_2463247 (schema-only clone of local drts_fleet_platform)\n\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\n[Nest] 2463977  - 09/08/2026, 3:25:17 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 2463977  - 09/08/2026, 3:25:17 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 2463977  - 09/08/2026, 3:25:17 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 2463977  - 09/08/2026, 3:25:47 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 2463977  - 09/08/2026, 3:25:47 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n\n Test Files  1 passed (1)\n      Tests  2 passed (2)\n   Start at  15:25:14\n   Duration  32.97s (transform 1.47s, setup 0ms, import 2.11s, tests 30.56s, environment 0ms)\n\n"
+    },
+    {
+      "timestamp": "2026-09-08T15:25:47.736Z",
+      "level": "info",
+      "message": "Local PostgreSQL key readback and automatic webhook retry after service reinitialization passed. Timeout uses a test-injected deadline; deployed API and OS process restart remain unverified."
     }
   ],
   "artifacts": [],
@@ -44,7 +69,7 @@
   "unimplementedLiveSurfaces": [
     {
       "surface": "C111-C112",
-      "reason": "Authenticated HTTP API, DB readback/restart deduplication, automatic retry worker and default transport timeout remain unverified."
+      "reason": "Authenticated HTTP API, OS process restart and default transport timeout remain unverified. Local DB readback, service reinitialization, automatic retry and outbox deduplication passed."
     },
     {
       "surface": "C113",

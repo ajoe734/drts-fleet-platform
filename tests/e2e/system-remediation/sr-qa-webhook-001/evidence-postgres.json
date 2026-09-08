@@ -1,0 +1,26 @@
+{
+  "baseSha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
+  "executionSha": "aa6f9295a32da6c8c1fea8d65f5d2c80c7bcfaee",
+  "recordedAt": "2026-09-08T15:25:47.236Z",
+  "scope": "Local PostgreSQL and real HTTP; service instance reinitialization, not OS process restart or deployed authentication",
+  "evidence": [
+    {
+      "label": "SR-QA-WEBHOOK-001 DB keys",
+      "resource": {
+        "tenantId": "qa-webhook-6d7bbbb3-e1e5-4e24-9819-b8cec0a6f5f9",
+        "apiKeyId": "api_key_d7796438-7e34-4092-8879-8b32676823d2",
+        "rotatedApiKeyId": "api_key_add83444-c2df-426e-8f91-1aee1e884059"
+      }
+    },
+    {
+      "label": "SR-QA-WEBHOOK-001 DB delivery",
+      "resource": {
+        "tenantId": "qa-webhook-42121040-0790-4840-a7b7-312a0eeab09c",
+        "webhookId": "wh_c04b755d-02cf-4502-b612-964ebb8c0379",
+        "deliveryId": "wd_06cbe21a-4c5a-4bdb-a714-97aa6b26de46",
+        "outboxKey": "712d8960-73ca-4b6c-9ce6-9d126a18d733",
+        "requests": 3
+      }
+    }
+  ]
+}

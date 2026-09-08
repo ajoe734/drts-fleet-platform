@@ -15,7 +15,9 @@ test("SR-QA-WEBHOOK-001: controlled HTTP service regression", async () => {
   });
   const artifactPath = path.resolve(
     __dirname,
-    "evidence-sr-qa-webhook-001.json",
+    process.env.DRTS_WEBHOOK_LIVE === "1"
+      ? "evidence-live-unavailable.json"
+      : "evidence-sr-qa-webhook-001.json",
   );
   try {
     if (process.env.DRTS_WEBHOOK_LIVE === "1") {

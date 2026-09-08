@@ -2,6 +2,22 @@
 
 本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Codex2。未 handoff、未完成 review/CI/merge。
 
+## 2026-09-08 15:26 UTC 整合入口續驗（最新）
+
+以下更新優先於下方歷史紀錄中的「尚未建立 DB 資料集」及 C111/C112 DB 待驗項目。
+
+- fetch 後 base `origin/dev`：`c4c4a35f88907df6bf68e781059dde397c06ba03`，已是本分支祖先，無需再次 rebase。
+- 執行 HEAD：`aa6f9295a32da6c8c1fea8d65f5d2c80c7bcfaee`；尚無 lifecycle candidate。本輪後續只分開 live 失敗 artifact 路徑及更新證據，沒有修改產品碼。
+- `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 0，5 passed，50.4s；本 task wrapper 48.6s，包含 24 個本機 regression 與 2 個 PostgreSQL 案例，其餘 4 個為 shared harness。
+- DB runner `bash tests/unit/system-remediation/sr-qa-webhook-001/run-postgres.sh` 由 wrapper 實際執行。從本機 DB 複製 schema 到獨立暫存 DB，結束後 drop；沒有寫入來源 DB。獨立執行時可設定 `DRTS_WEBHOOK_DB_EVIDENCE` 指定 JSON 輸出路徑。
+- C111：SQL 回讀兩筆 key、確認無 plaintext、輪替關聯正確；重新初始化後 overlap 狀態存在；撤銷持久化後再次初始化仍 revoked，拒絕再 rotate。
+- C112：受控 HTTP 503 產生 queued delivery；重新初始化 service 後真實約 30 秒 backoff 自動送達，DB 回讀 delivered；接收 bytes/HMAC 相符且竄改不符；相同 outbox key 再發布不新增送達。這是 service instance 恢復，尚非 OS process 重啟。
+- 完整資源 ID：`tests/e2e/system-remediation/sr-qa-webhook-001/evidence-postgres.json`。例如 webhook `wh_c04b755d-02cf-4502-b612-964ebb8c0379`、delivery `wd_06cbe21a-4c5a-4bdb-a714-97aa6b26de46`，接收器共收到 3 次 HTTP。
+- 修正 artifact 路徑後執行 `DRTS_WEBHOOK_LIVE=1 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 1，1 failed / 4 passed，2.3s；缺 live 證據明確失敗，成功 artifact 保留，失敗另寫 `evidence-live-unavailable.json`。
+- `pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/*.ts tests/e2e/system-remediation/sr-qa-webhook-001/*.ts --max-warnings=0` → exit 0；`git diff --check` → exit 0。
+
+尚缺 C111 authenticated API 最小權限、使用量；C112 OS process 重啟、產品預設 deadline 及完整 replay 接收端策略；C113 ERP/SSO/bank sandbox；C114 真 provider；C115 部署排程、積壓、重啟補跑與告警回執。後三項需 supervisor 協調外部環境與證據；本地測試成功不能取代這些驗收，仍維持 in_progress，不 handoff。
+
 ## 基準與追溯
 
 - 2026-09-08 dispatch 起始 origin/dev：`3b60a3757238663572f16f010c94f446f2c71eaa`。
