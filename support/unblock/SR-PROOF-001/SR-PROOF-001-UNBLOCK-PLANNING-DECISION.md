@@ -1,5 +1,71 @@
 # SR-PROOF-001 Unblock Planning Decision
 
+## Current routing record — 2026-09-08
+
+Owner: Codex2. Reviewer: Gemini. This section supersedes the historical
+September 6 owner, status, branch, and continuation instructions below; those
+remain provenance of the earlier decision, not current dispatch instructions.
+
+Rechecked at `origin/dev` `f372e4a6a0dd16204ccbd660f23013601357c224`:
+
+- Parent `SR-PROOF-001`: blocked, owner Codex, reviewer/waiting-for Gemini;
+  only ARTIFACT and INVOICE dependencies, both recorded done. Its latest note
+  reports local evidence `97a535e0c` and a rejected non-fast-forward push.
+  These are parent-reported results, not tests rerun by this helper.
+- `SR-CONTRACT-001`: todo, owner Gemini, reviewer Codex2. The planned
+  `docs/04-uat/system-remediation-20260906/schema-allocation.json` is absent
+  at this base; a proof allocation must not be presumed delivered.
+- `billing-settlement.service.ts`, `markReimbursementPaid`, still checks a
+  nonempty proof ID and mutates the paid state before `persistChanges`.
+  This source inspection does not establish runtime correctness.
+- `document-artifact-kinds.ts` still supports only tenant-invoice, placard,
+  and report. ARTIFACT completion does not provide a proof storage/scanner
+  contract or permission to widen that shared family list.
+
+Decision: retain PRD §9.8.4 and service contracts §3.11 semantics and all
+parent acceptance. No product scope cut is approved. Route the unresolved
+implementation contract and scope authorization under `Q-SR-PROOF-001` in
+`PHASE1_OPEN_QUESTIONS.md`; this is a follow-up on the existing parent, not
+a newly registered producer or an authorization issued by this helper.
+
+### Required next actor and resume gate
+
+1. Supervisor/Chairman reviews overlapping writers, adds the SR-CONTRACT-001
+   dependency (or records an explicit reviewed alternative), and authorizes
+   the billing repository/module plus exact proof storage/scanner leaf paths.
+   Preserve the INVOICE → PROOF → FLEET-SETTLE ordering from the execution
+   rules. If a separate producer is needed, register it and its parent edge
+   in machine truth before dispatch; do not leave official work only here.
+2. Gemini as current SR-CONTRACT owner supplies reviewed proof API/error/type
+   and persistence allocation, including existence, batch/driver ownership,
+   scan result, approval, authorized readback and durable receipt behavior.
+   Follow its existing dependencies and shared export allocation rules.
+   Exact endpoint names, schema filenames and scanner adapter are not chosen
+   by this routing document.
+3. Supervisor assigns the missing upload/pending-scan/rejected/readback
+   states for `platform-screens-3.jsx` PA_Reimbursements and
+   PA_ReimbursementDetail to an authorized design scope or registered producer.
+4. Supervisor selects an unused recovery branch and dispatches Codex using
+   the merged [history-repair procedure](SR-PROOF-001-UNBLOCK-HISTORY-REPAIR.md).
+   Recheck current refs first; September 8 parent evidence postdates that
+   history audit. Preserve published history and local `97a535e0c`; do not
+   force-push or treat old draft PR #1699 as an implementation candidate.
+5. Only after allocations, authorization and required producer acceptance
+   are recorded, Codex implements and runs the parent's declared tests and
+   typechecks on fresh dev, then commits, normally pushes and hands off the
+   exact candidate to current reviewer Gemini. The parent remains blocked
+   until this gate; routing this helper does not prove proof upload or paid
+   correctness and does not execute a real payment.
+
+### This dispatch's verification and delivery
+
+`git fetch origin` and `git rebase origin/dev` exited 0 (up to date).
+Task slices and the cited source paths were inspected; no product runtime,
+browser, scan service, payment or parent regression was executed. Documentation
+diff/trailer/consistency checks, task-scoped push and PR evidence are recorded
+in this helper's machine-truth handoff. The parent receives the concrete
+routing step via `ai-status.sh note`, preserving its blocked lifecycle.
+
 ## Scope
 
 - Task: `SR-PROOF-001-UNBLOCK-PLANNING-DECISION`
