@@ -36,11 +36,13 @@ describe("UV-EXEC-011 TWM fixture adapters and language routing", () => {
     expect(asr.reconnect(440, { diagnosticReplay: true, utteranceId: "u-1" })).toMatchObject({ requiresFreshTicket: true, diagnosticOnly: true, confirmationEligible: false, utteranceId: "u-1" });
   });
 
-  it("does not enable an unverified TTS language and local stop does not claim provider cancellation or free billing", async () => {
+  it("rejects unverified TTS languages and reports no cancellation evidence without a playback controller", async () => {
     const tts = new TwmTtsFixtureAdapter([{ model: "tts-cmn", languageCode: "cmn-TW", name: "speaker", textType: "common", capabilityVerified: true }]);
     await expect(tts.synthesize({ sessionId: "s", text: "您好", languageCode: "hak-TW", generation: 1 })).rejects.toThrow("No verified");
     const playback = await tts.synthesize({ sessionId: "s", text: "您好", languageCode: "cmn-TW", generation: 1 });
-    expect(tts.localStop(playback.playbackId)).toMatchObject({ playbackCancellation: "cleared_locally", synthesisCancellation: "abort_requested", providerCancellationAcknowledged: "unverified", billingOutcome: "unverified" });
+    expect(playback.audioChunks).toEqual([new Uint8Array([0, 0])]);
+    expect(tts.localStop(playback.playbackId)).toEqual({ playbackId: playback.playbackId, playbackCancellation: "unknown", synthesisCancellation: "not_requested", providerCancellationAcknowledged: "unverified", billingOutcome: "unverified" });
+    expect(tts.localStop(playback.playbackId)).toBeNull();
   });
 
   it("offers DTMF language selection without requiring Mandarin ASR and invalidates only uncommitted confirmation on switch", () => {
@@ -131,7 +133,7 @@ describe("UV-EXEC-011 protocol regression evidence", () => {
     const request = { sessionId: "s", text: "fixture text", languageCode: "hak-TW", generation: 2 };
     expect(tts.buildSynthesisRequest(request)).toEqual({ input: { text: "fixture text", textType: "common" }, voice: { model: "fixture-tts-model", languageCode: "hak-TW", name: "fixture-sixian" }, audioConfig: { speakingRate: 1 }, outputConfig: { streamMode: 1 } });
     const handle = await tts.synthesize(request);
-    expect(tts.localStop(handle.playbackId)).toMatchObject({ providerCancellationAcknowledged: "unverified", billingOutcome: "unverified" });
+    expect(tts.localStop(handle.playbackId)).toMatchObject({ playbackCancellation: "cleared_locally", synthesisCancellation: "abort_requested", providerCancellationAcknowledged: "unverified", billingOutcome: "unverified" });
     expect(order).toEqual(["clear", "abort"]);
     expect(tts.localStop(handle.playbackId)).toBeNull();
   });
@@ -174,7 +176,7 @@ describe("UV-EXEC-011 deployment boundaries", () => {
       clear: () => { throw new Error("CTI unavailable"); }, abort,
     });
     const handle = await tts.synthesize({ sessionId: "s", text: "fixture", languageCode: "cmn-TW", generation: 1 });
-    expect(tts.localStop(handle.playbackId)).toMatchObject({ playbackCancellation: "unknown", billingOutcome: "unverified" });
+    expect(tts.localStop(handle.playbackId)).toMatchObject({ playbackCancellation: "unknown", synthesisCancellation: "abort_requested", billingOutcome: "unverified" });
     expect(abort).toHaveBeenCalledOnce();
   });
 });

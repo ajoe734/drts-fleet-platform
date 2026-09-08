@@ -198,7 +198,7 @@ export interface TwmTtsVoiceProfile {
 export interface TwmLocalStopResult {
   playbackId: string;
   playbackCancellation: "cleared_locally" | "unknown";
-  synthesisCancellation: "abort_requested";
+  synthesisCancellation: "abort_requested" | "not_requested";
   providerCancellationAcknowledged: "unverified";
   billingOutcome: "unverified";
 }
@@ -238,13 +238,22 @@ export class TwmTtsFixtureAdapter implements VoiceTextToSpeechAdapter {
 
   localStop(playbackId: string): TwmLocalStopResult | null {
     if (!this.active.delete(playbackId)) return null;
-    let playbackCancellation: TwmLocalStopResult["playbackCancellation"] = "cleared_locally";
-    try { this.playbackControl?.clear(playbackId); } catch { playbackCancellation = "unknown"; }
-    try { void Promise.resolve(this.playbackControl?.abort(playbackId)).catch(() => undefined); } catch { /* best effort */ }
+    // Removing the active ID cannot clear chunks already returned to the caller.
+    let playbackCancellation: TwmLocalStopResult["playbackCancellation"] = "unknown";
+    let synthesisCancellation: TwmLocalStopResult["synthesisCancellation"] = "not_requested";
+    if (this.playbackControl) {
+      try {
+        this.playbackControl.clear(playbackId);
+        playbackCancellation = "cleared_locally";
+      } catch { /* no evidence that outbound playback was cleared */ }
+      // Records an attempted request, never transport success or provider ACK.
+      synthesisCancellation = "abort_requested";
+      try { void Promise.resolve(this.playbackControl.abort(playbackId)).catch(() => undefined); } catch { /* best effort */ }
+    }
     return {
       playbackId,
       playbackCancellation,
-      synthesisCancellation: "abort_requested",
+      synthesisCancellation,
       providerCancellationAcknowledged: "unverified",
       billingOutcome: "unverified",
     };
