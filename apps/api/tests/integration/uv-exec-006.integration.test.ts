@@ -1238,6 +1238,120 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     },
   );
 
+  it.each(
+    ["on_trip", "proof_pending"].flatMap((taskStatus) =>
+      [
+        "valid",
+        "taskId",
+        "assignmentId",
+        "orderId",
+        "dispatchJobId",
+        "driverId",
+        "vehicleId",
+        "assignment_status",
+        "no_task_id",
+      ].map((corruption) => ({ taskStatus, corruption })),
+    ),
+  )(
+    "completion reconciles $taskStatus/$corruption before any write or release",
+    async ({ taskStatus, corruption }) => {
+      const database = new DatabaseService();
+      databases.push(database);
+      const candidate = {
+        driverId: `driver-completion-${randomUUID()}`,
+        vehicleId: `vehicle-completion-${randomUUID()}`,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      };
+      const { service } = createTestService(database, [candidate]);
+      const order = service.createPassengerOrder({
+        pickup: { address: "Taipei Main Station" },
+        dropoff: { address: "Taipei 101" },
+        passenger: { name: "Completion reconciliation", phone: "0911001444" },
+      });
+      trackOrder(order.orderId);
+      const job = await service.dispatchOrder(order.orderId, { mode: "auto" });
+      const assignment = await service.assignDispatch({
+        dispatchJobId: job.dispatchJobId,
+        ...candidate,
+      });
+      const now = new Date().toISOString();
+      await service.acceptDriverTask(assignment.taskId, { acceptedAt: now });
+      await service.departDriverTask(assignment.taskId, { departedAt: now });
+      await service.arrivedPickup(assignment.taskId, { arrivedAt: now });
+      await service.startDriverTask(assignment.taskId, { startedAt: now });
+      // Keep the cache valid while corrupting the authoritative row.
+      await database.query(
+        `UPDATE ops.phase1_driver_tasks SET record = jsonb_set(record, '{status}', $2::jsonb) WHERE task_id = $1`,
+        [assignment.taskId, JSON.stringify(taskStatus)],
+      );
+      if (corruption === "assignment_status" || corruption === "no_task_id") {
+        await database.query(
+          `UPDATE ops.phase1_dispatch_assignments SET record = jsonb_set(record, ARRAY[$2]::text[], $3::jsonb) WHERE assignment_id = $1`,
+          [
+            assignment.assignmentId,
+            corruption === "assignment_status" ? "status" : "taskId",
+            corruption === "assignment_status" ? '"assigned"' : "null",
+          ],
+        );
+      } else if (corruption !== "valid") {
+        await database.query(
+          `UPDATE ops.phase1_driver_tasks SET record = jsonb_set(record, ARRAY[$2]::text[], $3::jsonb) WHERE task_id = $1`,
+          [assignment.taskId, corruption, JSON.stringify(randomUUID())],
+        );
+      }
+      const readState = async () => {
+        const state: Record<string, unknown> = {};
+        for (const table of [
+          "phase1_owned_orders",
+          "phase1_dispatch_jobs",
+          "phase1_dispatch_assignments",
+          "phase1_driver_tasks",
+          "phase1_dispatch_trace_logs",
+          "dispatch_resource_reservations",
+          "driver_completion_outbox",
+        ]) {
+          state[table] = (
+            await database.query(
+              `SELECT * FROM ops.${table} WHERE order_id = $1 ORDER BY to_jsonb(${table})::text`,
+              [order.orderId],
+            )
+          ).rows;
+        }
+        return state;
+      };
+      const before = await readState();
+      const completion = service.completeDriverTask(assignment.taskId, {
+        completedAt: now,
+        actualDistanceKm: 10,
+        actualDurationSec: 600,
+        proof: { photos: [] },
+      });
+      if (corruption === "valid") {
+        await expect(completion).resolves.toMatchObject({
+          status: "completed",
+        });
+        expect(
+          await readAssignmentStatus(database, assignment.assignmentId),
+        ).toBe("completed");
+        const reservations = await database.query(
+          `SELECT status FROM ops.dispatch_resource_reservations WHERE assignment_id = $1`,
+          [assignment.assignmentId],
+        );
+        expect(reservations.rows).toEqual([
+          { status: "released" },
+          { status: "released" },
+        ]);
+      } else {
+        await expect(completion).rejects.toMatchObject({
+          code: "ASSIGNMENT_TASK_RECONCILIATION_REQUIRED",
+        });
+        expect(await readState()).toEqual(before);
+      }
+    },
+  );
+
   it("reassign waits for the old assignment before acquiring the order lock", async () => {
     const database = new DatabaseService();
     databases.push(database);
