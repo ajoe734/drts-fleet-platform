@@ -1,4 +1,9 @@
 import {
+  applyVoiceBookingQualification,
+  type QualifiedVoiceBookingSnapshot,
+} from "./voice-booking-qualification";
+import { assertAutonomousServiceArea } from "../service-area/autonomous-service-area";
+import {
   bookingRequirementFailures,
   validateBookingRequirements,
 } from "../vehicle-eligibility/booking-requirements";
@@ -1136,8 +1141,24 @@ export class OwnedMobilityService
     runtimeProfileCodeHeader?: string,
     identity?: BootstrapRequestIdentity | null,
   ): MaybePromise<OwnedOrderRecord> {
-    for (const field of ["bookingQualification", "serviceProductCode", "operatingAuthorizationId", "acquisitionMode", "timingMode", "queueMode", "requestedAt", "reservationWindowStart", "reservationWindowEnd"]) {
-      if (field in command) throw new ApiRequestError(409, "CALL_CENTER_PRODUCT_ROUTE_REQUIRED", "Product and scheduled requests require their dedicated booking route.", { field });
+    for (const field of [
+      "bookingQualification",
+      "serviceProductCode",
+      "operatingAuthorizationId",
+      "acquisitionMode",
+      "timingMode",
+      "queueMode",
+      "requestedAt",
+      "reservationWindowStart",
+      "reservationWindowEnd",
+    ]) {
+      if (field in command)
+        throw new ApiRequestError(
+          409,
+          "CALL_CENTER_PRODUCT_ROUTE_REQUIRED",
+          "Product and scheduled requests require their dedicated booking route.",
+          { field },
+        );
     }
     this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertAddress(command.pickup?.address, "pickup.address");
@@ -2188,6 +2209,13 @@ export class OwnedMobilityService
     ];
   }
 
+  prepareQualifiedVoiceOrder(
+    order: OwnedOrderRecord,
+    snapshot: QualifiedVoiceBookingSnapshot,
+  ): OwnedOrderRecord {
+    return applyVoiceBookingQualification(order, snapshot);
+  }
+
   /**
    * Creates a brand-new voice-linked order through the shared PoolClient
    * UoW (SD §7.1/§7.5). Fails closed when durable storage is not
@@ -2203,6 +2231,18 @@ export class OwnedMobilityService
     order: OwnedOrderRecord,
     context: string,
   ): Promise<OwnedOrderRecord> {
+    if (order.bookingQualification) {
+      if (!order.bookingRequirements)
+        throw new ApiRequestError(
+          409,
+          "BOOKING_REQUIREMENTS_INVALID",
+          "A qualified voice order requires booking requirements.",
+        );
+      order = applyVoiceBookingQualification(order, {
+        bookingQualification: order.bookingQualification,
+        bookingRequirements: order.bookingRequirements,
+      });
+    }
     const repository = this.requireVoiceCapableRepository(context);
     const aggregateVersion = await repository
       .withTransaction((client) => repository.insertVoiceOrder(client, order))
@@ -5277,6 +5317,20 @@ export class OwnedMobilityService
       dispatchJobs: this.dispatchJobs.map((job) => ({ ...job })),
       dispatchAssignments: this.dispatchAssignments.map((assignment) => ({
         ...assignment,
+        ...(assignment.bookingRequirements
+          ? {
+              bookingRequirements: structuredClone(
+                assignment.bookingRequirements,
+              ),
+            }
+          : {}),
+        ...(assignment.bookingQualification
+          ? {
+              bookingQualification: structuredClone(
+                assignment.bookingQualification,
+              ),
+            }
+          : {}),
       })),
       driverTasks: this.listDriverTasks(),
       dispatchTraceLogs: this.dispatchTraceLogs.map((traceLog) =>
@@ -5421,7 +5475,13 @@ export class OwnedMobilityService
           };
           const updatedOrder: OwnedOrderRecord = {
             ...order,
-      ...(order.bookingQualification ? { bookingQualification: structuredClone(order.bookingQualification) } : {}),
+            ...(order.bookingQualification
+              ? {
+                  bookingQualification: structuredClone(
+                    order.bookingQualification,
+                  ),
+                }
+              : {}),
             status: "driver_accepted",
             updatedAt: now,
           };
@@ -5583,7 +5643,13 @@ export class OwnedMobilityService
           };
           const updatedOrder: OwnedOrderRecord = {
             ...order,
-      ...(order.bookingQualification ? { bookingQualification: structuredClone(order.bookingQualification) } : {}),
+            ...(order.bookingQualification
+              ? {
+                  bookingQualification: structuredClone(
+                    order.bookingQualification,
+                  ),
+                }
+              : {}),
             status: "redispatch_required",
             updatedAt: now,
           };
@@ -8666,20 +8732,118 @@ export class OwnedMobilityService
     return traceLog;
   }
 
+  private assertQualifiedVoiceDispatch(
+    order: OwnedOrderRecord,
+    dispatchJobId: string,
+    vehicleId: string,
+    driverId: string,
+  ) {
+    if (order.bookingQualification) {
+      const qualification = order.bookingQualification;
+      if (
+        order.runtimeProfileCode !== qualification.runtimeProfileCode ||
+        order.serviceProductCode !== qualification.serviceProductCode ||
+        order.dispatchSemantics !== "realtime" ||
+        order.operatingAuthorizationId ||
+        ["pickup", "dropoff"].some((stop) => {
+          const key = stop as "pickup" | "dropoff";
+          return (
+            order[key].lat !== qualification[key].address.lat ||
+            order[key].lng !== qualification[key].address.lng ||
+            order[key].placeId !== qualification[key].address.placeId
+          );
+        })
+      )
+        throw new ApiRequestError(
+          409,
+          "VOICE_QUALIFICATION_STALE",
+          "Order locations or product no longer match the qualified draft.",
+        );
+      if (
+        !order.bookingRequirements ||
+        !this.serviceAreaService ||
+        !this.runtimeEligibilityEvaluator ||
+        !this.serviceProductService
+      )
+        throw new ApiRequestError(
+          409,
+          "VOICE_DISPATCH_POLICY_UNAVAILABLE",
+          "Voice dispatch requires complete qualification services.",
+        );
+      this.serviceProductService.assertRuntimeProfileServiceProductActive(
+        "ordinary_taxi",
+        "taxi_realtime",
+      );
+      const product =
+        this.serviceProductService.getRuntimeServiceProductByType(
+          "taxi_realtime",
+        );
+      if (!product?.active || product.timing !== "realtime")
+        throw new ApiRequestError(
+          409,
+          "VOICE_PRODUCT_HANDOFF_REQUIRED",
+          "The immediate product is not active.",
+        );
+      assertAutonomousServiceArea(
+        this.serviceAreaService.evaluate({
+          serviceProductType: "taxi_realtime",
+          pickup: order.bookingQualification.pickup.address,
+          dropoff: order.bookingQualification.dropoff.address,
+          requestedAt: new Date().toISOString(),
+        }),
+      );
+      if (
+        this.runtimeEligibilityEvaluator.assessAutonomous({
+          orderId: order.orderId,
+          dispatchJobId,
+          driverId,
+          vehicleId,
+          serviceProductCode: "taxi_realtime",
+          bookingRequirements: order.bookingRequirements,
+        }) !== "eligible"
+      )
+        throw new ApiRequestError(
+          409,
+          "BOOKING_REQUIREMENTS_NOT_MET",
+          "All runtime conditions must be satisfied before autonomous assignment.",
+        );
+    }
+  }
+
+  private qualifiedVoiceCandidateAllowed(
+    order: OwnedOrderRecord,
+    vehicleId: string,
+    driverId: string,
+  ): boolean {
+    try {
+      this.assertQualifiedVoiceDispatch(
+        order,
+        `precheck:${order.orderId}`,
+        vehicleId,
+        driverId,
+      );
+      return true;
+    } catch (error) {
+      if (error instanceof ApiRequestError) return false;
+      throw error;
+    }
+  }
+
   private assertAssignmentEligibilityRecheck(
-    order: Pick<
-      OwnedOrderRecord,
-      | "orderId"
-      | "serviceBucket"
-      | "businessDispatchSubtype"
-      | "bookingRequirements"
-    >,
+    order: OwnedOrderRecord,
     dispatchJobId: string,
     vehicleId: string,
     driverId: string,
   ) {
     try {
       this.assertBookingRequirementCandidate(order, vehicleId);
+      this.assertQualifiedVoiceDispatch(
+        order,
+        dispatchJobId,
+        vehicleId,
+        driverId,
+      );
+
       if (this.vehicleEligibilityService) {
         this.vehicleEligibilityService.assertDispatchAssignmentEligible(
           order,
@@ -8867,7 +9031,9 @@ export class OwnedMobilityService
     }
     return {
       ...order,
-      ...(order.bookingQualification ? { bookingQualification: structuredClone(order.bookingQualification) } : {}),
+      ...(order.bookingQualification
+        ? { bookingQualification: structuredClone(order.bookingQualification) }
+        : {}),
       serviceProductCode: this.resolveServiceProductCodeForOrder(order),
     };
   }
@@ -8898,7 +9064,9 @@ export class OwnedMobilityService
       );
     }
     const assignment: DispatchAssignmentRecord = {
-      ...(order.bookingQualification ? { bookingQualification: structuredClone(order.bookingQualification) } : {}),
+      ...(order.bookingQualification
+        ? { bookingQualification: structuredClone(order.bookingQualification) }
+        : {}),
       ...(order.bookingRequirements
         ? { bookingRequirements: structuredClone(order.bookingRequirements) }
         : {}),
@@ -8921,7 +9089,9 @@ export class OwnedMobilityService
       updatedAt: now,
     };
     const task: DriverTaskRecord = {
-      ...(order.bookingQualification ? { bookingQualification: structuredClone(order.bookingQualification) } : {}),
+      ...(order.bookingQualification
+        ? { bookingQualification: structuredClone(order.bookingQualification) }
+        : {}),
       ...(order.bookingRequirements
         ? { bookingRequirements: structuredClone(order.bookingRequirements) }
         : {}),
@@ -10453,11 +10623,22 @@ export class OwnedMobilityService
           destination,
         );
     return candidates
-      .filter((candidate) =>
-        this.bookingRequirementCandidateAllowed(order, candidate.vehicleId),
+      .filter(
+        (candidate) =>
+          this.bookingRequirementCandidateAllowed(order, candidate.vehicleId) &&
+          this.qualifiedVoiceCandidateAllowed(
+            order,
+            candidate.vehicleId,
+            candidate.driverId,
+          ),
       )
       .map((candidate) => ({
         ...candidate,
+        ...(order.bookingQualification
+          ? {
+              bookingQualification: structuredClone(order.bookingQualification),
+            }
+          : {}),
         ...(order.bookingRequirements
           ? { bookingRequirements: structuredClone(order.bookingRequirements) }
           : {}),
@@ -10484,8 +10665,17 @@ export class OwnedMobilityService
 
     const evaluatedCandidates = await Promise.all(
       candidates
-        .filter((candidate) =>
-          this.bookingRequirementCandidateAllowed(order, candidate.vehicleId),
+        .filter(
+          (candidate) =>
+            this.bookingRequirementCandidateAllowed(
+              order,
+              candidate.vehicleId,
+            ) &&
+            this.qualifiedVoiceCandidateAllowed(
+              order,
+              candidate.vehicleId,
+              candidate.driverId,
+            ),
         )
         .map(async (candidate) => {
           const decision = await this.runtimeEligibilityEvaluator!.evaluate({
@@ -10496,7 +10686,9 @@ export class OwnedMobilityService
             serviceProductCode: serviceProduct,
             sourcePlatform,
             currentLocation: candidate.currentLocation ?? null,
-            bookingRequirements: order.bookingRequirements,
+            ...(order.bookingRequirements
+              ? { bookingRequirements: order.bookingRequirements }
+              : {}),
           });
 
           return {
@@ -10508,8 +10700,14 @@ export class OwnedMobilityService
                   ),
                 }
               : {}),
-            ...(order.bookingQualification ? { bookingQualification: structuredClone(order.bookingQualification) } : {}),
-          serviceProductContext: {
+            ...(order.bookingQualification
+              ? {
+                  bookingQualification: structuredClone(
+                    order.bookingQualification,
+                  ),
+                }
+              : {}),
+            serviceProductContext: {
               serviceProductId: decision.serviceProductId,
               serviceProductCode: decision.serviceProductCode,
               policyVersion: decision.policyVersion,
@@ -11927,7 +12125,9 @@ export class OwnedMobilityService
   ) {
     const nextOrder: OwnedOrderRecord = {
       ...order,
-      ...(order.bookingQualification ? { bookingQualification: structuredClone(order.bookingQualification) } : {}),
+      ...(order.bookingQualification
+        ? { bookingQualification: structuredClone(order.bookingQualification) }
+        : {}),
       referralPassengerLifecycle: {
         ...(this.getReferralLifecycle(order) ?? {}),
         ...patch,
@@ -12616,7 +12816,9 @@ export class OwnedMobilityService
     const queueState = this.resolveDispatchQueueState(order, complianceGates);
     return {
       ...order,
-      ...(order.bookingQualification ? { bookingQualification: structuredClone(order.bookingQualification) } : {}),
+      ...(order.bookingQualification
+        ? { bookingQualification: structuredClone(order.bookingQualification) }
+        : {}),
       ...(order.bookingRequirements
         ? { bookingRequirements: structuredClone(order.bookingRequirements) }
         : {}),
@@ -12786,7 +12988,9 @@ export class OwnedMobilityService
     );
     return {
       ...task,
-      ...(task.bookingQualification ? { bookingQualification: structuredClone(task.bookingQualification) } : {}),
+      ...(task.bookingQualification
+        ? { bookingQualification: structuredClone(task.bookingQualification) }
+        : {}),
       ...(task.bookingRequirements
         ? { bookingRequirements: structuredClone(task.bookingRequirements) }
         : {}),

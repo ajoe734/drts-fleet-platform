@@ -48,3 +48,11 @@ export interface BookingQualification {
   validatedAt: string;
   validUntil: string;
 }
+
+export const voiceAbsoluteTimeSchema = z.string().datetime({ offset: true });
+export const voiceOrdinaryRuntimeMappingSchema = z
+  .object({
+    runtimeProfileCode: z.literal("ordinary_taxi"),
+    serviceProductCode: z.literal("taxi_realtime"),
+  })
+  .strict();

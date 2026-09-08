@@ -66,6 +66,37 @@ export class RuntimeEligibilityEvaluator {
     @Optional() private readonly repository?: VehicleEligibilityRepository,
   ) {}
 
+  /** No persistence or override inside the assignment transaction. Recompute
+   * all conditions from current registry facts before reserving supply. */
+  assessAutonomous(
+    command: EvaluateRuntimeEligibilityCommand,
+  ): EligibilityDecision {
+    const context = this.eligibilityContextResolver.resolve(command);
+    const hard = this.collectHardReasonCodes(context);
+    if (command.bookingRequirements)
+      hard.push(
+        ...bookingRequirementFailures(
+          command.bookingRequirements,
+          context.vehicleCapability,
+        ),
+      );
+    if (hard.length) return "ineligible";
+    if (
+      context.vehicleCapability.conditionallyAllowed ||
+      this.collectSoftReasonCodes(
+        context,
+        this.classifyLocationState(context),
+        command.softReasonCodes ?? [],
+      ).length ||
+      this.collectMissingRequirements(
+        context,
+        command.missingRequirements ?? [],
+      ).length
+    )
+      return "conditionally_eligible";
+    return "eligible";
+  }
+
   async evaluate(
     command: EvaluateRuntimeEligibilityCommand,
   ): Promise<EvaluateRuntimeEligibilityResult> {
