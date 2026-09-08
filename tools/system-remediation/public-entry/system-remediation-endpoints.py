@@ -44,16 +44,20 @@ def parsed(result):
 
 
 def http(url, direct=False):
-    cmd = ["curl", "--silent", "--show-error", "--location", "--max-redirs", "5",
+    cmd = ["curl", "--disable", "--silent", "--show-error", "--location", "--max-redirs", "5",
            "--connect-timeout", "5", "--max-time", "15", "--proto", "=https",
            "--proto-redir", "=https", "--output", os.devnull, "--write-out",
-           '{"status":%{http_code},"final_url":"%{url_effective}",'
+           '{"status":"%{http_code}","final_url":"%{url_effective}",'
            '"remote_ip":"%{remote_ip}","redirects":%{num_redirects},'
            '"ssl_verify_result":%{ssl_verify_result}}']
     if direct:
         cmd += ["--noproxy", "*"]
     result = run(cmd + [url])
-    result["response"] = parsed(result)
+    try:
+        result["response"] = json.loads(result["stdout"])
+        result["response"]["status"] = int(result["response"]["status"])
+    except (ValueError, TypeError, KeyError):
+        result["response"] = None
     # HTTP 401/403/404 are observations, never successful user acceptance.
     response = result["response"] or {}
     result["reachable"] = result["exit_code"] == 0 and 200 <= response.get("status", 0) < 400
@@ -64,7 +68,7 @@ def probe(url):
     host = urlsplit(url).hostname
     return {
         "url": url,
-        "dns": {kind: run(["dig", "+time=3", "+tries=1", "+noall", "+comments", "+answer", host, kind])
+        "dns": {kind: run(["dig", "+time=3", "+tries=1", "+noall", "+comments", "+answer", "+stats", host, kind])
                 for kind in ("CNAME", "A", "AAAA")},
         "tls_direct": run(["openssl", "s_client", "-connect", host + ":443", "-servername", host,
                            "-verify_hostname", host, "-verify_return_error", "-brief"], timeout=12),
@@ -86,6 +90,7 @@ def cloud_inventory(project, region):
 
 
 def collect(project, region, base_sha):
+    started_at = datetime.now(timezone.utc).isoformat()
     discovery, services, mappings = cloud_inventory(project, region)
     def entry(item):
         prefix, name = item
@@ -110,7 +115,7 @@ def collect(project, region, base_sha):
                 "cloud_run_status": "observed" if valid_url else "unknown: discovery unavailable or URL missing"}
     with ThreadPoolExecutor(max_workers=9) as pool:
         entries = dict(zip(SERVICES, pool.map(entry, SERVICES.items())))
-    return {"observed_at": datetime.now(timezone.utc).isoformat(), "base_sha": base_sha,
+    return {"started_at": started_at, "observed_at": datetime.now(timezone.utc).isoformat(), "base_sha": base_sha,
             "candidate_sha": run(["git", "rev-parse", "HEAD"])["stdout"],
             "git_status": run(["git", "status", "--porcelain"]),
             "tool_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
@@ -126,6 +131,8 @@ def complete(report):
             parsed(report["domain_mappings"]) is not None and
             all(e["cloud_run"] is not None and
                 all(p["tls_direct"]["exit_code"] == 0 and
+                    all(r["exit_code"] == 0 and "status: NOERROR" in r["stdout"]
+                        for r in p["dns"].values()) and
                     p["http_direct"]["reachable"] and p["http_environment"]["reachable"]
                     for p in (e["public"], e["cloud_run"]))
                 for e in report["entries"].values()))
