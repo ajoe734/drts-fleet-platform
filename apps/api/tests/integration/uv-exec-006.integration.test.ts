@@ -2429,52 +2429,61 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     },
   );
 
-  it("a valid cancel atomically persists the cancellation and releases the reservation", async () => {
-    expect(DATABASE_URL).toBeTruthy();
-    const database = new DatabaseService();
-    databases.push(database);
-    const driverId = `driver-uvexec006-cxl-ok-${randomUUID()}`;
-    const vehicleId = `vehicle-uvexec006-cxl-ok-${randomUUID()}`;
-    const { service } = createTestService(database, [
-      {
-        driverId,
+  it.each([false, true])(
+    "a valid cancel atomically persists cancellation and releases resources: accepted=%s",
+    async (accepted) => {
+      expect(DATABASE_URL).toBeTruthy();
+      const database = new DatabaseService();
+      databases.push(database);
+      const driverId = `driver-uvexec006-cxl-ok-${randomUUID()}`;
+      const vehicleId = `vehicle-uvexec006-cxl-ok-${randomUUID()}`;
+      const { service } = createTestService(database, [
+        {
+          driverId,
+          vehicleId,
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ]);
+
+      const order = service.createPassengerOrder({
+        pickup: { address: "Taipei Main Station" },
+        dropoff: { address: "Taipei 101" },
+        passenger: { name: "UV-EXEC-006 Rider", phone: "0911001444" },
+      });
+      trackOrder(order.orderId);
+
+      const dispatchResult = await service.dispatchOrder(order.orderId, {
+        mode: "auto",
+      });
+      const assignment = await service.assignDispatch({
+        dispatchJobId: dispatchResult.dispatchJobId,
         vehicleId,
-        etaMinutes: 5,
-        operatingArea: "taipei",
-        serviceBuckets: ["standard_taxi"],
-      },
-    ]);
+        driverId,
+      });
 
-    const order = service.createPassengerOrder({
-      pickup: { address: "Taipei Main Station" },
-      dropoff: { address: "Taipei 101" },
-      passenger: { name: "UV-EXEC-006 Rider", phone: "0911001444" },
-    });
-    trackOrder(order.orderId);
+      if (accepted) {
+        await service.acceptDriverTask(assignment.taskId, {
+          acceptedAt: new Date().toISOString(),
+        });
+      }
 
-    const dispatchResult = await service.dispatchOrder(order.orderId, {
-      mode: "auto",
-    });
-    const assignment = await service.assignDispatch({
-      dispatchJobId: dispatchResult.dispatchJobId,
-      vehicleId,
-      driverId,
-    });
+      await service.cancelOwnedOrder(order.orderId, {
+        reason: "passenger_requested",
+      });
 
-    await service.cancelOwnedOrder(order.orderId, {
-      reason: "passenger_requested",
-    });
-
-    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
-      "cancelled",
-    );
-    expect(
-      await readActiveReservations(database, "driver", driverId),
-    ).toHaveLength(0);
-    expect(
-      await readActiveReservations(database, "vehicle", vehicleId),
-    ).toHaveLength(0);
-  });
+      expect(
+        await readAssignmentStatus(database, assignment.assignmentId),
+      ).toBe("cancelled");
+      expect(
+        await readActiveReservations(database, "driver", driverId),
+      ).toHaveLength(0);
+      expect(
+        await readActiveReservations(database, "vehicle", vehicleId),
+      ).toHaveLength(0);
+    },
+  );
   it.each(["stale_trip", "write_failure"])(
     "cancellation preserves live state on %s",
     async (scenario) => {

@@ -4421,18 +4421,7 @@ export class OwnedMobilityService
     );
   }
 
-  /**
-   * SD §7.6: atomically close one dispatch assignment (and its driver task,
-   * if still open) that a reassign/redispatch is superseding -- lock, verify
-   * it is still in an open (`assigned`/`accepted`) state, persist the
-   * cancellation, and release its shared reservation, all inside the
-   * caller's transaction. Returns `null` if the assignment was already
-   * terminal by the time this ran (raced closed by an accept, a driver
-   * reject/cancel, or a confirmed timeout); callers must treat that as a
-   * stale-state conflict rather than silently proceeding, since it means
-   * whatever in-memory snapshot triggered this close no longer matches the
-   * authoritative row.
-   */
+  /** SD §7.6: shared cancellation/replacement reconciliation fence. */
   private isReconciledAssignmentTask(
     assignment: DispatchAssignmentRecord,
     task: DriverTaskRecord | null,
@@ -4452,6 +4441,18 @@ export class OwnedMobilityService
     );
   }
 
+  /**
+   * SD §7.6: atomically close one dispatch assignment (and its driver task,
+   * if still open) that a reassign/redispatch is superseding -- lock, verify
+   * it is still in an open (`assigned`/`accepted`) state, persist the
+   * cancellation, and release its shared reservation, all inside the
+   * caller's transaction. Returns `null` if the assignment was already
+   * terminal by the time this ran (raced closed by an accept, a driver
+   * reject/cancel, or a confirmed timeout); callers must treat that as a
+   * stale-state conflict rather than silently proceeding, since it means
+   * whatever in-memory snapshot triggered this close no longer matches the
+   * authoritative row.
+   */
   private async closeSupersededDispatchAssignment(
     tx: OwnedMobilityQueryExecutor,
     assignmentId: string,
