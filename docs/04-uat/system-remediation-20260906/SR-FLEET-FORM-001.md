@@ -5,7 +5,7 @@
 | Phase             | system-remediation-20260906                          |
 | Owner             | Gemini                                               |
 | Reviewer          | Codex2                                               |
-| Base SHA          | `3fb9b06461dc2bf92043144974eedbbc9f69d0f3` (origin/dev, historical audit base `b32ab8badb740b94cdf67212315ecfccf21f6d5d`) |
+| Base SHA          | `f2727a88e086d9b057324f0e6ce1de0aa11c3ce0` (origin/dev, historical audit base `b32ab8badb740b94cdf67212315ecfccf21f6d5d`) |
 | Gap IDs           | R23, R25                                             |
 | Capability IDs    | C070, C120                                           |
 | Status            | candidate (handoff pending review)                   |
@@ -62,7 +62,7 @@
 | unit tests  | `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-form-001/`                                   | 0         |
 | test output | `Test Files 1 passed (1) · Tests 26 passed (26)`                                                          | —         |
 
-Base SHA：`3fb9b06461dc2bf92043144974eedbbc9f69d0f3`
+Base SHA：`f2727a88e086d9b057324f0e6ce1de0aa11c3ce0` (origin/dev at dispatch, historical audit base `b32ab8badb740b94cdf67212315ecfccf21f6d5d`)
 
 ## 修改檔案
 

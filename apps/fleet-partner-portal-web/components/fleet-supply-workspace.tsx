@@ -1064,6 +1064,7 @@ function DriverDraftFields({
   formKey?: string;
 }) {
   const { t } = useTranslation();
+  const theme = buildFleetTheme();
   const fid = (field: string) => fieldId(formKey, field);
   return (
     <>
@@ -1192,12 +1193,12 @@ function DriverDraftFields({
           style={{
             fontSize: 11.5,
             fontWeight: 600,
-            color: "inherit",
+            color: theme.text,
             marginBottom: 5,
           }}
         >
           {t("supply.field.supportedProducts")}
-          <span aria-hidden="true" style={{ color: "red" }}> *</span>
+          <span aria-hidden="true" style={{ color: theme.danger }}> *</span>
         </div>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
@@ -1225,6 +1226,7 @@ function VehicleDraftFields({
   formKey?: string;
 }) {
   const { t } = useTranslation();
+  const theme = buildFleetTheme();
   const fid = (field: string) => fieldId(formKey, field);
   return (
     <>
@@ -1403,12 +1405,12 @@ function VehicleDraftFields({
           style={{
             fontSize: 11.5,
             fontWeight: 600,
-            color: "inherit",
+            color: theme.text,
             marginBottom: 5,
           }}
         >
           {t("supply.field.supportedProducts")}
-          <span aria-hidden="true" style={{ color: "red" }}> *</span>
+          <span aria-hidden="true" style={{ color: theme.danger }}> *</span>
         </div>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
