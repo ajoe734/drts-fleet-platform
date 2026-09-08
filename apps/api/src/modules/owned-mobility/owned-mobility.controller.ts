@@ -542,13 +542,13 @@ export class OwnedMobilityController {
   }
 
   @Post("passenger/orders/:orderId/cancel")
-  cancelOwnedOrder(
+  async cancelOwnedOrder(
     @Param("orderId") orderId: string,
     @Body() command: CancelOwnedOrderCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.cancelOwnedOrder(orderId, command, requestId),
+      await this.ownedMobilityService.cancelOwnedOrder(orderId, command, requestId),
       requestId,
     );
   }
