@@ -552,7 +552,9 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       tripCompletedAt: this.resolveEventTimestamp(
         sortedOrderTraceLogs,
         "driver.completed_trip",
-        finalTask?.completedAt ?? null,
+        // Cancellation also records task closure in completedAt. Only a
+        // completed trip may use that field as the reporting fallback.
+        finalTask?.status === "completed" ? finalTask.completedAt : null,
         finalTask?.taskId,
         true,
       ),

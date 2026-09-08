@@ -1,4 +1,17 @@
 import "server-only";
+import { createHash } from "node:crypto";
+import { headers } from "next/headers";
+import { CONTROL_PLANE_IAP_EMAIL_HEADER } from "@drts/control-plane-auth";
+
+// Reuse the authoritative fleet scope; never persist under a demo identity.
+export async function getSupplyDraftScope(): Promise<string> {
+  const { fleetPartnerId } = await getServerFleetPartnerClient();
+  const principal = (await headers()).get(CONTROL_PLANE_IAP_EMAIL_HEADER) ?? "";
+  return createHash("sha256")
+    .update(JSON.stringify([fleetPartnerId, principal]))
+    .digest("hex");
+}
+
 
 import type {
   SupplyDocumentRecord,
