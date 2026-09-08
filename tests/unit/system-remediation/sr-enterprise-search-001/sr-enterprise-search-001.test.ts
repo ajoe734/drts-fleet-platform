@@ -753,9 +753,9 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
     });
   });
 
-  describe("12. Authoritative API Query and Resource-ID Evidence (Codex Acceptance Gap)", () => {
-    // Concrete authoritative tenant records with genuine resource IDs
-    const authoritativeApiBookings: BookingRecord[] = [
+  describe("12. Synthetic record filtering and pagination (unit coverage only)", () => {
+    // Synthetic BookingRecord fixtures; IDs below are not live API resources.
+    const syntheticBookings: BookingRecord[] = [
       createMockBooking({
         bookingId: "booking-authoritative-001",
         orderId: "ord-auth-001",
@@ -840,7 +840,7 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
     ];
 
     it("executes status query: completed -> exact resource ID booking-authoritative-003", () => {
-      const filtered = filterEnterpriseBookings(authoritativeApiBookings, {
+      const filtered = filterEnterpriseBookings(syntheticBookings, {
         ...DEFAULT_BOOKING_FILTER_CRITERIA,
         status: "completed",
       });
@@ -850,7 +850,7 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
     });
 
     it("executes status query: approval -> exact resource ID booking-authoritative-002", () => {
-      const filtered = filterEnterpriseBookings(authoritativeApiBookings, {
+      const filtered = filterEnterpriseBookings(syntheticBookings, {
         ...DEFAULT_BOOKING_FILTER_CRITERIA,
         status: "approval",
       });
@@ -860,7 +860,7 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
 
     it("executes scope query: byme -> exact resource ID booking-authoritative-003 (booked for Wang by Lin)", () => {
       const filtered = filterEnterpriseBookings(
-        authoritativeApiBookings,
+        syntheticBookings,
         {
           ...DEFAULT_BOOKING_FILTER_CRITERIA,
           scope: "byme",
@@ -872,9 +872,9 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
       expect(filtered[0]!.passenger.name).toBe("王大明");
     });
 
-    it("executes combined query with pagination across authoritative API dataset", () => {
+    it("filters and paginates synthetic records", () => {
       // Query: Cost center CC-PRD-01 (should match 001, 003, 005)
-      const filtered = filterEnterpriseBookings(authoritativeApiBookings, {
+      const filtered = filterEnterpriseBookings(syntheticBookings, {
         ...DEFAULT_BOOKING_FILTER_CRITERIA,
         q: "CC-PRD-01",
       });
