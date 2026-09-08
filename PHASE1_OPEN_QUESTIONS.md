@@ -4,6 +4,20 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-SR-PUSH-001 — provider/device contract and shared writer authorization
+
+Supervisor/Chairman must route the passenger push provider and pseudonymous
+subject-to-device contract to the product/contract decision owner; an adapter
+worker cannot infer this from Identity Service's driver/session device binding.
+SR-CONTRACT-001 owner Codex must receive explicitly authorized receipt/claim
+contract and migration-allocation scope before implementing that follow-up.
+Supervisor must authorize the parent's service/repository writes and sequence
+overlapping writers. UV-EXEC-006 is already done; it is not the remaining blocker.
+Keep SR-PUSH-001 blocked pending these recorded decisions, retain C023/N10 and
+the separate SR-LIVE-PUSH-001 device evidence gate. No scope cut or provider
+selection is approved by this routing record. See the
+[decision packet and concrete resume steps](support/unblock/SR-PUSH-001/SR-PUSH-001-UNBLOCK-PLANNING-DECISION.md).
+
 ### Q-SR-QA-WEBHOOK-TENANT-BINDING-001 — repair scope authorization pending
 
 Supervisor/Claude must authorize product write scopes and IAM/tenant overlap
