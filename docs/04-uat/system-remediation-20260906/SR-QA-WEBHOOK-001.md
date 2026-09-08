@@ -145,14 +145,14 @@ exit code: 0
 ## 6. 資源 ID 清單與環境邊界聲明
 
 ### 6.1 自動化測試追蹤之資源 ID
-- **Tenant ID**: `9d41299d-816e-4438-81d8-944770c6c314`（Code: `TEN_A_S0_FBBC591B`）
+- **Tenant ID**: `2a5ce785-2685-4de1-8342-c7f9883dacc1`（Code: `TEN_A_S0_F04124A6`）
 - **租戶 API Keys**:
-  - `api_key_2b380c40-3c06-4ebe-9ec5-6056bfabda7c`（Prefix: `tk_f307558ce`, Suffix: `****d99e`, Scopes: `tenant:webhooks:read`, `tenant:write`）
-  - `api_key_eac2d5dd-eee8-4032-ac9a-c8180477dcc4`（Rotated Key v2, Overlap Window: 7 days）
+  - `api_key_ef976c4e-566f-4883-a804-a06836ced202`（Prefix: `tk_3ebc399c3`, Suffix: `****2552`, Scopes: `tenant:webhooks:read`, `tenant:write`）
+  - `api_key_962834b8-aefb-406a-9808-03de9923012f`（Rotated Key v2, Overlap Window: 7 days）
 - **Webhook 端點**:
-  - `wh_1d88cc4f-0027-4911-af0a-a77455564cb1`（URL: `http://127.0.0.1:36877/webhooks/receiver`）
+  - `wh_4fea7776-62b4-4c49-b529-7740af5b99d8`（URL: `http://127.0.0.1:41723/webhooks/receiver`）
 - **Webhook 送達記錄 (Delivery ID)**:
-  - `wd_e3457121-40dc-44e9-971c-e357c62ef1d6`（Status: `queued`, HTTP Status: 503, Delay: 30000ms）
+  - `wd_4bcd54bb-567b-421d-b54b-0ee3c29d049b`（Status: `queued`, HTTP Status: 503, Delay: 30000ms）
 - **對帳單 ID**: `settlement-statement-tenant-demo-001-2026-03`
 - **電話進件與錄音 Session ID**: `provider-call-rec-001`（Recording: `rec_wire_ready_001`）
 
