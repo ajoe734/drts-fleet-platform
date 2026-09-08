@@ -4,9 +4,9 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-_None as of 2026-08-20._
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`.
 
-Every question on this board has been answered. Worth noting how, because the
+The original fifteen questions on this board were answered. Worth noting how, because the
 distribution was not what the board implied: of the fifteen, four were closed by
 a human decision, four were already answered by an accepted decision or a
 canonical document and had simply never been marked, four turned out to be
@@ -21,8 +21,33 @@ the code or an accepted packet already answers it.
 
 | ID  | Question | Source / Module | Named Owner | Decision Route | Interim Default |
 | --- | -------- | --------------- | ----------- | -------------- | --------------- |
+| Q-SR-OPS-SHELL-001 | Confirm the dispatch audit resource-context receiver contract and authorize the missing sender/receiver write scopes. | SR-OPS-SHELL-001; dispatch audit CTA; PRD §13.3; service contracts §3.13 | Codex (parent owner); Gemini (reviewer) | Supervisor first reviews scope overlap/dependencies; Codex and Gemini confirm existing receiver/API semantics. Escalate to human product owner only if acceptance must be reduced. See [routing record](support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION.md). | Keep full parent acceptance and blocked state; no invented query contract or unauthorized shared-file edits. Reuse existing runtime URL resolver after scope authorization. |
+
+### Q-SR-BANK-002 — scope authorization pending
+
+This item remains open; it is a routing decision, not a new grant of financial access.
+Supervisor/Claude must authorize shared-file scope and dependency sequencing for
+`SR-BANK-002` (owner Gemini, reviewer Codex): central tenant settlement route policy
+and bank read-model failure behavior. Preserve the parent acceptance and blocked
+state. Do not broaden all roles to bypass 403 or return seed statements after API
+failure. The existing completed `SR-IAM-001` and `SR-BANK-001` are provenance,
+not authorization to edit their shared files under the parent.
+See [decision and executable follow-up](support/unblock/SR-BANK-002/SR-BANK-002-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-ENTERPRISE-SEARCH-001 — producer and contract routing pending
+
+This question remains **open**: Supervisor/Chairman must register or identify the
+missing booking-filter producer, authorize backend and shared contract/client
+scopes with dependency ordering, and route exact date/passenger/status/pagination
+semantics to contract review. Parent owner Codex2 and reviewer Codex retain the
+full acceptance; no scope cut or frontend-only substitute is approved. The parent
+stays blocked until the producer is accepted and merged. See the
+[decision routing record](support/unblock/SR-ENTERPRISE-SEARCH-001/SR-ENTERPRISE-SEARCH-001-UNBLOCK-PLANNING-DECISION.md)
+for evidence, named follow-ups, and the resume gate. This is tracked follow-up on
+the existing parent, not a claim that a new producer is already on the task board.
 
 ## Resolved Items
+
 
 | ID     | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Accepted Decision                                                                                                                                                  |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
