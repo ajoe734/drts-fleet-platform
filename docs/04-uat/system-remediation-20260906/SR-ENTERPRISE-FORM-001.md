@@ -38,3 +38,12 @@ Additional reproducible defect: JavaScript accepts `2027-02-29T10:00:00+08:00` a
 4. No live booking was created; bookingId/orderId/resource IDs: none. No API delivery, CI, PR merge or deployment claim. Historical evidence claiming complete repair is superseded by this report.
 
 Only declared write scopes were changed. Shared dependencies and API contracts were not modified.
+
+## Follow-up dispatch: routing blocker confirmed
+
+- `git fetch origin`: exit 0; origin/dev remains `a24045986ac29231d34657df3a343b02d9fbb770`. Local HEAD and origin/codex/sr-enterprise-form-001 both resolve to `8ad8136935067f5edbb3568f4004cd6ed1841d58` before this evidence-only update. No rebase needed; worktree was clean.
+- Current source still uses frontend `MIN_LEAD_TIME_MINUTES = 15` and seeded bookedBy, while backend `getMinLeadTimeMinutes()` reads environment configuration. The policy/identity gaps above remain reproducible by source inspection.
+- Canonical `ai-status.sh show SR-BOOKING-VERIFY` and `show SR-BOOKING-VERIFY-001` both exit 1: Task not found. The execution table contains SR-QA-BOOKING-001, a downstream verification task depending on this task, so it cannot be substituted as the missing implementation dependency.
+- `ai-status.sh show SR-ENTERPRISE-DATA-001`: exit 0; status blocked, waiting_for Codex2, with no identity-source scope expansion. Its current scope does not supply an authenticated booking identity integration.
+- Supervisor adjudication needed: register/identify the minimum-lead policy API producer referenced by the brief, assign the authenticated identity integration producer, and add the necessary scopes/dependencies. Route through known reviewer Codex2; do not use the unregistered task name as a waiting-for agent.
+- `git diff --check`: exit 0. No implementation changes in this follow-up; earlier test results above are retained, not represented as rerun. No new browser, physical-device, live booking, resource ID, CI or merge evidence; no candidate handoff.
