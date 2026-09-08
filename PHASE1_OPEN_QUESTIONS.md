@@ -18,6 +18,17 @@ returns to Supervisor/Chairman, not an invented environment variable.
 This is a follow-up on the existing parent, not a new implementation task or
 scope grant. See [decision, paths and resume gate](support/unblock/SR-ENV-COPY-001/SR-ENV-COPY-001-UNBLOCK-PLANNING-DECISION.md).
 
+### Q-SR-QA-WEBHOOK-001 — tenant repair scope and webhook deadline
+
+Existing tenant isolation rules already forbid the API key metadata exposure
+reported by `SR-QA-WEBHOOK-001`; no product waiver is implied. Supervisor/Claude
+must authorize and sequence the existing P0
+`SR-QA-WEBHOOK-001-FIX-TENANT-BINDING`, add it to the parent's dependencies,
+and route the still-unspecified default webhook transport deadline contract.
+Codex owns parent/repair execution; Gemini reviews them. Preserve all C111–C115
+acceptance and the parent's blocked state, including usage and external evidence
+gates. See the [contract basis, proposed scope and resume steps](support/unblock/SR-QA-WEBHOOK-001/SR-QA-WEBHOOK-001-UNBLOCK-PLANNING-DECISION.md).
+
 Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-ENTERPRISE-FORM-001`, `Q-SR-ENTERPRISE-DATA-001`, `Q-SR-PROOF-001`, `Q-SR-REPORT-001`.
 
 ### Q-SR-ENTERPRISE-FORM-001 — theme precedence and shared scope authorization
