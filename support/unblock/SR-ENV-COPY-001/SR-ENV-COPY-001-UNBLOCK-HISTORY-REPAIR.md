@@ -44,7 +44,7 @@ to rewrite or delete shared history.
 The current three-dot diff has 11 files: five translation catalogs (enterprise,
 fleet, ops, platform-admin, tenant), three environment-badge source files, the
 parent UAT document, the scoped regression file, and
-`packages/ui-web/tests/unit/environment-badge.test.ts`. The last file is outside
+[the historical legacy badge test](https://github.com/ajoe734/drts-fleet-platform/blob/3a1024973d86fe0bee5e1d5879bcdeca7edf14d3/packages/ui-web/tests/unit/environment-badge.test.ts). The last file is outside
 the parent write scopes. It was introduced by 9ee6f587 and replayed in the
 equivalent implementation commits. Its NODE_ENV-only assertion expects
 production despite its test title; the corrected resolver returns unknown.
