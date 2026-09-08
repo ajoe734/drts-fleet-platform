@@ -1,94 +1,45 @@
 {
   "taskId": "SR-QA-WEBHOOK-001",
-  "runId": "uat-SR-QA-WEBHOOK-001-106cd73b",
+  "runId": "uat-SR-QA-WEBHOOK-001-dcbb2639",
   "shardIndex": 0,
-  "baseSha": "3b82fba0fabba3328e3443de3d602780f852d724",
-  "candidateSha": "55334bae5229d38c6254331c58dfdc35d3e91ae9",
-  "headSha": "55334bae5229d38c6254331c58dfdc35d3e91ae9",
-  "startTime": "2026-09-08T18:40:27.941Z",
-  "endTime": "2026-09-08T18:41:57.235Z",
+  "baseSha": "c71b66ebed6d6948dbb9eca99ce9efea3ede9218",
+  "candidateSha": "a95931f57687f26abcfb340df9e00a65448740fe",
+  "headSha": "a95931f57687f26abcfb340df9e00a65448740fe",
+  "startTime": "2026-09-08T21:39:39.001Z",
+  "endTime": "2026-09-08T21:39:50.603Z",
   "status": "failed",
   "exitCode": 1,
   "roles": [],
   "trackedResources": [
     {
       "type": "webhook",
-      "id": "wh_25c597dc-c5bf-4c5f-abe5-5adf26a3269e",
+      "id": "wh_606aa2b3-3f38-4711-a41e-0c0497dd52a9",
       "metadata": {
         "tenantId": "tenant-demo-001"
       }
     },
     {
       "type": "delivery",
-      "id": "wd_cff7b0fb-d4b3-4e49-98ff-526c91c00e31",
+      "id": "wd_9ce58f37-b7f1-4629-a949-ffa42bddc1ed",
       "metadata": {
-        "webhookId": "wh_25c597dc-c5bf-4c5f-abe5-5adf26a3269e"
-      }
-    },
-    {
-      "type": "postgres_acceptance",
-      "id": "qa-webhook-13be492c-936f-430b-892b-83daddb1749c",
-      "metadata": {
-        "tenantId": "qa-webhook-13be492c-936f-430b-892b-83daddb1749c",
-        "apiKeyId": "api_key_1255a65b-447a-4634-a260-7fa235b388ce",
-        "rotatedApiKeyId": "api_key_14be3e42-0d04-4b0b-a256-5416f4123af9",
-        "otherTenantId": "qa-webhook-ab519445-6899-40ff-92ab-de5edd08af1d",
-        "crossTenantMutationError": "API_KEY_NOT_FOUND",
-        "persistedRowsUnchangedAfterDeniedMutation": true
-      }
-    },
-    {
-      "type": "postgres_acceptance",
-      "id": "qa-webhook-e7fecef8-45ab-487f-a1e5-30200ae3865c",
-      "metadata": {
-        "tenantId": "qa-webhook-e7fecef8-45ab-487f-a1e5-30200ae3865c",
-        "webhookId": "wh_6dd85ef1-03e5-4bb0-8605-06269b56fb43",
-        "deliveryId": "wd_13a2d67c-e100-4e80-a819-83b4482a5a36",
-        "outboxKey": "3ba6a3f6-11f9-43f3-9fde-df68d054f471",
-        "requests": 3
-      }
-    },
-    {
-      "type": "postgres_acceptance",
-      "id": "qa-webhook-6547d3f3-4558-4187-bf97-4a5811db88a7",
-      "metadata": {
-        "tenantId": "qa-webhook-6547d3f3-4558-4187-bf97-4a5811db88a7",
-        "webhookId": "wh_d421d6a5-faaa-4a3f-8699-3996e6475c73",
-        "deliveryId": "wd_ac0c3446-6aed-4888-aeda-70ef6a18a9f0",
-        "command": {
-          "eventType": "dispatch.assigned",
-          "data": {
-            "orderId": "f43a10de-4987-47a3-8583-3853280cab9e"
-          },
-          "outboxKey": "8affd1d2-75ae-45b1-8f5b-d2ca5e483ff3"
-        },
-        "writerPid": 9537,
-        "recoveryPid": 9667,
-        "status": "delivered",
-        "requests": 3,
-        "terminationSignal": "SIGKILL"
+        "webhookId": "wh_606aa2b3-3f38-4711-a41e-0c0497dd52a9"
       }
     }
   ],
   "httpCalls": [],
   "consoleLogs": [
     {
-      "timestamp": "2026-09-08T18:40:33.120Z",
+      "timestamp": "2026-09-08T21:39:43.878Z",
       "level": "info",
-      "message": "\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\nSR-QA-WEBHOOK-001 timeout resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_25c597dc-c5bf-4c5f-abe5-5adf26a3269e\",\"deliveryId\":\"wd_cff7b0fb-d4b3-4e49-98ff-526c91c00e31\",\"transport\":\"real fetch with test-injected 100ms deadline\"}\nSR-QA-WEBHOOK-001 default transport resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_f17d0bfc-e960-4af6-b4d1-3e530f16b482\",\"deliveryId\":\"wd_e5570784-ae23-43d5-89cf-d5f1c96f3655\",\"observationMs\":1001,\"settledBeforePeerDisconnect\":false,\"recoveryTrigger\":\"receiver closed TCP connection\",\"limitation\":\"A bounded observation does not establish a default deadline or its absence\"}\nSR-QA-WEBHOOK-001 replay resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_389331d3-57c2-4611-83a6-bdb7bd0200d1\",\"deliveryId\":\"wd_61bedf1a-a843-424e-ac32-01c8e853c0e0\",\"receiverRequests\":8,\"negativeCases\":[{\"name\":\"tampered body\",\"status\":401},{\"name\":\"wrong signature\",\"status\":401},{\"name\":\"missing signature\",\"status\":401},{\"name\":\"expired timestamp\",\"status\":400},{\"name\":\"future timestamp\",\"status\":400},{\"name\":\"invalid timestamp\",\"status\":400}],\"replayStatus\":409,\"policy\":\"test-owned receiver; 300s freshness, HMAC then deduplication\"}\n[Nest] 5934  - 09/08/2026, 6:40:33 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (fb398910-8366-415d-af12-9171d05719e5)\n[Nest] 5934  - 09/08/2026, 6:40:33 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (ce9391a5-3087-458d-a762-195cc870e603)\n\n Test Files  1 passed (1)\n      Tests  25 passed (25)\n   Start at  18:40:28\n   Duration  4.18s (transform 1.93s, setup 0ms, import 2.69s, tests 1.34s, environment 0ms)\n\n"
-    },
-    {
-      "timestamp": "2026-09-08T18:41:44.619Z",
-      "level": "info",
-      "message": "base_sha=3b82fba0fabba3328e3443de3d602780f852d724\nexecution_sha=55334bae5229d38c6254331c58dfdc35d3e91ae9\nisolated_database=sr_qa_webhook_001_1788892833_6250 (schema-only clone of local drts_fleet_platform)\n\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001\n\n[Nest] 6619  - 09/08/2026, 6:40:41 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 6619  - 09/08/2026, 6:40:41 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 6619  - 09/08/2026, 6:40:41 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 6619  - 09/08/2026, 6:41:11 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n[Nest] 6619  - 09/08/2026, 6:41:11 PM   DEBUG [DatabaseService] Closed Postgres connection pool.\n\n Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Start at  18:40:39\n   Duration  64.45s (transform 847ms, setup 0ms, import 1.28s, tests 63.00s, environment 0ms)\n\n"
+      "message": "\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001-2\n\nSR-QA-WEBHOOK-001 timeout resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_606aa2b3-3f38-4711-a41e-0c0497dd52a9\",\"deliveryId\":\"wd_9ce58f37-b7f1-4629-a949-ffa42bddc1ed\",\"transport\":\"real fetch with test-injected 100ms deadline\"}\nSR-QA-WEBHOOK-001 default transport resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_09e65a16-4385-4d20-a6f0-d38f086e8aac\",\"deliveryId\":\"wd_43f26e9f-3590-4517-bf09-db993e19443e\",\"observationMs\":1001,\"settledBeforePeerDisconnect\":false,\"recoveryTrigger\":\"receiver closed TCP connection\",\"limitation\":\"A bounded observation does not establish a default deadline or its absence\"}\nSR-QA-WEBHOOK-001 replay resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_016b7361-8a4f-4eff-b268-d27050a1266e\",\"deliveryId\":\"wd_40d2ee19-9bf8-4044-aee8-70b977852941\",\"receiverRequests\":8,\"negativeCases\":[{\"name\":\"tampered body\",\"status\":401},{\"name\":\"wrong signature\",\"status\":401},{\"name\":\"missing signature\",\"status\":401},{\"name\":\"expired timestamp\",\"status\":400},{\"name\":\"future timestamp\",\"status\":400},{\"name\":\"invalid timestamp\",\"status\":400}],\"replayStatus\":409,\"policy\":\"test-owned receiver; 300s freshness, HMAC then deduplication\"}\n[Nest] 913804  - 09/08/2026, 9:39:43 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (f80d3437-fce2-4a32-a7be-088f33676423)\n[Nest] 913804  - 09/08/2026, 9:39:43 PM   DEBUG [OpsDispatchEventsService] Event publication lag: 0ms for order_created (b3216af5-e21d-4ec2-a37f-ef5cf55f99e5)\n\n Test Files  1 passed (1)\n      Tests  25 passed (25)\n   Start at  21:39:39\n   Duration  3.94s (transform 1.77s, setup 0ms, import 2.48s, tests 1.30s, environment 0ms)\n\n"
     }
   ],
   "artifacts": [],
   "errors": [
     {
-      "message": "Command failed: bash tests/unit/system-remediation/sr-qa-webhook-001/run-auth-http.sh\n(node:14330) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n(Use `node --trace-warnings ...` to show where the warning was created)\n(node:14697) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n(Use `node --trace-warnings ...` to show where the warning was created)\n(node:14952) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n(Use `node --trace-warnings ...` to show where the warning was created)\n\n⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯\n\n FAIL  tests/unit/system-remediation/sr-qa-webhook-001/auth-http.test.ts > C111: durable Bearer [REDACTED_TOKEN] a persisted key over HTTP and denied writes leave DB unchanged\nAssertionError: {\"authenticatedTenantId\":\"qa-http-other-ff229e08-afa7-449c-908e-b1f77f5be0ea\",\"requestedTenantId\":\"qa-http-c5aec350-4b9f-4d8b-8a87-ad158a21c2cf\",\"sessionId\":\"sid_4ef74853aa2341659f5faa9f4bda0784\",\"status\":200,\"exposedVictimKeyId\":true}: expected 200 to be 403 // Object.is equality\n\n- Expected\n+ Received\n\n- 403\n+ 200\n\n ❯ tests/unit/system-remediation/sr-qa-webhook-001/auth-http.test.ts:295:65\n    293|         JSON.stringify(evidence, null, 2) + \"\\n\",\n    294|       );\n    295|     expect(crossTenantRead.status, JSON.stringify(crossTenant)).toBe(4…\n       |                                                                 ^\n    296|     expect(crossTenant.exposedVictimKeyId).toBe(false);\n    297|   } finally {\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯\n\n",
-      "stack": "Error: Command failed: bash tests/unit/system-remediation/sr-qa-webhook-001/run-auth-http.sh\n(node:14330) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n(Use `node --trace-warnings ...` to show where the warning was created)\n(node:14697) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n(Use `node --trace-warnings ...` to show where the warning was created)\n(node:14952) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n(Use `node --trace-warnings ...` to show where the warning was created)\n\n⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯\n\n FAIL  tests/unit/system-remediation/sr-qa-webhook-001/auth-http.test.ts > C111: durable Bearer [REDACTED_TOKEN] a persisted key over HTTP and denied writes leave DB unchanged\nAssertionError: {\"authenticatedTenantId\":\"qa-http-other-ff229e08-afa7-449c-908e-b1f77f5be0ea\",\"requestedTenantId\":\"qa-http-c5aec350-4b9f-4d8b-8a87-ad158a21c2cf\",\"sessionId\":\"sid_4ef74853aa2341659f5faa9f4bda0784\",\"status\":200,\"exposedVictimKeyId\":true}: expected 200 to be 403 // Object.is equality\n\n- Expected\n+ Received\n\n- 403\n+ 200\n\n ❯ tests/unit/system-remediation/sr-qa-webhook-001/auth-http.test.ts:295:65\n    293|         JSON.stringify(evidence, null, 2) + \"\\n\",\n    294|       );\n    295|     expect(crossTenantRead.status, JSON.stringify(crossTenant)).toBe(4…\n       |                                                                 ^\n    296|     expect(crossTenant.exposedVictimKeyId).toBe(false);\n    297|   } finally {\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯\n\n\n    at genericNodeError (node:internal/errors:983:15)\n    at wrappedFn (node:internal/errors:537:14)\n    at checkExecSyncError (node:child_process:916:11)\n    at execFileSync (node:child_process:952:15)\n    at /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001/tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts:85:36\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at /home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/workerMain.js:326:9\n    at /home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/testInfo.js:320:11\n    at TimeoutManager.withRunnable (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/timeoutManager.js:75:14)\n    at TestInfoImpl._runWithTimeout (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/testInfo.js:318:7)\n    at /home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/workerMain.js:324:7\n    at WorkerMain._runTest (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/workerMain.js:297:5)\n    at WorkerMain.runTestGroup (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/workerMain.js:203:9)\n    at process.<anonymous> (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/common/process.js:73:22)",
-      "timestamp": "2026-09-08T18:41:57.227Z"
+      "message": "Command failed: bash tests/unit/system-remediation/sr-qa-webhook-001/run-postgres.sh\nfatal: Unable to read current working directory: No such file or directory\nfatal: Unable to read current working directory: No such file or directory\n(node:915426) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n(Use `node --trace-warnings ...` to show where the warning was created)\nnode:internal/bootstrap/switches/does_own_process_state:142\n    cachedCwd = rawMethods.cwd();\n                           ^\n\nError: ENOENT: no such file or directory, uv_cwd\n\u001b[90m    at process.wrappedCwd (node:internal/bootstrap/switches/does_own_process_state:142:28)\u001b[39m\n    at process.cwd (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:1339:23)\n    at process.cwd (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:3560:23)\n    at ../node_modules/\u001b[4m.pnpm\u001b[24m/g***@2.0.12/node_modules/\u001b[4mget-source\u001b[24m/impl/path.js (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:35363:58)\n    at __require (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:12:50)\n    at ../node_modules/\u001b[4m.pnpm\u001b[24m/g***@2.0.12/node_modules/\u001b[4mget-source\u001b[24m/get-source.js (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:35454:17)\n    at __require (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:12:50)\n    at ../node_modules/\u001b[4m.pnpm\u001b[24m/s***@2.2.0/node_modules/\u001b[4mstacktracey\u001b[24m/stacktracey.js (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:35754:21)\n    at __require (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:12:50)\n    at ../cli/default-reporter/lib/reportError.js (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:35993:42) {\n  errno: \u001b[33m-2\u001b[39m,\n  code: \u001b[32m'ENOENT'\u001b[39m,\n  syscall: \u001b[32m'uv_cwd'\u001b[39m\n}\n\nNode.js v22.23.2\n",
+      "stack": "Error: Command failed: bash tests/unit/system-remediation/sr-qa-webhook-001/run-postgres.sh\nfatal: Unable to read current working directory: No such file or directory\nfatal: Unable to read current working directory: No such file or directory\n(node:915426) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n(Use `node --trace-warnings ...` to show where the warning was created)\nnode:internal/bootstrap/switches/does_own_process_state:142\n    cachedCwd = rawMethods.cwd();\n                           ^\n\nError: ENOENT: no such file or directory, uv_cwd\n\u001b[90m    at process.wrappedCwd (node:internal/bootstrap/switches/does_own_process_state:142:28)\u001b[39m\n    at process.cwd (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:1339:23)\n    at process.cwd (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:3560:23)\n    at ../node_modules/\u001b[4m.pnpm\u001b[24m/g***@2.0.12/node_modules/\u001b[4mget-source\u001b[24m/impl/path.js (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:35363:58)\n    at __require (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:12:50)\n    at ../node_modules/\u001b[4m.pnpm\u001b[24m/g***@2.0.12/node_modules/\u001b[4mget-source\u001b[24m/get-source.js (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:35454:17)\n    at __require (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:12:50)\n    at ../node_modules/\u001b[4m.pnpm\u001b[24m/s***@2.2.0/node_modules/\u001b[4mstacktracey\u001b[24m/stacktracey.js (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:35754:21)\n    at __require (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:12:50)\n    at ../cli/default-reporter/lib/reportError.js (/home/lupin/.local/share/pnpm/.tools/pnpm/10.33.0_tmp_11822_0/node_modules/\u001b[4mpnpm\u001b[24m/dist/pnpm.cjs:35993:42) {\n  errno: \u001b[33m-2\u001b[39m,\n  code: \u001b[32m'ENOENT'\u001b[39m,\n  syscall: \u001b[32m'uv_cwd'\u001b[39m\n}\n\nNode.js v22.23.2\n\n    at genericNodeError (node:internal/errors:983:15)\n    at wrappedFn (node:internal/errors:537:14)\n    at checkExecSyncError (node:child_process:916:11)\n    at execFileSync (node:child_process:952:15)\n    at /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-qa-webhook-001-2/tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts:64:34\n    at processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at /home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/workerMain.js:326:9\n    at /home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/testInfo.js:320:11\n    at TimeoutManager.withRunnable (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/timeoutManager.js:75:14)\n    at TestInfoImpl._runWithTimeout (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/testInfo.js:318:7)\n    at /home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/workerMain.js:324:7\n    at WorkerMain._runTest (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/workerMain.js:297:5)\n    at WorkerMain.runTestGroup (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/worker/workerMain.js:203:9)\n    at process.<anonymous> (/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm/p***@1.59.1/node_modules/playwright/lib/common/process.js:73:22)",
+      "timestamp": "2026-09-08T21:39:50.602Z"
     }
   ],
   "unimplementedLiveSurfaces": []
