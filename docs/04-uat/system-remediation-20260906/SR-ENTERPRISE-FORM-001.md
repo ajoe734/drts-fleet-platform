@@ -1,5 +1,13 @@
 # SR-ENTERPRISE-FORM-001 — 驗收證據
 
+## 2026-09-08 18:07 UTC dispatch — scope blocker 再確認
+
+- Fresh base origin/dev：`a44ea852eabe0c88e54d8124802eccf86ebc1dc6`；起始已發布 head：`093734506e591e6aac7f75a72163a31a3ed4db8f`。目前 base 尚無 booking-validation.ts，不將歷史修復誤認為已合併。
+- git fetch origin exit 0；git rebase origin/dev 初次 exit 1（重複歷史 patch 衝突），abort exit 0 後重新比對；skip 三個已保留的重複修復，最終 rebase exit 0。git merge --no-edit origin/codex2/sr-enterprise-form-001 exit 0，保留普通 push 歷史；task 檔案與起始 head 無內容差異。
+- 驗證 SHA：`d9ad700ce1b54009f34a9b191849c5c61339669c`。pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/ exit 0（15 passed、3 browser skipped）；pnpm --filter @drts/enterprise-dispatch-web typecheck exit 0；git diff --check exit 0。
+- 本輪未啟動 browser server，未做 live API、真機軟鍵盤或建立資源 ID；歷史 browser 結果見下節，不冒充本 SHA 的 browser 成功證據。尚無鎖定 candidate，最終 evidence-only head 由 machine blocker 記錄。
+- 阻礙仍存在：enterprise-theme.ts:54 自訂 accent #2457D6；realm tenant light/dark 為 #0F766E/#5EEAD4。machine write_scopes 仍未包含 lib/enterprise-theme.ts，且歷史 lib/translations.ts 變更仍需 scope 核對。依 dispatch 明示 guardrail，需 supervisor 擴 scope 並建立共用檔相依後才能寫；本輪未修改 UI、未 handoff。
+
 ## 2026-09-08 15:44 UTC Codex2 dispatch — 回歸完成，scope blocker 尚存
 
 - 本輪 base：fresh `origin/dev` = `3f182f7e314b5ddb4c37f1c3f5dc214a6d0edf0e`；起始 branch head `b97be8a00ff42bda340e40aa029e3b912b5203fd`。
