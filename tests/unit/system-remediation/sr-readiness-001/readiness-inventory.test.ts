@@ -48,6 +48,14 @@ describe("SR-READINESS-001 repository-only readiness inventory", () => {
         "current_evidence_merged",
       ]).toContain(item.status);
       expect(item.status).not.toBe("passed");
+      if (item.status === "current_evidence_merged") {
+        expect(item.evidence).toBeTruthy();
+        for (const taskId of item.evidence.match(/SR-[A-Z-]+-\d+/g) ?? []) {
+          expect(readiness.merged_task_evidence[taskId]).toMatch(
+            /^[0-9a-f]{40}$/,
+          );
+        }
+      }
     }
   });
 

@@ -24,9 +24,19 @@
     {
       "command": "git log --oneline -15 origin/dev",
       "exit_code": 0,
-      "result": "Current dev includes merged remediation evidence including SR-BANK-003, SR-IAM-001, SR-SCOPE-001, SR-INVOICE-001, SR-ADMIN-VERIFY-001, SR-FLEET-DATA-001 and UV-EXEC-027 re-verification commits."
+      "result": "Current dev includes merged remediation evidence including SR-BANK-003, SR-IAM-001, SR-SCOPE-001, SR-INVOICE-001, SR-ADMIN-VERIFY-001, and UV-EXEC-027 re-verification commits."
     }
   ],
+  "merged_task_evidence": {
+    "SR-ADMIN-VERIFY-001": "feaf5c7f260970955a63389cb45f8f863577c214",
+    "SR-BANK-001": "6d4c47feb1c68f8b53310597da7aeffb6940cc19",
+    "SR-IAM-001": "548608e45841ca9edcbf382399bbbfb74d164535",
+    "SR-REFERRAL-001": "503f36015adc084e75ee33e5a866525b5c7d72c6",
+    "SR-BANK-003": "b32ab8badb740b94cdf67212315ecfccf21f6d5d",
+    "SR-OPS-MAP-001": "bb265b286d718e61d2c50479deb0ddcd031a4597",
+    "SR-INVOICE-001": "a4876ac529abfb634c2b96f237116202abf3d87d",
+    "SR-MAIL-002": "564e27f63045789537b54f5c0b5909f6468032ca"
+  },
   "issue_inventory": {
     "source_files": ["source/findings.json", "source/new-gaps.json"],
     "current_version_sha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
@@ -65,23 +75,23 @@
       },
       {
         "id": "R08",
-        "status": "current_evidence_merged",
-        "evidence": "SR-ENTERPRISE-DATA-001 / SR-ENTERPRISE-SEARCH-001"
+        "status": "not_run",
+        "next": "SR-ENTERPRISE-DATA-001 / SR-ENTERPRISE-SEARCH-001"
       },
       {
         "id": "R09",
-        "status": "current_evidence_merged",
-        "evidence": "SR-ENTERPRISE-DATA-001"
+        "status": "not_run",
+        "next": "SR-ENTERPRISE-DATA-001"
       },
       {
         "id": "R10",
-        "status": "current_evidence_merged",
-        "evidence": "SR-FLEET-DATA-001"
+        "status": "not_run",
+        "next": "SR-FLEET-DATA-001"
       },
       {
         "id": "R11",
-        "status": "current_evidence_merged",
-        "evidence": "SR-FLEET-DATA-001"
+        "status": "not_run",
+        "next": "SR-FLEET-DATA-001"
       },
       { "id": "R12", "status": "not_run", "next": "SR-FLEET-CASE-001" },
       { "id": "R13", "status": "not_run", "next": "SR-FLEET-SETTLE-001" },
@@ -93,8 +103,8 @@
       { "id": "R15", "status": "not_run", "next": "SR-BANK-002" },
       {
         "id": "R16",
-        "status": "current_evidence_merged",
-        "evidence": "SR-BANK-001 / SR-ENTERPRISE-DATA-001"
+        "status": "not_run",
+        "next": "SR-BANK-001 / SR-ENTERPRISE-DATA-001"
       },
       {
         "id": "R17",
@@ -113,15 +123,15 @@
       { "id": "R23", "status": "not_run", "next": "SR-FLEET-FORM-001" },
       {
         "id": "R24",
-        "status": "current_evidence_merged",
-        "evidence": "SR-FLEET-DATA-001 / SR-ENTERPRISE-SEARCH-001"
+        "status": "not_run",
+        "next": "SR-FLEET-DATA-001 / SR-ENTERPRISE-SEARCH-001"
       },
       { "id": "R25", "status": "not_run", "next": "SR-FLEET-FORM-001" },
       { "id": "R26", "status": "not_run", "next": "SR-CHANNEL-001" },
       {
         "id": "R27",
-        "status": "current_evidence_merged",
-        "evidence": "SR-ENV-COPY-001"
+        "status": "not_run",
+        "next": "SR-ENV-COPY-001"
       },
       {
         "id": "R28",
@@ -156,18 +166,18 @@
       {
         "id": "N04",
         "status": "current_evidence_merged",
-        "evidence": "SR-ARTIFACT-001 / SR-INVOICE-001"
+        "evidence": "SR-INVOICE-001"
       },
       { "id": "N05", "status": "not_run", "next": "SR-REPORT-001" },
       {
         "id": "N06",
-        "status": "current_evidence_merged",
-        "evidence": "SR-NOTIFY-001 / SR-MAIL-001"
+        "status": "not_run",
+        "next": "SR-NOTIFY-001 / SR-MAIL-001"
       },
       {
         "id": "N07",
         "status": "current_evidence_merged",
-        "evidence": "SR-NOTIFY-001 / SR-MAIL-002"
+        "evidence": "SR-MAIL-002"
       },
       { "id": "N08", "status": "not_run", "next": "SR-PLACARD-001" },
       { "id": "N09", "status": "not_run", "next": "SR-PROOF-001" },
