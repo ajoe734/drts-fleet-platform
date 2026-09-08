@@ -70,7 +70,9 @@ describe("SR-PUSH-001 existing outbox boundary", () => {
       attemptCount: 1,
       nextAttemptAt: "2026-09-08T21:11:00.000Z",
     });
-    expect(repository.updateConsumerNotificationOutboxDelivery).toHaveBeenCalledWith(outcome);
+    expect(
+      repository.updateConsumerNotificationOutboxDelivery,
+    ).toHaveBeenCalledWith(outcome);
   });
 
   it.each(["provider 503", "expired device"])(
@@ -79,7 +81,9 @@ describe("SR-PUSH-001 existing outbox boundary", () => {
       const port = acknowledgingPort();
       port.send.mockRejectedValue(new Error(reason));
       const { service } = harness(port);
-      expect(await service.deliverPassengerNotification(record({ attemptCount: 8 }))).toMatchObject({
+      expect(
+        await service.deliverPassengerNotification(record({ attemptCount: 8 })),
+      ).toMatchObject({
         status: "failed",
         result: "provider_error",
         deliveredAt: null,
@@ -92,27 +96,51 @@ describe("SR-PUSH-001 existing outbox boundary", () => {
   it("forwards outbox identity and persists an acknowledged attempt", async () => {
     const port = acknowledgingPort();
     const { service, repository } = harness(port);
-    const outcome = await service.deliverPassengerNotification(record(), "sr-push-001-request-001");
+    const outcome = await service.deliverPassengerNotification(
+      record(),
+      "sr-push-001-request-001",
+    );
     expect(port.send).toHaveBeenCalledWith(
-      expect.objectContaining({ outboxId: record().outboxId, passengerSubjectRef: record().passengerSubjectRef }),
+      expect.objectContaining({
+        outboxId: record().outboxId,
+        passengerSubjectRef: record().passengerSubjectRef,
+      }),
       { requestId: "sr-push-001-request-001" },
     );
     expect(outcome.status).toBe("delivered");
-    expect(repository.updateConsumerNotificationOutboxDelivery).toHaveBeenCalledWith(outcome);
+    expect(
+      repository.updateConsumerNotificationOutboxDelivery,
+    ).toHaveBeenCalledWith(outcome);
   });
 
   // Expected-failure regressions keep the baseline audit executable. Remove
   // `.fails` when supervisor authorizes and the corresponding fix lands.
-  it.fails("must not send an already delivered outbox row again (scope expansion required)", async () => {
-    const port = acknowledgingPort();
-    const { service } = harness(port);
-    await service.deliverPassengerNotification(record({ status: "delivered", deliveredAt: now.toISOString(), attemptCount: 1 }));
-    expect(port.send).not.toHaveBeenCalled();
-  });
+  it.fails(
+    "must not send an already delivered outbox row again (scope expansion required)",
+    async () => {
+      const port = acknowledgingPort();
+      const { service } = harness(port);
+      await service.deliverPassengerNotification(
+        record({
+          status: "delivered",
+          deliveredAt: now.toISOString(),
+          attemptCount: 1,
+        }),
+      );
+      expect(port.send).not.toHaveBeenCalled();
+    },
+  );
 
-  it.fails("must not report durable delivery when the outbox write fails (scope expansion required)", async () => {
-    const { service, repository } = harness(acknowledgingPort());
-    repository.updateConsumerNotificationOutboxDelivery.mockRejectedValue(new Error("database unavailable"));
-    await expect(service.deliverPassengerNotification(record())).rejects.toThrow();
-  });
+  it.fails(
+    "must not report durable delivery when the outbox write fails (scope expansion required)",
+    async () => {
+      const { service, repository } = harness(acknowledgingPort());
+      repository.updateConsumerNotificationOutboxDelivery.mockRejectedValue(
+        new Error("database unavailable"),
+      );
+      await expect(
+        service.deliverPassengerNotification(record()),
+      ).rejects.toThrow();
+    },
+  );
 });

@@ -38,6 +38,10 @@ The existing injectable `PassengerPushPort` permits the regression tests without
 - `pnpm exec vitest run tests/unit/system-remediation/sr-push-001/`: exit 0; **4 passed, 2 expected failures**, 6 total, 2.57 seconds. Expected failures document unresolved bugs; they are not acceptance passes. Remove `.fails` when the corresponding fixes are authorized and implemented.
 - Subsequent `pnpm --filter @drts/api typecheck`: exit 2, missing `@drts/control-plane-auth` declarations. Dependency build and rerun follow below.
 - `git diff --check`: exit 0 before evidence commit.
+- `pnpm --filter @drts/control-plane-auth build`: exit 0; then `pnpm --filter @drts/api typecheck`: exit 0.
+- `pnpm exec prettier --write tests/unit/system-remediation/sr-push-001/outbox-boundary.test.ts docs/04-uat/system-remediation-20260906/SR-PUSH-001.md`: exit 0.
+- `pnpm exec eslint tests/unit/system-remediation/sr-push-001/outbox-boundary.test.ts --max-warnings=0`: exit 0.
+- First anchor `8b015a460` committed and `git push -u origin codex2/sr-push-001` exited 0 (ordinary new-branch push). Subsequent evidence/formatting commit remains an anchor, not a candidate.
 
 ## Resource IDs and limits
 
