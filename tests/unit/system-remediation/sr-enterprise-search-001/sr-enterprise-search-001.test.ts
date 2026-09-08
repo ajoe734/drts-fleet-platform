@@ -12,6 +12,7 @@ import BookingsHistoryPage, {
   matchesBookingDateRange,
   matchesBookingSearch,
   paginateEnterpriseBookings,
+  resolveCurrentEnterpriseUser,
   type EnterpriseBookingFilterCriteria,
   type EnterpriseCurrentUser,
   type EnterpriseUserIdentity,
@@ -753,8 +754,10 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
     });
   });
 
-  describe("12. Authoritative API Query and Resource-ID Evidence (Codex Acceptance Gap)", () => {
-    // Concrete authoritative tenant records with genuine resource IDs
+  describe("12. In-Memory Filter Contract Validation with BookingRecord Model (Unit-Level Only; Not Live/API Integration Evidence)", () => {
+    // In-memory verification of filter algorithms against the BookingRecord schema.
+    // NOTE (Codex review rejection P1 evidence): These records are mock unit data,
+    // NOT live API query or backend database resource ID evidence.
     const authoritativeApiBookings: BookingRecord[] = [
       createMockBooking({
         bookingId: "booking-authoritative-001",
@@ -901,6 +904,22 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
       expect(page2.page).toBe(2);
       expect(page2.items.length).toBe(1);
       expect(page2.items[0]!.bookingId).toBe("booking-authoritative-001");
+    });
+  });
+
+  describe("13. Current User Identity Resolution (Cookie, Prop, Fallback)", () => {
+    it("returns explicit user if provided as string or object", () => {
+      expect(resolveCurrentEnterpriseUser("Alice")).toBe("Alice");
+      const userObj: EnterpriseUserIdentity = {
+        id: "usr_alice_1",
+        name: "Alice",
+      };
+      expect(resolveCurrentEnterpriseUser(userObj)).toEqual(userObj);
+    });
+
+    it("falls back to default enterprise fixture user when no session or prop is available", () => {
+      expect(resolveCurrentEnterpriseUser()).toBe("林宜君");
+      expect(resolveCurrentEnterpriseUser(undefined)).toBe("林宜君");
     });
   });
 });

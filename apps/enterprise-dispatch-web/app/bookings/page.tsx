@@ -572,11 +572,78 @@ export interface BookingsHistoryPageProps {
   currentUser?: EnterpriseCurrentUser;
 }
 
+/**
+ * Resolves the active enterprise user identity.
+ *
+ * NOTE (Codex review rejection finding P1):
+ * Full authenticated session identity wiring in enterprise-dispatch-web requires
+ * supervisor-authorized scope expansion for authentication infrastructure.
+ * This helper attempts to resolve identity from explicit prop, then checks for browser-side
+ * session tokens (drts_session JWT payload, enterprise_user cookie) if present,
+ * before falling back to the default fixture user.
+ */
+export function resolveCurrentEnterpriseUser(
+  explicitUser?: EnterpriseCurrentUser,
+): EnterpriseCurrentUser {
+  if (explicitUser !== undefined && explicitUser !== null) {
+    return explicitUser;
+  }
+
+  if (typeof document !== "undefined" && document.cookie) {
+    const cookies = document.cookie.split(";").map((c) => c.trim());
+    for (const cookie of cookies) {
+      if (cookie.startsWith("enterprise_user=")) {
+        try {
+          const raw = decodeURIComponent(
+            cookie.slice("enterprise_user=".length),
+          );
+          return JSON.parse(raw);
+        } catch {
+          // ignore invalid JSON in cookie
+        }
+      }
+      if (cookie.startsWith("drts_session=")) {
+        try {
+          const token = cookie.slice("drts_session=".length);
+          const parts = token.split(".");
+          const payloadPart = parts[1];
+          if (parts.length >= 2 && payloadPart) {
+            const payloadJson = atob(
+              payloadPart.replace(/-/g, "+").replace(/_/g, "/"),
+            );
+            const payload = JSON.parse(payloadJson);
+            if (payload && (payload.sub || payload.name || payload.email)) {
+              return {
+                id: payload.sub ?? payload.userId ?? null,
+                name: payload.name ?? payload.fullName ?? null,
+                email: payload.email ?? null,
+                phone: payload.phone ?? null,
+              };
+            }
+          }
+        } catch {
+          // ignore invalid JWT structure
+        }
+      }
+    }
+  }
+
+  return enterpriseUser.name;
+}
+
 export default function BookingsHistoryPage({
-  currentUser = enterpriseUser.name,
+  currentUser: explicitUser,
 }: BookingsHistoryPageProps = {}) {
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, "zh");
+
+  const [currentUser, setCurrentUser] = useState<EnterpriseCurrentUser>(() =>
+    resolveCurrentEnterpriseUser(explicitUser),
+  );
+
+  useEffect(() => {
+    setCurrentUser(resolveCurrentEnterpriseUser(explicitUser));
+  }, [explicitUser]);
 
   const [bookings, setBookings] = useState<BookingRecord[] | null>(null);
   const [state, setState] = useState<GatewayState | null>(null);
