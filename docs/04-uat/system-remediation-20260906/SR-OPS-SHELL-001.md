@@ -1,5 +1,19 @@
 # SR-OPS-SHELL-001 — 本次恢復與阻塞證據
 
+## 2026-09-08 16:30 UTC dispatch 重驗
+
+- Fresh base `origin/dev`：`5cff9b36082998a0295f2550039306dc1f84c3d2`；恢復前 tip：`cef974a3d`；受測程式 SHA：`2c938cfef1c95690e160386740f17b390204831c`。尚無 handoff candidate，本次僅提交 evidence anchor。
+- `git fetch origin` exit 0；`git rebase origin/dev` 與多次 continue 因重複歷史的本 evidence 文件 add/add、content conflict exit 1；逐次保留已重播的新證據，最後 `GIT_EDITOR=true git rebase --continue` exit 0。沒有產品檔案衝突。
+- `git merge --no-edit origin/codex2/sr-ops-shell-001` exit 0；`git merge-base --is-ancestor cef974a3d HEAD` exit 0，保留已發布歷史供普通 push。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/` exit 0：1 file、13 tests passed，478ms。
+- `pnpm --filter @drts/ops-console-web typecheck` exit 0：`next typegen && tsc --noEmit` 成功。
+- `git diff --check` exit 0；`git diff origin/dev HEAD -- apps/ops-console-web/app/dispatch/page.tsx apps/platform-admin-web/app/audit/page.tsx` exit 0、無差異。
+- `gh pr list --head codex2/sr-ops-shell-001 --state open --json number,url` exit 0：既有 [PR #1714](https://github.com/ajoe734/drts-fleet-platform/pull/1714)。非新 candidate／CI 通過證據。
+
+Fresh base 的 dispatch 第1230行仍 fallback `/platform-admin`，第4520行仍使用無 resource context 的 `/audit`；audit receiver 第164行仍呼叫無參數 `listAuditLogs()`。這是原始碼核對，未宣稱 live popup 重現。Machine slice 仍未擴 sender／receiver scope、depends_on 為空。History-repair 明文指出「Product scope/receiver-contract blockers remain」；planning helper 要求 supervisor 授權 sender、必要 receiver 及重疊 writer 相依，並確認 `Q-SR-OPS-SHELL-001` 的 resource identity 與 URL→query 契約。僅以 history repair 完成再次喚醒，不足以解除這項產品阻塞。
+
+本次沒有 UI 修改。未執行瀏覽器 1440/390px CTA hit testing、開關／焦點／reload、audit popup、payments context 或真機/live 驗收；沒有 live 資源 ID，沒有建立業務資源。既有 AUD-* 僅為單元測試輸入。保留既有修補，等待上述 machine-truth 授權後再完成實作與 handoff。
+
 ## 2026-09-08 16:07 UTC history-repair 重派核對
 
 - Fresh base `origin/dev`：`c07d24e021aea847a988646427cdc534ccf4e496`；恢復前 task tip：`ffc7f4231`；受測程式 SHA：`44b40126bad2d3edba469bfa5ee586c5462a8bdd`。尚無 handoff candidate；本次 evidence anchor 不代表驗收完成。
