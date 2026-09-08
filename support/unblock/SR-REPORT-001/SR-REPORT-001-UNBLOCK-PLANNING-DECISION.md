@@ -31,4 +31,10 @@ Run the parent's API and ops-console typechecks, its task-local regression suite
 
 ## Helper verification and delivery
 
+### Dispatch recovery at 2026-09-08
+
+Rechecked dev `c07d24e021aea847a988646427cdc534ccf4e496`: the shared declaration remains CSV-only, PDF/XLSX renderers remain null, and the central regression still rejects both formats. The parent is in progress after history recovery, but its machine write scopes still omit both shared files. The scope follow-up above therefore remains necessary; history recovery has not supplied authorization. Both prerequisite tasks remain done.
+
+PR #1780 reported a merge conflict at candidate `e0a5f60fd5f20ec40d27cd0edb53ed7b69790f4b`. Attempted the prescribed rebase, then aborted because replacing the published history would require a non-fast-forward push. Integrated dev with a merge commit instead, retaining the existing published candidate as an ancestor. Resolved the open-question insertion conflict by preserving both Q-SR-REPORT-001 and Q-SR-ENTERPRISE-DATA-001 and listing both in the open-item summary. No other question decision changes. The updated exact candidate needs fresh review and CI; prior SHA evidence is not carried forward.
+
 Read single-task status slices for the helper, parent and two dependencies; inspected the cited product, scope and code sources at the base above. This change only records planning and routing; it does not implement formats or claim runtime/live acceptance. Delivery evidence is the task-scoped branch/PR and locked candidate in machine truth. Checks on routing anchor db44e5b0e: `git diff --check origin/dev...HEAD` exited 0; `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` exited 0 (1 commit OK); `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD` exited 0 (0 findings). Parent blocker/next step is recorded via the canonical ai-status.sh blocker command, waiting for Supervisor. Final candidate checks are also recorded in handoff.

@@ -4,7 +4,7 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-REPORT-001`.
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-REPORT-001`, `Q-SR-ENTERPRISE-DATA-001`.
 
 The original fifteen questions on this board were answered. Worth noting how, because the
 distribution was not what the board implied: of the fifteen, four were closed by
@@ -85,6 +85,18 @@ and sequencing are recorded in machine truth; history recovery alone does not
 satisfy that gate. See the [evidence, routing decision and resume gate](support/unblock/SR-REPORT-001/SR-REPORT-001-UNBLOCK-PLANNING-DECISION.md).
 This is an explicit follow-up on the existing parent, not authorization to edit
 shared files or a claim that a new producer task already exists.
+
+### Q-SR-ENTERPRISE-DATA-001 — shared scope and contact contract routing pending
+
+Owner: Codex2 (parent); reviewer: Codex. Supervisor/Chairman must adjudicate
+the shared detail 404, support action, and theme scopes and record dependency
+ordering before parent UI completion. Contract reviewer Codex must confirm an
+authorized driver/support contact source or route an explicit unavailable-contact
+acceptance decision. Passenger/onsite contact is not driver contact. Preserve
+the full parent acceptance; history repair does not grant scope or clear this
+gate. The parent remains blocked pending these decisions, tracked on the
+existing parent task rather than an unregistered producer. See the
+[routing record and concrete resume gate](support/unblock/SR-ENTERPRISE-DATA-001/SR-ENTERPRISE-DATA-001-UNBLOCK-PLANNING-DECISION.md).
 
 ## Resolved Items
 
