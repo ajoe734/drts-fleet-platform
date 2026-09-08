@@ -2005,8 +2005,9 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       try {
         if (scenario === "token_failure") {
           const multiTaxi = new MultiTaxiService(service, {
-            isEnabled: () => true,
-            persistRideAccessToken: async () => {
+              isEnabled: () => true,
+              persistAuthorization: async () => {},
+              persistRideAccessToken: async () => {
               throw new Error("injected token failure");
             },
           } as never);

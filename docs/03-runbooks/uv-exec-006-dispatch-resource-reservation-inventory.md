@@ -217,3 +217,29 @@ owned-mobility service unit suite passed **112/112** after strengthening its
 assignment recheck test with a deferred persistence promise: no transaction
 starts until the prior creation/matching writes finish. `git diff --check`
 also passed.
+
+### Cancellation persistence boundary follow-up (2026-09-08 15:57 UTC)
+
+Supervisor fallback retained Codex as implementation owner and Codex2 as
+reviewer. The P1 finding on candidate `b898ea9368ef` is addressed by draining
+preceding workflow writes before cancellation starts its authoritative locked
+transaction. This lets immediate cancellation see an uncommitted creation and
+prevents a preceding workflow upsert from overwriting committed cancellation.
+The transaction's durable validation and assignment-scoped release remain intact.
+
+Three deterministic PostgreSQL regressions hold workflow persistence behind a
+promise gate: immediate create/cancel, existing-order matching upsert/cancel,
+and real MultiTaxiService token-write failure compensation. Each checks that
+the cancellation lock reader has not started before the gate opens, then
+checks durable cancelled status and reason after all held writes settle.
+
+Validation: PostgreSQL integration **29/29**, owned-mobility and multi-taxi
+service unit tests **138/138**, and API typecheck passed after rebuilding
+contracts. The first integration run exposed a missing `persistAuthorization`
+method in the new token repository test double; adding its resolved stub made
+the real compensation path test pass. `git diff --check` passed.
+
+Plain rebase onto the latest dev again encountered duplicate-history replay
+conflicts and was aborted. A clean merge of `origin/dev` preserved pushed
+ancestry; this follow-up uses normal non-force pushes. Review/CI/merge and
+external acceptance remain candidate lifecycle gates.
