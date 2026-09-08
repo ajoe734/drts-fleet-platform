@@ -64,3 +64,27 @@ pnpm exec prettier --write docs/04-uat/system-remediation-20260906/readiness.jso
  git diff --check
 # exit 0
 ```
+
+## 2026-09-08 Codex2 P2：requested suite 缺失
+
+Reviewer candidate `50c2e0e4157736f1203c92e826b8e783627d7ff8` 的部分 suite 缺失可誤判 pass，已修正。預期 suites 現在由明列的 13 個回歸目錄與 base Git tree 產生，不再由提交報告推導。部分缺失為 incomplete、全部缺失為 missing；報告保留 expected_suites、missing_suites 與 coverage_state。缺少整個目錄的 tracked tests 時拒絕收集。
+
+`git fetch origin` exit 0，origin/dev 仍為 `c4c4a35f88907df6bf68e781059dde397c06ba03`。本次重複 `git rebase origin/dev` 因先前保留的遠端 anchor ancestry 發生 add/add 衝突（exit 1），已 `git rebase --abort`（exit 0），base 未前進，原 published history 完整保留。修正 anchor `70992c572` 已普通 push。
+
+以該 anchor（業務碼仍等同 base）重跑上方完整 13 目錄 Vitest 命令，實際由 collector.REGRESSION_DIRS 傳入 subprocess argv，exit 0：212 passed、0 failed、0 skipped。重新收集完整報告，新的原始報告 SHA-256 保存於 readiness.json；9 個 live gate 仍 missing。未執行的 live／真機項目同上。
+
+```bash
+python3 tests/unit/system-remediation/sr-readiness-001/collect.py --report /tmp/sr-readiness-regressions.json --base c4c4a35f88907df6bf68e781059dde397c06ba03
+# exit 0; 44 issues / 134 capabilities / 212 local tests
+python3 tests/unit/system-remediation/sr-readiness-001/check_partial_report.py --report /tmp/sr-readiness-regressions.json --base c4c4a35f88907df6bf68e781059dde397c06ba03
+# exit 0; omit controlled-download-artifact-bytes.test.ts; N04/N08 no false pass
+python3 tests/unit/system-remediation/sr-readiness-001/inventory_checks.py -v
+# exit 0; 6 passed, 0 skipped
+pnpm exec vitest run tests/unit/system-remediation/sr-readiness-001/
+# final exit 0; 1 passed, invokes 6 Python checks
+# first run exit 1: wrapper still expected 4 checks; updated to 6 and reran successfully
+```
+
+partial-report 檢查只在暫存目錄刪除報告的一個 suite，不覆寫正式 evidence。最終 candidate 由 canonical handoff 綁定，仍待獨立 review、同 SHA CI 與 merge。
+
+最後 `python3 tools/ci/check_test_coverage.py` exit 0（61 files）；`pnpm exec prettier --write` 對本次三個 Markdown/JSON 文件 exit 0；`git diff --check` exit 0。更新 readiness 後重跑 Vitest exit 0。

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "task_id": "SR-READINESS-001",
-  "observed_at": "2026-09-08T15:13:15.708239+00:00",
+  "observed_at": "2026-09-08T15:32:12.664076+00:00",
   "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
   "tested_code_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
   "candidate_sha": null,
@@ -26,8 +26,131 @@
     "passed": 212,
     "failed": 0,
     "skipped": 0,
-    "raw_report_sha256": "c4ffc05e851c971d48c56be3a85f20f601b0e16b1051e04417ba237023214d8c",
+    "expected_suites": [
+      "tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts",
+      "tests/unit/system-remediation/sr-admin-verify-001/p5-records.test.ts",
+      "tests/unit/system-remediation/sr-artifact-001/controlled-download-artifact-bytes.test.ts",
+      "tests/unit/system-remediation/sr-artifact-001/document-artifact-store.test.ts",
+      "tests/unit/system-remediation/sr-bank-001/sr-bank-001.test.ts",
+      "tests/unit/system-remediation/sr-bank-003/sr-bank-003.test.ts",
+      "tests/unit/system-remediation/sr-channel-001/channel-overview-export.test.ts",
+      "tests/unit/system-remediation/sr-iam-001/iam-role-api-matrix.test.ts",
+      "tests/unit/system-remediation/sr-iam-001/r05-session-governance.test.ts",
+      "tests/unit/system-remediation/sr-invoice-001/tenant-invoice-download-lifecycle.test.ts",
+      "tests/unit/system-remediation/sr-invoice-001/tenant-invoice-pdf-content.test.ts",
+      "tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery-status.test.ts",
+      "tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery.service.test.ts",
+      "tests/unit/system-remediation/sr-mail-002/audit-notification-email-adapter.test.ts",
+      "tests/unit/system-remediation/sr-mail-002/audit-notification-module.test.ts",
+      "tests/unit/system-remediation/sr-mail-002/audit-notification-service.dispatch.test.ts",
+      "tests/unit/system-remediation/sr-ops-map-001/sr-ops-map-001.test.ts",
+      "tests/unit/system-remediation/sr-referral-001/referral-embed-fallback-entry.test.ts",
+      "tests/unit/system-remediation/sr-referral-001/referral-embed-handoff-lifecycle.test.ts",
+      "tests/unit/system-remediation/sr-tenant-login-001/tenant-login-callback-recovery.test.ts",
+      "tests/unit/system-remediation/sr-uat-harness-001/browser-helpers.test.ts",
+      "tests/unit/system-remediation/sr-uat-harness-001/evidence-recorder.test.ts",
+      "tests/unit/system-remediation/sr-uat-harness-001/namespace-manager.test.ts",
+      "tests/unit/system-remediation/sr-uat-harness-001/pii-redactor.test.ts",
+      "tests/unit/system-remediation/sr-uat-harness-001/role-personas.test.ts"
+    ],
+    "missing_suites": [],
+    "coverage_state": "local_regression_passed_live_missing",
+    "raw_report_sha256": "fed22df6cb8fa34dcab67136b67ba452feac607d8fdb3b52cdf272b5454a0b38",
     "suites": [
+      {
+        "path": "tests/unit/system-remediation/sr-artifact-001/controlled-download-artifact-bytes.test.ts",
+        "status": "passed",
+        "tests": 9,
+        "assertions": [
+          {
+            "name": "controlled download serves real bytes for materialised artifacts returns the exact bytes and correct MIME type for an existing tenant invoice, with a computable sha256",
+            "status": "passed"
+          },
+          {
+            "name": "controlled download serves real bytes for materialised artifacts returns the exact bytes for an existing placard",
+            "status": "passed"
+          },
+          {
+            "name": "controlled download serves real bytes for materialised artifacts still fails explicitly for a kind/subjectId that was never materialised",
+            "status": "passed"
+          },
+          {
+            "name": "controlled download serves real bytes for materialised artifacts rejects an expired link even though the artifact exists",
+            "status": "passed"
+          },
+          {
+            "name": "controlled download serves real bytes for materialised artifacts rejects a tampered link (subject swapped after signing) even though both subjects exist",
+            "status": "passed"
+          },
+          {
+            "name": "controlled download serves real bytes for materialised artifacts rejects cross-kind (cross-scope) access: a valid link for one kind cannot read another kind's artifact at the same subjectId",
+            "status": "passed"
+          },
+          {
+            "name": "controlled download serves real bytes for materialised artifacts rejects a verified, unexpired link whose manifest hash no longer matches the stored artifact",
+            "status": "passed"
+          },
+          {
+            "name": "controlled download serves real bytes for materialised artifacts reissuing a URL for the same artifact does not change the bytes served",
+            "status": "passed"
+          },
+          {
+            "name": "controlled download serves real bytes for materialised artifacts falls back to its own local store when constructed with no arguments, preserving prior behaviour",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "path": "tests/unit/system-remediation/sr-artifact-001/document-artifact-store.test.ts",
+        "status": "passed",
+        "tests": 11,
+        "assertions": [
+          {
+            "name": "InMemoryDocumentArtifactStore stores and returns the exact bytes it was given, with a computable sha256",
+            "status": "passed"
+          },
+          {
+            "name": "InMemoryDocumentArtifactStore returns null for a (kind, subjectId) pair that was never stored",
+            "status": "passed"
+          },
+          {
+            "name": "InMemoryDocumentArtifactStore keeps kind and subjectId as a composite key: no cross-kind leakage",
+            "status": "passed"
+          },
+          {
+            "name": "InMemoryDocumentArtifactStore rejects kinds outside this period's scope",
+            "status": "passed"
+          },
+          {
+            "name": "InMemoryDocumentArtifactStore rejects empty bytes rather than storing a fake empty file",
+            "status": "passed"
+          },
+          {
+            "name": "InMemoryDocumentArtifactStore defensively copies bytes on the way in and out",
+            "status": "passed"
+          },
+          {
+            "name": "InMemoryDocumentArtifactStore reissuing a link is a client-side act: the stored artifact does not change",
+            "status": "passed"
+          },
+          {
+            "name": "resolveDocumentArtifact reports not_found for an unsupported kind even if the store has entries",
+            "status": "passed"
+          },
+          {
+            "name": "resolveDocumentArtifact reports not_found for an in-scope kind that was never materialised",
+            "status": "passed"
+          },
+          {
+            "name": "resolveDocumentArtifact reports content_mismatch when the link's manifest hash no longer matches the stored bytes",
+            "status": "passed"
+          },
+          {
+            "name": "resolveDocumentArtifact resolves ok with the exact bytes, mime type and a matching sha256 when the manifest hash matches",
+            "status": "passed"
+          }
+        ]
+      },
       {
         "path": "tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts",
         "status": "passed",
@@ -130,100 +253,6 @@
           },
           {
             "name": "SR-ADMIN-VERIFY-001 P5 visible retention truth derives coverage from current record dates, including the exact 730-day boundary",
-            "status": "passed"
-          }
-        ]
-      },
-      {
-        "path": "tests/unit/system-remediation/sr-artifact-001/controlled-download-artifact-bytes.test.ts",
-        "status": "passed",
-        "tests": 9,
-        "assertions": [
-          {
-            "name": "controlled download serves real bytes for materialised artifacts returns the exact bytes and correct MIME type for an existing tenant invoice, with a computable sha256",
-            "status": "passed"
-          },
-          {
-            "name": "controlled download serves real bytes for materialised artifacts returns the exact bytes for an existing placard",
-            "status": "passed"
-          },
-          {
-            "name": "controlled download serves real bytes for materialised artifacts still fails explicitly for a kind/subjectId that was never materialised",
-            "status": "passed"
-          },
-          {
-            "name": "controlled download serves real bytes for materialised artifacts rejects an expired link even though the artifact exists",
-            "status": "passed"
-          },
-          {
-            "name": "controlled download serves real bytes for materialised artifacts rejects a tampered link (subject swapped after signing) even though both subjects exist",
-            "status": "passed"
-          },
-          {
-            "name": "controlled download serves real bytes for materialised artifacts rejects cross-kind (cross-scope) access: a valid link for one kind cannot read another kind's artifact at the same subjectId",
-            "status": "passed"
-          },
-          {
-            "name": "controlled download serves real bytes for materialised artifacts rejects a verified, unexpired link whose manifest hash no longer matches the stored artifact",
-            "status": "passed"
-          },
-          {
-            "name": "controlled download serves real bytes for materialised artifacts reissuing a URL for the same artifact does not change the bytes served",
-            "status": "passed"
-          },
-          {
-            "name": "controlled download serves real bytes for materialised artifacts falls back to its own local store when constructed with no arguments, preserving prior behaviour",
-            "status": "passed"
-          }
-        ]
-      },
-      {
-        "path": "tests/unit/system-remediation/sr-artifact-001/document-artifact-store.test.ts",
-        "status": "passed",
-        "tests": 11,
-        "assertions": [
-          {
-            "name": "InMemoryDocumentArtifactStore stores and returns the exact bytes it was given, with a computable sha256",
-            "status": "passed"
-          },
-          {
-            "name": "InMemoryDocumentArtifactStore returns null for a (kind, subjectId) pair that was never stored",
-            "status": "passed"
-          },
-          {
-            "name": "InMemoryDocumentArtifactStore keeps kind and subjectId as a composite key: no cross-kind leakage",
-            "status": "passed"
-          },
-          {
-            "name": "InMemoryDocumentArtifactStore rejects kinds outside this period's scope",
-            "status": "passed"
-          },
-          {
-            "name": "InMemoryDocumentArtifactStore rejects empty bytes rather than storing a fake empty file",
-            "status": "passed"
-          },
-          {
-            "name": "InMemoryDocumentArtifactStore defensively copies bytes on the way in and out",
-            "status": "passed"
-          },
-          {
-            "name": "InMemoryDocumentArtifactStore reissuing a link is a client-side act: the stored artifact does not change",
-            "status": "passed"
-          },
-          {
-            "name": "resolveDocumentArtifact reports not_found for an unsupported kind even if the store has entries",
-            "status": "passed"
-          },
-          {
-            "name": "resolveDocumentArtifact reports not_found for an in-scope kind that was never materialised",
-            "status": "passed"
-          },
-          {
-            "name": "resolveDocumentArtifact reports content_mismatch when the link's manifest hash no longer matches the stored bytes",
-            "status": "passed"
-          },
-          {
-            "name": "resolveDocumentArtifact resolves ok with the exact bytes, mime type and a matching sha256 when the manifest hash matches",
             "status": "passed"
           }
         ]
@@ -562,72 +591,6 @@
         ]
       },
       {
-        "path": "tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery-status.test.ts",
-        "status": "passed",
-        "tests": 3,
-        "assertions": [
-          {
-            "name": "SR-MAIL-001 tenant invitation delivery semantics marks the invitation delivered only after the controlled receiver truly accepts it, and rejects reuse/revoke/expiry",
-            "status": "passed"
-          },
-          {
-            "name": "SR-MAIL-001 tenant invitation delivery semantics never fakes delivered when the provider is unavailable, and lets a later resend actually deliver",
-            "status": "passed"
-          },
-          {
-            "name": "SR-MAIL-001 tenant invitation delivery semantics rejects an expired invitation token even though it was genuinely delivered",
-            "status": "passed"
-          }
-        ]
-      },
-      {
-        "path": "tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery.service.test.ts",
-        "status": "passed",
-        "tests": 10,
-        "assertions": [
-          {
-            "name": "SR-MAIL-001 tenant invitation email delivery delivers a real invitation to the controlled receiver and reports sent",
-            "status": "passed"
-          },
-          {
-            "name": "SR-MAIL-001 tenant invitation email delivery never resends an invitation that already succeeded (idempotent retry after restart)",
-            "status": "passed"
-          },
-          {
-            "name": "SR-MAIL-001 tenant invitation email delivery scopes idempotent delivery identity to the tenant",
-            "status": "passed"
-          },
-          {
-            "name": "SR-MAIL-001 tenant invitation email delivery reports a failed (never delivered) status when the provider is unconfigured",
-            "status": "passed"
-          },
-          {
-            "name": "SR-MAIL-001 tenant invitation email delivery reports an explicit unavailable status without touching storage when no delivery service is wired",
-            "status": "passed"
-          },
-          {
-            "name": "SR-MAIL-001 tenant invitation email delivery defaults to unavailable (never fakes delivered) with the bare no-arg constructor",
-            "status": "passed"
-          },
-          {
-            "name": "SR-MAIL-001 tenant invitation email delivery surfaces a permanent provider rejection as failed and stops retrying",
-            "status": "passed"
-          },
-          {
-            "name": "SR-MAIL-001 tenant invitation email delivery never crashes the caller on an invalid recipient address and reports a bounded error code",
-            "status": "passed"
-          },
-          {
-            "name": "SR-MAIL-001 tenant invitation email delivery keeps arbitrary exception content (including the raw token) out of the returned delivery record",
-            "status": "passed"
-          },
-          {
-            "name": "SR-MAIL-001 tenant invitation email delivery lists deliveries most-recent first without ever exposing the raw token or leaking mutation",
-            "status": "passed"
-          }
-        ]
-      },
-      {
         "path": "tests/unit/system-remediation/sr-mail-002/audit-notification-email-adapter.test.ts",
         "status": "passed",
         "tests": 13,
@@ -744,6 +707,72 @@
           },
           {
             "name": "SR-MAIL-002 AuditNotificationService.dispatchApprovalNotification records an unavailable (not delivered) status when no delivery service is wired at all",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "path": "tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery-status.test.ts",
+        "status": "passed",
+        "tests": 3,
+        "assertions": [
+          {
+            "name": "SR-MAIL-001 tenant invitation delivery semantics marks the invitation delivered only after the controlled receiver truly accepts it, and rejects reuse/revoke/expiry",
+            "status": "passed"
+          },
+          {
+            "name": "SR-MAIL-001 tenant invitation delivery semantics never fakes delivered when the provider is unavailable, and lets a later resend actually deliver",
+            "status": "passed"
+          },
+          {
+            "name": "SR-MAIL-001 tenant invitation delivery semantics rejects an expired invitation token even though it was genuinely delivered",
+            "status": "passed"
+          }
+        ]
+      },
+      {
+        "path": "tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery.service.test.ts",
+        "status": "passed",
+        "tests": 10,
+        "assertions": [
+          {
+            "name": "SR-MAIL-001 tenant invitation email delivery delivers a real invitation to the controlled receiver and reports sent",
+            "status": "passed"
+          },
+          {
+            "name": "SR-MAIL-001 tenant invitation email delivery never resends an invitation that already succeeded (idempotent retry after restart)",
+            "status": "passed"
+          },
+          {
+            "name": "SR-MAIL-001 tenant invitation email delivery scopes idempotent delivery identity to the tenant",
+            "status": "passed"
+          },
+          {
+            "name": "SR-MAIL-001 tenant invitation email delivery reports a failed (never delivered) status when the provider is unconfigured",
+            "status": "passed"
+          },
+          {
+            "name": "SR-MAIL-001 tenant invitation email delivery reports an explicit unavailable status without touching storage when no delivery service is wired",
+            "status": "passed"
+          },
+          {
+            "name": "SR-MAIL-001 tenant invitation email delivery defaults to unavailable (never fakes delivered) with the bare no-arg constructor",
+            "status": "passed"
+          },
+          {
+            "name": "SR-MAIL-001 tenant invitation email delivery surfaces a permanent provider rejection as failed and stops retrying",
+            "status": "passed"
+          },
+          {
+            "name": "SR-MAIL-001 tenant invitation email delivery never crashes the caller on an invalid recipient address and reports a bounded error code",
+            "status": "passed"
+          },
+          {
+            "name": "SR-MAIL-001 tenant invitation email delivery keeps arbitrary exception content (including the raw token) out of the returned delivery record",
+            "status": "passed"
+          },
+          {
+            "name": "SR-MAIL-001 tenant invitation email delivery lists deliveries most-recent first without ever exposing the raw token or leaking mutation",
             "status": "passed"
           }
         ]
@@ -7101,9 +7130,9 @@
       "id": "SR-DRIVER-WEB-001",
       "owner": "Gemini",
       "reviewer": "Codex",
-      "status": "todo",
-      "last_update": "2026-09-08T15:01:48Z",
-      "next": "Availability-first reassignment: Gemini claimed SR-DRIVER-WEB-001 while Codex2 was unavailable or occupied.",
+      "status": "in_progress",
+      "last_update": "2026-09-08T15:31:47Z",
+      "next": "開始司機 web 預覽平台分流與既有修復回歸",
       "required_acceptance": []
     }
   ],

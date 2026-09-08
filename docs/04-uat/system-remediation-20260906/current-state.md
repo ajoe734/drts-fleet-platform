@@ -1,6 +1,6 @@
 # SR-READINESS-001 當前版本準備盤點
 
-觀察時間：2026-09-08T15:13:15.708239+00:00。Base / tested product SHA：`c4c4a35f88907df6bf68e781059dde397c06ba03`。
+觀察時間：2026-09-08T15:32:12.664076+00:00。Base / tested product SHA：`c4c4a35f88907df6bf68e781059dde397c06ba03`。
 
 44 個 issue 均有目前版本的 source blob 與追溯任務；134 項能力逐項列出角色、資料需求、場景、供給 owner 與讀回方式，詳見 [readiness.json](readiness.json)。來源檔案 SHA-256 與合併 PR SHA 也保留在 JSON。
 

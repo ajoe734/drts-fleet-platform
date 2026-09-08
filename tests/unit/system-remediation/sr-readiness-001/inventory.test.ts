@@ -14,5 +14,5 @@ it("validates readiness coverage, source evidence and missing live gates", () =>
   );
   expect(result.error).toBeUndefined();
   expect(result.status, result.stdout + result.stderr).toBe(0);
-  expect(result.stderr).toContain("Ran 4 tests");
+  expect(result.stderr).toContain("Ran 6 tests");
 }, 25_000);
