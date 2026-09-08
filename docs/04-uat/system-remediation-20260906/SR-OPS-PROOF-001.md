@@ -58,3 +58,37 @@ New tests use command spies solely to prove that unsafe URL variants cannot conn
 Remaining implementation work: compare snapshot-bound expected business data with restored rows (counts alone are insufficient); support authoritative booking/dispatch/report request methods and payloads, concurrent baseline pacing, latency evaluation and failed HTTP result handling; replace the static inventory description with observed resource/deployment receipts. The current load command is a recording probe, not a capacity acceptance harness. The inventory command describes documented expectations, not observed cloud state.
 
 No snapshot ID, isolated DB resource ID, live API credentials, cloud restore, deployment/rollback receipt or physical-device result was supplied or exercised in this continuation. No RPO/RTO values are invented. Live work remains subject to SR-LIVE-OPS-001 authorization. This task remains in progress and must not be handed off as complete on this evidence.
+
+## 2026-09-08 load failure recording continuation
+
+Dispatch base fetched and rebased: `40c231ba6718dbf7a7ee6662e446d44e48eabcb3`.
+The add/add conflict contained only the existing exploratory HTTP 404 evidence;
+that evidence was retained. The previously published task branch was merged after
+rebase to preserve ancestry for a normal push. Implementation anchor:
+`019014fcfb761356a701c2163b9be3d6b4e004a7`; no handoff candidate is locked.
+The shared `origin/dev` ref advanced again during verification, so the fetched
+base above identifies this continuation, not a claim to have tested later dev.
+
+The load probe now emits base/candidate SHA and a `load_probe` kind on every
+record. HTTP responses outside 200–299, curl failures, and malformed measurements
+record an error and cause final exit 1, while still attempting and retaining all
+three workload families. This fixes the previous false-success exit on HTTP 404
+or 500. A 2xx response remains only transport evidence, not business acceptance.
+
+| Actual command | Exit / observation |
+| --- | --- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-ops-proof-001/ops-proof.test.ts` before changes | 0; 10 tests |
+| Same command after changes | 0; 15 tests |
+| `bash -n tools/system-remediation/ops-proof/ops-proof.sh` | 0 |
+| `pnpm exec eslint tests/unit/system-remediation/sr-ops-proof-001/ops-proof.test.ts` | 0 |
+| `git diff --check` | 0 |
+| `git push -u origin codex/sr-ops-proof-001` | 0; `30616dc70..019014fcf`, non-force |
+| `command -v psql` and `command -v pg_restore` | 1 each; still unavailable |
+
+The five added cases use curl command spies for HTTP 200, HTTP 500, HTTP 302,
+connection failure and malformed output. They verify error recording and exit
+semantics only; they supply no API, database, resource or capacity acceptance.
+Remaining implementation and live gates listed above are unchanged. In
+particular, true request methods/payloads, concurrent SLO pacing/evaluation,
+snapshot-bound business reconciliation and observed deployment receipts remain
+outstanding. Status remains `in_progress`.
