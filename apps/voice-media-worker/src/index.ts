@@ -6,3 +6,5 @@ export * from "./recording/sealed-recorder";
 export * from "./recording/immutable-manifest";
 export * from "./recording/confirmation-coverage";
 export * from "./recording/confirmed-manifest";
+export * from "./providers/twm/twm-adapter";
+export * from "./language/language-router";

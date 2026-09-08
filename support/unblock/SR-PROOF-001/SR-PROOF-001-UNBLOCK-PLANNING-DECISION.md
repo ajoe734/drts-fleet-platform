@@ -1,5 +1,93 @@
 # SR-PROOF-001 Unblock Planning Decision
 
+## Current routing record — 2026-09-08
+
+Owner: Codex2. Reviewer: Gemini. This section supersedes the historical
+September 6 owner, status, branch, and continuation instructions below; those
+remain provenance of the earlier decision, not current dispatch instructions.
+
+Earlier source inspection at `origin/dev` `f372e4a6a0dd16204ccbd660f23013601357c224`:
+
+- Parent `SR-PROOF-001`: blocked, owner Codex, reviewer/waiting-for Gemini;
+  only ARTIFACT and INVOICE dependencies, both recorded done. Its latest note
+  reports local evidence `97a535e0c` and a rejected non-fast-forward push.
+  These are parent-reported results, not tests rerun by this helper.
+- `SR-CONTRACT-001`: todo, owner Gemini, reviewer Codex2. The planned
+  schema-allocation.json artifact named in that task's slice is absent
+  at this base; a proof allocation must not be presumed delivered.
+- `billing-settlement.service.ts`, `markReimbursementPaid`, still checks a
+  nonempty proof ID and mutates the paid state before `persistChanges`.
+  This source inspection does not establish runtime correctness.
+- `document-artifact-kinds.ts` still supports only tenant-invoice, placard,
+  and report. ARTIFACT completion does not provide a proof storage/scanner
+  contract or permission to widen that shared family list.
+
+Decision: retain PRD §9.8.4 and service contracts §3.11 semantics and all
+parent acceptance. No product scope cut is approved. Route the unresolved
+implementation contract and scope authorization under `Q-SR-PROOF-001` in
+`PHASE1_OPEN_QUESTIONS.md`; this is a follow-up on the existing parent, not
+a newly registered producer or an authorization issued by this helper.
+
+### Redispatch reconciliation — after 2026-09-08T16:38:01Z
+
+Rebased onto `origin/dev` `890548b4f357542968c8b14f33f23e0685be007a`.
+PR #1782 conflicted in the shared open-question inventory. Preserve both
+Q-SR-ENTERPRISE-FORM-001 and Q-SR-ENTERPRISE-DATA-001 alongside Q-SR-PROOF-001.
+Duplicate historical patches were skipped during rebase; published candidate
+`5deee13900ce8a68d466fa7380aa6973e69898de` was merged back to retain remote
+ancestry and permit a normal non-force push.
+
+The parent slice updated at `2026-09-08T16:35:21Z` is `blocked`, owner Codex,
+reviewer/waiting-for Gemini. Its reported tested HEAD is
+`d41072a1a76d04432619e90a1a61fe9090bcc08d` (not a candidate): one regression
+passed and two failed, with another non-fast-forward push rejection. These
+are parent-reported results, not tests rerun by this helper. Dependencies and
+write scopes still omit the requested contract edge and repository/module
+permission. SR-CONTRACT-001 remains `todo`, owner Gemini. History recovery
+did not clear the planning gate. Preserve this blocked lifecycle and route
+the four required actions below through Gemini to Supervisor/Chairman.
+
+### Required next actor and resume gate
+
+1. Supervisor/Chairman reviews overlapping writers, adds the SR-CONTRACT-001
+   dependency (or records an explicit reviewed alternative), and authorizes
+   the billing repository/module plus exact proof storage/scanner leaf paths.
+   Preserve the INVOICE → PROOF → FLEET-SETTLE ordering from the execution
+   rules. If a separate producer is needed, register it and its parent edge
+   in machine truth before dispatch; do not leave official work only here.
+2. Gemini as current SR-CONTRACT owner supplies reviewed proof API/error/type
+   and persistence allocation, including existence, batch/driver ownership,
+   scan result, approval, authorized readback and durable receipt behavior.
+   Follow its existing dependencies and shared export allocation rules.
+   Exact endpoint names, schema filenames and scanner adapter are not chosen
+   by this routing document.
+3. Supervisor assigns the missing upload/pending-scan/rejected/readback
+   states for `platform-screens-3.jsx` PA_Reimbursements and
+   PA_ReimbursementDetail to an authorized design scope or registered producer.
+4. Supervisor selects an unused recovery branch and dispatches Codex using
+   the merged [history-repair procedure](SR-PROOF-001-UNBLOCK-HISTORY-REPAIR.md).
+   Recheck current refs first; September 8 parent evidence postdates that
+   history audit. Preserve published history and local `97a535e0c`; do not
+   force-push or treat old draft PR #1699 as an implementation candidate.
+5. Only after allocations, authorization and required producer acceptance
+   are recorded, Codex implements and runs the parent's declared tests and
+   typechecks on fresh dev, then commits, normally pushes and hands off the
+   exact candidate to current reviewer Gemini. Dependent implementation waits
+   for this gate while the parent is blocked; routing this helper does not prove proof upload or paid
+   correctness and does not execute a real payment.
+
+### This dispatch's verification and delivery
+
+`git fetch origin` exited 0; `git rebase origin/dev` initially stopped on
+the open-question conflict and `git rebase --continue` exited 0 after preserving
+all three entries. The ancestry-preserving merge exited 0; normal push evidence
+is recorded with the final candidate in machine truth.
+Fresh parent/contract task slices and schema-allocation absence were checked.
+No product runtime, browser, scan service, payment or parent regression was
+executed. Documentation diff and candidate ancestry checks are recorded in
+this helper's machine-truth handoff. The parent receives the concrete routing
+step via `ai-status.sh note`, preserving its current lifecycle.
+
 ## Scope
 
 - Task: `SR-PROOF-001-UNBLOCK-PLANNING-DECISION`

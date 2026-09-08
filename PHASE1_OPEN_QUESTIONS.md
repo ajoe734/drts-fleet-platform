@@ -4,7 +4,19 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`.
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-ENTERPRISE-FORM-001`, `Q-SR-ENTERPRISE-DATA-001`, `Q-SR-PROOF-001`, `Q-SR-REPORT-001`.
+
+### Q-SR-ENTERPRISE-FORM-001 — theme precedence and shared scope authorization
+
+Supervisor/Chairman must confirm whether enterprise canvas branding or tenant
+realm tokens govern the shared enterprise theme, then authorize the theme and
+three existing translation keys with overlap/dependency sequencing. Parent owner
+Codex2 and reviewer Codex preserve full acceptance and the blocked state until
+that authorization or an accepted, merged shared-theme producer exists.
+`SR-DESIGN-001` covers leave/academy/Host contracts and is not an established
+theme dependency. This is an explicit follow-up on the existing parent, not a
+scope grant or a new registered implementation task. See the
+[decision routing and resume gate](support/unblock/SR-ENTERPRISE-FORM-001/SR-ENTERPRISE-FORM-001-UNBLOCK-PLANNING-DECISION.md).
 
 The original fifteen questions on this board were answered. Worth noting how, because the
 distribution was not what the board implied: of the fifteen, four were closed by
@@ -84,6 +96,36 @@ the full parent acceptance; history repair does not grant scope or clear this
 gate. The parent remains blocked pending these decisions, tracked on the
 existing parent task rather than an unregistered producer. See the
 [routing record and concrete resume gate](support/unblock/SR-ENTERPRISE-DATA-001/SR-ENTERPRISE-DATA-001-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-PROOF-001 — proof contract and scope routing pending
+
+Supervisor/Chairman must authorize repository/module/proof storage-scanner
+scopes, record SR-CONTRACT-001 ordering or an explicit reviewed alternative,
+route the missing proof UI states, and select an unused recovery branch.
+Parent owner Codex and reviewer Gemini retain all proof validation, readback,
+concurrency and durable receipt acceptance. PRD §9.8.4 and service contracts
+§3.11 already establish product ownership; this open item concerns the missing
+implementation allocation, not permission to accept arbitrary proof IDs.
+SR-CONTRACT-001 is currently todo; its owner Gemini must supply the reviewed
+contract/persistence allocation before dependent implementation. The parent is
+`blocked` as of 2026-09-08T16:35:21Z, waiting for Gemini to route the remaining
+authorizations to Supervisor/Chairman; history recovery did not supply them.
+The [resume gate](support/unblock/SR-PROOF-001/SR-PROOF-001-UNBLOCK-PLANNING-DECISION.md)
+still applies to dependent implementation. This follow-up is tracked on the existing parent; any separate
+producer must first be registered by the supervisor in machine truth.
+
+### Q-SR-REPORT-001 — ordinary report shared-file scope pending
+
+Supervisor/Chairman must authorize the parent's shared format declaration in
+`packages/contracts/src/index.ts` and affected assertions in
+`tests/unit/reporting-filing.test.ts`, with overlapping writer dependencies,
+or register a coordinated producer. Parent owner Codex and reviewer Gemini retain
+full CSV/XLSX/PDF acceptance under PRD §9.5.6 and the filing-byte exclusion under
+§9.10.2. No product scope cut is needed. Keep SR-REPORT-001 blocked until scope
+and sequencing are recorded in machine truth; history recovery alone does not
+satisfy that gate. See the [evidence, routing decision and resume gate](support/unblock/SR-REPORT-001/SR-REPORT-001-UNBLOCK-PLANNING-DECISION.md).
+This is an explicit follow-up on the existing parent, not authorization to edit
+shared files or a claim that a new producer task already exists.
 
 ## Resolved Items
 
