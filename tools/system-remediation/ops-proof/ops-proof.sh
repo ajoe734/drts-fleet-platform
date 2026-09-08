@@ -6,7 +6,7 @@ usage() {
   cat <<'EOF'
 Usage:
   ops-proof.sh inventory --output FILE
-  ops-proof.sh restore --snapshot FILE --isolated-database-url URL --output FILE
+  ops-proof.sh restore --snapshot FILE --expected-manifest FILE --isolated-database-url URL --output FILE
   ops-proof.sh load --booking-url URL --dispatch-url URL --report-url URL --output FILE [--requests N] [--header 'Name: value']
 
 The restore command intentionally has no source-database option. It will only
@@ -17,12 +17,14 @@ EOF
 
 die() { echo "[ops-proof] $*" >&2; exit 2; }
 command_name="${1:-}"; shift || true
+expected_manifest=""; helper="$(dirname "${BASH_SOURCE[0]}")/reconcile.mjs"
 output=""; snapshot=""; isolated_database_url=""; booking_url=""; dispatch_url=""; report_url=""; requests=1
 headers=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --output) output="${2:-}"; shift 2 ;;
+    --expected-manifest) expected_manifest="${2:-}"; shift 2 ;;
     --snapshot) snapshot="${2:-}"; shift 2 ;;
     --isolated-database-url) isolated_database_url="${2:-}"; shift 2 ;;
     --booking-url) booking_url="${2:-}"; shift 2 ;;
@@ -77,24 +79,30 @@ NODE
     [[ "$isolated_database_url" =~ ^postgres(ql)?:// ]] || die "isolated database URL must use postgres:// or postgresql://"
     # libpq accepts query parameters such as host/service/dbname that can
     # override the authority checked below. Never forward those overrides.
-    [[ "$isolated_database_url" != *'?'* && "$isolated_database_url" != *'#'* && "$isolated_database_url" != *'%'* ]] || die "restore URL must not contain query, fragment, or percent-encoded overrides"
+    [[ "$isolated_database_url" != *'?'* && "$isolated_database_url" != *'#'* && "$isolated_database_url" != *'%'* && "$isolated_database_url" != *'\'* ]] || die "restore URL must not contain query, fragment, percent-encoded or backslash overrides"
     [[ -z "${PGSERVICE:-}" && -z "${PGOPTIONS:-}" ]] || die "PGSERVICE and PGOPTIONS must be unset for isolated restore"
     target_host="$(node -e 'console.log(new URL(process.argv[1]).hostname)' "$isolated_database_url")"
     target_database="$(node -e 'console.log(new URL(process.argv[1]).pathname.slice(1))' "$isolated_database_url")"
-    [[ "$target_host" == "localhost" || "$target_host" == "127.0.0.1" || "$target_host" == "::1" ]] || die "restore target host must be loopback, never a shared or production database"
+    [[ "$target_host" == "localhost" || "$target_host" == "127.0.0.1" ]] || die "restore target host must be loopback, never a shared or production database"
     [[ "$target_database" =~ ^drts_ops_proof_[a-z0-9_]+$ ]] || die "restore target database must match drts_ops_proof_*"
+    export PGHOSTADDR=127.0.0.1
     command -v pg_restore >/dev/null || die "pg_restore is required for an actual restore"
     command -v psql >/dev/null || die "psql is required for restore readback"
     existing_relations="$(psql -X "$isolated_database_url" --no-align --tuples-only --set ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp%'")"
     [[ "$existing_relations" == "0" ]] || die "restore requires an empty disposable database; refusing to overwrite existing relations"
+    [[ -f "$expected_manifest" ]] || die "--expected-manifest is required; counts alone cannot prove restoration"
+    node "$helper" validate "$expected_manifest" "$snapshot"
     pg_restore --exit-on-error --single-transaction --no-owner --no-privileges --dbname="$isolated_database_url" "$snapshot"
-    counts="$(psql -X "$isolated_database_url" --no-align --tuples-only --set ON_ERROR_STOP=1 -c "SELECT json_build_object('trips', (SELECT count(*) FROM ops.orders), 'billing', (SELECT count(*) FROM billing.driver_statements), 'audit', (SELECT count(*) FROM admin.audit_logs))::text")"
+    reconciliation_status=0
+    readback="$(node "$helper" verify "$expected_manifest" "$snapshot" "$isolated_database_url")" || reconciliation_status=$?
+    [[ -n "$readback" ]] || die "restored database readback failed; restoration is not verified"
     snapshot_sha256="$(sha256sum "$snapshot" | awk '{print $1}')"
-    write_json "$(node - "$base_sha" "$candidate_sha" "$now" "$target_database" "$snapshot_sha256" "$counts" <<'NODE'
+    write_json "$(node - "$base_sha" "$candidate_sha" "$now" "$target_database" "$snapshot_sha256" "$readback" <<'NODE'
 const [baseSha, candidateSha, observedAt, database, snapshotSha256, readback] = process.argv.slice(2);
-console.log(JSON.stringify({taskId:"SR-OPS-PROOF-001",kind:"isolated_restore",observedAt,baseSha,candidateSha,resource:{isolatedDatabase:database,snapshotSha256},readback:JSON.parse(readback),productionDatabaseTouched:false}));
+console.log(JSON.stringify({taskId:"SR-OPS-PROOF-001",kind:"isolated_restore",observedAt,baseSha,candidateSha,resource:{isolatedDatabase:database,snapshotSha256},readback:JSON.parse(readback),isolationPolicy:"loopback-empty-disposable-target; operator must exclude tunnels"}));
 NODE
 )"
+    exit "$reconciliation_status"
     ;;
   load)
     [[ "$requests" =~ ^[1-9][0-9]*$ ]] || die "--requests must be a positive integer"
