@@ -2,6 +2,22 @@
 
 Status: partial implementation; web export blocked. No review candidate locked.
 
+## History-repair redispatch — 2026-09-08 16:43 UTC
+
+- Fresh base `origin/dev`: `890548b4f357542968c8b14f33f23e0685be007a`, including history helper PR #1781 (helper candidate `56a120338301`, not the parent candidate). Parent candidate remains unassigned.
+- `git fetch origin`: exit 0. `git rebase origin/dev` encountered duplicate-anchor conflicts in the report and platform test (exit 1); restored those files from published parent `f2a85c11ff95255ee033f399dbd7af998a0e4404` and continued. Final `GIT_EDITOR=true git rebase --continue`: exit 0. `git merge --no-edit origin/codex2/sr-driver-web-001`: exit 0, preserving normal-push ancestry. Resulting head: `12b6d66a54d47af7c132b910c483b384e06e49d2`.
+- `git diff origin/codex2/sr-driver-web-001 -- apps/driver-app tests/unit/system-remediation/sr-driver-web-001/ docs/04-uat/system-remediation-20260906/SR-DRIVER-WEB-001.md`: exit 0, empty before this update. Checks started while resolving the report-only rebase conflict; app/test contents were identical to the final merged head.
+- `pnpm --filter @drts/driver-app typecheck`: exit 0. `pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/`: exit 0, 1 file / 5 tests. `git diff --check`: exit 0 after rebase.
+- Web reproduction command:
+
+  ```sh
+  NODE_OPTIONS=--require="$PWD/tests/unit/system-remediation/sr-driver-web-001/metro-worktree-harness.cjs" pnpm --filter @drts/driver-app exec expo export --platform web --max-workers 2 --source-maps --output-dir /tmp/sr-driver-web-001-web-history-recheck > /tmp/sr-driver-web-001-web-history-recheck.log 2>&1
+  ```
+
+  Exit **1**: unresolved `./wa-sqlite/wa-sqlite.wasm` in `expo-sqlite/web/worker.ts`; import stack reaches `_layout.tsx` through the location heartbeat and persistent offline queue. Ephemeral log resource: `/tmp/sr-driver-web-001-web-history-recheck.log`.
+- The merged `support/unblock/SR-DRIVER-WEB-001/SR-DRIVER-WEB-001-UNBLOCK-HISTORY-REPAIR.md` explicitly says history repair is not scope authorization. Current machine task still has four original write scopes and no dependencies; `apps/driver-app/metro.config.js` is absent. Supervisor must authorize this configuration scope and reconcile dependencies/runbook, or register a bundler producer and parent dependency. Do not redispatch solely on the history helper merge.
+- No product/UI edits. Native exports and the 91 prior repair tests were not rerun; browser `/`, `/onboarding`, `/sos`, live services, signed device builds and physical devices remain unverified. No SOS sent, parent handoff, CI, merge or deployment success claimed.
+
 ## Dispatch recheck — 2026-09-08 15:47 UTC
 
 - Fetched base `origin/dev`: `3f182f7e314b5ddb4c37f1c3f5dc214a6d0edf0e`. Tested head: `b4e426fdcb1a545c90a4abb612df6bfb12867e8e`. Candidate SHA remains unassigned.
