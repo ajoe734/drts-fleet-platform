@@ -2,6 +2,39 @@
 
 Date: 2026-09-08. Owner: Codex2; Reviewer: Codex.
 
+## Redispatch verification — 2026-09-08 21:43 UTC
+
+This section supersedes earlier command results. Fetched base `origin/dev`:
+`a24045986ac29231d34657df3a343b02d9fbb770`; tested branch HEAD:
+`2191754ca83a70985edab29bdfba24dd650779ff`. Candidate SHA: none; acceptance
+is still red, so this update is evidence only.
+
+- `git fetch origin`: exit 0.
+- `git rebase origin/dev`: exit 1 at historical `ac1076708`, a repeated
+  add/add conflict in the task test. `git rebase --abort`: exit 0.
+- `git diff --quiet origin/dev HEAD -- apps/api/src/modules/billing-settlement/billing-settlement.service.ts apps/api/src/modules/billing-settlement/billing-settlement.repository.ts`:
+  exit 0. The tested implementation in these files matches fetched dev.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`:
+  exit 1; 3 executed, 1 passed, 2 failed. Fabricated proof still becomes
+  paid; unresolved persistence still returns paid. Unapproved rejection passes.
+- `pnpm --filter @drts/api typecheck`: exit 2; TS2307 for
+  `@drts/control-plane-auth` in four auth files.
+- `pnpm --filter @drts/platform-admin-web typecheck`: exit 0.
+- `git diff --check`: exit 0 before this evidence anchor.
+
+Current machine truth still grants only the original five write scopes and
+ARTIFACT/INVOICE dependencies. `SR-CONTRACT-001` is todo, owned by Codex.
+The planning helper's required scope/dependency/design routing remains
+unapplied; history-helper completion alone does not supply it. Supervisor
+must authorize the repository/module and exact storage/scanner leaves,
+allocate the proof contract and dependency (or reviewed alternative), route
+the existing missing-screen requirements, and select the recovery branch
+before redispatch. No out-of-scope implementation was attempted.
+
+Resource IDs remain the isolated test inputs listed below. No live resources,
+proof bytes/scans/readback, PostgreSQL concurrency, durable receipts,
+browser/device checks, or real payments were produced or verified.
+
 ## Redispatch verification — 2026-09-08 21:30 UTC
 
 This section supersedes previous execution results. Fetched base `origin/dev`:
