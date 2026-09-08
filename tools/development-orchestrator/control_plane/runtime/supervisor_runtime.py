@@ -1186,6 +1186,11 @@ def attach_workspace_metadata(
         request.metadata["workspace_source"] = workspace_source
 
     mode = str(request.metadata.get("mode") or "").strip().lower()
+    vm_restriction_notice = (
+        "- VM restriction: supervisor/workers may run repository checks, but must not start product "
+        "development servers, preview/browser test servers, or Docker Compose infrastructure here. "
+        "If a task requires a running environment, record the concrete blocker instead.\n"
+    )
     if request.task_id and branch:
         status_cli = task_board_cli_path()
         if workspace_root == canonical_root:
@@ -1202,6 +1207,7 @@ def attach_workspace_metadata(
             f"- Use `{status_cli}` for state changes; it runs current release code and writes through "
             "`ORCH_STATUS_ROOT` / `AI_STATUS_ROOT` to canonical machine truth.\n"
             "- Do not `git switch` the canonical root for task code; use the assigned cwd/branch.\n"
+            f"{vm_restriction_notice}"
         )
     elif mode == "coordination" and workspace_root != canonical_root:
         notice = (
@@ -1211,6 +1217,7 @@ def attach_workspace_metadata(
             "- Read/write machine truth through the absolute canonical paths above or `ORCH_STATUS_ROOT`; "
             "do not infer live status from this worktree's checked-out copy.\n"
             "- Do not edit product code from a coordination run.\n"
+            f"{vm_restriction_notice}"
         )
     else:
         return
