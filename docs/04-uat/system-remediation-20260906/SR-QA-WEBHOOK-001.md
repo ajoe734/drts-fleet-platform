@@ -2,6 +2,17 @@
 
 本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Gemini（本次 dispatch）。未 handoff、未完成 review/CI/merge。
 
+## 2026-09-08 18:43 UTC 解阻派工後重驗（最新，仍阻擋）
+
+- base `3b82fba0fabba3328e3443de3d602780f852d724`；執行 SHA `55334bae5229d38c6254331c58dfdc35d3e91ae9`。rebase 在歷史 a119ec0bb 的四檔 add/add 衝突後 abort，以 merge 納入 dev 保留已發布歷史。尚無 lifecycle candidate。
+- 已合併 PR #1809 的 helper artifact 明定「Parent remains blocked」，只完成規劃路由、沒有 scope cut。機器狀態卻恢復 todo；P0 `SR-QA-WEBHOOK-001-FIX-TENANT-BINDING` 仍 blocked、write_scopes 空，父 depends_on 仍缺此修復。Supervisor/Claude 必須授權修復範圍、序列化 IAM/tenant 相依並補父依賴；本輪不改產品碼。
+- 指定 `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 1，1 failed / 4 passed / 2.0m。25 local 與3 PostgreSQL案例先通過；真 controller/guard/middleware/JWT/PG 窄模組仍重現跨租戶 GET 200（預期403），exposedVictimKeyId=true。同租戶 issue/rotate/revoke 各201、撤銷 SQL 回讀及拒絕寫入 DB 不變先通過。
+- 此次在整合程序結束前啟動 live 負向命令，共用 Playwright test-results 被清理，額外造成 trace ENOENT 與 teardown timeout；因此不把本輪 trace 當完整 artifact。C111 失敗已獨立保存在 task JSON，並以 run-auth-http.sh 單獨重跑確認。未修改 shared config。
+- `DRTS_WEBHOOK_LIVE=1 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 1，1 failed / 4 passed / 1.2s；缺部署 API、C113/C114 provider、C115 scheduler 證據時明確失敗。
+- 整合受害 tenant `qa-http-c5aec350-4b9f-4d8b-8a87-ad158a21c2cf`，外洩 key ID `api_key_57559c85-2005-41b9-901e-466c2e3dd26f`；本輪 SHA、其餘真資源與 stdout 見 task evidence-sr-qa-webhook-001.json / evidence-postgres.json，獨立重跑的最新 HTTP 資源見 evidence-auth-http.json。
+- 獨立 `DRTS_WEBHOOK_AUTH_EVIDENCE=tests/e2e/system-remediation/sr-qa-webhook-001/evidence-auth-http.json bash tests/unit/system-remediation/sr-qa-webhook-001/run-auth-http.sh` → exit 1，1 failed / 3.92s，同樣200而非403。最新外洩 key `api_key_b6074fd5-5c37-4252-9287-36a4ae41ef30`。`git diff --check` → exit 0；清理後 PostgreSQL 本 task prefix database count=0（exit 0）。
+- 完整 AppModule、部署登入/MFA、API key 使用量、C112 產品 deadline 契約及 C113–C115 外部驗收仍未完成；本機 fixture 和注入 timeout 不代表這些能力通過。未 handoff，未宣告 done。
+
 ## 2026-09-08 17:19 UTC C111 跨租戶讀取失敗（最新，阻擋驗收）
 
 - base `e2df37f821ce76d8a3639ceaac6d253299c0a31c`；執行 anchor `6b9de8287abb48e5770524c3addf5e5e41f8f663`，已普通 push，尚無 lifecycle candidate。依指示 rebase 遇歷史 a119ec0bb 四檔 add/add 衝突後 abort，再 merge dev 保留已發布歷史。
