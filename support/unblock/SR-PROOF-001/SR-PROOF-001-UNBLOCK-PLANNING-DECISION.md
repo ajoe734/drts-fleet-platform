@@ -13,7 +13,7 @@ Rechecked at `origin/dev` `f372e4a6a0dd16204ccbd660f23013601357c224`:
   reports local evidence `97a535e0c` and a rejected non-fast-forward push.
   These are parent-reported results, not tests rerun by this helper.
 - `SR-CONTRACT-001`: todo, owner Gemini, reviewer Codex2. The planned
-  `docs/04-uat/system-remediation-20260906/schema-allocation.json` is absent
+  schema-allocation.json artifact named in that task's slice is absent
   at this base; a proof allocation must not be presumed delivered.
 - `billing-settlement.service.ts`, `markReimbursementPaid`, still checks a
   nonempty proof ID and mutates the paid state before `persistChanges`.
