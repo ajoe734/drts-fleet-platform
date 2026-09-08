@@ -1,5 +1,34 @@
 # SR-REPORT-001 — baseline and scope dependency
 
+## Dispatch verification — 2026-09-08 22:25 UTC
+
+- Owner/reviewer: Codex/Codex2. Fetched origin/dev:
+  `a24045986ac29231d34657df3a343b02d9fbb770`; tested dispatched HEAD:
+  `4d7d3a86c506591b4369fa2e1e22019fc7d70dad`.
+- Canonical task still grants only the original four scopes and two
+  dependencies. Execution shared-file rule 4 requires supervisor scope and
+  dependency updates before changing shared exports. Please authorize focused
+  changes to `packages/contracts/src/index.ts` and
+  `tests/unit/reporting-filing.test.ts`, with writer sequencing and synchronized
+  task specification, or deliver a coordinated integration child. History
+  repair does not resolve this separate scope blocker.
+- N05/C091 and PRD 9.5.6/9.10.2 rechecked. Current PDF/XLSX renderers remain
+  null, authoritative implemented formats remain CSV-only, and central tests
+  require rejection. Reporting service and central test have no diff against
+  fetched origin/dev; contract differences are unrelated dispatch/voice fields.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1 at step 9/45,
+  add/add conflict in this historical evidence file while replaying `85b005b48`.
+  `git rebase --abort`: exit 0; restored the clean dispatched branch instead of
+  adding another rebase/merge cycle to the duplicated evidence history.
+- `pnpm exec vitest run tests/unit/reporting-filing.test.ts`: exit 0,
+  30 tests / 1 file passed in 5.75s. In-memory order event resource:
+  `67fc4abb-c383-47f4-ab67-041f114fb67c`. This reproduces rejection on the
+  dispatched HEAD; it is not PDF/XLSX acceptance or a test run on origin/dev.
+- No production/UI modifications, live resources, browser/device checks,
+  deployment, typechecks, or renderer parsing acceptance claimed. This is an
+  evidence anchor only; its ordinary-pushed SHA is recorded in machine truth.
+  No implementation candidate or review handoff is claimed.
+
 Owner: Codex. Reviewer: Gemini. Recorded: 2026-09-08 UTC.
 
 ## Revision and reproduction
