@@ -1,3 +1,4 @@
+/* global window */
 // Local browser verification with intercepted API responses, never live submission evidence.
 // Start the built fleet app on 3317 with DRTS_FLEET_PARTNER_ID=sr-fleet-form-browser-test.
 import { chromium, expect } from "@playwright/test";
@@ -109,6 +110,12 @@ try {
   await expect(page.locator("#form-new-vehicle-color")).toHaveValue(
     "optional-only",
   );
+  await page.setExtraHTTPHeaders({
+    "x-fleet-partner-id": "sr-fleet-form-other-test",
+  });
+  await page.goto(`${base}/supply/vehicles/new`);
+  await expect(page.locator("#form-new-vehicle-color")).toBeEnabled();
+  await expect(page.locator("#form-new-vehicle-color")).toHaveValue("");
   console.log(
     JSON.stringify({
       result: "passed",

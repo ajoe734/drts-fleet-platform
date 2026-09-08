@@ -943,6 +943,8 @@ function useSupplyDraft<T extends object>(key: string, initial: T) {
     updateForm(value);
   };
   const clearDraft = () => {
+    current.current = initial;
+    updateForm(initial);
     supplyDraftMemory.delete(key);
     try {
       window.sessionStorage.removeItem(key);
@@ -963,15 +965,13 @@ export function NewDriverSubmissionForm({
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
   const { form, setForm, clearDraft, restoreVersion } = useSupplyDraft(
     `supply-draft:v1:${draftScope}:driver`,
     NEW_DRIVER_INITIAL_FORM,
   );
 
   // Every edited value is protected, including optional fields and product choices (R25).
-  const dirty =
-    !submitted && hasUnsavedDraftChanges(form, NEW_DRIVER_INITIAL_FORM);
+  const dirty = hasUnsavedDraftChanges(form, NEW_DRIVER_INITIAL_FORM);
 
   const { confirmLeave } = useDraftGuard(dirty);
 
@@ -983,9 +983,9 @@ export function NewDriverSubmissionForm({
         "fleet-partner/supply-submissions/drivers",
         { method: "POST", body: JSON.stringify(form) },
       );
-      // Mark submitted so the beforeunload guard is lifted before navigation.
+      // Clear only after the API accepts creation. Reset fields as well so a
+      // cached form can protect subsequent edits after browser Back.
       clearDraft();
-      setSubmitted(true);
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
     } catch (err) {
@@ -1052,15 +1052,13 @@ export function NewVehicleSubmissionForm({
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
   const { form, setForm, clearDraft, restoreVersion } = useSupplyDraft(
     `supply-draft:v1:${draftScope}:vehicle`,
     NEW_VEHICLE_INITIAL_FORM,
   );
 
   // Every edited value is protected, including optional fields and product choices (R25).
-  const dirty =
-    !submitted && hasUnsavedDraftChanges(form, NEW_VEHICLE_INITIAL_FORM);
+  const dirty = hasUnsavedDraftChanges(form, NEW_VEHICLE_INITIAL_FORM);
 
   const { confirmLeave } = useDraftGuard(dirty);
 
@@ -1072,9 +1070,9 @@ export function NewVehicleSubmissionForm({
         "fleet-partner/supply-submissions/vehicles",
         { method: "POST", body: JSON.stringify(form) },
       );
-      // Mark submitted so the beforeunload guard is lifted before navigation.
+      // Clear only after the API accepts creation. Reset fields as well so a
+      // cached form can protect subsequent edits after browser Back.
       clearDraft();
-      setSubmitted(true);
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
     } catch (err) {
