@@ -1,5 +1,33 @@
 # SR-ENTERPRISE-SEARCH-001 — 企業歷史查詢條件與結果一致
 
+## 2026-09-08 17:44 dispatch 再核實：後端前置仍缺
+
+- `git fetch origin` exit 0；目前 base `origin/dev` =
+  `2a093872d05a7d0344adf9bb58f9e5c4c99861d1`。
+- 本次開始的 local / remote task branch 均為
+  `7e82f650020cbc49ff41b77ea9851c85284bd8de`。
+- `git rebase origin/dev` exit 1：重播 `f20c35e97` 時本證據檔 add/add
+  conflict。`git rebase --abort` exit 0，恢復乾淨既有分支；未強推、未回退 dev。
+  本次僅追加阻擋證據，未聲稱已完成與新 base 整合。
+- 以 `git show origin/dev:<path>` 直接核對目前 base（各 exit 0）：
+  `apps/api/src/modules/owned-mobility/owned-mobility.controller.ts` 的
+  `listTenantBookings` 仍沒有 query 參數；同目錄 service 的
+  `listTenantBookings(tenantId: string)` 仍僅依 tenant 過濾、固定 page 1，
+  pageSize / totalItems 均為全量 items.length；
+  `packages/api-client/src/index.ts` 的 `listTenantBookings()` 仍無參數。
+- 目前 base 的 `apps/enterprise-dispatch-web/app/bookings/page.tsx`
+  仍只渲染 `EnterpriseBookingHistory`。此次沒有 UI 改動。
+- `ai-status.sh show SR-BOOKING-VERIFY` 與
+  `ai-status.sh show SR-BOOKING-VERIFY-001` 各 exit 1，均 Task not found。
+
+依 execution prompt 的明示前置，仍需 supervisor 登錄正確後端 producer、
+補 depends_on，協調 API / contract / client write scopes，提供日期、乘客、
+狀態及分頁的權威 query / total 契約後再續作。不能用現有前端全量篩選結案。
+資源端點為 GET `/api/tenant/bookings`；本次僅靜態核實，未發 live request，
+沒有新增 booking ID、真實 filtered total、瀏覽器或真機驗證。
+未重跑既有副本邏輯測試／typecheck，歷史結果不算本次驗收；沒有合格 candidate，
+不 handoff。本次證據 commit SHA 由 task board blocker 記錄。
+
 ## 2026-09-08 本次 dispatch 核實：blocked，尚未達到 handoff 條件
 
 本節取代下方歷史紀錄中的完成判定。fresh `origin/dev` base 為
