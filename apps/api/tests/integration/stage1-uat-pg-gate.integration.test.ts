@@ -464,11 +464,28 @@ async function seedDatabase(harness: Harness, seed: Seed) {
      VALUES ($1::uuid, $2, $3, 'enterprise', 'active', '{}'::jsonb)`,
     [seed.tenantId, `pg-${seed.tenantId}`, "Stage1 PG Gate"],
   );
-  await harness.repository.persistChanges({
-    orders: [seed.order],
-    dispatchJobs: [seed.dispatchJob],
-    dispatchAssignments: [seed.assignment],
-    driverTasks: [seed.task],
+  await harness.repository.withTransaction(async (client) => {
+    await harness.repository.persistOrderWorkflow(client, {
+      orders: [seed.order],
+      dispatchJobs: [seed.dispatchJob],
+      dispatchAssignments: [seed.assignment],
+      driverTasks: [seed.task],
+    });
+    // UV-EXEC-006/V0090: the deferred reservation fence checks at COMMIT
+    // that every active assignment has a held/occupied reservation for its
+    // driver+vehicle. Seed through the same ledger a real writer uses,
+    // reserved then occupied in this transaction, instead of bypassing it.
+    await harness.repository.reserveDispatchResources(client, {
+      orderId: seed.order.orderId,
+      assignmentId: seed.assignment.assignmentId,
+      driverId: seed.assignment.driverId,
+      vehicleId: seed.assignment.vehicleId,
+      expiresAt: null,
+    });
+    await harness.repository.occupyDispatchResourceReservations(
+      seed.assignment.assignmentId,
+      client,
+    );
   });
   await harness.tenantRepository.persistChanges({
     quotaPolicies: [seed.quotaPolicy],
@@ -532,6 +549,10 @@ async function cleanup(seed: Seed) {
     await database.query(
       "DELETE FROM ops.phase1_driver_tasks WHERE task_id = $1",
       [seed.task.taskId],
+    );
+    await database.query(
+      "DELETE FROM ops.dispatch_resource_reservations WHERE assignment_id = $1",
+      [seed.assignment.assignmentId],
     );
     await database.query(
       "DELETE FROM ops.phase1_dispatch_assignments WHERE assignment_id = $1",
