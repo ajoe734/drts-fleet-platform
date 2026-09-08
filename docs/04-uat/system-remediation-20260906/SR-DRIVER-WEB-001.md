@@ -1,11 +1,11 @@
-# SR-DRIVER-WEB-001 — 司機 web 預覽平台分流與既有修復回歸：完成證據
+# SR-DRIVER-WEB-001 — 司機 web 預覽平台分流與既有修復回歸：候選證據
 
 - Task: `SR-DRIVER-WEB-001`
-- Owner: `Claude2`（availability-first reassignment；沿用先前 `Claude` 在 PR #1666 / branch `claude/sr-driver-web-001` 的修復內容，修正該 candidate 未過的 CI 檢查後於本分支重新提交）
+- Owner: `Codex`（availability-first reassignment；重放已驗證的平台分流，並以目前 `origin/dev` 重跑可用檢查）
 - Reviewer: `Claude`
-- Base SHA (`origin/dev`): `2aa3cb5d8408f3bdcfad7bd82d25068ad998d578`
-- Worktree: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/claude2-sr-driver-web-001`
-- Branch: `claude2/sr-driver-web-001`
+- Base SHA (`origin/dev`, 2026-09-08): `b5c3774e5e62fab7cf43b67a7e69fae7e0ca91ef`
+- Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-driver-web-001`
+- Branch: `codex/sr-driver-web-001`
 - Gap: `R30` · Capabilities: `C049`, `C062`
 
 ---
@@ -229,3 +229,50 @@ symlink 已直接失效，同樣未能執行；不在本 task write scope 內修
   `tests/unit/system-remediation/sr-driver-web-001/sr-driver-web-001.test.ts`
 - Base SHA: `2aa3cb5d8408f3bdcfad7bd82d25068ad998d578`
 - Candidate SHA: 見 handoff 記錄（`git rev-parse HEAD` at commit time）
+
+---
+
+## 8. 2026-09-08 目前候選重驗（此節覆蓋上文的歷史環境與候選敘述）
+
+上文第 0–7 節保存 2026-09-06 舊 candidate 的修復根因與設計追溯；其中舊 branch、舊
+base SHA、舊 worktree、舊 CI 與失效 symlink 的描述不是本次候選的驗證結果。本次從目前
+`origin/dev` 的 `b5c3774e5e62fab7cf43b67a7e69fae7e0ca91ef` 重放同一個已驗證修復，沒有
+回退或重造 native 實作。
+
+本次 candidate 的實際命令結果如下：
+
+```text
+$ git rebase origin/dev
+Successfully rebased and updated refs/heads/codex/sr-driver-web-001.
+
+$ git diff --check origin/dev...HEAD
+exit code: 0
+
+$ pnpm --filter @drts/driver-app typecheck
+> tsc --noEmit
+exit code: 0
+
+$ pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/
+Test Files  1 passed (1)
+Tests       5 passed (5)
+exit code: 0
+```
+
+另嘗試下列 web bundle 實測，但在 Metro 解析 workspace 的 `expo-router/entry.js` 前失敗：
+
+```text
+$ pnpm --filter @drts/driver-app exec expo export --platform web --output-dir /tmp/sr-driver-web-001-export.UvndNp
+Error: Unable to resolve module .../expo-router/entry.js
+exit code: 1
+```
+
+因此，平台分流的 source invariant 與 TypeScript 檢查已直接驗證，三個路由檔的存在及 bare
+module import 亦由 5 個 regression assertions 驗證；但本次沒有把 web bundle/export 或瀏覽器
+三路由開啟宣稱為成功。原生 iOS/Android 實機／EAS build 同樣未做。`driver-trip-map.tsx`
+（native `react-native-maps` import）與 `app/trip.tsx`（bare import）均未修改；新
+`driver-trip-map.web.tsx` 完全不依賴 `react-native-maps`，使 native map 僅在 native
+platform resolution 中載入。
+
+資源 ID：Task `SR-DRIVER-WEB-001`；Gap `R30`；Capabilities `C049`, `C062`。最終
+candidate SHA 由 handoff 時的 `git rev-parse HEAD` 寫入 Supervisor machine truth；本文件
+不以舊 candidate SHA 冒充本次 candidate。
