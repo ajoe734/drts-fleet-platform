@@ -1,5 +1,14 @@
 # SR-ENTERPRISE-DATA-001 — baseline and screen requirements
 
+## Redispatch verification (2026-09-08T23:19:49Z)
+
+- Recorded canonical `start`; task still has six original write scopes, no dependencies and no new screen/contact decision. Re-read the execution/spec, R08/R09/R16, all six capability records, history-helper report, tenant realm tokens, ENT_Home/ENT_Trip, ENT_GATES and EEmpty.
+- `git fetch origin`: exit 0; current base `3bdb943eef2cb42fd825cc8e3d250d3d42cdf4bb`. `git rebase origin/dev`: initially exit 1 on duplicate historical task-document patches. Resolved only that document by retaining already-replayed evidence; final `git -c core.editor=true rebase --continue`: exit 0. `git merge --no-ff origin/codex/sr-enterprise-data-001` with task trailers: exit 0; verification head `9e5682beb5ed12034f43c54664538005c46950ff`. Diff against origin/dev contains only the task evidence document; its prior content is unchanged from dispatch head `287aeeeaf9d9c12e8bc1c7debe58f74f1d06f123`.
+- Current home/trip still read fixtures; home links `/trip` without an ID, trip renders fixed `active={2}` and inert contact controls. Shared booking detail still maps 404 to `degraded`. Missing canonical not-found/unavailable-contact states remain unspecified. The dispatch's explicit design STOP and shared-write scope restrictions still apply; history-helper completion does not resolve them.
+- `git diff --check`: exit 0. `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0 (`tsc --noEmit`). `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`: exit 1 (`No test files found`). No passing regression suite is claimed.
+- Resource `EB-7K2E1D` remains fixture-only; no live booking existence or authorized driver contact is asserted. Implementation candidate SHA: none. Evidence anchor/push SHA is recorded in machine truth. No product changes, live/browser/telephone/true-device tests, review, CI, acceptance or deployment were performed.
+- Supervisor must supply canonical missing states and adjudicate shared lifecycle/theme/help scopes and dependencies plus the permitted contact source. Please preserve blocked status until these product prerequisites are resolved; repeatedly completing/resuming the history helper cannot clear them.
+
 ## Redispatch after 22:41:52Z resume (2026-09-08)
 
 - Current fetched base: `eb684f176b1d3b46553a0f6f0556c79452fbac3c`. `git fetch origin`: exit 0. `git rebase origin/dev`: initially exit 1 on repeated historical evidence conflicts; retained already-replayed content in this task document only. Final `GIT_EDITOR=true git rebase --continue`: exit 0. Rebased head: `1465165f174008c41c8baeaf024ff7d5e80163d8`.
