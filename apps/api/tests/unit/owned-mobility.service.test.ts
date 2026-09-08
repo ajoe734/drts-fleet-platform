@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { buildOrderFixture } from "../integration/voice-order-fixture";
 
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { HttpStatus, Logger } from "@nestjs/common";
@@ -4992,6 +4993,41 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(
       tenantPartnerService.applyCommittedQuotaConsumption,
     ).not.toHaveBeenCalled();
+  });
+
+  it("hydrates voice database fixtures without aborting shared state loading", async () => {
+    const order = buildOrderFixture({
+      orderId: "voice-fixture-hydration",
+      callId: "call-fixture-hydration",
+      voiceIntentId: "intent-fixture-hydration",
+    });
+    const repository = {
+      isEnabled: () => true,
+      loadState: vi.fn(async () => ({
+        orders: [JSON.parse(JSON.stringify(order))],
+        dispatchJobs: [],
+        dispatchAttempts: [],
+        dispatchAssignments: [],
+        driverTasks: [],
+        dispatchTraceLogs: [],
+        passengerDisclosureSnapshots: [],
+        consumerNotificationOutbox: [],
+      })),
+      persistChanges: vi.fn(async () => {}),
+      persistOrderWorkflow: vi.fn(async () => {}),
+      withTransaction: vi.fn(async (work) => work({} as never)),
+      reportPersistenceFailure: vi.fn(),
+    };
+    const { service } = createOwnedMobilityService({ repository });
+    await service.onModuleInit();
+    expect(repository.reportPersistenceFailure).not.toHaveBeenCalled();
+    expect(service.getOrder(order.orderId)).toMatchObject({
+      orderId: order.orderId,
+      callId: order.callId,
+      voiceIntentId: order.voiceIntentId,
+      approvalRequestIds: [],
+      complianceFlags: [],
+    });
   });
 
   it("recovers pending driver-completion outbox work on module init", async () => {
