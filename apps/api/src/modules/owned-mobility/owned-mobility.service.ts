@@ -4330,7 +4330,11 @@ export class OwnedMobilityService
         lockedTask &&
         !["completed", "cancelled", "rejected"].includes(lockedTask.status)
       ) {
-        closedTask = { ...lockedTask, status: "cancelled", completedAt: now };
+        // `completedAt` means trip-completion time (see reporting's
+        // tripCompletedAt derivation), not "when this record stopped being
+        // active" -- stamping it here would make a superseded/cancelled
+        // task look like it finished a trip. Leave it null.
+        closedTask = { ...lockedTask, status: "cancelled" };
       }
     }
     await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
