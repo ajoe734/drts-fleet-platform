@@ -49,3 +49,35 @@ Acceptance is not yet complete. Earlier evidence overstated the implemented beha
 4. Detail consistency, browser filter/navigation/download behavior, and design fidelity remain unverified. There is no trip detail route in the task's existing trips directory. Confirm intended detail surface/canvas before adding a screen.
 
 No live API, Cloud Run, browser/E2E, physical-device, independent review, same-candidate CI, merge-to-dev, or deployment verification was performed. No `done` or `handoff` is appropriate yet.
+
+## Resumed dispatch — 2026-09-08 15:51 UTC
+
+- Fresh base: `f372e4a6a0dd16204ccbd660f23013601357c224` (`origin/dev`). Starting published progress: `196df659a7a3247da5a10930a162bd6b2d7dc178`.
+- Rebase initially conflicted because the earlier ancestry-preserving merge includes duplicate historical patches. Aborted the first attempt; on the second, skipped already-applied historical commits `bfb0a30f9`, `3ee84f73a`, `2ebacdb5c`; Git automatically dropped duplicate `98bf5563a`. Rebase completed exit 0. The scoped application/test/evidence diff against the starting published progress was empty before new edits.
+- Merged the published branch ancestry normally (exit 0, no tree changes), then ordinary push succeeded at `5ed459db9`. No force push or stash was used.
+- Implementation anchor `c858642cd` was committed and normally pushed. The final evidence/test commit is a progress revision, **not a candidate**. Candidate SHA: unset; acceptance remains incomplete.
+
+In-scope changes in this dispatch:
+
+- CSV serializes every field with delimiter/quote/newline escaping, including grouped summary counts (`1,000`) and resource IDs.
+- `loadTrips()` defaults to the current UTC month, matching dashboard; explicit periods remain passed to the authoritative API. Dashboard navigation carries the selected period to trips.
+- Trips page applies the existing export status query and preserves it through tabs, search submissions and export links. Available-driver count/filter uses API `dispatchEligible`, matching dashboard.
+- Layout, realm palette and typography were not changed. Read canonical `fleet-screens.jsx` and `packages/ui-tokens/src/realms.ts` before page edits. No detail screen was invented.
+
+Commands actually executed on this resumed work:
+
+| Command | Result |
+| --- | --- |
+| `git fetch origin` | exit 0; base above |
+| `git rebase origin/dev` | initial duplicate-patch conflict, resolved as described above; final exit 0 |
+| `git push -u origin codex/sr-fleet-data-001` | exit 0, `196df659a..5ed459db9` |
+| `git push origin codex/sr-fleet-data-001` | exit 0, `5ed459db9..c858642cd` |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-data-001/` | exit 0; 1 file, 19 tests; 15:51:09 UTC, 620 ms |
+| `pnpm --filter @drts/fleet-partner-portal-web typecheck` | exit 0; Next route type generation and TypeScript |
+| `git diff --check` | exit 0 |
+
+New unit scenarios use test-only IDs `drv-large-0` through `drv-large-999` and `ord,"quoted"`, plus the earlier partner/driver/trip IDs. API calls are mocked, including the 2026-10 UTC boundary; this is not live scope/isolation evidence. Page status-query and eligible-driver changes have typecheck and source inspection only, not browser verification.
+
+### Remaining blocker (supersedes item 3 above)
+
+CSV escaping and default-month defects are fixed. Shared page/table/copy scope remains unchanged in the current task slice. The merged helper `support/unblock/SR-FLEET-DATA-001/SR-FLEET-DATA-001-UNBLOCK-PLANNING-DECISION.md` and `Q-SR-FLEET-DATA-001` explicitly route scope extension, writer ordering and detail-surface choice to Supervisor/Chairman; the helper itself grants no scope. Await the four additional paths and acyclic ordering named above. Unknown documents/training presentation, truthful disconnected pages, and detail acceptance remain incomplete. Browser filter/navigation/download/design checks and live partner authorization remain unperformed. No same-candidate review, CI, merge, deployment or physical-device success is claimed.
