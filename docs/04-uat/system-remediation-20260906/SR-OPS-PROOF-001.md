@@ -35,3 +35,5 @@ No cloud backup inventory, Cloud SQL restore, authorized isolated cloud target, 
 ## Local verification evidence
 
 The unit regression executes `inventory`, proves a non-loopback restore target exits before restore tooling runs, and proves the load command rejects a missing dispatch/report workload. It does not manufacture a database dump or report live operation success.
+
+An exploratory loopback-only run also produced all three raw workload records (HTTP 404 from an intentionally empty local server); this confirms recording mechanics only, not booking, dispatch, or reporting success.
