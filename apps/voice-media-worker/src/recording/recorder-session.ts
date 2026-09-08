@@ -340,19 +340,36 @@ export class CallRecorderSession {
     return segment;
   }
 
-  /** True when the just-sealed (or about-to-be-sealed) offset is contiguous with the prior seal. */
+  /** True when all sealed segments have contiguous coverage across channels and boundaries. */
   hasContiguousCoverage(): boolean {
-    if (this.sealedSegments.length <= 1) {
+    if (this.sealedSegments.length === 0) {
       return true;
     }
-    for (let index = 1; index < this.sealedSegments.length; index += 1) {
-      const previous = this.sealedSegments[index - 1]!;
+    for (let index = 0; index < this.sealedSegments.length; index += 1) {
       const current = this.sealedSegments[index]!;
       if (
-        current.segmentSequence !== previous.segmentSequence + 1 ||
-        current.startOffsetMs !== previous.endOffsetMs
+        current.channelCoverage.some(
+          (c) => c.hasGaps || (c.intervals && c.intervals.length > 1),
+        )
       ) {
         return false;
+      }
+      if (index > 0) {
+        const previous = this.sealedSegments[index - 1]!;
+        if (
+          current.segmentSequence !== previous.segmentSequence + 1 ||
+          current.startOffsetMs !== previous.endOffsetMs
+        ) {
+          return false;
+        }
+        for (const ch of current.channelCoverage) {
+          const prevCh = previous.channelCoverage.find(
+            (c) => c.channel === ch.channel,
+          );
+          if (prevCh && ch.startOffsetMs > prevCh.endOffsetMs) {
+            return false;
+          }
+        }
       }
     }
     return true;

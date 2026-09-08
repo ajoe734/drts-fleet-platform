@@ -243,6 +243,7 @@ describe("CallRecorderSession (recorder ingest + sealed segments)", () => {
     expect(agentCov!.intervals[0]!.endOffsetMs).toBe(20);
     expect(agentCov!.intervals[1]!.startOffsetMs).toBe(800);
     expect(agentCov!.intervals[1]!.endOffsetMs).toBe(820);
+    expect(session.hasContiguousCoverage()).toBe(false);
   });
 
   it("never overwrites an already-sealed object key across seals", async () => {
@@ -2246,6 +2247,467 @@ describe("VoiceEvidenceService", () => {
 
       expect(result).toBeDefined();
       expect(result.checkpointId).toBe(checkpoint.checkpointId);
+    });
+
+    it("rejects gate and proof when an internal channel gap precedes readback (SD §8.2)", async () => {
+      // Single verified segment [0, 1000ms):
+      // Customer is fully contiguous [0, 1000ms).
+      // Agent has an internal gap: [0, 20ms) and [500, 1000ms) with hasGaps: true.
+      const { checkpoint } = await service.ingestSealedSegment(
+        segment({
+          segmentSequence: 1,
+          startOffsetMs: 0,
+          endOffsetMs: 1000,
+          startedAtUtc: "2026-09-08T00:00:00.000Z",
+          endedAtUtc: "2026-09-08T00:00:01.000Z",
+          readbackPlaybackId: "playback-1",
+          snapshotHash: "snapshot-hash",
+          channelCoverage: [
+            {
+              channel: "customer",
+              startOffsetMs: 0,
+              endOffsetMs: 1000,
+              startedAtUtc: "2026-09-08T00:00:00.000Z",
+              endedAtUtc: "2026-09-08T00:00:01.000Z",
+              hasGaps: false,
+              intervals: [
+                {
+                  startOffsetMs: 0,
+                  endOffsetMs: 1000,
+                  startedAtUtc: "2026-09-08T00:00:00.000Z",
+                  endedAtUtc: "2026-09-08T00:00:01.000Z",
+                },
+              ],
+            },
+            {
+              channel: "agent",
+              startOffsetMs: 0,
+              endOffsetMs: 1000,
+              startedAtUtc: "2026-09-08T00:00:00.000Z",
+              endedAtUtc: "2026-09-08T00:00:01.000Z",
+              hasGaps: true,
+              intervals: [
+                {
+                  startOffsetMs: 0,
+                  endOffsetMs: 20,
+                  startedAtUtc: "2026-09-08T00:00:00.000Z",
+                  endedAtUtc: "2026-09-08T00:00:00.020Z",
+                },
+                {
+                  startOffsetMs: 500,
+                  endOffsetMs: 1000,
+                  startedAtUtc: "2026-09-08T00:00:00.500Z",
+                  endedAtUtc: "2026-09-08T00:00:01.000Z",
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      // Gate must reject due to internal channel gap
+      const gate = await service.evaluateRecordingGate(CALL_ID, RECORDING_ID);
+      expect(gate.allowed).toBe(false);
+      expect(gate).toEqual({ allowed: false, reason: "continuity_broken" });
+
+      // Even if subsequent readback is at 600..800ms and speech is at 850..950ms,
+      // the gate rejection prevents autonomous commit
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent({
+          occurredAt: "2026-09-08T00:00:00.800Z",
+          payload: {
+            playbackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            promptPlaybackId: "playback-1",
+            promptId: "prompt-confirm-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.600Z",
+              endUtc: "2026-09-08T00:00:00.800Z",
+              startOffsetMs: 600,
+              endOffsetMs: 800,
+            },
+          },
+        }),
+        validAsrFinalEvent({
+          occurredAt: "2026-09-08T00:00:00.950Z",
+          payload: {
+            turnId: "55555555-5555-4555-8555-555555555555",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.850Z",
+              endUtc: "2026-09-08T00:00:00.950Z",
+              startOffsetMs: 850,
+              endOffsetMs: 950,
+            },
+          },
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      let thrown: any = null;
+      try {
+        await service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(ApiRequestError);
+      expect((thrown as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "VOICE_RECORDING_NOT_DURABLE",
+          details: { reason: "continuity_broken" },
+        },
+      });
+    });
+
+    it("rejects gate and proof when an inter-segment channel gap precedes readback (SD §8.2)", async () => {
+      // Segment 1: customer covers [0, 500ms), agent covers [0, 400ms) with a 100ms gap at end
+      await service.ingestSealedSegment(
+        segment({
+          segmentSequence: 1,
+          startOffsetMs: 0,
+          endOffsetMs: 500,
+          startedAtUtc: "2026-09-08T00:00:00.000Z",
+          endedAtUtc: "2026-09-08T00:00:00.500Z",
+          channelCoverage: [
+            {
+              channel: "customer",
+              startOffsetMs: 0,
+              endOffsetMs: 500,
+              startedAtUtc: "2026-09-08T00:00:00.000Z",
+              endedAtUtc: "2026-09-08T00:00:00.500Z",
+              hasGaps: false,
+              intervals: [{ startOffsetMs: 0, endOffsetMs: 500, startedAtUtc: "2026-09-08T00:00:00.000Z", endedAtUtc: "2026-09-08T00:00:00.500Z" }],
+            },
+            {
+              channel: "agent",
+              startOffsetMs: 0,
+              endOffsetMs: 400,
+              startedAtUtc: "2026-09-08T00:00:00.000Z",
+              endedAtUtc: "2026-09-08T00:00:00.400Z",
+              hasGaps: false,
+              intervals: [{ startOffsetMs: 0, endOffsetMs: 400, startedAtUtc: "2026-09-08T00:00:00.000Z", endedAtUtc: "2026-09-08T00:00:00.400Z" }],
+            },
+          ],
+        }),
+      );
+
+      // Segment 2 starts at 500ms: agent starts at 500ms (so gap was 400..500ms)
+      const { checkpoint } = await service.ingestSealedSegment(
+        segment({
+          segmentSequence: 2,
+          objectKey: `${CALL_ID}/${RECORDING_ID}/segments/000002`,
+          checksum: "checksum-seg-2-gap",
+          startOffsetMs: 500,
+          endOffsetMs: 1000,
+          startedAtUtc: "2026-09-08T00:00:00.500Z",
+          endedAtUtc: "2026-09-08T00:00:01.000Z",
+          readbackPlaybackId: "playback-1",
+          snapshotHash: "snapshot-hash",
+        }),
+      );
+
+      const gate = await service.evaluateRecordingGate(CALL_ID, RECORDING_ID);
+      expect(gate.allowed).toBe(false);
+      expect(gate).toEqual({ allowed: false, reason: "continuity_broken" });
+
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        validReadbackEvent({
+          occurredAt: "2026-09-08T00:00:00.800Z",
+          payload: {
+            playbackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            promptPlaybackId: "playback-1",
+            promptId: "prompt-confirm-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.600Z",
+              endUtc: "2026-09-08T00:00:00.800Z",
+              startOffsetMs: 600,
+              endOffsetMs: 800,
+            },
+          },
+        }),
+        validAsrFinalEvent({
+          occurredAt: "2026-09-08T00:00:00.950Z",
+          payload: {
+            turnId: "55555555-5555-4555-8555-555555555555",
+            callId: CALL_ID,
+            callLegId: "leg-customer-1",
+            audioRegion: {
+              startUtc: "2026-09-08T00:00:00.850Z",
+              endUtc: "2026-09-08T00:00:00.950Z",
+              startOffsetMs: 850,
+              endOffsetMs: 950,
+            },
+          },
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      let thrown: any = null;
+      try {
+        await service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(ApiRequestError);
+      expect((thrown as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "VOICE_RECORDING_NOT_DURABLE",
+          details: { reason: "continuity_broken" },
+        },
+      });
+    });
+
+    describe("absent/empty channelCoverage negative matrix (SD §8.2)", () => {
+      it("fails closed when channelCoverage is undefined/absent and never fabricates coverage", async () => {
+        const seg = segment({
+          readbackPlaybackId: "playback-1",
+          snapshotHash: "snapshot-hash",
+        });
+        delete seg.channelCoverage;
+
+        const { checkpoint } = await service.ingestSealedSegment(seg);
+        const gate = await service.evaluateRecordingGate(CALL_ID, RECORDING_ID);
+        expect(gate.allowed).toBe(false);
+        expect(gate).toEqual({ allowed: false, reason: "coverage_incomplete" });
+
+        fixture.seedEvents(VOICE_SESSION_ID, [
+          validReadbackEvent({
+            occurredAt: "2026-09-08T00:00:00.400Z",
+            payload: {
+              playbackId: "playback-1",
+              snapshotHash: "snapshot-hash",
+              callId: CALL_ID,
+              callLegId: "leg-customer-1",
+              promptPlaybackId: "playback-1",
+              promptId: "prompt-confirm-1",
+              audioRegion: {
+                startUtc: "2026-09-08T00:00:00.100Z",
+                endUtc: "2026-09-08T00:00:00.400Z",
+                startOffsetMs: 100,
+                endOffsetMs: 400,
+              },
+            },
+          }),
+          validAsrFinalEvent(),
+        ]);
+
+        const proof = {
+          ...baseProofFields(checkpoint.checkpointId),
+          confirmationMethod: "speech" as const,
+          evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+        };
+
+        let errObj: any = null;
+        try {
+          await service.assertProofIsRecordingBacked({
+            callId: CALL_ID,
+            recordingId: RECORDING_ID,
+            proof,
+          });
+        } catch (err) {
+          errObj = err;
+        }
+        expect(errObj).toBeInstanceOf(ApiRequestError);
+        expect((errObj as ApiRequestError).getResponse()).toMatchObject({
+          error: {
+            code: "VOICE_RECORDING_NOT_DURABLE",
+            details: { reason: "coverage_incomplete" },
+          },
+        });
+      });
+
+      it("fails closed when channelCoverage is an empty array", async () => {
+        const { checkpoint } = await service.ingestSealedSegment(
+          segment({
+            channelCoverage: [],
+            readbackPlaybackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+          }),
+        );
+        const gate = await service.evaluateRecordingGate(CALL_ID, RECORDING_ID);
+        expect(gate.allowed).toBe(false);
+        expect(gate).toEqual({ allowed: false, reason: "coverage_incomplete" });
+
+        fixture.seedEvents(VOICE_SESSION_ID, [
+          validReadbackEvent(),
+          validAsrFinalEvent(),
+        ]);
+
+        const proof = {
+          ...baseProofFields(checkpoint.checkpointId),
+          confirmationMethod: "speech" as const,
+          evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+        };
+
+        let errObj: any = null;
+        try {
+          await service.assertProofIsRecordingBacked({
+            callId: CALL_ID,
+            recordingId: RECORDING_ID,
+            proof,
+          });
+        } catch (err) {
+          errObj = err;
+        }
+        expect(errObj).toBeInstanceOf(ApiRequestError);
+        expect((errObj as ApiRequestError).getResponse()).toMatchObject({
+          error: {
+            code: "VOICE_RECORDING_NOT_DURABLE",
+            details: { reason: "coverage_incomplete" },
+          },
+        });
+      });
+
+      it("fails closed when channelCoverage is missing the required agent channel", async () => {
+        const { checkpoint } = await service.ingestSealedSegment(
+          segment({
+            channelCoverage: [
+              {
+                channel: "customer",
+                startOffsetMs: 0,
+                endOffsetMs: 1000,
+                startedAtUtc: "2026-09-08T00:00:00.000Z",
+                endedAtUtc: "2026-09-08T00:00:01.000Z",
+                hasGaps: false,
+                intervals: [
+                  {
+                    startOffsetMs: 0,
+                    endOffsetMs: 1000,
+                    startedAtUtc: "2026-09-08T00:00:00.000Z",
+                    endedAtUtc: "2026-09-08T00:00:01.000Z",
+                  },
+                ],
+              },
+            ],
+            readbackPlaybackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+          }),
+        );
+        const gate = await service.evaluateRecordingGate(CALL_ID, RECORDING_ID);
+        expect(gate.allowed).toBe(false);
+        expect(gate).toEqual({ allowed: false, reason: "coverage_incomplete" });
+
+        fixture.seedEvents(VOICE_SESSION_ID, [
+          validReadbackEvent(),
+          validAsrFinalEvent(),
+        ]);
+
+        const proof = {
+          ...baseProofFields(checkpoint.checkpointId),
+          confirmationMethod: "speech" as const,
+          evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+        };
+
+        let errObj: any = null;
+        try {
+          await service.assertProofIsRecordingBacked({
+            callId: CALL_ID,
+            recordingId: RECORDING_ID,
+            proof,
+          });
+        } catch (err) {
+          errObj = err;
+        }
+        expect(errObj).toBeInstanceOf(ApiRequestError);
+        expect((errObj as ApiRequestError).getResponse()).toMatchObject({
+          error: {
+            code: "VOICE_RECORDING_NOT_DURABLE",
+            details: { reason: "coverage_incomplete" },
+          },
+        });
+      });
+
+      it("fails closed when agent channelCoverage has empty intervals", async () => {
+        const { checkpoint } = await service.ingestSealedSegment(
+          segment({
+            channelCoverage: [
+              {
+                channel: "customer",
+                startOffsetMs: 0,
+                endOffsetMs: 1000,
+                startedAtUtc: "2026-09-08T00:00:00.000Z",
+                endedAtUtc: "2026-09-08T00:00:01.000Z",
+                hasGaps: false,
+                intervals: [
+                  {
+                    startOffsetMs: 0,
+                    endOffsetMs: 1000,
+                    startedAtUtc: "2026-09-08T00:00:00.000Z",
+                    endedAtUtc: "2026-09-08T00:00:01.000Z",
+                  },
+                ],
+              },
+              {
+                channel: "agent",
+                startOffsetMs: 0,
+                endOffsetMs: 1000,
+                startedAtUtc: "2026-09-08T00:00:00.000Z",
+                endedAtUtc: "2026-09-08T00:00:01.000Z",
+                hasGaps: false,
+                intervals: [],
+              },
+            ],
+            readbackPlaybackId: "playback-1",
+            snapshotHash: "snapshot-hash",
+          }),
+        );
+        const gate = await service.evaluateRecordingGate(CALL_ID, RECORDING_ID);
+        expect(gate.allowed).toBe(false);
+        expect(gate).toEqual({ allowed: false, reason: "coverage_incomplete" });
+
+        fixture.seedEvents(VOICE_SESSION_ID, [
+          validReadbackEvent(),
+          validAsrFinalEvent(),
+        ]);
+
+        const proof = {
+          ...baseProofFields(checkpoint.checkpointId),
+          confirmationMethod: "speech" as const,
+          evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+        };
+
+        let errObj: any = null;
+        try {
+          await service.assertProofIsRecordingBacked({
+            callId: CALL_ID,
+            recordingId: RECORDING_ID,
+            proof,
+          });
+        } catch (err) {
+          errObj = err;
+        }
+        expect(errObj).toBeInstanceOf(ApiRequestError);
+        expect((errObj as ApiRequestError).getResponse()).toMatchObject({
+          error: {
+            code: "VOICE_RECORDING_NOT_DURABLE",
+            details: { reason: "coverage_incomplete" },
+          },
+        });
+      });
     });
   });
 

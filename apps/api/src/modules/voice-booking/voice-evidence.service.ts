@@ -261,15 +261,74 @@ export class VoiceEvidenceService {
     const expectedNextSequence = lastSegment
       ? lastSegment.segmentSequence + 1
       : 1;
+    const sequenceGap = input.segmentSequence !== expectedNextSequence;
+    const segmentOffsetGap =
+      lastSegment !== null && input.startOffsetMs !== lastSegment.endOffsetMs;
+
+    let inputChannelGap = false;
+    if (input.channelCoverage && input.channelCoverage.length > 0) {
+      for (const cov of input.channelCoverage) {
+        if (cov.hasGaps || (cov.intervals && cov.intervals.length > 1)) {
+          inputChannelGap = true;
+          break;
+        }
+        if (cov.intervals && cov.intervals.length === 1) {
+          const iv = cov.intervals[0]!;
+          if (iv.startOffsetMs > cov.startOffsetMs || iv.endOffsetMs < cov.endOffsetMs) {
+            inputChannelGap = true;
+            break;
+          }
+        }
+      }
+    }
+
+    let interSegmentChannelGap = false;
+    if (lastSegment && lastSegment.channelCoverage && input.channelCoverage) {
+      for (const newCov of input.channelCoverage) {
+        if (!newCov.intervals || newCov.intervals.length === 0) {
+          continue;
+        }
+        const lastCov = lastSegment.channelCoverage.find(
+          (c) => c.channel === newCov.channel,
+        );
+        if (lastCov && lastCov.intervals && lastCov.intervals.length > 0) {
+          if (newCov.startOffsetMs > lastCov.endOffsetMs) {
+            interSegmentChannelGap = true;
+            break;
+          }
+        }
+      }
+      for (const lastCov of lastSegment.channelCoverage) {
+        if (lastCov.intervals && lastCov.intervals.length > 0) {
+          const newCov = input.channelCoverage.find(
+            (c) => c.channel === lastCov.channel,
+          );
+          if (!newCov || !newCov.intervals || newCov.intervals.length === 0) {
+            interSegmentChannelGap = true;
+            break;
+          }
+        }
+      }
+    }
+
     const gapThisSegment =
-      input.segmentSequence !== expectedNextSequence ||
-      (lastSegment !== null && input.startOffsetMs !== lastSegment.endOffsetMs);
+      sequenceGap ||
+      segmentOffsetGap ||
+      inputChannelGap ||
+      interSegmentChannelGap;
+
     const continuityBroken =
       gapThisSegment || Boolean(previousCoverage?.continuityBroken);
 
     const segments: RecordingManifestSegment[] = [...previousSegments, input];
     const channelsCovered = Array.from(
-      new Set(segments.flatMap((segment) => segment.channels)),
+      new Set(
+        segments.flatMap((segment) =>
+          (segment.channelCoverage ?? [])
+            .filter((cov) => cov.intervals && cov.intervals.length > 0)
+            .map((cov) => cov.channel),
+        ),
+      ),
     );
     const coverage: RecordingCoverage = {
       channelsCovered,
@@ -386,7 +445,48 @@ export class VoiceEvidenceService {
     ) {
       return { allowed: false, reason: "coverage_incomplete" };
     }
+
     const manifest = checkpoint.manifest as RecordingManifest;
+    const segments = manifest.segments ?? [];
+    if (segments.length === 0) {
+      return { allowed: false, reason: "no_checkpoint" };
+    }
+
+    // Direct per-channel verification of manifest segments:
+    // Ensure all required channels have verified intervals without internal gaps.
+    for (const ch of ["customer", "agent"] as const) {
+      const chIntervals: { startOffsetMs: number; endOffsetMs: number }[] = [];
+      for (const seg of segments) {
+        if (!seg.channelCoverage || seg.channelCoverage.length === 0) {
+          continue;
+        }
+        const cov = seg.channelCoverage.find((c) => c.channel === ch);
+        if (!cov || !cov.intervals || cov.intervals.length === 0) {
+          continue;
+        }
+        if (cov.hasGaps || cov.intervals.length > 1) {
+          return { allowed: false, reason: "continuity_broken" };
+        }
+        for (const iv of cov.intervals) {
+          chIntervals.push({
+            startOffsetMs: iv.startOffsetMs,
+            endOffsetMs: iv.endOffsetMs,
+          });
+        }
+      }
+
+      if (chIntervals.length === 0) {
+        return { allowed: false, reason: "coverage_incomplete" };
+      }
+
+      chIntervals.sort((a, b) => a.startOffsetMs - b.startOffsetMs);
+      for (let i = 1; i < chIntervals.length; i++) {
+        if (chIntervals[i]!.startOffsetMs > chIntervals[i - 1]!.endOffsetMs) {
+          return { allowed: false, reason: "continuity_broken" };
+        }
+      }
+    }
+
     return {
       allowed: true,
       state: manifest.final ? "finalized" : "checkpoint_ready",
@@ -929,12 +1029,11 @@ export class VoiceEvidenceService {
       );
     }
 
-    const channelSegments = segments.filter((s) => {
-      if (s.channelCoverage && s.channelCoverage.length > 0) {
-        return s.channelCoverage.some((c) => c.channel === channel);
-      }
-      return s.channels.includes(channel);
-    });
+    const channelSegments = segments.filter((s) =>
+      s.channelCoverage?.some(
+        (c) => c.channel === channel && c.intervals && c.intervals.length > 0,
+      ),
+    );
     if (channelSegments.length === 0) {
       throw new ApiRequestError(
         409,
@@ -953,35 +1052,29 @@ export class VoiceEvidenceService {
     const channelIntervals: ChannelInterval[] = [];
 
     for (const seg of segments) {
-      if (seg.channelCoverage && seg.channelCoverage.length > 0) {
-        const cov = seg.channelCoverage.find((c) => c.channel === channel);
-        if (cov) {
-          if (cov.intervals && cov.intervals.length > 0) {
-            for (const iv of cov.intervals) {
-              channelIntervals.push({
-                startMs: new Date(iv.startedAtUtc).getTime(),
-                endMs: new Date(iv.endedAtUtc).getTime(),
-                startOffsetMs: iv.startOffsetMs,
-                endOffsetMs: iv.endOffsetMs,
-              });
-            }
-          } else {
-            channelIntervals.push({
-              startMs: new Date(cov.startedAtUtc).getTime(),
-              endMs: new Date(cov.endedAtUtc).getTime(),
-              startOffsetMs: cov.startOffsetMs,
-              endOffsetMs: cov.endOffsetMs,
-            });
-          }
-        }
-      } else if (seg.channels.includes(channel)) {
+      if (!seg.channelCoverage || seg.channelCoverage.length === 0) {
+        continue;
+      }
+      const cov = seg.channelCoverage.find((c) => c.channel === channel);
+      if (!cov || !cov.intervals || cov.intervals.length === 0) {
+        continue;
+      }
+      for (const iv of cov.intervals) {
         channelIntervals.push({
-          startMs: new Date(seg.startedAtUtc).getTime(),
-          endMs: new Date(seg.endedAtUtc).getTime(),
-          startOffsetMs: seg.startOffsetMs,
-          endOffsetMs: seg.endOffsetMs,
+          startMs: new Date(iv.startedAtUtc).getTime(),
+          endMs: new Date(iv.endedAtUtc).getTime(),
+          startOffsetMs: iv.startOffsetMs,
+          endOffsetMs: iv.endOffsetMs,
         });
       }
+    }
+
+    if (channelIntervals.length === 0) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_RECORDING_NOT_DURABLE",
+        `Recording checkpoint has no verified intervals covering required channel '${channel}' for ${label}.`,
+      );
     }
 
     channelIntervals.sort(
