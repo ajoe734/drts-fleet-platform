@@ -1,4 +1,8 @@
-import { pcmDurationMs, type PcmFormat, type TimingPrecision } from "./audio-codec";
+import {
+  pcmDurationMs,
+  type PcmFormat,
+  type TimingPrecision,
+} from "./audio-codec";
 
 export type VoiceOutputOwner = "ai" | "handoff" | "human" | "none";
 
@@ -8,6 +12,12 @@ export interface VoiceMediaAccess {
   owner: Exclude<VoiceOutputOwner, "none">;
   scopeId: string;
   outputEpoch: number;
+  /**
+   * A per-playback-generation fence.  An output epoch identifies the owner;
+   * this token also prevents a cancelled synthesis stream from starting a new
+   * playback while that owner remains the same.
+   */
+  generation: number;
 }
 
 export interface VoiceMediaOutputSink {
@@ -64,7 +74,9 @@ export class VoiceMediaOutputFence {
     this.owner = options.initialOwner ?? "none";
     this.principalId = options.initialPrincipalId ?? null;
     if (this.owner !== "none" && !this.principalId) {
-      throw new Error("An initial output owner requires an initial principal id.");
+      throw new Error(
+        "An initial output owner requires an initial principal id.",
+      );
     }
   }
 
@@ -78,11 +90,20 @@ export class VoiceMediaOutputFence {
 
   issueAccess(principalId: string): VoiceMediaAccess | null {
     if (this.owner === "none" || this.principalId !== principalId) return null;
-    return { principalId, owner: this.owner, scopeId: this.options.scopeId, outputEpoch: this.outputEpoch };
+    return {
+      principalId,
+      owner: this.owner,
+      scopeId: this.options.scopeId,
+      outputEpoch: this.outputEpoch,
+      generation: this.generation,
+    };
   }
 
   /** Barge-in: invalidate first, immediately issue CTI clear, then abort TTS elsewhere. */
-  localClear(): { clearedPlaybackIds: string[]; result: "cleared" | "unknown" } {
+  localClear(): {
+    clearedPlaybackIds: string[];
+    result: "cleared" | "unknown";
+  } {
     const clearedPlaybackIds: string[] = [];
     this.generation += 1;
     for (const playback of this.playbacks.values()) {
@@ -94,7 +115,8 @@ export class VoiceMediaOutputFence {
         // a best-effort failure cannot become an unhandled rejection.
         try {
           const abortResult = playback.aborter?.abort();
-          if (abortResult instanceof Promise) void abortResult.catch(() => undefined);
+          if (abortResult instanceof Promise)
+            void abortResult.catch(() => undefined);
         } catch {
           // The playback outcome remains governed by the local CTI clear.
         }
@@ -118,7 +140,11 @@ export class VoiceMediaOutputFence {
    * Clears old output before changing the epoch. A failed clear revokes the
    * owner and leaves handoff pending, rather than claiming audio isolation.
    */
-  transfer(access: VoiceMediaAccess, nextOwner: Exclude<VoiceOutputOwner, "none">, nextPrincipalId: string): boolean {
+  transfer(
+    access: VoiceMediaAccess,
+    nextOwner: Exclude<VoiceOutputOwner, "none">,
+    nextPrincipalId: string,
+  ): boolean {
     if (!this.isCurrentAccess(access)) return false;
     const clear = this.localClear();
     this.owner = "none";
@@ -154,9 +180,28 @@ export class VoiceMediaOutputFence {
       };
       this.playbacks.set(playbackId, playback);
     }
-    if (playback.generation !== this.generation || playback.outcome !== "playing") return false;
-    const bytes = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-    this.options.sink.write(bytes, access);
+    if (
+      playback.generation !== this.generation ||
+      playback.outcome !== "playing"
+    )
+      return false;
+    const bytes = new Uint8Array(
+      chunk.buffer,
+      chunk.byteOffset,
+      chunk.byteLength,
+    );
+    try {
+      // This is immediately preceded by an access check.  The concrete sink
+      // receives the same token so an async/provider-facing implementation can
+      // apply its own final fence before it sends the chunk.
+      this.options.sink.write(bytes, access);
+    } catch {
+      // A disconnected CTI cannot establish whether this chunk played. Keep
+      // that uncertainty explicit and do not account it as queued audio.
+      playback.outcome = "unknown";
+      playback.timingPrecision = "unknown";
+      return false;
+    }
     playback.sentAudioMs += durationMs;
     this.bufferedAudioMs += durationMs;
     return true;
@@ -169,22 +214,39 @@ export class VoiceMediaOutputFence {
   ): boolean {
     if (!this.isCurrentAccess(access)) return false;
     const playback = this.playbacks.get(playbackId);
-    if (!playback || playback.access.outputEpoch !== access.outputEpoch) return false;
+    if (
+      !playback ||
+      playback.access.outputEpoch !== access.outputEpoch ||
+      playback.access.generation !== access.generation
+    )
+      return false;
     playback.aborter = aborter;
     return true;
   }
 
   /** Call only when the CTI reports buffer drain; never let local accounting grow forever. */
   noteBufferDrained(durationMs: number): void {
-    this.bufferedAudioMs = Math.max(0, this.bufferedAudioMs - Math.max(0, durationMs));
+    this.bufferedAudioMs = Math.max(
+      0,
+      this.bufferedAudioMs - Math.max(0, durationMs),
+    );
   }
 
   /** A clear may also return a provider mark. Only an un-cleared current generation completes. */
   markCompleted(playbackId: string, providerCursorMs?: number): boolean {
     const playback = this.playbacks.get(playbackId);
-    if (!playback || playback.outcome !== "playing" || playback.generation !== this.generation) return false;
+    if (
+      !playback ||
+      playback.outcome !== "playing" ||
+      playback.generation !== this.generation
+    )
+      return false;
     playback.outcome = "completed";
-    if (providerCursorMs === undefined) {
+    if (
+      providerCursorMs === undefined ||
+      !Number.isFinite(providerCursorMs) ||
+      providerCursorMs < 0
+    ) {
       playback.confirmedAudioMs = null;
       playback.timingPrecision = "unknown";
     } else {
@@ -211,6 +273,7 @@ export class VoiceMediaOutputFence {
     return (
       access.scopeId === this.options.scopeId &&
       access.outputEpoch === this.outputEpoch &&
+      access.generation === this.generation &&
       access.owner === this.owner &&
       access.principalId === this.principalId
     );
