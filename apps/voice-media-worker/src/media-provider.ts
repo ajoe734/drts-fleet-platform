@@ -34,6 +34,14 @@ export interface VoiceAsrSegmentResult {
   text: string;
   final: boolean;
   language: string;
+  /**
+   * SD §11.4 `supportsResumeCursor=false/unverified`: set when this result
+   * came from an automatic resend after a reconnect. There is no documented
+   * frame ACK/resume cursor, so the caller must never treat it as an
+   * ordinary confirmable segment -- re-ask the field or re-read-back instead
+   * of silently committing it.
+   */
+  requiresReconfirmation?: boolean;
 }
 
 export interface VoiceAsrTranscribeRequest {
