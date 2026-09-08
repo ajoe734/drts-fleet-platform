@@ -2,6 +2,37 @@
 
 Date: 2026-09-08. Owner: Codex2; Reviewer: Codex.
 
+## Redispatch verification — 2026-09-08 22:25 UTC
+
+Base remains `a24045986ac29231d34657df3a343b02d9fbb770`; tested HEAD is
+`c3fc95d598daafd8d927130384c32db2dd823c8a`. No implementation candidate.
+This rerun confirms the previous blockers after the 22:24 parent resume:
+
+- `git fetch origin`: exit 0.
+- `git rebase origin/dev`: exit 1, repeated historical `ac1076708` add/add
+  conflict in payment-gate.test.ts; `git rebase --abort`: exit 0.
+- `git diff --quiet origin/dev HEAD -- apps/api/src/modules/billing-settlement/billing-settlement.service.ts apps/api/src/modules/billing-settlement/billing-settlement.repository.ts`:
+  exit 0; tested implementation matches current dev.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`:
+  exit 1, 3 executed / 1 passed / 2 failed. Fabricated proof becomes paid;
+  unresolved persistence returns paid. Unapproved rejection passes.
+- `pnpm --filter @drts/api typecheck`: exit 2, four TS2307 errors for
+  `@drts/control-plane-auth` in auth files.
+- `pnpm --filter @drts/platform-admin-web typecheck`: exit 0.
+
+Read the history helper directly from origin/dev: merge `99858938` documents
+a recovery procedure, not an applied parent-branch repair. Its "Parent next
+step and remaining blockers" explicitly requires supervisor scope/dependency,
+canvas routing, and recovery-branch selection before redispatch. Current
+parent machine truth still has the original five write scopes and two
+dependencies; SR-CONTRACT-001 remains todo. These prerequisites remain open.
+Supervisor must apply the planning helper's routing actions, not resume solely
+because the history documentation helper is done.
+
+Resource IDs are the isolated inputs listed below. No live resources, uploaded
+proof bytes, scanner/readback, PostgreSQL concurrency, durable receipts,
+browser/device acceptance, or real payment were produced or verified.
+
 ## Redispatch verification — 2026-09-08 21:43 UTC
 
 This section supersedes earlier command results. Fetched base `origin/dev`:
