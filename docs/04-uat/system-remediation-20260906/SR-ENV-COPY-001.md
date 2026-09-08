@@ -4,8 +4,8 @@
 | ------------- | -------------------------------------------------------------------------------- |
 | Task spec     | `docs/03-runbooks/system-remediation-20260906/SR-ENV-COPY-001.md`               |
 | Owner         | Gemini                                                                           |
-| Reviewer      | Claude                                                                           |
-| Base SHA      | `bb265b286d718e61d2c50479deb0ddcd031a4597` (= `origin/dev` tip at task start)  |
+| Reviewer      | Codex                                                                            |
+| Base SHA      | `3b60a37574c82b0e9803bfe38a531e0ee7e6ecaa` (= `origin/dev` tip at task start)  |
 | Candidate SHA | recorded at `handoff` via `git rev-parse HEAD` (see task board)                  |
 
 ## 1. 重現與基準
@@ -89,8 +89,8 @@
 | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **中文/英文與正常/錯誤/空態無無意義ActionIntent等文字**    | 全庫 6 大 Web 應用繁中與英文字典已清除所有 `ActionIntent`，並替換未插補之 `submissionId` 為正式在地化業務詞彙（「申請編號」）。回歸測試驗證 `ActionIntent` 匹配數恆為 0，繁中 `submissionId` 匹配數恆為 0。              |
 | **env從runtime權威值，不靠domain字串猜；prod也不把未知資料標健康** | `resolveRuntimeEnvironment` 阻斷單純 domain/URL 推斷，以明確 runtime 變數為真值；若含 fixture/mock 旗標強制降級，絕不呈現 production；`resolveRuntimeHealth` 將未驗證、連線遺失或空資料安全解析為 `unknown`，絕不冒充 healthy。 |
-| **證據包含 base/candidate SHA、實際指令結果與資源 ID**     | 記載 Base SHA（`bb265b286d718e61d2c50479deb0ddcd031a4597`），Candidate SHA 於 handoff 產生；第 4 節完整記錄所有執行指令、exit code 0 與測試結果。                                                                           |
-| **先 commit＋普通 push，再 handoff；owner 不直接 done**    | 建立標準規範之 git commit（附 `LLM-Agent: Gemini`, `Task-ID: SR-ENV-COPY-001`, `Reviewer: Claude` trailers），推送至 `origin/gemini/sr-env-copy-001`，透過 `ai-status.sh handoff` 交接 Reviewer（Claude）。                |
+| **證據包含 base/candidate SHA、實際指令結果與資源 ID**     | 記載 Base SHA（`3b60a37574c82b0e9803bfe38a531e0ee7e6ecaa`），Candidate SHA 於 handoff 產生；第 4 節完整記錄所有執行指令、exit code 0 與測試結果。                                                                           |
+| **先 commit＋普通 push，再 handoff；owner 不直接 done**    | 建立標準規範之 git commit（附 `LLM-Agent: Gemini`, `Task-ID: SR-ENV-COPY-001`, `Reviewer: Codex` trailers），推送至 `origin/gemini/sr-env-copy-001`，透過 `ai-status.sh handoff` 交接 Reviewer（Codex）。                 |
 
 ## 4. 實際指令與結果
 
@@ -144,12 +144,12 @@ $ pnpm --filter @drts/ui-web typecheck
 (exit 0)
 
 $ pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/
- RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-env-copy-001
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-env-copy-001
 
  Test Files  1 passed (1)
-      Tests  13 passed (13)
-   Duration  593ms
-(exit 0，13 項回歸測試全數通過)
+      Tests  19 passed (19)
+   Duration  475ms
+(exit 0，19 項回歸與合約測試全數通過)
 
 $ pnpm --filter @drts/platform-admin-web test
  Test Files  9 passed (9)
@@ -192,7 +192,7 @@ $ pnpm --filter @drts/enterprise-dispatch-web test
 4. `apps/fleet-partner-portal-web/lib/translations.ts`（修改：清理 submissionId，增補環境字典）
 5. `apps/bank-console-web/lib/translations.ts`（修改：增補環境字典）
 6. `apps/enterprise-dispatch-web/lib/translations.ts`（修改：增補環境與狀態字典）
-7. `packages/ui-web/src/environment-badge/`（新增：`types.ts`, `environment-resolver.ts`, `environment-badge.tsx`, `index.ts`）
+7. `packages/ui-web/src/environment-badge/`（新增：`types.ts`, `environment-resolver.ts`, `environment-badge.tsx`, `runtime-environment.ts`, `EnvironmentBadge.tsx`, `index.ts`）
 8. `tests/unit/system-remediation/sr-env-copy-001/`（新增：`sr-env-copy-001.test.ts`）
 9. `docs/04-uat/system-remediation-20260906/SR-ENV-COPY-001.md`（新增：本交付驗證報告）
 

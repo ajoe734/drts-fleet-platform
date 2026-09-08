@@ -26,6 +26,12 @@ import {
   resolveRuntimeHealth,
 } from "../../../../packages/ui-web/src/environment-badge/environment-resolver";
 
+import {
+  resolveRuntimeEnvironmentTier,
+  RUNTIME_ENVIRONMENT_TIER_DISPLAY_STRINGS,
+  RUNTIME_ENVIRONMENT_TIER_TONE,
+} from "../../../../packages/ui-web/src/environment-badge/runtime-environment";
+
 import type {
   RuntimeEnvironment,
   RuntimeHealthStatus,
@@ -242,5 +248,62 @@ describe("SR-ENV-COPY-001: User Copy Cleaning in Translation Catalogs", () => {
         `File ${relPath} must include non-production environment label`,
       ).toBe(true);
     }
+  });
+});
+
+describe("SR-ENV-COPY-001: Runtime Environment Tier Resolver", () => {
+  it("resolves production from DRTS_ENV, taking precedence over APP_ENV and NODE_ENV", () => {
+    expect(
+      resolveRuntimeEnvironmentTier({
+        DRTS_ENV: "production",
+        APP_ENV: "staging",
+        NODE_ENV: "production",
+      }),
+    ).toBe("production");
+  });
+
+  it("falls back to APP_ENV when DRTS_ENV is absent", () => {
+    expect(
+      resolveRuntimeEnvironmentTier({ APP_ENV: "staging", NODE_ENV: "production" }),
+    ).toBe("staging");
+  });
+
+  it("does not trust NODE_ENV=production alone as proof of a real production deploy", () => {
+    expect(resolveRuntimeEnvironmentTier({ NODE_ENV: "production" })).toBe(
+      "production",
+    );
+    expect(
+      resolveRuntimeEnvironmentTier({ APP_ENV: "staging", NODE_ENV: "production" }),
+    ).toBe("staging");
+  });
+
+  it("resolves local/test tiers", () => {
+    expect(resolveRuntimeEnvironmentTier({ NODE_ENV: "development" })).toBe(
+      "local",
+    );
+    expect(resolveRuntimeEnvironmentTier({ DRTS_ENV: "sandbox" })).toBe(
+      "local",
+    );
+    expect(resolveRuntimeEnvironmentTier({ NODE_ENV: "test" })).toBe("test");
+    expect(resolveRuntimeEnvironmentTier({ CI: "true" })).toBe("test");
+  });
+
+  it("never guesses a healthy-looking tier for unrecognized or missing signals", () => {
+    expect(resolveRuntimeEnvironmentTier({})).toBe("unknown");
+    expect(
+      resolveRuntimeEnvironmentTier({ DRTS_ENV: "some-custom-value" }),
+    ).toBe("unknown");
+  });
+
+  it("every tier has a localized label and a non-neutral-for-unknown tone", () => {
+    for (const tier of Object.keys(
+      RUNTIME_ENVIRONMENT_TIER_DISPLAY_STRINGS,
+    ) as (keyof typeof RUNTIME_ENVIRONMENT_TIER_DISPLAY_STRINGS)[]) {
+      expect(RUNTIME_ENVIRONMENT_TIER_DISPLAY_STRINGS[tier].en).toBeTruthy();
+      expect(RUNTIME_ENVIRONMENT_TIER_DISPLAY_STRINGS[tier].zhTW).toBeTruthy();
+    }
+    expect(RUNTIME_ENVIRONMENT_TIER_TONE.unknown).not.toBe("neutral");
+    expect(RUNTIME_ENVIRONMENT_TIER_TONE.unknown).not.toBe("success");
+    expect(RUNTIME_ENVIRONMENT_TIER_TONE.production).toBe("danger");
   });
 });

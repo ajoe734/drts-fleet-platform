@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { StatusToneName, ToneRamp } from "@drts/ui-tokens";
+import type { RuntimeEnvironmentTier } from "./runtime-environment";
 
 export type RuntimeEnvironment =
   | "production"
@@ -34,6 +35,7 @@ export interface HealthResolutionInput {
 }
 
 export interface EnvironmentBadgeProps {
+  tier?: RuntimeEnvironmentTier | undefined;
   env?: string | null | undefined;
   health?: RuntimeHealthStatus | string | null | undefined;
   isFixture?: boolean | undefined;

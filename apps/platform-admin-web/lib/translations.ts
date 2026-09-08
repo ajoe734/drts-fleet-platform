@@ -98,7 +98,7 @@ const supplyReviewEn = {
     "Approval is a single transaction: provision canonical + affiliation + readiness + audit. Integrity check failures prevent approval.",
   "supplyReview.detail.guardrailTitle": "Guardrail",
   "supplyReview.detail.guardrailBody":
-    "Reviewers cannot approve self-submitted fleet data (REVIEWER_SELF_APPROVAL_DENIED) and cannot bypass required documents.",
+    "Reviewers cannot approve self-submitted fleet data and cannot bypass required documents.",
   "supplyReview.detail.auditReceiptTitle": "Audit Receipt",
   "supplyReview.detail.confirmApproveTitle":
     "Confirm Approval and Provision Canonical?",
@@ -206,12 +206,12 @@ const supplyReviewEn = {
   "supplyReview.err.rejectReasonRequired":
     "Reason code is required for rejection",
   "supplyReview.err.rejectCommentRequired": "Comment is required for rejection",
-  "supplyReview.banner.conflictTitle": "SUBMISSION_REVISION_CONFLICT · 409",
+  "supplyReview.banner.conflictTitle": "Submission Updated",
   "supplyReview.banner.conflictBody":
     "This submission has been updated (revision {rev}). Please reload before reviewing.",
-  "supplyReview.banner.selfApprovalTitle": "REVIEWER_SELF_APPROVAL_DENIED",
+  "supplyReview.banner.selfApprovalTitle": "Self-Approval Not Allowed",
   "supplyReview.banner.selfApprovalBody":
-    "Reviewers cannot approve submissions submitted by themselves as fleet partners (REVIEWER_SELF_APPROVAL_DENIED).",
+    "Reviewers cannot approve submissions they submitted themselves as a fleet partner.",
   "supplyReview.banner.loadingBody":
     "Loading submission details from server...",
   "supplyReview.banner.processing": "Processing, please wait...",
@@ -338,10 +338,10 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.detail.previewSubtitle":
     "VQ-4 · approve 會改動 registry（不可逆）",
   "supplyReview.detail.previewWarn":
-    "核可為單一交易：provision canonical + affiliation + readiness + audit。完整性未過則 SUBMISSION_INCOMPLETE，不可核可。",
+    "核可為單一交易：provision canonical + affiliation + readiness + audit。完整性未過則不可核可。",
   "supplyReview.detail.guardrailTitle": "把關 · guardrail",
   "supplyReview.detail.guardrailBody":
-    "審核人不得核可自己以車行身分提交的資料（REVIEWER_SELF_APPROVAL_DENIED），不得繞過必填文件。",
+    "審核人不得核可自己以車行身分提交的資料，不得繞過必填文件。",
   "supplyReview.detail.auditReceiptTitle": "審核憑證 · audit receipt",
   "supplyReview.detail.confirmApproveTitle": "確認核可並寫入 canonical？",
   "supplyReview.detail.confirmApproveIntro":

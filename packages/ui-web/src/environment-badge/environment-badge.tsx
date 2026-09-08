@@ -22,16 +22,23 @@ export function EnvironmentBadge({
   density = "comfortable",
   showHealth = false,
   showVersion = false,
+  tier,
   versionLabel,
   className,
   style,
   children,
 }: EnvironmentBadgeProps): ReactElement {
-  const resolvedEnv = resolveRuntimeEnvironment({
-    env,
-    isFixture,
-    isMock,
-  });
+  const resolvedEnv = tier
+    ? tier === "local"
+      ? "dev"
+      : tier === "test"
+        ? "preview"
+        : tier
+    : resolveRuntimeEnvironment({
+        env,
+        isFixture,
+        isMock,
+      });
   const envMeta = getEnvironmentDisplay(resolvedEnv, mode);
   const isZh = locale.startsWith("zh");
   const envText = isZh ? envMeta.labelZhTW : envMeta.labelEn;
@@ -92,6 +99,16 @@ export function EnvironmentBadge({
     <div
       data-testid="environment-badge"
       data-environment={resolvedEnv}
+      data-environment-tier={
+        tier ??
+        (resolvedEnv === "dev"
+          ? "local"
+          : resolvedEnv === "mock"
+            ? "local"
+            : resolvedEnv === "preview"
+              ? "test"
+              : resolvedEnv)
+      }
       data-tone={envMeta.tone}
       className={className}
       style={chipStyle}
