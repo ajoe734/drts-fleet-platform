@@ -85,3 +85,17 @@ API typecheck 是前輪結果，本輪未重跑。最新 dev 的 SR-READINESS-00
 | `git diff --check` | 0 | 無空白錯誤 |
 
 本輪資源 ID：無；HTTP calls：0；live/DB/mail/瀏覽器驗收未完成。shared pass 不算本 task 通過，前輪 55 unit tests 與 API typecheck 本輪未重跑。需要 provisioner 提供 API URL、可拋棄 A/B 租戶與各租戶可寫及 A 唯讀合法 bearer。其餘矩陣仍需補案例並實跑；維持 in_progress，未 handoff。
+
+## 2026-09-08 dispatch：缺前置時的目錄 evidence
+
+本輪 base `origin/dev`：`c07d24e021aea847a988646427cdc534ccf4e496`。rebase 遇到舊證據 add/add 衝突，保留主線已包含較完整歷史的版本後 continue 成功；再 merge 原遠端 branch ancestry，exit 0，task 檔案與原遠端內容一致，未回退既有修復。
+
+修正 `directory.spec.ts`：將全部環境檢查移入 try/finally，且在建立 client 前驗證完整身份設定。因此缺 URL 時也會附上 SHA、空 calls/resources；不再於 evidence 邊界外失敗。實跑 anchor：`73f21e9aae5298d17cea68e0509b679d122b75e1`，普通 push exit 0。尚無鎖定 candidate。
+
+| 實際指令 | exit | 結果 |
+| --- | --- | --- |
+| `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001` | 1 | 3 task failed，均缺 DRTS_TENANT_UAT_API_URL；4 shared passed 不列為租戶驗收 |
+| `pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001/ --max-warnings=0` | 0 | 三個 spec lint 通過 |
+| `git diff --check` | 0 | 無空白錯誤 |
+
+讀取 `test-results/system-remediation-report.json` 中三個 `tenant-*-evidence` 附件，確認每個附件的 baseSha/testedSha 均為上述 SHA，HTTP calls 與 resources 均為 0；新增的目錄前置失敗 evidence 已實際產出。此為測試診斷修復，並非產品缺陷或 live 通過。環境中沒有 DRTS_TENANT_UAT 變數；readiness 文件仍未提供 provisioned 身份。其餘能力矩陣、live HTTP/DB/mail/瀏覽器驗收仍待完成，需 provisioner 提供前述六項設定；維持 in_progress，不 handoff。
