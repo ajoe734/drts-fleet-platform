@@ -366,3 +366,58 @@ EXIT=0
 ```
 
 時間：2026-09-08T13:45:00Z
+
+## 7. Handoff 前 rebase 與最終驗證（本輪，candidate `aec208c7a`→`035e23d93`）
+
+交接前 `origin/dev` 已從 `c4c4a35f8`（rebase 前 merge-base）再確認：本 worktree
+啟動時 `origin/dev` 已推進至 `c4c4a35f88907df6bf68e781059dde397c06ba03`（10 個
+新 commit，皆為其他任務：`SR-DRIVER-WEB-001`/`SR-FLEET-DATA-001`/
+`SR-ENTERPRISE-SEARCH-001`/`SR-PUBLIC-001`/`SR-MAIL-001` 等）。
+
+```
+$ git log --oneline 3b60a3757..origin/dev -- apps/enterprise-dispatch-web \
+    tests/unit/system-remediation/sr-enterprise-form-001 \
+    docs/04-uat/system-remediation-20260906/SR-ENTERPRISE-FORM-001.md
+(無輸出 — 這 10 個新 commit 皆未觸及本任務相關檔案)
+```
+
+確認無檔案衝突後執行 `git rebase origin/dev`（乾淨 rebase，無 conflict），
+3 個 commit（`b7a4e2a4e`→`84767ef6a`、`5b08dc5b4`→`5cd0d3b61`、
+`aec208c7a`→`035e23d93`）依序重放到新 base `c4c4a35f8`，內容未變、僅 SHA
+因 base 改變而重寫。因為改寫了本分支自己獨佔的 commit 歷史，以
+`git push --force-with-lease` 更新遠端（非 shared 分支，`serial_resources:
+["enterprise-form"]` 鎖定本任務獨占，符合 branch-strategy §11 rebase 後
+force-with-lease 慣例）。
+
+Rebase 後於新 HEAD 重新完整執行驗證指令：
+
+```
+$ git rev-parse HEAD
+035e23d9305b76adbbb658b7c0ca88c0c979f438
+
+$ git diff --check
+EXIT=0
+
+$ pnpm --filter @drts/enterprise-dispatch-web typecheck
+> tsc --noEmit
+EXIT=0
+
+$ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+EXIT=0
+
+$ pnpm --filter @drts/enterprise-dispatch-web lint
+> eslint . --max-warnings=0
+EXIT=0
+
+$ git push --force-with-lease origin claude/sr-enterprise-form-001
+ + aec208c7a...035e23d93 claude/sr-enterprise-form-001 -> claude/sr-enterprise-form-001 (forced update)
+```
+
+Candidate SHA（本次 handoff）：`035e23d9305b76adbbb658b7c0ca88c0c979f438`
+（rebase 後新 SHA；內容與 `aec208c7a`／P1 修復版本相同）。
+Base SHA（本輪 rebase 後）：`c4c4a35f88907df6bf68e781059dde397c06ba03`
+（`origin/dev` 當前頂端）。
+
+時間：2026-09-08T14:55:00Z
