@@ -1,5 +1,15 @@
 # SR-ENTERPRISE-FORM-001 — 驗收證據
 
+## 2026-09-08 18:46 UTC dispatch — history repair 與 scope 分別核對
+
+- Fresh `origin/dev` base：`d4f54ef94e059a981bf2be1f7b944e815870e117`；起始 head：`56beeaa0b210a2ab831ce56c71edc3f595825e8f`。
+- `ai-status.sh start SR-ENTERPRISE-FORM-001` exit 0。helper `SR-ENTERPRISE-FORM-001-UNBLOCK-HISTORY-REPAIR` 確實為 done，PR #1774 / merge `7d1272fc85a7f4d2a20f4ccd2d01716e873cca5e`；但 parent machine `write_scopes` 仍缺 `lib/enterprise-theme.ts`、`lib/translations.ts`，`depends_on` 仍為空。helper 結案不是這兩個共用檔的寫入授權。
+- `git fetch origin` exit 0；`git rebase origin/dev` 初次 exit 1，原因為歷史 merge 造成同一修復多次重播。逐項核對前段已保留修復後 skip 重複 patch，最後 exit 0；`git merge --no-edit origin/codex2/sr-enterprise-form-001` exit 0，保留普通 push ancestry。`git diff --stat 56beeaa0 HEAD -- apps/enterprise-dispatch-web tests/unit/system-remediation/sr-enterprise-form-001` exit 0、無輸出，確認本輪未變更既有程式與測試內容。
+- 驗證 head：`f61f3847755c9065a88ffc2835b2def101bda07e`。`pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/` exit 0（15 passed、3 browser skipped）；`pnpm --filter @drts/enterprise-dispatch-web typecheck` exit 0；`git diff --check` exit 0。
+- `git cat-file -e origin/dev:apps/enterprise-dispatch-web/components/booking-form/enterprise-booking-validation.ts` exit 128，base 尚無此修復 helper，不能以 history repair 代替本表單合併證據。
+- 未啟動 browser/live server、未做真機鍵盤或錯誤遮 CTA 驗證、無 booking/order 資源 ID；本輪不重用歷史 browser 成功當成本 SHA 的實測。未鎖定 review candidate；本節 anchor 的最終 SHA 與 push 結果由 machine blocker 記錄。
+- **請 supervisor 修正 scope/dependency 後再 dispatch**：`enterprise-theme.ts:54` 仍為 `#2457D6`，權威 tenant realm 為 light `#0F766E` / dark `#5EEAD4`；應擴 theme scope 並建立共用 writer 相依或先行修復 task。歷史 `translations.ts` diff 是三個錯誤／最早預約時間 keys 的 en/zh 文案，也需要 scope 決定。本轮沒有越界修改、沒有 handoff；單純重新開啟 parent 或重跑 history repair 不會解除設計契約阻礙。
+
 ## 2026-09-08 18:07 UTC dispatch — scope blocker 再確認
 
 - Fresh base origin/dev：`a44ea852eabe0c88e54d8124802eccf86ebc1dc6`；起始已發布 head：`093734506e591e6aac7f75a72163a31a3ed4db8f`。目前 base 尚無 booking-validation.ts，不將歷史修復誤認為已合併。
