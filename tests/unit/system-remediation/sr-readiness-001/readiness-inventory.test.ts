@@ -110,4 +110,25 @@ describe("SR-READINESS-001 repository-only readiness inventory", () => {
         .readback,
     ).toContain("UV-EXEC-027");
   });
+
+  it("tracks all 11 merged remediation tasks with valid commit SHAs and verified regression suites", () => {
+    const mergedTasks = readiness.merged_task_evidence;
+    const taskIds = Object.keys(mergedTasks);
+    expect(taskIds.length).toBe(11);
+    for (const [taskId, sha] of Object.entries(mergedTasks)) {
+      expect(sha).toMatch(/^[0-9a-f]{40}$/);
+    }
+    const mergedIssues = readiness.issue_inventory.items.filter(
+      (item: any) => item.status === "current_evidence_merged",
+    );
+    expect(mergedIssues).toHaveLength(13);
+    for (const issue of mergedIssues) {
+      const referencedTasks = issue.task_id
+        .split(";")
+        .map((t: string) => t.trim());
+      for (const t of referencedTasks) {
+        expect(mergedTasks[t]).toBeDefined();
+      }
+    }
+  });
 });

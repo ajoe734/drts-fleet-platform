@@ -2,9 +2,9 @@
   "schema_version": 1,
   "task_id": "SR-READINESS-001",
   "inspection": {
-    "performed_at": "2026-09-08T12:09:50.352Z",
+    "performed_at": "2026-09-08T14:05:00.000Z",
     "scope": "repository-only, read-only; no browser, product server, Docker infrastructure, cloud console, secrets manager, or external provider operation",
-    "base_sha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
+    "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
     "candidate_sha": null,
     "candidate_sha_evidence": "The exact candidate SHA is deliberately locked by the ai-status handoff record after the final push; it cannot be inferred from this readiness snapshot.",
     "historical_audit_sha": "08b7a32f6fdaa00d8d1894f91569a7d72860cec2",
@@ -14,7 +14,7 @@
     {
       "command": "git fetch origin && git rev-parse origin/dev",
       "exit_code": 0,
-      "result": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff"
+      "result": "6f4ac8c74ae3618b6109efd010014365a85d36d8"
     },
     {
       "command": "jq length source/findings.json source/new-gaps.json source/capabilities.json",
@@ -24,12 +24,12 @@
     {
       "command": "git log --oneline -15 origin/dev",
       "exit_code": 0,
-      "result": "Current dev includes merged remediation evidence: SR-ADMIN-VERIFY-001 (#1638), SR-BANK-001 (#1654), SR-IAM-001 (#1683), SR-REFERRAL-001 (#1665), SR-BANK-003 (#1688), SR-OPS-MAP-001 (#1647), SR-INVOICE-001 (#1664), SR-MAIL-002 (#1646)"
+      "result": "Current dev includes merged remediation evidence: SR-ADMIN-VERIFY-001 (#1638), SR-BANK-001 (#1654), SR-IAM-001 (#1683), SR-REFERRAL-001 (#1665), SR-BANK-003 (#1688), SR-OPS-MAP-001 (#1647), SR-INVOICE-001 (#1664), SR-MAIL-002 (#1646), SR-TENANT-LOGIN-001 (#1674), SR-CHANNEL-001 (#1730), SR-MAIL-001 (#1755)"
     },
     {
-      "command": "pnpm exec vitest run tests/unit/system-remediation/sr-bank-001/ tests/unit/system-remediation/sr-bank-003/ tests/unit/system-remediation/sr-iam-001/ tests/unit/system-remediation/sr-admin-verify-001/ tests/unit/system-remediation/sr-referral-001/ tests/unit/system-remediation/sr-ops-map-001/ tests/unit/system-remediation/sr-invoice-001/ tests/unit/system-remediation/sr-mail-002/",
+      "command": "pnpm exec vitest run tests/unit/system-remediation/sr-bank-001/ tests/unit/system-remediation/sr-bank-003/ tests/unit/system-remediation/sr-iam-001/ tests/unit/system-remediation/sr-admin-verify-001/ tests/unit/system-remediation/sr-referral-001/ tests/unit/system-remediation/sr-ops-map-001/ tests/unit/system-remediation/sr-invoice-001/ tests/unit/system-remediation/sr-mail-002/ tests/unit/system-remediation/sr-tenant-login-001/ tests/unit/system-remediation/sr-channel-001/ tests/unit/system-remediation/sr-mail-001/",
       "exit_code": 0,
-      "result": "14 test files passed, 142 tests passed on current base SHA"
+      "result": "18 test files passed, 169 tests passed on current base SHA"
     },
     {
       "command": "git diff --check",
@@ -45,14 +45,17 @@
     "SR-BANK-003": "b32ab8badb740b94cdf67212315ecfccf21f6d5d",
     "SR-OPS-MAP-001": "bb265b286d718e61d2c50479deb0ddcd031a4597",
     "SR-INVOICE-001": "a4876ac529abfb634c2b96f237116202abf3d87d",
-    "SR-MAIL-002": "564e27f63045789537b54f5c0b5909f6468032ca"
+    "SR-MAIL-002": "564e27f63045789537b54f5c0b5909f6468032ca",
+    "SR-TENANT-LOGIN-001": "3b60a3757238663572f16f010c94f446f2c71eaa",
+    "SR-CHANNEL-001": "9f5c81bd53b4930321f7c659a9b27b4bc2fe89c5",
+    "SR-MAIL-001": "6f4ac8c74ae3618b6109efd010014365a85d36d8"
   },
   "issue_inventory": {
     "source_files": [
       "docs/04-uat/system-remediation-20260906/source/findings.json",
       "docs/04-uat/system-remediation-20260906/source/new-gaps.json"
     ],
-    "current_version_sha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
+    "current_version_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
     "reproduction_policy": "Each historical issue is explicitly evaluated against current origin/dev base. Reused fixes cite their commit SHA, regression test file, command, and actual execution result. Open or blocked issues specify reproducible current-version evidence, command/inspection path, blocking cause, and assigned downstream remediation task. No unrun check is ever marked passed.",
     "items": [
       {
@@ -64,10 +67,13 @@
       },
       {
         "id": "R02",
-        "status": "not_run",
-        "repro_command_or_evidence": "Inspect apps/tenant-console-web OIDC exchange: callback defaults to localhost:3104 origin and is rejected with 400 AUTH_SESSION_EXCHANGE_DENIED by backend session handler",
-        "blocking_reason": "Tenant console login callback requires dynamic origin derivation and error recovery flow; downstream task SR-TENANT-LOGIN-001 in progress",
-        "next_task": "SR-TENANT-LOGIN-001"
+        "status": "current_evidence_merged",
+        "task_id": "SR-TENANT-LOGIN-001",
+        "pr": "#1674",
+        "commit_sha": "3b60a3757238663572f16f010c94f446f2c71eaa",
+        "regression_test": "tests/unit/system-remediation/sr-tenant-login-001/tenant-login-callback-recovery.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-tenant-login-001/tenant-login-callback-recovery.test.ts",
+        "result": "Passed (exit 0); verified OIDC callback origin derivation, CSRF state verification, and session recovery redirect"
       },
       {
         "id": "R03",
@@ -253,10 +259,13 @@
       },
       {
         "id": "R26",
-        "status": "not_run",
-        "repro_command_or_evidence": "Inspect apps/channel-partner-portal-web: channel overview lacks CSV export pipeline and reconciliation statement query API",
-        "blocking_reason": "Channel overview export and statement reconciliation UI awaiting downstream delivery; awaits SR-CHANNEL-001",
-        "next_task": "SR-CHANNEL-001"
+        "status": "current_evidence_merged",
+        "task_id": "SR-CHANNEL-001",
+        "pr": "#1730",
+        "commit_sha": "9f5c81bd53b4930321f7c659a9b27b4bc2fe89c5",
+        "regression_test": "tests/unit/system-remediation/sr-channel-001/channel-overview-export.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-channel-001/channel-overview-export.test.ts",
+        "result": "Passed (exit 0); verified channel overview CSV export generation and reconciliation statement query API"
       },
       {
         "id": "R27",
@@ -329,10 +338,13 @@
       },
       {
         "id": "N06",
-        "status": "not_run",
-        "repro_command_or_evidence": "Inspect TenantInvitationDeliveryService: in-memory stub records invitation but raw token is never delivered via external SMTP transport",
-        "blocking_reason": "Tenant invitation delivery service not wired to real SMTP notification transport; awaits SR-NOTIFY-001; SR-MAIL-001",
-        "next_task": "SR-NOTIFY-001; SR-MAIL-001"
+        "status": "current_evidence_merged",
+        "task_id": "SR-MAIL-001",
+        "pr": "#1755",
+        "commit_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+        "regression_test": "tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery-status.test.ts; tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery.service.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery-status.test.ts tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery.service.test.ts",
+        "result": "Passed (exit 0); verified tenant invitation email durable delivery, delivered status semantics, and retry idempotency"
       },
       {
         "id": "N07",
@@ -559,7 +571,9 @@
         "state_at_audit": "待驗證",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -615,7 +629,9 @@
         "state_at_audit": "故障",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -686,7 +702,9 @@
         "state_at_audit": "故障",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -697,7 +715,9 @@
         "state_at_audit": "故障",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -753,7 +773,9 @@
         "state_at_audit": "待驗證",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -764,7 +786,9 @@
         "state_at_audit": "實作缺口",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -850,7 +874,9 @@
         "state_at_audit": "待驗證",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -921,7 +947,9 @@
         "state_at_audit": "驗收缺口",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -932,7 +960,9 @@
         "state_at_audit": "驗收缺口",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -1018,7 +1048,9 @@
         "state_at_audit": "外部待完成",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -1284,7 +1316,9 @@
         "state_at_audit": "故障",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -1400,7 +1434,9 @@
         "state_at_audit": "故障",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -1816,7 +1852,9 @@
         "state_at_audit": "待驗證",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -1827,7 +1865,9 @@
         "state_at_audit": "待驗證",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -1838,7 +1878,9 @@
         "state_at_audit": "待驗證",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -1984,7 +2026,9 @@
         "state_at_audit": "故障",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -2040,7 +2084,9 @@
         "state_at_audit": "外部待完成",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -2051,7 +2097,9 @@
         "state_at_audit": "驗收缺口",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -2062,7 +2110,9 @@
         "state_at_audit": "驗收缺口",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -2073,7 +2123,9 @@
         "state_at_audit": "待驗證",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -2084,7 +2136,9 @@
         "state_at_audit": "驗收缺口",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -2110,7 +2164,9 @@
         "state_at_audit": "驗收缺口",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -2121,7 +2177,9 @@
         "state_at_audit": "待驗證",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -2132,7 +2190,9 @@
         "state_at_audit": "驗收缺口",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -2158,7 +2218,9 @@
         "state_at_audit": "驗收缺口",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -2169,7 +2231,9 @@
         "state_at_audit": "驗收缺口",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Missing downstream UAT verification"
       },
       {
@@ -2210,7 +2274,9 @@
         "state_at_audit": "範圍排除",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Scope excluded from Phase 1 per SD-DP architectural decision; kept undeveloped per SR-SCOPE-001"
       },
       {
@@ -2251,7 +2317,9 @@
         "state_at_audit": "範圍排除",
         "required_persona": "platform_admin",
         "tenant_namespace": "tenant_isolated",
-        "required_records": ["audit_log_record"],
+        "required_records": [
+          "audit_log_record"
+        ],
         "missing_evidence": "Scope excluded from Phase 1 per SD-DP architectural decision; kept undeveloped per SR-SCOPE-001"
       },
       {
