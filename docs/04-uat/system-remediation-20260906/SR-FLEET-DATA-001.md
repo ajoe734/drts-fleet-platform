@@ -118,6 +118,16 @@
      - `app/page.tsx`：總覽「查看行程」連結更新為 `href={`/trips?period=${encodeURIComponent(dashboard.periodMonth)}`}`，確保從總覽跳轉至行程頁時完整保留月份上下文；總覽匯出按鈕同樣帶入 `period=${encodeURIComponent(dashboard.periodMonth)}`。
      - `app/trips/page.tsx`：預設 `currentPeriod = params.period ?? getCurrentPeriodMonth()`，在所有服務頁籤（tabs）、搜尋表單 hidden input 與 CSV 匯出按鈕均保留 `period`，防止操作篩選時遺失期間。
 
+### 3.6 CI 型別檢查回歸修復 (CI Typecheck Root Strictness Remediation)
+
+針對 GitHub Actions CI 於 `product_smoke_acceptance` 階段執行 `pnpm typecheck:root` (`tsc -p tsconfig.json --noEmit`) 檢查 `tests/**/*.ts` 時回報之 4 處 `TS2532: Object is possibly 'undefined'` 錯誤進行修復：
+
+1. **陣列索引嚴格型別防護 (Array Index Strictness)**:
+   - 根目錄 TypeScript 在 `strict` 模式下開啟未核驗索引存取檢查，測試中直接對 `driversView.rows[0].dispatchEligible`、`dashboard.recentTrips[0].id` 及 `tripsView.rows[0].id` 存取屬性會被標記為可能未定義。
+   - 修復方案：
+     - 在 `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` 加入可選串連（`?.`），如 `driversView.rows[0]?.dispatchEligible`、`dashboard.recentTrips[0]?.id`、`tripsView.rows[0]?.id`。
+     - 經 `pnpm typecheck:root` 重新驗證，本 task 測試檔案錯誤數歸零（0 errors）。
+
 ---
 
 ## 4. 驗收標準對照與驗證證據 (Acceptance Criteria Mapping & Evidence)
@@ -206,6 +216,9 @@ Generating route types...
 Exit Code:  0
 ```
 
+針對根目錄 `pnpm typecheck:root` (`tsc -p tsconfig.json --noEmit`) 進行全域嚴格型別檢查：
+- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` 經加入可選串連防護後，TS2532 錯誤完全排除，錯誤數為 0。
+
 ### 5.3 檔案規範與 Git 檢查
 
 執行 `git diff --check`：
@@ -223,5 +236,5 @@ Exit Code:  0
 - `apps/fleet-partner-portal-web/app/trips/page.tsx` (頁籤/關鍵字/狀態篩選、CSV 匯出按鈕串接、錯誤處理)
 - `apps/fleet-partner-portal-web/app/drivers/page.tsx` (頁籤/關鍵字篩選、可接單對齊 `dispatchEligible`、招募按鈕導向、錯誤處理)
 - `apps/fleet-partner-portal-web/app/vehicles/page.tsx` (頁籤/關鍵字篩選、新增車輛按鈕導向、錯誤處理)
-- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` (21 個完整驗證測試，含 5 個 Codex2 審查修復回歸場景)
+- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` (24 個完整驗證測試，含 Codex2 審查修復與 CI 嚴格型別防護)
 - `docs/04-uat/system-remediation-20260906/SR-FLEET-DATA-001.md` (驗證報告)

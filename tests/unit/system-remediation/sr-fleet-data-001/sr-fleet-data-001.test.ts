@@ -505,8 +505,8 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
 
       const driversView = await loadDrivers();
       expect(driversView.rows).toHaveLength(2);
-      expect(driversView.rows[0].dispatchEligible).toBe(true);
-      expect(driversView.rows[1].dispatchEligible).toBe(false);
+      expect(driversView.rows[0]?.dispatchEligible).toBe(true);
+      expect(driversView.rows[1]?.dispatchEligible).toBe(false);
 
       // Verify dashboard uses dispatchEligible
       mockVehicles.mockResolvedValue([]);
@@ -843,12 +843,12 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       expect(dashboard.periodMonth).toBe(previousPeriod);
       expect(dashboard.completedTrips).toBe("1");
       expect(dashboard.recentTrips).toHaveLength(1);
-      expect(dashboard.recentTrips[0].id).toBe("ord-previous-month");
+      expect(dashboard.recentTrips[0]?.id).toBe("ord-previous-month");
 
       // Explicit period on trips loader
       const tripsView = await loadTrips(previousPeriod);
       expect(tripsView.rows).toHaveLength(1);
-      expect(tripsView.rows[0].id).toBe("ord-previous-month");
+      expect(tripsView.rows[0]?.id).toBe("ord-previous-month");
 
       // Explicit period on export
       const req = new NextRequest(
