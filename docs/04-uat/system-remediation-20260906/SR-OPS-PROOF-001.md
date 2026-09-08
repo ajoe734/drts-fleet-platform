@@ -1,5 +1,37 @@
 # SR-OPS-PROOF-001 — isolated restore and workload-proof preparation
 
+## 2026-09-08 19:21 UTC dispatch — replacement routing still required
+
+Fetched base `d07bad8d7f84cc2c5a980c4e92ce3c2e2b654391`; inspected/tested
+parent head `819f5c9f3027a978d6ec01eab60f05d265ad6d82` equals its remote.
+The dispatch still assigns the historical `codex/sr-ops-proof-001` branch.
+The merged history-repair artifact in `origin/dev` prescribes a supervisor
+replacement-branch override and explicitly retains the independent planning
+resource gate. Its merge did not execute that recovery. Current dev's
+Q-SR-OPS-PROOF-001 still says no preparation-only scope cut is approved.
+
+| Actual command | Exit / result |
+| --- | --- |
+| `git fetch origin` | 0 |
+| `git rebase origin/dev` | 1; historical e2aef3803 add/add conflicts in three task files |
+| `git rebase --abort` | 0; original clean published head restored |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-ops-proof-001` | 0; 4 files, 35 tests; unresolved vitest/config warning |
+| `bash -n tools/system-remediation/ops-proof/ops-proof.sh` | 0 |
+| `git diff --check` before this addition | 0 |
+| `pnpm exec eslint tests/unit/system-remediation/sr-ops-proof-001` | 2; workspace dependency @eslint/js unavailable |
+| `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` | 1; six historical invalid test-prefixed subjects, identical to history-repair diagnosis |
+
+These regressions are on the historical parent head, not the fetched dev base
+or a locked candidate. No tool implementation changed. Supervisor must dispatch
+the replacement route documented in the merged history-repair artifact, using
+this latest evidence anchor as the source when preserving the parent snapshot.
+Also supply the reviewed boundary and authorized snapshot/independent manifest,
+isolated DB/API identifiers, workload and applicable cloud observation inputs
+specified by the planning decision. No such receipt was supplied in this dispatch.
+No restore, real capacity, cloud/deployment/rollback or physical-device proof was
+performed. Evidence anchor and ordinary push are recorded in canonical blocker
+state; no handoff or completion is claimed.
+
 ## 2026-09-08 18:27 UTC dispatch — resume gate still unsatisfied
 
 Fetched `origin/dev`: `318f5065433ff07fba2ddf242cf1c5aef5fb1cae`.
