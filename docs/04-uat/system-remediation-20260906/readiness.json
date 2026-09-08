@@ -1251,9 +1251,7 @@
       "evidence_ref": "docs/03-runbooks/system-remediation-20260906/SR-BANK-002.md"
     },
     "SR-BANK-003": {
-      "source_scopes": [
-        "apps/bank-console-web/app/artifacts/"
-      ],
+      "source_scopes": ["apps/bank-console-web/app/artifacts/"],
       "source_locators": [
         {
           "path": "apps/bank-console-web/app/artifacts/artifact-crypto.ts",
@@ -1285,9 +1283,7 @@
       "evidence_ref": "docs/03-runbooks/system-remediation-20260906/SR-BANK-003.md"
     },
     "SR-CHANNEL-001": {
-      "source_scopes": [
-        "apps/channel-partner-portal-web/"
-      ],
+      "source_scopes": ["apps/channel-partner-portal-web/"],
       "source_locators": [
         {
           "path": "apps/channel-partner-portal-web/Dockerfile",
@@ -1478,9 +1474,7 @@
       "evidence_ref": "docs/03-runbooks/system-remediation-20260906/SR-ENTERPRISE-FORM-001.md"
     },
     "SR-ENTERPRISE-SEARCH-001": {
-      "source_scopes": [
-        "apps/enterprise-dispatch-web/app/bookings/page.tsx"
-      ],
+      "source_scopes": ["apps/enterprise-dispatch-web/app/bookings/page.tsx"],
       "source_locators": [
         {
           "path": "apps/enterprise-dispatch-web/app/bookings/page.tsx",
@@ -1824,9 +1818,7 @@
       "evidence_ref": "docs/03-runbooks/system-remediation-20260906/SR-MAIL-002.md"
     },
     "SR-NOTIFY-001": {
-      "source_scopes": [
-        "apps/api/src/modules/notification-delivery/"
-      ],
+      "source_scopes": ["apps/api/src/modules/notification-delivery/"],
       "source_locators": [
         {
           "path": "apps/api/src/modules/notification-delivery/file-mail-outbox.ts",
@@ -1856,9 +1848,7 @@
       "evidence_ref": "docs/03-runbooks/system-remediation-20260906/SR-NOTIFY-001.md"
     },
     "SR-OPS-CONTRACT-001": {
-      "source_scopes": [
-        "apps/ops-console-web/app/contracts/"
-      ],
+      "source_scopes": ["apps/ops-console-web/app/contracts/"],
       "source_locators": [
         {
           "path": "apps/ops-console-web/app/contracts/[contractId]/page.tsx",
@@ -2142,9 +2132,7 @@
       "evidence_ref": "docs/03-runbooks/system-remediation-20260906/SR-TENANT-LOGIN-001.md"
     },
     "SR-UAT-HARNESS-001": {
-      "source_scopes": [
-        "playwright.system-remediation.config.ts"
-      ],
+      "source_scopes": ["playwright.system-remediation.config.ts"],
       "source_locators": [
         {
           "path": "playwright.system-remediation.config.ts",
@@ -2206,10 +2194,7 @@
       "title": "9個自訂網址無法建立HTTPS連線",
       "role": "全部對外角色",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-PUBLIC-001",
-        "SR-READINESS-001"
-      ],
+      "task_ids": ["SR-PUBLIC-001", "SR-READINESS-001"],
       "current_source_locators": [
         {
           "path": "tools/system-remediation/public-entry/system-remediation-endpoints.py",
@@ -2228,9 +2213,7 @@
       "title": "正常登入按鈕產生localhost callback並被拒絕",
       "role": "租戶管理員",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-TENANT-LOGIN-001"
-      ],
+      "task_ids": ["SR-TENANT-LOGIN-001"],
       "current_source_locators": [
         {
           "path": "apps/tenant-console-web/app/api/auth/[...auth]/route.ts",
@@ -2263,10 +2246,7 @@
       "title": "P5營運紀錄缺授權",
       "role": "平台管理員",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ADMIN-VERIFY-001",
-        "SR-IAM-001"
-      ],
+      "task_ids": ["SR-ADMIN-VERIFY-001", "SR-IAM-001"],
       "current_source_locators": [
         {
           "path": "apps/platform-admin-web/app/fleet-partners/[fleetPartnerId]/page.tsx",
@@ -2318,9 +2298,7 @@
       "title": "車隊夥伴清單程式錯誤",
       "role": "平台管理員",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ADMIN-VERIFY-001"
-      ],
+      "task_ids": ["SR-ADMIN-VERIFY-001"],
       "current_source_locators": [
         {
           "path": "apps/platform-admin-web/app/fleet-partners/[fleetPartnerId]/page.tsx",
@@ -2354,9 +2332,7 @@
       "title": "人員工作階段403無限重試",
       "role": "平台管理員",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-IAM-001"
-      ],
+      "task_ids": ["SR-IAM-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/common/auth/auth.constants.ts",
@@ -2390,9 +2366,7 @@
       "title": "首頁與合約頁服務端崩潰",
       "role": "銀行營運／財務／方案管理員",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-BANK-001"
-      ],
+      "task_ids": ["SR-BANK-001"],
       "current_source_locators": [
         {
           "path": "apps/bank-console-web/app/contracts/[contractId]/page.tsx",
@@ -2425,9 +2399,7 @@
       "title": "開始叫車與替代入口都到403白頁",
       "role": "社區乘客",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-REFERRAL-001"
-      ],
+      "task_ids": ["SR-REFERRAL-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/modules/tenant-partner/tenant-partner.controller.ts",
@@ -2461,9 +2433,7 @@
       "title": "首頁與行程顯示示意資料，詳情查無該筆",
       "role": "企業員工／行政代訂",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ENTERPRISE-DATA-001"
-      ],
+      "task_ids": ["SR-ENTERPRISE-DATA-001"],
       "current_source_locators": [
         {
           "path": "apps/enterprise-dispatch-web/app/page.tsx",
@@ -2494,9 +2464,7 @@
       "title": "聯絡司機與企業客服按鈕沒有動作",
       "role": "企業乘客",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ENTERPRISE-DATA-001"
-      ],
+      "task_ids": ["SR-ENTERPRISE-DATA-001"],
       "current_source_locators": [
         {
           "path": "apps/enterprise-dispatch-web/app/page.tsx",
@@ -2527,9 +2495,7 @@
       "title": "總覽示意數字與已連線清單混用",
       "role": "車行營運",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-FLEET-DATA-001"
-      ],
+      "task_ids": ["SR-FLEET-DATA-001"],
       "current_source_locators": [
         {
           "path": "apps/fleet-partner-portal-web/app/drivers/page.tsx",
@@ -2560,9 +2526,7 @@
       "title": "主要按鈕可點但未接線",
       "role": "車行營運",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-FLEET-DATA-001"
-      ],
+      "task_ids": ["SR-FLEET-DATA-001"],
       "current_source_locators": [
         {
           "path": "apps/fleet-partner-portal-web/app/drivers/page.tsx",
@@ -2593,9 +2557,7 @@
       "title": "事故申訴要求回覆卻未提供流程",
       "role": "車行案件處理",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-FLEET-CASE-001"
-      ],
+      "task_ids": ["SR-FLEET-CASE-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/modules/fleet-partner/fleet-partner.controller.ts",
@@ -2626,9 +2588,7 @@
       "title": "對帳狀態自相矛盾",
       "role": "車行財務",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-FLEET-SETTLE-001"
-      ],
+      "task_ids": ["SR-FLEET-SETTLE-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/modules/billing-settlement/billing-settlement.service.ts",
@@ -2659,9 +2619,7 @@
       "title": "下載簽名檔使用假摘要與固定簽名字串",
       "role": "銀行財務",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-BANK-003"
-      ],
+      "task_ids": ["SR-BANK-003"],
       "current_source_locators": [
         {
           "path": "apps/bank-console-web/app/artifacts/artifact-crypto.ts",
@@ -2694,10 +2652,7 @@
       "title": "結算金額可見性違反頁面角色定義",
       "role": "銀行營運檢視",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-BANK-002",
-        "SR-IAM-001"
-      ],
+      "task_ids": ["SR-BANK-002", "SR-IAM-001"],
       "current_source_locators": [
         {
           "path": "apps/bank-console-web/app/statements/[period]/page.tsx",
@@ -2747,10 +2702,7 @@
       "title": "資料讀取失敗仍呈現可信統計",
       "role": "管理員／銀行營運",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-BANK-001",
-        "SR-ENTERPRISE-DATA-001"
-      ],
+      "task_ids": ["SR-BANK-001", "SR-ENTERPRISE-DATA-001"],
       "current_source_locators": [
         {
           "path": "apps/bank-console-web/app/contracts/[contractId]/page.tsx",
@@ -2799,9 +2751,7 @@
       "title": "空間派車看板地圖圖磚404",
       "role": "調度員",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-OPS-MAP-001"
-      ],
+      "task_ids": ["SR-OPS-MAP-001"],
       "current_source_locators": [
         {
           "path": "apps/ops-console-web/components/google-map-base-layer.tsx",
@@ -2834,9 +2784,7 @@
       "title": "跨系統稽核連結導至錯誤位置",
       "role": "調度員",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-OPS-SHELL-001"
-      ],
+      "task_ids": ["SR-OPS-SHELL-001"],
       "current_source_locators": [
         {
           "path": "apps/ops-console-web/components/ops-assistant/assistant-actions.ts",
@@ -2867,9 +2815,7 @@
       "title": "預設助理遮擋工作控制項",
       "role": "調度員",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-OPS-SHELL-001"
-      ],
+      "task_ids": ["SR-OPS-SHELL-001"],
       "current_source_locators": [
         {
           "path": "apps/ops-console-web/components/ops-assistant/assistant-actions.ts",
@@ -2900,9 +2846,7 @@
       "title": "自訂情境與乘客資料未一致帶入",
       "role": "企業員工／代訂",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ENTERPRISE-FORM-001"
-      ],
+      "task_ids": ["SR-ENTERPRISE-FORM-001"],
       "current_source_locators": [
         {
           "path": "apps/enterprise-dispatch-web/app/bookings/new/page.tsx",
@@ -2933,9 +2877,7 @@
       "title": "過去日期可進最後確認頁",
       "role": "企業預約者",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ENTERPRISE-FORM-001"
-      ],
+      "task_ids": ["SR-ENTERPRISE-FORM-001"],
       "current_source_locators": [
         {
           "path": "apps/enterprise-dispatch-web/app/bookings/new/page.tsx",
@@ -2966,9 +2908,7 @@
       "title": "行動版橫向溢出",
       "role": "手機企業使用者",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ENTERPRISE-FORM-001"
-      ],
+      "task_ids": ["SR-ENTERPRISE-FORM-001"],
       "current_source_locators": [
         {
           "path": "apps/enterprise-dispatch-web/app/bookings/new/page.tsx",
@@ -2999,9 +2939,7 @@
       "title": "新增表單暗色文字難以閱讀且缺欄位關聯",
       "role": "車行建檔者",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-FLEET-FORM-001"
-      ],
+      "task_ids": ["SR-FLEET-FORM-001"],
       "current_source_locators": [
         {
           "path": "apps/fleet-partner-portal-web/app/supply/drivers/new/page.tsx",
@@ -3032,10 +2970,7 @@
       "title": "查詢工具不足、頁籤不會篩選",
       "role": "車行／企業查詢者",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ENTERPRISE-SEARCH-001",
-        "SR-FLEET-DATA-001"
-      ],
+      "task_ids": ["SR-ENTERPRISE-SEARCH-001", "SR-FLEET-DATA-001"],
       "current_source_locators": [
         {
           "path": "apps/enterprise-dispatch-web/app/bookings/page.tsx",
@@ -3070,9 +3005,7 @@
       "title": "未儲存輸入離頁直接丟失",
       "role": "車行建檔者",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-FLEET-FORM-001"
-      ],
+      "task_ids": ["SR-FLEET-FORM-001"],
       "current_source_locators": [
         {
           "path": "apps/fleet-partner-portal-web/app/supply/drivers/new/page.tsx",
@@ -3103,9 +3036,7 @@
       "title": "總覽匯出未接線，但對帳CSV可下載",
       "role": "通路財務",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-CHANNEL-001"
-      ],
+      "task_ids": ["SR-CHANNEL-001"],
       "current_source_locators": [
         {
           "path": "apps/channel-partner-portal-web/Dockerfile",
@@ -3138,9 +3069,7 @@
       "title": "環境標示與使用者文案混入工程資訊",
       "role": "各角色",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ENV-COPY-001"
-      ],
+      "task_ids": ["SR-ENV-COPY-001"],
       "current_source_locators": [
         {
           "path": "apps/bank-console-web/lib/translations.ts",
@@ -3171,9 +3100,7 @@
       "title": "對帳開立日晚於到期日",
       "role": "銀行財務",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-BANK-001"
-      ],
+      "task_ids": ["SR-BANK-001"],
       "current_source_locators": [
         {
           "path": "apps/bank-console-web/app/contracts/[contractId]/page.tsx",
@@ -3206,10 +3133,7 @@
       "title": "文件入口與實際部署版本不一致",
       "role": "維運／驗收人員",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-PUBLIC-001",
-        "SR-READINESS-001"
-      ],
+      "task_ids": ["SR-PUBLIC-001", "SR-READINESS-001"],
       "current_source_locators": [
         {
           "path": "tools/system-remediation/public-entry/system-remediation-endpoints.py",
@@ -3228,9 +3152,7 @@
       "title": "司機web預覽在載入時崩潰",
       "role": "司機／開發驗證",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-DRIVER-WEB-001"
-      ],
+      "task_ids": ["SR-DRIVER-WEB-001"],
       "current_source_locators": [
         {
           "path": "apps/driver-app/components/driver-trip-map.tsx",
@@ -3344,10 +3266,7 @@
       "title": "帳單建立了下載中繼資料，但沒有真正帳單檔案",
       "role": "租戶財務",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ARTIFACT-001",
-        "SR-INVOICE-001"
-      ],
+      "task_ids": ["SR-ARTIFACT-001", "SR-INVOICE-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/modules/billing-settlement/billing-settlement.service.ts",
@@ -3375,10 +3294,7 @@
       "title": "一般報表沒有 PDF／Excel renderer",
       "role": "營運／租戶報表使用者",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-DEPS-001",
-        "SR-REPORT-001"
-      ],
+      "task_ids": ["SR-DEPS-001", "SR-REPORT-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/modules/reporting-filing/reporting-filing.service.ts",
@@ -3397,10 +3313,7 @@
       "title": "邀請寄送只有記憶體紀錄，卻標示 delivered",
       "role": "租戶人員管理員／受邀者",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-MAIL-001",
-        "SR-NOTIFY-001"
-      ],
+      "task_ids": ["SR-MAIL-001", "SR-NOTIFY-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/modules/tenant-partner/tenant-invitation-delivery.service.ts",
@@ -3426,10 +3339,7 @@
       "title": "簽核 Email 沒有真正送出，但紀錄已送達人員",
       "role": "租戶簽核人／申請人",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-MAIL-002",
-        "SR-NOTIFY-001"
-      ],
+      "task_ids": ["SR-MAIL-002", "SR-NOTIFY-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/modules/audit-notification/audit-notification.email-adapter.ts",
@@ -3456,10 +3366,7 @@
       "title": "牌貼下載無可用檔案，連結也過期",
       "role": "車行／法遵／公開資訊管理員",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ARTIFACT-001",
-        "SR-PLACARD-001"
-      ],
+      "task_ids": ["SR-ARTIFACT-001", "SR-PLACARD-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/modules/controlled-download/controlled-download.controller.ts",
@@ -3485,9 +3392,7 @@
       "title": "匯款證明缺少上傳、存在性與關聯查驗",
       "role": "出納／覆核人",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-PROOF-001"
-      ],
+      "task_ids": ["SR-PROOF-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/modules/billing-settlement/billing-settlement.service.ts",
@@ -3510,10 +3415,7 @@
       "title": "派車／到達推播 provider 尚未接通",
       "role": "P5 乘客",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-PUSH-001",
-        "SR-READINESS-001"
-      ],
+      "task_ids": ["SR-PUSH-001", "SR-READINESS-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/modules/multi-taxi/passenger-push.port.ts",
@@ -3536,9 +3438,7 @@
       "title": "轉接器管理頁的資料 API 404",
       "role": "平臺轉接器管理員",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ADMIN-ADAPTER-001"
-      ],
+      "task_ids": ["SR-ADMIN-ADAPTER-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/modules/platform-admin/platform-admin.controller.ts",
@@ -3569,9 +3469,7 @@
       "title": "憑證到期警告使用過期固定資料",
       "role": "轉接器管理員",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-ADMIN-ADAPTER-001"
-      ],
+      "task_ids": ["SR-ADMIN-ADAPTER-001"],
       "current_source_locators": [
         {
           "path": "apps/api/src/modules/platform-admin/platform-admin.controller.ts",
@@ -3602,9 +3500,7 @@
       "title": "合約列表仍停用詳情入口",
       "role": "營運合約查詢者",
       "base_sha": "c4c4a35f88907df6bf68e781059dde397c06ba03",
-      "task_ids": [
-        "SR-OPS-CONTRACT-001"
-      ],
+      "task_ids": ["SR-OPS-CONTRACT-001"],
       "current_source_locators": [
         {
           "path": "apps/ops-console-web/app/contracts/[contractId]/page.tsx",
@@ -3693,18 +3589,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-READINESS-001",
-        "SR-PUBLIC-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-IDENTITY-001",
-        "SR-LIVE-ENTRY-001"
-      ],
-      "source_refs": [
-        "R01",
-        "R29"
-      ]
+      "implementation_tasks": ["SR-READINESS-001", "SR-PUBLIC-001"],
+      "verification_tasks": ["SR-QA-IDENTITY-001", "SR-LIVE-ENTRY-001"],
+      "source_refs": ["R01", "R29"]
     },
     {
       "id": "C002",
@@ -3724,15 +3611,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-TENANT-LOGIN-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-IDENTITY-001"
-      ],
-      "source_refs": [
-        "R02"
-      ]
+      "implementation_tasks": ["SR-TENANT-LOGIN-001"],
+      "verification_tasks": ["SR-QA-IDENTITY-001"],
+      "source_refs": ["R02"]
     },
     {
       "id": "C003",
@@ -3753,10 +3634,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-IDENTITY-001",
-        "SR-LIVE-ENTRY-001"
-      ],
+      "verification_tasks": ["SR-QA-IDENTITY-001", "SR-LIVE-ENTRY-001"],
       "source_refs": []
     },
     {
@@ -3777,15 +3655,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-BANK-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-IDENTITY-001"
-      ],
-      "source_refs": [
-        "R06"
-      ]
+      "implementation_tasks": ["SR-BANK-001"],
+      "verification_tasks": ["SR-QA-IDENTITY-001"],
+      "source_refs": ["R06"]
     },
     {
       "id": "C005",
@@ -3805,16 +3677,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-BANK-002",
-        "SR-IAM-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-IDENTITY-001"
-      ],
-      "source_refs": [
-        "R15"
-      ]
+      "implementation_tasks": ["SR-BANK-002", "SR-IAM-001"],
+      "verification_tasks": ["SR-QA-IDENTITY-001"],
+      "source_refs": ["R15"]
     },
     {
       "id": "C006",
@@ -3834,17 +3699,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-NOTIFY-001",
-        "SR-MAIL-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-IDENTITY-001",
-        "SR-LIVE-MAIL-001"
-      ],
-      "source_refs": [
-        "N06"
-      ]
+      "implementation_tasks": ["SR-NOTIFY-001", "SR-MAIL-001"],
+      "verification_tasks": ["SR-QA-IDENTITY-001", "SR-LIVE-MAIL-001"],
+      "source_refs": ["N06"]
     },
     {
       "id": "C007",
@@ -3864,15 +3721,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-IAM-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-IDENTITY-001"
-      ],
-      "source_refs": [
-        "R05"
-      ]
+      "implementation_tasks": ["SR-IAM-001"],
+      "verification_tasks": ["SR-QA-IDENTITY-001"],
+      "source_refs": ["R05"]
     },
     {
       "id": "C008",
@@ -3893,9 +3744,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-IDENTITY-001"
-      ],
+      "verification_tasks": ["SR-QA-IDENTITY-001"],
       "source_refs": []
     },
     {
@@ -3917,9 +3766,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-IDENTITY-001"
-      ],
+      "verification_tasks": ["SR-QA-IDENTITY-001"],
       "source_refs": []
     },
     {
@@ -3941,9 +3788,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-IDENTITY-001"
-      ],
+      "verification_tasks": ["SR-QA-IDENTITY-001"],
       "source_refs": []
     },
     {
@@ -3965,9 +3810,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-IDENTITY-001"
-      ],
+      "verification_tasks": ["SR-QA-IDENTITY-001"],
       "source_refs": []
     },
     {
@@ -3995,12 +3838,8 @@
         "SR-HOST-FE-001",
         "SR-WIRE-001"
       ],
-      "verification_tasks": [
-        "SR-QA-NEWFEATURES-001"
-      ],
-      "source_refs": [
-        "N03"
-      ]
+      "verification_tasks": ["SR-QA-NEWFEATURES-001"],
+      "source_refs": ["N03"]
     },
     {
       "id": "C013",
@@ -4026,13 +3865,8 @@
         "SR-ENTERPRISE-DATA-001",
         "SR-ENTERPRISE-SEARCH-001"
       ],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
-      "source_refs": [
-        "R08",
-        "R24"
-      ]
+      "verification_tasks": ["SR-QA-BOOKING-001"],
+      "source_refs": ["R08", "R24"]
     },
     {
       "id": "C014",
@@ -4054,9 +3888,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
       "source_refs": []
     },
     {
@@ -4078,15 +3910,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-ENTERPRISE-FORM-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
-      "source_refs": [
-        "R20"
-      ]
+      "implementation_tasks": ["SR-ENTERPRISE-FORM-001"],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
+      "source_refs": ["R20"]
     },
     {
       "id": "C016",
@@ -4107,15 +3933,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-ENTERPRISE-FORM-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
-      "source_refs": [
-        "R21"
-      ]
+      "implementation_tasks": ["SR-ENTERPRISE-FORM-001"],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
+      "source_refs": ["R21"]
     },
     {
       "id": "C017",
@@ -4136,15 +3956,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-ENTERPRISE-DATA-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
-      "source_refs": [
-        "R08"
-      ]
+      "implementation_tasks": ["SR-ENTERPRISE-DATA-001"],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
+      "source_refs": ["R08"]
     },
     {
       "id": "C018",
@@ -4165,15 +3979,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-ENTERPRISE-DATA-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
-      "source_refs": [
-        "R09"
-      ]
+      "implementation_tasks": ["SR-ENTERPRISE-DATA-001"],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
+      "source_refs": ["R09"]
     },
     {
       "id": "C019",
@@ -4194,15 +4002,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-ENTERPRISE-FORM-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
-      "source_refs": [
-        "R22"
-      ]
+      "implementation_tasks": ["SR-ENTERPRISE-FORM-001"],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
+      "source_refs": ["R22"]
     },
     {
       "id": "C020",
@@ -4223,15 +4025,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-REFERRAL-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
-      "source_refs": [
-        "R07"
-      ]
+      "implementation_tasks": ["SR-REFERRAL-001"],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
+      "source_refs": ["R07"]
     },
     {
       "id": "C021",
@@ -4252,15 +4048,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-REFERRAL-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
-      "source_refs": [
-        "R07"
-      ]
+      "implementation_tasks": ["SR-REFERRAL-001"],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
+      "source_refs": ["R07"]
     },
     {
       "id": "C022",
@@ -4282,9 +4072,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
       "source_refs": []
     },
     {
@@ -4306,17 +4094,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-PUSH-001",
-        "SR-READINESS-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001",
-        "SR-LIVE-PUSH-001"
-      ],
-      "source_refs": [
-        "N10"
-      ]
+      "implementation_tasks": ["SR-PUSH-001", "SR-READINESS-001"],
+      "verification_tasks": ["SR-QA-BOOKING-001", "SR-LIVE-PUSH-001"],
+      "source_refs": ["N10"]
     },
     {
       "id": "C024",
@@ -4338,9 +4118,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
       "source_refs": []
     },
     {
@@ -4363,9 +4141,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
       "source_refs": []
     },
     {
@@ -4387,17 +4163,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-NOTIFY-001",
-        "SR-MAIL-002"
-      ],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001",
-        "SR-LIVE-MAIL-001"
-      ],
-      "source_refs": [
-        "N07"
-      ]
+      "implementation_tasks": ["SR-NOTIFY-001", "SR-MAIL-002"],
+      "verification_tasks": ["SR-QA-BOOKING-001", "SR-LIVE-MAIL-001"],
+      "source_refs": ["N07"]
     },
     {
       "id": "C027",
@@ -4419,9 +4187,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
       "source_refs": []
     },
     {
@@ -4444,9 +4210,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
       "source_refs": []
     },
     {
@@ -4469,10 +4233,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001",
-        "SR-LIVE-FINANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-BOOKING-001", "SR-LIVE-FINANCE-001"],
       "source_refs": []
     },
     {
@@ -4495,9 +4256,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
       "source_refs": []
     },
     {
@@ -4520,9 +4279,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
       "source_refs": []
     },
     {
@@ -4545,9 +4302,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001"
-      ],
+      "verification_tasks": ["SR-QA-BOOKING-001"],
       "source_refs": []
     },
     {
@@ -4570,10 +4325,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001",
-        "SR-LIVE-FORWARD-001"
-      ],
+      "verification_tasks": ["SR-QA-BOOKING-001", "SR-LIVE-FORWARD-001"],
       "source_refs": []
     },
     {
@@ -4596,10 +4348,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-BOOKING-001",
-        "SR-LIVE-FORWARD-001"
-      ],
+      "verification_tasks": ["SR-QA-BOOKING-001", "SR-LIVE-FORWARD-001"],
       "source_refs": []
     },
     {
@@ -4622,9 +4371,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DISPATCH-001"
-      ],
+      "verification_tasks": ["SR-QA-DISPATCH-001"],
       "source_refs": []
     },
     {
@@ -4647,9 +4394,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DISPATCH-001"
-      ],
+      "verification_tasks": ["SR-QA-DISPATCH-001"],
       "source_refs": []
     },
     {
@@ -4672,9 +4417,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DISPATCH-001"
-      ],
+      "verification_tasks": ["SR-QA-DISPATCH-001"],
       "source_refs": []
     },
     {
@@ -4697,9 +4440,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DISPATCH-001"
-      ],
+      "verification_tasks": ["SR-QA-DISPATCH-001"],
       "source_refs": []
     },
     {
@@ -4722,9 +4463,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DISPATCH-001"
-      ],
+      "verification_tasks": ["SR-QA-DISPATCH-001"],
       "source_refs": []
     },
     {
@@ -4746,15 +4485,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-OPS-MAP-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-DISPATCH-001"
-      ],
-      "source_refs": [
-        "R17"
-      ]
+      "implementation_tasks": ["SR-OPS-MAP-001"],
+      "verification_tasks": ["SR-QA-DISPATCH-001"],
+      "source_refs": ["R17"]
     },
     {
       "id": "C041",
@@ -4776,9 +4509,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DISPATCH-001"
-      ],
+      "verification_tasks": ["SR-QA-DISPATCH-001"],
       "source_refs": []
     },
     {
@@ -4801,9 +4532,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DISPATCH-001"
-      ],
+      "verification_tasks": ["SR-QA-DISPATCH-001"],
       "source_refs": []
     },
     {
@@ -4826,9 +4555,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-CALL-001"
-      ],
+      "verification_tasks": ["SR-QA-CALL-001"],
       "source_refs": []
     },
     {
@@ -4851,10 +4578,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-CALL-001",
-        "UV-EXEC-028"
-      ],
+      "verification_tasks": ["SR-QA-CALL-001", "UV-EXEC-028"],
       "source_refs": []
     },
     {
@@ -4877,9 +4601,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-CALL-001"
-      ],
+      "verification_tasks": ["SR-QA-CALL-001"],
       "source_refs": []
     },
     {
@@ -4902,9 +4624,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-CALL-001"
-      ],
+      "verification_tasks": ["SR-QA-CALL-001"],
       "source_refs": []
     },
     {
@@ -4927,9 +4647,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-CALL-001"
-      ],
+      "verification_tasks": ["SR-QA-CALL-001"],
       "source_refs": []
     },
     {
@@ -4951,16 +4669,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-OPS-SHELL-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-DISPATCH-001"
-      ],
-      "source_refs": [
-        "R18",
-        "R19"
-      ]
+      "implementation_tasks": ["SR-OPS-SHELL-001"],
+      "verification_tasks": ["SR-QA-DISPATCH-001"],
+      "source_refs": ["R18", "R19"]
     },
     {
       "id": "C049",
@@ -4981,16 +4692,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-DRIVER-WEB-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-DRIVER-001",
-        "SR-LIVE-DRIVER-001"
-      ],
-      "source_refs": [
-        "R30"
-      ]
+      "implementation_tasks": ["SR-DRIVER-WEB-001"],
+      "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+      "source_refs": ["R30"]
     },
     {
       "id": "C050",
@@ -5012,10 +4716,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DRIVER-001",
-        "SR-LIVE-DRIVER-001"
-      ],
+      "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
       "source_refs": []
     },
     {
@@ -5038,10 +4739,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DRIVER-001",
-        "SR-LIVE-DRIVER-001"
-      ],
+      "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
       "source_refs": []
     },
     {
@@ -5070,12 +4768,8 @@
         "SR-LEAVE-FE-001",
         "SR-WIRE-001"
       ],
-      "verification_tasks": [
-        "SR-QA-NEWFEATURES-001"
-      ],
-      "source_refs": [
-        "N01"
-      ]
+      "verification_tasks": ["SR-QA-NEWFEATURES-001"],
+      "source_refs": ["N01"]
     },
     {
       "id": "C053",
@@ -5097,10 +4791,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DRIVER-001",
-        "SR-LIVE-DRIVER-001"
-      ],
+      "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
       "source_refs": []
     },
     {
@@ -5123,10 +4814,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DRIVER-001",
-        "SR-LIVE-DRIVER-001"
-      ],
+      "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
       "source_refs": []
     },
     {
@@ -5149,10 +4837,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DRIVER-001",
-        "SR-LIVE-DRIVER-001"
-      ],
+      "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
       "source_refs": []
     },
     {
@@ -5175,10 +4860,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DRIVER-001",
-        "SR-LIVE-DRIVER-001"
-      ],
+      "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
       "source_refs": []
     },
     {
@@ -5201,10 +4883,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DRIVER-001",
-        "SR-LIVE-DRIVER-001"
-      ],
+      "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
       "source_refs": []
     },
     {
@@ -5226,17 +4905,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-ARTIFACT-001",
-        "SR-INVOICE-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-DRIVER-001",
-        "SR-LIVE-DRIVER-001"
-      ],
-      "source_refs": [
-        "N04"
-      ]
+      "implementation_tasks": ["SR-ARTIFACT-001", "SR-INVOICE-001"],
+      "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+      "source_refs": ["N04"]
     },
     {
       "id": "C059",
@@ -5264,12 +4935,8 @@
         "SR-ACADEMY-FE-001",
         "SR-WIRE-001"
       ],
-      "verification_tasks": [
-        "SR-QA-NEWFEATURES-001"
-      ],
-      "source_refs": [
-        "N02"
-      ]
+      "verification_tasks": ["SR-QA-NEWFEATURES-001"],
+      "source_refs": ["N02"]
     },
     {
       "id": "C060",
@@ -5291,10 +4958,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-DRIVER-001",
-        "SR-LIVE-DRIVER-001"
-      ],
+      "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
       "source_refs": []
     },
     {
@@ -5316,17 +4980,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-NOTIFY-001",
-        "SR-MAIL-002"
-      ],
-      "verification_tasks": [
-        "SR-QA-DRIVER-001",
-        "SR-LIVE-DRIVER-001"
-      ],
-      "source_refs": [
-        "N07"
-      ]
+      "implementation_tasks": ["SR-NOTIFY-001", "SR-MAIL-002"],
+      "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+      "source_refs": ["N07"]
     },
     {
       "id": "C062",
@@ -5347,16 +5003,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-DRIVER-WEB-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-DRIVER-001",
-        "SR-LIVE-DRIVER-001"
-      ],
-      "source_refs": [
-        "R30"
-      ]
+      "implementation_tasks": ["SR-DRIVER-WEB-001"],
+      "verification_tasks": ["SR-QA-DRIVER-001", "SR-LIVE-DRIVER-001"],
+      "source_refs": ["R30"]
     },
     {
       "id": "C063",
@@ -5377,15 +5026,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-FLEET-DATA-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-SUPPLY-001"
-      ],
-      "source_refs": [
-        "R10"
-      ]
+      "implementation_tasks": ["SR-FLEET-DATA-001"],
+      "verification_tasks": ["SR-QA-SUPPLY-001"],
+      "source_refs": ["R10"]
     },
     {
       "id": "C064",
@@ -5406,15 +5049,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-FLEET-DATA-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-SUPPLY-001"
-      ],
-      "source_refs": [
-        "R11"
-      ]
+      "implementation_tasks": ["SR-FLEET-DATA-001"],
+      "verification_tasks": ["SR-QA-SUPPLY-001"],
+      "source_refs": ["R11"]
     },
     {
       "id": "C065",
@@ -5436,9 +5073,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-SUPPLY-001"
-      ],
+      "verification_tasks": ["SR-QA-SUPPLY-001"],
       "source_refs": []
     },
     {
@@ -5461,9 +5096,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-SUPPLY-001"
-      ],
+      "verification_tasks": ["SR-QA-SUPPLY-001"],
       "source_refs": []
     },
     {
@@ -5485,15 +5118,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-FLEET-CASE-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-SUPPLY-001"
-      ],
-      "source_refs": [
-        "R12"
-      ]
+      "implementation_tasks": ["SR-FLEET-CASE-001"],
+      "verification_tasks": ["SR-QA-SUPPLY-001"],
+      "source_refs": ["R12"]
     },
     {
       "id": "C068",
@@ -5514,15 +5141,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-FLEET-SETTLE-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001"
-      ],
-      "source_refs": [
-        "R13"
-      ]
+      "implementation_tasks": ["SR-FLEET-SETTLE-001"],
+      "verification_tasks": ["SR-QA-FINANCE-001"],
+      "source_refs": ["R13"]
     },
     {
       "id": "C069",
@@ -5543,17 +5164,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-FLEET-DATA-001",
-        "SR-ENTERPRISE-SEARCH-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-SUPPLY-001"
-      ],
-      "source_refs": [
-        "R24",
-        "R11"
-      ]
+      "implementation_tasks": ["SR-FLEET-DATA-001", "SR-ENTERPRISE-SEARCH-001"],
+      "verification_tasks": ["SR-QA-SUPPLY-001"],
+      "source_refs": ["R24", "R11"]
     },
     {
       "id": "C070",
@@ -5574,16 +5187,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-FLEET-FORM-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-SUPPLY-001"
-      ],
-      "source_refs": [
-        "R23",
-        "R25"
-      ]
+      "implementation_tasks": ["SR-FLEET-FORM-001"],
+      "verification_tasks": ["SR-QA-SUPPLY-001"],
+      "source_refs": ["R23", "R25"]
     },
     {
       "id": "C071",
@@ -5611,12 +5217,8 @@
         "SR-ACADEMY-FE-001",
         "SR-WIRE-001"
       ],
-      "verification_tasks": [
-        "SR-QA-NEWFEATURES-001"
-      ],
-      "source_refs": [
-        "N02"
-      ]
+      "verification_tasks": ["SR-QA-NEWFEATURES-001"],
+      "source_refs": ["N02"]
     },
     {
       "id": "C072",
@@ -5638,9 +5240,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-SUPPLY-001"
-      ],
+      "verification_tasks": ["SR-QA-SUPPLY-001"],
       "source_refs": []
     },
     {
@@ -5663,9 +5263,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-SUPPLY-001"
-      ],
+      "verification_tasks": ["SR-QA-SUPPLY-001"],
       "source_refs": []
     },
     {
@@ -5688,9 +5286,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-FINANCE-001"],
       "source_refs": []
     },
     {
@@ -5713,10 +5309,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001",
-        "SR-LIVE-FINANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-FINANCE-001", "SR-LIVE-FINANCE-001"],
       "source_refs": []
     },
     {
@@ -5739,9 +5332,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-FINANCE-001"],
       "source_refs": []
     },
     {
@@ -5764,9 +5355,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-FINANCE-001"],
       "source_refs": []
     },
     {
@@ -5788,17 +5377,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-ARTIFACT-001",
-        "SR-INVOICE-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001",
-        "SR-LIVE-DOC-001"
-      ],
-      "source_refs": [
-        "N04"
-      ]
+      "implementation_tasks": ["SR-ARTIFACT-001", "SR-INVOICE-001"],
+      "verification_tasks": ["SR-QA-FINANCE-001", "SR-LIVE-DOC-001"],
+      "source_refs": ["N04"]
     },
     {
       "id": "C079",
@@ -5825,14 +5406,8 @@
         "SR-MAIL-002",
         "SR-INVOICE-001"
       ],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001",
-        "SR-LIVE-MAIL-001"
-      ],
-      "source_refs": [
-        "N04",
-        "N07"
-      ]
+      "verification_tasks": ["SR-QA-FINANCE-001", "SR-LIVE-MAIL-001"],
+      "source_refs": ["N04", "N07"]
     },
     {
       "id": "C080",
@@ -5854,9 +5429,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-FINANCE-001"],
       "source_refs": []
     },
     {
@@ -5878,15 +5451,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-PROOF-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001"
-      ],
-      "source_refs": [
-        "N09"
-      ]
+      "implementation_tasks": ["SR-PROOF-001"],
+      "verification_tasks": ["SR-QA-FINANCE-001"],
+      "source_refs": ["N09"]
     },
     {
       "id": "C082",
@@ -5908,9 +5475,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-FINANCE-001"],
       "source_refs": []
     },
     {
@@ -5932,16 +5497,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-BANK-003"
-      ],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001",
-        "SR-LIVE-DOC-001"
-      ],
-      "source_refs": [
-        "R14"
-      ]
+      "implementation_tasks": ["SR-BANK-003"],
+      "verification_tasks": ["SR-QA-FINANCE-001", "SR-LIVE-DOC-001"],
+      "source_refs": ["R14"]
     },
     {
       "id": "C084",
@@ -5962,15 +5520,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-BANK-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001"
-      ],
-      "source_refs": [
-        "R28"
-      ]
+      "implementation_tasks": ["SR-BANK-001"],
+      "verification_tasks": ["SR-QA-FINANCE-001"],
+      "source_refs": ["R28"]
     },
     {
       "id": "C085",
@@ -5991,15 +5543,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-BANK-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001"
-      ],
-      "source_refs": [
-        "R06"
-      ]
+      "implementation_tasks": ["SR-BANK-001"],
+      "verification_tasks": ["SR-QA-FINANCE-001"],
+      "source_refs": ["R06"]
     },
     {
       "id": "C086",
@@ -6021,9 +5567,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-FINANCE-001"],
       "source_refs": []
     },
     {
@@ -6045,15 +5589,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-CHANNEL-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001"
-      ],
-      "source_refs": [
-        "R26"
-      ]
+      "implementation_tasks": ["SR-CHANNEL-001"],
+      "verification_tasks": ["SR-QA-FINANCE-001"],
+      "source_refs": ["R26"]
     },
     {
       "id": "C088",
@@ -6075,9 +5613,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-FINANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-FINANCE-001"],
       "source_refs": []
     },
     {
@@ -6100,9 +5636,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-CONCURRENCY-001"
-      ],
+      "verification_tasks": ["SR-QA-CONCURRENCY-001"],
       "source_refs": []
     },
     {
@@ -6125,9 +5659,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-REPORTS-001"
-      ],
+      "verification_tasks": ["SR-QA-REPORTS-001"],
       "source_refs": []
     },
     {
@@ -6149,16 +5681,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-REPORT-001",
-        "SR-DEPS-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-REPORTS-001"
-      ],
-      "source_refs": [
-        "N05"
-      ]
+      "implementation_tasks": ["SR-REPORT-001", "SR-DEPS-001"],
+      "verification_tasks": ["SR-QA-REPORTS-001"],
+      "source_refs": ["N05"]
     },
     {
       "id": "C092",
@@ -6180,9 +5705,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-REPORTS-001"
-      ],
+      "verification_tasks": ["SR-QA-REPORTS-001"],
       "source_refs": []
     },
     {
@@ -6210,13 +5733,8 @@
         "SR-ADMIN-VERIFY-001",
         "SR-ENTERPRISE-DATA-001"
       ],
-      "verification_tasks": [
-        "SR-QA-REPORTS-001"
-      ],
-      "source_refs": [
-        "R03",
-        "R16"
-      ]
+      "verification_tasks": ["SR-QA-REPORTS-001"],
+      "source_refs": ["R03", "R16"]
     },
     {
       "id": "C094",
@@ -6238,9 +5756,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-REPORTS-001"
-      ],
+      "verification_tasks": ["SR-QA-REPORTS-001"],
       "source_refs": []
     },
     {
@@ -6263,9 +5779,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-REPORTS-001"
-      ],
+      "verification_tasks": ["SR-QA-REPORTS-001"],
       "source_refs": []
     },
     {
@@ -6288,9 +5802,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-REPORTS-001"
-      ],
+      "verification_tasks": ["SR-QA-REPORTS-001"],
       "source_refs": []
     },
     {
@@ -6312,17 +5824,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-ARTIFACT-001",
-        "SR-PLACARD-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-REPORTS-001",
-        "SR-LIVE-DOC-001"
-      ],
-      "source_refs": [
-        "N08"
-      ]
+      "implementation_tasks": ["SR-ARTIFACT-001", "SR-PLACARD-001"],
+      "verification_tasks": ["SR-QA-REPORTS-001", "SR-LIVE-DOC-001"],
+      "source_refs": ["N08"]
     },
     {
       "id": "C098",
@@ -6344,9 +5848,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-REPORTS-001"
-      ],
+      "verification_tasks": ["SR-QA-REPORTS-001"],
       "source_refs": []
     },
     {
@@ -6369,9 +5871,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-REPORTS-001"
-      ],
+      "verification_tasks": ["SR-QA-REPORTS-001"],
       "source_refs": []
     },
     {
@@ -6394,9 +5894,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-REPORTS-001"
-      ],
+      "verification_tasks": ["SR-QA-REPORTS-001"],
       "source_refs": []
     },
     {
@@ -6417,15 +5915,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-ADMIN-VERIFY-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-GOVERNANCE-001"
-      ],
-      "source_refs": [
-        "R04"
-      ]
+      "implementation_tasks": ["SR-ADMIN-VERIFY-001"],
+      "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+      "source_refs": ["R04"]
     },
     {
       "id": "C102",
@@ -6446,9 +5938,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-GOVERNANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-GOVERNANCE-001"],
       "source_refs": []
     },
     {
@@ -6470,9 +5960,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-GOVERNANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-GOVERNANCE-001"],
       "source_refs": []
     },
     {
@@ -6493,15 +5981,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-ADMIN-ADAPTER-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-GOVERNANCE-001"
-      ],
-      "source_refs": [
-        "N11"
-      ]
+      "implementation_tasks": ["SR-ADMIN-ADAPTER-001"],
+      "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+      "source_refs": ["N11"]
     },
     {
       "id": "C105",
@@ -6521,15 +6003,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-ADMIN-ADAPTER-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-GOVERNANCE-001"
-      ],
-      "source_refs": [
-        "N12"
-      ]
+      "implementation_tasks": ["SR-ADMIN-ADAPTER-001"],
+      "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+      "source_refs": ["N12"]
     },
     {
       "id": "C106",
@@ -6550,9 +6026,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-GOVERNANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-GOVERNANCE-001"],
       "source_refs": []
     },
     {
@@ -6574,9 +6048,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-GOVERNANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-GOVERNANCE-001"],
       "source_refs": []
     },
     {
@@ -6597,16 +6069,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-BANK-001",
-        "SR-ENTERPRISE-DATA-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-GOVERNANCE-001"
-      ],
-      "source_refs": [
-        "R16"
-      ]
+      "implementation_tasks": ["SR-BANK-001", "SR-ENTERPRISE-DATA-001"],
+      "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+      "source_refs": ["R16"]
     },
     {
       "id": "C109",
@@ -6627,9 +6092,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-GOVERNANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-GOVERNANCE-001"],
       "source_refs": []
     },
     {
@@ -6650,15 +6113,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-ENV-COPY-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-GOVERNANCE-001"
-      ],
-      "source_refs": [
-        "R27"
-      ]
+      "implementation_tasks": ["SR-ENV-COPY-001"],
+      "verification_tasks": ["SR-QA-GOVERNANCE-001"],
+      "source_refs": ["R27"]
     },
     {
       "id": "C111",
@@ -6679,9 +6136,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-WEBHOOK-001"
-      ],
+      "verification_tasks": ["SR-QA-WEBHOOK-001"],
       "source_refs": []
     },
     {
@@ -6703,9 +6158,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-WEBHOOK-001"
-      ],
+      "verification_tasks": ["SR-QA-WEBHOOK-001"],
       "source_refs": []
     },
     {
@@ -6727,10 +6180,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-WEBHOOK-001",
-        "SR-LIVE-FINANCE-001"
-      ],
+      "verification_tasks": ["SR-QA-WEBHOOK-001", "SR-LIVE-FINANCE-001"],
       "source_refs": []
     },
     {
@@ -6752,10 +6202,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-WEBHOOK-001",
-        "SR-LIVE-MAP-001"
-      ],
+      "verification_tasks": ["SR-QA-WEBHOOK-001", "SR-LIVE-MAP-001"],
       "source_refs": []
     },
     {
@@ -6777,9 +6224,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-WEBHOOK-001"
-      ],
+      "verification_tasks": ["SR-QA-WEBHOOK-001"],
       "source_refs": []
     },
     {
@@ -6801,9 +6246,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-CONCURRENCY-001"
-      ],
+      "verification_tasks": ["SR-QA-CONCURRENCY-001"],
       "source_refs": []
     },
     {
@@ -6825,9 +6268,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-UX-001"
-      ],
+      "verification_tasks": ["SR-QA-UX-001"],
       "source_refs": []
     },
     {
@@ -6849,9 +6290,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-RELEASE-001"
-      ],
+      "verification_tasks": ["SR-RELEASE-001"],
       "source_refs": []
     },
     {
@@ -6877,14 +6316,8 @@
         "SR-IAM-001",
         "SR-ENTERPRISE-DATA-001"
       ],
-      "verification_tasks": [
-        "SR-QA-UX-001"
-      ],
-      "source_refs": [
-        "R05",
-        "R08",
-        "R16"
-      ]
+      "verification_tasks": ["SR-QA-UX-001"],
+      "source_refs": ["R05", "R08", "R16"]
     },
     {
       "id": "C120",
@@ -6904,17 +6337,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-FLEET-FORM-001",
-        "SR-ENTERPRISE-FORM-001"
-      ],
-      "verification_tasks": [
-        "SR-QA-UX-001"
-      ],
-      "source_refs": [
-        "R22",
-        "R23"
-      ]
+      "implementation_tasks": ["SR-FLEET-FORM-001", "SR-ENTERPRISE-FORM-001"],
+      "verification_tasks": ["SR-QA-UX-001"],
+      "source_refs": ["R22", "R23"]
     },
     {
       "id": "C121",
@@ -6935,9 +6360,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-QA-UX-001"
-      ],
+      "verification_tasks": ["SR-QA-UX-001"],
       "source_refs": []
     },
     {
@@ -6959,10 +6382,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-OPS-PROOF-001",
-        "SR-LIVE-OPS-001"
-      ],
+      "verification_tasks": ["SR-OPS-PROOF-001", "SR-LIVE-OPS-001"],
       "source_refs": []
     },
     {
@@ -6984,10 +6404,7 @@
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-OPS-PROOF-001",
-        "SR-LIVE-OPS-001"
-      ],
+      "verification_tasks": ["SR-OPS-PROOF-001", "SR-LIVE-OPS-001"],
       "source_refs": []
     },
     {
@@ -7008,17 +6425,9 @@
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
-      "implementation_tasks": [
-        "SR-READINESS-001",
-        "SR-PUBLIC-001"
-      ],
-      "verification_tasks": [
-        "SR-OPS-PROOF-001",
-        "SR-LIVE-OPS-001"
-      ],
-      "source_refs": [
-        "R29"
-      ]
+      "implementation_tasks": ["SR-READINESS-001", "SR-PUBLIC-001"],
+      "verification_tasks": ["SR-OPS-PROOF-001", "SR-LIVE-OPS-001"],
+      "source_refs": ["R29"]
     },
     {
       "id": "C125",
@@ -7044,15 +6453,8 @@
         "SR-PLACARD-001",
         "SR-PROOF-001"
       ],
-      "verification_tasks": [
-        "SR-QA-UX-001",
-        "SR-LIVE-DOC-001"
-      ],
-      "source_refs": [
-        "N04",
-        "N08",
-        "N09"
-      ]
+      "verification_tasks": ["SR-QA-UX-001", "SR-LIVE-DOC-001"],
+      "source_refs": ["N04", "N08", "N09"]
     },
     {
       "id": "C126",
@@ -7062,17 +6464,13 @@
       "state_at_audit": "範圍排除",
       "status": "excluded",
       "role_mapping_status": "not_applicable",
-      "data_requirements": [
-        "來源範圍裁決與排除依據；不建立驗收資料或開通資源"
-      ],
+      "data_requirements": ["來源範圍裁決與排除依據；不建立驗收資料或開通資源"],
       "scenario_requirement": "若重啟需新渠道切換及身份決策；本輪不重啟",
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-SCOPE-001"
-      ],
+      "verification_tasks": ["SR-SCOPE-001"],
       "source_refs": []
     },
     {
@@ -7083,17 +6481,13 @@
       "state_at_audit": "範圍排除",
       "status": "excluded",
       "role_mapping_status": "not_applicable",
-      "data_requirements": [
-        "來源範圍裁決與排除依據；不建立驗收資料或開通資源"
-      ],
+      "data_requirements": ["來源範圍裁決與排除依據；不建立驗收資料或開通資源"],
       "scenario_requirement": "记錄其使用者需求由誰承接；不可把舊app源碼存在當可用產品",
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-SCOPE-001"
-      ],
+      "verification_tasks": ["SR-SCOPE-001"],
       "source_refs": []
     },
     {
@@ -7104,17 +6498,13 @@
       "state_at_audit": "範圍排除",
       "status": "excluded",
       "role_mapping_status": "not_applicable",
-      "data_requirements": [
-        "來源範圍裁決與排除依據；不建立驗收資料或開通資源"
-      ],
+      "data_requirements": ["來源範圍裁決與排除依據；不建立驗收資料或開通資源"],
       "scenario_requirement": "保留獨立Phase2驗收矩陣，不列本期漏做的正式商用功能",
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-SCOPE-001"
-      ],
+      "verification_tasks": ["SR-SCOPE-001"],
       "source_refs": []
     },
     {
@@ -7125,17 +6515,13 @@
       "state_at_audit": "範圍排除",
       "status": "excluded",
       "role_mapping_status": "not_applicable",
-      "data_requirements": [
-        "來源範圍裁決與排除依據；不建立驗收資料或開通資源"
-      ],
+      "data_requirements": ["來源範圍裁決與排除依據；不建立驗收資料或開通資源"],
       "scenario_requirement": "維持外部送件流程與責任人；不能聲稱有實際包檔可下載",
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-SCOPE-001"
-      ],
+      "verification_tasks": ["SR-SCOPE-001"],
       "source_refs": []
     },
     {
@@ -7146,17 +6532,13 @@
       "state_at_audit": "範圍排除",
       "status": "excluded",
       "role_mapping_status": "not_applicable",
-      "data_requirements": [
-        "來源範圍裁決與排除依據；不建立驗收資料或開通資源"
-      ],
+      "data_requirements": ["來源範圍裁決與排除依據；不建立驗收資料或開通資源"],
       "scenario_requirement": "按現行授權交付資料與稽核，非新增監理網站缺陷",
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-SCOPE-001"
-      ],
+      "verification_tasks": ["SR-SCOPE-001"],
       "source_refs": []
     },
     {
@@ -7167,17 +6549,13 @@
       "state_at_audit": "範圍排除",
       "status": "excluded",
       "role_mapping_status": "not_applicable",
-      "data_requirements": [
-        "來源範圍裁決與排除依據；不建立驗收資料或開通資源"
-      ],
+      "data_requirements": ["來源範圍裁決與排除依據；不建立驗收資料或開通資源"],
       "scenario_requirement": "依已核定契約測轉態，不沿用舊架構差異作未實現",
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-SCOPE-001"
-      ],
+      "verification_tasks": ["SR-SCOPE-001"],
       "source_refs": []
     },
     {
@@ -7188,17 +6566,13 @@
       "state_at_audit": "範圍排除",
       "status": "excluded",
       "role_mapping_status": "not_applicable",
-      "data_requirements": [
-        "來源範圍裁決與排除依據；不建立驗收資料或開通資源"
-      ],
+      "data_requirements": ["來源範圍裁決與排除依據；不建立驗收資料或開通資源"],
       "scenario_requirement": "人工升級仍須可操作；提示與即將逾時Email另列N07",
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-SCOPE-001"
-      ],
+      "verification_tasks": ["SR-SCOPE-001"],
       "source_refs": []
     },
     {
@@ -7209,18 +6583,13 @@
       "state_at_audit": "外部待完成",
       "status": "missing",
       "role_mapping_status": "legitimate_account_and_iam_mapping_missing",
-      "data_requirements": [
-        "來源範圍裁決與排除依據；不建立驗收資料或開通資源"
-      ],
+      "data_requirements": ["來源範圍裁決與排除依據；不建立驗收資料或開通資源"],
       "scenario_requirement": "若啟用再驗證出金與簽章發布；不視為目前已承諾功能完全缺失",
       "resource_ids": [],
       "provisioning_owner": "SR-UAT-HARNESS-001 + 各 verification task owner；正式身份由 IAM 管理員提供",
       "readback": "依本列 scenario，由合法角色經權威 API 讀回相同 canonical ID；核對另一角色/另一租戶的允許與拒絕結果。",
       "implementation_tasks": [],
-      "verification_tasks": [
-        "SR-READINESS-001",
-        "SR-SCOPE-001"
-      ],
+      "verification_tasks": ["SR-READINESS-001", "SR-SCOPE-001"],
       "source_refs": []
     },
     {
@@ -7247,13 +6616,8 @@
         "SR-OPS-CONTRACT-001",
         "SR-CONTRACT-001"
       ],
-      "verification_tasks": [
-        "SR-QA-DISPATCH-001"
-      ],
-      "source_refs": [
-        "N13",
-        "N14"
-      ]
+      "verification_tasks": ["SR-QA-DISPATCH-001"],
+      "source_refs": ["N13", "N14"]
     }
   ],
   "live_gates": [
