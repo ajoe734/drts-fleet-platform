@@ -2,10 +2,17 @@
 
 - Status: candidate handed off for review (see `ai-status.json` for machine truth)
 - Owner: Claude
-- Reviewer: Claude2
+- Reviewer: Codex
 - Base SHA (`origin/dev` at task start after rebase): `0dd392894e455a3b50da80851155c71315c15a8`
 - Candidate branch: `claude/sr-tenant-login-001`
-- Candidate SHA: recorded at handoff via `CANDIDATE_SHA=$(git rev-parse HEAD)`
+- Candidate SHA: `76cc6c5be23ca80cd9ce3686b849c5e4ce26f0a3` (recorded at handoff via `CANDIDATE_SHA=$(git rev-parse HEAD)`)
+
+Note: an earlier draft of this document was written before the `ai-status.sh
+handoff` call actually landed in machine truth (the task remained
+`in_progress`, reassigned back to `Claude` on 2026-09-08 per
+`ai-status.json`'s `next` field). This session re-verified the same evidence
+below still holds at current `HEAD` (no drift from `origin/dev`, which only
+gained unrelated commits — see §2.5) and is issuing the real handoff now.
 
 ## 1. Audit finding vs. current code (regression check, not a redo)
 
@@ -129,6 +136,37 @@ $ npx --yes pnpm@10.33.0 --filter @drts/tenant-console-web typecheck
 ✓ Types generated successfully
 (exit 0)
 ```
+
+### 2.5 Re-verification at re-dispatch (2026-09-08, session 2)
+
+`origin/dev` had advanced 10 commits past base SHA `0dd392894` by the time
+this task was re-dispatched. None of those commits touch this task's
+write-scope files (`git diff HEAD..origin/dev --stat` over the scope paths
+shows only this task's own two files as dev-side deletions, i.e. dev simply
+doesn't have them yet — no upstream change to rebase against). Re-ran all
+three required commands unchanged from the isolated worktree, pnpm
+`10.33.0` on `PATH` this session (no `npx` workaround needed):
+
+```
+$ git diff --check
+(no output — clean, exit 0)
+
+$ pnpm --filter @drts/tenant-console-web typecheck
+✓ Types generated successfully
+
+$ pnpm exec vitest run tests/unit/system-remediation/sr-tenant-login-001/
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+
+$ pnpm --filter @drts/tenant-console-web exec vitest run   # full app suite, non-regression check
+ Test Files  12 passed (12)
+      Tests  73 passed (73)
+```
+
+No source changes were needed; this session's contribution is the
+re-verification above and issuing the actual `ai-status.sh handoff` call
+that the prior session's document described but machine truth shows never
+landed.
 
 ## 3. Acceptance criteria mapping
 
