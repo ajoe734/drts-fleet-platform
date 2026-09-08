@@ -65,3 +65,46 @@ resource, not a live report/download resource. No live resource IDs, PDF/XLSX
 artifacts, browser/physical-device checks, deployment, or acceptance evidence
 are claimed. API/ops typechecks and the new task-scoped suite have not been run;
 implementation has not started pending the scope coordination above.
+
+## Resumed dispatch verification — 2026-09-08 15:35 UTC
+
+History repair PR #1753 resolves the older Codex2 branch continuation issue;
+it explicitly leaves the shared contract and central test scope unresolved.
+The current canonical task slice still grants only the four original scopes
+and depends only on SR-ARTIFACT-001 and SR-DEPS-001. Therefore the scope
+coordination described above remains required before enabling the formats.
+
+- Fresh base: `52e8096e4441386901e57415ba06f6a2aabe4d0e` (`origin/dev`).
+- Dispatched HEAD: `33c8b1d135cd7eacef81a89a3a4018af00705ca7`.
+- Existing implementation inspected at `ecd9125a41d69c5045dfcbec52b33a56eb009e5f`
+  on the preserved local Codex2 branch: reusable renderers, asynchronous service
+  and controller integration, and task parsing tests. It does not update the
+  shared format declaration or central synchronous download assertions.
+- Current base still has null PDF/XLSX renderers, a CSV-only authoritative
+  implemented-format list, and central tests requiring PDF/XLSX rejection.
+  Enabling the old implementation alone would leave the picker unavailable and
+  break the existing regression suite. No production changes were restored.
+- Source trace rechecked: execution rules § shared-file rule 4; N05; C091;
+  PRD §9.5.6 and §9.10.1–2. No UI changed.
+
+| Actual command | Exit | Result |
+| --- | --- | --- |
+| `git fetch origin` | 0 | Refreshed base above. |
+| `git rebase origin/dev` | 0 | Rebased the one baseline evidence commit. |
+| `git rev-list --left-right --count origin/codex/sr-report-001...HEAD` (after rebase) | 0 | `1 3`; published baseline required preservation for ordinary push. |
+| `git merge --no-ff origin/codex/sr-report-001` (with task message and trailers) | 0 | Clean merge preserving the published baseline; no force push or reset. |
+| `pnpm exec vitest run tests/unit/reporting-filing.test.ts` | 0 | 1 file, 30 tests passed, duration 3.03s; current unsupported-format rejection reproduced. |
+
+Example resource observed: order event
+`4fc6c164-fbe9-4b29-af28-1cfa0d60e7cf` is from the in-memory test run only.
+No live report IDs, live downloads, browser/device checks, deployment, PDF/XLSX
+acceptance, or completed implementation candidate are claimed. API/ops
+typechecks and the historical task-scoped renderer suite were not run because
+the renderer changes have not been integrated into this branch.
+
+Required supervisor action: authorize the focused format declaration and
+central reporting-test updates through expanded scopes plus necessary writer
+dependencies, or assign coordinated integration children. Keep the task blocked
+on that scope decision, rather than reopening solely on history repair.
+The commit containing this section is evidence only, not a handoff candidate;
+its pushed SHA is recorded in the task blocker note.
