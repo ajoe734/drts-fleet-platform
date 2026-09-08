@@ -1102,7 +1102,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     expect(loserRows.rows).toHaveLength(0);
   });
 
-  it("an accepted offer is not undone by a late acceptance_timeout naming it (accept/timeout share the row lock)", async () => {
+  it("an accepted offer survives a timeout from another process with a stale assigned cache", async () => {
     expect(DATABASE_URL).toBeTruthy();
     const database = new DatabaseService();
     databases.push(database);
@@ -1134,6 +1134,9 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       driverId,
     });
 
+    const { service: timeoutWorker } = createTestService(database, []);
+    await timeoutWorker.onModuleInit();
+
     await service.acceptDriverTask(assignment.taskId, {
       acceptedAt: new Date().toISOString(),
     });
@@ -1149,7 +1152,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
 
     // A stale acceptance-timeout timer, armed before the accept landed,
     // fires late and still names the now-accepted assignment.
-    const timeoutResult = await service.handleDispatchTimeout(
+    const timeoutResult = await timeoutWorker.handleDispatchTimeout(
       order.orderId,
       "acceptance_timeout",
       undefined,

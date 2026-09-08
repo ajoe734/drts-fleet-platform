@@ -4292,6 +4292,7 @@ export class OwnedMobilityService
     tx: OwnedMobilityQueryExecutor,
     assignmentId: string,
     now: string,
+    pendingAcceptanceOnly = false,
   ): Promise<{
     assignment: DispatchAssignmentRecord;
     task: DriverTaskRecord | null;
@@ -4302,6 +4303,11 @@ export class OwnedMobilityService
         assignmentId,
       );
     if (!locked || !["assigned", "accepted"].includes(locked.status)) {
+      return null;
+    }
+    // A timeout may have read a stale cache before another process accepted.
+    // Reassignment can close accepted work; an acceptance timer cannot.
+    if (pendingAcceptanceOnly && locked.status !== "assigned") {
       return null;
     }
     const closedAssignment: DispatchAssignmentRecord = {
@@ -7876,6 +7882,7 @@ export class OwnedMobilityService
             tx,
             latestAssignment.assignmentId,
             now,
+            true,
           ),
       );
       if (!closedPrevious) {
