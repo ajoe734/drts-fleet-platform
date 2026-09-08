@@ -59,7 +59,11 @@ Canonical root remains on dev and was not switched or edited.
 
    - `tools/system-remediation/ops-proof/`
    - `tests/unit/system-remediation/sr-ops-proof-001/`
-   - `docs/04-uat/system-remediation-20260906/SR-OPS-PROOF-001.md`
+   - [docs/04-uat/system-remediation-20260906/SR-OPS-PROOF-001.md](https://github.com/ajoe734/drts-fleet-platform/blob/819f5c9f3027a978d6ec01eab60f05d265ad6d82/docs/04-uat/system-remediation-20260906/SR-OPS-PROOF-001.md)
+
+   The third path exists in the pinned parent commit, not in this helper or
+   the inspected dev tree. Its link deliberately identifies that historical
+   source; use the displayed repository-relative path as the restore argument.
 
    Verify the three paths against the pinned source with `git diff --cached
    <pinned-sha> -- <three-paths>` (must be empty), and check the staged file list
@@ -112,3 +116,21 @@ Gemini. Neither helper merge grants these inputs nor proves restore/load success
 Helper commit, normal push, PR and exact candidate SHA are recorded through the
 current-release ai-status.sh handoff. Review/CI/merge remain candidate lifecycle
 work; this document is not parent completion evidence.
+
+## PR #1818 follow-up
+
+The original helper candidate `01e9ad20ee7c948337c3ae728934ad4e18a98df2`
+passed Commit trailers but failed
+[Canonical consistency](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34265383510/job/102193307559):
+the parent-only UAT path above was incorrectly cited as a local helper path.
+The same failure reproduced locally. The follow-up replaces that citation with
+the pinned source link, without importing parent files or changing CI rules.
+`git cat-file -e` verified the linked file exists at the pinned parent SHA.
+Fresh fetch still resolves dev and parent to the SHAs recorded above;
+`git rebase origin/dev` reports this helper is up to date.
+
+Follow-up local validation: `python3 tools/ci/git/check_canonical_consistency.py
+--ci --base origin/dev --head HEAD`, `python3 tools/ci/git/check_commit_trailers.py
+--base origin/dev --head HEAD`, and `git diff --check` must pass for the new
+pushed candidate. Remote checks and Codex2 review must evaluate that new SHA;
+the original candidate's results do not certify the follow-up.
