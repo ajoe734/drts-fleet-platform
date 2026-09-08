@@ -24,9 +24,30 @@ Candidate SHA：尚未 handoff；anchor 不是審查 candidate。完成後才由
 | cost centres      | 新增、更新、訂單引用及停用                  | 外租戶引用、停用後使用                                           | 已補 HTTP 新增／更新／停用回讀、跨租戶讀取／停用拒絕、空白名稱拒絕及 activeOnly 排除；訂單／owner 關聯與 DB 待補                  |
 | quota             | 保留、取消返還、月結與使用量回讀            | 額度不足、跨月／時區、並發超額                                   | 既有 governance 回歸非完整配額驗收；HTTP／Postgres 並發待補              |
 | rules / approvals | 規則評估、核准／拒絕後訂單狀態與 audit 回讀 | 非核准者、無權限、重複決策                                       | 已補規則 CRUD／dry-run 匹配／停用／跨租戶拒絕 HTTP spec；實際訂單決策、權限與 DB 待補                |
-| SLA               | 修改設定、違約摘要與手動升級回讀            | 未授權修改、無效設定                                             | 既有 governance service 回歸非完整 SLA 驗收；HTTP／DB spec 待補          |
+| SLA               | 修改設定、違約摘要與手動升級回讀            | 未授權修改、無效設定                                             | 已寫 SLA 設定更新／負值／未登入／跨租戶 HTTP spec；缺環境未發請求，違約／升級／DB 待補          |
 | feature flags     | 指定租戶啟停及實際能力回讀                  | 其他租戶不受影響、無權限                                         | 尚未實作本 task 的驗收                                                   |
 | tenant lifecycle  | 合法新增／停用與治理記錄回讀                | 被停用租戶寫入、未授權管理                                       | 既有 governance rollback_hold 回歸非完整生命週期驗收；HTTP／DB spec 待補 |
+
+## 18:46 UTC dispatch：環境阻塞重驗
+
+- 本輪 base：`d4f54ef94e059a981bf2be1f7b944e815870e117`。
+- 本輪 tested anchor：`d2a2abd259f27772b4dfd5fc6748319149265b0b`；尚無 handoff candidate 或 API deployment SHA。
+- `git fetch origin`、`git rebase origin/dev` 完成；歷史證據衝突保留較新內容，已發布 ancestry merge 無 tree diff。未修改產品程式或新增 spec。
+
+```sh
+BASE_SHA=d4f54ef94e059a981bf2be1f7b944e815870e117 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001
+# exit 1；4 harness passed / 5 tenant HTTP failed；4.5s
+pnpm exec vitest run tests/unit/tenant-partner-foundation.test.ts tests/integ/tenant-governance-negative.test.ts
+# exit 0；2 files / 36 passed；6.10s
+pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001 --max-warnings=0
+# exit 0
+git diff --check
+# exit 0
+```
+
+五份 `test-results/sr-qa-tenant-001-*/tenant-evidence.json` 已逐一讀回：base/head 為本節 SHA，status failed、exitCode 1、httpCalls=[]、trackedResources=[]，均因 `Missing required DRTS_UAT_ENV; HTTP acceptance did not run`。程序環境的 DRTS_UAT_* 變數名稱清單為空。無 live 資源 ID，不能將 service 回歸當 HTTP／DB 驗收。
+
+阻塞交由 supervisor／環境 owner：提供已授權隔離 API、實際部署 SHA、兩個專用 tenant_admin sessions、全新測試 mailbox、合法 platform foundation read/write session 與 step-up，以及 DB／旗標清理方案。剩餘 quota、flags、lifecycle、approval-booking、SLA breach/escalation、邀請啟用及持久化矩陣仍未完成。已有可重跑案例在環境供應前不能取得有效 live 結果；本輪提交證據後記錄 blocker，未 handoff、未 done。
 
 ## 18:40 UTC dispatch 實際結果
 
