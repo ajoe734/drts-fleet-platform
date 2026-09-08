@@ -248,7 +248,7 @@ exit code: 0
 ### 6.2 機器證據包檔案
 - 路徑: `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-sr-qa-webhook-001.json`
 - 內容包含: Base SHA、Candidate/Head SHA（皆取自落盤當下 `git rev-parse HEAD`）、測試狀態（`passed`）、退出碼（`0`）、HTTP 呼叫記錄、控制台日誌、實體資源 ID 追蹤以及外部門禁清單。
-- Base SHA 固定為 merge-base `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`；Candidate/Head SHA 會隨每次落盤時的 `HEAD` 變動（自動化寫入，非手填）——handoff 前最後一次重跑會落在本任務最終 commit 上，故此欄位與 handoff 時的 `CANDIDATE_SHA` 一致。
+- Base SHA 固定為 merge-base `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`；Candidate/Head SHA 為產生當下 `git rev-parse HEAD` 的自動寫入值（非手填）。**已知限制**：由於證據檔內容必須先確定才能被 commit，其自我記錄的 SHA 在結構上必然是「產生時的 HEAD」（即最終 commit 的父版本），而非最終 commit 自身的雜湊——沒有任何 commit-then-regenerate 迴圈能讓一個檔案的內容包含它自己 commit 後才存在的雜湊。handoff 時的 `CANDIDATE_SHA`（`git rev-parse HEAD`，本任務最終 commit）因此預期會比證據檔內 `candidateSha`/`headSha` 新一個 commit；這是先天時序限制，不是 SHA 記錄錯誤，讀者比對時應預期這一個 commit 的差距。
 
 ### 6.3 Live／真機未做部分明列（誠實申報，不冒充完成）
 1. **GATE-C113-ERP-SSO-BANK (外部門禁)**:
