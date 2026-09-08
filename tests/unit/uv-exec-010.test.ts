@@ -171,4 +171,31 @@ describe("UV-EXEC-010 sealed recorder", () => {
       ),
     ).toThrow("gap");
   });
+
+  it("rejects separately continuous tracks with different UTC origins", async () => {
+    const f = fixture();
+    const inbound = await f.recorder.seal("authenticated", f.input);
+    const outbound = await f.recorder.seal("authenticated", {
+      ...f.input,
+      channel: "outbound",
+      utcStart: "2026-09-08T00:00:01Z",
+      utcEnd: "2026-09-08T00:00:02Z",
+    });
+    expect(() =>
+      assertBidirectionalCoverage(scope, [inbound, outbound], 0, 1000),
+    ).toThrow("Discontinuous UTC mapping");
+  });
+
+  it("does not allow metadata mutation to bless corrupt asynchronous readback", async () => {
+    const f = fixture();
+    const segment = { ...await f.recorder.seal("authenticated", f.input) };
+    let complete!: (value: { bytes: Uint8Array; objectVersion: string }) => void;
+    vi.mocked(f.store.readVersion).mockImplementationOnce(
+      () => new Promise((resolve) => { complete = resolve; }),
+    );
+    const pending = verifyRecordedObject(f.store, scope, segment);
+    segment.objectVersion = "v2";
+    complete({ bytes: new Uint8Array([1, 2, 3]), objectVersion: "v2" });
+    await expect(pending).rejects.toThrow("Object version mismatch");
+  });
 });
