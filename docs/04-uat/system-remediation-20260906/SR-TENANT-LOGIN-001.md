@@ -291,3 +291,39 @@ No live Cloud Run, real IdP, or formal IAP run was performed in this VM. The
 test suite exercises the actual BFF route and auth/session code, with only its
 upstream API HTTP responses mocked; it does not use a fake login header or
 claim external acceptance.
+
+## 8. 2026-09-08 candidate continuation verification
+
+The restored candidate was checked again on branch
+`codex/sr-tenant-login-001`, whose base is current `origin/dev`
+`70355aba97c23dd1cd592b71f1d3dfe6315d91ff` (the branch is already based on
+that SHA; `git rebase origin/dev` reported it up to date). No production auth
+file changed: the candidate remains the task-scoped regression test and this
+evidence record, preserving the implementation already present on the base.
+
+The following commands were run in the assigned isolated worktree and exited
+0:
+
+```
+pnpm --filter @drts/tenant-console-web typecheck
+# ✓ Types generated successfully
+
+pnpm exec vitest run tests/unit/system-remediation/sr-tenant-login-001/
+# Test Files  1 passed (1); Tests  6 passed (6)
+
+git diff --check
+# no output
+
+python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD
+# [consistency] OK
+```
+
+For transparency, `pnpm exec tsc -p tsconfig.json --noEmit` was also attempted
+and failed outside this task's changed files: the base's
+`apps/tenant-console-web/middleware.ts` cannot resolve its existing `@/lib`
+alias under the root TypeScript config, and several unrelated fleet/IAM test
+files load duplicate `ApiClient` declarations from separate worktrees. The
+task regression test itself is not reported by that command; the required
+tenant package typecheck above is clean. These root-config/worktree failures
+are not changed or masked here because their files are outside the approved
+write scopes.
