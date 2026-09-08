@@ -249,14 +249,14 @@ jobs:
           assert_exact_active_service enterprise-dispatch-web "$enterprise_dispatch_service" "drts-dev-enterprise-dispatch-web"
           assert_exact_active_service channel-partner-portal-web "$channel_partner_portal_service" "drts-channel-partner-portal-web"
 
-          api_exposure_flag="$(exposure_flag "${DEV_API_ALLOW_UNAUTHENTICATED:-}" true)"
-          platform_admin_exposure_flag="$(exposure_flag "${DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" true)"
-          ops_console_exposure_flag="$(exposure_flag "${DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)"
-          fleet_partner_portal_exposure_flag="$(exposure_flag "${DEV_FLEET_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" true)"
-          tenant_console_exposure_flag="$(exposure_flag "${DEV_TENANT_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)"
-          bank_console_exposure_flag="$(exposure_flag "${DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)"
-          enterprise_dispatch_exposure_flag="$(exposure_flag "${DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED:-}" true)"
-          channel_partner_portal_exposure_flag="$(exposure_flag "${DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" true)"
+          api_exposure_flag="$(exposure_flag "${DEV_API_ALLOW_UNAUTHENTICATED:-}" false)"
+          platform_admin_exposure_flag="$(exposure_flag "${DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" false)"
+          ops_console_exposure_flag="$(exposure_flag "${DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" false)"
+          fleet_partner_portal_exposure_flag="$(exposure_flag "${DEV_FLEET_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"
+          tenant_console_exposure_flag="$(exposure_flag "${DEV_TENANT_CONSOLE_ALLOW_UNAUTHENTICATED:-}" false)"
+          bank_console_exposure_flag="$(exposure_flag "${DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED:-}" false)"
+          enterprise_dispatch_exposure_flag="$(exposure_flag "${DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED:-}" false)"
+          channel_partner_portal_exposure_flag="$(exposure_flag "${DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"
           api_origin="${DEV_CONTROL_PLANE_API_ORIGIN:-}"
           platform_admin_origin="${DEV_PLATFORM_ADMIN_ORIGIN:-}"
           ops_console_origin="${DEV_OPS_CONSOLE_ORIGIN:-}"
@@ -723,10 +723,10 @@ jobs:
           # Dev embeds use server-to-server handoff. Map the managed secret to
           # issuer-scoped credential slots without exposing it to the
           # browser or accepting API keys from query parameters.
-          secret_args="${secret_args},PARTNER_INGRESS_KEY_CTBC=${internal_key_secret}:latest"
-          secret_args="${secret_args},PARTNER_INGRESS_KEY_CATHAY=${internal_key_secret}:latest"
-          secret_args="${secret_args},PARTNER_INGRESS_KEY_TAISHIN=${internal_key_secret}:latest"
-          secret_args="${secret_args},PARTNER_INGRESS_KEY_DBS=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_ACME=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_CONTOSO=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_FABRIKAM=${internal_key_secret}:latest"
+          secret_args="${secret_args},PARTNER_INGRESS_KEY_NORTHWIND=${internal_key_secret}:latest"
 
           geocoding_secret="${secret_prefix}-google-maps-geocoding-api-key"
           routes_secret="${secret_prefix}-google-maps-routes-api-key"
@@ -1044,7 +1044,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.referral_embed }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.yuhe-living.com.tw app-stg.yuhe-living.com.tw,REFERRAL_EMBED_DEMO=true,REFERRAL_EMBED_DEFAULT_ENTRY_SLUG=${{ needs.prepare.outputs.referral_embed_entry_slug }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.fabrikam-living.example app-stg.fabrikam-living.example,REFERRAL_EMBED_DEMO=true,REFERRAL_EMBED_DEFAULT_ENTRY_SLUG=${{ needs.prepare.outputs.referral_embed_entry_slug }}" \
             --allow-unauthenticated \
             --cpu 1 \
             --concurrency 80 \

@@ -19,6 +19,10 @@ import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.s
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import {
+  OwnedOrderDuplicateVoiceLinkError,
+  OwnedOrderVersionConflictError,
+} from "../../src/modules/owned-mobility/owned-mobility.repository";
 import { FareAnomalyRepository } from "../../src/modules/product-rule/fare-anomaly.repository";
 import { FareAnomalyService } from "../../src/modules/product-rule/fare-anomaly.service";
 import { ServiceAreaService } from "../../src/modules/service-area/service-area.service";
@@ -412,7 +416,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("routes manual-review service-area stops away from normal dispatch", () => {
+  it("routes manual-review service-area stops away from normal dispatch", async () => {
     const { service } = createOwnedMobilityService({
       serviceAreaService: new ServiceAreaService(),
       candidates: [
@@ -426,7 +430,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       ],
     });
 
-    const order = service.createCallCenterOrder({
+    const order = await service.createCallCenterOrder({
       callId: "call-map-review-001",
       agentId: "ops-agent-001",
       recordingId: "recording-map-review-001",
@@ -479,7 +483,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("keeps provider-outage call-center capture in manual review instead of normal ready", () => {
+  it("keeps provider-outage call-center capture in manual review instead of normal ready", async () => {
     const { service } = createOwnedMobilityService({
       serviceAreaService: new ServiceAreaService(),
       candidates: [
@@ -493,7 +497,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       ],
     });
 
-    const order = service.createCallCenterOrder({
+    const order = await service.createCallCenterOrder({
       callId: "call-map-provider-001",
       agentId: "ops-agent-001",
       recordingId: "recording-map-provider-001",
@@ -558,12 +562,12 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("persists service-area snapshots and emits spatial audit events for coordinate-bearing phone orders", () => {
+  it("persists service-area snapshots and emits spatial audit events for coordinate-bearing phone orders", async () => {
     const { service, auditNotificationService } = createOwnedMobilityService({
       serviceAreaService: new ServiceAreaService(),
     });
 
-    const order = service.createCallCenterOrder(
+    const order = await service.createCallCenterOrder(
       {
         callId: "call-map-audit-001",
         agentId: "ops-agent-geo-001",
@@ -6014,7 +6018,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       await createFareAnomalyAuthority(databaseService);
     const recordSpy = vi.spyOn(fareAnomalyService, "recordQuoteAnomaly");
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = createFareProducerOrder(service, { resolvedRoute: false });
+    const order = await createFareProducerOrder(service, { resolvedRoute: false });
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
 
     await expect(
@@ -6058,7 +6062,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const fareAnomalyService = await createFareAnomalyAuthority();
     const recordSpy = vi.spyOn(fareAnomalyService, "recordQuoteAnomaly");
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = createFareProducerOrder(service, {
+    const order = await createFareProducerOrder(service, {
       activeFareVersionId: " ",
     });
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
@@ -6088,7 +6092,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const fareAnomalyService = await createFareAnomalyAuthority();
     const resolveSpy = vi.spyOn(fareAnomalyService, "resolveOrderAnomalies");
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
     await fareAnomalyService.recordQuoteAnomaly({
       reason: "route_unresolved",
       snapshot: {
@@ -6147,7 +6151,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       new Error("fare anomaly store unavailable"),
     );
     const service = createMultiTaxiFareProducerService(fareAnomalyService);
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
 
     await expect(
@@ -6758,7 +6762,7 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
         missingFieldCodes: ["color", "doorCount"],
       },
     });
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
 
     const error = await captureApiError(() =>
@@ -6824,7 +6828,7 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
         missingFieldCodes: ["color"],
       },
     });
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
     const dispatch = service.dispatchOrder(order.orderId, { mode: "auto" });
     const outboxBefore = readOutbox(service).length;
 
@@ -6867,7 +6871,7 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
   it("rejects a stale redispatch that would replace a newer assignment", async () => {
     const fareAnomalyService = await createFareAnomalyAuthority();
     const { service } = createFleetDService({ fareAnomalyService });
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
 
     // Assignment v1. The version the passenger is told is the one the guard
     // must compare against, so read it from the disclosure snapshot rather
@@ -6945,7 +6949,7 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
   it("still redispatches unconditionally when no expected version is supplied", async () => {
     const fareAnomalyService = await createFareAnomalyAuthority();
     const { service } = createFleetDService({ fareAnomalyService });
-    const order = createFareProducerOrder(service);
+    const order = await createFareProducerOrder(service);
 
     // Reach assignment version 2 the only way production allows: assign,
     // redispatch, assign again.
@@ -6974,5 +6978,268 @@ describe("P5-RATE-001: Fleet D assignment authority acceptance", () => {
       reasonCode: "driver_unreachable",
     });
     expect(service.getOrder(order.orderId).status).toBe("redispatch_required");
+  });
+});
+
+describe("UV-EXEC-004: owned-order UoW / CAS transaction primitives", () => {
+  async function captureApiError(run: () => unknown): Promise<ApiRequestError> {
+    let caught: unknown;
+    let threw = false;
+    try {
+      await run();
+    } catch (error) {
+      threw = true;
+      caught = error;
+    }
+    expect(threw, "expected the call to be rejected").toBe(true);
+    expect(caught).toBeInstanceOf(ApiRequestError);
+    return caught as ApiRequestError;
+  }
+
+  function buildVoiceOrderFixture(
+    service: OwnedMobilityService,
+    overrides: Record<string, unknown> = {},
+  ) {
+    const created = service.createPassengerOrder({
+      pickup: { address: "Voice pickup landmark" },
+      dropoff: { address: "Voice dropoff landmark" },
+      passenger: { name: "Voice Rider", phone: "0911000111" },
+    });
+    const order = service.getOrder(created.orderId);
+    return {
+      ...order,
+      callId: "call-uv-exec-004-001",
+      voiceIntentId: "11111111-1111-1111-1111-111111111111",
+      ...overrides,
+    };
+  }
+
+  it("fails closed for createVoiceOrder when durable storage is not configured", async () => {
+    const { service } = createOwnedMobilityService({ candidates: [] });
+    const order = buildVoiceOrderFixture(service);
+
+    const error = await captureApiError(() =>
+      service.createVoiceOrder(order, "test_create_voice_order"),
+    );
+    expect(error.getStatus()).toBe(HttpStatus.SERVICE_UNAVAILABLE);
+    expect(error.code).toBe("OWNED_MOBILITY_DB_REQUIRED");
+  });
+
+  it("fails closed for commitVoiceOrderMutation when durable storage is not configured", async () => {
+    const { service } = createOwnedMobilityService({ candidates: [] });
+    const order = buildVoiceOrderFixture(service);
+
+    const error = await captureApiError(() =>
+      service.commitVoiceOrderMutation(
+        order.orderId,
+        "test_commit_mutation",
+        (current) => ({
+          order: { ...current, status: "cancelled" as const },
+          result: undefined,
+        }),
+      ),
+    );
+    expect(error.getStatus()).toBe(HttpStatus.SERVICE_UNAVAILABLE);
+    expect(error.code).toBe("OWNED_MOBILITY_DB_REQUIRED");
+  });
+
+  it("creates a durable voice order and applies the committed row to the in-memory projection", async () => {
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+      insertVoiceOrder: vi.fn(async () => 1),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    });
+    const order = buildVoiceOrderFixture(service);
+
+    const committed = await service.createVoiceOrder(
+      order,
+      "test_create_voice_order",
+    );
+
+    expect(committed.aggregateVersion).toBe(1);
+    expect(repository.insertVoiceOrder).toHaveBeenCalledTimes(1);
+    // The commit already replaced the in-memory projection -- a reader does
+    // not need a DB round trip to see the version this method just committed.
+    expect(service.getOrder(order.orderId).aggregateVersion).toBe(1);
+  });
+
+  it("translates a duplicate voice_intent_id/call_id collision into 409 VOICE_ORDER_DUPLICATE_LINK", async () => {
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+      insertVoiceOrder: vi.fn(
+        async (_tx: unknown, order: { orderId: string }) => {
+          throw new OwnedOrderDuplicateVoiceLinkError(
+            order.orderId,
+            new Error("23505"),
+          );
+        },
+      ),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    });
+    const order = buildVoiceOrderFixture(service);
+
+    const error = await captureApiError(() =>
+      service.createVoiceOrder(order, "test_create_voice_order"),
+    );
+    expect(error.getStatus()).toBe(HttpStatus.CONFLICT);
+    expect(error.code).toBe("VOICE_ORDER_DUPLICATE_LINK");
+  });
+
+  it("commits a CAS-protected mutation and only then updates the in-memory projection", async () => {
+    let stored = { status: "ready_for_dispatch", aggregateVersion: 1 };
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+      findOrderForUpdate: vi.fn(async (_tx: unknown, orderId: string) => ({
+        order: { ...seededOrder, ...stored, orderId },
+        aggregateVersion: stored.aggregateVersion,
+      })),
+      updateOrderWithCas: vi.fn(
+        async (
+          _tx: unknown,
+          order: { status: string },
+          expectedVersion: number,
+        ) => {
+          if (expectedVersion !== stored.aggregateVersion) {
+            throw new OwnedOrderVersionConflictError(
+              "order-id",
+              expectedVersion,
+            );
+          }
+          stored = {
+            status: order.status,
+            aggregateVersion: expectedVersion + 1,
+          };
+          return stored.aggregateVersion;
+        },
+      ),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    });
+    const seededOrder = buildVoiceOrderFixture(service);
+
+    const result = await service.commitVoiceOrderMutation(
+      seededOrder.orderId,
+      "test_commit_mutation",
+      (current, currentVersion) => ({
+        order: { ...current, status: "cancelled" as const },
+        result: { status: current.status, currentVersion },
+      }),
+    );
+
+    expect(result).toEqual({ status: "ready_for_dispatch", currentVersion: 1 });
+    expect(stored).toEqual({ status: "cancelled", aggregateVersion: 2 });
+    // Post-commit, the in-memory projection reflects the durable write.
+    expect(service.getOrder(seededOrder.orderId).status).toBe("cancelled");
+    expect(service.getOrder(seededOrder.orderId).aggregateVersion).toBe(2);
+  });
+
+  it("rejects a stale-snapshot mutation with 409 and leaves the in-memory projection untouched", async () => {
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+      findOrderForUpdate: vi.fn(async (_tx: unknown, orderId: string) => ({
+        order: { ...seededOrder, orderId, status: "ready_for_dispatch" },
+        aggregateVersion: 2,
+      })),
+      updateOrderWithCas: vi.fn(
+        async (_tx: unknown, order: { orderId: string }) => {
+          // Someone else committed in between: the CAS write in the real
+          // repository would see aggregate_version has already moved on.
+          throw new OwnedOrderVersionConflictError(order.orderId, 1);
+        },
+      ),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    });
+    const seededOrder = buildVoiceOrderFixture(service);
+    const beforeStatus = service.getOrder(seededOrder.orderId).status;
+
+    const error = await captureApiError(() =>
+      service.commitVoiceOrderMutation(
+        seededOrder.orderId,
+        "test_commit_mutation",
+        (current) => ({
+          order: { ...current, status: "cancelled" as const },
+          result: undefined,
+        }),
+      ),
+    );
+
+    expect(error.getStatus()).toBe(HttpStatus.CONFLICT);
+    expect(error.code).toBe("VOICE_ORDER_VERSION_CONFLICT");
+    // A rejected CAS write must not have touched the in-memory projection:
+    // no array pollution ahead of a commit that never happened (SD §7.5).
+    expect(service.getOrder(seededOrder.orderId).status).toBe(beforeStatus);
+  });
+
+  it("does not mutate the in-memory projection when the transaction rolls back for any other reason", async () => {
+    const repository = {
+      isEnabled: () => true,
+      persistChanges: vi.fn(async () => undefined),
+      persistOrderWorkflow: vi.fn(async () => undefined),
+      withTransaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) =>
+        work({}),
+      ),
+      reportPersistenceFailure: vi.fn(),
+      findOrderForUpdate: vi.fn(async (_tx: unknown, orderId: string) => ({
+        order: { ...seededOrder, orderId },
+        aggregateVersion: 1,
+      })),
+      updateOrderWithCas: vi.fn(async () => {
+        throw new Error("connection reset");
+      }),
+    };
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      repository: repository as never,
+    });
+    const seededOrder = buildVoiceOrderFixture(service);
+    const beforeStatus = service.getOrder(seededOrder.orderId).status;
+
+    await expect(
+      service.commitVoiceOrderMutation(
+        seededOrder.orderId,
+        "test_commit_mutation",
+        (current) => ({
+          order: { ...current, status: "cancelled" as const },
+          result: undefined,
+        }),
+      ),
+    ).rejects.toThrow("connection reset");
+
+    expect(service.getOrder(seededOrder.orderId).status).toBe(beforeStatus);
   });
 });

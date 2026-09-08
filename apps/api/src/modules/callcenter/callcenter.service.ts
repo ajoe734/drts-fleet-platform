@@ -25,6 +25,8 @@ import {
   type EvidenceAccessIdentity,
 } from "../../common/evidence-governance";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { VoiceBookingRepository } from "../voice-booking/voice-booking.repository";
+import { resolveVoiceOrderFence } from "../voice-booking/voice-order-fence";
 import { CallcenterRepository } from "./callcenter.repository";
 
 type RecordingAttachmentEvent = {
@@ -96,6 +98,7 @@ export class CallcenterService implements OnModuleInit {
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly callcenterRepository?: CallcenterRepository,
+    @Optional() private readonly voiceBookingRepository?: VoiceBookingRepository,
   ) {}
 
   async onModuleInit() {
@@ -422,7 +425,7 @@ export class CallcenterService implements OnModuleInit {
     callId: string,
     command: LinkCallOrderCommand,
     requestId?: string,
-  ) {
+  ): CallSessionRecord | Promise<CallSessionRecord> {
     const orderId = command.orderId.trim();
     if (!orderId) {
       throw new ApiRequestError(
@@ -432,6 +435,59 @@ export class CallcenterService implements OnModuleInit {
       );
     }
 
+    // Ensures the session exists before any DB round trip (matches prior
+    // synchronous NOT_FOUND behavior).
+    this.requireSession(callId);
+
+    if (this.voiceBookingRepository?.isEnabled()) {
+      return this.assertLinkOrderVoiceFence(callId, orderId).then(() =>
+        this.applyOrderLinkToSession(callId, orderId, requestId),
+      );
+    }
+
+    return this.applyOrderLinkToSession(callId, orderId, requestId);
+  }
+
+  /**
+   * SD §7.4/§7.5: `/callcenter/sessions/:callId/link-order` must apply the
+   * same fence as `POST /call-center/orders` -- it cannot be used to rebind
+   * a call already bound to a succeeded AI-originated order to a different
+   * one, nor to link any order while an AI command for this call is still
+   * pending reconciliation. A call with no voice session, no create intent,
+   * or only a rejected/no-order intent falls through unchanged (existing
+   * manual-operator behavior).
+   */
+  private async assertLinkOrderVoiceFence(
+    callId: string,
+    requestedOrderId: string,
+  ) {
+    const outcome = await resolveVoiceOrderFence(
+      this.voiceBookingRepository,
+      callId,
+    );
+    if (outcome.kind === "bound" && outcome.orderId !== requestedOrderId) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "VOICE_ORDER_ALREADY_LINKED",
+        `Call ${callId} is already linked to AI-originated order ${outcome.orderId}; it cannot be rebound to a different order.`,
+        { callId, existingOrderId: outcome.orderId },
+      );
+    }
+    if (outcome.kind === "pending") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "VOICE_ACTION_PENDING",
+        `An AI booking command for call ${callId} is still pending reconciliation; it cannot be linked to a different order yet.`,
+        { callId, intentId: outcome.intentId },
+      );
+    }
+  }
+
+  private applyOrderLinkToSession(
+    callId: string,
+    orderId: string,
+    requestId?: string,
+  ): CallSessionRecord {
     const session = this.requireSession(callId);
     session.linkedOrderId = orderId;
     if (!session.recordingId) {

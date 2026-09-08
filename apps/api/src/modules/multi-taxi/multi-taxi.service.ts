@@ -380,7 +380,7 @@ export class MultiTaxiService implements OnModuleInit {
   ) {
     this.assertServiceProductPolicy();
     const authorization = this.resolveActiveAuthorization();
-    const order = this.ownedMobilityService.createMultiTaxiRide(
+    const order = await this.ownedMobilityService.createMultiTaxiRide(
       command,
       authorization,
       identity,
@@ -395,7 +395,7 @@ export class MultiTaxiService implements OnModuleInit {
   ) {
     this.assertServiceProductPolicy();
     const authorization = this.resolveActiveAuthorization();
-    const order = this.ownedMobilityService.createMultiTaxiRide(
+    const order = await this.ownedMobilityService.createMultiTaxiRide(
       command,
       authorization,
       null,

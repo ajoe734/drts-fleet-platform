@@ -230,6 +230,7 @@ export class OwnedMobilityController {
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
     @Headers("x-runtime-profile-code") runtimeProfileCode?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     const result = await this.idempotencyService.execute({
       scope: `crm:callcenter:session:${command.callId ?? ""}:order_create`,
@@ -237,10 +238,11 @@ export class OwnedMobilityController {
       requestPath: "call-center/orders",
       payload: command,
       execute: async () => {
-        const order = this.ownedMobilityService.createCallCenterOrder(
+        const order = await this.ownedMobilityService.createCallCenterOrder(
           command,
           requestId,
           runtimeProfileCode,
+          identity,
         );
         return {
           data: {

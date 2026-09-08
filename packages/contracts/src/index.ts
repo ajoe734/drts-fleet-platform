@@ -3501,6 +3501,17 @@ export interface OwnedOrderRecord {
   bookingType: BookingType | null;
   etaSnapshot: EtaSnapshot | null;
   callId: string | null;
+  // Present only for orders created through the unattended voice-booking
+  // command path (SD §7.1/§7.2). Optional because it does not exist on
+  // orders persisted before that path landed; `ops.phase1_owned_orders`
+  // enforces `UNIQUE(voice_intent_id)` (non-null) on the DB side.
+  voiceIntentId?: string | null;
+  // Monotonic optimistic-concurrency version for the owned-order aggregate
+  // (SD §7.5: "voice aggregate 以 DB row 與單調 aggregateVersion 為權威").
+  // Absent on orders never written through a CAS-aware path; the DB column
+  // (`ops.phase1_owned_orders.aggregate_version`, a generated column derived
+  // from this same field) treats a missing value as version 1.
+  aggregateVersion?: number;
   recordingId: string | null;
   reservationWindowStart: string | null;
   reservationWindowEnd: string | null;

@@ -130,6 +130,8 @@ import { CallcenterService } from "../callcenter/callcenter.service";
 import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
 import {
   OwnedMobilityRepository,
+  OwnedOrderDuplicateVoiceLinkError,
+  OwnedOrderVersionConflictError,
   type DriverCompletionOutboxClaimResult,
   type DriverCompletionOutboxEffectType,
   type DriverCompletionOutboxRecord,
@@ -138,6 +140,8 @@ import {
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
+import { VoiceBookingRepository } from "../voice-booking/voice-booking.repository";
+import { resolveVoiceOrderFence } from "../voice-booking/voice-order-fence";
 import {
   TenantPartnerService,
   type TenantQuotaConsumptionCommitResult,
@@ -507,6 +511,10 @@ export class OwnedMobilityService
     private readonly fareAnomalyService?: FareAnomalyService,
     @Optional()
     private readonly idempotencyService?: IdempotencyService,
+    // Appended LAST (@Optional) for the same reason as the SVC params above:
+    // preserves every existing positional-arg unit-test harness.
+    @Optional()
+    private readonly voiceBookingRepository?: VoiceBookingRepository,
   ) {}
 
   private _fallbackIdempotencyService?: IdempotencyService;
@@ -873,7 +881,7 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     callContext?: MultiTaxiCallContext,
-  ) {
+  ): MaybePromise<OwnedOrderRecord> {
     this.assertNoCanonicalMultiTaxiContextOverrides(command);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
@@ -913,6 +921,44 @@ export class OwnedMobilityService
       );
     }
 
+    // SD §7.4: "`/call-center/multi-taxi/rides`...同樣依 callId 套用 §7.4
+    // fence,不能換入口繞過" -- the callcenter/multi-taxi entry point must not
+    // be usable to create a second order for a call a voice intent already
+    // owns (or has a pending AI command for).
+    if (callContext?.callId && this.voiceBookingRepository?.isEnabled()) {
+      return this.assertNoConflictingVoiceIntentForCall(
+        callContext.callId,
+        "create_multi_taxi_ride",
+      ).then(() =>
+        this.buildAndPersistMultiTaxiRide(
+          command,
+          authorization,
+          requestedPickupAt,
+          identity,
+          requestId,
+          callContext,
+        ),
+      );
+    }
+
+    return this.buildAndPersistMultiTaxiRide(
+      command,
+      authorization,
+      requestedPickupAt,
+      identity,
+      requestId,
+      callContext,
+    );
+  }
+
+  private buildAndPersistMultiTaxiRide(
+    command: CreateMultiTaxiRideCommand,
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+    requestedPickupAt: string,
+    identity: BootstrapRequestIdentity | null | undefined,
+    requestId: string | undefined,
+    callContext: MultiTaxiCallContext | undefined,
+  ): OwnedOrderRecord {
     const serviceProduct =
       this.serviceProductService?.getRuntimeServiceProductByType(
         "taxi_reservation",
@@ -1062,11 +1108,20 @@ export class OwnedMobilityService
     return this.cloneOrder(order);
   }
 
+  /**
+   * SD §7.4: the "另一電話建單入口" -- must apply the same fence as the voice
+   * commit path before creating a brand-new phone order for `command.callId`.
+   * Returns synchronously (legacy behavior, relied on by many unit-test
+   * harnesses that construct this service without a DB) when
+   * `voiceBookingRepository` is absent/disabled; only becomes a `Promise`
+   * when durable voice state actually needs to be consulted.
+   */
   createCallCenterOrder(
     command: CreateCallCenterOrderCommand,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
-  ) {
+    identity?: BootstrapRequestIdentity | null,
+  ): MaybePromise<OwnedOrderRecord> {
     this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
@@ -1077,6 +1132,60 @@ export class OwnedMobilityService
         "Call center orders require call_id.",
       );
     }
+
+    if (this.voiceBookingRepository?.isEnabled()) {
+      return this.assertNoConflictingVoiceIntentForCall(
+        command.callId,
+        "create_call_center_order",
+      ).then(() =>
+        this.buildAndPersistCallCenterOrder(command, requestId, identity),
+      );
+    }
+
+    return this.buildAndPersistCallCenterOrder(command, requestId, identity);
+  }
+
+  /**
+   * SD §7.4/§7.5: shared fence for every legacy entry point that can create
+   * or rebind an order for a `callId` that a voice session may already own.
+   * A `bound` outcome means a succeeded AI command already produced an
+   * order for this call -- creating another one here would be the exact
+   * "第二筆有效 intent order" the SD forbids. A `pending` outcome means an AI
+   * command is still being reconciled and must not be raced by a manual
+   * create. `none` (no voice session, no intent, or a rejected intent with
+   * no order) falls through to existing legacy behavior unchanged.
+   */
+  private async assertNoConflictingVoiceIntentForCall(
+    callId: string,
+    context: string,
+  ) {
+    const outcome = await resolveVoiceOrderFence(
+      this.voiceBookingRepository,
+      callId,
+    );
+    if (outcome.kind === "bound") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "VOICE_ORDER_ALREADY_LINKED",
+        `Call ${callId} is already linked to an AI-originated order; use the existing order instead of creating a new one.`,
+        { callId, orderId: outcome.orderId, context },
+      );
+    }
+    if (outcome.kind === "pending") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "VOICE_ACTION_PENDING",
+        `An AI booking command for call ${callId} is still pending reconciliation; wait for it to resolve before creating a manual order.`,
+        { callId, intentId: outcome.intentId, context },
+      );
+    }
+  }
+
+  private buildAndPersistCallCenterOrder(
+    command: CreateCallCenterOrderCommand,
+    requestId: string | undefined,
+    identity: BootstrapRequestIdentity | null | undefined,
+  ): OwnedOrderRecord {
     const recordingId = command.recordingId?.trim() || null;
 
     const now = new Date().toISOString();
@@ -1217,7 +1326,12 @@ export class OwnedMobilityService
     );
     this.recordAudit(
       {
-        actorId: command.agentId,
+        // SD §7.5: "actor 從 authenticated identity 注入,不能採 body.agentId" --
+        // command.agentId is retained only as descriptive call-session
+        // metadata (who staffed the call, used for spatial-audit/trace
+        // attribution above); the actor of record for this mutation is the
+        // authenticated caller when one is available.
+        actorId: identity?.actorId?.trim() || command.agentId,
         actorType: "ops_user",
         tenantId: null,
         moduleName: "callcenter",
@@ -1700,12 +1814,40 @@ export class OwnedMobilityService
     );
   }
 
-  handleCallRecordingStateChanged(event: CallRecordingStateChangeEvent) {
+  /**
+   * SD §8.4: the legacy recording-state callback cannot be applied blindly
+   * to a voice-originated order (`order.voiceIntentId` set) -- it must not
+   * clear a newer, already-bound recording index, and must never regress a
+   * dispatch-committed order back to `recording_pending` (only pre-dispatch
+   * demotion is meaningful; a mid-trip recording failure is an evidence
+   * exception, not an order-lifecycle rollback). Non-voice orders keep the
+   * exact original synchronous behavior (SD §7.4: "非 voice call 保留既有人工
+   * 行為").
+   */
+  handleCallRecordingStateChanged(
+    event: CallRecordingStateChangeEvent,
+  ): void | Promise<void> {
     const order = this.orders.find((candidateOrder) => {
       return candidateOrder.orderId === event.linkedOrderId;
     });
     if (!order) {
       return;
+    }
+
+    if (order.voiceIntentId && this.ownedMobilityRepository?.isEnabled()) {
+      // Returned (not just fired) so callers that care -- e.g. tests -- can
+      // await completion; existing fire-and-forget callers (the
+      // synchronous callcenter listener wiring) simply ignore the return
+      // value, and the internal .catch means this never rejects.
+      return this.handleVoiceCallRecordingStateChanged(order, event).catch(
+        (error) => {
+          this.logger.warn(
+            `Voice-aware recording state sync failed for order ${order.orderId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        },
+      );
     }
 
     const now = new Date().toISOString();
@@ -1747,6 +1889,102 @@ export class OwnedMobilityService
     );
   }
 
+  private static readonly PRE_DISPATCH_RECORDING_GATE_STATUSES = new Set<
+    OwnedOrderRecord["status"]
+  >(["created", "recording_pending", "ready_for_dispatch"]);
+
+  /**
+   * Voice-aware counterpart of the branch above, CAS-protected through
+   * `commitVoiceOrderMutation` (SD §7.5 UoW requirement). A cheap read of
+   * the in-memory snapshot decides whether this event can possibly apply
+   * before paying for a transaction; the authoritative decision is made
+   * again inside `prepare` against the row locked `FOR UPDATE`, so a
+   * concurrent writer between the two checks cannot cause an incorrect
+   * apply.
+   */
+  private async handleVoiceCallRecordingStateChanged(
+    order: OwnedOrderRecord,
+    event: CallRecordingStateChangeEvent,
+  ): Promise<void> {
+    if (event.recordingState === "ready") {
+      return;
+    }
+
+    const alreadyHasNewerIndex = (candidate: OwnedOrderRecord) =>
+      Boolean(candidate.recordingId) &&
+      candidate.complianceFlags.includes("recording_bound");
+    const isPastPreDispatch = (candidate: OwnedOrderRecord) =>
+      !OwnedMobilityService.PRE_DISPATCH_RECORDING_GATE_STATUSES.has(
+        candidate.status,
+      );
+
+    if (isPastPreDispatch(order) || alreadyHasNewerIndex(order)) {
+      const traceLog = this.appendTrace(
+        order.orderId,
+        "voice.recording_evidence_exception",
+        {
+          callId: event.callId,
+          recordingState: event.recordingState,
+          linkedOrderId: event.linkedOrderId,
+          reason: isPastPreDispatch(order)
+            ? "order_progressed"
+            : "newer_recording_bound",
+        },
+      );
+      this.persistChanges(
+        { dispatchTraceLogs: [traceLog] },
+        "sync_call_recording_state_voice_exception",
+      );
+      return;
+    }
+
+    const outcome = await this.commitVoiceOrderMutation<
+      "applied" | "order_progressed" | "newer_recording_bound"
+    >(order.orderId, "callcenter.recording_state_changed", (current) => {
+      if (isPastPreDispatch(current)) {
+        return { order: current, result: "order_progressed" };
+      }
+      if (alreadyHasNewerIndex(current)) {
+        return { order: current, result: "newer_recording_bound" };
+      }
+      const next: OwnedOrderRecord = {
+        ...current,
+        recordingId: null,
+        status: "recording_pending",
+        complianceFlags: [
+          ...current.complianceFlags.filter(
+            (flag) =>
+              flag !== "recording_bound" &&
+              flag !== "recording_pending" &&
+              flag !== "recording_missing",
+          ),
+          event.recordingState === "missing"
+            ? "recording_missing"
+            : "recording_pending",
+        ],
+        updatedAt: new Date().toISOString(),
+      };
+      return { order: next, result: "applied" };
+    });
+
+    const traceLog = this.appendTrace(
+      order.orderId,
+      outcome === "applied"
+        ? "callcenter.recording_state_changed"
+        : "voice.recording_evidence_exception",
+      {
+        callId: event.callId,
+        recordingState: event.recordingState,
+        linkedOrderId: event.linkedOrderId,
+        ...(outcome === "applied" ? {} : { reason: outcome }),
+      },
+    );
+    this.persistChanges(
+      { dispatchTraceLogs: [traceLog] },
+      "sync_call_recording_state_voice",
+    );
+  }
+
   listOrders() {
     return this.orders.map((order) => this.cloneOrder(order));
   }
@@ -1768,7 +2006,7 @@ export class OwnedMobilityService
       const persistedOrder =
         (await this.ownedMobilityRepository.findOrderById(orderId)) ??
         undefined;
-      order = this.pickNewestOrder(order, persistedOrder);
+      order = this.resolveAuthoritativeOrder(order, persistedOrder);
     }
     if (order) {
       const resolvedOrderId = order.orderId;
@@ -1852,7 +2090,7 @@ export class OwnedMobilityService
           bookingId,
           tenantId,
         )) ?? undefined;
-      order = this.pickNewestOrder(order, persistedOrder);
+      order = this.resolveAuthoritativeOrder(order, persistedOrder);
     }
     if (order) {
       const resolvedOrderId = order.orderId;
@@ -1870,20 +2108,146 @@ export class OwnedMobilityService
     return this.mapOrderToBooking(order);
   }
 
-  private pickNewestOrder(
+  /**
+   * SD §7.5: "不得以 updatedAt 從 DB 與記憶體挑較新者，因為記憶體可能是未持久化
+   * 狀態" -- a persisted DB row is always authoritative over the in-memory
+   * copy once persistence is enabled, because the in-memory copy may reflect
+   * a mutation whose transaction never committed (it can carry a strictly
+   * newer `updatedAt` than the last durable write). Only fall back to the
+   * in-memory copy when the DB genuinely has no row yet.
+   */
+  private resolveAuthoritativeOrder(
     localOrder: OwnedOrderRecord | undefined,
     persistedOrder: OwnedOrderRecord | undefined,
   ) {
-    if (!localOrder) {
-      return persistedOrder;
+    return persistedOrder ?? localOrder;
+  }
+
+  /**
+   * Replaces the in-memory projection for `orderId` with a row that is
+   * already durably committed. Only ever called after a transaction commits
+   * (SD §7.5: "commit 後再投影...不在交易中呼叫會先改共享 arrays...的舊建單方
+   * 法") -- never before, and never on a failed/rolled-back attempt.
+   */
+  private applyAuthoritativeOrder(order: OwnedOrderRecord) {
+    const resolvedOrderId = order.orderId;
+    this.orders = [
+      this.cloneOrder(order),
+      ...this.orders.filter(
+        (candidateOrder) => candidateOrder.orderId !== resolvedOrderId,
+      ),
+    ];
+  }
+
+  /**
+   * Creates a brand-new voice-linked order through the shared PoolClient
+   * UoW (SD §7.1/§7.5). Fails closed when durable storage is not
+   * configured -- a voice mutation with no DB must be rejected, not
+   * silently accepted into memory only, unlike the legacy
+   * `persistChanges`/`persistChangesRequired` fallback used by non-voice
+   * writers. A collision on `order_id`, or on the partial unique
+   * `voice_intent_id`/`call_id` indexes (V0088), surfaces as
+   * `VOICE_ORDER_DUPLICATE_LINK` so the caller can replay/look up the
+   * existing order instead of creating a second one for the same intent.
+   */
+  async createVoiceOrder(
+    order: OwnedOrderRecord,
+    context: string,
+  ): Promise<OwnedOrderRecord> {
+    const repository = this.requireVoiceCapableRepository(context);
+    const aggregateVersion = await repository
+      .withTransaction((client) => repository.insertVoiceOrder(client, order))
+      .catch((error) => {
+        if (error instanceof OwnedOrderDuplicateVoiceLinkError) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "VOICE_ORDER_DUPLICATE_LINK",
+            error.message,
+            { orderId: order.orderId },
+          );
+        }
+        throw error;
+      });
+    const committed: OwnedOrderRecord = { ...order, aggregateVersion };
+    this.applyAuthoritativeOrder(committed);
+    return this.cloneOrder(committed);
+  }
+
+  /**
+   * Pure-prepare + CAS transaction for mutating an existing voice-linked
+   * order (SD §7.1/§7.5). `prepare` receives the DB-authoritative current
+   * order and version, locked `FOR UPDATE` for the lifetime of the
+   * transaction, and must be pure: it only computes and returns the next
+   * order (and an arbitrary `result`), never mutating `this.orders`,
+   * `this.dispatchTraceLogs`, an event emitter, or the audit sink.
+   *
+   * Those side effects belong in the caller, applied only after this method
+   * resolves -- i.e. only after the CAS write has durably committed. A
+   * transaction that fails for any reason (stale `aggregateVersion`, a
+   * rejected precondition thrown by `prepare`, a dropped DB connection)
+   * leaves the in-memory cache, every event, and the audit sink exactly as
+   * they were: nothing here mutates shared state ahead of commit.
+   *
+   * Fails closed when durable storage is not configured, and translates a
+   * version conflict into `409 VOICE_ORDER_VERSION_CONFLICT` so two
+   * instances racing on the same stale snapshot cannot both "win".
+   */
+  async commitVoiceOrderMutation<TResult>(
+    orderId: string,
+    context: string,
+    prepare: (
+      current: OwnedOrderRecord,
+      currentVersion: number,
+    ) => { order: OwnedOrderRecord; result: TResult },
+  ): Promise<TResult> {
+    const repository = this.requireVoiceCapableRepository(context);
+    const { order, result } = await repository
+      .withTransaction(async (client) => {
+        const current = await repository.findOrderForUpdate(client, orderId);
+        if (!current) {
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "OWNED_ORDER_NOT_FOUND",
+            `Order ${orderId} was not found.`,
+            { orderId, context },
+          );
+        }
+        const prepared = prepare(current.order, current.aggregateVersion);
+        const aggregateVersion = await repository.updateOrderWithCas(
+          client,
+          prepared.order,
+          current.aggregateVersion,
+        );
+        return {
+          ...prepared,
+          order: { ...prepared.order, aggregateVersion },
+        };
+      })
+      .catch((error) => {
+        if (error instanceof OwnedOrderVersionConflictError) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "VOICE_ORDER_VERSION_CONFLICT",
+            error.message,
+            { orderId, context },
+          );
+        }
+        throw error;
+      });
+    this.applyAuthoritativeOrder(order);
+    return result;
+  }
+
+  private requireVoiceCapableRepository(context: string) {
+    if (!this.ownedMobilityRepository?.isEnabled()) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "OWNED_MOBILITY_DB_REQUIRED",
+        `Voice order mutation "${context}" requires durable storage; DATABASE_URL is not configured.`,
+        { context },
+      );
     }
-    if (!persistedOrder) {
-      return localOrder;
-    }
-    return Date.parse(persistedOrder.updatedAt) >=
-      Date.parse(localOrder.updatedAt)
-      ? persistedOrder
-      : localOrder;
+    return this.ownedMobilityRepository;
   }
 
   async approveTenantBookingApprovalRequest(

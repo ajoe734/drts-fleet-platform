@@ -13,6 +13,7 @@ import { ServiceProductModule } from "../service-product/service-product.module"
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
+import { VoiceBookingModule } from "../voice-booking/voice-booking.module";
 import { OwnedMobilityController } from "./owned-mobility.controller";
 import { OwnedMobilityRepository } from "./owned-mobility.repository";
 import { ReferralBindingScaffoldService } from "./referral-binding.scaffold.service";
@@ -31,6 +32,7 @@ import { OwnedMobilityService } from "./owned-mobility.service";
     AuditNotificationModule,
     CallcenterModule,
     ProductRuleModule,
+    VoiceBookingModule,
     forwardRef(() => SandboxDispatchGateModule),
     forwardRef(() => TenantPartnerModule),
   ],

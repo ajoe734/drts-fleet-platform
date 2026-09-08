@@ -268,7 +268,7 @@ describe("tenant partner ingress handoff controller", () => {
     const { controller } = createController();
     const command = {
       entrySlug: "yuhe-residence",
-      entryHost: "app.yuhe-living.com.tw",
+      entryHost: "app.fabrikam-living.example",
       partnerUserRef: "resident-001",
     };
 

@@ -511,6 +511,41 @@ function mapResourceScopeRow(
   };
 }
 
+export type VoiceLineBindingRecord = {
+  lineBindingId: string;
+  providerAccountId: string;
+  dnis: string;
+  brandId: string;
+  operatingProfileId: string;
+  queueId: string | null;
+  enabled: boolean;
+  version: number;
+};
+
+type VoiceLineBindingRow = QueryResultRow & {
+  line_binding_id: string;
+  provider_account_id: string;
+  dnis: string;
+  brand_id: string;
+  operating_profile_id: string;
+  queue_id: string | null;
+  enabled: boolean;
+  version: number;
+};
+
+function mapLineBindingRow(row: VoiceLineBindingRow): VoiceLineBindingRecord {
+  return {
+    lineBindingId: row.line_binding_id,
+    providerAccountId: row.provider_account_id,
+    dnis: row.dnis,
+    brandId: row.brand_id,
+    operatingProfileId: row.operating_profile_id,
+    queueId: row.queue_id,
+    enabled: row.enabled,
+    version: row.version,
+  };
+}
+
 type VoiceRecordingCheckpointRow = QueryResultRow & {
   checkpoint_id: string;
   call_id: string;
@@ -919,6 +954,37 @@ export class VoiceBookingRepository {
     );
     const row = result.rows[0];
     return row ? mapResourceScopeRow(row) : null;
+  }
+
+  /**
+   * SD §4.1/§4.3: the only trusted line-scope lookup. Callers must pass the
+   * *provider-verified* destination number (DNIS) and provider account, never
+   * the caller's asserted ANI -- `voice.line_binding` has no column for the
+   * caller's number at all, so there is no way to smuggle it in here.
+   *
+   * Returns every enabled row for the pair (normally 0 or 1; the DB partial
+   * unique index `uq_voice_line_binding_active` already forbids more than
+   * one) so the caller can fail closed on an unexpected multi-match instead
+   * of silently picking one.
+   */
+  async findEnabledLineBindings(
+    providerAccountId: string,
+    dnis: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceLineBindingRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<VoiceLineBindingRow>(
+      `
+        SELECT * FROM voice.line_binding
+        WHERE provider_account_id = $1 AND dnis = $2 AND enabled
+      `,
+      [providerAccountId, dnis],
+    );
+    return result.rows.map(mapLineBindingRow);
   }
 
   async findRecordingCheckpointById(

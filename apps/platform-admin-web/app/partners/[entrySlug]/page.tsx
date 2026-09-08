@@ -909,7 +909,7 @@ export default function PartnerDetailPage() {
             fieldLabel: "Rotation reason",
             hint: "Provide an operator reason. This action is audited and the plaintext secret will be revealed once.",
             placeholderIssue:
-              "Example: initial production launch for CTBC World Elite entry",
+              "Example: initial production launch for ACME Elite Demo entry",
             placeholderRotate:
               "Example: rotate after key exposure drill / scheduled quarterly refresh",
             cancel: "Cancel",
@@ -1018,7 +1018,7 @@ export default function PartnerDetailPage() {
             fieldLabel: "輪替原因",
             hint: "請填寫操作原因。此動作會留下 audit 記錄，且完整 secret 只會顯示一次。",
             placeholderIssue:
-              "例如：CTBC World Elite entry 首次 production 上線",
+              "例如：ACME Elite Demo entry 首次 production 上線",
             placeholderRotate: "例如：金鑰外洩演練後輪替 / 季度例行更新",
             cancel: "取消",
             issueConfirm: "發行 credential",

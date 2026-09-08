@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { CanvasPill, CanvasTable, type CanvasTableColumn } from "@drts/ui-web";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  CanvasIcon,
+  CanvasPill,
+  CanvasTable,
+  type CanvasTableColumn,
+} from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import type {
   ReferralStatementLineView,
@@ -151,9 +157,6 @@ export function ReferralStatementsTable({
           >
             {r.id}
           </Link>
-          <div style={{ fontSize: 11, color: theme.textDim }}>
-            {r.artifactId}
-          </div>
         </div>
       ),
     },
@@ -212,4 +215,81 @@ export function ReferralStatementsTable({
     },
   ];
   return <CanvasTable theme={theme} columns={columns} rows={rows} />;
+}
+
+export function DashboardPeriodFilter({
+  currentPeriod,
+  options,
+  label,
+}: {
+  currentPeriod: string;
+  options: string[];
+  label: string;
+}) {
+  const theme = buildFleetTheme();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        display: "inline-flex",
+        alignItems: "center",
+      }}
+    >
+      <select
+        value={currentPeriod}
+        aria-label={label}
+        data-drt-filter="period"
+        onChange={(e) => {
+          const nextPeriod = e.target.value;
+          const params = new URLSearchParams(
+            searchParams ? searchParams.toString() : "",
+          );
+          params.set("period", nextPeriod);
+          router.push(`${pathname}?${params.toString()}`);
+        }}
+        style={{
+          appearance: "none",
+          WebkitAppearance: "none",
+          MozAppearance: "none",
+          display: "inline-flex",
+          alignItems: "center",
+          border: `1px solid ${theme.border}`,
+          borderRadius: 8,
+          padding: "5px 26px 5px 10px",
+          background: theme.surface,
+          fontFamily: theme.monoFamily,
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: theme.text,
+          cursor: "pointer",
+          outline: "none",
+        }}
+      >
+        {options.map((p) => (
+          <option
+            key={p}
+            value={p}
+            style={{ background: theme.surface, color: theme.text }}
+          >
+            {p}
+          </option>
+        ))}
+      </select>
+      <span
+        style={{
+          position: "absolute",
+          right: 8,
+          pointerEvents: "none",
+          display: "inline-flex",
+          alignItems: "center",
+        }}
+      >
+        <CanvasIcon name="chevD" size={12} style={{ color: theme.textDim }} />
+      </span>
+    </div>
+  );
 }
