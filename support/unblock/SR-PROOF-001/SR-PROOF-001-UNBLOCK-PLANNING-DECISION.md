@@ -28,22 +28,24 @@ implementation contract and scope authorization under `Q-SR-PROOF-001` in
 `PHASE1_OPEN_QUESTIONS.md`; this is a follow-up on the existing parent, not
 a newly registered producer or an authorization issued by this helper.
 
-### Redispatch reconciliation — after 2026-09-08T16:06:33Z
+### Redispatch reconciliation — after 2026-09-08T16:38:01Z
 
-Rebased onto `origin/dev` `c07d24e021aea847a988646427cdc534ccf4e496`.
-PR #1782 conflicted because another task added Q-SR-ENTERPRISE-DATA-001
-at the same insertion point. Both open questions are preserved. The published
-candidate was merged back after rebase so a normal fast-forward push preserves
-remote history without force-pushing.
+Rebased onto `origin/dev` `890548b4f357542968c8b14f33f23e0685be007a`.
+PR #1782 conflicted in the shared open-question inventory. Preserve both
+Q-SR-ENTERPRISE-FORM-001 and Q-SR-ENTERPRISE-DATA-001 alongside Q-SR-PROOF-001.
+Duplicate historical patches were skipped during rebase; published candidate
+`5deee13900ce8a68d466fa7380aa6973e69898de` was merged back to retain remote
+ancestry and permit a normal non-force push.
 
-Fresh machine-truth slices show the parent is now `todo`, owner Codex,
-reviewer Gemini: Chairman resumed it at `2026-09-08T16:05:54Z` after the
-history-repair helper. Its dependencies and write scopes still omit the
-requested contract edge and repository/module authorization. SR-CONTRACT-001
-remains `todo`, owner Gemini, and its schema-allocation artifact is absent
-at this base. History repair permits recovery work; it does not supply these
-planning prerequisites. This helper preserves the Chairman's lifecycle state
-and records the pending adjudication on the parent through the status CLI.
+The parent slice updated at `2026-09-08T16:35:21Z` is `blocked`, owner Codex,
+reviewer/waiting-for Gemini. Its reported tested HEAD is
+`d41072a1a76d04432619e90a1a61fe9090bcc08d` (not a candidate): one regression
+passed and two failed, with another non-fast-forward push rejection. These
+are parent-reported results, not tests rerun by this helper. Dependencies and
+write scopes still omit the requested contract edge and repository/module
+permission. SR-CONTRACT-001 remains `todo`, owner Gemini. History recovery
+did not clear the planning gate. Preserve this blocked lifecycle and route
+the four required actions below through Gemini to Supervisor/Chairman.
 
 ### Required next actor and resume gate
 
@@ -71,14 +73,15 @@ and records the pending adjudication on the parent through the status CLI.
    are recorded, Codex implements and runs the parent's declared tests and
    typechecks on fresh dev, then commits, normally pushes and hands off the
    exact candidate to current reviewer Gemini. Dependent implementation waits
-   for this gate even though the parent is now todo; routing this helper does not prove proof upload or paid
+   for this gate while the parent is blocked; routing this helper does not prove proof upload or paid
    correctness and does not execute a real payment.
 
 ### This dispatch's verification and delivery
 
 `git fetch origin` exited 0; `git rebase origin/dev` initially stopped on
 the open-question conflict and `git rebase --continue` exited 0 after preserving
-both entries. The ancestry-preserving merge and normal push exited 0.
+all three entries. The ancestry-preserving merge exited 0; normal push evidence
+is recorded with the final candidate in machine truth.
 Fresh parent/contract task slices and schema-allocation absence were checked.
 No product runtime, browser, scan service, payment or parent regression was
 executed. Documentation diff and candidate ancestry checks are recorded in

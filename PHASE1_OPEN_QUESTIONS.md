@@ -107,9 +107,9 @@ concurrency and durable receipt acceptance. PRD §9.8.4 and service contracts
 §3.11 already establish product ownership; this open item concerns the missing
 implementation allocation, not permission to accept arbitrary proof IDs.
 SR-CONTRACT-001 is currently todo; its owner Gemini must supply the reviewed
-contract/persistence allocation before dependent implementation. Chairman resumed
-the parent to `todo` at 2026-09-08T16:05:54Z after history repair; that transition
-does not authorize additional write scopes or supply the pending allocation.
+contract/persistence allocation before dependent implementation. The parent is
+`blocked` as of 2026-09-08T16:35:21Z, waiting for Gemini to route the remaining
+authorizations to Supervisor/Chairman; history recovery did not supply them.
 The [resume gate](support/unblock/SR-PROOF-001/SR-PROOF-001-UNBLOCK-PLANNING-DECISION.md)
 still applies to dependent implementation. This follow-up is tracked on the existing parent; any separate
 producer must first be registered by the supervisor in machine truth.
