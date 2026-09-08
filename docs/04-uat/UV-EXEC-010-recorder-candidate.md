@@ -64,6 +64,8 @@ history-repair route after safely aborting a rebase conflict. Repair anchor
   PostgreSQL cases). The disposable PostgreSQL 16 container was removed.
 - Root `pnpm typecheck:root` passed after fixing local worktree dependency links
   that initially resolved workspace packages through the canonical checkout.
+- API and voice-media-worker typechecks passed after building the local
+  `@drts/control-plane-auth` dependency.
 - Changed test ESLint, four changed files' Prettier checks, frozen lockfile
   validation and `git diff --check` passed.
 
