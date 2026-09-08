@@ -24,6 +24,20 @@ function expectApiErrorCode(call: () => unknown, code: string) {
   throw new Error(`expected ${code}, but the call succeeded`);
 }
 
+async function expectApiErrorCodeAsync(
+  call: () => Promise<unknown>,
+  code: string,
+) {
+  try {
+    await call();
+  } catch (error) {
+    expect(error).toBeInstanceOf(ApiRequestError);
+    expect((error as ApiRequestError).code).toBe(code);
+    return;
+  }
+  throw new Error(`expected ${code}, but the call succeeded`);
+}
+
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
@@ -231,35 +245,37 @@ describe("reporting and filing service", () => {
       reportingFilingService,
     } = createServices();
 
-    const missingRecordingOrder = await ownedMobilityService.createCallCenterOrder({
-      callId: "CALL-20260411-000100",
-      agentId: "AGENT-0091",
-      pickup: {
-        address: "台中市梧棲區中二路一段9號",
-      },
-      dropoff: {
-        address: "台中市大安區興安路378號",
-      },
-      passenger: {
-        name: "王小姐",
-        phone: "0911000001",
-      },
-    });
+    const missingRecordingOrder =
+      await ownedMobilityService.createCallCenterOrder({
+        callId: "CALL-20260411-000100",
+        agentId: "AGENT-0091",
+        pickup: {
+          address: "台中市梧棲區中二路一段9號",
+        },
+        dropoff: {
+          address: "台中市大安區興安路378號",
+        },
+        passenger: {
+          name: "王小姐",
+          phone: "0911000001",
+        },
+      });
 
-    const recordingBoundOrder = await ownedMobilityService.createCallCenterOrder({
-      callId: "CALL-20260411-000101",
-      agentId: "AGENT-0092",
-      pickup: {
-        address: "台中市梧棲區中二路一段9號",
-      },
-      dropoff: {
-        address: "台中市大安區興安路378號",
-      },
-      passenger: {
-        name: "陳先生",
-        phone: "0911000002",
-      },
-    });
+    const recordingBoundOrder =
+      await ownedMobilityService.createCallCenterOrder({
+        callId: "CALL-20260411-000101",
+        agentId: "AGENT-0092",
+        pickup: {
+          address: "台中市梧棲區中二路一段9號",
+        },
+        dropoff: {
+          address: "台中市大安區興安路378號",
+        },
+        passenger: {
+          name: "陳先生",
+          phone: "0911000002",
+        },
+      });
 
     callcenterService.attachRecordingCallback("CALL-20260411-000101", {
       recordingId: "REC-20260411-000101",
@@ -864,7 +880,7 @@ describe("report export", () => {
   it("streams a report as CSV with the rows it computed", async () => {
     const { services, jobId } = await completedJob("vehicle_roster");
 
-    const artifact = services.reportingFilingService.renderReportArtifact(
+    const artifact = await services.reportingFilingService.renderReportArtifact(
       jobId,
       "req-download",
     );
@@ -905,9 +921,9 @@ describe("report export", () => {
   it("refuses a format that has no renderer instead of returning no file", () => {
     const { reportingFilingService } = createServices();
 
-    // `format` used to be decoration: xlsx and csv produced identical results,
-    // which is to say no bytes at all.
-    for (const format of ["xlsx", "pdf", "zip"] as const) {
+    // xlsx and pdf are implemented (SR-REPORT-001, N05); zip is declared but
+    // still has no renderer (filing ZIP is out of scope for general reports).
+    for (const format of ["zip"] as const) {
       expectApiErrorCode(
         () =>
           reportingFilingService.createReportJob({
@@ -919,14 +935,14 @@ describe("report export", () => {
     }
   });
 
-  it("refuses to hand over a file for a job that has not completed", () => {
+  it("refuses to hand over a file for a job that has not completed", async () => {
     const { reportingFilingService } = createServices();
     const accepted = reportingFilingService.createReportJob({
       jobType: "vehicle_roster",
       format: "csv",
     });
 
-    expectApiErrorCode(
+    await expectApiErrorCodeAsync(
       () => reportingFilingService.renderReportArtifact(accepted.jobId),
       "REPORT_ARTIFACT_NOT_READY",
     );
@@ -937,14 +953,14 @@ describe("report export", () => {
 
     // Downloading is a stronger act than describing, so it cannot be the
     // weaker check.
-    expect(() =>
+    await expect(
       services.reportingFilingService.renderReportArtifact(
         jobId,
         "req-download",
         null,
         "tenant-not-the-owner",
       ),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 });
 

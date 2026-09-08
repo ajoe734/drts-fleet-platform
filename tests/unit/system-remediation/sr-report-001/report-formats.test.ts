@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import ExcelJS from "exceljs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { OrderRecord, ReportOutputFormat } from "@drts/contracts";
+import type { OwnedOrderRecord, ReportOutputFormat } from "@drts/contracts";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { ReportingFilingService } from "../../../../apps/api/src/modules/reporting-filing/reporting-filing.service";
 import {
@@ -116,7 +116,7 @@ describe("SR-REPORT-001 service integration (in-memory, no live DB)", () => {
             serviceProductCode: "excluded",
             status: "cancelled",
           },
-        ] as OrderRecord[],
+        ] as OwnedOrderRecord[],
     );
     const filters = { from: "2026-09-01", to: "2026-09-30" };
     const manifests: unknown[] = [];
@@ -132,14 +132,15 @@ describe("SR-REPORT-001 service integration (in-memory, no live DB)", () => {
         expect(service.getReportJob(job.jobId).status).toBe("completed"),
       );
       const result = service.getReportJob(job.jobId);
-      expect(result.rows).toHaveLength(1);
-      expect(result.rows[0]).toMatchObject({
+      const rows = result.rows!;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
         serviceProduct: "general",
         totalOrders: 1,
         completedTrips: 1,
       });
-      expectedRows ??= result.rows;
-      expect(result.rows).toEqual(expectedRows);
+      expectedRows ??= rows;
+      expect(rows).toEqual(expectedRows);
       const artifact = await service.renderReportArtifact(job.jobId);
       expect(artifact.fileName).toBe(`trip_summary-${job.jobId}.${format}`);
       expect(artifact.contentType).toBe(
@@ -151,8 +152,8 @@ describe("SR-REPORT-001 service integration (in-memory, no live DB)", () => {
       );
       if (format === "xlsx") {
         expect(await workbookValues(artifact.buffer)).toEqual([
-          Object.keys(result.rows[0]!),
-          ...result.rows.map((row) => Object.values(row).map(textValue)),
+          Object.keys(rows[0]!),
+          ...rows.map((row) => Object.values(row).map(textValue)),
         ]);
       }
       save(`filtered.${format}`, artifact.buffer);
@@ -161,7 +162,7 @@ describe("SR-REPORT-001 service integration (in-memory, no live DB)", () => {
         artifactId: result.artifact?.artifactId,
         format,
         filters,
-        rows: result.rows,
+        rows,
       });
     }
     save("filtered.json", JSON.stringify(manifests));
