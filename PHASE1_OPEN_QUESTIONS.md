@@ -4,6 +4,18 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-SR-QA-WEBHOOK-TENANT-BINDING-001 — repair scope authorization pending
+
+Supervisor/Claude must authorize product write scopes and IAM/tenant overlap
+sequencing for `SR-QA-WEBHOOK-001-FIX-TENANT-BINDING` (owner Codex, reviewer
+Gemini), and add the repair as a dependency of `SR-QA-WEBHOOK-001` acceptance.
+The required cross-tenant rejection remains unchanged; no scope cut or new
+entitlement is approved. Keep the repair blocked with `waiting_for: Claude`
+until machine truth records the authorization. This is follow-up on the existing
+repair task, not a new implementation assignment. See the
+[decision, proposed scopes, and resume gate](support/unblock/SR-QA-WEBHOOK-001-FIX-TENANT-BINDING/SR-QA-WEBHOOK-001-FIX-TENANT-BINDING-UNBLOCK-PLANNING-DECISION.md).
+
+
 ### Q-SR-ENV-COPY-001 — runtime source and integration scope routing
 
 Supervisor/Chairman must authorize the runtime badge wiring scopes and sequence
