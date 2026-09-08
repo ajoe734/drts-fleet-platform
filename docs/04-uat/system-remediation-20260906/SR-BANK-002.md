@@ -1,5 +1,14 @@
 # SR-BANK-002 — 銀行角色金額／PII／匯出一致隔離
 
+## 2026-09-08T23:57Z resumed dispatch verification
+
+- Fetched `origin/dev` base: `32b6dde7db730a8524004a5e87d94d5a2a6d7853`; tested checkpoint: `87d655a63a905c9ac0a4c56421771583ef65b949`. No candidate established.
+- `git rebase origin/dev`: exit 1 at duplicate `dbec26678`, six task-file conflicts. `git rebase --abort`: exit 0; published history preserved. Checks below ran after abort, not on a successfully rebased branch.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0; defect sources match this fetched base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1, inner matrix 49 passed / 5 failed. Settlement list/detail lack financial scope; two upstream-403 loads return seed statements; Contoso CSV outage returns ACME rows. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, leaked seed sentinel `STM-ACME-202606`. These remain synthetic upstream tests with actual application handlers and cookie signing; no live/device/server/CI/merge/deployment acceptance was performed.
+- Read execution rules, R15/C005 sources, and both unblock plans. Current machine task still grants only six original scopes and two original dependencies; dispatch still assigns the original branch. Supervisor must register the replacement delivery branch, shared loader/export scope with overlapping-writer dependencies, and canonical IAM producer/dependency (or reviewed policy scope). History-helper completion has not resolved these prerequisites or the five product failures. No product edits or handoff; this commit only anchors fresh regression evidence.
+
 ## 2026-09-08T22:43Z resumed dispatch verification
 
 - Fetched `origin/dev` base: `eb684f176b1d3b46553a0f6f0556c79452fbac3c`; tested checkpoint: `564f434edd3428a6c86ecff034fc3d532194793e`. Candidate remains unset.
