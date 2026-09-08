@@ -3,9 +3,9 @@
 ## 狀態與版本
 
 - 日期：2026-09-08
-- Owner：`Gemini`，Reviewer：`Codex2`
-- 狀態：`review`（已建立候選 SHA，完成測試與 non-force push，移交審查）
-- Base / 查核時 `origin/dev`：`3b60a37576eb3309a47d2f9547cb071e6580e5b7`
+- Owner：`Gemini`，Reviewer：`Codex`
+- 狀態：`blocked`（候選 `22ec54524adf5b9b123095f28ea83c4ec73d7793` 經 Codex 審查駁回，已重現 5 項失敗回歸，等待 Supervisor 擴 scope 或指派相依修復）
+- Base / 查核時 `origin/dev`：`3b60a3757238663572f16f010c94f446f2c71eaa`
 - 乾淨分支軌道：`gemini/sr-bank-002`，依據 `support/unblock/SR-BANK-002/SR-BANK-002-UNBLOCK-HISTORY-REPAIR.md` 從最新 `origin/dev` 線性重構，完全避開舊有 `origin/codex2/sr-bank-002@e150fcfe1` 之歷史汙染軌道。
 - 前置相依查核：
   - `SR-BANK-001`：已合併至 `dev`（merge SHA `6d4c47feb1c6`，PR #1654）。
@@ -41,36 +41,48 @@
 5. **`tests/unit/system-remediation/sr-bank-002/`**：
    - `boundary.test.ts`：Root Vitest 發現進入點，以獨立 bank config 執行測試。
    - `vitest.bank.config.ts`：提供 bank console 專屬 `@` alias，隔離 Next SSR 測試環境，不修改全域 Vitest 配置。
-   - `page-boundary.spec.mts`：20 項測試涵蓋三角色（admin, finance, ops_viewer）在對帳清單、明細與人員頁之同租戶、跨租戶、無 session、偽造 cookie 與角色提升行為。
-   - `download-boundary.spec.mts`：29 項測試涵蓋全期 CSV、單期 CSV、對帳單 artifact、行程 artifact 在三角色同租戶與跨租戶之正負矩陣，並檢驗真實 mapper 序列化時對敏感 PII（卡號、電話、姓名、卡片參照）之遮罩保護。
+   - `page-boundary.spec.mts`：20 項測試涵蓋三角色（admin, finance, ops_viewer）在對帳清單、明細與人員頁之同租戶、跨租戶、無 session、偽造 cookie 與角色提升行為（全部通過）。
+   - `download-boundary.spec.mts`：29 項測試涵蓋全期 CSV、單期 CSV、對帳單 artifact、行程 artifact 在三角色同租戶與跨租戶之正負矩陣，並檢驗真實 mapper 序列化時對敏感 PII（卡號、電話、姓名、卡片參照）之遮罩保護（全部通過）。
+   - `out-of-scope-blockers.spec.mts`：5 項可執行之紅燈回歸測試，誠實捕捉 Codex 審查駁回所指之本任務 `write_scopes` 外缺口（API 權限 catalog 與 bank-dev-read-models fallback）。
 
 ---
 
 ## 檢查與驗證結果
 
-所有宣告之驗證指令均在本地 isolated task worktree（`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-bank-002`）執行完畢並全部通過：
+所有宣告之驗證指令均在本地 isolated task worktree（`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-bank-002`）執行完畢：
 
 | 檢驗指令 | 執行結果 / Exit Code | 說明 |
 | :--- | :--- | :--- |
 | `git diff --check` | Exit 0 | 無任何空白或 trailing 格式錯誤 |
 | `pnpm --filter @drts/bank-console-web typecheck` | Exit 0 | Next route typegen 成功，`tsc --noEmit` 無型別錯誤 |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/` | Exit 0 | 1 root test、2 inner test files、**49 passed, 0 failed** |
-| `pnpm exec eslint apps/bank-console-web/lib/session.ts apps/bank-console-web/app/statements/page.tsx 'apps/bank-console-web/app/statements/[period]/page.tsx' apps/bank-console-web/app/users/page.tsx tests/unit/system-remediation/sr-bank-002 --max-warnings=0` | Exit 0 | 無任何 ESLint 警告或錯誤 |
+| In-scope Vitest (`page-boundary` + `download-boundary`) | Exit 0 | 1 root test、2 inner test files、**49 passed, 0 failed** |
+| Full Vitest (`tests/unit/system-remediation/sr-bank-002/`) | Exit 1 | **49 passed, 5 failed**（5 項失敗精確重現 out-of-scope blocker） |
 
 ---
 
-## 分流路由事項 (Separately Routed Gaps)
+## 審查駁回與卡點說明 (Review Rejection & Blocker Analysis)
 
-依據 `support/unblock/SR-BANK-002/SR-BANK-002-UNBLOCK-HISTORY-REPAIR.md` §4 指引（Address or separately route the already recorded API-policy / read-model fallback regressions），下列五項問題源自本任務 `write_scopes` 以外之共用模組，依規定不跨 scope 修改，分流記錄如下供 supervisor 與相應工作流追蹤：
+Candidate `22ec54524adf5b9b123095f28ea83c4ec73d7793` 經 Reviewer `Codex` 審查駁回，核心爭點與卡點分析如下：
 
-1. **後端 IAM Policy Catalog 對對帳路由之 Scope 定義**：
-   - 路由：`GET /api/tenant/settlement-statements` 與 `GET /api/tenant/settlement-statements/:period`
-   - 現況：`apps/api/src/common/auth/auth.policy.ts` 中 `tenant/*` 預設回退至 `tenant:read`，未要求 `tenant:billing:read`。
-   - 分流路徑：由 IAM 權限專屬任務（如 SR-IAM 後續項目）統一修訂權威 catalog，本 task 依指示沿用既有權威契約，不擅自修改 `apps/api/`。
-2. **Bank Read Model 遇上游異常時之 Fallback 行為**：
-   - 檔案：`apps/bank-console-web/lib/bank-dev-read-models.ts`（原屬 `SR-BANK-001` write scope）
-   - 現況：當後端 upstream API 回傳 403 Forbidden 或 503 Service Unavailable 時，`loadBankStatementsData` catch 區塊回退回傳硬編碼之 ACME seed mock statements（如 `STM-ACME-202606`）。
-   - 分流路徑：分流至 Bank Console 資料讀取模型專屬重構任務；本任務已在前端頁面層以 `resolveBankPageSession` 阻擋 `bank_ops_viewer` 呼叫該 loader，並在下載 API 層前置阻絕非法請求。
+1. **Codex 審查駁回意見**：
+   - **P1 - API 層未具備三角色與跨租戶授權隔離**：`apps/api/src/common/auth/auth.policy.ts:420-463` 將 `tenant/settlement-statements` 與 `/:period` 排除在 billing scope 之外，回退至 `tenant:read`；`billing-settlement.controller.ts:211-235` 直接回傳 settlement JSON，且 `service.ts:2691-2720` 無角色遮罩。因此 `bank_ops_viewer` 仍可透過 JSON API 直接取得結算金額，未達成 Acceptance「受限金額不可在HTML/JSON/CSV間繞過」。
+   - **P1 - Read Model Fallback 非 fail-closed 導致跨租戶洩漏**：`apps/bank-console-web/lib/bank-dev-read-models.ts:850-864` 在遭遇上游 403（權限不足）或 503（服務不可用）時，會回退回傳硬編碼之 ACME seed mock statements（如 `STM-ACME-202606`）。這導致非 ACME 租戶（如 Contoso）在異常時的 CSV 匯出洩漏 ACME 結算列。
+   - **分流無效性 (No Concrete Closure)**：先前候選僅於文件中標註「分流路由事項 (Separately Routed Gaps)」，但在未有 supervisor 擴展 scope 或建立相依修復任務的情況下，驗收標準並未被滿足。
+   - **Base SHA 勘誤**：前次文件記載之 Base SHA `3b60a37576eb...` 為筆誤，已更正為查核時之真值 `3b60a3757238663572f16f010c94f446f2c71eaa`。
+
+2. **5 項失敗回歸重現 (`out-of-scope-blockers.spec.mts`)**：
+   - `GET /api/tenant/settlement-statements` 缺少 `tenant:billing:read` 範圍（目前僅 `tenant:read`）。
+   - `GET /api/tenant/settlement-statements/2026-03` 缺少 `tenant:billing:read` 範圍（目前僅 `tenant:read`）。
+   - `tenant-demo-001/bank_ops_viewer` 上游 403 拒絕時回傳非空之 ACME seed statements。
+   - `tenant-contoso-001/bank_finance` 上游 403 拒絕時回傳非空之 ACME seed statements。
+   - `Contoso CSV` 在上游 503 時匯出內容包含 `STM-ACME` 假資料。
+
+3. **阻塞原因與請求 Supervisor 介入**：
+   - 依據任務規範「只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫」，Owner 不得擅自修改 `apps/api/src/common/auth/auth.policy.ts`、`apps/api/src/modules/billing-settlement/` 或 `apps/bank-console-web/lib/bank-dev-read-models.ts`。
+   - 需由 Supervisor / Claude（治理與架構仲裁）：
+     1. 擴展本任務之 `write_scopes` 涵蓋上述檔案，或
+     2. 建立專屬 unblock / dependent remediation 任務修復 API 授權與 read-model fallback。
+   - 在此之前，本任務誠實記錄 blocker，保留全部重現證據與已通過之 49 項 UI/CSV 邊界測試，不假冒成功。
 
 ---
 
