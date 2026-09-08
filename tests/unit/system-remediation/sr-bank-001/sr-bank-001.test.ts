@@ -149,7 +149,7 @@ describe("SR-BANK-001: Bank Console Home, Contracts, and Statements Remediation"
     });
 
     it("metricValue, metricTarget, and metricDelta return null safely when attainment or targets are missing", () => {
-      const contract = getContractRecord("ctr_ctbc_world_elite_2026");
+      const contract = getContractRecord("ctr_acme_world_elite_2026");
       expect(contract).toBeDefined();
 
       const val = metricValue(contract?.periodAttainment, "pickup_punctuality");
@@ -233,30 +233,30 @@ describe("SR-BANK-001: Bank Console Home, Contracts, and Statements Remediation"
 
   describe("5. Multi-Key Contract Resolving", () => {
     it("resolves contract by contractId", () => {
-      const record = getContractRecord("ctr_ctbc_world_elite_2026");
+      const record = getContractRecord("ctr_acme_world_elite_2026");
       expect(record).toBeDefined();
-      expect(record?.contractId).toBe("ctr_ctbc_world_elite_2026");
-      expect(record?.programCode).toBe("CTBC_WORLD_ELITE");
+      expect(record?.contractId).toBe("ctr_acme_world_elite_2026");
+      expect(record?.programCode).toBe("ACME_WORLD_ELITE");
     });
 
     it("resolves contract by programId", () => {
-      const record = getContractRecord("prog-ctbc-world-elite");
+      const record = getContractRecord("prog-acme-world-elite");
       expect(record).toBeDefined();
-      expect(record?.contractId).toBe("ctr_ctbc_world_elite_2026");
+      expect(record?.contractId).toBe("ctr_acme_world_elite_2026");
     });
 
     it("resolves contract by programCode (case-insensitive, hyphen/underscore friendly)", () => {
-      const record = getContractRecord("CTBC_WORLD_ELITE");
+      const record = getContractRecord("ACME_WORLD_ELITE");
       expect(record).toBeDefined();
-      expect(record?.contractId).toBe("ctr_ctbc_world_elite_2026");
+      expect(record?.contractId).toBe("ctr_acme_world_elite_2026");
 
       const recordShort = getContractRecord("world-elite");
       expect(recordShort).toBeDefined();
-      expect(recordShort?.contractId).toBe("ctr_ctbc_world_elite_2026");
+      expect(recordShort?.contractId).toBe("ctr_acme_world_elite_2026");
 
       const recordSig = getContractRecord("infinite");
       expect(recordSig).toBeDefined();
-      expect(recordSig?.contractId).toBe("ctr_ctbc_infinite_2026");
+      expect(recordSig?.contractId).toBe("ctr_acme_infinite_2026");
     });
   });
 });

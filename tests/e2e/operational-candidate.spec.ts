@@ -80,7 +80,7 @@ test("bank console demo login remains on the deployed public origin", async ({
     );
   const expectedOrigin = new URL(baseUrl).origin;
 
-  await page.goto(`${expectedOrigin}/login?bank=ctbc&locale=zh&signedOut=1`, {
+  await page.goto(`${expectedOrigin}/login?bank=acme&locale=zh&signedOut=1`, {
     waitUntil: "domcontentloaded",
   });
   await Promise.all([
@@ -88,7 +88,7 @@ test("bank console demo login remains on the deployed public origin", async ({
       return (
         url.origin === expectedOrigin &&
         url.pathname === "/" &&
-        url.searchParams.get("bank") === "ctbc" &&
+        url.searchParams.get("bank") === "acme" &&
         url.searchParams.get("role") === "bank_program_admin"
       );
     }),

@@ -164,7 +164,7 @@ export const FX_REFERRAL_STATEMENTS: ReferralStatementView[] = [
     issued: "2026-06-01",
     artifactId: "referral-statement-yuhe-residence-2026-05",
     artifactHash: "9f2a…7c41",
-    direction: "DRTS → 御和物業",
+    direction: "DRTS → 法碧康物業",
     lines: FX_REFERRAL_STATEMENT_LINES,
   },
   {
@@ -178,7 +178,7 @@ export const FX_REFERRAL_STATEMENTS: ReferralStatementView[] = [
     issued: "2026-05-01",
     artifactId: "referral-statement-yuhe-residence-2026-04",
     artifactHash: "7ac1…4ef8",
-    direction: "DRTS → 御和物業",
+    direction: "DRTS → 法碧康物業",
     lines: FX_REFERRAL_STATEMENT_LINES,
   },
 ];
