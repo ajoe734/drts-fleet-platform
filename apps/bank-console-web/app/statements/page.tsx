@@ -15,6 +15,7 @@ import {
   BANK_CONSOLE_ROLE_COOKIE,
   BANK_CONSOLE_SESSION_COOKIE,
   bankConsoleHref,
+  canViewSettlementAmounts,
   getBankConsoleSession,
   resolveServerSessionRole,
 } from "@/lib/session";
@@ -67,6 +68,22 @@ function formatCurrency(amount: number, locale: Locale) {
   }).format(amount);
 }
 
+// Restricted-amount placeholder mirrors the "••••" masking convention this
+// app already uses for cardholder/benefit/card references (see
+// lib/bank-dev-read-models.ts maskCompact/maskSegmented), so an ops-viewer
+// session never renders the real figure into the HTML response (R15).
+const RESTRICTED_AMOUNT_PLACEHOLDER = "••••••";
+
+function formatAmountForRole(
+  amount: number,
+  locale: Locale,
+  canViewAmounts: boolean,
+) {
+  return canViewAmounts
+    ? formatCurrency(amount, locale)
+    : RESTRICTED_AMOUNT_PLACEHOLDER;
+}
+
 export default async function StatementsPage({
   searchParams,
 }: {
@@ -87,6 +104,7 @@ export default async function StatementsPage({
   const roleParam = one(resolvedSearchParams.role);
   const sessionRole = resolveServerSessionRole(cookieRole, roleParam).role;
   const session = getBankConsoleSession(tenant, locale, sessionRole);
+  const canViewAmounts = canViewSettlementAmounts(session.role);
   const statementData = await loadBankStatementsData(
     tenant.tenantId,
     session.role,
@@ -155,7 +173,9 @@ export default async function StatementsPage({
         </div>
         <div>
           <span className="eyebrow">{t("statements.strip.total", locale)}</span>
-          <strong>{formatCurrency(totalIssuerPaid, locale)}</strong>
+          <strong>
+            {formatAmountForRole(totalIssuerPaid, locale, canViewAmounts)}
+          </strong>
         </div>
       </section>
 
@@ -235,7 +255,7 @@ export default async function StatementsPage({
         />
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(totalIssuerPaid, locale)}
+          title={formatAmountForRole(totalIssuerPaid, locale, canViewAmounts)}
           description={t("statements.metrics.issuerPays", locale)}
         />
       </section>
@@ -299,7 +319,11 @@ export default async function StatementsPage({
                 </div>
               </Td>
               <Td mono>
-                {formatCurrency(statement.totalIssuerPayableAmount, locale)}
+                {formatAmountForRole(
+                  statement.totalIssuerPayableAmount,
+                  locale,
+                  canViewAmounts,
+                )}
               </Td>
               <Td>
                 <CanvasPill tone={statementStatusTone[statement.status]} dot>
