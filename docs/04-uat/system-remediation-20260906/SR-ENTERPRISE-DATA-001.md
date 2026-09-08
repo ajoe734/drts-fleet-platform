@@ -36,3 +36,27 @@ Machine truth still lists only the original write scopes with no dependencies. P
 Traceability: execution task spec `docs/03-runbooks/system-remediation-20260906/SR-ENTERPRISE-DATA-001.md`; source findings R08/R09/R16; capabilities C013/C017/C018/C093/C108/C119. Historical R08 resource `EB-7K2E1D` is audit evidence only, not a current verified booking.
 
 Not executed: browser interaction, live authenticated API, cross-tenant authorization checks, real phone/device navigation, CI, merge, deployment, or independent review. This document does not claim acceptance or completion.
+
+## Redispatch verification — 2026-09-08 15:35 UTC
+
+- Fresh base `origin/dev`: `52e8096e4441386901e57415ba06f6a2aabe4d0e`.
+- Tested WIP revision: `da6d5b64c3ac7469e919a94cf7822d18ab764187`.
+  Candidate SHA: none; implementation remains incomplete.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 0.
+  `git merge --no-edit origin/codex2/sr-enterprise-data-001`: exit 0,
+  preserving published ancestry for an ordinary push without product changes.
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`:
+  exit 0, 1 file / 17 tests passed (275 ms). Resource IDs are the unit inputs
+  listed above; no live resource was verified.
+- `git diff --check`: exit 0.
+
+PR #1772 merged the history audit at `40c231ba6718dbf7a7ee6662e446d44e48eabcb3`.
+Its report at `support/unblock/SR-ENTERPRISE-DATA-001/SR-ENTERPRISE-DATA-001-UNBLOCK-HISTORY-REPAIR.md`
+explicitly says it does not clear the scope/dependency blocker. The current
+`ai-status.sh show SR-ENTERPRISE-DATA-001` still has the original write scopes
+and no dependencies. Static inspection at the tested revision confirms all three
+shared-file gaps above remain, and trip still imports fixture bookings/driver.
+Supervisor must adjudicate those scopes/dependencies and the authorized contact
+source before UI completion. No new UI was written during this redispatch.
+The live/device/CI/review/merge/deployment exclusions above remain applicable.
