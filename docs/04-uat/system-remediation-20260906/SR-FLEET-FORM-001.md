@@ -3,12 +3,12 @@
 | 欄位              | 內容                                                 |
 | ----------------- | ---------------------------------------------------- |
 | Phase             | system-remediation-20260906                          |
-| Owner             | Gemini                                               |
-| Reviewer          | Gemini2                                              |
-| Base SHA          | `b32ab8badb740b94cdf67212315ecfccf21f6d5d` (origin/dev 2026-09-06) |
+| Owner             | Codex2                                              |
+| Reviewer          | Codex                                               |
+| Base SHA          | `70355aba9b8f9dd034f73e87e57a34a39a1c3701` (fresh `origin/dev`, 2026-09-08) |
 | Gap IDs           | R23, R25                                             |
 | Capability IDs    | C070, C120                                           |
-| Status            | candidate (handoff pending review)                   |
+| Status            | implementation verified; handoff pending review      |
 
 ## 驗收條件與實作摘要
 
@@ -25,6 +25,7 @@
 - `ProductChecklist` 組（checkbox 群組）改用 `role="group"` + `aria-labelledby` 提供群組標籤。
 - 行動裝置鍵盤提示：文字欄位加 `inputMode="text"`，電話加 `type="tel"` + `inputMode="tel"` + `autoComplete="tel"`，數字欄位加 `type="number"` + `inputMode="numeric"`，日期保留 `type="date"`。
 - `FieldInput` / `FieldSelect` 加 `outlineOffset: 2` 確保鍵盤焦點環不被背景蓋住。
+- 產品 checkbox 群組的必填標記改用 `theme.danger`，不引入非設計系統顏色。
 
 **暗色對比回歸（R23）：**
 - 現行 dark palette：`text: #E5EAF3`（L≈0.81）on `surface: #141B2B`（L≈0.005）→ 對比約 15.6:1，遠超 WCAG AA 4.5:1。
@@ -43,7 +44,7 @@
   - `confirmLeave()` 函式在 in-app 導航前呼叫，顯示 `window.confirm()` 對話框（含中文標題與說明）。
   - `DRAFT_GUARD_STRINGS` 常數（`fleet-portal-supply.ts`）集中管理文案，無 HTML tag（瀏覽器 dialog 只能顯示純文字）。
 - `NewDriverSubmissionForm` / `NewVehicleSubmissionForm`：
-  - `dirty` state 計算：任一必填識別欄位非空 → dirty=true。
+- `dirty` state 以 `hasUnsavedDraftChanges()` 比對完整初始表單；所有輸入（含選項、日期和 checkbox）都會觸發保護，而非僅部分識別欄位。
   - 成功 POST 後先設 `submitted=true`（移除 beforeunload），再 `router.push()`，確保成功送出不觸發警告。
   - Header 的「返回」按鈕改為 `<button onClick={() => { if (confirmLeave()) router.back(); }}>` — 空欄時直接返回，有內容時先確認。
 - `SupplySubmissionDetailView` 中的 "Save draft" 動作不受影響（已有 server-side 持久化，不需要客戶端 guard）。
@@ -58,15 +59,15 @@
 | diff-check  | `git diff --check`                                                                                        | 0         |
 | typecheck   | `pnpm --filter @drts/fleet-partner-portal-web typecheck`                                                  | 0         |
 | unit tests  | `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-form-001/`                                   | 0         |
-| test output | `Test Files 1 passed (1) · Tests 26 passed (26)` (2026-09-06T15:48:04Z)                                 | —         |
+| test output | `Test Files 1 passed (1) · Tests 26 passed (26)` (2026-09-08T11:08:24Z)                                 | —         |
 
-Base SHA：`b32ab8badb740b94cdf67212315ecfccf21f6d5d`
+Base SHA：`70355aba9b8f9dd034f73e87e57a34a39a1c3701`。前一輪 `b32ab8bad`／`37e898923` 僅為歷史觀察與存活分支來源；本輪已將實作 rebase 至此 fresh base 後重跑上述指令。Candidate SHA 由本輪普通 push 後的 `ai-status.sh handoff` 以 exact `HEAD` 寫入 machine truth。
 
 ## 修改檔案
 
 | 檔案                                                                                    | 變更                                                             |
 | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `apps/fleet-partner-portal-web/lib/fleet-portal-supply.ts`                              | 新增 `fieldId()` + `DRAFT_GUARD_STRINGS`                        |
+| `apps/fleet-partner-portal-web/lib/fleet-portal-supply.ts`                              | 新增 `fieldId()`、`DRAFT_GUARD_STRINGS` + 全欄位草稿差異判定 helper |
 | `apps/fleet-partner-portal-web/components/fleet-supply-workspace.tsx`                   | 新增 `FormField` + `useDraftGuard`；改 `DriverDraftFields` / `VehicleDraftFields` / 上傳卡 / 兩個 New*Form；加 `inputMode`/`autoComplete`/`outlineOffset` |
 | `tests/unit/system-remediation/sr-fleet-form-001/sr-fleet-form-001.test.ts`             | 新增 26 個 unit test（fieldId, DRAFT_GUARD_STRINGS, isEditableStatus, formatSupplySubject, dirty invariants） |
 

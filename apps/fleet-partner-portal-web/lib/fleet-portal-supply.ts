@@ -123,3 +123,12 @@ export const DRAFT_GUARD_STRINGS = {
 export function fieldId(form: string, field: string): string {
   return `form-${form}-${field}`;
 }
+
+/**
+ * True when any client-side draft value differs from its initial form state.
+ * This deliberately includes optional fields and checkbox selections so that
+ * no user-entered supply data can be lost without a leave warning (R25).
+ */
+export function hasUnsavedDraftChanges<T>(current: T, initial: T): boolean {
+  return JSON.stringify(current) !== JSON.stringify(initial);
+}

@@ -39,6 +39,7 @@ import {
   isEditableStatus,
   DRAFT_GUARD_STRINGS,
   fieldId,
+  hasUnsavedDraftChanges,
 } from "@/lib/fleet-portal-supply";
 
 
@@ -49,6 +50,35 @@ type ApiEnvelope<T> = {
 
 type DriverDraftInput = Omit<DriverSupplyDraft, "submissionId">;
 type VehicleDraftInput = Omit<VehicleSupplyDraft, "submissionId">;
+
+const NEW_DRIVER_INITIAL_FORM: DriverDraftInput = {
+  name: "",
+  mobile: "",
+  professionalDriverLicenseNo: "",
+  professionalDriverLicenseExpiry: "",
+  taxiDriverRegistrationNo: "",
+  taxiDriverRegistrationArea: "",
+  taxiDriverRegistrationExpiry: "",
+  supportedServiceProductCodes: ["taxi_realtime"],
+  preferredVehicleSubmissionId: null,
+};
+
+const NEW_VEHICLE_INITIAL_FORM: VehicleDraftInput = {
+  plateNo: "",
+  licenseType: "taxi",
+  brand: "",
+  model: "",
+  modelYear: 2024,
+  seatCount: 5,
+  luggageCapacity: 2,
+  businessArea: "台北市",
+  supportedServiceProductCodes: ["taxi_realtime"],
+  airportTransferEligible: false,
+  fixedFareAllowed: false,
+  currentDriverSubmissionId: null,
+  doorCount: 4,
+  color: "",
+};
 
 const DRIVER_DOC_TYPES = [
   "professional_driver_license",
@@ -832,25 +862,12 @@ export function NewDriverSubmissionForm() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const [form, setForm] = useState<DriverDraftInput>({
-    name: "",
-    mobile: "",
-    professionalDriverLicenseNo: "",
-    professionalDriverLicenseExpiry: "",
-    taxiDriverRegistrationNo: "",
-    taxiDriverRegistrationArea: "",
-    taxiDriverRegistrationExpiry: "",
-    supportedServiceProductCodes: ["taxi_realtime"],
-    preferredVehicleSubmissionId: null,
-  });
+  const [form, setForm] = useState<DriverDraftInput>(NEW_DRIVER_INITIAL_FORM);
 
-  // Draft is "dirty" once the user has typed anything in a required field (R25).
+  // Every edited value is protected, including optional fields and product choices (R25).
   const dirty =
     !submitted &&
-    (form.name !== "" ||
-      form.mobile !== "" ||
-      form.professionalDriverLicenseNo !== "" ||
-      form.taxiDriverRegistrationNo !== "");
+    hasUnsavedDraftChanges(form, NEW_DRIVER_INITIAL_FORM);
 
   const { confirmLeave } = useDraftGuard(dirty);
 
@@ -922,27 +939,12 @@ export function NewVehicleSubmissionForm() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const [form, setForm] = useState<VehicleDraftInput>({
-    plateNo: "",
-    licenseType: "taxi",
-    brand: "",
-    model: "",
-    modelYear: 2024,
-    seatCount: 5,
-    luggageCapacity: 2,
-    businessArea: "台北市",
-    supportedServiceProductCodes: ["taxi_realtime"],
-    airportTransferEligible: false,
-    fixedFareAllowed: false,
-    currentDriverSubmissionId: null,
-    doorCount: 4,
-    color: "",
-  });
+  const [form, setForm] = useState<VehicleDraftInput>(NEW_VEHICLE_INITIAL_FORM);
 
-  // Draft is "dirty" once the user has typed anything in a key required field (R25).
+  // Every edited value is protected, including optional fields and product choices (R25).
   const dirty =
     !submitted &&
-    (form.plateNo !== "" || form.brand !== "" || form.model !== "");
+    hasUnsavedDraftChanges(form, NEW_VEHICLE_INITIAL_FORM);
 
   const { confirmLeave } = useDraftGuard(dirty);
 
@@ -1070,6 +1072,7 @@ function DriverDraftFields({
   formKey?: string;
 }) {
   const { t } = useTranslation();
+  const theme = buildFleetTheme();
   const fid = (field: string) => fieldId(formKey, field);
   return (
     <>
@@ -1203,7 +1206,7 @@ function DriverDraftFields({
           }}
         >
           {t("supply.field.supportedProducts")}
-          <span aria-hidden="true" style={{ color: "red" }}> *</span>
+          <span aria-hidden="true" style={{ color: theme.danger }}> *</span>
           <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}>
             （必填）
           </span>
@@ -1234,6 +1237,7 @@ function VehicleDraftFields({
   formKey?: string;
 }) {
   const { t } = useTranslation();
+  const theme = buildFleetTheme();
   const fid = (field: string) => fieldId(formKey, field);
   return (
     <>
@@ -1417,7 +1421,7 @@ function VehicleDraftFields({
           }}
         >
           {t("supply.field.supportedProducts")}
-          <span aria-hidden="true" style={{ color: "red" }}> *</span>
+          <span aria-hidden="true" style={{ color: theme.danger }}> *</span>
           <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}>
             （必填）
           </span>
