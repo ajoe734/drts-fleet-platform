@@ -411,3 +411,17 @@ Branch synchronization: rebasing onto updated dev attempted to replay already
 integrated historical commits and conflicted. The rebase was aborted, then dev
 was merged without conflicts, preserving the existing published branch and
 normal non-force pushes.
+
+Final owner checks for this follow-up:
+
+- Isolated PostgreSQL `uv_exec_006_codex`: reservation integration suite **61/61**,
+  including both redispatch/cancel barriers and release-fault rollback.
+- API owned-mobility service, repository, controller, compliance-gates and
+  multi-taxi service unit suites: **161/161**.
+- Root owned-mobility unit suite: **37/37**.
+- API typecheck (after contracts build), ESLint on both changed API source
+  files, and `git diff --check`: passed.
+
+Commands use the same isolated database and API working-directory convention
+above. This is owner verification only; candidate review, CI, merge and external
+acceptance remain governed by the candidate lifecycle.
