@@ -84,7 +84,7 @@ const en = {
   "bookings.create": "Create booking",
   "bookings.banner.title": "Cost ownership and approval first",
   "bookings.banner.body":
-    "After submission, status may first show accepted or pending approval. Available actions still follow backend availableActions.",
+    "After submission, your booking may show accepted or pending approval. Check booking details for the actions currently available to you.",
   "bookings.card.passengerBooker": "Passenger / Booker",
   "bookings.card.costCenter": "Cost center",
   "bookings.card.route": "Trip",
@@ -200,7 +200,7 @@ const en = {
   "help.faq.title": "FAQ",
   "detail.title": "Booking details · {id}",
   "detail.subtitle":
-    "The detail page follows availableActions and read-side projection. It does not infer authority from status text.",
+    "View your booking status, trip details, and currently available actions.",
   "detail.card.trip": "Trip and authority",
   "detail.bookedBy": "Booked by",
   "detail.pickupDropoff": "Pickup / Drop-off",
@@ -431,7 +431,7 @@ const en = {
   "fixture.reviewChecklist.2":
     "Cost center and quota impact are confirmed; submission may first enter accepted + pending.",
   "fixture.reviewChecklist.3":
-    "If manager approval is not complete yet, booking detail uses availableActions to control next steps.",
+    "While manager approval is pending, check booking details for available next steps.",
   "fixture.tripProgress.1": "Booking created",
   "fixture.tripProgress.2": "Manager approved",
   "fixture.tripProgress.3": "Vehicle assigned",
@@ -568,7 +568,7 @@ const en = {
   "detail.action.receipt": "Get receipt",
   "detail.action.track": "Track trip",
   "detail.actions.note":
-    "Action availability follows backend availableActions, not status text.",
+    "Available actions depend on your permissions and the current booking conditions.",
   "detail.approval.approved": "Approved",
   "detail.timeline.created": "Booking created",
   "detail.timeline.createdBody":
@@ -695,7 +695,7 @@ const zh: Record<TranslationKey, string> = {
   "bookings.create": "建立預約",
   "bookings.banner.title": "費用歸屬與審批優先",
   "bookings.banner.body":
-    "預約送出後，狀態可能先顯示已受理或待審批；可用操作仍以 backend availableActions 為準。",
+    "預約送出後，狀態可能先顯示已受理或待審批；請至預約詳情查看目前可執行的操作。",
   "bookings.card.passengerBooker": "乘客 / 下單人",
   "bookings.card.costCenter": "成本中心",
   "bookings.card.route": "行程",
@@ -806,7 +806,7 @@ const zh: Record<TranslationKey, string> = {
   "help.faq.title": "常見問題",
   "detail.title": "預約詳情 · {id}",
   "detail.subtitle":
-    "詳情頁以 availableActions 與 read-side projection 為主，不從狀態文字推導權限。",
+    "查看預約狀態、行程詳情與目前可執行的操作。",
   "detail.card.trip": "行程與權責",
   "detail.bookedBy": "下單人",
   "detail.pickupDropoff": "上車 / 下車",
@@ -1001,7 +1001,7 @@ const zh: Record<TranslationKey, string> = {
   "fixture.reviewChecklist.2":
     "成本中心與 quota impact 已確認，提交後可能先進入 accepted + pending。",
   "fixture.reviewChecklist.3":
-    "若主管審批尚未完成，booking detail 會以 availableActions 控制下一步。",
+    "等待主管審批期間，請至預約詳情查看可執行的下一步。",
   "fixture.tripProgress.1": "預約已建立",
   "fixture.tripProgress.2": "主管已核准",
   "fixture.tripProgress.3": "已派車",
@@ -1131,7 +1131,7 @@ const zh: Record<TranslationKey, string> = {
   "detail.action.receipt": "取得收據",
   "detail.action.track": "追蹤行程",
   "detail.actions.note":
-    "操作可用性以後端 availableActions 為準，不以狀態文字推導權限。",
+    "可執行的操作取決於您的權限與目前的預約條件。",
   "detail.approval.approved": "已核准",
   "detail.timeline.created": "建立預約",
   "detail.timeline.createdBody": "由 周敏（行政祕書）代訂 · 乘客 Sato Kenji",

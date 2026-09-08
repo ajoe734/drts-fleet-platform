@@ -42,3 +42,12 @@ Executed on the corrected implementation (merge retained the same source/test co
 Dispatched CI resource: https://github.com/ajoe734/drts-fleet-platform/actions/runs/34223457142/job/102051836587 . Machine truth reported failure; `gh run view 34223457142 --job 102051836587 --log-failed` exited 1 because the run was still in progress and logs unavailable. No assertion about that CI failure's root cause or fresh-candidate CI success.
 
 No live deployment, browser screenshots, E2E, or device validation performed. No business resources created or modified. No review/merge/deployment acceptance claimed. This is an anchored partial implementation, not a completion handoff.
+
+## Follow-up dispatch, 2026-09-08 12:16 UTC
+
+- Starting pushed anchor: `30c93d90fb804dbbd25ac1f8f74cd52ea40bd4b2`; fetched base remains `3b60a3757238663572f16f010c94f446f2c71eaa`. No new candidate is handed off; this section belongs to a partial-work anchor whose exact SHA is recorded through task progress after push.
+- `git fetch origin` exited 0. `git rebase origin/dev` exited 1 on three add/add conflicts while replaying already merged task history. `git rebase --abort` exited 0 and restored the clean branch. `git merge-base --is-ancestor origin/dev HEAD` exited 0: current dev is already included; no trunk updates are missing.
+- Read R27/C110, task execution rules, realm tokens and Enterprise Dispatch canvas. Changed only eight English/Chinese translation values for booking submission, details, approval next steps and action availability. Translation keys, interpolation parameters, layout and visual tokens are unchanged.
+- `rg -n 'availableActions|read-side projection' apps/enterprise-dispatch-web/lib/translations.ts` exited 0 and returned only the two locale copies of the internal translation key `card.sub.availableActions`; no matching display value remains in this catalog.
+- `git diff --check` exited 0; `pnpm --filter @drts/enterprise-dispatch-web typecheck` exited 0; `pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/sr-env-copy-001.test.ts` exited 0, 7 tests passed. Other five app typechecks and the known failing legacy badge test were not repeated in this dispatch because their implementation did not change.
+- Supervisor has not expanded write scopes or dependencies. Runtime app wiring and the contradictory out-of-scope test remain blocked as listed above. Ops/tenant technical copy still needs cleanup. No live/browser/device validation or business resource changes in this dispatch; PR resource remains #1738. Acceptance is incomplete.
