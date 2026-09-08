@@ -123,3 +123,33 @@ export const DRAFT_GUARD_STRINGS = {
 export function fieldId(form: string, field: string): string {
   return `form-${form}-${field}`;
 }
+
+/**
+ * True when any client-side draft value differs from its initial form state.
+ * This deliberately includes optional fields and checkbox selections so that
+ * no user-entered supply data can be lost without a leave warning (R25).
+ */
+export function hasUnsavedDraftChanges<T>(current: T, initial: T): boolean {
+  return JSON.stringify(current) !== JSON.stringify(initial);
+}
+
+/**
+ * Whether a client-side link needs the unsaved-draft confirmation. External
+ * navigation is intentionally left to the native `beforeunload` prompt.
+ */
+export function shouldConfirmDraftNavigation(
+  dirty: boolean,
+  currentHref: string,
+  nextHref: string,
+): boolean {
+  if (!dirty || nextHref.startsWith("#")) return false;
+
+  const current = new URL(currentHref);
+  const next = new URL(nextHref, current);
+  return (
+    current.origin === next.origin &&
+    (current.pathname !== next.pathname ||
+      current.search !== next.search ||
+      current.hash !== next.hash)
+  );
+}

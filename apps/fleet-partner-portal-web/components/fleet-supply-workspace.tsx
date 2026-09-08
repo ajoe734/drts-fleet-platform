@@ -38,6 +38,8 @@ import {
   isEditableStatus,
   DRAFT_GUARD_STRINGS,
   fieldId,
+  hasUnsavedDraftChanges,
+  shouldConfirmDraftNavigation,
 } from "@/lib/fleet-portal-supply";
 
 
@@ -48,6 +50,35 @@ type ApiEnvelope<T> = {
 
 type DriverDraftInput = Omit<DriverSupplyDraft, "submissionId">;
 type VehicleDraftInput = Omit<VehicleSupplyDraft, "submissionId">;
+
+const NEW_DRIVER_INITIAL_FORM: DriverDraftInput = {
+  name: "",
+  mobile: "",
+  professionalDriverLicenseNo: "",
+  professionalDriverLicenseExpiry: "",
+  taxiDriverRegistrationNo: "",
+  taxiDriverRegistrationArea: "",
+  taxiDriverRegistrationExpiry: "",
+  supportedServiceProductCodes: ["taxi_realtime"],
+  preferredVehicleSubmissionId: null,
+};
+
+const NEW_VEHICLE_INITIAL_FORM: VehicleDraftInput = {
+  plateNo: "",
+  licenseType: "taxi",
+  brand: "",
+  model: "",
+  modelYear: 2024,
+  seatCount: 5,
+  luggageCapacity: 2,
+  businessArea: "台北市",
+  supportedServiceProductCodes: ["taxi_realtime"],
+  airportTransferEligible: false,
+  fixedFareAllowed: false,
+  currentDriverSubmissionId: null,
+  doorCount: 4,
+  color: "",
+};
 
 const DRIVER_DOC_TYPES = [
   "professional_driver_license",
@@ -341,7 +372,8 @@ function FormField({
 
 /**
  * Fires the browser's native beforeunload warning (R25) while the form is
- * dirty, and exposes `confirmLeave()` for in-app navigation interception.
+ * dirty, intercepts same-tab in-app links (including the persistent shell
+ * navigation), and exposes `confirmLeave()` for programmatic navigation.
  *
  * @param dirty - whether the form has unsaved changes
  * @returns `confirmLeave` — call before a programmatic router.push(); returns
@@ -356,9 +388,45 @@ function useDraftGuard(dirty: boolean): { confirmLeave: () => boolean } {
       // shown to the user is browser-controlled; we set it for legacy support.
       e.returnValue = DRAFT_GUARD_STRINGS.beforeUnload;
     }
+
+    function handleDocumentClick(e: MouseEvent) {
+      if (
+        e.defaultPrevented ||
+        e.button !== 0 ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.shiftKey ||
+        e.altKey
+      ) {
+        return;
+      }
+
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest<HTMLAnchorElement>("a[href]");
+      if (
+        !anchor ||
+        anchor.target ||
+        anchor.hasAttribute("download") ||
+        anchor.getAttribute("href")?.startsWith("#") ||
+        !shouldConfirmDraftNavigation(dirty, window.location.href, anchor.href)
+      ) {
+        return;
+      }
+
+      if (!window.confirm(
+        `${DRAFT_GUARD_STRINGS.confirmLeaveTitle}\n\n${DRAFT_GUARD_STRINGS.confirmLeaveBody}`,
+      )) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+
     window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleDocumentClick, true);
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleDocumentClick, true);
     };
   }, [dirty]);
 
@@ -826,25 +894,12 @@ export function NewDriverSubmissionForm() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const [form, setForm] = useState<DriverDraftInput>({
-    name: "",
-    mobile: "",
-    professionalDriverLicenseNo: "",
-    professionalDriverLicenseExpiry: "",
-    taxiDriverRegistrationNo: "",
-    taxiDriverRegistrationArea: "",
-    taxiDriverRegistrationExpiry: "",
-    supportedServiceProductCodes: ["taxi_realtime"],
-    preferredVehicleSubmissionId: null,
-  });
+  const [form, setForm] = useState<DriverDraftInput>(NEW_DRIVER_INITIAL_FORM);
 
-  // Draft is "dirty" once the user has typed anything in a required field (R25).
+  // Every edited value is protected, including optional fields and product choices (R25).
   const dirty =
     !submitted &&
-    (form.name !== "" ||
-      form.mobile !== "" ||
-      form.professionalDriverLicenseNo !== "" ||
-      form.taxiDriverRegistrationNo !== "");
+    hasUnsavedDraftChanges(form, NEW_DRIVER_INITIAL_FORM);
 
   const { confirmLeave } = useDraftGuard(dirty);
 
@@ -916,27 +971,12 @@ export function NewVehicleSubmissionForm() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const [form, setForm] = useState<VehicleDraftInput>({
-    plateNo: "",
-    licenseType: "taxi",
-    brand: "",
-    model: "",
-    modelYear: 2024,
-    seatCount: 5,
-    luggageCapacity: 2,
-    businessArea: "台北市",
-    supportedServiceProductCodes: ["taxi_realtime"],
-    airportTransferEligible: false,
-    fixedFareAllowed: false,
-    currentDriverSubmissionId: null,
-    doorCount: 4,
-    color: "",
-  });
+  const [form, setForm] = useState<VehicleDraftInput>(NEW_VEHICLE_INITIAL_FORM);
 
-  // Draft is "dirty" once the user has typed anything in a key required field (R25).
+  // Every edited value is protected, including optional fields and product choices (R25).
   const dirty =
     !submitted &&
-    (form.plateNo !== "" || form.brand !== "" || form.model !== "");
+    hasUnsavedDraftChanges(form, NEW_VEHICLE_INITIAL_FORM);
 
   const { confirmLeave } = useDraftGuard(dirty);
 
@@ -1038,7 +1078,9 @@ function DraftFormFrame({
           </div>
         </CanvasCard>
         {error ? (
-          <CanvasBanner theme={theme} tone="danger" icon="warn" body={error} />
+          <div role="alert" aria-live="assertive">
+            <CanvasBanner theme={theme} tone="danger" icon="warn" body={error} />
+          </div>
         ) : null}
         <ActionButton
           theme={theme}
@@ -1193,12 +1235,15 @@ function DriverDraftFields({
           style={{
             fontSize: 11.5,
             fontWeight: 600,
-            color: theme.text,
+            color: "inherit",
             marginBottom: 5,
           }}
         >
           {t("supply.field.supportedProducts")}
           <span aria-hidden="true" style={{ color: theme.danger }}> *</span>
+          <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}>
+            *
+          </span>
         </div>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
@@ -1405,12 +1450,15 @@ function VehicleDraftFields({
           style={{
             fontSize: 11.5,
             fontWeight: 600,
-            color: theme.text,
+            color: "inherit",
             marginBottom: 5,
           }}
         >
           {t("supply.field.supportedProducts")}
           <span aria-hidden="true" style={{ color: theme.danger }}> *</span>
+          <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}>
+            *
+          </span>
         </div>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
