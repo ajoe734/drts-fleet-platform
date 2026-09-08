@@ -97,9 +97,9 @@ for (const role of roles) {
       ],
     ] as const) {
       it(`${name}: same-tenant amounts follow the signed role`, async () => {
-        boundary.cookie = signSessionRole(role, "ctbc");
+        boundary.cookie = signSessionRole(role, "acme");
         const html = renderToStaticMarkup(
-          await page({ bank: "ctbc", role, locale: "en" }),
+          await page({ bank: "acme", role, locale: "en" }),
         );
         if (role === "bank_ops_viewer") {
           expect(loadBankStatementsData).not.toHaveBeenCalled();
@@ -114,17 +114,17 @@ for (const role of roles) {
         }
       });
       it(`${name}: cross-tenant requests stop before reading financial data`, async () => {
-        boundary.cookie = signSessionRole(role, "ctbc");
-        await expect(page({ bank: "cathay", role })).rejects.toThrow(
+        boundary.cookie = signSessionRole(role, "acme");
+        await expect(page({ bank: "contoso", role })).rejects.toThrow(
           "NOT_FOUND",
         );
         expect(loadBankStatementsData).not.toHaveBeenCalled();
       });
     }
     it("users: cross-tenant directory requests stop before reading PII", async () => {
-      boundary.cookie = signSessionRole(role, "ctbc");
+      boundary.cookie = signSessionRole(role, "acme");
       await expect(
-        UsersPage({ searchParams: Promise.resolve({ bank: "cathay", role }) }),
+        UsersPage({ searchParams: Promise.resolve({ bank: "contoso", role }) }),
       ).rejects.toThrow("NOT_FOUND");
       expect(loadBankUsersData).not.toHaveBeenCalled();
     });
@@ -134,7 +134,7 @@ for (const role of roles) {
 for (const cookie of [undefined, "forged.cookie", "bank_program_admin"]) {
   it(`rejects privileged query without a verified session (${cookie})`, async () => {
     boundary.cookie = cookie;
-    const query = Promise.resolve({ bank: "ctbc", role: "bank_program_admin" });
+    const query = Promise.resolve({ bank: "acme", role: "bank_program_admin" });
     await expect(StatementsPage({ searchParams: query })).rejects.toThrow(
       "NOT_FOUND",
     );
@@ -153,11 +153,11 @@ for (const cookie of [undefined, "forged.cookie", "bank_program_admin"]) {
 }
 
 it("rejects role escalation before loading the directory", async () => {
-  boundary.cookie = signSessionRole("bank_ops_viewer", "ctbc");
+  boundary.cookie = signSessionRole("bank_ops_viewer", "acme");
   await expect(
     UsersPage({
       searchParams: Promise.resolve({
-        bank: "ctbc",
+        bank: "acme",
         role: "bank_program_admin",
       }),
     }),
@@ -166,10 +166,10 @@ it("rejects role escalation before loading the directory", async () => {
 });
 
 it("uses the signed tenant when the bank query is omitted and preserves authoritative email", async () => {
-  boundary.cookie = signSessionRole("bank_program_admin", "cathay");
+  boundary.cookie = signSessionRole("bank_program_admin", "contoso");
   const html = renderToStaticMarkup(await UsersPage({}));
   expect(loadBankUsersData).toHaveBeenCalledWith(
-    "tenant-cathay-001",
+    "tenant-contoso-001",
     "bank_program_admin",
   );
   expect(html).toContain("private@issuer.example");
