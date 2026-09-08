@@ -6,6 +6,22 @@ import {
 
 export const dynamic = "force-dynamic";
 
+function escapeCsvCell(val: unknown): string {
+  if (val === null || val === undefined) {
+    return "";
+  }
+  const str = String(val);
+  if (
+    str.includes(",") ||
+    str.includes('"') ||
+    str.includes("\n") ||
+    str.includes("\r")
+  ) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const exportType = searchParams.get("type");
@@ -24,49 +40,63 @@ export async function GET(request: NextRequest) {
         );
       }
       const csvRows = [
-        ["Metric", "Value", "Period", "Timestamp"].join(","),
+        ["Metric", "Value", "Period", "Timestamp"].map(escapeCsvCell).join(","),
         [
           "Active Drivers",
           dashboard.driverCount,
           dashboard.periodMonth,
           dashboard.dataTimestamp,
-        ].join(","),
+        ]
+          .map(escapeCsvCell)
+          .join(","),
         [
           "Online Drivers",
           dashboard.driverStatusSummary.online,
           dashboard.periodMonth,
           dashboard.dataTimestamp,
-        ].join(","),
+        ]
+          .map(escapeCsvCell)
+          .join(","),
         [
           "Offline Drivers",
           dashboard.driverStatusSummary.offline,
           dashboard.periodMonth,
           dashboard.dataTimestamp,
-        ].join(","),
+        ]
+          .map(escapeCsvCell)
+          .join(","),
         [
           "Dispatchable Drivers",
           dashboard.dispatchable,
           dashboard.periodMonth,
           dashboard.dataTimestamp,
-        ].join(","),
+        ]
+          .map(escapeCsvCell)
+          .join(","),
         [
           "Completed Trips",
           dashboard.completedTrips,
           dashboard.periodMonth,
           dashboard.dataTimestamp,
-        ].join(","),
+        ]
+          .map(escapeCsvCell)
+          .join(","),
         [
-          `"Fleet Share"`,
-          `"${dashboard.share}"`,
+          "Fleet Share",
+          dashboard.share,
           dashboard.periodMonth,
           dashboard.dataTimestamp,
-        ].join(","),
+        ]
+          .map(escapeCsvCell)
+          .join(","),
         [
-          `"Gross Revenue"`,
-          `"${dashboard.grossRevenue}"`,
+          "Gross Revenue",
+          dashboard.grossRevenue,
           dashboard.periodMonth,
           dashboard.dataTimestamp,
-        ].join(","),
+        ]
+          .map(escapeCsvCell)
+          .join(","),
       ];
 
       return new NextResponse(csvRows.join("\n"), {
@@ -127,20 +157,24 @@ export async function GET(request: NextRequest) {
         "Reimbursement",
         "Status",
         "CompletedAt",
-      ].join(","),
+      ]
+        .map(escapeCsvCell)
+        .join(","),
       ...filteredRows.map((t) =>
         [
           t.id,
           t.svc,
-          `"${(t.driver || "").replace(/"/g, '""')}"`,
-          `"${(t.tenant || "").replace(/"/g, '""')}"`,
-          `"${(t.pickup || "").replace(/"/g, '""')}"`,
-          `"${(t.fare || "").replace(/"/g, '""')}"`,
-          `"${(t.commission || "").replace(/"/g, '""')}"`,
-          `"${(t.reimbursement || "").replace(/"/g, '""')}"`,
+          t.driver ?? "",
+          t.tenant ?? "",
+          t.pickup ?? "",
+          t.fare ?? "",
+          t.commission ?? "",
+          t.reimbursement ?? "",
           t.status,
-          `"${t.date}"`,
-        ].join(","),
+          t.date,
+        ]
+          .map(escapeCsvCell)
+          .join(","),
       ),
     ];
 

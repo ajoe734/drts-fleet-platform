@@ -28,7 +28,9 @@ export default async function FleetDriversPage({
 
   const tabCounts = {
     all: rows.length,
-    available: rows.filter((r) => r.status === "available").length,
+    available: rows.filter(
+      (r) => r.dispatchEligible ?? (r.status === "available"),
+    ).length,
     missingDocs: rows.filter(
       (r) => r.docs !== "complete" || r.license !== "valid",
     ).length,
@@ -36,7 +38,10 @@ export default async function FleetDriversPage({
   };
 
   const filteredRows = rows.filter((r) => {
-    if (activeTabKey === "available" && r.status !== "available") {
+    if (
+      activeTabKey === "available" &&
+      !(r.dispatchEligible ?? (r.status === "available"))
+    ) {
       return false;
     }
     if (

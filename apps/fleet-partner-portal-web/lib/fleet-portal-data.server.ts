@@ -56,6 +56,7 @@ export type FleetDriver = {
   trips30: number;
   rating: number;
   svc: ServiceKey[];
+  dispatchEligible?: boolean;
 };
 
 export type FleetVehicle = {
@@ -362,6 +363,7 @@ function mapDriver(record: FleetPartnerPortalDriverRecord): FleetDriver {
     trips30: 0,
     rating: 0,
     svc: mapServiceBuckets(record.supportedServiceBuckets),
+    dispatchEligible: Boolean(record.dispatchEligible),
   };
 }
 
@@ -751,7 +753,7 @@ export async function loadDashboard(
     (d) => d.status === "offline",
   ).length;
   const dispatchableDriverCount = driversView.rows.filter(
-    (d) => d.status === "available",
+    (d) => d.dispatchEligible ?? (d.status === "available"),
   ).length;
   const completedTripsCount = tripsView.rows.filter(
     (t) => t.status === "completed",

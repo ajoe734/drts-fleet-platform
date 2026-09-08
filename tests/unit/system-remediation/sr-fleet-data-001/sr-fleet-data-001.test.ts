@@ -434,5 +434,83 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       expect(data.ok).toBe(false);
       expect(data.error.message).toBe("Fleet service down");
     });
+
+    it("overview export properly quotes grouped numbers containing commas to preserve column count", async () => {
+      mockDrivers.mockResolvedValue([]);
+      mockVehicles.mockResolvedValue([]);
+      mockTrips.mockResolvedValue([]);
+      mockDashboard.mockResolvedValue({
+        fleetPartnerId: "fp-test-001",
+        periodMonth: "2026-09",
+        activeDriverCount: 1250,
+        onlineDriverCount: 1100,
+        dispatchEligibleDriverCount: 1050,
+        totalVehicleCount: 500,
+        dispatchableVehicleCount: 480,
+        completedTripCount: 14280,
+        inFlightTripCount: 30,
+        proofPendingTripCount: 5,
+        pendingStatementCount: 1,
+        latestStatementPeriodMonth: "2026-09",
+        grossEarningAmount: { amountMinor: 64200000, currency: "TWD" },
+        shareAmount: { amountMinor: 12840000, currency: "TWD" },
+      });
+
+      const req = new NextRequest(
+        "http://localhost:3000/trips/export?type=summary&period=2026-09",
+      );
+      const res = await exportHandler(req);
+      expect(res.status).toBe(200);
+
+      const body = await res.text();
+      const lines = body.trim().split("\n");
+      // Header + 7 metric rows = 8 lines
+      expect(lines).toHaveLength(8);
+      for (const line of lines) {
+        // Validate CSV column count using standard CSV split
+        const parts = line.match(/(?:^|,)(?:"(?:[^"]|"")*"|[^,]*)/g);
+        expect(parts).toHaveLength(4);
+      }
+      expect(body).toContain('"1,250"');
+      expect(body).toContain('"14,280"');
+      expect(body).toContain('"NT$ 642,000"');
+    });
+
+    it("drivers loader maps dispatchEligible and separates available status from eligibility", async () => {
+      mockDrivers.mockResolvedValue([
+        {
+          driverId: "drv-eligible",
+          name: "可接單司機",
+          currentVehiclePlateNo: "ABC-1111",
+          workState: "available",
+          licensesValid: true,
+          supportedServiceBuckets: ["standard_taxi"],
+          dispatchEligible: true,
+        },
+        {
+          driverId: "drv-ineligible-status-available",
+          name: "暫無接單資格司機",
+          currentVehiclePlateNo: "XYZ-2222",
+          workState: "available",
+          licensesValid: false,
+          supportedServiceBuckets: ["standard_taxi"],
+          dispatchEligible: false,
+        },
+      ]);
+
+      const driversView = await loadDrivers();
+      expect(driversView.rows).toHaveLength(2);
+      expect(driversView.rows[0].dispatchEligible).toBe(true);
+      expect(driversView.rows[1].dispatchEligible).toBe(false);
+
+      // Verify dashboard uses dispatchEligible
+      mockVehicles.mockResolvedValue([]);
+      mockTrips.mockResolvedValue([]);
+      mockDashboard.mockResolvedValue(null);
+
+      const dashboard = await loadDashboard("2026-09");
+      // Even though 2 drivers have workState 'available', only 1 has dispatchEligible: true
+      expect(dashboard.dispatchable).toBe("1");
+    });
   });
 });
