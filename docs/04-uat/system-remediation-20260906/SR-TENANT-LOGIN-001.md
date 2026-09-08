@@ -266,3 +266,28 @@ No files outside this task's `write_scopes` were modified. PR #1674
 (`claude/sr-tenant-login-001`) is superseded by this branch's candidate and
 should be closed once this candidate is reviewed/merged, to avoid two open
 PRs for the same task.
+
+## 7. 2026-09-08 recovery replay on current `origin/dev`
+
+The preserved Claude2 candidate was replayed onto current `origin/dev` at
+`70355aba97c23dd1cd592b71f1d3dfe6315d91ff` on branch
+`codex/sr-tenant-login-001`. The candidate SHA is locked by the subsequent
+Supervisor handoff record. This replay intentionally retains the real route
+handler regression suite and does not alter the already-fixed production auth
+implementation.
+
+Commands run in the isolated Codex task worktree, all exit 0:
+
+```
+pnpm --filter @drts/tenant-console-web typecheck
+pnpm exec vitest run tests/unit/system-remediation/sr-tenant-login-001/
+# Test Files  1 passed (1); Tests  6 passed (6)
+git diff --check
+python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD
+# [consistency] OK
+```
+
+No live Cloud Run, real IdP, or formal IAP run was performed in this VM. The
+test suite exercises the actual BFF route and auth/session code, with only its
+upstream API HTTP responses mocked; it does not use a fake login header or
+claim external acceptance.
