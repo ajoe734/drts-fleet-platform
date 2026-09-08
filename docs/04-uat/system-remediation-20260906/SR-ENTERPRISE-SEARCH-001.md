@@ -1,5 +1,23 @@
 # SR-ENTERPRISE-SEARCH-001 — 企業歷史查詢條件與結果一致
 
+## 2026-09-08 17:16 UTC 再派工核實（最新）
+
+- 本次 fetched base：`e2df37f821ce76d8a3639ceaac6d253299c0a31c`。
+- `git rebase origin/dev` exit 0；受測 SHA：`169cac6b0c68ddd9067ac481301ea1f3e15606de`。
+- 為保留已發布 ancestry 並允許普通 push，執行 `git merge --no-edit origin/codex/sr-enterprise-search-001`，exit 0；merge 前後 tree 無差異。
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`：exit 0。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/`：exit 0；1 file、50 tests passed，17:16:13 UTC，791ms。
+- `git diff --check`：exit 0。
+
+PR #1792 的 `c52f580ff0aec310324639de7134a7ffa9421c0c` 只新增
+`support/unblock/SR-ENTERPRISE-SEARCH-001/SR-ENTERPRISE-SEARCH-001-UNBLOCK-HISTORY-REPAIR.md`。
+該報告明定 parent remains blocked on backend capability planning；它沒有修改 API，也沒有授權共用 scope。
+本次核實 controller 第 459 行、service 第 2048 行及 enterprise API wrapper 第 59 行，仍與下方缺口相同：不接收 query、固定 page 1，全量陣列只在前端篩選。
+
+因此本次只有證據更新，沒有修改 UI 或新增視覺設計，沒有 handoff candidate。
+精確保存進度的 commit SHA 由 task board 記錄。未執行 live API、瀏覽器、真機或部署；沒有實際 query／response total／資源 ID，synthetic unit IDs 不算實際資源。
+請 supervisor 指定或登錄真正的後端 filter producer，補入 parent depends_on，並授權所需 contract/client/wrapper scope；歷史修復完成不能解除此能力阻擋。
+
 ## 2026-09-08 Codex 接手核實
 
 - Owner: Codex；Reviewer: Gemini。
