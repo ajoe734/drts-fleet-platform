@@ -116,3 +116,17 @@ No new product changes were made. Resource IDs remain the test-only IDs document
 - `git diff --check origin/dev...HEAD`: exit 0. No application changes made. This evidence-only revision is progress, not a handoff candidate; candidate SHA remains unset.
 
 Supervisor action required: authorize training/cases pages, shared `portal-tables.tsx` and `translations.ts`, record acyclic writer ordering (preserve CASE after DATA), and settle the approved detail surface/resource visibility. Do not redispatch solely on history-helper completion. Resource IDs remain mocked `fp-test-001`, `drv-01`/`drv-02`, `ord-001`/`ord-002`/`ord-003` and the CSV edge IDs above. No live API, browser, physical-device, design, review, same-candidate CI, merge or deployment verification is claimed.
+
+## Resumed dispatch — 2026-09-08 22:43 UTC
+
+- Fetched base: `eb684f176b1d3b46553a0f6f0556c79452fbac3c`; starting published progress: `b3334b73666104676ced07270e750decd2047a70`. Candidate SHA remains unset: implementation is blocked, not ready for handoff.
+- `git fetch origin`: exit 0. Required `git rebase origin/dev` stopped on duplicate historical commit `e2ecab6ef` (exit 1); `git rebase --abort`: exit 0. After reading the history helper's explicit non-destructive continuation guidance, `git merge --no-edit origin/dev` succeeded (exit 0), retaining published ancestry at tested progress SHA `67050cab327aeb8abe4cd0bf69ed547483b8fe0f`. No reset, stash or force push was used.
+- `git diff --exit-code b3334b736 HEAD -- apps/fleet-partner-portal-web tests/unit/system-remediation/sr-fleet-data-001 docs/04-uat/system-remediation-20260906/SR-FLEET-DATA-001.md`: exit 0. The integration introduced no task application/test/evidence changes. The final branch diff against origin/dev remains within the original write scopes.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-data-001/`: exit 0; 19 tests / 1 file, start 22:43:02 UTC, duration 1.19 seconds.
+- `pnpm --filter @drts/fleet-partner-portal-web typecheck`: exit 0; Next route generation and TypeScript completed.
+- `git diff --check origin/dev...HEAD`: exit 0 before this evidence update; final evidence whitespace check is repeated before commit.
+- Current branch and fetched origin/dev still render `data.fixtureNotice` in training/cases pages (33/45) and success badges for `complete` in shared tables (104/118). The branch loader still assigns training completion without regulatory evidence (362). Trips still contains only list/export routes.
+
+The current task slice still grants only seven original scopes and no writer dependencies. History-helper completion has not resolved the scope/ordering/detail decision; the helper explicitly says the parent remains blocked on that decision. Supervisor must authorize the four paths listed above, establish acyclic shared-writer ordering, and settle detail resource visibility before redispatch. Existing in-scope fixes are preserved and reverified; no new product changes were made.
+
+Resource IDs are the same mocked partner/driver/order and CSV boundary IDs listed above. No live resources were queried. VM restrictions prohibit starting product or browser test servers; browser, live API authorization, physical-device and design acceptance remain unperformed. No same-candidate review, CI, merge, deployment or completion is claimed. This evidence revision is committed and normally pushed as progress, then the unresolved scope gate is recorded through the canonical status command.
