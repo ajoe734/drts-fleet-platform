@@ -756,8 +756,10 @@ describe.each(["speech", "dtmf"] as const)(
 
     it("does not compare historical epoch sequences against the current cutoff", async () => {
       const h = await harness(method);
+      const historicalEvent = h.events[0];
+      if (!historicalEvent) throw new Error("Missing initial control event");
       h.events.unshift({
-        ...h.events[0],
+        ...historicalEvent,
         eventId: randomUUID(),
         mediaEpoch: 0,
         sequence: 99,
