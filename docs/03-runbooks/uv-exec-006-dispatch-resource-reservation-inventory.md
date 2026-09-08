@@ -425,3 +425,53 @@ Final owner checks for this follow-up:
 Commands use the same isolated database and API working-directory convention
 above. This is owner verification only; candidate review, CI, merge and external
 acceptance remain governed by the candidate lifecycle.
+
+## Fresh dev history recovery (2026-09-08 20:07 UTC)
+
+Supervisor assigned Codex2 as fallback owner and Codex as reviewer. Recovery
+uses the isolated `codex2/uv-exec-006-history-recovered` branch and replacement
+[PR #1822](https://github.com/ajoe734/drts-fleet-platform/pull/1822).
+Original PR #1721 and its published branch are preserved.
+
+Following the accepted history helper, the binary net patch from the merge
+base to pinned source `257784d1528707b5880685bbefe13db4efebb7c8` applied cleanly
+to fetched dev `bd224425b`. Its staged tree and independent `git merge-tree`
+both yielded `ca0c54dfd9a06d36ba3c05da770c1a0abafaca54`; anchor `80f426afc`
+was pushed normally. PR #1721 had subsequently advanced to
+`4c56f1f7cc2bf79f688f5105aa0fb681ee5b07d1`, so its seven task-owned follow-up
+files (atomic redispatch, cancellation/reporting fixes and evidence) were
+also recovered with a scoped three-way patch and pushed as `b34e15e06`.
+No duplicate commit history was replayed. Current dev's voice recording
+callback guards remain intact. The final product delta spans 17 task-owned
+files; reporting scope is justified by the cancellation regression above.
+
+Fresh owner verification used independently installed frozen-lockfile
+dependencies and a newly created local PostgreSQL database,
+`uv006_history_recovered_20260908`, with all migrations through V0091 applied
+successfully using `operations/database/db-apply.sh`:
+
+- `pnpm --filter @drts/contracts build`, control-plane-auth build, and
+  `pnpm --filter @drts/api typecheck`: passed. The initial shared dependency
+  links lacked Node types; isolated installation resolved that prerequisite.
+- From `apps/api`, Vitest on `tests/integration/uv-exec-006.integration.test.ts`
+  and `tests/integration/stage1-uat-pg-gate.integration.test.ts`, with
+  `--no-file-parallelism --maxConcurrency=1` and DATABASE_URL set to the new
+  database: **64/64 passed** (61 reservation cases plus three stage1 cases).
+  This exercises mixed-entry PostgreSQL races, legacy writer fences,
+  assignment/version fences, unknown-task retention, and atomic redispatch /
+  timeout / cancellation rollback and interleavings.
+- API owned-mobility service/repository/controller/compliance-gates,
+  multi-taxi service/controller, reporting service, and daily-dispatch-records
+  integration suites: **180/180 passed** across eight files.
+- Root `tests/unit/owned-mobility.test.ts`: **39/39 passed**.
+- ESLint on all five changed API source files and `git diff --check`: passed.
+
+Writer search still identifies OwnedMobilityRepository as the sole assignment
+table writer, OwnedMobilityService as its caller (including a table-name
+comment), and ReportingRepository as a reader. The task brief's root-level
+reservation test path is stale: use the API-relative path above.
+
+These results are fresh owner evidence, not independent review or deployment
+acceptance. The final commit is handed off by exact SHA through ai-status.sh;
+same-SHA reviewer approval, CI, merge and required acceptance remain lifecycle
+gates. No `done`, force push, stash, PR closure or merge is performed here.
