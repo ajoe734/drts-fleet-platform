@@ -1,5 +1,18 @@
 # SR-OPS-SHELL-001 — 本次恢復與阻塞證據
 
+## 2026-09-08 16:07 UTC history-repair 重派核對
+
+- Fresh base `origin/dev`：`c07d24e021aea847a988646427cdc534ccf4e496`；恢復前 task tip：`ffc7f4231`；受測程式 SHA：`44b40126bad2d3edba469bfa5ee586c5462a8bdd`。尚無 handoff candidate；本次 evidence anchor 不代表驗收完成。
+- `git fetch origin` exit 0；`git rebase origin/dev` 及中途 continue 因重複歷史的本文件 add/add、content conflict 返回 exit 1；逐次保留較新已重播證據，最後 `GIT_EDITOR=true git rebase --continue` exit 0。只有本 evidence 文件衝突，沒有產品衝突。
+- `git merge --no-edit origin/codex2/sr-ops-shell-001` exit 0；`git merge-base --is-ancestor ffc7f4231 HEAD` exit 0，保留已發布歷史以供普通 push。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/` exit 0：1 file、13 tests passed，354ms。
+- `pnpm --filter @drts/ops-console-web typecheck` exit 0：`next typegen && tsc --noEmit` 成功。
+- `git diff --check` exit 0；`git diff origin/dev HEAD -- apps/ops-console-web/app/dispatch/page.tsx apps/platform-admin-web/app/audit/page.tsx` exit 0、無差異。
+
+最新 base 仍有 dispatch 第1230行 `/platform-admin` fallback、第4520行無 context 的 `/audit` CTA，以及 audit receiver 第164行無參數 `listAuditLogs()`。本次是原始碼核對，沒有宣稱 live popup 重現。已重讀 execution_ref、R18/R19、C048、task spec 與兩份 unblock record。history repair 明文保留產品阻塞；task spec 要求 supervisor 先授權 sender scope、重疊 writer 相依及 receiver resource-context 契約。目前 machine slice 的 write_scopes 與 depends_on 均未補入這些前置，因此不能交接為完整實作。
+
+本次未改 UI，保留既有修補。未執行瀏覽器 1440/390px CTA、focus/reload、audit popup、payments context 或真機/live 驗收；沒有 live 資源 ID、沒有建立業務資源。單元測試 AUD-* 是測試輸入。請 supervisor 處理既有 `Q-SR-OPS-SHELL-001` planning 前置；不要再以僅修復歷史為由清除產品 blocker。
+
 ## 2026-09-08 16:03 UTC 再派工重驗
 
 - Fresh `origin/dev` base：`3fb9b06461dc2bf92043144974eedbbc9f69d0f3`；恢復前本地／遠端 task tip：`d1034dd0d57225b1fe3ccebcc7f9de18b1b754d2`。
