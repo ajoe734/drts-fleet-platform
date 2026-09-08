@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import {
   fieldId,
   hasUnsavedDraftChanges,
+  shouldConfirmDraftNavigation,
   DRAFT_GUARD_STRINGS,
   isEditableStatus,
   formatSupplySubject,
@@ -95,6 +96,33 @@ describe("SR-FLEET-FORM-001 / DRAFT_GUARD_STRINGS (R25 unsaved-draft guard)", ()
     expect(DRAFT_GUARD_STRINGS.confirmLeaveOk).not.toBe(
       DRAFT_GUARD_STRINGS.confirmLeaveCancel,
     );
+  });
+});
+
+describe("SR-FLEET-FORM-001 / in-app draft navigation guard (R25)", () => {
+  const current = "https://fleet.example.test/supply/drivers/new";
+
+  it("confirms a dirty draft before a same-origin shell navigation", () => {
+    expect(
+      shouldConfirmDraftNavigation(true, current, "/supply"),
+    ).toBe(true);
+  });
+
+  it("does not intercept same-document anchors or an unchanged route", () => {
+    expect(shouldConfirmDraftNavigation(true, current, current)).toBe(false);
+    expect(
+      shouldConfirmDraftNavigation(true, current, "#field-name"),
+    ).toBe(false);
+  });
+
+  it("leaves external navigation to the native beforeunload guard", () => {
+    expect(
+      shouldConfirmDraftNavigation(true, current, "https://other.example.test/"),
+    ).toBe(false);
+  });
+
+  it("does not show an in-app warning for a clean form", () => {
+    expect(shouldConfirmDraftNavigation(false, current, "/supply")).toBe(false);
   });
 });
 

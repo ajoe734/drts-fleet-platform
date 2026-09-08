@@ -40,6 +40,7 @@ import {
   DRAFT_GUARD_STRINGS,
   fieldId,
   hasUnsavedDraftChanges,
+  shouldConfirmDraftNavigation,
 } from "@/lib/fleet-portal-supply";
 
 
@@ -377,7 +378,8 @@ function FormField({
 
 /**
  * Fires the browser's native beforeunload warning (R25) while the form is
- * dirty, and exposes `confirmLeave()` for in-app navigation interception.
+ * dirty, intercepts same-tab in-app links (including the persistent shell
+ * navigation), and exposes `confirmLeave()` for programmatic navigation.
  *
  * @param dirty - whether the form has unsaved changes
  * @returns `confirmLeave` — call before a programmatic router.push(); returns
@@ -392,9 +394,45 @@ function useDraftGuard(dirty: boolean): { confirmLeave: () => boolean } {
       // shown to the user is browser-controlled; we set it for legacy support.
       e.returnValue = DRAFT_GUARD_STRINGS.beforeUnload;
     }
+
+    function handleDocumentClick(e: MouseEvent) {
+      if (
+        e.defaultPrevented ||
+        e.button !== 0 ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.shiftKey ||
+        e.altKey
+      ) {
+        return;
+      }
+
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest<HTMLAnchorElement>("a[href]");
+      if (
+        !anchor ||
+        anchor.target ||
+        anchor.hasAttribute("download") ||
+        anchor.getAttribute("href")?.startsWith("#") ||
+        !shouldConfirmDraftNavigation(dirty, window.location.href, anchor.href)
+      ) {
+        return;
+      }
+
+      if (!window.confirm(
+        `${DRAFT_GUARD_STRINGS.confirmLeaveTitle}\n\n${DRAFT_GUARD_STRINGS.confirmLeaveBody}`,
+      )) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+
     window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleDocumentClick, true);
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleDocumentClick, true);
     };
   }, [dirty]);
 
@@ -1046,7 +1084,9 @@ function DraftFormFrame({
           </div>
         </CanvasCard>
         {error ? (
-          <CanvasBanner theme={theme} tone="danger" icon="warn" body={error} />
+          <div role="alert" aria-live="assertive">
+            <CanvasBanner theme={theme} tone="danger" icon="warn" body={error} />
+          </div>
         ) : null}
         <ActionButton
           theme={theme}

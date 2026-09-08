@@ -3,8 +3,8 @@
 | 欄位              | 內容                                                 |
 | ----------------- | ---------------------------------------------------- |
 | Phase             | system-remediation-20260906                          |
-| Owner             | Codex2                                              |
-| Reviewer          | Codex                                               |
+| Owner             | Codex                                               |
+| Reviewer          | Codex2                                              |
 | Base SHA          | `70355aba97c23dd1cd592b71f1d3dfe6315d91ff` (fresh `origin/dev`, 2026-09-08) |
 | Gap IDs           | R23, R25                                             |
 | Capability IDs    | C070, C120                                           |
@@ -47,6 +47,7 @@
 - `dirty` state 以 `hasUnsavedDraftChanges()` 比對完整初始表單；所有輸入（含選項、日期和 checkbox）都會觸發保護，而非僅部分識別欄位。
   - 成功 POST 後先設 `submitted=true`（移除 beforeunload），再 `router.push()`，確保成功送出不觸發警告。
   - Header 的「返回」按鈕改為 `<button onClick={() => { if (confirmLeave()) router.back(); }}>` — 空欄時直接返回，有內容時先確認。
+  - 以 document capture-phase click handler 攔截同站、同 tab 的連結導覽（包括 persistent shell 側欄），避免使用者可透過非頁首連結繞過確認；外站導覽仍由 native `beforeunload` 保護。
 - `SupplySubmissionDetailView` 中的 "Save draft" 動作不受影響（已有 server-side 持久化，不需要客戶端 guard）。
 
 **未實作（限制說明）：**
@@ -59,9 +60,11 @@
 | diff-check  | `git diff --check`                                                                                        | 0         |
 | typecheck   | `pnpm --filter @drts/fleet-partner-portal-web typecheck`                                                  | 0         |
 | unit tests  | `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-form-001/`                                   | 0         |
-| test output | `Test Files 1 passed (1) · Tests 26 passed (26)` (2026-09-08T11:08:24Z)                                 | —         |
+| test output | `Test Files 1 passed (1) · Tests 30 passed (30)` (2026-09-08T11:15:04Z)                                 | —         |
 
 Base SHA：`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`。前一輪 `b32ab8bad`／`37e898923` 僅為歷史觀察與存活分支來源；本輪已將實作 rebase 至此 fresh base 後重跑上述指令。Candidate SHA 由本輪普通 push 後的 `ai-status.sh handoff` 以 exact `HEAD` 寫入 machine truth。
+
+Resource ID：無。此變更僅驗證 client-side 表單互動，未呼叫建立供給送件的 API，因此沒有聲稱或以 fixture 代替 live submission resource；實際瀏覽器／真機驗收仍列為未完成。
 
 ## 修改檔案
 
@@ -69,7 +72,7 @@ Base SHA：`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`。前一輪 `b32ab8bad`／
 | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `apps/fleet-partner-portal-web/lib/fleet-portal-supply.ts`                              | 新增 `fieldId()`、`DRAFT_GUARD_STRINGS` + 全欄位草稿差異判定 helper |
 | `apps/fleet-partner-portal-web/components/fleet-supply-workspace.tsx`                   | 新增 `FormField` + `useDraftGuard`；改 `DriverDraftFields` / `VehicleDraftFields` / 上傳卡 / 兩個 New*Form；加 `inputMode`/`autoComplete`/`outlineOffset` |
-| `tests/unit/system-remediation/sr-fleet-form-001/sr-fleet-form-001.test.ts`             | 新增 26 個 unit test（fieldId, DRAFT_GUARD_STRINGS, isEditableStatus, formatSupplySubject, dirty invariants） |
+| `tests/unit/system-remediation/sr-fleet-form-001/sr-fleet-form-001.test.ts`             | 30 個 unit test（fieldId, DRAFT_GUARD_STRINGS, in-app navigation guard, isEditableStatus, formatSupplySubject, dirty invariants） |
 
 ## 未完成 / 需要外部驗收的項目
 
