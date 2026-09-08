@@ -1,5 +1,17 @@
 # SR-ENTERPRISE-SEARCH-001 — 企業歷史查詢條件與結果一致
 
+## 2026-09-08 21:19 UTC dispatch 核實（最新，取代先前成功驗證推論）
+
+- Owner Codex；Reviewer Codex2。Fetched origin/dev：`e97653b7ffb962a6c4d688e8706711d860fa3604`；工作分支受測 HEAD：`7e2edeeccb9eaeddc2f2bed9b6435955835eebee`。無 handoff candidate。
+- `git fetch origin` exit 0；`git rebase origin/dev` exit 1，重播歷史 `903969279` 時 page、test、evidence 衝突；`git rebase --abort` exit 0，保留原有已發布分支，未強推或回退 trunk。
+- 直接 `git show origin/dev:apps/api/src/modules/owned-mobility/owned-mobility.controller.ts` 核對 GET tenant/bookings 仍只接 headers，沒有 query。相同方式讀 service：`listTenantBookings(tenantId)` 只按 tenant 過濾，pagination 固定 page 1、pageSize/totalItems 為 items.length。讀 `packages/api-client/src/index.ts`：`listTenantBookings()` 仍無參數；enterprise wrapper 亦無參數。上述讀取命令 exit 0。
+- `ai-status.sh show SR-BOOKING-VERIFY` exit 1：Task not found。此 task spec 指定的後端 producer 尚未能解析；需 supervisor 登錄／指定 producer、補依賴及 contract/client/wrapper scope 才能接線。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/` exit 1：Cannot find package react，1 failed suite、0 tests；另有 vitest/config unresolved warning。
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck` exit 2：TS2688 Cannot find type definition file vitest/globals。這次 worker 的依賴環境不能重現前次通過結果。
+- `git diff --check` exit 0。此次僅更新證據，不改 UI。未執行 live API／瀏覽器／真機／部署；沒有實際 query、response total 或資源 ID。現有 synthetic unit data 不作 live 成功證據。
+
+阻擋：後端 filter 能力仍缺、指定 producer 不存在，且目前 scope 不允許修改 API/client。歷史 rebase 衝突與本機依賴缺失也需在候選驗證前解決。本次 anchor 普通 push 後以 blocker 落盤，不 handoff、不 done。
+
 ## 2026-09-08 17:16 UTC 再派工核實（最新）
 
 - 本次 fetched base：`e2df37f821ce76d8a3639ceaac6d253299c0a31c`。
