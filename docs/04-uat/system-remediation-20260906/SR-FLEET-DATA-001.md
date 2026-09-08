@@ -1,5 +1,17 @@
 # Remediation Evidence: SR-FLEET-DATA-001
 
+## 2026-09-08 18:44 UTC dispatch 回歸與仍未滿足的 resume gate
+
+- 實測 branch `codex2/sr-fleet-data-001` / HEAD `09ea66eceb69e8e7c783bd22472b521f5d47be04`；`git fetch origin` exit 0，當前 base `origin/dev=d4f54ef94e059a981bf2be1f7b944e815870e117`。本節後續文件 anchor 不是 implementation candidate，未 handoff。
+- 重新讀取 current-release task slice 並以 `AI_NAME=Codex2 .../ai-status.sh start SR-FLEET-DATA-001` 落盤（exit 0）：write_scopes 仍為原七項，沒有 `lib/translations.ts`，depends_on 仍空。History helper 的 done／merge `8de85170b07ab7eb3d773e0845abebf12babc7e0` 不授予 scope；其 artifact 明確要求 supervisor 先決定 scope、ordering、detail。
+- 分支核對：`origin/codex/sr-fleet-data-001=70a53b5e0ad12b0608d60371d4730f0fc4f10a87`。`git diff --numstat HEAD origin/codex/sr-fleet-data-001 -- <task paths>` exit 0：drivers +37/-49、trip export +20/-62、trips page +36/-41、loader +60/-375、task tests +73/-705。兩條分支並非同一實作；不可把 helper 對 #1716 的 history 證據當作指定 Codex2 分支的修復或直接覆蓋。
+- `git rebase origin/dev` exit 1：重播 `d5e6e6196` 時 drivers、vehicles、trips page/export、loader、tests、evidence 七檔衝突。`git rebase --abort` exit 0，保留原發布歷史。沒有 reset、stash 或 force push。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-data-001/` exit 0：1 file / 31 tests passed，643ms。Mock 資源 `fp-test-001`、`ord-001`、`ord-002`、`ord-003`；不代表 live resource 驗收。
+- `pnpm --filter @drts/fleet-partner-portal-web typecheck` exit 0：Next route typegen 與 tsc 通過。
+- 單獨執行 `pnpm run i18n:guard` exit 1：519 files / 55 exempted，drivers/page.tsx:154、167 兩項 locale-ternary-copy，要求移至 translations.ts。fresh origin/dev 的 translations 也未找到對應未串接文案。`git diff --check` exit 0。
+- **仍需 supervisor 落盤**：核定兩條 parent 分支接續方式並保留既有工作；授權必要的 translations/shared scope 與無環 writer ordering；明定 detail route/resource visibility。這些 gate 尚未由 helper 合併解決，請勿只依 helper done 再次將本任務設為 ready。
+- 本輪只更新本 evidence 文件，未改 UI 或越界檔案；未做 browser、live API、真機、部署或同 candidate CI/merge。應維持 blocked，待上述機器決策完整後再整合與交接。
+
 ## 2026-09-08 resume gate 再核對（本輪最新證據）
 
 - 指定 branch `codex2/sr-fleet-data-001`，受測 HEAD / remote HEAD 均為 `e4b54283b2985e7015a138ec65f61a20abffc3ab`；fresh `origin/dev` base 為 `318f5065433ff07fba2ddf242cf1c5aef5fb1cae`。本輪沒有完成 candidate，不沿用 machine slice 的 Gemini candidate 作驗收。
