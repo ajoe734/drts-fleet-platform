@@ -2030,11 +2030,12 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       const readState = async () =>
         (
           await database.query(
-            `SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_driver_tasks WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_assignments WHERE order_id = $1`,
+            `SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_driver_tasks WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_assignments WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_attempts WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_trace_logs WHERE order_id = $1`,
             [order.orderId],
           )
         ).rows;
       const before = await readState();
+      const cachedOrder = structuredClone(service.getOrder(order.orderId));
       const cachedTask = service.getDriverTask(assignment.taskId);
       let released!: () => void;
       const atRelease = new Promise<void>((resolve) => {
@@ -2084,6 +2085,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
           await expect(timeout).rejects.toThrow("timeout release fault");
           expect(await readState()).toEqual(before);
           expect(service.getDriverTask(assignment.taskId)).toEqual(cachedTask);
+          expect(service.getOrder(order.orderId)).toEqual(cachedOrder);
           expect(
             await readActiveReservations(database, "driver", driverId),
           ).toHaveLength(1);

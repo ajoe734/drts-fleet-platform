@@ -378,3 +378,36 @@ The required reservation command is run from `apps/api`, with DATABASE_URL
 pointing to the isolated migrated database. The other targeted checks use the
 same Vitest commands and paths described above. These are owner verification
 results; fresh same-candidate review, CI, merge and acceptance are still required.
+
+## 2026-09-08 redispatch cancellation review follow-up
+
+Owner: Codex, assigned by supervisor fallback; reviewer: Codex2. This retains
+rather than changes the stated agy/Claude owner preference.
+
+Review of candidate `9c400939c393d65147aa211401298bed146b73a9` found a commit gap:
+redispatch released the old offer, then separately persisted a cached order and
+created the next job. A different instance could cancel in that gap and have
+its durable cancellation overwritten.
+
+The durable redispatch path now shares cancellation's ordered assignment,
+task, open-job, and order locks. It revalidates authoritative order state and
+assignment version, closes the old assignment/task and releases their capacity,
+closes old jobs, and writes the next job, attempt, order and trace in the same
+transaction. The workflow loader also fences open-job discovery under the order
+lock. Dispatch preparation is separate from cache updates, audit and events;
+redispatch applies those effects only after commit and performs no subsequent
+workflow upsert. Timeout drains its own preceding asynchronous writes before
+using the shared discovery fence, as cancellation and redispatch already do.
+
+PostgreSQL regression barriers cover both a concurrent cancellation during the
+uncommitted release and cancellation after commit but before service
+continuation. In the latter case cancellation completes before redispatch is
+allowed to resume: the durable order remains cancelled, all jobs are closed,
+and another redispatch from the stale instance is rejected. Fault injection
+after resource release verifies rollback of order, assignment/task, jobs,
+attempts, traces and both reservations, with unchanged cached order/task.
+
+Branch synchronization: rebasing onto updated dev attempted to replay already
+integrated historical commits and conflicted. The rebase was aborted, then dev
+was merged without conflicts, preserving the existing published branch and
+normal non-force pushes.

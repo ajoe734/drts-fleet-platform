@@ -1,4 +1,3 @@
-import { ApiRequestError } from "../../common/api-envelope";
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Logger, Optional } from "@nestjs/common";
@@ -16,6 +15,7 @@ import type {
   PassengerDispatchDisclosureSnapshot,
 } from "@drts/contracts";
 
+import { ApiRequestError } from "../../common/api-envelope";
 import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {

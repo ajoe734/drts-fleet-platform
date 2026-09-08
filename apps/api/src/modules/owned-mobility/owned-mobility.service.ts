@@ -8004,6 +8004,9 @@ export class OwnedMobilityService
     requestId?: string,
     options?: { targetAssignmentId?: string },
   ) {
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      await Promise.all([...this.pendingWorkflowWrites]);
+    }
     const afterCommit: (() => void)[] = [];
     const result = this.ownedMobilityRepository?.isEnabled()
       ? await this.ownedMobilityRepository.withTransaction((tx) =>
