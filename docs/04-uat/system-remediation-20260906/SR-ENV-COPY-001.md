@@ -1,5 +1,17 @@
 # SR-ENV-COPY-001 — partial implementation and scope blocker
 
+## Follow-up dispatch, 2026-09-08 15:39 UTC — recovery routing missing
+
+- Fresh fetched `origin/dev`: `7d1272fc85a7f4d2a20f4ccd2d01716e873cca5e`; tested task implementation: `3a1024973d86fe0bee5e1d5879bcdeca7edf14d3`. No acceptance candidate or handoff. This evidence-only anchor SHA is recorded in machine truth after ordinary push.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1, duplicate implementation commit `13bce75ab` produced add/add conflicts in the evidence, resolver and scoped test. `git rebase --abort`: exit 0; restored original clean branch, without discarding task work.
+- `gh pr view 1770 --json state,headRefOid,mergeCommit,url`: exit 0; MERGED, head `f0badf6eb738a2b3b931c63764a17b9e195c484d`, merge `52e8096e4441386901e57415ba06f6a2aabe4d0e`, resource https://github.com/ajoe734/drts-fleet-platform/pull/1770 . This delivers a recovery document, not the parent product fix.
+- Read the merged `support/unblock/SR-ENV-COPY-001/SR-ENV-COPY-001-UNBLOCK-HISTORY-REPAIR.md` from origin/dev. It requires supervisor routing to `codex/sr-env-copy-001-recovered-20260908` before selectively porting ten authorized files; preserve old refs and omit the legacy out-of-scope test. Current dispatch still mandates the old branch/worktree. No replacement routing or expanded runtime scopes/dependencies are recorded in the task slice.
+- Read-only render scan reconfirms fleet shell line 36 hardcodes production and bank navigation line 8 hardcodes preview. Existing admin/tenant/ops shell wiring, the legacy test scope conflict, and remaining technical copy are unresolved. No product changes made in this dispatch.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/sr-env-copy-001.test.ts`: exit 0, 7 passed.
+- `pnpm --filter @drts/ui-web exec vitest run tests/unit/environment-badge.test.ts`: exit 1, 5 passed / 1 failed; line 32 expects production for NODE_ENV alone while resolver correctly returns unknown.
+- Six app typechecks were not rerun for this evidence-only change. No browser/live/device, new CI, review, deployment or business-resource verification performed. Historical results do not transfer to a new candidate.
+- Required supervisor action: dispatch the documented replacement branch/worktree and assign runtime wiring scopes with dependencies. The helper's merged status does not satisfy these prerequisites; parent remains blocked and must not enter completion review.
+
 Owner: Codex. Reviewer: Codex2. Updated: 2026-09-08.
 
 ## Reproduction and commit evidence
