@@ -11,7 +11,7 @@ const React = requireApp("react");
 
 // Execute the real platform entry and navigation model, stubbing only host APIs.
 // Any attempted native-map import on web throws before a render can succeed.
-function loadMap(platform: "web" | "ios" | "android") {
+function loadMap(platform: "web" | "ios" | "android", forceNativeEntry = false) {
   const openURL = vi.fn(async () => undefined);
   const nativeImports = vi.fn();
   const load = (file: string): any => {
@@ -58,7 +58,7 @@ function loadMap(platform: "web" | "ios" | "android") {
     return module.exports;
   };
   const component = load(
-    `components/driver-trip-map${platform === "web" ? ".web" : ""}.tsx`,
+    `components/driver-trip-map${platform === "web" && !forceNativeEntry ? ".web" : ""}.tsx`,
   ).default;
   return { component, nativeImports, openURL };
 }
@@ -89,6 +89,10 @@ const props = {
 };
 
 describe("SR-DRIVER-WEB-001 platform map boundary", () => {
+  it("reproduces the unchanged base entry traversing native maps on web", () => {
+    expect(() => loadMap("web", true)).toThrow("Native map loaded on web");
+  });
+
   it("renders coordinate handoff on web even when native availability is requested", async () => {
     const { component, nativeImports, openURL } = loadMap("web");
     const nodes = flatten(component(props));
