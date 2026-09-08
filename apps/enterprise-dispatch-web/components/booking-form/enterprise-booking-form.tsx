@@ -16,6 +16,7 @@ import {
   formatDefaultPlacard,
   getEnterpriseBookingPreview,
   isEnterpriseDraftComplete,
+  resolveCopyByLocale,
   serializeEnterpriseBookingDraft,
   validateReservationWindow,
   type EnterpriseAirportDirection,
@@ -401,7 +402,7 @@ export function EnterpriseBookingForm({
                   </span>
                 </div>
                 <EPill t={t} tone="primary" dot>
-                  {locale === "zh" ? "本人用車" : "Self Booking"}
+                  {resolveCopyByLocale(locale, "本人用車", "Self Booking")}
                 </EPill>
               </div>
             </div>
@@ -418,11 +419,11 @@ export function EnterpriseBookingForm({
                   icon="search"
                   value={draft.passenger}
                   onChange={setPassengerName}
-                  placeholder={
-                    locale === "zh"
-                      ? "輸入訪客或同事姓名"
-                      : "Enter guest or colleague name"
-                  }
+                  placeholder={resolveCopyByLocale(
+                    locale,
+                    "輸入訪客或同事姓名",
+                    "Enter guest or colleague name",
+                  )}
                 />
               </EField>
               <div
@@ -459,24 +460,26 @@ export function EnterpriseBookingForm({
           <div style={{ marginTop: 14 }}>
             <EField
               t={t}
-              label={
-                locale === "zh"
-                  ? "舉牌姓名 placard"
-                  : "Placard Welcome Name"
-              }
-              hint={
-                locale === "zh"
-                  ? "司機接送時手持舉牌顯示的文字，預設與乘客姓名同步，亦可自行編輯"
-                  : "Name displayed on the welcome placard. Synced with passenger name by default, can be edited directly."
-              }
+              label={resolveCopyByLocale(
+                locale,
+                "舉牌姓名 placard",
+                "Placard Welcome Name",
+              )}
+              hint={resolveCopyByLocale(
+                locale,
+                "司機接送時手持舉牌顯示的文字，預設與乘客姓名同步，亦可自行編輯",
+                "Name displayed on the welcome placard. Synced with passenger name by default, can be edited directly.",
+              )}
             >
               <TextControl
                 icon="user"
                 value={effectivePlacard}
                 onChange={handlePlacardChange}
-                placeholder={
-                  locale === "zh" ? "例如：林宜君 様" : "e.g. Sato 様"
-                }
+                placeholder={resolveCopyByLocale(
+                  locale,
+                  "例如：林宜君 様",
+                  "e.g. Sato 様",
+                )}
               />
             </EField>
           </div>
@@ -544,18 +547,24 @@ export function EnterpriseBookingForm({
                 icon="alert"
                 title={
                   timeValidation.isPast
-                    ? locale === "zh"
-                      ? "用車時間不能為過去時間"
-                      : "Reservation Time In Past"
-                    : locale === "zh"
-                      ? "未達最短提前預約時間"
-                      : "Advance Lead Time Not Met"
+                    ? resolveCopyByLocale(
+                        locale,
+                        "用車時間不能為過去時間",
+                        "Reservation Time In Past",
+                      )
+                    : resolveCopyByLocale(
+                        locale,
+                        "未達最短提前預約時間",
+                        "Advance Lead Time Not Met",
+                      )
                 }
                 body={
                   timeValidation.errorMessage ??
-                  (locale === "zh"
-                    ? `最早可預約時間為 ${timeValidation.earliestAllowedDisplay}`
-                    : `Earliest allowed time is ${timeValidation.earliestAllowedDisplay}`)
+                  resolveCopyByLocale(
+                    locale,
+                    `最早可預約時間為 ${timeValidation.earliestAllowedDisplay}`,
+                    `Earliest allowed time is ${timeValidation.earliestAllowedDisplay}`,
+                  )
                 }
               />
             </div>
