@@ -17,6 +17,9 @@ describe("SR-ENV-COPY-001: environment truth and user-copy cleanup", () => {
   describe("runtime environment resolution never guesses from a domain string or defaults unknown data to healthy/production", () => {
     it("requires an explicit deploy-time signal to report production", () => {
       expect(resolveRuntimeEnvironmentTier({})).not.toBe("production");
+      expect(resolveRuntimeEnvironmentTier({ NODE_ENV: "production" })).toBe("unknown");
+      expect(resolveRuntimeEnvironmentTier({ APP_ENV: "production" })).toBe("production");
+      expect(resolveRuntimeEnvironmentTier({ DRTS_ENV: "fixture", NODE_ENV: "production" })).toBe("unknown");
       expect(
         resolveRuntimeEnvironmentTier({ DRTS_ENV: "totally-unrecognized" }),
       ).not.toBe("production");

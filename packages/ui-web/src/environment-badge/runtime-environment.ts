@@ -5,9 +5,9 @@ import type { LocalizedDisplayString } from "@drts/ui-tokens";
  * Runtime-authoritative environment tiers. This intentionally has no
  * "healthy default" — an app deployed with no recognizable env signal must
  * surface as `unknown`, never silently render as `production` or `local`.
- * Mirrors the precedence used by the API's `detectAuthEnvironment`
+ * Uses the deployment-variable precedence from the API's `detectAuthEnvironment`
  * (apps/api/src/config/auth-startup-config.ts): DRTS_ENV, then APP_ENV, then
- * NODE_ENV as a last resort (NODE_ENV is unreliable on its own because
+ * NODE_ENV only for non-production fallback (NODE_ENV is unreliable on its own because
  * `next build` always bakes in NODE_ENV=production regardless of which real
  * deployment tier consumes that build).
  */
@@ -33,7 +33,9 @@ export function resolveRuntimeEnvironmentTier(
     .toLowerCase();
 
   if (raw === "prod" || raw === "production") {
-    return "production";
+    return source.DRTS_ENV !== undefined || source.APP_ENV !== undefined
+      ? "production"
+      : "unknown";
   }
   if (raw === "stage" || raw === "staging") {
     return "staging";
