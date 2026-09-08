@@ -3,14 +3,15 @@
 | 欄位          | 內容                                                                                              |
 | ------------- | ------------------------------------------------------------------------------------------------- |
 | Task spec     | `docs/03-runbooks/system-remediation-20260906/SR-ENTERPRISE-SEARCH-001.md`                        |
-| Owner         | Gemini                                                                                            |
-| Reviewer      | Gemini2                                                                                           |
+| Owner         | Codex2                                                                                           |
+| Reviewer      | Codex                                                                                             |
 | Depends on    | 無 (`[]`)                                                                                         |
 | Gap ID        | `R24`                                                                                             |
 | Capability ID | `C013`, `C069`                                                                                    |
-| Base SHA      | `7dccddaba7d51dca8d56da01d5320d9f22f8b68f` (`origin/dev` at task start)                           |
-| Candidate SHA | 於 `handoff` 時以 `git rev-parse HEAD` 記錄（見 task board）                                       |
-| Branch        | `gemini/sr-enterprise-search-001`                                                                  |
+| Historical source SHA | `ecf6f70e7bf4a3a57735f198f6bfa81762019f3b` (`origin/gemini/sr-enterprise-search-001`)       |
+| Base SHA      | `70355aba97c23dd1cd592b71f1d3dfe6315d91ff` (`origin/dev` before recovery)                         |
+| Candidate SHA | 由本次普通 push 後的 `handoff` 以 `CANDIDATE_SHA=$(git rev-parse HEAD)` 鎖定（task board 為權威） |
+| Branch        | `codex2/sr-enterprise-search-001`                                                                  |
 
 ## 1. 稽核來源與基準重現
 
@@ -27,13 +28,19 @@
 
 ### 1.2 Base SHA 重現與後端 API 核實
 
-在 Base SHA (`7dccddaba7d51dca8d56da01d5320d9f22f8b68f`) 檢查現狀：
+9/6 的 audit 是歷史觀察，並非本次程式真值。既有實作先前已存在於
+`ecf6f70e7bf4a3a57735f198f6bfa81762019f3b`；本次從 fresh `origin/dev`
+(`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`) 恢復該 commit 並重新驗證。
+下列為該實作相對其原始 Base SHA (`7dccddaba7d51dca8d56da01d5320d9f22f8b68f`) 的核實：
 
 1. **前端現況**：`apps/enterprise-dispatch-web/app/bookings/page.tsx` 原先僅 6 行，直接渲染 `<EnterpriseBookingHistory />`。該元件無任何乘客關鍵字搜尋、無起訖日期篩選、無狀態過濾、無本人/代訂範圍頁籤，亦無翻頁分頁與篩選空狀態。
 2. **後端 API 核實**：
    - 檢查 `apps/api/src/modules/owned-mobility/owned-mobility.controller.ts:459` 之 `@Get("tenant/bookings")`：僅接收 `x-tenant-id` 與 `x-request-id` 標頭，呼叫 `this.ownedMobilityService.listTenantBookings(tenantId)`。
    - 檢查 `owned-mobility.service.ts:2048`：回傳該租戶之全量預約清單，分頁資訊為 `{ page: 1, pageSize: items.length, totalItems: items.length, totalPages: items.length > 0 ? 1 : 0 }`。
    - 目前後端該端點尚未定義伺服器端 Query DTO（如 `q`, `status`, `dateFrom`, `dateTo`, `page`, `pageSize`）。
+   - 本頁實際使用的權威資源是 `GET /api/tenant/bookings`，租戶資源 ID 為
+     `10000000-0000-0000-0000-000000000201`（`enterpriseTenant.id`）；本次只做
+     repository 驗證，未宣稱對任何 live 環境送出請求。
 3. **避免「只篩目前頁假裝全域」**：
    - 由於後端回傳的是當前租戶的全量預約清單，前端若先做分頁切片（例如切出前 10 筆）再進行關鍵字或狀態過濾，將導致第 2 頁以後的符合資料無法被搜尋到（即「只篩目前頁假裝全域」之反模式）。
    - 本任務嚴格遵守驗收要求：在前端取得租戶全量清單後，**先執行全域組合篩選與排序（依時間倒序），再對篩選後的總集執行分頁切片**。這確保搜尋與篩選條件是套用在全域資料集上，計算出的總數與總頁數完全反映全域篩選結果。
@@ -87,7 +94,26 @@
 
 ## 4. 實際驗證指令與執行結果
 
-所有指令均在本 isolated worktree (`/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-search-001`) 執行：
+歷史指令結果保留在上方以維持追溯；以下為本次 recovery 在 isolated
+worktree (`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-sr-enterprise-search-001`)
+對恢復後 SHA `f20c35e970a57ac0c5c15f1fe50816d74dd0ea74` 的實際結果：
+
+```bash
+$ git diff --check
+# 無任何輸出，exit code 0
+
+$ pnpm --filter @drts/enterprise-dispatch-web typecheck
+> @drts/enterprise-dispatch-web@0.1.0 typecheck
+> tsc --noEmit
+# exit code 0
+
+$ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/
+ Test Files  1 passed (1)
+      Tests  41 passed (41)
+# exit code 0
+```
+
+原始實作當時的指令如下：
 
 ```bash
 $ git diff --check
