@@ -17,6 +17,23 @@ DOC = ROOT / 'docs/04-uat/system-remediation-20260906'
 STATUS = '/home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh'
 
 
+# Explicit bounded regression command; never derive requested coverage from its report.
+REGRESSION_DIRS = tuple(
+    f'tests/unit/system-remediation/{task}/' for task in (
+        'sr-admin-verify-001', 'sr-artifact-001', 'sr-bank-001', 'sr-bank-003',
+        'sr-channel-001', 'sr-iam-001', 'sr-invoice-001', 'sr-mail-001',
+        'sr-mail-002', 'sr-ops-map-001', 'sr-referral-001',
+        'sr-tenant-login-001', 'sr-uat-harness-001'))
+
+
+def expected_suites(files):
+    paths = sorted(f for f in files if any(f.startswith(d) for d in REGRESSION_DIRS)
+                   and f.endswith('.test.ts'))
+    if any(not any(p.startswith(d) for p in paths) for d in REGRESSION_DIRS):
+        raise ValueError('Requested regression directory has no tracked test suites')
+    return paths
+
+
 def git(*args):
     return subprocess.check_output(['git', *args], cwd=ROOT, text=True).strip()
 
@@ -31,6 +48,8 @@ def regression_state(paths, suites):
         return 'current_version_indexed_reproduction_missing'
     if any(s['status'] == 'failed' or any(a['status'] == 'failed' for a in s['assertions']) for s in selected):
         return 'local_regression_failed_live_missing'
+    if set(paths) - {s['path'] for s in selected}:
+        return 'local_regression_incomplete_live_missing'
     if any(s['status'] != 'passed' or not s['assertions'] or any(a['status'] != 'passed' for a in s['assertions']) for s in selected):
         return 'local_regression_incomplete_live_missing'
     return 'local_regression_passed_live_missing'
@@ -53,6 +72,7 @@ def collect(report_path, base):
     comparison = read(DOC / 'source/source-comparison.json')
     tasks = {t['id']: t for t in manifest['tasks']}
     files = git('ls-tree', '-r', '--name-only', base).splitlines()
+    expected = expected_suites(files)
     log = [line.split('\t', 1) for line in git('log', base, '--format=%H%x09%s').splitlines()]
     report = read(report_path)
     suites = []
@@ -80,7 +100,7 @@ def collect(report_path, base):
             'source_scopes': scopes,
             'source_locators': [{'path': f, 'git_blob': git('rev-parse', f'{base}:{f}')} for f in matched[:4]],
             'merged_prs': merges[:3],
-            'regression_suites': [s['path'] for s in suites if f'/{task_id.lower()}/' in s['path']],
+            'regression_suites': [p for p in expected if f'/{task_id.lower()}/' in p],
             'evidence_ref': task['task_spec_ref'],
         }
     issues = []
@@ -176,9 +196,12 @@ def collect(report_path, base):
                            'packages/contracts/src/iam-policy-catalog.ts', 'tests/e2e/system-remediation/shared/role-personas.ts'],
         'sources': {f: hashlib.sha256((DOC / f).read_bytes()).hexdigest() for f in
                     ['source/findings.json', 'source/new-gaps.json', 'source/capabilities.json', 'coverage.json']},
-        'regression': {'command': 'pnpm exec vitest run ' + ' '.join(sorted({str(Path(s['path']).parent) + '/' for s in suites})) + ' --reporter=json --outputFile=/tmp/sr-readiness-regressions.json',
+        'regression': {'command': 'pnpm exec vitest run ' + ' '.join(REGRESSION_DIRS) + ' --reporter=json --outputFile=/tmp/sr-readiness-regressions.json',
                        'exit_code': 0 if report['success'] else 1, 'passed': report['numPassedTests'],
                        'failed': report['numFailedTests'], 'skipped': report['numPendingTests'],
+                       'expected_suites': expected,
+                       'missing_suites': sorted(set(expected) - {s['path'] for s in suites}),
+                       'coverage_state': regression_state(expected, suites),
                        'raw_report_sha256': hashlib.sha256(report_path.read_bytes()).hexdigest(), 'suites': suites},
         'task_evidence': task_evidence, 'issues': issues, 'capabilities': capabilities, 'live_gates': gates,
         'task_status_snapshots': snapshots,

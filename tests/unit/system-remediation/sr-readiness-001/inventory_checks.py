@@ -20,6 +20,28 @@ class InventoryTests(unittest.TestCase):
                                 'local_regression_passed_live_missing')
         self.assertEqual(collector.regression_state([], []), 'current_version_indexed_reproduction_missing')
 
+    def test_partial_absence_cannot_pass(self):
+        suite = {'path': 'present.test.ts', 'status': 'passed',
+                 'assertions': [{'status': 'passed'}]}
+        self.assertEqual(collector.regression_state(
+            ['present.test.ts', 'absent.test.ts'], [suite]),
+            'local_regression_incomplete_live_missing')
+        self.assertEqual(collector.regression_state(['absent.test.ts'], [suite]),
+                         'current_version_indexed_reproduction_missing')
+
+    def test_expected_coverage_comes_from_baseline(self):
+        files = [d + 'present.test.ts' for d in collector.REGRESSION_DIRS]
+        absent = collector.REGRESSION_DIRS[0] + 'absent.test.ts'
+        expected = collector.expected_suites(files + [absent, 'unrelated.test.ts'])
+        self.assertIn(absent, expected)
+        self.assertNotIn('unrelated.test.ts', expected)
+        suites = [{'path': p, 'status': 'passed', 'assertions': [{'status': 'passed'}]}
+                  for p in files]
+        self.assertEqual(collector.regression_state(expected, suites),
+                         'local_regression_incomplete_live_missing')
+        with self.assertRaises(ValueError):
+            collector.expected_suites(files[1:])
+
     def test_pass_does_not_release_live(self):
         suite = {'path': 'test.ts', 'status': 'passed', 'assertions': [{'status': 'passed'}]}
         self.assertEqual(collector.regression_state(['test.ts'], [suite]), 'local_regression_passed_live_missing')
