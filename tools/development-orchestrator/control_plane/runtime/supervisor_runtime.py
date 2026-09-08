@@ -7238,7 +7238,16 @@ def refresh_chair_review_state(
     now = utc_now()
 
     current_pending_approvals = pending_approval_items(safe_load_approval_state(config))
-    if str(active.get("reason") or "") != "approval_triage" and current_pending_approvals:
+    # A chairman may finish writing its decision in the same tick that another
+    # worker requests approval. Keep the review alive when its JSON output is
+    # already present so task/provider actions are applied before handing control
+    # to the higher-priority approval triage. Preempting at this point drops a
+    # valid decision and strands blocked tasks until the next review cooldown.
+    if (
+        str(active.get("reason") or "") != "approval_triage"
+        and current_pending_approvals
+        and not json_path.exists()
+    ):
         message = "Chair review preempted because pending approvals require immediate approval_triage."
         if active_worker is not None:
             terminate_worker_pid(active_worker.get("pid"))

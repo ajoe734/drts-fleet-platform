@@ -2354,6 +2354,105 @@ class ChairmanFlowTests(unittest.TestCase):
             self.assertIsNone(state["chair_review"]["active_review"])
             self.assertEqual(state["chair_review"]["last_reason"], "blocked_task_triage")
 
+    def test_chair_decision_is_applied_before_pending_approval_preemption(self) -> None:
+        """A completed blocked-task decision must not be lost to a new approval."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "review.md"
+            json_path = review_dir / "review.json"
+            status_path = root / "ai-status.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "operational_review",
+                        "approval_ttl_minutes": 45,
+                        "reason": "blocked task needs an unblock child",
+                        "blocked_by": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [],
+                        "task_actions": [
+                            {
+                                "task_id": "TASK-001",
+                                "action": "create_unblock_task",
+                                "unblock_kind": "history_repair",
+                                "target_agent": "Codex",
+                                "reviewer": "Codex2",
+                                "reason": "Repair the isolated task history.",
+                            }
+                        ],
+                        "provider_actions": [],
+                        "recommended_focus": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {"id": "DEP-001", "status": "done"},
+                            {
+                                "id": "TASK-001",
+                                "owner": "Codex",
+                                "reviewer": "Codex2",
+                                "status": "blocked",
+                                "depends_on": ["DEP-001"],
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                    "codex2": {"display_name": "Codex2", "provider": "codex2"},
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "gemini",
+                        "agent": "Gemini",
+                        "reason": "blocked_task_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(
+                    supervisor,
+                    "safe_load_approval_state",
+                    return_value={"pending": [{"approval_id": "apr-new"}], "history": []},
+                ),
+                mock.patch.object(supervisor, "create_chair_unblock_task", return_value=True) as create_unblock,
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            create_unblock.assert_called_once()
+            self.assertIsNone(state["chair_review"]["active_review"])
+            self.assertEqual(state["chair_review"]["last_reason"], "blocked_task_triage")
+
     def test_refresh_chair_review_state_materializes_workspace_baseline_task_from_reassignment_focus(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
