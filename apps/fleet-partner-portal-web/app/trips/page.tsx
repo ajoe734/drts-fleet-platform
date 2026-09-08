@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 export default async function FleetTripsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ svc?: string; period?: string; q?: string }>;
+  searchParams?: Promise<{ svc?: string; period?: string; q?: string; status?: string }>;
 }) {
   const params = searchParams ? await searchParams : {};
   const locale = await getServerLocale();
@@ -59,6 +59,9 @@ export default async function FleetTripsPage({
     if (currentSvc !== "all" && r.svc !== currentSvc) {
       return false;
     }
+    if (params.status && params.status !== "all" && r.status !== params.status) {
+      return false;
+    }
     if (params.q) {
       const q = params.q.toLowerCase();
       const match =
@@ -77,6 +80,7 @@ export default async function FleetTripsPage({
     const query = new URLSearchParams();
     if (tab.id !== "all") query.set("svc", tab.id);
     if (params.period) query.set("period", params.period);
+    if (params.status) query.set("status", params.status);
     if (params.q) query.set("q", params.q);
     const href = query.toString() ? `?${query.toString()}` : "/trips";
 
@@ -113,6 +117,7 @@ export default async function FleetTripsPage({
   const exportQuery = new URLSearchParams();
   if (currentSvc !== "all") exportQuery.set("svc", currentSvc);
   if (params.period) exportQuery.set("period", params.period);
+  if (params.status) exportQuery.set("status", params.status);
   if (params.q) exportQuery.set("q", params.q);
   const exportHref = `/trips/export?${exportQuery.toString()}`;
 
@@ -168,6 +173,7 @@ export default async function FleetTripsPage({
           {currentSvc !== "all" ? (
             <input type="hidden" name="svc" value={currentSvc} />
           ) : null}
+          {params.status ? <input type="hidden" name="status" value={params.status} /> : null}
           {params.period ? (
             <input type="hidden" name="period" value={params.period} />
           ) : null}

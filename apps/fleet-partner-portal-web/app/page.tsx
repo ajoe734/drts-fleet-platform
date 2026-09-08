@@ -256,7 +256,7 @@ export default async function FleetPortalIndex({
           title={t("dashboard.recentTrips", locale)}
           padding={0}
           actions={
-            <Link href="/trips" style={{ textDecoration: "none" }}>
+            <Link href={`/trips?${new URLSearchParams({ period: dashboard.periodMonth })}`} style={{ textDecoration: "none" }}>
               <CanvasBtn theme={theme} variant="ghost">
                 {t("dashboard.gotoTrips", locale)}
               </CanvasBtn>

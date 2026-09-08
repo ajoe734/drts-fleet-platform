@@ -480,7 +480,7 @@ function mapTrip(record: FleetPartnerPortalTripRecord): FleetTrip {
 export async function loadTrips(periodMonth?: string): Promise<TripsView> {
   try {
     const { client } = await getServerFleetPartnerClient();
-    const records = await client.listFleetPortalTrips(periodMonth);
+    const records = await client.listFleetPortalTrips(periodMonth ?? getCurrentPeriodMonth());
     // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapTrip), source: "live", error: null };
   } catch (err) {
