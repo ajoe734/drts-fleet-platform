@@ -16,7 +16,8 @@ Validated 2026-09-08 by Codex (supervisor fallback owner); reviewer: Codex2.
 
 ## Executed validation
 
-- `pnpm exec vitest run tests/unit/uv-exec-010.test.ts tests/unit/uv-exec-010-checkpoint.test.ts tests/unit/owned-mobility.test.ts`: 98 passed.
+- `pnpm exec vitest run tests/unit/uv-exec-010.test.ts tests/unit/uv-exec-010-checkpoint.test.ts tests/unit/owned-mobility.test.ts`: 110 passed.
+- `pnpm exec vitest run tests/unit/callcenter.test.ts tests/unit/sandbox-webhook.adapter.test.ts`: 11 passed.
 - `pnpm exec vitest run tests/integration/uv-exec-010-checkpoint.integration.test.ts`
   with `UV_RECORDER_TEST_DATABASE_URL` pointing to a task-owned disposable
   PostgreSQL 16 container: 4 passed. Tests exercise real V0086 append-only triggers,
@@ -36,8 +37,11 @@ mutation integration; this candidate does not claim a deployed autonomous loop.
 Real provider playback/recording compatibility, retrieval policy acceptance and
 checkpoint latency require deployment acceptance evidence.
 
-Latest dev synchronization attempted rebase, which encountered duplicated historic
-anchor conflicts. Rebase was aborted and dev merged without content conflicts to
-preserve already-published ancestry and permit a normal non-force push.
+Resume validation at 18:32 UTC followed the merged history-repair instructions in
+`support/unblock/UV-EXEC-010/UV-EXEC-010-UNBLOCK-HISTORY-REPAIR.md`.
+Dev `318f50654` was merged without content conflicts in anchor `2aec6815f`,
+preserving published ancestry, and pushed normally. All checks listed above were
+rerun after that merge, including all four PostgreSQL integration tests against
+a fresh task-owned PostgreSQL 16 container. No product-code change was needed.
 Candidate SHA is recorded by the task lifecycle at handoff; CI, review, merge and
 external acceptance remain lifecycle responsibilities.
