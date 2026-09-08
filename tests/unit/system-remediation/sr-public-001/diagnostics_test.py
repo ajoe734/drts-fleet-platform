@@ -1,5 +1,6 @@
 """Offline failure-path tests; fixtures are not live acceptance evidence."""
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import unittest
@@ -49,6 +50,28 @@ class DiagnosticsTests(unittest.TestCase):
             self.assertEqual(m.run(['openssl'])['exit_code'], 124)
         with patch.object(subprocess, 'run', side_effect=FileNotFoundError('missing')):
             self.assertEqual(m.run(['missing'])['exit_code'], 127)
+
+    def test_successful_discovery_uses_server_urls_and_serving_revisions(self):
+        services = [{"metadata": {"name": name}, "status": {
+            "url": "https://" + name + "-actual.run.app",
+            "traffic": [{"revisionName": name + "-001", "percent": 100}]
+        }} for name in m.SERVICES.values()]
+        ok = {"exit_code": 0, "stdout": "[]"}
+        probe_result = {"dns": {"A": {"exit_code": 0, "stdout": "status: NOERROR"}},
+                        "tls_direct": {"exit_code": 0}, "http_direct": {"reachable": True},
+                        "http_environment": {"reachable": True}}
+        with patch.object(m, 'cloud_inventory', return_value=(
+                {"exit_code": 0, "stdout": json.dumps(services)},
+                {s["metadata"]["name"]: s for s in services}, ok)), \
+                patch.object(m, 'run', return_value=ok), \
+                patch.object(m, 'probe', return_value=probe_result) as probe:
+            report = m.collect('test', 'us-central1', 'base')
+        self.assertTrue(m.complete(report))
+        self.assertEqual(probe.call_count, 18)
+        self.assertTrue(all(len(e['serving_revisions']) == 1 for e in report['entries'].values()))
+        self.assertIn('https://drts-dev-api-actual.run.app/', [c.args[0] for c in probe.call_args_list])
+        probe_result['dns']['A']['stdout'] = 'status: NXDOMAIN'
+        self.assertFalse(m.complete(report))
 
     def test_broken_tls_cannot_pass_even_with_http_200(self):
         probe = {'tls_direct': {'exit_code': 1}, 'http_direct': {'reachable': True}, 'http_environment': {'reachable': True}}
