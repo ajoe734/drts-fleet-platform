@@ -167,4 +167,4 @@ exit code: 0
 - **未修改中央共用設定**：
   未修改中央 shared exports、中央 test config、中央 routes、`package.json` 或 `pnpm-lock.yaml`。
 - **分支歷史與普通 Push 狀態**：
-  遠端分支 `origin/gemini/sr-ops-shell-001` 保留歷史 head `cdf5488d7`（對應 PR #1648，CI 23/23 全數通過）。本 branch 本地已成功 rebase 至最新 `origin/dev`（`6f4ac8c74`）；由於遠端既有歷史存在且依據守則禁止 force-push，故普通 push 需透過 supervisor 授權之 continuation branch（例如 `gemini/sr-ops-shell-001-rebased`）或由 supervisor 依 non-destructive continuation rail 裁決。
+  遠端分支 `origin/gemini/sr-ops-shell-001` 原有 head `cdf5488d7`（對應 PR #1648）。本地以 `dev` 為 base 完成驗證後，整合遠端既有 head 為祖先節點，以純普通（非強制）fast-forward push 推送至 `origin/gemini/sr-ops-shell-001`，滿足無損與 non-force push 規範。
