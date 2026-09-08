@@ -1177,14 +1177,12 @@ function DraftFormFrame({
           </CanvasCard>
           {error ? (
             <div role="alert" aria-live="assertive">
-              <div role="alert">
-                <CanvasBanner
-                  theme={theme}
-                  tone="danger"
-                  icon="warn"
-                  body={error}
-                />
-              </div>
+              <CanvasBanner
+                theme={theme}
+                tone="danger"
+                icon="warn"
+                body={error}
+              />
             </div>
           ) : null}
           <ActionButton

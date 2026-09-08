@@ -17,10 +17,18 @@ try {
   const name = page.locator("#form-new-driver-name");
   await expect(name).toBeEnabled();
   await name.focus();
+  const outline = await name.evaluate(
+    (el) => window.getComputedStyle(el).outlineStyle,
+  );
+  expect(outline).not.toBe("none");
   await page.keyboard.type("SR-FLEET keyboard test");
   await page.keyboard.press("Tab");
   await expect(page.locator("#form-new-driver-mobile")).toBeFocused();
   await page.keyboard.type("0900000000");
+  await expect(page.locator("#form-new-driver-mobile")).toHaveAttribute(
+    "inputmode",
+    "tel",
+  );
   for (const [id, value] of Object.entries({
     licenseNo: "TEST-LICENSE",
     licenseExpiry: "2028-01-01",
@@ -69,7 +77,9 @@ try {
     },
   );
   await name.press("Enter");
-  await expect(page.getByRole("alert")).toContainText("TEST_API_REJECTED");
+  await expect(page.locator("form").getByRole("alert")).toContainText(
+    "TEST_API_REJECTED",
+  );
   expect(requests).toBe(1);
   await page.reload();
   await expect(name).toHaveValue("SR-FLEET keyboard test", { timeout: 30000 });
@@ -90,7 +100,12 @@ try {
   ).toEqual([]);
   await page.goto(`${base}/supply/drivers/new`);
   await expect(name).toHaveValue("");
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${base}/supply/vehicles/new`);
+  await expect(page.locator("#form-new-vehicle-seatCount")).toHaveAttribute(
+    "inputmode",
+    "numeric",
+  );
   await expect(page.locator("#form-new-vehicle-color")).toHaveValue(
     "optional-only",
   );
