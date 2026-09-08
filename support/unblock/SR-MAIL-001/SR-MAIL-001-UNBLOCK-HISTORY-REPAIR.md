@@ -1,191 +1,137 @@
-# SR-MAIL-001 History Repair Note
+# SR-MAIL-001 branch history recovery (2026-09-08)
 
-- Task: `SR-MAIL-001-UNBLOCK-HISTORY-REPAIR`
-- Parent Task: `SR-MAIL-001` ("租戶邀請信真正交付並修正 delivered 語義")
-- Phase: `system-remediation-20260906`
-- Owner: `Gemini`
-- Reviewer: `Gemini2`
-- Date: `2026-09-06`
-- Status: Repaired & Documented — parent `SR-MAIL-001` unblocked next step recorded in machine truth; non-destructive repair path established; no git history rewrite; no force-push.
+Task: `SR-MAIL-001-UNBLOCK-HISTORY-REPAIR`; owner: Codex; reviewer: Claude.
+This audit supersedes the 2026-09-06 Gemini/Codex2 diagnosis in this file.
+That diagnosis concerned a different branch and is not evidence for today's blocker.
+Scope: document a non-destructive recovery; no parent source changes or parent
+candidate handoff are performed by this helper.
 
----
+## Exact observed state
 
-## 1. Executive Summary
+After successful `git fetch origin`:
 
-Parent task `SR-MAIL-001` was marked `blocked` with waiting actor `Codex` by its initial implementation owner `Codex2` (WIP commit `6895ef0a8414694584f3734b3d6baf524d8bc4a9`, branch `codex2/sr-mail-001`, PR [#1679](https://github.com/ajoe734/drts-fleet-platform/pull/1679)). Chairman triage generated `SR-MAIL-001-UNBLOCK-HISTORY-REPAIR` to investigate potential branch/worktree/commit contamination and determine a non-destructive repair path.
+| Ref | SHA |
+| --- | --- |
+| `origin/dev` / helper starting HEAD | `3b60a3757238663572f16f010c94f446f2c71eaa` |
+| local `codex/sr-mail-001` | `25fc24ab7d12b0aeb833bb868586afb1c1953d30` |
+| remote `origin/codex/sr-mail-001` | `a1924736aadb434521504725c11420517700f759` |
+| local parent's rebase base | `b5c3774e5e62fab7cf43b67a7e69fae7e0ca91ef` |
 
-**Audit Findings:**
-1. **No git repository contamination exists.**
-   - Branch `codex2/sr-mail-001` is a clean, linear stack of 6 commits starting from base `2093cf7e38526a7a7c027600be92004f7275efd3`.
-   - All commits carry correct trailers (`LLM-Agent: codex2`, `Task-ID: SR-MAIL-001`, `Reviewer: Codex`).
-   - No commits from other tasks are mixed in.
-   - All 7 modified files strictly adhere to the 5 approved `write_scopes` of `SR-MAIL-001`.
-   - No orphaned worktrees or dangling lockfiles exist for `codex2/sr-mail-001`.
-   - Local `codex2/sr-mail-001` and remote `origin/codex2/sr-mail-001` match exactly at SHA `6895ef0a8414694584f3734b3d6baf524d8bc4a9`.
-   - A three-way merge check against `origin/dev` (`40ba315e4`) succeeds with **zero** conflicts.
+[Parent PR #1719](https://github.com/ajoe734/drts-fleet-platform/pull/1719)
+is OPEN, targets dev, and still has remote head `a1924736a…`.
+`git worktree list --porcelain` shows no worktree checking out
+`codex/sr-mail-001`. The assigned helper worktree is
+`.artifacts/worktrees/auto/codex-sr-mail-001-unblock-history-repair`, on
+`codex/sr-mail-001-unblock-history-repair`, initially clean. The canonical root
+remains on dev and was not switched or edited.
 
-2. **The actual blockers keeping parent `SR-MAIL-001` from completion:**
-   - **Compilation / Typecheck failure in CI test suite**: On PR #1679, GitHub Actions run `34032802257` failed on `Product smoke acceptance` (and downstream `Smoke acceptance`) because tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts has 7 TypeScript errors (`TS2345` / `TS2322`). In `codex2`'s session, only package-scoped `pnpm --filter @drts/api typecheck` was run, missing the repository-wide `pnpm run typecheck` (`tsc -p tsconfig.json --noEmit`) which typechecks `tests/`.
-   - **Actor quota pause**: Original owner `Codex2` and reviewer `Codex` are currently paused due to quota/authentication constraints.
-   - **Unnecessary self-block on out-of-scope concerns**: `Codex2` marked the task blocked seeking supervisor coordination for frontend acceptance web pages and shared enum additions (`sent` in `@drts/contracts`). However, `SR-MAIL-001`'s acceptance criteria specifically target backend delivery adapter and controlled receiver verification ("沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 將invitation接共用delivery；原始token只交安全transport，不寫log/response。修復重寄撤銷、過期與寄送失敗，不讓記憶體send返回就標delivered。"). The backend adapter and outbox retry implementation already fulfills the required semantics.
+The current parent's machine status is blocked, requesting force-with-lease
+or an alternative candidate branch. The previous worker result
+`.orchestrator/worker-results/codex-20260908T113259Z-7ff3b739.json` reports a
+non-fast-forward rejection. This run independently confirms the divergence:
+local is eight commits ahead and six behind remote (one ahead commit is the
+new upstream base). This is published-history divergence, not foreign product
+files mixed into the parent patch.
 
----
+`git reflog show codex/sr-mail-001` records rebase from remote `a1924736a`
+to temporary head `63154d959` on `b5c3774e5`, amendment to `b9c8135ae`, then
+new evidence commit `25fc24ab7`.
 
-## 2. Detailed Diagnosis of Parent Task `SR-MAIL-001`
+`git range-diff 70355aba9..origin/codex/sr-mail-001 b5c3774e5..codex/sr-mail-001`
+identifies the exact old/new mapping:
 
-### 2.1 Dependencies Audit
+| Published commit | Rewritten commit | Change |
+| --- | --- | --- |
+| `31bc3f02e` | `93acae845` | Same patch/message |
+| `e811696a8` | `49d624873` | Same patch/message |
+| `1e3a58094` | `92cae7c90` | Same patch/message |
+| `99018c13a` | `d6b689cef` | Same patch/message |
+| `04d9c7768` | `808fbbad2` | Same patch/message |
+| `a1924736a` | `b9c8135ae` | Same patch; subject test → fix, agent trailer case changed |
+| none | `25fc24ab7` | Added candidate subject remediation record |
 
-- `depends_on`: `["SR-NOTIFY-001", "SR-REFERRAL-001"]`
-- `SR-NOTIFY-001`: Done and merged into `origin/dev` via PR [#1633](https://github.com/ajoe734/drts-fleet-platform/pull/1633) (`merge_sha: 3014f9a4942f73f89c0a6f8458dc8b042c1034d0`).
-- `SR-REFERRAL-001`: Done and merged into `origin/dev` via PR [#1665](https://github.com/ajoe734/drts-fleet-platform/pull/1665) (`merge_sha: 503f36015adc084e75ee33e5a866525b5c7d72c6`).
-- **Conclusion**: All dependencies are satisfied and merged in `origin/dev`.
+All seven commits above origin/dev carry Task-ID SR-MAIL-001. The six changed
+files are the three approved tenant-partner service/module files, the parent
+UAT document, and two tests under `tests/unit/system-remediation/sr-mail-001/`.
+There is no need to recover the old Codex2 stack or apply its historical
+verify-mailpit.ts fix to this stack.
 
-### 2.2 Git State & History Inspection
+## Verified non-destructive path
 
-```
-$ git log origin/dev..codex2/sr-mail-001 --oneline
-6895ef0a8 (codex2/sr-mail-001) wip(SR-MAIL-001): record final checks and draft review reference
-571279559 wip(SR-MAIL-001): anchor receiver evidence and remaining scope blockers
-3fc11249c wip(SR-MAIL-001): anchor controlled Mailpit acceptance verification
-553b9e4e4 wip(SR-MAIL-001): anchor retry and invitation lifecycle regressions
-cdf8645d8 wip(SR-MAIL-001): anchor durable invitation adapter and honest status
-c6aa3a9fd wip(SR-MAIL-001): anchor missing transport regression
-```
+Use a fresh parent replacement branch, preserving both existing refs and PR
+#1719 as history. Do not push rewritten history to the existing remote branch.
+The proposed name `codex/sr-mail-001-recovered-20260908` is absent remotely
+(`git ls-remote --heads origin codex/sr-mail-001-recovered-20260908`, exit 0,
+no output). Check local and remote availability again before creating it;
+if occupied, inspect/reuse the matching recovery or choose a new unused suffix.
 
-- Merge base with `origin/dev`: `2093cf7e38526a7a7c027600be92004f7275efd3`.
-- Changes relative to merge-base:
-  ```
-  apps/api/src/modules/tenant-partner/tenant-invitation-delivery.service.ts | 195 ++++++++++++---
-  apps/api/src/modules/tenant-partner/tenant-partner.module.ts             |   8 +-
-  apps/api/src/modules/tenant-partner/tenant-partner.service.ts            |  29 +--
-  docs/04-uat/system-remediation-20260906/SR-MAIL-001.md                  | 110 +++++++++
-  tests/unit/system-remediation/sr-mail-001/helpers.ts                    |  23 ++
-  tests/unit/system-remediation/sr-mail-001/invitation-delivery.test.ts   | 272 +++++++++++++++++++++
-  tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts             | 162 ++++++++++++
-  ```
-- Allowed `write_scopes`:
-  ```json
-  [
-    "apps/api/src/modules/tenant-partner/tenant-invitation-delivery.service.ts",
-    "apps/api/src/modules/tenant-partner/tenant-partner.service.ts",
-    "apps/api/src/modules/tenant-partner/tenant-partner.module.ts",
-    "tests/unit/system-remediation/sr-mail-001/",
-    "docs/04-uat/system-remediation-20260906/SR-MAIL-001.md"
-  ]
-  ```
-- Every modified file matches the write scope whitelist. No foreign modifications.
+The current release supports this lifecycle without code changes:
+`tools/development-orchestrator/bin/ai_status.py::command_handoff` accepts an
+explicit CANDIDATE_BRANCH; `github_bus.py::review_branch_for_task` prioritizes
+that recorded branch over agent defaults. Supervisor must also route the next
+parent worker to the replacement branch/worktree, so its wakeup does not send
+it back to `codex/sr-mail-001`. This is an operational next step, not a request
+for force-push permission.
 
-### 2.3 CI Failure Analysis (PR #1679)
+Supervisor/parent owner procedure (not executed by this helper):
 
-On PR #1679, GitHub check `CI/Product smoke acceptance` failed with exit code 2:
+1. Resume the blocked parent under Codex/Claude with the current status CLI's
+   `resume-blocked SR-MAIL-001 in_progress` command and route its worker to the
+   replacement workspace. Preserve all existing worktrees and refs.
+2. In the assigned recovery workspace, prepare from the retained parent head:
 
-```
-tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts(71,19): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
-tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts(90,38): error TS2322: Type 'string | null' is not assignable to type 'string'.
-tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts(95,9): error TS2322: Type 'string | null' is not assignable to type 'string'.
-tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts(101,38): error TS2322: Type 'string | null' is not assignable to type 'string'.
-tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts(112,5): error TS2322: Type 'string | null' is not assignable to type 'string'.
-tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts(123,38): error TS2322: Type 'string | null' is not assignable to type 'string'.
-tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts(136,38): error TS2322: Type 'string | null' is not assignable to type 'string'.
-```
+   ```bash
+   git fetch origin
+   git worktree add -b codex/sr-mail-001-recovered-20260908 \
+     .artifacts/worktrees/auto/codex-sr-mail-001-recovered-20260908 \
+     25fc24ab7d12b0aeb833bb868586afb1c1953d30
+   cd .artifacts/worktrees/auto/codex-sr-mail-001-recovered-20260908
+   git rebase origin/dev
+   ```
 
-#### Mechanism
-In tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts:
-```typescript
-const token = new URLSearchParams(link.hash.slice(1)).get("invitationToken");
-assert(token?.startsWith("ti_"));
-...
-return { token, entry };
-```
-Because `new URLSearchParams(...).get(...)` returns `string | null`, and `assert(token?.startsWith(...))` does not type-narrow `token` in TypeScript's type control flow, `token` remains `string | null`. When passed to `acceptTenantInvitation({ invitationToken: token })` or `includes(token)`, TypeScript strict checking fails.
+   Run worktree creation from the repository root designated by supervisor,
+   without switching that root's branch. If upstream has moved, inspect any
+   conflicts against the parent's write scopes; do not blindly take either
+   side. Rebase is safe here because the replacement branch is unpublished.
+3. Run `git diff --check`, `pnpm typecheck:root`,
+   `pnpm --filter @drts/api typecheck`,
+   `pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/`, and
+   `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD`.
+   Record actual results and current base/candidate in parent evidence; commit
+   any evidence/fixes with Task-ID SR-MAIL-001 and Reviewer Claude.
+4. Normal push: `git push -u origin codex/sr-mail-001-recovered-20260908`.
+   Create a dev-targeted replacement PR with a body file referencing #1719 and
+   explaining the preserved history. Do not reuse review/CI from #1719.
+5. From that workspace, hand off the exact pushed head using
+   `CANDIDATE_SHA=$(git rev-parse HEAD)`,
+   `CANDIDATE_BRANCH=$(git branch --show-current)`, `PR_URL=<replacement PR>`,
+   `AI_NAME=Codex`, and the current canonical status CLI:
+   `/home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh handoff SR-MAIL-001 Claude "Replacement branch; current checks and PR evidence recorded"`.
+   Independent same-SHA review, CI, merge and acceptance remain required.
 
-Adding an explicit assertion `assert(token);` immediately after extraction:
-```typescript
-const token = new URLSearchParams(link.hash.slice(1)).get("invitationToken");
-assert(token);
-assert(token.startsWith("ti_"));
-```
-narrows `token` to `string`, completely eliminating all 7 compiler errors.
+## Checks performed in this helper
 
----
+- Fetch, worktree/ref/reflog inspection, range-diff and GitHub PR query: exit 0.
+- `git merge-tree --write-tree origin/dev codex/sr-mail-001`: exit 0, no conflicts;
+  synthetic tree `803da5bdbb0a1a09fccfd89be5295e7583fd0eec`. This changes no refs
+  and proves only merge feasibility, not that a rebase or runtime test passed.
+- `git merge-base --is-ancestor` for notification merge
+  `3014f9a4942f73f89c0a6f8458dc8b042c1034d0` and referral merge
+  `503f36015adc084e75ee33e5a866525b5c7d72c6` against origin/dev: both exit 0.
+  Both dependencies are also recorded done in their task slices.
+- No product tests or live receiver checks rerun in this documentation helper.
+  Previous worker's 13 passing tests are historical, not replacement-candidate
+  acceptance. The parent must rerun validation after rebase.
 
-## 3. Non-Destructive Repair Path
+## Delivery and parent next step
 
-To preserve shared history and ensure clean candidate lifecycle progression without force-pushing:
+This file is the only helper change. Its task-scoped commit and normal push
+are on `codex/sr-mail-001-unblock-history-repair`; the final SHA and PR URL
+are recorded by helper handoff in machine truth and the PR itself, avoiding a
+self-referential SHA in this file. Review/CI/merge are not claimed complete.
 
-### Step 1: Reassign or Resume Parent Task (Supervisor Action)
-Because `Codex2` (owner) and `Codex` (reviewer) are paused, the supervisor should reassign `SR-MAIL-001` to healthy agents (`Gemini` as owner, `Gemini2` as reviewer) and resume the task:
-```bash
-AI_NAME=Supervisor /home/lupin/drts-fleet-platform/.artifacts/releases/orchestrator-99f7e0e56/tools/development-orchestrator/bin/ai-status.sh reassign SR-MAIL-001 Gemini Gemini2 "Reassigned to healthy Gemini lane following SR-MAIL-001-UNBLOCK-HISTORY-REPAIR"
-AI_NAME=Supervisor /home/lupin/drts-fleet-platform/.artifacts/releases/orchestrator-99f7e0e56/tools/development-orchestrator/bin/ai-status.sh resume-blocked SR-MAIL-001 in_progress "Resumed under Gemini owner to complete typecheck repair and candidate handoff"
-```
-
-### Step 2: Branch & Rebase
-Create a task branch or check out `gemini/sr-mail-001` based on `codex2/sr-mail-001` and rebase onto `origin/dev`:
-```bash
-git fetch origin
-git switch -c gemini/sr-mail-001 codex2/sr-mail-001
-git rebase origin/dev
-```
-*(Merge-tree check confirms 0 conflicts).*
-
-### Step 3: Apply the TypeScript Narrowing Fix in `verify-mailpit.ts`
-In tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts, insert `assert(token);`:
-```typescript
-    const link = new URL(received.Text.split("\n")[1]!.trim());
-    const token = new URLSearchParams(link.hash.slice(1)).get(
-      "invitationToken",
-    );
-    assert(token);
-    assert(token.startsWith("ti_"));
-```
-
-### Step 4: Execute Full Local Verification
-Run all validation suites locally:
-```bash
-git diff --check
-pnpm run typecheck:root
-pnpm --filter @drts/api typecheck
-pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/
-```
-
-### Step 5: Commit, Push & PR
-Commit the fix with standard trailers and push without `--force`:
-```bash
-git add tests/unit/system-remediation/sr-mail-001/verify-mailpit.ts
-git commit -m "fix(SR-MAIL-001): type-narrow invitation token in verify-mailpit" \
-  -m "LLM-Agent: gemini" \
-  -m "Task-ID: SR-MAIL-001" \
-  -m "Reviewer: Gemini2"
-git push -u origin gemini/sr-mail-001
-gh pr create --base dev --head gemini/sr-mail-001 --title "fix(SR-MAIL-001): durable tenant invitation delivery and type-safe verification" --body "Closes #1679 by rebasing onto origin/dev and fixing TS type narrowing in verify-mailpit.ts."
-```
-
-### Step 6: Candidate Handoff
-Lock candidate SHA via `ai-status.sh`:
-```bash
-AI_NAME=Gemini CANDIDATE_SHA=$(git rev-parse HEAD) CANDIDATE_BRANCH=gemini/sr-mail-001 \
-  /home/lupin/drts-fleet-platform/.artifacts/releases/orchestrator-99f7e0e56/tools/development-orchestrator/bin/ai-status.sh \
-  handoff SR-MAIL-001 Gemini2 "Rebased on dev, fixed verify-mailpit TS type narrowing, tests passing, ready for review."
-```
-
----
-
-## 4. Machine Truth Update Performed in this Task
-
-In accordance with Acceptance Criterion 4 ("Update the parent task with the concrete unblocked next step"), `ai-status.sh note` was invoked on parent `SR-MAIL-001`:
-
-```bash
-AI_NAME=Gemini /home/lupin/drts-fleet-platform/.artifacts/releases/orchestrator-99f7e0e56/tools/development-orchestrator/bin/ai-status.sh note SR-MAIL-001 "SR-MAIL-001-UNBLOCK-HISTORY-REPAIR diagnosis complete: no git contamination exists. Blockers identified: 1) TS typecheck failure in verify-mailpit.ts (fixed via assert(token)), 2) Codex/Codex2 quota pause. Concrete unblock path: Supervisor reassigns SR-MAIL-001 to Gemini/Gemini2 and calls resume-blocked; Gemini applies assert(token) on rebased branch gemini/sr-mail-001, pushes, opens PR, and handoffs candidate SHA to Gemini2. See support/unblock/SR-MAIL-001/SR-MAIL-001-UNBLOCK-HISTORY-REPAIR.md."
-```
-
----
-
-## 5. Acceptance Criteria Verification
-
-| Acceptance Criterion | Verification & Status |
-|---|---|
-| **1. Identify exact branch/worktree/commit contamination** | Audited: **No git contamination**. Identified exact defects: 7 TypeScript errors in `verify-mailpit.ts` breaking CI, paused actors (`Codex2`/`Codex`), and misclassified scope blocker. |
-| **2. Repair or document non-destructive repair path** | Documented complete 6-step non-destructive repair path with exact code patch and shell commands, avoiding any force-push. |
-| **3. Produce task-scoped commit/push/PR evidence** | Committed `support/unblock/SR-MAIL-001/SR-MAIL-001-UNBLOCK-HISTORY-REPAIR.md` to `gemini/sr-mail-001-unblock-history-repair`, pushed to `origin`, and PR opened. |
-| **4. Update parent task with concrete unblocked next step** | Updated machine truth `next` field on `SR-MAIL-001` via `ai-status.sh note`. |
+The parent receives a status CLI note with this concrete next step: supervisor
+routes Codex to the unused recovery branch/worktree; parent owner rebases the
+retained `25fc24ab7…`, validates, normal-pushes and hands off a new candidate.
+The parent remains blocked until routing/resume; this helper satisfies the
+accepted documented-path option and does not claim the mail feature is done.
