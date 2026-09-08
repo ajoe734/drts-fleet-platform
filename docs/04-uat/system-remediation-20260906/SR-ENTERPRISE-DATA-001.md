@@ -1,5 +1,14 @@
 # SR-ENTERPRISE-DATA-001 — baseline and screen requirements
 
+## Dispatch after 02:01:36Z resume (2026-09-09)
+
+- Canonical `start`: exit 0. Task still has six original write scopes and no dependencies. The completed history-helper explicitly preserves the product scope blocker; no new canonical screen/contact decision was provided.
+- `git fetch origin`: exit 0; current base `7d04833053b63558c10fb678a422dff3522e0150`. `git rebase origin/dev`: initially exit 1 on repeated historical evidence conflicts. Resolved only this document by retaining already-replayed evidence; final `git -c core.editor=true rebase --continue`: exit 0. Document diff against dispatch head `6417369a211d869b56b7cfe1d29d69ed514cd642` was empty before this entry. Ordinary `git merge --no-ff origin/codex/sr-enterprise-data-001` with task trailers: exit 0, verification head `8d5fe3543df0b7807120eebde1e80ffb5096b946`.
+- Re-read execution/spec, R08/R09/R16, C013/C017/C018/C093/C108/C119, helper report, tenant realm tokens and enterprise home/trip/gate canvas. Current source still selects fixture bookings, uses fixed trip progress and inert contact controls; shared detail still maps normal 404 to degraded. Missing trip-not-found/unavailable-contact designs below remain absent. The dispatch's explicit design STOP still applies.
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0 (`tsc --noEmit`). `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`: exit 1 (`No test files found`), not a passing regression suite. `git diff --check`: exit 0 before this entry.
+- Resource `EB-7K2E1D` is fixture-only; live existence was not checked. Implementation candidate SHA: none; evidence anchor/push SHA is recorded in machine truth. No product/browser server, infrastructure, live API/contact/true-device validation, CI, acceptance or deployment was performed.
+- Supervisor action: supply canonical missing screen states, adjudicate shared lifecycle/theme/help scopes and dependencies, and identify the authorized contact source or approved unavailable-contact state. Preserve blocked status until these product prerequisites are resolved; the completed history helper alone does not unblock implementation.
+
 ## Redispatch verification (2026-09-09)
 
 - Canonical `progress`: exit 0. Task still has six original write scopes and no dependencies; no missing-screen or contact-source decision was supplied.
