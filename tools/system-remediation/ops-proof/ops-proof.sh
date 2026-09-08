@@ -5,7 +5,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ops-proof.sh inventory --output FILE
+  ops-proof.sh inventory --output FILE [--project ID --region REGION --service NAME]
   ops-proof.sh restore --snapshot FILE --expected-manifest FILE --isolated-database-url URL --output FILE
   ops-proof.sh load --booking-url URL --dispatch-url URL --report-url URL --output FILE [--requests N] [--header 'Name: value']
 
@@ -20,9 +20,13 @@ command_name="${1:-}"; shift || true
 expected_manifest=""; helper="$(dirname "${BASH_SOURCE[0]}")/reconcile.mjs"
 output=""; snapshot=""; isolated_database_url=""; booking_url=""; dispatch_url=""; report_url=""; requests=1
 headers=()
+project=""; region=""; service=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --project) project="${2:-}"; shift 2 ;;
+    --region) region="${2:-}"; shift 2 ;;
+    --service) service="${2:-}"; shift 2 ;;
     --output) output="${2:-}"; shift 2 ;;
     --expected-manifest) expected_manifest="${2:-}"; shift 2 ;;
     --snapshot) snapshot="${2:-}"; shift 2 ;;
@@ -54,25 +58,7 @@ NODE
 
 case "$command_name" in
   inventory)
-    write_json "$(node - "$base_sha" "$candidate_sha" "$now" <<'NODE'
-const [baseSha, candidateSha, observedAt] = process.argv.slice(2);
-console.log(JSON.stringify({
-  taskId: "SR-OPS-PROOF-001", kind: "read_only_inventory", observedAt,
-  baseSha, candidateSha,
-  sources: [
-    "docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md",
-    "docs/03-runbooks/operational-sla-degradation-runbook.md",
-    "docs/03-runbooks/production-deploy-rail-spec-20260519.md"
-  ],
-  findings: {
-    restore: "No cloud backup receipt was read; live restore remains SR-LIVE-OPS-001 gated.",
-    workload: "Baseline defines intake 60/min, dispatch 300/min, reporting 30 jobs/min bursts for 15 minutes.",
-    deployment: "Deploy evidence must identify immutable source SHA and health result."
-  },
-  liveNotPerformed: ["cloud_backup_read", "cloud_restore", "production_load", "physical_device_validation"]
-}));
-NODE
-)"
+    node "$(dirname "${BASH_SOURCE[0]}")/inventory.mjs" "$output" "$base_sha" "$candidate_sha" "$project" "$region" "$service"
     ;;
   restore)
     [[ -f "$snapshot" ]] || die "--snapshot must name an existing PostgreSQL dump"
