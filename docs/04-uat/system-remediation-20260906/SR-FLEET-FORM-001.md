@@ -1,81 +1,59 @@
 # SR-FLEET-FORM-001 — 供給表單可及性及未儲存草稿
 
-| 欄位              | 內容                                                 |
-| ----------------- | ---------------------------------------------------- |
-| Phase             | system-remediation-20260906                          |
-| Owner             | Codex                                               |
-| Reviewer          | Codex2                                              |
-| Base SHA          | `70355aba97c23dd1cd592b71f1d3dfe6315d91ff` (fresh `origin/dev`, 2026-09-08) |
-| Gap IDs           | R23, R25                                             |
-| Capability IDs    | C070, C120                                           |
-| Status            | implementation verified; handoff pending review      |
+Owner: Codex · Reviewer: Codex2 · 2026-09-08
 
-## 驗收條件與實作摘要
+## 來源與版本
 
-### AC1 — 鍵盤完成新增表單，欄位有 accessible name 及可讀錯誤
+- Base: `d44bd28142f238ef9d40507685a9423ef5c814f7`，本輪 `git fetch origin` 後的 `origin/dev`；已執行 `git rebase origin/dev`（exit 0）。9/6 audit 僅作問題來源。
+- 實作 SHA: `80729bd6462d360409cbd8555442c7bd93185b12`。最終 candidate 包含本 evidence 文件，exact SHA 由 `CANDIDATE_SHA=$(git rev-parse HEAD)` 寫入 task handoff；以 machine-truth task slice 的 candidate SHA 為準，避免文件自引用 SHA。
+- Branch: `codex/sr-fleet-form-001`；PR: <https://github.com/ajoe734/drts-fleet-platform/pull/1723>。
+- 已恢復遠端存活分支 `c9f16307f8b0ef9880ed638e41f5100d9628f0db` 的全欄位 dirty 偵測／側欄導航確認，正常 merge、commit 與 non-force push，未回退既有修復。
+- Execution: `docs/03-runbooks/system-remediation-execution-tasks-20260906.md` 與 task spec。追溯 `source/findings.json` R23（暗色 label／欄位關聯）、R25（供給總覽再返回遺失輸入），`source/capabilities.json` C070、C120。
+- 視覺來源：`Fleet Partner Portal.html` §5.2／§5.3、`fleet-supply.jsx` 的 `FLP_DriverDraft`／`FLP_VehicleDraft`。沿用 `buildFleetTheme()` → `buildCanvasTheme({surface: "partner", dark: true})` 及 `packages/ui-tokens`；無新增調色板或畫面設計。
 
-**已實作：**
-- 新增 `FormField` 組件（`fleet-supply-workspace.tsx`），替換 `CanvasField` 用於新增/編輯表單。
-  - `FormField` 輸出 `<label htmlFor={id}>` + `<input id={id}>`，建立明確 label↔input 關聯（WCAG 1.3.1, 4.1.2）。
-  - 錯誤訊息在 `id="${id}-error"` + `role="alert"` 的 `<div>` 內，供 AT 即時播報。
-  - 必填星號以 `aria-hidden="true"` 隱藏視覺符號，同時附加 visually-hidden 「（必填）」文字供 screen reader 讀取。
-- `DriverDraftFields` / `VehicleDraftFields` 全部欄位改用 `FormField`，`formKey` prop 控制每個表單實例的 id 前綴（`new-driver` / `new-vehicle` / `detail`）。
-- 文件上傳卡內 `docType`、`docFile`、`docFrom`、`docUntil` 也改用 `FormField`。
-- 加入 `fieldId(form, field)` helper（`fleet-portal-supply.ts`），返回 `"form-{form}-{field}"` 格式的穩定 id 字串。
-- `ProductChecklist` 組（checkbox 群組）改用 `role="group"` + `aria-labelledby` 提供群組標籤。
-- 行動裝置鍵盤提示：文字欄位加 `inputMode="text"`，電話加 `type="tel"` + `inputMode="tel"` + `autoComplete="tel"`，數字欄位加 `type="number"` + `inputMode="numeric"`，日期保留 `type="date"`。
-- `FieldInput` / `FieldSelect` 加 `outlineOffset: 2` 確保鍵盤焦點環不被背景蓋住。
-- 產品 checkbox 群組的必填標記改用 `theme.danger`，不引入非設計系統顏色。
+## 交付行為
 
-**暗色對比回歸（R23）：**
-- 現行 dark palette：`text: #E5EAF3`（L≈0.81）on `surface: #141B2B`（L≈0.005）→ 對比約 15.6:1，遠超 WCAG AA 4.5:1。
-- `FormField` label 使用 `theme.text`（非 `theme.textMuted`），確保標籤對比亦達標。
-- 未修改共用調色板（在 `packages/ui-web` 外）；顏色來源均為設計系統 realm tokens，無硬編碼 hex。
+實際表單入口為 `app/supply/drivers/new/page.tsx`、`app/supply/vehicles/new/page.tsx`；既有 `fleet-supply-workspace.tsx` 共用欄位保留原 API／資料模型。
 
-**未實作（限制說明）：**
-- 實際 computed style 截圖及 axe/VoiceOver/NVDA 實機測試 — 需要瀏覽器環境，無法在此 CI 步驟自動驗證。
-- Modal focus trap 回傳（C120）— 無 modal 在此表單範圍，不適用。
+- Label 與 id 明確關聯，checkbox 使用包覆 label、產品群組有 accessible name；原必填標記同步到 native `required`，錯誤／提示以 `aria-describedby` 關聯，API 錯誤只有一個 assertive alert。
+- 原生 form 支援 Enter、瀏覽器 required validation；hydration／草稿恢復前及提交期間停用欄位，避免使用者輸入被恢復流程蓋掉與重複送出。電話用 tel、數字用 numeric，焦點保留 native outline。
+- 新增表單每次變更同步保存至 sessionStorage，包括日期、可選欄位與 checkbox。key 包含版本、由權威 fleet scope 與 IAP principal 雜湊而成的 namespace、driver／vehicle 類型。還原時檢查欄位型別、移除未知屬性；不是 fixture 或服務端草稿的替代 API。
+- 重整／離頁返回自動恢復；BFCache pageshow 亦重新套用草稿。儲存不可用時同一 SPA session 以 memory fallback 保留，重整／關頁另有原生 beforeunload 警告。既有同站側欄連結／頁首返回確認保留。
+- POST 被拒絕或網路失敗時保留草稿；只有 API 成功建立後清除對應草稿並重設表單，再導航至回傳 submissionId。driver 成功不清 vehicle 草稿。
+- 不修改供給 API、文件簽章、上傳或送審語意。詳細頁未儲存編輯的持久化不在本輪新增表單草稿恢復範圍。
 
-### AC2 — 離頁返回可恢復或先確認丟棄；成功送出才清 draft
+## 可重跑驗證
 
-**已實作：**
-- 新增 `useDraftGuard(dirty)` hook（`fleet-supply-workspace.tsx`）：
-  - 當表單有任何必填欄位內容時，掛接 `window.addEventListener("beforeunload", ...)` 觸發瀏覽器原生離頁確認。
-  - `confirmLeave()` 函式在 in-app 導航前呼叫，顯示 `window.confirm()` 對話框（含中文標題與說明）。
-  - `DRAFT_GUARD_STRINGS` 常數（`fleet-portal-supply.ts`）集中管理文案，無 HTML tag（瀏覽器 dialog 只能顯示純文字）。
-- `NewDriverSubmissionForm` / `NewVehicleSubmissionForm`：
-- `dirty` state 以 `hasUnsavedDraftChanges()` 比對完整初始表單；所有輸入（含選項、日期和 checkbox）都會觸發保護，而非僅部分識別欄位。
-  - 成功 POST 後先設 `submitted=true`（移除 beforeunload），再 `router.push()`，確保成功送出不觸發警告。
-  - Header 的「返回」按鈕改為 `<button onClick={() => { if (confirmLeave()) router.back(); }}>` — 空欄時直接返回，有內容時先確認。
-  - 以 document capture-phase click handler 攔截同站、同 tab 的連結導覽（包括 persistent shell 側欄），避免使用者可透過非頁首連結繞過確認；外站導覽仍由 native `beforeunload` 保護。
-- `SupplySubmissionDetailView` 中的 "Save draft" 動作不受影響（已有 server-side 持久化，不需要客戶端 guard）。
+在本 worktree 執行，未使用 `passWithNoTests`。以下最終驗證的 exit code 均為 0：
 
-**未實作（限制說明）：**
-- localStorage 持久草稿恢復（"回頁還原"）— 驗收說明接受 "提供未存提醒或安全暫存，回頁還原" 中的「提醒」路徑，已由 beforeunload + confirmLeave 實現。localStorage 路徑需要更廣泛的設計決策（key 命名、清除時機、multi-tab 競態），超出此任務 write scope，已明列為未完成。
+| 指令 | 結果 |
+| --- | --- |
+| `git diff --check` | 無 whitespace 錯誤 |
+| `pnpm --filter @drts/fleet-partner-portal-web typecheck` | Next route typegen 與 tsc 通過 |
+| `pnpm --filter @drts/fleet-partner-portal-web build` | Webpack production build 通過 |
+| `pnpm --filter @drts/fleet-partner-portal-web lint` | 通過 |
+| `pnpm exec eslint tests/unit/system-remediation/sr-fleet-form-001/ --max-warnings=0` | 通過 |
+| `node tools/ci/i18n-guard.mjs` | OK，520 files、55 既有 exemptions |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-form-001/` | 1 file、40 tests passed |
 
-### AC3 — 證據記錄
+瀏覽器驗證使用上述 production build，啟動指令：
 
-| 步驟        | 指令                                                                                                      | Exit Code |
-| ----------- | --------------------------------------------------------------------------------------------------------- | --------- |
-| diff-check  | `git diff --check`                                                                                        | 0         |
-| typecheck   | `pnpm --filter @drts/fleet-partner-portal-web typecheck`                                                  | 0         |
-| unit tests  | `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-form-001/`                                   | 0         |
-| test output | `Test Files 1 passed (1) · Tests 30 passed (30)` (2026-09-08T11:15:04Z)                                 | —         |
+```sh
+DRTS_FLEET_PARTNER_ID=sr-fleet-form-browser-test DRTS_API_URL=http://127.0.0.1:9 pnpm --filter @drts/fleet-partner-portal-web exec next start --hostname 127.0.0.1 --port 3317
+CHROMIUM_EXECUTABLE=/home/lupin/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome node tests/unit/system-remediation/sr-fleet-form-001/browser-regression.mjs
+```
 
-Base SHA：`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`。前一輪 `b32ab8bad`／`37e898923` 僅為歷史觀察與存活分支來源；本輪已將實作 rebase 至此 fresh base 後重跑上述指令。Candidate SHA 由本輪普通 push 後的 `ai-status.sh handoff` 以 exact `HEAD` 寫入 machine truth。
+Browser script exit 0、`result: passed`。可使用本機 Playwright 預設 browser（省略 CHROMIUM_EXECUTABLE）或指定已安裝 Chromium。驗證姓名→電話 Tab、Enter 提交、native required、13 個 driver controls 的 label、電話／數字 inputmode、native outline、重整／上一頁恢復、API 422 保留與成功清除、車輛 optional-only 草稿保留、切换 fleet header 不還原其他車行資料。viewport 包含 1280×900 及 390×844。
 
-Resource ID：無。此變更僅驗證 client-side 表單互動，未呼叫建立供給送件的 API，因此沒有聲稱或以 fixture 代替 live submission resource；實際瀏覽器／真機驗收仍列為未完成。
+實際 computed label color `rgb(229, 234, 243)`，input surface `rgb(20, 27, 43)`；以 sRGB 相對亮度公式計算對比 **14.24:1**，修正前輪 evidence 未實測的 15.6:1 數字。
 
-## 修改檔案
+Resource IDs：`sr-fleet-form-browser-test`／`sr-fleet-form-other-test` 為本機測試 scope；`test-only-submission` 僅為 Playwright intercepted response ID。**Live resource ID: 無**，沒有呼叫或宣稱成功建立真供給資料。
 
-| 檔案                                                                                    | 變更                                                             |
-| --------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `apps/fleet-partner-portal-web/lib/fleet-portal-supply.ts`                              | 新增 `fieldId()`、`DRAFT_GUARD_STRINGS` + 全欄位草稿差異判定 helper |
-| `apps/fleet-partner-portal-web/components/fleet-supply-workspace.tsx`                   | 新增 `FormField` + `useDraftGuard`；改 `DriverDraftFields` / `VehicleDraftFields` / 上傳卡 / 兩個 New*Form；加 `inputMode`/`autoComplete`/`outlineOffset` |
-| `tests/unit/system-remediation/sr-fleet-form-001/sr-fleet-form-001.test.ts`             | 30 個 unit test（fieldId, DRAFT_GUARD_STRINGS, in-app navigation guard, isEditableStatus, formatSupplySubject, dirty invariants） |
+## 檢查中發現及限制
 
-## 未完成 / 需要外部驗收的項目
-
-1. **實機 AT 測試**（axe DevTools / NVDA / VoiceOver / TalkBack）— 需要瀏覽器，不在此 CI 範圍。
-2. **localStorage 草稿持久化**（回頁後恢復，而非確認丟棄）— 超出此任務 write scope，需 supervisor 擴 scope。
-3. **焦點管理 E2E**（Tab 鍵循序、Enter 提交）— 需 Playwright/Cypress，不在此 unit 範圍。
+- 首次 Turbopack dev 啟動 exit 1：isolated worktree 的 node_modules symlink 指向 filesystem root 外；未改共用設定。Webpack dev 可啟動，但 full-history back 有 Next router initialization／未 hydration 行為。改以 production build 驗證上述路徑通過；不宣稱已修好共用 Next dev runtime。
+- 中途 browser assertion 曾因重複 alert 與未等待 hydration 失敗，已修正單一 alert 及恢復前 disabled；測試並未跳過失敗步驟。測試腳本 eslint 的 browser globals 亦已修正。
+- Production 啟動會提示 `output: standalone` 應使用 standalone server；本次 `next start` 確實供應 production build 並通過測試，未將其當成部署驗證。build 的 middleware deprecation 為既有警告。
+- 未做 live API／Cloud Run、同 candidate CI／merge／deploy、真機鍵盤、VoiceOver／NVDA／TalkBack 或全頁 axe 掃描。手機僅 Chromium viewport 與 inputmode，沒有宣稱真機通過。
+- 草稿限同分頁的 session，沒有跨裝置／永久 localStorage 保存。memory fallback 無法跨整頁 reload 保留，依 beforeunload 提醒；實際瀏覽器仍可自行限制原生離頁對話框。
+- Owner 僅交付可審查 candidate，普通 push 後 handoff Codex2；不呼叫 done。獨立 review、同 candidate CI／merge 與 acceptance 由 lifecycle 決定。
