@@ -51,7 +51,6 @@ function createMockBooking(
     passenger: {
       name: "林宜君",
       phone: "0912-345-678",
-      email: "lin.yj@hongshuo.example",
     },
     bookedBy: {
       name: "林宜君",
@@ -70,7 +69,7 @@ function createMockBooking(
       amountMinor: 150000,
       currency: "TWD",
     },
-    quotedFareSource: "rule_engine",
+    quotedFareSource: "platform_pricing_rule",
     quotedFareRuleVersion: "v1",
     manualFareOverride: null,
     approvalState: "approved",
@@ -90,6 +89,9 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
       passenger: {
         name: "陳思妤",
         phone: "0988-123-456",
+      },
+      bookedBy: {
+        name: "陳思妤",
         email: "chen@example.com",
       },
       pickup: { address: "台北君悅酒店" },
@@ -501,7 +503,7 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
       const bookings = [
         createMockBooking({
           bookingId: "EB-101",
-          passenger: { name: "張三" },
+          passenger: { name: "張三", phone: "0900-000-000" },
           status: "active",
         }),
       ];

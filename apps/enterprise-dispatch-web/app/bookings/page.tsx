@@ -266,6 +266,53 @@ export function formatBookingTime(isoString: string): string {
   }
 }
 
+const SEARCH_COPY = {
+  pageHeadSub: "前台歷史檢視 · 非派遣看板 · 支援組合搜尋與全域分頁",
+  scopeAria: "預約對象篩選",
+  statusLabel: "狀態:",
+  statusAll: "全部狀態",
+  statusReserved: "已預約",
+  statusApproval: "待審批",
+  statusAssigned: "已派車",
+  statusEnroute: "行程中 / 前往上車",
+  statusCompleted: "已完成",
+  statusCancelled: "已取消",
+  statusNosupply: "無法派車",
+  searchInputAria: "搜尋乘客姓名、電話、預約編號、地點",
+  searchPlaceholder: "搜尋乘客 / 編號 / 地點",
+  clearQueryAria: "清除關鍵字",
+  dateFromAria: "預約起始日期",
+  dateToAria: "預約結束日期",
+  clearFilters: "清除篩選",
+  matchingCriteria: "符合條件：",
+  itemsTotal: "筆（全域總數",
+  totalItemsUnit: "筆）",
+  totalPrefix: "共",
+  totalSuffix: "筆預約",
+  showingRange: "顯示第",
+  toRange: "–",
+  itemsOf: "筆，共",
+  pagesUnit: "頁",
+  loadingList: "讀取預約列表中...",
+  emptyTotalSub: "目前尚未建立任何企業預約。您可以為自己或公司同仁建立新行程。",
+  emptyFilteredTitle: "找不到符合條件的預約",
+  emptyFilteredSub: "沒有任何預約符合您所指定的篩選條件、搜尋字詞或日期區間。",
+  emptyFilteredClear: "清除所有篩選條件",
+  colId: "編號",
+  colPassenger: "乘客 / 下單",
+  colRoute: "行程",
+  colTime: "時間",
+  colCostCenter: "成本中心",
+  colState: "狀態",
+  pageSizeLabel: "每頁顯示:",
+  pageSizeAria: "每頁顯示筆數",
+  pageSize5: "5 筆",
+  pageSize10: "10 筆",
+  pageSize20: "20 筆",
+  pagePrev: "上一頁",
+  pageNext: "下一頁",
+};
+
 function errorContent(
   state: GatewayState,
   tr: ReturnType<typeof useTranslation>["t"],
@@ -276,10 +323,10 @@ function errorContent(
       <div data-testid="enterprise-booking-api-state">
         <strong>
           {state === "quota-blocked"
-            ? "額度或政策限制"
+            ? tr("gate.quotaBlocked.title")
             : state === "no-supply"
-              ? "目前無法派車"
-              : "服務暫時不穩定"}
+              ? tr("gate.noSupply.title")
+              : tr("gate.degraded.title")}
         </strong>
         <p style={{ color: t.muted, lineHeight: 1.6 }}>
           {tr("bookingLifecycle.gateway.body")}
@@ -364,16 +411,16 @@ export default function BookingsHistoryPage() {
   if (state) return errorContent(state, tr);
 
   const scopeOptions: { value: EnterpriseSearchScope; label: string }[] = [
-    { value: "all", label: "全部" },
-    { value: "mine", label: "我預約的" },
-    { value: "byme", label: "我代訂的" },
+    { value: "all", label: tr("bookings.filter.all") },
+    { value: "mine", label: tr("bookings.filter.mine") },
+    { value: "byme", label: tr("bookings.filter.byme") },
   ];
 
   return (
     <>
       <EntPageHead
         title={tr("bookings.title")}
-        sub="前台歷史檢視 · 非派遣看板 · 支援組合搜尋與全域分頁"
+        sub={SEARCH_COPY.pageHeadSub}
         actions={
           <Link
             href="/bookings/new"
@@ -404,7 +451,7 @@ export default function BookingsHistoryPage() {
           {/* Scope Segmented Control */}
           <div
             role="tablist"
-            aria-label="預約對象篩選"
+            aria-label={SEARCH_COPY.scopeAria}
             style={{
               display: "inline-flex",
               background: t.surfaceLo,
@@ -453,7 +500,7 @@ export default function BookingsHistoryPage() {
               htmlFor="booking-status-filter"
               style={{ fontSize: 12, color: t.muted, fontWeight: 500 }}
             >
-              狀態:
+              {SEARCH_COPY.statusLabel}
             </label>
             <select
               id="booking-status-filter"
@@ -477,14 +524,14 @@ export default function BookingsHistoryPage() {
                 outline: "none",
               }}
             >
-              <option value="all">全部狀態</option>
-              <option value="reserved">已預約</option>
-              <option value="approval">待審批</option>
-              <option value="assigned">已派車</option>
-              <option value="enroute">行程中 / 前往上車</option>
-              <option value="completed">已完成</option>
-              <option value="cancelled">已取消</option>
-              <option value="nosupply">無法派車</option>
+              <option value="all">{SEARCH_COPY.statusAll}</option>
+              <option value="reserved">{SEARCH_COPY.statusReserved}</option>
+              <option value="approval">{SEARCH_COPY.statusApproval}</option>
+              <option value="assigned">{SEARCH_COPY.statusAssigned}</option>
+              <option value="enroute">{SEARCH_COPY.statusEnroute}</option>
+              <option value="completed">{SEARCH_COPY.statusCompleted}</option>
+              <option value="cancelled">{SEARCH_COPY.statusCancelled}</option>
+              <option value="nosupply">{SEARCH_COPY.statusNosupply}</option>
             </select>
           </div>
 
@@ -510,11 +557,11 @@ export default function BookingsHistoryPage() {
             </span>
             <input
               type="text"
-              aria-label="搜尋乘客姓名、電話、預約編號、地點"
+              aria-label={SEARCH_COPY.searchInputAria}
               data-testid="enterprise-search-input"
               value={criteria.q}
               onChange={(e) => handleSearchChange(e.target.value)}
-              placeholder="搜尋乘客 / 編號 / 地點"
+              placeholder={SEARCH_COPY.searchPlaceholder}
               style={{
                 border: "none",
                 background: "transparent",
@@ -529,7 +576,7 @@ export default function BookingsHistoryPage() {
               <button
                 type="button"
                 onClick={() => handleSearchChange("")}
-                aria-label="清除關鍵字"
+                aria-label={SEARCH_COPY.clearQueryAria}
                 style={{
                   border: "none",
                   background: "transparent",
@@ -562,7 +609,7 @@ export default function BookingsHistoryPage() {
             </span>
             <input
               type="date"
-              aria-label="預約起始日期"
+              aria-label={SEARCH_COPY.dateFromAria}
               data-testid="enterprise-date-from"
               value={criteria.dateFrom}
               onChange={(e) => handleDateFromChange(e.target.value)}
@@ -578,7 +625,7 @@ export default function BookingsHistoryPage() {
             <span style={{ color: t.muted, fontSize: 12 }}>–</span>
             <input
               type="date"
-              aria-label="預約結束日期"
+              aria-label={SEARCH_COPY.dateToAria}
               data-testid="enterprise-date-to"
               value={criteria.dateTo}
               onChange={(e) => handleDateToChange(e.target.value)}
@@ -616,7 +663,7 @@ export default function BookingsHistoryPage() {
               }}
             >
               <EIcon name="refresh" size={13} />
-              清除篩選
+              {SEARCH_COPY.clearFilters}
             </button>
           )}
         </div>
@@ -635,27 +682,27 @@ export default function BookingsHistoryPage() {
         >
           <span>
             {bookings === null ? (
-              "讀取預約列表中..."
+              SEARCH_COPY.loadingList
             ) : active ? (
               <>
-                符合條件：
+                {SEARCH_COPY.matchingCriteria}
                 <strong style={{ color: t.primary }}>
                   {filteredBookings.length}
                 </strong>{" "}
-                筆（全域總數 {bookings.length} 筆）
+                {SEARCH_COPY.itemsTotal} {bookings.length} {SEARCH_COPY.totalItemsUnit}
               </>
             ) : (
               <>
-                共{" "}
+                {SEARCH_COPY.totalPrefix}{" "}
                 <strong style={{ color: t.ink }}>{bookings.length}</strong>{" "}
-                筆預約
+                {SEARCH_COPY.totalSuffix}
               </>
             )}
           </span>
           {pagination.total > 0 && (
             <span>
-              顯示第 {pagination.startIndex + 1}–{pagination.endIndex} 筆，共{" "}
-              {pagination.totalPages} 頁
+              {SEARCH_COPY.showingRange} {pagination.startIndex + 1}–{pagination.endIndex} {SEARCH_COPY.itemsOf}{" "}
+              {pagination.totalPages} {SEARCH_COPY.pagesUnit}
             </span>
           )}
         </div>
@@ -714,7 +761,7 @@ export default function BookingsHistoryPage() {
                 margin: 0,
               }}
             >
-              目前尚未建立任何企業預約。您可以為自己或公司同仁建立新行程。
+              {SEARCH_COPY.emptyTotalSub}
             </p>
             <div style={{ marginTop: 8 }}>
               <Link
@@ -753,7 +800,7 @@ export default function BookingsHistoryPage() {
               <EIcon name="search" size={24} />
             </div>
             <strong style={{ fontSize: 16, color: t.ink }}>
-              找不到符合條件的預約
+              {SEARCH_COPY.emptyFilteredTitle}
             </strong>
             <p
               style={{
@@ -763,7 +810,7 @@ export default function BookingsHistoryPage() {
                 margin: 0,
               }}
             >
-              沒有任何預約符合您所指定的篩選條件、搜尋字詞或日期區間。
+              {SEARCH_COPY.emptyFilteredSub}
             </p>
             <button
               type="button"
@@ -771,7 +818,7 @@ export default function BookingsHistoryPage() {
               data-testid="enterprise-filter-empty-clear"
               style={entBtnStyle(t, { variant: "default", size: "sm" })}
             >
-              <EBtnContent icon="refresh">清除所有篩選條件</EBtnContent>
+              <EBtnContent icon="refresh">{SEARCH_COPY.emptyFilteredClear}</EBtnContent>
             </button>
           </div>
         ) : (
@@ -791,12 +838,12 @@ export default function BookingsHistoryPage() {
                 letterSpacing: 0.3,
               }}
             >
-              <span>編號</span>
-              <span>乘客 / 下單</span>
-              <span>行程</span>
-              <span>時間</span>
-              <span>成本中心</span>
-              <span>狀態</span>
+              <span>{SEARCH_COPY.colId}</span>
+              <span>{SEARCH_COPY.colPassenger}</span>
+              <span>{SEARCH_COPY.colRoute}</span>
+              <span>{SEARCH_COPY.colTime}</span>
+              <span>{SEARCH_COPY.colCostCenter}</span>
+              <span>{SEARCH_COPY.colState}</span>
             </div>
 
             {/* List rows */}
@@ -857,8 +904,10 @@ export default function BookingsHistoryPage() {
                       }}
                     >
                       {isSelf
-                        ? "本人"
-                        : `${booking.bookedBy?.name ?? "同仁"} 代訂`}
+                        ? tr("common.self")
+                        : tr("common.bookedByDelegate", {
+                            name: booking.bookedBy?.name ?? "同仁",
+                          })}
                     </div>
                   </div>
                   <div style={{ fontSize: 12, color: t.ink2, minWidth: 0 }}>
@@ -934,9 +983,9 @@ export default function BookingsHistoryPage() {
         >
           {/* Page size picker */}
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 12, color: t.muted }}>每頁顯示:</span>
+            <span style={{ fontSize: 12, color: t.muted }}>{SEARCH_COPY.pageSizeLabel}</span>
             <select
-              aria-label="每頁顯示筆數"
+              aria-label={SEARCH_COPY.pageSizeAria}
               data-testid="enterprise-page-size"
               value={pageSize}
               onChange={(e) => handlePageSizeChange(Number(e.target.value))}
@@ -953,9 +1002,9 @@ export default function BookingsHistoryPage() {
                 outline: "none",
               }}
             >
-              <option value={5}>5 筆</option>
-              <option value={10}>10 筆</option>
-              <option value={20}>20 筆</option>
+              <option value={5}>{SEARCH_COPY.pageSize5}</option>
+              <option value={10}>{SEARCH_COPY.pageSize10}</option>
+              <option value={20}>{SEARCH_COPY.pageSize20}</option>
             </select>
           </div>
 
@@ -994,7 +1043,7 @@ export default function BookingsHistoryPage() {
                   size={13}
                   style={{ transform: "rotate(180deg)" }}
                 />
-                上一頁
+                {SEARCH_COPY.pagePrev}
               </span>
             </button>
 
@@ -1036,7 +1085,7 @@ export default function BookingsHistoryPage() {
                   gap: 4,
                 }}
               >
-                下一頁
+                {SEARCH_COPY.pageNext}
                 <EIcon name="arrow" size={13} />
               </span>
             </button>

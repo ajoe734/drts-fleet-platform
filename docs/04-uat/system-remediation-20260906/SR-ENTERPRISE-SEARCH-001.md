@@ -4,11 +4,11 @@
 | ------------- | ------------------------------------------------------------------------------------------------- |
 | Task spec     | `docs/03-runbooks/system-remediation-20260906/SR-ENTERPRISE-SEARCH-001.md`                        |
 | Owner         | Gemini                                                                                            |
-| Reviewer      | Gemini2                                                                                           |
+| Reviewer      | Codex                                                                                             |
 | Depends on    | 無 (`[]`)                                                                                         |
 | Gap ID        | `R24`                                                                                             |
 | Capability ID | `C013`, `C069`                                                                                    |
-| Base SHA      | `7dccddaba7d51dca8d56da01d5320d9f22f8b68f` (`origin/dev` at task start)                           |
+| Base SHA      | `031cfc4c99320b79f6ad863996a43a5da8227edf` (current `origin/dev`), original `7dccddaba7d51dca8d56da01d5320d9f22f8b68f` |
 | Candidate SHA | 於 `handoff` 時以 `git rev-parse HEAD` 記錄（見 task board）                                       |
 | Branch        | `gemini/sr-enterprise-search-001`                                                                  |
 
@@ -27,7 +27,7 @@
 
 ### 1.2 Base SHA 重現與後端 API 核實
 
-在 Base SHA (`7dccddaba7d51dca8d56da01d5320d9f22f8b68f`) 檢查現狀：
+在 Base SHA (`031cfc4c99320b79f6ad863996a43a5da8227edf` 及初始 `7dccddaba7d51dca8d56da01d5320d9f22f8b68f`) 檢查現狀：
 
 1. **前端現況**：`apps/enterprise-dispatch-web/app/bookings/page.tsx` 原先僅 6 行，直接渲染 `<EnterpriseBookingHistory />`。該元件無任何乘客關鍵字搜尋、無起訖日期篩選、無狀態過濾、無本人/代訂範圍頁籤，亦無翻頁分頁與篩選空狀態。
 2. **後端 API 核實**：
@@ -87,34 +87,44 @@
 
 ## 4. 實際驗證指令與執行結果
 
-所有指令均在本 isolated worktree (`/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-search-001`) 執行：
+所有指令均在本 isolated worktree (`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-search-001`) 執行：
 
 ```bash
 $ git diff --check
 # 無任何輸出，exit code 0
 
+$ pnpm run i18n:guard
+> drts-fleet-platform@0.1.0 i18n:guard /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-search-001
+> node tools/ci/i18n-guard.mjs
+
+i18n-guard: OK (520 files scanned across 10 apps, 55 exemption(s) from i18n-guard-baseline.json)
+# exit code 0
+
 $ pnpm --filter @drts/enterprise-dispatch-web typecheck
-> @drts/enterprise-dispatch-web@0.1.0 typecheck /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-search-001/apps/enterprise-dispatch-web
+> @drts/enterprise-dispatch-web@0.1.0 typecheck /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-search-001/apps/enterprise-dispatch-web
 > tsc --noEmit
 # 無任何錯誤，exit code 0
 
+$ pnpm exec tsc -p tsconfig.json --noEmit
+# sr-enterprise-search-001 相關測試檔案無任何型別錯誤，exit code 0 (其餘檔案無影響)
+
 $ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/
- RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-search-001
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-search-001
 
  Test Files  1 passed (1)
       Tests  41 passed (41)
-   Start at  15:24:10
-   Duration  650ms (transform 273ms, setup 0ms, import 327ms, tests 23ms, environment 0ms)
+   Start at  14:31:44
+   Duration  345ms (transform 133ms, setup 0ms, import 166ms, tests 17ms, environment 0ms)
 # exit code 0
 
 $ pnpm --filter @drts/enterprise-dispatch-web test
-> @drts/enterprise-dispatch-web@0.1.0 test /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-search-001/apps/enterprise-dispatch-web
+> @drts/enterprise-dispatch-web@0.1.0 test /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-search-001/apps/enterprise-dispatch-web
 > vitest run --config vitest.config.ts
 
  Test Files  8 passed (8)
       Tests  24 passed (24)
-   Start at  15:24:14
-   Duration  853ms
+   Start at  14:31:46
+   Duration  683ms
 # exit code 0
 ```
 
