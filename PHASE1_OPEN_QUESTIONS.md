@@ -4,7 +4,19 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`.
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-ENTERPRISE-FORM-001`.
+
+### Q-SR-ENTERPRISE-FORM-001 — theme precedence and shared scope authorization
+
+Supervisor/Chairman must confirm whether enterprise canvas branding or tenant
+realm tokens govern the shared enterprise theme, then authorize the theme and
+three existing translation keys with overlap/dependency sequencing. Parent owner
+Codex2 and reviewer Codex preserve full acceptance and the blocked state until
+that authorization or an accepted, merged shared-theme producer exists.
+`SR-DESIGN-001` covers leave/academy/Host contracts and is not an established
+theme dependency. This is an explicit follow-up on the existing parent, not a
+scope grant or a new registered implementation task. See the
+[decision routing and resume gate](support/unblock/SR-ENTERPRISE-FORM-001/SR-ENTERPRISE-FORM-001-UNBLOCK-PLANNING-DECISION.md).
 
 The original fifteen questions on this board were answered. Worth noting how, because the
 distribution was not what the board implied: of the fifteen, four were closed by
@@ -45,6 +57,45 @@ stays blocked until the producer is accepted and merged. See the
 [decision routing record](support/unblock/SR-ENTERPRISE-SEARCH-001/SR-ENTERPRISE-SEARCH-001-UNBLOCK-PLANNING-DECISION.md)
 for evidence, named follow-ups, and the resume gate. This is tracked follow-up on
 the existing parent, not a claim that a new producer is already on the task board.
+
+### Q-SR-FLEET-DATA-001 — shared scope and detail surface routing pending
+
+Supervisor/Chairman must authorize the parent's missing training/cases page and
+shared table/copy scopes, with explicit sequencing against `SR-FLEET-CASE-001`
+and `SR-ACADEMY-FE-001`. Parent owner Codex and reviewer Codex2 retain full
+acceptance: unknown document/training state is not completed, and unintegrated
+data must be visible. Do not make FLEET-DATA depend on FLEET-CASE: CASE already
+depends on DATA. Confirm the intended authorized detail surface before adding
+a new screen. See the [routing decision and resume gate](support/unblock/SR-FLEET-DATA-001/SR-FLEET-DATA-001-UNBLOCK-PLANNING-DECISION.md).
+This is an open supervisor follow-up on the existing parent, not scope approval
+or a reduction in acceptance. The parent remains blocked pending authorization;
+its existing CSV/filter work can resume within current scopes when dispatched.
+
+### Q-SR-DRIVER-WEB-001 — Metro scope authorization pending
+
+Owner: Codex2 (parent); reviewer: Codex; decision route: supervisor scope review.
+The parent reports SQLite WASM resolution failure after native-map isolation.
+Authorize the smallest driver Metro configuration scope, after checking overlapping
+writers and recording necessary dependencies in machine truth, or register a
+separate producer with a parent dependency. This entry does not grant that scope.
+Preserve all three web-route checks and native import regression acceptance;
+do not replace the offline queue or waive browser checks to obtain a green export.
+The parent remains blocked until authorization. See the
+[decision and continuation record](support/unblock/SR-DRIVER-WEB-001/SR-DRIVER-WEB-001-UNBLOCK-PLANNING-DECISION.md)
+for source evidence, exact proposed path and validation gates. No new product
+semantics or acceptance scope cut is approved.
+
+### Q-SR-ENTERPRISE-DATA-001 — shared scope and contact contract routing pending
+
+Owner: Codex2 (parent); reviewer: Codex. Supervisor/Chairman must adjudicate
+the shared detail 404, support action, and theme scopes and record dependency
+ordering before parent UI completion. Contract reviewer Codex must confirm an
+authorized driver/support contact source or route an explicit unavailable-contact
+acceptance decision. Passenger/onsite contact is not driver contact. Preserve
+the full parent acceptance; history repair does not grant scope or clear this
+gate. The parent remains blocked pending these decisions, tracked on the
+existing parent task rather than an unregistered producer. See the
+[routing record and concrete resume gate](support/unblock/SR-ENTERPRISE-DATA-001/SR-ENTERPRISE-DATA-001-UNBLOCK-PLANNING-DECISION.md).
 
 ## Resolved Items
 
