@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { BookingRecord } from "@drts/contracts";
+import { ApiClientError } from "../../../../packages/api-client/src";
 import {
+  bookingGatewayHref,
   classifyBookingRecordState,
   formatBookingWindowLabel,
+  getAuthorizedSupportContact,
   getDriverAssignedNotice,
   getTripProgressStageIndex,
   isInProgressTripState,
   isUpcomingTripState,
   mapBookingRecordToTripSummary,
+  resolveBookingGatewayState,
   toTelHref,
 } from "../../../../apps/enterprise-dispatch-web/lib/enterprise-fixtures";
 
@@ -261,6 +265,7 @@ describe("SR-ENTERPRISE-DATA-001: getDriverAssignedNotice", () => {
     expect(notice.title).toBe("司機已指派");
     expect(notice.subtitle).toBe("聯絡方式由企業客服提供");
     expect(notice.helpText).toContain("請改用企業客服");
+    expect(notice.isDriverAssigned).toBe(true);
   });
 
   it("returns English notice for en locale", () => {
@@ -268,5 +273,126 @@ describe("SR-ENTERPRISE-DATA-001: getDriverAssignedNotice", () => {
     expect(notice.title).toBe("Driver assigned");
     expect(notice.subtitle).toBe("Contact is routed through enterprise support");
     expect(notice.helpText).toContain("please use enterprise support");
+    expect(notice.isDriverAssigned).toBe(true);
+  });
+
+  it("returns unassigned finding-driver state when order is matching/pending", () => {
+    const noticeZh = getDriverAssignedNotice("zh", "matching");
+    expect(noticeZh.title).toBe("司機媒合中");
+    expect(noticeZh.subtitle).toBe("尚未指派司機");
+    expect(noticeZh.isDriverAssigned).toBe(false);
+
+    const noticeEn = getDriverAssignedNotice("en", "pending");
+    expect(noticeEn.title).toBe("Finding Driver");
+    expect(noticeEn.subtitle).toBe("No driver assigned yet");
+    expect(noticeEn.isDriverAssigned).toBe(false);
+  });
+
+  it("returns no-supply state when dispatch failed or no supply", () => {
+    const noticeZh = getDriverAssignedNotice("zh", "no_supply");
+    expect(noticeZh.title).toBe("暫無可派車輛");
+    expect(noticeZh.subtitle).toBe("目前無法派車");
+    expect(noticeZh.isDriverAssigned).toBe(false);
+
+    const noticeEn = getDriverAssignedNotice("en", "dispatch_failed");
+    expect(noticeEn.title).toBe("No Vehicle Available");
+    expect(noticeEn.subtitle).toBe("Dispatch unavailable");
+    expect(noticeEn.isDriverAssigned).toBe(false);
+  });
+});
+
+describe("SR-ENTERPRISE-DATA-001: getAuthorizedSupportContact", () => {
+  it("defaults to honest unauthorized in-app support (/help) without leaking fixture phone", () => {
+    const originalEnv = process.env.NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE;
+    delete process.env.NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE;
+    try {
+      const contact = getAuthorizedSupportContact("zh");
+      expect(contact.isAuthorized).toBe(false);
+      expect(contact.phone).toBeNull();
+      expect(contact.href).toBe("/help");
+      expect(contact.sourceType).toBe("in_app_support");
+      expect(contact.notice).toContain("直撥電話尚未取得租戶授權設定");
+    } finally {
+      if (originalEnv !== undefined) {
+        process.env.NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE = originalEnv;
+      }
+    }
+  });
+
+  it("uses authorized configured phone when available in runtime environment", () => {
+    const originalEnv = process.env.NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE;
+    process.env.NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE = "0800-888-999";
+    try {
+      const contact = getAuthorizedSupportContact("zh");
+      expect(contact.isAuthorized).toBe(true);
+      expect(contact.phone).toBe("0800-888-999");
+      expect(contact.href).toBe("tel:0800888999");
+      expect(contact.sourceType).toBe("authorized_env");
+      expect(contact.notice).toContain("0800-888-999");
+    } finally {
+      if (originalEnv !== undefined) {
+        process.env.NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE = originalEnv;
+      } else {
+        delete process.env.NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE;
+      }
+    }
+  });
+});
+
+describe("SR-ENTERPRISE-DATA-001: 404 BOOKING_NOT_FOUND error classification (C119 / R08)", () => {
+  it("classifies 404 BOOKING_NOT_FOUND as not-found, NEVER degraded", () => {
+    const err404 = new ApiClientError({
+      statusCode: 404,
+      code: "BOOKING_NOT_FOUND",
+      message: "Booking not found",
+      retryable: false,
+      rawBody: '{"code":"BOOKING_NOT_FOUND","message":"Booking not found"}',
+    });
+
+    expect(resolveBookingGatewayState(err404)).toBe("not-found");
+    expect(bookingGatewayHref(err404)).toBe("/not-found");
+
+    // Exact reproduction test from Codex review:
+    // candidate used: (gatewayHref(error)?.slice(1) as GatewayState) ?? "degraded"
+    const resolvedState =
+      (bookingGatewayHref(err404)?.slice(1) as string | undefined) ?? "degraded";
+    expect(resolvedState).toBe("not-found");
+    expect(resolvedState).not.toBe("degraded");
+  });
+
+  it("classifies 5xx server errors as degraded", () => {
+    const err500 = new ApiClientError({
+      statusCode: 500,
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Internal Server Error",
+      retryable: true,
+      rawBody: '{"code":"INTERNAL_SERVER_ERROR"}',
+    });
+    expect(resolveBookingGatewayState(err500)).toBe("degraded");
+    expect(bookingGatewayHref(err500)).toBe("/degraded");
+  });
+
+  it("classifies quota errors as quota-blocked", () => {
+    const errQuota = new ApiClientError({
+      statusCode: 403,
+      code: "TENANT_QUOTA_EXCEEDED",
+      message: "Quota exceeded",
+      retryable: false,
+      rawBody: '{"code":"TENANT_QUOTA_EXCEEDED"}',
+    });
+    expect(resolveBookingGatewayState(errQuota)).toBe("quota-blocked");
+    expect(bookingGatewayHref(errQuota)).toBe("/quota-blocked");
+  });
+
+  it("classifies supply errors as no-supply", () => {
+    const errSupply = new ApiClientError({
+      statusCode: 409,
+      code: "VEHICLE_UNAVAILABLE",
+      message: "Vehicle unavailable",
+      retryable: true,
+      rawBody: '{"code":"VEHICLE_UNAVAILABLE"}',
+    });
+    expect(resolveBookingGatewayState(errSupply)).toBe("no-supply");
+    expect(bookingGatewayHref(errSupply)).toBe("/no-supply");
   });
 });

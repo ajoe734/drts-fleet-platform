@@ -16,12 +16,12 @@ import { getEnterpriseDispatchTenantClient } from "@/lib/api-client";
 import {
   enterpriseTenant,
   type EnterpriseTripSummary,
+  getAuthorizedSupportContact,
   getBookingStateMeta,
   getDriverAssignedNotice,
   getTripProgressStageIndex,
   isInProgressTripState,
   mapBookingRecordToTripSummary,
-  toTelHref,
 } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { useTranslation } from "@/lib/i18n";
@@ -30,7 +30,7 @@ type LoadState = "loading" | "ready" | "error";
 
 export default function TripPage() {
   const { locale, t: tr } = useTranslation();
-  const driverNotice = getDriverAssignedNotice(locale);
+  const supportContact = getAuthorizedSupportContact(locale);
   const [summaries, setSummaries] = useState<EnterpriseTripSummary[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
 
@@ -147,10 +147,10 @@ export default function TripPage() {
                 <EAvatar t={t} size={50} tone="neutral" />
                 <div>
                   <div style={{ fontSize: 15.5, fontWeight: 700 }}>
-                    {driverNotice.title}
+                    {getDriverAssignedNotice(locale, trip.orderStatus).title}
                   </div>
                   <div style={{ fontSize: 12, color: t.muted }}>
-                    {driverNotice.subtitle}
+                    {getDriverAssignedNotice(locale, trip.orderStatus).subtitle}
                   </div>
                   <div style={{ marginTop: 5 }}>
                     <EPill t={t} tone={stateMeta[trip.state].tone} dot>
@@ -210,14 +210,14 @@ export default function TripPage() {
               >
                 <EBtnContent icon="phone">{tr("trip.contactDriver")}</EBtnContent>
               </button>
-              <a
-                href={toTelHref(enterpriseTenant.supportPhone)}
+              <Link
+                href={supportContact.href}
                 data-testid="trip-contact-support"
                 data-drt-operation="enterprise-contact-support"
                 style={entBtnStyle(t, { variant: "default", block: true })}
               >
                 <EBtnContent icon="brief">{tr("trip.contactSupport")}</EBtnContent>
-              </a>
+              </Link>
               <Link
                 href={`/bookings/${encodeURIComponent(trip.id)}`}
                 style={entBtnStyle(t, { variant: "primary", block: true })}
@@ -233,7 +233,7 @@ export default function TripPage() {
                 textAlign: "center",
               }}
             >
-              {driverNotice.helpText}
+              {getDriverAssignedNotice(locale, trip.orderStatus).helpText}
             </div>
             <div
               style={{
@@ -243,7 +243,7 @@ export default function TripPage() {
                 textAlign: "center",
               }}
             >
-              {tr("trip.etaNote")}
+              {supportContact.notice}
             </div>
           </ECard>
         )}

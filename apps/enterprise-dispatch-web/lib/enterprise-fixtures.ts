@@ -593,21 +593,205 @@ export interface DriverAssignedNotice {
   title: string;
   subtitle: string;
   helpText: string;
+  isDriverAssigned: boolean;
 }
 
-export function getDriverAssignedNotice(locale: Locale): DriverAssignedNotice {
-  let title = "Driver assigned";
-  let subtitle = "Contact is routed through enterprise support";
-  let helpText =
-    "Direct driver calling isn't available yet — please use enterprise support.";
+export function getDriverAssignedNotice(
+  locale: Locale,
+  orderStatus?: string | null,
+): DriverAssignedNotice {
+  const isZh = locale === "zh";
 
-  if (locale === "zh") {
-    title = "司機已指派";
-    subtitle = "聯絡方式由企業客服提供";
-    helpText = "聯絡司機尚未提供直撥號碼，請改用企業客服。";
+  if (
+    orderStatus === "no_supply" ||
+    orderStatus === "dispatch_failed" ||
+    orderStatus === "dispatch_timeout" ||
+    orderStatus === "redispatch_required"
+  ) {
+    return {
+      title: isZh ? "暫無可派車輛" : "No Vehicle Available",
+      subtitle: isZh ? "目前無法派車" : "Dispatch unavailable",
+      helpText: isZh
+        ? "目前無可派車輛，請聯繫企業客服或重新預約。"
+        : "No vehicle is currently available; please contact support or rebook.",
+      isDriverAssigned: false,
+    };
   }
 
-  return { title, subtitle, helpText };
+  if (
+    orderStatus === "draft" ||
+    orderStatus === "submitted" ||
+    orderStatus === "matching" ||
+    orderStatus === "pending" ||
+    orderStatus === "ready_for_dispatch"
+  ) {
+    return {
+      title: isZh ? "司機媒合中" : "Finding Driver",
+      subtitle: isZh ? "尚未指派司機" : "No driver assigned yet",
+      helpText: isZh
+        ? "目前尚未指派司機，請稍候或聯繫企業客服。"
+        : "No driver assigned yet; please wait or contact enterprise support.",
+      isDriverAssigned: false,
+    };
+  }
+
+  return {
+    title: isZh ? "司機已指派" : "Driver assigned",
+    subtitle: isZh
+      ? "聯絡方式由企業客服提供"
+      : "Contact is routed through enterprise support",
+    helpText: isZh
+      ? "聯絡司機尚未提供直撥號碼，請改用企業客服。"
+      : "Direct driver calling isn't available yet — please use enterprise support.",
+    isDriverAssigned: true,
+  };
+}
+
+export interface AuthorizedSupportContact {
+  isAuthorized: boolean;
+  phone: string | null;
+  href: string;
+  displayLabel: string;
+  sourceType: "authorized_env" | "in_app_support";
+  notice: string;
+}
+
+export function getAuthorizedSupportContact(
+  locale: Locale = "zh",
+): AuthorizedSupportContact {
+  const isZh = locale === "zh";
+  const configuredPhone =
+    process.env.NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE?.trim() ||
+    process.env.ENTERPRISE_SUPPORT_PHONE?.trim() ||
+    null;
+
+  if (configuredPhone) {
+    return {
+      isAuthorized: true,
+      phone: configuredPhone,
+      href: toTelHref(configuredPhone),
+      displayLabel: configuredPhone,
+      sourceType: "authorized_env",
+      notice: isZh
+        ? `企業客服專線：${configuredPhone}`
+        : `Enterprise Support: ${configuredPhone}`,
+    };
+  }
+
+  // Without verified tenant authority, phone must not be exposed (資料未授權不可露出).
+  // Provide honest alternative in-app support navigation.
+  return {
+    isAuthorized: false,
+    phone: null,
+    href: "/help",
+    displayLabel: isZh ? "企業客服支援中心" : "Enterprise Support Center",
+    sourceType: "in_app_support",
+    notice: isZh
+      ? "直撥電話尚未取得租戶授權設定，請透過企業客服支援中心尋求協助。"
+      : "Direct phone dialing is not configured; please use the Support Center for assistance.",
+  };
+}
+
+export type BookingGatewayState =
+  | "quota-blocked"
+  | "no-supply"
+  | "degraded"
+  | "not-found";
+
+export type ApiLikeError = {
+  statusCode?: number;
+  code?: string;
+  message?: string;
+};
+
+export function isApiClientError(
+  error: unknown,
+): error is ApiLikeError & { statusCode: number; code: string } {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as Record<string, unknown>;
+  const statusCode =
+    typeof candidate.statusCode === "number"
+      ? candidate.statusCode
+      : typeof candidate.status === "number"
+        ? candidate.status
+        : undefined;
+  const code =
+    typeof candidate.code === "string"
+      ? candidate.code
+      : typeof candidate.errorCode === "string"
+        ? candidate.errorCode
+        : undefined;
+  return typeof statusCode === "number" && typeof code === "string";
+}
+
+export function resolveBookingGatewayState(
+  error: unknown,
+): BookingGatewayState {
+  if (isApiClientError(error)) {
+    const candidate = error as Record<string, unknown>;
+    const code = (
+      typeof error.code === "string"
+        ? error.code
+        : typeof candidate.errorCode === "string"
+          ? String(candidate.errorCode)
+          : ""
+    ).toLowerCase();
+    const statusCode =
+      typeof error.statusCode === "number"
+        ? error.statusCode
+        : Number(candidate.status);
+
+    if (
+      statusCode === 404 ||
+      code.includes("not_found") ||
+      code.includes("booking_not_found")
+    ) {
+      return "not-found";
+    }
+    if (code.includes("quota") || code.includes("policy")) {
+      return "quota-blocked";
+    }
+    if (code.includes("supply") || code.includes("vehicle_unavailable")) {
+      return "no-supply";
+    }
+    if (statusCode >= 500) {
+      return "degraded";
+    }
+    // Any other 4xx client error
+    return "not-found";
+  }
+  return "degraded";
+}
+
+export function bookingGatewayHref(error: unknown): string | null {
+  if (!isApiClientError(error)) return "/degraded";
+  const candidate = error as Record<string, unknown>;
+  const code = (
+    typeof error.code === "string"
+      ? error.code
+      : typeof candidate.errorCode === "string"
+        ? String(candidate.errorCode)
+        : ""
+  ).toLowerCase();
+  const statusCode =
+    typeof error.statusCode === "number"
+      ? error.statusCode
+      : Number(candidate.status);
+
+  if (
+    statusCode === 404 ||
+    code.includes("not_found") ||
+    code.includes("booking_not_found")
+  ) {
+    return "/not-found";
+  }
+  if (code.includes("quota") || code.includes("policy")) {
+    return "/quota-blocked";
+  }
+  if (code.includes("supply") || code.includes("vehicle_unavailable")) {
+    return "/no-supply";
+  }
+  return statusCode >= 500 ? "/degraded" : null;
 }
 
 function getEnterpriseCostCenterLabel(

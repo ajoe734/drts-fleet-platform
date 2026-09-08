@@ -17,6 +17,7 @@ import {
   enterpriseQuotaSummary,
   enterpriseTenant,
   type EnterpriseTripSummary,
+  getAuthorizedSupportContact,
   getBookingStateMeta,
   getEnterpriseTenant,
   getEnterpriseUser,
@@ -24,7 +25,6 @@ import {
   isInProgressTripState,
   isUpcomingTripState,
   mapBookingRecordToTripSummary,
-  toTelHref,
 } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { useTranslation } from "@/lib/i18n";
@@ -35,6 +35,7 @@ type LoadState = "loading" | "ready" | "error";
 
 export default function HomePage() {
   const { locale, t: tr } = useTranslation();
+  const supportContact = getAuthorizedSupportContact(locale);
   const [summaries, setSummaries] = useState<EnterpriseTripSummary[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
 
@@ -425,25 +426,47 @@ export default function HomePage() {
                 </div>
               ))}
             </div>
-            <a
-              href={toTelHref(tenant.supportPhone)}
-              data-testid="enterprise-home-contact-support"
-              style={{
-                marginTop: 14,
-                paddingTop: 12,
-                borderTop: "1px solid " + t.lineSoft,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                color: "inherit",
-                textDecoration: "none",
-              }}
-            >
-              <EIcon name="phone" size={14} style={{ color: t.muted }} />
-              <span style={{ fontSize: 12, color: t.muted }}>
-                {tr("state.supportLine", { phone: tenant.supportPhone })}
-              </span>
-            </a>
+            {supportContact.isAuthorized && supportContact.phone ? (
+              <a
+                href={supportContact.href}
+                data-testid="enterprise-home-contact-support"
+                style={{
+                  marginTop: 14,
+                  paddingTop: 12,
+                  borderTop: "1px solid " + t.lineSoft,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  color: "inherit",
+                  textDecoration: "none",
+                }}
+              >
+                <EIcon name="phone" size={14} style={{ color: t.muted }} />
+                <span style={{ fontSize: 12, color: t.muted }}>
+                  {tr("state.supportLine", { phone: supportContact.phone })}
+                </span>
+              </a>
+            ) : (
+              <Link
+                href="/help"
+                data-testid="enterprise-home-contact-support"
+                style={{
+                  marginTop: 14,
+                  paddingTop: 12,
+                  borderTop: "1px solid " + t.lineSoft,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  color: "inherit",
+                  textDecoration: "none",
+                }}
+              >
+                <EIcon name="phone" size={14} style={{ color: t.muted }} />
+                <span style={{ fontSize: 12, color: t.muted }}>
+                  {supportContact.displayLabel}
+                </span>
+              </Link>
+            )}
           </ECard>
         </div>
       </div>
