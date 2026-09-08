@@ -13,11 +13,90 @@ import {
 } from "../../apps/voice-media-worker/src/dialogue/dialogue-state";
 import { VoiceDialogueTransport } from "../../apps/api/src/common/llm-gateway/voice-dialogue-transport";
 import { VoiceToolGatewayService } from "../../apps/api/src/modules/voice-booking/voice-tool-gateway.service";
+import { VoiceDialogueEngine } from "../../apps/voice-media-worker/src/dialogue/dialogue-engine";
 import type { VoiceCapabilityGuard } from "../../apps/api/src/common/auth/voice-capability.guard";
 import type { VoiceBookingRepository } from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import type { VoiceBookingAuthorizationService } from "../../apps/api/src/modules/voice-booking/voice-booking-authorization.service";
 
 afterEach(() => vi.useRealTimers());
+
+describe("UV-EXEC-012 controlled turn entry", () => {
+  it("never plays fabricated success and persists before executing tools", async () => {
+    const engine = new VoiceDialogueEngine(
+      {
+        mode: "live",
+        profileVersion: "v1",
+        propose: async () => output({ text: "已派車，車資100元" }),
+      },
+      true,
+    );
+    const events: string[] = [];
+    const result = await engine.turn(
+      request(),
+      new VoiceDialogueState(),
+      () => 1,
+      {
+        persist: async () => {
+          events.push("persist");
+        },
+        execute: async () => {
+          events.push("execute");
+          return [];
+        },
+      },
+    );
+    expect(events).toEqual(["persist", "execute"]);
+    expect(result.prompt).not.toContain("100");
+    expect(result.prompt).toContain("上車地點");
+  });
+  it("blocks tools after failed CAS or an epoch change during persistence", async () => {
+    const engine = new VoiceDialogueEngine(
+      { mode: "live", profileVersion: "v1", propose: async () => output() },
+      true,
+    );
+    const execute = vi.fn(async () => []);
+    await expect(
+      engine.turn(request(), new VoiceDialogueState(), () => 1, {
+        persist: async () => {
+          throw new Error("CAS");
+        },
+        execute,
+      }),
+    ).rejects.toThrow("CAS");
+    let epoch = 1;
+    await expect(
+      engine.turn(request(), new VoiceDialogueState(), () => epoch, {
+        persist: async () => {
+          epoch = 2;
+        },
+        execute,
+      }),
+    ).rejects.toThrow("stale");
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it("does not resume collection after explicit tool handoff", async () => {
+    const propose = vi.fn(async () =>
+      output({
+        tools: [
+          { name: "request_handoff", args: { reason: "location_unresolved" } },
+        ],
+      }),
+    );
+    const engine = new VoiceDialogueEngine(
+      { mode: "live", profileVersion: "v1", propose },
+      true,
+    );
+    const state = new VoiceDialogueState();
+    const ports = { persist: async () => {}, execute: async () => [] };
+    const result = await engine.turn(request(), state, () => 1, ports);
+    expect(result.terminal).toBe("handoff");
+    expect(state.handoff?.reason).toBe("location_unresolved");
+    expect((await engine.turn(request(), state, () => 1, ports)).prompt).toBe(
+      "",
+    );
+    expect(propose).toHaveBeenCalledOnce();
+  });
+});
 const output = (
   patch: Partial<VoiceDialogueOutput> = {},
 ): VoiceDialogueOutput => ({
@@ -228,10 +307,11 @@ function gateway() {
     dialogState: "collecting",
   };
   const authenticate = vi.fn(async () => claims);
-  const execute = vi.fn(
-    async (_proposal: unknown, _context: unknown) =>
-      ({ candidates: [] }) as unknown,
-  );
+  const execute = vi.fn(async (_proposal: unknown, _context: unknown) => {
+    void _proposal;
+    void _context;
+    return { candidates: [] } as unknown;
+  });
   const service = new VoiceToolGatewayService(
     { authenticate } as unknown as VoiceCapabilityGuard,
     {
