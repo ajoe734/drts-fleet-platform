@@ -35,6 +35,10 @@ import {
   saveVehicleDraft,
   loadVehicleDraft,
   clearVehicleDraft,
+  saveSubmissionDetailDraft,
+  loadSubmissionDetailDraft,
+  clearSubmissionDetailDraft,
+  getSubmissionDetailDraftStorageKey,
   shouldInterceptNavigation,
   DRIVER_DRAFT_STORAGE_KEY,
   VEHICLE_DRAFT_STORAGE_KEY,
@@ -625,6 +629,80 @@ describe("SR-FLEET-FORM-001 / draft storage persistence (R25)", () => {
     expect(loadDriverDraft()).toBeNull();
     expect(loadVehicleDraft()).toBeNull();
   });
+
+  it("saves, loads, and clears submission detail draft with retained detail values (driver and vehicle)", () => {
+    const submissionId1 = "sub-driver-101";
+    const driverDetailDraft = {
+      driverForm: {
+        ...INITIAL_DRIVER_DRAFT,
+        name: "李大同",
+        mobile: "0922333444",
+        preferredVehicleSubmissionId: "sub-veh-202",
+      },
+    };
+
+    saveSubmissionDetailDraft(submissionId1, driverDetailDraft);
+    const key1 = getSubmissionDetailDraftStorageKey(submissionId1);
+    expect(store.has(key1)).toBe(true);
+
+    const loaded1 = loadSubmissionDetailDraft(submissionId1);
+    expect(loaded1).not.toBeNull();
+    expect(loaded1?.driverForm?.name).toBe("李大同");
+    expect(loaded1?.driverForm?.mobile).toBe("0922333444");
+    expect(loaded1?.driverForm?.preferredVehicleSubmissionId).toBe("sub-veh-202");
+
+    const submissionId2 = "sub-vehicle-202";
+    const vehicleDetailDraft = {
+      vehicleForm: {
+        ...INITIAL_VEHICLE_DRAFT,
+        plateNo: "TDC-8888",
+        brand: "Tesla",
+        model: "Model 3",
+        currentDriverSubmissionId: "sub-driver-101",
+      },
+    };
+
+    saveSubmissionDetailDraft(submissionId2, vehicleDetailDraft);
+    const key2 = getSubmissionDetailDraftStorageKey(submissionId2);
+    expect(store.has(key2)).toBe(true);
+
+    const loaded2 = loadSubmissionDetailDraft(submissionId2);
+    expect(loaded2).not.toBeNull();
+    expect(loaded2?.vehicleForm?.plateNo).toBe("TDC-8888");
+    expect(loaded2?.vehicleForm?.brand).toBe("Tesla");
+    expect(loaded2?.vehicleForm?.model).toBe("Model 3");
+    expect(loaded2?.vehicleForm?.currentDriverSubmissionId).toBe("sub-driver-101");
+
+    // Clearing submissionId1 does not affect submissionId2
+    clearSubmissionDetailDraft(submissionId1);
+    expect(loadSubmissionDetailDraft(submissionId1)).toBeNull();
+    expect(loadSubmissionDetailDraft(submissionId2)).not.toBeNull();
+
+    clearSubmissionDetailDraft(submissionId2);
+    expect(loadSubmissionDetailDraft(submissionId2)).toBeNull();
+  });
+
+  it("gracefully handles SecurityError and quota errors on submission detail drafts", () => {
+    const originalLocalStorage = globalThis.window.localStorage;
+    Object.defineProperty(globalThis.window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("The operation is insecure.", "SecurityError");
+      },
+    });
+
+    try {
+      expect(loadSubmissionDetailDraft("sub-test")).toBeNull();
+      expect(() => saveSubmissionDetailDraft("sub-test", {})).not.toThrow();
+      expect(() => clearSubmissionDetailDraft("sub-test")).not.toThrow();
+    } finally {
+      Object.defineProperty(globalThis.window, "localStorage", {
+        configurable: true,
+        value: originalLocalStorage,
+        writable: true,
+      });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -760,7 +838,7 @@ describe("SR-FLEET-FORM-001 / useDraftGuard lifecycle and navigation protection 
     expect(confirmPromptCount).toBe(0);
   });
 
-  it("intercepts popstate events: prompts confirmation and recovers history if cancelled", () => {
+  it("intercepts popstate events: prompts confirmation and recovers history if cancelled (with URL change before popstate)", () => {
     const { mockWindow, mockDocument } = createMockEnv();
     const useDraftGuard = getDraftGuard(mockWindow, mockDocument);
 
@@ -769,6 +847,9 @@ describe("SR-FLEET-FORM-001 / useDraftGuard lifecycle and navigation protection 
     expect(popstateListeners.length).toBe(1);
     const handlePopState = popstateListeners[0];
 
+    // Browser changes location BEFORE firing popstate (Codex2 reproduction scenario)
+    mockWindow.location.href = "http://localhost:3000/supply";
+
     // User cancels navigation (clicks "Cancel" in confirm dialog)
     confirmResult = false;
     handlePopState(new Event("popstate"));
@@ -776,12 +857,114 @@ describe("SR-FLEET-FORM-001 / useDraftGuard lifecycle and navigation protection 
     expect(historyPushes.length).toBe(1);
     expect(historyPushes[0].url).toBe("http://localhost:3000/supply/drivers/new");
 
+    // Browser changes location again for next navigation attempt
+    mockWindow.location.href = "http://localhost:3000/supply";
+
     // User confirms navigation (clicks "OK" in confirm dialog)
     confirmResult = true;
     handlePopState(new Event("popstate"));
     expect(confirmPromptCount).toBe(2);
     // historyPushes remains 1 because user chose to proceed with navigation
     expect(historyPushes.length).toBe(1);
+
+    if (typeof effectCleanup === "function") effectCleanup();
+  });
+
+  it("coordinates history cancellation with router on popstate when dirty (Codex2 reproduction)", () => {
+    const { mockWindow, mockDocument } = createMockEnv();
+    mockWindow.location.href = "http://localhost:3000/supply/submissions/review-detail";
+    mockWindow.location.pathname = "/supply/submissions/review-detail";
+
+    const mockRouter = {
+      replaced: [] as string[],
+      pushed: [] as string[],
+      replace: (url: string) => {
+        mockRouter.replaced.push(url);
+      },
+      push: (url: string) => {
+        mockRouter.pushed.push(url);
+      },
+    };
+
+    const useDraftGuard = getDraftGuard(mockWindow, mockDocument);
+    useDraftGuard(true, mockRouter);
+
+    const popstateListeners = Array.from(windowListeners.get("popstate") || []);
+    expect(popstateListeners.length).toBe(1);
+    const handlePopState = popstateListeners[0];
+
+    // Browser changes location to /supply before popstate fires
+    mockWindow.location.href = "http://localhost:3000/supply";
+    mockWindow.location.pathname = "/supply";
+
+    // User rejects navigation (confirm = false)
+    confirmResult = false;
+    handlePopState(new Event("popstate"));
+
+    // Verify history pushState restored the exact form URL (not the destination URL)
+    expect(confirmPromptCount).toBe(1);
+    expect(historyPushes.length).toBe(1);
+    expect(historyPushes[0].url).toBe("http://localhost:3000/supply/submissions/review-detail");
+
+    // Verify router was coordinated to prevent Next App Router traversal
+    expect(mockRouter.replaced).toEqual(["http://localhost:3000/supply/submissions/review-detail"]);
+
+    // User attempts navigation again and confirms (confirm = true)
+    mockWindow.location.href = "http://localhost:3000/supply";
+    confirmResult = true;
+    handlePopState(new Event("popstate"));
+
+    expect(confirmPromptCount).toBe(2);
+    // No new pushState or router replacement when confirmed
+    expect(historyPushes.length).toBe(1);
+    expect(mockRouter.replaced.length).toBe(1);
+
+    if (typeof effectCleanup === "function") effectCleanup();
+  });
+
+  it("handles back and forward popstate navigation scenarios with confirmation and router", () => {
+    const { mockWindow, mockDocument } = createMockEnv();
+    mockWindow.location.href = "http://localhost:3000/supply/submissions/sub-detail-99";
+
+    const mockRouter = {
+      replaced: [] as string[],
+      replace: (url: string) => {
+        mockRouter.replaced.push(url);
+      },
+    };
+
+    const useDraftGuard = getDraftGuard(mockWindow, mockDocument);
+    useDraftGuard(true, mockRouter);
+
+    const popstateListeners = Array.from(windowListeners.get("popstate") || []);
+    const handlePopState = popstateListeners[0];
+
+    // Scenario A: Back button navigation
+    mockWindow.location.href = "http://localhost:3000/supply/submissions";
+    confirmResult = false; // User cancels
+    handlePopState(new Event("popstate"));
+
+    expect(historyPushes.length).toBe(1);
+    expect(historyPushes[0].url).toBe("http://localhost:3000/supply/submissions/sub-detail-99");
+    expect(mockRouter.replaced[0]).toBe("http://localhost:3000/supply/submissions/sub-detail-99");
+
+    // Scenario B: Forward button navigation
+    mockWindow.location.href = "http://localhost:3000/supply/documents";
+    confirmResult = false; // User cancels
+    handlePopState(new Event("popstate"));
+
+    expect(historyPushes.length).toBe(2);
+    expect(historyPushes[1].url).toBe("http://localhost:3000/supply/submissions/sub-detail-99");
+    expect(mockRouter.replaced[1]).toBe("http://localhost:3000/supply/submissions/sub-detail-99");
+
+    // Scenario C: Forward button navigation with user confirmation
+    mockWindow.location.href = "http://localhost:3000/supply/documents";
+    confirmResult = true; // User confirms leaving
+    handlePopState(new Event("popstate"));
+
+    // Allowed through: no new history push, no new router replacement
+    expect(historyPushes.length).toBe(2);
+    expect(mockRouter.replaced.length).toBe(2);
 
     if (typeof effectCleanup === "function") effectCleanup();
   });
@@ -895,5 +1078,111 @@ describe("SR-FLEET-FORM-001 / dirty-during-save invariant", () => {
     const updatedBaseline = { ...editedForm };
     const isDirtyAfterSave = computeDetailDirty(true, editedForm, updatedBaseline);
     expect(isDirtyAfterSave).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. Retained detail values lifecycle (R25 persistent recovery for detail edits)
+// ---------------------------------------------------------------------------
+describe("SR-FLEET-FORM-001 / retained detail values lifecycle (R25)", () => {
+  const store = new Map<string, string>();
+  const mockLocalStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => store.set(k, String(v)),
+    removeItem: (k: string) => store.delete(k),
+    clear: () => store.clear(),
+  };
+
+  beforeAll(() => {
+    // @ts-expect-error mock window for vitest
+    globalThis.window = {
+      localStorage: mockLocalStorage,
+      location: {
+        pathname: "/supply/submissions/sub-driver-999",
+        search: "",
+        origin: "http://localhost:3000",
+        href: "http://localhost:3000/supply/submissions/sub-driver-999",
+      },
+    };
+  });
+
+  afterAll(() => {
+    // @ts-expect-error clean up
+    delete globalThis.window;
+  });
+
+  beforeEach(() => {
+    store.clear();
+  });
+
+  it("persists edited driver detail values, restores on return, and discards on user request", () => {
+    const submissionId = "sub-driver-999";
+    const serverBaseline = {
+      ...INITIAL_DRIVER_DRAFT,
+      name: "林先發",
+      mobile: "0988777666",
+      supportedServiceProductCodes: ["taxi_realtime"],
+    };
+
+    // 1. User edits detail form fields
+    const editedForm = {
+      ...serverBaseline,
+      name: "林後援", // modified
+      mobile: "0911222333", // modified
+      supportedServiceProductCodes: ["taxi_realtime", "rental_package"], // modified
+    };
+    expect(isDriverFormDirty(editedForm, serverBaseline)).toBe(true);
+
+    // 2. Edits are persisted to detail storage
+    saveSubmissionDetailDraft(submissionId, { driverForm: editedForm });
+
+    // 3. User navigates away and later returns (simulated by re-mounting / loading draft)
+    const retained = loadSubmissionDetailDraft(submissionId);
+    expect(retained).not.toBeNull();
+    expect(retained?.driverForm).toEqual(editedForm);
+
+    // 4. Form restores retained values and remains dirty against server baseline
+    const restoredForm = retained!.driverForm!;
+    expect(isDriverFormDirty(restoredForm, serverBaseline)).toBe(true);
+
+    // 5. User chooses to discard retained draft
+    clearSubmissionDetailDraft(submissionId);
+    expect(loadSubmissionDetailDraft(submissionId)).toBeNull();
+
+    // 6. After discarding, form reverts to serverBaseline and is clean
+    expect(isDriverFormDirty(serverBaseline, serverBaseline)).toBe(false);
+  });
+
+  it("persists edited vehicle detail values, restores on return, and clears on successful save", () => {
+    const submissionId = "sub-veh-888";
+    const serverBaseline = {
+      ...INITIAL_VEHICLE_DRAFT,
+      plateNo: "ABC-1234",
+      brand: "Toyota",
+      model: "Camry",
+      seats: 5,
+    };
+
+    // 1. User edits vehicle detail
+    const editedForm = {
+      ...serverBaseline,
+      plateNo: "ABC-9999", // modified
+      seats: 7, // modified
+    };
+    expect(isVehicleFormDirty(editedForm, serverBaseline)).toBe(true);
+
+    // 2. Persisted to detail storage
+    saveSubmissionDetailDraft(submissionId, { vehicleForm: editedForm });
+
+    // 3. Retained on return
+    const retained = loadSubmissionDetailDraft(submissionId);
+    expect(retained?.vehicleForm).toEqual(editedForm);
+
+    // 4. User successfully saves draft -> storage cleared and baseline updated
+    clearSubmissionDetailDraft(submissionId);
+    expect(loadSubmissionDetailDraft(submissionId)).toBeNull();
+
+    const updatedBaseline = { ...editedForm };
+    expect(isVehicleFormDirty(editedForm, updatedBaseline)).toBe(false);
   });
 });

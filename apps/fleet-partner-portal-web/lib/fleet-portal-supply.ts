@@ -277,6 +277,56 @@ export function clearVehicleDraft(): void {
   }
 }
 
+export type SubmissionDetailDraftInput = {
+  driverForm?: DriverDraftInput | null;
+  vehicleForm?: VehicleDraftInput | null;
+};
+
+export function getSubmissionDetailDraftStorageKey(submissionId: string): string {
+  return `drts:fleet:supply:detail_draft:${submissionId}`;
+}
+
+export function saveSubmissionDetailDraft(
+  submissionId: string,
+  draft: SubmissionDetailDraftInput,
+): void {
+  try {
+    const storage = getSafeLocalStorage();
+    if (!storage) return;
+    storage.setItem(
+      getSubmissionDetailDraftStorageKey(submissionId),
+      JSON.stringify(draft),
+    );
+  } catch {
+    // Ignore quota or disabled storage error
+  }
+}
+
+export function loadSubmissionDetailDraft(
+  submissionId: string,
+): SubmissionDetailDraftInput | null {
+  try {
+    const storage = getSafeLocalStorage();
+    if (!storage) return null;
+    const raw = storage.getItem(getSubmissionDetailDraftStorageKey(submissionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed as SubmissionDetailDraftInput;
+  } catch {
+    return null;
+  }
+}
+
+export function clearSubmissionDetailDraft(submissionId: string): void {
+  try {
+    const storage = getSafeLocalStorage();
+    if (!storage) return;
+    storage.removeItem(getSubmissionDetailDraftStorageKey(submissionId));
+  } catch {
+    // Ignore disabled storage error
+  }
+}
+
 /**
  * Determines whether clicking a link should trigger the unsaved draft guard (R25).
  * Returns true if the link navigates to a different page/route.

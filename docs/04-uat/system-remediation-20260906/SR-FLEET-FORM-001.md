@@ -5,7 +5,7 @@
 | Phase             | system-remediation-20260906                          |
 | Owner             | Gemini                                               |
 | Reviewer          | Codex2                                               |
-| Base SHA          | `1cdaaa5b5e5301de2da0a692c78c4cc29b0c10a9` (origin/dev, historical audit base `b32ab8badb740b94cdf67212315ecfccf21f6d5d`) |
+| Base SHA          | `890548b4f357542968c8b14f33f23e0685be007a` (origin/dev, historical audit base `b32ab8badb740b94cdf67212315ecfccf21f6d5d`) |
 | Gap IDs           | R23, R25                                             |
 | Capability IDs    | C070, C120                                           |
 | Status            | candidate (handoff pending review)                   |
@@ -42,19 +42,20 @@
   - 司機表單追蹤所有欄位：姓名、手機、職業駕照號碼/到期日（date）、執業登記證號碼/營業區域（area）/到期日（date）、偏好車輛、服務產品清單（products）。
   - 車輛表單追蹤所有欄位：車牌號碼、牌照種類、廠牌、型號、出廠年份（year）、座位數（seats）、行李容量、營業區域（area）、服務產品清單（products）、機場接送資格/固定費率允許（flags）、當前司機、車門數、顏色（color）。
   - 支援客製 baseline 比對（供既有送件詳情編輯狀態防呆）。
-- **Next.js Link 客戶端導航攔截、原生 Unload 與 Popstate 歷史保護（`useDraftGuard`）**：
+- **Next.js Link 客戶端導航攔截、原生 Unload 與 Popstate 歷史保護與 Router 協同（`useDraftGuard`）**：
   - `shouldInterceptNavigation()` 辨識跨頁連結（略過 hash、mailto、tel、javascript、target="_blank" 以及同路徑）。
   - 在 capture phase 掛載 document click listener，在 Next.js Link 事件觸發前攔截使用者點擊側邊欄（如 `/supply`）或內部連結，提示確認對話框（`confirmLeave()`）。若使用者取消則阻止導航（`preventDefault` / `stopImmediatePropagation`）。
   - `beforeunload` 事件保護頁面重整、關閉分頁或外部網址跳轉。
-  - 掛載 `window:popstate` 事件攔截瀏覽器上一頁/下一頁歷程導航，提示確認對話框；取消時透過 `history.pushState` 還原目前路徑阻止導航離頁。
+  - 掛載 `window:popstate` 事件攔截瀏覽器上一頁/下一頁歷程導航，於 dirty 掛載時鎖定當前表單 URL。當 popstate 觸發（此時瀏覽器已先行將 `window.location` 變更至目標網址）時提示確認對話框；取消時透過 `history.pushState(null, "", currentFormUrl)` 還原表單路徑，並與 Next App Router 協同調用 `router.replace(currentFormUrl)` 阻止 App Router 路由跳轉。使用者確認離開時則順暢放行。涵蓋 back、forward 與 confirmation。
   - Header「返回」按鈕在 dirty 時亦呼叫 `confirmLeave()`。
-  - `SupplySubmissionDetailView` 亦整合 `useDraftGuard`，在儲存中（`busy === "save"` / `upload`）維持 dirty 防護不被清空，直到 API 成功回應並更新 baseline。
-- **草稿持久化、還原與安全存取（`localStorage`）**：
-  - 編輯時即時將 dirty 內容寫入 `localStorage`（鍵值：`drts:fleet:supply:driver_draft`, `drts:fleet:supply:vehicle_draft`）。
+  - `SupplySubmissionDetailView` 亦整合 `useDraftGuard` 與 router 協同，在儲存中（`busy === "save"` / `upload`）維持 dirty 防護不被清空，直到 API 成功回應並更新 baseline。
+- **草稿持久化、還原、既有詳情保留值與安全存取（`localStorage`）**：
+  - 編輯新送件時即時將 dirty 內容寫入 `localStorage`（鍵值：`drts:fleet:supply:driver_draft`, `drts:fleet:supply:vehicle_draft`）。
+  - 編輯既有送件詳情（`SupplySubmissionDetailView`）時，亦將修改內容即時寫入以 `submissionId` 為維度的持久化草稿（鍵值：`drts:fleet:supply:detail_draft:${submissionId}`），使既有送件編輯（detail edits）具備 persistent recovery 能力，保留使用者未存檔的欄位值。
   - 所有 storage 操作封裝於 `getSafeLocalStorage()` 與 try/catch，防範受限環境（如無痕/iframe/禁用 cookie）存取 `window.localStorage` 時擲出 `SecurityError` 崩潰。
-  - 回到新增表單頁面時自動從 storage 還原先前填寫的內容（「離頁返回可恢復」）。
+  - 回到表單或詳情頁面時自動從 storage 還原先前填寫的內容（「離頁返回可恢復」）。
   - 還原草稿時於表單頂部顯示提示條，並提供「放棄草稿」按鈕，點擊經 `confirmDiscard` 確認後清空並重設表單（「先確認丟棄」）。
-  - 成功建立送件（`onCreate()` 成功）後立即清除持久化草稿（「成功送出才清 draft」）。
+  - 成功建立送件（`onCreate()` 成功）或詳情儲存/送審（`saveDraft()` / `submitSubmission()`）後立即清除持久化草稿（「成功送出才清 draft」）。
 
 ### AC3 — 證據記錄
 
@@ -65,17 +66,17 @@
 | i18n-guard  | `node tools/ci/i18n-guard.mjs`                                                                            | 0         |
 | typecheck   | `pnpm --filter @drts/fleet-partner-portal-web typecheck`                                                  | 0         |
 | unit tests  | `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-form-001/`                                   | 0         |
-| test output | `Test Files 1 passed (1) · Tests 70 passed (70)`                                                          | —         |
+| test output | `Test Files 1 passed (1) · Tests 76 passed (76)`                                                          | —         |
 
-Base SHA：`1cdaaa5b5e5301de2da0a692c78c4cc29b0c10a9` (origin/dev, historical audit base `b32ab8badb740b94cdf67212315ecfccf21f6d5d`)
+Base SHA：`890548b4f357542968c8b14f33f23e0685be007a` (origin/dev, historical audit base `b32ab8badb740b94cdf67212315ecfccf21f6d5d`)
 
 ## 修改檔案
 
 | 檔案                                                                                    | 變更                                                             |
 | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `apps/fleet-partner-portal-web/lib/fleet-portal-supply.ts`                              | 新增 `fieldId()`, `DRAFT_GUARD_STRINGS`, `INITIAL_*_DRAFT`, `isDriverFormDirty`, `isVehicleFormDirty`, `getSafeLocalStorage`, `save*Draft`, `load*Draft`, `clear*Draft`, `shouldInterceptNavigation`（含 SecurityError 防禦） |
-| `apps/fleet-partner-portal-web/components/fleet-supply-workspace.tsx`                   | 更新 `useDraftGuard` 支援 capture click 攔截與 popstate 歷史防護；移除 detail workspace `detailDirty` 的 `!busy` 閘門維持儲存期間防護；`NewDriverSubmissionForm`/`NewVehicleSubmissionForm` 整合草稿持久化與全欄位 dirty 檢查 |
-| `tests/unit/system-remediation/sr-fleet-form-001/sr-fleet-form-001.test.ts`             | 70 個 unit test（fieldId, DRAFT_GUARD_STRINGS, isEditableStatus, formatSupplySubject, 生產環境 dirty 判定測試、導航攔截測試、草稿儲存還原測試、SecurityError 防禦測試、useDraftGuard lifecycle/popstate 測試、dirty-during-save invariant 測試） |
+| `apps/fleet-partner-portal-web/lib/fleet-portal-supply.ts`                              | 新增 `fieldId()`, `DRAFT_GUARD_STRINGS`, `INITIAL_*_DRAFT`, `isDriverFormDirty`, `isVehicleFormDirty`, `getSafeLocalStorage`, `save*Draft`, `load*Draft`, `clear*Draft`, `saveSubmissionDetailDraft`, `loadSubmissionDetailDraft`, `clearSubmissionDetailDraft`, `shouldInterceptNavigation` |
+| `apps/fleet-partner-portal-web/components/fleet-supply-workspace.tsx`                   | 更新 `useDraftGuard` 支援 capture click 攔截、URL change before popstate 歷史保護與 Next App Router 協同；`SupplySubmissionDetailView` 支援 detail edits 草稿持久化、還原、放棄與儲存後清理；`NewDriverSubmissionForm`/`NewVehicleSubmissionForm` 整合草稿持久化與全欄位 dirty 檢查 |
+| `tests/unit/system-remediation/sr-fleet-form-001/sr-fleet-form-001.test.ts`             | 76 個 unit test（fieldId, DRAFT_GUARD_STRINGS, isEditableStatus, formatSupplySubject, dirty 判定測試、導航攔截測試、草稿儲存還原測試、SecurityError 防禦測試、popstate URL 變更前攔截與 router 協同測試、back/forward 歷程測試、retained detail values 生命週期測試、dirty-during-save invariant 測試） |
 | `docs/04-uat/system-remediation-20260906/SR-FLEET-FORM-001.md`                         | 更新驗收文件與測試證據表記錄                                     |
 
 ## 未完成 / 需要外部驗收的項目

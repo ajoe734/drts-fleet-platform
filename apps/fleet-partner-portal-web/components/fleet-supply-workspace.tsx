@@ -46,6 +46,9 @@ import {
   saveVehicleDraft,
   loadVehicleDraft,
   clearVehicleDraft,
+  saveSubmissionDetailDraft,
+  loadSubmissionDetailDraft,
+  clearSubmissionDetailDraft,
   shouldInterceptNavigation,
   type DriverDraftInput,
   type VehicleDraftInput,
@@ -352,12 +355,22 @@ function FormField({
  * Fires the browser's native beforeunload warning (R25) while the form is
  * dirty, intercepts in-app link clicks (including Next.js <Link> components),
  * and exposes `confirmLeave()` for programmatic router navigation.
- *
- * @param dirty - whether the form has unsaved changes
- * @returns `confirmLeave` — call before a programmatic router.push(); returns
- *          `true` if the user confirmed they want to leave.
  */
-export function useDraftGuard(dirty: boolean): { confirmLeave: () => boolean } {
+
+export type DraftGuardRouter = {
+  push?: (url: string) => void;
+  replace?: (url: string) => void;
+};
+
+export type DraftGuardOptions = {
+  router?: DraftGuardRouter | null;
+  formUrl?: string;
+};
+
+export function useDraftGuard(
+  dirty: boolean,
+  routerOrOptions?: DraftGuardRouter | DraftGuardOptions | null,
+): { confirmLeave: () => boolean } {
   function confirmLeave(): boolean {
     if (!dirty) return true;
     return window.confirm(
@@ -365,8 +378,24 @@ export function useDraftGuard(dirty: boolean): { confirmLeave: () => boolean } {
     );
   }
 
+  const router: DraftGuardRouter | null | undefined =
+    routerOrOptions && ("push" in routerOrOptions || "replace" in routerOrOptions)
+      ? (routerOrOptions as DraftGuardRouter)
+      : (routerOrOptions as DraftGuardOptions | null | undefined)?.router;
+
+  const explicitFormUrl = (routerOrOptions as DraftGuardOptions | null | undefined)?.formUrl;
+
   useEffect(() => {
     if (!dirty) return;
+    if (typeof window === "undefined") return;
+
+    // Capture current form URL on mount / dirty state. When popstate occurs,
+    // window.location has already updated to the destination URL; if the user
+    // cancels, push currentFormUrl to restore browser history and coordinate
+    // with Next App Router to prevent route traversal.
+    const currentFormUrl =
+      explicitFormUrl ||
+      (window.location ? window.location.href || window.location.pathname || "" : "");
 
     function handleBeforeUnload(e: BeforeUnloadEvent) {
       e.preventDefault();
@@ -400,7 +429,14 @@ export function useDraftGuard(dirty: boolean): { confirmLeave: () => boolean } {
       const confirmed = confirmLeave();
       if (!confirmed) {
         try {
-          window.history.pushState(null, "", window.location.href);
+          if (currentFormUrl) {
+            window.history.pushState(null, "", currentFormUrl);
+          }
+          if (router?.replace) {
+            router.replace(currentFormUrl);
+          } else if (router?.push) {
+            router.push(currentFormUrl);
+          }
         } catch {
           // Ignore history API errors in restricted environments
         }
@@ -416,7 +452,7 @@ export function useDraftGuard(dirty: boolean): { confirmLeave: () => boolean } {
       document.removeEventListener("click", handleDocumentClick, true);
       window.removeEventListener("popstate", handlePopState);
     };
-  }, [dirty]);
+  }, [dirty, router, explicitFormUrl]);
 
   return { confirmLeave };
 }
@@ -901,7 +937,7 @@ export function NewDriverSubmissionForm() {
     }
   }, [form, submitted]);
 
-  const { confirmLeave } = useDraftGuard(dirty);
+  const { confirmLeave } = useDraftGuard(dirty, router);
 
   function handleDiscard() {
     if (window.confirm(DRAFT_GUARD_STRINGS.confirmDiscard)) {
@@ -1059,7 +1095,7 @@ export function NewVehicleSubmissionForm() {
     }
   }, [form, submitted]);
 
-  const { confirmLeave } = useDraftGuard(dirty);
+  const { confirmLeave } = useDraftGuard(dirty, router);
 
   function handleDiscard() {
     if (window.confirm(DRAFT_GUARD_STRINGS.confirmDiscard)) {
@@ -1653,23 +1689,37 @@ export function SupplySubmissionDetailView({
   const [hydrated, setHydrated] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [restored, setRestored] = useState(false);
+
+  const initialDriverBaseline: DriverDraftInput | null = useMemo(
+    () =>
+      detail.driverDraft
+        ? {
+            ...detail.driverDraft,
+            preferredVehicleSubmissionId:
+              detail.driverDraft.preferredVehicleSubmissionId ?? null,
+          }
+        : null,
+    [detail.driverDraft],
+  );
+
+  const initialVehicleBaseline: VehicleDraftInput | null = useMemo(
+    () =>
+      detail.vehicleDraft
+        ? {
+            ...detail.vehicleDraft,
+            currentDriverSubmissionId:
+              detail.vehicleDraft.currentDriverSubmissionId ?? null,
+          }
+        : null,
+    [detail.vehicleDraft],
+  );
+
   const [driverForm, setDriverForm] = useState<DriverDraftInput | null>(
-    initialDetail.driverDraft
-      ? {
-          ...initialDetail.driverDraft,
-          preferredVehicleSubmissionId:
-            initialDetail.driverDraft.preferredVehicleSubmissionId ?? null,
-        }
-      : null,
+    initialDriverBaseline,
   );
   const [vehicleForm, setVehicleForm] = useState<VehicleDraftInput | null>(
-    initialDetail.vehicleDraft
-      ? {
-          ...initialDetail.vehicleDraft,
-          currentDriverSubmissionId:
-            initialDetail.vehicleDraft.currentDriverSubmissionId ?? null,
-        }
-      : null,
+    initialVehicleBaseline,
   );
   const [docType, setDocType] = useState<string>(
     initialDetail.driverDraft ? DRIVER_DOC_TYPES[0] : VEHICLE_DOC_TYPES[0],
@@ -1684,33 +1734,84 @@ export function SupplySubmissionDetailView({
     : VEHICLE_DOC_TYPES;
   const subject = useMemo(() => formatSupplySubject(detail), [detail]);
 
+  // Restore saved detail draft on mount if available (R25)
+  useEffect(() => {
+    if (!editable) return;
+    const saved = loadSubmissionDetailDraft(detail.submission.submissionId);
+    if (!saved) return;
+
+    let hasRestored = false;
+    if (saved.driverForm && initialDriverBaseline) {
+      if (isDriverFormDirty(saved.driverForm, initialDriverBaseline)) {
+        setDriverForm(saved.driverForm);
+        hasRestored = true;
+      }
+    }
+    if (saved.vehicleForm && initialVehicleBaseline) {
+      if (isVehicleFormDirty(saved.vehicleForm, initialVehicleBaseline)) {
+        setVehicleForm(saved.vehicleForm);
+        hasRestored = true;
+      }
+    }
+    if (hasRestored) {
+      setRestored(true);
+    }
+  }, [
+    detail.submission.submissionId,
+    editable,
+    initialDriverBaseline,
+    initialVehicleBaseline,
+  ]);
+
   const detailDirty =
     editable &&
-    (driverForm
-      ? isDriverFormDirty(
-          driverForm,
-          detail.driverDraft
-            ? {
-                ...detail.driverDraft,
-                preferredVehicleSubmissionId:
-                  detail.driverDraft.preferredVehicleSubmissionId ?? null,
-              }
-            : null,
-        )
-      : vehicleForm
-        ? isVehicleFormDirty(
-            vehicleForm,
-            detail.vehicleDraft
-              ? {
-                  ...detail.vehicleDraft,
-                  currentDriverSubmissionId:
-                    detail.vehicleDraft.currentDriverSubmissionId ?? null,
-                }
-              : null,
-          )
+    (driverForm && initialDriverBaseline
+      ? isDriverFormDirty(driverForm, initialDriverBaseline)
+      : vehicleForm && initialVehicleBaseline
+        ? isVehicleFormDirty(vehicleForm, initialVehicleBaseline)
         : false);
 
-  useDraftGuard(Boolean(detailDirty));
+  // Persist detail draft to storage on change; clear if clean
+  useEffect(() => {
+    if (!editable) return;
+    const submissionId = detail.submission.submissionId;
+    const isDriverDirty =
+      driverForm && initialDriverBaseline
+        ? isDriverFormDirty(driverForm, initialDriverBaseline)
+        : false;
+    const isVehicleDirty =
+      vehicleForm && initialVehicleBaseline
+        ? isVehicleFormDirty(vehicleForm, initialVehicleBaseline)
+        : false;
+
+    if (isDriverDirty || isVehicleDirty) {
+      saveSubmissionDetailDraft(submissionId, {
+        driverForm: isDriverDirty ? driverForm : null,
+        vehicleForm: isVehicleDirty ? vehicleForm : null,
+      });
+    } else {
+      clearSubmissionDetailDraft(submissionId);
+      setRestored(false);
+    }
+  }, [
+    detail.submission.submissionId,
+    editable,
+    driverForm,
+    vehicleForm,
+    initialDriverBaseline,
+    initialVehicleBaseline,
+  ]);
+
+  const { confirmLeave } = useDraftGuard(Boolean(detailDirty), router);
+
+  function handleDiscardDetailDraft() {
+    if (window.confirm(DRAFT_GUARD_STRINGS.confirmDiscard)) {
+      clearSubmissionDetailDraft(detail.submission.submissionId);
+      if (initialDriverBaseline) setDriverForm(initialDriverBaseline);
+      if (initialVehicleBaseline) setVehicleForm(initialVehicleBaseline);
+      setRestored(false);
+    }
+  }
 
   useEffect(() => {
     setHydrated(true);
@@ -1746,8 +1847,26 @@ export function SupplySubmissionDetailView({
       `fleet-partner/supply-submissions/${detail.submission.submissionId}`,
     );
     setDetail(next);
-    setDriverForm(next.driverDraft ? { ...next.driverDraft } : null);
-    setVehicleForm(next.vehicleDraft ? { ...next.vehicleDraft } : null);
+    setDriverForm(
+      next.driverDraft
+        ? {
+            ...next.driverDraft,
+            preferredVehicleSubmissionId:
+              next.driverDraft.preferredVehicleSubmissionId ?? null,
+          }
+        : null,
+    );
+    setVehicleForm(
+      next.vehicleDraft
+        ? {
+            ...next.vehicleDraft,
+            currentDriverSubmissionId:
+              next.vehicleDraft.currentDriverSubmissionId ?? null,
+          }
+        : null,
+    );
+    clearSubmissionDetailDraft(next.submission.submissionId);
+    setRestored(false);
     router.refresh();
   }
 
@@ -1787,6 +1906,8 @@ export function SupplySubmissionDetailView({
         },
       );
     }
+    clearSubmissionDetailDraft(detail.submission.submissionId);
+    setRestored(false);
     await refreshDetail();
   }
 
@@ -1800,6 +1921,8 @@ export function SupplySubmissionDetailView({
         }),
       },
     );
+    clearSubmissionDetailDraft(detail.submission.submissionId);
+    setRestored(false);
     await refreshDetail();
   }
 
@@ -1813,6 +1936,8 @@ export function SupplySubmissionDetailView({
         }),
       },
     );
+    clearSubmissionDetailDraft(detail.submission.submissionId);
+    setRestored(false);
     await refreshDetail();
   }
 
@@ -1882,7 +2007,7 @@ export function SupplySubmissionDetailView({
         title={`${subject.title} · ${t("supply.detail.titleSuffix")}`}
         subtitle={`${detail.submission.submissionType} · ${detail.submission.submissionId}`}
         actions={
-          <>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             <CanvasPill
               theme={theme}
               tone={statusTone(detail.submission.status)}
@@ -1890,10 +2015,36 @@ export function SupplySubmissionDetailView({
             >
               {formatStatus(detail.submission.status)}
             </CanvasPill>
-            <Link href="/supply/submissions" style={cardLinkStyle(theme)}>
+            {detailDirty && (
+              <button
+                type="button"
+                onClick={handleDiscardDetailDraft}
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 4,
+                  color: theme.danger,
+                  fontWeight: 600,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  padding: "4px 8px",
+                }}
+              >
+                {DRAFT_GUARD_STRINGS.discardDraft}
+              </button>
+            )}
+            <Link
+              href="/supply/submissions"
+              style={cardLinkStyle(theme)}
+              onClick={(e) => {
+                if (!confirmLeave()) {
+                  e.preventDefault();
+                }
+              }}
+            >
               {t("supply.action.backSubmissions")}
             </Link>
-          </>
+          </div>
         }
       />
       <div
@@ -1904,6 +2055,39 @@ export function SupplySubmissionDetailView({
           gap: 16,
         }}
       >
+        {restored && (
+          <div
+            role="status"
+            style={{
+              padding: "10px 14px",
+              borderRadius: 6,
+              backgroundColor: theme.surfaceLo,
+              border: `1px solid ${theme.accentBorder}`,
+              color: theme.text,
+              fontSize: 13,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>{DRAFT_GUARD_STRINGS.restoredNotice}</span>
+            <button
+              type="button"
+              onClick={handleDiscardDetailDraft}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: theme.danger,
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: 12,
+                padding: 0,
+              }}
+            >
+              {DRAFT_GUARD_STRINGS.discardDraft}
+            </button>
+          </div>
+        )}
         {source === "fallback" ? (
           <CanvasBanner
             theme={theme}
