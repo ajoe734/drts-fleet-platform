@@ -4433,6 +4433,25 @@ export class OwnedMobilityService
    * whatever in-memory snapshot triggered this close no longer matches the
    * authoritative row.
    */
+  private isReconciledAssignmentTask(
+    assignment: DispatchAssignmentRecord,
+    task: DriverTaskRecord | null,
+  ): task is DriverTaskRecord {
+    return !!(
+      task &&
+      ["assigned", "accepted"].includes(assignment.status) &&
+      task.taskId === assignment.taskId &&
+      task.assignmentId === assignment.assignmentId &&
+      task.orderId === assignment.orderId &&
+      task.dispatchJobId === assignment.dispatchJobId &&
+      task.driverId === assignment.driverId &&
+      task.vehicleId === assignment.vehicleId &&
+      DRIVER_TASK_TRANSITIONS[task.status]?.includes("cancelled") &&
+      (assignment.status === "assigned") ===
+        (task.status === "pending_acceptance")
+    );
+  }
+
   private async closeSupersededDispatchAssignment(
     tx: OwnedMobilityQueryExecutor,
     assignmentId: string,
@@ -4469,18 +4488,7 @@ export class OwnedMobilityService
         tx,
         locked.taskId,
       );
-    if (
-      !lockedTask ||
-      lockedTask.taskId !== locked.taskId ||
-      lockedTask.assignmentId !== locked.assignmentId ||
-      lockedTask.orderId !== locked.orderId ||
-      lockedTask.dispatchJobId !== locked.dispatchJobId ||
-      lockedTask.driverId !== locked.driverId ||
-      lockedTask.vehicleId !== locked.vehicleId ||
-      !DRIVER_TASK_TRANSITIONS[lockedTask.status]?.includes("cancelled") ||
-      (locked.status === "assigned") !==
-        (lockedTask.status === "pending_acceptance")
-    ) {
+    if (!this.isReconciledAssignmentTask(locked, lockedTask)) {
       return null;
     }
     const closedTask: DriverTaskRecord = {
@@ -4758,6 +4766,20 @@ export class OwnedMobilityService
       this.assertOrderCancelable(order);
       const assignment = bundle.assignment ? { ...bundle.assignment } : null;
       const task = bundle.task ? this.cloneTask(bundle.task) : null;
+      // The persisted branch prepares from assignment/task rows locked in the
+      // same transaction as cancellation and release. Unknown relationships or
+      // incoherent states must retain both resources for reconciliation.
+      if (
+        assignment &&
+        (assignment.orderId !== order.orderId ||
+          !this.isReconciledAssignmentTask(assignment, task))
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "REDISPATCH_ASSIGNMENT_ALREADY_CLOSED",
+          "Active assignment task requires reconciliation",
+        );
+      }
       if (task) this.assertDriverTaskTransition(task, "cancelled");
       order.status = "cancelled";
       order.cancelledAt = now;

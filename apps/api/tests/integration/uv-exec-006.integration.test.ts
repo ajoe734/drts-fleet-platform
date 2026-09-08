@@ -1117,11 +1117,17 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
         "driverId",
         "vehicleId",
         "taskId",
-      ].map((corruption) => ({ accepted, corruption })),
+      ].flatMap((corruption) =>
+        ["redispatch", "cancel"].map((action) => ({
+          accepted,
+          corruption,
+          action,
+        })),
+      ),
     ),
   )(
-    "redispatch retains capacity for unreconciled task state: $accepted/$corruption",
-    async ({ accepted, corruption }) => {
+    "$action retains capacity for unreconciled task state: $accepted/$corruption",
+    async ({ accepted, corruption, action }) => {
       const database = new DatabaseService();
       databases.push(database);
       const candidate = {
@@ -1201,9 +1207,13 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
         ),
       ).toBe(true);
       await expect(
-        service.redispatchOrder(order.orderId, {
-          reasonCode: "operator_redispatch",
-        }),
+        action === "redispatch"
+          ? service.redispatchOrder(order.orderId, {
+              reasonCode: "operator_redispatch",
+            })
+          : service.cancelOwnedOrder(order.orderId, {
+              reason: "passenger_requested",
+            }),
       ).rejects.toMatchObject({
         code: "REDISPATCH_ASSIGNMENT_ALREADY_CLOSED",
       });
