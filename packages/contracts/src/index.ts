@@ -3810,6 +3810,8 @@ export interface DispatchAssignmentRecord {
   driverId: string;
   assignmentType: "metered" | "fixed_price";
   status: DispatchAssignmentStatus;
+  /** Persisted offer deadline; absent legacy offers require reconciliation. */
+  acceptanceDeadline?: string | null;
   acceptedAt: string | null;
   rejectedAt: string | null;
   rejectReasonCode: string | null;
