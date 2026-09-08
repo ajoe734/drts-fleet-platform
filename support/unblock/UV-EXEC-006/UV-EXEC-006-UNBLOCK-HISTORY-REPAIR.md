@@ -82,8 +82,10 @@ Concrete next execution steps for the parent owner/supervisor:
    trailers; normal push to the new branch. Open a replacement PR against dev
    referencing #1721. Leave #1721 preserved until the replacement is tracked.
 4. Run API typecheck, the affected unit suites, and PostgreSQL integration using
-   the actual path `apps/api/tests/integration/uv-exec-006.integration.test.ts`
-   (the parent's root-level test path is stale). Supply a valid DATABASE_URL.
+   the [parent candidate integration suite](https://github.com/ajoe734/drts-fleet-platform/blob/257784d1528707b5880685bbefe13db4efebb7c8/apps/api/tests/integration/uv-exec-006.integration.test.ts)
+   after applying the recovery patch. This suite exists in the parent candidate,
+   not this helper branch; the parent's root-level test path is stale.
+   Supply a valid DATABASE_URL.
    Inspect and resolve current failing CI before claiming readiness.
 5. Commit/push any fixes, then use canonical ai-status.sh with the **new** HEAD
    as CANDIDATE_SHA and recovery branch as CANDIDATE_BRANCH to handoff UV-EXEC-006
