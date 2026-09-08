@@ -1,5 +1,18 @@
 # SR-OPS-SHELL-001 — 本次恢復與阻塞證據
 
+## 2026-09-08 17:39 UTC resume 核對
+
+- Fresh base `origin/dev`：`2a093872d05a7d0344adf9bb58f9e5c4c99861d1`；恢復前 tip：`81da9d0979ed0e2ab960f74840eb768e100cb679`；受測程式 SHA：`1547b73e8ff14d70ce6c87bfd5232373352f3eaa`。本次為 evidence anchor，尚無 handoff candidate。
+- `git fetch origin` exit 0。`git rebase origin/dev` 及中途 continue 因歷史重播的本文件 add/add、content conflict exit 1；僅對此文件保留恢復前完整最新證據，最後 `git -c core.editor=true rebase --continue` exit 0。沒有產品檔案衝突。
+- `git merge --no-edit origin/codex2/sr-ops-shell-001` exit 0；`git merge-base --is-ancestor 81da9d0979ed0e2ab960f74840eb768e100cb679 HEAD` exit 0，保留已發布歷史供普通 push。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/` exit 0：1 file、13 tests passed，622ms。
+- `pnpm --filter @drts/ops-console-web typecheck` exit 0：`next typegen && tsc --noEmit` 成功；`git diff --check` exit 0。
+- `git diff origin/dev HEAD -- apps/ops-console-web/app/dispatch/page.tsx apps/platform-admin-web/app/audit/page.tsx` exit 0、無差異。原始碼重驗：dispatch 第1230行仍 fallback `/platform-admin`，第4520行仍傳無上下文的 `/audit`；audit receiver 第164行仍 `client.listAuditLogs()`，沒有 searchParams 消費。
+
+重新核對 task machine slice、execution_ref、task spec、R18/R19、C048、planning/history helper 與 `Q-SR-OPS-SHELL-001`。write_scopes 仍未授權 sender／receiver，depends_on 仍為空。請 supervisor 依既有 planning routing record 授權 sender／必要 receiver scope、補入重疊 writer dependencies，並落盤 resource identity 與 URL→query 契約；history child done 不滿足這些產品前置。未自行修改範圍外程式，未 handoff 或宣稱產品 gate 已通過。
+
+本次未改 UI。未執行瀏覽器 1440/390px CTA hit testing、開關／焦點／reload、audit popup、payments context 或 live／真機驗收。沒有 live 資源 ID、沒有建立業務資源；AUD-* 仍僅為單元測試輸入。
+
 ## 2026-09-08 16:30 UTC dispatch 重驗
 
 - Fresh base `origin/dev`：`5cff9b36082998a0295f2550039306dc1f84c3d2`；恢復前 tip：`cef974a3d`；受測程式 SHA：`2c938cfef1c95690e160386740f17b390204831c`。尚無 handoff candidate，本次僅提交 evidence anchor。
