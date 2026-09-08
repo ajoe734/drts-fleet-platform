@@ -1,5 +1,65 @@
 # SR-ADMIN-ADAPTER-001 — 平台轉接器登錄 API 接線及到期真值
 
+## 2026-09-08 Codex2 dispatch audit — blocked, no candidate
+
+This section supersedes the historical completion claims below. Owner: Codex2;
+reviewer: Codex. Traceability: N11/N12, C104/C105 (the older C097/R07 reference is incorrect).
+
+- Current fetched base: `d4f54ef94e059a981bf2be1f7b944e815870e117` (`origin/dev`).
+- Inherited task head: `b096f7da6f91e38085c057e6d8e3cca134ed5e47`.
+- Rebased implementation under inspection: `6dc203d333c246bda081e7147f36bd4139941080`.
+- Branch: `codex2/sr-admin-adapter-001`; no review candidate is nominated.
+- `git fetch origin` exited 0. Rebase initially exited 1 on duplicate historical
+  commits `55a1f43b2` and `5e97b391a`; both were skipped after confirming the
+  newer implementation had already replayed. Final `git rebase --skip` exited 0.
+- Base controller inspection found no adapter routes: the fix exists on the task
+  branch, not on current dev. No live HTTP 404 reproduction was performed.
+
+### Actual checks in this dispatch
+
+All commands ran in the assigned Codex2 isolated worktree.
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-admin-adapter-001/` | 0 | 3 files, 38 tests passed |
+| `pnpm --filter @drts/api typecheck` | 0 | TypeScript passed |
+| `pnpm --filter @drts/platform-admin-web typecheck` | 0 | Routes generated; TypeScript passed |
+| `git diff --check` | 0 | Before this evidence update; rechecked at commit |
+
+Resource IDs exercised by the inherited unit tests include `owned-dispatch`,
+`cityride-forwarder`, `mof-bgmt`, `tw-metro-transit`, and `kura-bus-adapter`.
+These are local test resources, not live resources. API tests call controller
+methods directly; UI tests inspect source. They do not prove proxy routing,
+browser form behavior, PostgreSQL durability, or deployed authentication.
+
+### Blocking authority and scope gaps
+
+1. The service creates `admin.phase1_platform_adapters` with runtime DDL, then
+   uses a process-static Map as its read authority. Database startup failures
+   are swallowed. PATCH/POST update that Map before fire-and-forget SQL and
+   swallow write failures, allowing successful responses without durability.
+   Existing multi-instance/reload tests provide no DatabaseService and exercise
+   only the same process Map; the historical persistence claim is unsupported.
+2. `queueGovernedAction` only calls `setFlash`; edit/rotate credential buttons
+   do not submit a governed command. Do not count them as delivered governance.
+3. Baseline health and enabled flags are assigned without runtime probes. Stub
+   entries can be HEALTHY despite no health-check timestamp. This does not
+   establish live availability.
+
+Supervisor action needed: allocate a task-specific `infra/migrations/` path and
+   the platform-admin repository/module scope (or a dependency owning those
+   surfaces), and identify the authoritative credential governance contract.
+   Current write_scopes exclude these shared files; no out-of-scope changes were
+   made. Then replace Map/DDL authority with durable reads and awaited writes,
+   test database rejection and independent process reload, and wire governance.
+
+No live database, browser, credential rotation, external adapter, CI, merge, or
+deployment acceptance was executed. No handoff/done claim is made. The canvas
+`platform-screens-2.jsx` registry section and realm tokens were read; this
+dispatch introduces no UI design changes.
+
+## Historical owner evidence (not current verification)
+
 - **任務編號**：`SR-ADMIN-ADAPTER-001`
 - **Owner**：`Gemini`
 - **Reviewer**：`Codex2`
