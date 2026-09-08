@@ -39,6 +39,26 @@ function parseReservationStart(date: string, time: string): Date | null {
     return null;
   }
 
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
+  const day = Number(date.slice(8, 10));
+  const hour = Number(time.slice(0, 2));
+  const minute = Number(time.slice(3, 5));
+  const calendarDate = new Date(Date.UTC(year, month - 1, day));
+
+  // `new Date()` silently normalizes impossible values (for example,
+  // 2026-02-30 becomes March 2). A non-existent wall-clock timestamp must
+  // never become a later, submittable reservation by accident.
+  if (
+    hour > 23 ||
+    minute > 59 ||
+    calendarDate.getUTCFullYear() !== year ||
+    calendarDate.getUTCMonth() !== month - 1 ||
+    calendarDate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
   const parsed = new Date(`${date}T${time}:00${RESERVATION_TIMEZONE_OFFSET}`);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
