@@ -81,3 +81,15 @@ New unit scenarios use test-only IDs `drv-large-0` through `drv-large-999` and `
 ### Remaining blocker (supersedes item 3 above)
 
 CSV escaping and default-month defects are fixed. Shared page/table/copy scope remains unchanged in the current task slice. The merged helper `support/unblock/SR-FLEET-DATA-001/SR-FLEET-DATA-001-UNBLOCK-PLANNING-DECISION.md` and `Q-SR-FLEET-DATA-001` explicitly route scope extension, writer ordering and detail-surface choice to Supervisor/Chairman; the helper itself grants no scope. Await the four additional paths and acyclic ordering named above. Unknown documents/training presentation, truthful disconnected pages, and detail acceptance remain incomplete. Browser filter/navigation/download/design checks and live partner authorization remain unperformed. No same-candidate review, CI, merge, deployment or physical-device success is claimed.
+
+## Resumed dispatch — 2026-09-08 17:45 UTC
+
+- Fetched base: `2a093872d05a7d0344adf9bb58f9e5c4c99861d1`; starting published progress: `a56012f0126d0aa6ecb41500adf6294b6a4a1e9a`.
+- Initial `git rebase origin/dev` stopped on duplicate historical patches (exit 1); `git rebase --abort` succeeded. Interactive rebase omitted the ten duplicate historical commits and replayed the eight current first-parent implementation/evidence commits (exit 0). The scoped diff against starting progress was empty.
+- `git merge --no-edit a56012f01` preserved published ancestry (exit 0); `git diff HEAD^ HEAD --stat` was empty. Tested progress SHA: `2b105e038155222bec2a331a1ed270a60a7e0e40`. This evidence update follows that tree; candidate SHA remains unset.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-data-001/`: exit 0, 19 tests in one file, 563 ms, start 17:45:44 UTC.
+- `pnpm --filter @drts/fleet-partner-portal-web typecheck`: exit 0, Next route generation and `tsc --noEmit`.
+- `git diff --check origin/dev...HEAD`: exit 0.
+- Read-only source inspection still finds `data.fixtureNotice` at training page line 33 and cases page line 45, and successful `complete` badges in shared tables lines 104/118. Current task slice still lists only the original seven scopes. No additional scope or writer ordering was granted by the merged planning helper.
+
+No application change was needed for the existing in-scope regressions. Resource IDs remain the mocked IDs documented above; no live resource was queried. Browser/detail/live authorization and design acceptance remain unverified. Supervisor must authorize the four requested shared paths with acyclic dependencies and settle the detail surface before full implementation can proceed. This dispatch records a blocker, not a review handoff or completion.
