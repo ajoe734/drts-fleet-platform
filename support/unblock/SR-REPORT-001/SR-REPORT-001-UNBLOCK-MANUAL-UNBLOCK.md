@@ -28,20 +28,23 @@ Current repository evidence confirms the remaining blocker:
 
 ## Parent next step
 
-The parent blocker was recorded using the current canonical ai-status.sh release.
+The parent next step was recorded with note using the current canonical ai-status.sh release.
+A blocker transition was rejected: Supervisor is not a recognized waiting agent,
+and the parent owner then changed to Codex2 during this audit. No owner override
+was attempted; the current owner/Supervisor must enforce the gate.
 Supervisor/Chairman must authorize the two exact shared paths above for format
 declaration and affected assertions, record overlapping-writer dependencies or
 serialization, and synchronize the reviewed task specification. Alternatively,
 register a coordinated shared-file producer and attach its dependency. This
 helper grants no scope expansion and creates no unregistered implementation task.
 
-After that gate is satisfied, dispatch parent owner Codex on an isolated parent
+After that gate is satisfied, dispatch the current parent owner on an isolated parent
 continuation branch using the existing history-repair procedure adapted to the
 current owner. Rebase on current dev, complete ordinary CSV/XLSX/PDF behavior,
 preserve all nine row builders and filters, and retain ZIP rejection and filing
 metadata-only behavior. Run the parent's API/ops typechecks, task-local tests and
 affected central reporting tests; record parseability and download evidence,
-commit, non-force push, open PR and hand off the exact SHA to reviewer Gemini.
+commit, non-force push, open PR and hand off the exact SHA to the current assigned reviewer.
 
 Review or merge of this diagnostic helper must not be treated as authorization
 or proof that the parent scope gate has been satisfied.
