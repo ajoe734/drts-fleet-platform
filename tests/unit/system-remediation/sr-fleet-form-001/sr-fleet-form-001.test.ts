@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   fieldId,
+  hasUnsavedDraftChanges,
   DRAFT_GUARD_STRINGS,
   isEditableStatus,
   formatSupplySubject,
@@ -223,64 +224,57 @@ describe("SR-FLEET-FORM-001 / formatSupplySubject (regression)", () => {
 // 5. Dirty-state logic invariants — R25 draft guard threshold
 // ---------------------------------------------------------------------------
 describe("SR-FLEET-FORM-001 / dirty-state invariants (R25)", () => {
-  function isDriverDirty(
-    form: { name: string; mobile: string; professionalDriverLicenseNo: string; taxiDriverRegistrationNo: string },
-    submitted: boolean,
-  ): boolean {
-    return (
-      !submitted &&
-      (form.name !== "" ||
-        form.mobile !== "" ||
-        form.professionalDriverLicenseNo !== "" ||
-        form.taxiDriverRegistrationNo !== "")
-    );
-  }
-
-  function isVehicleDirty(
-    form: { plateNo: string; brand: string; model: string },
-    submitted: boolean,
-  ): boolean {
-    return !submitted && (form.plateNo !== "" || form.brand !== "" || form.model !== "");
-  }
+  const initialDriver = {
+    name: "",
+    mobile: "",
+    professionalDriverLicenseNo: "",
+    professionalDriverLicenseExpiry: "",
+    taxiDriverRegistrationNo: "",
+  };
+  const initialVehicle = {
+    plateNo: "",
+    brand: "",
+    model: "",
+    airportTransferEligible: false,
+  };
 
   it("driver form is not dirty on initial empty state", () => {
     expect(
-      isDriverDirty(
-        { name: "", mobile: "", professionalDriverLicenseNo: "", taxiDriverRegistrationNo: "" },
-        false,
-      ),
+      hasUnsavedDraftChanges(initialDriver, initialDriver),
     ).toBe(false);
   });
 
   it("driver form is dirty once name is typed", () => {
     expect(
-      isDriverDirty(
-        { name: "A", mobile: "", professionalDriverLicenseNo: "", taxiDriverRegistrationNo: "" },
-        false,
+      hasUnsavedDraftChanges({ ...initialDriver, name: "A" }, initialDriver),
+    ).toBe(true);
+  });
+
+  it("detects edits to a required date field, not just text identifiers", () => {
+    expect(
+      hasUnsavedDraftChanges(
+        { ...initialDriver, professionalDriverLicenseExpiry: "2028-03-01" },
+        initialDriver,
       ),
     ).toBe(true);
   });
 
-  it("driver form is not dirty after successful submit (submitted=true)", () => {
-    expect(
-      isDriverDirty(
-        { name: "A", mobile: "0922", professionalDriverLicenseNo: "X", taxiDriverRegistrationNo: "Y" },
-        true,
-      ),
-    ).toBe(false);
-  });
-
   it("vehicle form is not dirty on initial empty state", () => {
-    expect(isVehicleDirty({ plateNo: "", brand: "", model: "" }, false)).toBe(false);
+    expect(hasUnsavedDraftChanges(initialVehicle, initialVehicle)).toBe(false);
   });
 
   it("vehicle form is dirty once plateNo is typed", () => {
-    expect(isVehicleDirty({ plateNo: "KAB-001", brand: "", model: "" }, false)).toBe(true);
+    expect(
+      hasUnsavedDraftChanges({ ...initialVehicle, plateNo: "KAB-001" }, initialVehicle),
+    ).toBe(true);
   });
 
-  it("vehicle form is not dirty after successful submit (submitted=true)", () => {
-    expect(isVehicleDirty({ plateNo: "KAB-001", brand: "Toyota", model: "Sienta" }, true)).toBe(
-      false,
-    );
+  it("detects edits to an optional vehicle checkbox", () => {
+    expect(
+      hasUnsavedDraftChanges(
+        { ...initialVehicle, airportTransferEligible: true },
+        initialVehicle,
+      ),
+    ).toBe(true);
   });
 });
