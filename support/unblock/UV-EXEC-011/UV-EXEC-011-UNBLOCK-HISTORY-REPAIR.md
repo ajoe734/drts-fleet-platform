@@ -26,7 +26,8 @@ Evidence after `git fetch origin`:
   This is also the merge base with inspected `origin/dev`
   `031cfc4c99320b79f6ad863996a43a5da8227edf`.
 - The three-dot diff contains 11 files: TWM providers, language routing,
-  worker index/media-provider, and `tests/unit/uv-exec-011.test.ts`.
+  worker index/media-provider, and the
+  [candidate unit test](https://github.com/ajoe734/drts-fleet-platform/blob/a864bf8eb6a93488bcb342d83f38947be35e0813/tests/unit/uv-exec-011.test.ts).
   No orchestrator, unrelated task, or generated machine-state files appear.
 - `git worktree list --porcelain` no longer lists the previous
   `.artifacts/worktrees/auto/claude-uv-exec-011` worktree. Its branch remains
@@ -77,3 +78,46 @@ machine truth receives a `note` with this next step, preserving its owner and
 blocked status. This helper's own document is committed and normally pushed
 on its task branch, then submitted as a separate PR and locked candidate;
 its commit/PR evidence is recorded in helper machine truth at handoff.
+
+## Redispatch audit (2026-09-08, after 15:41 UTC)
+
+The helper was redispatched as `todo` despite the existing pushed document
+commit `8be327896c6828c145d2b6fe8298cae99121963a` and open
+[PR #1764](https://github.com/ajoe734/drts-fleet-platform/pull/1764).
+The assigned worktree was clean. Parent machine truth still names Claude as
+owner and remains blocked on the approved handoff path described above.
+
+Fresh fetch and live remote inspection confirm the parent local branch, remote
+branch and PR #1745 still agree on `a864bf8eb6a93488bcb342d83f38947be35e0813`.
+Against dev `f372e4a6a0dd16204ccbd660f23013601357c224`, its exclusive history
+still contains exactly the two task commits and the same 11-file diff.
+PR #1745 reports MERGEABLE/CLEAN; its existing successful CI is historical
+candidate evidence, not a new run against this latest dev head.
+
+There is also an open [PR #1736](https://github.com/ajoe734/drts-fleet-platform/pull/1736)
+from `codex2/uv-exec-011` at `e4689bd2228302f24c704e8a16206d29295b59b3`.
+It is a distinct one-commit implementation, not contamination inside Claude's
+branch. The next handoff must explicitly select PR #1745, branch and SHA;
+do not infer the candidate from task ID alone, combine the implementations,
+or merge both PRs. Supervisor should reconcile the alternate PR's ownership
+before integration. No parent branch is currently attached to a listed worktree.
+
+The helper's previous CI failure was reproduced from
+[Canonical consistency job logs](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34237813593/job/102099979847):
+the document cited a candidate-only test as a local path, but that test is not
+on the helper branch. This revision replaces that citation with a link pinned
+to the parent commit; copying parent implementation files into the helper
+would create the very scope contamination this task must avoid.
+
+The helper's published head is seven dev commits behind with one exclusive
+commit. Rebasing that published commit would require a prohibited force-push
+to retain PR #1764. Preserve its ancestry and publish this document correction
+as an ordinary child commit. If base synchronization becomes necessary, use
+an additive merge of dev after conflict review, or a new branch/PR with explicit
+candidate replacement; never rewrite the published branch. The earlier
+"already up to date" rebase observation applies only to the initial audit.
+
+This helper delivers the documented recovery path and citation fix. It does
+not claim the owner's approval broker has recovered, that the parent has a
+locked candidate, or that either PR has merged. After this revision is pushed,
+handoff the helper's new exact SHA to Codex2 and let CI rerun on that SHA.
