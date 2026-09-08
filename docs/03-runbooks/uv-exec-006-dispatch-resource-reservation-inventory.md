@@ -243,3 +243,20 @@ Plain rebase onto the latest dev again encountered duplicate-history replay
 conflicts and was aborted. A clean merge of `origin/dev` preserved pushed
 ancestry; this follow-up uses normal non-force pushes. Review/CI/merge and
 external acceptance remain candidate lifecycle gates.
+
+### Dispatch resumption verification (2026-09-08 16:32 UTC)
+
+Supervisor fallback dispatched Codex as owner, with Codex2 remaining reviewer.
+The existing cancellation persistence fix was retained. Both dependencies
+UV-EXEC-004 and UV-EXEC-005 are recorded as done in canonical task slices.
+The prescribed plain rebase again conflicted while replaying previously
+integrated task history and was aborted; merging origin/dev at `5cff9b360`
+cleanly integrated five support/planning documents without rewriting pushed
+ancestry. Source search reconfirmed that assignment writes remain in
+OwnedMobilityRepository and reporting only reads those rows.
+
+After integration, the isolated PostgreSQL task suite passed **29/29**, the
+five related API unit suites passed **179/179**, and API typecheck passed
+after rebuilding contracts. `git diff --check` passed. This verification is
+local evidence for candidate handoff; same-SHA review, CI, merge and external
+acceptance are still pending.
