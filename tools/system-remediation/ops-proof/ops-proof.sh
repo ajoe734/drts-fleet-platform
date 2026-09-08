@@ -79,12 +79,13 @@ NODE
     [[ "$isolated_database_url" =~ ^postgres(ql)?:// ]] || die "isolated database URL must use postgres:// or postgresql://"
     # libpq accepts query parameters such as host/service/dbname that can
     # override the authority checked below. Never forward those overrides.
-    [[ "$isolated_database_url" != *'?'* && "$isolated_database_url" != *'#'* && "$isolated_database_url" != *'%'* ]] || die "restore URL must not contain query, fragment, or percent-encoded overrides"
+    [[ "$isolated_database_url" != *'?'* && "$isolated_database_url" != *'#'* && "$isolated_database_url" != *'%'* && "$isolated_database_url" != *'\'* ]] || die "restore URL must not contain query, fragment, percent-encoded or backslash overrides"
     [[ -z "${PGSERVICE:-}" && -z "${PGOPTIONS:-}" ]] || die "PGSERVICE and PGOPTIONS must be unset for isolated restore"
     target_host="$(node -e 'console.log(new URL(process.argv[1]).hostname)' "$isolated_database_url")"
     target_database="$(node -e 'console.log(new URL(process.argv[1]).pathname.slice(1))' "$isolated_database_url")"
-    [[ "$target_host" == "localhost" || "$target_host" == "127.0.0.1" || "$target_host" == "::1" ]] || die "restore target host must be loopback, never a shared or production database"
+    [[ "$target_host" == "localhost" || "$target_host" == "127.0.0.1" ]] || die "restore target host must be loopback, never a shared or production database"
     [[ "$target_database" =~ ^drts_ops_proof_[a-z0-9_]+$ ]] || die "restore target database must match drts_ops_proof_*"
+    export PGHOSTADDR=127.0.0.1
     command -v pg_restore >/dev/null || die "pg_restore is required for an actual restore"
     command -v psql >/dev/null || die "psql is required for restore readback"
     existing_relations="$(psql -X "$isolated_database_url" --no-align --tuples-only --set ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp%'")"
