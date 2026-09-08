@@ -3,6 +3,7 @@ import { VoiceEvidenceService } from "../../apps/api/src/modules/voice-booking/v
 import { VoiceCheckpointRepository } from "../../apps/api/src/modules/voice-booking/voice-checkpoint.repository";
 import type { VoiceBookingRepository } from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import { ConfirmedRecordingManifests } from "../../apps/voice-media-worker/src/recording/confirmed-manifest";
+import { FinalRecordingManifests } from "../../apps/voice-media-worker/src/recording/final-manifest";
 import {
   assertConfirmationCoverage,
   type RecordedConfirmationReceipt,
@@ -214,6 +215,59 @@ describe("UV-EXEC-010 confirmation audio coverage", () => {
     await expect(
       confirmed.readTrusted("credential", f.binding, ref),
     ).rejects.toThrow("ledger mismatch");
+  });
+
+  it("finalizes full-call audio without replacing checkpoint proof on late failure", async () => {
+    const f = await proofFixture();
+    const manifests = new ImmutableRecordingManifests(f.store);
+    const confirmed = new ConfirmedRecordingManifests(manifests, {
+      resolve: async () => f.receipt,
+    });
+    const checkpoint = await confirmed.seal(
+      "credential",
+      f.manifest,
+      f.binding,
+    );
+    const tail = await Promise.all(
+      (["inbound", "outbound"] as const).map((channel) =>
+        f.recorder.seal("credential", {
+          ...f.input,
+          channel,
+          startMs: 1000,
+          endMs: 2000,
+          utcStart: "2026-09-08T00:00:01Z",
+          utcEnd: "2026-09-08T00:00:02Z",
+        }),
+      ),
+    );
+    const final = new FinalRecordingManifests(manifests, {
+      resolve: async () => ({
+        closedEventId: "closed",
+        endedAt: "2026-09-08T00:00:02Z",
+        endMs: 2000,
+        checkpointRefs: [checkpoint],
+      }),
+    });
+    await expect(
+      final.seal("credential", scope, f.manifest.segments),
+    ).rejects.toThrow("closure coverage");
+    const ref = await final.seal("credential", scope, [
+      ...f.manifest.segments,
+      ...tail,
+    ]);
+    expect((await final.read(scope, ref)).endMs).toBe(2000);
+    expect((await final.read(scope, ref)).finalization?.checkpointRefs).toEqual(
+      [checkpoint],
+    );
+    f.objects.delete(tail[0]!.objectKey);
+    await expect(final.read(scope, ref)).rejects.toThrow("unreadable");
+    expect((await confirmed.read(f.binding, checkpoint)).endMs).toBe(1000);
+    const unclosed = new FinalRecordingManifests(manifests, {
+      resolve: async () => null,
+    });
+    await expect(
+      unclosed.seal("credential", scope, f.manifest.segments),
+    ).rejects.toThrow("closure unavailable");
   });
 
   it.each(["speech", "dtmf"] as const)(

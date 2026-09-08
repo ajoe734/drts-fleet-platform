@@ -20,6 +20,11 @@ export interface RecordingManifest {
   segments: readonly RecorderSegment[];
   /** Present only after resolving the receipt through a trusted event ledger. */
   confirmationReceipt?: RecordedConfirmationReceipt;
+  finalization?: {
+    closedEventId: string;
+    endedAt: string;
+    checkpointRefs: readonly RecordingManifestRef[];
+  };
 }
 
 export interface RecordingManifestRef {
@@ -154,6 +159,18 @@ function snapshot(input: RecordingManifest): Readonly<RecordingManifest> {
     segments: Object.freeze(
       input.segments.map((segment) => Object.freeze({ ...segment })),
     ),
+    ...(input.finalization
+      ? {
+          finalization: Object.freeze({
+            ...input.finalization,
+            checkpointRefs: Object.freeze(
+              input.finalization.checkpointRefs.map((ref) =>
+                Object.freeze({ ...ref }),
+              ),
+            ),
+          }),
+        }
+      : {}),
     ...(input.confirmationReceipt
       ? {
           confirmationReceipt: freezeReceipt(input.confirmationReceipt),

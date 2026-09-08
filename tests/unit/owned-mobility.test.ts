@@ -459,7 +459,7 @@ describe("owned mobility service", () => {
       };
       // Seed the persisted voice aggregate without using a legacy creation DTO.
       Object.assign(ownedMobilityService, { orders: [pinned] });
-      const original = structuredClone(pinned);
+      const original = ownedMobilityService.getOrder(created.orderId);
       const common = {
         callId: "voice-call",
         linkedOrderId: created.orderId,
