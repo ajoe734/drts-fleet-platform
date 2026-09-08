@@ -2,6 +2,46 @@
 
 Date: 2026-09-08. Owner: Codex2; Reviewer: Codex.
 
+## Redispatch verification — 2026-09-08 23:19 UTC
+
+Base: `3bdb943eef2cb42fd825cc8e3d250d3d42cdf4bb` (`origin/dev`).
+Tested HEAD: `4ca22d53e5e2455c2be8be0257e016f423f128fd`.
+Candidate SHA: none; acceptance remains red.
+
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1 at the
+  historical `ac1076708` add/add test conflict. `git rebase --abort`: exit 0.
+- `git merge origin/dev -m 'merge(SR-PROOF-001): sync dev while preserving published anchors' -m 'LLM-Agent: codex2' -m 'Task-ID: SR-PROOF-001' -m 'Reviewer: Codex'`:
+  exit 0, no conflicts. This merges current dev, not another copy of old
+  rebased anchors; published branch ancestry is preserved for ordinary push.
+- `git diff --name-only origin/dev...HEAD`: exit 0; only this task's evidence
+  and payment-gate test differ. `git diff --quiet origin/dev HEAD -- apps/api/src/modules/billing-settlement`:
+  exit 0; tested billing code matches the fetched base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`: exit 1;
+  3 executed, 1 passed, 2 failed. Fabricated proof still returns paid, and
+  unresolved persistence still returns paid. Unapproved rejection passes.
+- `pnpm --filter @drts/api typecheck`: exit 2; missing
+  `@drts/control-plane-auth` declarations and unresolved voice/booking exports
+  and properties from `@drts/contracts`. These are outside this task's diff;
+  no claim that API typecheck passed or that dependency build state is healthy.
+- `pnpm --filter @drts/platform-admin-web typecheck`: exit 0.
+- `git diff --check`: exit 0.
+
+Read the merged history-repair artifact and current task slices. The helper
+explicitly leaves scope, dependency and canvas routing blocked; its completion
+does not allocate implementation authority. Parent still lists only the original
+five write scopes and ARTIFACT/INVOICE dependencies; SR-CONTRACT-001 is todo.
+Supervisor must authorize repository/module and named proof storage/scanner
+leaves, allocate proof contracts/migration with a dependency or reviewed
+exception, and route the missing proof UI states before implementation resumes.
+The canonical `PA_Reimbursements` / `PA_ReimbursementDetail` canvas still lacks
+upload/scan/reject/readback states; the screen requirements below remain open.
+
+Resource IDs: `sr-proof-001-batch-a`, `sr-proof-001-driver-a`,
+`sr-proof-001-statement-a`, `sr-proof-001-nonexistent-proof` are isolated test
+inputs. No live upload, scanner, authorized download, PostgreSQL concurrency,
+durable receipt, browser/device acceptance, or real payment was verified.
+No product servers, browser test servers, or Docker infrastructure were started.
+
 ## Redispatch verification — 2026-09-08 22:43 UTC
 
 Fetched base: `eb684f176b1d3b46553a0f6f0556c79452fbac3c`.
