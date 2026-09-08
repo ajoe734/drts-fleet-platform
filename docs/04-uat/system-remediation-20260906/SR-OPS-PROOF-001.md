@@ -128,19 +128,19 @@ $ pnpm vitest run tests/unit/system-remediation/sr-ops-proof-001/
 ### C. CLI 驗證工具直接執行（人讀格式）
 
 ```bash
-$ node tools/system-remediation/ops-proof/bin/ops-proof.mjs all
+$ node tools/system-remediation/ops-proof/bin/ops-proof.mjs all --candidate-sha 15abba23987da8c4c5b652ccfbda071179c372ee
 
 ================================================================================
  DRTS Ops-Proof Verification Runner — Task SR-OPS-PROOF-001
 ================================================================================
  Base SHA:       40ba315e4114369eaa7e12d35aae83a795c97b1d
- Candidate SHA:  40ba315e4114369eaa7e12d35aae83a795c97b1d
+ Candidate SHA:  15abba23987da8c4c5b652ccfbda071179c372ee
  Resource ID:    iso-db-res-001
  Isolated Target: in-memory-isolated-store@localhost (工具不碰正式DB: PASS)
 --------------------------------------------------------------------------------
 
 [1] 隔離 DB 快照還原與三領域校核 (C122): ✓ PASS
-    - 還原紀錄: 7 筆 (耗時 2ms)
+    - 還原紀錄: 7 筆 (耗時 1ms)
     - 行程校核: ✓ PASS (訂單/派車/行程關聯一致)
     - 帳務校核: ✓ PASS (發票/明細/司機結算金額平整)
     - 稽核校核: ✓ PASS (SHA-256 防篡改雜湊驗證通過)
@@ -150,19 +150,19 @@ $ node tools/system-remediation/ops-proof/bin/ops-proof.mjs all
 [2] 三負載容量與原始延遲校驗 (C123): ✓ PASS
     - Booking (Intake):
       樣本數: 25, 錯誤數: 0, 錯誤率: 0%
-      延遲統計: min=36.6ms, p50=80.3ms, p95=202.5ms (SLO ≤2000ms), max=204ms
+      延遲統計: min=32.6ms, p50=79.2ms, p95=194.3ms (SLO ≤2000ms), max=217.7ms
       SLO 達標: ✓ PASS
     - Dispatch:
       樣本數: 50, 錯誤數: 0, 錯誤率: 0%
-      延遲統計: min=50.8ms, p50=113.7ms, p95=346.1ms (SLO ≤10000ms), max=401.9ms
+      延遲統計: min=56.3ms, p50=138.6ms, p95=361.7ms (SLO ≤10000ms), max=453.9ms
       SLO 達標: ✓ PASS
     - Report:
       樣本數: 20, 錯誤數: 0, 錯誤率: 0%
-      延遲統計: min=101.5ms, p50=349ms, p95=711.6ms (SLO ≤3000ms), max=711.6ms
+      延遲統計: min=113.2ms, p50=285.5ms, p95=799.4ms (SLO ≤3000ms), max=799.4ms
       SLO 達標: ✓ PASS
 
 [3] 部署版本與回滾演練 (C124): ✓ PASS
-    - 候選版本: 40ba315e4114369eaa7e12d35aae83a795c97b1d (格式合法: ✓)
+    - 候選版本: 15abba23987da8c4c5b652ccfbda071179c372ee (格式合法: ✓)
     - 健康檢查: /health -> ok (DB: connected)
     - 回滾演練: prod/v2026.05.19.1 -> prod/v2026.05.18.0 (skip_migration=true: ✓)
 --------------------------------------------------------------------------------
