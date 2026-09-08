@@ -2,7 +2,19 @@
 
 本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Gemini（本次 dispatch）。未 handoff、未完成 review/CI/merge。
 
-## 2026-09-08 16:38 UTC replay 接收器負向續驗（最新）
+## 2026-09-08 16:45 UTC 預設 transport 停滯觀察（最新）
+
+本節優先於歷史紀錄。base `890548b4f357542968c8b14f33f23e0685be007a`；執行 anchor `b52204d602e91056a381d86f160b991b1ec1f113`，非 lifecycle candidate。一般 rebase 重播 a119ec0bb 再次遇到四個 task 檔 add/add 衝突，已 abort；以 merge 納入 dev 保留發布歷史，普通 push 成功，未覆蓋新版產品碼。
+
+- 新增 C112-default-transport：真 `WebhookDispatchService()`，沒有注入 fetch、AbortSignal 或 fake timer。接收器收到 HTTP 後保持連線，實測 1000ms 仍未完成；接收器關閉 TCP 後，服務返回 httpStatus null，按 webhook ID 回讀唯一 delivery 為 queued、attempt 1 且有 nextAttemptAt。這是停滯／斷線恢復觀察，**不是預設 deadline 通過，也不能由一秒觀察推論永遠不會逾時**。
+- 真實 webhook `wh_1bd62d95-5b69-4c16-adf1-4eff78ef4635`、delivery `wd_78431702-9409-4467-b904-7c239fb93177`。完整 stdout、base/執行 SHA、DB 與 OS process 資源保存於同 task `evidence-sr-qa-webhook-001.json` / `evidence-postgres.json`。recorder 的 candidateSha 欄是執行 HEAD，尚未 handoff 鎖定。
+- `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 0，5 passed / 1.3m；含 25 local、3 PostgreSQL（含 SIGKILL／新程序恢復），其餘 4 個是 shared harness。
+- `DRTS_WEBHOOK_LIVE=1 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 1，1 failed / 4 passed / 1.4s；缺 live 證據明確失敗，另存 `evidence-live-unavailable.json`。
+- `pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/*.ts tests/e2e/system-remediation/sr-qa-webhook-001/*.ts --max-warnings=0` → exit 0；`git diff --check` → exit 0。
+
+仍 in_progress，未 handoff。C111 authenticated 管理 API 權限／tenant key 使用量尚待驗；讀碼發現 partner ingress 更新的是 partner credential 使用時間，不能作為 tenant key 證據。請 supervisor 協調 tenant key 消費路由／測試身份、C112 deadline 契約、C113 sandbox、C114 真 provider 與 C115 部署排程／告警回執。本輪沒有認定新產品缺陷，未修改產品或 UI。
+
+## 2026-09-08 16:38 UTC replay 接收器負向續驗（歷史）
 
 本節優先於歷史紀錄。已納入 base `8de85170b07ab7eb3d773e0845abebf12babc7e0`；執行 anchor `3e4d30f4c98b3d7b7ac06a27a27cf1d646b8c0e7`，非 lifecycle candidate。按指示 rebase 再次於歷史提交 a119ec0bb 出現 task 檔 add/add 衝突，已 abort 並 merge dev，保留已發布歷史且普通 push 成功。
 
