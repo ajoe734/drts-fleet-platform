@@ -58,6 +58,7 @@ it("C111: durable bearer reads a persisted key over HTTP and denied writes leave
     logger: false,
     abortOnError: false,
   });
+  const proofs = new StepUpProofService();
   app.useGlobalGuards(
     new BootstrapAuthGuard(
       new Reflector(),
@@ -66,7 +67,7 @@ it("C111: durable bearer reads a persisted key over HTTP and denied writes leave
       undefined,
       undefined,
       undefined,
-      new StepUpProofService(),
+      proofs,
     ),
   );
   app.useGlobalFilters(new SnakeCaseExceptionFilter());
@@ -163,6 +164,63 @@ it("C111: durable bearer reads a persisted key over HTTP and denied writes leave
       (row) => row.tenantId === tenantId,
     );
     expect(after).toEqual(before);
+    // Local issuer precondition only: this does not exercise a deployed MFA challenge.
+    const writerPayload = await jwt.verifyAccessToken(writer.token);
+    expect(writerPayload).not.toBeNull();
+    const writerIdentity = jwt.toRequestIdentity(writerPayload!);
+    const post = async (path: string, body: Record<string, unknown>) => {
+      const proof = proofs.createProof(writerIdentity, {
+        method: "POST",
+        path: `/api/tenant/api-keys${path}`,
+      });
+      const response = await fetch(`${endpoint}${path}`, {
+        method: "POST",
+        headers: {
+          ...headers,
+          authorization: `Bearer ${writer.token}`,
+          "x-drts-step-up-reference": proof.stepUpReference!,
+        },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(201);
+      return (await response.json()).data;
+    };
+    const created = await post("", {
+      keyName: "HTTP lifecycle acceptance",
+      scopes: ["tenant:read"],
+    });
+    const createdId = created.apiKey.apiKeyId;
+    const rotated = await post(`/${createdId}/rotate`, {
+      keyName: "HTTP rotated acceptance",
+      overlapDays: 7,
+    });
+    const rotatedId = rotated.apiKey.apiKeyId;
+    await expect.poll(async () => {
+      const rows = (await repository.loadState()).apiKeys;
+      return rows.find((row) => row.apiKeyId === createdId)?.supersededByApiKeyId;
+    }).toBe(rotatedId);
+    await post(`/${rotatedId}/revoke`, {});
+    await expect.poll(async () =>
+      (await repository.loadState()).apiKeys.find(
+        (row) => row.apiKeyId === rotatedId,
+      )?.status,
+    ).toBe("revoked");
+    const persisted = await db.query<{ record: Record<string, unknown> }>(
+      "SELECT record FROM admin.phase1_tenant_api_keys WHERE tenant_id = $1",
+      [tenantId],
+    );
+    expect(persisted.rows).toHaveLength(3);
+    for (const secret of [created.plaintextKey, rotated.plaintextKey]) {
+      expect(typeof secret).toBe("string");
+      expect(JSON.stringify(persisted.rows)).not.toContain(secret);
+    }
+    const finalRead = await fetch(endpoint, { headers });
+    expect(finalRead.status).toBe(200);
+    const finalPayload = JSON.stringify(await finalRead.json());
+    expect(finalPayload).toContain(rotatedId);
+    expect(finalPayload).toContain("revoked");
+    expect(finalPayload).not.toContain(created.plaintextKey);
+    expect(finalPayload).not.toContain(rotated.plaintextKey);
     const evidence = {
       baseSha: execFileSync("git", ["merge-base", "HEAD", "origin/dev"], {
         encoding: "utf8",
@@ -172,7 +230,7 @@ it("C111: durable bearer reads a persisted key over HTTP and denied writes leave
       }).trim(),
       recordedAt: new Date().toISOString(),
       scope:
-        "Local inherited production controller routes, real auth guard/JWT and PostgreSQL. Key seeded through service; HTTP successful writes, full AppModule middleware and deployed MFA not verified.",
+        "Local inherited production controller routes, real auth guard/JWT and PostgreSQL. HTTP issue/rotate/revoke with product-issued local session and proof; full AppModule middleware and deployed MFA not verified.",
       tenantId,
       principalId,
       sessionId: issued.sessionId,
@@ -185,7 +243,11 @@ it("C111: durable bearer reads a persisted key over HTTP and denied writes leave
       failure,
       missingProofStatus: noProof.status,
       proofFailure,
-      databaseUnchanged: true,
+      rejectedWritesDatabaseUnchanged: true,
+      httpCreatedApiKeyId: createdId,
+      httpRotatedApiKeyId: rotatedId,
+      httpLifecycleStatuses: [201, 201, 201],
+      persistedRevoked: true,
     };
     console.log(
       "SR-QA-WEBHOOK-001 auth HTTP resources",
