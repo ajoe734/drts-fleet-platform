@@ -1,5 +1,17 @@
 # SR-ADMIN-ADAPTER-001 — 執行證據與 scope 缺口
 
+## 2026-09-08 16:10 dispatch continuation（最新結果）
+
+- Fetched base: `f2727a88e086d9b057324f0e6ce1de0aa11c3ce0`; inspected source HEAD: `47dd8e5c55fb54f1cb755a93125b19a3cd17e6da`.
+- Read the merged history-repair report at `support/unblock/SR-ADMIN-ADAPTER-001/SR-ADMIN-ADAPTER-001-UNBLOCK-HISTORY-REPAIR.md` in origin/dev. It explicitly excludes parent implementation/acceptance and requires supervisor assignment of a clean branch. This dispatch still assigns the preserved historical branch. `git rebase origin/dev` exited 1 on duplicate add/add conflicts in registry-notice.ts and this evidence file; `git rebase --abort` exited 0 and preserved all published history. No reset, force push, or historical ancestry merge was performed.
+- In-scope improvement: moved existing bilingual notice copy into local `translations.ts`, preserving the existing export and rendered behavior. Product source checkpoint: `0283255d8`; ordinary `git push origin codex/sr-admin-adapter-001` exited 0. This is an anchor, not an acceptance candidate; no handoff was issued.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/modules/platform-admin/platform-admin.controller.ts apps/api/src/modules/platform-admin/platform-admin.service.ts packages/contracts/src/platform-adapter-registry.ts`: exit 0 before the translation-only change. Those actual controller/service/contract sources match the fetched base.
+- Diagnostic command: `NODE_ENV=test pnpm --filter @drts/api exec tsx --tsconfig ../../tests/unit/system-remediation/sr-admin-adapter-001/registry-api-reproduction.tsconfig.json ../../tests/unit/system-remediation/sr-admin-adapter-001/registry-api-reproduction.ts`: exit 0 at source HEAD above, observed `2026-09-08T16:13:03.678Z`. Local host `127.0.0.1:34589` returned GET public-info 200 (seed resource `public-info-demo-001`, request ID `dfa7216e-e285-4cbf-b32f-586175bf2d8f`); GET adapters, GET adapters/grab_taiwan and PATCH adapters/grab_taiwan each returned 404. Host closed after diagnostics. Diagnostic exit 0 is not API acceptance.
+- `pnpm --filter @drts/api typecheck`: exit 0. `pnpm --filter @drts/platform-admin-web typecheck`: exit 0 before and after translation extraction.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-admin-adapter-001/`: exit 0 before and after extraction; 1 file, 9 tests. `node tools/ci/i18n-guard.mjs`: initially exit 1 for inline bilingual map; after extraction exit 0, 521 files scanned. `git diff --check` and `git diff 47dd8e5c5 HEAD --check`: exit 0. `pnpm exec prettier --check apps/platform-admin-web/app/adapter-registry/registry-notice.ts apps/platform-admin-web/app/adapter-registry/translations.ts`: exit 0.
+- Remaining blockers: supervisor must assign the clean recovery branch/workspace described by the merged helper, reconcile the planning task and authorize shared persistence/module/contract/client scopes with dependencies, and supply canonical registration/configuration/credential form designs. Current task scopes still exclude those shared files; the canvas still supplies the list and action buttons only. No authority or expiry timestamp was invented.
+- Not executed: live/dev deployment, authenticated role checks, persisted registry form writes/readback, real credential rotation, four expiry-state acceptance, independent candidate review/CI/merge. Earlier evidence sections are historical and do not override these current limits.
+
 ## 基準與交付界線
 
 - 日期：2026-09-06。
