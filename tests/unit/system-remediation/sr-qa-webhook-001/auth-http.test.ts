@@ -5,6 +5,7 @@ import { writeFileSync } from "node:fs";
 import { expect, it, vi } from "vitest";
 import { DatabaseService } from "../../../../apps/api/src/common/db";
 import { BootstrapAuthGuard } from "../../../../apps/api/src/common/auth/bootstrap-auth.guard";
+import { InternalKeyMiddleware } from "../../../../apps/api/src/common/auth/internal-key.middleware";
 import { JwtAuthService } from "../../../../apps/api/src/common/auth/jwt-auth.service";
 import { StepUpProofService } from "../../../../apps/api/src/common/auth/step-up-proof.service";
 import { SnakeCaseExceptionFilter } from "../../../../apps/api/src/common/snake-case.exception-filter";
@@ -53,7 +54,11 @@ it("C111: durable bearer reads a persisted key over HTTP and denied writes leave
   }
   Reflect.defineMetadata("design:paramtypes", [], CredentialHttpController);
   @Module({ controllers: [CredentialHttpController] })
-  class CredentialHttpModule {}
+  class CredentialHttpModule {
+    configure(consumer: import("../../../../apps/api/node_modules/@nestjs/common").MiddlewareConsumer) {
+      consumer.apply(InternalKeyMiddleware).forRoutes(CredentialHttpController);
+    }
+  }
   const app = await NestFactory.create(CredentialHttpModule, {
     logger: false,
     abortOnError: false,
@@ -221,6 +226,34 @@ it("C111: durable bearer reads a persisted key over HTTP and denied writes leave
     expect(finalPayload).toContain("revoked");
     expect(finalPayload).not.toContain(created.plaintextKey);
     expect(finalPayload).not.toContain(rotated.plaintextKey);
+    const otherTenantId = `qa-http-other-${randomUUID()}`;
+    const otherPrincipalId = `qa-http-other-principal-${randomUUID()}`;
+    const otherSession = await jwt.issueSessionToken(
+      {
+        authMode: "jwt_bearer",
+        actorType: "tenant_admin",
+        actorId: otherPrincipalId,
+        principalId: otherPrincipalId,
+        realm: "tenant",
+        tenantId: otherTenantId,
+        roleFamilies: ["tenant"],
+        roles: ["tenant_admin"],
+        scopes: ["tenant:read"],
+        requestId: null,
+      },
+      { principalId: otherPrincipalId, subject: `tenant:${otherPrincipalId}`, ensurePrincipal: true },
+    );
+    const crossTenantRead = await fetch(endpoint, {
+      headers: { ...headers, authorization: `Bearer ${otherSession.token}` },
+    });
+    const crossTenantPayload = JSON.stringify(await crossTenantRead.json());
+    const crossTenant = {
+      authenticatedTenantId: otherTenantId,
+      requestedTenantId: tenantId,
+      sessionId: otherSession.sessionId,
+      status: crossTenantRead.status,
+      exposedVictimKeyId: crossTenantPayload.includes(createdId),
+    };
     const evidence = {
       baseSha: execFileSync("git", ["merge-base", "HEAD", "origin/dev"], {
         encoding: "utf8",
@@ -248,6 +281,7 @@ it("C111: durable bearer reads a persisted key over HTTP and denied writes leave
       httpRotatedApiKeyId: rotatedId,
       httpLifecycleStatuses: [201, 201, 201],
       persistedRevoked: true,
+      crossTenant,
     };
     console.log(
       "SR-QA-WEBHOOK-001 auth HTTP resources",
@@ -258,6 +292,8 @@ it("C111: durable bearer reads a persisted key over HTTP and denied writes leave
         process.env.DRTS_WEBHOOK_AUTH_EVIDENCE,
         JSON.stringify(evidence, null, 2) + "\n",
       );
+    expect(crossTenantRead.status, JSON.stringify(crossTenant)).toBe(403);
+    expect(crossTenant.exposedVictimKeyId).toBe(false);
   } finally {
     await app.close();
     service.onModuleDestroy();
