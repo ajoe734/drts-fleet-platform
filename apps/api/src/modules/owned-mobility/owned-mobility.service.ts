@@ -4354,6 +4354,28 @@ export class OwnedMobilityService
     if (this.ownedMobilityRepository?.isEnabled()) {
       return this.ownedMobilityRepository
         .withTransaction(async (tx) => {
+          // All assignment writers take assignment -> task -> job -> order
+          // before any upsert, matching cancellation and completion.
+          const current = await this.ownedMobilityRepository!
+            .loadOrderCancellationForUpdate(tx, order.orderId);
+          if ((current.assignment?.assignmentId ?? null) !==
+              (options?.previousAssignmentId ?? null)) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "SUPERSEDED_ASSIGNMENT_ALREADY_CLOSED",
+              "The active assignment changed before dispatch acquired its locks.",
+              { orderId: order.orderId },
+            );
+          }
+          const currentJob = current.dispatchJobs.find(
+            (job) => job.dispatchJobId === dispatchJob.dispatchJobId,
+          );
+          if (!currentJob || ["cancelled", "completed"].includes(current.order.status)) {
+            throw new ApiRequestError(HttpStatus.CONFLICT,
+              "DISPATCH_JOB_NOT_ASSIGNABLE", "The dispatch job is no longer active.");
+          }
+          order = current.order;
+          dispatchJob = currentJob;
           if (
             order.runtimeProfileCode === "multi_taxi_direct" &&
             order.operatingAuthorizationId
