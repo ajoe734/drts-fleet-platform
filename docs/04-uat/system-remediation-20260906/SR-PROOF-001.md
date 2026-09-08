@@ -2,6 +2,44 @@
 
 Date: 2026-09-08. Owner: Codex2; Reviewer: Codex.
 
+## Redispatch verification — 2026-09-08 21:22 UTC
+
+This section supersedes the older command results below for this dispatch.
+Fetched `origin/dev`: `e97653b7ffb962a6c4d688e8706711d860fa3604`;
+execution head: `acd6b7bb4d32329986a04cd6050624bc1fc39f34` on the assigned
+`codex2/sr-proof-001` worktree. No implementation candidate is nominated.
+
+- `git fetch origin`: exit 0.
+- `git rebase origin/dev`: exit 1, duplicate historical reproducer commit
+  `ac1076708` conflicts add/add in the task test. `git rebase --abort`: exit 0;
+  restored the published head without rewriting or merging repeated anchors.
+- `git diff --quiet origin/dev HEAD -- apps/api/src/modules/billing-settlement/billing-settlement.service.ts apps/api/src/modules/billing-settlement/billing-settlement.repository.ts`:
+  exit 0. These two product files match current dev exactly; source inspection
+  still shows only a nonempty proof ID check and an unawaited persistence call.
+- `git diff --check`: exit 0.
+- `pnpm --filter @drts/api typecheck`: exit 2, missing Node type definitions.
+- `pnpm --filter @drts/platform-admin-web typecheck`: exit 2, missing dependency
+  types; Next's automatic dependency attempt reports
+  `ERR_PNPM_UNEXPECTED_VIRTUAL_STORE` pointing at the SR-PUSH-001 worktree store.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`: exit 1,
+  suite import fails on missing `@nestjs/common`; **zero tests executed**.
+  The older 1-pass/2-fail result below was not reproduced in this environment.
+
+The completed history helper explicitly says history repair does not clear
+scope/dependency/canvas routing blockers (see
+`support/unblock/SR-PROOF-001/SR-PROOF-001-UNBLOCK-HISTORY-REPAIR.md`,
+"Parent next step and remaining blockers"). The current task slice still
+has only ARTIFACT/INVOICE dependencies and the original five write scopes.
+Supervisor must apply the documented repository/module/storage/scanner scope
+expansion, contract allocation/dependency, canvas routing, and select the
+unused recovery branch before another implementation dispatch. Helper closure
+alone is not authorization to write shared files. The original screen
+requirements below remain the design handoff.
+
+No new resource IDs, uploaded bytes, live payment, browser/device evidence,
+or durable receipt were produced. Dependency failures are environment failures,
+not passing acceptance or fresh execution evidence for the historical red tests.
+
 ## Current result
 
 - Fresh base: `origin/dev` at `70355aba9f8c7a878941144d6f551586d957afc9`.
