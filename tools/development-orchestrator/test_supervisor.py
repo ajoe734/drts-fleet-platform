@@ -823,6 +823,7 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "")
             self.assertIn("isolated coordination worktree", request.message)
             self.assertIn("must not start product development servers", request.message)
+            self.assertIn("pnpm exec playwright", request.message)
             self.assertEqual(request.metadata["workspace_root"], str(workspace))
 
 

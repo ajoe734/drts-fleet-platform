@@ -1189,7 +1189,8 @@ def attach_workspace_metadata(
     vm_restriction_notice = (
         "- VM restriction: supervisor/workers may run repository checks, but must not start product "
         "development servers, preview/browser test servers, or Docker Compose infrastructure here. "
-        "If a task requires a running environment, record the concrete blocker instead.\n"
+        "Do not run `pnpm exec playwright`, `playwright test`, `pnpm dev`, or `docker compose`; "
+        "if a task requires a running environment, record the concrete blocker instead.\n"
     )
     if request.task_id and branch:
         status_cli = task_board_cli_path()
