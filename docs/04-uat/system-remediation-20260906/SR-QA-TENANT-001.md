@@ -2,8 +2,8 @@
 
 Owner Codex2 / Reviewer Codex。2026-09-08。
 
-Base / tested product source SHA：`318f5065433ff07fba2ddf242cf1c5aef5fb1cae`，本次 fetch 後 rebase 至 origin/dev；不是 live server deployment SHA。
-Tested anchor：`269b8cfbe438c13437bced542cdd251cd8bda2c0`，已普通 push 至 `origin/codex2/sr-qa-tenant-001`。
+Base / tested product source SHA：`3b82fba0fabba3328e3443de3d602780f852d724`，本次 fetch 後 rebase 至 origin/dev；不是 live server deployment SHA。
+Tested anchor：`d506b091704bc2cc60b9cb22800d7e049824629d`；本次 closeout 文件提交包含此 anchor，普通 push 結果以機器狀態為準。
 Candidate SHA：尚未 handoff；anchor 不是審查 candidate。完成後才由 machine truth 鎖定 candidate。
 
 ## 來源與界線
@@ -27,6 +27,28 @@ Candidate SHA：尚未 handoff；anchor 不是審查 candidate。完成後才由
 | SLA               | 修改設定、違約摘要與手動升級回讀            | 未授權修改、無效設定                                             | 既有 governance service 回歸非完整 SLA 驗收；HTTP／DB spec 待補          |
 | feature flags     | 指定租戶啟停及實際能力回讀                  | 其他租戶不受影響、無權限                                         | 尚未實作本 task 的驗收                                                   |
 | tenant lifecycle  | 合法新增／停用與治理記錄回讀                | 被停用租戶寫入、未授權管理                                       | 既有 governance rollback_hold 回歸非完整生命週期驗收；HTTP／DB spec 待補 |
+
+## 18:40 UTC dispatch 實際結果
+
+完成最新 origin/dev rebase。歷史 evidence 重複提交的衝突保留較新上游內容，SLA 測試與後續證據成功重播；merge 接回已發布 branch ancestry 無 tree diff，沒有回退產品碼。此次未新增驗收 spec，亦未發現可重現的產品缺陷。
+
+```sh
+BASE_SHA=3b82fba0fabba3328e3443de3d602780f852d724 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001
+# exit 1；4 harness passed / 5 tenant HTTP failed；3.0s
+# 五例均 Missing required DRTS_UAT_ENV; HTTP acceptance did not run
+pnpm exec vitest run tests/unit/tenant-partner-foundation.test.ts tests/integ/tenant-governance-negative.test.ts
+# exit 0；2 files / 36 tests passed；3.70s
+pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001 --max-warnings=0
+# exit 0
+git diff --check
+# exit 0
+```
+
+五份 `test-results/sr-qa-tenant-001-*/tenant-evidence.json` 已逐一回讀：base/head 如頁首、status failed、exitCode 1、每份 HTTP 0、資源 IDs `[]`。程序環境沒有 DRTS UAT 變數名稱。此結果只證明缺設定時會失敗，不能算 live regression pass；尚無 API 部署 SHA 或 DB 證據。
+
+補查 C109 執行前提：`apps/api/src/modules/feature-flags/feature-flags.controller.ts` 的 `/api/admin/flags` 只允許 system/platform realm，讀取需 `foundation:read`，tenant override POST 需 `foundation:write`。`apps/api/src/common/auth/step-up.policy.ts` 的 `platform:feature-flags:tenant-override:update` 要求 platform session 的 step-up 在十分鐘有效期內。因此現有雙 tenant_admin sessions 不足以完成正常旗標案例，不能偽造 actor headers。環境 owner 另需提供合法平台 session、step-up 流程及專用 flag/tenant 清理方案；API 沒有刪除 override 路由，將有效值設回不能冒稱已還原「原本沒有 override」狀態。正式實作旗標案例前須確定已存在的專用 override 或 DB teardown，並驗證實際受控能力及另一租戶不受影響。
+
+其餘未完成矩陣仍如上表；繼續保持 in_progress，不 handoff。此輪只更新 scope 內證據文件。
 
 ## 18:33 UTC dispatch 實際結果
 
