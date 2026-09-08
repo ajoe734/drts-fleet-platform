@@ -70,5 +70,9 @@ field with this packet and the routing request.
 - `gh pr view 1823 --json url,headRefOid,state`: exit 0; OPEN at the parent
   anchor quoted above. No parent branch edits or candidate handoff occurred.
 - Planning-only change: no runtime/typecheck/live-device test result is claimed.
+- `git diff origin/dev --check`: exit 0. Python pathlib assertions verified a
+  unique Q-SR-PUSH-001 entry, its existing packet target, and all named producer,
+  live-gate, escalation and shared-writer references: exit 0.
+- Recoverability anchor `e7d40a5ad` committed and ordinary branch push exited 0.
 - Helper commit/push/PR and final validation are recorded in the exact-SHA
   handoff and PR. Helper review does not complete parent implementation.
