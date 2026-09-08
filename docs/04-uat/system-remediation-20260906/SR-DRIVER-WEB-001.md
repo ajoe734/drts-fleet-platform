@@ -5,6 +5,8 @@
 - Reviewer: `Codex`（本次 dispatch 之 owner；見 §9，取代 §8 記錄時的 `Claude2`）
 - Base SHA (`origin/dev` at original fix): `6adf792381f99783d12c8142bfc69d2c54ad9103`
 - Base SHA (`origin/dev` at 本次 2026-09-06T11:51Z 重驗 dispatch): `2093cf7e38526a7a7c027600be92004f7275efd3`
+- Base SHA (`origin/dev` at 本次 2026-09-08 重驗 dispatch，見 §9): `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`
+- Candidate SHA (本次 handoff): 見 handoff 記錄（`git rev-parse HEAD` at commit time）
 - Worktree: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/claude-sr-driver-web-001`
 - Branch: `claude/sr-driver-web-001`
 - Gap: `R30` · Capabilities: `C049`, `C062`
