@@ -4,7 +4,7 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-ENTERPRISE-FORM-001`, `Q-SR-ENTERPRISE-DATA-001`, `Q-SR-PROOF-001`.
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-ENTERPRISE-FORM-001`, `Q-SR-ENTERPRISE-DATA-001`, `Q-SR-PROOF-001`, `Q-SR-REPORT-001`.
 
 ### Q-SR-ENTERPRISE-FORM-001 — theme precedence and shared scope authorization
 
@@ -113,6 +113,19 @@ authorizations to Supervisor/Chairman; history recovery did not supply them.
 The [resume gate](support/unblock/SR-PROOF-001/SR-PROOF-001-UNBLOCK-PLANNING-DECISION.md)
 still applies to dependent implementation. This follow-up is tracked on the existing parent; any separate
 producer must first be registered by the supervisor in machine truth.
+
+### Q-SR-REPORT-001 — ordinary report shared-file scope pending
+
+Supervisor/Chairman must authorize the parent's shared format declaration in
+`packages/contracts/src/index.ts` and affected assertions in
+`tests/unit/reporting-filing.test.ts`, with overlapping writer dependencies,
+or register a coordinated producer. Parent owner Codex and reviewer Gemini retain
+full CSV/XLSX/PDF acceptance under PRD §9.5.6 and the filing-byte exclusion under
+§9.10.2. No product scope cut is needed. Keep SR-REPORT-001 blocked until scope
+and sequencing are recorded in machine truth; history recovery alone does not
+satisfy that gate. See the [evidence, routing decision and resume gate](support/unblock/SR-REPORT-001/SR-REPORT-001-UNBLOCK-PLANNING-DECISION.md).
+This is an explicit follow-up on the existing parent, not authorization to edit
+shared files or a claim that a new producer task already exists.
 
 ## Resolved Items
 
