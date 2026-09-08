@@ -167,3 +167,86 @@ claimed here.
 
 The subsequent evidence/test anchor SHA and push outcome are recorded in the
 canonical `progress` update. No handoff candidate has been submitted.
+
+## 2026-09-08 capacity and deployment inventory continuation
+
+Fetched/rebased base: `5cff9b36082998a0295f2550039306dc1f84c3d2`.
+Previously committed task files were compared against `0b0655d46` after rebase
+with no task-file differences. Published ancestry was merged, retaining the
+newer capacity/inventory implementation, and ordinary push succeeded at
+`69433ee5f`. Tested implementation: `2cbfa40f58278ec20bbded69858800c8c2e09941`.
+These are implementation anchors; no review candidate is locked.
+
+`capacity --plan PLAN.json --output RAW.jsonl` now executes independent POST
+requests at the baseline's 60/300/30 arrivals per minute, with a bounded
+in-flight limit. It records generator overload as an unsent failed request,
+rather than quietly reducing the requested rate. Each raw record retains
+latency/error, schedule/launch lag, HTTP status, response hash, returned resource
+IDs, request-body hash, plan hash, baseline file hash and base/candidate SHA.
+Authorization header values and request/response bodies are not recorded.
+Synchronous request-construction failures also produce raw failure records.
+
+The operator plan requires `origin` (plain loopback HTTP origin),
+`isolatedResourceId`, `durationSeconds` (>0 and <=900), `maxInFlight` (1..500),
+and `workloads.booking`, `.dispatch`, `.report` arrays. Each array requires
+exactly ceil(durationSeconds * rate / 60) independent requests, each with
+`method: "POST"`, `path`, `headers` and `body`. All requests require unique
+`idempotency-key` headers. Booking also requires `x-tenant-id` and the required
+CreateTenantBookingCommand fields; dispatch uses distinct pre-provisioned order
+IDs with `mode: "auto"`; reports require `jobType` and `format`. Actual field
+values, authorization and independently prepared business resources must come
+from the isolated environment. The validator does not replace API validation.
+
+Authoritative route/command sources:
+`apps/api/src/modules/owned-mobility/owned-mobility.controller.ts`
+(`tenant/bookings`, `orders/:orderId/dispatch`), report jobs API and
+`packages/contracts/src/index.ts` (CreateTenantBookingCommand,
+DispatchOrderCommand, CreateReportJobCommand). Paths include the `/api` prefix.
+The adjacent `.summary.json` evaluates nearest-rank p95 and booking p99 against
+the accepted baseline. `measurements_within_targets` is only a measurement
+result; `acceptance` remains `not_established`, including on a full 900-second
+schedule. Durable business readback, dispatch queue timing, backlog/concurrency
+shape and monthly availability require separate evidence. The old `load`
+command remains a transport probe.
+
+`inventory --output FILE --project ID --region REGION --service NAME` captures
+an actual read-only `gcloud run services describe` command, exit status and
+selected raw identity/status output. It checks service identity, observed
+generation and Ready/latest-created/latest-ready revision consistency. Failed
+queries, malformed output and unready generations fail the command. It does
+not infer source SHA from a revision name or claim application health/rollback.
+Without resource arguments it records local tools and documentation hashes,
+with deployment `not_requested`; this is not a cloud observation.
+
+Actual local receipt is preserved at
+`tools/system-remediation/ops-proof/evidence/inventory-20260908T163140Z.json`.
+It observed Node v22.23.2, missing host psql/pg_restore (ENOENT), and no requested
+deployment/resource. Docker server version was separately observed as 29.8.0;
+no container, database or synthetic backup was created or counted as restoration.
+
+| Actual command | Exit / result |
+| --- | --- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-ops-proof-001` before this continuation's edits | 0; 3 files / 28 tests |
+| Same command after capacity failure handling and tests | 0; 4 files / 35 tests |
+| `pnpm exec eslint tests/unit/system-remediation/sr-ops-proof-001` | 0 |
+| `bash -n tools/system-remediation/ops-proof/ops-proof.sh` | 0 |
+| `git diff --check` | 0 |
+| `bash tools/system-remediation/ops-proof/ops-proof.sh inventory --output /tmp/SR-OPS-PROOF-001-inventory-20260908.json` | 0; local observations only |
+| `docker info --format '{{.ServerVersion}}'` | 0; 29.8.0 |
+| `git push origin codex/sr-ops-proof-001` at ancestry anchor | 0; `157b937fe..69433ee5f`, ordinary push |
+
+Capacity regression uses a temporary real loopback HTTP listener with synthetic
+responses solely to test mechanics: POST/body transmission, three workload
+families, dispatch pacing, HTTP failure, missing success envelope, generator
+overload, invalid request header, remote origin and duplicate-key rejection.
+Inventory regressions use command spies, including stale deployment generation.
+Neither supplies real business or cloud evidence.
+
+Remaining inputs: trusted same-snapshot dump and independently exported manifest,
+isolated database and authenticated API workload resources, and explicit cloud
+project/region/service IDs for deployment observation. Remaining acceptance:
+real restore/readback, representative capacity and business persistence,
+immutable deployed build provenance, health and rollback. Cloud restore/load
+and physical-device work remain under SR-LIVE-OPS-001 authorization. No RPO/RTO,
+real resource ID, CI, merge or live success is claimed. Status remains
+`in_progress`; supervisor should supply/route these inputs before final handoff.
