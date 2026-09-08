@@ -1,0 +1,124 @@
+{
+  "taskId": "SR-QA-WEBHOOK-001",
+  "runId": "uat-SR-QA-WEBHOOK-001-7c735b09",
+  "shardIndex": 0,
+  "baseSha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
+  "candidateSha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
+  "headSha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
+  "startTime": "2026-09-08T11:08:49.810Z",
+  "endTime": "2026-09-08T11:08:49.905Z",
+  "status": "passed",
+  "exitCode": 0,
+  "roles": [
+    "Tenant Admin (tenant_admin)",
+    "Platform Admin (platform_admin)"
+  ],
+  "trackedResources": [
+    {
+      "type": "tenant",
+      "id": "4c9e457c-254d-4cce-a7cd-0a6a69f9746d",
+      "metadata": {
+        "code": "TEN_A_S0_96FF1558"
+      }
+    },
+    {
+      "type": "tenant_api_key",
+      "id": "api_key_028ad92b-c5af-452e-84bf-568f2f034f52",
+      "metadata": {
+        "keyName": "E2E Automated Webhook Key",
+        "scopes": [
+          "tenant:webhooks:read",
+          "tenant:write"
+        ],
+        "keyPrefix": "tk_ba1a1f36d",
+        "maskedSuffix": "****2069"
+      }
+    },
+    {
+      "type": "tenant_api_key",
+      "id": "api_key_4394336f-ac9c-4c97-afe8-9653c3ef6559",
+      "metadata": {
+        "keyName": "E2E Automated Webhook Key v2",
+        "rotatedFromApiKeyId": "api_key_028ad92b-c5af-452e-84bf-568f2f034f52",
+        "status": "active",
+        "overlapEndsAt": "2026-09-15T11:08:49.838Z"
+      }
+    },
+    {
+      "type": "webhook_endpoint",
+      "id": "wh_672a4c42-9cab-447b-80e2-2d3835677e8d",
+      "metadata": {
+        "url": "http://127.0.0.1:41767/webhooks/receiver",
+        "status": "test_pending"
+      }
+    },
+    {
+      "type": "webhook_delivery",
+      "id": "wd_3df5d336-2c5f-4634-8674-eb0112b31354",
+      "metadata": {
+        "status": "queued",
+        "httpStatus": 503,
+        "attempt": 1,
+        "nextDelayMs": 30000
+      }
+    }
+  ],
+  "httpCalls": [
+    {
+      "id": "d4fc830f-efe1-43f4-ad13-c2dc2cd04afb",
+      "timestamp": "2026-09-08T11:08:49.884Z",
+      "method": "POST",
+      "url": "http://127.0.0.1:41767/webhooks/receiver",
+      "statusCode": 200,
+      "durationMs": 8,
+      "requestHeaders": {
+        "content-type": "application/json",
+        "x-drts-event-type": "tenant.webhook.test",
+        "x-drts-webhook-signature": "v=1;t=2026-09-08T11:08:49.839Z;sig=84d31c1e277826e70d8c39dc95ad92d9458348fb28792fe061733e09047ab787"
+      },
+      "responseBody": {
+        "ok": true,
+        "received": true
+      },
+      "actorRole": "Webhook Receiver"
+    }
+  ],
+  "consoleLogs": [
+    {
+      "timestamp": "2026-09-08T11:08:49.827Z",
+      "level": "info",
+      "message": "Starting C111: Tenant API key issuance and governance verification"
+    },
+    {
+      "timestamp": "2026-09-08T11:08:49.839Z",
+      "level": "info",
+      "message": "C111 verified successfully: minimal scopes, secret masking, overlap rotation, and immediate revocation validated."
+    },
+    {
+      "timestamp": "2026-09-08T11:08:49.839Z",
+      "level": "info",
+      "message": "Starting C112: Webhook real HTTP receiver HMAC signing and fault recovery verification"
+    },
+    {
+      "timestamp": "2026-09-08T11:08:49.904Z",
+      "level": "info",
+      "message": "C112 verified successfully: HMAC-SHA256, 503 backoff, auto-disable, and secret rotation validated."
+    }
+  ],
+  "artifacts": [],
+  "errors": [],
+  "unimplementedLiveSurfaces": [
+    {
+      "surface": "GATE-C113-ERP-SSO-BANK",
+      "reason": "Live enterprise ERP SSO (SAML 2.0 / Azure AD) and Bank Host-to-Host (H2H) leased lines are external gates requiring production corporate credentials; in-memory statement ledgers verified."
+    },
+    {
+      "surface": "GATE-C114-GOOGLE-MAPS",
+      "reason": "Official Google Maps Platform API key and Taiwan quota credentials are an external gate; geocoding boundary fallback verified."
+    },
+    {
+      "surface": "LIMITATION-C115-CTI-CRON",
+      "reason": "Carrier voice telephony SIP trunk PBX hardware and Cloud Run persistent cron jobs are physical/infra limitations; recording lifecycle adapter callbacks verified."
+    }
+  ]
+}
