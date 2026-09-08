@@ -2,6 +2,44 @@
 
 Date: 2026-09-08. Owner: Codex2; Reviewer: Codex.
 
+## Redispatch verification — 2026-09-08 23:58 UTC
+
+Fetched base: `32b6dde7db730a8524004a5e87d94d5a2a6d7853`.
+Tested HEAD: `d958fe1aa378dad568d24b247c46db31fa296d79`.
+Candidate SHA: none; this remains blocked regression evidence.
+
+- `git fetch origin`: exit 0.
+- `git rebase origin/dev`: exit 1 at historical `ac1076708`, add/add
+  conflict in the payment-gate test. `git rebase --abort`: exit 0.
+- `git merge origin/dev -m 'merge(SR-PROOF-001): sync current dev preserving published anchors' -m 'LLM-Agent: codex2' -m 'Task-ID: SR-PROOF-001' -m 'Reviewer: Codex'`:
+  exit 0; preserved published ancestry for ordinary push.
+- `git diff --quiet origin/dev HEAD -- apps/api/src/modules/billing-settlement`:
+  exit 0; tested billing source equals the fetched base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`: exit 1;
+  3 executed, 1 passed, 2 failed. A fabricated proof returns paid, and a
+  pending persistence write does not prevent returning paid.
+- `pnpm --filter @drts/api typecheck`: exit 2; unresolved
+  `@drts/control-plane-auth` and voice/booking exports/properties from
+  `@drts/contracts`, outside this task's changes.
+- `pnpm --filter @drts/platform-admin-web typecheck`: exit 0.
+- `git diff --check`: exit 0.
+
+The resumed task still grants only the original five scopes and two
+dependencies. The merged history helper explicitly leaves repository/module,
+proof storage/scanner, contract dependency and canvas routing unresolved.
+Current `PA_Reimbursements` / `PA_ReimbursementDetail` still lack the proof
+upload/scan/reject/readback states listed in the screen requirements below.
+Supervisor must allocate those named scopes and the contract dependency (or
+reviewed exception), and route those canvas states before redispatch; helper
+completion alone has not fulfilled those prerequisites. No out-of-scope
+implementation or invented UI was added.
+
+Resource IDs: `sr-proof-001-batch-a`, `sr-proof-001-driver-a`,
+`sr-proof-001-statement-a`, `sr-proof-001-nonexistent-proof` are isolated test
+inputs only. Live bytes/scanner/readback, PostgreSQL concurrency, durable
+receipt, browser/device acceptance and real payment remain unverified.
+No product servers, browser servers or Docker infrastructure were started.
+
 ## Redispatch verification — 2026-09-08 23:19 UTC
 
 Base: `3bdb943eef2cb42fd825cc8e3d250d3d42cdf4bb` (`origin/dev`).
