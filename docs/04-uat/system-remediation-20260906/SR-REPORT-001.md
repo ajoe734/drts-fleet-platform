@@ -132,3 +132,28 @@ Supervisor action remains: add focused write scopes for the authoritative
 format list and central regression updates plus writer dependencies, or assign
 coordinated children. History repair alone does not satisfy that prerequisite.
 This update is an evidence anchor, not a review handoff.
+
+## Redispatch verification — 2026-09-08 16:04 UTC
+
+- Fresh origin/dev base: `3fb9b06461dc2bf92043144974eedbbc9f69d0f3`;
+  dispatched HEAD: `49952f0e4894b3ff808924f5e32625bb8bdde206`.
+- Canonical `show SR-REPORT-001` still grants only the four original scopes
+  and two dependencies. History repair procedure §7 explicitly retains the
+  shared-file restriction. Required supervisor action remains expansion for
+  packages/contracts/src/index.ts and tests/unit/reporting-filing.test.ts,
+  with the necessary writer dependencies, or coordinated integration children.
+- Current service has null PDF/XLSX renderers; contracts declare CSV only;
+  the central regression expects PDF/XLSX rejection. This is a scope blocker,
+  distinct from the resolved history repair. No production/UI changes made.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: initially exit 1 on
+  duplicated evidence commits; resolved by preserving the entire dispatched
+  evidence document. Final `GIT_EDITOR=true git rebase --continue`: exit 0.
+  `git merge --no-ff origin/codex/sr-report-001` with task trailers: exit 0;
+  published history preserved for normal push.
+- `pnpm exec vitest run tests/unit/reporting-filing.test.ts`: exit 0;
+  30 tests / 1 file passed in 2.73s. Example in-memory order event resource:
+  `7375bc1e-ff31-4ac7-af27-8fe5a0875b72`. This verifies current rejection,
+  not successful PDF/XLSX generation. No live resources or device/browser
+  checks, deployment, typechecks, or renderer parsing tests claimed.
+- This document remains an evidence anchor, not an implementation candidate.
+  Its ordinary-pushed SHA is recorded in canonical blocker status.
