@@ -2,9 +2,9 @@
 
 - Task: `SR-ENTERPRISE-FORM-001`
 - Owner: `Gemini`
-- Reviewer: `Gemini2`
-- Base SHA (`origin/dev`): `40ba315e4114369eaa7e12d35aae83a795c97b1d`
-- Worktree: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001`
+- Reviewer: `Codex2`
+- Base SHA (`origin/dev`): `8e97268c7ec38258b393b8e8931d960009aab9fb`
+- Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001`
 - Branch: `gemini/sr-enterprise-form-001`
 
 ---
@@ -114,7 +114,7 @@ exit code: 0
 ```text
 $ pnpm --filter @drts/enterprise-dispatch-web typecheck
 
-> @drts/enterprise-dispatch-web@0.1.0 typecheck /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001/apps/enterprise-dispatch-web
+> @drts/enterprise-dispatch-web@0.1.0 typecheck /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001/apps/enterprise-dispatch-web
 > tsc --noEmit
 
 exit code: 0
@@ -124,14 +124,14 @@ exit code: 0
 ```text
 $ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/
 
- RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001
 
- ✓ tests/unit/system-remediation/sr-enterprise-form-001/sr-enterprise-form-001.test.ts (15 tests) 46ms
+ ✓ tests/unit/system-remediation/sr-enterprise-form-001/sr-enterprise-form-001.test.ts (15 tests) 34ms
 
  Test Files  1 passed (1)
       Tests  15 passed (15)
-   Start at  14:28:08
-   Duration  767ms
+   Start at  13:06:51
+   Duration  688ms
 exit code: 0
 ```
 
@@ -139,15 +139,35 @@ exit code: 0
 ```text
 $ pnpm --filter @drts/enterprise-dispatch-web test
 
-> @drts/enterprise-dispatch-web@0.1.0 test /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001/apps/enterprise-dispatch-web
+> @drts/enterprise-dispatch-web@0.1.0 test /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001/apps/enterprise-dispatch-web
 > vitest run --config vitest.config.ts
 
- RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001/apps/enterprise-dispatch-web
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001/apps/enterprise-dispatch-web
 
  Test Files  8 passed (8)
       Tests  24 passed (24)
-   Start at  14:28:24
-   Duration  831ms
+   Start at  13:06:44
+   Duration  825ms
+exit code: 0
+```
+
+### 4.5 企業派遣 Web 應用編譯驗證（Next.js Production Build）
+```text
+$ pnpm --filter @drts/enterprise-dispatch-web build
+
+> @drts/enterprise-dispatch-web@0.1.0 build /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001/apps/enterprise-dispatch-web
+> next build --webpack
+
+▲ Next.js 16.2.3 (webpack)
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 12.5s
+  Finished TypeScript in 8.2s    ✓ Finished TypeScript in 8.2s 
+  Collecting page data using 7 workers in 952ms    ✓ Collecting page data using 7 workers in 952ms 
+✓ Generating static pages using 7 workers (26/26) in 434ms
+  Collecting build traces in 543ms    ✓ Collecting build traces in 543ms 
+  Finalizing page optimization in 633ms    ✓ Finalizing page optimization in 633ms 
+
 exit code: 0
 ```
 
