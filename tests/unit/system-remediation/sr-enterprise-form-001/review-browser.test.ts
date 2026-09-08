@@ -18,16 +18,16 @@ describe.skipIf(!baseURL)("enterprise review browser regression", () => {
   function reviewURL(start: number, passengerMode = "other") {
     const local = new Date(start + 8 * 3600000).toISOString();
     const params = new URLSearchParams({
-      passengerMode,
+      pm: passengerMode,
       passenger: "Renamed Visitor",
       bookedBy: "Booker Name",
       pickup: "Airport",
       dropoff: "Hotel",
-      reservationDate: local.slice(0, 10),
-      reservationTime: local.slice(11, 16),
-      onsiteContactPhone: "0912000000",
-      costCenterCode: "CC-PRD-07",
-      costCenterLabel: "Product",
+      date: local.slice(0, 10),
+      time: local.slice(11, 16),
+      contact: "0912000000",
+      cc: "CC-PRD-07",
+      ccLabel: "Product",
     });
     return `${baseURL}/bookings/review?${params}`;
   }
@@ -65,6 +65,7 @@ describe.skipIf(!baseURL)("enterprise review browser regression", () => {
         viewport: innerWidth,
         document: document.documentElement.scrollWidth,
       }));
+      console.info(JSON.stringify({ path: new URL(url).pathname, ...widths }));
       expect(
         widths.document,
         `${url}: ${JSON.stringify(widths)}`,
