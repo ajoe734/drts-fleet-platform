@@ -1,5 +1,6 @@
 import type {
   VoiceAsrSegmentResult,
+  VoiceAsrTranscribeRequest,
   VoiceSpeechToTextAdapter,
   VoiceTextToSpeechAdapter,
   VoiceTtsPlaybackHandle,
@@ -58,7 +59,13 @@ export class TwmAsrFixtureAdapter implements VoiceSpeechToTextAdapter {
   readonly providerName = "twm";
   readonly isProductionCapable = false as const;
   private transcriptIndex = 0;
-  private readonly finalRevisions = new Map<string, number>();
+  private readonly segments = new Map<string, TwmTranscriptFixture>();
+  private readonly usedTickets = new Set<string>();
+  private ready = false;
+  private hasAccess = false;
+  private diagnosticOnly = false;
+  private utteranceId?: string;
+  private drainUntil = 0;
   private eosSent = false;
 
   constructor(
@@ -73,33 +80,65 @@ export class TwmAsrFixtureAdapter implements VoiceSpeechToTextAdapter {
     authorization: "Bearer fixture-token";
     websocketUrlWithTicket: string;
   } {
-    if (Date.parse(access.expiresAt) <= Date.parse(now)) {
+    if (!Number.isFinite(Date.parse(now)) || !Number.isFinite(Date.parse(access.expiresAt)) || Date.parse(access.expiresAt) <= Date.parse(now)) {
       throw new Error("TWM access ticket is expired; acquire a fresh ticket before connecting.");
     }
     const url = new URL(access.websocketUrl);
+    if (url.protocol !== "wss:" || !access.ticket || this.usedTickets.has(access.ticket)) {
+      throw new Error("TWM requires a fresh single-use ticket and secure WebSocket URL.");
+    }
+    this.usedTickets.add(access.ticket);
+    this.hasAccess = true;
+    this.ready = false;
     url.searchParams.set("ticket", access.ticket);
+    url.searchParams.set("modelName", this.profile.modelName);
+    url.searchParams.set("type", this.profile.audioType);
+    url.searchParams.set("rate", String(this.profile.sampleRateHz));
+    url.searchParams.set("enableTransient", "1");
+    url.searchParams.set("saveResult", "0");
     return { authorization: "Bearer fixture-token", websocketUrlWithTicket: url.toString() };
   }
 
   /** `180`, not `100`, is the fixture protocol's media-send readiness gate. */
   maySendAudio(providerStatus: number): boolean {
-    return providerStatus === 180 && !this.eosSent;
+    this.ready = this.hasAccess && providerStatus === 180 && !this.eosSent;
+    return this.ready;
   }
 
-  async transcribe(): Promise<VoiceAsrSegmentResult> {
-    if (this.eosSent) throw new Error("TWM ASR stream is draining after EOS; do not send more audio.");
+  async transcribe(request: VoiceAsrTranscribeRequest): Promise<VoiceAsrSegmentResult> {
+    if (this.diagnosticOnly) throw new Error("Diagnostic replay is isolated from the dialogue stream.");
+    this.sendAudio(request.audioChunk);
+    return this.receiveResult();
+  }
+
+  sendAudio(chunk: Uint8Array): void {
+    if (!this.ready || this.eosSent) throw new Error("TWM audio requires 180 ready and an open stream.");
+    if (chunk.byteLength >= 384 * 1024) throw new Error("TWM frame must be smaller than 384 KB.");
+  }
+
+  /** Receive-side drain stays open after audio sending stops. Final is never consent. */
+  receiveResult(now = Date.now()): TwmTranscriptFixture & {
+    confirmationEligible: false; diagnosticOnly: boolean; utteranceId?: string;
+  } {
+    if (!this.hasAccess || (!this.ready && !this.eosSent) ||
+        (this.eosSent && now >= this.drainUntil)) throw new Error("TWM result stream is closed or not ready.");
     const fixture = this.fixtures[this.transcriptIndex++];
     if (!fixture) throw new Error("TWM ASR fixture has no remaining transcript event.");
-    const previousFinal = this.finalRevisions.get(fixture.segmentId);
-    if (previousFinal !== undefined && fixture.revision <= previousFinal) {
-      throw new Error("A final TWM segment is immutable and cannot be revised.");
+    const key = JSON.stringify([fixture.providerSessionId, fixture.segmentId]);
+    const previous = this.segments.get(key);
+    if (!Number.isInteger(fixture.revision) || fixture.revision < 0 ||
+        previous?.final || (previous && fixture.revision <= previous.revision)) {
+      throw new Error("TWM segment revision must increase; a final segment is immutable.");
     }
-    if (fixture.final) this.finalRevisions.set(fixture.segmentId, fixture.revision);
-    return { ...fixture };
+    this.segments.set(key, { ...fixture });
+    return { ...fixture, confirmationEligible: false, diagnosticOnly: this.diagnosticOnly,
+      ...(this.utteranceId ? { utteranceId: this.utteranceId } : {}) };
   }
 
-  endAudio(): { frame: "EOS"; drainWindowMs: number; confirmationEligible: false } {
+  endAudio(now = Date.now()): { frame: "EOS"; drainWindowMs: number; confirmationEligible: false } {
+    if (!this.eosSent) this.drainUntil = now + this.profile.timeouts.eosDrainMs;
     this.eosSent = true;
+    this.ready = false;
     return {
       frame: "EOS",
       drainWindowMs: this.profile.timeouts.eosDrainMs,
@@ -115,7 +154,12 @@ export class TwmAsrFixtureAdapter implements VoiceSpeechToTextAdapter {
     utteranceId?: string;
   } {
     if (![408, 440, 486].includes(code)) throw new Error("Unsupported TWM disconnect classification.");
+    if (options.diagnosticReplay && !options.utteranceId) throw new Error("Diagnostic replay requires utteranceId.");
     this.eosSent = false;
+    this.ready = false;
+    this.hasAccess = false;
+    this.diagnosticOnly = options.diagnosticReplay === true;
+    this.utteranceId = options.utteranceId;
     return {
       requiresFreshTicket: true,
       diagnosticOnly: options.diagnosticReplay === true,
@@ -129,6 +173,7 @@ export interface TwmTtsVoiceProfile {
   model: string;
   languageCode: "cmn-TW" | "nan-TW" | "hak-TW";
   name: string;
+  accent?: "sixian" | "hailu";
   textType: string;
   /** Must be observed from this account's models/voices matrix before routing. */
   capabilityVerified: boolean;
@@ -136,7 +181,7 @@ export interface TwmTtsVoiceProfile {
 
 export interface TwmLocalStopResult {
   playbackId: string;
-  playbackCancellation: "cleared_locally";
+  playbackCancellation: "cleared_locally" | "unknown";
   synthesisCancellation: "abort_requested";
   providerCancellationAcknowledged: "unverified";
   billingOutcome: "unverified";
@@ -149,13 +194,26 @@ export class TwmTtsFixtureAdapter implements VoiceTextToSpeechAdapter {
   private playbackCounter = 0;
   private readonly active = new Set<string>();
 
-  constructor(readonly voices: readonly TwmTtsVoiceProfile[]) {}
+  constructor(readonly voices: readonly TwmTtsVoiceProfile[], private readonly playbackControl?: {
+    clear(playbackId: string): void;
+    abort(playbackId: string): void | Promise<void>;
+  }) {}
 
-  async synthesize(request: VoiceTtsSynthesizeRequest): Promise<VoiceTtsPlaybackHandle> {
-    const voice = this.voices.find((candidate) => candidate.languageCode === request.languageCode);
-    if (!voice || !voice.capabilityVerified) {
+  buildSynthesisRequest(request: VoiceTtsSynthesizeRequest) {
+    const voice = this.voices.find((candidate) => candidate.languageCode === request.languageCode && candidate.capabilityVerified);
+    if (!voice || !voice.model || !voice.name || !voice.textType ||
+        (voice.languageCode === "hak-TW" && !voice.accent)) {
       throw new Error(`No verified TWM TTS voice is enabled for '${request.languageCode}'.`);
     }
+    return {
+      input: { text: request.text, textType: voice.textType },
+      voice: { model: voice.model, languageCode: voice.languageCode, name: voice.name },
+      audioConfig: { speakingRate: 1.0 }, outputConfig: { streamMode: 1 },
+    };
+  }
+
+  async synthesize(request: VoiceTtsSynthesizeRequest): Promise<VoiceTtsPlaybackHandle> {
+    this.buildSynthesisRequest(request);
     this.playbackCounter += 1;
     const playbackId = `twm-fixture-playback-${this.playbackCounter}`;
     this.active.add(playbackId);
@@ -164,9 +222,12 @@ export class TwmTtsFixtureAdapter implements VoiceTextToSpeechAdapter {
 
   localStop(playbackId: string): TwmLocalStopResult | null {
     if (!this.active.delete(playbackId)) return null;
+    let playbackCancellation: TwmLocalStopResult["playbackCancellation"] = "cleared_locally";
+    try { this.playbackControl?.clear(playbackId); } catch { playbackCancellation = "unknown"; }
+    try { void Promise.resolve(this.playbackControl?.abort(playbackId)).catch(() => undefined); } catch { /* best effort */ }
     return {
       playbackId,
-      playbackCancellation: "cleared_locally",
+      playbackCancellation,
       synthesisCancellation: "abort_requested",
       providerCancellationAcknowledged: "unverified",
       billingOutcome: "unverified",

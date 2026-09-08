@@ -9,6 +9,10 @@ export interface VoiceLanguageRoute {
   language: VoiceLanguage;
   asrModelName: string;
   ttsVoiceEnabled: boolean;
+  asrCapabilityVerified: boolean;
+  /** Human-checked recording/text variant, including the configured Hakka accent. */
+  selectionPrompt: { assetId: string; verified: boolean };
+  accent?: "sixian" | "hailu";
 }
 
 export interface LanguageSwitchResult {
@@ -39,6 +43,18 @@ export class VoiceLanguageRouter {
   getCurrentLanguage(): VoiceLanguage { return this.current; }
   getProviderEpoch(): number { return this.providerEpoch; }
 
+  /** Playback these checked language variants before requiring any recognition. */
+  selectionPrompts(): { language: VoiceLanguage; assetId: string }[] {
+    return [...this.routes.values()].filter((route) => {
+      try { this.assertEnabled(route.language); return true; } catch { return false; }
+    }).map((route) => ({ language: route.language, assetId: route.selectionPrompt.assetId }));
+  }
+
+  /** Uncommitted proofs carry this epoch; old proofs fail after any model switch. */
+  acceptsUncommittedConfirmation(providerEpoch: number): boolean {
+    return providerEpoch === this.providerEpoch;
+  }
+
   shortPrompt(): string {
     return "國語請按1，台語請按2，客語請按3。";
   }
@@ -62,7 +78,9 @@ export class VoiceLanguageRouter {
 
   private assertEnabled(language: VoiceLanguage): void {
     const route = this.routes.get(language);
-    if (!route?.asrModelName || !route.ttsVoiceEnabled) {
+    if (!route?.asrModelName || !route.ttsVoiceEnabled || !route.asrCapabilityVerified ||
+        !route.selectionPrompt?.verified || !route.selectionPrompt.assetId ||
+        (language === "hak-TW" && !route.accent)) {
       throw new Error(`Language '${language}' is not enabled: ASR/TTS capability evidence is required.`);
     }
   }
