@@ -77,7 +77,10 @@ routing is tracked by the existing parent and helper tasks and by
 
 ## Helper verification
 
-Read-only source and parent regression inspection above; `git diff --check`.
+Read-only source and parent regression inspection above;
+`git diff --check origin/dev...HEAD` exited 0. Parent routing was recorded with
+`AI_NAME=Codex2 ai-status.sh note SR-BANK-002`; owner-only `progress` was rejected,
+so no owner identity was substituted and the parent's blocked state was retained.
 No application tests or live bank requests were run for this documentation-only
 change. Commit/push/PR and locked candidate evidence are recorded in the helper
 machine-truth handoff after publication.
