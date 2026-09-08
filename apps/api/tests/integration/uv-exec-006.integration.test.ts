@@ -1100,7 +1100,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     ]);
   });
 
-  it("mixed_entry_postgres_race_evidence: two orders from independent service instances racing for the same driver+vehicle resolve to exactly one winner", async () => {
+  it("mixed_entry_postgres_race_evidence: passenger and callcenter instances racing for the same driver+vehicle resolve to exactly one winner", async () => {
     expect(DATABASE_URL).toBeTruthy();
     const databaseA = new DatabaseService();
     const databaseB = new DatabaseService();
@@ -1125,7 +1125,10 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       passenger: { name: "Rider A", phone: "0911000601" },
     });
     trackOrder(orderA.orderId);
-    const orderB = serviceB.createPassengerOrder({
+    const orderB = await serviceB.createCallCenterOrder({
+      callId: `call-uvexec006-${randomUUID()}`,
+      agentId: "agent-uvexec006",
+      recordingId: `recording-uvexec006-${randomUUID()}`,
       pickup: { address: "Taipei Main Station" },
       dropoff: { address: "Taipei 101" },
       passenger: { name: "Rider B", phone: "0911000602" },
