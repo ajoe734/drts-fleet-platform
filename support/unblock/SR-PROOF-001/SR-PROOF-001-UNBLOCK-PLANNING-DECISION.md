@@ -6,7 +6,7 @@ Owner: Codex2. Reviewer: Gemini. This section supersedes the historical
 September 6 owner, status, branch, and continuation instructions below; those
 remain provenance of the earlier decision, not current dispatch instructions.
 
-Rechecked at `origin/dev` `f372e4a6a0dd16204ccbd660f23013601357c224`:
+Earlier source inspection at `origin/dev` `f372e4a6a0dd16204ccbd660f23013601357c224`:
 
 - Parent `SR-PROOF-001`: blocked, owner Codex, reviewer/waiting-for Gemini;
   only ARTIFACT and INVOICE dependencies, both recorded done. Its latest note
@@ -27,6 +27,23 @@ parent acceptance. No product scope cut is approved. Route the unresolved
 implementation contract and scope authorization under `Q-SR-PROOF-001` in
 `PHASE1_OPEN_QUESTIONS.md`; this is a follow-up on the existing parent, not
 a newly registered producer or an authorization issued by this helper.
+
+### Redispatch reconciliation — after 2026-09-08T16:06:33Z
+
+Rebased onto `origin/dev` `c07d24e021aea847a988646427cdc534ccf4e496`.
+PR #1782 conflicted because another task added Q-SR-ENTERPRISE-DATA-001
+at the same insertion point. Both open questions are preserved. The published
+candidate was merged back after rebase so a normal fast-forward push preserves
+remote history without force-pushing.
+
+Fresh machine-truth slices show the parent is now `todo`, owner Codex,
+reviewer Gemini: Chairman resumed it at `2026-09-08T16:05:54Z` after the
+history-repair helper. Its dependencies and write scopes still omit the
+requested contract edge and repository/module authorization. SR-CONTRACT-001
+remains `todo`, owner Gemini, and its schema-allocation artifact is absent
+at this base. History repair permits recovery work; it does not supply these
+planning prerequisites. This helper preserves the Chairman's lifecycle state
+and records the pending adjudication on the parent through the status CLI.
 
 ### Required next actor and resume gate
 
@@ -53,18 +70,20 @@ a newly registered producer or an authorization issued by this helper.
 5. Only after allocations, authorization and required producer acceptance
    are recorded, Codex implements and runs the parent's declared tests and
    typechecks on fresh dev, then commits, normally pushes and hands off the
-   exact candidate to current reviewer Gemini. The parent remains blocked
-   until this gate; routing this helper does not prove proof upload or paid
+   exact candidate to current reviewer Gemini. Dependent implementation waits
+   for this gate even though the parent is now todo; routing this helper does not prove proof upload or paid
    correctness and does not execute a real payment.
 
 ### This dispatch's verification and delivery
 
-`git fetch origin` and `git rebase origin/dev` exited 0 (up to date).
-Task slices and the cited source paths were inspected; no product runtime,
-browser, scan service, payment or parent regression was executed. Documentation
-diff/trailer/consistency checks, task-scoped push and PR evidence are recorded
-in this helper's machine-truth handoff. The parent receives the concrete
-routing step via `ai-status.sh note`, preserving its blocked lifecycle.
+`git fetch origin` exited 0; `git rebase origin/dev` initially stopped on
+the open-question conflict and `git rebase --continue` exited 0 after preserving
+both entries. The ancestry-preserving merge and normal push exited 0.
+Fresh parent/contract task slices and schema-allocation absence were checked.
+No product runtime, browser, scan service, payment or parent regression was
+executed. Documentation diff and candidate ancestry checks are recorded in
+this helper's machine-truth handoff. The parent receives the concrete routing
+step via `ai-status.sh note`, preserving its current lifecycle.
 
 ## Scope
 
