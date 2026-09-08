@@ -1,5 +1,29 @@
 # SR-ENV-COPY-001 — partial implementation and scope blocker
 
+## Follow-up dispatch, 2026-09-08 — runtime producer inventory
+
+- Inspected fresh `origin/dev` base: `fa0fd8257950764526a522d091be9d97effa82b9`; preserved task HEAD: `cefd09c27c1b1aa339f1f11d2726d81aa8b8eda6`. No acceptance candidate. Evidence anchor SHA is recorded in canonical task status after ordinary push.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1 replaying `13bce75ab`, add/add conflicts in this document, runtime resolver and scoped test. `git rebase --abort`: exit 0; `git status --short`: exit 0, empty. No history discarded. Current dispatch still specifies the original branch/worktree; the recovery routing required by the merged history-repair document is absent.
+- Read planning decision with `git show 419734ddb:support/unblock/SR-ENV-COPY-001/SR-ENV-COPY-001-UNBLOCK-PLANNING-DECISION.md` (exit 0). The same path on `origin/dev` is absent (`git show`, exit 128); the helper candidate must not be described as merged. Its decision preserves full acceptance and requires supervisor scope/dependency authorization.
+
+All locations below were read from the pinned current base using `git show origin/dev:<path>` or `git grep -n ... origin/dev -- <paths>` (exit 0 for the inventory queries). These are repository configuration observations, not observations of deployed service values.
+
+| Producer / consumer | Current source binding and integration gap |
+| --- | --- |
+| `.github/workflows/deploy-dev.yml:920` | Web deployment environment includes `DRTS_ENV=development` and `NODE_ENV=production`. This explicitly demonstrates why build mode cannot establish deployment environment. |
+| `.github/workflows/deploy-staging.yml:564,589,606,622` | API receives `APP_ENV=staging` and `DRTS_ENV=staging`; listed web deployments receive only `NODE_ENV=production` for environment. Web consumers cannot infer staging from that value. |
+| `.github/workflows/deploy-prod.yml:550,591,608` | API receives explicit production values; listed web deployments only receive production build mode. Authorize explicit web deployment-value plumbing before claiming production authority. |
+| `apps/ops-console-web/app/layout.tsx:61` | Badge renders a production translation directly. `lib/ops-assistant-context.server.ts:16` separately resolves DRTS_ENV, NEXT_PUBLIC_DRTS_ENV, NODE_ENV, then development, and propagates it to assistant identity. That fallback is not a safe badge contract; its health seed at line 67 is fixed healthy. |
+| `apps/fleet-partner-portal-web/components/fleet-portal-shell.tsx:36` | Literal `env="production"`, with no runtime environment binding. |
+| `apps/bank-console-web/lib/navigation.ts:8` | `BANK_CONSOLE_ENV="preview"`, consumed by `components/bank-shell.tsx:137`. |
+| `apps/tenant-console-web/lib/navigation.ts:5` | NEXT_PUBLIC_TENANT_CONSOLE_ENV defaults to production; shell line 909 instead renders `shell.env`. No demonstrated deployment-authoritative binding. |
+| `apps/enterprise-dispatch-web/lib/runtime-config.ts` | Server-to-client script `window.__DRTS_ENTERPRISE_DISPATCH_CONFIG__` carries only apiBaseUrl; `app/layout.tsx:29` installs it. It does not propagate deployment environment or data-source provenance. |
+| Enterprise / tenant / admin health | `components/enterprise-shell.tsx:55`, `components/tenant-shell.tsx:749`, and `components/admin-shell.tsx:352` normalize absent status to healthy and fall through to healthy for unrecognized values. Successful HTTP plus unknown payload is therefore mislabeled. Enterprise reads `/health`; that is not evidence of business-data provenance. |
+
+Supervisor follow-up: route the reviewed recovery worktree or record a reviewed alternative; authorize the app layouts/shells/navigation and runtime config paths above, ops assistant context if its environment/health seed is included, and staging/prod web deployment plumbing with overlap dependencies. Source/data-health propagation remains incomplete; no new environment enum or API contract is invented here. Existing explicit deployment values observed are development, staging and production; unknown/missing values must remain unknown. Catalog/resolver implementation can resume after recovery routing. Full bilingual render verification still requires integrated consumers.
+
+Only this evidence document changed. No app tests, six app typechecks, browser/live/device checks, business-resource calls, fresh candidate CI, review, merge or deployment were performed in this evidence-only dispatch. Resource IDs: SR-ENV-COPY-001, R27, C110, Q-SR-ENV-COPY-001, existing PR #1738 (not remotely revalidated). No completion handoff.
+
 ## Follow-up dispatch, 2026-09-08 16:38 UTC — prerequisites still absent
 
 - Fresh fetched base `origin/dev`: `1cdaaa5b5e5301de2da0a692c78c4cc29b0c10a9`; tested implementation anchor: `2ad10d1e23c266023e7ea8217e7c939d0244af78`. Candidate SHA: none. The evidence-only anchor is recorded in machine truth after ordinary push.
