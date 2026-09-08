@@ -1,5 +1,14 @@
 # SR-BANK-002 — 銀行角色金額／PII／匯出一致隔離
 
+## 2026-09-08T17:56Z resumed dispatch（最新）
+
+- Fetch 的最新 base `origin/dev`：`fa0fd8257950764526a522d091be9d97effa82b9`；受測 branch checkpoint：`3b316d27c45d28af7b186cd02241880a9fa411e8`，不是 candidate。
+- `git rebase origin/dev`：exit 1，重播重複 commit `dbec2667882e0f4646a2a07e20eb7420f618640e` 時在 session、三個頁面和兩個測試設定衝突；`git rebase --abort`：exit 0，保留已推送歷史。沒有 force push 或再次 merge 重複 rail。
+- Helper `SR-BANK-002-UNBLOCK-HISTORY-REPAIR` 的 done 只代表 PR #1734 修復方案文件已合併；文件明確指出產品五項失敗仍需另行處理，並要求新 delivery branch。本次 dispatch 仍指定原 branch，未更新 write_scopes 或 IAM 相依。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`：exit 1；內層 49 passed、5 failed，外層 wrapper 如實失敗。失敗仍為兩條 settlement policy 缺財務讀權限、兩個上游 403 seed fallback、Contoso 上游 503 CSV 包含 `STM-ACME-202606`。資源與 synthetic/live 界線沿用下文。
+- `pnpm --filter @drts/bank-console-web typecheck`：exit 0。`git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`：exit 0，三個缺陷來源檔與最新 dev 完全相同；本次整組測試是在上述 branch checkpoint 執行，沒有冒稱已完成 rebase。
+- 需要 supervisor 擴 loader scope／重疊 writer 相依，安排 canonical IAM policy owner，並將派工 delivery branch 更新為 helper 提出的乾淨 replacement rail。未授權前不修改共用來源，不 handoff。此提交僅保存重驗證據；沒有產品 UI 變更或 live／CI／merge 驗收。
+
 ## 2026-09-08T17:46Z dispatch 重驗（最新）
 
 - Owner Codex2；本次 reviewer 為 Codex。任務尚未完成，沒有 candidate／handoff。
