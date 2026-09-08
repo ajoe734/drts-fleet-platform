@@ -1,5 +1,4 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { StatusToneName, ToneRamp } from "@drts/ui-tokens";
 import type { RuntimeEnvironmentTier } from "./runtime-environment";
 
 export type RuntimeEnvironment =

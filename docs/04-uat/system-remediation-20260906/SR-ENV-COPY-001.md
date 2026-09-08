@@ -143,6 +143,12 @@ $ pnpm --filter @drts/ui-web typecheck
 > tsc -p tsconfig.json --noEmit
 (exit 0)
 
+$ pnpm --filter @drts/ui-web lint
+> @drts/ui-web@0.1.0 lint
+> eslint src --max-warnings=0
+(exit 0)
+
+
 $ pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-env-copy-001
 
