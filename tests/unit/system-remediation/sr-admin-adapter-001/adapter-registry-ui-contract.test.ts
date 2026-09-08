@@ -172,4 +172,26 @@ describe("SR-ADMIN-ADAPTER-001 — Adapter Registry UI Contract & Banner Suppres
       expect(expectedBody).toContain("相關介接功能可能已中斷");
     });
   });
+
+  describe("Adapter Registration Flow & Contract Wiring", () => {
+    it("wires the Register Adapter header button to open RegisterAdapterModal instead of static flash info", () => {
+      expect(pageSource).toContain("setIsRegisterOpen(true)");
+      expect(pageSource).not.toMatch(
+        /onClick=\{[^}]*setFlash\(\{\s*tone:\s*"info",\s*message:\s*copy\.registerInfo/,
+      );
+    });
+
+    it("imports and mounts RegisterAdapterModal with proper props", () => {
+      expect(pageSource).toContain("RegisterAdapterModal");
+      expect(pageSource).toContain("isOpen={isRegisterOpen}");
+      expect(pageSource).toContain("onClose={() => setIsRegisterOpen(false)}");
+      expect(pageSource).toContain("onRegister={handleRegisterAdapter}");
+    });
+
+    it("wires handleRegisterAdapter to submit POST to /api/platform-admin/adapters", () => {
+      expect(pageSource).toContain("client.post<PlatformAdapter>(");
+      expect(pageSource).toContain('"/api/platform-admin/adapters"');
+      expect(pageSource).toContain("payload");
+    });
+  });
 });

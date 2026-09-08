@@ -366,7 +366,11 @@ export class PlatformAdminController {
     action: "read" | "write" = "read",
   ): void {
     if (!identity) {
-      return;
+      throw new ApiRequestError(
+        401,
+        "PLATFORM_ADMIN_IDENTITY_REQUIRED",
+        "Platform admin adapter governance requires an authenticated identity.",
+      );
     }
     const realm = identity.realm;
     if (realm !== "platform" && realm !== "system") {

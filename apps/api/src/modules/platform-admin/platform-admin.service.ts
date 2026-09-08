@@ -1,12 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Injectable,
+  Logger,
+  OnModuleInit,
+  Optional,
+} from "@nestjs/common";
 
 import {
   AdapterType,
   CredentialStatus,
   Environment,
   FinanceAuthorityMode,
+  PLATFORM_CODE_REGISTRY,
   RolloutStatus,
   type AuditLogRecord,
   type CanonicalAccountStatus,
@@ -47,6 +54,7 @@ import {
   type ControlledDownloadMetadata,
 } from "../../common/controlled-download";
 import type { AuditedActionResult } from "../../common/action-receipt";
+import { DatabaseService } from "../../common/db";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { IdentityRepository } from "../identity/identity.repository";
 import {
@@ -184,8 +192,11 @@ export interface PlatformAdapterRecord extends PlatformAdapter {
   credentialExpiresAt?: string | null | undefined;
 }
 
-const PLATFORM_ADAPTERS_SEED: PlatformAdapterRecord[] = [
-  {
+export function buildAuthoritativePlatformAdapters(): PlatformAdapterRecord[] {
+  const adapters: PlatformAdapterRecord[] = [];
+
+  // 1. Native platform dispatch engine
+  adapters.push({
     id: "owned-dispatch",
     platformCode: "DRTS",
     name: "DRTS Native Dispatch",
@@ -198,10 +209,10 @@ const PLATFORM_ADAPTERS_SEED: PlatformAdapterRecord[] = [
     config: { isEnabled: true },
     rolloutStatus: RolloutStatus.COMPLETED,
     credentialStatus: CredentialStatus.VALID,
-    credentialExpiresAt: "2027-01-01T00:00:00.000Z",
+    credentialExpiresAt: null,
     webhookStatus: null,
     healthStatus: {
-      lastCheckTimestamp: "2026-09-08T12:00:00.000Z",
+      lastCheckTimestamp: null,
       status: "HEALTHY",
       message: null,
     },
@@ -224,147 +235,60 @@ const PLATFORM_ADAPTERS_SEED: PlatformAdapterRecord[] = [
     ],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",
-  },
-  {
-    id: "cityride-forwarder",
-    platformCode: "CITY",
-    name: "CityRide Forwarded Orders",
-    description:
-      "External forwarded-order source with platform-owned fare authority.",
-    version: "1.0.0",
-    environment: Environment.PRODUCTION,
-    rolloutStage: Environment.SANDBOX,
-    adapterType: AdapterType.EXTERNAL_COMBINED,
-    isForwarded: true,
-    config: { isEnabled: true },
-    rolloutStatus: RolloutStatus.IN_PROGRESS,
-    credentialStatus: CredentialStatus.VALID,
-    credentialExpiresAt: "2026-09-14T00:00:00.000Z",
-    webhookStatus: {
-      url: "https://cityride.tw/webhooks/v1",
-      isEnabled: true,
-      lastEventTimestamp: "2026-09-08T15:30:00.000Z",
-      lastStatus: "SUCCESS",
-      lastStatusCode: "200",
-    },
-    healthStatus: {
-      lastCheckTimestamp: "2026-09-08T15:30:00.000Z",
-      status: "HEALTHY",
-      message: null,
-    },
-    policies: {
-      serviceBuckets: ["standard"],
-      maxCandidates: 2,
-      acceptTimeoutSeconds: 20,
-      manualFallbackThresholdSeconds: 60,
-      financeAuthorityMode: FinanceAuthorityMode.EXTERNAL,
-    },
-    featureFlags: {
-      driverSafeActions: true,
-      proofRequired: true,
-      manualFallback: true,
-    },
-    supportedActions: [
-      { name: "accept", description: "Forward acceptance." },
-      { name: "reject", description: "Forward rejection." },
-      { name: "retry", description: "Retry callback." },
-    ],
-    createdAt: "2026-02-01T00:00:00.000Z",
-    updatedAt: "2026-04-01T00:00:00.000Z",
-  },
-  {
-    id: "srx-v3",
-    platformCode: "SRX",
-    name: "SmartRides X",
-    description: "High-throughput external platform forwarded order intake.",
-    version: "3.2.0",
-    environment: Environment.PRODUCTION,
-    rolloutStage: Environment.PRODUCTION,
-    adapterType: AdapterType.EXTERNAL_COMBINED,
-    isForwarded: true,
-    config: { isEnabled: true },
-    rolloutStatus: RolloutStatus.COMPLETED,
-    credentialStatus: CredentialStatus.VALID,
-    credentialExpiresAt: "2026-12-31T00:00:00.000Z",
-    webhookStatus: {
-      url: "https://srx.tw/events",
-      isEnabled: true,
-      lastEventTimestamp: "2026-09-08T16:00:00.000Z",
-      lastStatus: "SUCCESS",
-      lastStatusCode: "200",
-    },
-    healthStatus: {
-      lastCheckTimestamp: "2026-09-08T16:00:00.000Z",
-      status: "HEALTHY",
-      message: null,
-    },
-    policies: {
-      serviceBuckets: ["standard", "accessible"],
-      maxCandidates: 5,
-      acceptTimeoutSeconds: 15,
-      manualFallbackThresholdSeconds: 45,
-      financeAuthorityMode: FinanceAuthorityMode.EXTERNAL,
-    },
-    featureFlags: {
-      driverSafeActions: true,
-      proofRequired: true,
-      manualFallback: true,
-    },
-    supportedActions: [
-      { name: "accept", description: "Forward acceptance." },
-      { name: "reject", description: "Forward rejection." },
-      { name: "retry", description: "Retry callback." },
-    ],
-    createdAt: "2026-01-15T00:00:00.000Z",
-    updatedAt: "2026-04-01T00:00:00.000Z",
-  },
-  {
-    id: "gocab-v1",
-    platformCode: "GOCAB",
-    name: "GoCab",
-    description: "Secondary external taxi aggregator forwarder.",
-    version: "1.4.1",
-    environment: Environment.PRODUCTION,
-    rolloutStage: Environment.PRODUCTION,
-    adapterType: AdapterType.EXTERNAL_COMBINED,
-    isForwarded: true,
-    config: { isEnabled: true },
-    rolloutStatus: RolloutStatus.COMPLETED,
-    credentialStatus: CredentialStatus.VALID,
-    credentialExpiresAt: "2026-11-15T00:00:00.000Z",
-    webhookStatus: {
-      url: "https://gocab.tw/drts-hook",
-      isEnabled: true,
-      lastEventTimestamp: "2026-09-08T14:10:00.000Z",
-      lastStatus: "FAILURE",
-      lastStatusCode: "504",
-    },
-    healthStatus: {
-      lastCheckTimestamp: "2026-09-08T16:20:00.000Z",
-      status: "DEGRADED",
-      message: "Elevated sync failure rate",
-    },
-    policies: {
-      serviceBuckets: ["standard"],
-      maxCandidates: 3,
-      acceptTimeoutSeconds: 30,
-      manualFallbackThresholdSeconds: 90,
-      financeAuthorityMode: FinanceAuthorityMode.EXTERNAL,
-    },
-    featureFlags: {
-      driverSafeActions: true,
-      proofRequired: true,
-      manualFallback: true,
-    },
-    supportedActions: [
-      { name: "accept", description: "Forward acceptance." },
-      { name: "reject", description: "Forward rejection." },
-      { name: "retry", description: "Retry callback." },
-    ],
-    createdAt: "2026-02-10T00:00:00.000Z",
-    updatedAt: "2026-04-01T00:00:00.000Z",
-  },
-  {
+  });
+
+  // 2. Canonical external platforms from PLATFORM_CODE_REGISTRY
+  for (const [code, registryEntry] of Object.entries(PLATFORM_CODE_REGISTRY)) {
+    const isStub = registryEntry.status === "forwarder_stub";
+    adapters.push({
+      id: code,
+      platformCode: code,
+      name: registryEntry.displayName,
+      description: isStub
+        ? `${registryEntry.displayName} stub forwarder adapter.`
+        : `${registryEntry.displayName} platform integration (configuration required).`,
+      version: "1.0.0",
+      environment: Environment.PRODUCTION,
+      rolloutStage: isStub ? Environment.SANDBOX : Environment.PRODUCTION,
+      adapterType: AdapterType.EXTERNAL_COMBINED,
+      isForwarded: true,
+      config: { isEnabled: isStub },
+      rolloutStatus: isStub
+        ? RolloutStatus.IN_PROGRESS
+        : RolloutStatus.NOT_STARTED,
+      credentialStatus: isStub
+        ? CredentialStatus.PENDING
+        : CredentialStatus.NOT_CONFIGURED,
+      credentialExpiresAt: null,
+      webhookStatus: null,
+      healthStatus: {
+        lastCheckTimestamp: null,
+        status: isStub ? "HEALTHY" : "DEGRADED",
+        message: isStub ? "Stub forwarder adapter" : "Configuration required",
+      },
+      policies: {
+        serviceBuckets: ["standard"],
+        maxCandidates: 3,
+        acceptTimeoutSeconds: 20,
+        manualFallbackThresholdSeconds: 60,
+        financeAuthorityMode: FinanceAuthorityMode.EXTERNAL,
+      },
+      featureFlags: {
+        driverSafeActions: true,
+        proofRequired: true,
+        manualFallback: true,
+      },
+      supportedActions: [
+        { name: "accept", description: "Forward acceptance." },
+        { name: "reject", description: "Forward rejection." },
+      ],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+    });
+  }
+
+  // 3. Platform filing integration: mof-bgmt
+  adapters.push({
     id: "mof-bgmt",
     platformCode: "MOF_BGMT",
     name: "BGMT 派遣回報",
@@ -375,14 +299,14 @@ const PLATFORM_ADAPTERS_SEED: PlatformAdapterRecord[] = [
     adapterType: AdapterType.EXTERNAL_REST,
     isForwarded: false,
     config: { isEnabled: true },
-    rolloutStatus: RolloutStatus.COMPLETED,
-    credentialStatus: CredentialStatus.PENDING,
-    credentialExpiresAt: "2026-09-14T00:00:00.000Z",
+    rolloutStatus: RolloutStatus.NOT_STARTED,
+    credentialStatus: CredentialStatus.NOT_CONFIGURED,
+    credentialExpiresAt: null,
     webhookStatus: null,
     healthStatus: {
-      lastCheckTimestamp: "2026-09-08T12:00:00.000Z",
-      status: "HEALTHY",
-      message: null,
+      lastCheckTimestamp: null,
+      status: "DEGRADED",
+      message: "Filing token not configured",
     },
     policies: {
       serviceBuckets: [],
@@ -400,58 +324,102 @@ const PLATFORM_ADAPTERS_SEED: PlatformAdapterRecord[] = [
     ],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",
-  },
-  {
-    id: "grab_taiwan",
-    platformCode: "GRAB_TW",
-    name: "Grab Taiwan",
-    description: "External ride-hailing partner adapter for Grab Taiwan.",
-    version: "1.1.0",
-    environment: Environment.PRODUCTION,
-    rolloutStage: Environment.PRODUCTION,
-    adapterType: AdapterType.EXTERNAL_COMBINED,
-    isForwarded: true,
-    config: { isEnabled: true },
-    rolloutStatus: RolloutStatus.COMPLETED,
-    credentialStatus: CredentialStatus.VALID,
-    credentialExpiresAt: "2026-10-30T00:00:00.000Z",
-    webhookStatus: {
-      url: "https://api.grab.com/tw/drts",
-      isEnabled: true,
-      lastEventTimestamp: "2026-09-08T16:15:00.000Z",
-      lastStatus: "SUCCESS",
-      lastStatusCode: "200",
+  });
+
+  // 4. Operational forwarder partners
+  const partnerAdapters = [
+    {
+      id: "cityride-forwarder",
+      platformCode: "CITY",
+      name: "CityRide Forwarded Orders",
+      description:
+        "External forwarded-order source with platform-owned fare authority.",
     },
-    healthStatus: {
-      lastCheckTimestamp: "2026-09-08T16:15:00.000Z",
-      status: "HEALTHY",
-      message: null,
+    {
+      id: "srx-v3",
+      platformCode: "SRX",
+      name: "SmartRides X",
+      description: "High-throughput external platform forwarded order intake.",
     },
-    policies: {
-      serviceBuckets: ["standard"],
-      maxCandidates: 3,
-      acceptTimeoutSeconds: 20,
-      manualFallbackThresholdSeconds: 60,
-      financeAuthorityMode: FinanceAuthorityMode.EXTERNAL,
+    {
+      id: "gocab-v1",
+      platformCode: "GOCAB",
+      name: "GoCab",
+      description: "Secondary external taxi aggregator forwarder.",
     },
-    featureFlags: {
-      driverSafeActions: true,
-      proofRequired: true,
-      manualFallback: true,
-    },
-    supportedActions: [
-      { name: "accept", description: "Accept partner trip." },
-      { name: "complete", description: "Complete partner trip." },
-    ],
-    createdAt: "2026-03-01T00:00:00.000Z",
-    updatedAt: "2026-04-01T00:00:00.000Z",
-  },
-];
+  ];
+
+  for (const partner of partnerAdapters) {
+    adapters.push({
+      id: partner.id,
+      platformCode: partner.platformCode,
+      name: partner.name,
+      description: partner.description,
+      version: "1.0.0",
+      environment: Environment.PRODUCTION,
+      rolloutStage: Environment.SANDBOX,
+      adapterType: AdapterType.EXTERNAL_COMBINED,
+      isForwarded: true,
+      config: { isEnabled: true },
+      rolloutStatus: RolloutStatus.IN_PROGRESS,
+      credentialStatus: CredentialStatus.NOT_CONFIGURED,
+      credentialExpiresAt: null,
+      webhookStatus: null,
+      healthStatus: {
+        lastCheckTimestamp: null,
+        status: "DEGRADED",
+        message: "Configuration required",
+      },
+      policies: {
+        serviceBuckets: ["standard"],
+        maxCandidates: 3,
+        acceptTimeoutSeconds: 20,
+        manualFallbackThresholdSeconds: 60,
+        financeAuthorityMode: FinanceAuthorityMode.EXTERNAL,
+      },
+      featureFlags: {
+        driverSafeActions: true,
+        proofRequired: true,
+        manualFallback: true,
+      },
+      supportedActions: [
+        { name: "accept", description: "Forward acceptance." },
+        { name: "reject", description: "Forward rejection." },
+        { name: "retry", description: "Retry callback." },
+      ],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+    });
+  }
+
+  return adapters;
+}
 
 @Injectable()
 export class PlatformAdminService implements OnModuleInit {
-  private platformAdapters: PlatformAdapterRecord[] =
-    PLATFORM_ADAPTERS_SEED.map((adapter) => this.clonePlatformAdapter(adapter));
+  private readonly logger = new Logger(PlatformAdminService.name);
+
+  // Durable shared store across all instances within process runtime
+  private static readonly sharedAdapterStore = new Map<
+    string,
+    PlatformAdapterRecord
+  >();
+
+  private static ensureInitialized() {
+    if (PlatformAdminService.sharedAdapterStore.size === 0) {
+      const baseline = buildAuthoritativePlatformAdapters();
+      for (const adapter of baseline) {
+        PlatformAdminService.sharedAdapterStore.set(adapter.id, { ...adapter });
+      }
+    }
+  }
+
+  public static resetSharedAdapterStoreForTest() {
+    PlatformAdminService.sharedAdapterStore.clear();
+    PlatformAdminService.ensureInitialized();
+  }
+
+  private platformAdapters: PlatformAdapterRecord[] = [];
 
   private publicInfoVersions = PUBLIC_INFO_SEED.map((version) =>
     this.clonePublicInfoVersion(version),
@@ -495,9 +463,71 @@ export class PlatformAdminService implements OnModuleInit {
     private readonly platformAdminRepository?: PlatformAdminRepository,
     @Optional()
     private readonly identityRepository: IdentityRepository = new IdentityRepository(),
-  ) {}
+    @Optional()
+    private readonly databaseService?: DatabaseService,
+  ) {
+    PlatformAdminService.ensureInitialized();
+    this.reloadPlatformAdaptersFromAuthority();
+  }
+
+  private reloadPlatformAdaptersFromAuthority() {
+    this.platformAdapters = Array.from(
+      PlatformAdminService.sharedAdapterStore.values(),
+    ).map((a) => this.clonePlatformAdapter(a));
+  }
 
   async onModuleInit() {
+    if (this.databaseService?.isEnabled()) {
+      try {
+        await this.databaseService.query(`
+          CREATE TABLE IF NOT EXISTS admin.phase1_platform_adapters (
+            id varchar(100) PRIMARY KEY,
+            platform_code varchar(100) NOT NULL,
+            status varchar(50) NOT NULL,
+            updated_at timestamptz NOT NULL,
+            record jsonb NOT NULL
+          );
+        `);
+
+        const result = await this.databaseService.query<{ record: unknown }>(`
+          SELECT record FROM admin.phase1_platform_adapters ORDER BY updated_at DESC;
+        `);
+
+        if (result.rows && result.rows.length > 0) {
+          for (const row of result.rows) {
+            const record = row.record as PlatformAdapterRecord;
+            if (record && record.id) {
+              PlatformAdminService.sharedAdapterStore.set(record.id, record);
+            }
+          }
+        } else {
+          for (const adapter of PlatformAdminService.sharedAdapterStore.values()) {
+            await this.databaseService.query(
+              `INSERT INTO admin.phase1_platform_adapters (id, platform_code, status, updated_at, record)
+               VALUES ($1, $2, $3, $4, $5::jsonb)
+               ON CONFLICT (id) DO UPDATE SET
+                 platform_code = EXCLUDED.platform_code,
+                 status = EXCLUDED.status,
+                 updated_at = EXCLUDED.updated_at,
+                 record = EXCLUDED.record`,
+              [
+                adapter.id,
+                adapter.platformCode,
+                adapter.healthStatus.status,
+                adapter.updatedAt,
+                JSON.stringify(adapter),
+              ],
+            );
+          }
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Platform-admin adapter persistence skipped during module init: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    this.reloadPlatformAdaptersFromAuthority();
+
     if (this.platformAdminRepository) {
       try {
         const persistedState = await this.platformAdminRepository.loadState();
@@ -2063,12 +2093,14 @@ export class PlatformAdminService implements OnModuleInit {
   }
 
   listPlatformAdapters(): PlatformAdapterRecord[] {
+    this.reloadPlatformAdaptersFromAuthority();
     return this.platformAdapters.map((adapter) =>
       this.clonePlatformAdapter(adapter),
     );
   }
 
   getPlatformAdapter(adapterId: string): PlatformAdapterRecord | undefined {
+    this.reloadPlatformAdaptersFromAuthority();
     const found = this.platformAdapters.find(
       (a) =>
         a.id === adapterId ||
@@ -2086,16 +2118,19 @@ export class PlatformAdminService implements OnModuleInit {
     requestId?: string,
     actorId?: string,
   ): PlatformAdapterRecord | undefined {
-    const existingIndex = this.platformAdapters.findIndex(
-      (a) =>
-        a.id === adapterId ||
-        a.platformCode.toLowerCase() === adapterId.toLowerCase(),
-    );
-    if (existingIndex === -1) {
+    this.reloadPlatformAdaptersFromAuthority();
+    const existing =
+      PlatformAdminService.sharedAdapterStore.get(adapterId) ??
+      Array.from(PlatformAdminService.sharedAdapterStore.values()).find(
+        (a) =>
+          a.id === adapterId ||
+          a.platformCode.toLowerCase() === adapterId.toLowerCase(),
+      );
+    if (!existing) {
       return undefined;
     }
 
-    const current = this.platformAdapters[existingIndex]!;
+    const current = existing;
     const now = new Date().toISOString();
 
     const updated: PlatformAdapterRecord = {
@@ -2136,7 +2171,36 @@ export class PlatformAdminService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.platformAdapters[existingIndex] = updated;
+    PlatformAdminService.sharedAdapterStore.set(
+      current.id,
+      this.clonePlatformAdapter(updated),
+    );
+    this.reloadPlatformAdaptersFromAuthority();
+
+    if (this.databaseService?.isEnabled()) {
+      this.databaseService
+        .query(
+          `INSERT INTO admin.phase1_platform_adapters (id, platform_code, status, updated_at, record)
+           VALUES ($1, $2, $3, $4, $5::jsonb)
+           ON CONFLICT (id) DO UPDATE SET
+             platform_code = EXCLUDED.platform_code,
+             status = EXCLUDED.status,
+             updated_at = EXCLUDED.updated_at,
+             record = EXCLUDED.record`,
+          [
+            updated.id,
+            updated.platformCode,
+            updated.healthStatus.status,
+            updated.updatedAt,
+            JSON.stringify(updated),
+          ],
+        )
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to persist adapter update: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+    }
 
     if (actorId) {
       this.recordAudit(
@@ -2169,10 +2233,15 @@ export class PlatformAdminService implements OnModuleInit {
     requestId?: string,
     actorId?: string,
   ): PlatformAdapterRecord {
+    this.reloadPlatformAdaptersFromAuthority();
     const now = new Date().toISOString();
-    const existing = this.platformAdapters.find(
-      (a) => a.id === command.id || a.platformCode === command.platformCode,
-    );
+    const existing =
+      PlatformAdminService.sharedAdapterStore.get(command.id) ??
+      Array.from(PlatformAdminService.sharedAdapterStore.values()).find(
+        (a) =>
+          a.id === command.id ||
+          a.platformCode.toLowerCase() === command.platformCode.toLowerCase(),
+      );
     if (existing) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -2196,7 +2265,10 @@ export class PlatformAdminService implements OnModuleInit {
       },
       rolloutStatus: command.rolloutStatus ?? RolloutStatus.NOT_STARTED,
       credentialStatus:
-        command.credentialStatus ?? CredentialStatus.VALID,
+        command.credentialStatus ??
+        (command.credentialExpiresAt
+          ? CredentialStatus.VALID
+          : CredentialStatus.NOT_CONFIGURED),
       credentialExpiresAt: command.credentialExpiresAt ?? null,
       webhookStatus: command.webhookStatus ?? null,
       healthStatus: command.healthStatus ?? {
@@ -2223,7 +2295,36 @@ export class PlatformAdminService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.platformAdapters.push(adapter);
+    PlatformAdminService.sharedAdapterStore.set(
+      adapter.id,
+      this.clonePlatformAdapter(adapter),
+    );
+    this.reloadPlatformAdaptersFromAuthority();
+
+    if (this.databaseService?.isEnabled()) {
+      this.databaseService
+        .query(
+          `INSERT INTO admin.phase1_platform_adapters (id, platform_code, status, updated_at, record)
+           VALUES ($1, $2, $3, $4, $5::jsonb)
+           ON CONFLICT (id) DO UPDATE SET
+             platform_code = EXCLUDED.platform_code,
+             status = EXCLUDED.status,
+             updated_at = EXCLUDED.updated_at,
+             record = EXCLUDED.record`,
+          [
+            adapter.id,
+            adapter.platformCode,
+            adapter.healthStatus.status,
+            adapter.updatedAt,
+            JSON.stringify(adapter),
+          ],
+        )
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to persist new adapter: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+    }
 
     if (actorId) {
       this.recordAudit(
