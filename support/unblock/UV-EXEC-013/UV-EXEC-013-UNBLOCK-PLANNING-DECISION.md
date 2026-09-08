@@ -79,3 +79,8 @@ Planning-only change: checked parent machine-truth slice, PR head/check results,
 failed job logs and cited SD/decision sections. No product implementation or
 runtime tests are claimed. Task-scoped commit, normal push, PR and candidate
 handoff are recorded through the helper lifecycle; review/merge remain gates.
+
+Local validation passed: `git diff origin/dev...HEAD --check` and existence
+checks for local Markdown link targets in both changed documents. Parent
+follow-up is recorded with `ai-status.sh note`, which preserves its blocked
+state; `progress` is restricted to parent owner Codex2.
