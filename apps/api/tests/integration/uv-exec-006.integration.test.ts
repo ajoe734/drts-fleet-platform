@@ -295,7 +295,27 @@ function createTestService(
 }
 
 function getErrorCode(error: unknown): string | null {
-  return error instanceof ApiRequestError ? error.code : null;
+  if (error instanceof ApiRequestError) {
+    return error.code;
+  }
+  if (typeof error === "object" && error !== null) {
+    if (
+      "code" in error &&
+      typeof (error as { code: unknown }).code === "string"
+    ) {
+      return (error as { code: string }).code;
+    }
+    const response = (error as { getResponse?: () => unknown }).getResponse?.();
+    if (
+      typeof response === "object" &&
+      response !== null &&
+      "error" in response &&
+      typeof (response as { error?: { code?: string } }).error?.code === "string"
+    ) {
+      return (response as { error: { code: string } }).error.code;
+    }
+  }
+  return null;
 }
 
 describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () => {
