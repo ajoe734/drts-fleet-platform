@@ -910,7 +910,8 @@ function useSupplyDraft<T extends object>(key: string, initial: T) {
     function restore() {
       let raw = supplyDraftMemory.get(key) ?? null;
       try {
-        raw = window.sessionStorage.getItem(key) ?? raw;
+        // This document's latest edit wins even if a previous storage write failed.
+        raw ??= window.sessionStorage.getItem(key);
       } catch {
         /* Memory fallback. */
       }
@@ -945,7 +946,8 @@ function useSupplyDraft<T extends object>(key: string, initial: T) {
   const clearDraft = () => {
     current.current = initial;
     updateForm(initial);
-    supplyDraftMemory.delete(key);
+    // Retain an empty snapshot so failed removal cannot resurrect old input.
+    supplyDraftMemory.set(key, JSON.stringify(initial));
     try {
       window.sessionStorage.removeItem(key);
     } catch {
