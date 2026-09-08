@@ -1100,6 +1100,92 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     ]);
   });
 
+  it("reassign waits for the old assignment before acquiring the order lock", async () => {
+    const database = new DatabaseService();
+    databases.push(database);
+    const candidates = [0, 1].map(() => ({
+      driverId: `driver-lock-${randomUUID()}`,
+      vehicleId: `vehicle-lock-${randomUUID()}`,
+      etaMinutes: 5,
+      operatingArea: "taipei",
+      serviceBuckets: ["standard_taxi"],
+    }));
+    const { service } = createTestService(database, candidates);
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Lock regression", phone: "0911001444" },
+    });
+    trackOrder(order.orderId);
+    const job = await service.dispatchOrder(order.orderId, { mode: "auto" });
+    const previous = await service.assignDispatch({
+      dispatchJobId: job.dispatchJobId,
+      ...candidates[0],
+    });
+    const blocker = await database.connect();
+    let replacement: Promise<unknown> | undefined;
+    try {
+      await blocker.query("BEGIN");
+      const pid = (await blocker.query("SELECT pg_backend_pid() AS pid"))
+        .rows[0].pid;
+      await blocker.query(
+        "SELECT 1 FROM ops.phase1_dispatch_assignments WHERE assignment_id = $1 FOR UPDATE",
+        [previous.assignmentId],
+      );
+      // Attach the rejection handler immediately; assert the result after unlocking.
+      replacement = Promise.resolve(
+        service.reassignDispatch({
+          dispatchJobId: job.dispatchJobId,
+          ...candidates[1],
+          reasonCode: "operator_redispatch",
+        }),
+      ).then(
+        (value) => ({ value }),
+        (error) => ({ error }),
+      );
+      let waiting = false;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const result = await database.query(
+          "SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))",
+          [pid],
+        );
+        if (result.rows.length) {
+          waiting = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(waiting).toBe(true);
+      // A job/order-first reassign would already own this row, producing
+      // a lock timeout or deadlock while we own the old assignment.
+      await blocker.query("SET LOCAL lock_timeout = '500ms'");
+      await blocker.query(
+        "SELECT 1 FROM ops.phase1_owned_orders WHERE order_id = $1 FOR UPDATE",
+        [order.orderId],
+      );
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+    }
+    expect(await replacement).toHaveProperty("value.assignmentId");
+    expect(await readAssignmentStatus(database, previous.assignmentId)).toBe(
+      "cancelled",
+    );
+    expect(
+      await readActiveReservations(database, "driver", candidates[0].driverId),
+    ).toHaveLength(0);
+    expect(
+      await readActiveReservations(database, "driver", candidates[1].driverId),
+    ).toHaveLength(1);
+    expect(
+      await readActiveReservations(
+        database,
+        "vehicle",
+        candidates[1].vehicleId,
+      ),
+    ).toHaveLength(1);
+  });
+
   it("mixed_entry_postgres_race_evidence: passenger and callcenter instances racing for the same driver+vehicle resolve to exactly one winner", async () => {
     expect(DATABASE_URL).toBeTruthy();
     const databaseA = new DatabaseService();
@@ -1780,14 +1866,24 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     });
 
     const early = await service.handleDispatchTimeout(
-      order.orderId, "acceptance_timeout", undefined,
+      order.orderId,
+      "acceptance_timeout",
+      undefined,
       { targetAssignmentId: assignment.assignmentId },
     );
     expect(early.escalationAction).toBe("superseded");
-    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe("assigned");
-    expect(await readActiveReservations(database, "driver", driverId)).toHaveLength(1);
-    expect(await readActiveReservations(database, "vehicle", vehicleId)).toHaveLength(1);
-    const durable = await database.query<{ record: { acceptanceDeadline: string } }>(
+    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
+      "assigned",
+    );
+    expect(
+      await readActiveReservations(database, "driver", driverId),
+    ).toHaveLength(1);
+    expect(
+      await readActiveReservations(database, "vehicle", vehicleId),
+    ).toHaveLength(1);
+    const durable = await database.query<{
+      record: { acceptanceDeadline: string };
+    }>(
       `SELECT record FROM ops.phase1_dispatch_assignments WHERE assignment_id = $1`,
       [assignment.assignmentId],
     );
@@ -1795,27 +1891,76 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     expect(Number.isFinite(deadline)).toBe(true);
     const clock = vi.spyOn(Date, "now").mockReturnValue(deadline + 1);
     try {
-    const result = await service.handleDispatchTimeout(
-      order.orderId,
-      "acceptance_timeout",
-      undefined,
-      { targetAssignmentId: assignment.assignmentId },
-    );
-    expect(result.escalationAction).toBe("retry_dispatch");
+      const result = await service.handleDispatchTimeout(
+        order.orderId,
+        "acceptance_timeout",
+        undefined,
+        { targetAssignmentId: assignment.assignmentId },
+      );
+      expect(result.escalationAction).toBe("retry_dispatch");
 
-    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
-      "cancelled",
-    );
-    expect(
-      await readActiveReservations(database, "driver", driverId),
-    ).toHaveLength(0);
-    expect(
-      await readActiveReservations(database, "vehicle", vehicleId),
-    ).toHaveLength(0);
+      expect(
+        await readAssignmentStatus(database, assignment.assignmentId),
+      ).toBe("cancelled");
+      expect(
+        await readActiveReservations(database, "driver", driverId),
+      ).toHaveLength(0);
+      expect(
+        await readActiveReservations(database, "vehicle", vehicleId),
+      ).toHaveLength(0);
     } finally {
       clock.mockRestore();
     }
   });
+
+  it.each([null, "invalid-date"])(
+    "timeout retains capacity when durable deadline is %s",
+    async (deadline) => {
+      const database = new DatabaseService();
+      databases.push(database);
+      const candidate = {
+        driverId: `driver-deadline-${randomUUID()}`,
+        vehicleId: `vehicle-deadline-${randomUUID()}`,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      };
+      const { service } = createTestService(database, [candidate]);
+      const order = service.createPassengerOrder({
+        pickup: { address: "Taipei Main Station" },
+        dropoff: { address: "Taipei 101" },
+        passenger: { name: "Unknown deadline", phone: "0911001444" },
+      });
+      trackOrder(order.orderId);
+      const job = await service.dispatchOrder(order.orderId, { mode: "auto" });
+      const assignment = await service.assignDispatch({
+        dispatchJobId: job.dispatchJobId,
+        ...candidate,
+      });
+      await database.query(
+        `UPDATE ops.phase1_dispatch_assignments
+       SET record = jsonb_set(record, '{acceptanceDeadline}', $2::jsonb)
+       WHERE assignment_id = $1`,
+        [assignment.assignmentId, JSON.stringify(deadline)],
+      );
+      const result = await service.handleDispatchTimeout(
+        order.orderId,
+        "acceptance_timeout",
+        undefined,
+        { targetAssignmentId: assignment.assignmentId },
+      );
+      expect(result.escalationAction).toBe("superseded");
+      expect(
+        await readAssignmentStatus(database, assignment.assignmentId),
+      ).toBe("assigned");
+      expect(
+        await readActiveReservations(database, "driver", candidate.driverId),
+      ).toHaveLength(1);
+      expect(
+        await readActiveReservations(database, "vehicle", candidate.vehicleId),
+      ).toHaveLength(1);
+    },
+  );
 
   it("a valid cancel atomically persists the cancellation and releases the reservation", async () => {
     expect(DATABASE_URL).toBeTruthy();

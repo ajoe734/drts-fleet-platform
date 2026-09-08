@@ -4337,7 +4337,11 @@ export class OwnedMobilityService
     if (requireExpiredPendingOffer) {
       const deadline = Date.parse(locked.acceptanceDeadline ?? "");
       // Unknown deadlines and inconsistent tasks retain capacity for reconciliation.
-      if (!Number.isFinite(deadline) || Date.now() < deadline || !pendingAcceptance) {
+      if (
+        !Number.isFinite(deadline) ||
+        Date.now() < deadline ||
+        !pendingAcceptance
+      ) {
         return null;
       }
     }
@@ -4366,10 +4370,15 @@ export class OwnedMobilityService
         .withTransaction(async (tx) => {
           // All assignment writers take assignment -> task -> job -> order
           // before any upsert, matching cancellation and completion.
-          const current = await this.ownedMobilityRepository!
-            .loadOrderCancellationForUpdate(tx, order.orderId);
-          if ((current.assignment?.assignmentId ?? null) !==
-              (options?.previousAssignmentId ?? null)) {
+          const current =
+            await this.ownedMobilityRepository!.loadOrderCancellationForUpdate(
+              tx,
+              order.orderId,
+            );
+          if (
+            (current.assignment?.assignmentId ?? null) !==
+            (options?.previousAssignmentId ?? null)
+          ) {
             throw new ApiRequestError(
               HttpStatus.CONFLICT,
               "SUPERSEDED_ASSIGNMENT_ALREADY_CLOSED",
@@ -4380,9 +4389,15 @@ export class OwnedMobilityService
           const currentJob = current.dispatchJobs.find(
             (job) => job.dispatchJobId === dispatchJob.dispatchJobId,
           );
-          if (!currentJob || ["cancelled", "completed"].includes(current.order.status)) {
-            throw new ApiRequestError(HttpStatus.CONFLICT,
-              "DISPATCH_JOB_NOT_ASSIGNABLE", "The dispatch job is no longer active.");
+          if (
+            !currentJob ||
+            ["cancelled", "completed"].includes(current.order.status)
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "DISPATCH_JOB_NOT_ASSIGNABLE",
+              "The dispatch job is no longer active.",
+            );
           }
           order = current.order;
           dispatchJob = currentJob;
@@ -7973,10 +7988,17 @@ export class OwnedMobilityService
 
     if (latestAssignment && !this.ownedMobilityRepository?.isEnabled()) {
       const deadline = Date.parse(latestAssignment.acceptanceDeadline ?? "");
-      if (!Number.isFinite(deadline) || Date.now() < deadline ||
-          latestTask?.status !== "pending_acceptance") {
-        return { orderId, status: order.status, timeoutReasonCode,
-          escalationAction: "superseded" as const };
+      if (
+        !Number.isFinite(deadline) ||
+        Date.now() < deadline ||
+        latestTask?.status !== "pending_acceptance"
+      ) {
+        return {
+          orderId,
+          status: order.status,
+          timeoutReasonCode,
+          escalationAction: "superseded" as const,
+        };
       }
     }
 
@@ -8554,9 +8576,16 @@ export class OwnedMobilityService
     const nextDispatchJob = { ...dispatchJob };
     const taskId = randomUUID();
     const serviceProductCode = this.resolveServiceProductCodeForOrder(order);
-    const acceptanceTimeoutMs = Number(process.env.DISPATCH_ACCEPTANCE_TIMEOUT_MS ?? 60_000);
-    if (!Number.isSafeInteger(acceptanceTimeoutMs) || acceptanceTimeoutMs <= 0) {
-      throw new Error("DISPATCH_ACCEPTANCE_TIMEOUT_MS must be a positive integer");
+    const acceptanceTimeoutMs = Number(
+      process.env.DISPATCH_ACCEPTANCE_TIMEOUT_MS ?? 60_000,
+    );
+    if (
+      !Number.isSafeInteger(acceptanceTimeoutMs) ||
+      acceptanceTimeoutMs <= 0
+    ) {
+      throw new Error(
+        "DISPATCH_ACCEPTANCE_TIMEOUT_MS must be a positive integer",
+      );
     }
     const assignment: DispatchAssignmentRecord = {
       assignmentId: randomUUID(),
@@ -8568,7 +8597,9 @@ export class OwnedMobilityService
       driverId,
       assignmentType: order.fixedPrice ? "fixed_price" : "metered",
       status: "assigned",
-      acceptanceDeadline: new Date(Date.parse(now) + acceptanceTimeoutMs).toISOString(),
+      acceptanceDeadline: new Date(
+        Date.parse(now) + acceptanceTimeoutMs,
+      ).toISOString(),
       acceptedAt: null,
       rejectedAt: null,
       rejectReasonCode: null,
