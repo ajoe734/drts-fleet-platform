@@ -2,6 +2,21 @@
 
 Owner: Codex · Reviewer: Codex2 · 2026-09-08
 
+## P2 review 修正（2026-09-08 本次 dispatch）
+
+- Fresh `origin/dev` base：`e2df37f821ce76d8a3639ceaac6d253299c0a31c`；收到的 rejected candidate：`37f8e25fcacca26aa28c0c6457a6529a3d2f059b`。目前 dev 尚無 `useSupplyDraft`／sessionStorage 恢復邏輯；不把 9/6 audit 當成目前實作真值。
+- `git fetch origin` exit 0。`git rebase origin/dev` exit 1：舊重複提交 a9afdcd94 造成 component 與 evidence 衝突。`git rebase --abort` exit 0，再 `git merge origin/dev --no-edit` exit 0，保留已公開分支歷史與普通 non-force push。無手動編輯 scope 外檔案。
+- 實作 anchor：`4270b0bf392149958b8fd3cc67da76a337a20887`，已普通 push 至 `origin/codex/sr-fleet-form-001`（exit 0）。最終 candidate 包含此 evidence 更新，由 handoff 寫入 exact SHA；PR #1723 保持 OPEN、base dev。
+- 恢復草稿優先採用本 document 最新 memory snapshot，只有不存在時才讀 sessionStorage。成功建立後保留空白 memory snapshot，避免 removeItem 失敗時舊草稿在同一 SPA session 再出現。無 UI、tokens、API 或模型變更。
+- 新增 `draft-storage.test.ts`：從 production component 提取並 transpile 實際 hook，以 hook lifecycle／storage adapters 測試首次持久化恢復、已有舊值且 setItem 失敗後 SPA remount／BFCache return、driver/vehicle key 隔離、clear 後 removeItem 失敗。這是單元層模擬，非真 React DOM／瀏覽器測試。
+- 修正前執行 `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-form-001/draft-storage.test.ts` exit 1：3 tests 中 2 failed；latest 預期值實際為 old，清除預期空值實際為 submitted。
+- 修正後 `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-form-001/` exit 0：2 files、43 tests passed。
+- `pnpm --filter @drts/fleet-partner-portal-web typecheck` exit 0（route typegen + tsc）；`pnpm --filter @drts/fleet-partner-portal-web lint` exit 0；`pnpm exec eslint tests/unit/system-remediation/sr-fleet-form-001/ --max-warnings=0` exit 0；`git diff --check` 與 `git diff --check origin/dev HEAD` exit 0。
+- 本輪未重跑 production build、瀏覽器、live API、真機或讀屏；以下 browser/build 數據為上一輪 candidate 歷史證據，不冒充本輪結果。Live resource ID：無；測試使用 driver／vehicle storage keys，未建立供給資源。memory fallback 仍不能跨整頁 reload，在 storage 不可用時依既有 beforeunload 提醒。
+- 等待 Codex2 exact-candidate 獨立 review 與同 SHA CI／merge；owner 不呼叫 done。
+
+## 上一輪歷史證據
+
 ## 來源與版本
 
 - Base: `d44bd28142f238ef9d40507685a9423ef5c814f7`，本輪 `git fetch origin` 後的 `origin/dev`；已執行 `git rebase origin/dev`（exit 0）。9/6 audit 僅作問題來源。
