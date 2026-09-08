@@ -51,6 +51,10 @@
 
 `tenant-invitation-delivery.service.test.ts`（10 tests，round 1／round 2 均通过）覆盖：真正送达并回报 `sent`＋`providerMessageId`＋token 只出现在 transport payload、进程重启后的幂等重试不重新调用 transport、幂等 key 按 tenant 隔离、provider 未设定时回报 `unavailable`／默认建构子回报 `unavailable`、provider 永久拒绝回报 `failed` 且停止重试、无效收件地址回报有界 error code 且不调用 transport、任意例外内容（含 raw token）不会外泄进 delivery record、`listDeliveries()` 回传的是拷贝且最新在前。
 
+### Codex handoff verification — 2026-09-08 UTC（base `70355aba9`）
+
+在指定 worktree、`codex/sr-mail-001` 上重新执行：`git diff --check`（exit 0）、`pnpm --filter @drts/api typecheck`（exit 0）、`pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/`（exit 0；2 files / 13 tests passed）、以及 `pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts`（exit 0；2 files / 77 tests passed）。本轮还新增断言：储存／transport 任意异常即使包含 raw token，返回 record 和 warning log 都不会包含该 token。
+
 ## 未做的 live／真机部分
 
 - 没有像 `SR-NOTIFY-001.md` 那样另外起一个真实 Mailpit container 做 SMTP/HTTP 层的收件证据——本任务范围是 tenant-invitation adapter 是否正确、诚实地使用 SR-NOTIFY-001 已验收的共用核心，SMTP transport 本身的真实收发证据由 `SR-NOTIFY-001` 承担，这里不重做。
