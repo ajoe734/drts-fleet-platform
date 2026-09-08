@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import {
   assertConfirmationCoverage,
   type ConfirmationBinding,
@@ -68,6 +69,31 @@ export class ConfirmedRecordingManifests {
       manifest.confirmationReceipt ?? null,
       binding,
     );
+    return manifest;
+  }
+
+  /** API admission rechecks authenticated ledger provenance, even when the
+   * supplied object has a valid checksum and a plausible embedded receipt. */
+  async readTrusted(
+    credential: string,
+    binding: ConfirmationBinding,
+    ref: RecordingManifestRef,
+  ): Promise<Readonly<RecordingManifest>> {
+    binding = snapshotBinding(binding);
+    ref = Object.freeze({ ...ref });
+    const manifest = await this.read(binding, ref);
+    let receipt: RecordedConfirmationReceipt | null;
+    try {
+      receipt = await this.ledger.resolve(credential, binding);
+    } catch {
+      throw new RecordingEvidenceError(
+        "Trusted confirmation ledger unavailable",
+      );
+    }
+    assertConfirmationCoverage(manifest, receipt, binding);
+    if (!isDeepStrictEqual(receipt, manifest.confirmationReceipt)) {
+      throw new RecordingEvidenceError("Confirmation ledger mismatch");
+    }
     return manifest;
   }
 }

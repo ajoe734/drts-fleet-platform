@@ -4,6 +4,8 @@ import { DatabaseModule } from "../../common/db";
 import { VoiceBookingAuthorizationService } from "./voice-booking-authorization.service";
 import { VoiceBookingRepository } from "./voice-booking.repository";
 import { VoiceLineScopeService } from "./voice-line-scope.service";
+import { VoiceCheckpointRepository } from "./voice-checkpoint.repository";
+import { VoiceEvidenceService } from "./voice-evidence.service";
 
 /**
  * UV-EXEC-003 built VoiceBookingRepository/VoiceBookingAuthorizationService/
@@ -16,11 +18,14 @@ import { VoiceLineScopeService } from "./voice-line-scope.service";
 @Module({
   imports: [DatabaseModule],
   providers: [
+    VoiceCheckpointRepository,
+    VoiceEvidenceService,
     VoiceBookingRepository,
     VoiceBookingAuthorizationService,
     VoiceLineScopeService,
   ],
   exports: [
+    VoiceEvidenceService,
     VoiceBookingRepository,
     VoiceBookingAuthorizationService,
     VoiceLineScopeService,
