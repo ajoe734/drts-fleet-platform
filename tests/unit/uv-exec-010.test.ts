@@ -10,9 +10,12 @@ import type { VoiceBookingRepository } from "../../apps/api/src/modules/voice-bo
 import type { VoiceSessionRepository } from "../../apps/api/src/modules/voice-booking/voice-session.repository";
 import {
   VoiceEvidenceService,
+  type RecordingManifestView,
   type RecordingObjectReadbackVerifier,
   type SealedRecordingSegmentInput,
 } from "../../apps/api/src/modules/voice-booking/voice-evidence.service";
+import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
+import type { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import {
   CallRecorderSession,
   type RecordingFrameInput,
@@ -482,6 +485,27 @@ describe("VoiceEvidenceService", () => {
         service.finalizeRecording(CALL_ID, RECORDING_ID),
       ).rejects.toThrow(ApiRequestError);
     });
+
+    it("denies not_verified when a checkpoint exists but verifiedAt is null", async () => {
+      fixture.insert({
+        callId: CALL_ID,
+        recordingId: RECORDING_ID,
+        manifestVersion: 1,
+        manifest: { policyVersion: "v1", final: false, segments: [] },
+        manifestHash: "hash-unverified",
+        coverage: {
+          channelsCovered: ["customer", "agent"],
+          continuityBroken: false,
+          coverageStartUtc: "2026-09-08T00:00:00.000Z",
+          coverageEndUtc: "2026-09-08T00:00:01.000Z",
+          segmentCount: 1,
+        },
+        policyVersion: "voice-recording-evidence-v1",
+        verifiedAt: null,
+      });
+      const gate = await service.evaluateRecordingGate(CALL_ID, RECORDING_ID);
+      expect(gate).toEqual({ allowed: false, reason: "not_verified" });
+    });
   });
 
   describe("out-of-order / duplicate / conflicting segment reports never rewrite established evidence", () => {
@@ -757,6 +781,322 @@ describe("VoiceEvidenceService", () => {
           proof,
         }),
       ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a speech proof whose ASR final event occurred outside the coverage window", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+        }),
+        sessionEvent({
+          eventId: "asr-final-event",
+          eventType: "asr.segment.final",
+          sequence: 2,
+          // Outside coverage window ("2026-09-08T00:00:00.000Z" to "2026-09-08T00:00:01.000Z")
+          occurredAt: "2026-09-08T00:00:05.000Z",
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a speech proof whose readback completed event occurred outside the coverage window", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          // Before coverage start
+          occurredAt: "2026-09-07T23:59:59.000Z",
+        }),
+        sessionEvent({
+          eventId: "asr-final-event",
+          eventType: "asr.segment.final",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:00.600Z",
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "asr-final-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a DTMF proof whose digit event occurred outside the coverage window", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+        }),
+        sessionEvent({
+          eventId: "dtmf-event",
+          eventType: "dtmf.received",
+          sequence: 2,
+          occurredAt: "2026-09-08T00:00:02.500Z",
+          payload: { digit: "1" },
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "dtmf" as const,
+        evidence: { eventId: "dtmf-event", digit: "1" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a speech proof when the ASR final event is not found in session events", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "speech" as const,
+        evidence: { turnId: "55555555-5555-4555-8555-555555555555", finalEventId: "nonexistent-asr-event" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+
+    it("rejects a DTMF proof when the digit event is not found in session events", async () => {
+      const checkpoint = await seedVerifiedCheckpoint();
+      fixture.seedEvents(VOICE_SESSION_ID, [
+        sessionEvent({
+          eventId: "readback-event",
+          eventType: "tts.playback.completed",
+          sequence: 1,
+          occurredAt: "2026-09-08T00:00:00.400Z",
+        }),
+      ]);
+
+      const proof = {
+        ...baseProofFields(checkpoint.checkpointId),
+        confirmationMethod: "dtmf" as const,
+        evidence: { eventId: "nonexistent-dtmf-event", digit: "1" },
+      };
+
+      await expect(
+        service.assertProofIsRecordingBacked({
+          callId: CALL_ID,
+          recordingId: RECORDING_ID,
+          proof,
+        }),
+      ).rejects.toThrow(ApiRequestError);
+    });
+  });
+
+  describe("recording manifest retrieval (recording_manifest_retrieval_evidence)", () => {
+    it("returns null when no checkpoint exists for the call", async () => {
+      const checkpoint = await service.getLatestRecordingCheckpoint("call-nonexistent");
+      expect(checkpoint).toBeNull();
+      const manifest = await service.getRecordingManifest("call-nonexistent");
+      expect(manifest).toBeNull();
+    });
+
+    it("returns null when the checkpoint belongs to a different recordingId chain", async () => {
+      await service.ingestSealedSegment(segment());
+      const checkpoint = await service.getLatestRecordingCheckpoint(CALL_ID, "other-recording");
+      expect(checkpoint).toBeNull();
+      const manifest = await service.getRecordingManifest(CALL_ID, "other-recording");
+      expect(manifest).toBeNull();
+    });
+
+    it("retrieves the active recording manifest with all sealed segments and verified metadata", async () => {
+      await service.ingestSealedSegment(segment());
+      await service.ingestSealedSegment(
+        segment({
+          segmentSequence: 2,
+          objectKey: `${CALL_ID}/${RECORDING_ID}/segments/000002`,
+          checksum: "checksum-2",
+          startOffsetMs: 1000,
+          endOffsetMs: 2000,
+          startedAtUtc: "2026-09-08T00:00:01.000Z",
+          endedAtUtc: "2026-09-08T00:00:02.000Z",
+          durableAt: "2026-09-08T00:00:02.100Z",
+        }),
+      );
+
+      const manifestView = await service.getRecordingManifest(CALL_ID, RECORDING_ID);
+      expect(manifestView).not.toBeNull();
+      expect(manifestView!.final).toBe(false);
+      expect(manifestView!.manifestVersion).toBe(2);
+      expect(manifestView!.segments).toHaveLength(2);
+      expect(manifestView!.segments[0]!.segmentSequence).toBe(1);
+      expect(manifestView!.segments[1]!.segmentSequence).toBe(2);
+      expect(manifestView!.manifestHash).toBeDefined();
+      expect(manifestView!.coverage.segmentCount).toBe(2);
+      expect(manifestView!.coverage.continuityBroken).toBe(false);
+      expect(manifestView!.verifiedAt).toBeDefined();
+    });
+
+    it("retrieves the final manifest marked final: true after full-call finalization", async () => {
+      await service.ingestSealedSegment(segment());
+      await service.finalizeRecording(CALL_ID, RECORDING_ID);
+
+      const manifestView = await service.getRecordingManifest(CALL_ID, RECORDING_ID);
+      expect(manifestView).not.toBeNull();
+      expect(manifestView!.final).toBe(true);
+      expect(manifestView!.manifestVersion).toBe(2);
+      expect(manifestView!.segments).toHaveLength(1);
+    });
+  });
+
+  describe("callback compatibility & legacy isolation (callback_compatibility_evidence)", () => {
+    function createMockCallcenterService(): CallcenterService {
+      const mockAuditService: Partial<AuditNotificationService> = {
+        recordAuditLog: vi.fn(),
+        notifyEvent: vi.fn(),
+      };
+      return new CallcenterService(mockAuditService as AuditNotificationService);
+    }
+
+    it("legacy callcenter recording callback cannot flip the voice recording gate without durable evidence", async () => {
+      const callcenter = createMockCallcenterService();
+      const legacySession = callcenter.openCallSession({
+        callerPhone: "0912345678",
+        callType: "inbound",
+        agentId: "agent-test",
+      });
+
+      // Callcenter attaches an arbitrary recordingId via legacy callback.
+      callcenter.attachRecordingCallback(legacySession.callId, {
+        recordingId: "arbitrary-rec-id-999",
+        recordingUrl: "https://example.com/recording.wav",
+      });
+
+      // SD §8.1: 不得呼叫既有 recording callback，填任意 recordingId 把 gate 翻成 clear.
+      const gate = await service.evaluateRecordingGate(legacySession.callId, "arbitrary-rec-id-999");
+      expect(gate.allowed).toBe(false);
+      expect(gate).toEqual({ allowed: false, reason: "no_checkpoint" });
+    });
+
+    it("legacy callcenter markRecordingFailed does not erase or mutate established immutable voice checkpoints", async () => {
+      const callcenter = createMockCallcenterService();
+      const legacySession = callcenter.openCallSession({
+        callerPhone: "0912345678",
+        callType: "inbound",
+        agentId: "agent-test",
+      });
+
+      // A voice session creates a durable, verified checkpoint for this call.
+      const { checkpoint } = await service.ingestSealedSegment(
+        segment({ callId: legacySession.callId }),
+      );
+
+      // Legacy callcenter receives a failure callback later (e.g. timeout on post-call processing).
+      callcenter.markRecordingFailed(legacySession.callId, {
+        endedAt: "2026-09-08T00:05:00.000Z",
+      });
+
+      // SD §8.4: 已驗證 checkpoint refs 不因後半段失敗或舊 pending callback 被清除。
+      const gate = await service.evaluateRecordingGate(legacySession.callId, RECORDING_ID);
+      expect(gate.allowed).toBe(true);
+      if (gate.allowed) {
+        expect(gate.checkpoint.checkpointId).toBe(checkpoint.checkpointId);
+        expect(gate.state).toBe("checkpoint_ready");
+      }
+      expect(fixture.checkpoints).toHaveLength(1);
+    });
+
+    it("legacy callcenter markRecordingPending does not mutate existing voice checkpoints", async () => {
+      const callcenter = createMockCallcenterService();
+      const legacySession = callcenter.openCallSession({
+        callerPhone: "0912345678",
+        callType: "inbound",
+        agentId: "agent-test",
+      });
+
+      await service.ingestSealedSegment(
+        segment({ callId: legacySession.callId }),
+      );
+
+      // Legacy callcenter receives a recording.pending event.
+      callcenter.markRecordingPending(legacySession.callId);
+
+      const manifestView = await service.getRecordingManifest(legacySession.callId, RECORDING_ID);
+      expect(manifestView).not.toBeNull();
+      expect(manifestView!.segments).toHaveLength(1);
+    });
+
+    it("post-commit mid-trip recording failure preserves existing sealed checkpoints and manifests (SD §8.3)", async () => {
+      // Phase 1: Confirmation checkpoint established and verified.
+      await service.ingestSealedSegment(segment());
+      const gateBefore = await service.evaluateRecordingGate(CALL_ID, RECORDING_ID);
+      expect(gateBefore.allowed).toBe(true);
+
+      // Phase 2: Mid-trip audio stream is interrupted or fails object store put.
+      // SD §8.3: commit 後後半段錄音失敗...保存已封閉證據、阻止尚未執行的額外 mutation.
+      verifier.unreadableKeys.add(`${CALL_ID}/${RECORDING_ID}/segments/000002`);
+      await expect(
+        service.ingestSealedSegment(
+          segment({
+            segmentSequence: 2,
+            objectKey: `${CALL_ID}/${RECORDING_ID}/segments/000002`,
+            checksum: "checksum-corrupted",
+            startOffsetMs: 1000,
+            endOffsetMs: 2000,
+          }),
+        ),
+      ).rejects.toThrow(ApiRequestError);
+
+      // The prior confirmed evidence remains fully intact and verifiable.
+      const manifestView = await service.getRecordingManifest(CALL_ID, RECORDING_ID);
+      expect(manifestView).not.toBeNull();
+      expect(manifestView!.manifestVersion).toBe(1);
+      expect(manifestView!.segments).toHaveLength(1);
+
+      const gateAfter = await service.evaluateRecordingGate(CALL_ID, RECORDING_ID);
+      expect(gateAfter.allowed).toBe(true);
     });
   });
 });

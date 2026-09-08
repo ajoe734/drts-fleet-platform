@@ -86,21 +86,34 @@ export interface RecordingObjectReadbackVerifier {
   }): Promise<{ readable: boolean; checksumMatches: boolean }>;
 }
 
-type RecordingManifestSegment = SealedRecordingSegmentInput;
+export type RecordingManifestSegment = SealedRecordingSegmentInput;
 
-interface RecordingManifest {
+export interface RecordingManifest {
   policyVersion: string;
   final: boolean;
   segments: RecordingManifestSegment[];
 }
 
-interface RecordingCoverage {
+export interface RecordingCoverage {
   channelsCovered: RecordingSegmentChannel[];
   /** Sticky once set: a lost gap can never be un-lost by a later good segment. */
   continuityBroken: boolean;
   coverageStartUtc: string | null;
   coverageEndUtc: string | null;
   segmentCount: number;
+}
+
+export interface RecordingManifestView {
+  checkpointId: string;
+  callId: string;
+  recordingId: string | null;
+  manifestVersion: number;
+  manifestHash: string;
+  policyVersion: string;
+  final: boolean;
+  segments: readonly SealedRecordingSegmentInput[];
+  coverage: RecordingCoverage;
+  verifiedAt: string | null;
 }
 
 export const RECORDING_EVIDENCE_POLICY_VERSION = "voice-recording-evidence-v1";
@@ -479,6 +492,61 @@ export class VoiceEvidenceService {
         `The ${label} event falls outside the durable recording coverage window.`,
       );
     }
+  }
+
+  /**
+   * SD §8.2 / SD §9.1: Retrieves the latest recording checkpoint record for the call.
+   * If a specific `recordingId` is requested, confirms the latest checkpoint
+   * belongs to that active recording chain.
+   */
+  async getLatestRecordingCheckpoint(
+    callId: string,
+    recordingId?: string | null,
+  ): Promise<VoiceRecordingCheckpointRecord | null> {
+    const latestForCall =
+      await this.bookingRepository.findLatestRecordingCheckpointForCall(callId);
+    if (!latestForCall) {
+      return null;
+    }
+    if (
+      recordingId !== undefined &&
+      recordingId !== null &&
+      latestForCall.recordingId !== recordingId
+    ) {
+      return null;
+    }
+    return latestForCall;
+  }
+
+  /**
+   * Retrieves the immutable recording manifest and verification metadata for audit,
+   * inspection, or evidentiary readback (SD §8.2 / §9.1).
+   */
+  async getRecordingManifest(
+    callId: string,
+    recordingId?: string | null,
+  ): Promise<RecordingManifestView | null> {
+    const checkpoint = await this.getLatestRecordingCheckpoint(
+      callId,
+      recordingId,
+    );
+    if (!checkpoint) {
+      return null;
+    }
+    const manifest = checkpoint.manifest as RecordingManifest;
+    const coverage = checkpoint.coverage as RecordingCoverage;
+    return {
+      checkpointId: checkpoint.checkpointId,
+      callId: checkpoint.callId,
+      recordingId: checkpoint.recordingId,
+      manifestVersion: checkpoint.manifestVersion,
+      manifestHash: checkpoint.manifestHash,
+      policyVersion: checkpoint.policyVersion,
+      final: Boolean(manifest.final),
+      segments: manifest.segments,
+      coverage,
+      verifiedAt: checkpoint.verifiedAt,
+    };
   }
 
   /**
