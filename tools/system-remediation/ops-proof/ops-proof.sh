@@ -75,14 +75,20 @@ NODE
   restore)
     [[ -f "$snapshot" ]] || die "--snapshot must name an existing PostgreSQL dump"
     [[ "$isolated_database_url" =~ ^postgres(ql)?:// ]] || die "isolated database URL must use postgres:// or postgresql://"
+    # libpq accepts query parameters such as host/service/dbname that can
+    # override the authority checked below. Never forward those overrides.
+    [[ "$isolated_database_url" != *'?'* && "$isolated_database_url" != *'#'* && "$isolated_database_url" != *'%'* ]] || die "restore URL must not contain query, fragment, or percent-encoded overrides"
+    [[ -z "${PGSERVICE:-}" && -z "${PGOPTIONS:-}" ]] || die "PGSERVICE and PGOPTIONS must be unset for isolated restore"
     target_host="$(node -e 'console.log(new URL(process.argv[1]).hostname)' "$isolated_database_url")"
     target_database="$(node -e 'console.log(new URL(process.argv[1]).pathname.slice(1))' "$isolated_database_url")"
     [[ "$target_host" == "localhost" || "$target_host" == "127.0.0.1" || "$target_host" == "::1" ]] || die "restore target host must be loopback, never a shared or production database"
     [[ "$target_database" =~ ^drts_ops_proof_[a-z0-9_]+$ ]] || die "restore target database must match drts_ops_proof_*"
     command -v pg_restore >/dev/null || die "pg_restore is required for an actual restore"
     command -v psql >/dev/null || die "psql is required for restore readback"
-    pg_restore --clean --if-exists --no-owner --no-privileges --dbname="$isolated_database_url" "$snapshot"
-    counts="$(psql "$isolated_database_url" --no-align --tuples-only --set ON_ERROR_STOP=1 -c "SELECT json_build_object('trips', (SELECT count(*) FROM ops.orders), 'billing', (SELECT count(*) FROM billing.driver_statements), 'audit', (SELECT count(*) FROM admin.audit_logs))::text")"
+    existing_relations="$(psql -X "$isolated_database_url" --no-align --tuples-only --set ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp%'")"
+    [[ "$existing_relations" == "0" ]] || die "restore requires an empty disposable database; refusing to overwrite existing relations"
+    pg_restore --exit-on-error --single-transaction --no-owner --no-privileges --dbname="$isolated_database_url" "$snapshot"
+    counts="$(psql -X "$isolated_database_url" --no-align --tuples-only --set ON_ERROR_STOP=1 -c "SELECT json_build_object('trips', (SELECT count(*) FROM ops.orders), 'billing', (SELECT count(*) FROM billing.driver_statements), 'audit', (SELECT count(*) FROM admin.audit_logs))::text")"
     snapshot_sha256="$(sha256sum "$snapshot" | awk '{print $1}')"
     write_json "$(node - "$base_sha" "$candidate_sha" "$now" "$target_database" "$snapshot_sha256" "$counts" <<'NODE'
 const [baseSha, candidateSha, observedAt, database, snapshotSha256, readback] = process.argv.slice(2);
@@ -103,7 +109,7 @@ NODE
     for workload in booking dispatch report; do
       url_var="${workload}_url"; url="${!url_var}"
       for ((i=1; i<=requests; i++)); do
-        curl_args=(--silent --show-error --output /dev/null --write-out '%{http_code} %{time_total}')
+        curl_args=(--disable --noproxy '*' --proto '=http,https' --connect-timeout 5 --max-time 30 --silent --show-error --output /dev/null --write-out '%{http_code} %{time_total}')
         for header in "${headers[@]}"; do curl_args+=(--header "$header"); done
         set +e
         raw="$(curl "${curl_args[@]}" "$url" 2>&1)"; exit_code=$?
