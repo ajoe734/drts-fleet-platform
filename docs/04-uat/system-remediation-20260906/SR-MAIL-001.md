@@ -1,7 +1,7 @@
 # SR-MAIL-001 — 租戶邀請信真正交付並修正 delivered 語義
 
-- Owner: `Claude`；independent reviewer: `Claude2`。
-- Branch: `claude/sr-mail-001`。
+- Owner: `Codex`；independent reviewer: `Claude`。
+- Branch: `codex/sr-mail-001`。
 - Base（`git fetch origin` 後 `origin/dev` HEAD，round 2 rebase 後）: `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`（round 1 原始 base：`650e233bb1c35269852c291ef892d25967380c12`）。
 - 依賴：`SR-NOTIFY-001`（`NotificationDeliveryService` 共用耐久郵件核心，已 merge）、`SR-REFERRAL-001`（皆已 done）。
 
@@ -14,7 +14,7 @@
 - `TenantInvitationDeliveryService` 改為注入（`@Optional`）SR-NOTIFY-001 的 `NotificationDeliveryService`；`send()` 一律回傳 `{ status: "sent" | "failed" | "unavailable", sentAt, providerMessageId, errorCode, retryable, ... }`，**从不 throw**，也从不在没有 provider acknowledgement 时回报 `sent`。
 - Idempotency key 固定為 `tenant-invitation:${invitationId}`，与 `tenantId` 一并交给 `NotificationDeliveryService.enqueue`；同一 invitation 的重寄／进程重启重试会拿回同一笔 durable receipt 而不会重新調用 transport（见下方测试 2/3）。
 - `tenant-partner.service.ts` 的 `issueTenantInvitation` 移除了「送出不 throw 就等于 delivered」的旧逻辑，改成 `deliveryStatus: delivery.status === "sent" ? "delivered" : "delivery_failed"`；`resendTenantInvitation` 沿用既有的「撤销未接受的旧 invitation」逻辑（不是本次新增，這裡只是重新验证行为未被破坏）。
-- 原始 one-time token（`rawToken`）只在 `buildInvitationEmailBody()` 组出的邮件正文里出现一次，交给 transport payload；不写入任何 log、也不出现在 `TenantInvitationDeliveryRecord` / HTTP response 里（见测试 "keeps ... rawToken ... out of the returned delivery record" 与 "not.toHaveProperty(rawToken)"）。
+- 原始 one-time token（`rawToken`）只在 `buildInvitationEmailBody()` 组出的邮件正文里出现一次，交给 transport payload；不写入任何 log、也不出现在 `TenantInvitationDeliveryRecord` / HTTP response 里（见测试 "keeps ... rawToken ... out of the returned delivery record" 与 "not.toHaveProperty(rawToken)"）。异常日志只记录经白名单过滤的 error code。
 - 缺少 provider 设定（`NOTIFICATION_OUTBOX_DIRECTORY` 未设置）时，`tenant-partner.module.ts` 让 `NotificationDeliveryService` provider 解析成 `null`，`TenantInvitationDeliveryService` 明確回报 `unavailable`，不阻断模块 bootstrap、也不假装 delivered。
 - Provider 失败（无效收件地址、transport 抛出、outbox 存储异常）一律回报 `status: "failed", sentAt: null`，並保留 `retryable`；invitation 仍可被 `resendTenantInvitation` 重新送出。
 
@@ -63,8 +63,8 @@
 
 ```bash
 CANDIDATE_SHA=$(git rev-parse HEAD) CANDIDATE_BRANCH=$(git branch --show-current) \
-AI_NAME=Claude /home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh \
-  handoff SR-MAIL-001 Claude2 "见本文件与 candidate diff"
+AI_NAME=Codex /home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh \
+  handoff SR-MAIL-001 Claude "见本文件与 candidate diff"
 ```
 
 精确 candidate SHA、branch、reviewer 与 state 以 `ai-status.sh show SR-MAIL-001` 读回。独立 review、同 candidate CI／merge 及 required_acceptance 完备后才可结案；round 1 记录的两个既有缺口（typecheck 语音功能线错误、`packages/contracts` 缺 `zod`）已在 round 2 base 上确认修复，reviewer 应重点确认：(1) rebase 后 diff 仍只有预期 3 个档案、无额外改动混入；(2) `tenant-invitation-delivery-status.test.ts` 的 13 test 全绿是本次首次真正执行的结果，覆盖 acceptance 中「舊／撤銷／過期token拒絕」與「provider失败/重启/重复send可恢復且不假delivered」两项。
