@@ -339,3 +339,42 @@ unchanged from the earlier evidence, executed from `apps/api` for Vitest.
 conflicts while replaying 47 commits. It was aborted, then `origin/dev` was
 merged cleanly to preserve the published task history and permit a normal
 non-force push. Review, CI, merge and external acceptance remain pending.
+
+## Resumed dispatch and CI repair (2026-09-08 18:16 UTC)
+
+Supervisor fallback again assigned Codex owner and Codex2 reviewer; dependencies
+UV-EXEC-004 and UV-EXEC-005 are done. PR #1799 delivered history-repair guidance,
+not the parent implementation. This dispatch explicitly provisioned the original
+`codex/uv-exec-006` branch. The prescribed rebase was attempted, hit duplicate
+implementation replay conflicts, and was aborted. A clean merge of current dev
+`74ffe8912` preserved the published parent ancestry and allowed a normal push
+on the assigned branch. No reset, force push, or stash was used.
+
+The writer search still finds OwnedMobilityRepository as the assignment writer
+and reporting as a reader. Existing transactional reservation implementation
+and V0090/V0091 guards were preserved. Review of prior failed CI runs
+34254156596 and 34254156593 identified two actionable regressions:
+
+- Root tenant isolation and webhook tests did not await the now asynchronous
+  cancellation method. Both now await it; the reporting integration cancellation
+  caller also awaits completion before rebuilding its projection.
+- Task cancellation records closure in `completedAt`. Reporting must only use
+  this timestamp as a trip completion fallback when the task is `completed`.
+  The existing same-millisecond redispatch/cancellation regression retains its
+  expectation that a cancelled unstarted trip has no trip completion time.
+  This requires the precise additional source scope
+  `apps/api/src/modules/reporting/reporting.service.ts`, plus its existing
+  integration test and `tests/unit/owned-mobility.test.ts`.
+
+Fresh local checks:
+
+- Isolated PostgreSQL `uv_exec_006_codex`: required reservation suite **58/58**.
+- Five owned-mobility/multi-taxi API unit suites: **164/164**.
+- Root `tests/unit/owned-mobility.test.ts`: **37/37**, no unhandled rejection.
+- API reporting service unit and daily dispatch integration suites: **9/9**.
+- API typecheck after contracts build, and `git diff --check`: passed.
+
+The required reservation command is run from `apps/api`, with DATABASE_URL
+pointing to the isolated migrated database. The other targeted checks use the
+same Vitest commands and paths described above. These are owner verification
+results; fresh same-candidate review, CI, merge and acceptance are still required.
