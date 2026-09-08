@@ -77,7 +77,7 @@ function codeOf(call: () => unknown): string {
   throw new Error("expected the call to throw");
 }
 
-async function asyncCodeOf(call: () => Promise<unknown>): Promise<string> {
+async function asyncCodeOf(call: () => unknown): Promise<string> {
   try {
     await call();
   } catch (error) {
