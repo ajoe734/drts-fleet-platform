@@ -81,6 +81,25 @@ test("SR-QA-WEBHOOK-001: controlled HTTP service regression", async () => {
       );
     }
     recorder.recordConsole("info", dbOutput);
+    const authEvidencePath = path.resolve(__dirname, "evidence-auth-http.json");
+    const authOutput = execFileSync(
+      "bash",
+      ["tests/unit/system-remediation/sr-qa-webhook-001/run-auth-http.sh"],
+      {
+        cwd: process.cwd(),
+        timeout: 45_000,
+        encoding: "utf8",
+        env: { ...process.env, DRTS_WEBHOOK_AUTH_EVIDENCE: authEvidencePath },
+      },
+    );
+    const authEvidence = JSON.parse(readFileSync(authEvidencePath, "utf8"));
+    expect(authEvidence.databaseUnchanged).toBe(true);
+    recorder.recordResourceId(
+      "auth_http_acceptance",
+      authEvidence.apiKeyId,
+      authEvidence,
+    );
+    recorder.recordConsole("info", authOutput);
 
     recorder.recordConsole(
       "info",
@@ -88,7 +107,7 @@ test("SR-QA-WEBHOOK-001: controlled HTTP service regression", async () => {
     );
     recorder.recordLiveLimitation(
       "C111-C112",
-      "Authenticated HTTP API and default transport timeout remain unverified. SIGKILL/new OS process recovery passed. Local DB readback, service reinitialization, automatic retry and outbox deduplication passed.",
+      "Local HTTP bearer read, anonymous/scope/missing-step-up rejection and unchanged DB passed. Successful HTTP mutation, full AppModule tenant middleware, deployed authentication and default transport timeout remain unverified. SIGKILL/new OS process recovery passed.",
     );
     recorder.recordLiveLimitation(
       "C113",
