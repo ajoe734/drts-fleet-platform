@@ -2,6 +2,47 @@
 
 ## 2026-09-08 Codex2 dispatch audit — blocked, no candidate
 
+### Dispatch after history-helper resume — planning routing reviewed, scope not granted
+
+- `git fetch origin`: exit 0; base remains `d4f54ef94e059a981bf2be1f7b944e815870e117`.
+- Local and remote task head at inspection: `9e84a1b6528e9584860813ce1dd08dbed6faf75b`.
+  `git merge-base --is-ancestor origin/dev HEAD`: exit 0; no rebase needed.
+- Canonical `show SR-ADMIN-ADAPTER-001-UNBLOCK-PLANNING-DECISION`: exit 0;
+  status `integrating`, reviewed candidate `8490b17a027b1b3947643b46ac87b68fe7a4b5f8`,
+  PR #1820, CI running at read time. Its report was read from the remote helper
+  branch. It explicitly routes supervisor action; neither its review nor merge
+  grants scope expansion or reduces parent acceptance.
+- Parent `show`: exit 0; repository, migration and shared contracts still absent
+  from write scopes; dependencies still empty. Owner resumed via `start` (exit 0).
+- Source inspection reconfirms runtime DDL, static Map authority, swallowed SQL
+  errors and flash-only `queueGovernedAction`; these require the existing routing
+  follow-up, not another history helper.
+
+#### Screen requirements for the existing supervisor follow-up
+
+Read `docs/05-ui/drts-design-canvas/platform-screens-2.jsx` lines 368–411 and
+searched the current `platform*.jsx` canvases. The registry canvas specifies
+list cards, warning banner and action buttons, but supplies no adapter-specific
+registration/configuration/credential form screen. The referral credential
+screens concern a different resource and do not authorize substituting a design.
+Q-ADM17 supplies role authority, not those missing form layouts.
+
+The design follow-up must supply the registration/configuration fields and
+validation layout; credential edit/rotation entry and secret handling; required
+reason/confirmation and server receipt presentation; pending, rejected,
+unavailable and successful readback states. It must preserve platform-admin
+configuration authority and ops TTL boundaries. Reviewed contract fields and
+expiry boundary policy must accompany that design; this note does not invent them.
+Under the dispatch canvas rule, UI implementation stops pending those screens.
+The inherited registration modal is not accepted merely because it exists.
+
+No product files changed in this dispatch. The unchanged source and dependency
+symlink do not justify relabeling or repeating the immediately preceding checks;
+their actual 38-test pass and typecheck failures remain recorded below. No new
+HTTP/browser/database/live/resource validation was performed; no product candidate
+is nominated. Supervisor must execute the four routing actions in the reviewed
+planning report and record scope/dependencies before redispatching shared writes.
+
 ### Resumed dispatch at 18:49 UTC — history resolved; planning still pending
 
 This rerun supersedes the earlier passing typecheck results for this workspace.
