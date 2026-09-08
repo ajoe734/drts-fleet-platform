@@ -4,17 +4,16 @@
 // `/api/fleet-partner/*` endpoints exposed by `@drts/api-client`. Each page
 // calls one `load*()` accessor here; the accessor fetches partner-scoped data
 // through `getServerFleetPartnerClient()`, maps the contract records into the
-// display shapes the pages already render, and — only when the endpoint is
-// unavailable or errors — gracefully falls back to the design fixtures (the
-// ops-detail fallback pattern). A reachable endpoint that returns an empty
-// list is legitimate zero data and is rendered live (empty), not replaced with
-// demo rows. The `source` flag lets a page show the "design data" notice only
-// when it is actually showing fixtures.
+// display shapes the pages already render. A reachable endpoint that returns
+// an empty list is legitimate zero data and is rendered live (empty), not
+// replaced with demo rows. A read error returns no operational rows plus an
+// error value, so callers never render fabricated operational statistics.
 //
 // Endpoint coverage (DH-FLP-BE-CLIENT): dashboard, drivers, vehicles, trips,
 // quality-metrics, statements (+ revenue, derived from the latest statement).
-// The cases / documents / training views have no fleet-partner endpoint yet,
-// so their loaders return fixtures with `source: "fallback"` until a
+// The cases / documents / training views have no fleet-partner endpoint yet.
+// Cases and training therefore explicitly return an unintegrated empty state;
+// the documents view remains a separate legacy design-fixture surface until a
 // dedicated endpoint ships.
 //
 // Field gaps: the portal contracts intentionally do not yet surface every
@@ -27,6 +26,7 @@ import "server-only";
 
 import type {
   DriverWorkState,
+  FleetPartnerPortalDashboardRecord,
   FleetPartnerPortalDriverRecord,
   FleetPartnerPortalQualityMetricsRecord,
   FleetPartnerPortalTripRecord,
@@ -37,33 +37,249 @@ import type {
 } from "@drts/contracts";
 
 import { getServerFleetPartnerClient } from "./api-client.server";
-import {
-  FX_DASHBOARD_ATTENTION,
-  FX_DASHBOARD_SUPPLEMENTAL,
-  FX_DASHBOARD_SUPPLY,
-  FX_FLEET_CASES,
-  FX_FLEET_DOCS,
-  FX_FLEET_DRIVERS,
-  FX_FLEET_QUALITY,
-  FX_FLEET_STATEMENT,
-  FX_FLEET_STATEMENTS,
-  FX_FLEET_TRAINING,
-  FX_FLEET_TRIPS,
-  FX_FLEET_VEHICLES,
-  FX_TRAINING_OVERDUE_INCOMPLETE,
-  type FleetAttentionBanner,
-  type FleetCase,
-  type FleetDashboardSupplemental,
-  type FleetDoc,
-  type FleetDriver,
-  type FleetQuality,
-  type FleetStatement,
-  type FleetTraining,
-  type FleetTrip,
-  type FleetVehicle,
-  type ServiceKey,
-  type StatementLine,
-} from "./fleet-portal-fixtures";
+export type ServiceKey =
+  | "realtime"
+  | "business"
+  | "airport"
+  | "insurance"
+  | "travel";
+
+export type FleetDriver = {
+  id: string;
+  name: string;
+  plate: string;
+  status: "available" | "on_trip" | "break" | "offline";
+  dispatchEligible?: boolean;
+  license: "valid" | "expires_30d";
+  docs: "complete" | "missing_1" | "missing_2";
+  training: "complete" | "pending";
+  trips30: number;
+  rating: number;
+  svc: ServiceKey[];
+};
+
+export type FleetVehicle = {
+  plate: string;
+  model: string;
+  year: number;
+  driver: string;
+  svc: ServiceKey[];
+  insurance: string;
+  inspection: "ok" | "due_30d";
+  status: "active" | "maintenance";
+};
+
+export type FleetTrip = {
+  id: string;
+  svc: ServiceKey;
+  driver: string;
+  tenant: string;
+  sponsorFunded?: boolean;
+  benefitReference?: string | null;
+  pickup: string;
+  fare: string;
+  commission: string;
+  reimbursement?: string | null;
+  status: "completed" | "in_progress" | "cancelled";
+  date: string;
+};
+
+export type StatementLine = {
+  key: string;
+  v: string;
+  sign: "+" | "−";
+  reimbursement?: string | null;
+};
+
+export type FleetStatement = {
+  id: string;
+  period: string;
+  trips: number;
+  sponsorFundedTrips?: number;
+  payable: string;
+  reimbursement?: string | null;
+  status: "pending_confirm" | "paid";
+  issued: string;
+};
+
+export type FleetDoc = {
+  driver: string;
+  id: string;
+  doc: string;
+  en: string;
+  status: "expires_30d" | "expires_60d" | "missing" | "pending_signature";
+  due: string;
+  owner: "fleet" | "driver";
+};
+
+export type FleetCase = {
+  id: string;
+  type: "complaint" | "incident";
+  cat: string;
+  driver: string;
+  severity: "high" | "medium" | "low";
+  responsibility: "fleet" | "shared" | "platform";
+  status: "in_review" | "open" | "pending";
+  sla: "breached" | "on_track";
+  date: string;
+};
+
+export type FleetQuality = {
+  key: string;
+  v: string;
+  tone: "success" | "warn" | "neutral";
+  delta: string;
+};
+
+export type FleetTraining = {
+  course: string;
+  en: string;
+  completed: number;
+  total: number;
+  pct: number;
+};
+
+export type FleetDashboardSupplemental = {
+  missingDocsDrivers: string;
+  openCases: string;
+  trainingCompletion: string;
+};
+
+export type FleetAttentionBanner = {
+  tone: "warn" | "danger" | "info";
+  titleKey: string;
+  bodyKey: string;
+};
+
+function getCurrentPeriodMonth(): string {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+const FX_FLEET_STATEMENT: {
+  period: string;
+  status: string;
+  payable: string;
+  lines: StatementLine[];
+} = {
+  period: getCurrentPeriodMonth(),
+  status: "pending_confirm",
+  payable: "NT$ 642,000",
+  lines: [
+    { key: "per_trip", v: "NT$ 598,400", sign: "+" },
+    { key: "recruitment", v: "NT$ 24,000", sign: "+" },
+    { key: "mgmt_fee", v: "NT$ 36,000", sign: "+" },
+    { key: "performance", v: "NT$ 12,000", sign: "+" },
+    { key: "clawback", v: "NT$ 28,400", sign: "−" },
+  ],
+};
+
+const FX_FLEET_STATEMENTS: FleetStatement[] = [
+  {
+    id: `fst_${getCurrentPeriodMonth().replace("-", "_")}`,
+    period: getCurrentPeriodMonth(),
+    trips: 14280,
+    payable: "NT$ 642,000",
+    status: "pending_confirm",
+    issued: `${getCurrentPeriodMonth()}-01`,
+  },
+  {
+    id: "fst_2026_04",
+    period: "2026-04",
+    trips: 13120,
+    payable: "NT$ 588,400",
+    status: "paid",
+    issued: "2026-05-01",
+  },
+  {
+    id: "fst_2026_03",
+    period: "2026-03",
+    trips: 12740,
+    payable: "NT$ 561,200",
+    status: "paid",
+    issued: "2026-04-01",
+  },
+];
+
+const FX_FLEET_DOCS: FleetDoc[] = [
+  {
+    driver: "黃文豪",
+    id: "d_8851",
+    doc: "職業駕照",
+    en: "pro_license",
+    status: "expires_30d",
+    due: "2026-07-04",
+    owner: "fleet",
+  },
+  {
+    driver: "吳鎮宇",
+    id: "d_8881",
+    doc: "機場接送資格證",
+    en: "airport_permit",
+    status: "missing",
+    due: "—",
+    owner: "fleet",
+  },
+  {
+    driver: "吳鎮宇",
+    id: "d_8881",
+    doc: "車輛保險",
+    en: "vehicle_insurance",
+    status: "expires_60d",
+    due: "2026-08-02",
+    owner: "fleet",
+  },
+  {
+    driver: "陳俊宏",
+    id: "d_8843",
+    doc: "保險代步服務同意書",
+    en: "insurance_consent",
+    status: "pending_signature",
+    due: "2026-06-15",
+    owner: "driver",
+  },
+];
+
+const FX_FLEET_QUALITY: FleetQuality[] = [
+  {
+    key: "avg_rating",
+    v: "4.86",
+    tone: "success",
+    delta: "↑ 0.02",
+  },
+  {
+    key: "completion_rate",
+    v: "97.4%",
+    tone: "success",
+    delta: "↑ 0.6pp",
+  },
+  {
+    key: "cancel_rate",
+    v: "1.8%",
+    tone: "neutral",
+    delta: "↓ 0.2pp",
+  },
+  {
+    key: "no_show_rate",
+    v: "0.8%",
+    tone: "neutral",
+    delta: "—",
+  },
+  {
+    key: "complaint_rate",
+    v: "0.12%",
+    tone: "warn",
+    delta: "↑ 0.01pp",
+  },
+  {
+    key: "on_time_rate",
+    v: "94.2%",
+    tone: "success",
+    delta: "↑ 1.1pp",
+  },
+];
 
 export type DataSource = "live" | "fallback";
 
@@ -130,6 +346,7 @@ function mapDriverStatus(state: DriverWorkState): FleetDriver["status"] {
 export interface DriversView {
   rows: FleetDriver[];
   source: DataSource;
+  error?: string | null;
 }
 
 function mapDriver(record: FleetPartnerPortalDriverRecord): FleetDriver {
@@ -138,6 +355,7 @@ function mapDriver(record: FleetPartnerPortalDriverRecord): FleetDriver {
     name: record.name,
     plate: record.currentVehiclePlateNo ?? "—",
     status: mapDriverStatus(record.workState),
+    dispatchEligible: record.dispatchEligible,
     license: record.licensesValid ? "valid" : "expires_30d",
     // Not yet surfaced by /api/fleet-partner/drivers — neutral defaults.
     docs: "complete",
@@ -161,12 +379,13 @@ export async function loadDrivers(): Promise<DriversView> {
     const records = await client.listFleetPortalDrivers();
     // An empty list from a reachable endpoint is legitimate zero data, not a
     // failure — render the live (empty) result rather than demo fixtures.
-    return { rows: records.map(mapDriver), source: "live" };
+    return { rows: records.map(mapDriver), source: "live", error: null };
   } catch (err) {
     if (isConfigError(err)) {
       throw err;
     }
-    return { rows: FX_FLEET_DRIVERS, source: "fallback" };
+    const message = err instanceof Error ? err.message : "READ_FAILED";
+    return { rows: [], source: "fallback", error: message };
   }
 }
 
@@ -175,6 +394,7 @@ export async function loadDrivers(): Promise<DriversView> {
 export interface VehiclesView {
   rows: FleetVehicle[];
   source: DataSource;
+  error?: string | null;
 }
 
 function mapVehicle(record: FleetPartnerPortalVehicleRecord): FleetVehicle {
@@ -196,12 +416,13 @@ export async function loadVehicles(): Promise<VehiclesView> {
     const { client } = await getServerFleetPartnerClient();
     const records = await client.listFleetPortalVehicles();
     // Empty but reachable === legitimate zero data; keep it live.
-    return { rows: records.map(mapVehicle), source: "live" };
+    return { rows: records.map(mapVehicle), source: "live", error: null };
   } catch (err) {
     if (isConfigError(err)) {
       throw err;
     }
-    return { rows: FX_FLEET_VEHICLES, source: "fallback" };
+    const message = err instanceof Error ? err.message : "READ_FAILED";
+    return { rows: [], source: "fallback", error: message };
   }
 }
 
@@ -210,6 +431,7 @@ export async function loadVehicles(): Promise<VehiclesView> {
 export interface TripsView {
   rows: FleetTrip[];
   source: DataSource;
+  error?: string | null;
 }
 
 function mapTripStatus(
@@ -258,14 +480,15 @@ function mapTrip(record: FleetPartnerPortalTripRecord): FleetTrip {
 export async function loadTrips(periodMonth?: string): Promise<TripsView> {
   try {
     const { client } = await getServerFleetPartnerClient();
-    const records = await client.listFleetPortalTrips(periodMonth);
+    const records = await client.listFleetPortalTrips(periodMonth ?? getCurrentPeriodMonth());
     // Empty but reachable === legitimate zero data; keep it live.
-    return { rows: records.map(mapTrip), source: "live" };
+    return { rows: records.map(mapTrip), source: "live", error: null };
   } catch (err) {
     if (isConfigError(err)) {
       throw err;
     }
-    return { rows: FX_FLEET_TRIPS, source: "fallback" };
+    const message = err instanceof Error ? err.message : "READ_FAILED";
+    return { rows: [], source: "fallback", error: message };
   }
 }
 
@@ -427,12 +650,6 @@ function mapStatementLines(
   });
 }
 
-function getCurrentPeriodMonth(): string {
-  const now = new Date();
-  const year = now.getUTCFullYear();
-  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
-}
 
 export async function loadRevenue(): Promise<RevenueView> {
   const currentPeriod = getCurrentPeriodMonth();
@@ -485,110 +702,143 @@ export interface DashboardView {
   completedTrips: string;
   share: string;
   grossRevenue: string;
-  supply: typeof FX_DASHBOARD_SUPPLY;
+  supply: { svc: ServiceKey; pct: number; n: string }[];
   recentTrips: FleetTrip[];
-  // The recent-trips strip is loaded from the trips endpoint independently of
-  // the headline KPIs. It can fall back to fixtures while the KPIs are live, so
-  // it carries its own source flag instead of inheriting `source`.
   recentTripsSource: DataSource;
   source: DataSource;
-  // Compliance / cases / training KPIs, the attention banners, and the
-  // supply-by-service breakdown have no fleet-partner endpoint yet, so they are
-  // always design data. `supplementalSource` lets the page mark them as such
-  // even when the headline KPIs are live.
   supplemental: FleetDashboardSupplemental;
   attention: FleetAttentionBanner[];
   supplementalSource: DataSource;
+  periodMonth: string;
+  dataTimestamp: string;
+  error?: string | null;
 }
 
-const DASHBOARD_FALLBACK: Omit<
-  DashboardView,
-  | "supply"
-  | "recentTrips"
-  | "recentTripsSource"
-  | "source"
-  | "supplemental"
-  | "attention"
-  | "supplementalSource"
-> = {
-  driverCount: "128",
-  driverStatusSummary: {
-    online: "96",
-    offline: "32",
-  },
-  dispatchable: "96",
-  completedTrips: "14,280",
-  share: "NT$ 642K",
-  grossRevenue: "NT$ 2.14M",
-};
+export async function loadDashboard(
+  periodMonth?: string,
+): Promise<DashboardView> {
+  const currentPeriod = periodMonth ?? getCurrentPeriodMonth();
+  const dataTimestamp = new Date().toISOString();
 
-export async function loadDashboard(): Promise<DashboardView> {
-  // The recent-trips strip and the dashboard KPIs come from different
-  // endpoints; the supplemental KPIs / attention banners / supply-by-service
-  // breakdown have no endpoint yet and always use design fixtures. `source`
-  // reflects the headline KPI record; `supplementalSource` is always fallback.
-  const supplemental = FX_DASHBOARD_SUPPLEMENTAL;
-  const attention = FX_DASHBOARD_ATTENTION;
-  const supplementalSource: DataSource = "fallback";
-  let recentTrips: FleetTrip[] = FX_FLEET_TRIPS.slice(0, 5);
-  let recentTripsSource: DataSource = "fallback";
+  // Load client to ensure configuration is valid
+  let client: {
+    listFleetPortalDashboard: (
+      periodMonth?: string,
+    ) => Promise<FleetPartnerPortalDashboardRecord>;
+  } | null = null;
   try {
-    const tripsView = await loadTrips();
-    if (tripsView.source === "live") {
-      recentTrips = tripsView.rows.slice(0, 5);
-      recentTripsSource = "live";
-    } else {
-      recentTrips = FX_FLEET_TRIPS.slice(0, 5);
-      recentTripsSource = "fallback";
-    }
+    const res = await getServerFleetPartnerClient();
+    client = res.client;
   } catch (err) {
     if (isConfigError(err)) {
       throw err;
     }
-    recentTrips = FX_FLEET_TRIPS.slice(0, 5);
-    recentTripsSource = "fallback";
   }
 
-  try {
-    const { client } = await getServerFleetPartnerClient();
-    const record = await client.listFleetPortalDashboard();
-    const offline = Math.max(
-      record.activeDriverCount - record.onlineDriverCount,
-      0,
-    );
-    return {
-      driverCount: record.activeDriverCount.toLocaleString("en-US"),
-      driverStatusSummary: {
-        online: record.onlineDriverCount.toLocaleString("en-US"),
-        offline: offline.toLocaleString("en-US"),
-      },
-      dispatchable: record.dispatchEligibleDriverCount.toLocaleString("en-US"),
-      completedTrips: record.completedTripCount.toLocaleString("en-US"),
-      share: formatMoney(record.shareAmount),
-      grossRevenue: formatMoney(record.grossEarningAmount),
-      supply: FX_DASHBOARD_SUPPLY,
-      recentTrips,
-      recentTripsSource,
-      source: "live",
-      supplemental,
-      attention,
-      supplementalSource,
-    };
-  } catch (err) {
-    if (isConfigError(err)) {
-      throw err;
+  // Load authoritative lists concurrently to keep dashboard and lists strictly in sync
+  const [driversView, tripsView] = await Promise.all([
+    loadDrivers(),
+    loadTrips(currentPeriod),
+  ]);
+
+  const activeDriverCount = driversView.rows.length;
+  const onlineDriverCount = driversView.rows.filter(
+    (d) =>
+      d.status === "available" ||
+      d.status === "on_trip" ||
+      d.status === "break",
+  ).length;
+  const offlineDriverCount = driversView.rows.filter(
+    (d) => d.status === "offline",
+  ).length;
+  const dispatchableDriverCount = driversView.rows.filter(
+    (d) => d.dispatchEligible === true,
+  ).length;
+  const completedTripsCount = tripsView.rows.filter(
+    (t) => t.status === "completed",
+  ).length;
+
+  let aggregateError: string | null = null;
+  let dashboardRecord: FleetPartnerPortalDashboardRecord | null = null;
+  if (client) {
+    try {
+      dashboardRecord = await client.listFleetPortalDashboard(currentPeriod);
+    } catch (err) {
+      aggregateError = err instanceof Error ? err.message : "READ_FAILED";
     }
-    return {
-      ...DASHBOARD_FALLBACK,
-      supply: FX_DASHBOARD_SUPPLY,
-      recentTrips,
-      recentTripsSource,
-      source: "fallback",
-      supplemental,
-      attention,
-      supplementalSource,
-    };
   }
+
+  const isLive =
+    driversView.source === "live" ||
+    tripsView.source === "live" ||
+    Boolean(dashboardRecord);
+  const readError =
+    driversView.error || tripsView.error || aggregateError || null;
+
+  const services: ServiceKey[] = [
+    "realtime",
+    "business",
+    "airport",
+    "insurance",
+    "travel",
+  ];
+  const supply = services.map((svc) => {
+    const count = driversView.rows.filter((d) => d.svc.includes(svc)).length;
+    const pct =
+      activeDriverCount > 0 ? Math.round((count / activeDriverCount) * 100) : 0;
+    return { svc, pct, n: String(count) };
+  });
+
+  const missingDocsDrivers = driversView.rows.filter(
+    (d) => d.license !== "valid" || d.docs !== "complete",
+  ).length;
+
+  const supplemental: FleetDashboardSupplemental = {
+    missingDocsDrivers: String(missingDocsDrivers),
+    openCases: "—", // cases endpoint not yet integrated
+    trainingCompletion: "—", // training endpoint not yet integrated
+  };
+
+  const attention: FleetAttentionBanner[] = [];
+  for (const d of driversView.rows) {
+    if (d.license === "expires_30d") {
+      attention.push({
+        tone: "warn",
+        titleKey: "dashboard.attention.licenseExpiring",
+        bodyKey: "dashboard.attention.licenseExpiringBody",
+      });
+      break;
+    }
+  }
+
+  const shareMoney = dashboardRecord?.shareAmount
+    ? formatMoney(dashboardRecord.shareAmount)
+    : "—";
+  const grossMoney = dashboardRecord?.grossEarningAmount
+    ? formatMoney(dashboardRecord.grossEarningAmount)
+    : "—";
+
+  return {
+    driverCount: driversView.error ? "—" : activeDriverCount.toLocaleString("en-US"),
+    driverStatusSummary: {
+      online: driversView.error ? "—" : onlineDriverCount.toLocaleString("en-US"),
+      offline: driversView.error ? "—" : offlineDriverCount.toLocaleString("en-US"),
+    },
+    dispatchable: driversView.error ? "—" : dispatchableDriverCount.toLocaleString("en-US"),
+    completedTrips: tripsView.error ? "—" : completedTripsCount.toLocaleString("en-US"),
+    share: shareMoney,
+    grossRevenue: grossMoney,
+    supply,
+    recentTrips: tripsView.rows.slice(0, 5),
+    recentTripsSource: tripsView.source,
+    source: isLive ? "live" : "fallback",
+    supplemental,
+    attention,
+    supplementalSource: "fallback",
+    periodMonth: currentPeriod,
+    dataTimestamp,
+    error: readError ?? null,
+  };
 }
 
 // --- views without a portal endpoint yet (fixtures through the seam) --------
@@ -596,11 +846,13 @@ export async function loadDashboard(): Promise<DashboardView> {
 export interface CasesView {
   rows: FleetCase[];
   source: DataSource;
+  connected?: boolean;
 }
 
 export async function loadCases(): Promise<CasesView> {
   // No /api/fleet-partner/cases endpoint in DH-FLP-BE-CLIENT yet.
-  return { rows: FX_FLEET_CASES, source: "fallback" };
+  // Explicitly mark as unintegrated without injecting fake fixture records.
+  return { rows: [], source: "fallback", connected: false };
 }
 
 export interface DocumentsView {
@@ -615,36 +867,27 @@ export async function loadDocuments(): Promise<DocumentsView> {
 
 export interface TrainingView {
   rows: FleetTraining[];
-  // Header KPIs. `completionPct` and `pendingHeadcount` are derived from the
-  // course rows (the same seam data the page lists). `overdueIncomplete` has no
-  // backing field on any fleet-partner endpoint yet, so it is supplemental
-  // design data carried behind the seam (like the dashboard supplemental KPIs)
-  // rather than a literal in the render path.
   summary: {
     completionPct: string;
     pendingHeadcount: string;
     overdueIncomplete: string;
   };
   source: DataSource;
-}
-
-function summariseTraining(rows: FleetTraining[]): TrainingView["summary"] {
-  const completed = rows.reduce((sum, c) => sum + c.completed, 0);
-  const total = rows.reduce((sum, c) => sum + c.total, 0);
-  const completionPct = total > 0 ? Math.round((completed / total) * 100) : 0;
-  return {
-    completionPct: `${completionPct}%`,
-    pendingHeadcount: (total - completed).toLocaleString("en-US"),
-    overdueIncomplete: FX_TRAINING_OVERDUE_INCOMPLETE,
-  };
+  connected?: boolean;
 }
 
 export async function loadTraining(): Promise<TrainingView> {
   // No /api/fleet-partner/training endpoint in DH-FLP-BE-CLIENT yet.
+  // Explicitly mark as unintegrated without injecting fake fixture records.
   return {
-    rows: FX_FLEET_TRAINING,
-    summary: summariseTraining(FX_FLEET_TRAINING),
+    rows: [],
+    summary: {
+      completionPct: "—",
+      pendingHeadcount: "—",
+      overdueIncomplete: "—",
+    },
     source: "fallback",
+    connected: false,
   };
 }
 
