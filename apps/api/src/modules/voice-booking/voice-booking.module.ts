@@ -1,3 +1,4 @@
+import { VoiceConfirmationService } from "./voice-confirmation.service";
 import { GeoModule } from "../geo/geo.module";
 import { ServiceAreaModule } from "../service-area/service-area.module";
 import { ServiceProductModule } from "../service-product/service-product.module";
@@ -23,6 +24,7 @@ import { VoiceEvidenceService } from "./voice-evidence.service";
   imports: [DatabaseModule, GeoModule, ServiceAreaModule, ServiceProductModule],
   providers: [
     VoiceBookingDraftService,
+    VoiceConfirmationService,
     VoiceCheckpointRepository,
     VoiceEvidenceService,
     VoiceBookingRepository,
@@ -31,6 +33,7 @@ import { VoiceEvidenceService } from "./voice-evidence.service";
   ],
   exports: [
     VoiceBookingDraftService,
+    VoiceConfirmationService,
     VoiceEvidenceService,
     VoiceBookingRepository,
     VoiceBookingAuthorizationService,
