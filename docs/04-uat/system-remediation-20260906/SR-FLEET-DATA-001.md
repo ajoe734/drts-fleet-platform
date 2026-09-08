@@ -7,6 +7,7 @@
 - **Owner**: `Gemini`
 - **Reviewer**: `Codex2`
 - **Base SHA**: `7dccddaba7d51dca8d56da01d5320d9f22f8b68f`
+- **Candidate SHA**: 於 `handoff` 時以 `git rev-parse HEAD` 寫入（見 task board 與 machine truth）
 - **Reconstruction Head SHA**: `fd9ec34ee9b075dd8e05451f1f22f7f34abe1d68`
 - **Audit Observation SHA**: `08b7a32f6fdaa00d8d1894f91569a7d72860cec2`
 - **Branch**: `gemini/sr-fleet-data-001`
@@ -169,8 +170,8 @@
 
  Test Files  1 passed (1)
       Tests  21 passed (21)
-   Start at  15:25:14
-   Duration  767ms
+   Start at  16:48:45
+   Duration  960ms (transform 328ms, setup 0ms, import 503ms, tests 136ms, environment 0ms)
 Exit Code:  0
 ```
 
