@@ -4,7 +4,7 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-Open remediation follow-up as of 2026-09-08: `Q-SR-OPS-SHELL-001`.
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`.
 
 The original fifteen questions on this board were answered. Worth noting how, because the
 distribution was not what the board implied: of the fifteen, four were closed by
@@ -23,7 +23,19 @@ the code or an accepted packet already answers it.
 | --- | -------- | --------------- | ----------- | -------------- | --------------- |
 | Q-SR-OPS-SHELL-001 | Confirm the dispatch audit resource-context receiver contract and authorize the missing sender/receiver write scopes. | SR-OPS-SHELL-001; dispatch audit CTA; PRD §13.3; service contracts §3.13 | Codex (parent owner); Gemini (reviewer) | Supervisor first reviews scope overlap/dependencies; Codex and Gemini confirm existing receiver/API semantics. Escalate to human product owner only if acceptance must be reduced. See [routing record](support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION.md). | Keep full parent acceptance and blocked state; no invented query contract or unauthorized shared-file edits. Reuse existing runtime URL resolver after scope authorization. |
 
+### Q-SR-BANK-002 — scope authorization pending
+
+This item remains open; it is a routing decision, not a new grant of financial access.
+Supervisor/Claude must authorize shared-file scope and dependency sequencing for
+`SR-BANK-002` (owner Gemini, reviewer Codex): central tenant settlement route policy
+and bank read-model failure behavior. Preserve the parent acceptance and blocked
+state. Do not broaden all roles to bypass 403 or return seed statements after API
+failure. The existing completed `SR-IAM-001` and `SR-BANK-001` are provenance,
+not authorization to edit their shared files under the parent.
+See [decision and executable follow-up](support/unblock/SR-BANK-002/SR-BANK-002-UNBLOCK-PLANNING-DECISION.md).
+
 ## Resolved Items
+
 
 | ID     | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Accepted Decision                                                                                                                                                  |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
