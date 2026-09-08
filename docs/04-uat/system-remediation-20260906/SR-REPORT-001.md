@@ -1,5 +1,19 @@
 # SR-REPORT-001 — 接手實作與阻塞證據
 
+## 2026-09-08 17:49 UTC dispatch 重驗（最新）
+
+- 本輪 owner Codex2 / reviewer **Codex**，取代下方歷史 reviewer；依賴 SR-ARTIFACT-001、SR-DEPS-001 machine status 均為 done。
+- `git fetch origin`、`git rebase origin/dev` 均 exit 0。本輪 base：`2a093872d05a7d0344adf9bb58f9e5c4c99861d1`；重驗 implementation head：`a419c814b`。candidate 尚未鎖定，沒有 handoff。
+- `pnpm --filter @drts/api typecheck`、`pnpm --filter @drts/ops-console-web typecheck`、`git diff --check` 均 exit 0。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-report-001/` exit 0，9 passed。
+- `SR_REPORT_EVIDENCE_DIR=/tmp/sr-report-001-dispatch-1749 pnpm exec vitest run tests/unit/system-remediation/sr-report-001/ tests/unit/reporting-filing.test.ts` exit 1，35 passed / 4 failed / 2 unhandled rejections。仍是共用測試的同步下載斷言及 PDF/XLSX 必須拒絕的舊預期。
+- 舊暫存 parser venv 不存在（exit 127），系統也無 pypdf（exit 1）；重新執行 `python3 -m venv /tmp/sr-report-001-dispatch-venv && /tmp/sr-report-001-dispatch-venv/bin/pip -q install pypdf==6.17.0 && /tmp/sr-report-001-dispatch-venv/bin/python tests/unit/system-remediation/sr-report-001/verify-artifacts.py /tmp/sr-report-001-dispatch-1749` exit 0：filtered PDF 1 頁 / 1 筆、wide PDF 35 頁 / 55 筆，empty PDF 可解析；CSV 與 manifest 一致。XLSX 由本輪 Vitest 解析。
+- 本輪 in-memory 資源：CSV `JOB-7e66aed2-9dda-425f-8db5-b786f93bc914` / `ART-772121eb-1e7a-48a2-a608-f30225acfc1b`；XLSX `JOB-2bcdef3f-a7b2-4d5d-8444-967d7553283a` / `ART-18cbc0af-0ec0-485a-a583-dbae203fd925`；PDF `JOB-09e32d13-3c7a-4dc6-8e35-3c0dbea9b52d` / `ART-99747165-8b4c-4f84-8537-b09f2d1ed4ef`。共同篩選 2026-09-01 至 2026-09-30，三者同一筆 general row。
+- 本輪未修改產品程式。`packages/contracts/src/index.ts:5525` 仍只宣告 CSV，Ops picker 仍引用它；需 supervisor 授權該常數與 `tests/unit/reporting-filing.test.ts` 的 scope 並協調 SR-CONTRACT-001 相依，才可完成宣告與既有回歸。中文字型部署仍未交付；本輪未跑 Unicode、live HTTP、DB、瀏覽器、真機、CI 或部署驗收。
+- 遠端 task branch 為 `f95532988616389fc40ee794f9eef23d05ea14c0`，不是 rebase 後 HEAD 的 ancestor（`git merge-base --is-ancestor origin/codex2/sr-report-001 HEAD` exit 1）。普通 push 結果另寫 machine progress/blocker；不得 force push 或把 WIP 當 candidate。
+
+下方為前輪歷史紀錄，SHA、資源與結果不代表本輪執行。
+
 - Owner：Codex2；Reviewer：Claude。
 - 起點／本次 `origin/dev` base：`69c519702047862212bc0e4890350e6b58917062`。
 - 分支：`codex2/sr-report-001`；沿用 supervisor 指定 isolated worktree。
