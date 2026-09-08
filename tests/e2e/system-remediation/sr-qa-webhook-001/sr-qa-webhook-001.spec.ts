@@ -93,7 +93,9 @@ test("SR-QA-WEBHOOK-001: controlled HTTP service regression", async () => {
       },
     );
     const authEvidence = JSON.parse(readFileSync(authEvidencePath, "utf8"));
-    expect(authEvidence.databaseUnchanged).toBe(true);
+    expect(authEvidence.rejectedWritesDatabaseUnchanged).toBe(true);
+    expect(authEvidence.persistedRevoked).toBe(true);
+    expect(authEvidence.httpLifecycleStatuses).toEqual([201, 201, 201]);
     recorder.recordResourceId(
       "auth_http_acceptance",
       authEvidence.apiKeyId,
