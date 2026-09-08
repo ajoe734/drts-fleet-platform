@@ -1,8 +1,8 @@
 # SR-MAIL-001 — 租戶邀請信真正交付並修正 delivered 語義
 
-- Owner: `Codex`；independent reviewer: `Claude`。
-- Branch: `codex/sr-mail-001`。
-- Base（`git fetch origin` 後本輪 rebase 的 `origin/dev` HEAD）: `b5c3774e5e62fab7cf43b67a7e69fae7e0ca91ef`（round 2 base：`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`；round 1 原始 base：`650e233bb1c35269852c291ef892d25967380c12`）。
+- Owner: `Gemini`（前任 `Codex` / `Claude`）；independent reviewer: `Claude`。
+- Branch: `gemini/sr-mail-001`。
+- Base（`origin/dev` HEAD）: `38173c7817dd2c15760978bfc64f9c30a53bc19e`（round 3 base：`38173c781`；round 2 base：`70355aba9`；round 1 原始 base：`650e233bb`）。
 - 依賴：`SR-NOTIFY-001`（`NotificationDeliveryService` 共用耐久郵件核心，已 merge）、`SR-REFERRAL-001`（皆已 done）。
 
 ## 基準重現（修復前語義）
@@ -55,9 +55,23 @@
 
 在指定 worktree、`codex/sr-mail-001` 上重新执行：`git diff --check`（exit 0）、`pnpm --filter @drts/api typecheck`（exit 0）、`pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/`（exit 0；2 files / 13 tests passed）、以及 `pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts`（exit 0；2 files / 77 tests passed）。本轮还新增断言：储存／transport 任意异常即使包含 raw token，返回 record 和 warning log 都不会包含该 token；provider 从 unavailable 恢复后，重建 delivery adapter 并重寄会得到受控 receiver acknowledgement，且旧 invitation 被撤销。
 
-### Candidate subject remediation — 2026-09-08 UTC（base `b5c3774e5`）
+#### Candidate subject remediation — 2026-09-08 UTC（base `b5c3774e5`）
 
 `origin/dev` 前进后，分支已无冲突 rebase 至 `b5c3774e5e62fab7cf43b67a7e69fae7e0ca91ef`。原 candidate 顶层 commit 的 `test(SR-MAIL-001)` subject 不符合 CI `Commit trailers` 的允许前缀，已改为 `fix(SR-MAIL-001): prove delivery recovery after provider restart`，并保留 `LLM-Agent`、`Task-ID`、`Reviewer` trailers。此轮本地实测：`git diff --check` exit 0；`pnpm --filter @drts/api typecheck` exit 0；`pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/` exit 0（2 files / 13 tests）；`python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` exit 0（6 commits）。此项只修正 candidate metadata，不改变功能行为。
+
+### Gemini unblock & rebase verification — 2026-09-08 UTC（base `38173c781`）
+
+Supervisor 依據 `docs(SR-MAIL-001-UNBLOCK-HISTORY-REPAIR): preserve published history with replacement candidate (#1748)` 規劃之非破壞性修復軌道，調派 Gemini 承接 SR-MAIL-001，於獨立 worktree `.artifacts/worktrees/auto/gemini-sr-mail-001` 及乾淨分支 `gemini/sr-mail-001`（基於最新 `origin/dev` HEAD `38173c7817dd2c15760978bfc64f9c30a53bc19e`）無衝突 rebase 並完整重測：
+
+| 指令 | Exit | 實際結果 |
+| --- | --- | --- |
+| `git diff --check origin/dev..HEAD` | 0 | 無任何 trailing whitespace 或 formatting 錯誤 |
+| `pnpm --filter @drts/api typecheck` | 0 | API 模組 typecheck 乾淨無錯誤 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/` | 0 | 2 files passed / 13 tests passed |
+| `pnpm exec vitest run tests/unit/tenant-invitation-lifecycle.test.ts tests/unit/tenant-partner-foundation.test.ts tests/unit/system-remediation/sr-mail-001/` | 0 | 4 files passed / 40 tests passed（涵蓋既有租戶生命週期回歸測試） |
+| `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` | 0 | 所有 commit message 與 trailers 均符合規範 |
+
+改動檔案完全限制於 task write_scopes 內，無共用設定檔或非授權檔案變更。
 
 ## 未做的 live／真机部分
 
@@ -71,8 +85,8 @@
 
 ```bash
 CANDIDATE_SHA=$(git rev-parse HEAD) CANDIDATE_BRANCH=$(git branch --show-current) \
-AI_NAME=Codex /home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh \
-  handoff SR-MAIL-001 Claude "见本文件与 candidate diff"
+AI_NAME=Gemini /home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh \
+  handoff SR-MAIL-001 Claude "見本文件與 candidate diff；已在 gemini/sr-mail-001 完成所有驗證並 normal push"
 ```
 
-精确 candidate SHA、branch、reviewer 与 state 以 `ai-status.sh show SR-MAIL-001` 读回。独立 review、同 candidate CI／merge 及 required_acceptance 完备后才可结案；round 1 记录的两个既有缺口（typecheck 语音功能线错误、`packages/contracts` 缺 `zod`）已在 round 2 base 上确认修复，reviewer 应重点确认：(1) rebase 后 diff 仍只有预期 3 个档案、无额外改动混入；(2) `tenant-invitation-delivery-status.test.ts` 的 13 test 全绿是本次首次真正执行的结果，覆盖 acceptance 中「舊／撤銷／過期token拒絕」與「provider失败/重启/重复send可恢復且不假delivered」两项。
+精确 candidate SHA、branch、reviewer 与 state 以 `ai-status.sh show SR-MAIL-001` 读回。独立 review、同 candidate CI／merge 及 required_acceptance 完备后才可结案；round 1 记录的两个既有缺口（typecheck 语音功能线错误、`packages/contracts` 缺 `zod`）已在 round 2/3 base 上确认修复，reviewer 应重点确认：(1) rebase 后 diff 仍只有预期 3 个檔案、无额外改动混入；(2) `tenant-invitation-delivery-status.test.ts` 的 13 test 全绿，覆盖 acceptance 中「舊／撤銷／過期token拒絕」與「provider失败/重启/重复send可恢復且不假delivered」两项。
