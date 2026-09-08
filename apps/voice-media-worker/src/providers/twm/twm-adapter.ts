@@ -43,8 +43,20 @@ export interface TwmTranscriptFixture {
 
 export type TwmAsrDisconnectCode = 408 | 440 | 486;
 
+/** SD §11 documents these paths; environment validation remains UV-EXEC-027/028. */
+export const TWM_PROTOCOL_FIXTURE = {
+  asrLogin: { method: "POST", path: "/api/v1/login" },
+  asrAccess: { method: "GET", path: "/api/v1/streaming/transcript/access-info" },
+  ttsLogin: { method: "POST", path: "/api/v1/tts/login" },
+  ttsModels: { method: "GET", path: "/api/v1/tts/models" },
+  ttsSynthesize: { method: "POST", path: "/api/v1/tts/synthesize" },
+  supportsResumeCursor: false,
+  ttsStreamFormat: { encoding: "pcm_s16le", sampleRateHz: 16_000, channels: 1 },
+} as const;
+
 function assertTimeouts(timeouts: TwmAsrTimeouts): void {
-  for (const [name, value] of Object.entries(timeouts)) {
+  for (const name of ["minSilenceDurMs", "maxPacketLossDurSec", "noSpeechTimeoutMs", "idleTimeoutMs", "maxDurationMs", "eosDrainMs"] as const) {
+    const value = timeouts[name];
     if (!Number.isFinite(value) || value <= 0) {
       throw new Error(`TWM ASR ${name} must be a positive number.`);
     }
@@ -64,7 +76,7 @@ export class TwmAsrFixtureAdapter implements VoiceSpeechToTextAdapter {
   private ready = false;
   private hasAccess = false;
   private diagnosticOnly = false;
-  private utteranceId?: string;
+  private utteranceId: string | undefined;
   private drainUntil = 0;
   private eosSent = false;
 
@@ -73,6 +85,8 @@ export class TwmAsrFixtureAdapter implements VoiceSpeechToTextAdapter {
     private readonly fixtures: readonly TwmTranscriptFixture[],
   ) {
     assertTimeouts(profile.timeouts);
+    if (!profile.modelName.trim() || ![8_000, 16_000].includes(profile.sampleRateHz) ||
+        !["pcm_s16le", "g711_ulaw"].includes(profile.audioType)) throw new Error("Invalid TWM ASR route profile.");
   }
 
   /** Models the login + one-time, URL-encoded ticket acquisition steps. */
@@ -148,6 +162,7 @@ export class TwmAsrFixtureAdapter implements VoiceSpeechToTextAdapter {
   }
 
   reconnect(code: TwmAsrDisconnectCode, options: { diagnosticReplay?: boolean; utteranceId?: string } = {}): {
+    reason: "timeout" | "capacity";
     requiresFreshTicket: true;
     diagnosticOnly: boolean;
     confirmationEligible: false;
@@ -161,6 +176,7 @@ export class TwmAsrFixtureAdapter implements VoiceSpeechToTextAdapter {
     this.diagnosticOnly = options.diagnosticReplay === true;
     this.utteranceId = options.utteranceId;
     return {
+      reason: code === 486 ? "capacity" : "timeout",
       requiresFreshTicket: true,
       diagnosticOnly: options.diagnosticReplay === true,
       confirmationEligible: false,
