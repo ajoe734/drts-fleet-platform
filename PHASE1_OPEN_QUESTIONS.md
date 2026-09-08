@@ -73,6 +73,18 @@ The parent remains blocked until authorization. See the
 for source evidence, exact proposed path and validation gates. No new product
 semantics or acceptance scope cut is approved.
 
+### Q-SR-ENTERPRISE-DATA-001 — shared scope and contact contract routing pending
+
+Owner: Codex2 (parent); reviewer: Codex. Supervisor/Chairman must adjudicate
+the shared detail 404, support action, and theme scopes and record dependency
+ordering before parent UI completion. Contract reviewer Codex must confirm an
+authorized driver/support contact source or route an explicit unavailable-contact
+acceptance decision. Passenger/onsite contact is not driver contact. Preserve
+the full parent acceptance; history repair does not grant scope or clear this
+gate. The parent remains blocked pending these decisions, tracked on the
+existing parent task rather than an unregistered producer. See the
+[routing record and concrete resume gate](support/unblock/SR-ENTERPRISE-DATA-001/SR-ENTERPRISE-DATA-001-UNBLOCK-PLANNING-DECISION.md).
+
 ## Resolved Items
 
 
