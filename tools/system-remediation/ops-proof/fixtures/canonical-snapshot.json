@@ -1,0 +1,307 @@
+{
+  "metadata": {
+    "snapshotId": "snap-ops-proof-ref-001",
+    "capturedAt": "2026-09-06T12:00:00.000Z",
+    "schemaVersion": "1.0.0",
+    "baseSha": "40ba315e4114369eaa7e12d35aae83a795c97b1d",
+    "resourceId": "iso-db-res-001",
+    "checksumSha256": "4fd4144365b263b652bebc94b6389fef3f48aaec5f20658f844a4aaef21516f4",
+    "domainCounts": {
+      "orders": 2,
+      "bookings": 2,
+      "dispatchJobs": 2,
+      "dispatchAssignments": 2,
+      "trips": 2,
+      "proofBundles": 1,
+      "driverFeePlans": 1,
+      "driverStatements": 1,
+      "driverStatementLines": 4,
+      "tenantInvoices": 1,
+      "invoiceLines": 2,
+      "auditLogs": 3,
+      "dispatchTraceLogs": 3
+    }
+  },
+  "trips": {
+    "orders": [
+      {
+        "order_id": "ord-001",
+        "order_no": "ORD-20260906-001",
+        "tenant_id": "tenant-001",
+        "service_bucket": "enterprise_dispatch",
+        "pickup_address": "No. 1, Sec. 1, Zhongxiao E. Rd., Taipei",
+        "pickup_lat": 25.045,
+        "pickup_lng": 121.52,
+        "current_status": "completed",
+        "created_at": "2026-09-06T09:30:00.000Z"
+      },
+      {
+        "order_id": "ord-002",
+        "order_no": "ORD-20260906-002",
+        "tenant_id": "tenant-001",
+        "service_bucket": "airport_transfer",
+        "pickup_address": "Taipei Songshan Airport",
+        "pickup_lat": 25.069,
+        "pickup_lng": 121.552,
+        "current_status": "completed",
+        "created_at": "2026-09-06T10:15:00.000Z"
+      }
+    ],
+    "bookings": [
+      {
+        "booking_id": "bk-001",
+        "order_id": "ord-001",
+        "booking_type": "oneway",
+        "created_at": "2026-09-06T09:30:00.000Z"
+      },
+      {
+        "booking_id": "bk-002",
+        "order_id": "ord-002",
+        "booking_type": "oneway",
+        "created_at": "2026-09-06T10:15:00.000Z"
+      }
+    ],
+    "dispatchJobs": [
+      {
+        "dispatch_job_id": "job-001",
+        "order_id": "ord-001",
+        "dispatch_mode": "auto",
+        "status": "completed",
+        "priority_score": 100,
+        "created_at": "2026-09-06T09:35:00.000Z"
+      },
+      {
+        "dispatch_job_id": "job-002",
+        "order_id": "ord-002",
+        "dispatch_mode": "auto",
+        "status": "completed",
+        "priority_score": 120,
+        "created_at": "2026-09-06T10:20:00.000Z"
+      }
+    ],
+    "dispatchAssignments": [
+      {
+        "assignment_id": "asg-001",
+        "dispatch_job_id": "job-001",
+        "vehicle_id": "veh-001",
+        "driver_id": "drv-001",
+        "status": "completed",
+        "assigned_at": "2026-09-06T09:36:00.000Z",
+        "completed_at": "2026-09-06T10:30:00.000Z",
+        "version_no": 1
+      },
+      {
+        "assignment_id": "asg-002",
+        "dispatch_job_id": "job-002",
+        "vehicle_id": "veh-001",
+        "driver_id": "drv-001",
+        "status": "completed",
+        "assigned_at": "2026-09-06T10:21:00.000Z",
+        "completed_at": "2026-09-06T11:45:00.000Z",
+        "version_no": 1
+      }
+    ],
+    "trips": [
+      {
+        "trip_id": "trp-001",
+        "order_id": "ord-001",
+        "assignment_id": "asg-001",
+        "vehicle_id": "veh-001",
+        "driver_id": "drv-001",
+        "trip_status": "completed",
+        "actual_distance_km": 7.2,
+        "actual_duration_sec": 1440,
+        "proof_required": true,
+        "proof_status": "verified",
+        "created_at": "2026-09-06T09:40:00.000Z",
+        "completed_at": "2026-09-06T10:30:00.000Z"
+      },
+      {
+        "trip_id": "trp-002",
+        "order_id": "ord-002",
+        "assignment_id": "asg-002",
+        "vehicle_id": "veh-001",
+        "driver_id": "drv-001",
+        "trip_status": "completed",
+        "actual_distance_km": 11.5,
+        "actual_duration_sec": 2100,
+        "proof_required": false,
+        "proof_status": "not_required",
+        "created_at": "2026-09-06T10:25:00.000Z",
+        "completed_at": "2026-09-06T11:45:00.000Z"
+      }
+    ],
+    "proofBundles": [
+      {
+        "proof_bundle_id": "pb-001",
+        "trip_id": "trp-001",
+        "signoff_name": "Wang Xiao-Ming",
+        "signoff_at": "2026-09-06T10:30:00.000Z",
+        "photo_count": 2,
+        "expense_total": 0,
+        "created_at": "2026-09-06T10:31:00.000Z"
+      }
+    ]
+  },
+  "billing": {
+    "driverFeePlans": [
+      {
+        "plan_id": "fp-001",
+        "plan_name": "Standard DRTS Driver Commission",
+        "version_no": "v1.0",
+        "calculation_method": "percentage_and_subsidy",
+        "effective_from": "2026-01-01T00:00:00.000Z",
+        "status": "active"
+      }
+    ],
+    "driverStatements": [
+      {
+        "statement_id": "stm-001",
+        "driver_id": "drv-001",
+        "period_month": "2026-09-01",
+        "fee_plan_id": "fp-001",
+        "gross_earning": 900.0,
+        "service_fee": 135.0,
+        "subsidy_amount": 50.0,
+        "net_amount": 815.0,
+        "payout_status": "approved"
+      }
+    ],
+    "driverStatementLines": [
+      {
+        "line_id": "stl-001",
+        "statement_id": "stm-001",
+        "line_type": "trip_fare",
+        "ref_id": "trp-001",
+        "description": "Trip compensation - Order ORD-20260906-001",
+        "amount": 350.0
+      },
+      {
+        "line_id": "stl-002",
+        "statement_id": "stm-001",
+        "line_type": "trip_fare",
+        "ref_id": "trp-002",
+        "description": "Trip compensation - Order ORD-20260906-002",
+        "amount": 550.0
+      },
+      {
+        "line_id": "stl-003",
+        "statement_id": "stm-001",
+        "line_type": "service_fee",
+        "description": "15% platform commission",
+        "amount": -135.0
+      },
+      {
+        "line_id": "stl-004",
+        "statement_id": "stm-001",
+        "line_type": "peak_subsidy",
+        "description": "Morning rush-hour completion incentive",
+        "amount": 50.0
+      }
+    ],
+    "tenantInvoices": [
+      {
+        "invoice_id": "inv-001",
+        "tenant_id": "tenant-001",
+        "invoice_no": "INV-20260906-001",
+        "period_from": "2026-09-01",
+        "period_to": "2026-09-30",
+        "total_amount": 900.0,
+        "currency_code": "TWD",
+        "status": "issued"
+      }
+    ],
+    "invoiceLines": [
+      {
+        "invoice_line_id": "inl-001",
+        "invoice_id": "inv-001",
+        "order_id": "ord-001",
+        "description": "Enterprise Dispatch - Taipei Central",
+        "quantity": 1,
+        "unit_price": 350.0,
+        "line_total": 350.0
+      },
+      {
+        "invoice_line_id": "inl-002",
+        "invoice_id": "inv-001",
+        "order_id": "ord-002",
+        "description": "Airport Transfer - Songshan to Nangang",
+        "quantity": 1,
+        "unit_price": 550.0,
+        "line_total": 550.0
+      }
+    ]
+  },
+  "audit": {
+    "auditLogs": [
+      {
+        "audit_id": "aud-001",
+        "actor_id": "usr-admin-01",
+        "actor_type": "platform_admin",
+        "tenant_id": "tenant-001",
+        "module_name": "ops.orders",
+        "action_name": "order.created",
+        "resource_type": "order",
+        "resource_id": "ord-001",
+        "created_at": "2026-09-06T09:30:00.000Z",
+        "hash_value": "3cbe24131584ea05cf25f235bb95188d30d1ff11ee16f71d5308b49f99f9c7be"
+      },
+      {
+        "audit_id": "aud-002",
+        "actor_id": "usr-admin-01",
+        "actor_type": "platform_admin",
+        "tenant_id": "tenant-001",
+        "module_name": "ops.orders",
+        "action_name": "order.created",
+        "resource_type": "order",
+        "resource_id": "ord-002",
+        "created_at": "2026-09-06T10:15:00.000Z",
+        "hash_value": "fa557a151b75df74167e914041e17d6b3846bc0f507b539bda997637aaae627b"
+      },
+      {
+        "audit_id": "aud-003",
+        "actor_id": "system-billing",
+        "actor_type": "system",
+        "tenant_id": "tenant-001",
+        "module_name": "billing.invoices",
+        "action_name": "invoice.issued",
+        "resource_type": "invoice",
+        "resource_id": "inv-001",
+        "created_at": "2026-09-06T11:55:00.000Z",
+        "hash_value": "bf0ee5a5198ec44bbfb1df1e15faec9bb8e7a02b1f415392efae204cba799bbd"
+      }
+    ],
+    "dispatchTraceLogs": [
+      {
+        "trace_id": "trc-001",
+        "order_id": "ord-001",
+        "vehicle_id": "veh-001",
+        "driver_id": "drv-001",
+        "event_type": "assignment_offered",
+        "event_time": "2026-09-06T09:36:00.000Z",
+        "source_channel": "auto_dispatcher",
+        "payload_hash": "e6dcbe75b5b9e38d60156942ad71ee52ad9ee53f86e92ee34685ff86ad0eb563"
+      },
+      {
+        "trace_id": "trc-002",
+        "order_id": "ord-001",
+        "vehicle_id": "veh-001",
+        "driver_id": "drv-001",
+        "event_type": "trip_completed",
+        "event_time": "2026-09-06T10:30:00.000Z",
+        "source_channel": "driver_app_api",
+        "payload_hash": "2ff1a052ff37c4db618e7d23d8c8e11a3db6822c92e92ec4ea3235b62e49c5e5"
+      },
+      {
+        "trace_id": "trc-003",
+        "order_id": "ord-002",
+        "vehicle_id": "veh-001",
+        "driver_id": "drv-001",
+        "event_type": "trip_completed",
+        "event_time": "2026-09-06T11:45:00.000Z",
+        "source_channel": "driver_app_api",
+        "payload_hash": "778e7f1e712a3d76e48ff2f5d918a28723930b80efd124806a5b4c102a0aeb2d"
+      }
+    ]
+  }
+}

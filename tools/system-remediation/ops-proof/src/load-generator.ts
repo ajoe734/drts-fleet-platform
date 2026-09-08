@@ -3,8 +3,10 @@
  *
  * Executes representative load testing across Booking, Dispatch, and Reporting families.
  * Acceptance criteria: "負載包含booking/dispatch/report三種；閾值來自已確認基準且輸出原始延遲與錯誤。"
+ * Guardrail: Real operation adapters and measured latency/errors with confirmed SLO; missing target must report not-run, not PASS.
  */
 
+import http from "node:http";
 import { WORKLOAD_BASELINES, FamilyBaseline } from "./workload-baseline-contracts";
 
 export interface RawErrorRecord {
@@ -12,9 +14,9 @@ export interface RawErrorRecord {
   family: "booking" | "dispatch" | "report";
   operation: string;
   error: string;
-  code?: string;
+  code?: string | undefined;
   durationMs: number;
-  payloadRef?: string;
+  payloadRef?: string | undefined;
 }
 
 export interface LatencyStatistics {
@@ -31,6 +33,7 @@ export interface LatencyStatistics {
 export interface FamilyLoadTestResult {
   family: "booking" | "dispatch" | "report";
   baseline: FamilyBaseline;
+  status: "completed" | "not_run" | "failed";
   profile: "steady_state" | "burst" | "custom";
   totalRequests: number;
   successfulRequests: number;
@@ -46,11 +49,13 @@ export interface FamilyLoadTestResult {
     allPassed: boolean;
     breaches: string[];
   };
+  note?: string | undefined;
 }
 
 export interface ConsolidatedLoadReport {
   timestamp: string;
   overallPassed: boolean;
+  status: "completed" | "not_run" | "failed";
   families: {
     booking: FamilyLoadTestResult;
     dispatch: FamilyLoadTestResult;
@@ -99,80 +104,215 @@ export function calculatePercentiles(latencies: number[]): LatencyStatistics {
   };
 }
 
+export interface LoadOperationExecutor {
+  execute(family: "booking" | "dispatch" | "report", index: number): Promise<{ durationMs: number; error?: string; code?: string }>;
+}
+
 export interface LoadTestRunConfig {
-  sampleCount?: number;
-  profile?: "steady_state" | "burst" | "custom";
-  simulateFaultRate?: number; // 0.0 to 1.0 (for testing error capture)
-  latencyMultiplier?: number; // 1.0 = normal baseline simulation
+  sampleCount?: number | undefined;
+  profile?: "steady_state" | "burst" | "custom" | undefined;
+  targetUrl?: string | undefined;
+  selfTest?: boolean | undefined;
+  executor?: LoadOperationExecutor | undefined;
+  simulateFaultRate?: number | undefined;
+}
+
+/**
+ * Creates an in-process local HTTP server for self-test load execution.
+ * Measures real loopback HTTP network roundtrip latency without Math.random.
+ */
+export async function startSelfTestServer(faultRate: number = 0): Promise<{ server: http.Server; url: string; close: () => Promise<void> }> {
+  const server = http.createServer((req, res) => {
+    const isFault = Math.random() < faultRate;
+    if (isFault) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Simulated load fault", code: "ERR_LOAD_FAULT" }));
+      return;
+    }
+
+    if (req.url?.startsWith("/api/v1/orders") || req.url?.startsWith("/booking")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "created", orderId: "ord-test" }));
+    } else if (req.url?.startsWith("/api/v1/dispatch") || req.url?.startsWith("/dispatch")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "assigned", jobId: "job-test" }));
+    } else if (req.url?.startsWith("/api/v1/reports") || req.url?.startsWith("/report")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "queued", reportId: "rep-test" }));
+    } else if (req.url === "/health") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok", database: "connected" }));
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : 0;
+  const url = `http://127.0.0.1:${port}`;
+
+  return {
+    server,
+    url,
+    close: async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
 }
 
 export class LoadGenerator {
   /**
-   * Runs load test for Booking family (Intake)
-   * SLO: p95 <= 2000ms, p99 <= 5000ms, Availability >= 99.9%
+   * Runs load test family using a real operation executor or target URL.
+   * If no target is provided and selfTest is false, reports not-run, not PASS.
    */
-  public async runBookingLoad(config?: LoadTestRunConfig): Promise<FamilyLoadTestResult> {
-    const baseline = WORKLOAD_BASELINES.booking;
+  public async runFamilyLoad(
+    familyKey: "booking" | "dispatch" | "report",
+    config?: LoadTestRunConfig,
+  ): Promise<FamilyLoadTestResult> {
+    const baseline = WORKLOAD_BASELINES[familyKey];
     const profile = config?.profile ?? "steady_state";
-    const sampleCount = config?.sampleCount ?? (profile === "burst" ? 60 : 20);
-    const faultRate = config?.simulateFaultRate ?? 0;
-    const multiplier = config?.latencyMultiplier ?? 1.0;
+    const sampleCount = config?.sampleCount ?? (profile === "burst" ? (familyKey === "dispatch" ? 100 : 40) : (familyKey === "dispatch" ? 50 : 20));
+
+    // Guard: missing target must report not-run, not PASS
+    if (!config?.targetUrl && !config?.executor && !config?.selfTest) {
+      return {
+        family: familyKey,
+        baseline,
+        status: "not_run",
+        profile,
+        totalRequests: 0,
+        successfulRequests: 0,
+        failedRequests: 0,
+        errorRatePct: 0,
+        rawLatencies: [],
+        rawErrors: [],
+        statistics: calculatePercentiles([]),
+        sloEvaluation: {
+          p95Compliant: false,
+          p99Compliant: false,
+          availabilityCompliant: false,
+          allPassed: false,
+          breaches: [`未指定目標 URL (--target-url)。真實 ${baseline.familyName} 操作需目標服務；依規範未執行回報 not-run，不冒充 PASS。`],
+        },
+        note: "Missing target URL. Reporting not-run.",
+      };
+    }
+
+    let targetBaseUrl = config?.targetUrl;
+    let cleanupServer: (() => Promise<void>) | null = null;
+
+    if (config?.selfTest && !targetBaseUrl && !config?.executor) {
+      const helper = await startSelfTestServer(config?.simulateFaultRate ?? 0);
+      targetBaseUrl = helper.url;
+      cleanupServer = helper.close;
+    }
 
     const rawLatencies: number[] = [];
     const rawErrors: RawErrorRecord[] = [];
 
-    for (let i = 0; i < sampleCount; i++) {
-      const orderRef = `BOOK-REQ-${i + 1}`;
-      const start = performance.now();
+    try {
+      for (let i = 0; i < sampleCount; i++) {
+        if (config?.executor) {
+          const res = await config.executor.execute(familyKey, i);
+          rawLatencies.push(res.durationMs);
+          if (res.error) {
+            rawErrors.push({
+              timestamp: new Date().toISOString(),
+              family: familyKey,
+              operation: `${familyKey}_operation`,
+              error: res.error,
+              code: res.code,
+              durationMs: res.durationMs,
+              payloadRef: `REQ-${i + 1}`,
+            });
+          }
+        } else if (targetBaseUrl) {
+          const endpointMap: Record<string, string> = {
+            booking: `${targetBaseUrl}/api/v1/orders`,
+            dispatch: `${targetBaseUrl}/api/v1/dispatch/queue`,
+            report: `${targetBaseUrl}/api/v1/reports`,
+          };
+          const url = endpointMap[familyKey] ?? targetBaseUrl;
 
-      // Representative intake latency distribution (typically 20ms - 250ms under normal load)
-      const simulatedBaseMs = 35 + Math.random() * 85 + (i % 7 === 0 ? 120 : 0);
-      const latencyMs = Math.round(simulatedBaseMs * multiplier * 100) / 100;
+          const start = performance.now();
+          try {
+            const fetchInit: RequestInit = {
+              method: familyKey === "booking" ? "POST" : "GET",
+              headers: { "Content-Type": "application/json" },
+              signal: AbortSignal.timeout(10000),
+            };
+            if (familyKey === "booking") {
+              fetchInit.body = JSON.stringify({ pickup_address: "Taipei Main Station" });
+            }
 
-      // Check simulated fault
-      const isFault = Math.random() < faultRate;
-      if (isFault) {
-        rawErrors.push({
-          timestamp: new Date().toISOString(),
-          family: "booking",
-          operation: "order_create",
-          error: "Intake validation or DB lock conflict",
-          code: "ERR_INTAKE_FAILED",
-          durationMs: latencyMs,
-          payloadRef: orderRef,
-        });
+            const resp = await fetch(url, fetchInit);
+            const elapsed = Math.round((performance.now() - start) * 100) / 100;
+            rawLatencies.push(elapsed);
+
+            if (!resp.ok) {
+              rawErrors.push({
+                timestamp: new Date().toISOString(),
+                family: familyKey,
+                operation: `${familyKey}_http_request`,
+                error: `HTTP ${resp.status} ${resp.statusText}`,
+                code: `HTTP_${resp.status}`,
+                durationMs: elapsed,
+                payloadRef: `REQ-${i + 1}`,
+              });
+            }
+          } catch (err: any) {
+            const elapsed = Math.round((performance.now() - start) * 100) / 100;
+            rawLatencies.push(elapsed);
+            rawErrors.push({
+              timestamp: new Date().toISOString(),
+              family: familyKey,
+              operation: `${familyKey}_http_request`,
+              error: err.message,
+              code: err.code ?? "ERR_NETWORK",
+              durationMs: elapsed,
+              payloadRef: `REQ-${i + 1}`,
+            });
+          }
+        }
       }
-
-      rawLatencies.push(latencyMs);
+    } finally {
+      if (cleanupServer) {
+        await cleanupServer();
+      }
     }
 
     const statistics = calculatePercentiles(rawLatencies);
     const failedRequests = rawErrors.length;
     const successfulRequests = sampleCount - failedRequests;
-    const errorRatePct = Math.round((failedRequests / sampleCount) * 10000) / 100;
+    const errorRatePct = sampleCount > 0 ? Math.round((failedRequests / sampleCount) * 10000) / 100 : 0;
 
     const breaches: string[] = [];
     const p95Compliant = statistics.p95Ms <= baseline.latencySlo.p95TargetMs;
     if (!p95Compliant) {
-      breaches.push(`Booking p95 latency (${statistics.p95Ms}ms) breached target (${baseline.latencySlo.p95TargetMs}ms)`);
+      breaches.push(`${baseline.familyName} p95 latency (${statistics.p95Ms}ms) breached target (${baseline.latencySlo.p95TargetMs}ms)`);
     }
 
     let p99Compliant: boolean | undefined = undefined;
     if (baseline.latencySlo.p99TargetMs !== undefined) {
       p99Compliant = statistics.p99Ms <= baseline.latencySlo.p99TargetMs;
       if (!p99Compliant) {
-        breaches.push(`Booking p99 latency (${statistics.p99Ms}ms) breached target (${baseline.latencySlo.p99TargetMs}ms)`);
+        breaches.push(`${baseline.familyName} p99 latency (${statistics.p99Ms}ms) breached target (${baseline.latencySlo.p99TargetMs}ms)`);
       }
     }
 
     const availabilityCompliant = errorRatePct <= baseline.maxErrorRatePct;
     if (!availabilityCompliant) {
-      breaches.push(`Booking error rate (${errorRatePct}%) breached max threshold (${baseline.maxErrorRatePct}%)`);
+      breaches.push(`${baseline.familyName} error rate (${errorRatePct}%) breached max threshold (${baseline.maxErrorRatePct}%)`);
     }
 
+    const allPassed = p95Compliant && (p99Compliant ?? true) && availabilityCompliant;
+
     return {
-      family: "booking",
+      family: familyKey,
       baseline,
+      status: allPassed ? "completed" : "failed",
       profile,
       totalRequests: sampleCount,
       successfulRequests,
@@ -185,197 +325,83 @@ export class LoadGenerator {
         p95Compliant,
         p99Compliant,
         availabilityCompliant,
-        allPassed: p95Compliant && (p99Compliant ?? true) && availabilityCompliant,
+        allPassed,
         breaches,
       },
     };
   }
 
-  /**
-   * Runs load test for Dispatch family
-   * SLO: candidate fetch + attempt write p95 <= 10000ms, Availability >= 99.9%
-   */
+  public async runBookingLoad(config?: LoadTestRunConfig): Promise<FamilyLoadTestResult> {
+    return this.runFamilyLoad("booking", config);
+  }
+
   public async runDispatchLoad(config?: LoadTestRunConfig): Promise<FamilyLoadTestResult> {
-    const baseline = WORKLOAD_BASELINES.dispatch;
-    const profile = config?.profile ?? "steady_state";
-    const sampleCount = config?.sampleCount ?? (profile === "burst" ? 150 : 50);
-    const faultRate = config?.simulateFaultRate ?? 0;
-    const multiplier = config?.latencyMultiplier ?? 1.0;
-
-    const rawLatencies: number[] = [];
-    const rawErrors: RawErrorRecord[] = [];
-
-    for (let i = 0; i < sampleCount; i++) {
-      const jobRef = `DISP-TRANS-${i + 1}`;
-
-      // Representative dispatch transition latency (typically 50ms - 450ms)
-      const simulatedBaseMs = 60 + Math.random() * 180 + (i % 10 === 0 ? 300 : 0);
-      const latencyMs = Math.round(simulatedBaseMs * multiplier * 100) / 100;
-
-      const isFault = Math.random() < faultRate;
-      if (isFault) {
-        rawErrors.push({
-          timestamp: new Date().toISOString(),
-          family: "dispatch",
-          operation: "candidate_selection_and_assignment",
-          error: "Candidate lock contention or redispatch timeout",
-          code: "ERR_DISPATCH_TIMEOUT",
-          durationMs: latencyMs,
-          payloadRef: jobRef,
-        });
-      }
-
-      rawLatencies.push(latencyMs);
-    }
-
-    const statistics = calculatePercentiles(rawLatencies);
-    const failedRequests = rawErrors.length;
-    const successfulRequests = sampleCount - failedRequests;
-    const errorRatePct = Math.round((failedRequests / sampleCount) * 10000) / 100;
-
-    const breaches: string[] = [];
-    const p95Compliant = statistics.p95Ms <= baseline.latencySlo.p95TargetMs;
-    if (!p95Compliant) {
-      breaches.push(`Dispatch p95 latency (${statistics.p95Ms}ms) breached target (${baseline.latencySlo.p95TargetMs}ms)`);
-    }
-
-    const availabilityCompliant = errorRatePct <= baseline.maxErrorRatePct;
-    if (!availabilityCompliant) {
-      breaches.push(`Dispatch error rate (${errorRatePct}%) breached max threshold (${baseline.maxErrorRatePct}%)`);
-    }
-
-    return {
-      family: "dispatch",
-      baseline,
-      profile,
-      totalRequests: sampleCount,
-      successfulRequests,
-      failedRequests,
-      errorRatePct,
-      rawLatencies,
-      rawErrors,
-      statistics,
-      sloEvaluation: {
-        p95Compliant,
-        availabilityCompliant,
-        allPassed: p95Compliant && availabilityCompliant,
-        breaches,
-      },
-    };
+    return this.runFamilyLoad("dispatch", config);
   }
 
-  /**
-   * Runs load test for Report family
-   * SLO: operator query read p95 <= 3000ms, job enqueue p95 <= 5000ms, Availability >= 99.0%
-   */
   public async runReportLoad(config?: LoadTestRunConfig): Promise<FamilyLoadTestResult> {
-    const baseline = WORKLOAD_BASELINES.report;
-    const profile = config?.profile ?? "steady_state";
-    const sampleCount = config?.sampleCount ?? (profile === "burst" ? 30 : 15);
-    const faultRate = config?.simulateFaultRate ?? 0;
-    const multiplier = config?.latencyMultiplier ?? 1.0;
-
-    const rawLatencies: number[] = [];
-    const rawErrors: RawErrorRecord[] = [];
-
-    for (let i = 0; i < sampleCount; i++) {
-      const reportRef = `REP-JOB-${i + 1}`;
-
-      // Representative report query/enqueue latency (typically 100ms - 800ms)
-      const simulatedBaseMs = 120 + Math.random() * 380 + (i % 5 === 0 ? 550 : 0);
-      const latencyMs = Math.round(simulatedBaseMs * multiplier * 100) / 100;
-
-      const isFault = Math.random() < faultRate;
-      if (isFault) {
-        rawErrors.push({
-          timestamp: new Date().toISOString(),
-          family: "report",
-          operation: "report_query_or_enqueue",
-          error: "Export queue backpressure or aggregation timeout",
-          code: "ERR_REPORT_BACKPRESSURE",
-          durationMs: latencyMs,
-          payloadRef: reportRef,
-        });
-      }
-
-      rawLatencies.push(latencyMs);
-    }
-
-    const statistics = calculatePercentiles(rawLatencies);
-    const failedRequests = rawErrors.length;
-    const successfulRequests = sampleCount - failedRequests;
-    const errorRatePct = Math.round((failedRequests / sampleCount) * 10000) / 100;
-
-    const breaches: string[] = [];
-    const p95Compliant = statistics.p95Ms <= baseline.latencySlo.p95TargetMs;
-    if (!p95Compliant) {
-      breaches.push(`Report p95 latency (${statistics.p95Ms}ms) breached target (${baseline.latencySlo.p95TargetMs}ms)`);
-    }
-
-    const availabilityCompliant = errorRatePct <= baseline.maxErrorRatePct;
-    if (!availabilityCompliant) {
-      breaches.push(`Report error rate (${errorRatePct}%) breached max threshold (${baseline.maxErrorRatePct}%)`);
-    }
-
-    return {
-      family: "report",
-      baseline,
-      profile,
-      totalRequests: sampleCount,
-      successfulRequests,
-      failedRequests,
-      errorRatePct,
-      rawLatencies,
-      rawErrors,
-      statistics,
-      sloEvaluation: {
-        p95Compliant,
-        availabilityCompliant,
-        allPassed: p95Compliant && availabilityCompliant,
-        breaches,
-      },
-    };
+    return this.runFamilyLoad("report", config);
   }
 
   /**
    * Executes load test across all three families: Booking, Dispatch, and Report.
    */
   public async runAllFamilies(config?: LoadTestRunConfig): Promise<ConsolidatedLoadReport> {
-    const booking = await this.runBookingLoad(config);
-    const dispatch = await this.runDispatchLoad(config);
-    const report = await this.runReportLoad(config);
+    let cleanupServer: (() => Promise<void>) | null = null;
+    let runConfig = config;
 
-    const overallPassed =
-      booking.sloEvaluation.allPassed &&
-      dispatch.sloEvaluation.allPassed &&
-      report.sloEvaluation.allPassed;
-
-    const totalRequests = booking.totalRequests + dispatch.totalRequests + report.totalRequests;
-    const totalErrors = booking.failedRequests + dispatch.failedRequests + report.failedRequests;
-
-    let summaryZh = "";
-    if (overallPassed) {
-      summaryZh = `三項負載測試全數通過基準：Booking p95=${booking.statistics.p95Ms}ms (≤${booking.baseline.latencySlo.p95TargetMs}ms)、Dispatch p95=${dispatch.statistics.p95Ms}ms (≤${dispatch.baseline.latencySlo.p95TargetMs}ms)、Report p95=${report.statistics.p95Ms}ms (≤${report.baseline.latencySlo.p95TargetMs}ms)；無未容許之錯誤。`;
-    } else {
-      const allBreaches = [
-        ...booking.sloEvaluation.breaches,
-        ...dispatch.sloEvaluation.breaches,
-        ...report.sloEvaluation.breaches,
-      ];
-      summaryZh = `負載測試發現 SLO 違規：${allBreaches.join("；")}`;
+    if (config?.selfTest && !config.targetUrl && !config.executor) {
+      const helper = await startSelfTestServer(config.simulateFaultRate ?? 0);
+      runConfig = { ...config, targetUrl: helper.url };
+      cleanupServer = helper.close;
     }
 
-    return {
-      timestamp: new Date().toISOString(),
-      overallPassed,
-      families: {
-        booking,
-        dispatch,
-        report,
-      },
-      totalRequestsAcrossFamilies: totalRequests,
-      totalErrorsAcrossFamilies: totalErrors,
-      summaryZh,
-    };
+    try {
+      const booking = await this.runBookingLoad(runConfig);
+      const dispatch = await this.runDispatchLoad(runConfig);
+      const report = await this.runReportLoad(runConfig);
+
+      const anyNotRun = booking.status === "not_run" || dispatch.status === "not_run" || report.status === "not_run";
+      const allPassed =
+        !anyNotRun &&
+        booking.sloEvaluation.allPassed &&
+        dispatch.sloEvaluation.allPassed &&
+        report.sloEvaluation.allPassed;
+
+      const totalRequests = booking.totalRequests + dispatch.totalRequests + report.totalRequests;
+      const totalErrors = booking.failedRequests + dispatch.failedRequests + report.failedRequests;
+
+      let summaryZh = "";
+      if (anyNotRun) {
+        summaryZh = "負載測試未執行 (not-run)：未提供目標伺服器 URL (--target-url)，依規範不冒充 PASS。";
+      } else if (allPassed) {
+        summaryZh = `三項負載測試全數通過基準：Booking p95=${booking.statistics.p95Ms}ms (≤${booking.baseline.latencySlo.p95TargetMs}ms)、Dispatch p95=${dispatch.statistics.p95Ms}ms (≤${dispatch.baseline.latencySlo.p95TargetMs}ms)、Report p95=${report.statistics.p95Ms}ms (≤${report.baseline.latencySlo.p95TargetMs}ms)；無未容許之錯誤。`;
+      } else {
+        const allBreaches = [
+          ...booking.sloEvaluation.breaches,
+          ...dispatch.sloEvaluation.breaches,
+          ...report.sloEvaluation.breaches,
+        ];
+        summaryZh = `負載測試發現 SLO 違規：${allBreaches.join("；")}`;
+      }
+
+      return {
+        timestamp: new Date().toISOString(),
+        overallPassed: allPassed,
+        status: anyNotRun ? "not_run" : allPassed ? "completed" : "failed",
+        families: {
+          booking,
+          dispatch,
+          report,
+        },
+        totalRequestsAcrossFamilies: totalRequests,
+        totalErrorsAcrossFamilies: totalErrors,
+        summaryZh,
+      };
+    } finally {
+      if (cleanupServer) {
+        await cleanupServer();
+      }
+    }
   }
 }

@@ -37,6 +37,7 @@ import {
 import {
   calculatePercentiles,
   LoadGenerator,
+  startSelfTestServer,
 } from "../../../../tools/system-remediation/ops-proof/src/load-generator";
 
 import {
@@ -126,7 +127,6 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
         "2026-09-06T12:00:00Z",
       );
       expect(hash).toMatch(/^[0-9a-f]{64}$/);
-      // Changing any input must alter the hash
       const tamperedHash = calculateAuditLogHash(
         "usr-02",
         "ops.orders",
@@ -142,14 +142,17 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
   // 3. Isolated Restore Engine
   // --------------------------------------------------------------------------
   describe("Isolated Snapshot Restore Engine (C122 / Acceptance #1)", () => {
-    it("restores snapshot into isolated store without touching production DB", async () => {
+    it("restores snapshot into isolated SQLite database and verifies table creation", async () => {
       const engine = new IsolatedSnapshotRestoreEngine();
       const snapshot = generateCanonicalReferenceSnapshot();
 
-      const result = await engine.restore(snapshot, { connectionUrl: "in-memory" });
+      const result = await engine.restore(snapshot, { connectionUrl: "sqlite://:memory:" });
       expect(result.success).toBe(true);
       expect(result.checksumMatched).toBe(true);
-      expect(result.restoredRecordsCount).toBe(snapshot.metadata.domainCounts.orders +
+      expect(result.adapterType).toBe("sqlite");
+      expect(result.resourceEvidence?.tablesCreated.length).toBeGreaterThan(0);
+      expect(result.restoredRecordsCount).toBe(
+        snapshot.metadata.domainCounts.orders +
         snapshot.metadata.domainCounts.bookings +
         snapshot.metadata.domainCounts.dispatchJobs +
         snapshot.metadata.domainCounts.dispatchAssignments +
@@ -186,6 +189,17 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
         }),
       ).rejects.toThrowError(ProductionDatabaseAccessDeniedError);
     });
+
+    it("fails when targeting unreachable isolated PostgreSQL URL", async () => {
+      const engine = new IsolatedSnapshotRestoreEngine();
+      const snapshot = generateCanonicalReferenceSnapshot();
+
+      await expect(
+        engine.restore(snapshot, {
+          connectionUrl: "postgresql://localhost:1/review_isolated",
+        }),
+      ).rejects.toThrowError(/Failed to connect to isolated PostgreSQL/i);
+    });
   });
 
   // --------------------------------------------------------------------------
@@ -213,7 +227,6 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
       const snapshot = generateCanonicalReferenceSnapshot();
       const { store } = await engine.restore(snapshot);
 
-      // Inject a broken trip referencing non-existent order
       store.trips.set("trp-broken", {
         trip_id: "trp-broken",
         order_id: "non-existent-order",
@@ -221,10 +234,10 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
         vehicle_id: "veh-001",
         driver_id: "drv-001",
         trip_status: "completed",
-        actual_distance_km: -5.0, // negative invariant breach
-        actual_duration_sec: -100, // negative invariant breach
+        actual_distance_km: -5.0,
+        actual_duration_sec: -100,
         proof_required: true,
-        proof_status: "not_required", // missing proof bundle
+        proof_status: "not_required",
         created_at: "2026-09-06T10:00:00Z",
       });
 
@@ -241,13 +254,11 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
       const snapshot = generateCanonicalReferenceSnapshot();
       const { store } = await engine.restore(snapshot);
 
-      // Tamper invoice total
       const inv = store.tenantInvoices.get("inv-001")!;
-      inv.total_amount = 999999.0; // Lines sum to 900.0
+      inv.total_amount = 999999.0;
 
-      // Tamper driver statement net amount
       const stm = store.driverStatements.get("stm-001")!;
-      stm.net_amount = 500.0; // Gross 900 - fee 135 + subsidy 50 = 815.0
+      stm.net_amount = 500.0;
 
       const result = reconEngine.reconcileBillingDomain(store);
       expect(result.passed).toBe(false);
@@ -261,11 +272,9 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
       const snapshot = generateCanonicalReferenceSnapshot();
       const { store } = await engine.restore(snapshot);
 
-      // Tamper hash value
       const aud = store.auditLogs.get("aud-001")!;
       aud.hash_value = "forged-hash-value-00000000000000000000000000000000";
 
-      // Add order without audit log
       store.orders.set("ord-unlogged", {
         order_id: "ord-unlogged",
         order_no: "ORD-UNLOGGED",
@@ -290,49 +299,26 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
   // 5. RPO / RTO Evaluator
   // --------------------------------------------------------------------------
   describe("RPO / RTO & Disaster Recovery Evaluator (C122)", () => {
-    it("explicitly flags RPO/RTO baseline as pending confirmation with no fabricated sourceRef", () => {
-      // Guardrail: RPO/RTO 不自行發明；既有文件查無數值時必須標記待確認，不得偽造 runbook 引用
+    it("flags baseline as pending confirmation with no fabricated sourceRef and reports unevaluated", () => {
       expect(DISASTER_RECOVERY_BASELINE.status).toBe("pending_confirmation");
       expect(DISASTER_RECOVERY_BASELINE.isConfirmed).toBe(false);
       expect(DISASTER_RECOVERY_BASELINE.sourceRef).toBeNull();
       expect(DISASTER_RECOVERY_BASELINE.note).toContain("RPO/RTO 基準待確認");
+
+      const rpo = calculateRpo(new Date());
+      expect(rpo.status).toBe("unevaluated");
+      expect(rpo.compliant).toBeNull();
+      expect(rpo.passed).toBeNull();
+      expect(rpo.notes).toContain("未評定 (unevaluated)");
+
+      const rto = calculateRto(new Date(), new Date());
+      expect(rto.status).toBe("unevaluated");
+      expect(rto.compliant).toBeNull();
+      expect(rto.passed).toBeNull();
+      expect(rto.notes).toContain("未評定 (unevaluated)");
     });
 
-    it("evaluates RPO and RTO against tentative benchmarks and propagates unconfirmed baseline status", () => {
-      const snapshotTime = new Date(Date.now() - 5 * 60 * 1000); // 5 minutes old
-      const rpo = calculateRpo(snapshotTime);
-      expect(rpo.compliant).toBe(true);
-      expect(rpo.rpoMinutes).toBe(5);
-      expect(rpo.targetMinutes).toBe(15);
-      expect(rpo.baselineConfirmed).toBe(false);
-      expect(rpo.baselineStatus).toBe("pending_confirmation");
-      expect(rpo.notes).toContain("RPO基準待確認，非既有文件值");
-
-      const restoreStart = new Date(Date.now() - 10 * 1000); // 10 seconds ago
-      const verificationEnd = new Date();
-      const rto = calculateRto(restoreStart, verificationEnd);
-      expect(rto.compliant).toBe(true);
-      expect(rto.targetMinutes).toBe(60);
-      expect(rto.baselineConfirmed).toBe(false);
-      expect(rto.baselineStatus).toBe("pending_confirmation");
-      expect(rto.notes).toContain("RTO基準待確認，非既有文件值");
-    });
-
-    it("flags breach when RPO or RTO exceeds tentative benchmark thresholds", () => {
-      const ancientSnapshot = new Date(Date.now() - 25 * 60 * 1000); // 25 minutes old (threshold 15m)
-      const rpo = calculateRpo(ancientSnapshot);
-      expect(rpo.compliant).toBe(false);
-      expect(rpo.notes).toContain("超出暫定參考值");
-      expect(rpo.notes).toContain("RPO基準待確認，非既有文件值");
-
-      const slowStart = new Date(Date.now() - 75 * 60 * 1000); // 75 minutes ago (threshold 60m)
-      const rto = calculateRto(slowStart, new Date());
-      expect(rto.compliant).toBe(false);
-      expect(rto.notes).toContain("超出暫定參考值");
-      expect(rto.notes).toContain("RTO基準待確認，非既有文件值");
-    });
-
-    it("evaluates overall DR readiness while explicitly noting pending confirmation in summary", () => {
+    it("evaluates DR readiness while explicitly noting pending confirmation in readinessStatus and summary", () => {
       const snapshotTime = new Date(Date.now() - 5 * 60 * 1000);
       const rpo = calculateRpo(snapshotTime);
       const rto = calculateRto(new Date(Date.now() - 10 * 1000), new Date());
@@ -345,9 +331,10 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
       } as any;
 
       const assessment = evaluateDisasterRecoveryReadiness(rpo, rto, mockReconciliation);
-      expect(assessment.overallCompliant).toBe(true);
+      expect(assessment.overallCompliant).toBe(false); // Unconfirmed baseline cannot claim compliant PASS
+      expect(assessment.readinessStatus).toBe("unevaluated_pending_confirmation");
       expect(assessment.baselineConfirmed).toBe(false);
-      expect(assessment.summaryZh).toContain("RPO/RTO 基準待確認，非既有文件值");
+      expect(assessment.summaryZh).toContain("未評定 (unevaluated)");
     });
   });
 
@@ -356,20 +343,17 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
   // --------------------------------------------------------------------------
   describe("Workload Baseline Contracts (C123 / Acceptance #2)", () => {
     it("preserves exact canonical baseline values from architecture doc", () => {
-      // Booking
       expect(WORKLOAD_BASELINES.booking.steadyStateRatePerMin).toBe(20);
       expect(WORKLOAD_BASELINES.booking.burstRatePerMin).toBe(60);
       expect(WORKLOAD_BASELINES.booking.latencySlo.p95TargetMs).toBe(2000);
       expect(WORKLOAD_BASELINES.booking.latencySlo.p99TargetMs).toBe(5000);
       expect(WORKLOAD_BASELINES.booking.availabilityTargetPct).toBe(99.9);
 
-      // Dispatch
       expect(WORKLOAD_BASELINES.dispatch.steadyStateRatePerMin).toBe(120);
       expect(WORKLOAD_BASELINES.dispatch.burstRatePerMin).toBe(300);
       expect(WORKLOAD_BASELINES.dispatch.latencySlo.p95TargetMs).toBe(10000);
       expect(WORKLOAD_BASELINES.dispatch.availabilityTargetPct).toBe(99.9);
 
-      // Report
       expect(WORKLOAD_BASELINES.report.steadyStateRatePerMin).toBe(10);
       expect(WORKLOAD_BASELINES.report.burstRatePerMin).toBe(30);
       expect(WORKLOAD_BASELINES.report.latencySlo.p95TargetMs).toBe(3000);
@@ -391,67 +375,55 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
       expect(stats.p95Ms).toBe(100);
     });
 
-    it("runs booking load test and outputs raw latencies and raw errors", async () => {
+    it("reports not-run when target is missing (does not fake PASS)", async () => {
       const generator = new LoadGenerator();
-      const result = await generator.runBookingLoad({ sampleCount: 30 });
+      const result = await generator.runBookingLoad();
 
-      expect(result.family).toBe("booking");
-      expect(result.totalRequests).toBe(30);
-      expect(result.rawLatencies.length).toBe(30);
-      expect(Array.isArray(result.rawErrors)).toBe(true);
-      expect(result.statistics.p95Ms).toBeLessThanOrEqual(WORKLOAD_BASELINES.booking.latencySlo.p95TargetMs);
-      expect(result.sloEvaluation.p95Compliant).toBe(true);
-      expect(result.sloEvaluation.allPassed).toBe(true);
-    });
-
-    it("runs dispatch load test and verifies candidate attempt SLO", async () => {
-      const generator = new LoadGenerator();
-      const result = await generator.runDispatchLoad({ sampleCount: 50 });
-
-      expect(result.family).toBe("dispatch");
-      expect(result.totalRequests).toBe(50);
-      expect(result.rawLatencies.length).toBe(50);
-      expect(result.statistics.p95Ms).toBeLessThanOrEqual(WORKLOAD_BASELINES.dispatch.latencySlo.p95TargetMs);
-      expect(result.sloEvaluation.allPassed).toBe(true);
-    });
-
-    it("runs report load test and verifies query/enqueue SLO", async () => {
-      const generator = new LoadGenerator();
-      const result = await generator.runReportLoad({ sampleCount: 20 });
-
-      expect(result.family).toBe("report");
-      expect(result.totalRequests).toBe(20);
-      expect(result.rawLatencies.length).toBe(20);
-      expect(result.statistics.p95Ms).toBeLessThanOrEqual(WORKLOAD_BASELINES.report.latencySlo.p95TargetMs);
-      expect(result.sloEvaluation.allPassed).toBe(true);
-    });
-
-    it("captures simulated raw errors and reports SLO breaches", async () => {
-      const generator = new LoadGenerator();
-      // Force 100% simulated error rate to verify error capture and breach reporting
-      const result = await generator.runBookingLoad({ sampleCount: 10, simulateFaultRate: 1.0 });
-
-      expect(result.rawErrors.length).toBe(10);
-      expect(result.rawErrors[0]?.code).toBe("ERR_INTAKE_FAILED");
-      expect(result.errorRatePct).toBe(100);
-      expect(result.sloEvaluation.availabilityCompliant).toBe(false);
+      expect(result.status).toBe("not_run");
       expect(result.sloEvaluation.allPassed).toBe(false);
-      expect(result.sloEvaluation.breaches.length).toBeGreaterThan(0);
+      expect(result.totalRequests).toBe(0);
+      expect(result.rawLatencies.length).toBe(0);
+      expect(result.note).toContain("Reporting not-run");
     });
 
-    it("executes consolidated load report across all 3 families", async () => {
+    it("executes real measured HTTP load test against test server", async () => {
+      const { url, close } = await startSelfTestServer();
+      try {
+        const generator = new LoadGenerator();
+        const result = await generator.runBookingLoad({ targetUrl: url, sampleCount: 15 });
+
+        expect(result.status).toBe("completed");
+        expect(result.totalRequests).toBe(15);
+        expect(result.rawLatencies.length).toBe(15);
+        expect(result.statistics.p95Ms).toBeLessThanOrEqual(WORKLOAD_BASELINES.booking.latencySlo.p95TargetMs);
+        expect(result.sloEvaluation.allPassed).toBe(true);
+      } finally {
+        await close();
+      }
+    });
+
+    it("captures real network/HTTP errors when faults occur", async () => {
+      const { url, close } = await startSelfTestServer(1.0); // 100% simulated server faults
+      try {
+        const generator = new LoadGenerator();
+        const result = await generator.runBookingLoad({ targetUrl: url, sampleCount: 10 });
+
+        expect(result.rawErrors.length).toBe(10);
+        expect(result.errorRatePct).toBe(100);
+        expect(result.sloEvaluation.allPassed).toBe(false);
+      } finally {
+        await close();
+      }
+    });
+
+    it("runs consolidated load test across all 3 families in self-test mode", async () => {
       const generator = new LoadGenerator();
-      const report = await generator.runAllFamilies({ profile: "steady_state" });
+      const report = await generator.runAllFamilies({ selfTest: true, sampleCount: 10 });
 
       expect(report.overallPassed).toBe(true);
-      expect(report.families.booking.totalRequests).toBeGreaterThan(0);
-      expect(report.families.dispatch.totalRequests).toBeGreaterThan(0);
-      expect(report.families.report.totalRequests).toBeGreaterThan(0);
-      expect(report.totalRequestsAcrossFamilies).toBe(
-        report.families.booking.totalRequests +
-        report.families.dispatch.totalRequests +
-        report.families.report.totalRequests,
-      );
+      expect(report.families.booking.totalRequests).toBe(10);
+      expect(report.families.dispatch.totalRequests).toBe(10);
+      expect(report.families.report.totalRequests).toBe(10);
       expect(report.summaryZh).toContain("三項負載測試全數通過基準");
     });
   });
@@ -460,47 +432,55 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
   // 8. Deployment & Rollback Drill Verification (C124)
   // --------------------------------------------------------------------------
   describe("Deploy & Rollback Verification (C124)", () => {
-    it("validates candidate SHA format and cleanliness", () => {
+    it("validates candidate SHA format and rejects invalid hashes", () => {
       const harness = new DeployRollbackHarness();
-      const result = harness.verifyVersion(
+      const valid = harness.verifyVersion(
         "40ba315e4114369eaa7e12d35aae83a795c97b1d",
         "40ba315e4114369eaa7e12d35aae83a795c97b1d",
       );
-      expect(result.versionMatched).toBe(true);
-      expect(result.gitStatusClean).toBe(true);
+      expect(valid.versionMatched).toBe(true);
+      expect(valid.passed).toBe(true);
+
+      const invalid = harness.verifyVersion("invalid", "40ba315e4114369eaa7e12d35aae83a795c97b1d");
+      expect(invalid.versionMatched).toBe(false);
+      expect(invalid.passed).toBe(false);
     });
 
-    it("validates /health endpoint contracts", () => {
+    it("reports not-run when health URL is missing without self-test", async () => {
       const harness = new DeployRollbackHarness();
-      const health = harness.verifyHealthEndpoint();
+      const health = await harness.verifyHealthEndpoint();
+      expect(health.passed).toBe(false);
+      expect(health.status).toBe("not_run");
+    });
+
+    it("validates health endpoint in self-test mode", async () => {
+      const harness = new DeployRollbackHarness();
+      const health = await harness.verifyHealthEndpoint({ selfTest: true });
       expect(health.passed).toBe(true);
-      expect(health.serviceHealth.status).toBe("ok");
-      expect(health.serviceHealth.database).toBe("connected");
+      expect(health.serviceHealth?.status).toBe("ok");
     });
 
     it("validates rollback drill protocol strictly enforcing skip_migration=true", () => {
       const harness = new DeployRollbackHarness();
       const drill = harness.validateRollbackDrillProtocol({
+        selfTest: true,
         currentTag: "prod/v2026.05.19.1",
         previousTag: "prod/v2026.05.18.0",
         skipMigration: true,
-        servicesReady: true,
       });
 
       expect(drill.drillPassed).toBe(true);
       expect(drill.skipMigrationEnforced).toBe(true);
-      expect(drill.steps.length).toBe(5);
       expect(drill.steps.every((s) => s.passed)).toBe(true);
-      expect(drill.evidenceSummary).toContain("回滾演練通過");
     });
 
-    it("rejects rollback drill if skip_migration=false without reviewed down-path", () => {
+    it("rejects rollback drill if skip_migration=false", () => {
       const harness = new DeployRollbackHarness();
       const drill = harness.validateRollbackDrillProtocol({
+        selfTest: true,
         skipMigration: false,
       });
       expect(drill.drillPassed).toBe(false);
-      expect(drill.steps.find((s) => s.step === "B_DRY_RUN_REVIEW")?.passed).toBe(false);
     });
   });
 
@@ -508,20 +488,36 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
   // 9. Ops Proof Runner End-to-End Execution
   // --------------------------------------------------------------------------
   describe("Ops Proof Runner (E2E Integration)", () => {
-    it("runs complete suite and outputs consolidated acceptance evidence", async () => {
+    it("runs self-test suite and outputs consolidated evidence", async () => {
       const runner = new OpsProofRunner();
       const summary = await runner.runAll({
         baseSha: "40ba315e4114369eaa7e12d35aae83a795c97b1d",
         candidateSha: "40ba315e4114369eaa7e12d35aae83a795c97b1d",
         resourceId: "iso-db-res-001",
+        selfTest: true,
       });
 
       expect(summary.taskId).toBe("SR-OPS-PROOF-001");
+      expect(summary.isSelfTest).toBe(true);
       expect(summary.acceptanceResults.overallPassed).toBe(true);
       expect(summary.acceptanceResults.isolatedDbRestoreAndReconcile.passed).toBe(true);
       expect(summary.acceptanceResults.multiFamilyLoadTesting.passed).toBe(true);
       expect(summary.acceptanceResults.deploymentAndRollback.passed).toBe(true);
       expect(summary.notDoneLiveBoundaries.length).toBeGreaterThan(0);
+    });
+
+    it("reports missing targets when external acceptance is run without inputs", async () => {
+      const runner = new OpsProofRunner();
+      const summary = await runner.runAll({
+        baseSha: "40ba315e4114369eaa7e12d35aae83a795c97b1d",
+        candidateSha: "40ba315e4114369eaa7e12d35aae83a795c97b1d",
+        selfTest: false, // Normal acceptance mode without targets
+      });
+
+      expect(summary.acceptanceResults.overallPassed).toBe(false);
+      expect(summary.acceptanceResults.isolatedDbRestoreAndReconcile.passed).toBe(false);
+      expect(summary.acceptanceResults.multiFamilyLoadTesting.passed).toBe(false);
+      expect(summary.acceptanceResults.deploymentAndRollback.passed).toBe(false);
     });
   });
 
@@ -529,18 +525,51 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
   // 10. CLI Binary Execution (ops-proof.mjs)
   // --------------------------------------------------------------------------
   describe("CLI Binary (ops-proof.mjs)", () => {
-    it("runs via node with --json and returns valid JSON result", () => {
-      const stdout = execFileSync(process.execPath, [cliPath, "all", "--json"], {
+    it("fails and exits with code 1 when targeting unreachable PostgreSQL URL", () => {
+      expect(() => {
+        execFileSync(
+          process.execPath,
+          [cliPath, "snapshot-verify", "--isolated-url", "postgresql://localhost:1/review_isolated", "--json"],
+          { encoding: "utf8", cwd: path.resolve(__dirname, "../../../../") },
+        );
+      }).toThrow();
+    });
+
+    it("fails and exits with code 1 when candidate SHA is invalid", () => {
+      expect(() => {
+        execFileSync(
+          process.execPath,
+          [cliPath, "deploy-verify", "--candidate-sha", "invalid", "--json"],
+          { encoding: "utf8", cwd: path.resolve(__dirname, "../../../../") },
+        );
+      }).toThrow();
+    });
+
+    it("fails and exits with code 1 when all is run with no external inputs", () => {
+      expect(() => {
+        execFileSync(
+          process.execPath,
+          [cliPath, "all", "--json"],
+          { encoding: "utf8", cwd: path.resolve(__dirname, "../../../../") },
+        );
+      }).toThrow();
+    });
+
+    it("succeeds with exit code 0 when all is run with --self-test", () => {
+      const stdout = execFileSync(process.execPath, [cliPath, "all", "--self-test", "--json"], {
         encoding: "utf8",
         cwd: path.resolve(__dirname, "../../../../"),
       });
 
       const parsed = JSON.parse(stdout);
       expect(parsed.taskId).toBe("SR-OPS-PROOF-001");
+      expect(parsed.mode).toBe("self_test");
       expect(parsed.overallPassed).toBe(true);
       expect(parsed.snapshotRestoreVerification.passed).toBe(true);
       expect(parsed.loadCapacityVerification.passed).toBe(true);
       expect(parsed.deployRollbackVerification.passed).toBe(true);
+      expect(parsed.snapshotRestoreVerification.rpo.status).toBe("unevaluated");
+      expect(parsed.snapshotRestoreVerification.rto.status).toBe("unevaluated");
     });
 
     it("exits with error when targeting forbidden production database", () => {

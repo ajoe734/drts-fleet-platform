@@ -7,19 +7,24 @@
  * - Capability C124: Deployment version check, health verification, and rollback drill
  */
 
-import { generateCanonicalReferenceSnapshot } from "./snapshot-schema";
+import fs from "node:fs";
+import { generateCanonicalReferenceSnapshot, OpsSnapshot } from "./snapshot-schema";
 import { IsolatedSnapshotRestoreEngine, RestoreResult } from "./snapshot-restore-engine";
 import { OpsReconciliationEngine, FullReconciliationReport } from "./reconciliation-engine";
 import { calculateRpo, calculateRto, evaluateDisasterRecoveryReadiness, DrReadinessAssessment } from "./rpo-rto-calculator";
 import { LoadGenerator, ConsolidatedLoadReport, LoadTestRunConfig } from "./load-generator";
-import { DeployRollbackHarness, RollbackDrillValidation, VersionCheckResult, HealthCheckResult } from "./deploy-rollback-harness";
+import { DeployRollbackHarness, ConsolidatedDeployVerification } from "./deploy-rollback-harness";
 
 export interface OpsProofRunnerConfig {
-  baseSha?: string;
-  candidateSha?: string;
-  resourceId?: string;
-  isolatedDbUrl?: string;
-  loadConfig?: LoadTestRunConfig;
+  baseSha?: string | undefined;
+  candidateSha?: string | undefined;
+  resourceId?: string | undefined;
+  isolatedDbUrl?: string | undefined;
+  snapshotFile?: string | undefined;
+  targetUrl?: string | undefined;
+  healthUrl?: string | undefined;
+  selfTest?: boolean | undefined;
+  loadConfig?: LoadTestRunConfig | undefined;
 }
 
 export interface OpsProofExecutionSummary {
@@ -28,27 +33,31 @@ export interface OpsProofExecutionSummary {
   baseSha: string;
   candidateSha: string;
   resourceId: string;
+  isSelfTest: boolean;
   acceptanceResults: {
     isolatedDbRestoreAndReconcile: {
       passed: boolean;
+      status: string;
       summary: string;
-      restoreResult: {
+      restoreResult?: {
         snapshotId: string;
         isolatedTarget: string;
         recordsRestored: number;
         elapsedMs: number;
-      };
-      reconciliationReport: {
+      } | undefined;
+      reconciliationReport?: {
         overallPassed: boolean;
         tripsPassed: boolean;
         billingPassed: boolean;
         auditPassed: boolean;
         discrepanciesCount: number;
-      };
-      drAssessment: DrReadinessAssessment;
+      } | undefined;
+      drAssessment?: DrReadinessAssessment | undefined;
+      error?: string | undefined;
     };
     multiFamilyLoadTesting: {
       passed: boolean;
+      status: string;
       summary: string;
       totalRequests: number;
       totalErrors: number;
@@ -60,9 +69,7 @@ export interface OpsProofExecutionSummary {
     deploymentAndRollback: {
       passed: boolean;
       summary: string;
-      versionCheck: VersionCheckResult;
-      healthCheck: HealthCheckResult;
-      rollbackValidation: RollbackDrillValidation;
+      deployVerification: ConsolidatedDeployVerification;
     };
     overallPassed: boolean;
   };
@@ -79,70 +86,90 @@ export class OpsProofRunner {
    * Executes isolated snapshot restore and tri-domain reconciliation (C122)
    */
   public async runSnapshotRestoreProof(config?: OpsProofRunnerConfig): Promise<{
-    restoreResult: RestoreResult;
-    reconciliationReport: FullReconciliationReport;
-    drAssessment: DrReadinessAssessment;
+    restoreResult?: RestoreResult | undefined;
+    reconciliationReport?: FullReconciliationReport | undefined;
+    drAssessment?: DrReadinessAssessment | undefined;
+    passed: boolean;
+    status: string;
+    error?: string | undefined;
   }> {
     const baseSha = config?.baseSha ?? "40ba315e4114369eaa7e12d35aae83a795c97b1d";
     const resourceId = config?.resourceId ?? "iso-db-res-001";
+    const selfTest = config?.selfTest ?? false;
 
-    // 1. Generate canonical reference snapshot
-    const snapshot = generateCanonicalReferenceSnapshot({
-      baseSha,
-      resourceId,
-    });
+    let snapshot: OpsSnapshot;
+    if (config?.snapshotFile && fs.existsSync(config.snapshotFile)) {
+      snapshot = JSON.parse(fs.readFileSync(config.snapshotFile, "utf8"));
+    } else {
+      snapshot = generateCanonicalReferenceSnapshot({ baseSha, resourceId });
+    }
 
     const restoreStartTime = new Date();
+    const isolatedUrl = config?.isolatedDbUrl ?? (selfTest ? "in-memory" : undefined);
 
-    // 2. Restore into isolated environment (enforces assertIsolatedDatabase)
-    const restoreResult = await this.restoreEngine.restore(snapshot, {
-      connectionUrl: config?.isolatedDbUrl ?? "in-memory",
-    });
+    if (!isolatedUrl && !selfTest) {
+      return {
+        passed: false,
+        status: "missing_target",
+        error: "未指定隔離資料庫 URL (--isolated-url)。真實快照還原需指定隔離資料庫目標；依規範回報 missing_target，不冒充 PASS。",
+      };
+    }
 
-    // 3. Reconcile across Trips, Billing, and Audit domains
-    const reconciliationReport = this.reconciliationEngine.reconcileAll(restoreResult.store);
+    try {
+      const restoreResult = await this.restoreEngine.restore(snapshot, {
+        connectionUrl: isolatedUrl ?? "in-memory",
+      });
 
-    const verificationEndTime = new Date();
+      const reconciliationReport = this.reconciliationEngine.reconcileAll(restoreResult.store);
+      const verificationEndTime = new Date();
 
-    // 4. Calculate RPO and RTO
-    const rpo = calculateRpo(snapshot.metadata.capturedAt, restoreStartTime);
-    const rto = calculateRto(restoreStartTime, verificationEndTime);
-    const drAssessment = evaluateDisasterRecoveryReadiness(rpo, rto, reconciliationReport);
+      const rpo = calculateRpo(snapshot.metadata.capturedAt, restoreStartTime);
+      const rto = calculateRto(restoreStartTime, verificationEndTime);
+      const drAssessment = evaluateDisasterRecoveryReadiness(rpo, rto, reconciliationReport);
 
-    return {
-      restoreResult,
-      reconciliationReport,
-      drAssessment,
-    };
+      const passed = restoreResult.success && reconciliationReport.overallPassed;
+
+      return {
+        restoreResult,
+        reconciliationReport,
+        drAssessment,
+        passed,
+        status: passed ? "completed" : "failed",
+      };
+    } catch (err: any) {
+      return {
+        passed: false,
+        status: "failed",
+        error: err.message,
+      };
+    }
   }
 
   /**
    * Executes load testing across Booking, Dispatch, and Report families (C123)
    */
   public async runLoadCapacityProof(config?: OpsProofRunnerConfig): Promise<ConsolidatedLoadReport> {
-    return await this.loadGenerator.runAllFamilies(config?.loadConfig);
+    const loadConfig: LoadTestRunConfig = {
+      ...config?.loadConfig,
+      targetUrl: config?.targetUrl ?? config?.loadConfig?.targetUrl,
+      selfTest: config?.selfTest ?? config?.loadConfig?.selfTest,
+    };
+    return await this.loadGenerator.runAllFamilies(loadConfig);
   }
 
   /**
    * Executes deployment check and rollback drill verification (C124)
    */
-  public runDeployRollbackProof(config?: OpsProofRunnerConfig): {
-    versionCheck: VersionCheckResult;
-    healthCheck: HealthCheckResult;
-    rollbackValidation: RollbackDrillValidation;
-  } {
+  public async runDeployRollbackProof(config?: OpsProofRunnerConfig): Promise<ConsolidatedDeployVerification> {
     const baseSha = config?.baseSha ?? "40ba315e4114369eaa7e12d35aae83a795c97b1d";
     const candidateSha = config?.candidateSha ?? "40ba315e4114369eaa7e12d35aae83a795c97b1d";
 
-    const versionCheck = this.deployHarness.verifyVersion(candidateSha, baseSha);
-    const healthCheck = this.deployHarness.verifyHealthEndpoint();
-    const rollbackValidation = this.deployHarness.validateRollbackDrillProtocol();
-
-    return {
-      versionCheck,
-      healthCheck,
-      rollbackValidation,
-    };
+    return await this.deployHarness.verifyAll({
+      candidateSha,
+      baseSha,
+      healthUrl: config?.healthUrl ?? (config?.targetUrl ? `${config.targetUrl}/health` : undefined),
+      selfTest: config?.selfTest,
+    });
   }
 
   /**
@@ -152,21 +179,15 @@ export class OpsProofRunner {
     const baseSha = config?.baseSha ?? "40ba315e4114369eaa7e12d35aae83a795c97b1d";
     const candidateSha = config?.candidateSha ?? "40ba315e4114369eaa7e12d35aae83a795c97b1d";
     const resourceId = config?.resourceId ?? "iso-db-res-001";
+    const selfTest = config?.selfTest ?? false;
 
     const snapshotProof = await this.runSnapshotRestoreProof(config);
     const loadProof = await this.runLoadCapacityProof(config);
-    const deployProof = this.runDeployRollbackProof(config);
+    const deployProof = await this.runDeployRollbackProof(config);
 
-    const restorePassed =
-      snapshotProof.restoreResult.success &&
-      snapshotProof.reconciliationReport.overallPassed &&
-      snapshotProof.drAssessment.overallCompliant;
-
+    const restorePassed = snapshotProof.passed;
     const loadPassed = loadProof.overallPassed;
-    const deployPassed =
-      deployProof.versionCheck.versionMatched &&
-      deployProof.healthCheck.passed &&
-      deployProof.rollbackValidation.drillPassed;
+    const deployPassed = deployProof.passed;
 
     const overallPassed = restorePassed && loadPassed && deployPassed;
 
@@ -176,27 +197,35 @@ export class OpsProofRunner {
       baseSha,
       candidateSha,
       resourceId,
+      isSelfTest: selfTest,
       acceptanceResults: {
         isolatedDbRestoreAndReconcile: {
           passed: restorePassed,
-          summary: snapshotProof.drAssessment.summaryZh,
-          restoreResult: {
-            snapshotId: snapshotProof.restoreResult.snapshotId,
-            isolatedTarget: snapshotProof.restoreResult.isolatedTarget,
-            recordsRestored: snapshotProof.restoreResult.restoredRecordsCount,
-            elapsedMs: snapshotProof.restoreResult.elapsedMs,
-          },
-          reconciliationReport: {
-            overallPassed: snapshotProof.reconciliationReport.overallPassed,
-            tripsPassed: snapshotProof.reconciliationReport.trips.passed,
-            billingPassed: snapshotProof.reconciliationReport.billing.passed,
-            auditPassed: snapshotProof.reconciliationReport.audit.passed,
-            discrepanciesCount: snapshotProof.reconciliationReport.allDiscrepancies.length,
-          },
+          status: snapshotProof.status,
+          summary: snapshotProof.drAssessment?.summaryZh ?? (snapshotProof.error ?? "未完成還原"),
+          restoreResult: snapshotProof.restoreResult
+            ? {
+                snapshotId: snapshotProof.restoreResult.snapshotId,
+                isolatedTarget: snapshotProof.restoreResult.isolatedTarget,
+                recordsRestored: snapshotProof.restoreResult.restoredRecordsCount,
+                elapsedMs: snapshotProof.restoreResult.elapsedMs,
+              }
+            : undefined,
+          reconciliationReport: snapshotProof.reconciliationReport
+            ? {
+                overallPassed: snapshotProof.reconciliationReport.overallPassed,
+                tripsPassed: snapshotProof.reconciliationReport.trips.passed,
+                billingPassed: snapshotProof.reconciliationReport.billing.passed,
+                auditPassed: snapshotProof.reconciliationReport.audit.passed,
+                discrepanciesCount: snapshotProof.reconciliationReport.allDiscrepancies.length,
+              }
+            : undefined,
           drAssessment: snapshotProof.drAssessment,
+          error: snapshotProof.error,
         },
         multiFamilyLoadTesting: {
           passed: loadPassed,
+          status: loadProof.status,
           summary: loadProof.summaryZh,
           totalRequests: loadProof.totalRequestsAcrossFamilies,
           totalErrors: loadProof.totalErrorsAcrossFamilies,
@@ -208,9 +237,7 @@ export class OpsProofRunner {
         deploymentAndRollback: {
           passed: deployPassed,
           summary: deployProof.rollbackValidation.evidenceSummary,
-          versionCheck: deployProof.versionCheck,
-          healthCheck: deployProof.healthCheck,
-          rollbackValidation: deployProof.rollbackValidation,
+          deployVerification: deployProof,
         },
         overallPassed,
       },
@@ -219,6 +246,7 @@ export class OpsProofRunner {
         "真機 Cloud Run 多實例線上高壓壓力測試（保留至 SR-LIVE-OPS-001）",
         "真機 GitHub Actions deploy-prod.yml 線上 dispatch 執行（保留至正式發布流程與 SR-LIVE-OPS-001）",
         "生產環境 PagerDuty / Ops 呼叫告警路由測試（保留至 live ops 線上驗收）",
+        "正式 RPO/RTO 權威 SLA 定案（待維運與架構團隊簽核，在確認前標記為未評定，不冒充 PASS）",
       ],
     };
   }

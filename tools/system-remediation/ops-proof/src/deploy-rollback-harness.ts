@@ -5,7 +5,7 @@
  * References:
  * - docs/03-runbooks/production-deploy-rail-spec-20260519.md
  * - docs/03-runbooks/production-rollback-drill-20260519.md
- * Capability: C124 ("部署版本、health、業務驗收與回滾 ... 以目前各服務版本與可重跑用戶旅程作發布門檻；记錄rollback演练")
+ * Capability: C124 ("部署版本、health、業務驗收與回滾 ... 以目前各服務版本與可重跑用戶旅程作發布門檻；记录rollback演练")
  */
 
 export interface VersionCheckResult {
@@ -13,6 +13,7 @@ export interface VersionCheckResult {
   baseSha: string;
   gitStatusClean: boolean;
   versionMatched: boolean;
+  passed: boolean;
   notes: string;
 }
 
@@ -20,12 +21,14 @@ export interface HealthCheckResult {
   endpoint: string;
   statusCode: number;
   statusText: string;
-  serviceHealth: {
+  serviceHealth?: {
     status: "ok" | "degraded" | "down";
     database: "connected" | "disconnected";
     uptimeSec: number;
-  };
+  } | undefined;
   passed: boolean;
+  status: "completed" | "not_run" | "failed";
+  note?: string | undefined;
 }
 
 export interface RollbackDrillStep {
@@ -37,12 +40,21 @@ export interface RollbackDrillStep {
 
 export interface RollbackDrillValidation {
   drillPassed: boolean;
-  currentTag: string;
-  previousKnownGoodTag: string;
-  skipMigrationEnforced: boolean;
-  targetServicesReady: boolean;
+  status: "completed" | "not_run" | "failed";
+  currentTag?: string | undefined;
+  previousKnownGoodTag?: string | undefined;
+  skipMigrationEnforced?: boolean | undefined;
+  targetServicesReady?: boolean | undefined;
   steps: RollbackDrillStep[];
   evidenceSummary: string;
+  note?: string | undefined;
+}
+
+export interface ConsolidatedDeployVerification {
+  passed: boolean;
+  versionCheck: VersionCheckResult;
+  healthCheck: HealthCheckResult;
+  rollbackValidation: RollbackDrillValidation;
 }
 
 export class DeployRollbackHarness {
@@ -56,32 +68,81 @@ export class DeployRollbackHarness {
       baseSha,
       gitStatusClean: true,
       versionMatched: isShaValid,
+      passed: isShaValid,
       notes: isShaValid
         ? `Candidate SHA ${candidateSha} is valid git commit digest branched from base ${baseSha}`
-        : `Candidate SHA ${candidateSha} is invalid or malformed`,
+        : `Candidate SHA '${candidateSha}' is invalid or malformed (must be 40-character hex)`,
     };
   }
 
   /**
-   * Simulates or checks `/health` endpoint contract
+   * Checks `/health` endpoint contract against a target or self-test
    */
-  public verifyHealthEndpoint(mockResponse?: Partial<HealthCheckResult>): HealthCheckResult {
-    const defaultResponse: HealthCheckResult = {
-      endpoint: "/health",
-      statusCode: 200,
-      statusText: "OK",
-      serviceHealth: {
-        status: "ok",
-        database: "connected",
-        uptimeSec: 1420,
-      },
-      passed: true,
-    };
+  public async verifyHealthEndpoint(options?: {
+    healthUrl?: string | undefined;
+    selfTest?: boolean | undefined;
+    mockResponse?: Partial<HealthCheckResult> | undefined;
+  }): Promise<HealthCheckResult> {
+    if (options?.healthUrl) {
+      try {
+        const start = performance.now();
+        const resp = await fetch(options.healthUrl, { signal: AbortSignal.timeout(5000) });
+        const elapsed = Math.round((performance.now() - start) * 100) / 100;
+        const body = (await resp.json().catch(() => ({}))) as any;
+        const isOk = resp.ok && (body.status === "ok" || resp.status === 200);
 
+        return {
+          endpoint: options.healthUrl,
+          statusCode: resp.status,
+          statusText: resp.statusText,
+          serviceHealth: {
+            status: isOk ? "ok" : "degraded",
+            database: body.database ?? (isOk ? "connected" : "disconnected"),
+            uptimeSec: body.uptimeSec ?? Math.round(elapsed),
+          },
+          passed: isOk,
+          status: isOk ? "completed" : "failed",
+        };
+      } catch (err: any) {
+        return {
+          endpoint: options.healthUrl,
+          statusCode: 0,
+          statusText: err.message,
+          passed: false,
+          status: "failed",
+          note: `Health check connection error: ${err.message}`,
+        };
+      }
+    }
+
+    if (options?.selfTest) {
+      const defaultResponse: HealthCheckResult = {
+        endpoint: "/health",
+        statusCode: 200,
+        statusText: "OK",
+        serviceHealth: {
+          status: "ok",
+          database: "connected",
+          uptimeSec: 1420,
+        },
+        passed: true,
+        status: "completed",
+      };
+      return {
+        ...defaultResponse,
+        ...options.mockResponse,
+        passed: (options.mockResponse?.statusCode ?? 200) === 200 && (options.mockResponse?.serviceHealth?.status ?? "ok") === "ok",
+      };
+    }
+
+    // Missing target health URL and not self-test
     return {
-      ...defaultResponse,
-      ...mockResponse,
-      passed: (mockResponse?.statusCode ?? 200) === 200 && (mockResponse?.serviceHealth?.status ?? "ok") === "ok",
+      endpoint: "/health",
+      statusCode: 0,
+      statusText: "NOT_RUN",
+      passed: false,
+      status: "not_run",
+      note: "未提供健康檢查 URL (--health-url 或 --target-url)。依規範回報 not-run，不冒充 PASS。",
     };
   }
 
@@ -89,11 +150,25 @@ export class DeployRollbackHarness {
    * Validates executable rollback drill steps according to production-rollback-drill-20260519.md
    */
   public validateRollbackDrillProtocol(options?: {
-    currentTag?: string;
-    previousTag?: string;
-    skipMigration?: boolean;
-    servicesReady?: boolean;
+    currentTag?: string | undefined;
+    previousTag?: string | undefined;
+    skipMigration?: boolean | undefined;
+    servicesReady?: boolean | undefined;
+    selfTest?: boolean | undefined;
   }): RollbackDrillValidation {
+    const isSelfTest = options?.selfTest ?? false;
+    const hasInputs = Boolean(options?.currentTag || options?.previousTag);
+
+    if (!isSelfTest && !hasInputs) {
+      return {
+        drillPassed: false,
+        status: "not_run",
+        steps: [],
+        evidenceSummary: "回滾演練未執行 (not-run)：未提供回滾演練版本 tag 或證據檔，依規範不冒充 PASS。",
+        note: "Missing rollback evidence or tags. Reporting not-run.",
+      };
+    }
+
     const currentTag = options?.currentTag ?? "prod/v2026.05.19.1";
     const previousTag = options?.previousTag ?? "prod/v2026.05.18.0";
     const skipMigration = options?.skipMigration ?? true;
@@ -115,7 +190,6 @@ export class DeployRollbackHarness {
     });
 
     // Step B: Dry-run operator review (skip_migration rule)
-    // Runbook rule: "Default rollback mode is application-only redeploy of the previous known-good prod/v* tag with skip_migration=true."
     steps.push({
       step: "B_DRY_RUN_REVIEW",
       description: "Confirm operator command enforces skip_migration=true unless reviewed DB down-path exists",
@@ -168,12 +242,47 @@ export class DeployRollbackHarness {
 
     return {
       drillPassed,
+      status: drillPassed ? "completed" : "failed",
       currentTag,
       previousKnownGoodTag: previousTag,
       skipMigrationEnforced: skipMigration,
       targetServicesReady: servicesReady,
       steps,
       evidenceSummary,
+    };
+  }
+
+  /**
+   * Consolidated deployment & rollback verification
+   */
+  public async verifyAll(config: {
+    candidateSha: string;
+    baseSha: string;
+    healthUrl?: string | undefined;
+    selfTest?: boolean | undefined;
+    currentTag?: string | undefined;
+    previousTag?: string | undefined;
+    skipMigration?: boolean | undefined;
+  }): Promise<ConsolidatedDeployVerification> {
+    const versionCheck = this.verifyVersion(config.candidateSha, config.baseSha);
+    const healthCheck = await this.verifyHealthEndpoint({
+      healthUrl: config.healthUrl,
+      selfTest: config.selfTest,
+    });
+    const rollbackValidation = this.validateRollbackDrillProtocol({
+      currentTag: config.currentTag,
+      previousTag: config.previousTag,
+      skipMigration: config.skipMigration,
+      selfTest: config.selfTest,
+    });
+
+    const passed = versionCheck.passed && healthCheck.passed && rollbackValidation.drillPassed;
+
+    return {
+      passed,
+      versionCheck,
+      healthCheck,
+      rollbackValidation,
     };
   }
 }
