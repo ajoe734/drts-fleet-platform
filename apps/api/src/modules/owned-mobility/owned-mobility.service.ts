@@ -4471,14 +4471,20 @@ export class OwnedMobilityService
               expiresAt: null,
             });
           } catch (error) {
-            if (error instanceof DispatchResourceReservationConflictError) {
+            if (
+              error instanceof DispatchResourceReservationConflictError ||
+              (error as { name?: string })?.name ===
+                "DispatchResourceReservationConflictError"
+            ) {
+              const conflict =
+                error as DispatchResourceReservationConflictError;
               throw new ApiRequestError(
                 HttpStatus.CONFLICT,
                 "DISPATCH_RESOURCE_RESERVATION_CONFLICT",
-                `The ${error.resourceType} is already held or occupied by another dispatch assignment.`,
+                `The ${conflict.resourceType} is already held or occupied by another dispatch assignment.`,
                 {
-                  resourceType: error.resourceType,
-                  resourceId: error.resourceId,
+                  resourceType: conflict.resourceType,
+                  resourceId: conflict.resourceId,
                 },
               );
             }
