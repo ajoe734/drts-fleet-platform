@@ -1,4 +1,16 @@
 import "server-only";
+import { createHash } from "node:crypto";
+import { headers } from "next/headers";
+import { CONTROL_PLANE_IAP_EMAIL_HEADER } from "@drts/control-plane-auth";
+
+// Reuse the authoritative fleet scope; never persist under a demo identity.
+export async function getSupplyDraftScope(): Promise<string> {
+  const { fleetPartnerId } = await getServerFleetPartnerClient();
+  const principal = (await headers()).get(CONTROL_PLANE_IAP_EMAIL_HEADER) ?? "";
+  return createHash("sha256")
+    .update(JSON.stringify([fleetPartnerId, principal]))
+    .digest("hex");
+}
 
 import type {
   SupplyDocumentRecord,
@@ -77,13 +89,55 @@ const FALLBACK_SUBMISSIONS: SupplySubmissionDetail[] = [
       color: "black",
     },
     documents: [
-      makeDoc("doc_01", "sub_s39", "vehicle_registration", "reg_kab7720.pdf", "approved", "2024-01-12", "2029-01-12"),
-      makeDoc("doc_02", "sub_s39", "insurance_policy", "policy_kab7720.pdf", "pending", "2026-08-01", "2026-08-18"),
-      makeDoc("doc_03", "sub_s39", "fleet_participation_contract", "contract_metro.pdf", "approved", "2025-06-01", "2026-09-02"),
+      makeDoc(
+        "doc_01",
+        "sub_s39",
+        "vehicle_registration",
+        "reg_kab7720.pdf",
+        "approved",
+        "2024-01-12",
+        "2029-01-12",
+      ),
+      makeDoc(
+        "doc_02",
+        "sub_s39",
+        "insurance_policy",
+        "policy_kab7720.pdf",
+        "pending",
+        "2026-08-01",
+        "2026-08-18",
+      ),
+      makeDoc(
+        "doc_03",
+        "sub_s39",
+        "fleet_participation_contract",
+        "contract_metro.pdf",
+        "approved",
+        "2025-06-01",
+        "2026-09-02",
+      ),
     ],
     reviewEvents: [
-      makeEvent("evt_01", "sub_s39", "submitted", "fleet-user-1", "partner_api_key", null, "Waiting for reviewer", "2026-06-18T14:02:00.000Z"),
-      makeEvent("evt_02", "sub_s39", "review_started", "platform-reviewer-011", "platform_admin", "manual_screening", "Vehicle documents ready for approval.", "2026-06-18T15:02:00.000Z"),
+      makeEvent(
+        "evt_01",
+        "sub_s39",
+        "submitted",
+        "fleet-user-1",
+        "partner_api_key",
+        null,
+        "Waiting for reviewer",
+        "2026-06-18T14:02:00.000Z",
+      ),
+      makeEvent(
+        "evt_02",
+        "sub_s39",
+        "review_started",
+        "platform-reviewer-011",
+        "platform_admin",
+        "manual_screening",
+        "Vehicle documents ready for approval.",
+        "2026-06-18T15:02:00.000Z",
+      ),
     ],
   },
   {
@@ -124,11 +178,36 @@ const FALLBACK_SUBMISSIONS: SupplySubmissionDetail[] = [
     },
     vehicleDraft: null,
     documents: [
-      makeDoc("doc_04", "sub_s38", "professional_driver_license", "license_tsai.pdf", "approved", "2024-03-01", "2028-03-01"),
-      makeDoc("doc_05", "sub_s38", "taxi_driver_registration", "taxi_reg_tsai.jpg", "pending", "2026-08-01", "2026-08-30"),
+      makeDoc(
+        "doc_04",
+        "sub_s38",
+        "professional_driver_license",
+        "license_tsai.pdf",
+        "approved",
+        "2024-03-01",
+        "2028-03-01",
+      ),
+      makeDoc(
+        "doc_05",
+        "sub_s38",
+        "taxi_driver_registration",
+        "taxi_reg_tsai.jpg",
+        "pending",
+        "2026-08-01",
+        "2026-08-30",
+      ),
     ],
     reviewEvents: [
-      makeEvent("evt_03", "sub_s38", "submitted", "fleet-user-1", "partner_api_key", null, null, "2026-06-18T09:40:00.000Z"),
+      makeEvent(
+        "evt_03",
+        "sub_s38",
+        "submitted",
+        "fleet-user-1",
+        "partner_api_key",
+        null,
+        null,
+        "2026-06-18T09:40:00.000Z",
+      ),
     ],
   },
   {
@@ -174,11 +253,37 @@ const FALLBACK_SUBMISSIONS: SupplySubmissionDetail[] = [
       color: "silver",
     },
     documents: [
-      makeDoc("doc_06", "sub_r33", "vehicle_registration", "reg_kab6610.pdf", "rejected", "2024-01-12", "2029-01-12"),
+      makeDoc(
+        "doc_06",
+        "sub_r33",
+        "vehicle_registration",
+        "reg_kab6610.pdf",
+        "rejected",
+        "2024-01-12",
+        "2029-01-12",
+      ),
     ],
     reviewEvents: [
-      makeEvent("evt_04", "sub_r33", "submitted", "fleet-user-1", "partner_api_key", null, null, "2026-06-17T16:20:00.000Z"),
-      makeEvent("evt_05", "sub_r33", "needs_revision", "platform-reviewer-019", "platform_admin", "DOCUMENT_REQUIRED", "行照模糊，請重新上傳", "2026-06-17T17:00:00.000Z"),
+      makeEvent(
+        "evt_04",
+        "sub_r33",
+        "submitted",
+        "fleet-user-1",
+        "partner_api_key",
+        null,
+        null,
+        "2026-06-17T16:20:00.000Z",
+      ),
+      makeEvent(
+        "evt_05",
+        "sub_r33",
+        "needs_revision",
+        "platform-reviewer-019",
+        "platform_admin",
+        "DOCUMENT_REQUIRED",
+        "行照模糊，請重新上傳",
+        "2026-06-17T17:00:00.000Z",
+      ),
     ],
   },
   {
@@ -259,10 +364,27 @@ const FALLBACK_SUBMISSIONS: SupplySubmissionDetail[] = [
     },
     vehicleDraft: null,
     documents: [
-      makeDoc("doc_07", "sub_a20", "professional_driver_license", "license_kao.pdf", "approved", "2025-02-01", "2029-02-01"),
+      makeDoc(
+        "doc_07",
+        "sub_a20",
+        "professional_driver_license",
+        "license_kao.pdf",
+        "approved",
+        "2025-02-01",
+        "2029-02-01",
+      ),
     ],
     reviewEvents: [
-      makeEvent("evt_06", "sub_a20", "approved", "platform-reviewer-001", "platform_admin", "all_documents_valid", "已寫入 canonical", "2026-06-15T11:40:00.000Z"),
+      makeEvent(
+        "evt_06",
+        "sub_a20",
+        "approved",
+        "platform-reviewer-001",
+        "platform_admin",
+        "all_documents_valid",
+        "已寫入 canonical",
+        "2026-06-15T11:40:00.000Z",
+      ),
     ],
   },
 ];
@@ -302,7 +424,9 @@ function makeDoc(
     documentType,
     fileObjectKey: `fleet-partner/fleet-demo-001/supply-submissions/${submissionId}/${originalFileName}`,
     originalFileName,
-    contentType: originalFileName.endsWith(".jpg") ? "image/jpeg" : "application/pdf",
+    contentType: originalFileName.endsWith(".jpg")
+      ? "image/jpeg"
+      : "application/pdf",
     fileSize: 1024,
     checksumSha256: "a".repeat(64),
     effectiveFrom,
@@ -373,7 +497,9 @@ async function loadSupplyBundle(): Promise<SupplyBundle> {
   }
 }
 
-function mapSubmissionSubject(detail: SupplySubmissionDetail): SupplySubjectSummary {
+function mapSubmissionSubject(
+  detail: SupplySubmissionDetail,
+): SupplySubjectSummary {
   return formatSupplySubject(detail);
 }
 

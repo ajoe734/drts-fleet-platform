@@ -105,12 +105,10 @@ export function isEditableStatus(status: SupplySubmissionStatus) {
  */
 export const DRAFT_GUARD_STRINGS = {
   /** Shown in the browser's native beforeunload dialog (plain text only). */
-  beforeUnload:
-    "您有尚未儲存的草稿內容。確定要離開嗎？離開後資料將會遺失。",
+  beforeUnload: "您有尚未儲存的草稿內容。確定要離開嗎？離開後資料將會遺失。",
   /** Shown in the in-app navigation confirmation dialog. */
   confirmLeaveTitle: "尚未儲存的草稿",
-  confirmLeaveBody:
-    "表單中有尚未儲存的內容，確定離開嗎？離開後資料將會遺失。",
+  confirmLeaveBody: "表單中有尚未儲存的內容，確定離開嗎？離開後資料將會遺失。",
   confirmLeaveCancel: "繼續填寫",
   confirmLeaveOk: "確定離開",
 } as const;
@@ -152,4 +150,37 @@ export function shouldConfirmDraftNavigation(
       current.search !== next.search ||
       current.hash !== next.hash)
   );
+}
+
+/** Reject stale/corrupt browser drafts before using them as controlled values. */
+export function restoreSupplyDraft<T extends object>(
+  raw: string | null,
+  initial: T,
+): T {
+  if (!raw) return initial;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return initial;
+    const valid = Object.entries(initial).every(([key, value]) => {
+      const candidate = parsed[key];
+      if (value === null)
+        return candidate === null || typeof candidate === "string";
+      if (Array.isArray(value))
+        return (
+          Array.isArray(candidate) &&
+          candidate.every((item: unknown) => typeof item === "string")
+        );
+      return (
+        typeof candidate === typeof value &&
+        (typeof candidate !== "number" || Number.isFinite(candidate))
+      );
+    });
+    if (!valid) return initial;
+    return Object.fromEntries(
+      Object.keys(initial).map((key) => [key, parsed[key]]),
+    ) as T;
+  } catch {
+    return initial;
+  }
 }

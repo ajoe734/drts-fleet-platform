@@ -6,11 +6,12 @@ import type {
   Dispatch,
   InputHTMLAttributes,
   ReactNode,
+  ReactElement,
   SelectHTMLAttributes,
   SetStateAction,
   TextareaHTMLAttributes,
 } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { cloneElement, useEffect, useMemo, useRef, useState } from "react";
 import type {
   DriverSupplyDraft,
   SupplyDocumentRecord,
@@ -38,10 +39,10 @@ import {
   isEditableStatus,
   DRAFT_GUARD_STRINGS,
   fieldId,
+  restoreSupplyDraft,
   hasUnsavedDraftChanges,
   shouldConfirmDraftNavigation,
 } from "@/lib/fleet-portal-supply";
-
 
 type ApiEnvelope<T> = {
   data: T;
@@ -339,9 +340,21 @@ function FormField({
           </span>
         ) : null}
       </label>
-      {children}
+      {cloneElement(
+        children as ReactElement<InputHTMLAttributes<HTMLInputElement>>,
+        {
+          required,
+          "aria-invalid": error ? true : undefined,
+          "aria-describedby": error
+            ? `${id}-error`
+            : hint
+              ? `${id}-hint`
+              : undefined,
+        },
+      )}
       {hint && !error ? (
         <div
+          id={`${id}-hint`}
           style={{
             fontSize: 11,
             color: theme.textMuted,
@@ -414,9 +427,11 @@ function useDraftGuard(dirty: boolean): { confirmLeave: () => boolean } {
         return;
       }
 
-      if (!window.confirm(
-        `${DRAFT_GUARD_STRINGS.confirmLeaveTitle}\n\n${DRAFT_GUARD_STRINGS.confirmLeaveBody}`,
-      )) {
+      if (
+        !window.confirm(
+          `${DRAFT_GUARD_STRINGS.confirmLeaveTitle}\n\n${DRAFT_GUARD_STRINGS.confirmLeaveBody}`,
+        )
+      ) {
         e.preventDefault();
         e.stopPropagation();
       }
@@ -439,8 +454,6 @@ function useDraftGuard(dirty: boolean): { confirmLeave: () => boolean } {
 
   return { confirmLeave };
 }
-
-
 
 function ProductChecklist({
   selected,
@@ -887,19 +900,66 @@ export function SupplyDocumentsBoard({ data }: { data: SupplyDocumentsView }) {
   );
 }
 
-export function NewDriverSubmissionForm() {
+// In-memory fallback retains drafts across SPA history navigation when storage is unavailable.
+const supplyDraftMemory = new Map<string, string>();
+function useSupplyDraft<T extends object>(key: string, initial: T) {
+  const [form, updateForm] = useState(initial);
+  const current = useRef(initial);
+  useEffect(() => {
+    let raw = supplyDraftMemory.get(key) ?? null;
+    try {
+      raw = window.sessionStorage.getItem(key) ?? raw;
+    } catch {
+      /* Memory fallback. */
+    }
+    current.current = restoreSupplyDraft(raw, initial);
+    updateForm(current.current);
+  }, [key, initial]);
+  const setForm: Dispatch<SetStateAction<T>> = (next) => {
+    const value =
+      typeof next === "function"
+        ? (next as (value: T) => T)(current.current)
+        : next;
+    current.current = value;
+    const raw = JSON.stringify(value);
+    supplyDraftMemory.set(key, raw);
+    try {
+      window.sessionStorage.setItem(key, raw);
+    } catch {
+      /* beforeunload still protects reload. */
+    }
+    updateForm(value);
+  };
+  const clearDraft = () => {
+    supplyDraftMemory.delete(key);
+    try {
+      window.sessionStorage.removeItem(key);
+    } catch {
+      /* Storage unavailable. */
+    }
+  };
+  return { form, setForm, clearDraft };
+}
+
+export function NewDriverSubmissionForm({
+  draftScope,
+}: {
+  draftScope: string;
+}) {
   const router = useRouter();
   const theme = buildFleetTheme();
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const [form, setForm] = useState<DriverDraftInput>(NEW_DRIVER_INITIAL_FORM);
+  const { form, setForm, clearDraft } = useSupplyDraft(
+    `supply-draft:v1:${draftScope}:driver`,
+    NEW_DRIVER_INITIAL_FORM,
+  );
 
   // Every edited value is protected, including optional fields and product choices (R25).
   const dirty =
-    !submitted &&
-    hasUnsavedDraftChanges(form, NEW_DRIVER_INITIAL_FORM);
+    !submitted && hasUnsavedDraftChanges(form, NEW_DRIVER_INITIAL_FORM);
 
   const { confirmLeave } = useDraftGuard(dirty);
 
@@ -912,6 +972,7 @@ export function NewDriverSubmissionForm() {
         { method: "POST", body: JSON.stringify(form) },
       );
       // Mark submitted so the beforeunload guard is lifted before navigation.
+      clearDraft();
       setSubmitted(true);
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
@@ -956,27 +1017,36 @@ export function NewDriverSubmissionForm() {
           onSave={onCreate}
           saveLabel={t("supply.action.createDraft")}
         >
-          <DriverDraftFields form={form} setForm={setForm} formKey="new-driver" />
+          <DriverDraftFields
+            form={form}
+            setForm={setForm}
+            formKey="new-driver"
+          />
         </DraftFormFrame>
       </div>
     </>
   );
 }
 
-
-export function NewVehicleSubmissionForm() {
+export function NewVehicleSubmissionForm({
+  draftScope,
+}: {
+  draftScope: string;
+}) {
   const router = useRouter();
   const theme = buildFleetTheme();
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const [form, setForm] = useState<VehicleDraftInput>(NEW_VEHICLE_INITIAL_FORM);
+  const { form, setForm, clearDraft } = useSupplyDraft(
+    `supply-draft:v1:${draftScope}:vehicle`,
+    NEW_VEHICLE_INITIAL_FORM,
+  );
 
   // Every edited value is protected, including optional fields and product choices (R25).
   const dirty =
-    !submitted &&
-    hasUnsavedDraftChanges(form, NEW_VEHICLE_INITIAL_FORM);
+    !submitted && hasUnsavedDraftChanges(form, NEW_VEHICLE_INITIAL_FORM);
 
   const { confirmLeave } = useDraftGuard(dirty);
 
@@ -989,6 +1059,7 @@ export function NewVehicleSubmissionForm() {
         { method: "POST", body: JSON.stringify(form) },
       );
       // Mark submitted so the beforeunload guard is lifted before navigation.
+      clearDraft();
       setSubmitted(true);
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
@@ -1033,13 +1104,16 @@ export function NewVehicleSubmissionForm() {
           onSave={onCreate}
           saveLabel={t("supply.action.createDraft")}
         >
-          <VehicleDraftFields form={form} setForm={setForm} formKey="new-vehicle" />
+          <VehicleDraftFields
+            form={form}
+            setForm={setForm}
+            formKey="new-vehicle"
+          />
         </DraftFormFrame>
       </div>
     </>
   );
 }
-
 
 function DraftFormFrame({
   title,
@@ -1059,7 +1133,12 @@ function DraftFormFrame({
   const theme = buildFleetTheme();
   const { t } = useTranslation();
   return (
-    <div
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!saving) onSave();
+      }}
+      aria-busy={saving}
       style={{
         display: "grid",
         gridTemplateColumns: "minmax(0, 1.4fr) 320px",
@@ -1079,7 +1158,14 @@ function DraftFormFrame({
         </CanvasCard>
         {error ? (
           <div role="alert" aria-live="assertive">
-            <CanvasBanner theme={theme} tone="danger" icon="warn" body={error} />
+            <div role="alert">
+              <CanvasBanner
+                theme={theme}
+                tone="danger"
+                icon="warn"
+                body={error}
+              />
+            </div>
           </div>
         ) : null}
         <ActionButton
@@ -1088,10 +1174,10 @@ function DraftFormFrame({
           helper={t("supply.draft.saveHelper")}
           variant="primary"
           busy={saving}
-          onClick={onSave}
+          type="submit"
         />
       </div>
-    </div>
+    </form>
   );
 }
 
@@ -1111,7 +1197,11 @@ function DriverDraftFields({
   return (
     <>
       <div style={sectionGrid()}>
-        <FormField id={fid("name")} label={t("supply.driverField.name")} required>
+        <FormField
+          id={fid("name")}
+          label={t("supply.driverField.name")}
+          required
+        >
           <FieldInput
             id={fid("name")}
             value={form.name}
@@ -1125,7 +1215,11 @@ function DriverDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("mobile")} label={t("supply.driverField.mobile")} required>
+        <FormField
+          id={fid("mobile")}
+          label={t("supply.driverField.mobile")}
+          required
+        >
           <FieldInput
             id={fid("mobile")}
             value={form.mobile}
@@ -1140,7 +1234,11 @@ function DriverDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("licenseNo")} label={t("supply.driverField.licenseNo")} required>
+        <FormField
+          id={fid("licenseNo")}
+          label={t("supply.driverField.licenseNo")}
+          required
+        >
           <FieldInput
             id={fid("licenseNo")}
             value={form.professionalDriverLicenseNo}
@@ -1154,7 +1252,11 @@ function DriverDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("licenseExpiry")} label={t("supply.driverField.licenseExpiry")} required>
+        <FormField
+          id={fid("licenseExpiry")}
+          label={t("supply.driverField.licenseExpiry")}
+          required
+        >
           <FieldInput
             id={fid("licenseExpiry")}
             type="date"
@@ -1167,7 +1269,11 @@ function DriverDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("registrationNo")} label={t("supply.driverField.registrationNo")} required>
+        <FormField
+          id={fid("registrationNo")}
+          label={t("supply.driverField.registrationNo")}
+          required
+        >
           <FieldInput
             id={fid("registrationNo")}
             value={form.taxiDriverRegistrationNo}
@@ -1181,7 +1287,11 @@ function DriverDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("registrationArea")} label={t("supply.driverField.registrationArea")} required>
+        <FormField
+          id={fid("registrationArea")}
+          label={t("supply.driverField.registrationArea")}
+          required
+        >
           <FieldInput
             id={fid("registrationArea")}
             value={form.taxiDriverRegistrationArea}
@@ -1195,7 +1305,11 @@ function DriverDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("registrationExpiry")} label={t("supply.driverField.registrationExpiry")} required>
+        <FormField
+          id={fid("registrationExpiry")}
+          label={t("supply.driverField.registrationExpiry")}
+          required
+        >
           <FieldInput
             id={fid("registrationExpiry")}
             type="date"
@@ -1229,7 +1343,11 @@ function DriverDraftFields({
       {/* ProductChecklist renders its own <label> wrapping each <input type="checkbox">,
           so implicit association works correctly here. The group label is announced via
           the role="group" + aria-labelledby pattern below (R23). */}
-      <div role="group" aria-labelledby={fid("products-label")} style={{ marginBottom: 14 }}>
+      <div
+        role="group"
+        aria-labelledby={fid("products-label")}
+        style={{ marginBottom: 14 }}
+      >
         <div
           id={fid("products-label")}
           style={{
@@ -1240,8 +1358,20 @@ function DriverDraftFields({
           }}
         >
           {t("supply.field.supportedProducts")}
-          <span aria-hidden="true" style={{ color: theme.danger }}> *</span>
-          <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}>
+          <span aria-hidden="true" style={{ color: theme.danger }}>
+            {" "}
+            *
+          </span>
+          <span
+            style={{
+              position: "absolute",
+              width: 1,
+              height: 1,
+              overflow: "hidden",
+              clip: "rect(0,0,0,0)",
+              whiteSpace: "nowrap",
+            }}
+          >
             *
           </span>
         </div>
@@ -1259,7 +1389,6 @@ function DriverDraftFields({
   );
 }
 
-
 function VehicleDraftFields({
   form,
   setForm,
@@ -1276,7 +1405,11 @@ function VehicleDraftFields({
   return (
     <>
       <div style={sectionGrid()}>
-        <FormField id={fid("plateNo")} label={t("supply.vehicleField.plateNo")} required>
+        <FormField
+          id={fid("plateNo")}
+          label={t("supply.vehicleField.plateNo")}
+          required
+        >
           <FieldInput
             id={fid("plateNo")}
             value={form.plateNo}
@@ -1290,7 +1423,11 @@ function VehicleDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("licenseType")} label={t("supply.vehicleField.licenseType")} required>
+        <FormField
+          id={fid("licenseType")}
+          label={t("supply.vehicleField.licenseType")}
+          required
+        >
           <FieldSelect
             id={fid("licenseType")}
             value={form.licenseType}
@@ -1340,7 +1477,10 @@ function VehicleDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("modelYear")} label={t("supply.vehicleField.modelYear")}>
+        <FormField
+          id={fid("modelYear")}
+          label={t("supply.vehicleField.modelYear")}
+        >
           <FieldInput
             id={fid("modelYear")}
             type="number"
@@ -1356,7 +1496,11 @@ function VehicleDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("seatCount")} label={t("supply.vehicleField.seatCount")} required>
+        <FormField
+          id={fid("seatCount")}
+          label={t("supply.vehicleField.seatCount")}
+          required
+        >
           <FieldInput
             id={fid("seatCount")}
             type="number"
@@ -1370,7 +1514,11 @@ function VehicleDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("luggageCapacity")} label={t("supply.vehicleField.luggageCapacity")} required>
+        <FormField
+          id={fid("luggageCapacity")}
+          label={t("supply.vehicleField.luggageCapacity")}
+          required
+        >
           <FieldInput
             id={fid("luggageCapacity")}
             type="number"
@@ -1384,7 +1532,11 @@ function VehicleDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("businessArea")} label={t("supply.vehicleField.businessArea")} required>
+        <FormField
+          id={fid("businessArea")}
+          label={t("supply.vehicleField.businessArea")}
+          required
+        >
           <FieldInput
             id={fid("businessArea")}
             value={form.businessArea}
@@ -1398,7 +1550,10 @@ function VehicleDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("currentDriver")} label={t("supply.vehicleField.currentDriverSubmissionId")}>
+        <FormField
+          id={fid("currentDriver")}
+          label={t("supply.vehicleField.currentDriverSubmissionId")}
+        >
           <FieldInput
             id={fid("currentDriver")}
             value={form.currentDriverSubmissionId ?? ""}
@@ -1412,7 +1567,10 @@ function VehicleDraftFields({
             }
           />
         </FormField>
-        <FormField id={fid("doorCount")} label={t("supply.vehicleField.doorCount")}>
+        <FormField
+          id={fid("doorCount")}
+          label={t("supply.vehicleField.doorCount")}
+        >
           <FieldInput
             id={fid("doorCount")}
             type="number"
@@ -1444,7 +1602,11 @@ function VehicleDraftFields({
         </FormField>
       </div>
       {/* Checklist group with aria-labelledby (R23) */}
-      <div role="group" aria-labelledby={fid("products-label")} style={{ marginBottom: 14 }}>
+      <div
+        role="group"
+        aria-labelledby={fid("products-label")}
+        style={{ marginBottom: 14 }}
+      >
         <div
           id={fid("products-label")}
           style={{
@@ -1455,8 +1617,20 @@ function VehicleDraftFields({
           }}
         >
           {t("supply.field.supportedProducts")}
-          <span aria-hidden="true" style={{ color: theme.danger }}> *</span>
-          <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }}>
+          <span aria-hidden="true" style={{ color: theme.danger }}>
+            {" "}
+            *
+          </span>
+          <span
+            style={{
+              position: "absolute",
+              width: 1,
+              height: 1,
+              overflow: "hidden",
+              clip: "rect(0,0,0,0)",
+              whiteSpace: "nowrap",
+            }}
+          >
             *
           </span>
         </div>
@@ -1502,7 +1676,6 @@ function VehicleDraftFields({
     </>
   );
 }
-
 
 export function SupplySubmissionDetailView({
   initialDetail,
@@ -1952,7 +2125,11 @@ export function SupplySubmissionDetailView({
             </div>
           </CanvasCard>
           <CanvasCard theme={theme} title={t("supply.detail.uploadTitle")}>
-            <FormField id="upload-doc-type" label={t("supply.table.documentType")} required>
+            <FormField
+              id="upload-doc-type"
+              label={t("supply.table.documentType")}
+              required
+            >
               <FieldSelect
                 id="upload-doc-type"
                 value={docType}
@@ -1963,14 +2140,21 @@ export function SupplySubmissionDetailView({
                 }))}
               />
             </FormField>
-            <FormField id="upload-file" label={t("supply.table.fileName")} required>
+            <FormField
+              id="upload-file"
+              label={t("supply.table.fileName")}
+              required
+            >
               <input
                 id="upload-file"
                 type="file"
                 onChange={(e) => setDocFile(e.currentTarget.files?.[0] ?? null)}
               />
             </FormField>
-            <FormField id="upload-effective-from" label={t("supply.detail.effectiveFrom")}>
+            <FormField
+              id="upload-effective-from"
+              label={t("supply.detail.effectiveFrom")}
+            >
               <FieldInput
                 id="upload-effective-from"
                 type="date"
@@ -1978,7 +2162,10 @@ export function SupplySubmissionDetailView({
                 onChange={(e) => setDocFrom(e.currentTarget.value)}
               />
             </FormField>
-            <FormField id="upload-effective-until" label={t("supply.detail.effectiveUntil")}>
+            <FormField
+              id="upload-effective-until"
+              label={t("supply.detail.effectiveUntil")}
+            >
               <FieldInput
                 id="upload-effective-until"
                 type="date"
@@ -1996,7 +2183,6 @@ export function SupplySubmissionDetailView({
               onClick={() => runAction("upload", uploadDocument)}
             />
           </CanvasCard>
-
         </div>
         <CanvasCard theme={theme} title={t("supply.detail.revisionHistory")}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
