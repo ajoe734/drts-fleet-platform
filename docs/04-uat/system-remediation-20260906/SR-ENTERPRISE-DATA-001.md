@@ -177,3 +177,37 @@ accepted unavailable-contact path) before redispatch. No UI/product changes were
 made. Live authenticated API, browser, real-device calls, independent review,
 candidate CI, merge and deployment remain unverified. This evidence is WIP,
 not a handoff or completion claim.
+
+## Redispatch verification — 2026-09-08 17:56 UTC
+
+- Fetched `origin/dev` base: `fa0fd8257950764526a522d091be9d97effa82b9`.
+- Tested WIP revision: `dcbfdbaa4963458a40211400d10f785740c3bddb`.
+  Candidate SHA: none; trip/contact acceptance remains incomplete.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: initially exit 1
+  on repeated historical evidence conflicts. Preserved the complete pre-rebase
+  task evidence, resolving only this document; final
+  `GIT_EDITOR=true git rebase --continue`: exit 0.
+- `git merge --no-edit origin/codex2/sr-enterprise-data-001`: exit 0,
+  retaining published ancestry for an ordinary non-force push.
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`:
+  exit 0; 1 file / 17 tests passed, duration 267 ms.
+- `git diff --check`: exit 0. Resource IDs are the unit inputs documented
+  above; no live booking/contact resource was verified.
+
+The merged PR #1800 report
+`support/unblock/SR-ENTERPRISE-DATA-001/SR-ENTERPRISE-DATA-001-UNBLOCK-MANUAL-UNBLOCK.md`
+explicitly states “Disposition: diagnosis delivered; parent planning gate remains
+blocked” and “This helper's review or merge is not a scope grant.” Current task
+read-back still has original write scopes and no dependencies. Static inspection
+confirms trip fixture data and inert contact buttons, detail's `degraded` error
+fallback, fixture support phone, and the shared raw theme remain. Thus the
+reported helper reconciliation does not clear the parent implementation gate.
+
+Supervisor must record minimal shared detail/help scopes or serialized producer
+dependencies, adjudicate the shared theme prerequisite, and establish permitted
+contact data/unavailable-driver behavior as requested by that report. No UI or
+product changes were made in this redispatch. Browser, authenticated live API,
+real-device calls, independent review, candidate CI, merge and deployment remain
+unverified. Preserve parent blocked until those concrete decisions are recorded;
+do not redispatch merely because the diagnosis helper merged.
