@@ -61,7 +61,11 @@ needing a per-entry-point retrofit.
 - `infra/migrations/V0087__dispatch_resource_reservations.sql` (already
   landed by UV-EXEC-002): the ledger table and its
   `UNIQUE (resource_type, resource_id) WHERE status IN ('held','occupied')`
-  active-occupation constraint. This task did not need a new migration.
+  active-occupation constraint.
+- `infra/migrations/V0090__dispatch_assignment_reservation_fence.sql`:
+  deferred assignment constraint rejects older writers that commit an active
+  assignment without both resource reservations. It also backfills existing
+  assignments; unresolved rollout issues are recorded below.
 - `OwnedMobilityRepository`:
   - `reserveDispatchResources(executor, params)` -- inserts a `held` row for
     driver then vehicle (fixed order, independent of resource IDs) inside
@@ -102,3 +106,40 @@ needing a per-entry-point retrofit.
 - `_executeDispatchOrder` (`request_dispatch` / matching-job creation) does
   not reserve anything -- SD §7.6 step 1 vs step 2: the matching job only
   lists candidates, the reservation happens at the actual assign step.
+
+## 2026-09-08 continuation evidence and remaining acceptance gaps
+
+Supervisor assigned execution to Codex2 through availability-first fallback;
+Codex remains the reviewer. The isolated branch was rebased onto `origin/dev`.
+
+Acceptance-timeout now checks `assigned` under the database row lock. The
+shared close helper still permits `accepted` for reassignment, but timeout
+explicitly opts into the narrower condition. The regression uses a second
+service instance loaded before the first accepts, proving a stale cache
+cannot cause timeout to release occupied resources.
+
+Validation used a dedicated local PostgreSQL database with all tracked
+`infra/migrations/V*.sql` applied in filename order using `psql` with
+`ON_ERROR_STOP=1`:
+
+- `pnpm --filter @drts/api exec vitest run tests/integration/uv-exec-006.integration.test.ts --no-file-parallelism --maxConcurrency=1`:
+  **18 passed** (2026-09-08 18:35 UTC).
+- `pnpm --filter @drts/api typecheck`: passed after the timeout fix.
+- Initial execution without `DATABASE_URL` failed its environment assertions;
+  the passing run used the dedicated migrated database.
+
+Task remains `in_progress` pending these acceptance gaps:
+
+1. `handleDispatchTimeout` accepts only a target assignment ID; it does not
+   validate a durable acceptance deadline or assignment version as required
+   by SD §7.6. Assignment reservations currently set `expiresAt: null`.
+2. V0090 backfill uses `ON CONFLICT ... DO NOTHING`, which can leave an
+   already-active conflicting assignment without both reservations. A
+   reconciliation/failure policy must preserve the unknown state and prevent
+   unguarded rollout instead of silently skipping the conflict.
+3. V0090's deferred trigger checks the event's `NEW` snapshot rather than
+   re-reading the final assignment row. An assignment inserted and then
+   legitimately closed in the same transaction needs explicit coverage.
+
+Passing checks are not evidence for deadline validation, legacy-data
+conflict handling, or completion of the entire unattended dispatch executor.
