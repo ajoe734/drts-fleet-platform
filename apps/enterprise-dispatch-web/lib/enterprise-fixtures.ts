@@ -1,9 +1,6 @@
-import {
-  adaptBookingRecordToEnterpriseBooking,
-  type EnterpriseDispatchBookingFixture,
-} from "./dispatch-fixture-adapter";
-import type { BookingRecord } from "@drts/contracts";
-import { type Locale, type TranslationKey, t } from "@/lib/translations";
+import type { BookingRecord, OwnedOrderStatus } from "@drts/contracts";
+import type { EnterpriseDispatchBookingFixture } from "./dispatch-fixture-adapter";
+import { type Locale, type TranslationKey, t } from "./translations";
 
 export type BookingState =
   | "assigned"
@@ -452,15 +449,165 @@ export function getEnterpriseBooking(bookingId: string, locale?: Locale) {
     : booking;
 }
 
-export function getAuthoritativeEnterpriseBooking(
-  bookingId: string,
-  records: BookingRecord[],
-): EnterpriseBooking | undefined {
-  const record = records.find((item) => item.bookingId === bookingId);
-  if (!record) {
-    return undefined;
+// --- Real tenant booking API -> home/trip display mapping (SR-ENTERPRISE-DATA-001) ---
+//
+// Home and trip previously rendered `enterpriseBookings` above, a static demo
+// array. Its IDs (e.g. EB-7K2E1D) do not exist against the real tenant
+// booking API, so following a link from home/trip into `/bookings/[id]`
+// 404'd. The functions below read the same `BookingRecord` shape that
+// `/bookings` and `/bookings/[bookingId]` already fetch from
+// `getEnterpriseDispatchTenantClient`, so home/trip/list/detail agree on the
+// same booking. `enterpriseBookings` and the getters above stay in place
+// because `components/ent-embed-screens.tsx` (outside this task's write
+// scope) still renders from them.
+
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+const NO_SUPPLY_ORDER_STATUSES: ReadonlySet<OwnedOrderStatus> = new Set([
+  "no_supply",
+  "dispatch_failed",
+  "dispatch_timeout",
+  "redispatch_required",
+]);
+
+const ASSIGNED_ORDER_STATUSES: ReadonlySet<OwnedOrderStatus> = new Set([
+  "assigned",
+  "driver_accepted",
+]);
+
+const ENROUTE_ORDER_STATUSES: ReadonlySet<OwnedOrderStatus> = new Set([
+  "enroute_pickup",
+  "arrived_pickup",
+  "on_trip",
+  "proof_pending",
+]);
+
+export interface EnterpriseTripSummary {
+  id: string;
+  passenger: string;
+  bookedBy: string;
+  self: boolean;
+  from: string;
+  to: string;
+  window: string;
+  state: BookingState;
+  orderStatus: OwnedOrderStatus;
+  // No live location/ETA feed is wired into the tenant booking API yet.
+  // Always null: callers must render the existing "—" fallback rather than
+  // inventing a countdown (this is what R08 flagged as a fabricated ETA).
+  etaMinutes: null;
+  flight?: string;
+  terminal?: string;
+}
+
+export function classifyBookingRecordState(
+  record: Pick<BookingRecord, "status" | "orderStatus" | "approvalState">,
+): BookingState {
+  if (record.status === "cancelled" || record.orderStatus === "cancelled") {
+    return "cancelled";
   }
-  return adaptBookingRecordToEnterpriseBooking(record);
+  if (record.status === "completed" || record.orderStatus === "completed") {
+    return "completed";
+  }
+  if (NO_SUPPLY_ORDER_STATUSES.has(record.orderStatus)) {
+    return "nosupply";
+  }
+  if (record.approvalState === "pending") {
+    return "approval";
+  }
+  if (ASSIGNED_ORDER_STATUSES.has(record.orderStatus)) {
+    return "assigned";
+  }
+  if (ENROUTE_ORDER_STATUSES.has(record.orderStatus)) {
+    return "enroute";
+  }
+  return "reserved";
+}
+
+export function isInProgressTripState(state: BookingState): boolean {
+  return state === "assigned" || state === "enroute";
+}
+
+export function isUpcomingTripState(state: BookingState): boolean {
+  return (
+    state === "assigned" ||
+    state === "enroute" ||
+    state === "approval" ||
+    state === "reserved"
+  );
+}
+
+// 5-stage rail used on /trip: assigned -> enroute -> arrived -> in progress -> completed.
+export function getTripProgressStageIndex(orderStatus: OwnedOrderStatus): number {
+  switch (orderStatus) {
+    case "enroute_pickup":
+      return 1;
+    case "arrived_pickup":
+      return 2;
+    case "on_trip":
+      return 3;
+    case "proof_pending":
+    case "completed":
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+export function formatBookingWindowLabel(startIso: string): string {
+  const start = new Date(startIso);
+  if (Number.isNaN(start.getTime())) {
+    return "—";
+  }
+  const shifted = new Date(start.getTime() + TAIPEI_OFFSET_MS).toISOString();
+  return `${shifted.slice(5, 10).replace("-", "/")} ${shifted.slice(11, 16)}`;
+}
+
+export function mapBookingRecordToTripSummary(
+  record: BookingRecord,
+): EnterpriseTripSummary {
+  const bookedByName = record.bookedBy?.name ?? record.passenger.name;
+
+  return {
+    id: record.bookingId,
+    passenger: record.passenger.name,
+    bookedBy: bookedByName,
+    self: bookedByName === record.passenger.name,
+    from: record.pickup.address,
+    to: record.dropoff.address,
+    window: formatBookingWindowLabel(record.reservationWindowStart),
+    state: classifyBookingRecordState(record),
+    orderStatus: record.orderStatus,
+    etaMinutes: null,
+    ...(record.flightNo ? { flight: record.flightNo } : {}),
+    ...(record.terminal ? { terminal: record.terminal } : {}),
+  };
+}
+
+// Normalizes a display phone number (e.g. "0800-200-118") into a `tel:` URI.
+export function toTelHref(phone: string): string {
+  return `tel:${phone.replace(/[^\d+]/g, "")}`;
+}
+
+export interface DriverAssignedNotice {
+  title: string;
+  subtitle: string;
+  helpText: string;
+}
+
+export function getDriverAssignedNotice(locale: Locale): DriverAssignedNotice {
+  let title = "Driver assigned";
+  let subtitle = "Contact is routed through enterprise support";
+  let helpText =
+    "Direct driver calling isn't available yet — please use enterprise support.";
+
+  if (locale === "zh") {
+    title = "司機已指派";
+    subtitle = "聯絡方式由企業客服提供";
+    helpText = "聯絡司機尚未提供直撥號碼，請改用企業客服。";
+  }
+
+  return { title, subtitle, helpText };
 }
 
 function getEnterpriseCostCenterLabel(
