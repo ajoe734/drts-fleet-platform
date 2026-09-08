@@ -28,8 +28,9 @@ const row = () => ({
 
 describe("UV-EXEC-010 append-only checkpoint writer", () => {
   it("requires durable storage even when the request looks valid", async () => {
-    await expect(new VoiceCheckpointRepository().appendVerified(input()))
-      .rejects.toThrow("database unavailable");
+    await expect(
+      new VoiceCheckpointRepository().appendVerified(input()),
+    ).rejects.toThrow("database unavailable");
   });
 
   it("snapshots nested evidence before database I/O", async () => {
@@ -40,7 +41,8 @@ describe("UV-EXEC-010 append-only checkpoint writer", () => {
       return { rows: [row()] };
     });
     const result = await new VoiceCheckpointRepository().appendVerified(
-      request, { query } as unknown as VoiceQueryExecutor,
+      request,
+      { query } as unknown as VoiceQueryExecutor,
     );
     const args = (query.mock.calls as unknown as [string, unknown[]][])[0]!;
     expect(JSON.parse(args[1][3] as string).objectVersion).toBe("immutable-1");
@@ -49,11 +51,13 @@ describe("UV-EXEC-010 append-only checkpoint writer", () => {
   });
 
   it("returns the original identity and verification time on an exact retry", async () => {
-    const query = vi.fn()
+    const query = vi
+      .fn()
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [row()] });
     const result = await new VoiceCheckpointRepository().appendVerified(
-      input(), { query },
+      input(),
+      { query },
     );
     expect(result.checkpointId).toBe("checkpoint");
     expect(result.verifiedAt).toBe("2026-09-08T12:00:00.000Z");
@@ -61,21 +65,24 @@ describe("UV-EXEC-010 append-only checkpoint writer", () => {
     expect(query.mock.calls[1]![0]).toContain("manifest = $4::jsonb");
     expect(query.mock.calls[1]![0]).toContain("coverage = $6::jsonb");
     expect(query.mock.calls[1]![0]).toContain("policy_version = $7");
-    expect(query.mock.calls.map(([sql]) => sql).join(" "))
-      .not.toMatch(/\b(UPDATE|DELETE)\b/);
+    expect(query.mock.calls.map(([sql]) => sql).join(" ")).not.toMatch(
+      /\b(UPDATE|DELETE)\b/,
+    );
   });
 
   it("rejects a version collision without replacing established evidence", async () => {
     const query = vi.fn().mockResolvedValue({ rows: [] });
-    await expect(new VoiceCheckpointRepository().appendVerified(input(), { query }))
-      .rejects.toThrow("version conflict");
+    await expect(
+      new VoiceCheckpointRepository().appendVerified(input(), { query }),
+    ).rejects.toThrow("version conflict");
     expect(query).toHaveBeenCalledTimes(2);
   });
 
   it("does not acknowledge checkpoint success when storage fails", async () => {
     const query = vi.fn().mockRejectedValue(new Error("connection lost"));
-    await expect(new VoiceCheckpointRepository().appendVerified(input(), { query }))
-      .rejects.toThrow("connection lost");
+    await expect(
+      new VoiceCheckpointRepository().appendVerified(input(), { query }),
+    ).rejects.toThrow("connection lost");
     expect(query).toHaveBeenCalledTimes(1);
   });
 
@@ -89,9 +96,12 @@ describe("UV-EXEC-010 append-only checkpoint writer", () => {
     { coverage: [] },
   ])("rejects invalid journal input before writing: %j", async (patch) => {
     const query = vi.fn();
-    await expect(new VoiceCheckpointRepository().appendVerified(
-      { ...input(), ...patch } as VerifiedCheckpointAppend, { query },
-    )).rejects.toThrow("Invalid checkpoint");
+    await expect(
+      new VoiceCheckpointRepository().appendVerified(
+        { ...input(), ...patch } as VerifiedCheckpointAppend,
+        { query },
+      ),
+    ).rejects.toThrow("Invalid checkpoint");
     expect(query).not.toHaveBeenCalled();
   });
 });
