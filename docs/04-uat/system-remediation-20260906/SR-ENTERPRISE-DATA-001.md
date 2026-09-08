@@ -1,5 +1,18 @@
 # SR-ENTERPRISE-DATA-001 — baseline and screen requirements
 
+## Redispatch verification (2026-09-08, after history-helper completion)
+
+- Fresh `git fetch origin && git rebase origin/dev`: exit 0. Base `origin/dev` is `d4f54ef94e059a981bf2be1f7b944e815870e117`; rebased evidence head was `cfc2575b9a6cd3edadbde6e820d6bafee24f3563`.
+- The published evidence anchor `64fcea903f9be1d74b0b2efb42229727eec737ea` contained the same task document. A normal merge preserved that published ancestry after the required rebase: `git merge --no-ff origin/codex/sr-enterprise-data-001` (with task trailers), exit 0, head `d6f1b8c40ef9f61dc80ed6dc2b9fa85ee92d8007`. No product changes were introduced.
+- Read the completed helper report at `support/unblock/SR-ENTERPRISE-DATA-001/SR-ENTERPRISE-DATA-001-UNBLOCK-HISTORY-REPAIR.md`, merged by `40c231ba6718dbf7a7ee6662e446d44e48eabcb3`. It explicitly says history repair does **not** authorize product edits or clear the scope blocker; supervisor scope/dependency adjudication remains the next action.
+- Current task `show` still lists only the original six write scopes and no dependencies. Neither shared lifecycle/theme/help authorization nor a contact-data dependency has been supplied.
+- Re-read canonical ENT_Home, ENT_Trip, ENT_GATES, EEmpty and tenant realm tokens. The missing states listed below remain unspecified. The dispatch requirement to write screen requirements and STOP therefore still applies.
+- Current source still reproduces fixture home/trip selection, fixed `active={2}`, and shared detail fallback to `degraded` for 404. Resource `EB-7K2E1D` is a fixture identifier only; no live booking existence is asserted.
+- Executed again on the above head: `git diff --check` exit 0; `pnpm --filter @drts/enterprise-dispatch-web typecheck` exit 0 (`tsc --noEmit`); `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/` exit 1 (`No test files found`). This is not a passing regression suite.
+- Implementation candidate SHA: none. Final documentation anchor/push SHA is recorded in the machine-truth blocker note. No UI implementation, live API/browser/contact/true-device checks, acceptance, CI or deployment is claimed for this redispatch.
+
+Supervisor action required: supply the missing canonical screen states; authorize or assign shared lifecycle 404, theme token and help/contact fixes with dependencies; identify the permitted session/contact source. Resume the owner only after these decisions are recorded. Completing the history helper alone does not resolve them.
+
 ## Dispatch baseline (2026-09-08)
 
 - Owner: Codex; reviewer: Codex2. Implementation is blocked before UI edits; this is not acceptance evidence or a review candidate.
