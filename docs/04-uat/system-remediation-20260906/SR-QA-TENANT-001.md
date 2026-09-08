@@ -151,3 +151,11 @@ fetch 後 base：`5cff9b36082998a0295f2550039306dc1f84c3d2`。rebase 重複歷�
 | `git diff --check` | 0 | 無空白錯誤 |
 
 逐一解碼 report 中四個 tenant evidence 附件，確認 baseSha/testedSha 為上述版本，calls/resources 均為空；無實際資源 ID。未執行 live HTTP、DB、mail 或瀏覽器验收；未重跑 unit/typecheck。既有未完成矩陣仍待補齊，不 handoff。請 Gemini/provisioner 注入六項既述設定並提供環境來源及有效期／更新方式，負責可拋棄租戶 teardown，再恢復派工。此為環境阻礙，未重現新產品缺陷。
+
+## 2026-09-08 21:18 dispatch：阻礙仍未解除
+
+本輪 `git fetch origin` exit 0，最新 base `e97653b7ffb962a6c4d688e8706711d860fa3604`；實跑 SHA `1f9a6c4965c0af50ac0bb97f60af4a4e0a91d358`，無 candidate。`git rebase origin/dev` exit 1：54 筆重播至第 12 筆 `f2e49cdf5`，directory.spec.ts add/add 衝突；`git rebase --abort` exit 0。原分支與遠端比較 `git rev-list --left-right --count HEAD...origin/codex/sr-qa-tenant-001` 為 `0 0`（exit 0）。依最新 dev 的 HISTORY-REPAIR helper 保留已發布 refs，請 supervisor 路由 current-dev recovery branch 與經核對 cumulative patch，不再 merge 重複 ancestry。
+
+`printenv | cut -d= -f1 | rg '^DRTS_TENANT_UAT_'` exit 1：本輪無上述環境變數名稱，未輸出憑證。`pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001` exit 1：4 task failed，全部缺 `DRTS_TENANT_UAT_API_URL`；4 shared passed 不屬本 task 驗收。前置即失敗，未發 HTTP 寫入，無資源 ID；live、DB、mail、瀏覽器仍未執行。本輪未改測試或業務碼，未重跑 unit/typecheck。能力矩陣仍不完整，不 handoff。
+
+最新 dev 的 HISTORY-REPAIR 與 MANUAL-UNBLOCK helper 均要求 parent 保持 blocked / waiting_for Gemini。仍需 supervisor 安排 recovery branch，Gemini/provisioner 配置前述六項設定及非機密來源、有效期與 teardown 責任；dispatch 的 in_progress 並非解除前置證據。
