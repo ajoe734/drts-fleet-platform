@@ -1,12 +1,14 @@
 # SR-PUBLIC-001 — 公开入口／callback／版本清單修復準備
 
 - Owner: `Gemini`
-- Reviewer: `Codex`
+- Reviewer: `Codex2`
 - Wave: `system-remediation-20260906`
 - Gap IDs: `R01`, `R29`
 - Capability IDs: `C001`, `C124`
+- Reassignment Note: Chairman reassigned owner from Gemini2 to Gemini (Gemini2 exact lane capacity paused; terminal failure 1 time; reassigned to healthy Gemini, retaining independent reviewer Codex2).
 - Base SHA: `40ba315e4114369eaa7e12d35aae83a795c97b1d` (`origin/dev` at branch creation)
-- Previous Candidate SHA: `7ad94cfe7c7a1f271afe5d3f4c0d38b64821ebab` (Review rejected by Codex with 3 findings)
+- Current `origin/dev` SHA: `3b60a3757238663572f16f010c94f446f2c71eaa` (verified no overlap with write scopes)
+- Prior Branch Commits: `7ad94cfe7` (initial implementation), `c22646b66` (review feedback address)
 - Current Candidate SHA: recorded at `handoff` time via `git rev-parse HEAD`
 - Branch: `gemini/sr-public-001`
 
@@ -137,14 +139,14 @@ Codex 對 candidate `7ad94cfe7` 提出 3 項具體缺陷反饋，本候選版本
 ```bash
 pnpm exec vitest run tests/unit/system-remediation/sr-public-001/
 ```
-執行結果：
+執行結果（2026-09-08 重驗）：
 ```
- RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-public-001
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-public-001
 
  Test Files  2 passed (2)
       Tests  22 passed (22)
-   Start at  14:51:47
-   Duration  1.80s (transform 184ms, setup 0ms, import 240ms, tests 1.41s, environment 0ms)
+   Start at  12:20:26
+   Duration  1.55s (transform 89ms, setup 0ms, import 156ms, tests 1.26s, environment 0ms)
 ```
 Exit Code: `0` (22 項測試全部通過)
 
@@ -195,24 +197,16 @@ Status: PASS (Recovery acceptance verified: all 9 entries healthy on DNS/TLS/HTT
 ```
 Exit Code: `0`
 
-#### C. 即時 Live 探測自適應驗證
+#### C. 即時 Live 探測觀測記錄（2026-09-08 實測）
 ```bash
-python3 tools/system-remediation/public-entry/system-remediation-endpoints.py --mode verify
+python3 tools/system-remediation/public-entry/system-remediation-endpoints.py --mode table
 ```
-執行結果：
-```
-=== SR-PUBLIC-001 Verification Check ===
-Target phase: auto
-Active entries count: 9 (expected: 9)
-R01 reproduced (exit 35 on direct A record): True
-R29 reproduced (stale URL 404, active lyo6ra57fq healthy): True
-Diagnosis reproduction passed: True
-Recovery acceptance passed: False
-Retired domains clean NXDOMAIN: True
-All Cloud Run active healthy: True
-Status: PASS (Diagnosis reproduction verified: defects R01 and R29 accurately reproduced; retired domains clean; live gate preserved)
-```
-Exit Code: `0`
+實測觀測真值：
+1. **Public DNS & TLS (R01)**：全部 9 個公開子網域在 GoDaddy 權威 NS 仍指向過期 A 紀錄 `8.233.119.14`，curl 直連 100% 重現 exit 35（`SSL_ERROR_SYSCALL`）。
+2. **GHS SNI 憑證**：透過 Google Anycast IP 握手，全部 9 個子網域皆取得 Google Trust Services 簽發之有效 TLS 憑證，GFE 回傳 HTTP 404（domain mapping 待 live 配置）。
+3. **防污染邊界**：`book`, `ride`, `concierge` 實測皆為 clean `NXDOMAIN`。
+4. **Cloud Run Fallback (R29)**：舊文件 `4t7rg6fmeq` 實測 HTTP 404；目前 dev 部署環境（`lyo6ra57fq`）在公網目前亦回傳 HTTP 404（待環境啟用／部署後生效）。
+5. **Live Gate**：公網 DNS 紀錄變更與 Cloud Run mapping 配置交由具備授權帳號的 `SR-LIVE-ENTRY-001` 執行，不冒充公網真機已上線。
 
 ---
 

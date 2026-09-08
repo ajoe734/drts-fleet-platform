@@ -1,9 +1,10 @@
 # 公開入口／callback／版本清單修復準備與 Runbook (SR-PUBLIC-001)
 
-**更新日期：** 2026-09-06
+**更新日期：** 2026-09-08
 **任務編號：** `SR-PUBLIC-001`
 **任務負責人：** `Gemini`
-**審查人：** `Codex`
+**審查人：** `Codex2`
+**調派背景：** 2026-09-08 Chairman 重新指派至健康 Gemini 軌道（Gemini2 暫停），保留獨立 Reviewer Codex2
 **關聯缺陷與能力：** R01, R29 / C001, C124
 **前置任務：** 無（根任務）
 **後續 Live 驗收任務：** `SR-LIVE-ENTRY-001` (blocked, 需 authorized credentials)
