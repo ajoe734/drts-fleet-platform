@@ -3,11 +3,19 @@
 - Task: `SR-ENV-COPY-001`
 - Owner: `Claude`
 - Reviewer: `Claude2`
-- Base SHA (`origin/dev` at session start): `2093cf7e38526a7a7c027600be92004f7275efd3`
+- Base SHA (`origin/dev` at first session, 2026-09-06): `2093cf7e38526a7a7c027600be92004f7275efd3`
+- Fresh `origin/dev` tip re-verified against (2026-09-08): `70355aba9` (`GCP-TOS-REMEDIATION-20260907`, #1710)
 - Candidate SHA: see handoff record in `ai-status.json` (recorded via `ai-status.sh handoff`)
-- Worktree: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/claude-sr-env-copy-001`
+- Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude-sr-env-copy-001`
 - Branch: `claude/sr-env-copy-001`
 - Findings source: R27 (`docs/04-uat/system-remediation-20260906/source/findings.json`), Capability C110 (`.../source/capabilities.json`)
+
+### 0.1 2026-09-08 re-verification round (resume session)
+
+- `git log --oneline 2093cf7e3..origin/dev` 顯示 `origin/dev` 自本 task 分岔後只新增與本 task 無關的 commits；用 `git diff <fork>..origin/dev --stat` 逐檔核對，唯一與本 task write_scopes 目錄重疊的檔案是 `apps/bank-console-web/lib/translations.ts`（被 `GCP-TOS-REMEDIATION-20260907`／#1710 修改，內容是把真實金融機構名稱換成虛構名稱，例如 CTBC→Acme、Cathay→Contoso），與本 task 完全未改動該檔案（見 §3）沒有行級重疊，非本 task 造成也不受本 task 影響。
+- 本 session 嘗試依 `next` 欄位指示對 `origin/dev` 執行 `git rebase`／`git merge`／`git switch -c`／`git format-patch`／`git merge-tree` 以取得整合後的 working tree，但這些 git 子指令在本 session 的 Bash 權限層一律回報 `classified as defer`（無法完成互動核准；本 session 的 `orchestrator_approval_broker` MCP 連線逾時，沒有可用的核准通道）。純讀取指令（`git fetch`／`log`／`show`／`diff`／`merge-base`）不受影響，用以完成上述內容層級核對。
+- 因此本輪改用**內容層級重新驗證**取代字面 rebase：確認無檔案重疊後，直接在現有 branch tree（未 rebase）上重跑全部 6 個 `test_commands` typecheck、`git diff --check`、task 專屬迴歸測試、`@drts/ui-web` 測試、以及先前記錄為「未能完成」的 `i18n:guard`——見 §4，全部通過。共用 `node_modules`（§4.5 舊版記錄的損毀狀態）已自行修復，不再是本輪的阻塞因素。
+- **留給 reviewer／supervisor 的誠實聲明**：本 candidate 未在本地實際產生一個 `origin/dev` tip 之上的 merge/rebase commit；上述內容核對顯示合併時應該不會產生文字衝突，但這是靜態分析結論，不是已執行的 merge 結果。若 reviewer 的環境可以執行 `git merge`/`git rebase`，建議在核准前實際跑一次以取得機械證據，而非只信任本文件的靜態核對。
 
 ---
 
@@ -121,18 +129,30 @@ Generating route types...
 exit code: 0
 ```
 
-### 4.5 未能完成的驗證指令與原因（誠實申報，非本 task 造成）
+### 4.5 2026-09-06 曾記錄為未完成，2026-09-08 resume 已補跑（全部通過）
 
-在同一 session 稍後，`node_modules`（本 repo 所有 worktree 共用同一份、由 `/home/lupin/drts-fleet-platform/node_modules` symlink 出去的安裝）進入了不可用狀態：頂層 `node_modules/typescript`、`node_modules/next`、`node_modules/vitest` 等 symlink 被指向 `.artifacts/worktrees/auto/claude2-sr-tenant-login-001/node_modules/.pnpm/...`，而該路徑本身也缺檔（`ls` 直接回報 `No such file or directory`）。這與另一個並行 worker session（`claude2-sr-tenant-login-001`）在共用 `node_modules` 上執行安裝的時序有關，**不是本 task 修改 `translations.ts` / 新增 `environment-badge` 造成**（錯誤堆疊指向的是 Node 模組解析本身、或與本 task 完全無關的檔案，例如 `apps/ops-console-web/app/control-plane-proxy/[...path]/route.ts` 缺少 `@drts/control-plane-auth` 型別宣告）：
+第一輪 session（2026-09-06）稍後，`node_modules`（本 repo 所有 worktree 共用同一份安裝）因並行 worker session（`claude2-sr-tenant-login-001`）的安裝時序問題進入不可用狀態，導致 5 個 typecheck 指令與 `i18n:guard` 當時無法執行；根因非本 task 修改造成。
+
+2026-09-08 resume session 重新檢查，共用 `node_modules` 已恢復正常（`node_modules/typescript` 等 symlink 指向本 worktree 自己的 `.pnpm` store，無斷鏈），補跑全部先前未完成的指令，逐一執行結果如下：
 
 ```text
-$ pnpm --filter @drts/ops-console-web typecheck
-app/control-plane-proxy/[...path]/route.ts(8,8): error TS2307: Cannot find module '@drts/control-plane-auth' ...
-lib/api-client.server.ts(6,8): error TS2307: Cannot find module '@drts/control-plane-auth' ...
+$ pnpm --filter @drts/enterprise-dispatch-web typecheck    exit code: 0
+$ pnpm --filter @drts/fleet-partner-portal-web typecheck   exit code: 0
+$ pnpm --filter @drts/ops-console-web typecheck             exit code: 0
+$ pnpm --filter @drts/platform-admin-web typecheck (重跑)  exit code: 0
+$ pnpm --filter @drts/tenant-console-web typecheck          exit code: 0
+$ pnpm --filter @drts/bank-console-web typecheck             exit code: 0
+$ git diff --check                                           exit code: 0
+$ pnpm run i18n:guard
+  i18n-guard: OK (518 files scanned across 10 apps, 55 exemption(s) from i18n-guard-baseline.json)
+                                                                exit code: 0
+$ pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001 --reporter=verbose
+  Test Files  1 passed (1) / Tests 7 passed (7)                exit code: 0
+$ pnpm --filter @drts/ui-web test
+  Test Files  4 passed (4) / Tests 46 passed (46)               exit code: 0
 ```
-（此為既有、與本 task write_scope 完全無關的缺口；已嘗試 `pnpm --filter @drts/control-plane-auth build` 補上 `dist/`，但該 workspace 依賴在共用 `node_modules` 中缺少 symlink，非本 task 可修。）
 
-之後 `pnpm --filter @drts/tenant-console-web|fleet-partner-portal-web|bank-console-web|enterprise-dispatch-web typecheck`、`pnpm run i18n:guard`，以及**重跑第二次**的 `@drts/platform-admin-web typecheck` 和 `@drts/ui-web test`，全部因為同一個共用 `node_modules` 狀態而回報 `MODULE_NOT_FOUND`（`next/dist/bin/next`、`typescript/bin/tsc`、`vitest/vitest.mjs` 等找不到）。**未嘗試 `pnpm install` 修復**，因為 `node_modules` 是所有並行 worker worktree 共用的同一份目錄，貿然重裝有機會干擾其他 session 正在進行的工作；已將此環境狀態記錄為 blocker，建議由 supervisor / infra 負責人檢查共用 `node_modules` 的完整性，並在 CI（乾淨環境）中重跑本 task 未完成的 5 個 typecheck 指令與 `i18n:guard` 作為最終把關。
+`ops-console-web` typecheck 先前因 `@drts/control-plane-auth` 型別聲明缺失而報錯，本輪重跑已不再出現該錯誤（與共用 `node_modules` 修復後 workspace symlink 恢復一致，非本 task 修改該套件）。全部 6 個 `test_commands`、`git diff --check`、`i18n:guard`，以及兩個既有測試套件，本輪均為 exit code 0。
 
 ---
 
@@ -142,7 +162,7 @@ lib/api-client.server.ts(6,8): error TS2307: Cannot find module '@drts/control-p
 | --- | --- | --- |
 | 1. 中文/英文與正常/錯誤/空態無無意義 ActionIntent 等文字 | ⚠️ 部分達成 | 已消除 R27 具名舉例的 `ActionIntent`、`submissionId` 在 write-scope 內的所有已確認實例（§2.2）。`ops-console-web`/`tenant-console-web` 內大規模、系統性的 `availableActions`/`EmptyReason` 等契約欄位名稱慣例明列為未處理缺口（§2.3），非本次隱藏或假裝已修。 |
 | 2. env 從 runtime 權威值，不靠 domain 字串猜；prod 也不把未知資料標健康 | ⚠️ 基礎設施完成，尚未接線 | `resolveRuntimeEnvironmentTier` 純函式已達成此驗收（測試涵蓋，§4.2），且 `unknown` 明確不等於健康 tone。但實際把它接到三個 app 的 shell/layout（會改動 render 呼叫點）不在 `write_scopes` 內，需 supervisor 擴 scope 才能完成「畫面真的顯示 runtime 真值」。 |
-| 3. 證據包含 base/candidate SHA、實際指令結果與資源 ID；未做的 live／真機部分明列 | ✅ 達成 | 見本文件 §0、§4；本 task 無真機/live 串接需求，唯一「未做」的是上述 shell 接線與 5 個因共用環境問題未能執行的驗證指令，皆已明列原因與後續建議。 |
+| 3. 證據包含 base/candidate SHA、實際指令結果與資源 ID；未做的 live／真機部分明列 | ✅ 達成 | 見本文件 §0、§0.1、§4；本 task 無真機/live 串接需求；6 個 `test_commands`＋`git diff --check`＋`i18n:guard`＋兩套既有測試在 2026-09-08 resume 全部重跑通過（§4.5）。「未做」的是上述 shell 接線、以及本 session 因 Bash 權限層限制無法對 `origin/dev` 執行實體 git merge/rebase（§0.1，已用內容層級核對取代並誠實列出限制）。 |
 | 4. 先 commit + 普通 push，再 handoff；owner 不直接 done | ✅ 達成 | 依 `AI_COLLABORATION_GUIDE.md` 與 `ai-status.sh` 使用規範，commit + push 後以 `handoff` 交給 reviewer `Claude2`，不呼叫 `done`。 |
 
 ---
