@@ -1,3 +1,4 @@
+import { ApiRequestError } from "../../common/api-envelope";
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Logger, Optional } from "@nestjs/common";
@@ -753,7 +754,11 @@ export class OwnedMobilityRepository {
         )
       : { rows: [] };
     if (assignment && tasks.rows.length !== 1)
-      throw new Error("Active assignment task requires reconciliation");
+      throw new ApiRequestError(
+        409,
+        "REDISPATCH_ASSIGNMENT_ALREADY_CLOSED",
+        "Active assignment task requires reconciliation",
+      );
     const task = tasks.rows[0]
       ? this.parseRecord<DriverTaskRecord>(
           tasks.rows[0].record,
@@ -782,13 +787,34 @@ export class OwnedMobilityRepository {
         current.aggregateVersion,
       );
     }
+    const latestJobs = await executor.query<{ dispatch_job_id: string }>(
+      `SELECT dispatch_job_id FROM ops.phase1_dispatch_jobs
+       WHERE order_id = $1 AND status <> 'closed' ORDER BY dispatch_job_id`,
+      [orderId],
+    );
+    if (
+      latestJobs.rows.length !== jobs.rows.length ||
+      latestJobs.rows.some(
+        (row, index) =>
+          row.dispatch_job_id !==
+          this.parseRecord<DispatchJobRecord>(
+            jobs.rows[index]!.record,
+            "ops.phase1_dispatch_jobs",
+          ).dispatchJobId,
+      )
+    ) {
+      throw new OwnedOrderVersionConflictError(
+        orderId,
+        current.aggregateVersion,
+      );
+    }
     const versions = await executor.query<{ count: string }>(
       `SELECT count(*) FROM ops.phase1_dispatch_assignments WHERE order_id = $1`,
       [orderId],
     );
     return {
       order: current.order,
-      assignmentVersion: Number(versions.rows[0].count),
+      assignmentVersion: Number(versions.rows[0]!.count),
       assignment,
       task,
       dispatchJobs: jobs.rows.map((row) =>

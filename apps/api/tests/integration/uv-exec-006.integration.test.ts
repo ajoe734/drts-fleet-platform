@@ -1982,6 +1982,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     ["timeout", "cancel"],
     ["redispatch", "rollback"],
     ["redispatch", "cancel"],
+    ["redispatch", "cancel_after_commit"],
   ])(
     "%s is atomic across resource release: %s",
     async (operation, scenario) => {
@@ -2049,11 +2050,24 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
         .spyOn(repository, "releaseDispatchResourceReservations")
         .mockImplementation(async (...args) => {
           const result = await original(...args);
+          if (scenario === "cancel_after_commit") return result;
           released();
           if (scenario === "rollback") throw new Error("timeout release fault");
           await barrier;
           return result;
         });
+      const transact = repository.withTransaction.bind(repository);
+      const commitHook =
+        scenario === "cancel_after_commit"
+          ? vi
+              .spyOn(repository, "withTransaction")
+              .mockImplementation(async (work) => {
+                const result = await transact(work);
+                released();
+                await barrier;
+                return result;
+              })
+          : null;
       try {
         const timeout =
           operation === "redispatch"
@@ -2079,10 +2093,12 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
         } else {
           await atRelease;
           // Another connection still sees the complete pre-timeout workflow.
-          expect(await readState()).toEqual(before);
-          expect(
-            await readActiveReservations(database, "driver", driverId),
-          ).toHaveLength(1);
+          if (scenario !== "cancel_after_commit") {
+            expect(await readState()).toEqual(before);
+            expect(
+              await readActiveReservations(database, "driver", driverId),
+            ).toHaveLength(1);
+          }
           let entered!: () => void;
           const attempting = new Promise<void>((resolve) => {
             entered = resolve;
@@ -2104,6 +2120,10 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
               (error: unknown) => error,
             );
           await attempting;
+          if (scenario === "cancel_after_commit") {
+            expect(await cancellation).toBeNull();
+            commitHook?.mockRestore();
+          }
           resume();
           await timeout;
           const cancellationError = await cancellation;
@@ -2147,6 +2167,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       } finally {
         resume();
         hook.mockRestore();
+        commitHook?.mockRestore();
       }
     },
   );
