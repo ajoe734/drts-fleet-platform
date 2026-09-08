@@ -1033,7 +1033,7 @@ describe("owned mobility service", () => {
     }
 
     try {
-      ownedMobilityService.cancelTenantBooking(
+      await ownedMobilityService.cancelTenantBooking(
         TENANT_ACME,
         newcoBooking.bookingId,
         {
@@ -1206,7 +1206,7 @@ describe("owned mobility service", () => {
           .filter((delivery) => delivery.eventType !== "tenant.webhook.test"),
       ).toEqual([]);
 
-      ownedMobilityService.cancelTenantBooking(
+      await ownedMobilityService.cancelTenantBooking(
         TENANT_ACME,
         acmeBooking.bookingId,
         {
