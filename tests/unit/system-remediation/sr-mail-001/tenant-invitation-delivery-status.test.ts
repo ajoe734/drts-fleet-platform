@@ -163,13 +163,31 @@ describe("SR-MAIL-001 tenant invitation delivery semantics", () => {
       );
     expect(firstInvitation?.deliveryStatus).toBe("delivery_failed");
 
+    // Model the deployment restarting after its provider configuration is
+    // restored. The identity authority retains the failed invitation; only
+    // the delivery adapter is rebuilt around the same durable outbox path.
+    const transport = acceptingTransport();
+    const recoveredDelivery = new TenantInvitationDeliveryService(
+      new NotificationDeliveryService(
+        new FileMailOutbox(directory),
+        transport,
+        { now, maxAttempts: 3, retryDelayMs: 1_000, leaseMs: 1_000 },
+      ),
+    );
+    (
+      service as unknown as {
+        tenantInvitationDelivery: TenantInvitationDeliveryService;
+      }
+    ).tenantInvitationDelivery = recoveredDelivery;
+
     const resent = await service.resendTenantInvitation(
       "tenant-mail-001",
       created.userId,
       "req-sr-mail-001-resend-retry",
       tenantAdminIdentity,
     );
-    expect(resent.deliveryStatus).toBe("delivery_failed");
+    expect(transport.send).toHaveBeenCalledOnce();
+    expect(resent.deliveryStatus).toBe("delivered");
     expect(resent.revokedAt).toBeNull();
 
     // The superseded first invitation is revoked, not silently left pending.
