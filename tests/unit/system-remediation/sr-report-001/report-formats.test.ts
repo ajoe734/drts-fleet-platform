@@ -116,7 +116,7 @@ describe("SR-REPORT-001 service integration (in-memory, no live DB)", () => {
             serviceProductCode: "excluded",
             status: "cancelled",
           },
-        ] as OwnedOrderRecord[],
+        ] as unknown as OwnedOrderRecord[],
     );
     const filters = { from: "2026-09-01", to: "2026-09-30" };
     const manifests: unknown[] = [];
