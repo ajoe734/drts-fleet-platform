@@ -101,6 +101,35 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       expect(dashboard.dataTimestamp).toBeDefined();
     });
 
+    it("does not replace list counts with a disagreeing aggregate", async () => {
+      mockDrivers.mockResolvedValue([]);
+      mockTrips.mockResolvedValue([]);
+      mockDashboard.mockResolvedValue({
+        activeDriverCount: 128, onlineDriverCount: 96,
+        dispatchEligibleDriverCount: 96, completedTripCount: 14280,
+      });
+      const view = await loadDashboard("2026-09");
+      expect(view.driverCount).toBe("0");
+      expect(view.completedTrips).toBe("0");
+      expect(view.driverStatusSummary.online).toBe("0");
+    });
+
+    it("exposes a partial list failure and refuses an incomplete summary CSV", async () => {
+      mockDrivers.mockRejectedValue(new Error("Driver service unavailable"));
+      mockTrips.mockResolvedValue([]);
+      mockDashboard.mockResolvedValue({
+        activeDriverCount: 128, onlineDriverCount: 96,
+        dispatchEligibleDriverCount: 96, completedTripCount: 14280,
+      });
+      const view = await loadDashboard("2026-09");
+      expect(view.error).toBe("Driver service unavailable");
+      expect(view.driverCount).toBe("—");
+      const response = await exportHandler(new NextRequest(
+        "http://localhost:3000/trips/export?type=summary&period=2026-09",
+      ));
+      expect(response.status).toBe(500);
+    });
+
     it("separates legitimate zero data from read failure on dashboard and loaders", async () => {
       // 1. Legitimate zero data: reachable API returning empty arrays
       mockDrivers.mockResolvedValue([]);
@@ -170,7 +199,7 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       const failedDashboard = await loadDashboard("2026-09");
       expect(failedDashboard.source).toBe("fallback");
       expect(failedDashboard.error).toBe("503 Service Unavailable");
-      expect(failedDashboard.driverCount).toBe("0");
+      expect(failedDashboard.driverCount).toBe("—");
       expect(failedDashboard.driverCount).not.toBe("128");
     });
   });
