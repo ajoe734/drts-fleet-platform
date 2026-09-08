@@ -12,40 +12,54 @@ import type {
 } from "react";
 import { useEffect, useMemo, useState } from "react";
 import type {
-  DriverSupplyDraft,
   SupplyDocumentRecord,
   SupplyReadinessReasonCode,
   SupplySubmissionStatus,
-  VehicleSupplyDraft,
 } from "@drts/contracts";
 import {
   ActionButton,
   CanvasBanner,
   CanvasCard,
   CanvasEmptyState,
-  CanvasField,
   CanvasPageHeader,
   CanvasPill,
 } from "@drts/ui-web";
-import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { useTranslation } from "@/lib/i18n";
+import { buildFleetTheme } from "../lib/fleet-portal-theme";
+import { useTranslation } from "../lib/i18n";
 import type {
   SupplyDashboardView,
   SupplyDocumentsView,
   SupplySubmissionDetail,
-} from "@/lib/fleet-portal-supply";
+} from "../lib/fleet-portal-supply";
 import {
   formatSupplySubject,
   isEditableStatus,
-} from "@/lib/fleet-portal-supply";
+  DRAFT_GUARD_STRINGS,
+  fieldId,
+  INITIAL_DRIVER_DRAFT,
+  INITIAL_VEHICLE_DRAFT,
+  isDriverFormDirty,
+  isVehicleFormDirty,
+  saveDriverDraft,
+  loadDriverDraft,
+  clearDriverDraft,
+  saveVehicleDraft,
+  loadVehicleDraft,
+  clearVehicleDraft,
+  saveSubmissionDetailDraft,
+  loadSubmissionDetailDraft,
+  clearSubmissionDetailDraft,
+  shouldInterceptNavigation,
+  type DriverDraftInput,
+  type VehicleDraftInput,
+} from "../lib/fleet-portal-supply";
+
 
 type ApiEnvelope<T> = {
   data: T;
   meta: { requestId: string; timestamp: string };
 };
 
-type DriverDraftInput = Omit<DriverSupplyDraft, "submissionId">;
-type VehicleDraftInput = Omit<VehicleSupplyDraft, "submissionId">;
 
 const DRIVER_DOC_TYPES = [
   "professional_driver_license",
@@ -202,6 +216,9 @@ function FieldInput(
     color: theme.text,
     fontSize: 12.5,
     fontFamily: theme.fontFamily,
+    // Ensure focus ring is visible against the dark surface (R23 contrast).
+    // We use `outline` rather than box-shadow so it respects forced-colors mode.
+    outlineOffset: 2,
   };
   if (props.multiline) {
     return (
@@ -237,6 +254,7 @@ function FieldSelect(
         background: theme.surface,
         color: theme.text,
         fontSize: 12.5,
+        outlineOffset: 2,
       }}
     >
       {props.options.map((option) => (
@@ -247,6 +265,199 @@ function FieldSelect(
     </select>
   );
 }
+
+/**
+ * Accessible form field wrapper for supply forms (R23).
+ *
+ * Unlike the shared `CanvasField` (which renders the label as a sibling of the
+ * children, not a wrapping element), this component emits:
+ *
+ *   <div>
+ *     <label htmlFor={id}>…</label>   ← explicit for/id linkage
+ *     {children}                      ← must receive the same id
+ *     <div role="alert">error</div>   ← live region for screen readers
+ *   </div>
+ *
+ * The wrapping `<label>` with `htmlFor` satisfies WCAG 1.3.1 and 4.1.2
+ * for assistive technology that relies on the label/control association.
+ */
+function FormField({
+  id,
+  label,
+  required,
+  error,
+  hint,
+  children,
+}: {
+  id: string;
+  label: string;
+  required?: boolean;
+  error?: string | null;
+  hint?: string;
+  children: ReactNode;
+}) {
+  const theme = buildFleetTheme();
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label
+        htmlFor={id}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          fontSize: 11.5,
+          fontWeight: 600,
+          // Use theme.text (not textMuted) for sufficient contrast on dark
+          // surface (#E5EAF3 on #141B2B ≈ 15.6:1 — well above WCAG AA 4.5:1).
+          color: theme.text,
+          marginBottom: 5,
+        }}
+      >
+        {label}
+        {required ? (
+          <span style={{ color: theme.danger }} aria-hidden="true">
+            *
+          </span>
+        ) : null}
+      </label>
+      {children}
+      {hint && !error ? (
+        <div
+          style={{
+            fontSize: 11,
+            color: theme.textMuted,
+            marginTop: 4,
+            lineHeight: 1.35,
+          }}
+        >
+          {hint}
+        </div>
+      ) : null}
+      {error ? (
+        <div
+          id={`${id}-error`}
+          role="alert"
+          style={{
+            fontSize: 11,
+            color: theme.danger,
+            marginTop: 4,
+            lineHeight: 1.35,
+          }}
+        >
+          {error}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Fires the browser's native beforeunload warning (R25) while the form is
+ * dirty, intercepts in-app link clicks (including Next.js <Link> components),
+ * and exposes `confirmLeave()` for programmatic router navigation.
+ */
+
+export type DraftGuardRouter = {
+  push?: (url: string) => void;
+  replace?: (url: string) => void;
+};
+
+export type DraftGuardOptions = {
+  router?: DraftGuardRouter | null;
+  formUrl?: string;
+};
+
+export function useDraftGuard(
+  dirty: boolean,
+  routerOrOptions?: DraftGuardRouter | DraftGuardOptions | null,
+): { confirmLeave: () => boolean } {
+  function confirmLeave(): boolean {
+    if (!dirty) return true;
+    return window.confirm(
+      `${DRAFT_GUARD_STRINGS.confirmLeaveTitle}\n\n${DRAFT_GUARD_STRINGS.confirmLeaveBody}`,
+    );
+  }
+
+  const router: DraftGuardRouter | null | undefined =
+    routerOrOptions && ("push" in routerOrOptions || "replace" in routerOrOptions)
+      ? (routerOrOptions as DraftGuardRouter)
+      : (routerOrOptions as DraftGuardOptions | null | undefined)?.router;
+
+  const explicitFormUrl = (routerOrOptions as DraftGuardOptions | null | undefined)?.formUrl;
+
+  useEffect(() => {
+    if (!dirty) return;
+    if (typeof window === "undefined") return;
+
+    // Capture current form URL on mount / dirty state. When popstate occurs,
+    // window.location has already updated to the destination URL; if the user
+    // cancels, push currentFormUrl to restore browser history and coordinate
+    // with Next App Router to prevent route traversal.
+    const currentFormUrl =
+      explicitFormUrl ||
+      (window.location ? window.location.href || window.location.pathname || "" : "");
+
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      // Modern browsers use `returnValue` for the native dialog. The value
+      // shown to the user is browser-controlled; we set it for legacy support.
+      e.returnValue = DRAFT_GUARD_STRINGS.beforeUnload;
+    }
+
+    function handleDocumentClick(e: MouseEvent) {
+      const target = e.target as HTMLElement | null;
+      const anchor = target?.closest?.("a");
+      if (!anchor) return;
+
+      const href =
+        typeof anchor.href === "string" ? anchor.href : anchor.getAttribute("href");
+      const anchorTarget = anchor.getAttribute("target") ?? anchor.target;
+
+      if (!shouldInterceptNavigation(href, anchorTarget, window.location)) {
+        return;
+      }
+
+      const confirmed = confirmLeave();
+      if (!confirmed) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }
+    }
+
+    function handlePopState() {
+      const confirmed = confirmLeave();
+      if (!confirmed) {
+        try {
+          if (currentFormUrl) {
+            window.history.pushState(null, "", currentFormUrl);
+          }
+          if (router?.replace) {
+            router.replace(currentFormUrl);
+          } else if (router?.push) {
+            router.push(currentFormUrl);
+          }
+        } catch {
+          // Ignore history API errors in restricted environments
+        }
+      }
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleDocumentClick, true);
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleDocumentClick, true);
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [dirty, router, explicitFormUrl]);
+
+  return { confirmLeave };
+}
+
+
 
 function ProductChecklist({
   selected,
@@ -699,17 +910,42 @@ export function NewDriverSubmissionForm() {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState<DriverDraftInput>({
-    name: "",
-    mobile: "",
-    professionalDriverLicenseNo: "",
-    professionalDriverLicenseExpiry: "",
-    taxiDriverRegistrationNo: "",
-    taxiDriverRegistrationArea: "",
-    taxiDriverRegistrationExpiry: "",
-    supportedServiceProductCodes: ["taxi_realtime"],
-    preferredVehicleSubmissionId: null,
-  });
+  const [submitted, setSubmitted] = useState(false);
+  const [form, setForm] = useState<DriverDraftInput>(INITIAL_DRIVER_DRAFT);
+  const [restored, setRestored] = useState(false);
+
+  // Restore saved draft on mount if available (R25)
+  useEffect(() => {
+    const saved = loadDriverDraft();
+    if (saved && isDriverFormDirty(saved)) {
+      setForm(saved);
+      setRestored(true);
+    }
+  }, []);
+
+  // Track all changes against initial draft (R25)
+  const dirty = !submitted && isDriverFormDirty(form);
+
+  // Persist draft to storage on change; clear if clean or submitted
+  useEffect(() => {
+    if (submitted) return;
+    if (isDriverFormDirty(form)) {
+      saveDriverDraft(form);
+    } else {
+      clearDriverDraft();
+      setRestored(false);
+    }
+  }, [form, submitted]);
+
+  const { confirmLeave } = useDraftGuard(dirty, router);
+
+  function handleDiscard() {
+    if (window.confirm(DRAFT_GUARD_STRINGS.confirmDiscard)) {
+      clearDriverDraft();
+      setForm(INITIAL_DRIVER_DRAFT);
+      setRestored(false);
+    }
+  }
 
   async function onCreate() {
     setSaving(true);
@@ -719,6 +955,9 @@ export function NewDriverSubmissionForm() {
         "fleet-partner/supply-submissions/drivers",
         { method: "POST", body: JSON.stringify(form) },
       );
+      // Mark submitted and clear persisted draft so guard is lifted before navigation
+      setSubmitted(true);
+      clearDriverDraft();
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
     } catch (err) {
@@ -734,8 +973,80 @@ export function NewDriverSubmissionForm() {
         theme={theme}
         title={t("supply.driverNew.title")}
         subtitle={t("supply.driverNew.subtitle")}
+        actions={
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            {dirty && (
+              <button
+                type="button"
+                onClick={handleDiscard}
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 4,
+                  color: theme.danger,
+                  fontWeight: 600,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  padding: "4px 8px",
+                }}
+              >
+                {DRAFT_GUARD_STRINGS.discardDraft}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (confirmLeave()) router.back();
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: theme.accent,
+                fontWeight: 600,
+                fontSize: 12,
+                cursor: "pointer",
+                padding: 0,
+              }}
+            >
+              {t("supply.action.backDashboard")}
+            </button>
+          </div>
+        }
       />
       <div style={{ padding: 24 }}>
+        {restored && (
+          <div
+            role="status"
+            style={{
+              padding: "10px 14px",
+              marginBottom: 16,
+              borderRadius: 6,
+              backgroundColor: theme.surfaceLo,
+              border: `1px solid ${theme.accentBorder}`,
+              color: theme.text,
+              fontSize: 12,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>{DRAFT_GUARD_STRINGS.restoredNotice}</span>
+            <button
+              type="button"
+              onClick={handleDiscard}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: theme.danger,
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {DRAFT_GUARD_STRINGS.discardDraft}
+            </button>
+          </div>
+        )}
         <DraftFormFrame
           title={t("supply.driverNew.cardTitle")}
           error={error}
@@ -743,12 +1054,13 @@ export function NewDriverSubmissionForm() {
           onSave={onCreate}
           saveLabel={t("supply.action.createDraft")}
         >
-          <DriverDraftFields form={form} setForm={setForm} />
+          <DriverDraftFields form={form} setForm={setForm} formKey="new-driver" />
         </DraftFormFrame>
       </div>
     </>
   );
 }
+
 
 export function NewVehicleSubmissionForm() {
   const router = useRouter();
@@ -756,22 +1068,42 @@ export function NewVehicleSubmissionForm() {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState<VehicleDraftInput>({
-    plateNo: "",
-    licenseType: "taxi",
-    brand: "",
-    model: "",
-    modelYear: 2024,
-    seatCount: 5,
-    luggageCapacity: 2,
-    businessArea: "台北市",
-    supportedServiceProductCodes: ["taxi_realtime"],
-    airportTransferEligible: false,
-    fixedFareAllowed: false,
-    currentDriverSubmissionId: null,
-    doorCount: 4,
-    color: "",
-  });
+  const [submitted, setSubmitted] = useState(false);
+  const [form, setForm] = useState<VehicleDraftInput>(INITIAL_VEHICLE_DRAFT);
+  const [restored, setRestored] = useState(false);
+
+  // Restore saved draft on mount if available (R25)
+  useEffect(() => {
+    const saved = loadVehicleDraft();
+    if (saved && isVehicleFormDirty(saved)) {
+      setForm(saved);
+      setRestored(true);
+    }
+  }, []);
+
+  // Track all changes against initial draft (R25)
+  const dirty = !submitted && isVehicleFormDirty(form);
+
+  // Persist draft to storage on change; clear if clean or submitted
+  useEffect(() => {
+    if (submitted) return;
+    if (isVehicleFormDirty(form)) {
+      saveVehicleDraft(form);
+    } else {
+      clearVehicleDraft();
+      setRestored(false);
+    }
+  }, [form, submitted]);
+
+  const { confirmLeave } = useDraftGuard(dirty, router);
+
+  function handleDiscard() {
+    if (window.confirm(DRAFT_GUARD_STRINGS.confirmDiscard)) {
+      clearVehicleDraft();
+      setForm(INITIAL_VEHICLE_DRAFT);
+      setRestored(false);
+    }
+  }
 
   async function onCreate() {
     setSaving(true);
@@ -781,6 +1113,9 @@ export function NewVehicleSubmissionForm() {
         "fleet-partner/supply-submissions/vehicles",
         { method: "POST", body: JSON.stringify(form) },
       );
+      // Mark submitted and clear persisted draft so guard is lifted before navigation
+      setSubmitted(true);
+      clearVehicleDraft();
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
     } catch (err) {
@@ -796,8 +1131,80 @@ export function NewVehicleSubmissionForm() {
         theme={theme}
         title={t("supply.vehicleNew.title")}
         subtitle={t("supply.vehicleNew.subtitle")}
+        actions={
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            {dirty && (
+              <button
+                type="button"
+                onClick={handleDiscard}
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 4,
+                  color: theme.danger,
+                  fontWeight: 600,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  padding: "4px 8px",
+                }}
+              >
+                {DRAFT_GUARD_STRINGS.discardDraft}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (confirmLeave()) router.back();
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: theme.accent,
+                fontWeight: 600,
+                fontSize: 12,
+                cursor: "pointer",
+                padding: 0,
+              }}
+            >
+              {t("supply.action.backDashboard")}
+            </button>
+          </div>
+        }
       />
       <div style={{ padding: 24 }}>
+        {restored && (
+          <div
+            role="status"
+            style={{
+              padding: "10px 14px",
+              marginBottom: 16,
+              borderRadius: 6,
+              backgroundColor: theme.surfaceLo,
+              border: `1px solid ${theme.accentBorder}`,
+              color: theme.text,
+              fontSize: 12,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>{DRAFT_GUARD_STRINGS.restoredNotice}</span>
+            <button
+              type="button"
+              onClick={handleDiscard}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: theme.danger,
+                cursor: "pointer",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {DRAFT_GUARD_STRINGS.discardDraft}
+            </button>
+          </div>
+        )}
         <DraftFormFrame
           title={t("supply.vehicleNew.cardTitle")}
           error={error}
@@ -805,12 +1212,13 @@ export function NewVehicleSubmissionForm() {
           onSave={onCreate}
           saveLabel={t("supply.action.createDraft")}
         >
-          <VehicleDraftFields form={form} setForm={setForm} />
+          <VehicleDraftFields form={form} setForm={setForm} formKey="new-vehicle" />
         </DraftFormFrame>
       </div>
     </>
   );
 }
+
 
 function DraftFormFrame({
   title,
@@ -867,17 +1275,25 @@ function DraftFormFrame({
 function DriverDraftFields({
   form,
   setForm,
+  formKey = "detail",
 }: {
   form: DriverDraftInput;
   setForm: Dispatch<SetStateAction<DriverDraftInput>>;
+  /** Unique key for this form instance; used as prefix for stable field IDs (R23). */
+  formKey?: string;
 }) {
   const { t } = useTranslation();
+  const theme = buildFleetTheme();
+  const fid = (field: string) => fieldId(formKey, field);
   return (
     <>
       <div style={sectionGrid()}>
-        <CanvasField label={t("supply.driverField.name")} required>
+        <FormField id={fid("name")} label={t("supply.driverField.name")} required>
           <FieldInput
+            id={fid("name")}
             value={form.name}
+            autoComplete="name"
+            inputMode="text"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -885,10 +1301,14 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.driverField.mobile")} required>
+        </FormField>
+        <FormField id={fid("mobile")} label={t("supply.driverField.mobile")} required>
           <FieldInput
+            id={fid("mobile")}
             value={form.mobile}
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -896,10 +1316,13 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.driverField.licenseNo")} required>
+        </FormField>
+        <FormField id={fid("licenseNo")} label={t("supply.driverField.licenseNo")} required>
           <FieldInput
+            id={fid("licenseNo")}
             value={form.professionalDriverLicenseNo}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -907,9 +1330,10 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.driverField.licenseExpiry")} required>
+        </FormField>
+        <FormField id={fid("licenseExpiry")} label={t("supply.driverField.licenseExpiry")} required>
           <FieldInput
+            id={fid("licenseExpiry")}
             type="date"
             value={form.professionalDriverLicenseExpiry}
             onChange={(e) =>
@@ -919,10 +1343,13 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.driverField.registrationNo")} required>
+        </FormField>
+        <FormField id={fid("registrationNo")} label={t("supply.driverField.registrationNo")} required>
           <FieldInput
+            id={fid("registrationNo")}
             value={form.taxiDriverRegistrationNo}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -930,10 +1357,13 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.driverField.registrationArea")} required>
+        </FormField>
+        <FormField id={fid("registrationArea")} label={t("supply.driverField.registrationArea")} required>
           <FieldInput
+            id={fid("registrationArea")}
             value={form.taxiDriverRegistrationArea}
+            inputMode="text"
+            autoComplete="address-level2"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -941,12 +1371,10 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField
-          label={t("supply.driverField.registrationExpiry")}
-          required
-        >
+        </FormField>
+        <FormField id={fid("registrationExpiry")} label={t("supply.driverField.registrationExpiry")} required>
           <FieldInput
+            id={fid("registrationExpiry")}
             type="date"
             value={form.taxiDriverRegistrationExpiry}
             onChange={(e) =>
@@ -956,12 +1384,16 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField
+        </FormField>
+        <FormField
+          id={fid("preferredVehicle")}
           label={t("supply.driverField.preferredVehicleSubmissionId")}
         >
           <FieldInput
+            id={fid("preferredVehicle")}
             value={form.preferredVehicleSubmissionId ?? ""}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -969,9 +1401,24 @@ function DriverDraftFields({
               }))
             }
           />
-        </CanvasField>
+        </FormField>
       </div>
-      <CanvasField label={t("supply.field.supportedProducts")} required>
+      {/* ProductChecklist renders its own <label> wrapping each <input type="checkbox">,
+          so implicit association works correctly here. The group label is announced via
+          the role="group" + aria-labelledby pattern below (R23). */}
+      <div role="group" aria-labelledby={fid("products-label")} style={{ marginBottom: 14 }}>
+        <div
+          id={fid("products-label")}
+          style={{
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: theme.text,
+            marginBottom: 5,
+          }}
+        >
+          {t("supply.field.supportedProducts")}
+          <span aria-hidden="true" style={{ color: theme.danger }}> *</span>
+        </div>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
           onChange={(value) =>
@@ -981,25 +1428,34 @@ function DriverDraftFields({
             }))
           }
         />
-      </CanvasField>
+      </div>
     </>
   );
 }
 
+
 function VehicleDraftFields({
   form,
   setForm,
+  formKey = "detail",
 }: {
   form: VehicleDraftInput;
   setForm: Dispatch<SetStateAction<VehicleDraftInput>>;
+  /** Unique key for this form instance; used as prefix for stable field IDs (R23). */
+  formKey?: string;
 }) {
   const { t } = useTranslation();
+  const theme = buildFleetTheme();
+  const fid = (field: string) => fieldId(formKey, field);
   return (
     <>
       <div style={sectionGrid()}>
-        <CanvasField label={t("supply.vehicleField.plateNo")} required>
+        <FormField id={fid("plateNo")} label={t("supply.vehicleField.plateNo")} required>
           <FieldInput
+            id={fid("plateNo")}
             value={form.plateNo}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -1007,9 +1463,10 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.licenseType")} required>
+        </FormField>
+        <FormField id={fid("licenseType")} label={t("supply.vehicleField.licenseType")} required>
           <FieldSelect
+            id={fid("licenseType")}
             value={form.licenseType}
             onChange={(e) =>
               setForm((current) => ({
@@ -1028,10 +1485,13 @@ function VehicleDraftFields({
               },
             ]}
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.brand")}>
+        </FormField>
+        <FormField id={fid("brand")} label={t("supply.vehicleField.brand")}>
           <FieldInput
+            id={fid("brand")}
             value={form.brand ?? ""}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -1039,10 +1499,13 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.model")}>
+        </FormField>
+        <FormField id={fid("model")} label={t("supply.vehicleField.model")}>
           <FieldInput
+            id={fid("model")}
             value={form.model ?? ""}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -1050,10 +1513,12 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.modelYear")}>
+        </FormField>
+        <FormField id={fid("modelYear")} label={t("supply.vehicleField.modelYear")}>
           <FieldInput
+            id={fid("modelYear")}
             type="number"
+            inputMode="numeric"
             value={String(form.modelYear ?? "")}
             onChange={(e) =>
               setForm((current) => ({
@@ -1064,10 +1529,12 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.seatCount")} required>
+        </FormField>
+        <FormField id={fid("seatCount")} label={t("supply.vehicleField.seatCount")} required>
           <FieldInput
+            id={fid("seatCount")}
             type="number"
+            inputMode="numeric"
             value={String(form.seatCount)}
             onChange={(e) =>
               setForm((current) => ({
@@ -1076,10 +1543,12 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.luggageCapacity")} required>
+        </FormField>
+        <FormField id={fid("luggageCapacity")} label={t("supply.vehicleField.luggageCapacity")} required>
           <FieldInput
+            id={fid("luggageCapacity")}
             type="number"
+            inputMode="numeric"
             value={String(form.luggageCapacity)}
             onChange={(e) =>
               setForm((current) => ({
@@ -1088,10 +1557,13 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.businessArea")} required>
+        </FormField>
+        <FormField id={fid("businessArea")} label={t("supply.vehicleField.businessArea")} required>
           <FieldInput
+            id={fid("businessArea")}
             value={form.businessArea}
+            inputMode="text"
+            autoComplete="address-level2"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -1099,10 +1571,13 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.currentDriverSubmissionId")}>
+        </FormField>
+        <FormField id={fid("currentDriver")} label={t("supply.vehicleField.currentDriverSubmissionId")}>
           <FieldInput
+            id={fid("currentDriver")}
             value={form.currentDriverSubmissionId ?? ""}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -1110,10 +1585,12 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.doorCount")}>
+        </FormField>
+        <FormField id={fid("doorCount")} label={t("supply.vehicleField.doorCount")}>
           <FieldInput
+            id={fid("doorCount")}
             type="number"
+            inputMode="numeric"
             value={String(form.doorCount ?? "")}
             onChange={(e) =>
               setForm((current) => ({
@@ -1124,10 +1601,13 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
-        <CanvasField label={t("supply.vehicleField.color")}>
+        </FormField>
+        <FormField id={fid("color")} label={t("supply.vehicleField.color")}>
           <FieldInput
+            id={fid("color")}
             value={form.color ?? ""}
+            inputMode="text"
+            autoComplete="off"
             onChange={(e) =>
               setForm((current) => ({
                 ...current,
@@ -1135,9 +1615,22 @@ function VehicleDraftFields({
               }))
             }
           />
-        </CanvasField>
+        </FormField>
       </div>
-      <CanvasField label={t("supply.field.supportedProducts")} required>
+      {/* Checklist group with aria-labelledby (R23) */}
+      <div role="group" aria-labelledby={fid("products-label")} style={{ marginBottom: 14 }}>
+        <div
+          id={fid("products-label")}
+          style={{
+            fontSize: 11.5,
+            fontWeight: 600,
+            color: theme.text,
+            marginBottom: 5,
+          }}
+        >
+          {t("supply.field.supportedProducts")}
+          <span aria-hidden="true" style={{ color: theme.danger }}> *</span>
+        </div>
         <ProductChecklist
           selected={form.supportedServiceProductCodes}
           onChange={(value) =>
@@ -1147,7 +1640,8 @@ function VehicleDraftFields({
             }))
           }
         />
-      </CanvasField>
+      </div>
+      {/* Boolean checkboxes — <label> wraps <input>, so implicit association is correct (no for/id needed). */}
       <div style={{ display: "flex", gap: 24 }}>
         <label>
           <input
@@ -1180,6 +1674,7 @@ function VehicleDraftFields({
   );
 }
 
+
 export function SupplySubmissionDetailView({
   initialDetail,
   source,
@@ -1194,23 +1689,37 @@ export function SupplySubmissionDetailView({
   const [hydrated, setHydrated] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [restored, setRestored] = useState(false);
+
+  const initialDriverBaseline: DriverDraftInput | null = useMemo(
+    () =>
+      detail.driverDraft
+        ? {
+            ...detail.driverDraft,
+            preferredVehicleSubmissionId:
+              detail.driverDraft.preferredVehicleSubmissionId ?? null,
+          }
+        : null,
+    [detail.driverDraft],
+  );
+
+  const initialVehicleBaseline: VehicleDraftInput | null = useMemo(
+    () =>
+      detail.vehicleDraft
+        ? {
+            ...detail.vehicleDraft,
+            currentDriverSubmissionId:
+              detail.vehicleDraft.currentDriverSubmissionId ?? null,
+          }
+        : null,
+    [detail.vehicleDraft],
+  );
+
   const [driverForm, setDriverForm] = useState<DriverDraftInput | null>(
-    initialDetail.driverDraft
-      ? {
-          ...initialDetail.driverDraft,
-          preferredVehicleSubmissionId:
-            initialDetail.driverDraft.preferredVehicleSubmissionId ?? null,
-        }
-      : null,
+    initialDriverBaseline,
   );
   const [vehicleForm, setVehicleForm] = useState<VehicleDraftInput | null>(
-    initialDetail.vehicleDraft
-      ? {
-          ...initialDetail.vehicleDraft,
-          currentDriverSubmissionId:
-            initialDetail.vehicleDraft.currentDriverSubmissionId ?? null,
-        }
-      : null,
+    initialVehicleBaseline,
   );
   const [docType, setDocType] = useState<string>(
     initialDetail.driverDraft ? DRIVER_DOC_TYPES[0] : VEHICLE_DOC_TYPES[0],
@@ -1224,6 +1733,85 @@ export function SupplySubmissionDetailView({
     ? DRIVER_DOC_TYPES
     : VEHICLE_DOC_TYPES;
   const subject = useMemo(() => formatSupplySubject(detail), [detail]);
+
+  // Restore saved detail draft on mount if available (R25)
+  useEffect(() => {
+    if (!editable) return;
+    const saved = loadSubmissionDetailDraft(detail.submission.submissionId);
+    if (!saved) return;
+
+    let hasRestored = false;
+    if (saved.driverForm && initialDriverBaseline) {
+      if (isDriverFormDirty(saved.driverForm, initialDriverBaseline)) {
+        setDriverForm(saved.driverForm);
+        hasRestored = true;
+      }
+    }
+    if (saved.vehicleForm && initialVehicleBaseline) {
+      if (isVehicleFormDirty(saved.vehicleForm, initialVehicleBaseline)) {
+        setVehicleForm(saved.vehicleForm);
+        hasRestored = true;
+      }
+    }
+    if (hasRestored) {
+      setRestored(true);
+    }
+  }, [
+    detail.submission.submissionId,
+    editable,
+    initialDriverBaseline,
+    initialVehicleBaseline,
+  ]);
+
+  const detailDirty =
+    editable &&
+    (driverForm && initialDriverBaseline
+      ? isDriverFormDirty(driverForm, initialDriverBaseline)
+      : vehicleForm && initialVehicleBaseline
+        ? isVehicleFormDirty(vehicleForm, initialVehicleBaseline)
+        : false);
+
+  // Persist detail draft to storage on change; clear if clean
+  useEffect(() => {
+    if (!editable) return;
+    const submissionId = detail.submission.submissionId;
+    const isDriverDirty =
+      driverForm && initialDriverBaseline
+        ? isDriverFormDirty(driverForm, initialDriverBaseline)
+        : false;
+    const isVehicleDirty =
+      vehicleForm && initialVehicleBaseline
+        ? isVehicleFormDirty(vehicleForm, initialVehicleBaseline)
+        : false;
+
+    if (isDriverDirty || isVehicleDirty) {
+      saveSubmissionDetailDraft(submissionId, {
+        driverForm: isDriverDirty ? driverForm : null,
+        vehicleForm: isVehicleDirty ? vehicleForm : null,
+      });
+    } else {
+      clearSubmissionDetailDraft(submissionId);
+      setRestored(false);
+    }
+  }, [
+    detail.submission.submissionId,
+    editable,
+    driverForm,
+    vehicleForm,
+    initialDriverBaseline,
+    initialVehicleBaseline,
+  ]);
+
+  const { confirmLeave } = useDraftGuard(Boolean(detailDirty), router);
+
+  function handleDiscardDetailDraft() {
+    if (window.confirm(DRAFT_GUARD_STRINGS.confirmDiscard)) {
+      clearSubmissionDetailDraft(detail.submission.submissionId);
+      if (initialDriverBaseline) setDriverForm(initialDriverBaseline);
+      if (initialVehicleBaseline) setVehicleForm(initialVehicleBaseline);
+      setRestored(false);
+    }
+  }
 
   useEffect(() => {
     setHydrated(true);
@@ -1259,8 +1847,26 @@ export function SupplySubmissionDetailView({
       `fleet-partner/supply-submissions/${detail.submission.submissionId}`,
     );
     setDetail(next);
-    setDriverForm(next.driverDraft ? { ...next.driverDraft } : null);
-    setVehicleForm(next.vehicleDraft ? { ...next.vehicleDraft } : null);
+    setDriverForm(
+      next.driverDraft
+        ? {
+            ...next.driverDraft,
+            preferredVehicleSubmissionId:
+              next.driverDraft.preferredVehicleSubmissionId ?? null,
+          }
+        : null,
+    );
+    setVehicleForm(
+      next.vehicleDraft
+        ? {
+            ...next.vehicleDraft,
+            currentDriverSubmissionId:
+              next.vehicleDraft.currentDriverSubmissionId ?? null,
+          }
+        : null,
+    );
+    clearSubmissionDetailDraft(next.submission.submissionId);
+    setRestored(false);
     router.refresh();
   }
 
@@ -1300,6 +1906,8 @@ export function SupplySubmissionDetailView({
         },
       );
     }
+    clearSubmissionDetailDraft(detail.submission.submissionId);
+    setRestored(false);
     await refreshDetail();
   }
 
@@ -1313,6 +1921,8 @@ export function SupplySubmissionDetailView({
         }),
       },
     );
+    clearSubmissionDetailDraft(detail.submission.submissionId);
+    setRestored(false);
     await refreshDetail();
   }
 
@@ -1326,6 +1936,8 @@ export function SupplySubmissionDetailView({
         }),
       },
     );
+    clearSubmissionDetailDraft(detail.submission.submissionId);
+    setRestored(false);
     await refreshDetail();
   }
 
@@ -1395,7 +2007,7 @@ export function SupplySubmissionDetailView({
         title={`${subject.title} · ${t("supply.detail.titleSuffix")}`}
         subtitle={`${detail.submission.submissionType} · ${detail.submission.submissionId}`}
         actions={
-          <>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             <CanvasPill
               theme={theme}
               tone={statusTone(detail.submission.status)}
@@ -1403,10 +2015,36 @@ export function SupplySubmissionDetailView({
             >
               {formatStatus(detail.submission.status)}
             </CanvasPill>
-            <Link href="/supply/submissions" style={cardLinkStyle(theme)}>
+            {detailDirty && (
+              <button
+                type="button"
+                onClick={handleDiscardDetailDraft}
+                style={{
+                  background: "transparent",
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: 4,
+                  color: theme.danger,
+                  fontWeight: 600,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  padding: "4px 8px",
+                }}
+              >
+                {DRAFT_GUARD_STRINGS.discardDraft}
+              </button>
+            )}
+            <Link
+              href="/supply/submissions"
+              style={cardLinkStyle(theme)}
+              onClick={(e) => {
+                if (!confirmLeave()) {
+                  e.preventDefault();
+                }
+              }}
+            >
               {t("supply.action.backSubmissions")}
             </Link>
-          </>
+          </div>
         }
       />
       <div
@@ -1417,6 +2055,39 @@ export function SupplySubmissionDetailView({
           gap: 16,
         }}
       >
+        {restored && (
+          <div
+            role="status"
+            style={{
+              padding: "10px 14px",
+              borderRadius: 6,
+              backgroundColor: theme.surfaceLo,
+              border: `1px solid ${theme.accentBorder}`,
+              color: theme.text,
+              fontSize: 13,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>{DRAFT_GUARD_STRINGS.restoredNotice}</span>
+            <button
+              type="button"
+              onClick={handleDiscardDetailDraft}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: theme.danger,
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: 12,
+                padding: 0,
+              }}
+            >
+              {DRAFT_GUARD_STRINGS.discardDraft}
+            </button>
+          </div>
+        )}
         {source === "fallback" ? (
           <CanvasBanner
             theme={theme}
@@ -1628,8 +2299,9 @@ export function SupplySubmissionDetailView({
             </div>
           </CanvasCard>
           <CanvasCard theme={theme} title={t("supply.detail.uploadTitle")}>
-            <CanvasField label={t("supply.table.documentType")} required>
+            <FormField id="upload-doc-type" label={t("supply.table.documentType")} required>
               <FieldSelect
+                id="upload-doc-type"
                 value={docType}
                 onChange={(e) => setDocType(e.currentTarget.value)}
                 options={documentOptions.map((value) => ({
@@ -1637,27 +2309,30 @@ export function SupplySubmissionDetailView({
                   label: t(DOCUMENT_LABEL_KEYS[value] ?? value),
                 }))}
               />
-            </CanvasField>
-            <CanvasField label={t("supply.table.fileName")} required>
+            </FormField>
+            <FormField id="upload-file" label={t("supply.table.fileName")} required>
               <input
+                id="upload-file"
                 type="file"
                 onChange={(e) => setDocFile(e.currentTarget.files?.[0] ?? null)}
               />
-            </CanvasField>
-            <CanvasField label={t("supply.detail.effectiveFrom")}>
+            </FormField>
+            <FormField id="upload-effective-from" label={t("supply.detail.effectiveFrom")}>
               <FieldInput
+                id="upload-effective-from"
                 type="date"
                 value={docFrom}
                 onChange={(e) => setDocFrom(e.currentTarget.value)}
               />
-            </CanvasField>
-            <CanvasField label={t("supply.detail.effectiveUntil")}>
+            </FormField>
+            <FormField id="upload-effective-until" label={t("supply.detail.effectiveUntil")}>
               <FieldInput
+                id="upload-effective-until"
                 type="date"
                 value={docUntil}
                 onChange={(e) => setDocUntil(e.currentTarget.value)}
               />
-            </CanvasField>
+            </FormField>
             <ActionButton
               theme={theme}
               label={t("supply.action.uploadConfirm")}
@@ -1668,6 +2343,7 @@ export function SupplySubmissionDetailView({
               onClick={() => runAction("upload", uploadDocument)}
             />
           </CanvasCard>
+
         </div>
         <CanvasCard theme={theme} title={t("supply.detail.revisionHistory")}>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
