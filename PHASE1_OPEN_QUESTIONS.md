@@ -4,7 +4,32 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-ENTERPRISE-FORM-001`, `Q-SR-ENTERPRISE-DATA-001`, `Q-SR-PROOF-001`.
+### Q-SR-ENV-COPY-001 — runtime source and integration scope routing
+
+Supervisor/Chairman must authorize the runtime badge wiring scopes and sequence
+overlapping shell/deployment work for parent `SR-ENV-COPY-001` (Codex / Codex2).
+The existing task contract already requires authoritative runtime environment,
+no domain guessing, and no production/healthy claim for unknown data. Retain
+that acceptance. The parent can resume authorized catalog cleanup and scoped
+resolver work; full acceptance still requires actual render integration.
+Before wiring, record the existing deployment configuration producer, its
+server/client delivery boundary and allowed values; unresolved source selection
+returns to Supervisor/Chairman, not an invented environment variable.
+This is a follow-up on the existing parent, not a new implementation task or
+scope grant. See [decision, paths and resume gate](support/unblock/SR-ENV-COPY-001/SR-ENV-COPY-001-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-QA-WEBHOOK-001 — tenant repair scope and webhook deadline
+
+Existing tenant isolation rules already forbid the API key metadata exposure
+reported by `SR-QA-WEBHOOK-001`; no product waiver is implied. Supervisor/Claude
+must authorize and sequence the existing P0
+`SR-QA-WEBHOOK-001-FIX-TENANT-BINDING`, add it to the parent's dependencies,
+and route the still-unspecified default webhook transport deadline contract.
+Codex owns parent/repair execution; Gemini reviews them. Preserve all C111–C115
+acceptance and the parent's blocked state, including usage and external evidence
+gates. See the [contract basis, proposed scope and resume steps](support/unblock/SR-QA-WEBHOOK-001/SR-QA-WEBHOOK-001-UNBLOCK-PLANNING-DECISION.md).
+
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-ENTERPRISE-FORM-001`, `Q-SR-ENTERPRISE-DATA-001`, `Q-SR-PROOF-001`, `Q-SR-REPORT-001`.
 
 ### Q-SR-ENTERPRISE-FORM-001 — theme precedence and shared scope authorization
 
@@ -113,6 +138,31 @@ authorizations to Supervisor/Chairman; history recovery did not supply them.
 The [resume gate](support/unblock/SR-PROOF-001/SR-PROOF-001-UNBLOCK-PLANNING-DECISION.md)
 still applies to dependent implementation. This follow-up is tracked on the existing parent; any separate
 producer must first be registered by the supervisor in machine truth.
+
+### Q-SR-REPORT-001 — ordinary report shared-file scope pending
+
+Supervisor/Chairman must authorize the parent's shared format declaration in
+`packages/contracts/src/index.ts` and affected assertions in
+`tests/unit/reporting-filing.test.ts`, with overlapping writer dependencies,
+or register a coordinated producer. Parent owner Codex and reviewer Gemini retain
+full CSV/XLSX/PDF acceptance under PRD §9.5.6 and the filing-byte exclusion under
+§9.10.2. No product scope cut is needed. Keep SR-REPORT-001 blocked until scope
+and sequencing are recorded in machine truth; history recovery alone does not
+satisfy that gate. See the [evidence, routing decision and resume gate](support/unblock/SR-REPORT-001/SR-REPORT-001-UNBLOCK-PLANNING-DECISION.md).
+This is an explicit follow-up on the existing parent, not authorization to edit
+shared files or a claim that a new producer task already exists.
+
+### Q-SR-OPS-PROOF-001 — preparation handoff and live resource sequencing pending
+
+Supervisor/Chairman must record the preparation-versus-live acceptance boundary
+for SR-OPS-PROOF-001 (Codex / Codex2) and route isolated resource preparation
+through Gemini, owner of SR-LIVE-OPS-001. LIVE-OPS already depends on OPS-PROOF;
+do not add the reverse dependency or require completed live receipts to begin
+resource coordination. Preserve both acceptance sets until the supervisor records
+a reviewed allocation; no preparation-only scope cut is approved by this helper.
+The parent remains blocked pending that decision and retrievable authorized
+inputs. This is follow-up on the existing parent, not a new unregistered task.
+See the [decision route and resume gate](support/unblock/SR-OPS-PROOF-001/SR-OPS-PROOF-001-UNBLOCK-PLANNING-DECISION.md).
 
 ## Resolved Items
 
