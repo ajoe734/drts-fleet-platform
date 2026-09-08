@@ -7891,22 +7891,63 @@ export class OwnedMobilityService
     requestId?: string,
     options?: { targetAssignmentId?: string },
   ) {
-    const order = this.requireOrder(orderId);
+    const afterCommit: (() => void)[] = [];
+    const result = this.ownedMobilityRepository?.isEnabled()
+      ? await this.ownedMobilityRepository.withTransaction((tx) =>
+          this.applyDispatchTimeout(
+            orderId,
+            timeoutReasonCode,
+            requestId,
+            options,
+            afterCommit,
+            tx,
+          ),
+        )
+      : await this.applyDispatchTimeout(
+          orderId,
+          timeoutReasonCode,
+          requestId,
+          options,
+          afterCommit,
+        );
+    for (const publish of afterCommit) publish();
+    return result;
+  }
+
+  private async applyDispatchTimeout(
+    orderId: string,
+    timeoutReasonCode: "acceptance_timeout" | "matching_timeout",
+    requestId: string | undefined,
+    options: { targetAssignmentId?: string } | undefined,
+    afterCommit: (() => void)[],
+    tx?: OwnedMobilityQueryExecutor,
+  ) {
+    // Shared assignment -> task -> job -> order locks fence stale workers,
+    // including timers whose cache has never observed an assignment.
+    const current = tx
+      ? await this.ownedMobilityRepository!.loadOrderCancellationForUpdate(
+          tx,
+          orderId,
+        )
+      : null;
+    const order = current?.order ?? this.requireOrder(orderId);
     const now = new Date().toISOString();
 
-    const activeJob = this.dispatchJobs.find(
+    const activeJob = (current?.dispatchJobs ?? this.dispatchJobs).find(
       (job) =>
         job.orderId === orderId &&
         ["matching", "assigned"].includes(job.status),
     );
 
-    const latestAssignment = activeJob
-      ? this.dispatchAssignments.find(
-          (assignment) =>
-            assignment.dispatchJobId === activeJob.dispatchJobId &&
-            ["assigned", "accepted"].includes(assignment.status),
-        )
-      : null;
+    const latestAssignment = current
+      ? current.assignment
+      : activeJob
+        ? this.dispatchAssignments.find(
+            (assignment) =>
+              assignment.dispatchJobId === activeJob.dispatchJobId &&
+              ["assigned", "accepted"].includes(assignment.status),
+          )
+        : null;
 
     // SD §7.6: an acceptance timeout is armed for one specific offer and
     // must be able to name it -- without a target, there is nothing to fence
@@ -7968,6 +8009,24 @@ export class OwnedMobilityService
       };
     }
 
+    if (
+      current &&
+      (!activeJob ||
+        ![
+          "created",
+          "ready_for_dispatch",
+          "redispatch_required",
+          "assigned",
+        ].includes(order.status))
+    ) {
+      return {
+        orderId,
+        status: order.status,
+        timeoutReasonCode,
+        escalationAction: "superseded" as const,
+      };
+    }
+
     let closedPrevious: {
       assignment: DispatchAssignmentRecord;
       task: DriverTaskRecord | null;
@@ -7980,15 +8039,12 @@ export class OwnedMobilityService
       // A `null` result means the row already left "assigned" (accepted, or
       // already closed by something else) since the in-memory check above;
       // treat it exactly like the superseded case.
-      closedPrevious = await this.ownedMobilityRepository.withTransaction(
-        (tx) =>
-          this.closeSupersededDispatchAssignment(
-            tx,
-            latestAssignment.assignmentId,
-            now,
-            ["assigned"],
-            true,
-          ),
+      closedPrevious = await this.closeSupersededDispatchAssignment(
+        tx!,
+        latestAssignment.assignmentId,
+        now,
+        ["assigned"],
+        true,
       );
       if (!closedPrevious) {
         return {
@@ -8000,13 +8056,15 @@ export class OwnedMobilityService
       }
     }
 
-    const latestTask = latestAssignment
-      ? this.driverTasks.find(
-          (task) =>
-            task.assignmentId === latestAssignment.assignmentId &&
-            !["completed", "cancelled", "rejected"].includes(task.status),
-        )
-      : null;
+    const latestTask = current
+      ? current.task
+      : latestAssignment
+        ? this.driverTasks.find(
+            (task) =>
+              task.assignmentId === latestAssignment.assignmentId &&
+              !["completed", "cancelled", "rejected"].includes(task.status),
+          )
+        : null;
 
     if (latestAssignment && !this.ownedMobilityRepository?.isEnabled()) {
       const deadline = Date.parse(latestAssignment.acceptanceDeadline ?? "");
@@ -8061,59 +8119,88 @@ export class OwnedMobilityService
       reasonCode: timeoutReasonCode,
       createdAt: now,
     };
-    this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
 
-    const traceLog = this.appendTrace(orderId, "dispatch.timeout", {
+    const traceLog = this.buildTraceLog(orderId, "dispatch.timeout", {
       dispatchJobId: activeJob?.dispatchJobId ?? null,
       timeoutReasonCode,
       previousAssignmentId: latestAssignment?.assignmentId ?? null,
       attemptCount: order.dispatchAttemptCount,
     });
 
-    this.persistChanges(
-      {
-        orders: [order],
-        ...(activeJob ? { dispatchJobs: [activeJob] } : {}),
-        // Already durably persisted atomically by closeSupersededDispatchAssignment
-        // above when closedPrevious is set; re-including it here would just be a
-        // redundant (harmless, but pointless) re-upsert of identical values.
-        ...(latestAssignment && !closedPrevious
-          ? { dispatchAssignments: [latestAssignment] }
-          : {}),
-        ...(latestTask && !closedPrevious ? { driverTasks: [latestTask] } : {}),
-        dispatchAttempts: [dispatchAttempt],
-        dispatchTraceLogs: [traceLog],
-      },
-      "dispatch_timeout",
-    );
+    const changes = {
+      orders: [order],
+      ...(activeJob ? { dispatchJobs: [activeJob] } : {}),
+      // Already durably persisted atomically by closeSupersededDispatchAssignment
+      // above when closedPrevious is set; re-including it here would just be a
+      // redundant (harmless, but pointless) re-upsert of identical values.
+      ...(latestAssignment && !closedPrevious
+        ? { dispatchAssignments: [latestAssignment] }
+        : {}),
+      ...(latestTask && !closedPrevious ? { driverTasks: [latestTask] } : {}),
+      dispatchAttempts: [dispatchAttempt],
+      dispatchTraceLogs: [traceLog],
+    };
+    if (tx)
+      await this.ownedMobilityRepository!.persistOrderWorkflow(tx, changes);
+    else this.persistChanges(changes, "dispatch_timeout");
 
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "system",
-        tenantId: order.tenantId,
-        moduleName: "dispatch",
-        actionName: "dispatch_timeout",
-        resourceType: "order",
-        resourceId: orderId,
-        newValuesSummary: {
-          timeoutReasonCode,
-          status: order.status,
-          attemptCount: order.dispatchAttemptCount,
-        },
-      },
-      requestId,
-    );
-
-    if (latestTask) {
-      this.ownedMobilityTaskEventsService.publishTaskCancelled(
-        latestTask,
+    afterCommit.push(() => {
+      this.orders = [
         order,
+        ...this.orders.filter((item) => item.orderId !== orderId),
+      ];
+      if (activeJob)
+        this.dispatchJobs = [
+          activeJob,
+          ...this.dispatchJobs.filter(
+            (item) => item.dispatchJobId !== activeJob.dispatchJobId,
+          ),
+        ];
+      if (latestAssignment)
+        this.dispatchAssignments = [
+          latestAssignment,
+          ...this.dispatchAssignments.filter(
+            (item) => item.assignmentId !== latestAssignment.assignmentId,
+          ),
+        ];
+      if (latestTask)
+        this.driverTasks = [
+          latestTask,
+          ...this.driverTasks.filter(
+            (item) => item.taskId !== latestTask.taskId,
+          ),
+        ];
+      this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
+      this.dispatchTraceLogs = [traceLog, ...this.dispatchTraceLogs];
+
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "system",
+          tenantId: order.tenantId,
+          moduleName: "dispatch",
+          actionName: "dispatch_timeout",
+          resourceType: "order",
+          resourceId: orderId,
+          newValuesSummary: {
+            timeoutReasonCode,
+            status: order.status,
+            attemptCount: order.dispatchAttemptCount,
+          },
+        },
         requestId,
       );
-    }
 
-    this.opsDispatchEventsService?.publishOrderUpdated(order, requestId);
+      if (latestTask) {
+        this.ownedMobilityTaskEventsService.publishTaskCancelled(
+          latestTask,
+          order,
+          requestId,
+        );
+      }
+
+      this.opsDispatchEventsService?.publishOrderUpdated(order, requestId);
+    });
 
     return {
       orderId,

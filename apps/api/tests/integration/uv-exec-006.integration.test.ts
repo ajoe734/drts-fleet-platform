@@ -1875,6 +1875,10 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     const dispatchResult = await service.dispatchOrder(order.orderId, {
       mode: "auto",
     });
+    const timerDatabase = new DatabaseService();
+    databases.push(timerDatabase);
+    const { service: timerService } = createTestService(timerDatabase, []);
+    await timerService.onModuleInit();
     const assignment = await service.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId,
@@ -1885,7 +1889,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     // with no target (matching how `acceptance_timeout` was already
     // vulnerable before requiring one) -- it must not reach into the job
     // and close the offer that was made after it was armed.
-    const timeoutResult = await service.handleDispatchTimeout(
+    const timeoutResult = await timerService.handleDispatchTimeout(
       order.orderId,
       "matching_timeout",
     );
