@@ -1,5 +1,16 @@
 # SR-BANK-002 — 銀行角色金額／PII／匯出一致隔離
 
+## 2026-09-08T17:46Z dispatch 重驗（最新）
+
+- Owner Codex2；本次 reviewer 為 Codex。任務尚未完成，沒有 candidate／handoff。
+- 本次 fetch 後 base `origin/dev`：`2a093872d05a7d0344adf9bb58f9e5c4c99861d1`。既有分支 `e150fcfe1` 含同一組修復的重複合併歷史；rebase 保留較新的格式化版本，跳過重複舊 patch，移除重複的 `.test.ts`（完整案例仍在 `.spec.mts`，root wrapper 仍會執行）。
+- 前置 task slice：SR-BANK-001、SR-IAM-001 均為 done，記錄 merge 分別為 `6d4c47feb1c6`、`548608e45841`；但目前 base 的下列缺陷仍可重現。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`：exit 1；內層 54 項中 49 passed、5 failed，外層 wrapper 正確回報失敗。完整失敗範圍仍為本文「五個未通過案例」：結算清單／明細僅要求 tenant:read；ACME OPS／Contoso finance 上游 403 回傳 seed；Contoso CSV 上游 503 帶出 `STM-ACME-202606` 等 rows。
+- `pnpm --filter @drts/bank-console-web typecheck`：exit 0（next typegen、tsc --noEmit）。`git diff --check` 及 `git diff --cached --check`：exit 0。
+- 本次沒有產品 UI 改動，未執行 live、真 IAP、真實金融資料或部署驗收；沿用本文列出的 synthetic 資源 ID 和驗證界線。
+- 阻礙仍須 supervisor 處理：擴 scope 至 `apps/bank-console-web/lib/bank-dev-read-models.ts` 並加入重疊 writer 相依；由 canonical IAM owner 整合結算 API 財務讀政策與 bank role mapping。現有 write_scopes 未授權這兩處，不擅改，也不以擴大全員 scope 解決。
+- 本次提交為 WIP evidence checkpoint；實際 checkpoint SHA 與普通 push 結果由 machine progress/blocker 記錄，不能視為 candidate、CI 或 merge 證據。
+
 ## 狀態與版本
 
 2026-09-06，Owner Codex2，Reviewer Claude2。**部分修復已推送；任務 blocked，未 handoff，不能結案。**
