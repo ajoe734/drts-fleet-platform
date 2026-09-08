@@ -114,6 +114,10 @@ export class DispatchResourceReservationConflictError extends Error {
       `${resourceType} ${resourceId} is already held or occupied by another dispatch assignment.`,
     );
     this.name = "DispatchResourceReservationConflictError";
+    Object.setPrototypeOf(
+      this,
+      DispatchResourceReservationConflictError.prototype,
+    );
   }
 }
 
@@ -588,7 +592,8 @@ export class OwnedMobilityRepository {
           updatedAt: new Date(row.updated_at).toISOString(),
         });
       } catch (error) {
-        if ((error as { code?: string })?.code === "23505") {
+        const pgCode = (error as { code?: string })?.code;
+        if (pgCode === "23505" || pgCode === "55P03" || pgCode === "40P01") {
           throw new DispatchResourceReservationConflictError(
             resource.resourceType,
             resource.resourceId,
