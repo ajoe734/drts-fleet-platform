@@ -97,3 +97,38 @@ export function isEditableStatus(status: SupplySubmissionStatus) {
     status === "draft" || status === "needs_revision" || status === "withdrawn"
   );
 }
+
+/**
+ * Unsaved-draft guard copy used by the new-driver / new-vehicle forms (R25).
+ * Kept here so it is discoverable by tests and translators without touching
+ * the shared translations.ts (outside this task's write scope).
+ */
+export const DRAFT_GUARD_STRINGS = {
+  /** Shown in the browser's native beforeunload dialog (plain text only). */
+  beforeUnload:
+    "您有尚未儲存的草稿內容。確定要離開嗎？離開後資料將會遺失。",
+  /** Shown in the in-app navigation confirmation dialog. */
+  confirmLeaveTitle: "尚未儲存的草稿",
+  confirmLeaveBody:
+    "表單中有尚未儲存的內容，確定離開嗎？離開後資料將會遺失。",
+  confirmLeaveCancel: "繼續填寫",
+  confirmLeaveOk: "確定離開",
+} as const;
+
+/**
+ * Returns a stable `id` string for a named form field within a form context,
+ * e.g. `fieldId("new-driver", "name")` → `"form-new-driver-name"`.
+ * Used to wire `<label htmlFor>` ↔ `<input id>` for assistive technology (R23).
+ */
+export function fieldId(form: string, field: string): string {
+  return `form-${form}-${field}`;
+}
+
+/**
+ * True when any client-side draft value differs from its initial form state.
+ * This deliberately includes optional fields and checkbox selections so that
+ * no user-entered supply data can be lost without a leave warning (R25).
+ */
+export function hasUnsavedDraftChanges<T>(current: T, initial: T): boolean {
+  return JSON.stringify(current) !== JSON.stringify(initial);
+}
