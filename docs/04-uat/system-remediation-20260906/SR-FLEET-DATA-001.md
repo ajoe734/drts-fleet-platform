@@ -4,11 +4,11 @@
 
 - **Task ID**: `SR-FLEET-DATA-001`
 - **Task Title**: 車行資料來源、篩選與無效按鈕 (Fleet Partner Portal Data Sources, Filtering, and Action Buttons)
-- **Owner**: `Gemini`
-- **Reviewer**: `Claude2`
-- **Base SHA**: `7dccddaba7d51dca8d56da01d5320d9f22f8b68f`
+- **Owner (recovery)**: `Codex`
+- **Reviewer (recovery)**: `Codex2`
+- **Base SHA (2026-09-08 rebase)**: `70355aba97c23dd1cd592b71f1d3dfe6315d91ff` (`origin/dev`)
 - **Audit Observation SHA**: `08b7a32f6fdaa00d8d1894f91569a7d72860cec2`
-- **Branch**: `gemini/sr-fleet-data-001`
+- **Branch**: `codex/sr-fleet-data-001` (rebuilt from `origin/gemini/sr-fleet-data-001` commit `fd9ec34ee9b075dd8e05451f1f22f7f34abe1d68`)
 - **Planning Ref**: `docs/04-uat/system-remediation-20260906/source/capabilities.json` (C013, C063, C064, C069; R10, R11, R24)
 
 ---
@@ -131,12 +131,12 @@
 執行結果：
 
 ```
- RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-fleet-data-001
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-fleet-data-001
 
  Test Files  1 passed (1)
       Tests  14 passed (14)
-   Start at  15:13:49
-   Duration  633ms
+   Start at  11:06:48
+   Duration  553ms
 Exit Code:  0
 ```
 
@@ -145,7 +145,7 @@ Exit Code:  0
 執行 `pnpm --filter @drts/fleet-partner-portal-web typecheck`：
 
 ```
-> @drts/fleet-partner-portal-web@0.1.0 typecheck /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-fleet-data-001/apps/fleet-partner-portal-web
+> @drts/fleet-partner-portal-web@0.1.0 typecheck /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-fleet-data-001/apps/fleet-partner-portal-web
 > next typegen && tsc --noEmit
 
 Generating route types...
@@ -170,5 +170,19 @@ Exit Code:  0
 - `apps/fleet-partner-portal-web/app/trips/page.tsx` (頁籤/關鍵字篩選、CSV 匯出按鈕串接、錯誤處理)
 - `apps/fleet-partner-portal-web/app/drivers/page.tsx` (頁籤/關鍵字篩選、招募按鈕導向、錯誤處理)
 - `apps/fleet-partner-portal-web/app/vehicles/page.tsx` (頁籤/關鍵字篩選、新增車輛按鈕導向、錯誤處理)
-- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` (12 個完整驗證測試)
+- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` (14 個完整驗證測試)
 - `docs/04-uat/system-remediation-20260906/SR-FLEET-DATA-001.md` (驗證報告)
+
+---
+
+## 7. 2026-09-08 dispatch recovery evidence
+
+- **Historical reconstruction input**: `origin/gemini/sr-fleet-data-001` at `fd9ec34ee9b075dd8e05451f1f22f7f34abe1d68`; it is a historical implementation input, not current-trunk truth.
+- **Fresh base**: `origin/dev` at `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`.
+- **Rebased implementation commits**: `bfb0a30f934fe6c4b4b974363e86b990b1dbbe70` and `3ee84f73a9634bca2398ace8665d09b6d71852f4`. The final candidate SHA is locked by the supervisor handoff after this evidence refresh; it must be the same SHA reviewed and sent to CI.
+- **Commands executed locally (all exit code 0)**:
+  - `git diff --check origin/dev...HEAD`
+  - `pnpm --filter @drts/fleet-partner-portal-web typecheck`
+  - `pnpm exec vitest run tests/unit/system-remediation/sr-fleet-data-001/` — 1 test file, 14 tests passed.
+- **Test resource IDs**: fleet partner `fp-test-001`; trip records `ord-001`, `ord-002`, `ord-003`.
+- **Not performed**: no product dev server, browser/E2E, Cloud Run, live API, or physical-device validation was run in this VM-restricted dispatch. Training and cases remain explicitly unintegrated (`connected: false`) rather than being represented by fixture rows.
