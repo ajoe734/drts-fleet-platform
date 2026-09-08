@@ -1,4 +1,11 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { REALM_COLORS } from "../../../../packages/ui-tokens/src/realms";
+import {
+  buildTenantEnterpriseTheme,
+  tenantEnterpriseTheme,
+} from "../../../../apps/enterprise-dispatch-web/components/booking-form/theme";
 import {
   buildEnterpriseBookingCommand,
   buildEnterpriseBookingUpdateCommand,
@@ -421,6 +428,39 @@ describe("SR-ENTERPRISE-FORM-001 — 企業預約乘客、日期與手機表單"
           reservationTime: "10:30",
         }),
       ).toBe("2026/09/08 10:30");
+    });
+  });
+
+  describe("UI Design Contract & Realm Token Compliance: Tenant Realm Tokens 遵循", () => {
+    it("4.1 tenantEnterpriseTheme 嚴格引用 canonical REALM_COLORS.tenant（teal 色系）", () => {
+      expect(tenantEnterpriseTheme.primary).toBe(REALM_COLORS.tenant.light.fg);
+      expect(tenantEnterpriseTheme.primaryBg).toBe(REALM_COLORS.tenant.light.bg);
+      expect(tenantEnterpriseTheme.primaryBd).toBe(REALM_COLORS.tenant.light.border);
+      expect(tenantEnterpriseTheme.primary).toBe("#0F766E");
+      expect(tenantEnterpriseTheme.primaryBg).toBe("#F0FDFA");
+      expect(tenantEnterpriseTheme.primaryBd).toBe("#99F6E4");
+    });
+
+    it("4.2 buildTenantEnterpriseTheme 支援暗色模式並引用 REALM_COLORS.tenant.dark", () => {
+      const darkTheme = buildTenantEnterpriseTheme({ dark: true });
+      expect(darkTheme.primary).toBe(REALM_COLORS.tenant.dark.fg);
+      expect(darkTheme.primaryBg).toBe(REALM_COLORS.tenant.dark.bg);
+      expect(darkTheme.primaryBd).toBe(REALM_COLORS.tenant.dark.border);
+      expect(darkTheme.primary).toBe("#5EEAD4");
+      expect(darkTheme.primaryBg).toBe("#0F2A28");
+      expect(darkTheme.primaryBd).toBe("#134E48");
+    });
+
+    it("4.3 globals.css 不包含硬編碼之 raw hex realm 變數（--realm-tenant-*）", () => {
+      const globalsCssPath = path.resolve(
+        __dirname,
+        "../../../../apps/enterprise-dispatch-web/app/globals.css",
+      );
+      const content = fs.readFileSync(globalsCssPath, "utf-8");
+      expect(content).not.toContain("--realm-tenant-fg");
+      expect(content).not.toContain("--realm-tenant-bg");
+      expect(content).not.toContain("--realm-tenant-border");
+      expect(content).not.toContain("#0f766e");
     });
   });
 });

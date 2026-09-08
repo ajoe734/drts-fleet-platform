@@ -24,7 +24,7 @@ import {
   type EnterprisePassengerMode,
   type EnterpriseVehiclePreference,
 } from "@/lib/enterprise-booking-draft";
-import { enterpriseTheme as t } from "@/lib/enterprise-theme";
+import { tenantEnterpriseTheme as t } from "./theme";
 import { useTranslation } from "@/lib/i18n";
 
 type Option = { value: string; label: string; icon?: string };
