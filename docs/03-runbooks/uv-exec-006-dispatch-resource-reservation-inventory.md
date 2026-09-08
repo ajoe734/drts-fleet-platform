@@ -277,3 +277,32 @@ five related API unit suites passed **179/179**. API typecheck passed after
 rebuilding contracts, and `git diff --check` passed. Assignment writer inventory
 was reconfirmed (the service table-name match is a comment). Review, CI,
 merge and external acceptance remain pending.
+
+### Unreconciled redispatch task guard (2026-09-08 16:46 UTC)
+
+Supervisor fallback assigned Codex as owner and Codex2 as reviewer. The P1
+finding against candidate `86364a15a7a03355dc6997abca704cabad434c18` is fixed:
+`closeSupersededDispatchAssignment` now requires an authoritative locked task,
+matching task/assignment/order/job/driver/vehicle links, a legal cancellation
+transition from `DRIVER_TASK_TRANSITIONS`, and compatible assignment/task
+statuses before any persistence or reservation release. Missing, terminal,
+unknown, or inconsistent task state returns a conflict and retains capacity
+for reconciliation, including the ordinary redispatch path without a timeout.
+
+Added 26 PostgreSQL regressions through `redispatchOrder`, covering both held
+and occupied reservations across missing task IDs/rows, terminal and unknown
+states, incompatible statuses, and each inconsistent task link. Every case
+checks both reservation rows remain byte-for-byte equivalent (including
+versions) and the assignment remains active. Existing valid reassign and
+timeout tests continue to pass. Isolated PostgreSQL suite: **55/55 passed**;
+API typecheck passed after rebuilding contracts.
+
+The required rebase encountered duplicate-history conflicts; both attempts
+were aborted without retaining partial changes. A clean merge of origin/dev
+at `890548b4f` preserved published ancestry and integrated its support document.
+Anchor `fe47bf59d` was pushed normally. Same-SHA review, CI, merge and external
+acceptance remain pending.
+
+Related unit validation: owned-mobility service/repository/controller and
+multi-taxi service/controller suites passed **164/164**. `git diff --check`
+passed. These are owner-run checks, not independent reviewer evidence.
