@@ -2,8 +2,8 @@
 
 Owner Codex2 / Reviewer Codex。2026-09-08。
 
-Base / tested product SHA：`fa0fd8257950764526a522d091be9d97effa82b9`，本次 fetch 後 rebase 至 origin/dev。
-HTTP test anchor：`b6f1f523ef510bfb9ee16d378b6b6eac25b0ceb4`，已普通 push 至 `origin/codex2/sr-qa-tenant-001`。
+Base / tested product SHA：`a44ea852eabe0c88e54d8124802eccf86ebc1dc6`，本次 fetch 後 rebase 至 origin/dev。
+Tested anchor：`0600ad941919d8584c88c8b2aa863cf5b3586d31`，已普通 push 至 `origin/codex2/sr-qa-tenant-001`。
 Candidate SHA：尚未 handoff；anchor 不是審查 candidate。完成後才由 machine truth 鎖定 candidate。
 
 ## 來源與界線
@@ -21,14 +21,41 @@ Candidate SHA：尚未 handoff；anchor 不是審查 candidate。完成後才由
 | 乘客              | 新建、GET 回讀、停用回讀                    | 空白姓名、外租戶修改及清單隔離、拒絕後原值不變                   | 已寫 HTTP spec；缺環境未執行請求                                         |
 | 地址              | 新建並引用乘客、GET 關聯回讀、停用回讀      | 外租戶 address ID 修改、外租戶 passenger ID 引用、拒絕後原值不變 | 已寫 HTTP spec；缺環境未執行請求                                         |
 | users / invites   | 建立使用者、邀請啟用後身份及角色回讀        | 過期、撤銷、重用與 delivery unavailable                          | 既有 service 回歸已跑；HTTP／DB／真收件未驗                              |
-| cost centres      | 新增、更新、訂單引用及停用                  | 外租戶引用、停用後使用                                           | 既有 foundation/governance 回歸已跑；HTTP／DB spec 待補                  |
+| cost centres      | 新增、更新、訂單引用及停用                  | 外租戶引用、停用後使用                                           | 已補 HTTP 新增／更新／停用回讀、跨租戶讀取／停用拒絕、空白名稱拒絕及 activeOnly 排除；訂單／owner 關聯與 DB 待補                  |
 | quota             | 保留、取消返還、月結與使用量回讀            | 額度不足、跨月／時區、並發超額                                   | 既有 governance 回歸非完整配額驗收；HTTP／Postgres 並發待補              |
 | rules / approvals | 規則評估、核准／拒絕後訂單狀態與 audit 回讀 | 非核准者、無權限、重複決策                                       | 既有 governance/mail service 回歸已跑；HTTP／DB spec 待補                |
 | SLA               | 修改設定、違約摘要與手動升級回讀            | 未授權修改、無效設定                                             | 既有 governance service 回歸非完整 SLA 驗收；HTTP／DB spec 待補          |
 | feature flags     | 指定租戶啟停及實際能力回讀                  | 其他租戶不受影響、無權限                                         | 尚未實作本 task 的驗收                                                   |
 | tenant lifecycle  | 合法新增／停用與治理記錄回讀                | 被停用租戶寫入、未授權管理                                       | 既有 governance rollback_hold 回歸非完整生命週期驗收；HTTP／DB spec 待補 |
 
-## 實際指令與結果
+## 18:06 UTC dispatch 實際結果
+
+在上述 tested anchor 執行：
+
+```sh
+pnpm exec vitest run tests/unit/tenant-partner-foundation.test.ts tests/integ/tenant-governance-negative.test.ts tests/unit/system-remediation/sr-mail-001 tests/unit/system-remediation/sr-mail-002
+# exit 0；7 files / 74 passed；10.38s
+pnpm --filter @drts/api typecheck
+# exit 0
+pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001 --max-warnings=0
+# exit 0
+git diff --check
+# exit 0
+BASE_SHA=a44ea852eabe0c88e54d8124802eccf86ebc1dc6 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-tenant-001
+# exit 1；4 shared harness passed / 2 tenant HTTP failed；6.1s
+# 兩例均 Missing required DRTS_UAT_ENV; HTTP acceptance did not run
+```
+
+兩份 `tenant-evidence.json` 回讀均為上述 base/head SHA、`status=failed`、`exitCode=1`、HTTP calls 0、`trackedResources=[]`：
+
+- `test-results/sr-qa-tenant-001-cost-cent-17a69-isable-and-tenant-isolation/tenant-evidence.json`
+- `test-results/sr-qa-tenant-001-passenger-49847-adback-and-tenant-isolation/tenant-evidence.json`
+
+新增 `cost-center.spec.ts` 沿用權威 controller / contracts；代碼依 tenant 分區，跨租戶驗證採 GET 與 disable 拒絕，不能把另一租戶使用相同 code 的合法 upsert 誤當越權。測試成功會停用本次成本中心並回讀停用原因與 activeOnly 排除；失敗時依 evidence ID 清理。未驗證成本中心與訂單、owner、quota 關聯及持久化耐久性。
+
+rebase 後首次普通 push exit 1（non-fast-forward）。以 merge 接回 `origin/codex2/sr-qa-tenant-001` 已發布 anchors，`git diff HEAD^ HEAD --stat` 為空，無產品檔案回退；新增測試 anchor 後普通 push exit 0。未 force push。
+
+## 前次實際指令與結果（歷史 base fa0fd825）
 
 以下均在本 task isolated worktree 執行；無 skip 代替成功。
 
