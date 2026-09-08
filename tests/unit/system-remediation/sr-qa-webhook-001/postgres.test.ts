@@ -1,4 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, expect, it } from "vitest";
@@ -7,6 +9,32 @@ import { AuditNotificationService } from "../../../../apps/api/src/modules/audit
 import { TenantPartnerRepository } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { WebhookDispatchService } from "../../../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
+
+const evidence: { label: string; resource: unknown }[] = [];
+function recordEvidence(label: string, resourceJson: string) {
+  evidence.push({ label, resource: JSON.parse(resourceJson) });
+  if (process.env.DRTS_WEBHOOK_DB_EVIDENCE) {
+    writeFileSync(
+      process.env.DRTS_WEBHOOK_DB_EVIDENCE,
+      JSON.stringify(
+        {
+          baseSha: execFileSync("git", ["rev-parse", "origin/dev"], {
+            encoding: "utf8",
+          }).trim(),
+          executionSha: execFileSync("git", ["rev-parse", "HEAD"], {
+            encoding: "utf8",
+          }).trim(),
+          recordedAt: new Date().toISOString(),
+          scope:
+            "Local PostgreSQL and real HTTP; service instance reinitialization, not OS process restart or deployed authentication",
+          evidence,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+  }
+}
 
 const databases: DatabaseService[] = [];
 const services: TenantPartnerService[] = [];
@@ -109,7 +137,7 @@ it("C111: persisted key rotation and revocation survive new service initializati
       keyName: "forbidden",
     }),
   ).rejects.toThrow();
-  console.log(
+  recordEvidence(
     "SR-QA-WEBHOOK-001 DB keys",
     JSON.stringify({
       tenantId,
@@ -207,7 +235,7 @@ it("C112: PostgreSQL queued delivery resumes automatically after service restart
   );
   expect(duplicate.deliveryId).toBe(queued.deliveryId);
   expect(requests).toHaveLength(3);
-  console.log(
+  recordEvidence(
     "SR-QA-WEBHOOK-001 DB delivery",
     JSON.stringify({
       tenantId,
