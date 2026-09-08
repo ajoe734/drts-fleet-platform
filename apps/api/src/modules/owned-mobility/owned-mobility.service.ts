@@ -4292,6 +4292,10 @@ export class OwnedMobilityService
     tx: OwnedMobilityQueryExecutor,
     assignmentId: string,
     now: string,
+    allowedStatuses: readonly DispatchAssignmentRecord["status"][] = [
+      "assigned",
+      "accepted",
+    ],
   ): Promise<{
     assignment: DispatchAssignmentRecord;
     task: DriverTaskRecord | null;
@@ -4301,7 +4305,7 @@ export class OwnedMobilityService
         tx,
         assignmentId,
       );
-    if (!locked || !["assigned", "accepted"].includes(locked.status)) {
+    if (!locked || !allowedStatuses.includes(locked.status)) {
       return null;
     }
     const closedAssignment: DispatchAssignmentRecord = {
@@ -7867,6 +7871,9 @@ export class OwnedMobilityService
       // path, immediately before acting -- the in-memory check above can be
       // stale (e.g. this process's cache lagging another pod's accept), and
       // this is the authoritative fence against a timeout racing an accept.
+      // We pass ["assigned"] so that if the offer was accepted in PostgreSQL
+      // before this timeout acquired the lock, it is NOT closed and its
+      // reservation is NOT released.
       // A `null` result means the row already left "assigned" (accepted, or
       // already closed by something else) since the in-memory check above;
       // treat it exactly like the superseded case.
@@ -7876,6 +7883,7 @@ export class OwnedMobilityService
             tx,
             latestAssignment.assignmentId,
             now,
+            ["assigned"],
           ),
       );
       if (!closedPrevious) {

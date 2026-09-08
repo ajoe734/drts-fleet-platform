@@ -1102,13 +1102,14 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     expect(loserRows.rows).toHaveLength(0);
   });
 
-  it("an accepted offer is not undone by a late acceptance_timeout naming it (accept/timeout share the row lock)", async () => {
+  it("an accepted offer is not undone by a late acceptance_timeout naming it (two-instance stale-cache/accept-timeout race shares the row lock)", async () => {
     expect(DATABASE_URL).toBeTruthy();
-    const database = new DatabaseService();
-    databases.push(database);
+    const databaseA = new DatabaseService();
+    const databaseB = new DatabaseService();
+    databases.push(databaseA, databaseB);
     const driverId = `driver-uvexec006-acc-${randomUUID()}`;
     const vehicleId = `vehicle-uvexec006-acc-${randomUUID()}`;
-    const { service } = createTestService(database, [
+    const candidates = [
       {
         driverId,
         vehicleId,
@@ -1116,40 +1117,61 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
         operatingArea: "taipei",
         serviceBuckets: ["standard_taxi"],
       },
-    ]);
+    ];
+    const { service: serviceA } = createTestService(databaseA, candidates);
+    const { service: serviceB } = createTestService(databaseB, candidates);
 
-    const order = service.createPassengerOrder({
+    const order = serviceA.createPassengerOrder({
       pickup: { address: "Taipei Main Station" },
       dropoff: { address: "Taipei 101" },
       passenger: { name: "UV-EXEC-006 Rider", phone: "0911000666" },
     });
     trackOrder(order.orderId);
 
-    const dispatchResult = await service.dispatchOrder(order.orderId, {
+    const dispatchResult = await serviceA.dispatchOrder(order.orderId, {
       mode: "auto",
     });
-    const assignment = await service.assignDispatch({
+    const assignment = await serviceA.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId,
       driverId,
     });
 
-    await service.acceptDriverTask(assignment.taskId, {
+    // Pod B initializes its in-memory view from the database, where the
+    // assignment is stored as 'assigned'.
+    await serviceB.onModuleInit();
+
+    // Pod B processes the driver's accept command and commits it to Postgres.
+    // In Postgres, the assignment is now 'accepted' and its reservation is 'occupied'.
+    await serviceB.acceptDriverTask(assignment.taskId, {
       acceptedAt: new Date().toISOString(),
     });
-    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
+    expect(await readAssignmentStatus(databaseA, assignment.assignmentId)).toBe(
       "accepted",
     );
-    expect(await readActiveReservations(database, "driver", driverId)).toEqual([
+    expect(await readActiveReservations(databaseA, "driver", driverId)).toEqual([
+      expect.objectContaining({
+        assignment_id: assignment.assignmentId,
+        status: "occupied",
+      }),
+    ]);
+    expect(
+      await readActiveReservations(databaseA, "vehicle", vehicleId),
+    ).toEqual([
       expect.objectContaining({
         assignment_id: assignment.assignmentId,
         status: "occupied",
       }),
     ]);
 
-    // A stale acceptance-timeout timer, armed before the accept landed,
-    // fires late and still names the now-accepted assignment.
-    const timeoutResult = await service.handleDispatchTimeout(
+    // Pod A's in-memory cache still has latestAssignment.status === "assigned"
+    // (stale cache lagging Pod B's accept). When Pod A's acceptance timer
+    // fires naming this assignment, Pod A passes its in-memory "assigned"
+    // guard and enters the row-lock transaction in PostgreSQL.
+    // Under the row lock, the timeout-specific predicate must see that the
+    // authoritative DB row is "accepted", refuse to close it or release
+    // the reservation, and report the timer as superseded.
+    const timeoutResult = await serviceA.handleDispatchTimeout(
       order.orderId,
       "acceptance_timeout",
       undefined,
@@ -1157,24 +1179,117 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     );
     expect(timeoutResult.escalationAction).toBe("superseded");
 
-    // The accepted offer and its occupied reservation must be untouched.
-    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
+    // The accepted offer and its occupied reservation must be untouched in PostgreSQL.
+    expect(await readAssignmentStatus(databaseA, assignment.assignmentId)).toBe(
       "accepted",
     );
-    expect(await readActiveReservations(database, "driver", driverId)).toEqual([
+    expect(await readActiveReservations(databaseA, "driver", driverId)).toEqual([
       expect.objectContaining({
         assignment_id: assignment.assignmentId,
         status: "occupied",
       }),
     ]);
     expect(
-      await readActiveReservations(database, "vehicle", vehicleId),
+      await readActiveReservations(databaseA, "vehicle", vehicleId),
     ).toEqual([
       expect.objectContaining({
         assignment_id: assignment.assignmentId,
         status: "occupied",
       }),
     ]);
+
+    // Pod A's local order status must not be erroneously marked as dispatch_timeout.
+    const orderOnA = serviceA.getOrder(order.orderId);
+    expect(orderOnA?.status).not.toBe("dispatch_timeout");
+  });
+
+  it("two-instance PostgreSQL accept/timeout race: concurrent accept and acceptance_timeout resolve safely without stranding or incorrectly releasing", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+    const databaseA = new DatabaseService();
+    const databaseB = new DatabaseService();
+    databases.push(databaseA, databaseB);
+    const driverId = `driver-uvexec006-race-acc-${randomUUID()}`;
+    const vehicleId = `vehicle-uvexec006-race-acc-${randomUUID()}`;
+    const candidates = [
+      {
+        driverId,
+        vehicleId,
+        etaMinutes: 5,
+        operatingArea: "taipei",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ];
+    const { service: serviceA } = createTestService(databaseA, candidates);
+    const { service: serviceB } = createTestService(databaseB, candidates);
+
+    const order = serviceA.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "UV-EXEC-006 Rider", phone: "0911000667" },
+    });
+    trackOrder(order.orderId);
+
+    const dispatchResult = await serviceA.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const assignment = await serviceA.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId,
+      driverId,
+    });
+
+    await serviceB.onModuleInit();
+
+    // Concurrently race acceptDriverTask on Pod B and handleDispatchTimeout on Pod A
+    const [acceptOutcome, timeoutOutcome] = await Promise.allSettled([
+      serviceB.acceptDriverTask(assignment.taskId, {
+        acceptedAt: new Date().toISOString(),
+      }),
+      serviceA.handleDispatchTimeout(
+        order.orderId,
+        "acceptance_timeout",
+        undefined,
+        { targetAssignmentId: assignment.assignmentId },
+      ),
+    ]);
+
+    const finalAssignmentStatus = await readAssignmentStatus(
+      databaseA,
+      assignment.assignmentId,
+    );
+    if (acceptOutcome.status === "fulfilled") {
+      expect(finalAssignmentStatus).toBe("accepted");
+      if (timeoutOutcome.status === "fulfilled") {
+        expect(timeoutOutcome.value.escalationAction).toBe("superseded");
+      }
+      expect(
+        await readActiveReservations(databaseA, "driver", driverId),
+      ).toEqual([
+        expect.objectContaining({
+          assignment_id: assignment.assignmentId,
+          status: "occupied",
+        }),
+      ]);
+      expect(
+        await readActiveReservations(databaseA, "vehicle", vehicleId),
+      ).toEqual([
+        expect.objectContaining({
+          assignment_id: assignment.assignmentId,
+          status: "occupied",
+        }),
+      ]);
+    } else {
+      expect(finalAssignmentStatus).toBe("cancelled");
+      expect(getErrorCode(acceptOutcome.reason)).toBe(
+        "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE",
+      );
+      expect(
+        await readActiveReservations(databaseA, "driver", driverId),
+      ).toHaveLength(0);
+      expect(
+        await readActiveReservations(databaseA, "vehicle", vehicleId),
+      ).toHaveLength(0);
+    }
   });
 
   it("rejects an acceptance_timeout call that omits its target assignment", async () => {
