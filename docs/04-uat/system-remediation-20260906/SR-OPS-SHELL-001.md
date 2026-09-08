@@ -1,5 +1,21 @@
 # SR-OPS-SHELL-001 — 本次恢復與阻塞證據
 
+## 2026-09-08 16:03 UTC 再派工重驗
+
+- Fresh `origin/dev` base：`3fb9b06461dc2bf92043144974eedbbc9f69d0f3`；恢復前本地／遠端 task tip：`d1034dd0d57225b1fe3ccebcc7f9de18b1b754d2`。
+- 受測程式 SHA：`03f05b0a490c2bd180f8f34164991001e2a6e9bf`。本次僅追加證據；尚無 handoff candidate，因完整 acceptance 仍受下述 scope／契約阻塞。
+- `git fetch origin` exit 0；`git rebase origin/dev` 初次及三次 continue exit 1，均為歷史重播的本證據文件 add/add 或 content conflict。保留已重播的較新證據，最後 `GIT_EDITOR=true git rebase --continue` exit 0；產品檔案沒有衝突。
+- `git merge --no-edit origin/codex2/sr-ops-shell-001` exit 0；`git merge-base --is-ancestor d1034dd0d57225b1fe3ccebcc7f9de18b1b754d2 HEAD` exit 0，保留已發布歷史供普通 non-force push。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/` exit 0：1 file、13 tests passed，304ms。
+- `pnpm --filter @drts/ops-console-web typecheck` exit 0：`next typegen && tsc --noEmit`，route types 產生成功。
+- `git diff --check` exit 0。`git diff origin/dev HEAD -- apps/ops-console-web/app/dispatch/page.tsx apps/platform-admin-web/app/audit/page.tsx` exit 0、無差異；下列唯讀證據也適用本次 fresh base。
+
+重新讀取 execution_ref、task spec、R18/R19、C048、planning decision 及 history repair。history repair 明文說明「Product scope/receiver-contract blockers remain」，僅修復歷史來源。最新 `ai-status.sh show SR-OPS-SHELL-001` 仍僅允許 assistant、ops-shell、task tests 與本文件，depends_on 仍為空；沒有 sender／receiver 擴 scope 授權。
+
+目前 dispatch 第1230行仍以 `/platform-admin` 為 fallback，第4520行 CTA 仍只傳 `/audit`；platform-admin audit 第164行仍呼叫無參數 `client.listAuditLogs()`，沒有 searchParams 消費。這是原始碼核對，未冒充 live popup 404 重現。需要 supervisor 執行既有 planning record 的 sender／必要 receiver scope、重疊 writer 相依與 resource identity／URL→query 契約決策；單純再以 history-repair 已完成重派工，無法解除此產品阻塞。
+
+既有 assistant 修補保留；本次未改 UI。未執行 live／真機／瀏覽器 1440/390px CTA hit testing、開關／焦點／reload、audit 新分頁或 payments context，沒有 live 資源 ID，也未建立業務資源。AUD-* 僅為下文列出的單元測試輸入。未宣稱 candidate review、CI、merge、deploy 或完整驗收成功。
+
 ## 2026-09-08 dispatch 重驗（PR #1775 後）
 
 - Fresh base `origin/dev`：`3f182f7e314b5ddb4c37f1c3f5dc214a6d0edf0e`；原 task tip：`e2ec3c1922824123f310aeb1023e805662a0c1e0`。
