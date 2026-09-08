@@ -306,3 +306,36 @@ acceptance remain pending.
 Related unit validation: owned-mobility service/repository/controller and
 multi-taxi service/controller suites passed **164/164**. `git diff --check`
 passed. These are owner-run checks, not independent reviewer evidence.
+
+## P1 timeout workflow follow-up (2026-09-08 16:56 UTC)
+
+Codex resumed the supervisor fallback owner assignment after Codex2 rejected
+candidate `8db7753260e754240cd87e712df1b7b8e8ec7663`. Both targeted and
+untargeted timeouts now use the durable cancellation workflow loader with
+assignment → task → job → order locks and its post-lock assignment discovery
+fence. The order must still be dispatchable with an active matching/assigned
+job. Closing the expired pending offer, releasing both resources, and writing
+order/job/attempt/trace now share one transaction. Cache updates and events run
+only after successful commit.
+
+The PostgreSQL suite passed **58/58** using `uv_exec_006_codex`, including:
+
+- A second instance hydrated before assignment cannot use targetless matching
+  timeout to overwrite either a new pending offer or a subsequently accepted
+  offer; persisted order/job and reservations remain unchanged.
+- An injected exception immediately after resource release rolls back the
+  entire timeout workflow and leaves the service task cache unchanged.
+- A barrier after target release demonstrates that another connection still
+  observes the pre-timeout workflow, then starts cancellation on that other
+  instance before allowing timeout to commit. Cancellation remains final;
+  a discovery conflict is retried through the existing cancellation command.
+
+The five related unit suites passed **179/179**. API typecheck passed after
+rebuilding the local contracts output (the initial check found stale generated
+contract types lacking the existing `acceptanceDeadline` field). Commands are
+unchanged from the earlier evidence, executed from `apps/api` for Vitest.
+
+`git rebase origin/dev` encountered duplicate historical implementation
+conflicts while replaying 47 commits. It was aborted, then `origin/dev` was
+merged cleanly to preserve the published task history and permit a normal
+non-force push. Review, CI, merge and external acceptance remain pending.

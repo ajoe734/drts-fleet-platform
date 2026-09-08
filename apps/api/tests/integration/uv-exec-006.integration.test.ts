@@ -1849,65 +1849,86 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     expect(service.getOrder(order.orderId)?.status).toBe("dispatch_timeout");
   });
 
-  it("a targetless matching_timeout does not touch an assignment made after the timer was armed", async () => {
-    expect(DATABASE_URL).toBeTruthy();
-    const database = new DatabaseService();
-    databases.push(database);
-    const driverId = `driver-uvexec006-matchto2-${randomUUID()}`;
-    const vehicleId = `vehicle-uvexec006-matchto2-${randomUUID()}`;
-    const { service } = createTestService(database, [
-      {
-        driverId,
+  it.each([false, true])(
+    "a stale targetless matching timer preserves a new offer (accepted=%s)",
+    async (accepted) => {
+      expect(DATABASE_URL).toBeTruthy();
+      const database = new DatabaseService();
+      databases.push(database);
+      const driverId = `driver-uvexec006-matchto2-${randomUUID()}`;
+      const vehicleId = `vehicle-uvexec006-matchto2-${randomUUID()}`;
+      const { service } = createTestService(database, [
+        {
+          driverId,
+          vehicleId,
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ]);
+
+      const order = service.createPassengerOrder({
+        pickup: { address: "Taipei Main Station" },
+        dropoff: { address: "Taipei 101" },
+        passenger: { name: "UV-EXEC-006 Rider", phone: "0911001222" },
+      });
+      trackOrder(order.orderId);
+
+      const dispatchResult = await service.dispatchOrder(order.orderId, {
+        mode: "auto",
+      });
+      const timerDatabase = new DatabaseService();
+      databases.push(timerDatabase);
+      const { service: timerService } = createTestService(timerDatabase, []);
+      await timerService.onModuleInit();
+      const assignment = await service.assignDispatch({
+        dispatchJobId: dispatchResult.dispatchJobId,
         vehicleId,
-        etaMinutes: 5,
-        operatingArea: "taipei",
-        serviceBuckets: ["standard_taxi"],
-      },
-    ]);
+        driverId,
+      });
 
-    const order = service.createPassengerOrder({
-      pickup: { address: "Taipei Main Station" },
-      dropoff: { address: "Taipei 101" },
-      passenger: { name: "UV-EXEC-006 Rider", phone: "0911001222" },
-    });
-    trackOrder(order.orderId);
+      if (accepted)
+        await service.acceptDriverTask(assignment.taskId, {
+          acceptedAt: new Date().toISOString(),
+        });
+      const before = await database.query(
+        `SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1`,
+        [order.orderId],
+      );
+      // A matching timer armed before the assignment was made fires late,
+      // with no target (matching how `acceptance_timeout` was already
+      // vulnerable before requiring one) -- it must not reach into the job
+      // and close the offer that was made after it was armed.
+      const timeoutResult = await timerService.handleDispatchTimeout(
+        order.orderId,
+        "matching_timeout",
+      );
+      expect(timeoutResult.escalationAction).toBe("superseded");
 
-    const dispatchResult = await service.dispatchOrder(order.orderId, {
-      mode: "auto",
-    });
-    const timerDatabase = new DatabaseService();
-    databases.push(timerDatabase);
-    const { service: timerService } = createTestService(timerDatabase, []);
-    await timerService.onModuleInit();
-    const assignment = await service.assignDispatch({
-      dispatchJobId: dispatchResult.dispatchJobId,
-      vehicleId,
-      driverId,
-    });
-
-    // A matching timer armed before the assignment was made fires late,
-    // with no target (matching how `acceptance_timeout` was already
-    // vulnerable before requiring one) -- it must not reach into the job
-    // and close the offer that was made after it was armed.
-    const timeoutResult = await timerService.handleDispatchTimeout(
-      order.orderId,
-      "matching_timeout",
-    );
-    expect(timeoutResult.escalationAction).toBe("superseded");
-
-    expect(await readAssignmentStatus(database, assignment.assignmentId)).toBe(
-      "assigned",
-    );
-    expect(await readActiveReservations(database, "driver", driverId)).toEqual([
-      expect.objectContaining({
-        assignment_id: assignment.assignmentId,
-        status: "held",
-      }),
-    ]);
-    expect(service.getOrder(order.orderId)?.status).not.toBe(
-      "dispatch_timeout",
-    );
-  });
+      expect(
+        await readAssignmentStatus(database, assignment.assignmentId),
+      ).toBe(accepted ? "accepted" : "assigned");
+      expect(
+        await readActiveReservations(database, "driver", driverId),
+      ).toEqual([
+        expect.objectContaining({
+          assignment_id: assignment.assignmentId,
+          status: accepted ? "occupied" : "held",
+        }),
+      ]);
+      expect(
+        (
+          await database.query(
+            `SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1`,
+            [order.orderId],
+          )
+        ).rows,
+      ).toEqual(before.rows);
+      expect(service.getOrder(order.orderId)?.status).not.toBe(
+        "dispatch_timeout",
+      );
+    },
+  );
 
   it("a valid reject atomically persists the rejection and releases the reservation", async () => {
     expect(DATABASE_URL).toBeTruthy();
@@ -1955,6 +1976,157 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       await readActiveReservations(database, "vehicle", vehicleId),
     ).toHaveLength(0);
   });
+
+  it.each(["rollback", "cancel"])(
+    "target timeout is atomic across resource release: %s",
+    async (scenario) => {
+      expect(DATABASE_URL).toBeTruthy();
+      const database = new DatabaseService();
+      databases.push(database);
+      const driverId = `driver-uvexec006-rej-ok-${randomUUID()}`;
+      const vehicleId = `vehicle-uvexec006-rej-ok-${randomUUID()}`;
+      const { service, ownedMobilityRepository: repository } =
+        createTestService(database, [
+          {
+            driverId,
+            vehicleId,
+            etaMinutes: 5,
+            operatingArea: "taipei",
+            serviceBuckets: ["standard_taxi"],
+          },
+        ]);
+
+      const order = service.createPassengerOrder({
+        pickup: { address: "Taipei Main Station" },
+        dropoff: { address: "Taipei 101" },
+        passenger: { name: "UV-EXEC-006 Rider", phone: "0911001333" },
+      });
+      trackOrder(order.orderId);
+
+      const dispatchResult = await service.dispatchOrder(order.orderId, {
+        mode: "auto",
+      });
+      const assignment = await service.assignDispatch({
+        dispatchJobId: dispatchResult.dispatchJobId,
+        vehicleId,
+        driverId,
+      });
+
+      const otherDatabase = new DatabaseService();
+      databases.push(otherDatabase);
+      const { service: other, ownedMobilityRepository: otherRepository } =
+        createTestService(otherDatabase, []);
+      await other.onModuleInit();
+      await database.query(
+        `UPDATE ops.phase1_dispatch_assignments SET record = jsonb_set(record, '{acceptanceDeadline}', to_jsonb('2000-01-01T00:00:00Z'::text)) WHERE assignment_id = $1`,
+        [assignment.assignmentId],
+      );
+      const readState = async () =>
+        (
+          await database.query(
+            `SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_driver_tasks WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_assignments WHERE order_id = $1`,
+            [order.orderId],
+          )
+        ).rows;
+      const before = await readState();
+      const cachedTask = service.getDriverTask(assignment.taskId);
+      let released!: () => void;
+      const atRelease = new Promise<void>((resolve) => {
+        released = resolve;
+      });
+      let resume!: () => void;
+      const barrier = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const original =
+        repository.releaseDispatchResourceReservations.bind(repository);
+      const hook = vi
+        .spyOn(repository, "releaseDispatchResourceReservations")
+        .mockImplementation(async (...args) => {
+          const result = await original(...args);
+          released();
+          if (scenario === "rollback") throw new Error("timeout release fault");
+          await barrier;
+          return result;
+        });
+      try {
+        const timeout = service.handleDispatchTimeout(
+          order.orderId,
+          "acceptance_timeout",
+          undefined,
+          { targetAssignmentId: assignment.assignmentId },
+        );
+        if (scenario === "rollback") {
+          await expect(timeout).rejects.toThrow("timeout release fault");
+          expect(await readState()).toEqual(before);
+          expect(service.getDriverTask(assignment.taskId)).toEqual(cachedTask);
+          expect(
+            await readActiveReservations(database, "driver", driverId),
+          ).toHaveLength(1);
+          expect(
+            await readActiveReservations(database, "vehicle", vehicleId),
+          ).toHaveLength(1);
+        } else {
+          await atRelease;
+          // Another connection still sees the complete pre-timeout workflow.
+          expect(await readState()).toEqual(before);
+          expect(
+            await readActiveReservations(database, "driver", driverId),
+          ).toHaveLength(1);
+          let entered!: () => void;
+          const attempting = new Promise<void>((resolve) => {
+            entered = resolve;
+          });
+          const load =
+            otherRepository.loadOrderCancellationForUpdate.bind(
+              otherRepository,
+            );
+          const cancelHook = vi
+            .spyOn(otherRepository, "loadOrderCancellationForUpdate")
+            .mockImplementation(async (...args) => {
+              entered();
+              return load(...args);
+            });
+          const cancellation = other
+            .cancelOwnedOrder(order.orderId, { reason: "passenger_requested" })
+            .then(
+              () => null,
+              (error: unknown) => error,
+            );
+          await attempting;
+          resume();
+          await timeout;
+          const cancellationError = await cancellation;
+          cancelHook.mockRestore();
+          // Discovery may be fenced when the target closes while cancellation waits.
+          if (cancellationError)
+            await other.cancelOwnedOrder(order.orderId, {
+              reason: "passenger_requested",
+            });
+          expect(
+            (
+              await database.query<{ record: OwnedOrderRecord }>(
+                `SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1`,
+                [order.orderId],
+              )
+            ).rows[0].record.status,
+          ).toBe("cancelled");
+          expect(
+            await readAssignmentStatus(database, assignment.assignmentId),
+          ).toBe("cancelled");
+          expect(
+            await readActiveReservations(database, "driver", driverId),
+          ).toHaveLength(0);
+          expect(
+            await readActiveReservations(database, "vehicle", vehicleId),
+          ).toHaveLength(0);
+        }
+      } finally {
+        resume();
+        hook.mockRestore();
+      }
+    },
+  );
 
   it("a targeted timeout preserves early offers and releases both resources only after the durable deadline", async () => {
     expect(DATABASE_URL).toBeTruthy();
