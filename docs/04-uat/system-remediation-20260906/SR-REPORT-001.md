@@ -213,3 +213,33 @@ This update is an evidence anchor, not a review handoff.
   task-local renderer parsing run is claimed. Implementation remains gated on
   supervisor scope coordination. This commit is an evidence anchor, not a
   review candidate; its pushed SHA is recorded in canonical blocker status.
+
+## Chairman resume verification — 2026-09-08 17:40 UTC
+
+- Fresh base: `2a093872d05a7d0344adf9bb58f9e5c4c99861d1`; dispatched
+  HEAD: `b59ef8b6d52ac98d19bdc34e5b119713cccb43be`.
+- Read the current parent and history-child task slices and both unblock
+  artifacts. The child is done, but parent write scopes remain the original
+  four and dependencies remain only SR-ARTIFACT-001 / SR-DEPS-001. The task
+  specification likewise lacks shared scope expansion. PR #1793 explicitly
+  requires supervisor authorization and writer sequencing before implementation.
+- Required supervisor action: authorize focused changes to
+  `packages/contracts/src/index.ts` and `tests/unit/reporting-filing.test.ts`,
+  record overlapping writer dependencies, and synchronize the task spec; or
+  deliver the coordinated producer described by the planning helper.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: initially exit 1 on
+  repeated historical evidence conflicts; preserved the complete dispatched
+  evidence document for each conflict, final continuation exit 0.
+  `git merge --no-ff origin/codex/sr-report-001` with task trailers: exit 0,
+  preserving published history for ordinary push.
+- `git diff HEAD origin/dev -- apps/api/src/modules/reporting-filing/
+  packages/contracts/src/index.ts tests/unit/reporting-filing.test.ts` before
+  rebase showed no differences. Current PDF/XLSX renderers remain null, the
+  shared declaration remains CSV-only, and the central tests require rejection.
+- `pnpm exec vitest run tests/unit/reporting-filing.test.ts`: exit 0,
+  30 tests / 1 file passed in 6.84s. In-memory order resource:
+  `861be4d0-ea2e-4b03-a7ff-a07f88943a8d`. `git diff --check`: exit 0.
+- No production/UI changes, implementation candidate, live resources,
+  browser/device checks, deployment, API/ops typechecks, or PDF/XLSX parsing
+  acceptance are claimed. This is a scope blocker evidence anchor; its pushed
+  SHA is recorded through the canonical status command.
