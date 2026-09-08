@@ -7,6 +7,7 @@
 - `git fetch origin` exit 0。`git rebase origin/dev` 初次 exit 1：重播舊 implementation commit 的證據文件 add/add conflict；僅保留已重播的較新證據，`GIT_EDITOR=true git rebase --continue` exit 0。產品檔案無衝突。
 - `git merge --no-edit origin/codex2/sr-ops-shell-001` exit 0，保留已發布 tip；`git merge-base --is-ancestor e2ec3c1922824123f310aeb1023e805662a0c1e0 HEAD` exit 0。可普通 non-force push。
 - `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/` exit 0：1 file、13 tests passed，517ms。
+- `pnpm --filter @drts/ops-console-web typecheck` exit 0：`next typegen && tsc --noEmit`，route types 產生成功且 TypeScript 無錯誤。
 - `git diff --check` exit 0。
 
 ### 仍需 supervisor 處理的產品前置
