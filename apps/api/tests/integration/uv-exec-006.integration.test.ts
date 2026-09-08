@@ -207,6 +207,11 @@ async function purgeOrderCascade(database: DatabaseService, orderId: string) {
   // (V0087); the other runtime-snapshot tables (V0011) are plain varchar
   // columns with no FK, but are still cleaned up here for test hygiene.
   await database.query(
+    `UPDATE ops.phase1_dispatch_assignments SET status = 'cancelled'
+     WHERE order_id = $1`,
+    [orderId],
+  );
+  await database.query(
     `DELETE FROM ops.dispatch_resource_reservations WHERE order_id = $1`,
     [orderId],
   );
@@ -328,6 +333,11 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
     if (DATABASE_URL && (orderIds.length > 0 || assignmentIds.length > 0)) {
       const cleanupDatabase = new DatabaseService();
       try {
+        await cleanupDatabase.query(
+          `UPDATE ops.phase1_dispatch_assignments SET status = 'cancelled'
+           WHERE order_id = ANY($1)`,
+          [orderIds],
+        );
         await cleanupDatabase.query(
           `DELETE FROM ops.dispatch_resource_reservations WHERE order_id = ANY($1)`,
           [orderIds],
@@ -697,6 +707,10 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
         driverId,
         vehicleId,
       });
+      await client.query(
+        "UPDATE ops.phase1_dispatch_assignments SET status = 'cancelled' WHERE assignment_id = $1",
+        [oldAssignmentId],
+      );
       await repository.releaseDispatchResourceReservations(
         oldAssignmentId,
         client,
@@ -755,8 +769,18 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
 
     // A valid release of the *current* assignment (reject/cancel/complete/
     // confirmed timeout) does free the resource for the next competitor.
-    const validReleaseCount =
-      await repository.releaseDispatchResourceReservations(newAssignmentId);
+    const validReleaseCount = await repository.withTransaction(
+      async (client) => {
+        await client.query(
+          "UPDATE ops.phase1_dispatch_assignments SET status = 'cancelled' WHERE assignment_id = $1",
+          [newAssignmentId],
+        );
+        return repository.releaseDispatchResourceReservations(
+          newAssignmentId,
+          client,
+        );
+      },
+    );
     expect(validReleaseCount).toBe(2);
     expect(
       await readActiveReservations(database, "driver", driverId),
@@ -769,6 +793,65 @@ describe("UV-EXEC-006 shared driver+vehicle dispatch resource reservation", () =
     const repeatReleaseCount =
       await repository.releaseDispatchResourceReservations(newAssignmentId);
     expect(repeatReleaseCount).toBe(0);
+  });
+
+  it("rejects release or deletion of live capacity and permits an atomic terminal transition", async () => {
+    const database = new DatabaseService();
+    databases.push(database);
+    const repository = new OwnedMobilityRepository(database);
+    const orderId = trackOrder(`order-uvexec006-${randomUUID()}`);
+    const assignmentId = trackAssignment(
+      `assignment-uvexec006-${randomUUID()}`,
+    );
+    const driverId = `driver-${randomUUID()}`;
+    const vehicleId = `vehicle-${randomUUID()}`;
+    await insertOrder(repository, orderId);
+    await repository.withTransaction(async (tx) => {
+      await insertAssignment(tx, {
+        assignmentId,
+        orderId,
+        driverId,
+        vehicleId,
+      });
+      await repository.reserveDispatchResources(tx, {
+        assignmentId,
+        orderId,
+        driverId,
+        vehicleId,
+        expiresAt: null,
+      });
+    });
+    await expect(
+      repository.releaseDispatchResourceReservations(assignmentId),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      database.query(
+        "DELETE FROM ops.dispatch_resource_reservations WHERE assignment_id = $1",
+        [assignmentId],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    expect(
+      await readActiveReservations(database, "driver", driverId),
+    ).toHaveLength(1);
+    await repository.withTransaction(async (tx) => {
+      // Queue an intermediate active UPDATE, then close. Deferred checks must
+      // inspect the final state, not reject the earlier trigger's NEW image.
+      await tx.query(
+        "UPDATE ops.phase1_dispatch_assignments SET status = 'accepted' WHERE assignment_id = $1",
+        [assignmentId],
+      );
+      await tx.query(
+        "UPDATE ops.phase1_dispatch_assignments SET status = 'completed' WHERE assignment_id = $1",
+        [assignmentId],
+      );
+      await repository.releaseDispatchResourceReservations(assignmentId, tx);
+    });
+    expect(
+      await readActiveReservations(database, "driver", driverId),
+    ).toHaveLength(0);
+    expect(
+      await readActiveReservations(database, "vehicle", vehicleId),
+    ).toHaveLength(0);
   });
 
   it("old_revision_fence_evidence: V0090's backend fence rejects an assignment left active without ever calling reserveDispatchResources", async () => {
