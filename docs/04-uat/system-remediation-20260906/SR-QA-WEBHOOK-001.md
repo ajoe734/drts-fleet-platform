@@ -4,9 +4,9 @@
 - Title: API keys／Webhook簽章與故障恢复驗收
 - Status: `review` (ready for handoff)
 - Owner: `Gemini`
-- Reviewer: `Claude`
-- Base SHA (`origin/dev`): `7dccddaba7d51dca8d56da01d5320d9f22f8b68f`
-- Worktree: `/home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-qa-webhook-001`
+- Reviewer: `Codex2`
+- Base SHA (`origin/dev`): `3b60a3757238663572f16f010c94f446f2c71eaa`
+- Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-qa-webhook-001`
 - Branch: `gemini/sr-qa-webhook-001`
 - Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json` (C111, C112, C113, C114, C115)
 - Task Spec: `docs/03-runbooks/system-remediation-20260906/SR-QA-WEBHOOK-001.md`
@@ -86,12 +86,12 @@ exit code: 0
 ```text
 $ pnpm exec vitest run tests/unit/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.test.ts
 
- RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-qa-webhook-001
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-qa-webhook-001
 
  Test Files  1 passed (1)
       Tests  23 passed (23)
-   Start at  15:26:16
-   Duration  4.86s (transform 3.22s, setup 0ms, import 4.39s, tests 180ms, environment 0ms)
+   Start at  12:55:02
+   Duration  3.08s (transform 1.98s, setup 0ms, import 2.79s, tests 129ms, environment 0ms)
 exit code: 0
 ```
 
@@ -101,17 +101,17 @@ $ pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-web
 
 Running 5 tests using 4 workers
 
-     1 …ation › generates role personas and enforces live fakeheaders guardrails
-     2 …olation Verification › handles execution failure with non-zero exit code
-     3 …ntains complete data and namespace isolation between two parallel shards
-  ✓  1 … generates role personas and enforces live fakeheaders guardrails (34ms)
+     1 …olation Verification › handles execution failure with non-zero exit code
+     2 …ntains complete data and namespace isolation between two parallel shards
+     3 …ation › generates role personas and enforces live fakeheaders guardrails
      4 …evidence with SHA, HTTP/console logs, artifact hashes, and PII redaction
+  ✓  2 …complete data and namespace isolation between two parallel shards (41ms)
+  ✓  1 … Verification › handles execution failure with non-zero exit code (38ms)
      5 …fault recovery, and API key governance lifecycle with evidence recording
-  ✓  3 …complete data and namespace isolation between two parallel shards (65ms)
-  ✓  2 … Verification › handles execution failure with non-zero exit code (83ms)
-  ✓  4 …e with SHA, HTTP/console logs, artifact hashes, and PII redaction (77ms)
-  ✓  5 …covery, and API key governance lifecycle with evidence recording (131ms)
-  5 passed (1.9s)
+  ✓  3 … generates role personas and enforces live fakeheaders guardrails (35ms)
+  ✓  4 …e with SHA, HTTP/console logs, artifact hashes, and PII redaction (50ms)
+  ✓  5 …ecovery, and API key governance lifecycle with evidence recording (84ms)
+  5 passed (1.2s)
 exit code: 0
 ```
 
@@ -119,12 +119,12 @@ exit code: 0
 ```text
 $ pnpm --filter @drts/api exec vitest run tests/unit/webhook-dispatch.service.test.ts
 
- RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-qa-webhook-001/apps/api
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-qa-webhook-001/apps/api
 
  Test Files  1 passed (1)
       Tests  2 passed (2)
-   Start at  15:27:21
-   Duration  1.32s (transform 181ms, setup 0ms, import 712ms, tests 33ms, environment 0ms)
+   Start at  12:55:12
+   Duration  501ms (transform 85ms, setup 0ms, import 316ms, tests 14ms, environment 0ms)
 exit code: 0
 ```
 
@@ -145,14 +145,14 @@ exit code: 0
 ## 6. 資源 ID 清單與環境邊界聲明
 
 ### 6.1 自動化測試追蹤之資源 ID
-- **Tenant ID**: `bd8720d0-2b6a-42e0-bc63-66065dd47f16`（Code: `TEN_A_S0_4C46B4D0`）
+- **Tenant ID**: `9d41299d-816e-4438-81d8-944770c6c314`（Code: `TEN_A_S0_FBBC591B`）
 - **租戶 API Keys**:
-  - `api_key_4310a368-c81c-4548-8f18-24de80ea8efe`（Prefix: `tk_d1c6b9add`, Suffix: `****3f1c`, Scopes: `tenant:webhooks:read`, `tenant:write`）
-  - `api_key_aa7418e8-cf00-4ceb-8b95-dd5d7fed11a2`（Rotated Key v2, Overlap Window: 7 days）
+  - `api_key_2b380c40-3c06-4ebe-9ec5-6056bfabda7c`（Prefix: `tk_f307558ce`, Suffix: `****d99e`, Scopes: `tenant:webhooks:read`, `tenant:write`）
+  - `api_key_eac2d5dd-eee8-4032-ac9a-c8180477dcc4`（Rotated Key v2, Overlap Window: 7 days）
 - **Webhook 端點**:
-  - `wh_d985f035-703a-4eab-91bf-55f2a4a69d3a`（URL: `http://127.0.0.1:35819/webhooks/receiver`）
+  - `wh_1d88cc4f-0027-4911-af0a-a77455564cb1`（URL: `http://127.0.0.1:36877/webhooks/receiver`）
 - **Webhook 送達記錄 (Delivery ID)**:
-  - `wd_f84d7d19-0dc6-4c0a-b84e-79830a4f31e9`（Status: `queued`, HTTP Status: 503, Delay: 30000ms）
+  - `wd_e3457121-40dc-44e9-971c-e357c62ef1d6`（Status: `queued`, HTTP Status: 503, Delay: 30000ms）
 - **對帳單 ID**: `settlement-statement-tenant-demo-001-2026-03`
 - **電話進件與錄音 Session ID**: `provider-call-rec-001`（Recording: `rec_wire_ready_001`）
 

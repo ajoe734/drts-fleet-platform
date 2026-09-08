@@ -132,7 +132,7 @@ function computeRetryDelayMs(
   return Math.min(Math.max(1, Math.round(delaySeconds)), maxBackoff) * 1000;
 }
 
-const BASE_SHA = "7dccddaba7d51dca8d56da01d5320d9f22f8b68f";
+const BASE_SHA = process.env.BASE_SHA || "3b60a3757238663572f16f010c94f446f2c71eaa";
 
 test.describe("SR-QA-WEBHOOK-001: API Keys, Webhook HMAC Signatures, and Fault Recovery E2E Verification", () => {
   let receiver: ControlledReceiver;
