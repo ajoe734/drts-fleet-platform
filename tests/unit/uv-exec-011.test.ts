@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   TwmAsrFixtureAdapter,
@@ -44,9 +44,9 @@ describe("UV-EXEC-011 TWM fixture adapters and language routing", () => {
 
   it("offers DTMF language selection without requiring Mandarin ASR and invalidates only uncommitted confirmation on switch", () => {
     const routes = new Map([
-      ["cmn-TW", { language: "cmn-TW" as const, asrModelName: "myVoca", ttsVoiceEnabled: true }],
-      ["hak-TW", { language: "hak-TW" as const, asrModelName: "bronci-b3-model-hakka-20260518", ttsVoiceEnabled: true }],
-      ["nan-TW", { language: "nan-TW" as const, asrModelName: "myVoca", ttsVoiceEnabled: false }],
+      ["cmn-TW", { language: "cmn-TW" as const, asrModelName: "myVoca", ttsVoiceEnabled: true, asrCapabilityVerified: true, accent: "sixian" as const, selectionPrompt: { assetId: "checked-prompt", verified: true } }],
+      ["hak-TW", { language: "hak-TW" as const, asrModelName: "bronci-b3-model-hakka-20260518", ttsVoiceEnabled: true, asrCapabilityVerified: true, accent: "sixian" as const, selectionPrompt: { assetId: "checked-prompt", verified: true } }],
+      ["nan-TW", { language: "nan-TW" as const, asrModelName: "myVoca", ttsVoiceEnabled: false, asrCapabilityVerified: false, selectionPrompt: { assetId: "unchecked", verified: false } }],
     ]);
     const router = new VoiceLanguageRouter(routes, "cmn-TW");
     expect(router.shortPrompt()).toContain("客語請按3");
