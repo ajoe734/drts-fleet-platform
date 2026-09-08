@@ -157,3 +157,30 @@ This update is an evidence anchor, not a review handoff.
   checks, deployment, typechecks, or renderer parsing tests claimed.
 - This document remains an evidence anchor, not an implementation candidate.
   Its ordinary-pushed SHA is recorded in canonical blocker status.
+
+## Redispatch verification — 2026-09-08 16:07 UTC
+
+- Fresh base: `c07d24e021aea847a988646427cdc534ccf4e496` (`origin/dev`);
+  dispatched HEAD: `127fdc987aa9cbeb3500a2093518bde663d4bdc2`.
+- Canonical `show SR-REPORT-001` still grants only the original four scopes
+  and two dependencies. The history-repair resume does not authorize shared
+  writes under execution rules §4. Required coordination remains unchanged:
+  authorize `packages/contracts/src/index.ts` (implemented formats) and
+  `tests/unit/reporting-filing.test.ts` (format and asynchronous assertions),
+  with writer dependencies, or assign integration children for those changes.
+- Current source rechecked against PRD §9.5.6 / §9.10.2, N05, and C091:
+  PDF/XLSX/ZIP renderer entries remain null, authoritative formats remain
+  CSV-only, and the central regression still requires PDF/XLSX rejection.
+- `git fetch origin`: exit 0. `git rebase origin/dev` initially exited 1 on
+  repeated evidence-document conflicts; preserved the complete dispatched
+  document and resolved each conflict with `git add` / `GIT_EDITOR=true git
+  rebase --continue`. Final continuation exited 0. No production code changed.
+- `git merge --no-ff origin/codex/sr-report-001` with task trailers: exit 0;
+  preserves published history for a normal non-force push.
+- `pnpm exec vitest run tests/unit/reporting-filing.test.ts`: exit 0;
+  1 file, 30 tests passed, duration 5.92s. Example in-memory order event:
+  `d6ab5666-7ba0-4049-aa1f-ee48f013b9a2`. This reproduces unsupported formats,
+  not successful PDF/XLSX generation.
+- No live resource, browser/device, deployment, API/ops typecheck, or new
+  renderer parsing verification was performed. There is no implementation
+  candidate; this evidence anchor SHA is recorded in the machine blocker note.
