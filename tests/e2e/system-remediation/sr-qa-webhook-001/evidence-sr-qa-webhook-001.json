@@ -1,12 +1,12 @@
 {
   "taskId": "SR-QA-WEBHOOK-001",
-  "runId": "uat-SR-QA-WEBHOOK-001-7c735b09",
+  "runId": "uat-SR-QA-WEBHOOK-001-0614b6ec",
   "shardIndex": 0,
   "baseSha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
-  "candidateSha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
-  "headSha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
-  "startTime": "2026-09-08T11:08:49.810Z",
-  "endTime": "2026-09-08T11:08:49.905Z",
+  "candidateSha": "25d9fd6a0ab6d646b48ed026515fd3aebc400d32",
+  "headSha": "25d9fd6a0ab6d646b48ed026515fd3aebc400d32",
+  "startTime": "2026-09-08T13:28:48.598Z",
+  "endTime": "2026-09-08T13:28:48.684Z",
   "status": "passed",
   "exitCode": 0,
   "roles": [
@@ -16,45 +16,45 @@
   "trackedResources": [
     {
       "type": "tenant",
-      "id": "4c9e457c-254d-4cce-a7cd-0a6a69f9746d",
+      "id": "db7ead8e-b538-4ba6-add6-0498382ffb45",
       "metadata": {
-        "code": "TEN_A_S0_96FF1558"
+        "code": "TEN_A_S0_5B81E845"
       }
     },
     {
       "type": "tenant_api_key",
-      "id": "api_key_028ad92b-c5af-452e-84bf-568f2f034f52",
+      "id": "api_key_c5a65a85-539d-44b8-a6da-1389017de8d4",
       "metadata": {
         "keyName": "E2E Automated Webhook Key",
         "scopes": [
           "tenant:webhooks:read",
           "tenant:write"
         ],
-        "keyPrefix": "tk_ba1a1f36d",
-        "maskedSuffix": "****2069"
+        "keyPrefix": "tk_44b9074ad",
+        "maskedSuffix": "****8588"
       }
     },
     {
       "type": "tenant_api_key",
-      "id": "api_key_4394336f-ac9c-4c97-afe8-9653c3ef6559",
+      "id": "api_key_0d83bcf9-2968-4759-9ec4-b7cb4addbea7",
       "metadata": {
         "keyName": "E2E Automated Webhook Key v2",
-        "rotatedFromApiKeyId": "api_key_028ad92b-c5af-452e-84bf-568f2f034f52",
+        "rotatedFromApiKeyId": "api_key_c5a65a85-539d-44b8-a6da-1389017de8d4",
         "status": "active",
-        "overlapEndsAt": "2026-09-15T11:08:49.838Z"
+        "overlapEndsAt": "2026-09-15T13:28:48.613Z"
       }
     },
     {
       "type": "webhook_endpoint",
-      "id": "wh_672a4c42-9cab-447b-80e2-2d3835677e8d",
+      "id": "wh_0c66c8e8-983a-4012-9f26-dd831422d92e",
       "metadata": {
-        "url": "http://127.0.0.1:41767/webhooks/receiver",
+        "url": "http://127.0.0.1:41291/webhooks/receiver",
         "status": "test_pending"
       }
     },
     {
       "type": "webhook_delivery",
-      "id": "wd_3df5d336-2c5f-4634-8674-eb0112b31354",
+      "id": "wd_8f74e722-b9bc-412e-811f-4a6b6a23838e",
       "metadata": {
         "status": "queued",
         "httpStatus": 503,
@@ -65,16 +65,16 @@
   ],
   "httpCalls": [
     {
-      "id": "d4fc830f-efe1-43f4-ad13-c2dc2cd04afb",
-      "timestamp": "2026-09-08T11:08:49.884Z",
+      "id": "3fa563cc-e4af-4f0c-a637-6df6034830d7",
+      "timestamp": "2026-09-08T13:28:48.655Z",
       "method": "POST",
-      "url": "http://127.0.0.1:41767/webhooks/receiver",
+      "url": "http://127.0.0.1:41291/webhooks/receiver",
       "statusCode": 200,
       "durationMs": 8,
       "requestHeaders": {
         "content-type": "application/json",
         "x-drts-event-type": "tenant.webhook.test",
-        "x-drts-webhook-signature": "v=1;t=2026-09-08T11:08:49.839Z;sig=84d31c1e277826e70d8c39dc95ad92d9458348fb28792fe061733e09047ab787"
+        "x-drts-webhook-signature": "v=1;t=2026-09-08T13:28:48.615Z;sig=1c0af9aff5bd78bf259ed77587aa75741251d61ebee39edf2f35d67b710754fa"
       },
       "responseBody": {
         "ok": true,
@@ -85,22 +85,22 @@
   ],
   "consoleLogs": [
     {
-      "timestamp": "2026-09-08T11:08:49.827Z",
+      "timestamp": "2026-09-08T13:28:48.608Z",
       "level": "info",
       "message": "Starting C111: Tenant API key issuance and governance verification"
     },
     {
-      "timestamp": "2026-09-08T11:08:49.839Z",
+      "timestamp": "2026-09-08T13:28:48.615Z",
       "level": "info",
       "message": "C111 verified successfully: minimal scopes, secret masking, overlap rotation, and immediate revocation validated."
     },
     {
-      "timestamp": "2026-09-08T11:08:49.839Z",
+      "timestamp": "2026-09-08T13:28:48.615Z",
       "level": "info",
       "message": "Starting C112: Webhook real HTTP receiver HMAC signing and fault recovery verification"
     },
     {
-      "timestamp": "2026-09-08T11:08:49.904Z",
+      "timestamp": "2026-09-08T13:28:48.683Z",
       "level": "info",
       "message": "C112 verified successfully: HMAC-SHA256, 503 backoff, auto-disable, and secret rotation validated."
     }
