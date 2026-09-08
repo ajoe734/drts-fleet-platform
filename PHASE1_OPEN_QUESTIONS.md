@@ -4,6 +4,18 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-SR-QA-WEBHOOK-TENANT-BINDING-001 — repair scope authorization pending
+
+Supervisor/Claude must authorize product write scopes and IAM/tenant overlap
+sequencing for `SR-QA-WEBHOOK-001-FIX-TENANT-BINDING` (owner Codex, reviewer
+Gemini), and add the repair as a dependency of `SR-QA-WEBHOOK-001` acceptance.
+The required cross-tenant rejection remains unchanged; no scope cut or new
+entitlement is approved. Keep the repair blocked with `waiting_for: Claude`
+until machine truth records the authorization. This is follow-up on the existing
+repair task, not a new implementation assignment. See the
+[decision, proposed scopes, and resume gate](support/unblock/SR-QA-WEBHOOK-001-FIX-TENANT-BINDING/SR-QA-WEBHOOK-001-FIX-TENANT-BINDING-UNBLOCK-PLANNING-DECISION.md).
+
+
 ### Q-SR-ENV-COPY-001 — runtime source and integration scope routing
 
 Supervisor/Chairman must authorize the runtime badge wiring scopes and sequence
@@ -17,6 +29,17 @@ server/client delivery boundary and allowed values; unresolved source selection
 returns to Supervisor/Chairman, not an invented environment variable.
 This is a follow-up on the existing parent, not a new implementation task or
 scope grant. See [decision, paths and resume gate](support/unblock/SR-ENV-COPY-001/SR-ENV-COPY-001-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-QA-WEBHOOK-001 — tenant repair scope and webhook deadline
+
+Existing tenant isolation rules already forbid the API key metadata exposure
+reported by `SR-QA-WEBHOOK-001`; no product waiver is implied. Supervisor/Claude
+must authorize and sequence the existing P0
+`SR-QA-WEBHOOK-001-FIX-TENANT-BINDING`, add it to the parent's dependencies,
+and route the still-unspecified default webhook transport deadline contract.
+Codex owns parent/repair execution; Gemini reviews them. Preserve all C111–C115
+acceptance and the parent's blocked state, including usage and external evidence
+gates. See the [contract basis, proposed scope and resume steps](support/unblock/SR-QA-WEBHOOK-001/SR-QA-WEBHOOK-001-UNBLOCK-PLANNING-DECISION.md).
 
 Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-ENTERPRISE-FORM-001`, `Q-SR-ENTERPRISE-DATA-001`, `Q-SR-PROOF-001`, `Q-SR-REPORT-001`.
 
