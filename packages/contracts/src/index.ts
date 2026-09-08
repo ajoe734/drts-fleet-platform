@@ -1,3 +1,5 @@
+import type { BookingRequirements } from "./booking-requirements";
+export * from "./booking-requirements";
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 export * from "./iam-contracts";
@@ -3260,6 +3262,7 @@ export interface CallCenterMapFallbackReview {
 }
 
 export interface CreateCallCenterOrderCommand {
+  bookingRequirements?: BookingRequirements;
   callId: string;
   agentId: string;
   recordingId?: string | null;
@@ -3468,6 +3471,7 @@ export interface DriverCompleteTaskCommand {
 }
 
 export interface OwnedOrderRecord {
+  bookingRequirements?: BookingRequirements;
   orderId: string;
   orderNo: string;
   orderSource: OwnedOrderSource;
@@ -3688,6 +3692,7 @@ export interface TenantOrderListQuery {
 }
 
 export interface DispatchCandidate {
+  bookingRequirements?: BookingRequirements;
   vehicleId: string;
   driverId: string;
   operatingArea: string;
@@ -3801,6 +3806,7 @@ export interface DispatchTimeoutRecord {
 }
 
 export interface DispatchAssignmentRecord {
+  bookingRequirements?: BookingRequirements;
   assignmentId: string;
   dispatchJobId: string;
   orderId: string;
@@ -3830,6 +3836,7 @@ export interface WaypointRecord {
 }
 
 export interface DriverTaskRecord {
+  bookingRequirements?: BookingRequirements;
   taskId: string;
   orderId: string;
   dispatchJobId: string;
