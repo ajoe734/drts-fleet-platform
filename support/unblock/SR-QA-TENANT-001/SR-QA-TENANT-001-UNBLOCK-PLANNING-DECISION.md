@@ -91,6 +91,26 @@ merge tree diff against its first parent was empty, and ordinary push succeeded.
 
 ## Verification and delivery boundary
 
+### Merge-conflict redispatch (after 18:39Z)
+
+Rebased onto fetched `origin/dev` at
+`3b82fba0fabba3328e3443de3d602780f852d724`. Retained the concurrent
+Q-SR-ENV-COPY-001 and Q-SR-QA-WEBHOOK-001 entries while replaying this task's
+decision. Reconciled published candidate `d73904a4b2169f0ccaeed2ee68c2dd8e971f2f4f`
+through merge anchor `0a2d234ed`; its tree matches the rebased first parent.
+Normal push succeeded. `git diff origin/dev --check` and ancestry checks for
+both the fetched base and published candidate exited 0. The local diff against
+that base contains only this artifact and the tenant questions-index entry.
+GitHub reported PR #1805 `MERGEABLE` after the anchor push.
+
+The canonical parent `progress` command was rejected with
+`Only the owner (Codex2) can progress SR-QA-TENANT-001`. No parent state was
+changed. Required follow-up is therefore routed to Codex2 through this helper's
+canonical review handoff: record steps 1–5 above in the parent next field,
+continue scoped matrix development, and retain the live provisioning gate.
+Supervisor must preserve the parent's in-progress work when applying helper
+merge resolution; the helper handoff itself does not persist `PARENT_NEXT`.
+
 This helper changes the planning index and routing artifact only. Verification:
 source/task-slice inspection, `git diff --check`, retained unrelated planning
 entries and normal push ancestry. No live HTTP, DB, mail or browser acceptance
