@@ -439,6 +439,51 @@ describe("owned mobility service", () => {
     ).toEqual(["recording_bound"]);
   });
 
+  it.each(["recording_pending", "on_trip"] as const)(
+    "UV-EXEC-010 unversioned callbacks preserve voice evidence in %s, including DB loss",
+    async (status) => {
+      const { ownedMobilityService } = createService();
+      const created = await ownedMobilityService.createCallCenterOrder({
+        callId: "voice-call",
+        agentId: "agent",
+        pickup: { address: "台中市梧棲區中二路一段9號" },
+        dropoff: { address: "台中市大安區興安路378號" },
+        passenger: { name: "李先生", phone: "0911222333" },
+      });
+      const pinned = {
+        ...created,
+        status,
+        voiceIntentId: "voice-intent",
+        recordingId: "verified-recording",
+        complianceFlags: ["recording_bound"],
+      };
+      // Seed the persisted voice aggregate without using a legacy creation DTO.
+      Object.assign(ownedMobilityService, { orders: [pinned] });
+      const original = structuredClone(pinned);
+      const common = {
+        callId: "voice-call",
+        linkedOrderId: created.orderId,
+        providerRecordingRef: null,
+        recordingUrl: null,
+        startedAt: null,
+        endedAt: null,
+        agentId: null,
+      };
+      ownedMobilityService.handleCallRecordingAttached({
+        ...common,
+        recordingId: "unverified-old",
+      });
+      for (const recordingState of ["pending", "missing", "ready"] as const) {
+        await ownedMobilityService.handleCallRecordingStateChanged({
+          ...common,
+          recordingState,
+          recordingId: null,
+        });
+      }
+      expect(ownedMobilityService.getOrder(created.orderId)).toEqual(original);
+    },
+  );
+
   it("prevents trip start before arrived_pickup", async () => {
     const { ownedMobilityService } = createService();
     const order = ownedMobilityService.createPassengerOrder({

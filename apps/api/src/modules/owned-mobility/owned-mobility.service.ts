@@ -1763,6 +1763,25 @@ export class OwnedMobilityService
       return;
     }
 
+    // Legacy callbacks contain no immutable manifest version or verified
+    // checkpoint. They cannot establish or replace voice evidence, nor open
+    // its dispatch gate. Final recording evidence has its own journal path.
+    if (order.voiceIntentId) {
+      const traceLog = this.appendTrace(
+        order.orderId,
+        "voice.recording_evidence_exception",
+        {
+          callId: event.callId,
+          reason: "unversioned_recording_callback",
+        },
+      );
+      this.persistChanges(
+        { dispatchTraceLogs: [traceLog] },
+        "sync_call_recording_attachment_voice_exception",
+      );
+      return;
+    }
+
     const now = new Date().toISOString();
     order.recordingId = event.recordingId;
     order.updatedAt = now;
@@ -1834,7 +1853,15 @@ export class OwnedMobilityService
       return;
     }
 
-    if (order.voiceIntentId && this.ownedMobilityRepository?.isEnabled()) {
+    if (order.voiceIntentId) {
+      // Losing the durable repository must not fall through to the legacy
+      // in-memory writer and erase established voice evidence/order progress.
+      if (!this.ownedMobilityRepository?.isEnabled()) {
+        this.logger.warn(
+          "Voice recording callback deferred: durable repository unavailable",
+        );
+        return;
+      }
       // Returned (not just fired) so callers that care -- e.g. tests -- can
       // await completion; existing fire-and-forget callers (the
       // synchronous callcenter listener wiring) simply ignore the return

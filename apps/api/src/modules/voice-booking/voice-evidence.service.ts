@@ -106,7 +106,7 @@ export class VoiceEvidenceService {
     checkpointId: string,
   ) {
     const row = await this.repository.findRecordingCheckpointById(checkpointId);
-    if (!row || row.callId !== callId || !row.verifiedAt) {
+    if (!row || row.callId !== callId || !row.recordingId || !row.verifiedAt) {
       throw new CheckpointJournalError("Verified checkpoint unavailable");
     }
     const ref = row.manifest as EvidenceManifestRef;
