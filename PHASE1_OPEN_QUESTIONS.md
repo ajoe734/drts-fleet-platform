@@ -17,6 +17,18 @@ server/client delivery boundary and allowed values; unresolved source selection
 returns to Supervisor/Chairman, not an invented environment variable.
 This is a follow-up on the existing parent, not a new implementation task or
 scope grant. See [decision, paths and resume gate](support/unblock/SR-ENV-COPY-001/SR-ENV-COPY-001-UNBLOCK-PLANNING-DECISION.md).
+### Q-SR-QA-TENANT-001 — UAT provisioning follow-up, no product scope cut
+
+The planning triage found no unresolved product/contract choice in the reported
+blocker. PRD §9.1.2, service contracts §3.2 and the parent execution task retain
+the full tenant acceptance matrix. Supervisor/Gemini must coordinate provisioned
+disposable tenants and legitimate writable/read-only identities, inject the six
+existing UAT settings into the parent worker, and record nonsecret provenance,
+expiry/refresh and teardown ownership. Parent owner Codex and reviewer Codex2
+then resume real write/readback verification. This remains an open environment
+follow-up on the registered parent, not a new implementation task or scope grant.
+Keep the parent blocked pending that evidence; helper merge alone cannot satisfy
+the gate. See the [planning decision and resume conditions](support/unblock/SR-QA-TENANT-001/SR-QA-TENANT-001-UNBLOCK-PLANNING-DECISION.md).
 
 ### Q-SR-QA-WEBHOOK-001 — tenant repair scope and webhook deadline
 
