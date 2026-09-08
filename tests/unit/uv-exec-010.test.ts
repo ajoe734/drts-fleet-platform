@@ -10,7 +10,6 @@ import type { VoiceBookingRepository } from "../../apps/api/src/modules/voice-bo
 import type { VoiceSessionRepository } from "../../apps/api/src/modules/voice-booking/voice-session.repository";
 import {
   VoiceEvidenceService,
-  type RecordingManifestView,
   type RecordingObjectReadbackVerifier,
   type SealedRecordingSegmentInput,
 } from "../../apps/api/src/modules/voice-booking/voice-evidence.service";
