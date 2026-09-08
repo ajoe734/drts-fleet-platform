@@ -535,6 +535,66 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       }
     });
 
+    it("C112-default-transport: stalled real HTTP remains pending during observation then queues after peer disconnect", async () => {
+      receiver.setHandler(() => {
+        // Observe the actual default transport, without an injected abort signal.
+      });
+      const service = new TenantPartnerService(
+        new AuditNotificationService(),
+        undefined,
+        new WebhookDispatchService(),
+        [],
+      );
+      const endpoint = service.createWebhookEndpoint("tenant-demo-001", {
+        url: receiver.url,
+        secret: "whsec_default_transport_observation",
+        events: ["tenant.webhook.test"],
+      });
+      let settled = false;
+      const pending = service
+        .sendTestWebhook("tenant-demo-001", {
+          webhookId: endpoint.webhookId,
+        })
+        .finally(() => {
+          settled = true;
+        });
+      try {
+        await expect.poll(() => receiver.requests.length).toBe(1);
+        const observedAt = Date.now();
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const observationMs = Date.now() - observedAt;
+        expect(settled).toBe(false);
+        receiver.server.closeAllConnections();
+        const result = await pending;
+        expect(result.httpStatus).toBeNull();
+        const deliveries = service.listWebhookDeliveriesByWebhook(
+          "tenant-demo-001",
+          endpoint.webhookId,
+        );
+        expect(deliveries).toHaveLength(1);
+        expect(deliveries[0]).toMatchObject({ status: "queued", attempt: 1 });
+        expect(deliveries[0]!.nextAttemptAt).not.toBeNull();
+        process.stdout.write(
+          "SR-QA-WEBHOOK-001 default transport resources " +
+            JSON.stringify({
+              tenantId: "tenant-demo-001",
+              webhookId: endpoint.webhookId,
+              deliveryId: deliveries[0]!.deliveryId,
+              observationMs,
+              settledBeforePeerDisconnect: false,
+              recoveryTrigger: "receiver closed TCP connection",
+              limitation:
+                "A bounded observation does not establish a default deadline or its absence",
+            }) +
+            "\n",
+        );
+      } finally {
+        receiver.server.closeAllConnections();
+        await pending;
+        service.onModuleDestroy();
+      }
+    });
+
     it("C112-4 (Negative): Auto-disables endpoint after non-retryable response / delivery failure", async () => {
       receiver.setHandler((_req, res) => {
         // 400 Bad Request is non-retryable in retryPolicy.retryableStatusCodes ([408, 429, 500, 502, 503, 504])
