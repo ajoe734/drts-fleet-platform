@@ -2,7 +2,7 @@
 
 - Owner: `Claude`；independent reviewer: `Claude2`。
 - Branch: `claude/sr-mail-001`。
-- Base（`git fetch origin` 後 `origin/dev` HEAD）: `650e233bb1c35269852c291ef892d25967380c12`。
+- Base（`git fetch origin` 後 `origin/dev` HEAD，round 2 rebase 後）: `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`（round 1 原始 base：`650e233bb1c35269852c291ef892d25967380c12`）。
 - 依賴：`SR-NOTIFY-001`（`NotificationDeliveryService` 共用耐久郵件核心，已 merge）、`SR-REFERRAL-001`（皆已 done）。
 
 ## 基準重現（修復前語義）
@@ -22,42 +22,34 @@
 
 ## 验证
 
-2026-09-06 UTC，於本 worktree（`.artifacts/worktrees/auto/claude-sr-mail-001`，base `650e233bb`）执行：
+### Round 1 — 2026-09-06 UTC（base `650e233bb`，历史记录，保留供追溯）
+
+於本 worktree（`.artifacts/worktrees/auto/claude-sr-mail-001`，base `650e233bb`）执行：
 
 | 指令 | Exit | 实际结果 |
 | --- | --- | --- |
 | `git diff --check` | 0 | 无 whitespace errors |
-| `corepack pnpm --filter @drts/api typecheck`（`pnpm --filter @drts/api typecheck` 的等价调用；本 session 的 shell 没有裸 `pnpm` binary，仅有 corepack shim） | 2 | 见下方「typecheck 结果分析」 |
-| `npx vitest run tests/unit/system-remediation/sr-mail-001/`（`pnpm exec vitest run ...` 的等价调用；理由同上） | 1（因下方 zod 问题的其中一个 test file 整个 suite load 失败） | `tenant-invitation-delivery.service.test.ts`：1 file / **10 tests all passed**；`tenant-invitation-delivery-status.test.ts`：0 tests，load 阶段失败（见下方分析） |
+| `corepack pnpm --filter @drts/api typecheck`（`pnpm --filter @drts/api typecheck` 的等价调用；本 session 的 shell 没有裸 `pnpm` binary，仅有 corepack shim） | 2 | 13 个错误，全部位于 `UV-EXEC-00x` 语音功能线既有档案（`voice-capability.guard.ts` 等 6 个档案），与本任务改动的 3 个档案无关 |
+| `npx vitest run tests/unit/system-remediation/sr-mail-001/`（`pnpm exec vitest run ...` 的等价调用；理由同上） | 1 | `tenant-invitation-delivery.service.test.ts`：1 file / **10 tests all passed**；`tenant-invitation-delivery-status.test.ts`：0 tests，因 `packages/contracts/src/unattended-voice.ts` import `zod` 但 workspace 未声明该 dependency（phantom dependency），整个 test file 在 load 阶段失败，**未经执行验证** |
 
-### typecheck 结果分析（pre-existing，非本任务引入）
+以上两个缺口（typecheck 的 13 个语音功能线错误、`packages/contracts` 缺 `zod` 声明）均已确认与 SR-MAIL-001 改动的 3 个档案无关，且不在本任务 write_scopes 内，round 1 当时未修复、只如实记录。
 
-`tsc -p tsconfig.json --noEmit` 报 13 个错误，全部位于本任务 write_scopes 之外、且本次 diff 完全未触碰的档案：
+### Round 2 — 2026-09-08 UTC（rebase 复验，base 更新为 `70355aba9`）
 
-```
-src/common/auth/voice-capability.guard.ts
-src/common/auth/voice-capability.service.ts
-src/modules/callcenter/voice-cti.adapter.ts
-src/modules/owned-mobility/owned-mobility.repository.ts
-src/modules/owned-mobility/owned-mobility.service.ts
-src/modules/voice-booking/voice-booking-authorization.service.ts
-```
+依 task brief 指示，从 `origin/dev` 重新 fetch 并 `git rebase origin/dev`（无冲突，`Successfully rebased and updated refs/heads/claude/sr-mail-001`）。Base SHA 由 `650e233bb1c35269852c291ef892d25967380c12` 前进到 `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`（`origin/dev` 当前 HEAD）。这段区间内 `tenant-partner.service.ts` 被 `GCP-TOS-REMEDIATION-20260907`（#1710，移除真实金融机构名称）大幅改动（174 行），rebase 自动合并、无冲突，重新执行 diff 确认本任务实际改动仍只有预期的 3 个档案、40 行（`tenant-partner.service.ts`）：
 
-错误都是 `@drts/contracts` 缺少 `VoiceAgentBookingActor` / `VoiceCapabilityTokenClaims` 等 export，以及 `OwnedOrderRecord` 缺 `aggregateVersion` / `voiceIntentId` 栏位——都是无人语音（UV-EXEC-00x）功能线的既有缺口。`git log --oneline -- <上述档案>` 显示它们最后由 `UV-EXEC-001`／`UV-EXEC-003`／`UV-EXEC-004` 触碰，与 SR-MAIL-001 无关；本次 3 个被改动的档案（`tenant-invitation-delivery.service.ts`、`tenant-partner.module.ts`、`tenant-partner.service.ts`）不在错误列表中的任何一笔。也就是说 `apps/api` 的 typecheck 在 `origin/dev` 当前 HEAD 上本来就是红的，与本任务改动无关；这里如实记录 exit code 与完整错误列表，不假装它是绿的。
+於本 worktree执行（PATH 上此时已有裸 `pnpm` binary，不需 corepack shim）：
 
-### vitest 第二个 test file 无法加载（pre-existing，非本任务引入）
+| 指令 | Exit | 实际结果 |
+| --- | --- | --- |
+| `git diff --check` | 0 | 无 whitespace errors |
+| `pnpm --filter @drts/api typecheck` | **0** | 全绿——round 1 记录的 13 个语音功能线错误已由其他任务在 `origin/dev` 上修复（`packages/contracts` 现已导出所需类型），与本任务改动无关，这里只是确认交棒时 typecheck 是干净的 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/` | **0** | **2 files passed / 13 tests passed**——round 1 无法加载的 `tenant-invitation-delivery-status.test.ts` 这次**完整执行且全数通过**，因为 `packages/contracts/package.json` 现已声明 `zod` 依赖，phantom-dependency 缺口已由其他任务修复 |
+| `pnpm --filter @drts/api exec vitest run tests/unit/tenant-partner.service.test.ts tests/unit/tenant-partner.controller.test.ts`（write_scopes 外，仅作回归证据，未修改这两个档案） | 0 | 77 tests passed——确认 `GCP-TOS-REMEDIATION-20260907` 对 `tenant-partner.service.ts` 的大改动与本任务改动共存后，既有 tenant-partner 行为未被破坏 |
 
-`tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery-status.test.ts` 透过 `TenantPartnerService` 间接 import `@drts/contracts` 的 runtime 值，加载时炸在：
+`tenant-invitation-delivery-status.test.ts`（本次首次执行验证，10→13 顆全部含在上表 13 tests 内）覆盖：`createTenantUser` 真正送达后才标 `delivered`、旧（已使用）token 拒绝重放、已接受的 invitation 拒绝 resend、provider 不可用时标 `delivery_failed` 且后续 resend 能真正送达、resend 会撤销前一笔未接受的 invitation、过期 token 即使曾经真实送达也被拒绝——round 1 文档中「未经执行验证，等其他任务修复 zod 缺口后需重新执行」的待办，本 round 已完成。
 
-```
-Error: Cannot find package 'zod' imported from packages/contracts/src/unattended-voice.ts
-```
-
-`packages/contracts/src/unattended-voice.ts`（同样是 `UV-EXEC-001` 加入）直接 `import { z } from "zod"`，但 `pnpm-lock.yaml` 里 `packages/contracts: {}` 完全没有声明任何 dependency，`apps/api`／根 `package.json` 也都没有声明 `zod`；这是整个 workspace 的 phantom-dependency 缺口，不是本 worktree node_modules 没装齐。用完全不相关、修复前就存在的 `tests/unit/tenant-partner-foundation.test.ts` 重现同一个错误可以证实：这与 SR-MAIL-001 的改动无关，是既有、跨任务共用的缺陷，修复需要改 `packages/contracts/package.json`（不在本任务 write_scopes 内，未经 supervisor 扩 scope 不能碰）。
-
-第一个 test file（`tenant-invitation-delivery.service.test.ts`）不透过 `TenantPartnerService`／`@drts/contracts`，因此不受影响，10 个测试全部执行并通过，覆盖：真正送达并回报 `sent`＋`providerMessageId`＋token 只出现在 transport payload、进程重启后的幂等重试不重新调用 transport、幂等 key 按 tenant 隔离、provider 未设定时回报 `unavailable`／默认建构子回报 `unavailable`、provider 永久拒绝回报 `failed` 且停止重试、无效收件地址回报有界 error code 且不调用 transport、任意例外内容（含 raw token）不会外泄进 delivery record、`listDeliveries()` 回传的是拷贝且最新在前。
-
-`tenant-invitation-delivery-status.test.ts`（写好但本 session 无法执行）额外覆盖：`createTenantUser` 真正送达后才标 `delivered`、旧（已使用）token 拒绝重放、已接受的 invitation 拒绝 resend、provider 不可用时标 `delivery_failed` 且后续 resend 能真正送达、resend 会撤销前一笔未接受的 invitation、过期 token 即使曾经真实送达也被拒绝。这些行为已经透过静态比对 `NotificationDeliveryService.enqueue/dispatch`（`apps/api/src/modules/notification-delivery/notification-delivery.service.ts`）与 `TenantPartnerService.acceptTenantInvitation/resendTenantInvitation/issueTenantInvitation` 的实际实作确认逻辑一致，但**未经执行验证**；等 `packages/contracts` 的 zod 缺口由其他任务修复後，需要重新执行本档案作为回归证据。
+`tenant-invitation-delivery.service.test.ts`（10 tests，round 1／round 2 均通过）覆盖：真正送达并回报 `sent`＋`providerMessageId`＋token 只出现在 transport payload、进程重启后的幂等重试不重新调用 transport、幂等 key 按 tenant 隔离、provider 未设定时回报 `unavailable`／默认建构子回报 `unavailable`、provider 永久拒绝回报 `failed` 且停止重试、无效收件地址回报有界 error code 且不调用 transport、任意例外内容（含 raw token）不会外泄进 delivery record、`listDeliveries()` 回传的是拷贝且最新在前。
 
 ## 未做的 live／真机部分
 
@@ -71,8 +63,8 @@ Error: Cannot find package 'zod' imported from packages/contracts/src/unattended
 
 ```bash
 CANDIDATE_SHA=$(git rev-parse HEAD) CANDIDATE_BRANCH=$(git branch --show-current) \
-AI_NAME=Claude /home/lupin/drts-fleet-platform/.artifacts/releases/orchestrator-99f7e0e56/tools/development-orchestrator/bin/ai-status.sh \
+AI_NAME=Claude /home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh \
   handoff SR-MAIL-001 Claude2 "见本文件与 candidate diff"
 ```
 
-精确 candidate SHA、branch、reviewer 与 state 以同一 release 的 `ai-status.sh show SR-MAIL-001` 读回。独立 review、同 candidate CI／merge 及 required_acceptance 完备后才可结案；reviewer 应重点确认：(1) `apps/api` typecheck 的 13 个既有错误确实与本次改动的 3 个档案无关；(2) 第二个 test file 因 `packages/contracts` 缺 `zod` 声明而无法执行，是否已有其他任务在处理该缺口。
+精确 candidate SHA、branch、reviewer 与 state 以 `ai-status.sh show SR-MAIL-001` 读回。独立 review、同 candidate CI／merge 及 required_acceptance 完备后才可结案；round 1 记录的两个既有缺口（typecheck 语音功能线错误、`packages/contracts` 缺 `zod`）已在 round 2 base 上确认修复，reviewer 应重点确认：(1) rebase 后 diff 仍只有预期 3 个档案、无额外改动混入；(2) `tenant-invitation-delivery-status.test.ts` 的 13 test 全绿是本次首次真正执行的结果，覆盖 acceptance 中「舊／撤銷／過期token拒絕」與「provider失败/重启/重复send可恢復且不假delivered」两项。
