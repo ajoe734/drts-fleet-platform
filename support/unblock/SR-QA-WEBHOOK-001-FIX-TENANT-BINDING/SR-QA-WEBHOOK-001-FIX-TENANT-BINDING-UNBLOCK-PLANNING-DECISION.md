@@ -38,8 +38,10 @@ PR or its approval alone must not resume implementation.
 - Parent machine truth attributes a narrow-module HTTP leak to source commit
   `6b9de8287abb48e5770524c3addf5e5e41f8f663`, based on
   `e2df37f821ce76d8a3639ceaac6d253299c0a31c`, and references
-  `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-auth-http.json`.
-  The referenced UAT report is absent from this integration checkout. Those
+  the historical HTTP evidence location in the parent's `evidence_refs` field
+  (filename `evidence-auth-http.json`). Retrieve it from the source commit
+  before reproducing; it is absent from this integration checkout, as is the
+  referenced UAT report. Those
   results are inherited task evidence, not rerun or independently verified here.
 
 ## Concrete follow-up and proposed scopes
@@ -95,3 +97,11 @@ paths. Runtime security tests belong to the authorized repair and were not run
 by this helper. Task-scoped commit, pushed branch and PR are recorded through
 the helper's candidate handoff. Keep parent status blocked/waiting for Claude
 until the explicit resume gate above is satisfied.
+
+PR #1810's original canonical-consistency failure identified the absent
+historical HTTP evidence as a live repository-path citation. The reference above
+now points to the parent machine-truth field and source commit, explicitly
+recording that retrieval is required. No replacement security evidence was
+created. Revalidation uses
+`python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`
+after committing this correction, alongside `git diff --check`.
