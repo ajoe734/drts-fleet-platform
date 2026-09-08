@@ -712,3 +712,12 @@ describe("UV-EXEC-014 local confirmation orchestration", () => {
     );
   });
 });
+
+it("UV-EXEC-014 blocks an unapplied tail from a newer media epoch", async () => {
+  const h = await harness();
+  const applied = h.session.lastAppliedControlSequence;
+  const newer = h.event("speech_start");
+  newer.mediaEpoch = 2;
+  h.session.lastAppliedControlSequence = applied;
+  await expect(h.accept()).rejects.toThrow();
+});
