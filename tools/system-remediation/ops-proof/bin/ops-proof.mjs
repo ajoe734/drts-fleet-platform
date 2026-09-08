@@ -3,7 +3,7 @@
 /**
  * Operations Proof CLI Runner
  * Task: SR-OPS-PROOF-001
- * 
+ *
  * Verifiable verification tool for:
  * 1. Isolated Snapshot Restore & Tri-Domain Reconciliation (Trips, Billing, Audit) [C122]
  * 2. Multi-Family Load Capacity & Raw Latency/Error Verification (Booking, Dispatch, Report) [C123]

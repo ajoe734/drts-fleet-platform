@@ -1,9 +1,9 @@
 /**
  * Workload Baseline Contracts
- * 
+ *
  * Canonical non-functional planning baselines strictly cited from:
  * docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md
- * 
+ *
  * Acceptance criteria: "負載包含booking/dispatch/report三種；閾值來自已確認基準且輸出原始延遲與錯誤。"
  * Rule: "沿runbook與現行SLO，RPO/RTO不自行發明。"
  */

@@ -1,11 +1,11 @@
 /**
  * Snapshot Schema & Canonical Data Model
- * 
+ *
  * Defines snapshot representation across Trips (行程), Billing (帳務), and Audit (稽核).
  * Acceptance criteria: "同一snapshot可在隔離DB還原並校核行程/帳務/audit，工具不碰正式DB。"
  */
 
-import crypto from "node:crypto";
+import { createHash } from "node:crypto";
 
 // --- Trips Domain (行程) ---
 export interface OpsOrderRecord {
@@ -222,7 +222,7 @@ export function calculateSnapshotChecksum(
     billing,
     audit,
   });
-  return crypto.createHash("sha256").update(payloadString).digest("hex");
+  return createHash("sha256").update(payloadString).digest("hex");
 }
 
 /**
@@ -236,7 +236,7 @@ export function calculateAuditLogHash(
   created_at: string,
 ): string {
   const content = `${actor_id}:${module_name}:${action_name}:${resource_id}:${created_at}`;
-  return crypto.createHash("sha256").update(content).digest("hex");
+  return createHash("sha256").update(content).digest("hex");
 }
 
 /**
@@ -554,7 +554,7 @@ export function generateCanonicalReferenceSnapshot(options?: {
       event_type: "assignment_offered",
       event_time: "2026-09-06T09:36:00.000Z",
       source_channel: "auto_dispatcher",
-      payload_hash: crypto.createHash("sha256").update("asg-001:offered").digest("hex"),
+      payload_hash: createHash("sha256").update("asg-001:offered").digest("hex"),
     },
     {
       trace_id: "trc-002",
@@ -564,7 +564,7 @@ export function generateCanonicalReferenceSnapshot(options?: {
       event_type: "trip_completed",
       event_time: "2026-09-06T10:30:00.000Z",
       source_channel: "driver_app_api",
-      payload_hash: crypto.createHash("sha256").update("trp-001:completed").digest("hex"),
+      payload_hash: createHash("sha256").update("trp-001:completed").digest("hex"),
     },
     {
       trace_id: "trc-003",
@@ -574,7 +574,7 @@ export function generateCanonicalReferenceSnapshot(options?: {
       event_type: "trip_completed",
       event_time: "2026-09-06T11:45:00.000Z",
       source_channel: "driver_app_api",
-      payload_hash: crypto.createHash("sha256").update("trp-002:completed").digest("hex"),
+      payload_hash: createHash("sha256").update("trp-002:completed").digest("hex"),
     },
   ];
 

@@ -1,6 +1,6 @@
 /**
  * Ops Proof Runner
- * 
+ *
  * Orchestrates verification for Task SR-OPS-PROOF-001:
  * - Capability C122: Snapshot restore & tri-domain reconciliation (Trips, Billing, Audit)
  * - Capability C123: Multi-family load capacity & raw latency/error verification (Booking, Dispatch, Report)

@@ -1,13 +1,13 @@
 /**
  * Database Safety Guard
- * 
+ *
  * Strict safety guardrails ensuring operations proof tools NEVER touch production databases.
  * Acceptance criteria: "同一snapshot可在隔離DB還原並校核行程/帳務/audit，工具不碰正式DB。"
  */
 
 export class ProductionDatabaseAccessDeniedError extends Error {
   public readonly code = "PRODUCTION_DB_TOUCH_PROHIBITED";
-  public readonly targetUrl?: string;
+  public readonly targetUrl?: string | undefined;
   constructor(message: string, targetUrl?: string) {
     super(`[PRODUCTION_DB_TOUCH_PROHIBITED] ${message}`);
     this.name = "ProductionDatabaseAccessDeniedError";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
-import path from "node:path";
+import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -433,7 +433,7 @@ describe("SR-OPS-PROOF-001: 備份還原／容量／背景部署可驗證方案"
       const result = await generator.runBookingLoad({ sampleCount: 10, simulateFaultRate: 1.0 });
 
       expect(result.rawErrors.length).toBe(10);
-      expect(result.rawErrors[0].code).toBe("ERR_INTAKE_FAILED");
+      expect(result.rawErrors[0]?.code).toBe("ERR_INTAKE_FAILED");
       expect(result.errorRatePct).toBe(100);
       expect(result.sloEvaluation.availabilityCompliant).toBe(false);
       expect(result.sloEvaluation.allPassed).toBe(false);

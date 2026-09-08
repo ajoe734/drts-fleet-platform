@@ -1,6 +1,6 @@
 /**
  * Ops Reconciliation Engine
- * 
+ *
  * Performs comprehensive verification across Trips (行程), Billing (帳務), and Audit (稽核) domains.
  * Acceptance criteria: "同一snapshot可在隔離DB還原並校核行程/帳務/audit，工具不碰正式DB。"
  */

@@ -1,6 +1,6 @@
 /**
  * Deployment & Rollback Verification Harness
- * 
+ *
  * Verifies deployment version, service health, and rollback drill protocols.
  * References:
  * - docs/03-runbooks/production-deploy-rail-spec-20260519.md

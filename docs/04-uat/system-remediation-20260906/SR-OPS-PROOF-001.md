@@ -4,7 +4,7 @@
 | ------------- | ------------------------------------------------------------------------------ |
 | Task spec     | `docs/03-runbooks/system-remediation-20260906/SR-OPS-PROOF-001.md`               |
 | Owner         | Gemini                                                                         |
-| Reviewer      | Claude                                                                         |
+| Reviewer      | Codex2                                                                         |
 | Base SHA      | `40ba315e4114369eaa7e12d35aae83a795c97b1d` (= `origin/dev` tip at task start)  |
 | Candidate SHA | recorded at `handoff` via `git rev-parse HEAD` (see task board)                |
 | Resource ID   | `iso-db-res-001`                                                               |
@@ -100,7 +100,7 @@
 | **同一snapshot可在隔離DB還原並校核行程/帳務/audit，工具不碰正式DB** | `assertIsolatedDatabase` 嚴格阻擋生產連線（拋出 `PRODUCTION_DB_TOUCH_PROHIBITED`）；`IsolatedSnapshotRestoreEngine` 在隔離儲存成功還原；`OpsReconciliationEngine` 完整校核訂單-行程關聯、發票-明細與司機淨額算術、稽核 SHA-256 防篡改雜湊。單元測試與 CLI 驗證全數通過。 |
 | **負載包含booking/dispatch/report三種；閾值來自已確認基準且輸出原始延遲與錯誤** | 閾值嚴格源自 `docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md`（Booking p95≤2s、Dispatch p95≤10s、Report p95≤3s）。`LoadGenerator` 輸出每一筆 `rawLatencies` 與 `rawErrors`，並計算 p50/p90/p95/p99 統計量。 |
 | **證據包含 base/candidate SHA、實際指令結果與資源 ID；未做的 live／真機部分明列，不冒充成功** | 記錄 Base SHA（`40ba315e4114369eaa7e12d35aae83a795c97b1d`）、Resource ID（`iso-db-res-001`）；實際執行輸出與指令詳列於第 4 節；第 5 節明列真機雲端還原與線上壓測屬於 `SR-LIVE-OPS-001`，且 RPO/RTO 正式權威值標明待確認，不冒充成功。 |
-| **先 commit＋普通 push，再 handoff；owner 不直接 done，獨立 reviewer、同 candidate CI／merge及 required_acceptance 完備才可結案** | 依循工作流執行 task-scoped anchor commit，透過普通 push 推送至 `gemini/sr-ops-proof-001`，呼叫 `ai-status.sh handoff SR-OPS-PROOF-001 Claude`，不直接呼叫 `done`。 |
+| **先 commit＋普通 push，再 handoff；owner 不直接 done，獨立 reviewer、同 candidate CI／merge及 required_acceptance 完備才可結案** | 依循工作流執行 task-scoped anchor commit，透過普通 push 推送至 `gemini/sr-ops-proof-001`，呼叫 `ai-status.sh handoff SR-OPS-PROOF-001 Codex2`，不直接呼叫 `done`。 |
 
 ## 4. 實際指令與結果
 
@@ -114,14 +114,14 @@ $ git diff --check
 ### B. 單元與整合測試套件
 
 ```bash
-$ node /home/lupin/drts-fleet-platform/node_modules/.pnpm/vitest@4.1.4_@types+node@24.12.2_vite@8.0.11_@types+node@24.12.2_esbuild@0.27.7_jiti@2._561c481093c389f7659e44b5ed90ab72/node_modules/vitest/vitest.mjs run tests/unit/system-remediation/sr-ops-proof-001/
+$ pnpm vitest run tests/unit/system-remediation/sr-ops-proof-001/
 
- RUN  v4.1.4 /home/lupin/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-proof-001
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-proof-001
 
  Test Files  1 passed (1)
       Tests  32 passed (32)
-   Start at  14:58:57
-   Duration  737ms
+   Start at  12:16:41
+   Duration  520ms
 (exit 0，32 項單元與整合測試全數通過)
 ```
 

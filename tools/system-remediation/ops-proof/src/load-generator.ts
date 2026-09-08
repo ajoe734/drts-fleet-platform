@@ -1,6 +1,6 @@
 /**
  * Multi-Family Load Generator & SLO Evaluator
- * 
+ *
  * Executes representative load testing across Booking, Dispatch, and Reporting families.
  * Acceptance criteria: "負載包含booking/dispatch/report三種；閾值來自已確認基準且輸出原始延遲與錯誤。"
  */
@@ -41,7 +41,7 @@ export interface FamilyLoadTestResult {
   statistics: LatencyStatistics;
   sloEvaluation: {
     p95Compliant: boolean;
-    p99Compliant?: boolean;
+    p99Compliant?: boolean | undefined;
     availabilityCompliant: boolean;
     allPassed: boolean;
     breaches: string[];
@@ -84,13 +84,13 @@ export function calculatePercentiles(latencies: number[]): LatencyStatistics {
 
   const getPercentile = (p: number): number => {
     const index = Math.ceil((p / 100) * count) - 1;
-    return sorted[Math.max(0, Math.min(index, count - 1))];
+    return sorted[Math.max(0, Math.min(index, count - 1))] ?? 0;
   };
 
   return {
     count,
-    minMs: Math.round(sorted[0] * 100) / 100,
-    maxMs: Math.round(sorted[count - 1] * 100) / 100,
+    minMs: Math.round((sorted[0] ?? 0) * 100) / 100,
+    maxMs: Math.round((sorted[count - 1] ?? 0) * 100) / 100,
     meanMs: Math.round((sum / count) * 100) / 100,
     p50Ms: Math.round(getPercentile(50) * 100) / 100,
     p90Ms: Math.round(getPercentile(90) * 100) / 100,
