@@ -1,5 +1,28 @@
 # SR-ENV-COPY-001 — partial implementation and scope blocker
 
+## Follow-up dispatch, 2026-09-08 18:05 UTC — operations copy progress
+
+- Fetched current `origin/dev`: `a44ea852eabe0c88e54d8124802eccf86ebc1dc6`. Starting branch HEAD: `b823805460adf6a2c0e68cbe422456fb160e07ad`. Tested implementation anchor: `74fda39773e123fd70ab49d7602ff6d3aeda7a80`. Candidate SHA: none; acceptance remains incomplete. The subsequent evidence anchor is recorded in canonical status.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1 replaying duplicate `13bce75ab`, with add/add conflicts in the evidence, runtime resolver and scoped test. `git rebase --abort`: exit 0, original clean HEAD restored. Changes below are on the preserved task branch, not a completed rebase or a current-dev candidate.
+- Read the merged history-repair document, execution rules, R27/C110, realm tokens and Ops Console canvas. The helper explicitly requires supervisor replacement routing; current dispatch still specifies the old branch/worktree. Runtime shell/deployment scopes and dependencies remain absent.
+- Changed 25 operations translation values in both languages: action availability, assistant next steps, dispatch read-only/empty guidance, flag labels and risk confirmation guidance. No visual/layout changes. An executed `python3` catalog comparison against `git show b82380546:apps/ops-console-web/lib/translations.ts` exited 0: all 7,660 parsed keys and interpolation parameters preserved; no ActionIntent, availableActions or EmptyReason in either locale's display values. Other engineering copy and other catalogs still require cleanup; this is not full render acceptance.
+- Current-base reproduction: `git show origin/dev:apps/fleet-partner-portal-web/components/fleet-portal-shell.tsx | rg -n 'env='` and `git show origin/dev:apps/bank-console-web/lib/navigation.ts | rg -n BANK_CONSOLE_ENV` each exited 0; fleet line 36 still hardcodes production and bank line 8 still hardcodes preview.
+
+| Actual command on implementation anchor | Exit | Result |
+| --- | --- | --- |
+| `git diff --check` | 0 | clean |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/sr-env-copy-001.test.ts` | 0 | 7 passed |
+| `pnpm --filter @drts/ui-web exec vitest run tests/unit/environment-badge.test.ts` | 1 | 5 passed, 1 failed: line 32 expects production for NODE_ENV alone, actual unknown; file outside write scopes |
+| `pnpm --filter @drts/bank-console-web typecheck` | 0 | passed |
+| `pnpm --filter @drts/enterprise-dispatch-web typecheck` | 0 | passed |
+| `pnpm --filter @drts/fleet-partner-portal-web typecheck` | 0 | passed |
+| `pnpm --filter @drts/ops-console-web typecheck` | 0 | passed |
+| `pnpm --filter @drts/platform-admin-web typecheck` | 0 | passed |
+| `pnpm --filter @drts/tenant-console-web typecheck` | 0 | passed |
+| `git push -u origin codex/sr-env-copy-001` | 0 | ordinary push b82380546..74fda3977 |
+
+Resources: task SR-ENV-COPY-001, finding R27, capability C110, helper SR-ENV-COPY-001-UNBLOCK-HISTORY-REPAIR, existing PR #1738 (not remotely revalidated). No business resources created or modified. Browser/live/device checks, fresh candidate CI, independent review, merge and deployment were not performed. No completion handoff. Supervisor must route the reviewed recovery branch and authorize runtime integration plus legacy test handling before full acceptance can proceed.
+
 ## Follow-up dispatch, 2026-09-08 — runtime producer inventory
 
 - Inspected fresh `origin/dev` base: `fa0fd8257950764526a522d091be9d97effa82b9`; preserved task HEAD: `cefd09c27c1b1aa339f1f11d2726d81aa8b8eda6`. No acceptance candidate. Evidence anchor SHA is recorded in canonical task status after ordinary push.
