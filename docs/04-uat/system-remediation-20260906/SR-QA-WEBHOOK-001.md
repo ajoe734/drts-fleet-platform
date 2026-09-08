@@ -1,169 +1,96 @@
-# SR-QA-WEBHOOK-001 — API keys／Webhook簽章與故障恢复驗收：完成證據
+# SR-QA-WEBHOOK-001 — 驗收進度（本地驗收完備，準備交接 Review）
 
-- Task: `SR-QA-WEBHOOK-001`
-- Title: API keys／Webhook簽章與故障恢复驗收
-- Status: `review` (ready for handoff)
-- Owner: `Gemini`
-- Reviewer: `Codex2`
-- Base SHA (`origin/dev`): `3b60a3757238663572f16f010c94f446f2c71eaa`
-- Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-qa-webhook-001`
-- Branch: `gemini/sr-qa-webhook-001`
-- Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json` (C111, C112, C113, C114, C115)
-- Task Spec: `docs/03-runbooks/system-remediation-20260906/SR-QA-WEBHOOK-001.md`
+本文件記錄 SR-QA-WEBHOOK-001 API keys／Webhook 簽章與故障恢復驗收進度。Owner: Gemini；Reviewer: Codex2。
 
----
+## 2026-09-08 15:56 UTC Gemini 接手驗證與收尾（最新）
 
-## 1. 問題根因與能力盤點（Fix 前與驗收缺口分析）
+本節記錄最新以當前 `origin/dev` 為 base 的完整可重跑驗收與端到端證據：
 
-本驗收任務針對 2026-09-06 UAT 觀察與 134 能力盤點中整合與自動化領域的核心能力（C111, C112, C113, C114, C115）進行全生命週期可重跑驗收：
+- **Base SHA (`origin/dev`)**: `f372e4a6a0dd16204ccbd660f23013601357c224`。分支透過 merge `origin/gemini/sr-qa-webhook-001` 保留已發布歷史，使 remote branch 保持 fast-forward 可推狀態。
+- **全套測試執行與結果**:
+  - `git diff --check` → exit 0（無空白錯誤或 conflict markers）。
+  - `pnpm exec vitest run tests/unit/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.test.ts` → exit 0，24 passed，涵蓋 C111–C115 本機 regression，包括真 HTTP receiver HMAC-SHA256 驗簽（`x-drts-webhook-signature`）、200 交付、503 退避重試、socket 異常斷線、4xx 非重試停用、密鑰輪替版本遷移與測試注入 deadline 超時。
+  - `bash tests/unit/system-remediation/sr-qa-webhook-001/run-postgres.sh` → exit 0，3 passed（耗時 ~65s）：
+    - 建立隔離暫存 DB（複製本機 PostgreSQL schema，測試後自動 drop）。
+    - 驗證 C111 API Key 寫入後 DB 回讀，確認 `keyHash` SHA-256 儲存、無 plaintext、前綴/後綴遮罩及輪替/撤銷狀態機。
+    - 驗證 C112 Webhook delivery 寫入後 DB 回讀、重啟服務實例後自動 retry 送達、HMAC 驗證與 outbox key 去重。
+    - 驗證真實 OS 子程序寫入 PostgreSQL queued delivery 後遭父程序 `SIGKILL` 終止，新 OS 子程序獨立啟動並於 ~30s 自然 retry timer 觸發下成功送達受控 HTTP receiver，完成狀態推進與 DB 重讀核對。
+  - `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 0，5 passed（1.4m）。真實資源 ID 記錄於 `evidence-sr-qa-webhook-001.json` 與 `evidence-postgres.json`。
+  - `DRTS_WEBHOOK_LIVE=1 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 1，1 failed / 4 passed（fail closed：缺 live 外部憑證時非零退出，不 skip 冒充成功），產物寫入 `evidence-live-unavailable.json`。
+  - `pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/*.ts tests/e2e/system-remediation/sr-qa-webhook-001/*.ts --max-warnings=0` → exit 0。
+- **邊界與限制誠實宣告**:
+  - 本次任務限定於 `write_scopes`，未修改產品業務代碼、全域設定或 UI。
+  - C111 部署環境 authenticated API 最小權限/配額、C113 實體 ERP/SSO/銀行專線、C114 真機 GPS 與 Google Maps 付費配額、C115 電信業者 SIP Trunking 與 Cloud Run 排程器屬外部 live 門禁，依規定誠實記錄為環境限制，不偽造假成功。
 
-1. **C111: 租戶技術管理員 — API keys、輪替、撤銷與密鑰遮罩**
-   - **歷史現狀與缺口**: 租戶 API Key 與治理策略雖然已實作，但缺乏對最小 scope、相容別名正規化、預設 60 天到期、90 天上限約束、輪替雙重疊窗（`overlap_active`）、重疊期滿自動撤銷（`auto_revoked` / `rotation_overlap_elapsed`）、手動即時撤銷（`manual_revoke`）以及資料庫遮罩防護（庫存僅保留 SHA-256 `keyHash`，讀取遮罩 `keyPrefix` 前 12 碼與 `maskedSuffix` 後 4 碼）的端到端檢驗。
-   - **驗收策略**: 透過寫入後重新讀取 DB/服務狀態，驗證從發行、輪替、過期至撤銷的狀態機閉環。
+## 2026-09-08 15:39 UTC OS process 恢復續驗（歷史）
 
-2. **C112: Webhook 接收平臺 — 簽章、重試、停用、回放與密鑰輪替**
-   - **歷史現狀與缺口**: 過去僅依賴單元測試 mock 介面，未建立「真機受控本機 HTTP 接收器（Controlled Local HTTP Receiver）」。不能把存在 interface 當作驗收完成。
-   - **驗收策略**: 透過動態隨機埠本機 `http.Server` 作為受控接收端，對真實 HTTP POST 請求進行位元組層級 HMAC-SHA256 驗簽（`x-drts-webhook-signature` 格式 `v=<ver>;t=<timestamp>;sig=<hex>`）、200 晉升驗證、503 指數退避計算、網路中斷防護、非重試錯誤自動停用（`disabled` 狀態與 `disableReason = "delivery_failed"`）、重放攻擊防護（Timestamp 300s 邊界與 Delivery ID 唯一性）、密鑰輪替（版本推進至 v=2 且歷史記錄排除明文）以及重啟去重。
+本節優先於以下歷史紀錄；仍未 handoff，沒有 lifecycle candidate。
 
-3. **C113: 租戶／外部系統 — ERP／企業 SSO／銀行帳本同步（外部門禁 GATE）**
-   - **驗收與邊界**: 驗證對帳單模型（`SettlementStatementRecord`）結構（`period`、`periodStart`、`periodEnd`、`totals.fareTotal`）、資料提取與無效期別防護。誠實申報實體銀行專線（H2H MPLS）與企業 SSO（SAML 2.0 / Azure AD）為外部門禁，不冒充已連線真機。
+- 本輪 fetch 時 `origin/dev`：`40c231ba6718dbf7a7ee6662e446d44e48eabcb3`。一般 rebase 及指定舊 base 的 rebase 均重播重複歷史，造成 task 檔 add/add 衝突；均已 abort，改以 merge 整合 dev 並保留已發布歷史，普通 push 成功。沒有採用衝突中的歷史假驗收版本。
+- 執行 SHA：`b7f046ea1cd1f7f562782c794fe769161355e70e`。其他 worker 的 fetch 會推進共用 `origin/dev` ref，因此 runner 改用 `git merge-base HEAD origin/dev` 記錄已納入的 base；本輪三份證據均使用 `40c231ba…`，不把遠端前進當成已測版本。
+- 新增獨立 Vitest 子程序：writer 用真服務寫 PostgreSQL queued delivery，父程序觀察持久化完成後對該 process group 發送 `SIGKILL`，確認退出 signal；另一個 OS process 初始化真服務，等待原始約 30 秒 retry timer 自動送達。沒有手動 retry、改 DB deadline 或 fake timer。
+- recovery 程序回讀同一 tenant/webhook/delivery 關聯，重送同一 outbox key 回傳同一 delivery，DB 同 ID 只有一筆；受控 receiver 共收到 3 次 HTTP（test 200、event 503、retry 200），核對實際 bytes/HMAC 及 payload delivery ID。
+- 真實資源：webhook `wh_86d657ff-4cf3-4e40-bbbd-d74521f3dcc5`、delivery `wd_6efe5509-dfbb-4ee6-ac27-37d0cf7bdda2`；writer PID `2564273`、recovery PID `2564529`。完整 tenant/outbox ID 在 `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-postgres.json`。
+- `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 0，5 passed / 1.4m；包含原 24 個本機 regression、3 個 PostgreSQL 案例（含兩個子程序）及 4 個 shared harness 案例。這不是部署環境驗收。
+- `DRTS_WEBHOOK_LIVE=1 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 1，1 failed / 4 passed，1.3s；缺外部證據即失敗，另存 `evidence-live-unavailable.json`。
+- `pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/*.ts tests/e2e/system-remediation/sr-qa-webhook-001/*.ts --max-warnings=0` → exit 0；`git diff --check` → exit 0。最初 lint 發現 finally 直接 throw，已抽成 cleanup helper 並在上述執行 SHA 重驗。
 
-4. **C114: 地圖／定位資料提供者 — 真地圖、地理編碼、路由／ETA（外部門禁 MAP,GATE）**
-   - **驗收與邊界**: 驗證地理編碼解析（台灣核心座標經緯度邊界約束）與無效輸入錯誤防護。誠實申報正式 Google Maps Platform 臺灣配額憑證與車載 GPS 硬體為外部門禁。
+本輪只修改 task 測試與證據；沒有改產品、共用設定或 UI。仍待 C111 authenticated API 最小權限與使用量、C112 預設傳輸 deadline／完整 replay 接收策略；C113 sandbox、C114 真 provider、C115 部署排程及告警回執需 supervisor 協調。OS process 中斷恢復已補證據，主機 reboot／部署重啟沒有驗證；不將本機程序測試等同主機驗收。
 
-5. **C115: 錄音與證照保存作業 — 背景補件、到期掃描與告警回執（驗收缺口）**
-   - **驗收與邊界**: 驗證電話叫車進件錄音回調狀態機（`callStarted` -> `recordingPending` -> `recordingReady` 促使訂單由 `recording_pending` 推進至 `ready_for_dispatch`；`recordingFailed` 促使標記為 `recording_missing`）。誠實申報電信業者實體 SIP Trunking 語音線路與 Cloud Run 持久定時排程器為環境限制。
+## 2026-09-08 15:26 UTC 整合入口續驗（歷史）
 
----
+以下更新優先於下方歷史紀錄中的「尚未建立 DB 資料集」及 C111/C112 DB 待驗項目。
 
-## 2. 驗收架構與測試設計
+- fetch 後 base `origin/dev`：`c4c4a35f88907df6bf68e781059dde397c06ba03`，已是本分支祖先，無需再次 rebase。
+- 執行 HEAD：`aa6f9295a32da6c8c1fea8d65f5d2c80c7bcfaee`；尚無 lifecycle candidate。本輪後續只分開 live 失敗 artifact 路徑及更新證據，沒有修改產品碼。
+- `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 0，5 passed，50.4s；本 task wrapper 48.6s，包含 24 個本機 regression 與 2 個 PostgreSQL 案例，其餘 4 個為 shared harness。
+- DB runner `bash tests/unit/system-remediation/sr-qa-webhook-001/run-postgres.sh` 由 wrapper 實際執行。從本機 DB 複製 schema 到獨立暫存 DB，結束後 drop；沒有寫入來源 DB。獨立執行時可設定 `DRTS_WEBHOOK_DB_EVIDENCE` 指定 JSON 輸出路徑。
+- C111：SQL 回讀兩筆 key、確認無 plaintext、輪替關聯正確；重新初始化後 overlap 狀態存在；撤銷持久化後再次初始化仍 revoked，拒絕再 rotate。
+- C112：受控 HTTP 503 產生 queued delivery；重新初始化 service 後真實約 30 秒 backoff 自動送達，DB 回讀 delivered；接收 bytes/HMAC 相符且竄改不符；相同 outbox key 再發布不新增送達。這是 service instance 恢復，尚非 OS process 重啟。
+- 完整資源 ID：`tests/e2e/system-remediation/sr-qa-webhook-001/evidence-postgres.json`。例如 webhook `wh_c04b755d-02cf-4502-b612-964ebb8c0379`、delivery `wd_06cbe21a-4c5a-4bdb-a714-97aa6b26de46`，接收器共收到 3 次 HTTP。
+- 修正 artifact 路徑後執行 `DRTS_WEBHOOK_LIVE=1 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 1，1 failed / 4 passed，2.3s；缺 live 證據明確失敗，成功 artifact 保留，失敗另寫 `evidence-live-unavailable.json`。
+- `pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/*.ts tests/e2e/system-remediation/sr-qa-webhook-001/*.ts --max-warnings=0` → exit 0；`git diff --check` → exit 0。
 
-```mermaid
-flowchart TD
-    subgraph Webhook_Delivery_Lifecycle [C112 Webhook 送達與故障恢復驗收]
-        WH_CREATE[1. 建立 Webhook 端點] -->|初始狀態: test_pending| WH_PENDING[test_pending]
-        WH_PENDING -->|發送 tenant.webhook.test| WH_DISPATCH[WebhookDispatchService 真 HTTP POST]
-        WH_DISPATCH -->|帶簽章 v=1;t=...;sig=...| HTTP_RECEIVER[本機受控 HTTP 接收器 127.0.0.1:port]
-        
-        HTTP_RECEIVER -->|驗證 HMAC-SHA256 成功並回傳 200 OK| WH_ACTIVATE[2. 晉升狀態: active, 更新 lastDeliveredAt]
-        HTTP_RECEIVER -->|回傳 503 Service Unavailable| WH_BACKOFF[3. 指數退避排程: queued, attempt+1, delay=30s]
-        HTTP_RECEIVER -->|回傳 400 或超過重試上限| WH_DISABLE[4. 自動停用: disabled, disableReason: delivery_failed]
-        
-        WH_ACTIVATE -->|呼叫 rotateWebhookSecret| WH_ROTATE[5. 密鑰輪替: v=2, 狀態回退 test_pending]
-        WH_ROTATE -->|以新密鑰驗簽通過 / 舊密鑰失效| WH_V2_DELIVERY[v=2 簽章交付驗證]
-    end
+尚缺 C111 authenticated API 最小權限、使用量；C112 OS process 重啟、產品預設 deadline 及完整 replay 接收端策略；C113 ERP/SSO/bank sandbox；C114 真 provider；C115 部署排程、積壓、重啟補跑與告警回執。後三項需 supervisor 協調外部環境與證據；本地測試成功不能取代這些驗收，仍維持 in_progress，不 handoff。
 
-    subgraph API_Key_Governance [C111 租戶 API Key 治理驗收]
-        AK_ISSUE[發行 API Key] -->|最小 scope, 預設 60 天, 上限 90 天| AK_ACTIVE[狀態: active, 明文只回傳一次]
-        AK_ACTIVE -->|密鑰遮罩| AK_MASK[keyPrefix: 12碼 / maskedSuffix: ****xxxx / 庫存只留 SHA-256 keyHash]
-        AK_ACTIVE -->|呼叫 rotateApiKey| AK_OVERLAP[舊 Key 進入 overlap_active 雙重疊窗]
-        AK_OVERLAP -->|重疊期滿| AK_AUTO_REVOKE[舊 Key 自動撤銷: auto_revoked]
-        AK_ACTIVE -->|呼叫 revokeApiKey| AK_REVOKED[即刻撤銷: revoked, 拒絕旋轉 409]
-    end
-```
+## 基準與追溯
 
----
+- 2026-09-08 dispatch 起始 origin/dev：`3b60a3757238663572f16f010c94f446f2c71eaa`。
+- 本次測試程式 anchor：`f08c8bc94e491cf3c90c5c6f50331ab2d01b7574`；後續修改僅 runner import 和證據文件。此 SHA 是測試時 HEAD，尚非 lifecycle candidate。
+- 最終 progress commit 可由 `git log -1 --format=%H -- docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md` 取得；未鎖定 candidate，不能把本次證據當成同 candidate CI。
+- 已依指示 fetch/rebase origin/dev；merge 已發布的 task 分支歷史以保留普通 non-force push 能力，沒有回退產品碼。
+- 權威來源：`docs/03-runbooks/system-remediation-execution-tasks-20260906.md`、task spec、`source/capabilities.json` C111–C115；API 語義見 `phase1_service_contracts_v1.md` tenant governance / delivery contracts。9/6 audit 是歷史觀察。
 
-## 3. Write Scopes 遵循檢查
+## 實際涵蓋與不足
 
-嚴格遵守任務指派之 3 處可寫入範圍，未修改未指派之共用檔案：
-1. `tests/unit/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.test.ts`（全新單元／整合規格，23 項測試案例）
-2. `tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts`（全新 Playwright E2E 規格，附證據收集器與 SHA 追蹤）
-3. `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-sr-qa-webhook-001.json`（自動化執行所產生之機器證據包）
-4. `docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001.md`（本證據文件）
+| 能力 | 現有本機案例                                                                                                | 仍未驗收                                                                            |
+| ---- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| C111 | issue/list 遮罩、預設到期及上限拒絕、rotation overlap、auto revoke、manual revoke 後拒絕 rotate             | authenticated HTTP API 權限、實際 DB 寫入與回讀、API key 使用量                     |
+| C112 | 真 HTTP bytes/HMAC、200、503/backoff 計算、socket drop、非重試失敗停用、secret rotation、單實例 outbox 去重 | 持久 DB 重啟去重、自動 retry worker 恢復、預設傳輸 deadline、完整 replay 接收端策略 |
+| C113 | fixture ledger 結構與無效期別拒絕，僅 local smoke                                                           | ERP/SSO/bank sandbox、權限、mapping、重送與對帳差異                                 |
+| C114 | MockGeoProvider 座標及空地址拒絕，僅 local smoke                                                            | 真 provider、路由/ETA、配額、斷線與過期位置                                         |
+| C115 | sandbox callback 正常及失敗路徑，僅 local smoke                                                             | 部署排程、積壓、重啟補跑、告警回執                                                  |
 
----
+新增 C112-timeout 使用保持 TCP 連線但不送 headers 的本機接收器，以真 fetch + 測試注入 `AbortSignal.timeout(100)` 觸發逾時；回讀該 webhook 的 delivery，確認 queued 和 nextAttemptAt。這不是假送達，但也不能證明產品預設 fetch 有 deadline。`WebhookDispatchService` 預設未傳 signal；deadline 的產品契約尚需確認，不在本 task 偷改業務碼。
 
-## 4. 驗證指令與執行日誌（附 Exit Code）
+原 23 案全部通過不代表 23 個外部能力成功，其中包含 fixture 和限制宣告。新增後為 24 案。E2E wrapper 現在從執行 stdout 擷取真正產生的 webhook/delivery ID，移除未被服務使用的虛構 tenant namespace 與角色證據；不再只比對固定的 passed 數字。HTTP 送達是在 nested suite 驗證，wrapper 沒有捏造 API transcript。
 
-### 4.1 Git Diff 格式檢查
-```text
-$ git diff --check
-exit code: 0
-```
+## 本次可重跑指令與結果
 
-### 4.2 本次專屬全套單元／整合測試（23/23 通過）
-```text
-$ pnpm exec vitest run tests/unit/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.test.ts
+所有命令在指定 isolated worker cwd 執行。
 
- RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-qa-webhook-001
+| 命令                                                                                                                                                                                   | exit code | 實際結果                                                                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.test.ts`（修改前）                                                                             | 0         | 23 passed，3.25s                                                                       |
+| 同命令（加入真 timeout 後）                                                                                                                                                            | 0         | 24 passed，3.58s                                                                       |
+| `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001`                                                                                               | 0         | 5 passed；只有 1 個是本 task runner，其餘 4 個是 shared harness，不是額外 webhook 案例 |
+| `DRTS_WEBHOOK_LIVE=1 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001`                                                                           | 1         | 1 failed / 4 passed；live 未實作時 fail closed，沒有 skip 後 pass                      |
+| `pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.test.ts tests/e2e/system-remediation/sr-qa-webhook-001/sr-qa-webhook-001.spec.ts --max-warnings=0` | 0         | 無錯誤                                                                                 |
 
- Test Files  1 passed (1)
-      Tests  23 passed (23)
-   Start at  12:55:02
-   Duration  3.08s (transform 1.98s, setup 0ms, import 2.79s, tests 129ms, environment 0ms)
-exit code: 0
-```
+成功執行的 stdout、base/HEAD、資源 ID 見 `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-sr-qa-webhook-001.json`。缺 live 證據的失敗 artifact 另存 `evidence-live-unavailable.json`。local bundle 的 passed 只表示 local regression 命令成功。
 
-### 4.3 Playwright 系統驗收測試（5/5 通過，附受控 HTTP Receiver 與證據落盤）
-```text
-$ pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001
+## 環境與下一步
 
-Running 5 tests using 4 workers
+`docker ps` 確認本機有 drts-postgres / redis / mailpit，因此不宣稱沒有 DB。此 worker 環境未設定 DATABASE_URL、DRTS_API_BASE_URL、DRTS_UAT_API_BASE_URL、GOOGLE_MAPS_API_KEY（僅查是否存在，未輸出秘密）。尚未建立本 task 的持久化隔離資料集與 authenticated API fixture；這是待做工作，不是已證明的產品缺陷。
 
-     1 …olation Verification › handles execution failure with non-zero exit code
-     2 …ntains complete data and namespace isolation between two parallel shards
-     3 …ation › generates role personas and enforces live fakeheaders guardrails
-     4 …evidence with SHA, HTTP/console logs, artifact hashes, and PII redaction
-  ✓  2 …complete data and namespace isolation between two parallel shards (41ms)
-  ✓  1 … Verification › handles execution failure with non-zero exit code (38ms)
-     5 …fault recovery, and API key governance lifecycle with evidence recording
-  ✓  3 … generates role personas and enforces live fakeheaders guardrails (35ms)
-  ✓  4 …e with SHA, HTTP/console logs, artifact hashes, and PII redaction (50ms)
-  ✓  5 …ecovery, and API key governance lifecycle with evidence recording (84ms)
-  5 passed (1.2s)
-exit code: 0
-```
-
-### 4.4 既有 Webhook 派發核心單元測試（2/2 通過）
-```text
-$ pnpm --filter @drts/api exec vitest run tests/unit/webhook-dispatch.service.test.ts
-
- RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-qa-webhook-001/apps/api
-
- Test Files  1 passed (1)
-      Tests  2 passed (2)
-   Start at  12:55:12
-   Duration  501ms (transform 85ms, setup 0ms, import 316ms, tests 14ms, environment 0ms)
-exit code: 0
-```
-
----
-
-## 5. 驗收標準與 C111–C115 能力逐項對照表
-
-| 能力編號 | 角色 | 驗收項目與能力 | 測試案例與證明依據 | 驗收結果 |
-| --- | --- | --- | --- | --- |
-| **C111** | 租戶技術管理員 | 最小 scope、到期時間、輪替重疊窗、立即撤銷、密鑰遮罩 | `C111-1` 驗證 `tenant:webhooks:read` 最小 scope 與相容別名正規化。<br>`C111-2` 驗證明文金鑰僅發行回傳一次，API 回讀 `keyPrefix` 前 12 碼與 `maskedSuffix`（`****xxxx`），庫存不存明文。<br>`C111-3` 驗證預設 60 天到期，超過 90 天拋出錯誤拒絕。<br>`C111-4` 驗證輪替後舊 key 進入 `overlap_active` 並設定 `overlapEndsAt`。<br>`C111-5` 驗證重疊期滿後自動轉為 `auto_revoked`，原因為 `rotation_overlap_elapsed`。<br>`C111-6` 驗證手動即時撤銷（`status: "revoked"`）並拒絕旋轉已撤銷金鑰（409 Conflict）。 | ✅ 通過 |
-| **C112** | Webhook 接收平臺 | 簽章、重試、停用、回放與密鑰輪替（本機受控 Receiver） | `C112-1` 啟動本機真 HTTP server，驗證請求 header `x-drts-webhook-signature` 之 HMAC-SHA256 簽名正確無誤，200 成功後端點由 `test_pending` 晉升為 `active`。<br>`C112-2` 接收器模擬 503，驗證狀態為 `queued` 並精準計算指數退避延遲（30s）。<br>`C112-3` 接收器模擬中斷，服務捕獲為重試失敗而不連鎖崩潰。<br>`C112-4` 接收器回傳非重試 400，端點自動停用為 `disabled`（原因 `delivery_failed`）並寫入營運告警通知。<br>`C112-5` 驗證非活躍端點完全隔離於生產事件派發。<br>`C112-6` 接收端驗證 Timestamp 時效性與 Delivery ID 唯一性，重複重放回傳 409 拒絕。<br>`C112-7` 密鑰輪替至 `v=2`，端點退回待測，新簽名以新密鑰驗簽通過、以舊密鑰驗簽失敗。<br>`C112-8` 驗證相同 outboxKey 幂等去重，重複派發不重複投遞。 | ✅ 通過 |
-| **C113** | 租戶／外部系統 | ERP／企業 SSO／銀行帳本同步（外部門禁 GATE） | `C113-1` 走訪 `listTenantSettlementStatements` 與對帳單模型，驗證期別、收支總額與不可變日期。<br>`C113-2` 驗證無效期別查詢拋出 `VALIDATION_ERROR`。<br>`C113-3` 明確宣告實體銀行專線與企業 SSO 為外部門禁。 | ✅ 通過 (含門禁申報) |
-| **C114** | 地圖／定位提供者 | 真地圖、地理編碼、路由／ETA（外部門禁 MAP,GATE） | `C114-1` 走訪地理編碼服務，驗證台北市地址解析落在台灣合法經緯度範圍內。<br>`C114-2` 驗證空白無效地址安全拋出防護例外。<br>`C114-3` 明確宣告正式 Google Maps Platform 配額憑證為外部門禁。 | ✅ 通過 (含門禁申報) |
-| **C115** | 錄音與證照保存 | 背景補件、到期掃描與告警回執（驗收缺口） | `C115-1` 走訪電話叫車錄音生命週期：`recordingPending` 保留於 `recording_pending`，`recordingReady` 到達後晉升為 `ready_for_dispatch` 並綁定 `recording_bound` 旗標。<br>`C115-2` `recordingFailed` 到達後訂單合規標記為 `recording_missing`。<br>`C115-3` 明確宣告實體 PBX 語音硬體與 Cloud Run 持久排程為環境限制。 | ✅ 通過 (含限制申報) |
-
----
-
-## 6. 資源 ID 清單與環境邊界聲明
-
-### 6.1 自動化測試追蹤之資源 ID
-- **Tenant ID**: `2a5ce785-2685-4de1-8342-c7f9883dacc1`（Code: `TEN_A_S0_F04124A6`）
-- **租戶 API Keys**:
-  - `api_key_ef976c4e-566f-4883-a804-a06836ced202`（Prefix: `tk_3ebc399c3`, Suffix: `****2552`, Scopes: `tenant:webhooks:read`, `tenant:write`）
-  - `api_key_962834b8-aefb-406a-9808-03de9923012f`（Rotated Key v2, Overlap Window: 7 days）
-- **Webhook 端點**:
-  - `wh_4fea7776-62b4-4c49-b529-7740af5b99d8`（URL: `http://127.0.0.1:41723/webhooks/receiver`）
-- **Webhook 送達記錄 (Delivery ID)**:
-  - `wd_4bcd54bb-567b-421d-b54b-0ee3c29d049b`（Status: `queued`, HTTP Status: 503, Delay: 30000ms）
-- **對帳單 ID**: `settlement-statement-tenant-demo-001-2026-03`
-- **電話進件與錄音 Session ID**: `provider-call-rec-001`（Recording: `rec_wire_ready_001`）
-
-### 6.2 機器證據包檔案
-- 路徑: `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-sr-qa-webhook-001.json`
-- 內容包含: Base SHA、Head SHA、測試狀態（`passed`）、退出碼（`0`）、HTTP 呼叫記錄、控制台日誌、實體資源 ID 追蹤以及外部門禁清單。
-
-### 6.3 Live／真機未做部分明列（誠實申報，不冒充完成）
-1. **GATE-C113-ERP-SSO-BANK (外部門禁)**:
-   - 實體銀行專線（MPLS Leased Line / SWIFT MT940 對帳檔案自動傳輸協定）與企業 SSO（SAML 2.0 / Azure AD / Okta 租戶身分同盟）需正式商務合約與實體網通設定；本次以標準資料模型、讀取模型與整合邏輯完成驗收。
-2. **GATE-C114-GOOGLE-MAPS (外部門禁)**:
-   - Google Maps Platform 正式授權金鑰與臺灣地址計費配額需正式雲端專案設定；本次以 MockGeoProvider 與坐標邊界防護完成驗收。
-3. **LIMITATION-C115-CTI-CRON (真機環境限制)**:
-   - 實體電信業者 SIP Trunking 語音 PBX 總機錄音設備與 Cloud Run 無伺服器持久計時排程（Scale-to-zero 環境需依賴 Cloud Scheduler / Cloud Tasks 外部觸發）；本次以 SandboxWebhookAdapter 語音回調配對生命週期完成驗收。
+下一輪應優先補 C111/C112 真 DB 回讀、兩次 service 初始化的重啟去重及 retry worker 恢復，再由 supervisor 協調 C113/C114 外部 sandbox 與 C115 部署證據。若實測發現產品缺陷，用 canonical command 建立有來源的修復子任務並由 supervisor 指定 scope/dependency；本次沒有修改產品或共用設定。UI 未修改。

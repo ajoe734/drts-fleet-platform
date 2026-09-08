@@ -1,0 +1,46 @@
+{
+  "baseSha": "f372e4a6a0dd16204ccbd660f23013601357c224",
+  "executionSha": "c9d1d230bb9decbaeb974a3d95c1f5c309f55a2e",
+  "recordedAt": "2026-09-08T15:56:01.894Z",
+  "scope": "Local PostgreSQL and real HTTP; service reinitialization and SIGKILL/new OS process recovery; deployed authentication remains unverified",
+  "evidence": [
+    {
+      "label": "SR-QA-WEBHOOK-001 DB keys",
+      "resource": {
+        "tenantId": "qa-webhook-04ef9ff8-39ac-4521-994d-06e3622857c3",
+        "apiKeyId": "api_key_720f148b-5143-4ecc-a726-02f82f2443b5",
+        "rotatedApiKeyId": "api_key_93e81ee7-45e6-4691-9257-43b3c15c7635"
+      }
+    },
+    {
+      "label": "SR-QA-WEBHOOK-001 DB delivery",
+      "resource": {
+        "tenantId": "qa-webhook-5f4dcacf-3e92-4ded-9bb9-a706d09aa0bf",
+        "webhookId": "wh_ace37ece-4c3b-47f0-94c0-6877e026ba76",
+        "deliveryId": "wd_017da045-7321-42f9-a1e0-7ba441d24f69",
+        "outboxKey": "1956dbaa-fc73-48fb-a3a6-4565e17d3379",
+        "requests": 3
+      }
+    },
+    {
+      "label": "SR-QA-WEBHOOK-001 OS process recovery",
+      "resource": {
+        "tenantId": "qa-webhook-bb39254c-6af6-4a64-a9f7-c5be91488f36",
+        "webhookId": "wh_7c20d9c9-4bf1-4025-9996-5c9f7dac3116",
+        "deliveryId": "wd_4768c4c1-bdd9-4d39-a3b3-6e0187b44463",
+        "command": {
+          "eventType": "dispatch.assigned",
+          "data": {
+            "orderId": "9b7369f7-77b4-4e38-9d5f-d37985082519"
+          },
+          "outboxKey": "6861fa2f-d288-4137-8bd1-140604e951bf"
+        },
+        "writerPid": 2875598,
+        "recoveryPid": 2875797,
+        "status": "delivered",
+        "requests": 3,
+        "terminationSignal": "SIGKILL"
+      }
+    }
+  ]
+}

@@ -1,124 +1,108 @@
 {
   "taskId": "SR-QA-WEBHOOK-001",
-  "runId": "uat-SR-QA-WEBHOOK-001-3c65eaa5",
+  "runId": "uat-SR-QA-WEBHOOK-001-7e73d2be",
   "shardIndex": 0,
-  "baseSha": "3b60a3757238663572f16f010c94f446f2c71eaa",
-  "candidateSha": "1962991bba0d1b27b3dfc079125121f2c6390cdc",
-  "headSha": "1962991bba0d1b27b3dfc079125121f2c6390cdc",
-  "startTime": "2026-09-08T12:59:28.944Z",
-  "endTime": "2026-09-08T12:59:29.030Z",
+  "baseSha": "f372e4a6a0dd16204ccbd660f23013601357c224",
+  "candidateSha": "c9d1d230bb9decbaeb974a3d95c1f5c309f55a2e",
+  "headSha": "c9d1d230bb9decbaeb974a3d95c1f5c309f55a2e",
+  "startTime": "2026-09-08T15:54:43.409Z",
+  "endTime": "2026-09-08T15:56:02.330Z",
   "status": "passed",
   "exitCode": 0,
-  "roles": [
-    "Tenant Admin (tenant_admin)",
-    "Platform Admin (platform_admin)"
-  ],
+  "roles": [],
   "trackedResources": [
     {
-      "type": "tenant",
-      "id": "2a5ce785-2685-4de1-8342-c7f9883dacc1",
+      "type": "webhook",
+      "id": "wh_ee983e1c-f3ec-4a01-a514-72ae003e9d12",
       "metadata": {
-        "code": "TEN_A_S0_F04124A6"
+        "tenantId": "tenant-demo-001"
       }
     },
     {
-      "type": "tenant_api_key",
-      "id": "api_key_ef976c4e-566f-4883-a804-a06836ced202",
+      "type": "delivery",
+      "id": "wd_6204cdc0-97a9-4f09-b369-4b3600a83c94",
       "metadata": {
-        "keyName": "E2E Automated Webhook Key",
-        "scopes": [
-          "tenant:webhooks:read",
-          "tenant:write"
-        ],
-        "keyPrefix": "tk_3ebc399c3",
-        "maskedSuffix": "****2552"
+        "webhookId": "wh_ee983e1c-f3ec-4a01-a514-72ae003e9d12"
       }
     },
     {
-      "type": "tenant_api_key",
-      "id": "api_key_962834b8-aefb-406a-9808-03de9923012f",
+      "type": "postgres_acceptance",
+      "id": "qa-webhook-04ef9ff8-39ac-4521-994d-06e3622857c3",
       "metadata": {
-        "keyName": "E2E Automated Webhook Key v2",
-        "rotatedFromApiKeyId": "api_key_ef976c4e-566f-4883-a804-a06836ced202",
-        "status": "active",
-        "overlapEndsAt": "2026-09-15T12:59:28.958Z"
+        "tenantId": "qa-webhook-04ef9ff8-39ac-4521-994d-06e3622857c3",
+        "apiKeyId": "api_key_720f148b-5143-4ecc-a726-02f82f2443b5",
+        "rotatedApiKeyId": "api_key_93e81ee7-45e6-4691-9257-43b3c15c7635"
       }
     },
     {
-      "type": "webhook_endpoint",
-      "id": "wh_4fea7776-62b4-4c49-b529-7740af5b99d8",
+      "type": "postgres_acceptance",
+      "id": "qa-webhook-5f4dcacf-3e92-4ded-9bb9-a706d09aa0bf",
       "metadata": {
-        "url": "http://127.0.0.1:41723/webhooks/receiver",
-        "status": "test_pending"
+        "tenantId": "qa-webhook-5f4dcacf-3e92-4ded-9bb9-a706d09aa0bf",
+        "webhookId": "wh_ace37ece-4c3b-47f0-94c0-6877e026ba76",
+        "deliveryId": "wd_017da045-7321-42f9-a1e0-7ba441d24f69",
+        "outboxKey": "1956dbaa-fc73-48fb-a3a6-4565e17d3379",
+        "requests": 3
       }
     },
     {
-      "type": "webhook_delivery",
-      "id": "wd_4bcd54bb-567b-421d-b54b-0ee3c29d049b",
+      "type": "postgres_acceptance",
+      "id": "qa-webhook-bb39254c-6af6-4a64-a9f7-c5be91488f36",
       "metadata": {
-        "status": "queued",
-        "httpStatus": 503,
-        "attempt": 1,
-        "nextDelayMs": 30000
+        "tenantId": "qa-webhook-bb39254c-6af6-4a64-a9f7-c5be91488f36",
+        "webhookId": "wh_7c20d9c9-4bf1-4025-9996-5c9f7dac3116",
+        "deliveryId": "wd_4768c4c1-bdd9-4d39-a3b3-6e0187b44463",
+        "command": {
+          "eventType": "dispatch.assigned",
+          "data": {
+            "orderId": "9b7369f7-77b4-4e38-9d5f-d37985082519"
+          },
+          "outboxKey": "6861fa2f-d288-4137-8bd1-140604e951bf"
+        },
+        "writerPid": 2875598,
+        "recoveryPid": 2875797,
+        "status": "delivered",
+        "requests": 3,
+        "terminationSignal": "SIGKILL"
       }
     }
   ],
-  "httpCalls": [
-    {
-      "id": "5f92061c-9bee-4eec-b01f-e9fbab7a880f",
-      "timestamp": "2026-09-08T12:59:28.997Z",
-      "method": "POST",
-      "url": "http://127.0.0.1:41723/webhooks/receiver",
-      "statusCode": 200,
-      "durationMs": 8,
-      "requestHeaders": {
-        "content-type": "application/json",
-        "x-drts-event-type": "tenant.webhook.test",
-        "x-drts-webhook-signature": "v=1;t=2026-09-08T12:59:28.960Z;sig=e76bf380df3cc92367d31daf75d497d8406c8cb68779464f08a24bc075592fb3"
-      },
-      "responseBody": {
-        "ok": true,
-        "received": true
-      },
-      "actorRole": "Webhook Receiver"
-    }
-  ],
+  "httpCalls": [],
   "consoleLogs": [
     {
-      "timestamp": "2026-09-08T12:59:28.953Z",
+      "timestamp": "2026-09-08T15:54:49.403Z",
       "level": "info",
-      "message": "Starting C111: Tenant API key issuance and governance verification"
+      "message": "\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-qa-webhook-001\n\nSR-QA-WEBHOOK-001 timeout resources {\"tenantId\":\"tenant-demo-001\",\"webhookId\":\"wh_ee983e1c-f3ec-4a01-a514-72ae003e9d12\",\"deliveryId\":\"wd_6204cdc0-97a9-4f09-b369-4b3600a83c94\",\"transport\":\"real fetch with test-injected 100ms deadline\"}\n\u001b[95m[Nest] 2868521  - \u001b[39m09/08/2026, 3:54:49 PM \u001b[95m  DEBUG\u001b[39m \u001b[38;5;3m[OpsDispatchEventsService] \u001b[39m\u001b[95mEvent publication lag: 0ms for order_created (622c7951-c0db-4908-a32b-c66ad794bf46)\u001b[39m\n\u001b[95m[Nest] 2868521  - \u001b[39m09/08/2026, 3:54:49 PM \u001b[95m  DEBUG\u001b[39m \u001b[38;5;3m[OpsDispatchEventsService] \u001b[39m\u001b[95mEvent publication lag: 0ms for order_created (3fa52b51-2565-4c34-a949-3309e76c137b)\u001b[39m\n\n Test Files  1 passed (1)\n      Tests  24 passed (24)\n   Start at  15:54:44\n   Duration  4.37s (transform 2.83s, setup 0ms, import 3.76s, tests 353ms, environment 0ms)\n\n"
     },
     {
-      "timestamp": "2026-09-08T12:59:28.960Z",
+      "timestamp": "2026-09-08T15:56:02.329Z",
       "level": "info",
-      "message": "C111 verified successfully: minimal scopes, secret masking, overlap rotation, and immediate revocation validated."
+      "message": "base_sha=f372e4a6a0dd16204ccbd660f23013601357c224\nexecution_sha=c9d1d230bb9decbaeb974a3d95c1f5c309f55a2e\nisolated_database=sr_qa_webhook_001_1788882889_2869277 (schema-only clone of local drts_fleet_platform)\n\n RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-qa-webhook-001\n\n\u001b[95m[Nest] 2871101  - \u001b[39m09/08/2026, 3:54:58 PM \u001b[95m  DEBUG\u001b[39m \u001b[38;5;3m[DatabaseService] \u001b[39m\u001b[95mClosed Postgres connection pool.\u001b[39m\n\u001b[95m[Nest] 2871101  - \u001b[39m09/08/2026, 3:54:58 PM \u001b[95m  DEBUG\u001b[39m \u001b[38;5;3m[DatabaseService] \u001b[39m\u001b[95mClosed Postgres connection pool.\u001b[39m\n\u001b[95m[Nest] 2871101  - \u001b[39m09/08/2026, 3:54:58 PM \u001b[95m  DEBUG\u001b[39m \u001b[38;5;3m[DatabaseService] \u001b[39m\u001b[95mClosed Postgres connection pool.\u001b[39m\n\u001b[95m[Nest] 2871101  - \u001b[39m09/08/2026, 3:55:29 PM \u001b[95m  DEBUG\u001b[39m \u001b[38;5;3m[DatabaseService] \u001b[39m\u001b[95mClosed Postgres connection pool.\u001b[39m\n\u001b[95m[Nest] 2871101  - \u001b[39m09/08/2026, 3:55:29 PM \u001b[95m  DEBUG\u001b[39m \u001b[38;5;3m[DatabaseService] \u001b[39m\u001b[95mClosed Postgres connection pool.\u001b[39m\n\n Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Start at  15:54:57\n   Duration  64.85s (transform 911ms, setup 0ms, import 1.32s, tests 63.35s, environment 0ms)\n\n"
     },
     {
-      "timestamp": "2026-09-08T12:59:28.960Z",
+      "timestamp": "2026-09-08T15:56:02.329Z",
       "level": "info",
-      "message": "Starting C112: Webhook real HTTP receiver HMAC signing and fault recovery verification"
-    },
-    {
-      "timestamp": "2026-09-08T12:59:29.030Z",
-      "level": "info",
-      "message": "C112 verified successfully: HMAC-SHA256, 503 backoff, auto-disable, and secret rotation validated."
+      "message": "Local PostgreSQL key readback and automatic webhook retry after service reinitialization passed. Timeout uses a test-injected deadline; SIGKILL/new OS process recovery passed; deployed API remains unverified."
     }
   ],
   "artifacts": [],
   "errors": [],
   "unimplementedLiveSurfaces": [
     {
-      "surface": "GATE-C113-ERP-SSO-BANK",
-      "reason": "Live enterprise ERP SSO (SAML 2.0 / Azure AD) and Bank Host-to-Host (H2H) leased lines are external gates requiring production corporate credentials; in-memory statement ledgers verified."
+      "surface": "C111-C112",
+      "reason": "Authenticated HTTP API and default transport timeout remain unverified. SIGKILL/new OS process recovery passed. Local DB readback, service reinitialization, automatic retry and outbox deduplication passed."
     },
     {
-      "surface": "GATE-C114-GOOGLE-MAPS",
-      "reason": "Official Google Maps Platform API key and Taiwan quota credentials are an external gate; geocoding boundary fallback verified."
+      "surface": "C113",
+      "reason": "ERP/SSO/bank sandbox mapping, permissions, retransmission and reconciliation remain unverified; fixture ledger tests are local smoke only."
     },
     {
-      "surface": "LIMITATION-C115-CTI-CRON",
-      "reason": "Carrier voice telephony SIP trunk PBX hardware and Cloud Run persistent cron jobs are physical/infra limitations; recording lifecycle adapter callbacks verified."
+      "surface": "C114",
+      "reason": "Real geocoding/routes/ETA, quota failures and stale location remain unverified; MockGeoProvider is local smoke only."
+    },
+    {
+      "surface": "C115",
+      "reason": "Persistent scheduler deployment, backlog, restart and catch-up remain unverified; callback fixtures are local smoke only."
     }
   ]
 }
