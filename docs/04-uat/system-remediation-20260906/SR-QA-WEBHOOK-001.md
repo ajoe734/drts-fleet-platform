@@ -2,7 +2,22 @@
 
 本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Codex2。未 handoff、未完成 review/CI/merge。
 
-## 2026-09-08 15:26 UTC 整合入口續驗（最新）
+## 2026-09-08 15:39 UTC OS process 恢復續驗（最新）
+
+本節優先於以下歷史紀錄；仍未 handoff，沒有 lifecycle candidate。
+
+- 本輪 fetch 時 `origin/dev`：`40c231ba6718dbf7a7ee6662e446d44e48eabcb3`。一般 rebase 及指定舊 base 的 rebase 均重播重複歷史，造成 task 檔 add/add 衝突；均已 abort，改以 merge 整合 dev 並保留已發布歷史，普通 push 成功。沒有採用衝突中的歷史假驗收版本。
+- 執行 SHA：`b7f046ea1cd1f7f562782c794fe769161355e70e`。其他 worker 的 fetch 會推進共用 `origin/dev` ref，因此 runner 改用 `git merge-base HEAD origin/dev` 記錄已納入的 base；本輪三份證據均使用 `40c231ba…`，不把遠端前進當成已測版本。
+- 新增獨立 Vitest 子程序：writer 用真服務寫 PostgreSQL queued delivery，父程序觀察持久化完成後對該 process group 發送 `SIGKILL`，確認退出 signal；另一個 OS process 初始化真服務，等待原始約 30 秒 retry timer 自動送達。沒有手動 retry、改 DB deadline 或 fake timer。
+- recovery 程序回讀同一 tenant/webhook/delivery 關聯，重送同一 outbox key 回傳同一 delivery，DB 同 ID 只有一筆；受控 receiver 共收到 3 次 HTTP（test 200、event 503、retry 200），核對實際 bytes/HMAC 及 payload delivery ID。
+- 真實資源：webhook `wh_86d657ff-4cf3-4e40-bbbd-d74521f3dcc5`、delivery `wd_6efe5509-dfbb-4ee6-ac27-37d0cf7bdda2`；writer PID `2564273`、recovery PID `2564529`。完整 tenant/outbox ID 在 `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-postgres.json`。
+- `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 0，5 passed / 1.4m；包含原 24 個本機 regression、3 個 PostgreSQL 案例（含兩個子程序）及 4 個 shared harness 案例。這不是部署環境驗收。
+- `DRTS_WEBHOOK_LIVE=1 pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-webhook-001` → exit 1，1 failed / 4 passed，1.3s；缺外部證據即失敗，另存 `evidence-live-unavailable.json`。
+- `pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/*.ts tests/e2e/system-remediation/sr-qa-webhook-001/*.ts --max-warnings=0` → exit 0；`git diff --check` → exit 0。最初 lint 發現 finally 直接 throw，已抽成 cleanup helper 並在上述執行 SHA 重驗。
+
+本輪只修改 task 測試與證據；沒有改產品、共用設定或 UI。仍待 C111 authenticated API 最小權限與使用量、C112 預設傳輸 deadline／完整 replay 接收策略；C113 sandbox、C114 真 provider、C115 部署排程及告警回執需 supervisor 協調。OS process 中斷恢復已補證據，主機 reboot／部署重啟沒有驗證；不將本機程序測試等同主機驗收。
+
+## 2026-09-08 15:26 UTC 整合入口續驗（歷史）
 
 以下更新優先於下方歷史紀錄中的「尚未建立 DB 資料集」及 C111/C112 DB 待驗項目。
 
