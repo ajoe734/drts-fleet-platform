@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type {
   VoiceCapabilityTokenClaims,
   VoiceProof,
@@ -124,13 +124,13 @@ class FakeVoiceBookingRepository {
     updatedAt: "2026-09-08T10:00:00.000Z",
   };
   resourceScope: VoiceResourceScopeRecord | null = {
-    resourceScopeId: RESOURCE_SCOPE_ID,
+    scopeId: RESOURCE_SCOPE_ID,
     brandId: "brand-taxi-tw",
-    operatingProfileId: "profile-std",
-    operatingProfileVersion: 1,
+    operatingUnitId: null,
+    runtimeMapping: {},
+    grantedBy: "admin",
     status: "active",
-    createdAt: "2026-09-08T10:00:00.000Z",
-    updatedAt: "2026-09-08T10:00:00.000Z",
+    version: 1,
   };
 
   async findSessionById(id: string): Promise<VoiceSessionRecord | null> {
@@ -144,7 +144,7 @@ class FakeVoiceBookingRepository {
   }
 
   async findResourceScopeById(id: string): Promise<VoiceResourceScopeRecord | null> {
-    if (this.resourceScope && this.resourceScope.resourceScopeId === id) return this.resourceScope;
+    if (this.resourceScope && this.resourceScope.scopeId === id) return this.resourceScope;
     return null;
   }
 }
