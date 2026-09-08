@@ -4,7 +4,7 @@
 
 - 日期：2026-09-06。
 - Base：`afefd55d3d23dd361d2dd81fd5f80eedb6671002`，工作開始時 `git fetch origin` 後的 `origin/dev` 與 HEAD 相同。
-- Rebase base：`3014f9a4942f73f89c0a6f8458dc8b042c1034d0`（SR-NOTIFY-001 合併後）。已 rebase；為保留先前已推送 anchor 的 ancestry，再合併其 SHA，後續維持普通 non-force push。
+- 本輪 rebase base：`70355aba97c23dd1cd592b71f1d3dfe6315d91ff`（fresh `origin/dev`）。2026-09-08 已重新套用既有 task commits；重放期間的重複 patch 已由 Git 正常略過。
 - 工作分支：`codex/sr-admin-adapter-001`；使用 supervisor 指定的 isolated worktree。
 - Candidate：尚未 handoff；本文件所述為部分修正，完整驗收未達成。
 - 追溯：`source/new-gaps.json` N11/N12、`source/capabilities.json` C104/C105；歷史 audit 不作為目前程式真值。
@@ -53,12 +53,24 @@
 | `git diff 3014f9a4942f73f89c0a6f8458dc8b042c1034d0 HEAD --check`                                                                                                                                                                                                                                                     | 0    | 已提交 task diff 無 whitespace error                                                                                                                                          |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-admin-adapter-001/`                                                                                                                                                                                                                                           | 0    | 最後執行：1 test file、9 tests passed；真實 RegistryNotice HTML render，涵蓋 loading、empty、healthy、403/404/503/空錯誤訊息、stale reload、中英文 degraded 與 EXPIRED status |
 | `pnpm --filter @drts/platform-admin-web typecheck`                                                                                                                                                                                                                                                                   | 0    | 補本地依賴連結後 route type generation 與 TypeScript 通過；空錯誤訊息補測後再次執行亦 exit 0                                                                                  |
-| `pnpm --filter @drts/api typecheck`                                                                                                                                                                                                                                                                                  | 2    | 最後執行在 rebase 後失敗：auth guard、JWT、auth controller、IAP adapter 無法解析 `@drts/control-plane-auth` 型別；本 task 未改 backend                                        |
+| `pnpm --filter @drts/api typecheck`                                                                                                                                                                                                                                                                                  | 0    | 2026-09-08 fresh-rebase 後通過；本 task 沒有修改 backend，這只表示目前 worktree 依賴解析可用，不替代 adapter API 驗收                                                         |
 | `pnpm exec eslint apps/platform-admin-web/app/adapter-registry/page.tsx apps/platform-admin-web/app/adapter-registry/registry-notice.ts tests/unit/system-remediation/sr-admin-adapter-001/registry-notice.test.ts tests/unit/system-remediation/sr-admin-adapter-001/registry-api-reproduction.ts --max-warnings=0` | 0    | 相關 TypeScript／TSX 無 lint error                                                                                                                                            |
 | `pnpm exec prettier --write apps/platform-admin-web/app/adapter-registry/page.tsx apps/platform-admin-web/app/adapter-registry/registry-notice.ts tests/unit/system-remediation/sr-admin-adapter-001/registry-notice.test.ts docs/04-uat/system-remediation-20260906/SR-ADMIN-ADAPTER-001.md`                        | 0    | 格式化本 task 檔案                                                                                                                                                            |
 | `pnpm exec prettier --write tests/unit/system-remediation/sr-admin-adapter-001/registry-api-reproduction.ts tests/unit/system-remediation/sr-admin-adapter-001/registry-api-reproduction.tsconfig.json`                                                                                                              | 0    | 診斷檔案格式化                                                                                                                                                                |
 
 測試範圍僅為 notice 元件渲染；未測父頁完整 fetch/flash 互動、代理、角色、表單寫入或 provider，到期四態也未冒稱完成。既有 toggle 成功提示仍沒有後端 audit receipt／reason 契約且使用要求值，必須在後續管理接線一起修復。
+
+### Fresh-rebase revalidation（2026-09-08；不是 acceptance）
+
+Base 為 `70355aba97c23dd1cd592b71f1d3dfe6315d91ff`。候選 SHA 會由 owner 在普通 push 後以同一 SHA 寫入 supervisor machine truth；不得以本段的舊 anchor SHA 取代候選。
+
+| 命令                                                                                                                                                                                                                                                                                                                 | Exit | 實際結果                                      |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | --------------------------------------------- |
+| `git diff --check origin/dev...HEAD`                                                                                                                                                                                                                                                                                 | 0    | task diff 無 whitespace error                 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-admin-adapter-001/`                                                                                                                                                                                                                                           | 0    | 1 test file、9 tests passed                   |
+| `pnpm --filter @drts/platform-admin-web typecheck`                                                                                                                                                                                                                                                                   | 0    | Next route types generated，TypeScript 通過   |
+| `pnpm --filter @drts/api typecheck`                                                                                                                                                                                                                                                                                  | 0    | TypeScript 通過；未主張 adapter routes 已存在 |
+| `pnpm exec eslint apps/platform-admin-web/app/adapter-registry/page.tsx apps/platform-admin-web/app/adapter-registry/registry-notice.ts tests/unit/system-remediation/sr-admin-adapter-001/registry-notice.test.ts tests/unit/system-remediation/sr-admin-adapter-001/registry-api-reproduction.ts --max-warnings=0` | 0    | scoped lint 通過                              |
 
 ### HTTP 診斷（不是 acceptance）
 
@@ -68,15 +80,15 @@ NODE_ENV=test pnpm --filter @drts/api exec tsx --tsconfig ../../tests/unit/syste
 
 Exit `0` 代表診斷程式正常結束，**不代表 API 修復通過**。
 
-- 最新讀取 source SHA：`7583a7717be404dcb1cefa9128d038ca24d8466a`；時間 `2026-09-06T06:37:06.004Z`。controller/service blob 與原始 base 相同。
+- 最新讀取 source SHA：`5a8c0f73b19040b7d31260694159ffc13ad5e946`；時間 `2026-09-08T08:45:47.593Z`。controller/service 仍沒有 adapter management route；與原始問題一致。
 - 先前 source SHA：`b93ab98f0031da821b1583c9f7968fa26106c426`；時間 `2026-09-06T06:34:29.386Z`，port 44639，同樣結果。
-- 最新 loopback：`http://127.0.0.1:40671`，結束時已關閉。
+- 最新 loopback：`http://127.0.0.1:38351`，結束時已關閉。
 - 請求資源 ID：`grab_taiwan`（已知 catalog code；不存在管理 endpoint，沒有建立 registry record）。
 - 控制組：`public-info-demo-001` 是 service 原有 seed，只證明 controller router 正常掛載，並非本 task 產生的真資料。
 
 | 方法與 path                                      | HTTP | 實際結果                                                                   |
 | ------------------------------------------------ | ---- | -------------------------------------------------------------------------- |
-| `GET /api/platform-admin/public-info`            | 200  | 既有 endpoint 回傳 items；requestId `eb618a61-a65d-4be8-a3c9-97069f357acb` |
+| `GET /api/platform-admin/public-info`            | 200  | 既有 endpoint 回傳 items；requestId `62feffeb-866e-42bd-9c95-e5e440c06886` |
 | `GET /api/platform-admin/adapters`               | 404  | `Cannot GET /api/platform-admin/adapters`                                  |
 | `GET /api/platform-admin/adapters/grab_taiwan`   | 404  | `Cannot GET /api/platform-admin/adapters/grab_taiwan`                      |
 | `PATCH /api/platform-admin/adapters/grab_taiwan` | 404  | `Cannot PATCH /api/platform-admin/adapters/grab_taiwan`                    |
@@ -93,6 +105,6 @@ Exit `0` 代表診斷程式正常結束，**不代表 API 修復通過**。
 
 ### 可恢復交付
 
-部分修正與證據以 task-scoped commits 保存並普通 push。`7583a7717be404dcb1cefa9128d038ca24d8466a` 已推送；後續小修與證據的最終 HEAD 由狀態命令記錄。尚無 locked candidate、獨立 review 或合併驗收；任務需保持 blocked 等待 supervisor 擴 scope／安排設計。
+部分修正與證據以 task-scoped commits 保存並普通 push。fresh-rebase 之後的 candidate SHA 由 handoff command 以 machine truth 記錄；尚無獨立 review、CI 或合併驗收。此 candidate 只交付已授權的 UI truthfulness regression 與可重現 scope finding；它不聲稱完成 API CRUD、角色／表單回讀、持久化 credential governance 或四態真到期驗收，仍需要 supervisor 擴 scope／安排設計與相依。
 
 未執行：正式/dev 部署、真 registry DB CRUD／重啟回讀、provider 憑證輪替、正式角色瀏覽器表單流程、四態真到期值驗證、CI／merge／獨立 reviewer。沒有宣稱 stub/live 成功，也沒有將本 task 標為 done。
