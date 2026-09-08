@@ -1024,6 +1024,7 @@ export function NewDriverSubmissionForm({
       <div style={{ padding: 24 }}>
         <DraftFormFrame
           key={restoreVersion}
+          ready={restoreVersion > 0}
           title={t("supply.driverNew.cardTitle")}
           error={error}
           saving={saving}
@@ -1112,6 +1113,7 @@ export function NewVehicleSubmissionForm({
       <div style={{ padding: 24 }}>
         <DraftFormFrame
           key={restoreVersion}
+          ready={restoreVersion > 0}
           title={t("supply.vehicleNew.cardTitle")}
           error={error}
           saving={saving}
@@ -1133,6 +1135,7 @@ function DraftFormFrame({
   title,
   error,
   saving,
+  ready,
   onSave,
   saveLabel,
   children,
@@ -1140,6 +1143,7 @@ function DraftFormFrame({
   title: string;
   error: string | null;
   saving: boolean;
+  ready: boolean;
   onSave: () => void;
   saveLabel: string;
   children: ReactNode;
@@ -1159,38 +1163,40 @@ function DraftFormFrame({
         gap: 16,
       }}
     >
-      <CanvasCard theme={theme} title={title}>
-        {children}
-      </CanvasCard>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <CanvasCard theme={theme} title={t("supply.draft.tipTitle")}>
-          <div
-            style={{ fontSize: 12, lineHeight: 1.5, color: theme.textMuted }}
-          >
-            {t("supply.draft.tipBody")}
-          </div>
+      <fieldset disabled={!ready || saving} style={{ display: "contents" }}>
+        <CanvasCard theme={theme} title={title}>
+          {children}
         </CanvasCard>
-        {error ? (
-          <div role="alert" aria-live="assertive">
-            <div role="alert">
-              <CanvasBanner
-                theme={theme}
-                tone="danger"
-                icon="warn"
-                body={error}
-              />
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <CanvasCard theme={theme} title={t("supply.draft.tipTitle")}>
+            <div
+              style={{ fontSize: 12, lineHeight: 1.5, color: theme.textMuted }}
+            >
+              {t("supply.draft.tipBody")}
             </div>
-          </div>
-        ) : null}
-        <ActionButton
-          theme={theme}
-          label={saveLabel}
-          helper={t("supply.draft.saveHelper")}
-          variant="primary"
-          busy={saving}
-          type="submit"
-        />
-      </div>
+          </CanvasCard>
+          {error ? (
+            <div role="alert" aria-live="assertive">
+              <div role="alert">
+                <CanvasBanner
+                  theme={theme}
+                  tone="danger"
+                  icon="warn"
+                  body={error}
+                />
+              </div>
+            </div>
+          ) : null}
+          <ActionButton
+            theme={theme}
+            label={saveLabel}
+            helper={t("supply.draft.saveHelper")}
+            variant="primary"
+            busy={saving}
+            type="submit"
+          />
+        </div>
+      </fieldset>
     </form>
   );
 }

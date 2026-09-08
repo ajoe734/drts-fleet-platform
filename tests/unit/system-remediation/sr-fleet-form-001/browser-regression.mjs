@@ -1,12 +1,12 @@
 // Local browser verification with intercepted API responses, never live submission evidence.
-// Start fleet Next dev on 3317 with DRTS_FLEET_PARTNER_ID=sr-fleet-form-browser-test.
+// Start the built fleet app on 3317 with DRTS_FLEET_PARTNER_ID=sr-fleet-form-browser-test.
 import { chromium, expect } from "@playwright/test";
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_EXECUTABLE,
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 const base = process.env.FLEET_TEST_URL ?? "http://127.0.0.1:3317";
-page.on("pageerror", error => console.log("PAGEERROR", error.message));
+page.on("pageerror", (error) => console.log("PAGEERROR", error.message));
 let dialogs = 0;
 page.on("dialog", async (dialog) => {
   dialogs++;
@@ -15,7 +15,7 @@ page.on("dialog", async (dialog) => {
 try {
   await page.goto(`${base}/supply/drivers/new`);
   const name = page.locator("#form-new-driver-name");
-  await expect(name).toBeVisible();
+  await expect(name).toBeEnabled();
   await name.focus();
   await page.keyboard.type("SR-FLEET keyboard test");
   await page.keyboard.press("Tab");
@@ -30,15 +30,13 @@ try {
   })) {
     await page.locator(`#form-new-driver-${id}`).fill(value);
   }
-  const accessibility = await page
-    .locator("form")
-    .evaluate((form) =>
-      [...form.querySelectorAll("input,select,textarea")].map((el) => ({
-        id: el.id,
-        labels: [...el.labels].map((l) => l.textContent.trim()).join(" "),
-        required: el.required,
-      })),
-    );
+  const accessibility = await page.locator("form").evaluate((form) =>
+    [...form.querySelectorAll("input,select,textarea")].map((el) => ({
+      id: el.id,
+      labels: [...el.labels].map((l) => l.textContent.trim()).join(" "),
+      required: el.required,
+    })),
+  );
   expect(accessibility.every((field) => field.labels.length > 0)).toBe(true);
   expect(
     accessibility.find((field) => field.id.endsWith("-name")).required,
@@ -48,15 +46,14 @@ try {
     surface: window.getComputedStyle(el).backgroundColor,
   }));
   await page.reload();
-  await expect(name).toHaveValue("SR-FLEET keyboard test");
+  await expect(name).toHaveValue("SR-FLEET keyboard test", { timeout: 30000 });
   // Full navigation and browser back exercise restoration independent of the header button.
   await page.goto(`${base}/supply/vehicles/new`);
   await expect(page.locator("#form-new-vehicle-plateNo")).toBeVisible();
+  await expect(page.locator("#form-new-vehicle-color")).toBeEnabled();
   await page.locator("#form-new-vehicle-color").fill("optional-only");
-  console.log("before back", await page.evaluate(() => ({...sessionStorage})));
   await page.goBack();
-  console.log("after back", await page.evaluate(() => ({ storage: {...sessionStorage}, ready: document.readyState, name: document.querySelector("#form-new-driver-name")?.outerHTML })));
-  await expect(name).toHaveValue("SR-FLEET keyboard test");
+  await expect(name).toHaveValue("SR-FLEET keyboard test", { timeout: 30000 });
   let requests = 0;
   await page.route(
     "**/fleet-partner/supply-submissions/drivers",
@@ -75,7 +72,7 @@ try {
   await expect(page.getByRole("alert")).toContainText("TEST_API_REJECTED");
   expect(requests).toBe(1);
   await page.reload();
-  await expect(name).toHaveValue("SR-FLEET keyboard test");
+  await expect(name).toHaveValue("SR-FLEET keyboard test", { timeout: 30000 });
   await page.unroute("**/fleet-partner/supply-submissions/drivers");
   await page.route("**/fleet-partner/supply-submissions/drivers", (route) =>
     route.fulfill({
