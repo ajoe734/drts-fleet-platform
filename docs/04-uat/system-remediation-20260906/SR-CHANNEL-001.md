@@ -2,7 +2,7 @@
 
 - Owner: `Codex`
 - Reviewer: `Codex2`
-- Base SHA: `70355aba97c23dd1cd592b71f1d3dfe6315d91ff` (`origin/dev` at reproduction)
+- Base SHA: `b5c3774e5e62fab7cf43b67a7e69fae7e0ca91ef` (`origin/dev` at final reproduction/rebase)
 - Candidate: the exact final branch head is recorded by the required Supervisor `handoff` command.
 - Resource: partner-scoped `GET /api/partner/referral/dashboard?periodMonth={period}` and `GET /api/partner/referral/statements/{period}/artifact`
 
@@ -57,6 +57,12 @@ pnpm --filter @drts/channel-partner-portal-web test
 git diff --check
 # exit 0
 ```
+
+The original candidate was rebased onto the current `origin/dev` base above
+before final validation. Its prior CI run was cancelled before scope
+classification completed, so it is not treated as product-test evidence; the
+final candidate is submitted through the normal Supervisor lifecycle for a new
+same-SHA CI run.
 
 ## Verification boundary
 

@@ -127,7 +127,7 @@ export default async function ReferralDashboardPage(props: {
           background: theme.accent,
           border: `1px solid ${theme.accent}`,
           borderRadius: 6,
-          color: "#fff",
+          color: theme.invert,
           display: "inline-flex",
           fontSize: 12,
           fontWeight: 600,
