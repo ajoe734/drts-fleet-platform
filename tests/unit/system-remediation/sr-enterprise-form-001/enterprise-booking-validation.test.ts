@@ -73,6 +73,18 @@ describe("SR-ENTERPRISE-FORM-001 (R21): reservation window past-time / timezone-
         NOW,
       ),
     ).toBe(false);
+    expect(
+      isReservationWindowInFuture(
+        { reservationDate: "2026-02-30", reservationTime: "10:00" },
+        NOW,
+      ),
+    ).toBe(false);
+    expect(
+      isReservationWindowInFuture(
+        { reservationDate: "2026-09-08", reservationTime: "24:00" },
+        NOW,
+      ),
+    ).toBe(false);
   });
 
   it("getEarliestBookableLabel surfaces a locale-aware, non-empty explanation of the current boundary", () => {
