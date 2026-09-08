@@ -11,6 +11,7 @@ import {
   getEnterprisePassengerDisplayName,
   isEnterpriseDraftComplete,
   isReservationWindowInFuture,
+  requireFutureReservationStart,
   type EnterpriseDraftCompletenessInput,
 } from "../../../../apps/enterprise-dispatch-web/components/booking-form/enterprise-booking-validation";
 
@@ -35,6 +36,19 @@ function completeDraft(
 }
 
 describe("SR-ENTERPRISE-FORM-001 (R21): reservation window past-time / timezone-boundary guard", () => {
+  it("rejects a previously valid review at the command boundary once its time arrives", () => {
+    const draft = completeDraft({ reservationDate: "2026-09-06", reservationTime: "10:01" });
+    expect(requireFutureReservationStart(draft, NOW).toISOString()).toBe("2026-09-06T02:01:00.000Z");
+    expect(() => requireFutureReservationStart(draft, new Date("2026-09-06T02:01:00Z"))).toThrow();
+    expect(() => requireFutureReservationStart(draft, new Date("2026-09-06T02:02:00Z"))).toThrow();
+  });
+
+  it("never converts invalid command dates into a fallback instant", () => {
+    for (const reservationDate of ["", "2026-02-30", "not-a-date"]) {
+      expect(() => requireFutureReservationStart(completeDraft({ reservationDate }), NOW)).toThrow();
+    }
+  });
+
   it("rejects a reservation date that has already passed relative to now (audit repro: filled 6/13 while today is 9/6)", () => {
     const draft = { reservationDate: "2026-06-13", reservationTime: "15:20" };
     expect(isReservationWindowInFuture(draft, NOW)).toBe(false);

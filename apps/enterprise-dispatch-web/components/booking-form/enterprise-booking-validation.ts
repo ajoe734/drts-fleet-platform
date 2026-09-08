@@ -77,6 +77,21 @@ export function isReservationWindowInFuture(
   );
 }
 
+export function requireFutureReservationStart(
+  draft: EnterpriseReservationWindowInput,
+  now = new Date(),
+): Date {
+  const start = parseReservationStart(draft.reservationDate, draft.reservationTime);
+  if (start === null || start.getTime() <= now.getTime()) {
+    throw new Error(
+      translate("review.blocked.pastReservation", {
+        earliest: getEarliestBookableLabel("zh", now),
+      }, "zh"),
+    );
+  }
+  return start;
+}
+
 export function getEarliestBookableLabel(
   locale: "zh" | "en",
   now = new Date(),

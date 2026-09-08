@@ -13,6 +13,7 @@ import {
   getEnterprisePassengerDisplayName,
   isEnterpriseDraftComplete,
   isReservationWindowInFuture,
+  requireFutureReservationStart,
 } from "@/components/booking-form/enterprise-booking-validation";
 
 export {
@@ -81,7 +82,6 @@ const QUERY_KEYS = {
 const DISPLAY_BUDGET_TOTAL = 60_000;
 const DISPLAY_BUDGET_AVAILABLE = 31_000;
 const APPROVAL_THRESHOLD = 1_500;
-const DEFAULT_TIMEZONE_OFFSET = "+08:00";
 const DEFAULT_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 function firstParam(value: string | string[] | undefined): string | undefined {
@@ -146,16 +146,6 @@ function estimateFare(draft: EnterpriseBookingDraftForm) {
   }
 
   return Math.max(480, Math.round(amount / 10) * 10);
-}
-
-function getReservationStart(date: string, time: string, now = new Date()) {
-  const normalizedDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "2026-06-13";
-  const normalizedTime = /^\d{2}:\d{2}$/.test(time) ? time : "15:20";
-  const parsed = new Date(
-    `${normalizedDate}T${normalizedTime}:00${DEFAULT_TIMEZONE_OFFSET}`,
-  );
-
-  return Number.isNaN(parsed.getTime()) ? now : parsed;
 }
 
 function getReservationWallClockFields(reservationWindowStart: string) {
@@ -369,11 +359,8 @@ export function buildEnterpriseBookingCommand(
   draft: EnterpriseBookingDraftForm,
   now = new Date(),
 ): CreateTenantBookingCommand {
-  const reservationWindowStart = getReservationStart(
-    draft.reservationDate,
-    draft.reservationTime,
-    now,
-  );
+  // Recheck at the API command boundary: a valid review can expire while open.
+  const reservationWindowStart = requireFutureReservationStart(draft, now);
   const reservationWindowEnd = new Date(
     reservationWindowStart.getTime() + 30 * 60 * 1000,
   );
