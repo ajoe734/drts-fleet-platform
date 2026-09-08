@@ -5,9 +5,9 @@
 | Task spec     | `docs/03-runbooks/system-remediation-20260906/SR-OPS-PROOF-001.md`                                   |
 | Owner         | Gemini                                                                                             |
 | Reviewer      | Codex2                                                                                             |
-| Base SHA      | `40ba315e4114369eaa7e12d35aae83a795c97b1d` (= `origin/dev` tip at task start)                      |
+| Base SHA      | `40ba315e4114369eaa7e12d35aae83a795c97b1d` (= `origin/dev` tip at task start), integrated with current `origin/dev` (`f372e4a6a5789f2a9c39bc077b58a183570624a6`) |
 | Prior Candidate SHA | `8c1dbec1d443e456082b92b8e8a1a8fd50fe2136` (Codex2 審查駁回，存在假數據、未連線 PASS 與硬編碼問題) |
-| Current Candidate SHA | 於本輪 commit / handoff 時記錄 (詳見 task board 與 git rev-parse HEAD)                               |
+| Current Candidate SHA | 於本輪 commit / handoff 時鎖定 (詳見 task board 與 git rev-parse HEAD)                               |
 | Resource ID   | `iso-db-res-001`                                                                                   |
 
 ---
@@ -175,14 +175,14 @@ $ pnpm vitest run tests/unit/system-remediation/sr-ops-proof-001/
 (exit 0，35 項測試全數通過)
 ```
 
-### F. 代碼格式與 TypeScript 類型檢查
+### F. 代碼格式、ESLint 與 TypeScript 檢查
 
 ```bash
 $ git diff --check
 (exit 0，無格式錯誤或尾隨空白)
 
-$ pnpm tsc -p tsconfig.json --noEmit
-(write_scopes 範圍內零 TypeScript 錯誤，符合 exactOptionalPropertyTypes 要求)
+$ pnpm exec eslint tools/system-remediation/ops-proof/ tests/unit/system-remediation/sr-ops-proof-001/
+(exit 0，零警告零錯誤)
 ```
 
 ---

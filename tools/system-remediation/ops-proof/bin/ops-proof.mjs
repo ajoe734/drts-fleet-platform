@@ -649,7 +649,7 @@ async function main() {
   // --------------------------------------------------------------------------
   // [2] Load Capacity Verification (C123)
   // --------------------------------------------------------------------------
-  if (command === "capacity-verify" || command === "load-test" || command === "all" || command === "self-test") {
+  if (command === "capacity-verify" || command === "load-verify" || command === "load-test" || command === "all" || command === "self-test") {
     if (!targetUrl && !isSelfTest) {
       results.loadCapacityVerification = {
         passed: false,
@@ -797,7 +797,7 @@ async function main() {
 
   if (command === "snapshot-verify") {
     results.overallPassed = snapCheck ? snapCheck.passed === true : false;
-  } else if (command === "capacity-verify" || command === "load-test") {
+  } else if (command === "capacity-verify" || command === "load-verify" || command === "load-test") {
     results.overallPassed = loadCheck ? loadCheck.passed === true : false;
   } else if (command === "deploy-verify") {
     results.overallPassed = depCheck ? depCheck.passed === true : false;
