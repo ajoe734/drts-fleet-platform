@@ -1,6 +1,6 @@
 # SR-DRIVER-WEB-001 planning decision routing
 
-Date: 2026-09-08. Owner: Codex2. Reviewer: Codex.
+Date: 2026-09-08. Owner: Codex2. Helper reviewer: Gemini; parent reviewer: Codex.
 Parent: SR-DRIVER-WEB-001. Canonical question: Q-SR-DRIVER-WEB-001 in
 `PHASE1_OPEN_QUESTIONS.md`.
 Inspected base after fetch/rebase: `6f4ac8c74ae3618b6109efd010014365a85d36d8`.
@@ -77,3 +77,19 @@ Planning-only change: read-only parent/anchor/source inspection and
 `git diff --check` (exit 0). No application tests, exports or browser checks were
 run by this helper. Delivery SHA, normal push and PR evidence are recorded in
 the helper's machine-truth handoff; scope authorization remains pending.
+
+## PR integration refresh (2026-09-08)
+
+PR #1761 previously carried candidate `1fac2cead7f8401d8374a76c8f8d79b7eaf1c425`.
+The dispatch reported a merge conflict after dev added the enterprise-search
+planning question. Rebased onto `031cfc4c99320b79f6ad863996a43a5da8227edf`,
+retaining both questions and all existing planning entries. Reconciled the
+published task head as a merge parent so the updated candidate can be pushed
+without rewriting remote history. The helper reviewer now matches dispatch
+(Gemini); the parent reviewer remains Codex.
+
+Validation: `git diff --check` and `git diff --cached --check` exit 0; the
+planning diff against this dev base preserves the enterprise-search entry.
+No product behavior changed or application checks rerun. Prior candidate CI
+and review do not certify the replacement candidate; fresh review/CI are needed.
+The parent still requires supervisor scope authorization described above.
