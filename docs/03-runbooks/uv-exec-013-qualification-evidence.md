@@ -25,3 +25,40 @@ Current capability data is license-class based. More than four passengers, wheel
 - Contracts build and `pnpm --filter @drts/api typecheck` passed.
 
 The qualification-to-task scenario uses provider/ETA fixtures, a captured UoW repository insert, and a runtime evaluator fixture to inject condition changes. It proves the domain mapping and assignment fences, not PostgreSQL concurrency or live telephone/map acceptance. Reservation/CAS SQL is unchanged; UV-EXEC-006 owns its PostgreSQL race evidence. No live provider, deployment, confirmation receipt, or external acceptance is claimed here.
+
+## 2026-09-08 Product smoke repair
+
+Resumed by Codex2 under supervisor fallback, following
+`support/unblock/UV-EXEC-013/UV-EXEC-013-UNBLOCK-PLANNING-DECISION.md`.
+The old candidate's integration workflow passed, but Product smoke run
+34282197576 failed in UV-EXEC-006 `cancellation preserves live state on
+stale_trip`: hydration had logged an undefined `includes` before the stale
+service's `getDriverTask` returned `DRIVER_TASK_NOT_FOUND`.
+
+UV-EXEC-002 and the bound-order path in UV-EXEC-005 wrote partial JSON order
+records without `complianceFlags` or `approvalRequestIds`. These rows share
+`ops.phase1_owned_orders` with UV-EXEC-006; `onModuleInit` loads all rows and
+clones orders before driver tasks. Both producers now use the existing
+UV-EXEC-005 order builder, extracted into `voice-order-fixture.ts`. Production
+loading, cancellation fences and stale-trip assertions are unchanged.
+
+Verification on the repaired branch:
+
+- Root qualification/owned-mobility/vehicle-eligibility/UV-EXEC-012 unit command:
+  106 passed.
+- From `apps/api`, `pnpm exec vitest run tests/unit/owned-mobility.service.test.ts`:
+  113 passed, including shared voice fixture hydration.
+- Negative control: temporarily removing the builder's `complianceFlags` made
+  the new hydration test fail on `reportPersistenceFailure` with the same
+  undefined `includes` error. The field was restored afterward.
+- Contracts and control-plane-auth packages built before API typecheck.
+
+The worker has no `DATABASE_URL`; the dispatch prohibits starting product
+servers or Docker Compose infrastructure. No local PostgreSQL reproduction or
+full Product smoke success is claimed. The patch demonstrates and repairs the
+fixture hydration defect; CI must still verify the full concurrent database
+suite and the original stale-trip case on the new candidate.
+
+The mandated rebase was attempted and aborted on duplicate add/add conflicts
+from the previously published ancestry. A merge of `origin/dev` preserves that
+ancestry and permits a normal non-force push; no work was stashed.
