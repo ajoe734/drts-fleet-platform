@@ -1977,9 +1977,15 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
     ).toHaveLength(0);
   });
 
-  it.each(["rollback", "cancel"])(
-    "target timeout is atomic across resource release: %s",
-    async (scenario) => {
+  it.each([
+    ["timeout", "rollback"],
+    ["timeout", "cancel"],
+    ["redispatch", "rollback"],
+    ["redispatch", "cancel"],
+    ["redispatch", "cancel_after_commit"],
+  ])(
+    "%s is atomic across resource release: %s",
+    async (operation, scenario) => {
       expect(DATABASE_URL).toBeTruthy();
       const database = new DatabaseService();
       databases.push(database);
@@ -2024,11 +2030,12 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       const readState = async () =>
         (
           await database.query(
-            `SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_driver_tasks WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_assignments WHERE order_id = $1`,
+            `SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_driver_tasks WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_assignments WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_attempts WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_trace_logs WHERE order_id = $1`,
             [order.orderId],
           )
         ).rows;
       const before = await readState();
+      const cachedOrder = structuredClone(service.getOrder(order.orderId));
       const cachedTask = service.getDriverTask(assignment.taskId);
       let released!: () => void;
       const atRelease = new Promise<void>((resolve) => {
@@ -2044,22 +2051,41 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
         .spyOn(repository, "releaseDispatchResourceReservations")
         .mockImplementation(async (...args) => {
           const result = await original(...args);
+          if (scenario === "cancel_after_commit") return result;
           released();
           if (scenario === "rollback") throw new Error("timeout release fault");
           await barrier;
           return result;
         });
+      const transact = repository.withTransaction.bind(repository);
+      const commitHook =
+        scenario === "cancel_after_commit"
+          ? vi
+              .spyOn(repository, "withTransaction")
+              .mockImplementation(async (work) => {
+                const result = await transact(work);
+                released();
+                await barrier;
+                return result;
+              })
+          : null;
       try {
-        const timeout = service.handleDispatchTimeout(
-          order.orderId,
-          "acceptance_timeout",
-          undefined,
-          { targetAssignmentId: assignment.assignmentId },
-        );
+        const timeout =
+          operation === "redispatch"
+            ? service.redispatchOrder(order.orderId, {
+                reasonCode: "operator_redispatch",
+              })
+            : service.handleDispatchTimeout(
+                order.orderId,
+                "acceptance_timeout",
+                undefined,
+                { targetAssignmentId: assignment.assignmentId },
+              );
         if (scenario === "rollback") {
           await expect(timeout).rejects.toThrow("timeout release fault");
           expect(await readState()).toEqual(before);
           expect(service.getDriverTask(assignment.taskId)).toEqual(cachedTask);
+          expect(service.getOrder(order.orderId)).toEqual(cachedOrder);
           expect(
             await readActiveReservations(database, "driver", driverId),
           ).toHaveLength(1);
@@ -2069,10 +2095,12 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
         } else {
           await atRelease;
           // Another connection still sees the complete pre-timeout workflow.
-          expect(await readState()).toEqual(before);
-          expect(
-            await readActiveReservations(database, "driver", driverId),
-          ).toHaveLength(1);
+          if (scenario !== "cancel_after_commit") {
+            expect(await readState()).toEqual(before);
+            expect(
+              await readActiveReservations(database, "driver", driverId),
+            ).toHaveLength(1);
+          }
           let entered!: () => void;
           const attempting = new Promise<void>((resolve) => {
             entered = resolve;
@@ -2094,6 +2122,10 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
               (error: unknown) => error,
             );
           await attempting;
+          if (scenario === "cancel_after_commit") {
+            expect(await cancellation).toBeNull();
+            commitHook?.mockRestore();
+          }
           resume();
           await timeout;
           const cancellationError = await cancellation;
@@ -2112,6 +2144,19 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
             ).rows[0].record.status,
           ).toBe("cancelled");
           expect(
+            (
+              await database.query(
+                `SELECT status FROM ops.phase1_dispatch_jobs WHERE order_id = $1 AND status <> 'closed'`,
+                [order.orderId],
+              )
+            ).rows,
+          ).toHaveLength(0);
+          await expect(
+            service.redispatchOrder(order.orderId, {
+              reasonCode: "stale_cache",
+            }),
+          ).rejects.toMatchObject({ code: "ORDER_NOT_READY_FOR_DISPATCH" });
+          expect(
             await readAssignmentStatus(database, assignment.assignmentId),
           ).toBe("cancelled");
           expect(
@@ -2124,6 +2169,7 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       } finally {
         resume();
         hook.mockRestore();
+        commitHook?.mockRestore();
       }
     },
   );

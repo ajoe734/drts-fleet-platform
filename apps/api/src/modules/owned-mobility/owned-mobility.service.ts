@@ -2950,7 +2950,27 @@ export class OwnedMobilityService
     command: DispatchOrderCommand,
     requestId?: string,
   ) {
-    const order = this.requireOrder(orderId);
+    const prepared = this.prepareDispatchOrder(
+      this.cloneOrder(this.requireOrder(orderId)),
+      command,
+      requestId,
+    );
+    this.persistChanges(
+      {
+        ...prepared.changes,
+        orders: prepared.shouldPersistOrder ? prepared.changes.orders : [],
+      },
+      "dispatch_order",
+    );
+    return prepared.apply();
+  }
+
+  private prepareDispatchOrder(
+    order: OwnedOrderRecord,
+    command: DispatchOrderCommand,
+    requestId?: string,
+  ) {
+    const orderId = order.orderId;
     if (
       order.bookingId &&
       ["pending", "blocked", "rejected"].includes(order.approvalState)
@@ -3026,8 +3046,6 @@ export class OwnedMobilityService
       reasonCode: candidates.length > 0 ? null : exceptionHoldEval.reasonCode,
       createdAt: now,
     };
-    this.dispatchJobs = [dispatchJob, ...this.dispatchJobs];
-    this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
 
     const traceLogs: DispatchTraceLogRecord[] = [];
     let shouldPersistOrder = false;
@@ -3039,19 +3057,20 @@ export class OwnedMobilityService
         order.status = "redispatch_required";
         this.transitionReservationHold(order, "redispatch_queue");
         traceLogs.push(
-          this.appendTrace(orderId, "dispatch.failed", {
+          this.buildTraceLog(orderId, "dispatch.failed", {
             dispatchJobId: dispatchJob.dispatchJobId,
             reasonCode: exceptionHoldEval.reasonCode,
           }),
         );
         traceLogs.push(
-          this.appendTrace(orderId, "queue.entry.created", {
+          this.buildTraceLog(orderId, "queue.entry.created", {
             dispatchJobId: dispatchJob.dispatchJobId,
             queueType: "redispatch",
             reasonCode: exceptionHoldEval.reasonCode,
           }),
         );
       } else if (isReservation) {
+        shouldPersistOrder = true;
         order.status = "exception_hold";
         this.transitionReservationHold(order, "exception_hold");
         order.exceptionHold = this.createExceptionHoldRecord(
@@ -3066,13 +3085,13 @@ export class OwnedMobilityService
           },
         );
         traceLogs.push(
-          this.appendTrace(orderId, "dispatch.failed", {
+          this.buildTraceLog(orderId, "dispatch.failed", {
             dispatchJobId: dispatchJob.dispatchJobId,
             reasonCode: exceptionHoldEval.reasonCode,
           }),
         );
         traceLogs.push(
-          this.appendTrace(orderId, "order.exception_hold", {
+          this.buildTraceLog(orderId, "order.exception_hold", {
             dispatchJobId: dispatchJob.dispatchJobId,
             reasonCode: exceptionHoldEval.reasonCode,
             exceptionHoldCriteria: {
@@ -3099,7 +3118,7 @@ export class OwnedMobilityService
             resolvedAt: null,
           };
           traceLogs.push(
-            this.appendTrace(orderId, "dispatch.no_supply_delayed", {
+            this.buildTraceLog(orderId, "dispatch.no_supply_delayed", {
               dispatchJobId: dispatchJob.dispatchJobId,
               reasonCode: exceptionHoldEval.reasonCode,
               escalationAction,
@@ -3121,7 +3140,7 @@ export class OwnedMobilityService
             resolvedAt: null,
           };
           traceLogs.push(
-            this.appendTrace(orderId, "dispatch.no_supply_escalated", {
+            this.buildTraceLog(orderId, "dispatch.no_supply_escalated", {
               dispatchJobId: dispatchJob.dispatchJobId,
               reasonCode: exceptionHoldEval.reasonCode,
               escalationAction,
@@ -3131,7 +3150,7 @@ export class OwnedMobilityService
         } else {
           order.status = "dispatch_failed";
           traceLogs.push(
-            this.appendTrace(orderId, "dispatch.failed", {
+            this.buildTraceLog(orderId, "dispatch.failed", {
               dispatchJobId: dispatchJob.dispatchJobId,
               reasonCode: exceptionHoldEval.reasonCode,
             }),
@@ -3140,19 +3159,12 @@ export class OwnedMobilityService
         order.dispatchAttemptCount += 1;
         order.lastDispatchFailureReason = exceptionHoldEval.reasonCode;
       }
-
-      if (isReservation) {
-        this.recordReservationEscalationNotifications(
-          order,
-          dispatchJob.dispatchJobId,
-        );
-      }
     } else if (isReservation) {
       shouldPersistOrder = true;
       order.status = "preassigned";
       order.updatedAt = now;
       traceLogs.push(
-        this.appendTrace(orderId, "reservation.hold.created", {
+        this.buildTraceLog(orderId, "reservation.hold.created", {
           dispatchJobId: dispatchJob.dispatchJobId,
           reservationHoldId: order.reservationHoldId,
           candidateCount: candidates.length,
@@ -3161,48 +3173,61 @@ export class OwnedMobilityService
       );
     } else {
       traceLogs.push(
-        this.appendTrace(orderId, "dispatch.matching", {
+        this.buildTraceLog(orderId, "dispatch.matching", {
           dispatchJobId: dispatchJob.dispatchJobId,
           candidateCount: candidates.length,
         }),
       );
     }
 
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
-        moduleName: "dispatch",
-        actionName: "dispatch_order",
-        resourceType: "dispatch_job",
-        resourceId: dispatchJob.dispatchJobId,
-        newValuesSummary: {
-          orderId,
-          status: dispatchJob.status,
-          candidateCount: candidates.length,
-        },
-      },
-      requestId,
-    );
-    this.persistChanges(
-      {
-        ...(shouldPersistOrder ? { orders: [order] } : {}),
-        dispatchJobs: [dispatchJob],
-        dispatchAttempts: [dispatchAttempt],
-        dispatchTraceLogs: traceLogs,
-      },
-      "dispatch_order",
-    );
-    this.opsDispatchEventsService?.publishDispatchJobUpdated(
-      orderId,
-      dispatchJob,
-      requestId,
-    );
-
+    const changes = {
+      orders: [order],
+      dispatchJobs: [dispatchJob],
+      dispatchAttempts: [dispatchAttempt],
+      dispatchTraceLogs: traceLogs,
+    };
     return {
-      dispatchJobId: dispatchJob.dispatchJobId,
-      status: dispatchJob.status,
+      changes,
+      shouldPersistOrder,
+      apply: () => {
+        this.applyAuthoritativeOrder(order);
+        this.dispatchJobs = [dispatchJob, ...this.dispatchJobs];
+        this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
+        this.dispatchTraceLogs = [...traceLogs, ...this.dispatchTraceLogs];
+        if (isReservation && candidates.length === 0) {
+          this.recordReservationEscalationNotifications(
+            order,
+            dispatchJob.dispatchJobId,
+          );
+        }
+        this.recordAudit(
+          {
+            actorId: null,
+            actorType: "system",
+            tenantId: null,
+            moduleName: "dispatch",
+            actionName: "dispatch_order",
+            resourceType: "dispatch_job",
+            resourceId: dispatchJob.dispatchJobId,
+            newValuesSummary: {
+              orderId,
+              status: dispatchJob.status,
+              candidateCount: candidates.length,
+            },
+          },
+          requestId,
+        );
+        this.opsDispatchEventsService?.publishDispatchJobUpdated(
+          orderId,
+          dispatchJob,
+          requestId,
+        );
+
+        return {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          status: dispatchJob.status,
+        };
+      },
     };
   }
 
@@ -3281,6 +3306,9 @@ export class OwnedMobilityService
         "Redispatch reason is required.",
       );
     }
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      return this.redispatchOrderDurably(orderId, command, requestId);
+    }
     const order = this.requireOrder(orderId);
     if (
       order.status === "exception_hold" ||
@@ -3325,34 +3353,148 @@ export class OwnedMobilityService
 
     const now = new Date().toISOString();
 
-    const proceed = (
-      closedPrevious: {
-        assignment: DispatchAssignmentRecord;
-        task: DriverTaskRecord | null;
-      } | null,
-    ): MaybePromise<any> => {
+    order.status = "redispatch_required";
+    order.dispatchAttemptCount += 1;
+    order.lastDispatchFailureReason = command.reasonCode;
+    order.updatedAt = now;
+
+    const latestTask = latestAssignment
+      ? this.driverTasks.find(
+          (task) =>
+            task.assignmentId === latestAssignment.assignmentId &&
+            !["completed", "cancelled", "rejected"].includes(task.status),
+        )
+      : null;
+    if (latestAssignment) {
+      latestAssignment.status = "cancelled";
+      latestAssignment.updatedAt = now;
+    }
+    if (latestTask) {
+      latestTask.status = "cancelled";
+      latestTask.completedAt = now;
+    }
+
+    const traceLog = this.appendTrace(orderId, "dispatch.redispatch_required", {
+      reasonCode: command.reasonCode,
+      reasonNote: command.reasonNote ?? null,
+      operatorId: command.operatorId ?? null,
+      escalationTarget: command.escalationTarget ?? null,
+      attemptCount: order.dispatchAttemptCount,
+    });
+    this.persistChanges(
+      {
+        orders: [order],
+        ...(latestAssignment
+          ? { dispatchAssignments: [latestAssignment] }
+          : {}),
+        ...(latestTask ? { driverTasks: [latestTask] } : {}),
+        dispatchTraceLogs: [traceLog],
+      },
+      "redispatch_order",
+    );
+
+    this.recordAudit(
+      {
+        actorId: command.operatorId ?? null,
+        actorType: command.operatorId ? "ops_user" : "system",
+        tenantId: order.tenantId,
+        moduleName: "dispatch",
+        actionName: "redispatch_order",
+        resourceType: "order",
+        resourceId: orderId,
+        newValuesSummary: {
+          reasonCode: command.reasonCode,
+          reasonNote: command.reasonNote ?? null,
+          escalationTarget: command.escalationTarget ?? null,
+          status: order.status,
+          attemptCount: order.dispatchAttemptCount,
+        },
+      },
+      requestId,
+    );
+    if (latestTask) {
+      this.ownedMobilityTaskEventsService.publishTaskCancelled(
+        latestTask,
+        order,
+        requestId,
+      );
+    }
+
+    return this.dispatchOrder(orderId, { mode: "auto" }, requestId);
+  }
+
+  private async redispatchOrderDurably(
+    orderId: string,
+    command: RedispatchOrderCommand,
+    requestId?: string,
+  ) {
+    const repository = this.ownedMobilityRepository!;
+    await Promise.all([...this.pendingWorkflowWrites]);
+    const committed = await repository.withTransaction(async (tx) => {
+      // Share cancellation's assignment -> task -> jobs -> order locks and
+      // discovery fence. No cached workflow may revive a terminal order.
+      const current = await repository.loadOrderCancellationForUpdate(
+        tx,
+        orderId,
+      );
+      const order = this.cloneOrder(current.order);
+      if (
+        order.status === "exception_hold" ||
+        order.reservationHoldStatus === "exception_hold"
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "EXCEPTION_HOLD_REQUIRES_RESOLUTION",
+          "Exception-hold orders require resolution before redispatch.",
+        );
+      }
+      if (["cancelled", "completed"].includes(order.status)) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ORDER_NOT_READY_FOR_DISPATCH",
+          "Order cannot be redispatched.",
+        );
+      }
+      if (
+        command.expectedAssignmentVersion != null &&
+        current.assignmentVersion > command.expectedAssignmentVersion
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "STALE_REDISPATCH_EVENT",
+          "The redispatch request is stale.",
+        );
+      }
+      const now = new Date().toISOString();
+      const closed = current.assignment
+        ? await this.closeSupersededDispatchAssignment(
+            tx,
+            current.assignment.assignmentId,
+            now,
+          )
+        : null;
+      if (current.assignment && !closed) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "REDISPATCH_ASSIGNMENT_ALREADY_CLOSED",
+          "Assignment state requires reconciliation.",
+        );
+      }
       order.status = "redispatch_required";
       order.dispatchAttemptCount += 1;
       order.lastDispatchFailureReason = command.reasonCode;
       order.updatedAt = now;
-
-      const latestTask = latestAssignment
-        ? this.driverTasks.find(
-            (task) =>
-              task.assignmentId === latestAssignment.assignmentId &&
-              !["completed", "cancelled", "rejected"].includes(task.status),
-          )
-        : null;
-      if (latestAssignment) {
-        latestAssignment.status = "cancelled";
-        latestAssignment.updatedAt = now;
-      }
-      if (latestTask) {
-        latestTask.status = "cancelled";
-        latestTask.completedAt = now;
-      }
-
-      const traceLog = this.appendTrace(
+      const prepared = this.prepareDispatchOrder(
+        order,
+        { mode: "auto" },
+        requestId,
+      );
+      const closedJobs = current.dispatchJobs.map((job) => ({
+        ...job,
+        status: "closed" as const,
+        updatedAt: now,
+      }));
+      const trace = this.buildTraceLog(
         orderId,
         "dispatch.redispatch_required",
         {
@@ -3363,91 +3505,62 @@ export class OwnedMobilityService
           attemptCount: order.dispatchAttemptCount,
         },
       );
-      this.persistChanges(
-        {
-          orders: [order],
-          // Already durably persisted atomically by closeSupersededDispatchAssignment
-          // above when closedPrevious is set; re-including it here would just be a
-          // redundant (harmless, but pointless) re-upsert of identical values.
-          ...(latestAssignment && !closedPrevious
-            ? { dispatchAssignments: [latestAssignment] }
-            : {}),
-          ...(latestTask && !closedPrevious
-            ? { driverTasks: [latestTask] }
-            : {}),
-          dispatchTraceLogs: [traceLog],
+      prepared.changes.dispatchTraceLogs.unshift(trace);
+      await repository.persistOrderWorkflow(tx, {
+        ...prepared.changes,
+        dispatchJobs: [...closedJobs, ...prepared.changes.dispatchJobs],
+      });
+      return { prepared, closed, closedJobs, order };
+    });
+    const { prepared, closed, closedJobs, order } = committed;
+    for (const job of closedJobs) {
+      this.dispatchJobs = [
+        job,
+        ...this.dispatchJobs.filter(
+          (item) => item.dispatchJobId !== job.dispatchJobId,
+        ),
+      ];
+    }
+    if (closed) {
+      this.dispatchAssignments = [
+        closed.assignment,
+        ...this.dispatchAssignments.filter(
+          (item) => item.assignmentId !== closed.assignment.assignmentId,
+        ),
+      ];
+      if (closed.task)
+        this.driverTasks = [
+          closed.task,
+          ...this.driverTasks.filter(
+            (item) => item.taskId !== closed.task!.taskId,
+          ),
+        ];
+    }
+    const result = prepared.apply();
+    this.recordAudit(
+      {
+        actorId: command.operatorId ?? null,
+        actorType: command.operatorId ? "ops_user" : "system",
+        tenantId: order.tenantId,
+        moduleName: "dispatch",
+        actionName: "redispatch_order",
+        resourceType: "order",
+        resourceId: orderId,
+        newValuesSummary: {
+          reasonCode: command.reasonCode,
+          status: order.status,
+          attemptCount: order.dispatchAttemptCount,
         },
-        "redispatch_order",
-      );
-
-      this.recordAudit(
-        {
-          actorId: command.operatorId ?? null,
-          actorType: command.operatorId ? "ops_user" : "system",
-          tenantId: order.tenantId,
-          moduleName: "dispatch",
-          actionName: "redispatch_order",
-          resourceType: "order",
-          resourceId: orderId,
-          newValuesSummary: {
-            reasonCode: command.reasonCode,
-            reasonNote: command.reasonNote ?? null,
-            escalationTarget: command.escalationTarget ?? null,
-            status: order.status,
-            attemptCount: order.dispatchAttemptCount,
-          },
-        },
+      },
+      requestId,
+    );
+    if (closed?.task)
+      this.ownedMobilityTaskEventsService.publishTaskCancelled(
+        closed.task,
+        order,
         requestId,
       );
-      if (latestTask) {
-        this.ownedMobilityTaskEventsService.publishTaskCancelled(
-          latestTask,
-          order,
-          requestId,
-        );
-      }
-
-      return this.dispatchOrder(orderId, { mode: "auto" }, requestId);
-    };
-
-    if (latestAssignment && this.ownedMobilityRepository?.isEnabled()) {
-      // SD §7.6: close the current assignment (and release its reservation)
-      // atomically in one transaction, before mutating any in-memory state
-      // or reading it into the audit/event payloads below -- redispatch
-      // closes the current assignment before the subsequent `dispatchOrder`
-      // call tries to reserve a (possibly identical) driver/vehicle for the
-      // next attempt, and a crash between closing and releasing can never
-      // leave the old assignment still active with its reservation already
-      // gone. A `null` result means the row was already closed by something
-      // else (accept, reject/cancel, a confirmed timeout) since this
-      // in-memory snapshot was read, so the redispatch must not proceed as
-      // if it still owned that offer.
-      return this.afterMaybePromise(
-        this.ownedMobilityRepository.withTransaction((tx) =>
-          this.closeSupersededDispatchAssignment(
-            tx,
-            latestAssignment.assignmentId,
-            now,
-          ),
-        ),
-        (closedPrevious) => {
-          if (!closedPrevious) {
-            throw new ApiRequestError(
-              HttpStatus.CONFLICT,
-              "REDISPATCH_ASSIGNMENT_ALREADY_CLOSED",
-              "The assignment being redispatched was already closed by another operation.",
-              {
-                orderId,
-                assignmentId: latestAssignment.assignmentId,
-              },
-            );
-          }
-          return proceed(closedPrevious);
-        },
-      );
-    }
-
-    return proceed(null);
+    return result;
   }
 
   resolveExceptionHold(
@@ -7918,6 +8031,9 @@ export class OwnedMobilityService
     requestId?: string,
     options?: { targetAssignmentId?: string },
   ) {
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      await Promise.all([...this.pendingWorkflowWrites]);
+    }
     const afterCommit: (() => void)[] = [];
     const result = this.ownedMobilityRepository?.isEnabled()
       ? await this.ownedMobilityRepository.withTransaction((tx) =>
