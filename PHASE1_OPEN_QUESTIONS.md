@@ -4,9 +4,9 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-_None as of 2026-08-20._
+Open remediation follow-up as of 2026-09-08: `Q-SR-OPS-SHELL-001`.
 
-Every question on this board has been answered. Worth noting how, because the
+The original fifteen questions on this board were answered. Worth noting how, because the
 distribution was not what the board implied: of the fifteen, four were closed by
 a human decision, four were already answered by an accepted decision or a
 canonical document and had simply never been marked, four turned out to be
@@ -21,6 +21,7 @@ the code or an accepted packet already answers it.
 
 | ID  | Question | Source / Module | Named Owner | Decision Route | Interim Default |
 | --- | -------- | --------------- | ----------- | -------------- | --------------- |
+| Q-SR-OPS-SHELL-001 | Confirm the dispatch audit resource-context receiver contract and authorize the missing sender/receiver write scopes. | SR-OPS-SHELL-001; dispatch audit CTA; PRD §13.3; service contracts §3.13 | Codex (parent owner); Gemini (reviewer) | Supervisor first reviews scope overlap/dependencies; Codex and Gemini confirm existing receiver/API semantics. Escalate to human product owner only if acceptance must be reduced. See [routing record](support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION.md). | Keep full parent acceptance and blocked state; no invented query contract or unauthorized shared-file edits. Reuse existing runtime URL resolver after scope authorization. |
 
 ## Resolved Items
 

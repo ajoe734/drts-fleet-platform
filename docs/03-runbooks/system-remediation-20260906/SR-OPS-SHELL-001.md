@@ -27,6 +27,14 @@
 
 ## 驗收條件
 
+### 2026-09-08 planning blocker route
+
+`Q-SR-OPS-SHELL-001` 記錄於 `PHASE1_OPEN_QUESTIONS.md`；詳細證據與 supervisor 可執行步驟見
+[planning routing record](../../../support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION.md)。
+目前 `/dispatch` 的 audit CTA 位於未列入 scope 的 `apps/ops-console-web/app/dispatch/page.tsx`。
+Supervisor 必須先核准該 sender 的 scope 與重疊 writer 相依，並確認 audit receiver 的 resource-context 契約／必要接收端 scope，再讓 owner 實作。
+這份 follow-up 不自行擴大上方可寫入範圍，也不刪減下方驗收。父任務保留 blocked，直到授權與契約回填 machine truth。
+
 - audit新分頁到平台正確URL非ops404。
 - 1440/390px核心CTA可按，開關助理與重載保留合理版面。
 - 證據包含 base/candidate SHA、實際指令結果與資源 ID；未做的 live／真機部分明列，不冒充成功。
