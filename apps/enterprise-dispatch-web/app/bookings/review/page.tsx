@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BookingSubmitButton } from "@/components/booking-submit-button";
+import { ReservationExpiryGate } from "@/components/booking-form/reservation-expiry-gate";
 import {
   EBanner,
   EBtnContent,
@@ -20,6 +21,7 @@ import {
   isEnterpriseDraftComplete,
   isReservationWindowInFuture,
   parseEnterpriseBookingDraft,
+  requireFutureReservationStart,
   serializeEnterpriseBookingDraft,
 } from "@/lib/enterprise-booking-draft";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
@@ -66,8 +68,9 @@ export default async function ReviewBookingPage({
   const airportLabel =
     airportParts.length > 0 ? airportParts.join(" · ") : undefined;
   const passengerDisplayName = getEnterprisePassengerDisplayName(draft);
-  const isReservationInFuture = isReservationWindowInFuture(draft);
-  const isSubmittable = isEnterpriseDraftComplete(draft);
+  const now = new Date();
+  const isReservationInFuture = isReservationWindowInFuture(draft, now);
+  const isSubmittable = isEnterpriseDraftComplete(draft, now);
 
   return (
     <>
@@ -337,10 +340,29 @@ export default async function ReviewBookingPage({
               <EBtnContent>{tr("review.back")}</EBtnContent>
             </Link>
             {isSubmittable ? (
-              <BookingSubmitButton
-                draft={draft}
-                {...(bookingId ? { bookingId } : {})}
-              />
+              <ReservationExpiryGate
+                expiresAt={requireFutureReservationStart(draft, now).getTime()}
+                fallback={
+                  <div role="status" data-testid="enterprise-booking-expired">
+                    <EBanner
+                      t={t}
+                      tone="warn"
+                      icon="clock"
+                      body={tr("review.blocked.pastReservation", {
+                        earliest: getEarliestBookableLabel(
+                          locale,
+                          requireFutureReservationStart(draft, now),
+                        ),
+                      })}
+                    />
+                  </div>
+                }
+              >
+                <BookingSubmitButton
+                  draft={draft}
+                  {...(bookingId ? { bookingId } : {})}
+                />
+              </ReservationExpiryGate>
             ) : null}
           </div>
         </div>
