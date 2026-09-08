@@ -6,7 +6,13 @@ import {
   CanvasPageHeader,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { getCurrentPeriodMonth, loadTrips } from "@/lib/fleet-portal-data.server";
+import {
+  computeTripTabCounts,
+  filterTripsForService,
+  getCurrentPeriodMonth,
+  loadTrips,
+  scopeTripRows,
+} from "@/lib/fleet-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { TripsTable } from "@/components/portal-tables";
 import { getServerLocale } from "@/lib/server-locale";
@@ -32,58 +38,41 @@ export default async function FleetTripsPage({
 
   const currentSvc = params.svc && params.svc !== "all" ? params.svc : "all";
 
+  // Filter rows by period, status, and query criteria before computing service tab counts,
+  // ensuring tab badges, table list, and CSV export reflect the exact same scope.
+  const scopedRows = scopeTripRows(rows, { q: params.q, status: params.status });
+  const tabCounts = computeTripTabCounts(scopedRows);
+
   const tabDefs = [
-    { id: "all", label: t("trips.tabAll", locale), count: rows.length },
+    { id: "all", label: t("trips.tabAll", locale), count: tabCounts.all },
     {
       id: "realtime",
       label: t("service.realtime", locale),
-      count: rows.filter((r) => r.svc === "realtime").length,
+      count: tabCounts.realtime,
     },
     {
       id: "business",
       label: t("service.business", locale),
-      count: rows.filter((r) => r.svc === "business").length,
+      count: tabCounts.business,
     },
     {
       id: "airport",
       label: t("service.airport", locale),
-      count: rows.filter((r) => r.svc === "airport").length,
+      count: tabCounts.airport,
     },
     {
       id: "insurance",
       label: t("service.insurance", locale),
-      count: rows.filter((r) => r.svc === "insurance").length,
+      count: tabCounts.insurance,
     },
     {
       id: "travel",
       label: t("service.travel", locale),
-      count: rows.filter((r) => r.svc === "travel").length,
+      count: tabCounts.travel,
     },
   ];
 
-  const filteredRows = rows.filter((r) => {
-    if (currentSvc !== "all" && r.svc !== currentSvc) {
-      return false;
-    }
-    if (
-      params.status &&
-      params.status !== "all" &&
-      r.status !== params.status
-    ) {
-      return false;
-    }
-    if (params.q) {
-      const q = params.q.toLowerCase();
-      const match =
-        r.id.toLowerCase().includes(q) ||
-        r.driver.toLowerCase().includes(q) ||
-        r.pickup.toLowerCase().includes(q);
-      if (!match) {
-        return false;
-      }
-    }
-    return true;
-  });
+  const filteredRows = filterTripsForService(scopedRows, currentSvc);
 
   const tabs = tabDefs.map((tab) => {
     const isSelected = currentSvc === tab.id;

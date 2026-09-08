@@ -7,6 +7,9 @@ vi.mock("server-only", () => ({}));
 // Mock next/headers
 vi.mock("next/headers", () => ({
   headers: vi.fn(async () => new Headers()),
+  cookies: vi.fn(async () => ({
+    get: vi.fn(() => ({ value: "zh" })),
+  })),
 }));
 
 // Mock api-client.server
@@ -31,6 +34,10 @@ vi.mock(
 );
 
 import {
+  computeDriverTabCounts,
+  computeTripTabCounts,
+  filterDriversForTab,
+  filterTripsForService,
   getCurrentPeriodMonth,
   loadCases,
   loadDashboard,
@@ -38,6 +45,8 @@ import {
   loadTraining,
   loadTrips,
   loadVehicles,
+  scopeDriverRows,
+  scopeTripRows,
 } from "../../../../apps/fleet-partner-portal-web/lib/fleet-portal-data.server";
 
 import { GET as exportHandler } from "../../../../apps/fleet-partner-portal-web/app/trips/export/route";
@@ -858,6 +867,278 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       expect(res.status).toBe(200);
       const body = await res.text();
       expect(body).toContain("ord-previous-month");
+    });
+  });
+
+  describe("Review Remediation P2: Unknown-data discipline and trips tab scope consistency", () => {
+    describe("P2 R10/R24: Live drivers unknown docs/training discipline and unavailable tab indicators", () => {
+      it("loadDrivers sets docs: unavailable, training: unavailable, and flags availability for live drivers", async () => {
+        mockDrivers.mockResolvedValue([
+          {
+            driverId: "drv-live-01",
+            name: "陳駕駛",
+            currentVehiclePlateNo: "XYZ-1111",
+            workState: "available",
+            licensesValid: true,
+            supportedServiceBuckets: ["standard_taxi"],
+            dispatchEligible: true,
+          },
+          {
+            driverId: "drv-live-02",
+            name: "黃駕駛",
+            currentVehiclePlateNo: "XYZ-2222",
+            workState: "offline",
+            licensesValid: false,
+            supportedServiceBuckets: ["standard_taxi"],
+            dispatchEligible: false,
+          },
+        ]);
+
+        const driversView = await loadDrivers();
+        expect(driversView.source).toBe("live");
+        expect(driversView.docsAvailable).toBe(false);
+        expect(driversView.trainingAvailable).toBe(false);
+        expect(driversView.rows).toHaveLength(2);
+
+        // Driver 1: licensesValid is true, but docs & training are unknown / unavailable
+        const d1 = driversView.rows[0]!;
+        expect(d1.license).toBe("valid");
+        expect(d1.docs).toBe("unavailable");
+        expect(d1.training).toBe("unavailable");
+        expect(d1.dispatchEligible).toBe(true);
+
+        // Driver 2: licensesValid is false, docs & training are unavailable
+        const d2 = driversView.rows[1]!;
+        expect(d2.license).toBe("expires_30d");
+        expect(d2.docs).toBe("unavailable");
+        expect(d2.training).toBe("unavailable");
+        expect(d2.dispatchEligible).toBe(false);
+      });
+
+      it("computeDriverTabCounts reports unavailable ('—') rather than false legitimate zero for unintegrated docs and training", async () => {
+        mockDrivers.mockResolvedValue([
+          {
+            driverId: "drv-01",
+            name: "陳駕駛",
+            currentVehiclePlateNo: "XYZ-1111",
+            workState: "available",
+            licensesValid: true,
+            supportedServiceBuckets: ["standard_taxi"],
+            dispatchEligible: true,
+          },
+        ]);
+
+        const driversView = await loadDrivers();
+        expect(driversView.docsAvailable).toBe(false);
+        expect(driversView.trainingAvailable).toBe(false);
+
+        const tabCounts = computeDriverTabCounts(driversView.rows, {
+          docsAvailable: driversView.docsAvailable,
+          trainingAvailable: driversView.trainingAvailable,
+        });
+
+        expect(tabCounts.all).toBe(1);
+        expect(tabCounts.available).toBe(1);
+        // Unintegrated docs and training must NOT report 0
+        expect(tabCounts.missingDocs).toBe("—");
+        expect(tabCounts.missingDocs).not.toBe(0);
+        expect(tabCounts.trainingIncomplete).toBe("—");
+        expect(tabCounts.trainingIncomplete).not.toBe(0);
+      });
+
+      it("filterDriversForTab on trainingIncomplete does not hide unintegrated drivers as completed", async () => {
+        mockDrivers.mockResolvedValue([
+          {
+            driverId: "drv-01",
+            name: "陳駕駛",
+            currentVehiclePlateNo: "XYZ-1111",
+            workState: "available",
+            licensesValid: true,
+            supportedServiceBuckets: ["standard_taxi"],
+            dispatchEligible: true,
+          },
+        ]);
+
+        const driversView = await loadDrivers();
+        const filtered = filterDriversForTab(driversView.rows, "trainingIncomplete", {
+          docsAvailable: driversView.docsAvailable,
+          trainingAvailable: driversView.trainingAvailable,
+        });
+
+        // Driver must NOT be hidden as completed
+        expect(filtered).toHaveLength(1);
+        expect(filtered[0]?.id).toBe("drv-01");
+        expect(filtered[0]?.training).toBe("unavailable");
+      });
+
+      it("filterDriversForTab on missingDocs does not hide unintegrated drivers when docs endpoint is unavailable", async () => {
+        mockDrivers.mockResolvedValue([
+          {
+            driverId: "drv-01",
+            name: "陳駕駛",
+            currentVehiclePlateNo: "XYZ-1111",
+            workState: "available",
+            licensesValid: true,
+            supportedServiceBuckets: ["standard_taxi"],
+            dispatchEligible: true,
+          },
+        ]);
+
+        const driversView = await loadDrivers();
+        const filtered = filterDriversForTab(driversView.rows, "missingDocs", {
+          docsAvailable: driversView.docsAvailable,
+          trainingAvailable: driversView.trainingAvailable,
+        });
+
+        // Live driver with unavailable docs review is not falsely filtered out as complete
+        expect(filtered).toHaveLength(1);
+        expect(filtered[0]?.id).toBe("drv-01");
+        expect(filtered[0]?.docs).toBe("unavailable");
+      });
+
+      it("scopeDriverRows and computeDriverTabCounts scope tab counts and results when search q filter is applied", async () => {
+        mockDrivers.mockResolvedValue([
+          {
+            driverId: "drv-01",
+            name: "陳駕駛",
+            currentVehiclePlateNo: "ABC-1234",
+            workState: "available",
+            licensesValid: true,
+            supportedServiceBuckets: ["standard_taxi"],
+            dispatchEligible: true,
+          },
+          {
+            driverId: "drv-02",
+            name: "黃駕駛",
+            currentVehiclePlateNo: "XYZ-9999",
+            workState: "available",
+            licensesValid: true,
+            supportedServiceBuckets: ["standard_taxi"],
+            dispatchEligible: true,
+          },
+        ]);
+
+        const driversView = await loadDrivers();
+        const scoped = scopeDriverRows(driversView.rows, { q: "陳駕駛" });
+        expect(scoped).toHaveLength(1);
+        expect(scoped[0]?.id).toBe("drv-01");
+
+        const tabCounts = computeDriverTabCounts(scoped, {
+          docsAvailable: driversView.docsAvailable,
+          trainingAvailable: driversView.trainingAvailable,
+        });
+        // Scoped tab badges must reflect the q-scoped count (1, not 2)
+        expect(tabCounts.all).toBe(1);
+        expect(tabCounts.available).toBe(1);
+      });
+    });
+
+    describe("P2 C069: Trip tab counts computed from same q/status/period scope before service grouping", () => {
+      beforeEach(() => {
+        mockTrips.mockResolvedValue([
+          {
+            orderId: "ord-001",
+            driverName: "張駕駛",
+            grossEarning: { amountMinor: 120000, currency: "TWD" },
+            fleetShareAmount: { amountMinor: 24000, currency: "TWD" },
+            reimbursementAmount: { amountMinor: 0, currency: "TWD" },
+            status: "completed",
+            completedAt: "2026-09-01T10:00:00Z",
+            businessDispatchSubtype: "credit_card_airport_transfer",
+            pickupAddress: "桃園機場第一航廈",
+          },
+          {
+            orderId: "ord-002",
+            driverName: "李駕駛",
+            grossEarning: { amountMinor: 50000, currency: "TWD" },
+            fleetShareAmount: { amountMinor: 10000, currency: "TWD" },
+            reimbursementAmount: { amountMinor: 0, currency: "TWD" },
+            status: "completed",
+            completedAt: "2026-09-02T11:00:00Z",
+            businessDispatchSubtype: "standard_taxi",
+            pickupAddress: "台北市信義區松仁路",
+          },
+          {
+            orderId: "ord-003",
+            driverName: "王駕駛",
+            grossEarning: { amountMinor: 60000, currency: "TWD" },
+            fleetShareAmount: { amountMinor: 12000, currency: "TWD" },
+            reimbursementAmount: { amountMinor: 0, currency: "TWD" },
+            status: "cancelled",
+            completedAt: "2026-09-03T12:00:00Z",
+            businessDispatchSubtype: "enterprise_dispatch",
+            pickupAddress: "新竹市科學園區",
+          },
+        ]);
+      });
+
+      it("scopeTripRows and computeTripTabCounts with q=ord-001 scope All badge and service badge to 1, exactly matching list and CSV export", async () => {
+        const { rows } = await loadTrips();
+        expect(rows).toHaveLength(3);
+
+        // Before fix: tab counts were computed from unfiltered rows (3).
+        // With fix: scopedRows is filtered by q=ord-001 first.
+        const scopedRows = scopeTripRows(rows, { q: "ord-001" });
+        expect(scopedRows).toHaveLength(1);
+        expect(scopedRows[0]?.id).toBe("ord-001");
+
+        const tabCounts = computeTripTabCounts(scopedRows);
+        expect(tabCounts.all).toBe(1);
+        expect(tabCounts.airport).toBe(1);
+        expect(tabCounts.realtime).toBe(0);
+        expect(tabCounts.business).toBe(0);
+
+        // Filtered rows for service list
+        const serviceAllRows = filterTripsForService(scopedRows, "all");
+        expect(serviceAllRows).toHaveLength(1);
+        expect(serviceAllRows[0]?.id).toBe("ord-001");
+
+        const serviceAirportRows = filterTripsForService(scopedRows, "airport");
+        expect(serviceAirportRows).toHaveLength(1);
+
+        const serviceRealtimeRows = filterTripsForService(scopedRows, "realtime");
+        expect(serviceRealtimeRows).toHaveLength(0);
+
+        // CSV export with same q=ord-001 MUST also have exactly 1 trip
+        const exportReq = new NextRequest("http://localhost:3000/trips/export?q=ord-001");
+        const exportRes = await exportHandler(exportReq);
+        expect(exportRes.status).toBe(200);
+        const csvBody = await exportRes.text();
+        const lines = csvBody.trim().split("\n");
+        // Header + 1 trip row = 2 lines
+        expect(lines).toHaveLength(2);
+        expect(lines[1]).toContain("ord-001");
+      });
+
+      it("scopeTripRows and computeTripTabCounts with status=completed scope All badge to completed trips before service grouping", async () => {
+        const { rows } = await loadTrips();
+        expect(rows).toHaveLength(3);
+
+        // Scoped by status=completed (excludes ord-003 cancelled)
+        const scopedRows = scopeTripRows(rows, { status: "completed" });
+        expect(scopedRows).toHaveLength(2);
+        expect(scopedRows.map((r) => r.id)).toEqual(["ord-001", "ord-002"]);
+
+        const tabCounts = computeTripTabCounts(scopedRows);
+        // All badge reflects completed trips (2, not 3)
+        expect(tabCounts.all).toBe(2);
+        expect(tabCounts.airport).toBe(1);
+        expect(tabCounts.realtime).toBe(1);
+        expect(tabCounts.business).toBe(0); // ord-003 was business but cancelled, so 0
+
+        // Service filtering from scoped rows
+        const completedAllRows = filterTripsForService(scopedRows, "all");
+        expect(completedAllRows).toHaveLength(2);
+
+        // CSV export with status=completed has exactly 2 trips
+        const exportReq = new NextRequest("http://localhost:3000/trips/export?status=completed");
+        const exportRes = await exportHandler(exportReq);
+        expect(exportRes.status).toBe(200);
+        const csvBody = await exportRes.text();
+        const lines = csvBody.trim().split("\n");
+        expect(lines).toHaveLength(3);
+        expect(csvBody).not.toContain("ord-003");
+      });
     });
   });
 });

@@ -6,7 +6,12 @@ import {
   CanvasPageHeader,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { loadDrivers } from "@/lib/fleet-portal-data.server";
+import {
+  computeDriverTabCounts,
+  filterDriversForTab,
+  loadDrivers,
+  scopeDriverRows,
+} from "@/lib/fleet-portal-data.server";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { DriversTable } from "@/components/portal-tables";
 import { getServerLocale } from "@/lib/server-locale";
@@ -22,49 +27,25 @@ export default async function FleetDriversPage({
   const params = searchParams ? await searchParams : {};
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
-  const { rows, source, error } = await loadDrivers();
+  const {
+    rows,
+    source,
+    error,
+    docsAvailable = source === "fallback",
+    trainingAvailable = source === "fallback",
+  } = await loadDrivers();
 
   const activeTabKey = params.tab || "all";
 
-  const tabCounts = {
-    all: rows.length,
-    available: rows.filter(
-      (r) => r.dispatchEligible ?? (r.status === "available"),
-    ).length,
-    missingDocs: rows.filter(
-      (r) => r.docs !== "complete" || r.license !== "valid",
-    ).length,
-    trainingIncomplete: rows.filter((r) => r.training !== "complete").length,
-  };
-
-  const filteredRows = rows.filter((r) => {
-    if (
-      activeTabKey === "available" &&
-      !(r.dispatchEligible ?? (r.status === "available"))
-    ) {
-      return false;
-    }
-    if (
-      activeTabKey === "missingDocs" &&
-      r.docs === "complete" &&
-      r.license === "valid"
-    ) {
-      return false;
-    }
-    if (activeTabKey === "trainingIncomplete" && r.training === "complete") {
-      return false;
-    }
-    if (params.q) {
-      const q = params.q.toLowerCase();
-      const match =
-        r.name.toLowerCase().includes(q) ||
-        r.plate.toLowerCase().includes(q) ||
-        r.id.toLowerCase().includes(q);
-      if (!match) {
-        return false;
-      }
-    }
-    return true;
+  // Filter rows by query criteria first, ensuring tab counts reflect active scope
+  const scopedRows = scopeDriverRows(rows, { q: params.q });
+  const tabCounts = computeDriverTabCounts(scopedRows, {
+    docsAvailable,
+    trainingAvailable,
+  });
+  const filteredRows = filterDriversForTab(scopedRows, activeTabKey, {
+    docsAvailable,
+    trainingAvailable,
   });
 
   const tabDefs = [
@@ -163,6 +144,32 @@ export default async function FleetDriversPage({
             body={t("data.fixtureNotice", locale)}
           />
         ) : null}
+        {activeTabKey === "trainingIncomplete" && !trainingAvailable ? (
+          <CanvasBanner
+            theme={theme}
+            tone="info"
+            icon="warn"
+            title={t("drivers.tabTrainingIncomplete", locale)}
+            body={
+              locale === "zh"
+                ? "駕駛教育訓練資料尚未串接後端 API，目前欄位標記為未串接，不以假資料篩選排除人員。"
+                : "Driver training status is not yet integrated with the fleet API. Showing drivers without assuming completed training."
+            }
+          />
+        ) : null}
+        {activeTabKey === "missingDocs" && !docsAvailable ? (
+          <CanvasBanner
+            theme={theme}
+            tone="info"
+            icon="warn"
+            title={t("drivers.tabMissingDocs", locale)}
+            body={
+              locale === "zh"
+                ? "駕駛文件審查資料尚未串接後端 API，目前欄位標記為未串接，不以假資料篩選排除人員。"
+                : "Driver document review is not yet integrated with the fleet API. Showing drivers without assuming complete documents."
+            }
+          />
+        ) : null}
         <form
           method="GET"
           action="/drivers"
@@ -201,7 +208,7 @@ export default async function FleetDriversPage({
         </form>
         <CanvasCard theme={theme} padding={0}>
           {filteredRows.length > 0 ? (
-            <DriversTable rows={filteredRows} />
+            <DriversTable rows={filteredRows as any} />
           ) : (
             <div
               style={{

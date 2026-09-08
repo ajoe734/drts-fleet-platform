@@ -51,12 +51,14 @@ export type FleetDriver = {
   plate: string;
   status: "available" | "on_trip" | "break" | "offline";
   license: "valid" | "expires_30d";
-  docs: "complete" | "missing_1" | "missing_2";
-  training: "complete" | "pending";
+  docs: "complete" | "missing_1" | "missing_2" | "unavailable";
+  training: "complete" | "pending" | "unavailable";
   trips30: number;
   rating: number;
   svc: ServiceKey[];
   dispatchEligible?: boolean;
+  docsAvailable?: boolean;
+  trainingAvailable?: boolean;
 };
 
 export type FleetVehicle = {
@@ -358,6 +360,8 @@ export interface DriversView {
   rows: FleetDriver[];
   source: DataSource;
   error?: string | null;
+  docsAvailable?: boolean;
+  trainingAvailable?: boolean;
 }
 
 function mapDriver(record: FleetPartnerPortalDriverRecord): FleetDriver {
@@ -367,13 +371,15 @@ function mapDriver(record: FleetPartnerPortalDriverRecord): FleetDriver {
     plate: record.currentVehiclePlateNo ?? "—",
     status: mapDriverStatus(record.workState),
     license: record.licensesValid ? "valid" : "expires_30d",
-    // Not yet surfaced by /api/fleet-partner/drivers — neutral defaults.
-    docs: "complete",
-    training: "complete",
+    // Not surfaced by /api/fleet-partner/drivers — mark unavailable explicitly.
+    docs: "unavailable",
+    training: "unavailable",
     trips30: 0,
     rating: 0,
     svc: mapServiceBuckets(record.supportedServiceBuckets),
     dispatchEligible: Boolean(record.dispatchEligible),
+    docsAvailable: false,
+    trainingAvailable: false,
   };
 }
 
@@ -390,14 +396,107 @@ export async function loadDrivers(): Promise<DriversView> {
     const records = await client.listFleetPortalDrivers();
     // An empty list from a reachable endpoint is legitimate zero data, not a
     // failure — render the live (empty) result rather than demo fixtures.
-    return { rows: records.map(mapDriver), source: "live", error: null };
+    return {
+      rows: records.map(mapDriver),
+      source: "live",
+      error: null,
+      docsAvailable: false,
+      trainingAvailable: false,
+    };
   } catch (err) {
     if (isConfigError(err)) {
       throw err;
     }
     const message = err instanceof Error ? err.message : "READ_FAILED";
-    return { rows: [], source: "fallback", error: message };
+    return {
+      rows: [],
+      source: "fallback",
+      error: message,
+      docsAvailable: false,
+      trainingAvailable: false,
+    };
   }
+}
+
+export interface DriverTabCounts {
+  all: number | string;
+  available: number | string;
+  missingDocs: number | string;
+  trainingIncomplete: number | string;
+}
+
+export function scopeDriverRows(
+  rows: FleetDriver[],
+  params: { q?: string | undefined },
+): FleetDriver[] {
+  if (!params.q) return rows;
+  const q = params.q.toLowerCase();
+  return rows.filter(
+    (r) =>
+      r.name.toLowerCase().includes(q) ||
+      r.plate.toLowerCase().includes(q) ||
+      r.id.toLowerCase().includes(q),
+  );
+}
+
+export function computeDriverTabCounts(
+  scopedRows: FleetDriver[],
+  flags?: { docsAvailable?: boolean | undefined; trainingAvailable?: boolean | undefined },
+): DriverTabCounts {
+  const docsAvailable = flags?.docsAvailable ?? false;
+  const trainingAvailable = flags?.trainingAvailable ?? false;
+
+  return {
+    all: scopedRows.length,
+    available: scopedRows.filter(
+      (r) => r.dispatchEligible ?? (r.status === "available"),
+    ).length,
+    missingDocs: docsAvailable
+      ? scopedRows.filter(
+          (r) => r.docs !== "complete" || r.license !== "valid",
+        ).length
+      : "—",
+    trainingIncomplete: trainingAvailable
+      ? scopedRows.filter((r) => r.training !== "complete").length
+      : "—",
+  };
+}
+
+export function filterDriversForTab(
+  scopedRows: FleetDriver[],
+  activeTabKey: string,
+  flags?: { docsAvailable?: boolean | undefined; trainingAvailable?: boolean | undefined },
+): FleetDriver[] {
+  const docsAvailable = flags?.docsAvailable ?? false;
+  const trainingAvailable = flags?.trainingAvailable ?? false;
+
+  return scopedRows.filter((r) => {
+    if (
+      activeTabKey === "available" &&
+      !(r.dispatchEligible ?? (r.status === "available"))
+    ) {
+      return false;
+    }
+    if (activeTabKey === "missingDocs") {
+      if (docsAvailable) {
+        if (r.docs === "complete" && r.license === "valid") {
+          return false;
+        }
+      } else {
+        // Unknown document review data is not filtered as complete.
+      }
+    }
+    if (activeTabKey === "trainingIncomplete") {
+      if (trainingAvailable) {
+        if (r.training === "complete") {
+          return false;
+        }
+      } else {
+        // Unknown training data is not filtered as complete.
+      }
+    }
+    return true;
+  });
 }
 
 // --- vehicles ---------------------------------------------------------------
@@ -669,6 +768,63 @@ function mapStatementLines(
   });
 }
 
+export interface TripTabCounts {
+  all: number;
+  realtime: number;
+  business: number;
+  airport: number;
+  insurance: number;
+  travel: number;
+}
+
+export function scopeTripRows(
+  rows: FleetTrip[],
+  params: { q?: string | undefined; status?: string | undefined },
+): FleetTrip[] {
+  return rows.filter((r) => {
+    if (
+      params.status &&
+      params.status !== "all" &&
+      r.status !== params.status
+    ) {
+      return false;
+    }
+    if (params.q) {
+      const q = params.q.toLowerCase();
+      const match =
+        r.id.toLowerCase().includes(q) ||
+        r.driver.toLowerCase().includes(q) ||
+        r.pickup.toLowerCase().includes(q);
+      if (!match) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+export function computeTripTabCounts(
+  scopedRows: FleetTrip[],
+): TripTabCounts {
+  return {
+    all: scopedRows.length,
+    realtime: scopedRows.filter((r) => r.svc === "realtime").length,
+    business: scopedRows.filter((r) => r.svc === "business").length,
+    airport: scopedRows.filter((r) => r.svc === "airport").length,
+    insurance: scopedRows.filter((r) => r.svc === "insurance").length,
+    travel: scopedRows.filter((r) => r.svc === "travel").length,
+  };
+}
+
+export function filterTripsForService(
+  scopedRows: FleetTrip[],
+  currentSvc: string,
+): FleetTrip[] {
+  if (currentSvc !== "all") {
+    return scopedRows.filter((r) => r.svc === currentSvc);
+  }
+  return scopedRows;
+}
 
 export async function loadRevenue(): Promise<RevenueView> {
   const currentPeriod = getCurrentPeriodMonth();

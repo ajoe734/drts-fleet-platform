@@ -128,21 +128,39 @@
      - 在 `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` 加入可選串連（`?.`），如 `driversView.rows[0]?.dispatchEligible`、`dashboard.recentTrips[0]?.id`、`tripsView.rows[0]?.id`。
      - 經 `pnpm typecheck:root` 重新驗證，本 task 測試檔案錯誤數歸零（0 errors）。
 
+### 3.7 審查回饋修復三 (Codex2 Review Feedback Remediation - P2 R10/R24 & P2 C069)
+
+針對 Codex2 審查候選版本 `dde03e7b0b8f18d36c3f3143f86e935223c8549d` 所提出的兩項 P2 缺失進行專項補強：
+
+1. **司機未知訓練與文件紀律 (P2 R10/R24: Live Driver Unknown Training & Docs Discipline)**:
+   - 原 `lib/fleet-portal-data.server.ts` 在映射 live 司機時將 API 未提供的 `docs` 與 `training` 欄位寫死為 `"complete"`，導致司機頁 `tab=trainingIncomplete` 計算待完成人數為 0，且進入該頁籤時所有司機皆被視為「已完成訓練」而遭全數隱藏（空列表），偽裝為全體完成。
+   - 修復方案：
+     - 在 `FleetDriver` 及 `mapDriver` 中，將 API 尚未提供的 `docs` 與 `training` 顯式標記為 `"unavailable"`，並設定 `docsAvailable: false`、`trainingAvailable: false`。
+     - 司機頁籤（`missingDocs` 與 `trainingIncomplete`）對於未串接之指標一律顯示 `"—”`（無法取得），絕不謊報為合法 0 筆。
+     - 進入未串接頁籤時，不將未知資料視為「已完成」而排除人員；司機列表維持可見，並渲染 CanvasBanner 顯式告知使用者該項目後端 API 尚未串接，絕不塞入假資料。
+     - 執照狀態（`license`）維持使用權威欄位 `licensesValid`（有效顯示 `"valid"`，無效/即將到期顯示 `"expires_30d"`）。
+2. **行程頁籤筆數 scope 與清單/CSV 嚴格對齊 (P2 C069: Trip Tab Counts Scoped Before Service Grouping)**:
+   - 原 `app/trips/page.tsx` 先自未經篩選的 raw rows 計算各服務別頁籤（All, Realtime, Business...）之筆數，之後才於列表過濾 `status` 與搜尋關鍵字 `q`。例如同月有 ord-001/ord-002/ord-003 時，若帶入 `q=ord-001`，列表與 CSV 均僅有 1 筆，但 All 頁籤徽章仍顯示 3。
+   - 修復方案：
+     - 抽換為 `scopeTripRows()`，先依據當月期間、狀態（`status`）與關鍵字（`q`）篩選出當前 active scope 的行程，再由 `computeTripTabCounts()` 計算各服務頁籤之動態筆數徽章。
+     - 確保當 `q=ord-001` 時，All 徽章為 1、對應服務徽章為 1、列表渲染 1 筆、CSV 匯出亦為 1 筆，四者 scope 完全一致。
+     - 實作 `scopeDriverRows()` 與 `computeDriverTabCounts()`，使司機頁在帶入搜尋關鍵字 `q` 時亦同樣即時收斂頁籤筆數。
+
 ---
 
 ## 4. 驗收標準對照與驗證證據 (Acceptance Criteria Mapping & Evidence)
 
 | 驗收條件 | 實作現況與驗證結果 | 相關資源 ID / 檔案 |
 | :--- | :--- | :--- |
-| **首頁/list/detail/CSV數量與scope相同** | `loadDashboard()` 與 `loadTrips()` 統一預設月份為 `getCurrentPeriodMonth()`，完全杜絕跨月回溯差異；首頁/列表/總覽 CSV/行程 CSV 預設與指定月份 scope 均精確對齊（當月無資料時一致為 0 筆）；導航連結與篩選保留明確 `period`；Canvas 規範未定義獨立 trip detail screen，清單與匯出筆數嚴格對齊，未自創非規範畫面 | `apps/fleet-partner-portal-web/app/trips/export/route.ts`, `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` (測試資源: `fp-test-001`, `ord-001`, `ord-002`, `ord-003`, `ord-previous-month`) |
-| **filter改變query與結果，空資料與讀取失敗分開** | 司機/車輛/行程頁籤與搜尋均寫入 URL query string，並過濾列表 rows；司機可接單頁籤對齊 `dispatchEligible` 資格；行程頁籤支援 `svc`, `status`, `q`, `period`；正常 0 筆空資料渲染中性提示卡與數字 "0"，API 錯誤渲染 Danger 警告橫幅與 "—" 無法取得標記，保留各來源錯誤原因 | `apps/fleet-partner-portal-web/app/drivers/page.tsx`, `apps/fleet-partner-portal-web/app/vehicles/page.tsx`, `apps/fleet-partner-portal-web/app/trips/page.tsx` |
+| **首頁/list/detail/CSV數量與scope相同** | `loadDashboard()` 與 `loadTrips()` 統一預設月份為 `getCurrentPeriodMonth()`，完全杜絕跨月回溯差異；首頁/列表/總覽 CSV/行程 CSV 預設與指定月份 scope 均精確對齊（當月無資料時一致為 0 筆）；導航連結與篩選保留明確 `period`；行程與司機頁籤徽章由 `scopeTripRows` / `scopeDriverRows` 在同等 q/status/period 範圍下計算，All 徽章與清單/CSV 筆數完全一致；Canvas 規範未定義獨立 trip detail screen，清單與匯出筆數嚴格對齊，未自創非規範畫面 | `apps/fleet-partner-portal-web/app/trips/export/route.ts`, `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts`, `apps/fleet-partner-portal-web/app/trips/page.tsx` (測試資源: `fp-test-001`, `ord-001`, `ord-002`, `ord-003`, `ord-previous-month`) |
+| **filter改變query與結果，空資料與讀取失敗分開** | 司機/車輛/行程頁籤與搜尋均寫入 URL query string，並過濾列表 rows；司機可接單頁籤對齊 `dispatchEligible` 資格；未串接之教育訓練與文件審查顯式標記 unavailable（徽章為 "—"），不以假完成狀態篩選排除人員，並顯示明確未串接橫幅；行程頁籤支援 `svc`, `status`, `q`, `period`；正常 0 筆空資料渲染中性提示卡與數字 "0"，API 錯誤渲染 Danger 警告橫幅與 "—" 無法取得標記，保留各來源錯誤原因 | `apps/fleet-partner-portal-web/app/drivers/page.tsx`, `apps/fleet-partner-portal-web/app/vehicles/page.tsx`, `apps/fleet-partner-portal-web/app/trips/page.tsx` |
 | **無效按鈕接線與未串接標記** | 首頁與車輛頁「新增車輛」導向 `/supply/vehicles/new`；首頁與司機頁「招募司機」導向 `/supply/drivers/new`；首頁「查看行程」導向 `/trips?period=...`；匯出按鈕導向 `/trips/export`；未串接之教育訓練與案件回傳 `connected: false` 並顯式註明未接線 | `apps/fleet-partner-portal-web/app/page.tsx`, `apps/fleet-partner-portal-web/app/vehicles/page.tsx`, `apps/fleet-partner-portal-web/app/drivers/page.tsx` |
 | **證據包含 SHA、測試結果、界線說明** | 記錄完整 Base SHA、Candidate SHA、測試 Exit Code 與邊界說明 | `docs/04-uat/system-remediation-20260906/SR-FLEET-DATA-001.md` |
 
 ### 4.1 驗證界線與未進行之 Live / 真機項目說明
 
 - **已完成驗證範圍**:
-  - 本地 Vitest 單元/整合測試（24/24 通過），驗證資料層權威來源整合、假數據移除、空資料與異常讀取分離、未串接端點防呆、CSV 匯出筆數與篩選連動（含 q 關鍵字搜尋與 compound 複合過濾）、千分位分組數值引號包裹防護（防止欄位數錯置）、司機 `dispatchEligible` 資格與狀態分離、個別來源異常獨立追蹤、部分失敗防護及 aggregate 異常時即時推導營收，以及最新候選版本修復之預設月份 scope 統一與跨月空資料回歸。
+  - 本地 Vitest 單元/整合測試（31/31 通過），驗證資料層權威來源整合、假數據移除、空資料與異常讀取分離、未串接端點防呆、CSV 匯出筆數與篩選連動（含 q 關鍵字搜尋與 compound 複合過濾）、千分位分組數值引號包裹防護（防止欄位數錯置）、司機 `dispatchEligible` 資格與狀態分離、個別來源異常獨立追蹤、部分失敗防護及 aggregate 異常時即時推導營收、預設月份 scope 統一與跨月空資料回歸，以及未串接教育訓練與文件審查之未知資料紀律（標記 unavailable、徽章顯示 "—"、不隱藏人員、未串接提示橫幅）與行程頁籤 scope 先行過濾機制。
   - Next.js 靜態型別檢查（`next typegen && tsc --noEmit`），驗證所有頁面與 Route Handlers 型別安全。
   - 解耦 `fleet-portal-data.server.ts` 與 `fleet-portal-fixtures.ts`，直接宣告純資料結構與回退常數，避免根目錄 `tsconfig.json`（無 `--jsx`）在編譯 `tests/**/*.ts` 時傳遞解析 `@drts/ui-web` TSX 模組而產生 `TS6142` 錯誤。
   - Git diff 格式檢查與 write_scopes 邊界檢查。
@@ -159,7 +177,7 @@
 
 ### 5.1 自動化單元測試
 
-新建 Vitest 測試套件 `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts`，涵蓋 24 個核心場景：
+新建 Vitest 測試套件 `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts`，涵蓋 31 個核心場景：
 
 - **Requirement 1 & Capability C063**:
   1. `dashboard reflects live driver list counts rather than 128/96 fake stats`: 驗證總覽指標與列表真實筆數一致，完全無 128/96 假數字。
@@ -190,6 +208,14 @@
   22. `loadTrips(undefined) defaults to current UTC month and never calls API with undefined`: 驗證 `loadTrips()` 與 `loadTrips(undefined)` 預設使用當前 UTC 月份，不傳遞 undefined 避免後端回溯。
   23. `cross-month empty data: dashboard and trips list both return 0 trips when current month has no data but previous month has trips`: 驗證當月無行程而上月有資料時，dashboard 與 trips list 同步回傳 0 筆，summary CSV 與 trips CSV 數量與 scope 完全一致。
   24. `explicit previous period returns previous month data consistently across dashboard, trips, and export`: 驗證明確指定上月時，dashboard、trips list 與 CSV 匯出一致回傳上月真實行程。
+- **Review Remediation (Codex2 Feedback Coverage - Round 3 Candidate dde03e7b0b8f P2 Remediations)**:
+  25. `loadDrivers sets docs: unavailable, training: unavailable, and flags availability for live drivers`: 驗證 live 司機之未串接訓練與文件審核顯式標記為 `"unavailable"`，`docsAvailable` 與 `trainingAvailable` 為 false，並保留 `licensesValid` 權威欄位。
+  26. `computeDriverTabCounts reports unavailable ('—') rather than false legitimate zero for unintegrated docs and training`: 驗證未串接項目頁籤徽章顯示 `"—”`，不誤報合法 0 筆。
+  27. `filterDriversForTab on trainingIncomplete does not hide unintegrated drivers as completed`: 驗證教育訓練未串接時不將司機視為已完成而全數隱藏，列表司機完整保留。
+  28. `filterDriversForTab on missingDocs does not hide unintegrated drivers when docs endpoint is unavailable`: 驗證文件審查未串接時不假定文件完整而排除人員。
+  29. `scopeDriverRows and computeDriverTabCounts scope tab counts and results when search q filter is applied`: 驗證搜尋關鍵字 `q` 即時收斂司機頁籤筆數與列表結果。
+  30. `scopeTripRows and computeTripTabCounts with q=ord-001 scope All badge and service badge to 1, exactly matching list and CSV export`: 驗證行程關鍵字 `q=ord-001` 先行過濾 scope，使 All 徽章收斂為 1，與列表 (1) 及 CSV 匯出 (1) 筆數完全一致。
+  31. `scopeTripRows and computeTripTabCounts with status=completed scope All badge to completed trips before service grouping`: 驗證行程狀態 `status=completed` 先行收斂 scope，使 All 徽章精確對齊已完成趟次數 (2)，排除 cancelled 項目。
 
 執行結果：
 
@@ -197,9 +223,9 @@
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-fleet-data-001
 
  Test Files  1 passed (1)
-      Tests  24 passed (24)
-   Start at  16:56:22
-   Duration  693ms (transform 274ms, setup 0ms, import 392ms, tests 68ms, environment 0ms)
+      Tests  31 passed (31)
+   Start at  17:29:52
+   Duration  534ms (transform 199ms, setup 0ms, import 305ms, tests 64ms, environment 0ms)
 Exit Code:  0
 ```
 
@@ -217,7 +243,7 @@ Exit Code:  0
 ```
 
 針對根目錄 `pnpm typecheck:root` (`tsc -p tsconfig.json --noEmit`) 進行全域嚴格型別檢查：
-- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` 經加入可選串連防護後，TS2532 錯誤完全排除，錯誤數為 0。
+- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` 錯誤數為 0。
 
 ### 5.3 檔案規範與 Git 檢查
 
@@ -230,11 +256,11 @@ Exit Code:  0
 
 ## 6. 變更檔案清單 (Modified Files Summary)
 
-- `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` (移除假資料、整合權威來源、錯誤/空資料分離、未接線標記、對齊 `dispatchEligible` 資格欄位、各來源錯誤獨立追蹤、營收權威推導、預設月份統一)
+- `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` (移除假資料、整合權威來源、錯誤/空資料分離、未接線標記、對齊 `dispatchEligible` 資格欄位、各來源錯誤獨立追蹤、營收權威推導、預設月份統一、未串接 docs/training 顯式標記 unavailable、新增司機與行程 tab scope 及過濾共用函式)
 - `apps/fleet-partner-portal-web/app/trips/export/route.ts` (新增 CSV 匯出 API Route，實作 `escapeCsvCell` 防護分組數字與特殊字元，阻擋 partial failure 與無法取得狀態之偽造匯出)
 - `apps/fleet-partner-portal-web/app/page.tsx` (權威總覽頁、按鈕串接、時間維度、未串接提示、錯誤橫幅)
-- `apps/fleet-partner-portal-web/app/trips/page.tsx` (頁籤/關鍵字/狀態篩選、CSV 匯出按鈕串接、錯誤處理)
-- `apps/fleet-partner-portal-web/app/drivers/page.tsx` (頁籤/關鍵字篩選、可接單對齊 `dispatchEligible`、招募按鈕導向、錯誤處理)
+- `apps/fleet-partner-portal-web/app/trips/page.tsx` (頁籤/關鍵字/狀態篩選、行程 scope 先行過濾、頁籤筆數與清單/CSV 嚴格對齊、CSV 匯出按鈕串接、錯誤處理)
+- `apps/fleet-partner-portal-web/app/drivers/page.tsx` (頁籤/關鍵字篩選、未串接 docs/training 徽章顯示 "—" 與橫幅警語、未知資料不排除人員、可接單對齊 `dispatchEligible`、招募按鈕導向、錯誤處理)
 - `apps/fleet-partner-portal-web/app/vehicles/page.tsx` (頁籤/關鍵字篩選、新增車輛按鈕導向、錯誤處理)
-- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` (24 個完整驗證測試，含 Codex2 審查修復與 CI 嚴格型別防護)
+- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` (31 個完整驗證測試，含 Codex2 P1/P2 審查修復與 CI 嚴格型別防護)
 - `docs/04-uat/system-remediation-20260906/SR-FLEET-DATA-001.md` (驗證報告)
