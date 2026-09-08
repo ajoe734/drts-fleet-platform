@@ -1,5 +1,14 @@
 # SR-ENV-COPY-001 — partial implementation and scope blocker
 
+## Follow-up dispatch, 2026-09-08 18:52 UTC — recovery and scope gate revalidated
+
+- Fetched base: `d4f54ef94e059a981bf2be1f7b944e815870e117`; tested implementation: `a7ba15972f6769c3416ad0a534ca41ee204c5396`. No acceptance candidate or handoff. Resource IDs: SR-ENV-COPY-001, R27, C110, Q-SR-ENV-COPY-001; existing PR #1738 was not remotely revalidated.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1, duplicate `13bce75ab` add/add conflicts in evidence, resolver and scoped regression. `git rebase --abort`: exit 0; original clean branch restored. `git rev-list --left-right --count HEAD...origin/codex/sr-env-copy-001`: exit 0, `0 0`.
+- Read both merged history-repair and planning-decision artifacts under `support/unblock/SR-ENV-COPY-001/` directly from this base. They require supervisor replacement-worktree routing (or reviewed alternative), runtime source binding, and explicit shell/config scopes with dependencies. Current dispatch still prescribes the original branch and unchanged scopes. The producer inventory below already supplies the requested read-only mapping; merged helper documents do not authorize those writes.
+- Current-base reproduction commands `git show origin/dev:apps/fleet-partner-portal-web/components/fleet-portal-shell.tsx | rg -n 'env='`, `git show origin/dev:apps/ops-console-web/app/layout.tsx | rg -n 'env='`, and `git show origin/dev:apps/bank-console-web/lib/navigation.ts | rg -n 'BANK_CONSOLE_ENV'` each exited 0: fleet line 36 remains literal production, ops line 61 remains the production catalog key, bank line 8 remains literal preview.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/sr-env-copy-001.test.ts`: exit 0, 7 passed. `pnpm --filter @drts/ui-web exec vitest run tests/unit/environment-badge.test.ts`: exit 1, 5 passed / 1 failed, contradictory NODE_ENV-only assertion at line 32. Both commands emitted a vitest/config resolution warning but executed tests. Legacy test remains outside authorized scopes.
+- Evidence-only update; no UI/product changes, six app typechecks, browser/live/device checks, fresh CI, independent review, merge or deployment verification in this dispatch. No business resources created. Supervisor must apply the documented routing and scope/dependency decision before full acceptance can proceed. Anchor/push SHA is recorded in canonical blocker status.
+
 ## Follow-up dispatch, 2026-09-08 18:05 UTC — operations copy progress
 
 - Fetched current `origin/dev`: `a44ea852eabe0c88e54d8124802eccf86ebc1dc6`. Starting branch HEAD: `b823805460adf6a2c0e68cbe422456fb160e07ad`. Tested implementation anchor: `74fda39773e123fd70ab49d7602ff6d3aeda7a80`. Candidate SHA: none; acceptance remains incomplete. The subsequent evidence anchor is recorded in canonical status.
