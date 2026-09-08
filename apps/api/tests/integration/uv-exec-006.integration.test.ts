@@ -9,6 +9,7 @@ import { ApiRequestError } from "../../src/common/api-envelope";
 import { DatabaseService } from "../../src/common/db";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
+import { MultiTaxiService } from "../../src/modules/multi-taxi/multi-taxi.service";
 import {
   DispatchResourceReservationConflictError,
   OwnedMobilityRepository,
@@ -1959,6 +1960,121 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       expect(
         await readActiveReservations(database, "vehicle", candidate.vehicleId),
       ).toHaveLength(1);
+    },
+  );
+
+  it.each(["immediate_cancel", "existing_upsert", "token_failure"])(
+    "cancellation drains delayed workflow persistence: %s",
+    async (scenario) => {
+      const database = new DatabaseService();
+      databases.push(database);
+      const { service, ownedMobilityRepository: repository } =
+        createTestService(database, []);
+      const command = {
+        pickup: { address: "Taipei Main Station" },
+        dropoff: { address: "Taipei 101" },
+        passenger: { name: "Delayed cancellation", phone: "0911001444" },
+      };
+      let orderId: string | undefined;
+      if (scenario === "existing_upsert") {
+        orderId = trackOrder(service.createPassengerOrder(command).orderId);
+        await Promise.all([
+          ...(
+            service as unknown as { pendingWorkflowWrites: Set<Promise<void>> }
+          ).pendingWorkflowWrites,
+        ]);
+      }
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const writes: Promise<void>[] = [];
+      const persist = repository.persistChanges.bind(repository);
+      const persistSpy = vi
+        .spyOn(repository, "persistChanges")
+        .mockImplementation((changes) => {
+          if (!orderId && changes.orders?.[0])
+            orderId = trackOrder(changes.orders[0].orderId);
+          const write = gate.then(() => persist(changes));
+          writes.push(write);
+          return write;
+        });
+      const readSpy = vi.spyOn(repository, "loadOrderCancellationForUpdate");
+      const cancelSpy = vi.spyOn(service, "cancelOwnedOrder");
+      let result: Promise<unknown> | undefined;
+      try {
+        if (scenario === "token_failure") {
+          const multiTaxi = new MultiTaxiService(service, {
+            isEnabled: () => true,
+            persistRideAccessToken: async () => {
+              throw new Error("injected token failure");
+            },
+          } as never);
+          const authorization = multiTaxi.createAuthorization({
+            operatorId: "operator-delayed",
+            authorityCode: "TPE-DELAYED",
+            businessPlanVersion: "2026.1",
+            serviceAreaCodes: ["TPE"],
+            activeFareVersionId: "fare-delayed",
+            effectiveFrom: "2026-01-01T00:00:00.000Z",
+            effectiveUntil: "2099-01-01T00:00:00.000Z",
+          });
+          multiTaxi.activateAuthorization(authorization.authorizationId);
+          result = multiTaxi
+            .createRide(
+              {
+                ...command,
+                requestedPickupAt: new Date().toISOString(),
+                timingMode: "on_demand",
+                paymentMethodTokenRef: null,
+              },
+              null,
+            )
+            .catch((error: unknown) => error);
+        } else {
+          if (scenario === "existing_upsert") {
+            await service.dispatchOrder(orderId!, { mode: "auto" });
+          } else {
+            service.createPassengerOrder(command);
+          }
+          result = service
+            .cancelOwnedOrder(orderId!, { reason: "passenger_requested" })
+            .catch((error: unknown) => error);
+        }
+        await vi.waitFor(() => expect(cancelSpy).toHaveBeenCalledOnce());
+        expect(writes.length).toBeGreaterThan(0);
+        expect(readSpy).not.toHaveBeenCalled();
+        release();
+        const outcome = await result;
+        if (scenario === "token_failure") {
+          expect(getErrorCode(outcome)).toBe(
+            "PASSENGER_ACCESS_TOKEN_PERSISTENCE_FAILED",
+          );
+        } else {
+          expect(outcome).toMatchObject({ status: "cancelled" });
+        }
+        await Promise.all(writes);
+        const durable = await database.query<{
+          status: string;
+          record: OwnedOrderRecord;
+        }>(
+          "SELECT status, record FROM ops.phase1_owned_orders WHERE order_id = $1",
+          [orderId],
+        );
+        expect(durable.rows[0].status).toBe("cancelled");
+        expect(durable.rows[0].record.cancelReason).toBe(
+          scenario === "token_failure"
+            ? "passenger_access_token_persistence_failed"
+            : "passenger_requested",
+        );
+      } finally {
+        release();
+        await result;
+        await Promise.all(writes);
+        persistSpy.mockRestore();
+        readSpy.mockRestore();
+        cancelSpy.mockRestore();
+      }
     },
   );
 

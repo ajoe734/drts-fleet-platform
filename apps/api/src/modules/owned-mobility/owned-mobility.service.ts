@@ -4642,6 +4642,12 @@ export class OwnedMobilityService
       return { order, assignment, task, dispatchJobs, traceLogs };
     };
     const repository = this.ownedMobilityRepository;
+    if (repository?.isEnabled()) {
+      // Creation/matching can return while their workflow snapshots are still
+      // being persisted. Drain them before reading and locking durable state,
+      // so cancellation sees the order and no preceding upsert resurrects it.
+      await Promise.all([...this.pendingWorkflowWrites]);
+    }
     const committed = repository?.isEnabled()
       ? await repository.withTransaction(async (tx) => {
           const prepared = prepare(
