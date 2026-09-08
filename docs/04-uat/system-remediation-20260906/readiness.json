@@ -1,0 +1,2508 @@
+{
+  "schema_version": 1,
+  "task_id": "SR-READINESS-001",
+  "inspection": {
+    "performed_at": "2026-09-08T14:05:00.000Z",
+    "scope": "repository-only, read-only; no browser, product server, Docker infrastructure, cloud console, secrets manager, or external provider operation",
+    "base_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+    "candidate_sha": null,
+    "candidate_sha_evidence": "The exact candidate SHA is deliberately locked by the ai-status handoff record after the final push; it cannot be inferred from this readiness snapshot.",
+    "historical_audit_sha": "08b7a32f6fdaa00d8d1894f91569a7d72860cec2",
+    "historical_audit_is_not_current_truth": true
+  },
+  "commands": [
+    {
+      "command": "git fetch origin && git rev-parse origin/dev",
+      "exit_code": 0,
+      "result": "6f4ac8c74ae3618b6109efd010014365a85d36d8"
+    },
+    {
+      "command": "jq length source/findings.json source/new-gaps.json source/capabilities.json",
+      "exit_code": 0,
+      "result": "30 findings; 14 gaps; 134 capabilities"
+    },
+    {
+      "command": "git log --oneline -15 origin/dev",
+      "exit_code": 0,
+      "result": "Current dev includes merged remediation evidence: SR-ADMIN-VERIFY-001 (#1638), SR-BANK-001 (#1654), SR-IAM-001 (#1683), SR-REFERRAL-001 (#1665), SR-BANK-003 (#1688), SR-OPS-MAP-001 (#1647), SR-INVOICE-001 (#1664), SR-MAIL-002 (#1646), SR-TENANT-LOGIN-001 (#1674), SR-CHANNEL-001 (#1730), SR-MAIL-001 (#1755)"
+    },
+    {
+      "command": "pnpm exec vitest run tests/unit/system-remediation/sr-bank-001/ tests/unit/system-remediation/sr-bank-003/ tests/unit/system-remediation/sr-iam-001/ tests/unit/system-remediation/sr-admin-verify-001/ tests/unit/system-remediation/sr-referral-001/ tests/unit/system-remediation/sr-ops-map-001/ tests/unit/system-remediation/sr-invoice-001/ tests/unit/system-remediation/sr-mail-002/ tests/unit/system-remediation/sr-tenant-login-001/ tests/unit/system-remediation/sr-channel-001/ tests/unit/system-remediation/sr-mail-001/",
+      "exit_code": 0,
+      "result": "18 test files passed, 169 tests passed on current base SHA"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "result": "Clean, no whitespace errors"
+    }
+  ],
+  "merged_task_evidence": {
+    "SR-ADMIN-VERIFY-001": "feaf5c7f260970955a63389cb45f8f863577c214",
+    "SR-BANK-001": "6d4c47feb1c68f8b53310597da7aeffb6940cc19",
+    "SR-IAM-001": "548608e45841ca9edcbf382399bbbfb74d164535",
+    "SR-REFERRAL-001": "503f36015adc084e75ee33e5a866525b5c7d72c6",
+    "SR-BANK-003": "b32ab8badb740b94cdf67212315ecfccf21f6d5d",
+    "SR-OPS-MAP-001": "bb265b286d718e61d2c50479deb0ddcd031a4597",
+    "SR-INVOICE-001": "a4876ac529abfb634c2b96f237116202abf3d87d",
+    "SR-MAIL-002": "564e27f63045789537b54f5c0b5909f6468032ca",
+    "SR-TENANT-LOGIN-001": "3b60a3757238663572f16f010c94f446f2c71eaa",
+    "SR-CHANNEL-001": "9f5c81bd53b4930321f7c659a9b27b4bc2fe89c5",
+    "SR-MAIL-001": "6f4ac8c74ae3618b6109efd010014365a85d36d8"
+  },
+  "issue_inventory": {
+    "source_files": [
+      "docs/04-uat/system-remediation-20260906/source/findings.json",
+      "docs/04-uat/system-remediation-20260906/source/new-gaps.json"
+    ],
+    "current_version_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+    "reproduction_policy": "Each historical issue is explicitly evaluated against current origin/dev base. Reused fixes cite their commit SHA, regression test file, command, and actual execution result. Open or blocked issues specify reproducible current-version evidence, command/inspection path, blocking cause, and assigned downstream remediation task. No unrun check is ever marked passed.",
+    "items": [
+      {
+        "id": "R01",
+        "status": "not_run_live",
+        "repro_command_or_evidence": "curl -k -v --connect-timeout 5 https://fleets.smarttransport.tw -> exit code 35 / connection closed; custom public domains lack active external TLS/DNS and routing in test environment",
+        "blocking_reason": "Requires public DNS delegation, TLS certificate issuance, and external IAP gateway ingress",
+        "next_task": "SR-PUBLIC-001; SR-LIVE-ENTRY-001"
+      },
+      {
+        "id": "R02",
+        "status": "current_evidence_merged",
+        "task_id": "SR-TENANT-LOGIN-001",
+        "pr": "#1674",
+        "commit_sha": "3b60a3757238663572f16f010c94f446f2c71eaa",
+        "regression_test": "tests/unit/system-remediation/sr-tenant-login-001/tenant-login-callback-recovery.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-tenant-login-001/tenant-login-callback-recovery.test.ts",
+        "result": "Passed (exit 0); verified OIDC callback origin derivation, CSRF state verification, and session recovery redirect"
+      },
+      {
+        "id": "R03",
+        "status": "current_evidence_merged",
+        "task_id": "SR-ADMIN-VERIFY-001; SR-IAM-001",
+        "pr": "#1638, #1683",
+        "commit_sha": "feaf5c7f260970955a63389cb45f8f863577c214",
+        "regression_test": "tests/unit/system-remediation/sr-admin-verify-001/p5-records.test.ts; tests/unit/system-remediation/sr-iam-001/iam-role-api-matrix.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-admin-verify-001/p5-records.test.ts tests/unit/system-remediation/sr-iam-001/iam-role-api-matrix.test.ts",
+        "result": "Passed (exit 0); verified platform_admin multi_taxi_records:read scope authorization and 403 prevention"
+      },
+      {
+        "id": "R04",
+        "status": "current_evidence_merged",
+        "task_id": "SR-ADMIN-VERIFY-001",
+        "pr": "#1638",
+        "commit_sha": "feaf5c7f260970955a63389cb45f8f863577c214",
+        "regression_test": "tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-admin-verify-001/fleet-lists.test.ts",
+        "result": "Passed (exit 0); verified ApiClient envelope unwrap separating empty lists from 403/503 network errors, eliminating .map crash"
+      },
+      {
+        "id": "R05",
+        "status": "current_evidence_merged",
+        "task_id": "SR-IAM-001",
+        "pr": "#1683",
+        "commit_sha": "548608e45841ca9edcbf382399bbbfb74d164535",
+        "regression_test": "tests/unit/system-remediation/sr-iam-001/r05-session-governance.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-iam-001/r05-session-governance.test.ts",
+        "result": "Passed (exit 0); verified non-retryable 403 status aborts polling, halts request storm, displays clear auth error"
+      },
+      {
+        "id": "R06",
+        "status": "current_evidence_merged",
+        "task_id": "SR-BANK-001",
+        "pr": "#1654",
+        "commit_sha": "6d4c47feb1c68f8b53310597da7aeffb6940cc19",
+        "regression_test": "tests/unit/system-remediation/sr-bank-001/sr-bank-001.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-bank-001/sr-bank-001.test.ts",
+        "result": "Passed (exit 0); verified home and contract pages render for all 3 bank personas without crashing, handles undefined metric edge cases"
+      },
+      {
+        "id": "R07",
+        "status": "current_evidence_merged",
+        "task_id": "SR-REFERRAL-001",
+        "pr": "#1665",
+        "commit_sha": "503f36015adc084e75ee33e5a866525b5c7d72c6",
+        "regression_test": "tests/unit/system-remediation/sr-referral-001/referral-embed-fallback-entry.test.ts; tests/unit/system-remediation/sr-referral-001/referral-embed-handoff-lifecycle.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-referral-001/referral-embed-fallback-entry.test.ts tests/unit/system-remediation/sr-referral-001/referral-embed-handoff-lifecycle.test.ts",
+        "result": "Passed (exit 0); verified referral embed eliminates self-referential redirect loop, enforces valid cryptographic handoff, guards against token replay"
+      },
+      {
+        "id": "R08",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/enterprise-portal-web booking detail lookup: fixture/mock data used, requesting booking EB-7K2E1D returns 404 BOOKING_NOT_FOUND with misleading \"service unstable\" banner",
+        "blocking_reason": "Enterprise portal booking queries not wired to canonical booking repository; awaits SR-ENTERPRISE-DATA-001",
+        "next_task": "SR-ENTERPRISE-DATA-001; SR-ENTERPRISE-SEARCH-001"
+      },
+      {
+        "id": "R09",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/enterprise-portal-web/app/trips/[id]/page.tsx: contact driver and support buttons are inert placeholders with no onClick handler or tel: dispatch",
+        "blocking_reason": "Driver contact and support dispatch integration not wired in enterprise trip view; awaits SR-ENTERPRISE-DATA-001",
+        "next_task": "SR-ENTERPRISE-DATA-001"
+      },
+      {
+        "id": "R10",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/fleet-admin-web vehicle list: loads static mock dataset without server-side pagination or sync with backend fleet repo",
+        "blocking_reason": "Fleet admin web lacks live backend fleet vehicle repository synchronization; awaits SR-FLEET-DATA-001",
+        "next_task": "SR-FLEET-DATA-001"
+      },
+      {
+        "id": "R11",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/fleet-admin-web driver list: displays mock/stub driver entities without backend shift query or license verification state",
+        "blocking_reason": "Fleet admin web lacks live backend driver repository synchronization; awaits SR-FLEET-DATA-001",
+        "next_task": "SR-FLEET-DATA-001"
+      },
+      {
+        "id": "R12",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/fleet-admin-web/app/cases: case management UI operations (investigate, upload evidence, assign) lack backend API endpoints",
+        "blocking_reason": "Fleet case lifecycle and evidence attachment backend not implemented; awaits SR-FLEET-CASE-001",
+        "next_task": "SR-FLEET-CASE-001"
+      },
+      {
+        "id": "R13",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/fleet-admin-web/app/settlement: driver settlement statement calculation and payout CSV export endpoints missing",
+        "blocking_reason": "Settlement calculation service and reconciliation export pipeline not integrated; awaits SR-FLEET-SETTLE-001",
+        "next_task": "SR-FLEET-SETTLE-001"
+      },
+      {
+        "id": "R14",
+        "status": "current_evidence_merged",
+        "task_id": "SR-BANK-003",
+        "pr": "#1688",
+        "commit_sha": "b32ab8badb740b94cdf67212315ecfccf21f6d5d",
+        "regression_test": "tests/unit/system-remediation/sr-bank-003/sr-bank-003.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-bank-003/sr-bank-003.test.ts",
+        "result": "Passed (exit 0); verified cryptographic hash chaining, ECDSA signature verification, and standalone verification runner"
+      },
+      {
+        "id": "R15",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/bank-admin-web amount masking: OPS_VIEWER role can view unmasked financial totals on summary metrics while masked on table view",
+        "blocking_reason": "Inconsistent role-based field masking policy between summary cards and table rows; awaits SR-BANK-002",
+        "next_task": "SR-BANK-002"
+      },
+      {
+        "id": "R16",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect bank transaction audit query: cross-institutional multi-tenant foreign keys lack constraint check and test isolation fixtures",
+        "blocking_reason": "Bank transaction audit trail requires multi-tenant isolation fixtures; awaits SR-BANK-001; SR-ENTERPRISE-DATA-001",
+        "next_task": "SR-BANK-001; SR-ENTERPRISE-DATA-001"
+      },
+      {
+        "id": "R17",
+        "status": "current_evidence_merged",
+        "task_id": "SR-OPS-MAP-001",
+        "pr": "#1647",
+        "commit_sha": "bb265b286d718e61d2c50479deb0ddcd031a4597",
+        "regression_test": "tests/unit/system-remediation/sr-ops-map-001/sr-ops-map-001.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-ops-map-001/sr-ops-map-001.test.ts",
+        "result": "Passed (exit 0); verified tile server fallback, offline grid styling, and stale vehicle GPS coordinate handling"
+      },
+      {
+        "id": "R18",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/ops-console-web navigation: switching between dispatch, fleet, and billing modules clears active tenant and role context",
+        "blocking_reason": "Ops console shell lacks cross-application state bridge and context persistence; awaits SR-OPS-SHELL-001",
+        "next_task": "SR-OPS-SHELL-001"
+      },
+      {
+        "id": "R19",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/ops-console-web assistant drawer: assistant modal intercepts map pointer events and cannot be minimized during active dispatch",
+        "blocking_reason": "Ops assistant UI lacks non-blocking floating layout and window minimization; awaits SR-OPS-SHELL-001",
+        "next_task": "SR-OPS-SHELL-001"
+      },
+      {
+        "id": "R20",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/enterprise-portal-web booking form: booking for others does not persist contact phone and placard name into reservation payload snapshot",
+        "blocking_reason": "Enterprise booking form traveler/contact synchronization schema mismatch; awaits SR-ENTERPRISE-FORM-001",
+        "next_task": "SR-ENTERPRISE-FORM-001"
+      },
+      {
+        "id": "R21",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/enterprise-portal-web date validation: date picker allows selection of past dates and under-cutoff lead time without client/server error",
+        "blocking_reason": "Enterprise booking date picker lacks cutoff validation logic; awaits SR-ENTERPRISE-FORM-001",
+        "next_task": "SR-ENTERPRISE-FORM-001"
+      },
+      {
+        "id": "R22",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/enterprise-portal-web on 375px mobile viewport: form grid columns fail to stack, overflowing viewport and cutting off submit action",
+        "blocking_reason": "Responsive CSS layout missing breakpoint collapse on mobile devices; awaits SR-FLEET-FORM-001; SR-ENTERPRISE-FORM-001",
+        "next_task": "SR-FLEET-FORM-001; SR-ENTERPRISE-FORM-001"
+      },
+      {
+        "id": "R23",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/fleet-admin-web vehicle creation form: allows submitting vehicle without registration document plate or expiration date",
+        "blocking_reason": "Fleet vehicle registration form schema lacks mandatory licensing document validation; awaits SR-FLEET-FORM-001",
+        "next_task": "SR-FLEET-FORM-001"
+      },
+      {
+        "id": "R24",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect fleet vehicle and enterprise search endpoints: combining date range with status parameter in query fails or returns empty list",
+        "blocking_reason": "Multi-parameter search query builder in fleet/enterprise API drops filter predicates; awaits SR-FLEET-DATA-001; SR-ENTERPRISE-SEARCH-001",
+        "next_task": "SR-FLEET-DATA-001; SR-ENTERPRISE-SEARCH-001"
+      },
+      {
+        "id": "R25",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/fleet-admin-web driver onboarding form: driver license number regex validator throws unhandled exception on special characters",
+        "blocking_reason": "Driver license regex validation parser lacks error boundary and sanitization; awaits SR-FLEET-FORM-001",
+        "next_task": "SR-FLEET-FORM-001"
+      },
+      {
+        "id": "R26",
+        "status": "current_evidence_merged",
+        "task_id": "SR-CHANNEL-001",
+        "pr": "#1730",
+        "commit_sha": "9f5c81bd53b4930321f7c659a9b27b4bc2fe89c5",
+        "regression_test": "tests/unit/system-remediation/sr-channel-001/channel-overview-export.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-channel-001/channel-overview-export.test.ts",
+        "result": "Passed (exit 0); verified channel overview CSV export generation and reconciliation statement query API"
+      },
+      {
+        "id": "R27",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect environment template files: .env.example files contain staging internal endpoints and insecure fallback defaults",
+        "blocking_reason": "Configuration templates require sanitization and dynamic fallback decoupling; awaits SR-ENV-COPY-001",
+        "next_task": "SR-ENV-COPY-001"
+      },
+      {
+        "id": "R28",
+        "status": "current_evidence_merged",
+        "task_id": "SR-BANK-001",
+        "pr": "#1654",
+        "commit_sha": "6d4c47feb1c68f8b53310597da7aeffb6940cc19",
+        "regression_test": "tests/unit/system-remediation/sr-bank-001/sr-bank-001.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-bank-001/sr-bank-001.test.ts",
+        "result": "Passed (exit 0); verified bank contract date calculations and active status transitions"
+      },
+      {
+        "id": "R29",
+        "status": "not_run_live",
+        "repro_command_or_evidence": "Inspect ops console production deployment endpoints: live ops endpoint unauthenticated / connection closed in sandbox environment",
+        "blocking_reason": "Requires production Cloud Run deployment, TLS certificate issuance, and authorized platform IAM credentials",
+        "next_task": "SR-PUBLIC-001; SR-OPS-PROOF-001; SR-LIVE-ENTRY-001; SR-LIVE-OPS-001"
+      },
+      {
+        "id": "R30",
+        "status": "not_run_device",
+        "repro_command_or_evidence": "Inspect driver mobile web on physical Android/iOS device: viewport scaling, camera barcode scanning, and push token registration cannot run in headless CI",
+        "blocking_reason": "Requires physical Android/iOS hardware test lab and registered mobile test identity",
+        "next_task": "SR-DRIVER-WEB-001; SR-LIVE-DRIVER-001"
+      },
+      {
+        "id": "N01",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect services/shift-service/ and driver API: no leave request, manager approval/rejection, or schedule interlocking endpoints exist (PRD 9.4.7)",
+        "blocking_reason": "Leave request backend lifecycle and frontend workflows not implemented; awaits SR-LEAVE-BE-001; SR-LEAVE-FE-001",
+        "next_task": "SR-LEAVE-BE-001; SR-LEAVE-FE-001"
+      },
+      {
+        "id": "N02",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect loadTraining implementation: returns stub FX_FLEET_TRAINING; no training course video, quiz scoring, or completion recording APIs exist (PRD 9.4.9)",
+        "blocking_reason": "Academy and quiz completion backend/frontend not implemented; awaits SR-ACADEMY-BE-001; SR-ACADEMY-FE-001",
+        "next_task": "SR-ACADEMY-BE-001; SR-ACADEMY-FE-001"
+      },
+      {
+        "id": "N03",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect IAM and fleet services: vehicle host self-service portal route (/host) and host-scoped read models not productized (PRD 12.6)",
+        "blocking_reason": "Vehicle host portal and scoped vehicle access control not implemented; awaits SR-HOST-BE-001; SR-HOST-FE-001",
+        "next_task": "SR-HOST-BE-001; SR-HOST-FE-001"
+      },
+      {
+        "id": "N04",
+        "status": "current_evidence_merged",
+        "task_id": "SR-INVOICE-001",
+        "pr": "#1664",
+        "commit_sha": "a4876ac529abfb634c2b96f237116202abf3d87d",
+        "regression_test": "tests/unit/system-remediation/sr-invoice-001/tenant-invoice-pdf-content.test.ts; tests/unit/system-remediation/sr-invoice-001/tenant-invoice-download-lifecycle.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-invoice-001/tenant-invoice-pdf-content.test.ts tests/unit/system-remediation/sr-invoice-001/tenant-invoice-download-lifecycle.test.ts",
+        "result": "Passed (exit 0); verified real PDF byte generation for tenant invoices, tamper detection, artifact store integration, cross-tenant denial"
+      },
+      {
+        "id": "N05",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect services/reporting-service/reportArtifactRenderers: pdf and xlsx renderers are null; only CSV is implemented",
+        "blocking_reason": "PDF and Excel export format renderers not implemented; awaits SR-REPORT-001",
+        "next_task": "SR-REPORT-001"
+      },
+      {
+        "id": "N06",
+        "status": "current_evidence_merged",
+        "task_id": "SR-MAIL-001",
+        "pr": "#1755",
+        "commit_sha": "6f4ac8c74ae3618b6109efd010014365a85d36d8",
+        "regression_test": "tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery-status.test.ts; tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery.service.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery-status.test.ts tests/unit/system-remediation/sr-mail-001/tenant-invitation-delivery.service.test.ts",
+        "result": "Passed (exit 0); verified tenant invitation email durable delivery, delivered status semantics, and retry idempotency"
+      },
+      {
+        "id": "N07",
+        "status": "current_evidence_merged",
+        "task_id": "SR-MAIL-002",
+        "pr": "#1646",
+        "commit_sha": "564e27f63045789537b54f5c0b5909f6468032ca",
+        "regression_test": "tests/unit/system-remediation/sr-mail-002/audit-notification-service.dispatch.test.ts; tests/unit/system-remediation/sr-mail-002/audit-notification-email-adapter.test.ts",
+        "test_command": "pnpm exec vitest run tests/unit/system-remediation/sr-mail-002/audit-notification-service.dispatch.test.ts tests/unit/system-remediation/sr-mail-002/audit-notification-email-adapter.test.ts",
+        "result": "Passed (exit 0); verified AuditNotificationEmailAdapter wires to durable NotificationDeliveryService, handles near-timeout and approval status dispatch"
+      },
+      {
+        "id": "N08",
+        "status": "not_run",
+        "repro_command_or_evidence": "Request /downloads/placard/placard-demo-001: returns 404; placard demo link expired 2026-08-25 and source code only generates metadata without printable file bytes",
+        "blocking_reason": "Placard printable file generation and active signed download token renewal not implemented; awaits SR-PLACARD-001",
+        "next_task": "SR-PLACARD-001"
+      },
+      {
+        "id": "N09",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect markReimbursementPaid in billing service: accepts arbitrary string as proofId without verifying file upload or existence in artifact store",
+        "blocking_reason": "Reimbursement payment proof upload, anti-virus scan, and existence verification not wired; awaits SR-PROOF-001",
+        "next_task": "SR-PROOF-001"
+      },
+      {
+        "id": "N10",
+        "status": "not_run_live_device",
+        "repro_command_or_evidence": "Inspect UnavailablePassengerPushPort: isAvailable returns false; push notification adapter for passenger dispatch/arrival not wired to live APNs/FCM provider",
+        "blocking_reason": "Requires APNs/FCM push credentials, device registration mapping, and physical handset validation",
+        "next_task": "SR-PUSH-001; SR-LIVE-PUSH-001"
+      },
+      {
+        "id": "N11",
+        "status": "not_run",
+        "repro_command_or_evidence": "Request /control-plane-proxy/platform-admin/adapters: returns 404 on adapter management page; proxy route lacks backend API implementation",
+        "blocking_reason": "Platform admin adapter management backend API and proxy route alignment missing; awaits SR-ADMIN-ADAPTER-001",
+        "next_task": "SR-ADMIN-ADAPTER-001"
+      },
+      {
+        "id": "N12",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/platform-admin-web CertificateStatus component: warning calculation uses hardcoded fixed date (2026-05-31) instead of dynamic certificate expiry metadata",
+        "blocking_reason": "Certificate expiration calculation uses static date constant rather than dynamic certificate metadata; awaits SR-ADMIN-ADAPTER-001",
+        "next_task": "SR-ADMIN-ADAPTER-001"
+      },
+      {
+        "id": "N13",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/ops-console-web/app/contracts/page.tsx: contract detail action button has hardcoded enabled: false and contract_detail_pending despite route existing",
+        "blocking_reason": "Contract list UI wiring disables navigation to existing contract detail route; awaits SR-CONTRACT-READ-001; SR-OPS-CONTRACT-001",
+        "next_task": "SR-CONTRACT-READ-001; SR-OPS-CONTRACT-001"
+      },
+      {
+        "id": "N14",
+        "status": "not_run",
+        "repro_command_or_evidence": "Inspect apps/ops-console-web/app/contracts/[contractId]/page.tsx: dispatch operational parameters (window, SLA, waiting, no-show) display \"read model not provided\"",
+        "blocking_reason": "Contract read model lacks projection of execution terms to ops console; awaits SR-CONTRACT-READ-001; SR-OPS-CONTRACT-001",
+        "next_task": "SR-CONTRACT-READ-001; SR-OPS-CONTRACT-001"
+      }
+    ]
+  },
+  "capability_role_test_data_requirement": {
+    "source": "docs/04-uat/system-remediation-20260906/source/capabilities.json",
+    "coverage": "docs/04-uat/system-remediation-20260906/coverage.json",
+    "scope_exclusions": "docs/04-uat/system-remediation-20260906/scope-and-coverage.md",
+    "policy": "For every capability, provision an isolated persona matching its source role, an isolated tenant namespace, deterministic domain records required by the capability, and a redacted evidence reference. No shared production identity, fixture-only substitute, fixed percentage, fake signature, or fake delivery may satisfy a live gate. Capabilities requiring live/device/provider evidence additionally require an authorized resource ID, account/tenant ownership, readback command, candidate SHA, and captured receipt. Missing any item remains missing.",
+    "items": [
+      {
+        "id": "C001",
+        "domain": "入口與身份",
+        "role": "所有外部使用者",
+        "capability": "從正式公開網址進入服務",
+        "state_at_audit": "故障",
+        "required_persona": "public_anonymous",
+        "tenant_namespace": "public_cross_tenant",
+        "required_records": [
+          "public_endpoint_dns",
+          "tls_certificate_record",
+          "ingress_route_config"
+        ],
+        "missing_evidence": "Missing authorized external DNS/TLS certificate and public ingress readback (SR-LIVE-ENTRY-001)"
+      },
+      {
+        "id": "C002",
+        "domain": "入口與身份",
+        "role": "租戶管理員",
+        "capability": "OIDC 登入及返回業務頁",
+        "state_at_audit": "故障",
+        "required_persona": "tenant_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "tenant_profile_record",
+          "user_identity_record",
+          "oidc_callback_state"
+        ],
+        "missing_evidence": "Missing authorized tenant IdP credentials and isolated tenant record (SR-TENANT-LOGIN-001)"
+      },
+      {
+        "id": "C003",
+        "domain": "入口與身份",
+        "role": "平臺／營運人員",
+        "capability": "IAP／SSO 與 MFA 正式登入",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C004",
+        "domain": "入口與身份",
+        "role": "銀行三種角色",
+        "capability": "登入後進入正確首頁",
+        "state_at_audit": "故障",
+        "required_persona": "bank_finance",
+        "tenant_namespace": "bank_isolated",
+        "required_records": [
+          "bank_institution_record",
+          "contract_schedule_record",
+          "audit_evidence_digest"
+        ],
+        "missing_evidence": "None; verified by merged regression test (PR #1654)"
+      },
+      {
+        "id": "C005",
+        "domain": "入口與身份",
+        "role": "銀行營運檢視／財務",
+        "capability": "金額欄位依角色隔離",
+        "state_at_audit": "故障",
+        "required_persona": "bank_finance",
+        "tenant_namespace": "bank_isolated",
+        "required_records": [
+          "bank_institution_record",
+          "contract_schedule_record",
+          "audit_evidence_digest"
+        ],
+        "missing_evidence": "Missing financial institution sandbox credentials and authorized settlement evidence"
+      },
+      {
+        "id": "C006",
+        "domain": "入口與身份",
+        "role": "租戶人員管理者",
+        "capability": "邀請→收到信→啟用→重寄／撤銷",
+        "state_at_audit": "實作缺口",
+        "required_persona": "tenant_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "tenant_profile_record",
+          "user_identity_record",
+          "oidc_callback_state"
+        ],
+        "missing_evidence": "Missing authorized tenant IdP credentials and isolated tenant record (SR-TENANT-LOGIN-001)"
+      },
+      {
+        "id": "C007",
+        "domain": "入口與身份",
+        "role": "平臺人員管理者",
+        "capability": "人員查詢與工作階段管理",
+        "state_at_audit": "故障",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "None; verified by merged regression test (PR #1638, #1683)"
+      },
+      {
+        "id": "C008",
+        "domain": "入口與身份",
+        "role": "租戶營運／財務／技術／唯讀",
+        "capability": "角色最小權限與選單／API 一致",
+        "state_at_audit": "待驗證",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C009",
+        "domain": "入口與身份",
+        "role": "跨租戶／跨車行使用者",
+        "capability": "資源歸屬隔離與匯出隔離",
+        "state_at_audit": "待驗證",
+        "required_persona": "fleet_operator",
+        "tenant_namespace": "fleet_isolated",
+        "required_records": [
+          "fleet_partner_profile",
+          "vehicle_registration_record",
+          "driver_employment_contract"
+        ],
+        "missing_evidence": "Missing fleet admin backend synchronization (SR-FLEET-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C010",
+        "domain": "入口與身份",
+        "role": "平臺安全管理員",
+        "capability": "停權／離職立即失效與金鑰輪替",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C011",
+        "domain": "入口與身份",
+        "role": "特權申請／核准人",
+        "capability": "臨時角色、四眼核准、到期回收",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C012",
+        "domain": "入口與身份",
+        "role": "車主 Host",
+        "capability": "只看自有車輛收益／維保／任務／案件",
+        "state_at_audit": "未完整落地",
+        "required_persona": "host_user",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "host_profile_record",
+          "vehicle_ownership_link",
+          "revenue_statement_record"
+        ],
+        "missing_evidence": "Missing host portal self-service endpoints and vehicle ownership authorization (SR-HOST-BE-001/FE-001)"
+      },
+      {
+        "id": "C013",
+        "domain": "預約與乘客",
+        "role": "企業員工／行政代訂",
+        "capability": "查看歷史與既有預約詳情",
+        "state_at_audit": "已測片段",
+        "required_persona": "customer_passenger",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "booking_reservation_record",
+          "passenger_profile_record",
+          "cost_center_assignment"
+        ],
+        "missing_evidence": "Missing downstream enterprise booking integration (SR-ENTERPRISE-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C014",
+        "domain": "預約與乘客",
+        "role": "企業預約者",
+        "capability": "填寫預約、必填檢核、最後確認",
+        "state_at_audit": "已測片段",
+        "required_persona": "customer_passenger",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "booking_reservation_record",
+          "passenger_profile_record",
+          "cost_center_assignment"
+        ],
+        "missing_evidence": "Missing downstream enterprise booking integration (SR-ENTERPRISE-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C015",
+        "domain": "預約與乘客",
+        "role": "自己預約／代訂者",
+        "capability": "乘客資料、聯絡人與舉牌同步",
+        "state_at_audit": "故障",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C016",
+        "domain": "預約與乘客",
+        "role": "企業預約者",
+        "capability": "過去日期、最短提前時間與改期限制",
+        "state_at_audit": "故障",
+        "required_persona": "customer_passenger",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "booking_reservation_record",
+          "passenger_profile_record",
+          "cost_center_assignment"
+        ],
+        "missing_evidence": "Missing downstream enterprise booking integration (SR-ENTERPRISE-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C017",
+        "domain": "預約與乘客",
+        "role": "企業乘客",
+        "capability": "首頁／行程／詳情與實際訂單一致",
+        "state_at_audit": "故障",
+        "required_persona": "customer_passenger",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "booking_reservation_record",
+          "passenger_profile_record",
+          "cost_center_assignment"
+        ],
+        "missing_evidence": "Missing downstream enterprise booking integration (SR-ENTERPRISE-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C018",
+        "domain": "預約與乘客",
+        "role": "行程中乘客",
+        "capability": "聯絡司機、企業客服及求助",
+        "state_at_audit": "故障",
+        "required_persona": "customer_passenger",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "booking_reservation_record",
+          "passenger_profile_record",
+          "cost_center_assignment"
+        ],
+        "missing_evidence": "Missing downstream enterprise booking integration (SR-ENTERPRISE-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C019",
+        "domain": "預約與乘客",
+        "role": "手機企業使用者",
+        "capability": "手機填單、確認與可讀排版",
+        "state_at_audit": "故障",
+        "required_persona": "customer_passenger",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "booking_reservation_record",
+          "passenger_profile_record",
+          "cost_center_assignment"
+        ],
+        "missing_evidence": "Missing downstream enterprise booking integration (SR-ENTERPRISE-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C020",
+        "domain": "預約與乘客",
+        "role": "社區住戶",
+        "capability": "合法 signed handoff 進入嵌入叫車",
+        "state_at_audit": "故障",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C021",
+        "domain": "預約與乘客",
+        "role": "社區住戶",
+        "capability": "嵌入失敗的獨立叫車 fallback",
+        "state_at_audit": "故障",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C022",
+        "domain": "預約與乘客",
+        "role": "轉介乘客",
+        "capability": "即時報價→送單→續接→取消→評分／收據",
+        "state_at_audit": "待驗證",
+        "required_persona": "referral_passenger",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "booking_reservation_record",
+          "passenger_profile_record",
+          "cost_center_assignment"
+        ],
+        "missing_evidence": "Missing downstream enterprise booking integration (SR-ENTERPRISE-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C023",
+        "domain": "預約與乘客",
+        "role": "乘客通知接收者",
+        "capability": "派車／到達／異動通知實際送達",
+        "state_at_audit": "外部待完成",
+        "required_persona": "customer_passenger",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "booking_reservation_record",
+          "passenger_profile_record",
+          "cost_center_assignment"
+        ],
+        "missing_evidence": "Missing APNs/FCM provider credentials and physical device receipt (SR-LIVE-PUSH-001)"
+      },
+      {
+        "id": "C024",
+        "domain": "預約與乘客",
+        "role": "租戶預約管理員",
+        "capability": "租戶建單／修改／取消與歷程",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C025",
+        "domain": "預約與乘客",
+        "role": "租戶簽核人",
+        "capability": "送審→核准／駁回→人工升級",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C026",
+        "domain": "預約與乘客",
+        "role": "簽核通知接收者",
+        "capability": "收到新申請／接近逾時／決定 Email",
+        "state_at_audit": "實作缺口",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C027",
+        "domain": "預約與乘客",
+        "role": "租戶營運管理員",
+        "capability": "預約乘客、常用地址與成本中心",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C028",
+        "domain": "預約與乘客",
+        "role": "租戶管理員",
+        "capability": "額度、用車規則、服務方案、SLA",
+        "state_at_audit": "待驗證",
+        "required_persona": "tenant_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "tenant_profile_record",
+          "user_identity_record",
+          "oidc_callback_state"
+        ],
+        "missing_evidence": "Missing authorized tenant IdP credentials and isolated tenant record (SR-TENANT-LOGIN-001)"
+      },
+      {
+        "id": "C029",
+        "domain": "預約與乘客",
+        "role": "銀行方案管理員",
+        "capability": "卡友資格／權益／人工審查",
+        "state_at_audit": "外部待完成",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C030",
+        "domain": "預約與乘客",
+        "role": "銀行營運",
+        "capability": "卡友預約列表與狀態篩選",
+        "state_at_audit": "已測片段",
+        "required_persona": "bank_finance",
+        "tenant_namespace": "bank_isolated",
+        "required_records": [
+          "bank_institution_record",
+          "contract_schedule_record",
+          "audit_evidence_digest"
+        ],
+        "missing_evidence": "Missing financial institution sandbox credentials and authorized settlement evidence"
+      },
+      {
+        "id": "C031",
+        "domain": "預約與乘客",
+        "role": "機場接送乘客／客服",
+        "capability": "航班異動、等待、加價與取消規則",
+        "state_at_audit": "待驗證",
+        "required_persona": "customer_passenger",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "booking_reservation_record",
+          "passenger_profile_record",
+          "cost_center_assignment"
+        ],
+        "missing_evidence": "Missing downstream enterprise booking integration (SR-ENTERPRISE-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C032",
+        "domain": "預約與乘客",
+        "role": "旅行社／保險代步服務",
+        "capability": "非核心產品的獨立業務閉環",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C033",
+        "domain": "預約與乘客",
+        "role": "第三方平臺方",
+        "capability": "轉派單接入／接受／拒絕／完成回傳",
+        "state_at_audit": "外部待完成",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C034",
+        "domain": "預約與乘客",
+        "role": "第三方平臺方",
+        "capability": "取消競態、失去搶單與第三方收據歸屬",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C035",
+        "domain": "調度與營運",
+        "role": "調度員",
+        "capability": "任務清單→詳情→候選車查詢",
+        "state_at_audit": "已測片段",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C036",
+        "domain": "調度與營運",
+        "role": "調度員",
+        "capability": "人工派車、改派、撤回及並發占用",
+        "state_at_audit": "待驗證",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C037",
+        "domain": "調度與營運",
+        "role": "排班／預約 scheduler",
+        "capability": "時間到自動釋放預約／提醒／升級",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C038",
+        "domain": "調度與營運",
+        "role": "即時 matcher／SLA monitor",
+        "capability": "自動匹配、超時、無供給與恢復",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C039",
+        "domain": "調度與營運",
+        "role": "排班站點／調度員",
+        "capability": "排班佇列 check-in／out、順序與例外",
+        "state_at_audit": "待驗證",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C040",
+        "domain": "調度與營運",
+        "role": "地圖調度員",
+        "capability": "可讀地圖、位置與車輛態勢",
+        "state_at_audit": "故障",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "None; verified by merged regression test (PR #1647)"
+      },
+      {
+        "id": "C041",
+        "domain": "調度與營運",
+        "role": "多平臺司機／調度員",
+        "capability": "presence 占用與回復可派狀態",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C042",
+        "domain": "調度與營運",
+        "role": "營運主管",
+        "capability": "出勤、營收、維保看板",
+        "state_at_audit": "已測片段",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C043",
+        "domain": "調度與營運",
+        "role": "客服話務人員",
+        "capability": "通話建檔、caller 查找、轉訂單／客訴",
+        "state_at_audit": "待驗證",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C044",
+        "domain": "調度與營運",
+        "role": "CTI／錄音 callback 來源",
+        "capability": "真電話接入、排隊、錄音與補件",
+        "state_at_audit": "外部待完成",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C045",
+        "domain": "調度與營運",
+        "role": "客訴專員",
+        "capability": "分類→指派→調查→回覆→結案／重開",
+        "state_at_audit": "待驗證",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C046",
+        "domain": "調度與營運",
+        "role": "事故處理員",
+        "capability": "事故→責任／附件→限制派車→恢復",
+        "state_at_audit": "待驗證",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C047",
+        "domain": "調度與營運",
+        "role": "SOS 值班人員",
+        "capability": "收警→認領→處置→解除與回執",
+        "state_at_audit": "待驗證",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C048",
+        "domain": "調度與營運",
+        "role": "營運使用者",
+        "capability": "跨應用追查與助理工作協作",
+        "state_at_audit": "故障",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C049",
+        "domain": "司機",
+        "role": "新司機",
+        "capability": "文件建檔、送審與核准後開通",
+        "state_at_audit": "待驗證",
+        "required_persona": "driver_user",
+        "tenant_namespace": "driver_isolated",
+        "required_records": [
+          "driver_license_record",
+          "shift_status_record",
+          "vehicle_dispatch_assignment"
+        ],
+        "missing_evidence": "Missing physical mobile device execution and driver web integration (SR-DRIVER-WEB-001, SR-LIVE-DRIVER-001)"
+      },
+      {
+        "id": "C050",
+        "domain": "司機",
+        "role": "換機／遺失裝置司機",
+        "capability": "裝置綁定、解綁、復原與 session 更新",
+        "state_at_audit": "待驗證",
+        "required_persona": "driver_user",
+        "tenant_namespace": "driver_isolated",
+        "required_records": [
+          "driver_license_record",
+          "shift_status_record",
+          "vehicle_dispatch_assignment"
+        ],
+        "missing_evidence": "Missing physical mobile device execution and driver web integration (SR-DRIVER-WEB-001, SR-LIVE-DRIVER-001)"
+      },
+      {
+        "id": "C051",
+        "domain": "司機",
+        "role": "值勤司機",
+        "capability": "上／下線、班次歷史與出勤計時",
+        "state_at_audit": "待驗證",
+        "required_persona": "driver_user",
+        "tenant_namespace": "driver_isolated",
+        "required_records": [
+          "driver_license_record",
+          "shift_status_record",
+          "vehicle_dispatch_assignment"
+        ],
+        "missing_evidence": "Missing physical mobile device execution and driver web integration (SR-DRIVER-WEB-001, SR-LIVE-DRIVER-001)"
+      },
+      {
+        "id": "C052",
+        "domain": "司機",
+        "role": "司機／排班主管",
+        "capability": "請假申請、審核與班表聯動",
+        "state_at_audit": "實作缺口",
+        "required_persona": "driver_user",
+        "tenant_namespace": "driver_isolated",
+        "required_records": [
+          "driver_license_record",
+          "shift_status_record",
+          "vehicle_dispatch_assignment"
+        ],
+        "missing_evidence": "Missing leave management workflow endpoints (SR-LEAVE-BE-001/FE-001)"
+      },
+      {
+        "id": "C053",
+        "domain": "司機",
+        "role": "接單司機",
+        "capability": "收新任務、接受／拒絕與逾時",
+        "state_at_audit": "待驗證",
+        "required_persona": "driver_user",
+        "tenant_namespace": "driver_isolated",
+        "required_records": [
+          "driver_license_record",
+          "shift_status_record",
+          "vehicle_dispatch_assignment"
+        ],
+        "missing_evidence": "Missing physical mobile device execution and driver web integration (SR-DRIVER-WEB-001, SR-LIVE-DRIVER-001)"
+      },
+      {
+        "id": "C054",
+        "domain": "司機",
+        "role": "執行行程司機",
+        "capability": "出發→到達→開始→完成／取消",
+        "state_at_audit": "待驗證",
+        "required_persona": "driver_user",
+        "tenant_namespace": "driver_isolated",
+        "required_records": [
+          "driver_license_record",
+          "shift_status_record",
+          "vehicle_dispatch_assignment"
+        ],
+        "missing_evidence": "Missing physical mobile device execution and driver web integration (SR-DRIVER-WEB-001, SR-LIVE-DRIVER-001)"
+      },
+      {
+        "id": "C055",
+        "domain": "司機",
+        "role": "司機／乘客簽收者",
+        "capability": "照片／簽收證明與完成條件",
+        "state_at_audit": "待驗證",
+        "required_persona": "customer_passenger",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "booking_reservation_record",
+          "passenger_profile_record",
+          "cost_center_assignment"
+        ],
+        "missing_evidence": "Missing downstream enterprise booking integration (SR-ENTERPRISE-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C056",
+        "domain": "司機",
+        "role": "司機",
+        "capability": "背景定位、導航、離線排隊與重連",
+        "state_at_audit": "待驗證",
+        "required_persona": "driver_user",
+        "tenant_namespace": "driver_isolated",
+        "required_records": [
+          "driver_license_record",
+          "shift_status_record",
+          "vehicle_dispatch_assignment"
+        ],
+        "missing_evidence": "Missing physical mobile device execution and driver web integration (SR-DRIVER-WEB-001, SR-LIVE-DRIVER-001)"
+      },
+      {
+        "id": "C057",
+        "domain": "司機",
+        "role": "司機",
+        "capability": "收益日週月、服務費與補助追溯",
+        "state_at_audit": "待驗證",
+        "required_persona": "driver_user",
+        "tenant_namespace": "driver_isolated",
+        "required_records": [
+          "driver_license_record",
+          "shift_status_record",
+          "vehicle_dispatch_assignment"
+        ],
+        "missing_evidence": "Missing physical mobile device execution and driver web integration (SR-DRIVER-WEB-001, SR-LIVE-DRIVER-001)"
+      },
+      {
+        "id": "C058",
+        "domain": "司機",
+        "role": "司機",
+        "capability": "下載自己的 statement／收據",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "driver_user",
+        "tenant_namespace": "driver_isolated",
+        "required_records": [
+          "driver_license_record",
+          "shift_status_record",
+          "vehicle_dispatch_assignment"
+        ],
+        "missing_evidence": "Missing physical mobile device execution and driver web integration (SR-DRIVER-WEB-001, SR-LIVE-DRIVER-001)"
+      },
+      {
+        "id": "C059",
+        "domain": "司機",
+        "role": "司機",
+        "capability": "教學影片、SOP、測驗與完訓紀錄",
+        "state_at_audit": "實作缺口",
+        "required_persona": "driver_user",
+        "tenant_namespace": "driver_isolated",
+        "required_records": [
+          "driver_license_record",
+          "shift_status_record",
+          "vehicle_dispatch_assignment"
+        ],
+        "missing_evidence": "Missing physical mobile device execution and driver web integration (SR-DRIVER-WEB-001, SR-LIVE-DRIVER-001)"
+      },
+      {
+        "id": "C060",
+        "domain": "司機",
+        "role": "司機",
+        "capability": "個資、通知偏好與裝置自檢",
+        "state_at_audit": "待驗證",
+        "required_persona": "driver_user",
+        "tenant_namespace": "driver_isolated",
+        "required_records": [
+          "driver_license_record",
+          "shift_status_record",
+          "vehicle_dispatch_assignment"
+        ],
+        "missing_evidence": "Missing physical mobile device execution and driver web integration (SR-DRIVER-WEB-001, SR-LIVE-DRIVER-001)"
+      },
+      {
+        "id": "C061",
+        "domain": "司機",
+        "role": "證照到期司機／主管",
+        "capability": "到期提醒與禁止接單",
+        "state_at_audit": "待驗證",
+        "required_persona": "driver_user",
+        "tenant_namespace": "driver_isolated",
+        "required_records": [
+          "driver_license_record",
+          "shift_status_record",
+          "vehicle_dispatch_assignment"
+        ],
+        "missing_evidence": "Missing physical mobile device execution and driver web integration (SR-DRIVER-WEB-001, SR-LIVE-DRIVER-001)"
+      },
+      {
+        "id": "C062",
+        "domain": "司機",
+        "role": "開發驗證人員",
+        "capability": "Web 預覽作為基本巡檢入口",
+        "state_at_audit": "故障",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C063",
+        "domain": "車行與供給",
+        "role": "車行營運主管",
+        "capability": "總覽 KPI 與司機／車輛清單一致",
+        "state_at_audit": "故障",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C064",
+        "domain": "車行與供給",
+        "role": "供給建檔人員",
+        "capability": "新增司機／車輛與主要操作入口",
+        "state_at_audit": "故障",
+        "required_persona": "fleet_operator",
+        "tenant_namespace": "fleet_isolated",
+        "required_records": [
+          "fleet_partner_profile",
+          "vehicle_registration_record",
+          "driver_employment_contract"
+        ],
+        "missing_evidence": "Missing fleet admin backend synchronization (SR-FLEET-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C065",
+        "domain": "車行與供給",
+        "role": "供給建檔人員",
+        "capability": "文件上傳→檢查→送件→退補／重送",
+        "state_at_audit": "待驗證",
+        "required_persona": "fleet_operator",
+        "tenant_namespace": "fleet_isolated",
+        "required_records": [
+          "fleet_partner_profile",
+          "vehicle_registration_record",
+          "driver_employment_contract"
+        ],
+        "missing_evidence": "Missing fleet admin backend synchronization (SR-FLEET-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C066",
+        "domain": "車行與供給",
+        "role": "平臺供給審核員",
+        "capability": "受理／核可／駁回／revision 衝突",
+        "state_at_audit": "已測片段",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C067",
+        "domain": "車行與供給",
+        "role": "車行案件人員",
+        "capability": "回覆事故／申訴與 SLA",
+        "state_at_audit": "實作缺口",
+        "required_persona": "fleet_operator",
+        "tenant_namespace": "fleet_isolated",
+        "required_records": [
+          "fleet_partner_profile",
+          "vehicle_registration_record",
+          "driver_employment_contract"
+        ],
+        "missing_evidence": "Missing fleet admin backend synchronization (SR-FLEET-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C068",
+        "domain": "車行與供給",
+        "role": "車行財務",
+        "capability": "statement 查詢／確認／爭議處理",
+        "state_at_audit": "故障",
+        "required_persona": "fleet_operator",
+        "tenant_namespace": "fleet_isolated",
+        "required_records": [
+          "fleet_partner_profile",
+          "vehicle_registration_record",
+          "driver_employment_contract"
+        ],
+        "missing_evidence": "Missing fleet admin backend synchronization (SR-FLEET-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C069",
+        "domain": "車行與供給",
+        "role": "車行查詢使用者",
+        "capability": "有效狀態／趟次篩選與匯出",
+        "state_at_audit": "故障",
+        "required_persona": "fleet_operator",
+        "tenant_namespace": "fleet_isolated",
+        "required_records": [
+          "fleet_partner_profile",
+          "vehicle_registration_record",
+          "driver_employment_contract"
+        ],
+        "missing_evidence": "Missing fleet admin backend synchronization (SR-FLEET-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C070",
+        "domain": "車行與供給",
+        "role": "手機／低視力建檔者",
+        "capability": "可讀表單、欄位標籤與離頁保護",
+        "state_at_audit": "故障",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C071",
+        "domain": "車行與供給",
+        "role": "車行訓練管理員",
+        "capability": "看真完訓率與逾期名單",
+        "state_at_audit": "實作缺口",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C072",
+        "domain": "車行與供給",
+        "role": "車隊／法遵管理員",
+        "capability": "保險、證照、委託合約與排他性",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C073",
+        "domain": "車行與供給",
+        "role": "退場管理員",
+        "capability": "終止委託、下架與 debranding 閉環",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C074",
+        "domain": "帳務與金流",
+        "role": "平臺財務",
+        "capability": "支付訂單與 reconciliation 案件查詢",
+        "state_at_audit": "已測片段",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C075",
+        "domain": "帳務與金流",
+        "role": "平臺財務",
+        "capability": "重新收款／退款／作廢真實執行",
+        "state_at_audit": "外部待完成",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C076",
+        "domain": "帳務與金流",
+        "role": "定價／費用管理者",
+        "capability": "費率草稿、比較、發布與不可變快照",
+        "state_at_audit": "已測片段",
+        "required_persona": "tenant_finance",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "billing_statement_record",
+          "invoice_artifact_record",
+          "payment_ledger_entry"
+        ],
+        "missing_evidence": "Missing downstream billing settlement integration (SR-PROOF-001, SR-BANK-002)"
+      },
+      {
+        "id": "C077",
+        "domain": "帳務與金流",
+        "role": "租戶財務",
+        "capability": "抬頭、統編、請款設定及期間結算",
+        "state_at_audit": "待驗證",
+        "required_persona": "tenant_finance",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "billing_statement_record",
+          "invoice_artifact_record",
+          "payment_ledger_entry"
+        ],
+        "missing_evidence": "None; verified by merged regression test (PR #1664)"
+      },
+      {
+        "id": "C078",
+        "domain": "帳務與金流",
+        "role": "租戶財務",
+        "capability": "可下載真正的帳單 PDF",
+        "state_at_audit": "實作缺口",
+        "required_persona": "tenant_finance",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "billing_statement_record",
+          "invoice_artifact_record",
+          "payment_ledger_entry"
+        ],
+        "missing_evidence": "None; verified by merged regression test (PR #1664)"
+      },
+      {
+        "id": "C079",
+        "domain": "帳務與金流",
+        "role": "租戶財務",
+        "capability": "月結帳單寄送與失敗追蹤",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "tenant_finance",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "billing_statement_record",
+          "invoice_artifact_record",
+          "payment_ledger_entry"
+        ],
+        "missing_evidence": "Missing downstream billing settlement integration (SR-PROOF-001, SR-BANK-002)"
+      },
+      {
+        "id": "C080",
+        "domain": "帳務與金流",
+        "role": "平臺出納",
+        "capability": "代墊批次、核准、匯出與付款狀態",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C081",
+        "domain": "帳務與金流",
+        "role": "出納／覆核人",
+        "capability": "上傳與查驗匯款證明原檔",
+        "state_at_audit": "實作缺口",
+        "required_persona": "tenant_finance",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "billing_statement_record",
+          "invoice_artifact_record",
+          "payment_ledger_entry"
+        ],
+        "missing_evidence": "Missing downstream billing settlement integration (SR-PROOF-001, SR-BANK-002)"
+      },
+      {
+        "id": "C082",
+        "domain": "帳務與金流",
+        "role": "銀行財務",
+        "capability": "真 statement CSV 下載與資料一致",
+        "state_at_audit": "已測片段",
+        "required_persona": "bank_finance",
+        "tenant_namespace": "bank_isolated",
+        "required_records": [
+          "bank_institution_record",
+          "contract_schedule_record",
+          "audit_evidence_digest"
+        ],
+        "missing_evidence": "Missing financial institution sandbox credentials and authorized settlement evidence"
+      },
+      {
+        "id": "C083",
+        "domain": "帳務與金流",
+        "role": "銀行財務／稽核",
+        "capability": "摘要／簽章真實可驗證",
+        "state_at_audit": "故障",
+        "required_persona": "bank_finance",
+        "tenant_namespace": "bank_isolated",
+        "required_records": [
+          "bank_institution_record",
+          "contract_schedule_record",
+          "audit_evidence_digest"
+        ],
+        "missing_evidence": "Missing financial institution sandbox credentials and authorized settlement evidence"
+      },
+      {
+        "id": "C084",
+        "domain": "帳務與金流",
+        "role": "銀行財務",
+        "capability": "正確開立日、到期日與帳期",
+        "state_at_audit": "故障",
+        "required_persona": "bank_finance",
+        "tenant_namespace": "bank_isolated",
+        "required_records": [
+          "bank_institution_record",
+          "contract_schedule_record",
+          "audit_evidence_digest"
+        ],
+        "missing_evidence": "None; verified by merged regression test (PR #1688)"
+      },
+      {
+        "id": "C085",
+        "domain": "帳務與金流",
+        "role": "銀行方案管理員",
+        "capability": "合約、使用量、方案與人員管理",
+        "state_at_audit": "故障",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C086",
+        "domain": "帳務與金流",
+        "role": "通路財務",
+        "capability": "用量→分潤→對帳明細→CSV",
+        "state_at_audit": "已測片段",
+        "required_persona": "tenant_finance",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "billing_statement_record",
+          "invoice_artifact_record",
+          "payment_ledger_entry"
+        ],
+        "missing_evidence": "Missing downstream billing settlement integration (SR-PROOF-001, SR-BANK-002)"
+      },
+      {
+        "id": "C087",
+        "domain": "帳務與金流",
+        "role": "通路營運主管",
+        "capability": "總覽匯出",
+        "state_at_audit": "故障",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C088",
+        "domain": "帳務與金流",
+        "role": "平臺／車行／通路財務",
+        "capability": "取消、退款、爭議的跨帳一致性",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C089",
+        "domain": "帳務與金流",
+        "role": "billing_job",
+        "capability": "批次跨月、重跑、失敗續跑與對帳",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "tenant_finance",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "billing_statement_record",
+          "invoice_artifact_record",
+          "payment_ledger_entry"
+        ],
+        "missing_evidence": "Missing downstream billing settlement integration (SR-PROOF-001, SR-BANK-002)"
+      },
+      {
+        "id": "C090",
+        "domain": "報表與法遵",
+        "role": "營運報表使用者",
+        "capability": "營運報表查詢、產生與 CSV 下載",
+        "state_at_audit": "待驗證",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C091",
+        "domain": "報表與法遵",
+        "role": "營運／租戶財務",
+        "capability": "一般報表 PDF／Excel 輸出",
+        "state_at_audit": "實作缺口",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing downstream ops console integration (SR-OPS-SHELL-001/DISPATCH-001)"
+      },
+      {
+        "id": "C092",
+        "domain": "報表與法遵",
+        "role": "監理承辦／法遵",
+        "capability": "九項 PRD 9.10.1 監理資料報表",
+        "state_at_audit": "待驗證",
+        "required_persona": "compliance_auditor",
+        "tenant_namespace": "compliance_isolated",
+        "required_records": [
+          "regulatory_filing_metadata",
+          "multi_taxi_trip_audit_record",
+          "export_job_manifest"
+        ],
+        "missing_evidence": "Missing regulatory report renderers for XLSX/PDF (SR-REPORT-001)"
+      },
+      {
+        "id": "C093",
+        "domain": "報表與法遵",
+        "role": "P5 法遵人員",
+        "capability": "行程紀錄、資料保存與查詢",
+        "state_at_audit": "故障",
+        "required_persona": "compliance_auditor",
+        "tenant_namespace": "compliance_isolated",
+        "required_records": [
+          "regulatory_filing_metadata",
+          "multi_taxi_trip_audit_record",
+          "export_job_manifest"
+        ],
+        "missing_evidence": "None; verified by merged regression test (PR #1638)"
+      },
+      {
+        "id": "C094",
+        "domain": "報表與法遵",
+        "role": "P5 審查員",
+        "capability": "乘客揭露／公開車資版本審核",
+        "state_at_audit": "待驗證",
+        "required_persona": "compliance_auditor",
+        "tenant_namespace": "compliance_isolated",
+        "required_records": [
+          "regulatory_filing_metadata",
+          "multi_taxi_trip_audit_record",
+          "export_job_manifest"
+        ],
+        "missing_evidence": "Missing regulatory report renderers for XLSX/PDF (SR-REPORT-001)"
+      },
+      {
+        "id": "C095",
+        "domain": "報表與法遵",
+        "role": "車資異常／評價管理員",
+        "capability": "車資異常處理、評價與補正",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C096",
+        "domain": "報表與法遵",
+        "role": "法遵／公開資訊管理員",
+        "capability": "公開電話、車資、版本與歷史治理",
+        "state_at_audit": "已測片段",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C097",
+        "domain": "報表與法遵",
+        "role": "車行／法遵",
+        "capability": "下載可列印車內牌貼",
+        "state_at_audit": "實作缺口",
+        "required_persona": "fleet_operator",
+        "tenant_namespace": "fleet_isolated",
+        "required_records": [
+          "fleet_partner_profile",
+          "vehicle_registration_record",
+          "driver_employment_contract"
+        ],
+        "missing_evidence": "Missing fleet admin backend synchronization (SR-FLEET-DATA-001/FORM-001)"
+      },
+      {
+        "id": "C098",
+        "domain": "報表與法遵",
+        "role": "電子證明使用者",
+        "capability": "多元計程車電子證明 HTML／PDF",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C099",
+        "domain": "報表與法遵",
+        "role": "稽核／調查人員",
+        "capability": "證據清單、匯出授權、法律保留",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C100",
+        "domain": "報表與法遵",
+        "role": "稽核保管／資料庫維運",
+        "capability": "不可變 audit、保存、封存與刪除邊界",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C101",
+        "domain": "平臺治理",
+        "role": "平臺管理員",
+        "capability": "車隊夥伴主檔列表與管理",
+        "state_at_audit": "故障",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "None; verified by merged regression test (PR #1638, #1683)"
+      },
+      {
+        "id": "C102",
+        "domain": "平臺治理",
+        "role": "平臺管理員",
+        "capability": "租戶生命週期與跨租戶治理",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C103",
+        "domain": "平臺治理",
+        "role": "合作夥伴管理員",
+        "capability": "方案、入口、價格、來源歸屬",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C104",
+        "domain": "平臺治理",
+        "role": "轉接器管理員",
+        "capability": "查詢／註冊／停用／憑證治理",
+        "state_at_audit": "故障",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C105",
+        "domain": "平臺治理",
+        "role": "轉接器管理員",
+        "capability": "憑證到期提醒正確性",
+        "state_at_audit": "故障",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C106",
+        "domain": "平臺治理",
+        "role": "服務區管理員",
+        "capability": "區域草稿、審核、發布、停靠規則",
+        "state_at_audit": "已測片段",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C107",
+        "domain": "平臺治理",
+        "role": "服務產品管理員",
+        "capability": "產品型別、資格、時間與結算模式",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C108",
+        "domain": "平臺治理",
+        "role": "平臺維運",
+        "capability": "health、告警、通道與積壓可觀測性",
+        "state_at_audit": "已測片段",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C109",
+        "domain": "平臺治理",
+        "role": "平臺管理員",
+        "capability": "公告／維護通知與功能旗標",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C110",
+        "domain": "平臺治理",
+        "role": "使用者／維運",
+        "capability": "環境、資料來源與文案可信度",
+        "state_at_audit": "故障",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C111",
+        "domain": "整合與自動化",
+        "role": "租戶技術管理員",
+        "capability": "API keys、輪替、撤銷與使用量",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C112",
+        "domain": "整合與自動化",
+        "role": "Webhook 接收平臺",
+        "capability": "簽章、重試、停用、回放與密鑰輪替",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C113",
+        "domain": "整合與自動化",
+        "role": "租戶／外部系統",
+        "capability": "ERP／企業 SSO／銀行帳本同步",
+        "state_at_audit": "外部待完成",
+        "required_persona": "partner_api_key",
+        "tenant_namespace": "partner_isolated",
+        "required_records": [
+          "partner_credential_record",
+          "webhook_subscription_record",
+          "api_gateway_proxy_route"
+        ],
+        "missing_evidence": "Missing adapter management proxy API and webhook handler registration (SR-ADMIN-ADAPTER-001)"
+      },
+      {
+        "id": "C114",
+        "domain": "整合與自動化",
+        "role": "地圖／定位資料提供者",
+        "capability": "真地圖、地理编碼、路由／ETA",
+        "state_at_audit": "外部待完成",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C115",
+        "domain": "整合與自動化",
+        "role": "錄音與證照保存作業",
+        "capability": "背景補件、到期掃描與告警回執",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C116",
+        "domain": "整合與自動化",
+        "role": "背景作業維運",
+        "capability": "排程多實例互斥、重啟恢復與重試",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C117",
+        "domain": "品質與營運保障",
+        "role": "所有寫入者",
+        "capability": "同一請求重送不重複建單／扣款／派車",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C118",
+        "domain": "品質與營運保障",
+        "role": "多端使用者",
+        "capability": "同一訂單跨角色的完整業務閉環",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C119",
+        "domain": "品質與營運保障",
+        "role": "平臺與一線使用者",
+        "capability": "失敗、空清單、過期、429與重試恢復",
+        "state_at_audit": "故障",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C120",
+        "domain": "品質與營運保障",
+        "role": "鍵盤／讀屏／行動使用者",
+        "capability": "全域可及性、焦點、對比與響應式",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C121",
+        "domain": "品質與營運保障",
+        "role": "多語系使用者",
+        "capability": "繁中／英文、一致時間與貨幣格式",
+        "state_at_audit": "待驗證",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C122",
+        "domain": "品質與營運保障",
+        "role": "維運／值班人員",
+        "capability": "備份、還原、RPO／RTO及災難演练",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C123",
+        "domain": "品質與營運保障",
+        "role": "平臺維運",
+        "capability": "負載、延遲、容量與限流",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Missing platform IAM credential and authorized realm access"
+      },
+      {
+        "id": "C124",
+        "domain": "品質與營運保障",
+        "role": "發布／維運",
+        "capability": "部署版本、health、業務驗收與回滾",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C125",
+        "domain": "品質與營運保障",
+        "role": "上傳文件使用者／稽核",
+        "capability": "檔案 bytes、掃描、歸屬、到期與真下載",
+        "state_at_audit": "驗收缺口",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Missing downstream UAT verification"
+      },
+      {
+        "id": "C126",
+        "domain": "範圍邊界",
+        "role": "銀行卡友自助預約",
+        "capability": "獨立 Partner Booking 網站",
+        "state_at_audit": "範圍排除",
+        "required_persona": "bank_finance",
+        "tenant_namespace": "bank_isolated",
+        "required_records": [
+          "bank_institution_record",
+          "contract_schedule_record",
+          "audit_evidence_digest"
+        ],
+        "missing_evidence": "Scope excluded from Phase 1 per SD-DP architectural decision; kept undeveloped per SR-SCOPE-001"
+      },
+      {
+        "id": "C127",
+        "domain": "範圍邊界",
+        "role": "一般乘客／現場代叫者",
+        "capability": "舊 Passenger／Concierge／Assisted 入口",
+        "state_at_audit": "範圍排除",
+        "required_persona": "customer_passenger",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "booking_reservation_record",
+          "passenger_profile_record",
+          "cost_center_assignment"
+        ],
+        "missing_evidence": "Scope excluded from Phase 1 per SD-DP architectural decision; kept undeveloped per SR-SCOPE-001"
+      },
+      {
+        "id": "C128",
+        "domain": "範圍邊界",
+        "role": "ROC／安全操作員",
+        "capability": "AV／ODD／Tesla 接管與远端营运",
+        "state_at_audit": "範圍排除",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Scope excluded from Phase 1 per SD-DP architectural decision; kept undeveloped per SR-SCOPE-001"
+      },
+      {
+        "id": "C129",
+        "domain": "範圍邊界",
+        "role": "監理送件承辦",
+        "capability": "Phase1 filing PDF 主報告與ZIP送件包",
+        "state_at_audit": "範圍排除",
+        "required_persona": "compliance_auditor",
+        "tenant_namespace": "compliance_isolated",
+        "required_records": [
+          "regulatory_filing_metadata",
+          "multi_taxi_trip_audit_record",
+          "export_job_manifest"
+        ],
+        "missing_evidence": "Scope excluded from Phase 1 per SD-DP architectural decision; kept undeveloped per SR-SCOPE-001"
+      },
+      {
+        "id": "C130",
+        "domain": "範圍邊界",
+        "role": "監理機關使用者",
+        "capability": "獨立 regulator realm 與正式監理入口",
+        "state_at_audit": "範圍排除",
+        "required_persona": "compliance_auditor",
+        "tenant_namespace": "compliance_isolated",
+        "required_records": [
+          "regulatory_filing_metadata",
+          "multi_taxi_trip_audit_record",
+          "export_job_manifest"
+        ],
+        "missing_evidence": "Scope excluded from Phase 1 per SD-DP architectural decision; kept undeveloped per SR-SCOPE-001"
+      },
+      {
+        "id": "C131",
+        "domain": "範圍邊界",
+        "role": "背景事件消費者",
+        "capability": "獨立事件匯流排與13態轉單模型",
+        "state_at_audit": "範圍排除",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "tenant_isolated",
+        "required_records": [
+          "audit_log_record"
+        ],
+        "missing_evidence": "Scope excluded from Phase 1 per SD-DP architectural decision; kept undeveloped per SR-SCOPE-001"
+      },
+      {
+        "id": "C132",
+        "domain": "範圍邊界",
+        "role": "租戶簽核管理員",
+        "capability": "逾時自動升級",
+        "state_at_audit": "範圍排除",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "Scope excluded from Phase 1 per SD-DP architectural decision; kept undeveloped per SR-SCOPE-001"
+      },
+      {
+        "id": "C133",
+        "domain": "範圍邊界",
+        "role": "司機／發行管理員",
+        "capability": "提領、商店公開上架與商用簽章",
+        "state_at_audit": "外部待完成",
+        "required_persona": "platform_admin",
+        "tenant_namespace": "platform_global",
+        "required_records": [
+          "platform_actor_record",
+          "role_permission_assignment",
+          "session_credential"
+        ],
+        "missing_evidence": "External gate: Apple App Store / Google Play Store commercial signing identity and commercial disbursement channel required (SR-LIVE-DRIVER-001)"
+      },
+      {
+        "id": "C134",
+        "domain": "調度與營運",
+        "role": "調度員／合約查詢者",
+        "capability": "合約詳情可進入並提供執行條款",
+        "state_at_audit": "實作缺口",
+        "required_persona": "ops_dispatcher",
+        "tenant_namespace": "ops_fleet_isolated",
+        "required_records": [
+          "dispatch_task_record",
+          "candidate_vehicle_projection",
+          "ops_event_journal"
+        ],
+        "missing_evidence": "Missing contract detail route action enablement and execution terms read model projection (SR-CONTRACT-READ-001, SR-OPS-CONTRACT-001)"
+      }
+    ]
+  },
+  "live_gates": [
+    {
+      "id": "public_entry_iap",
+      "status": "missing",
+      "owner": "platform/IAM",
+      "requires": [
+        "public endpoint resource IDs",
+        "DNS/TLS readback",
+        "IAP test identity",
+        "candidate SHA"
+      ],
+      "readback": "authorized external URL, TLS/DNS and IAP login evidence",
+      "downstream": "SR-LIVE-ENTRY-001"
+    },
+    {
+      "id": "test_tenant_identities",
+      "status": "missing",
+      "owner": "tenant/IAM",
+      "requires": [
+        "isolated tenant IDs",
+        "role personas",
+        "credential handoff via approved secret channel"
+      ],
+      "readback": "SR-UAT-HARNESS namespace/evidence recorder",
+      "downstream": "SR-QA-IDENTITY-001"
+    },
+    {
+      "id": "mail_provider",
+      "status": "missing",
+      "owner": "messaging operator",
+      "requires": [
+        "authorized sandbox account",
+        "recipient mailbox",
+        "delivery receipt"
+      ],
+      "readback": "provider event/read receipt without sending from this task",
+      "downstream": "SR-LIVE-MAIL-001"
+    },
+    {
+      "id": "push_device",
+      "status": "missing",
+      "owner": "mobile release operator",
+      "requires": [
+        "authorized test device ID",
+        "push provider account",
+        "device delivery receipt"
+      ],
+      "readback": "provider receipt plus device evidence",
+      "downstream": "SR-LIVE-PUSH-001"
+    },
+    {
+      "id": "financial_sandbox",
+      "status": "missing",
+      "owner": "finance/issuer operator",
+      "requires": [
+        "authorized financial sandbox",
+        "issuer eligibility receipt",
+        "reconciliation evidence"
+      ],
+      "readback": "sandbox transaction and reconciliation IDs",
+      "downstream": "SR-LIVE-FINANCE-001"
+    },
+    {
+      "id": "maps_location",
+      "status": "missing",
+      "owner": "maps operator",
+      "requires": [
+        "configured map credential",
+        "authorized location test",
+        "ETA provider evidence"
+      ],
+      "readback": "provider request/resource IDs",
+      "downstream": "SR-LIVE-MAP-001"
+    },
+    {
+      "id": "storage_document",
+      "status": "missing",
+      "owner": "storage operator",
+      "requires": [
+        "authorized storage target",
+        "materialized artifact bytes",
+        "controlled download receipt"
+      ],
+      "readback": "object/version ID and hash",
+      "downstream": "SR-LIVE-DOC-001"
+    },
+    {
+      "id": "cti_voice",
+      "status": "missing",
+      "owner": "telephony/procurement",
+      "requires": [
+        "CTI account capability evidence",
+        "number/queue configuration",
+        "authorized provider readback"
+      ],
+      "readback": "Reuse docs/04-uat/unattended-voice-external-readiness.md (UV-EXEC-027); do not repeat inventory.",
+      "downstream": "UV-EXEC-028"
+    },
+    {
+      "id": "backup_ops",
+      "status": "missing",
+      "owner": "SRE/operations",
+      "requires": [
+        "authorized isolated ops target",
+        "backup/restore readback",
+        "RPO/RTO baseline",
+        "scheduled-job restart proof"
+      ],
+      "readback": "run/job/restore resource IDs",
+      "downstream": "SR-LIVE-OPS-001"
+    },
+    {
+      "id": "app_store_signing",
+      "status": "missing",
+      "owner": "mobile release manager",
+      "requires": [
+        "store account authorization",
+        "commercial signing identity",
+        "review/release evidence"
+      ],
+      "readback": "store console build/release IDs",
+      "downstream": "C133 external gate / SR-LIVE-DRIVER-001"
+    },
+    {
+      "id": "forward_platform_sandbox",
+      "status": "missing",
+      "owner": "partner integrations lead",
+      "requires": [
+        "third-party dispatch contract",
+        "API credentials",
+        "verified webhook secret"
+      ],
+      "readback": "sandbox dispatch quote/accept receipt",
+      "downstream": "SR-LIVE-FORWARD-001"
+    }
+  ]
+}
