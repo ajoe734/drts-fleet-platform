@@ -2,7 +2,17 @@
 
 本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Gemini（本次 dispatch）。未 handoff、未完成 review/CI/merge。
 
-## 2026-09-08 16:50 UTC C111 身分驗證前置回歸（最新）
+## 2026-09-08 17:00 UTC C111 本機 HTTP 身分驗證續驗（最新）
+
+- base `c171ea5126c1a7c19fa090429b2965bbac106768`；測試入口 anchor `4a6bd78006babeeed6969821688540d79a56b14d`，不是 lifecycle candidate。依指示 rebase 重播歷史 a119ec0bb 時遇四個 task 檔 add/add 衝突，已 abort，再 merge dev 保留已發布歷史；普通 push 成功。
+- 新增 `auth-http.test.ts` 與隔離 DB runner `run-auth-http.sh`，並接入指定 Playwright 入口。真 Nest listener 繼承產品 controller routes，使用真 BootstrapAuthGuard、JwtAuthService、StepUpProofService、IdentityRepository、TenantPartnerRepository。JWT 經產品服務簽發且 session 寫入 PostgreSQL；未覆寫 guard 或偽造 JWT。
+- key 先由產品 service 寫入，再以 HTTP bearer GET 回讀該 ID，確認不含 plaintext/hash；匿名 GET 為 401，read-only bearer POST 為 `AUTH_SCOPE_DENIED` 403，write-scope bearer 缺 proof POST 為 `STEP_UP_REQUIRED` 403；兩次拒絕後比對該 tenant 的完整 DB key records 不變。
+- 獨立命令 `DRTS_WEBHOOK_AUTH_EVIDENCE=tests/e2e/system-remediation/sr-qa-webhook-001/evidence-auth-http.json bash tests/unit/system-remediation/sr-qa-webhook-001/run-auth-http.sh` → exit 0，1 passed / 4.36s，執行 SHA `6f6c9b3c1cd202f74ee93d7103646a69a570e8e1`。key `api_key_a0ca8efd-378b-4599-aefc-153d5fb8688e`；read session `sid_e5aee1b0258e423d9eea228b3ed19310`；write session `sid_ec195199378a4bebb8e525e8189197d4`。整合入口會用最新執行資源覆寫 JSON，歷史資源保留在本段。
+- 初次 runner exit 1（root 無 reflect-metadata 依賴），第二次 exit 1（Nest 繼承 constructor metadata）；均屬測試組裝問題，已改從 API package 解析依賴並明確定義測試 subclass 的空 constructor metadata。未改產品或共用設定。這四次獨立執行建立的隔離 DB，結束後 `pg_database` 回讀同名計數為 0。
+- 更正前節證據解讀：既有 credential lifecycle suite 使用 durable **記憶體 double**，不是 PostgreSQL 持久化證據；既有 JWT suite 才使用真 DB。此次新增案例才補上 HTTP read/auth rejection + DB 回讀。
+- 本機測試使用窄範圍 controller module，不含完整 AppModule middleware；成功 HTTP issue/rotate/revoke、跨租戶 middleware、tenant key 消費與使用量、部署登入/MFA 均尚未驗。C112 預設 deadline、C113 sandbox、C114 provider、C115 部署排程／告警證據仍缺。維持 in_progress，不 handoff；請 supervisor 協調外部驗收證據。
+
+## 2026-09-08 16:50 UTC C111 身分驗證前置回歸（歷史）
 
 - base `890548b4f357542968c8b14f33f23e0685be007a`；執行 SHA `9cf47045c75f0bc657fd52ae91e137246f979db6`，尚非 lifecycle candidate。fetch 後確認 base 已是 HEAD 祖先（`git merge-base --is-ancestor origin/dev HEAD` exit 0）。一般 rebase 重播舊提交遇到 add/add 衝突，已 abort，原已發布歷史保留。
 - 追溯 C111 `source/capabilities.json`：管理 API 為 `tenant/api-keys`；`auth.policy.ts` 要求 GET `tenant:read`、寫入 `tenant:write`；`step-up.policy.ts` 的 issue/rotate/revoke 要求 tenant/platform 的 15 分鐘 freshness。這是程式追查，不能當作 HTTP 權限驗收。

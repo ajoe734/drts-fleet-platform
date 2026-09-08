@@ -77,6 +77,13 @@ it("C111: durable bearer reads a persisted key over HTTP and denied writes leave
       keyName: "HTTP read acceptance",
       scopes: ["tenant:read"],
     });
+    await expect
+      .poll(async () =>
+        (await repository.loadState()).apiKeys.some(
+          (row) => row.apiKeyId === key.apiKey.apiKeyId,
+        ),
+      )
+      .toBe(true);
     const before = (await repository.loadState()).apiKeys.filter(
       (row) => row.tenantId === tenantId,
     );
