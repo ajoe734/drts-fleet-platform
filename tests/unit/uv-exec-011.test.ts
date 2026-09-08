@@ -6,6 +6,8 @@ import {
   VoiceLanguageRouter,
   VoiceMediaProviderRegistry,
   type TwmAsrRouteProfile,
+  type VoiceLanguage,
+  type VoiceLanguageRoute,
 } from "../../apps/voice-media-worker/src";
 
 const profile: TwmAsrRouteProfile = {
@@ -46,7 +48,7 @@ describe("UV-EXEC-011 TWM fixture adapters and language routing", () => {
   });
 
   it("offers DTMF language selection without requiring Mandarin ASR and invalidates only uncommitted confirmation on switch", () => {
-    const routes = new Map([
+    const routes = new Map<VoiceLanguage, VoiceLanguageRoute>([
       ["cmn-TW", { language: "cmn-TW" as const, asrModelName: "myVoca", ttsVoiceEnabled: true, asrCapabilityVerified: true, accent: "sixian" as const, selectionPrompt: { assetId: "checked-prompt", verified: true } }],
       ["hak-TW", { language: "hak-TW" as const, asrModelName: "bronci-b3-model-hakka-20260518", ttsVoiceEnabled: true, asrCapabilityVerified: true, accent: "sixian" as const, selectionPrompt: { assetId: "checked-prompt", verified: true } }],
       ["nan-TW", { language: "nan-TW" as const, asrModelName: "myVoca", ttsVoiceEnabled: false, asrCapabilityVerified: false, selectionPrompt: { assetId: "unchecked", verified: false } }],
@@ -141,13 +143,15 @@ describe("UV-EXEC-011 protocol regression evidence", () => {
   it("requires verified ASR, prompt and Hakka accent and fences old confirmation epochs", () => {
     const cmn = { language: "cmn-TW" as const, asrModelName: "myVoca", asrCapabilityVerified: true, ttsVoiceEnabled: true, selectionPrompt: { assetId: "fixture-cmn", verified: true } };
     const hak = { ...cmn, language: "hak-TW" as const, asrModelName: "bronci-b3-model-hakka-20260518", accent: "sixian" as const, selectionPrompt: { assetId: "fixture-hak-sixian", verified: true } };
-    const router = new VoiceLanguageRouter(new Map([["cmn-TW", cmn], ["hak-TW", hak]]), "cmn-TW");
+    const router = new VoiceLanguageRouter(new Map<VoiceLanguage, VoiceLanguageRoute>([["cmn-TW", cmn], ["hak-TW", hak]]), "cmn-TW");
     const previous = router.getProviderEpoch();
     expect(router.selectionPrompts()).toContainEqual({ language: "hak-TW", assetId: "fixture-hak-sixian" });
     router.selectDtmf("3");
     expect(router.acceptsUncommittedConfirmation(previous)).toBe(false);
     expect(router.acceptsUncommittedConfirmation(router.getProviderEpoch())).toBe(true);
-    for (const unverified of [{ ...hak, asrCapabilityVerified: false }, { ...hak, accent: undefined }, { ...hak, selectionPrompt: { assetId: "x", verified: false } }]) {
+    const withoutAccent: VoiceLanguageRoute = { ...hak };
+    delete withoutAccent.accent;
+    for (const unverified of [{ ...hak, asrCapabilityVerified: false }, withoutAccent, { ...hak, selectionPrompt: { assetId: "x", verified: false } }]) {
       expect(() => new VoiceLanguageRouter(new Map([["hak-TW", unverified]]), "hak-TW")).toThrow("capability evidence");
     }
   });
