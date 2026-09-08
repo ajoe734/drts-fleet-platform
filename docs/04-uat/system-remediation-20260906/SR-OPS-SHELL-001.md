@@ -2,10 +2,11 @@
 
 - Task: `SR-OPS-SHELL-001`
 - Owner: `Gemini`
-- Reviewer: `Claude`
+- Reviewer: `Codex`
 - Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json`
-- Base SHA (`origin/dev` at start): `f759582305ca7ff1b17a0225d3dd54db22ee9a18` (歷史 audit SHA: `6bbeaaa45`)
-- Prior Candidate SHA (Reopened): `4e0e8b82e5e6c1b47b85d90b368e3e0bb48fa1da`
+- Base SHA (`origin/dev` at rebase): `6f4ac8c74d6f45209c13d7d7cf616f7311c6ad69` (歷史 audit SHA: `6bbeaaa45`, 原始實作 base: `f759582305ca7ff1b17a0225d3dd54db22ee9a18`)
+- Prior Candidate SHA (PR #1728 / failed CI): `7308cc2802278d3c381c18eac4a420c4d9e2ed41`
+- Original PR #1648 SHA (All CI passed): `cdf5488d7dfd59415b5975d8163dc423bcb2c251`
 - Worktree: `.artifacts/worktrees/auto/gemini-sr-ops-shell-001`
 - Branch: `gemini/sr-ops-shell-001`
 
@@ -159,6 +160,11 @@ exit code: 0
 
 ## 5. 未做 / 明列排除
 
-- 未修改其他 apps（如 `apps/platform-admin-web` 或 `apps/tenant-console-web`）的路由或元件，嚴格遵循單一應用程式關注點與 write_scopes 邊界。
-- 未修改中央 shared exports、中央 test config、中央 routes、`package.json` 或 `pnpm-lock.yaml`。
-- 本 task 不以假 fixture 或固定 mock 取代真邏輯，所有 URL 解析均可於真實環境變數或執行階段無縫接軌。
+- **跨應用審計與資源上下文範疇界線（`Q-SR-OPS-SHELL-001`）**：
+  如 `support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION.md`（PR #1749）記錄，`/dispatch` 頁面（`apps/ops-console-web/app/dispatch/page.tsx`）的 audit CTA 與接收端 `apps/platform-admin-web/app/audit/page.tsx` 目前不在本任務的 `write_scopes` 內。依據執行規則與合意決策，在 supervisor 正式擴充 write_scopes 與相依、且確認 audit receiver 的 resource-context 契約前，本任務不擅自跨 scope 修改未授權之 page 檔案，保留父任務嚴格邊界。
+- **真機／瀏覽器手動視覺驗證**：
+  未在實體裝置或圖形介面瀏覽器進行手動點擊（因無 GUI 容器環境）；本報告以純函式幾何 clamp、DOM pointer-events 繼承模擬、全域 click 事件循環與焦點切換之自動化單元測試（35 項測試通過）作為驗證依據，不冒充真機通過。
+- **未修改中央共用設定**：
+  未修改中央 shared exports、中央 test config、中央 routes、`package.json` 或 `pnpm-lock.yaml`。
+- **分支歷史與普通 Push 狀態**：
+  遠端分支 `origin/gemini/sr-ops-shell-001` 保留歷史 head `cdf5488d7`（對應 PR #1648，CI 23/23 全數通過）。本 branch 本地已成功 rebase 至最新 `origin/dev`（`6f4ac8c74`）；由於遠端既有歷史存在且依據守則禁止 force-push，故普通 push 需透過 supervisor 授權之 continuation branch（例如 `gemini/sr-ops-shell-001-rebased`）或由 supervisor 依 non-destructive continuation rail 裁決。
