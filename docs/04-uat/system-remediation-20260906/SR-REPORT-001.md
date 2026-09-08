@@ -243,3 +243,32 @@ This update is an evidence anchor, not a review handoff.
   browser/device checks, deployment, API/ops typechecks, or PDF/XLSX parsing
   acceptance are claimed. This is a scope blocker evidence anchor; its pushed
   SHA is recorded through the canonical status command.
+
+## Dispatch verification — 2026-09-08 18:31 UTC
+
+- Owner/reviewer: Codex/Codex2. Fresh origin/dev base:
+  `318f5065433ff07fba2ddf242cf1c5aef5fb1cae`; dispatched HEAD:
+  `35fb357b8230dad849e133fad2c3dbce83c29db8`.
+- Canonical task still grants four original write scopes and two dependencies.
+  The merged planning decision explicitly requires supervisor authorization for
+  `packages/contracts/src/index.ts` and `tests/unit/reporting-filing.test.ts`,
+  plus writer sequencing or a coordinated producer, before parent resume.
+  History repair completion does not supply that authorization.
+- Current source still declares CSV only, null PDF/XLSX renderers, and central
+  assertions requiring PDF/XLSX rejection. N05/C091 and PRD 9.5.6/9.10.2
+  were rechecked. No production or UI changes made.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: initially exit 1 on
+  duplicated historical evidence conflicts; preserved the complete dispatched
+  document in each conflict. Final continuation: exit 0.
+  `git merge --no-ff origin/codex/sr-report-001` with task trailers: exit 0,
+  preserving published history for ordinary non-force push.
+- `pnpm exec vitest run tests/unit/reporting-filing.test.ts`: exit 0;
+  30 tests / 1 file passed, duration 7.86s. Example in-memory order event:
+  `92666120-442b-4a88-a97a-4686a124707c`. This reproduces unsupported-format
+  rejection; it is not successful PDF/XLSX acceptance.
+- No live resources, browser/device checks, deployment, typechecks or renderer
+  parsing suite run is claimed. No implementation candidate exists; the pushed
+  evidence anchor SHA is recorded in canonical blocker status.
+- Supervisor must record the exact shared scopes and writer dependencies and
+  synchronize the task specification, or deliver a coordinated producer.
+  Keep this scope blocker distinct from the completed history helper.
