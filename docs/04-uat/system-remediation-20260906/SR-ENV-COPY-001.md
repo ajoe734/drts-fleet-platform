@@ -4,7 +4,7 @@
 | ------------- | -------------------------------------------------------------------------------- |
 | Task spec     | `docs/03-runbooks/system-remediation-20260906/SR-ENV-COPY-001.md`               |
 | Owner         | Gemini                                                                           |
-| Reviewer      | Codex                                                                            |
+| Reviewer      | Codex2                                                                           |
 | Base SHA      | `3b60a37574c82b0e9803bfe38a531e0ee7e6ecaa` (= `origin/dev` tip at task start)  |
 | Candidate SHA | recorded at `handoff` via `git rev-parse HEAD` (see task board)                  |
 
@@ -90,7 +90,7 @@
 | **中文/英文與正常/錯誤/空態無無意義ActionIntent等文字**    | 全庫 6 大 Web 應用繁中與英文字典已清除所有 `ActionIntent`，並替換未插補之 `submissionId` 為正式在地化業務詞彙（「申請編號」）。回歸測試驗證 `ActionIntent` 匹配數恆為 0，繁中 `submissionId` 匹配數恆為 0。              |
 | **env從runtime權威值，不靠domain字串猜；prod也不把未知資料標健康** | `resolveRuntimeEnvironment` 阻斷單純 domain/URL 推斷，以明確 runtime 變數為真值；若含 fixture/mock 旗標強制降級，絕不呈現 production；`resolveRuntimeHealth` 將未驗證、連線遺失或空資料安全解析為 `unknown`，絕不冒充 healthy。 |
 | **證據包含 base/candidate SHA、實際指令結果與資源 ID**     | 記載 Base SHA（`3b60a37574c82b0e9803bfe38a531e0ee7e6ecaa`），Candidate SHA 於 handoff 產生；第 4 節完整記錄所有執行指令、exit code 0 與測試結果。                                                                           |
-| **先 commit＋普通 push，再 handoff；owner 不直接 done**    | 建立標準規範之 git commit（附 `LLM-Agent: Gemini`, `Task-ID: SR-ENV-COPY-001`, `Reviewer: Codex` trailers），推送至 `origin/gemini/sr-env-copy-001`，透過 `ai-status.sh handoff` 交接 Reviewer（Codex）。                 |
+| **先 commit＋普通 push，再 handoff；owner 不直接 done**    | 建立標準規範之 git commit（附 `LLM-Agent: Gemini`, `Task-ID: SR-ENV-COPY-001`, `Reviewer: Codex2` trailers），推送至 `origin/gemini/sr-env-copy-001`，透過 `ai-status.sh handoff` 交接 Reviewer（Codex2）。                 |
 
 ## 4. 實際指令與結果
 
