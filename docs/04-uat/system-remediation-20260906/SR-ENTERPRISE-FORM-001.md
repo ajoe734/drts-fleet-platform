@@ -1,5 +1,38 @@
 # SR-ENTERPRISE-FORM-001 — 驗收證據
 
+## 2026-09-08 Codex2 dispatch — 最新進度（未 handoff）
+
+- Owner / reviewer：Codex2 / Codex，以本次 machine task slice 為準；下方歷史紀錄不代表目前狀態。
+- 本輪 `git fetch origin` exit 0；base `origin/dev` = `c4c4a35f88907df6bf68e781059dde397c06ba03`。
+- `git rebase origin/dev` exit 0，保留三個既有 task 修復。rebase 後 dry-run push 被 non-fast-forward 拒絕，因此正常 merge 已發布的 `origin/codex2/sr-enterprise-form-001`（無內容差異，exit 0），保留遠端歷史，未 force push。
+- `git show origin/dev:apps/enterprise-dispatch-web/app/bookings/review/page.tsx` 確認目前 base 第 234 行仍引用 `enterpriseDriver.placard`、第 316 行仍無條件 render `BookingSubmitButton`。base draft completeness 第 455–466 行仍僅檢查非空；因此前次修復尚未存在目前 dev，沒有回退其他任務修復。
+- 新發現：review 的 server render gate 不會隨停留時間更新；原 command builder 對錯誤日期還會回退至 fixture／now。新增 `requireFutureReservationStart`，create/update 共用的 builder 在實際送出時重新嚴格解析與驗證 `+08:00` 日期；時間已到或不存在則拋出既有錯誤文案，由既有 submit catch 顯示錯誤，不呼叫 create/update API。
+- 已發布 anchor SHA：`01ed8ba44`，branch `codex2/sr-enterprise-form-001`。`git push -u origin codex2/sr-enterprise-form-001` exit 0（`a02f14513..01ed8ba44`）。本節所在後續 commit 僅整理格式及證據；最終 progress SHA 由 machine status 記錄，沒有鎖定 review candidate。
+
+實際檢查（本 isolated worktree）：
+
+```text
+pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-form-001/
+exit 0; Test Files 1 passed; Tests 15 passed (新增停留至到期、無效 command 日期回歸)
+pnpm --filter @drts/enterprise-dispatch-web typecheck
+exit 0; tsc --noEmit
+git diff --check
+exit 0
+pnpm exec prettier --check <本輪三個 TypeScript 檔案>
+exit 1; validation helper / test formatting warnings
+pnpm exec prettier --write apps/enterprise-dispatch-web/components/booking-form/enterprise-booking-validation.ts tests/unit/system-remediation/sr-enterprise-form-001/enterprise-booking-validation.test.ts
+exit 0; formatting corrected
+```
+
+尚未達到 handoff 的界線：
+
+- **需要 supervisor 擴 scope／加入共用設計相依**：`lib/enterprise-theme.ts` 不在 write_scopes，仍自行定義 raw palette（`accent = "#2457D6"`），沒有使用 `@drts/ui-tokens`。本次 UI contract 要求 tenant realm tokens；權威 `packages/ui-tokens/src/realms.ts` tenant fg 是 light `#0F766E` / dark `#5EEAD4`。已讀 `ent-screens-1.jsx` New/Review，保留 canvas layout，不在 globals.css 以硬蓋 palette 迴避 scope。需要由 supervisor 授權共用 theme 檔或提供先行修復 dependency。
+- 確認頁到期後的按鈕尚未主動消失；本輪只補實際 command 阻擋。仍需在 `components/booking-form/` 內完成動態到期 gate 並接到 review。
+- 390px 瀏覽器／鍵盤／錯誤與 CTA 量測仍未執行；既有 CSS 推導不等於瀏覽器驗收。未執行 live backend 或真機，沒有建立 booking/order 資源 ID，沒有送達、CI、merge、deploy 成功證據。
+- 既有 fixture 金額／審批推估不作為本任務完成證據；前端不得自行新增最短提前分鐘數，後端 policy 仍由 SR-BOOKING-VERIFY 負責。
+
+---
+
 | 欄位                                                                                | 內容                                       |
 | ----------------------------------------------------------------------------------- | ------------------------------------------ |
 | Owner                                                                               | Claude2                                    |
