@@ -1,0 +1,324 @@
+{
+  "schema_version": 1,
+  "task_id": "SR-READINESS-001",
+  "inspection": {
+    "performed_at": "2026-09-08T11:13:46Z",
+    "scope": "repository-only, read-only; no browser, product server, Docker infrastructure, cloud console, secrets manager, or external provider operation",
+    "base_sha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
+    "candidate_sha": null,
+    "candidate_sha_evidence": "The exact candidate SHA is deliberately locked by the ai-status handoff record after the final push; it cannot be inferred from this readiness snapshot.",
+    "historical_audit_sha": "08b7a32f6fdaa00d8d1894f91569a7d72860cec2",
+    "historical_audit_is_not_current_truth": true
+  },
+  "commands": [
+    {
+      "command": "git fetch origin && git rev-parse origin/dev",
+      "exit_code": 0,
+      "result": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff"
+    },
+    {
+      "command": "jq length source/findings.json source/new-gaps.json source/capabilities.json",
+      "exit_code": 0,
+      "result": "30 findings; 14 gaps; 134 capabilities"
+    },
+    {
+      "command": "git log --oneline -15 origin/dev",
+      "exit_code": 0,
+      "result": "Current dev includes merged remediation evidence including SR-BANK-003, SR-IAM-001, SR-SCOPE-001, SR-INVOICE-001, SR-ADMIN-VERIFY-001, SR-FLEET-DATA-001 and UV-EXEC-027 re-verification commits."
+    }
+  ],
+  "issue_inventory": {
+    "source_files": ["source/findings.json", "source/new-gaps.json"],
+    "current_version_sha": "70355aba97c23dd1cd592b71f1d3dfe6315d91ff",
+    "reproduction_policy": "Each historical issue is explicitly retained as repository-only/not-run unless its dedicated current-SHA evidence is named below. Historical observations are never reported as a current failure or a pass.",
+    "items": [
+      {
+        "id": "R01",
+        "status": "not_run_live",
+        "next": "SR-PUBLIC-001 and SR-LIVE-ENTRY-001"
+      },
+      { "id": "R02", "status": "not_run", "next": "SR-TENANT-LOGIN-001" },
+      {
+        "id": "R03",
+        "status": "current_evidence_merged",
+        "evidence": "SR-ADMIN-VERIFY-001; SR-BANK-001; SR-IAM-001"
+      },
+      {
+        "id": "R04",
+        "status": "current_evidence_merged",
+        "evidence": "SR-ADMIN-VERIFY-001"
+      },
+      {
+        "id": "R05",
+        "status": "current_evidence_merged",
+        "evidence": "SR-IAM-001"
+      },
+      {
+        "id": "R06",
+        "status": "current_evidence_merged",
+        "evidence": "SR-BANK-001"
+      },
+      {
+        "id": "R07",
+        "status": "current_evidence_merged",
+        "evidence": "SR-REFERRAL-001"
+      },
+      {
+        "id": "R08",
+        "status": "current_evidence_merged",
+        "evidence": "SR-ENTERPRISE-DATA-001 / SR-ENTERPRISE-SEARCH-001"
+      },
+      {
+        "id": "R09",
+        "status": "current_evidence_merged",
+        "evidence": "SR-ENTERPRISE-DATA-001"
+      },
+      {
+        "id": "R10",
+        "status": "current_evidence_merged",
+        "evidence": "SR-FLEET-DATA-001"
+      },
+      {
+        "id": "R11",
+        "status": "current_evidence_merged",
+        "evidence": "SR-FLEET-DATA-001"
+      },
+      { "id": "R12", "status": "not_run", "next": "SR-FLEET-CASE-001" },
+      { "id": "R13", "status": "not_run", "next": "SR-FLEET-SETTLE-001" },
+      {
+        "id": "R14",
+        "status": "current_evidence_merged",
+        "evidence": "SR-BANK-003"
+      },
+      { "id": "R15", "status": "not_run", "next": "SR-BANK-002" },
+      {
+        "id": "R16",
+        "status": "current_evidence_merged",
+        "evidence": "SR-BANK-001 / SR-ENTERPRISE-DATA-001"
+      },
+      {
+        "id": "R17",
+        "status": "current_evidence_merged",
+        "evidence": "SR-OPS-MAP-001"
+      },
+      { "id": "R18", "status": "not_run", "next": "SR-OPS-SHELL-001" },
+      { "id": "R19", "status": "not_run", "next": "SR-OPS-SHELL-001" },
+      { "id": "R20", "status": "not_run", "next": "SR-ENTERPRISE-FORM-001" },
+      { "id": "R21", "status": "not_run", "next": "SR-ENTERPRISE-FORM-001" },
+      {
+        "id": "R22",
+        "status": "not_run",
+        "next": "SR-FLEET-FORM-001 / SR-ENTERPRISE-FORM-001"
+      },
+      { "id": "R23", "status": "not_run", "next": "SR-FLEET-FORM-001" },
+      {
+        "id": "R24",
+        "status": "current_evidence_merged",
+        "evidence": "SR-FLEET-DATA-001 / SR-ENTERPRISE-SEARCH-001"
+      },
+      { "id": "R25", "status": "not_run", "next": "SR-FLEET-FORM-001" },
+      { "id": "R26", "status": "not_run", "next": "SR-CHANNEL-001" },
+      {
+        "id": "R27",
+        "status": "current_evidence_merged",
+        "evidence": "SR-ENV-COPY-001"
+      },
+      {
+        "id": "R28",
+        "status": "current_evidence_merged",
+        "evidence": "SR-BANK-001"
+      },
+      {
+        "id": "R29",
+        "status": "not_run_live",
+        "next": "SR-PUBLIC-001; SR-OPS-PROOF-001; SR-LIVE-ENTRY-001; SR-LIVE-OPS-001"
+      },
+      {
+        "id": "R30",
+        "status": "not_run_device",
+        "next": "SR-DRIVER-WEB-001; SR-LIVE-DRIVER-001"
+      },
+      {
+        "id": "N01",
+        "status": "not_run",
+        "next": "SR-LEAVE-BE-001 / SR-LEAVE-FE-001"
+      },
+      {
+        "id": "N02",
+        "status": "not_run",
+        "next": "SR-ACADEMY-BE-001 / SR-ACADEMY-FE-001"
+      },
+      {
+        "id": "N03",
+        "status": "not_run",
+        "next": "SR-HOST-BE-001 / SR-HOST-FE-001"
+      },
+      {
+        "id": "N04",
+        "status": "current_evidence_merged",
+        "evidence": "SR-ARTIFACT-001 / SR-INVOICE-001"
+      },
+      { "id": "N05", "status": "not_run", "next": "SR-REPORT-001" },
+      {
+        "id": "N06",
+        "status": "current_evidence_merged",
+        "evidence": "SR-NOTIFY-001 / SR-MAIL-001"
+      },
+      {
+        "id": "N07",
+        "status": "current_evidence_merged",
+        "evidence": "SR-NOTIFY-001 / SR-MAIL-002"
+      },
+      { "id": "N08", "status": "not_run", "next": "SR-PLACARD-001" },
+      { "id": "N09", "status": "not_run", "next": "SR-PROOF-001" },
+      {
+        "id": "N10",
+        "status": "not_run_live_device",
+        "next": "SR-PUSH-001 / SR-LIVE-PUSH-001"
+      },
+      { "id": "N11", "status": "not_run", "next": "SR-ADMIN-ADAPTER-001" },
+      { "id": "N12", "status": "not_run", "next": "SR-ADMIN-ADAPTER-001" },
+      {
+        "id": "N13",
+        "status": "not_run",
+        "next": "SR-CONTRACT-READ-001 / SR-OPS-CONTRACT-001"
+      },
+      {
+        "id": "N14",
+        "status": "not_run",
+        "next": "SR-CONTRACT-READ-001 / SR-OPS-CONTRACT-001"
+      }
+    ]
+  },
+  "capability_role_test_data_requirement": {
+    "source": "source/capabilities.json",
+    "coverage": "coverage.json",
+    "selection": "C001-C134 inclusive; derive the role string for each capability directly from source/capabilities.json at test execution",
+    "requirement": "For every capability, provision an isolated persona matching its source role, an isolated tenant namespace, deterministic domain records required by the capability, and a redacted evidence reference. No shared production identity, fixture-only substitute, fixed percentage, fake signature, or fake delivery may satisfy a live gate.",
+    "live_extension": "Capabilities whose source state or verification task requires live/device/provider evidence additionally require an authorized resource ID, account/tenant ownership, readback command, candidate SHA, and captured receipt. Missing any item remains missing."
+  },
+  "live_gates": [
+    {
+      "id": "public_entry_iap",
+      "status": "missing",
+      "owner": "platform/IAM",
+      "requires": [
+        "public endpoint resource IDs",
+        "DNS/TLS readback",
+        "IAP test identity",
+        "candidate SHA"
+      ],
+      "readback": "authorized external URL, TLS/DNS and IAP login evidence",
+      "downstream": "SR-LIVE-ENTRY-001"
+    },
+    {
+      "id": "test_tenant_identities",
+      "status": "missing",
+      "owner": "tenant/IAM",
+      "requires": [
+        "isolated tenant IDs",
+        "role personas",
+        "credential handoff via approved secret channel"
+      ],
+      "readback": "SR-UAT-HARNESS namespace/evidence recorder",
+      "downstream": "SR-QA-IDENTITY-001"
+    },
+    {
+      "id": "mail_provider",
+      "status": "missing",
+      "owner": "messaging operator",
+      "requires": [
+        "authorized sandbox account",
+        "recipient mailbox",
+        "delivery receipt"
+      ],
+      "readback": "provider event/read receipt without sending from this task",
+      "downstream": "SR-LIVE-MAIL-001"
+    },
+    {
+      "id": "push_device",
+      "status": "missing",
+      "owner": "mobile release operator",
+      "requires": [
+        "authorized test device ID",
+        "push provider account",
+        "device delivery receipt"
+      ],
+      "readback": "provider receipt plus device evidence",
+      "downstream": "SR-LIVE-PUSH-001"
+    },
+    {
+      "id": "financial_sandbox",
+      "status": "missing",
+      "owner": "finance/issuer operator",
+      "requires": [
+        "authorized financial sandbox",
+        "issuer eligibility receipt",
+        "reconciliation evidence"
+      ],
+      "readback": "sandbox transaction and reconciliation IDs",
+      "downstream": "SR-LIVE-FINANCE-001"
+    },
+    {
+      "id": "maps_location",
+      "status": "missing",
+      "owner": "maps operator",
+      "requires": [
+        "configured map credential",
+        "authorized location test",
+        "ETA provider evidence"
+      ],
+      "readback": "provider request/resource IDs",
+      "downstream": "SR-LIVE-MAP-001"
+    },
+    {
+      "id": "storage_document",
+      "status": "missing",
+      "owner": "storage operator",
+      "requires": [
+        "authorized storage target",
+        "materialized artifact bytes",
+        "controlled download receipt"
+      ],
+      "readback": "object/version ID and hash",
+      "downstream": "SR-LIVE-DOC-001"
+    },
+    {
+      "id": "cti_voice",
+      "status": "missing",
+      "owner": "telephony/procurement",
+      "requires": [
+        "CTI account capability evidence",
+        "number/queue configuration",
+        "authorized provider readback"
+      ],
+      "readback": "Reuse docs/04-uat/unattended-voice-external-readiness.md (UV-EXEC-027); do not repeat inventory.",
+      "downstream": "UV-EXEC-028"
+    },
+    {
+      "id": "backup_ops",
+      "status": "missing",
+      "owner": "SRE/operations",
+      "requires": [
+        "authorized isolated ops target",
+        "backup/restore readback",
+        "RPO/RTO baseline",
+        "scheduled-job restart proof"
+      ],
+      "readback": "run/job/restore resource IDs",
+      "downstream": "SR-LIVE-OPS-001"
+    },
+    {
+      "id": "app_store_signing",
+      "status": "missing",
+      "owner": "mobile release manager",
+      "requires": [
+        "store account authorization",
+        "commercial signing identity",
+        "review/release evidence"
+      ],
+      "readback": "store console build/release IDs",
+      "downstream": "C133 external gate"
+    }
+  ]
+}
