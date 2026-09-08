@@ -32,8 +32,8 @@ This helper documents the repair; it does not replace or approve the parent impl
   `6f6f418fdd6c7fa0811765710f66a5608e0b8ad0`. The final fixes are
   `08bf038e6`, `c9994951c`, and `65186b22c`.
   Replaying the combined histories risks re-adding
-  `apps/voice-media-worker/src/dialogue/voice-dialogue-provider.ts` and
-  `packages/contracts/src/voice-dialogue.ts`; the parent records an aborted
+  [voice-dialogue-provider.ts at the parent SHA](https://github.com/ajoe734/drts-fleet-platform/blob/65186b22c066da9eeca1266d6af2f9ee77be95a1/apps/voice-media-worker/src/dialogue/voice-dialogue-provider.ts) and
+  [voice-dialogue.ts at the parent SHA](https://github.com/ajoe734/drts-fleet-platform/blob/65186b22c066da9eeca1266d6af2f9ee77be95a1/packages/contracts/src/voice-dialogue.ts); the parent records an aborted
   rebase with add/add conflicts in those files. This helper did not rerun that
   destructive-to-local-history experiment.
 - Fetched dev is `d4f54ef94e059a981bf2be1f7b944e815870e117`.
@@ -101,3 +101,17 @@ rewriting published history is needed for this path.
 - Helper delivery uses `codex/uv-exec-012-unblock-history-repair`, a task-scoped
   commit, ordinary origin push, and PR against dev. Its exact SHA/PR evidence
   is recorded in the helper candidate handoff, avoiding a self-referential SHA.
+
+## Helper CI follow-up
+
+- PR #1819 candidate `0f21e597dececafb608a62f3c4ce2699c5b40874` failed
+  Canonical consistency because the two parent-only source files above were
+  cited as local paths in this support-only branch. Both files exist in the
+  recorded parent commit, verified with `git cat-file -e <sha>:<path>`.
+- Replace those local citations with immutable parent-commit links. This keeps
+  the history evidence explicit without importing parent implementation into
+  the helper. The parent recovery steps remain unchanged.
+- Validate the correction with
+  `python3 tools/ci/git/check_canonical_consistency.py --ci --base origin/dev --head HEAD`
+  after committing, then push normally to the existing PR and hand off the new
+  exact SHA. Earlier review and CI results do not apply to this replacement.
