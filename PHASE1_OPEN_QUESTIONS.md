@@ -4,6 +4,18 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-SR-QA-WEBHOOK-TENANT-BINDING-001 — repair scope authorization pending
+
+Supervisor/Claude must authorize product write scopes and IAM/tenant overlap
+sequencing for `SR-QA-WEBHOOK-001-FIX-TENANT-BINDING` (owner Codex, reviewer
+Gemini), and add the repair as a dependency of `SR-QA-WEBHOOK-001` acceptance.
+The required cross-tenant rejection remains unchanged; no scope cut or new
+entitlement is approved. Keep the repair blocked with `waiting_for: Claude`
+until machine truth records the authorization. This is follow-up on the existing
+repair task, not a new implementation assignment. See the
+[decision, proposed scopes, and resume gate](support/unblock/SR-QA-WEBHOOK-001-FIX-TENANT-BINDING/SR-QA-WEBHOOK-001-FIX-TENANT-BINDING-UNBLOCK-PLANNING-DECISION.md).
+
+
 ### Q-SR-ENV-COPY-001 — runtime source and integration scope routing
 
 Supervisor/Chairman must authorize the runtime badge wiring scopes and sequence
@@ -17,6 +29,20 @@ server/client delivery boundary and allowed values; unresolved source selection
 returns to Supervisor/Chairman, not an invented environment variable.
 This is a follow-up on the existing parent, not a new implementation task or
 scope grant. See [decision, paths and resume gate](support/unblock/SR-ENV-COPY-001/SR-ENV-COPY-001-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-QA-TENANT-001 — UAT provisioning follow-up, no product scope cut
+
+The planning triage found no unresolved product/contract choice in the reported
+blocker. PRD §9.1.2, service contracts §3.2 and the parent execution task retain
+the full tenant acceptance matrix. Supervisor/Gemini must coordinate provisioned
+disposable tenants and legitimate writable/read-only identities. The current parent
+uses `DRTS_UAT_ENV`, `DRTS_UAT_API_URL` (origin), tenant A/B IDs and tokens,
+and `DRTS_UAT_USER_EMAIL`; record deployment SHA, identity expiry/refresh and
+DB teardown ownership. Current parent owner Codex2 and reviewer Codex resume
+scoped test development and, once access exists, real write/readback verification.
+This remains an open environment follow-up on the registered parent, not a new
+implementation task or scope grant. Preserve useful in-progress test work; helper
+merge cannot clear the live acceptance gate. See the [planning decision and resume conditions](support/unblock/SR-QA-TENANT-001/SR-QA-TENANT-001-UNBLOCK-PLANNING-DECISION.md).
 
 ### Q-SR-QA-WEBHOOK-001 — tenant repair scope and webhook deadline
 

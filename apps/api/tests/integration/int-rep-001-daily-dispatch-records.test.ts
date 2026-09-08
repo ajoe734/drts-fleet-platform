@@ -207,7 +207,7 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       },
       "req-int-rep-assign-003",
     );
-    ownedMobilityService.cancelOwnedOrder(
+    await ownedMobilityService.cancelOwnedOrder(
       redispatchedOrder.orderId,
       { reason: "passenger_cancelled" },
       "req-int-rep-cancel-001",

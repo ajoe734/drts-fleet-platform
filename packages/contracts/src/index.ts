@@ -3810,6 +3810,8 @@ export interface DispatchAssignmentRecord {
   driverId: string;
   assignmentType: "metered" | "fixed_price";
   status: DispatchAssignmentStatus;
+  /** Persisted offer deadline; absent legacy offers require reconciliation. */
+  acceptanceDeadline?: string | null;
   acceptedAt: string | null;
   rejectedAt: string | null;
   rejectReasonCode: string | null;
@@ -7421,3 +7423,4 @@ export * from "./phase2-tesla-fsd-sandbox";
 export * from "./phase1-p5-s3-multi-taxi";
 export * from "./p5-fare-anomaly-admin";
 export * from "./unattended-voice";
+export * from "./voice-dialogue";
