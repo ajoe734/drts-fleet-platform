@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { PlatformAdapter, UpdatePlatformAdapterCommand } from "@drts/contracts";
 import { EditAdapterModal } from "./EditAdapterModal";
-import { ApiClient } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { t as translate } from "@/lib/translations";
 import {
@@ -18,10 +17,7 @@ import {
   Td,
   Tr,
 } from "@drts/ui-web";
-
-const apiClient = new ApiClient({
-  baseUrl: "",
-});
+import { usePlatformAdminClient } from "@/lib/admin-client";
 
 type AdapterFilter = "all" | "forwarded" | "enabled" | "attention";
 
@@ -97,6 +93,7 @@ function isAttentionAdapter(adapter: PlatformAdapter) {
 
 export function AdapterList() {
   const { t, locale } = useTranslation();
+  const client = usePlatformAdminClient();
   const [adapters, setAdapters] = useState<PlatformAdapter[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +107,7 @@ export function AdapterList() {
       setIsLoading(true);
       setError(null);
       try {
-        const fetchedAdapters = await apiClient.listPlatformAdapters();
+        const fetchedAdapters = await client.listPlatformAdapters();
         setAdapters(fetchedAdapters);
       } catch (err: any) {
         console.error("Error fetching adapters:", err);
@@ -124,7 +121,7 @@ export function AdapterList() {
     };
 
     fetchAdapters();
-  }, [locale]);
+  }, [client, locale]);
 
   const filteredAdapters = adapters.filter((adapter) => {
     switch (filter) {
@@ -188,7 +185,7 @@ export function AdapterList() {
     if (!selectedAdapter) return;
 
     try {
-      const updatedAdapter = await apiClient.updatePlatformAdapter(
+      const updatedAdapter = await client.updatePlatformAdapter(
         selectedAdapter.id,
         updatedData,
       );
