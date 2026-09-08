@@ -8,6 +8,21 @@ import {
   getEnterpriseBookingDraft,
 } from "@/lib/enterprise-fixtures";
 import { t as translate, type Locale } from "@/lib/translations";
+import {
+  getEarliestBookableLabel,
+  getEnterprisePassengerDisplayName,
+  isEnterpriseDraftComplete,
+  isReservationWindowInFuture,
+  requireFutureReservationStart,
+} from "@/components/booking-form/enterprise-booking-validation";
+
+export {
+  requireFutureReservationStart,
+  getEarliestBookableLabel,
+  getEnterprisePassengerDisplayName,
+  isEnterpriseDraftComplete,
+  isReservationWindowInFuture,
+};
 
 export type EnterprisePassengerMode = "self" | "other";
 export type EnterpriseAirportDirection = "pickup" | "dropoff";
@@ -68,7 +83,6 @@ const QUERY_KEYS = {
 const DISPLAY_BUDGET_TOTAL = 60_000;
 const DISPLAY_BUDGET_AVAILABLE = 31_000;
 const APPROVAL_THRESHOLD = 1_500;
-const DEFAULT_TIMEZONE_OFFSET = "+08:00";
 const DEFAULT_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 function firstParam(value: string | string[] | undefined): string | undefined {
@@ -133,16 +147,6 @@ function estimateFare(draft: EnterpriseBookingDraftForm) {
   }
 
   return Math.max(480, Math.round(amount / 10) * 10);
-}
-
-function getReservationStart(date: string, time: string, now = new Date()) {
-  const normalizedDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "2026-06-13";
-  const normalizedTime = /^\d{2}:\d{2}$/.test(time) ? time : "15:20";
-  const parsed = new Date(
-    `${normalizedDate}T${normalizedTime}:00${DEFAULT_TIMEZONE_OFFSET}`,
-  );
-
-  return Number.isNaN(parsed.getTime()) ? now : parsed;
 }
 
 function getReservationWallClockFields(reservationWindowStart: string) {
@@ -356,18 +360,14 @@ export function buildEnterpriseBookingCommand(
   draft: EnterpriseBookingDraftForm,
   now = new Date(),
 ): CreateTenantBookingCommand {
-  const reservationWindowStart = getReservationStart(
-    draft.reservationDate,
-    draft.reservationTime,
-    now,
-  );
+  // Recheck at the API command boundary: a valid review can expire while open.
+  const reservationWindowStart = requireFutureReservationStart(draft, now);
   const reservationWindowEnd = new Date(
     reservationWindowStart.getTime() + 30 * 60 * 1000,
   );
   const preview = getEnterpriseBookingPreview(draft, "zh");
   const luggageCount = Number.parseInt(draft.luggageCount, 10);
-  const passengerName =
-    draft.passengerMode === "self" ? draft.bookedBy : draft.passenger;
+  const passengerName = getEnterprisePassengerDisplayName(draft);
   const onsiteContactPhone = draft.onsiteContactPhone.trim();
 
   return {
@@ -450,20 +450,6 @@ function inferAddressName(address: string) {
   const trimmed = address.trim();
   const [head] = trimmed.split("·");
   return head?.trim() || trimmed;
-}
-
-export function isEnterpriseDraftComplete(draft: EnterpriseBookingDraftForm) {
-  return [
-    draft.passengerMode === "self" ? draft.bookedBy : draft.passenger,
-    draft.bookedBy,
-    draft.pickup,
-    draft.dropoff,
-    draft.reservationDate,
-    draft.reservationTime,
-    draft.onsiteContactPhone,
-    draft.costCenterCode,
-    draft.costCenterLabel,
-  ].every((value) => value.trim().length > 0);
 }
 
 export function getVehicleLabelFromDraft(

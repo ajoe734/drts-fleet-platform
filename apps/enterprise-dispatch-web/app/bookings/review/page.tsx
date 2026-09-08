@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BookingSubmitButton } from "@/components/booking-submit-button";
+import { ReservationExpiryGate } from "@/components/booking-form/reservation-expiry-gate";
 import {
   EBanner,
   EBtnContent,
@@ -13,12 +14,16 @@ import {
 import { EntParty, EntRoute } from "@/components/ent-screen-bits";
 import { EntPageHead } from "@/components/enterprise-shell";
 import {
+  getEarliestBookableLabel,
   getEnterpriseBookingPreview,
+  getEnterprisePassengerDisplayName,
   getVehicleLabelFromDraft,
+  isEnterpriseDraftComplete,
+  isReservationWindowInFuture,
   parseEnterpriseBookingDraft,
+  requireFutureReservationStart,
   serializeEnterpriseBookingDraft,
 } from "@/lib/enterprise-booking-draft";
-import { enterpriseDriver } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { getServerLocale } from "@/lib/server-locale";
 import { type TranslationKey, t as translate } from "@/lib/translations";
@@ -57,8 +62,15 @@ export default async function ReviewBookingPage({
     : resolvedSearchParams.bookingId;
   const preview = getEnterpriseBookingPreview(draft, locale);
   const vehicleLabel = getVehicleLabelFromDraft(draft, locale);
-  const airportParts = [draft.flight.trim(), draft.terminal.trim()].filter(Boolean);
-  const airportLabel = airportParts.length > 0 ? airportParts.join(" · ") : undefined;
+  const airportParts = [draft.flight.trim(), draft.terminal.trim()].filter(
+    Boolean,
+  );
+  const airportLabel =
+    airportParts.length > 0 ? airportParts.join(" · ") : undefined;
+  const passengerDisplayName = getEnterprisePassengerDisplayName(draft);
+  const now = new Date();
+  const isReservationInFuture = isReservationWindowInFuture(draft, now);
+  const isSubmittable = isEnterpriseDraftComplete(draft, now);
 
   return (
     <>
@@ -80,6 +92,7 @@ export default async function ReviewBookingPage({
       </div>
 
       <div
+        className="ent-page-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "1fr 1.1fr",
@@ -170,7 +183,7 @@ export default async function ReviewBookingPage({
           >
             <EntParty
               t={t}
-              passenger={draft.passengerMode === "self" ? draft.bookedBy : draft.passenger}
+              passenger={passengerDisplayName}
               passengerLabel={tr("party.passenger")}
               subline={
                 draft.passengerMode === "self" ? (
@@ -195,6 +208,7 @@ export default async function ReviewBookingPage({
               }
             />
             <div
+              className="ent-2col-grid"
               style={{
                 marginTop: 14,
                 display: "grid",
@@ -231,7 +245,7 @@ export default async function ReviewBookingPage({
                   {tr("review.summary.placard")}
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  {enterpriseDriver.placard}
+                  {displayDraftValue(passengerDisplayName)}
                 </div>
               </div>
             </div>
@@ -239,11 +253,7 @@ export default async function ReviewBookingPage({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <ECard
-            t={t}
-            title={tr("detail.card.trip")}
-            sub={tr("card.sub.trip")}
-          >
+          <ECard t={t} title={tr("detail.card.trip")} sub={tr("card.sub.trip")}>
             <EntRoute
               t={t}
               from={draft.pickup}
@@ -306,6 +316,22 @@ export default async function ReviewBookingPage({
               </div>
             </div>
           </ECard>
+          {!isSubmittable ? (
+            <div data-testid="enterprise-booking-blocked">
+              <EBanner
+                t={t}
+                tone="warn"
+                icon="clock"
+                body={
+                  isReservationInFuture
+                    ? tr("review.blocked.incompleteFields")
+                    : tr("review.blocked.pastReservation", {
+                        earliest: getEarliestBookableLabel(locale),
+                      })
+                }
+              />
+            </div>
+          ) : null}
           <div style={{ display: "flex", gap: 12 }}>
             <Link
               href={`/bookings/new?${serializeEnterpriseBookingDraft(draft).toString()}${bookingId ? `&bookingId=${encodeURIComponent(bookingId)}` : ""}`}
@@ -313,7 +339,31 @@ export default async function ReviewBookingPage({
             >
               <EBtnContent>{tr("review.back")}</EBtnContent>
             </Link>
-            <BookingSubmitButton draft={draft} {...(bookingId ? { bookingId } : {})} />
+            {isSubmittable ? (
+              <ReservationExpiryGate
+                expiresAt={requireFutureReservationStart(draft, now).getTime()}
+                fallback={
+                  <div role="status" data-testid="enterprise-booking-expired">
+                    <EBanner
+                      t={t}
+                      tone="warn"
+                      icon="clock"
+                      body={tr("review.blocked.pastReservation", {
+                        earliest: getEarliestBookableLabel(
+                          locale,
+                          requireFutureReservationStart(draft, now),
+                        ),
+                      })}
+                    />
+                  </div>
+                }
+              >
+                <BookingSubmitButton
+                  draft={draft}
+                  {...(bookingId ? { bookingId } : {})}
+                />
+              </ReservationExpiryGate>
+            ) : null}
           </div>
         </div>
       </div>
