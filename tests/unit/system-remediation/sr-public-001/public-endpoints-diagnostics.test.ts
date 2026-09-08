@@ -295,6 +295,161 @@ print("SUCCESS_BROKEN_REDIRECT_DETECTION")
   });
 });
 
+describe("SR-PUBLIC-001: P1 Fix - Transport Failure & Redirect Exhaustion Regressions", () => {
+  it("detects redirect exhaustion (exit 47, HTTP 307, NUM_REDIRECTS 5) and marks fallback unhealthy", () => {
+    const pythonCode = `
+import importlib.util, subprocess
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location("sre", "${DIAGNOSTIC_TOOL}")
+sre = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sre)
+
+loop_stdout = """HTTP/1.1 307 Temporary Redirect
+Location: /loop1
+
+HTTP/1.1 307 Temporary Redirect
+Location: /loop2
+
+FINAL_URL:https://drts-dev-ops-console-web-lyo6ra57fq-uc.a.run.app/loop2
+FINAL_STATUS:307
+NUM_REDIRECTS:5
+"""
+mock_proc = subprocess.CompletedProcess(
+    args=["curl"],
+    returncode=47,
+    stdout=loop_stdout,
+    stderr="curl: (47) Maximum redirects reached",
+)
+
+with patch("subprocess.run", return_value=mock_proc):
+    res = sre.check_cloud_run_fallback("drts-dev-ops-console-web", path="/", mock=False)
+    assert res["active_healthy"] is False, "Exit 47 must produce active_healthy=False"
+    assert res["active_exit_code"] == 47
+    assert res["active_final_status"] == 307
+    assert "Maximum redirects reached" in res["active_error"]
+
+print("SUCCESS_REDIRECT_EXHAUSTION_REGRESSION")
+`;
+    const result = execFileSync("python3", ["-c", pythonCode], {
+      encoding: "utf-8",
+      cwd: REPO_ROOT,
+    });
+    expect(result).toContain("SUCCESS_REDIRECT_EXHAUSTION_REGRESSION");
+  });
+
+  it("detects curl timeout (exit 28) and marks fallback unhealthy and recovery failing", () => {
+    const pythonCode = `
+import importlib.util, subprocess
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location("sre", "${DIAGNOSTIC_TOOL}")
+sre = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sre)
+
+mock_proc = subprocess.CompletedProcess(
+    args=["curl"],
+    returncode=28,
+    stdout="",
+    stderr="curl: (28) Operation timed out",
+)
+
+with patch("subprocess.run", return_value=mock_proc):
+    res = sre.check_cloud_run_fallback("drts-dev-ops-console-web", path="/", mock=False)
+    assert res["active_healthy"] is False, "Exit 28 timeout must produce active_healthy=False"
+    assert res["active_exit_code"] == 28
+    assert "Operation timed out" in res["active_error"]
+
+print("SUCCESS_TIMEOUT_REGRESSION")
+`;
+    const result = execFileSync("python3", ["-c", pythonCode], {
+      encoding: "utf-8",
+      cwd: REPO_ROOT,
+    });
+    expect(result).toContain("SUCCESS_TIMEOUT_REGRESSION");
+  });
+
+  it("rejects terminal 307 as healthy even when curl exit code is 0", () => {
+    const pythonCode = `
+import importlib.util, subprocess
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location("sre", "${DIAGNOSTIC_TOOL}")
+sre = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sre)
+
+terminal_307_stdout = """HTTP/1.1 307 Temporary Redirect
+Location: /some-target
+
+FINAL_URL:https://drts-dev-ops-console-web-lyo6ra57fq-uc.a.run.app/some-target
+FINAL_STATUS:307
+NUM_REDIRECTS:1
+"""
+mock_proc = subprocess.CompletedProcess(
+    args=["curl"],
+    returncode=0,
+    stdout=terminal_307_stdout,
+    stderr="",
+)
+
+with patch("subprocess.run", return_value=mock_proc):
+    res = sre.check_cloud_run_fallback("drts-dev-ops-console-web", path="/", mock=False)
+    assert res["active_healthy"] is False, "Terminal 307 must never be marked healthy"
+    assert res["active_final_status"] == 307
+
+    resp = sre.check_http_response("ops.smarttransport.tw", path="/", mock=False)
+    assert resp["final_http_code"] == 307
+
+print("SUCCESS_TERMINAL_307_REJECTION")
+`;
+    const result = execFileSync("python3", ["-c", pythonCode], {
+      encoding: "utf-8",
+      cwd: REPO_ROOT,
+    });
+    expect(result).toContain("SUCCESS_TERMINAL_307_REJECTION");
+  });
+
+  it("requires successful transport and completed terminal 200 response for recovery acceptance", () => {
+    const pythonCode = `
+import importlib.util, subprocess
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location("sre", "${DIAGNOSTIC_TOOL}")
+sre = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sre)
+
+success_stdout = """HTTP/1.1 307 Temporary Redirect
+Location: /dashboard
+
+HTTP/1.1 200 OK
+
+FINAL_URL:https://drts-dev-ops-console-web-lyo6ra57fq-uc.a.run.app/dashboard
+FINAL_STATUS:200
+NUM_REDIRECTS:1
+"""
+mock_proc = subprocess.CompletedProcess(
+    args=["curl"],
+    returncode=0,
+    stdout=success_stdout,
+    stderr="",
+)
+
+with patch("subprocess.run", return_value=mock_proc):
+    res = sre.check_cloud_run_fallback("drts-dev-ops-console-web", path="/", mock=False)
+    assert res["active_healthy"] is True, "exit_code=0 and final_status=200 must be healthy"
+    assert res["active_exit_code"] == 0
+    assert res["active_final_status"] == 200
+
+print("SUCCESS_COMPLETED_TERMINAL_200")
+`;
+    const result = execFileSync("python3", ["-c", pythonCode], {
+      encoding: "utf-8",
+      cwd: REPO_ROOT,
+    });
+    expect(result).toContain("SUCCESS_COMPLETED_TERMINAL_200");
+  });
+});
+
 describe("SR-PUBLIC-001: P2 Fix - Fail-Closed DNS Error Handling on EAI_AGAIN", () => {
   it("preserves socket.EAI_AGAIN as temporary failure and does NOT map to NXDOMAIN", () => {
     const pythonCode = `

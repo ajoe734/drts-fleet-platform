@@ -648,6 +648,8 @@ def check_cloud_run_fallback(
                 "active_num_redirects": 0,
                 "active_final_url": active_url,
                 "active_final_status": 200,
+                "active_exit_code": 0,
+                "active_error": None,
                 "stale_url": stale_url,
                 "stale_status": 404,
                 "stale_healthy": False,
@@ -655,35 +657,44 @@ def check_cloud_run_fallback(
                 "stale_num_redirects": 0,
                 "stale_final_url": stale_url,
                 "stale_final_status": 404,
+                "stale_exit_code": 0,
+                "stale_error": None,
             }
 
     probe_active = probe_http_endpoint_with_redirects(active_url, timeout_sec=timeout_sec, max_redirects=max_redirects)
     probe_stale = probe_http_endpoint_with_redirects(stale_url, timeout_sec=timeout_sec, max_redirects=max_redirects)
 
+    # Require successful transport (exit_code == 0) and completed terminal 200 response (never terminal 307)
     active_healthy = (
-        probe_active["initial_http_code"] in [200, 307]
-        and probe_active["final_http_code"] in [200, 307]
+        probe_active.get("exit_code") == 0
+        and probe_active.get("initial_http_code") in [200, 307]
+        and probe_active.get("final_http_code") == 200
     )
     stale_healthy = (
-        probe_stale["initial_http_code"] in [200, 307]
-        and probe_stale["final_http_code"] in [200, 307]
+        probe_stale.get("exit_code") == 0
+        and probe_stale.get("initial_http_code") in [200, 307]
+        and probe_stale.get("final_http_code") == 200
     )
 
     return {
         "active_url": active_url,
-        "active_status": probe_active["initial_http_code"],
+        "active_status": probe_active.get("initial_http_code", 0),
         "active_healthy": active_healthy,
-        "active_redirect_chain": probe_active["redirect_chain"],
-        "active_num_redirects": probe_active["num_redirects"],
-        "active_final_url": probe_active["final_url"],
-        "active_final_status": probe_active["final_http_code"],
+        "active_redirect_chain": probe_active.get("redirect_chain", []),
+        "active_num_redirects": probe_active.get("num_redirects", 0),
+        "active_final_url": probe_active.get("final_url", active_url),
+        "active_final_status": probe_active.get("final_http_code", 0),
+        "active_exit_code": probe_active.get("exit_code", 0),
+        "active_error": probe_active.get("error"),
         "stale_url": stale_url,
-        "stale_status": probe_stale["initial_http_code"],
+        "stale_status": probe_stale.get("initial_http_code", 0),
         "stale_healthy": stale_healthy,
-        "stale_redirect_chain": probe_stale["redirect_chain"],
-        "stale_num_redirects": probe_stale["num_redirects"],
-        "stale_final_url": probe_stale["final_url"],
-        "stale_final_status": probe_stale["final_http_code"],
+        "stale_redirect_chain": probe_stale.get("redirect_chain", []),
+        "stale_num_redirects": probe_stale.get("num_redirects", 0),
+        "stale_final_url": probe_stale.get("final_url", stale_url),
+        "stale_final_status": probe_stale.get("final_http_code", 0),
+        "stale_exit_code": probe_stale.get("exit_code", 0),
+        "stale_error": probe_stale.get("error"),
     }
 
 
@@ -720,23 +731,39 @@ def diagnose_public_entries(
         if cr_info.get("stale_status") == 404:
             layer_root_causes.append(f"DOC_LAYER_R29: Stale Cloud Run URL ({KNOWN_CLOUD_RUN_SUFFIXES['stale_documentation']}) returns 404; active URL is on {KNOWN_CLOUD_RUN_SUFFIXES['active']}")
 
-        # Detection of broken login redirects
+        # Detection of broken login redirects, transport failures, redirect exhaustion, or timeouts
         broken_redirect = False
-        if http_direct.get("redirect_chain"):
-            if http_direct.get("final_http_code") not in [200, 307]:
-                layer_root_causes.append(f"REDIRECT_LAYER: Broken redirect chain terminating in HTTP {http_direct.get('final_http_code')}")
-                broken_redirect = True
-        if cr_info.get("active_redirect_chain"):
-            if cr_info.get("active_final_status") not in [200, 307]:
-                layer_root_causes.append(f"FALLBACK_REDIRECT_LAYER: Cloud Run fallback redirect terminating in HTTP {cr_info.get('active_final_status')}")
-                broken_redirect = True
+        if http_direct.get("exit_code", 0) != 0:
+            layer_root_causes.append(
+                f"HTTP_TRANSPORT_ERROR: Direct HTTP request failed with exit code {http_direct.get('exit_code')}"
+                + (f" ({http_direct.get('error')})" if http_direct.get("error") else "")
+            )
+            broken_redirect = True
+        elif http_direct.get("final_http_code") != 200:
+            layer_root_causes.append(
+                f"REDIRECT_LAYER: Direct HTTP request terminated with non-200 status {http_direct.get('final_http_code')} (initial: {http_direct.get('http_code')})"
+            )
+            broken_redirect = True
 
-        # Layer repair criteria
+        if cr_info.get("active_exit_code", 0) != 0:
+            layer_root_causes.append(
+                f"FALLBACK_TRANSPORT_ERROR: Cloud Run fallback failed with exit code {cr_info.get('active_exit_code')}"
+                + (f" ({cr_info.get('active_error')})" if cr_info.get("active_error") else "")
+            )
+            broken_redirect = True
+        elif cr_info.get("active_final_status") != 200:
+            layer_root_causes.append(
+                f"FALLBACK_REDIRECT_LAYER: Cloud Run fallback terminated with non-200 status {cr_info.get('active_final_status')} (initial: {cr_info.get('active_status')})"
+            )
+            broken_redirect = True
+
+        # Layer repair criteria: strictly require exit_code == 0 and completed terminal 200 response
         repaired_dns = (not dns_info.get("has_stale_a")) and (dns_info.get("cname") == CANONICAL_CNAME_TARGET or dns_info.get("resolved", False))
         repaired_tls = tls_direct.get("success", False)
         repaired_http = (
-            http_direct.get("http_code") in entry["expected_direct_status"]
-            and http_direct.get("final_http_code") in [200, 307]
+            http_direct.get("exit_code") == 0
+            and http_direct.get("http_code") in entry["expected_direct_status"]
+            and http_direct.get("final_http_code") == 200
             and not broken_redirect
         )
         repaired_all = repaired_dns and repaired_tls and repaired_http and cr_info.get("active_healthy", False)

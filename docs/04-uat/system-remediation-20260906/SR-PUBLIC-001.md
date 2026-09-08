@@ -1,14 +1,14 @@
 # SR-PUBLIC-001 — 公开入口／callback／版本清單修復準備
 
 - Owner: `Gemini`
-- Reviewer: `Codex2`
+- Reviewer: `Codex`
 - Wave: `system-remediation-20260906`
 - Gap IDs: `R01`, `R29`
 - Capability IDs: `C001`, `C124`
-- Reassignment Note: Chairman reassigned owner from Gemini2 to Gemini (Gemini2 exact lane capacity paused; terminal failure 1 time; reassigned to healthy Gemini, retaining independent reviewer Codex2).
+- Reassignment Note: Chairman reassigned owner from Gemini2 to Gemini (Gemini2 exact lane capacity paused; terminal failure 1 time; reassigned to healthy Gemini, retaining independent reviewer Codex).
 - Base SHA: `40ba315e4114369eaa7e12d35aae83a795c97b1d` (`origin/dev` at branch creation)
 - Current `origin/dev` SHA: `3b60a3757238663572f16f010c94f446f2c71eaa` (verified no overlap with write scopes)
-- Prior Branch Commits: `7ad94cfe7` (initial implementation), `c22646b66` (review feedback address)
+- Prior Branch Commits: `7ad94cfe7` (initial implementation), `c22646b66` (review round 1), `9f34a4be8` (review round 2)
 - Current Candidate SHA: recorded at `handoff` time via `git rev-parse HEAD`
 - Branch: `gemini/sr-public-001`
 
@@ -44,56 +44,53 @@
      ```
    - 9 個子網域（`fleets`, `ops`, `partners`, `dispatch`, `bank`, `channel`, `tenant`, `refer`, `api`）全部帶有過期的靜態 A 紀錄 `8.233.119.14`，皆無 CNAME `ghs.googlehosted.com.`。
 
-2. **TLS / HTTP 層重現 (R01)**：
-   - 直接連線：
+2. **TLS / HTTP 層重現**：
+   - 直連靜態 A 紀錄：
      ```bash
-     curl -Iv https://fleets.smarttransport.tw --max-time 5
-     # 輸出：curl: (35) OpenSSL SSL_connect: SSL_ERROR_SYSCALL in connection to fleets.smarttransport.tw:443
+     curl -Iv --connect-timeout 5 https://fleets.smarttransport.tw/
+     # 輸出：OpenSSL SSL_connect: SSL_ERROR_SYSCALL in connection to fleets.smarttransport.tw:443 (exit code 35)
      ```
-   - 9 個子網域公網直連 100% 重現 curl exit 35、SSL_ERROR_SYSCALL，與 R01 描述完全相符。
-   - 透過 Google Anycast IP (`108.177.97.121`) 測試 SNI 握手：
+   - 強制解析至 Google Anycast Front End (`108.177.97.121`)：
      ```bash
-     curl -Iv --resolve fleets.smarttransport.tw:443:108.177.97.121 https://fleets.smarttransport.tw/ --max-time 5
-     # 輸出：SSL connection using TLSv1.3. Server certificate: CN=fleets.smarttransport.tw (Google Trust Services). HTTP/2 404
+     curl -Iv --resolve fleets.smarttransport.tw:443:108.177.97.121 https://fleets.smarttransport.tw/
+     # 輸出：Server certificate: CN=fleets.smarttransport.tw (valid), HTTP/2 404 Not Found
      ```
-   - 證實 Google Edge 已簽發有效 SSL 憑證，但 Cloud Run domain-mapping 尚未導通至現行 revision（回傳 HTTP 404）。
+   - 證實 TLS 握手在 Google Edge 完全有效，核心瓶頸在於 Cloud Run domain mapping 路由轉發。
 
-3. **Cloud Run 現行版本與文件漂移重現 (R29)**：
-   - 探測舊文件中記載的 `*-4t7rg6fmeq-uc.a.run.app`：
-     全部 9 個服務皆回傳 **HTTP 404**（已失效）。
-   - 探測 2026-09-03 部署日誌記載的 `*-lyo6ra57fq-uc.a.run.app`：
-     - `drts-dev-api/api/health`: **HTTP 200**
-     - `drts-dev-platform-admin-web/`: **HTTP 200**
-     - `drts-dev-ops-console-web/`: **HTTP 307** (安全重導向 `/dashboard`，終點 HTTP 200)
-     - `drts-dev-fleet-partner-portal-web/`: **HTTP 307** (安全重導向 `/dashboard`，終點 HTTP 200)
-     - `drts-dev-tenant-console-web/`: **HTTP 307** (安全重導向 `/login?redirect_uri=%2F`，終點 HTTP 200)
-     - `drts-dev-bank-console-web/`: **HTTP 200**
-     - `drts-dev-referral-embed-web/embed/yuhe-residence`: **HTTP 200**
-     - `drts-dev-enterprise-dispatch-web/`: **HTTP 200**
-     - `drts-channel-partner-portal-web/`: **HTTP 307** (安全重導向 `/dashboard`，終點 HTTP 200)
-   - 證實：`lyo6ra57fq-uc.a.run.app` 為目前真實有效之 Cloud Run 環境，9 個服務 100% 存活。
+3. **Cloud Run Fallback 與文件漂移重現 (R29)**：
+   - 陳舊文件 URL `4t7rg6fmeq` 實測回傳 HTTP 404。
+   - 2026-09-08 候選即時實測觀測：歷史紀錄 `lyo6ra57fq` 在公網直連探測亦回傳 HTTP 404（因目標環境未將 revision 宣告公網開放，屬未決 Live Gate）。
 
-4. **防污染檢查（退休與暫停網域）**：
-   - `book.smarttransport.tw`（2026-08-01 起 PAUSED）：實測 `NXDOMAIN`。
-   - `ride.smarttransport.tw`（2026-06-16 起 RETIRED）：實測 `NXDOMAIN`。
-   - `concierge.smarttransport.tw`（2026-06-16 起 RETIRED）：實測 `NXDOMAIN`。
+4. **退休／暫停網域乾淨排除**：
+   - `book.smarttransport.tw`, `ride.smarttransport.tw`, `concierge.smarttransport.tw` 實測皆為 `NXDOMAIN`。
    - 三者無 DNS 殘留，嚴禁納入 active surface。
 
 ### 1.3 Review Rejection (`7ad94cfe7`) 審查意見與修復項目
 
-Codex 對 candidate `7ad94cfe7` 提出 3 項具體缺陷反饋，本候選版本已逐一完整修復並提供回歸測試：
+Codex 對 candidate `7ad94cfe7` 提出 3 項具體缺陷反饋，已修復完成：
+1. **[P1] 診斷重現判定與修復驗收判定分離**（`diagnosis_passed` vs `recovery_passed`，引入 `--target {auto,diagnosis,recovery}`）。
+2. **[P1] 有界重新導向鏈追蹤（Bounded Redirect Chain）與最終 URL 收集**（追蹤至多 5 跳，記錄中間狀態與最終 landing URL）。
+3. **[P2] DNS 解析錯誤 fail-closed 防護**（`socket.EAI_AGAIN` 視為暫態故障，不誤判 clean NXDOMAIN）。
 
-1. **[P1] 診斷重現判定與修復驗收判定分離**：
-   - **審查反饋**：舊有 `system-remediation-endpoints.py` 在 `main()` 驗證邏輯中強制要求 `r01_reproduced_all_entries` 為 True 才能輸出 PASS，導致在記憶體中模擬 9 個網域全數修復（DNS/TLS/HTTP 皆通且 fallback 正常）時，因未發生 R01 錯誤而反向判為 `FAILED_VERIFICATION exit 1`。
-   - **修復實現**：在 `system-remediation-endpoints.py` 中分離 `diagnosis_passed`（重現階段確認）與 `recovery_passed`（修復階段驗收），並提供 `--target {auto,diagnosis,recovery}` 參數。`auto` 模式依觀測狀態自適應回報正確 PASS；`--target recovery` 專用於 Step 3 讀回驗收，對修復狀態產出 PASS exit 0。
+### 1.4 Review Rejection (`9f34a4be8`) 審查意見與修復項目
 
-2. **[P1] 有界重新導向鏈追蹤（Bounded Redirect Chain）與最終 URL 收集**：
-   - **審查反饋**：舊有 `check_http_response` 未跟隨亦未記錄重導向，將請求 URL 直接寫為 `final_url`；`check_cloud_run_fallback` 丟棄了 Location 標頭與重導向目標，模擬 307 依然回報原始 URL，無法滿足「最終 URL 分層記錄」與檢測破裂登入重導向的需求。
-   - **修復實現**：為 `check_http_response` 與 `check_cloud_run_fallback` 引入有界重導向追蹤（上限 5 跳），利用 curl dump headers (`-D -`) 與 write-out 格式精確解析每一跳狀態、Location 標頭、建構完整 `redirect_chain`，並計算實際到達之 `final_url` 與 `final_http_code`，同時具備破裂重導向（終點 404/500）偵測警報。
+Codex 對 candidate `9f34a4be8` 提出 2 項具體 P1 審查反饋，本候選版本已徹底落實修復：
 
-3. **[P2] DNS 解析錯誤 fail-closed 防護（阻斷 EAI_AGAIN 誤判 clean NXDOMAIN）**：
-   - **審查反饋**：舊有代碼將 `socket.EAI_AGAIN` (`-3`) 與 `socket.EAI_NONAME` (`-2`) 一同歸為 `NXDOMAIN`，使得解析器暫時性逾時或斷網時誤判退休網域 clean NXDOMAIN。
-   - **修復實現**：嚴格區分例外錯誤碼，僅 `socket.EAI_NONAME` (`-2`) 判定為 `NXDOMAIN`，`socket.EAI_AGAIN` (`-3`) 記錄為 `EAI_AGAIN` 暫時性故障，並在退休網域檢查中判定 `is_clean_nxdomain = False`，落實 fail-closed 原則。
+1. **[P1] 傳輸成功判定與終點響應完成檢驗（修復忽略 exit_code 與誤收終點 307）**：
+   - **審查反饋**：`system-remediation-endpoints.py:663-669,737-742` 忽略 curl exit_code 且接受終點 307 為 healthy：當記憶體模擬 subprocess 回傳 exit 47 (`CURLE_TOO_MANY_REDIRECTS`)、HTTP 307、NUM_REDIRECTS 5 時，誤將 `active_healthy` 判定為 `True`。要求必須嚴格檢驗傳輸成功（`exit_code == 0`）且終點響應完成（`final_http_code == 200`，不可為 307 導向未決）；並新增重導向耗盡與逾時之回歸測試。
+   - **修復實現**：
+     - 在 `check_cloud_run_fallback` 中將 `active_healthy` / `stale_healthy` 約束為：`exit_code == 0`、`initial_http_code in [200, 307]` 且 `final_http_code == 200`。
+     - 在 `diagnose_public_entries` 中將 `repaired_http` 約束為：`exit_code == 0`、`http_code in expected`、`final_http_code == 200` 且 `not broken_redirect`。
+     - 若 curl `exit_code != 0`（如 exit 47、exit 28 逾時、exit 35 TLS 失敗）或終點非 200（如 terminal 307、404、500），皆標記 `broken_redirect = True` 並記錄 `HTTP_TRANSPORT_ERROR` / `FALLBACK_TRANSPORT_ERROR` / `REDIRECT_LAYER`。
+     - 在 `public-endpoints-diagnostics.test.ts` 新增 4 個回歸測試（exit 47 重導向耗盡、exit 28 逾時、terminal 307 拒絕、exit 0 terminal 200 成功）。
+     - 在 `public-endpoints-registry.test.ts` 更新 `evaluateRedirectChain` 嚴格要求 `finalCode === 200`。
+
+2. **[P1] 移除 `lyo6ra57fq` 100% 存活與已驗證回滾之不實宣稱，標定未決 Live Gate**：
+   - **審查反饋**：`public-entry-repair.md:27-29,140` 宣稱 `lyo6ra57fq` 目前 100% healthy 且為可用回滾，與 `SR-PUBLIC-001.md` Section 3.3C 2026-09-08 實測觀測（公網直連回傳 404）產生矛盾。要求將歷史成功宣稱替換為時間戳連結之 9 入口候選實測輸出與 GCP 權威服務／revision URL 驗證指令，或明確標定未決 live gate，嚴禁將失敗 URL 作為已驗證回滾。
+   - **修復實現**：
+     - 在 `public-entry-repair.md` Section 1.1 與 Section 2 更新時間戳為 `2026-09-08T12:34:02Z` 之 9 入口候選實測輸出，明確標示 `lyo6ra57fq` 在公網直連目前為 HTTP 404。
+     - 在 Section 4 嚴正宣告 `LIVE-GATE-PUBLIC-ENTRY`，嚴禁將 404 URL 偽造為有效回滾。
+     - 提供 `SR-LIVE-ENTRY-001` 在執行切換時使用之權威 GCP 查詢指令（`gcloud run services describe --format='value(status.url)'`）與 revision 回滾指令（`gcloud run services update-traffic --to-revisions`）。
 
 ---
 
@@ -106,26 +103,27 @@ Codex 對 candidate `7ad94cfe7` 提出 3 項具體缺陷反饋，本候選版本
    - 完整評估 4 個層次：
      1. DNS Resolution Layer（A 紀錄 vs CNAME `ghs.googlehosted.com.`、NXDOMAIN 檢查、`EAI_AGAIN` fail-closed）。
      2. TLS Layer（直接連線 TLS 握手 vs GHS Anycast SNI 握手與憑證檢驗）。
-     3. HTTP/Routing Layer（HTTP 狀態碼、有界重導向鏈、最終 URL 與狀態碼）。
-     4. Cloud Run Fallback Layer（`lyo6ra57fq` 現行版本健康探測與重導向解析 vs `4t7rg6fmeq` 陳舊版本偵測）。
+     3. HTTP/Routing Layer（HTTP 狀態碼、有界重導向鏈、最終 URL 與狀態碼、exit_code 0 嚴格檢核、terminal 307 拒絕）。
+     4. Cloud Run Fallback Layer（健康探測與重導向解析、exit_code 檢核 vs 陳舊版本偵測）。
    - 支援 `--mode table` 輸出 Markdown 稽核矩陣、`--mode verify --target recovery` 與 `--mode verify --target diagnosis`。
 
 2. **`docs/04-uat/system-remediation-20260906/public-entry-repair.md`**：
-   - 記錄 9 入口 DNS/TLS/HTTP、重新導向目標與最終 URL 分層對照矩陣。
+   - 記錄 9 入口 DNS/TLS/HTTP、重新導向目標與最終 URL 分層對照矩陣（具備 2026-09-08T12:34:02Z 候選時間戳）。
    - 提供供 `SR-LIVE-ENTRY-001` 執行的最小修復步驟（Cloud Run mapping 建立、GoDaddy DNS A 紀錄刪除與 CNAME 新增）。
-   - 制定完整回滾計畫（業務流量導向 `lyo6ra57fq` 直連 URL、DNS 快取清理、Cloud Run mapping 刪除）。
+   - 制定完整回滾計畫與權威 GCP 指令（查詢權威 URL、流量切回穩定 revision、DNS 快取清理、Cloud Run mapping 刪除）。
    - 明確標定權限界線與 Live Gate，不偽造成功。
 
 3. **`tests/unit/system-remediation/sr-public-001/`**：
    - `public-endpoints-registry.test.ts`：
      - 鎖定 9 個 active public entries 契約（子網域、服務名稱、路徑、認證要求、預期重導向目標）。
      - 鎖定退休網域（book, ride, concierge）防回流契約。
-     - 檢驗 R01/R29 錯誤分類邏輯、DNS fail-closed 分類規則與重導向健康度分類。
+     - 檢驗 R01/R29 錯誤分類邏輯、DNS fail-closed 分類規則與重導向健康度分類（終點 200 嚴格判定）。
    - `public-endpoints-diagnostics.test.ts`：
      - 測試 Python 診斷工具的離線執行、JSON 結構、Markdown 表格產出。
      - 測試重現判定（`--target diagnosis`）與修復驗收（`--target recovery`）分離驗證邏輯。
      - 測試模擬 307 下之有界重導向追蹤、Cloud Run fallback 重導向解析與破裂重導向偵測。
      - 測試 `socket.EAI_AGAIN` fail-closed 防護，確保解析器異常不被誤判為 clean NXDOMAIN。
+     - 測試 curl exit 47 重導向耗盡、exit 28 逾時、terminal 307 拒絕、exit 0 terminal 200 回歸保護。
      - 測試修復 Runbook 文件的必要章節與關鍵字。
 
 4. **`docs/04-uat/system-remediation-20260906/SR-PUBLIC-001.md`**（本交付文件）。
@@ -144,11 +142,11 @@ pnpm exec vitest run tests/unit/system-remediation/sr-public-001/
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-public-001
 
  Test Files  2 passed (2)
-      Tests  22 passed (22)
-   Start at  12:20:26
-   Duration  1.55s (transform 89ms, setup 0ms, import 156ms, tests 1.26s, environment 0ms)
+      Tests  26 passed (26)
+   Start at  12:36:23
+   Duration  2.07s (transform 157ms, setup 0ms, import 213ms, tests 1.71s, environment 0ms)
 ```
-Exit Code: `0` (22 項測試全部通過)
+Exit Code: `0` (26 項測試全部通過)
 
 ### 3.2 程式碼格式與差異檢查
 

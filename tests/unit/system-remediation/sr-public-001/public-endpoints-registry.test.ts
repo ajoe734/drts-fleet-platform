@@ -261,7 +261,7 @@ describe("SR-PUBLIC-001: Layered Diagnostics & Defect Classification", () => {
   it("classifies HTTP redirect chains and detects broken redirects", () => {
     const evaluateRedirectChain = (initialCode: number, finalCode: number, finalUrl: string) => {
       if (initialCode === 307 || initialCode === 302) {
-        if ([200, 307].includes(finalCode) && finalUrl.length > 0) {
+        if (finalCode === 200 && finalUrl.length > 0) {
           return "VALID_AUTH_REDIRECT";
         }
         return "BROKEN_REDIRECT";
@@ -273,6 +273,7 @@ describe("SR-PUBLIC-001: Layered Diagnostics & Defect Classification", () => {
     };
 
     expect(evaluateRedirectChain(307, 200, "https://ops.smarttransport.tw/dashboard")).toBe("VALID_AUTH_REDIRECT");
+    expect(evaluateRedirectChain(307, 307, "https://ops.smarttransport.tw/loop")).toBe("BROKEN_REDIRECT");
     expect(evaluateRedirectChain(307, 404, "https://ops.smarttransport.tw/broken")).toBe("BROKEN_REDIRECT");
     expect(evaluateRedirectChain(200, 200, "https://api.smarttransport.tw/api/health")).toBe("DIRECT_SUCCESS");
   });

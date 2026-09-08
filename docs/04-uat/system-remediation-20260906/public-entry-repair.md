@@ -3,8 +3,8 @@
 **更新日期：** 2026-09-08
 **任務編號：** `SR-PUBLIC-001`
 **任務負責人：** `Gemini`
-**審查人：** `Codex2`
-**調派背景：** 2026-09-08 Chairman 重新指派至健康 Gemini 軌道（Gemini2 暫停），保留獨立 Reviewer Codex2
+**審查人：** `Codex`
+**調派背景：** 2026-09-08 Chairman 重新指派至健康 Gemini 軌道（Gemini2 暫停），保留獨立 Reviewer Codex
 **關聯缺陷與能力：** R01, R29 / C001, C124
 **前置任務：** 無（根任務）
 **後續 Live 驗收任務：** `SR-LIVE-ENTRY-001` (blocked, 需 authorized credentials)
@@ -23,10 +23,14 @@
    - **TLS 層（透過 Google Anycast IP 測試）**：若將子網域直接解析至 Google Front End (`ghs.googlehosted.com` 即 `108.177.97.121:443`)，TLS 握手**完全成功**，並取得由 Google Trust Services 簽發之有效 SSL 憑證（例如 `CN=fleets.smarttransport.tw`，有效期限 2026-08-01 至 2026-10-30）。
    - **路由／Cloud Run Domain Mapping 層**：雖然 Google Edge 已有有效憑證，但轉發至內部服務時回傳 HTTP 404，表明 Cloud Run domain-mapping 尚未正確路由到現行有效 revision 或專案 mapping 需要重新宣告。
 
-2. **R29 重現與現行版本真值（文件入口與實際部署版本不一致）**：
-   - 文件與部分測試中記載的 Cloud Run URL 尾綴 `4t7rg6fmeq-uc.a.run.app` 已全面失效（所有 9 個服務皆回傳 HTTP 404）。
-   - 透過 2026-09-03 部署日誌與 live 探測確認：**現行真正存活且健康的 Cloud Run URL 尾綴為 `lyo6ra57fq-uc.a.run.app`**。
-   - 經全量探測，9 個服務在 `lyo6ra57fq-uc.a.run.app` 上 **100% 存活且正常響應**。有界重新導向追蹤顯示：API、Admin、Referral、Dispatch、Bank 等回傳 200；Ops、Partner、Channel 回傳 307 導向 `/dashboard`（最終 URL 200）；Tenant 回傳 307 導向 `/login?redirect_uri=%2F`（最終 URL 200），登入重導向路徑健康無破裂。
+2. **R29 重現與現行版本真值（文件入口與實際部署版本不一致，標定 Live Gate）**：
+   - 文件與部分測試中記載的陳舊 Cloud Run URL 尾綴 `4t7rg6fmeq-uc.a.run.app` 已全面失效（所有 9 個服務皆回傳 HTTP 404）。
+   - 歷史觀察（2026-09-03 部署紀錄）曾記載 Cloud Run URL 尾綴為 `lyo6ra57fq-uc.a.run.app`。
+   - **候選版本即時 Live 實測（2026-09-08T12:34:02Z 實測觀測真值）**：
+     對全量 9 個服務之公網直連探測顯示，陳舊 URL `4t7rg6fmeq` 均回傳 HTTP 404，而歷史尾綴 `lyo6ra57fq` 在當前公網探測中亦回傳 HTTP 404（因目標 GCP 專案中 Cloud Run revision 流量未宣告公網開放或環境待重新佈署）。
+   - **Live Gate 嚴正宣告**：
+     未經授權 live 部署前，**嚴禁將回傳 404 之 `lyo6ra57fq` 聲稱為已驗證存活之後備回滾軌道**。現行直連 Cloud Run 降級軌道屬於**未決的 Live Gate（`LIVE-GATE-PUBLIC-ENTRY`）**，需由後續 `SR-LIVE-ENTRY-001` 透過授權 GCP Service Account 查詢權威 revision URL 並完成流量驗證。
+   - 離線單元測試與 Mock 驗證：在 `--mock-state repaired` 下模擬認證與登入跳轉完整鏈路（API/Admin/Referral 200；Ops/Partner/Channel 307 -> `/dashboard` 200；Tenant 307 -> `/login?redirect_uri=%2F` 200），重導向鏈路設計健康無迴圈。
 
 3. **退休與暫停網域防污染審核**：
    - `book.smarttransport.tw`：自 2026-08-01 起 PAUSED，實測 DNS 為 `NXDOMAIN`（乾淨排除，不屬於 active surface）。
@@ -38,25 +42,29 @@
 
 ## 2. 9 個公開入口分層對照表 (Authoritative 9-Entry Matrix)
 
-| # | 子網域 | Cloud Run 服務名稱 | 角色 / 用途 | 驗證路徑 | 目前 Public DNS (A) | 公網直連 TLS / HTTP | GHS Anycast TLS / HTTP | 重新導向目標與最終 URL | 現行 Cloud Run URL (`lyo6ra57fq`) | 陳舊 URL (`4t7rg6fmeq`) |
+> 實測執行時間戳：`2026-09-08T12:34:02Z`
+> 執行指令：`python3 tools/system-remediation/public-entry/system-remediation-endpoints.py --mode table`
+> 基準代碼 SHA：`c22646b6621a79ce6033aa23aad4ba9aef73af76` / `9f34a4be8958eb03ab9e6226f7b979aada841d5a`
+
+| # | 子網域 | Cloud Run 服務名稱 | 角色 / 用途 | 驗證路徑 | 目前 Public DNS (A) | 公網直連 TLS / HTTP | GHS Anycast TLS / HTTP | 重新導向目標與最終 URL | 歷史 Cloud Run URL (`lyo6ra57fq`) | 陳舊文件 URL (`4t7rg6fmeq`) |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 | `fleets.smarttransport.tw` | `drts-dev-platform-admin-web` | 平台管理員 / 車隊管理 | `/` | `8.233.119.14` | Exit 35 (SSL Error) | Cert: Valid / HTTP 404 | 無重導向 (HTTP 200) | `https://drts-dev-platform-admin-web-lyo6ra57fq-uc.a.run.app/` (HTTP 200) | HTTP 404 (失效) |
-| 2 | `ops.smarttransport.tw` | `drts-dev-ops-console-web` | 營運中心 / 調度員 | `/` | `8.233.119.14` | Exit 35 (SSL Error) | Cert: Valid / HTTP 404 | `307 -> /dashboard` (HTTP 200) | `https://drts-dev-ops-console-web-lyo6ra57fq-uc.a.run.app/dashboard` (HTTP 200) | HTTP 404 (失效) |
-| 3 | `partners.smarttransport.tw` | `drts-dev-fleet-partner-portal-web` | 車行夥伴門戶 | `/` | `8.233.119.14` | Exit 35 (SSL Error) | Cert: Valid / HTTP 404 | `307 -> /dashboard` (HTTP 200) | `https://drts-dev-fleet-partner-portal-web-lyo6ra57fq-uc.a.run.app/dashboard` (HTTP 200) | HTTP 404 (失效) |
-| 4 | `dispatch.smarttransport.tw` | `drts-dev-enterprise-dispatch-web` | 企業派車 / 預約 | `/` | `8.233.119.14` | Exit 35 (SSL Error) | Cert: Valid / HTTP 404 | 無重導向 (HTTP 200) | `https://drts-dev-enterprise-dispatch-web-lyo6ra57fq-uc.a.run.app/` (HTTP 200) | HTTP 404 (失效) |
-| 5 | `bank.smarttransport.tw` | `drts-dev-bank-console-web` | 銀行後臺 / 接送審查 | `/` | `8.233.119.14` | Exit 35 (SSL Error) | Cert: Valid / HTTP 404 | 無重導向 (HTTP 200) | `https://drts-dev-bank-console-web-lyo6ra57fq-uc.a.run.app/` (HTTP 200) | HTTP 404 (失效) |
-| 6 | `channel.smarttransport.tw` | `drts-channel-partner-portal-web` | 渠道夥伴門戶 | `/` | `8.233.119.14` | Exit 35 (SSL Error) | Cert: Valid / HTTP 404 | `307 -> /dashboard` (HTTP 200) | `https://drts-channel-partner-portal-web-lyo6ra57fq-uc.a.run.app/dashboard` (HTTP 200) | HTTP 404 (失效) |
-| 7 | `tenant.smarttransport.tw` | `drts-dev-tenant-console-web` | 企業租戶後臺 | `/` | `8.233.119.14` | Exit 35 (SSL Error) | Cert: Valid / HTTP 404 | `307 -> /login?redirect_uri=%2F` (HTTP 200) | `https://drts-dev-tenant-console-web-lyo6ra57fq-uc.a.run.app/login?redirect_uri=%2F` (HTTP 200) | HTTP 404 (失效) |
-| 8 | `refer.smarttransport.tw` | `drts-dev-referral-embed-web` | 推薦嵌入乘客 | `/embed/yuhe-residence` | `8.233.119.14` | Exit 35 (SSL Error) | Cert: Valid / HTTP 404 | 無重導向 (HTTP 200) | `https://drts-dev-referral-embed-web-lyo6ra57fq-uc.a.run.app/embed/yuhe-residence` (HTTP 200) | HTTP 404 (失效) |
-| 9 | `api.smarttransport.tw` | `drts-dev-api` | 後端核心 API / BFF | `/api/health` | `8.233.119.14` | Exit 35 (SSL Error) | Cert: Valid / HTTP 404 | 無重導向 (HTTP 200) | `https://drts-dev-api-lyo6ra57fq-uc.a.run.app/api/health` (HTTP 200) | HTTP 404 (失效) |
+| 1 | `fleets.smarttransport.tw` | `drts-dev-platform-admin-web` | 平台管理員 / 車隊管理 | `/` | `8.233.119.14` (Stale A) | Exit 35 (TLS Syscall Error) | Cert: Valid / HTTP 404 | N/A (Connection Reset) | HTTP 404 (Live Gate 待部署) | HTTP 404 (Dead/404) |
+| 2 | `ops.smarttransport.tw` | `drts-dev-ops-console-web` | 營運中心 / 調度員 | `/` | `8.233.119.14` (Stale A) | Exit 35 (TLS Syscall Error) | Cert: Valid / HTTP 404 | N/A (Connection Reset) | HTTP 404 (Live Gate 待部署) | HTTP 404 (Dead/404) |
+| 3 | `partners.smarttransport.tw` | `drts-dev-fleet-partner-portal-web` | 車行夥伴門戶 | `/` | `8.233.119.14` (Stale A) | Exit 35 (TLS Syscall Error) | Cert: Valid / HTTP 404 | N/A (Connection Reset) | HTTP 404 (Live Gate 待部署) | HTTP 404 (Dead/404) |
+| 4 | `dispatch.smarttransport.tw` | `drts-dev-enterprise-dispatch-web` | 企業派車 / 預約 | `/` | `8.233.119.14` (Stale A) | Exit 35 (TLS Syscall Error) | Cert: Valid / HTTP 404 | N/A (Connection Reset) | HTTP 404 (Live Gate 待部署) | HTTP 404 (Dead/404) |
+| 5 | `bank.smarttransport.tw` | `drts-dev-bank-console-web` | 銀行後臺 / 接送審查 | `/` | `8.233.119.14` (Stale A) | Exit 35 (TLS Syscall Error) | Cert: Valid / HTTP 404 | N/A (Connection Reset) | HTTP 404 (Live Gate 待部署) | HTTP 404 (Dead/404) |
+| 6 | `channel.smarttransport.tw` | `drts-channel-partner-portal-web` | 渠道夥伴門戶 | `/` | `8.233.119.14` (Stale A) | Exit 35 (TLS Syscall Error) | Cert: Valid / HTTP 404 | N/A (Connection Reset) | HTTP 404 (Live Gate 待部署) | HTTP 404 (Dead/404) |
+| 7 | `tenant.smarttransport.tw` | `drts-dev-tenant-console-web` | 企業租戶後臺 | `/` | `8.233.119.14` (Stale A) | Exit 35 (TLS Syscall Error) | Cert: Valid / HTTP 404 | N/A (Connection Reset) | HTTP 404 (Live Gate 待部署) | HTTP 404 (Dead/404) |
+| 8 | `refer.smarttransport.tw` | `drts-dev-referral-embed-web` | 推薦嵌入乘客 | `/embed/yuhe-residence` | `8.233.119.14` (Stale A) | Exit 35 (TLS Syscall Error) | Cert: Valid / HTTP 404 | N/A (Connection Reset) | HTTP 404 (Live Gate 待部署) | HTTP 404 (Dead/404) |
+| 9 | `api.smarttransport.tw` | `drts-dev-api` | 後端核心 API / BFF | `/api/health` | `8.233.119.14` (Stale A) | Exit 35 (TLS Syscall Error) | Cert: Valid / HTTP 404 | N/A (Connection Reset) | HTTP 404 (Live Gate 待部署) | HTTP 404 (Dead/404) |
 
 ### 退休／暫停網域（嚴格防回流清單）
 
-| 子網域 | 服務狀態 | 策略說明 | DNS 觀測真值 |
-|---|---|---|---|
-| `book.smarttransport.tw` | PAUSED | 2026-08-01 起暫停，不包含於 active surface | `NXDOMAIN` (合規) |
-| `ride.smarttransport.tw` | RETIRED | 2026-06-16 起退休，由 referral-embed 取代 | `NXDOMAIN` (合規) |
-| `concierge.smarttransport.tw` | RETIRED | 2026-06-16 起退休 | `NXDOMAIN` (合規) |
+| 子網域 | 服務狀態 | 策略說明 | DNS 觀測真值 | 防回流檢核 |
+|---|---|---|---|---|
+| `book.smarttransport.tw` | `paused` | 2026-08-01 起暫停，不包含於 active surface | `NXDOMAIN` | ✅ Clean |
+| `ride.smarttransport.tw` | `retired` | 2026-06-16 起退休，由 referral-embed 取代 | `NXDOMAIN` | ✅ Clean |
+| `concierge.smarttransport.tw` | `retired` | 2026-06-16 起退休 | `NXDOMAIN` | ✅ Clean |
 
 ---
 
@@ -134,15 +142,31 @@ python3 tools/system-remediation/public-entry/system-remediation-endpoints.py --
 
 ## 4. 回滾計畫 (Rollback Plan)
 
-若 DNS 變更或 Cloud Run 域名映射在切換過程中引發不可預期之路由崩潰或憑證簽發失敗，執行以下安全回滾程序：
+若 DNS 變更或 Cloud Run 域名映射在切換過程中引發不可預期之路由崩潰或憑證簽發失敗，執行以下安全回滾與流量隔離程序：
 
-### 4.1 業務流量降級 (Traffic Fallback)
-各前端與客戶端立即切換至現行直連 Cloud Run URL（`*-lyo6ra57fq-uc.a.run.app`），此軌道已實測 100% 正常，具備完整高可用能力：
-- Platform Admin: `https://drts-dev-platform-admin-web-lyo6ra57fq-uc.a.run.app/`
-- Ops Console: `https://drts-dev-ops-console-web-lyo6ra57fq-uc.a.run.app/`
-- Enterprise Dispatch: `https://drts-dev-enterprise-dispatch-web-lyo6ra57fq-uc.a.run.app/`
-- Referral Embed: `https://drts-dev-referral-embed-web-lyo6ra57fq-uc.a.run.app/embed/yuhe-residence`
-- Core API: `https://drts-dev-api-lyo6ra57fq-uc.a.run.app/api/health`
+### 4.1 業務流量降級與 Live Gate 邊界 (Traffic Fallback & Live Gate Boundary)
+> [!WARNING]
+> **嚴禁將未經 live 驗證或現行回傳 404 之 URL 標榜為已驗證回滾路徑**。
+> 依據 2026-09-08 候選實測，公網探測 `*-lyo6ra57fq-uc.a.run.app` 與 `*-4t7rg6fmeq-uc.a.run.app` 目前皆回傳 HTTP 404（服務未指派 live 流量或 revision 處於 private/待發布狀態）。因此，直連 Cloud Run 降級軌道屬於**未決的 Live Gate（`LIVE-GATE-PUBLIC-ENTRY`）**。
+
+`SR-LIVE-ENTRY-001` 在執行切換與應急回滾時之權威作業程序：
+1. **查詢 GCP 權威服務與 Revision 真實 URL**：
+   在執行任何公網切換前，先透過 GCP 權威 API 讀取各服務當前真實可用之 revision URL：
+   ```bash
+   gcloud run services describe <service-name> \
+     --region us-central1 \
+     --project nodal-alloy-503700-s3 \
+     --format='value(status.url)'
+   ```
+2. **若需要緊急切回前一穩定版本（Revision Rollback）**：
+   ```bash
+   gcloud run services update-traffic <service-name> \
+     --region us-central1 \
+     --project nodal-alloy-503700-s3 \
+     --to-revisions=<stable-revision-id>=100
+   ```
+3. **若確認 active revision 存活**：
+   僅在上述 command 取得 HTTP 200 / 307（終點 200）之真機驗收證據後，方可將前端與客戶端流量切換至該權威 URL。在此之前，不將 404 URL 偽造為有效回滾。
 
 ### 4.2 DNS 回滾操作
 在 GoDaddy DNS 控制臺將 9 個子網域之 CNAME 紀錄暫停或改回原始狀態，或將 TTL 設為最低（300 秒）以加速快取清除。
