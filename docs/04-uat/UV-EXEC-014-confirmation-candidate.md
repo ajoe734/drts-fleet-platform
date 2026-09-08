@@ -79,3 +79,8 @@ claimed. Product servers, browser servers and Docker were not started.
 Checks: task + UV-EXEC-007/009/010/012/013 unit suites; API and media-worker
 TypeScript checks; scoped ESLint and formatting checks. Exact final counts and
 candidate SHA are recorded in the machine-truth handoff.
+
+Final local verification on 2026-09-08 UTC: all six suites passed, 212 tests
+(including 62 task cases); API and media-worker typechecks passed after building
+contracts/control-plane-auth; scoped ESLint, Prettier and `git diff --check`
+passed. The new-epoch unapplied-tail negative case is included.

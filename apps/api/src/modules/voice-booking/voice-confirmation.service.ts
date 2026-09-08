@@ -650,7 +650,8 @@ export class VoiceConfirmationService {
     );
     const current = events.filter((e) => e.mediaEpoch === cutoff.mediaEpoch);
     requireGate(
-      current.length >= cutoff.controlSequence &&
+      events.every((e) => e.sequence <= cutoff.controlSequence) &&
+        current.length >= cutoff.controlSequence &&
         current.every(
           (e, i) =>
             e.sequence === i + 1 &&
