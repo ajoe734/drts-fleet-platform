@@ -28,7 +28,6 @@ import {
   FILING_PACKAGE_TYPES,
   OWNED_ORDER_STATUSES,
   IMPLEMENTED_REPORT_JOB_TYPES,
-  IMPLEMENTED_REPORT_OUTPUT_FORMATS,
   REGULATORY_REPORT_JOB_TYPES,
   REPORT_JOB_TYPES,
 } from "@drts/contracts";
@@ -67,6 +66,12 @@ type OperationalReportType =
 // (the background report-job pipeline only emits csv/xlsx/pdf/zip), so it is a
 // UI-only format handled client-side rather than through `createReportJob`.
 type OperationalExportFormat = ReportOutputFormat | "json";
+
+const AVAILABLE_REPORT_OUTPUT_FORMATS = [
+  "csv",
+  "xlsx",
+  "pdf",
+] as const satisfies readonly ReportOutputFormat[];
 
 type DailyRecordRow = DispatchDailyRecord & Record<string, unknown>;
 
@@ -645,7 +650,7 @@ function ReportJobComposerModal({
                 }
                 style={nativeSelectStyle}
               >
-                {IMPLEMENTED_REPORT_OUTPUT_FORMATS.map((value) => (
+                {AVAILABLE_REPORT_OUTPUT_FORMATS.map((value) => (
                   <option key={value} value={value}>
                     {value.toUpperCase()}
                   </option>
