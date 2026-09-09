@@ -1,5 +1,15 @@
 # SR-QA-WEBHOOK-001 — 驗收進度（未完成）
 
+## 2026-09-09 dispatch 重驗（目前阻擋）
+
+- 本輪 Owner Codex / Reviewer Codex2。指定 cwd 與 `codex/sr-qa-webhook-001` 相符，起始 working tree 乾淨。
+- `git fetch origin` exit 0；當時 origin/dev `3062ea363769cc393e59384251f5aedc7e570ac5`，執行 HEAD `9d77ea52e88d8bb3b5421d2a689624c8c9d8f492`，已納入 base（merge-base）為 `c71b66ebed6d6948dbb9eca99ce9efea3ede9218`。沒有 lifecycle candidate，也沒有在最新 dev 完成動態回歸。
+- `git rebase origin/dev` exit 1：重播 `a119ec0bb` 時四個 task 檔 add/add 衝突。`git rebase --abort` exit 0，恢復原 HEAD 與乾淨工作樹。已讀 `support/unblock/SR-QA-WEBHOOK-001/SR-QA-WEBHOOK-001-UNBLOCK-HISTORY-REPAIR.md`；helper 完成的是 recovery 計畫，要求 supervisor 指派 fresh recovery branch。本 dispatch 仍指定原分支，需 supervisor 落實 recovery routing；沒有 force push 或回退產品碼。
+- `pnpm exec eslint tests/unit/system-remediation/sr-qa-webhook-001/*.ts tests/e2e/system-remediation/sr-qa-webhook-001/*.ts --max-warnings=0` exit 0；`git diff --check` exit 0。這些只是靜態檢查。
+- 本輪 VM 明令禁止 Playwright 及產品／測試伺服器。既有 unit HTTP receiver、PostgreSQL recovery receiver 與 Nest auth HTTP 測試均呼叫 `listen`，因此未執行動態 suite；未產生新資源 ID，也未更新歷史 JSON 冒充本輪證據。需允許執行的外部驗收環境。
+- canonical show：`SR-QA-WEBHOOK-001-FIX-TENANT-BINDING` 現為 in_progress，但 `write_scopes=[]`；父任務仍僅依賴 SR-UAT-HARNESS-001。請 supervisor 授權修復 scope、排序 IAM/tenant 相依並補父依賴，再於同 candidate 重跑跨租戶 GET/issue/rotate/revoke 與 DB 不變檢查。前次 GET 200 外洩是歷史觀察，本輪未證明最新 dev 仍有該缺陷。
+- C111 使用量、C112 deadline/replay 契約、C113–C115 外部 provider／部署排程證據仍未完成。不 handoff、不宣告驗收通過；本輪只提交此進度證據。
+
 本文件取代先前將 local fixture smoke、連線中斷及單實例去重描述為完整驗收的聲明。Owner Codex；Reviewer Gemini（本次 dispatch）。未 handoff、未完成 review/CI/merge。
 
 ## 2026-09-08 21:40 UTC history repair 後重驗（最新，仍阻擋）
