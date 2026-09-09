@@ -2,7 +2,6 @@ import { Injectable, Optional, Logger } from "@nestjs/common";
 import type {
   OwnedOrderRecord,
   OwnedOrderStatus,
-  VoiceCapabilityTokenClaims,
 } from "@drts/contracts";
 import { ApiRequestError } from "../../common/api-envelope";
 import { VoiceBookingRepository } from "./voice-booking.repository";
@@ -286,7 +285,7 @@ export class VoiceOperationPolicyService {
   async evaluateOrderQueryPolicy(
     request: OrderQueryPolicyRequest,
   ): Promise<OrderQueryPolicyResult> {
-    const { voiceSessionId, resourceScopeId, targetOrderId, callerPhone, identityProof } =
+    const { voiceSessionId, resourceScopeId, targetOrderId, identityProof } =
       request;
 
     // Check capability
