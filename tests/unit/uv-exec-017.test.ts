@@ -642,6 +642,8 @@ describe("UV-EXEC-017: 真人轉接 coordinator 與排隊控制權移交", () =>
         resultVersion: 1,
         errorCode: null,
         errorReason: null,
+        createdAt: "2026-09-06T00:00:00.000Z",
+        updatedAt: "2026-09-06T00:00:00.000Z",
       };
 
       const h = buildTestHarness({ pendingReceipts: [pendingCommand] });
@@ -686,8 +688,6 @@ describe("UV-EXEC-017: 真人轉接 coordinator 與排隊控制權移交", () =>
         consumedCommandId: null,
         confirmedAt: "2026-09-06T00:00:00.000Z",
         expiresAt: "2026-09-06T00:02:00.000Z",
-        createdAt: "2026-09-06T00:00:00.000Z",
-        updatedAt: "2026-09-06T00:00:00.000Z",
       };
 
       const h = buildTestHarness({ activeConfirmation });
