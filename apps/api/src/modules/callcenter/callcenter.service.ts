@@ -83,6 +83,16 @@ type RecordingPendingCommand = {
 
 type RecordingFailedCommand = RecordingPendingCommand;
 
+export type CallcenterCallbackTaskRecord = CallbackTaskRecord & {
+  assignedOperatorId?: string | null;
+  attemptCount?: number;
+  lastOutcome?: string | null;
+  brandId?: string | null;
+  contactRole?: string | null;
+  contactName?: string | null;
+  consentRef?: string | null;
+};
+
 @Injectable()
 export class CallcenterService implements OnModuleInit {
   private callSequence = 1;
@@ -926,13 +936,13 @@ export class CallcenterService implements OnModuleInit {
     }
 
     const now = new Date().toISOString();
-    const updatedTask: CallbackTaskRecord = {
+    const updatedTask: CallcenterCallbackTaskRecord = {
       ...session.callbackTask,
       agentId: operatorId,
       assignedOperatorId: operatorId,
       status: "claimed" as any,
       updatedAt: now,
-    } as any;
+    };
     session.callbackTask = updatedTask;
     this.persistSessions([session], "claim_callback_task");
 
@@ -1007,14 +1017,14 @@ export class CallcenterService implements OnModuleInit {
         : "pending";
     const currentAttemptCount =
       ((session.callbackTask as any).attemptCount ?? 0) + 1;
-    const updatedTask: CallbackTaskRecord = {
+    const updatedTask: CallcenterCallbackTaskRecord = {
       ...session.callbackTask,
       note: command.notes ?? session.callbackTask.note,
       status: newStatus as any,
       attemptCount: currentAttemptCount,
       lastOutcome: command.outcome,
       updatedAt: now,
-    } as any;
+    };
     session.callbackTask = updatedTask;
     this.persistSessions([session], "record_callback_attempt");
 
@@ -1078,7 +1088,7 @@ export class CallcenterService implements OnModuleInit {
     }
 
     const now = new Date().toISOString();
-    const updatedTask: CallbackTaskRecord = {
+    const updatedTask: CallcenterCallbackTaskRecord = {
       ...session.callbackTask,
       note: command.reason ?? session.callbackTask.note,
       status: "cancelled" as any,

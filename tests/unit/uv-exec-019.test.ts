@@ -353,23 +353,23 @@ describe("UV-EXEC-019 Ops Console Exception Workbench, Tracing, and Callback Ope
       });
 
       // 2. Claim callback task
-      const claimed = await callcenterService.claimCallbackTask(
+      const claimed = (await callcenterService.claimCallbackTask(
         cb.callbackTaskId,
         "OP-99",
-      );
+      )) as ExtendedCallbackTaskRecord;
       expect(mockVoiceCallback.claimCallback).toHaveBeenCalled();
       expect(claimed.status).toBe("claimed");
       expect(claimed.assignedOperatorId).toBe("OP-99");
 
       // 3. Record contact attempt
-      const attempted = await callcenterService.recordCallbackAttempt(
+      const attempted = (await callcenterService.recordCallbackAttempt(
         cb.callbackTaskId,
         {
           operatorId: "OP-99",
           outcome: "busy",
           notes: "Line busy, try again in 10 mins",
         },
-      );
+      )) as ExtendedCallbackTaskRecord;
       expect(mockVoiceCallback.recordAttempt).toHaveBeenCalled();
       expect(attempted.lastOutcome).toBe("busy");
       expect(attempted.attemptCount).toBe(1);
