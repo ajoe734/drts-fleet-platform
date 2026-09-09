@@ -95,7 +95,10 @@ function mapSessionRow(row: VoiceSessionRow): VoiceSessionRecord {
     routeProfileVersion: row.route_profile_version,
     dialogState: row.dialog_state,
     mediaState: row.media_state,
-    controlOwner: row.control_owner,
+    controlOwner:
+      row.control_owner === "handoff" && row.dialog_state === "handoff_pending"
+        ? "coordinator"
+        : row.control_owner,
     leaseEpoch: row.lease_epoch,
     sessionVersion: row.session_version,
     commitStatus: row.commit_status,
@@ -460,7 +463,11 @@ export class VoiceSessionRepository {
         expectedSessionVersion,
         patch.dialogState ?? null,
         patch.mediaState ?? null,
-        patch.controlOwner ?? null,
+        patch.controlOwner
+          ? patch.controlOwner === "coordinator"
+            ? "handoff"
+            : patch.controlOwner
+          : null,
         patch.leaseEpoch ?? null,
         patch.commitStatus ?? null,
         patch.recordingState ?? null,

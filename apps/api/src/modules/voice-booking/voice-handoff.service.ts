@@ -7,9 +7,7 @@ import {
   type HandoffQueueItem,
 } from "../callcenter/voice-handoff-queue.service";
 import type { VoiceHangupReason } from "../callcenter/voice-cti.adapter";
-import type {
-  VoiceSessionRecord,
-} from "./voice-booking.repository";
+import type { VoiceSessionRecord } from "./voice-booking.repository";
 import { VoiceBookingRepository } from "./voice-booking.repository";
 import { VoiceSessionRepository } from "./voice-session.repository";
 import { VoiceSessionService } from "./voice-session.service";
@@ -207,7 +205,11 @@ export class VoiceHandoffService {
         "Session revision changed; reload before handoff.",
       );
     }
-    if (session.controlOwner !== "ai" && session.controlOwner !== "coordinator") {
+    if (
+      session.controlOwner !== "ai" &&
+      session.controlOwner !== "coordinator" &&
+      session.controlOwner !== "handoff"
+    ) {
       throw new ApiRequestError(
         409,
         "VOICE_SESSION_NOT_OWNER",
@@ -323,11 +325,7 @@ export class VoiceHandoffService {
       voiceSessionId: session.voiceSessionId,
       resourceScopeId: session.resourceScopeId,
       leaseEpoch: nextLeaseEpoch,
-      scopes: [
-        "session_execute",
-        "order_read_bound",
-        "handoff_request",
-      ],
+      scopes: ["session_execute", "order_read_bound", "handoff_request"],
     };
 
     return {
@@ -414,7 +412,8 @@ export class VoiceHandoffService {
     requestedEpoch: number,
     principalRole: string = "ai",
   ): Promise<VoiceSessionRecord> {
-    const session = await this.sessionRepository.findSessionById(voiceSessionId);
+    const session =
+      await this.sessionRepository.findSessionById(voiceSessionId);
     if (!session) {
       throw new ApiRequestError(
         404,
