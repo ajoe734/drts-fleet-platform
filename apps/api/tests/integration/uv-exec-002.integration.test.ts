@@ -252,6 +252,8 @@ describe("UV-EXEC-002 voice-booking runtime schema", () => {
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'voice' ORDER BY table_name`,
     );
     expect(tables.rows.map((row) => row.table_name)).toEqual([
+      "booking_audit_intent",
+      "booking_command_proof",
       "call_admission",
       "call_leg",
       "callback_attempt",
