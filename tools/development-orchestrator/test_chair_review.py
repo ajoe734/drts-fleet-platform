@@ -12,6 +12,24 @@ from control_plane.runtime import supervisor_runtime as supervisor
 
 
 class ChairmanFlowTests(unittest.TestCase):
+    def test_stale_or_blocked_helper_is_visible_but_cannot_resume_parent(self) -> None:
+        for disposition, resolution in (("blocked", "2026-09-09T03:00:00Z"), ("todo", "2026-09-09T01:00:00Z"), ("todo", None), ("todo", "invalid")):
+            with self.subTest(disposition=disposition, resolution=resolution):
+                parent = {"id": "PARENT-001", "status": "blocked", "owner": "Codex", "reviewer": "Codex2", "depends_on": [], "next": "Missing scope"}
+                helper = {"id": "HELPER-001", "status": "done", "task_class": "unblock", "helper_parent": parent["id"],
+                          "helper_kind": supervisor.blocked_task_triage_kind(parent), "resolved_parent_status": disposition,
+                          "last_update": "2026-09-09T03:00:00Z"}
+                if resolution is not None:
+                    helper["resolved_parent_at"] = resolution
+                status = {"tasks": [parent, helper], "blockers": [{"task_id": parent["id"], "status": "open", "created_at": "2026-09-09T02:00:00Z"}]}
+                self.assertEqual(supervisor.blocked_task_triage_action(status, parent), ("wait_for_parent_resolution", helper["id"]))
+                self.assertEqual(supervisor.dependency_ready_blocked_task_records({}, status), [])
+                visible = supervisor.dependency_ready_blocked_task_records({}, status, include_held=True)
+                self.assertEqual(visible[0]["task_id"], parent["id"])
+                with mock.patch.object(supervisor, "load_status", return_value=status), mock.patch.object(supervisor, "run_task_board_command") as writer:
+                    self.assertFalse(supervisor.apply_chair_parent_resume_action({}, {}, {"task_id": parent["id"], "reason": "Old helper is done"}))
+                writer.assert_not_called()
+
     def test_chair_review_message_includes_provider_health_context(self) -> None:
         message = supervisor.build_chair_review_message(
             {
@@ -579,6 +597,7 @@ class ChairmanFlowTests(unittest.TestCase):
                     "task_class": "unblock",
                     "helper_parent": "ADM-UI-RD-006",
                     "helper_kind": "history_repair",
+                    "resolved_parent_at": "2026-09-09T03:00:00Z",
                     "next": "Repair route documented and pushed.",
                 },
             ]
@@ -721,6 +740,7 @@ class ChairmanFlowTests(unittest.TestCase):
                     "task_class": "unblock",
                     "helper_parent": "ADM-UI-RD-006",
                     "helper_kind": "history_repair",
+                    "resolved_parent_at": "2026-09-09T03:00:00Z",
                     "next": "Repair route documented and pushed.",
                 },
             ]
