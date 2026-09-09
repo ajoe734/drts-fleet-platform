@@ -864,7 +864,7 @@ describe("report export", () => {
   it("streams a report as CSV with the rows it computed", async () => {
     const { services, jobId } = await completedJob("vehicle_roster");
 
-    const artifact = services.reportingFilingService.renderReportArtifact(
+    const artifact = await services.reportingFilingService.renderReportArtifact(
       jobId,
       "req-download",
     );

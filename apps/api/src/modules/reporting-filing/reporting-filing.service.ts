@@ -187,11 +187,7 @@ export type ReportArtifactResult = {
   buffer: Buffer;
   contentType: string;
   fileName: string;
-} & Promise<{
-  buffer: Buffer;
-  contentType: string;
-  fileName: string;
-}>;
+};
 
 @Injectable()
 export class ReportingFilingService implements OnModuleInit {
@@ -805,7 +801,7 @@ export class ReportingFilingService implements OnModuleInit {
     requestId?: string,
     identity?: EvidenceAccessIdentity | null,
     tenantScopeId?: string | null,
-  ): ReportArtifactResult {
+  ): ReportArtifactResult | Promise<ReportArtifactResult> {
     const job = this.requireGenericReportJob(jobId);
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
     if (normalizedTenantScopeId) {
@@ -864,7 +860,7 @@ export class ReportingFilingService implements OnModuleInit {
         contentType: renderer.contentType,
         fileName: `${job.jobType}-${job.jobId}.${job.format}`,
       };
-      return Object.assign(Promise.resolve(result), result) as ReportArtifactResult;
+      return result;
     }
 
     const promise = (async () => {
@@ -895,7 +891,7 @@ export class ReportingFilingService implements OnModuleInit {
       };
     })();
 
-    return promise as unknown as ReportArtifactResult;
+    return promise;
   }
 
   private assertReportFormatRenders(format: string) {

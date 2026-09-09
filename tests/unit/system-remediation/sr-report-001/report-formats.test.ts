@@ -590,9 +590,15 @@ describe("ReportingFilingService — formats, MIME types, rejection & scope", ()
 
     const artifactPdf = await service.renderReportArtifact(acceptedPdf.jobId);
     const pdfText = await extractPdfText(artifactPdf.buffer);
+    console.info("SR-REPORT-001 unit resources", JSON.stringify(
+      [accepted, acceptedXlsx, acceptedPdf].map(({ jobId }) => ({
+        jobId,
+        artifactId: service.getReportJob(jobId).artifact?.artifactId,
+      })),
+    ));
 
     // Number of filtered rows matches between CSV and XLSX
-    expect(csvRows.length).toBe(xlsxRows.length);
+    expect(csvRows).toEqual(xlsxRows);
     expect(csvRows.length).toBe(1); // ORD-001 is completed, ORD-002 is cancelled
     expect(artifactCsv.buffer.toString("utf8")).toContain("ORD-001");
     expect(artifactCsv.buffer.toString("utf8")).toContain("王小明");
