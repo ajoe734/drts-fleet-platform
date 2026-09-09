@@ -1,5 +1,33 @@
 # SR-PUSH-001 — current-dev reproduction and scope blocker
 
+## Dispatch verification — 2026-09-09 03:24 UTC
+
+- `git fetch origin`: exit 0; base `9b57f767047825fe116b2231aa22900ce408897a`.
+  Tested branch SHA `0952ef655aae6646f7d728216927545eaabcee69`;
+  implementation candidate SHA remains null.
+- `git rebase origin/dev`: exit 1 at duplicate historical anchor `8b015a460`
+  (evidence/test add-add conflicts). `git rebase --abort`: exit 0.
+  `git diff --quiet origin/dev HEAD -- apps/api/src/modules/multi-taxi/`:
+  exit 0; tested push source matches fetched dev.
+- `git merge-base --is-ancestor 6de31c41fa49d7089d87d42aa8f22378caa07858 origin/dev`:
+  exit 0. Read both merged history and planning packets under
+  `support/unblock/SR-PUSH-001/`. Neither grants product scopes or resolves the
+  provider/device protocol. The dispatch still grants five original paths and
+  only UV-EXEC-006 dependency; successor routing has not been applied.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-push-001/`: exit 0,
+  4 passed / 2 expected failures, 6 total, 14.09 seconds. Duplicate delivery and
+  swallowed persistence failure still reproduce; these are not acceptance passes.
+- `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api typecheck`:
+  exit 0. `git diff --check`: exit 0.
+- Supervisor action: apply the existing planning packet's service/repository
+  scope expansion and writer dependencies, approve provider/device resolution,
+  and route durable claim/receipt allocation. Apply the existing successor branch
+  routing; do not dispatch another history helper or resume only on helper done.
+- Resource IDs remain the test-only IDs below. Readiness still lists missing
+  provider account and authorized device. Live provider/message/device, receiver
+  and PostgreSQL resource IDs remain null. No server, external send, controlled
+  receiver, database integration or real-device verification ran.
+
 ## Dispatch verification — 2026-09-09 02:25 UTC
 
 - `git fetch origin`: exit 0; current base is
