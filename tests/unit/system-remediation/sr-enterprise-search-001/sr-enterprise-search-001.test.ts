@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { ApiClientError } from "../../../../packages/api-client/src";
-import {
+import BookingsHistoryPage, {
+  type EnterpriseBookingFilterCriteria,
+  type EnterpriseCurrentUser,
+  type EnterpriseUserIdentity,
+} from "../../../../apps/enterprise-dispatch-web/app/bookings/page";
+
+const {
   DEFAULT_BOOKING_FILTER_CRITERIA,
   entBtnStyle,
   filterEnterpriseBookings,
@@ -14,10 +20,7 @@ import {
   matchesBookingSearch,
   paginateEnterpriseBookings,
   resolveCurrentEnterpriseUser,
-  type EnterpriseBookingFilterCriteria,
-  type EnterpriseCurrentUser,
-  type EnterpriseUserIdentity,
-} from "./enterprise-search-logic";
+} = BookingsHistoryPage;
 import { tenantEnterpriseTheme } from "../../../../apps/enterprise-dispatch-web/components/booking-form/theme";
 import { REALM_COLORS } from "../../../../packages/ui-tokens/src/realms";
 import { readFileSync } from "node:fs";
@@ -722,6 +725,10 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
     });
 
     it("verifies BookingsHistoryPage exports default component and wires session identity", () => {
+      expect(typeof BookingsHistoryPage).toBe("function");
+      expect(typeof BookingsHistoryPage.filterEnterpriseBookings).toBe("function");
+      expect(typeof BookingsHistoryPage.paginateEnterpriseBookings).toBe("function");
+      expect(typeof BookingsHistoryPage.resolveCurrentEnterpriseUser).toBe("function");
       const pagePath = resolve(
         process.cwd(),
         "apps/enterprise-dispatch-web/app/bookings/page.tsx",

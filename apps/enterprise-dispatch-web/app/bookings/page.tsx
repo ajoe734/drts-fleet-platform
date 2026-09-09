@@ -16,11 +16,11 @@ import { t as translate, type TranslationKey } from "../../lib/translations";
 
 const h = React.createElement;
 
-type GatewayState = "quota-blocked" | "no-supply" | "degraded";
+export type GatewayState = "quota-blocked" | "no-supply" | "degraded";
 
-type EnterpriseSearchScope = "all" | "mine" | "byme";
+export type EnterpriseSearchScope = "all" | "mine" | "byme";
 
-type EnterpriseBookingStatusFilter =
+export type EnterpriseBookingStatusFilter =
   | "all"
   | "reserved"
   | "approval"
@@ -30,16 +30,16 @@ type EnterpriseBookingStatusFilter =
   | "cancelled"
   | "nosupply";
 
-interface EnterpriseUserIdentity {
+export interface EnterpriseUserIdentity {
   id?: string | null;
   name?: string | null;
   email?: string | null;
   phone?: string | null;
 }
 
-type EnterpriseCurrentUser = string | EnterpriseUserIdentity;
+export type EnterpriseCurrentUser = string | EnterpriseUserIdentity;
 
-interface EnterpriseBookingFilterCriteria {
+export interface EnterpriseBookingFilterCriteria {
   scope: EnterpriseSearchScope;
   q: string;
   status: EnterpriseBookingStatusFilter;
@@ -1492,3 +1492,17 @@ export default function BookingsHistoryPage() {
       ),
   );
 }
+
+BookingsHistoryPage.DEFAULT_BOOKING_FILTER_CRITERIA = DEFAULT_BOOKING_FILTER_CRITERIA;
+BookingsHistoryPage.gatewayHref = gatewayHref;
+BookingsHistoryPage.getBookingStateMeta = getBookingStateMeta;
+BookingsHistoryPage.isSamePassenger = isSamePassenger;
+BookingsHistoryPage.isSameBookedBy = isSameBookedBy;
+BookingsHistoryPage.matchesBookingSearch = matchesBookingSearch;
+BookingsHistoryPage.matchesBookingDateRange = matchesBookingDateRange;
+BookingsHistoryPage.hasActiveFilters = hasActiveFilters;
+BookingsHistoryPage.filterEnterpriseBookings = filterEnterpriseBookings;
+BookingsHistoryPage.paginateEnterpriseBookings = paginateEnterpriseBookings;
+BookingsHistoryPage.formatBookingTime = formatBookingTime;
+BookingsHistoryPage.entBtnStyle = entBtnStyle;
+BookingsHistoryPage.resolveCurrentEnterpriseUser = resolveCurrentEnterpriseUser;
