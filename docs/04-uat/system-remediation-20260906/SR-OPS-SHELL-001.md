@@ -4,11 +4,12 @@
 - Owner: `Gemini`
 - Reviewer: `Codex`
 - Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json`
-- Base SHA (`origin/dev` at rebase): `6f4ac8c74d6f45209c13d7d7cf616f7311c6ad69` (歷史 audit SHA: `6bbeaaa45`, 原始實作 base: `f759582305ca7ff1b17a0225d3dd54db22ee9a18`)
-- Prior Candidate SHA (PR #1728 / failed CI): `7308cc2802278d3c381c18eac4a420c4d9e2ed41`
-- Original PR #1648 SHA (All CI passed): `cdf5488d7dfd59415b5975d8163dc423bcb2c251`
+- Base SHA (`origin/dev` at merge): `3062ea363769cc393e59384251f5aedc7e570ac5` (前次 base: `6f4ac8c74ae3618b6109efd010014365a85d36d8`, 歷史 audit SHA: `6bbeaaa45`, 原始實作 base: `f759582305ca7ff1b17a0225d3dd54db22ee9a18`)
+- Current Local Head: `git merge origin/dev` completed cleanly with zero conflicts
+- PR #1648 URL: https://github.com/ajoe734/drts-fleet-platform/pull/1648
 - Worktree: `.artifacts/worktrees/auto/gemini-sr-ops-shell-001`
 - Branch: `gemini/sr-ops-shell-001`
+- Status: `blocked` (卡點已記錄於機讀狀態，保留完整驗收條件，不直接 done)
 
 ## 1. 現況盤點與根因分析（fix 前）
 
@@ -64,6 +65,32 @@ Codex 審查 candidate `5a0320b21` 時提出兩項 reopen 判定：
      - 於 `assistant-widget-layout.test.ts` 新增 1440x900 與 390x844 視窗的幾何邊界與命中測試（hit-testing），模擬多層 z-index 與 `pointerEvents: "none"` 穿透機制，驗證底層 dispatch 核心控制項（`dispatch-pagination-cta`、`dispatch-order-assign-cta`、`mobile-action-bar-submit`）在各種坐標點均不被 portal 攔截。
      - 於 `audit-and-cross-app-links.test.ts` 引入 DRTS Phase 1 權威 `ActionReceipt` 契約與真實資源 ID（如 `ord-tpe-2026-8801`、`inc-tpe-2026-0042`、`aud-disp-log-20260908-991`、`act-disp-assign-20260908-01`、`usr-ops-lead-01`），驗證序列化後的審計 URL 完全命中 runtime 正確之 platform-admin origin（而非 ops-console 404 或嵌套 `/platform-admin/audit`），且所有跨 app 連結均保證 `openMode: "new_tab"`。
      - 測試總數擴充至 41 項，全面 exit 0 通過。
+
+### 1.4 2026-09-09 Dispatch 診斷、Trunk Merge 與卡點分析
+
+在 2026-09-09T01:41Z 收到 supervisor dispatch（`Availability-first reassignment: Gemini claimed SR-OPS-SHELL-001`）後，進行深入核驗與診斷：
+
+1. **Trunk 整合 (`origin/dev`)**：
+   - 本地成功執行 `git merge --no-edit origin/dev`（base `3062ea363769cc393e59384251f5aedc7e570ac5`），無任何衝突（exit 0）。
+   - 驗證套件全部通過：
+     - `git diff --check`: exit 0
+     - `pnpm --filter @drts/ops-console-web typecheck`: exit 0 (`next typegen && tsc --noEmit` 通過)
+     - `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/`: exit 0（2 test files, 41/41 passed, 775ms）
+     - `pnpm --filter @drts/ops-console-web lint`: exit 0 (`--max-warnings=0` 通過)
+
+2. **卡點 1：CI Commit Trailers 格式失敗與遠端祖先非強制推送政策衝突**：
+   - 經檢查 PR #1648 之 GitHub Actions checks，共 24 項通過、僅 1 項失敗：`CI/Commit trailers (pull_request)`。
+   - 本地重現指令：`python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` 報錯：
+     `commit fe3d92cbaa12: subject must be '<TASK-ID>: <summary>', got: 'test(SR-OPS-SHELL-001): resolve review rejection P2 with realistic hit-testing and domain IDs'`
+   - 根因：前一輪 commit `fe3d92cba` 之 commit subject 使用了 `test(...)` 前綴。而 `tools/ci/git/check_commit_trailers.py` 第 31 行正則表達式 `SUBJECT_RE` 僅允許 `(?:wip|fix|feat|refactor|docs|chore|style)` 或無 prefix 格式，不接受 `test`。
+   - 依據 `docs/ops/branch-strategy.md` §11 及本次派工指令（「先 commit＋普通 push，再 handoff；若安全 commit 或普通 non-force push 做不到，必須明確回報 progress / blocker 與原因，不能把工作描述成已完成」），此處嚴禁使用 `git push --force`。
+   - 由於 `fe3d92cba` 已經由前任推送至遠端 `origin/gemini/sr-ops-shell-001`，任何普通（fast-forward）push 皆必須保留 `fe3d92cba` 作為祖先節點。在 `check_commit_trailers.py` 檢查 `origin/dev..HEAD` 中所有 non-merge commits 的機制下，該歷史 commit 將持續導致 PR #1648 的 Commit trailers 檢查紅燈。
+   - **建議處置**：比照 `UV-EXEC-006`（PR #1822）、`SR-FLEET-FORM-001`（PR #1752）與 `UV-EXEC-012`（PR #1821）之非破壞性歷史修復模式，由 Supervisor 授權建立 fresh replacement branch（例如 `gemini/sr-ops-shell-001-recovered-20260909`），將此處已驗證通過之 41 項測試與助理 layout 淨補丁推送至新分支建立 PR；或由 Supervisor 裁定採用已通過全部 24 項 CI 檢查之平行 PR #1728（`codex/sr-ops-shell-001`）。
+
+3. **卡點 2：Q-SR-OPS-SHELL-001 跨 app dispatch/audit 頁面與接收端契約阻塞**：
+   - 如 PR #1749、PR #1804 及本 runbook 記載，`/dispatch` 頁面（`apps/ops-console-web/app/dispatch/page.tsx:4520`）之 audit CTA 僅傳遞 `/audit` 且無 selected resource context，接收端 `apps/platform-admin-web/app/audit/page.tsx:164` 呼叫 `client.listAuditLogs()` 亦未消費 URL query 參數。
+   - 兩者均在當前 `write_scopes` 之外。依據協同規範，owner 不得擅自越權修改共用頁面，必須等待 Supervisor 擴充 machine-truth write_scopes 與相依、並確認 receiver 契約後方得實作。
+   - 本任務堅持誠實原則，維持嚴格 scope 界線與完整驗收條件，以 `ai-status.sh blocker` 落盤記錄阻塞，不以 branch-only 宣稱已完成。
 
 ## 2. 解決方案與架構設計
 
@@ -151,8 +178,8 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/
 
  Test Files  2 passed (2)
       Tests  41 passed (41)
-   Start at  14:59:46
-   Duration  577ms
+   Start at  01:47:53
+   Duration  775ms
 exit code: 0
 ```
 
@@ -173,5 +200,5 @@ exit code: 0
   未在實體裝置或圖形介面瀏覽器進行手動點擊（因無 GUI 容器環境）；本報告以純函式幾何 clamp、DOM pointer-events 繼承模擬、全域 click 事件循環與焦點切換之自動化單元測試（41 項測試通過）作為驗證依據，不冒充真機通過。
 - **未修改中央共用設定**：
   未修改中央 shared exports、中央 test config、中央 routes、`package.json` 或 `pnpm-lock.yaml`。
-- **分支歷史與普通 Push 狀態**：
-  遠端分支 `origin/gemini/sr-ops-shell-001` 原有 head `cdf5488d7`（對應 PR #1648）。本地以 `dev` 為 base 完成驗證後，整合遠端既有 head 為祖先節點，以純普通（非強制）fast-forward push 推送至 `origin/gemini/sr-ops-shell-001`，滿足無損與 non-force push 規範。
+- **分支歷史與普通 Push 狀態及卡點記錄**：
+  遠端分支 `origin/gemini/sr-ops-shell-001` 原有 head `cdf5488d7`，後續整合時包含帶有非白名單 prefix 之歷史 commit `fe3d92cba`，導致 PR #1648 `CI/Commit trailers` 失敗。本地已合併最新 `origin/dev`（`3062ea363`），通過全部本地測試與型別檢查。依據「若安全 commit 或普通 non-force push 做不到，必須明確回報 progress / blocker 與原因，不能把工作描述成已完成」與禁止 force push 之規定，本輪以普通 commit 及 push 儲存進度，並以 `ai-status.sh blocker` 誠實記錄卡點，等待 Supervisor 裁定 fresh recovery branch 或 PR 整合路徑。
