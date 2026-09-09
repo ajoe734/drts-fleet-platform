@@ -13,12 +13,14 @@ from control_plane.runtime import supervisor_runtime as supervisor
 
 class ChairmanFlowTests(unittest.TestCase):
     def test_stale_or_blocked_helper_is_visible_but_cannot_resume_parent(self) -> None:
-        for disposition in ("blocked", "todo"):
-            with self.subTest(disposition=disposition):
+        for disposition, resolution in (("blocked", "2026-09-09T03:00:00Z"), ("todo", "2026-09-09T01:00:00Z"), ("todo", None), ("todo", "invalid")):
+            with self.subTest(disposition=disposition, resolution=resolution):
                 parent = {"id": "PARENT-001", "status": "blocked", "owner": "Codex", "reviewer": "Codex2", "depends_on": [], "next": "Missing scope"}
                 helper = {"id": "HELPER-001", "status": "done", "task_class": "unblock", "helper_parent": parent["id"],
                           "helper_kind": supervisor.blocked_task_triage_kind(parent), "resolved_parent_status": disposition,
-                          "last_update": "2026-09-09T01:00:00Z"}
+                          "last_update": "2026-09-09T03:00:00Z"}
+                if resolution is not None:
+                    helper["resolved_parent_at"] = resolution
                 status = {"tasks": [parent, helper], "blockers": [{"task_id": parent["id"], "status": "open", "created_at": "2026-09-09T02:00:00Z"}]}
                 self.assertEqual(supervisor.blocked_task_triage_action(status, parent), ("wait_for_parent_resolution", helper["id"]))
                 self.assertEqual(supervisor.dependency_ready_blocked_task_records({}, status), [])

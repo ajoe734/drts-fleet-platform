@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import copy
 import importlib.util
 import os
 import subprocess
@@ -379,6 +380,35 @@ class CandidateLifecycleTest(unittest.TestCase):
         _log.assert_not_called()
 
     @mock.patch.object(ai_status, "append_log")
+    def test_legacy_helper_note_or_progress_cannot_renew_resolution(self, _log: mock.Mock) -> None:
+        for command in (ai_status.command_note, ai_status.command_progress):
+            for resolution in (None, "invalid"):
+                with self.subTest(command=command.__name__, resolution=resolution):
+                    state = self.state()
+                    parent = self.task(state)
+                    parent.update(status="blocked", waiting_for="Claude", next="New blocker")
+                    helper = {
+                        "id": "HELPER-001", "owner": "Codex", "task_class": "unblock",
+                        "status": "done", "helper_parent": parent["id"],
+                        "resolved_parent_status": "todo", "last_update": "2026-09-09T01:00:00Z",
+                    }
+                    if resolution is not None:
+                        helper["resolved_parent_at"] = resolution
+                    state["tasks"].append(helper)
+                    state["blockers"] = [{"task_id": parent["id"], "status": "open", "created_at": "2026-09-09T02:00:00Z"}]
+                    with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True), mock.patch.object(
+                        ai_status, "iso_now", return_value="2026-09-09T03:00:00Z"
+                    ):
+                        command(state, [helper["id"], "Administrative update"])
+                    self.assertEqual(helper["status"], "done")
+                    self.assertEqual(helper["last_update"], "2026-09-09T03:00:00Z")
+                    before = copy.deepcopy(state)
+                    with mock.patch.dict(os.environ, {"AI_NAME": "Supervisor", "TASK_RESUME_HELPER_ID": helper["id"]}, clear=True):
+                        with self.assertRaisesRegex(SystemExit, "no verifiable parent resolution time"):
+                            ai_status.command_resume_blocked(state, [parent["id"], "todo", "Retry legacy helper"])
+                    self.assertEqual(state, before)
+
+    @mock.patch.object(ai_status, "append_log")
     def test_helper_backed_resume_accepts_fresh_resolution(self, _log: mock.Mock) -> None:
         state = self.state()
         parent = self.task(state)
@@ -386,6 +416,7 @@ class CandidateLifecycleTest(unittest.TestCase):
         state["tasks"].append({
             "id": "HELPER-001", "task_class": "unblock", "status": "done",
             "helper_parent": parent["id"], "resolved_parent_status": "todo",
+            "resolved_parent_at": "2026-09-09T03:00:00Z",
             "last_update": "2026-09-09T03:00:00Z",
         })
         state["blockers"] = [{"task_id": parent["id"], "status": "open", "created_at": "2026-09-09T02:00:00Z"}]

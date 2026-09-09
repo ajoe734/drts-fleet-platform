@@ -24,7 +24,9 @@ records `resolved_parent_at`; it must not silently replace it with `todo`.
 
 A helper-backed `resume-blocked` must name a completed helper for that parent,
 with a resumable disposition and no open parent blocker newer than its
-resolution. Updating a note does not renew resolution evidence. The chair keeps
+resolution. Legacy helpers without a valid `resolved_parent_at` remain held;
+mutable `last_update` is never completion evidence. Updating a note or progress
+does not renew resolution evidence. The chair keeps
 such held parents visible as `wait_for_parent_resolution`, without repeatedly
 dispatching their owners or creating the same helper. After actually resolving
 the remaining blocker, Supervisor can explicitly resume the parent with the
