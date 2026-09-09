@@ -59,6 +59,7 @@ from control_plane.domain.failure_policy import (
 )
 from control_plane.domain.resource_admission import decide as resource_admission_decision
 from control_plane.domain.lane_health import pause_matches_lane
+from control_plane.domain.unblock_resolution import parent_resume_blocker
 from control_plane.domain.chair_policy import (
     normalize_review_defaults as normalize_domain_review_defaults,
 )
@@ -5412,6 +5413,7 @@ def dependency_ready_blocked_task_records(
     status: dict[str, Any] | None,
     *,
     limit: int = 8,
+    include_held: bool = False,
 ) -> list[dict[str, Any]]:
     if not isinstance(status, dict):
         return []
@@ -5428,7 +5430,7 @@ def dependency_ready_blocked_task_records(
         if not dependencies_satisfied(task, task_map, dependency_done_statuses):
             continue
         action, helper_task_id = blocked_task_triage_action(status, task)
-        if action == "wait_for_unblock_task":
+        if action == "wait_for_unblock_task" or (action == "wait_for_parent_resolution" and not include_held):
             continue
         records.append(
             {
@@ -5442,7 +5444,10 @@ def dependency_ready_blocked_task_records(
                 "next": brief_reason_text(task.get("next"), max_length=220),
             }
         )
-    records.sort(key=lambda item: task_phase_priority(item["task"], task_map, dependency_done_statuses))
+    records.sort(key=lambda item: (
+        item["action"] == "wait_for_parent_resolution",
+        task_phase_priority(item["task"], task_map, dependency_done_statuses),
+    ))
     return records[:limit]
 
 
@@ -5610,7 +5615,7 @@ def _chair_review_summary_lines(
         dispatch_pause_lines.append("- none")
 
     blocked_task_lines: list[str] = []
-    for item in dependency_ready_blocked_task_records(config, status):
+    for item in dependency_ready_blocked_task_records(config, status, include_held=True):
         action_label = str(item.get("action") or "-")
         helper_label = str(item.get("helper_task_id") or "-")
         blocked_task_lines.append(
@@ -5713,9 +5718,10 @@ def build_chair_review_message(
         "- `dispatch_now` 只能對 machine truth 已符合派工條件的非 blocked 任務觸發。\n"
         "- `create_unblock_task` 只能用在下方 Dependency-ready blocked tasks；它會建立 task-scoped unblock child task，不會直接把 parent 從 blocked 改成 todo/done。\n"
         "- `resume_parent_task` 只能用在已經有 completed unblock child 的 blocked parent；它會把 parent 轉回可派工狀態，讓 owner 繼續主線執行。\n"
+        "- `wait_for_parent_resolution` 表示 helper 明確保留 blocked，或主任务又回報了更新的阻塞；舊 helper done 不能再次恢復派工。保留阻塞與 next，具體落實剩餘 routing/產品修復後由 Supervisor 明確 resume，不要重建同一 helper 或只重試 owner。\n"
         "- blocked task 若是 branch/commit/worktree/push 污染，`unblock_kind=history_repair`；若是 product/contract/canonical 決策缺口，`unblock_kind=planning_decision`；其他才用 `manual_unblock`。\n"
         "- 若 Chair review reason 是 `reassignment_triage`，且 `blocked_by` / `recommended_focus` 已明確指出某個 dependency-ready blocked task 的 unblock route，請直接輸出對應 `task_actions` (`create_unblock_task` 或 `resume_parent_task`)，不要只留在 `recommended_focus`。\n"
-        "- 若 Chair review reason 是 `blocked_task_triage`，不可只評論；每個 listed blocked task 都要依摘要建議採取 `create_unblock_task` 或 `resume_parent_task`，讓 machine truth 真正往前走。\n"
+        "- 若 Chair review reason 是 `blocked_task_triage`，對摘要中的 actionable blocked task 採取 `create_unblock_task` 或 `resume_parent_task`；`wait_for_parent_resolution` 只供追蹤剩餘阻塞，不能把舊證據當成新修復。\n"
         "- `provider_actions` 目前只允許 `pause` / `clear_pause`，只針對 exact lane 生效；暫停原因必須具體；不要重複 pause 已在 Provider lane pauses 列出的 lane，除非你要改變其狀態。\n"
         "- 若 Chair review reason 是 `approval_triage`，Pending approvals 不可只評論；每一個 pending approval 都必須在 `approval_actions` 中明確 `allow` 或 `deny`，並寫具體 reason。\n"
         "- `approval_actions` 必須使用 `decision` 欄位，不要用 `action`；格式是 `{\"approval_id\":\"...\",\"decision\":\"allow|deny\",\"reason\":\"...\"}`。\n"
@@ -6436,6 +6442,8 @@ def blocked_task_triage_action(
     unblock_kind = blocked_task_triage_kind(task)
     completed_helper = completed_unblock_task_for_parent(status, task_id, unblock_kind)
     if completed_helper is not None:
+        if parent_resume_blocker(status, task, completed_helper):
+            return "wait_for_parent_resolution", str(completed_helper.get("id") or "").strip() or None
         return "resume_parent_task", str(completed_helper.get("id") or "").strip() or None
     open_helper = open_unblock_task_for_parent(status, task_id, unblock_kind)
     if open_helper is not None:
@@ -6927,6 +6935,8 @@ def apply_chair_parent_resume_action(
     unblock_kind = blocked_task_triage_kind(parent)
     completed_helper = completed_unblock_task_for_parent(status, task_id, unblock_kind)
     if completed_helper is None:
+        return False
+    if parent_resume_blocker(status, parent, completed_helper):
         return False
 
     resume_status = str(action.get("resume_status") or "todo").strip().lower() or "todo"
