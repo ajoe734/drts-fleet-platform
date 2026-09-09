@@ -2,6 +2,22 @@
 
 Status: partial implementation; web export blocked. No review candidate locked.
 
+## Dispatch recheck — 2026-09-09 00:19 UTC
+
+- Fresh fetched `origin/dev` base: `8c6e1fa9732ec8322de275084817683e6d67407c`; tested head: `db077da1a1d30ee6e395b9e5660054154bfcfb9f`. Candidate remains unassigned.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: initially exit 1 on duplicate-anchor conflicts in the report/test. Retained published `e7cb1af222d9464a07b9bc6584ae5fc93ecffba0` contents for those conflicts; final `GIT_EDITOR=true git rebase --continue`: exit 0. `git merge --no-edit origin/codex2/sr-driver-web-001`: exit 0, preserving ordinary-push ancestry.
+- `git diff --exit-code e7cb1af222d9464a07b9bc6584ae5fc93ecffba0 HEAD -- apps/driver-app/components/driver-trip-map.tsx apps/driver-app/components/driver-trip-map.web.tsx tests/unit/system-remediation/sr-driver-web-001/ docs/04-uat/system-remediation-20260906/SR-DRIVER-WEB-001.md`: exit 0 before this update. No implementation/test changes.
+- `pnpm --filter @drts/driver-app typecheck`: exit 0. `pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/`: exit 0, 1 file / 5 tests. `git diff --check`: exit 0. `git diff --exit-code origin/dev -- apps/driver-app/components/driver-trip-map.tsx`: exit 0.
+- Actual export command:
+
+  ```sh
+  NODE_OPTIONS=--require="$PWD/tests/unit/system-remediation/sr-driver-web-001/metro-worktree-harness.cjs" pnpm --filter @drts/driver-app exec expo export --platform web --max-workers 2 --source-maps --output-dir /tmp/sr-driver-web-001-web-20260909 > /tmp/sr-driver-web-001-web-20260909.log 2>&1
+  ```
+
+  Exit **1**, 670 modules: unable to resolve `react` from `apps/driver-app/app/_layout.tsx`. This dispatch fails earlier than the historical SQLite WASM error and does not freshly reproduce that error. Ephemeral resource: `/tmp/sr-driver-web-001-web-20260909.log`. The provided app dependency symlink points through `codex-sr-qa-webhook-001`; the existing diagnostic harness does not suffice for this workspace layout.
+- Current canonical task still has four original write scopes and no dependencies; `git ls-tree origin/dev apps/driver-app/metro.config.js` has no entry. The history helper explicitly grants no scope. Supervisor must authorize the Metro scope and reconcile dependencies/runbook, or register a bundler producer with a parent dependency; also resolve the current dependency/Metro visibility problem before evaluating WASM again.
+- No product development/preview/browser server was launched. Browser `/`, `/onboarding`, `/sos` are unverified and prohibited on this VM. Native exports, the historical 91 repair tests, live APIs, signed builds and physical devices were not rerun. No SOS sent, handoff, CI, merge, deployment or acceptance success claimed.
+
 ## Dispatch recheck — 2026-09-08 18:47 UTC
 
 - Fresh fetched `origin/dev` base: `d4f54ef94e059a981bf2be1f7b944e815870e117`; tested head: `6664e1fa99af4a6b8c50184f33c98f9dd4bbd3ed`. Candidate remains unassigned.
