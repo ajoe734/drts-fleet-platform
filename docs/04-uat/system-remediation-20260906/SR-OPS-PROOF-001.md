@@ -1,5 +1,45 @@
 # SR-OPS-PROOF-001 — isolated restore and workload-proof preparation
 
+## 2026-09-09 resumed dispatch — recovery assignment still blocked
+
+Fresh `git fetch origin` and `git ls-remote origin refs/heads/dev` both identify
+base `3062ea363769cc393e59384251f5aedc7e570ac5`. Tested existing task anchor:
+`e7646f660cd0f3b439e7827871872ebff343c2bc`; no handoff candidate is locked.
+The required `git rebase origin/dev` exited 1 while replaying historical
+`e2aef3803` (three task-owned add/add conflicts). `git rebase --abort` exited 0
+and restored the clean original branch. These tests therefore certify the
+existing anchor only, not a successfully rebased candidate.
+
+The merged repair artifact at commit
+`3e0bdd6d8f31107e771e8379a0aaefc01b42ff03`, path
+`support/unblock/SR-OPS-PROOF-001/SR-OPS-PROOF-001-UNBLOCK-HISTORY-REPAIR.md`,
+requires supervisor to assign a replacement isolated branch
+`codex/sr-ops-proof-001-history-recovered`, then import only the three parent
+scopes without old ancestry. This dispatch still explicitly assigns
+`codex/sr-ops-proof-001`. The helper's completion documents a recovery route;
+it does not repair this branch or authorize this worker to override dispatch.
+No repeated rebase/remerge, force push or branch reset was performed.
+
+| Actual command | Exit / result |
+| --- | --- |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-ops-proof-001` | 0; 4 files, 35 tests |
+| `pnpm exec eslint tests/unit/system-remediation/sr-ops-proof-001` | 0; prior eslint exit 2 did not recur |
+| `bash -n tools/system-remediation/ops-proof/ops-proof.sh` | 0 |
+| `git diff --check` | 0 before evidence changes |
+| `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` | 1; the same six historical invalid subjects remain |
+| `bash tools/system-remediation/ops-proof/ops-proof.sh inventory --output /tmp/SR-OPS-PROOF-001-inventory-20260909.json` | 0; local observations only |
+
+Durable receipt: `tools/system-remediation/ops-proof/evidence/inventory-20260909T014005Z.json`.
+PostgreSQL clients remain unavailable (ENOENT); no cloud resource was requested.
+The capacity unit suite uses only a temporary mechanics-test HTTP listener;
+no product development server, browser/preview server or Docker infrastructure
+was started. No real snapshot restoration, business capacity or deployment
+acceptance was performed. Snapshot/independent manifest, isolated DB/API IDs,
+authenticated workload plan and applicable cloud authorization remain missing.
+Supervisor must apply the documented branch override and resolve the existing
+preparation/live boundary and resource gate before handoff. This continuation
+records `blocked`, with its evidence commit and ordinary push in canonical status.
+
 ## 2026-09-08 19:21 UTC dispatch — replacement routing still required
 
 Fetched base `d07bad8d7f84cc2c5a980c4e92ce3c2e2b654391`; inspected/tested
