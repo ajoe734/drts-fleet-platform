@@ -5,6 +5,7 @@ import { RequireRealms } from "../common/auth";
 import { internalKeyMetrics } from "../common/auth/internal-key-metrics";
 import { RATE_LIMIT_SKIP_DEFAULT } from "../common/throttling/rate-limit.constants";
 import { iamSecurityMetrics } from "../observability/iam-security-metrics";
+import { voiceAlertMetrics } from "../observability/voice-alert-metrics";
 
 @Controller("metrics")
 @SkipThrottle(RATE_LIMIT_SKIP_DEFAULT)
@@ -15,7 +16,8 @@ export class MetricsController {
   getMetrics() {
     const internalKey = internalKeyMetrics.toPrometheusFormat();
     const iamSecurity = iamSecurityMetrics.toPrometheusFormat();
-    return [internalKey, iamSecurity].filter(Boolean).join("\n\n");
+    const voiceAlerts = voiceAlertMetrics.toPrometheusFormat();
+    return [internalKey, iamSecurity, voiceAlerts].filter(Boolean).join("\n\n");
   }
 }
 

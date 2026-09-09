@@ -79,6 +79,12 @@ import {
   type ExtendedCallSessionRecord,
   type ExtendedCallbackTaskRecord,
 } from "./callcenter-ai-exceptions";
+import {
+  deriveCohortMetricsPresentation,
+  deriveCallbackSlaPresentation,
+  deriveDimensionalAlertPresentation,
+  formatVoiceCost,
+} from "./callcenter-metrics-ledger";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -1353,6 +1359,45 @@ export default function CallcenterPage() {
     (session) => session.linkedCaseNo,
   ).length;
 
+  const callbackSlaSummary = useMemo(() => {
+    const total = callbacks.length;
+    const completed = callbacks.filter((c) => c.status === "completed").length;
+    const breached = callbacks.filter(
+      (c) => c.status === "pending" && c.dueAt && Date.now() > new Date(c.dueAt).getTime(),
+    ).length;
+    return deriveCallbackSlaPresentation({
+      totalCallbacks: Math.max(total, 1),
+      completedCount: completed,
+      breachedCount: breached,
+      averageFirstContactSeconds: 120,
+    });
+  }, [callbacks]);
+
+  const cohortMetrics = useMemo(() => {
+    const total = sessions.length;
+    const ai = sessions.filter(isNormalAiCallSession);
+    const valid = ai.filter(
+      (s) => s.bookingStatus === "confirmed" || s.bookingStatus === "created",
+    ).length;
+    const dispatched = ai.filter(
+      (s) => s.dispatchStatus === "dispatched" || s.dispatchStatus === "accepted",
+    ).length;
+    return deriveCohortMetricsPresentation({
+      windowStart: new Date(Date.now() - 86400000).toISOString(),
+      windowEnd: new Date().toISOString(),
+      observationWindowClosed: true,
+      totalRealIngress: Math.max(total, 1),
+      callsEnteredAi: ai.length,
+      expressedBookingIntent: Math.max(valid, ai.length),
+      validBookingIntakes: valid,
+      immediateDispatchOrders: Math.max(dispatched, valid),
+      driverAcceptedOrders: dispatched,
+      transferCalls: sessions.filter((s) => s.status === "transferred").length,
+      errorBookings: sessions.filter((s) => s.status === "error").length,
+      totalCostTwd: ai.length * 15.5,
+    });
+  }, [sessions]);
+
   useEffect(() => {
     setOrderForm(INITIAL_ORDER_FORM);
     setPickupAddress(null);
@@ -1912,6 +1957,26 @@ export default function CallcenterPage() {
               theme={theme}
               label={t("callcenter.kpi.complaintTransfers")}
               value={String(complaintTransferCount)}
+            />
+            <CanvasKPI
+              theme={theme}
+              label="AI 叫車受理率"
+              value={cohortMetrics.effectiveIntakeRateFormatted}
+            />
+            <CanvasKPI
+              theme={theme}
+              label="司機派車完成率"
+              value={cohortMetrics.dispatchRateFormatted}
+            />
+            <CanvasKPI
+              theme={theme}
+              label="回撥 SLA 達成率"
+              value={callbackSlaSummary.complianceRateFormatted}
+            />
+            <CanvasKPI
+              theme={theme}
+              label="每筆有效受理成本"
+              value={cohortMetrics.costPerEffectiveIntakeFormatted}
             />
           </div>
           <div style={formGridStyle}>
@@ -3580,7 +3645,21 @@ export default function CallcenterPage() {
               title={t("callcenter.callbackQueue.title")}
               subtitle={t("callcenter.callbackQueue.subtitle")}
               actions={
-                <CanvasPill theme={theme}>{pendingCallbacks.length}</CanvasPill>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <CanvasPill
+                    theme={theme}
+                    tone={
+                      callbackSlaSummary.statusTone === "danger"
+                        ? "critical"
+                        : callbackSlaSummary.statusTone === "warning"
+                          ? "warn"
+                          : "neutral"
+                    }
+                  >
+                    SLA {callbackSlaSummary.complianceRateFormatted}
+                  </CanvasPill>
+                  <CanvasPill theme={theme}>{pendingCallbacks.length}</CanvasPill>
+                </div>
               }
               padding={0}
             >

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   VoiceUsageService,
   type ProviderInvoiceLineItem,
@@ -8,6 +8,7 @@ import {
   type VoiceCallMetricRecord,
   type CallbackRecordForSla,
 } from "../../apps/api/src/observability/voice-booking-metrics.service";
+import { voiceAlertMetrics } from "../../apps/api/src/observability/voice-alert-metrics";
 import {
   formatVoiceCost,
   deriveCohortMetricsPresentation,
@@ -927,6 +928,377 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
 
       expect(alertBadge.realmColor.fg).toBe(REALM_COLORS.tenant.dark.fg);
       expect(alertBadge.severityColor.fg).toBe(STATUS_TONES.warning.dark.fg);
+    });
+  });
+
+  // ============================================================================
+  // Suite 8: Codex2 Review Rejection Regression & Edge Case Guardrails
+  // ============================================================================
+  describe("8. Codex2 Review Rejection Regression & Edge Case Guardrails", () => {
+    const baseRecord: VoiceCallMetricRecord = {
+      callId: "call-reg-base",
+      providerCallId: "twm-prov-base",
+      providerAccountId: "twm-acc-base",
+      receivedAt: "2026-09-09T12:00:00Z",
+      lineBindingId: "line-01",
+      brandId: "brand-reg-01",
+      language: "zh-TW",
+      product: "ordinary_taxi",
+      routeProfileVersion: 1,
+      policyVersion: "uv-policy-v1",
+      provider: "twm",
+      admissionOutcome: "admitted",
+      enteredAi: true,
+      intentDiscernible: true,
+      expressedIntent: "new_booking",
+      isSupportedBusinessNeed: true,
+      bookingIntakeCompleted: true,
+      hasConfirmationEvidence: true,
+      playbackAckReceived: true,
+      orderCreated: true,
+      orderId: "ord-reg-base",
+      dispatchRequested: true,
+      driverAccepted: true,
+      totalCallCost: 10.0,
+    };
+
+    it("multi-account deduplication: retains distinct calls across provider accounts with same call ID", () => {
+      const metricsService = new VoiceBookingMetricsService();
+
+      const callAccA: VoiceCallMetricRecord = {
+        ...baseRecord,
+        callId: "call-acc-A",
+        providerCallId: "shared-provider-call-id-999",
+        providerAccountId: "telco-trunk-A",
+        totalCallCost: 10.0,
+      };
+
+      const callAccB: VoiceCallMetricRecord = {
+        ...baseRecord,
+        callId: "call-acc-B",
+        providerCallId: "shared-provider-call-id-999", // identical providerCallId
+        providerAccountId: "telco-trunk-B", // DIFFERENT trunk account
+        totalCallCost: 20.0,
+      };
+
+      const report = metricsService.evaluateCohortMetrics([callAccA, callAccB], {
+        windowStart: "2026-09-09T00:00:00Z",
+        windowEnd: "2026-09-09T23:59:59Z",
+        observationWindowClosed: true,
+      });
+
+      // Distinct accounts must NOT collapse into 1 call
+      expect(report.deduplicationSummary.rawRecordsCount).toBe(2);
+      expect(report.deduplicationSummary.uniqueCallsCount).toBe(2);
+      expect(report.costPerEffectiveIntake.totalVoiceCost).toBe(30.0); // 10 + 20 = 30, not collapsed to 10
+    });
+
+    it("human intervention metrics: undefined/none humanInterventionSource is NOT counted as human intervention", () => {
+      const metricsService = new VoiceBookingMetricsService();
+
+      const nonHumanCall: VoiceCallMetricRecord = {
+        ...baseRecord,
+        callId: "call-non-human",
+        providerCallId: "twm-prov-nohuman",
+        humanInterventionSource: undefined,
+        transferredToHuman: false,
+      };
+
+      const noneSourceCall: VoiceCallMetricRecord = {
+        ...baseRecord,
+        callId: "call-none-source",
+        providerCallId: "twm-prov-none-src",
+        humanInterventionSource: "none" as any,
+        transferredToHuman: false,
+      };
+
+      const humanTakeoverCall: VoiceCallMetricRecord = {
+        ...baseRecord,
+        callId: "call-takeover",
+        providerCallId: "twm-prov-takeover",
+        humanInterventionSource: "agent_takeover",
+        transferredToHuman: true,
+        requiredHumanIntervention: true,
+      };
+
+      const report = metricsService.evaluateCohortMetrics(
+        [nonHumanCall, noneSourceCall, humanTakeoverCall],
+        {
+          windowStart: "2026-09-09T00:00:00Z",
+          windowEnd: "2026-09-09T23:59:59Z",
+          observationWindowClosed: true,
+        },
+      );
+
+      // Only 1 of 3 was a true human intervention
+      expect(report.allIngressHumanIntervention.numeratorHumanInterventionUniqueCalls).toBe(1);
+      expect(report.allIngressHumanIntervention.rate).toBeCloseTo(1 / 3, 2);
+    });
+
+    it("dispatch denominator decoupling: interrupted intake with durable order enters dispatch denominator", () => {
+      const metricsService = new VoiceBookingMetricsService();
+
+      const interruptedIntakeWithDispatch: VoiceCallMetricRecord = {
+        ...baseRecord,
+        callId: "call-interrupted-intake",
+        providerCallId: "twm-prov-interrupted",
+        bookingIntakeCompleted: false, // Caller hung up during summary confirmation
+        hasConfirmationEvidence: false,
+        playbackAckReceived: false,
+        bookingIntakeDropReason: "caller_hangup",
+        orderCreated: true, // But system created durable order and requested dispatch
+        orderId: "ord-durable-int-01",
+        hasDurableOrder: true,
+        dispatchRequested: true,
+        driverAccepted: false,
+        dispatchFailureReason: "no_car_available",
+      };
+
+      const report = metricsService.evaluateCohortMetrics([interruptedIntakeWithDispatch], {
+        windowStart: "2026-09-09T00:00:00Z",
+        windowEnd: "2026-09-09T23:59:59Z",
+        observationWindowClosed: true,
+      });
+
+      // Effective intake is 0 because intake did not complete/confirm
+      expect(report.unattendedEffectiveIntake.numeratorValidIntakes).toBe(0);
+
+      // But dispatch denominator MUST include the durable order dispatch request!
+      expect(report.unattendedDispatchCompletion.denominatorImmediateDispatchOrders).toBe(1);
+      expect(report.unattendedDispatchCompletion.numeratorDriverAcceptedUniqueOrders).toBe(0);
+      expect(report.unattendedDispatchCompletion.retainedFailuresInDenominator.noCarAvailableCount).toBe(1);
+    });
+
+    it("intake evidence projection: requires confirmation evidence for valid intake count", () => {
+      const metricsService = new VoiceBookingMetricsService();
+
+      const unconfirmedIntake: VoiceCallMetricRecord = {
+        ...baseRecord,
+        callId: "call-unconfirmed",
+        providerCallId: "twm-prov-unconfirmed",
+        bookingIntakeCompleted: true,
+        hasConfirmationEvidence: false, // missing audio confirmation evidence
+      };
+
+      const confirmedIntake: VoiceCallMetricRecord = {
+        ...baseRecord,
+        callId: "call-confirmed",
+        providerCallId: "twm-prov-confirmed",
+        bookingIntakeCompleted: true,
+        hasConfirmationEvidence: true,
+        hasDurableOrder: true,
+        playbackAckReceived: true,
+      };
+
+      const report = metricsService.evaluateCohortMetrics([unconfirmedIntake, confirmedIntake], {
+        windowStart: "2026-09-09T00:00:00Z",
+        windowEnd: "2026-09-09T23:59:59Z",
+        observationWindowClosed: true,
+      });
+
+      expect(report.unattendedEffectiveIntake.denominatorExpressedBookingIntent).toBe(2);
+      expect(report.unattendedEffectiveIntake.numeratorValidIntakes).toBe(1); // Only confirmed one counts
+    });
+
+    it("missing rate card gate: marks cost unverified=true and does not default to free (0.00)", () => {
+      const usageService = new VoiceUsageService();
+
+      const cost = usageService.calculateCallCost({
+        provider: "nonexistent-telephony-vendor",
+        durationSeconds: 120, // 2 minutes
+        asrSeconds: 60,
+      });
+
+      expect(cost.unverified).toBe(true);
+      expect(cost.unverifiedReasons).toBeDefined();
+      expect(cost.unverifiedReasons?.some((r) => r.includes("missing active rate card"))).toBe(true);
+      // Must not default to free 0
+      expect(cost.totalEstimatedCost).toBeGreaterThan(0);
+    });
+
+    it("rate card validity: selects rate card matching usageTimestamp within effectiveFrom/effectiveUntil", () => {
+      const usageService = new VoiceUsageService();
+
+      usageService.publishRateCard({
+        rateCardId: "rc-seasonal-promo",
+        provider: "twm-tariff",
+        serviceType: "telephony",
+        unitPrice: 0.40,
+        billingUnit: "minute",
+        effectiveFrom: "2026-09-01T00:00:00Z",
+        effectiveUntil: "2026-09-10T00:00:00Z",
+      });
+
+      usageService.publishRateCard({
+        rateCardId: "rc-standard-tariff",
+        provider: "twm-tariff",
+        serviceType: "telephony",
+        unitPrice: 0.70,
+        billingUnit: "minute",
+        effectiveFrom: "2026-09-10T00:00:00Z",
+      });
+
+      // September 5th: should pick promotional 0.40
+      const costPromo = usageService.calculateCallCost({
+        provider: "twm-tariff",
+        durationSeconds: 60,
+        usageTimestamp: "2026-09-05T12:00:00Z",
+      });
+      const telephonyItemPromo = costPromo.items.find((i) => i.serviceType === "telephony");
+      expect(telephonyItemPromo?.cost).toBe(0.40);
+
+      // September 15th: should pick standard 0.70
+      const costStandard = usageService.calculateCallCost({
+        provider: "twm-tariff",
+        durationSeconds: 60,
+        usageTimestamp: "2026-09-15T12:00:00Z",
+      });
+      const telephonyItemStandard = costStandard.items.find((i) => i.serviceType === "telephony");
+      expect(telephonyItemStandard?.cost).toBe(0.70);
+    });
+
+    it("mixed currency support: calculates per-currency totals and converts to base currency", () => {
+      const usageService = new VoiceUsageService();
+
+      usageService.publishRateCard({
+        rateCardId: "rc-openai-usd",
+        provider: "openai",
+        serviceType: "llm",
+        currency: "USD",
+        unitPrice: 0.0001,
+        billingUnit: "token",
+        effectiveFrom: "2026-01-01T00:00:00Z",
+        conditions: { exchangeRateToTwd: 32.0 },
+      });
+
+      const cost = usageService.calculateCallCost({
+        provider: "twm",
+        llmProvider: "openai",
+        durationSeconds: 60, // TWD telephony
+        llmInputTokens: 1000, // USD LLM
+        llmOutputTokens: 200, // USD LLM
+      });
+
+      expect(cost.hasMixedCurrencies).toBe(true);
+      expect(cost.currency).toBe("MIXED");
+      expect(cost.currencyTotals?.["TWD"]).toBeDefined();
+      expect(cost.currencyTotals?.["USD"]).toBeDefined();
+      expect(cost.totalEstimatedCostInBaseCurrency).toBeGreaterThan(0);
+      expect(cost.baseCurrency).toBe("TWD");
+    });
+
+    it("repository persistence: delegates rate cards and usage records to repository and hydrates", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        insertRateCard: vi.fn(),
+        insertUsageRecord: vi.fn(),
+        updateUsageRecordReconciliation: vi.fn(),
+        listRateCards: vi.fn().mockResolvedValue([
+          {
+            rateCardId: "rc-db-hydrated",
+            version: 1,
+            provider: "db-provider",
+            serviceType: "asr",
+            currency: "TWD",
+            unitPrice: 0.88,
+            billingUnit: "minute",
+            effectiveFrom: "2026-01-01T00:00:00Z",
+            effectiveUntil: null,
+            taxInclusive: false,
+            roundingRule: "ceil_minute",
+            unverified: false,
+            createdAt: "2026-01-01T00:00:00Z",
+          },
+        ]),
+      };
+
+      const repoUsageService = new VoiceUsageService(mockRepo as any);
+      await repoUsageService.hydrateFromRepository();
+
+      expect(mockRepo.listRateCards).toHaveBeenCalledTimes(1);
+      expect(repoUsageService.getRateCard("rc-db-hydrated")?.unitPrice).toBe(0.88);
+
+      repoUsageService.publishRateCard({
+        rateCardId: "rc-repo-test",
+        provider: "twm",
+        serviceType: "sms",
+        unitPrice: 1.5,
+        billingUnit: "sms",
+        effectiveFrom: "2026-09-01T00:00:00Z",
+      });
+      expect(mockRepo.insertRateCard).toHaveBeenCalledWith(
+        expect.objectContaining({ rateCardId: "rc-repo-test", unitPrice: 1.5 }),
+      );
+
+      const usageRec = repoUsageService.recordUsage({
+        providerAccountId: "twm-acc-persist",
+        providerUsageRef: "ref-persist-001",
+        provider: "twm",
+        serviceType: "sms",
+        quantity: 1,
+        billingUnit: "sms",
+        estimatedCost: 1.5,
+      });
+      expect(mockRepo.insertUsageRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ usageId: usageRec.usageId }),
+      );
+
+      repoUsageService.reconcileInvoice("INV-PERSIST-1", "twm-acc-persist", [
+        {
+          providerAccountId: "twm-acc-persist",
+          providerUsageRef: "ref-persist-001",
+          serviceType: "sms",
+          quantity: 1,
+          billingUnit: "sms",
+          billedCost: 1.5,
+          currency: "TWD",
+          invoiceRef: "INV-PERSIST-1",
+          invoiceDate: "2026-09-09",
+        },
+      ]);
+      expect(mockRepo.updateUsageRecordReconciliation).toHaveBeenCalledWith(
+        usageRec.usageId,
+        1.5,
+        "INV-PERSIST-1",
+      );
+    });
+
+    it("prometheus emission: produces all 9 series matching infra/monitoring/voice-alerts.yaml", () => {
+      const labels = {
+        language: "zh-TW",
+        route_profile_version: "1",
+        provider: "twm",
+        brand_id: "brand-drts-01",
+      };
+
+      voiceAlertMetrics.recordErrorOrDuplicateBooking(labels);
+      voiceAlertMetrics.recordCrossScopeAccessDenied(labels);
+      voiceAlertMetrics.recordPendingCommandTimeout(labels);
+      voiceAlertMetrics.recordRecordingCheckpointFailure(labels);
+      voiceAlertMetrics.recordProviderCapacityExceeded(labels);
+      voiceAlertMetrics.recordHandoffUnansweredBreach(labels);
+      voiceAlertMetrics.recordDispatchUnavailableSpike(labels);
+      voiceAlertMetrics.recordCostAnomalySpikeRatio(labels, 1.45);
+      voiceAlertMetrics.recordWorkerLeaseConflict(labels);
+
+      const output = voiceAlertMetrics.toPrometheusFormat();
+
+      // Verify all 9 Prometheus metric names exist in output
+      expect(output).toContain("drts_voice_error_or_duplicate_bookings_total");
+      expect(output).toContain("drts_voice_cross_scope_denials_total");
+      expect(output).toContain("drts_voice_pending_command_timeouts_total");
+      expect(output).toContain("drts_voice_recording_checkpoint_failures_total");
+      expect(output).toContain("drts_voice_provider_overflow_total");
+      expect(output).toContain("drts_voice_handoff_queue_unanswered_count");
+      expect(output).toContain("drts_voice_dispatch_unavailable_total");
+      expect(output).toContain("drts_voice_call_unit_cost_twd");
+      expect(output).toContain("drts_voice_worker_lease_conflicts_total");
+
+      // Verify labels are correctly formatted
+      expect(output).toContain('language="zh-TW"');
+      expect(output).toContain('route_profile_version="1"');
+      expect(output).toContain('provider="twm"');
+      expect(output).toContain('brand_id="brand-drts-01"');
     });
   });
 });

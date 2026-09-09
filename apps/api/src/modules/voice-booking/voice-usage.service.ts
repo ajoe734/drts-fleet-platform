@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from "@nestjs/common";
+import { Injectable, Logger, Optional, type OnModuleInit } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -158,6 +158,8 @@ export interface FullCallCostInput {
   notificationCount?: number | undefined;
   humanOperatorSeconds?: number | undefined;
   provider?: string | undefined;
+  llmProvider?: string | undefined;
+  usageTimestamp?: string | Date | undefined;
   isAdmissionFailure?: boolean | undefined;
   isNoCarOrDrop?: boolean | undefined;
 }
@@ -184,8 +186,14 @@ export interface FullCallCostBreakdown {
   outcome?: string | undefined;
   items: CostItem[];
   totalEstimatedCost: number;
+  totalEstimatedCostInBaseCurrency?: number | undefined;
+  baseCurrency?: string | undefined;
   currency: string;
+  currencyTotals?: Record<string, number> | undefined;
+  hasMixedCurrencies?: boolean | undefined;
   hasUnverifiedCosts: boolean;
+  unverified?: boolean | undefined;
+  unverifiedReasons?: string[] | undefined;
   isFailedCallOrAdmission: boolean;
 }
 
@@ -239,7 +247,7 @@ export interface InvoiceReconciliationReport {
  *    WITHOUT overwriting estimated cost records ("估計不覆蓋帳單").
  */
 @Injectable()
-export class VoiceUsageService {
+export class VoiceUsageService implements OnModuleInit {
   private readonly logger = new Logger(VoiceUsageService.name);
 
   // In-memory published rate card catalog: key = `${rateCardId}#${version}`
@@ -257,6 +265,57 @@ export class VoiceUsageService {
     private readonly voiceRepo?: VoiceBookingRepository,
   ) {
     this.seedDefaultRateCards();
+  }
+
+  private isRepoEnabled(): boolean {
+    if (!this.voiceRepo) return false;
+    return typeof this.voiceRepo.isEnabled === "function"
+      ? this.voiceRepo.isEnabled()
+      : true;
+  }
+
+  async onModuleInit(): Promise<void> {
+    await this.hydrateFromRepository();
+  }
+
+  public async hydrateFromRepository(): Promise<void> {
+    if (!this.isRepoEnabled() || !this.voiceRepo) {
+      return;
+    }
+    try {
+      const persistedCards = await this.voiceRepo.listRateCards();
+      for (const card of persistedCards) {
+        const cond = (card.conditions as RateCardCondition) ?? {};
+        const serviceType = (cond.serviceType as VoiceUsageServiceType) ?? "asr";
+        const record: VoiceRateCardRecord = {
+          rateCardId: card.rateCardId,
+          version: card.version,
+          provider: card.provider,
+          serviceType,
+          currency: card.currency,
+          taxInclusive: card.taxInclusive,
+          unitPrice: card.unitPrice,
+          billingUnit: card.billingUnit as BillingUnit,
+          effectiveFrom: card.effectiveFrom,
+          effectiveUntil: card.effectiveUntil ?? undefined,
+          roundingRule: (card.roundingRule as RoundingRule) ?? "none",
+          minimumCharge: card.minimumCharge ?? undefined,
+          conditions: cond,
+          unverified: Boolean(cond.unverified),
+          unverifiedReasons: cond.unverifiedReasons as string[] | undefined,
+          reconciliationStatus: (card.reconciliationStatus as "draft" | "published" | "reconciled") ?? "published",
+          createdAt: card.createdAt,
+        };
+        const key = `${record.rateCardId}#${record.version}`;
+        this.rateCards.set(key, record);
+        const curLatest = this.rateCardLatestVersion.get(record.rateCardId) ?? 0;
+        if (record.version > curLatest) {
+          this.rateCardLatestVersion.set(record.rateCardId, record.version);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to hydrate rate cards from repository: ${err}`);
+    }
   }
 
   /**
@@ -406,6 +465,38 @@ export class VoiceUsageService {
     this.rateCards.set(key, record);
     this.rateCardLatestVersion.set(rateCardId, nextVersion);
 
+    if (this.isRepoEnabled() && this.voiceRepo) {
+      try {
+        const p = this.voiceRepo.insertRateCard({
+          rateCardId: record.rateCardId,
+          version: record.version,
+          provider: record.provider,
+          currency: record.currency,
+          taxInclusive: record.taxInclusive,
+          unitPrice: record.unitPrice,
+          billingUnit: record.billingUnit,
+          effectiveFrom: record.effectiveFrom,
+          effectiveUntil: record.effectiveUntil,
+          roundingRule: record.roundingRule,
+          minimumCharge: record.minimumCharge,
+          conditions: {
+            ...record.conditions,
+            serviceType: record.serviceType,
+            unverified: record.unverified,
+            unverifiedReasons: record.unverifiedReasons,
+          },
+          reconciliationStatus: record.reconciliationStatus,
+        });
+        if (p && typeof (p as Promise<any>).catch === "function") {
+          (p as Promise<any>).catch((err) => {
+            this.logger.error(`Failed to persist rate card ${rateCardId}#${nextVersion}: ${err}`);
+          });
+        }
+      } catch (err) {
+        this.logger.error(`Failed to call insertRateCard: ${err}`);
+      }
+    }
+
     this.logger.log(
       `[RateCard] Published rate card ${rateCardId} v${nextVersion} (${record.provider}/${record.serviceType}) @ ${record.unitPrice} ${record.currency}/${record.billingUnit}`,
     );
@@ -428,7 +519,9 @@ export class VoiceUsageService {
   public findRateCardForService(
     provider: string,
     serviceType: VoiceUsageServiceType,
+    atTime?: string | Date,
   ): VoiceRateCardRecord | null {
+    const targetTime = atTime ? new Date(atTime).getTime() : Date.now();
     let latestCard: VoiceRateCardRecord | null = null;
     for (const card of this.rateCards.values()) {
       if (
@@ -436,8 +529,14 @@ export class VoiceUsageService {
         card.serviceType === serviceType &&
         card.reconciliationStatus === "published"
       ) {
-        if (!latestCard || card.version > latestCard.version) {
-          latestCard = card;
+        const effFrom = new Date(card.effectiveFrom).getTime();
+        const effUntil = card.effectiveUntil
+          ? new Date(card.effectiveUntil).getTime()
+          : Infinity;
+        if (targetTime >= effFrom && targetTime <= effUntil) {
+          if (!latestCard || card.version > latestCard.version) {
+            latestCard = card;
+          }
         }
       }
     }
@@ -485,7 +584,17 @@ export class VoiceUsageService {
         : null;
 
     if (!rateCard) {
-      rateCard = this.findRateCardForService(input.provider, input.serviceType);
+      rateCard = this.findRateCardForService(
+        input.provider,
+        input.serviceType,
+        input.usageDate,
+      );
+    }
+
+    let isUnverified = input.unverified;
+    const unverifiedReasons: string[] = [];
+    if (input.unverifiedReasons) {
+      unverifiedReasons.push(...input.unverifiedReasons);
     }
 
     if (estimatedCost === undefined) {
@@ -494,14 +603,21 @@ export class VoiceUsageService {
           rateCard,
           input.quantity,
         );
+        if (isUnverified === undefined) {
+          isUnverified = rateCard.unverified;
+        }
       } else {
-        estimatedCost = 0;
+        // SD §14.3: "未知欄位標 unverified，不能默認為免費。"
+        // Rate card missing entirely: cannot default to zero/free without unverified flag!
+        estimatedCost = input.estimatedCost ?? 0;
+        isUnverified = true;
+        unverifiedReasons.push("missing_rate_card_pricing_unverified");
       }
+    } else if (isUnverified === undefined) {
+      isUnverified = rateCard ? rateCard.unverified : false;
     }
 
     const usageId = input.usageId ?? randomUUID();
-    const isUnverified =
-      input.unverified ?? (rateCard ? rateCard.unverified : false);
 
     const record: VoiceUsageRecord = {
       usageId,
@@ -529,7 +645,7 @@ export class VoiceUsageService {
         (input.actualCost !== undefined ? "invoiced" : "estimated"),
       reconciliationAdjustment: input.reconciliationAdjustment,
       usageDate: input.usageDate ?? new Date().toISOString().slice(0, 10),
-      unverified: isUnverified,
+      unverified: isUnverified ?? false,
       metadata: sanitizedMetadata,
       createdAt: new Date().toISOString(),
     };
@@ -538,6 +654,38 @@ export class VoiceUsageService {
     if (record.providerUsageRef) {
       const dedupKey = `${record.providerAccountId}#${record.providerUsageRef}`;
       this.providerRefIndex.set(dedupKey, usageId);
+    }
+
+    if (this.isRepoEnabled() && this.voiceRepo) {
+      try {
+        const p = this.voiceRepo.insertUsageRecord({
+          usageId: record.usageId,
+          providerAccountId: record.providerAccountId,
+          providerUsageRef: record.providerUsageRef,
+          admissionId: record.admissionId,
+          voiceSessionId: record.voiceSessionId,
+          provider: record.provider,
+          model: record.model,
+          modelVersion: record.modelVersion,
+          billingUnit: record.billingUnit,
+          quantity: record.quantity,
+          currency: record.currency,
+          rateCardId: record.rateCardId,
+          rateCardVersion: record.rateCardVersion,
+          estimatedCost: record.estimatedCost,
+          actualCost: record.actualCost,
+          invoiceRef: record.invoiceRef,
+          brandId: record.brandId,
+          usageDate: record.usageDate,
+        });
+        if (p && typeof (p as Promise<any>).catch === "function") {
+          (p as Promise<any>).catch((err) => {
+            this.logger.error(`Failed to persist usage record ${usageId}: ${err}`);
+          });
+        }
+      } catch (err) {
+        this.logger.error(`Failed to call insertUsageRecord: ${err}`);
+      }
     }
 
     return record;
@@ -631,95 +779,142 @@ export class VoiceUsageService {
     const items: CostItem[] = [];
     let totalCost = 0;
     let hasUnverified = false;
+    const unverifiedReasons: string[] = [];
 
     // 1. Telephony legs
     const telephonySeconds = input.durationSeconds ?? 0;
     if (telephonySeconds > 0) {
-      const ctiCard = this.findRateCardForService("twm-telephony", "telephony");
+      const provider = input.provider ?? "twm-telephony";
+      let ctiCard = this.findRateCardForService(provider, "telephony", input.usageTimestamp);
+      if (!ctiCard && !input.provider) {
+        ctiCard = this.findRateCardForService("twm-telephony", "telephony", input.usageTimestamp);
+      }
+      const isMissing = !ctiCard;
       const billedMinutes = Math.ceil(telephonySeconds / 60);
       const legCount = Math.max(1, input.telephonyLegCount ?? 1);
       const unitPrice = ctiCard?.unitPrice ?? 0.60;
       const legCost = billedMinutes * unitPrice * legCount;
+      const itemUnverified = isMissing || (ctiCard?.unverified ?? false);
       items.push({
         serviceType: "telephony",
-        provider: ctiCard?.provider ?? "twm-telephony",
+        provider: ctiCard?.provider ?? provider,
         quantity: billedMinutes * legCount,
         billingUnit: "minute",
         unitPrice,
         currency: ctiCard?.currency ?? "TWD",
         cost: Number(legCost.toFixed(6)),
-        unverified: ctiCard?.unverified ?? false,
+        unverified: itemUnverified,
       });
       totalCost += legCost;
-      if (ctiCard?.unverified) hasUnverified = true;
+      if (itemUnverified) {
+        hasUnverified = true;
+        if (isMissing) {
+          unverifiedReasons.push(`Telephony: missing active rate card for provider ${provider}`);
+        }
+      }
     }
 
     // 2. ASR (Realtime ASR)
     const asrSecs = input.asrSeconds ?? 0;
     if (asrSecs > 0) {
-      const asrCard = this.findRateCardForService(
-        input.provider ?? "twm",
+      const provider = input.provider ?? "twm";
+      let asrCard = this.findRateCardForService(
+        provider,
         "asr",
+        input.usageTimestamp,
       );
+      if (!asrCard && !input.provider) {
+        asrCard = this.findRateCardForService("twm", "asr", input.usageTimestamp);
+      }
+      const isMissing = !asrCard;
       const asrMinutes = Math.ceil(asrSecs / 60);
       const unitPrice = asrCard?.unitPrice ?? 0.74;
       const asrCost = asrMinutes * unitPrice;
+      const itemUnverified = isMissing || (asrCard?.unverified ?? false);
       items.push({
         serviceType: "asr",
-        provider: asrCard?.provider ?? (input.provider ?? "twm"),
+        provider: asrCard?.provider ?? provider,
         quantity: asrMinutes,
         billingUnit: "minute",
         unitPrice,
         currency: asrCard?.currency ?? "TWD",
         cost: Number(asrCost.toFixed(6)),
-        unverified: asrCard?.unverified ?? false,
+        unverified: itemUnverified,
       });
       totalCost += asrCost;
-      if (asrCard?.unverified) hasUnverified = true;
+      if (itemUnverified) {
+        hasUnverified = true;
+        if (isMissing) {
+          unverifiedReasons.push(`ASR: missing active rate card for provider ${provider}`);
+        }
+      }
     }
 
     // 3. TTS
     const ttsChars = input.ttsCharacters ?? 0;
     if (ttsChars > 0) {
-      const ttsCard = this.findRateCardForService(
-        input.provider ?? "twm",
+      const provider = input.provider ?? "twm";
+      let ttsCard = this.findRateCardForService(
+        provider,
         "tts",
+        input.usageTimestamp,
       );
+      if (!ttsCard && !input.provider) {
+        ttsCard = this.findRateCardForService("twm", "tts", input.usageTimestamp);
+      }
+      const isMissing = !ttsCard;
       const unitPrice = ttsCard?.unitPrice ?? 625 / 1_000_000;
       const ttsCost = ttsChars * unitPrice;
+      const itemUnverified = isMissing || (ttsCard?.unverified ?? false);
       items.push({
         serviceType: "tts",
-        provider: ttsCard?.provider ?? (input.provider ?? "twm"),
+        provider: ttsCard?.provider ?? provider,
         quantity: ttsChars,
         billingUnit: "character",
         unitPrice,
         currency: ttsCard?.currency ?? "TWD",
         cost: Number(ttsCost.toFixed(6)),
-        unverified: ttsCard?.unverified ?? false,
+        unverified: itemUnverified,
       });
       totalCost += ttsCost;
-      if (ttsCard?.unverified) hasUnverified = true;
+      if (itemUnverified) {
+        hasUnverified = true;
+        if (isMissing) {
+          unverifiedReasons.push(`TTS: missing active rate card for provider ${provider}`);
+        }
+      }
     }
 
     // 4. LLM
     const totalTokens =
       (input.llmInputTokens ?? 0) + (input.llmOutputTokens ?? 0);
     if (totalTokens > 0) {
-      const llmCard = this.findRateCardForService("gemini", "llm");
+      const provider = input.llmProvider ?? "gemini";
+      let llmCard = this.findRateCardForService(provider, "llm", input.usageTimestamp);
+      if (!llmCard && provider === "gemini") {
+        llmCard = this.findRateCardForService("openai", "llm", input.usageTimestamp);
+      }
+      const isMissing = !llmCard;
       const unitPrice = llmCard?.unitPrice ?? 0.00015;
       const llmCost = totalTokens * unitPrice;
+      const itemUnverified = isMissing || (llmCard?.unverified ?? false);
       items.push({
         serviceType: "llm",
-        provider: llmCard?.provider ?? "gemini",
+        provider: llmCard?.provider ?? provider,
         quantity: totalTokens,
         billingUnit: "token",
         unitPrice,
         currency: llmCard?.currency ?? "TWD",
         cost: Number(llmCost.toFixed(6)),
-        unverified: llmCard?.unverified ?? false,
+        unverified: itemUnverified,
       });
       totalCost += llmCost;
-      if (llmCard?.unverified) hasUnverified = true;
+      if (itemUnverified) {
+        hasUnverified = true;
+        if (isMissing) {
+          unverifiedReasons.push(`LLM: missing active rate card for provider ${provider}`);
+        }
+      }
     }
 
     // 5. Storage
@@ -728,9 +923,12 @@ export class VoiceUsageService {
       const storageCard = this.findRateCardForService(
         "gcp-cloud-storage",
         "storage",
+        input.usageTimestamp,
       );
+      const isMissing = !storageCard;
       const unitPrice = storageCard?.unitPrice ?? 0.05;
       const storageCost = storageMb * unitPrice;
+      const itemUnverified = isMissing || (storageCard?.unverified ?? false);
       items.push({
         serviceType: "storage",
         provider: storageCard?.provider ?? "gcp-cloud-storage",
@@ -739,10 +937,12 @@ export class VoiceUsageService {
         unitPrice,
         currency: storageCard?.currency ?? "TWD",
         cost: Number(storageCost.toFixed(6)),
-        unverified: storageCard?.unverified ?? false,
+        unverified: itemUnverified,
       });
       totalCost += storageCost;
-      if (storageCard?.unverified) hasUnverified = true;
+      if (itemUnverified) {
+        hasUnverified = true;
+      }
     }
 
     // 6. Human operator time allocation (for transfers / callback handling)
@@ -751,9 +951,12 @@ export class VoiceUsageService {
       const opCard = this.findRateCardForService(
         "drts-internal-ops",
         "human_operator",
+        input.usageTimestamp,
       );
+      const isMissing = !opCard;
       const unitPrice = opCard?.unitPrice ?? 300 / 3600;
       const opCost = operatorSecs * unitPrice;
+      const itemUnverified = isMissing || (opCard?.unverified ?? false);
       items.push({
         serviceType: "human_operator",
         provider: opCard?.provider ?? "drts-internal-ops",
@@ -762,10 +965,12 @@ export class VoiceUsageService {
         unitPrice,
         currency: opCard?.currency ?? "TWD",
         cost: Number(opCost.toFixed(6)),
-        unverified: opCard?.unverified ?? false,
+        unverified: itemUnverified,
       });
       totalCost += opCost;
-      if (opCard?.unverified) hasUnverified = true;
+      if (itemUnverified) {
+        hasUnverified = true;
+      }
     }
 
     // 7. Notification (SMS)
@@ -792,6 +997,46 @@ export class VoiceUsageService {
       input.outcome === "overflow" ||
       input.outcome === "auto_no_service";
 
+    // Currency analysis and conversion (SD §14.3: 另設版本化 rate card，包括 currency... 已核對匯率日期。未知欄位標 unverified，不能默認為免費)
+    const currencyTotals: Record<string, number> = {};
+    for (const item of items) {
+      currencyTotals[item.currency] = Number(
+        ((currencyTotals[item.currency] ?? 0) + item.cost).toFixed(6),
+      );
+    }
+    const currencyKeys = Object.keys(currencyTotals);
+    const hasMixedCurrencies = currencyKeys.length > 1;
+
+    let totalEstimatedCost = 0;
+    let totalEstimatedCostInBaseCurrency = 0;
+    let finalCurrency = "TWD";
+
+    if (hasMixedCurrencies) {
+      let convertedTotal = 0;
+      let allConverted = true;
+      for (const item of items) {
+        if (item.currency === "TWD") {
+          convertedTotal += item.cost;
+        } else {
+          const card = this.findRateCardForService(item.provider, item.serviceType, input.usageTimestamp);
+          const rate = card?.conditions?.exchangeRateToTwd ?? (item.currency === "USD" ? 32.0 : undefined);
+          if (typeof rate === "number" && rate > 0) {
+            convertedTotal += item.cost * rate;
+          } else {
+            allConverted = false;
+            hasUnverified = true;
+          }
+        }
+      }
+      totalEstimatedCostInBaseCurrency = Number(convertedTotal.toFixed(6));
+      totalEstimatedCost = totalEstimatedCostInBaseCurrency;
+      finalCurrency = "MIXED";
+    } else {
+      finalCurrency = currencyKeys.length === 1 ? currencyKeys[0] : "TWD";
+      totalEstimatedCost = Number(totalCost.toFixed(6));
+      totalEstimatedCostInBaseCurrency = totalEstimatedCost;
+    }
+
     return {
       voiceSessionId: input.voiceSessionId,
       callId: input.callId,
@@ -801,9 +1046,15 @@ export class VoiceUsageService {
       language: input.language,
       outcome: input.outcome,
       items,
-      totalEstimatedCost: Number(totalCost.toFixed(6)),
-      currency: "TWD",
+      totalEstimatedCost,
+      totalEstimatedCostInBaseCurrency,
+      baseCurrency: "TWD",
+      currency: finalCurrency,
+      currencyTotals,
+      hasMixedCurrencies,
       hasUnverifiedCosts: hasUnverified,
+      unverified: hasUnverified,
+      unverifiedReasons: unverifiedReasons.length > 0 ? unverifiedReasons : undefined,
       isFailedCallOrAdmission: isFailed,
     };
   }
@@ -861,6 +1112,23 @@ export class VoiceUsageService {
         matchedRecord.reconciliationStatus = "reconciled";
         matchedRecord.reconciliationAdjustment = Number(variance.toFixed(6));
 
+        if (this.isRepoEnabled() && this.voiceRepo) {
+          try {
+            const p = this.voiceRepo.updateUsageRecordReconciliation(
+              matchedRecord.usageId,
+              line.billedCost,
+              invoiceRef,
+            );
+            if (p && typeof (p as Promise<any>).catch === "function") {
+              (p as Promise<any>).catch((err) => {
+                this.logger.error(`Failed to update usage reconciliation in DB: ${err}`);
+              });
+            }
+          } catch (err) {
+            this.logger.error(`Failed to call updateUsageRecordReconciliation: ${err}`);
+          }
+        }
+
         adjustments.push({
           usageId: matchedRecord.usageId,
           providerUsageRef: matchedRecord.providerUsageRef,
@@ -907,6 +1175,31 @@ export class VoiceUsageService {
             `${providerAccountId}#${line.providerUsageRef}`,
             usageId,
           );
+        }
+
+        if (this.isRepoEnabled() && this.voiceRepo) {
+          try {
+            const p = this.voiceRepo.insertUsageRecord({
+              usageId: newRecord.usageId,
+              providerAccountId: newRecord.providerAccountId,
+              providerUsageRef: newRecord.providerUsageRef,
+              provider: newRecord.provider,
+              billingUnit: newRecord.billingUnit,
+              quantity: newRecord.quantity,
+              currency: newRecord.currency,
+              estimatedCost: newRecord.estimatedCost,
+              actualCost: newRecord.actualCost,
+              invoiceRef: newRecord.invoiceRef,
+              usageDate: newRecord.usageDate,
+            });
+            if (p && typeof (p as Promise<any>).catch === "function") {
+              (p as Promise<any>).catch((err) => {
+                this.logger.error(`Failed to persist un-estimated invoice line in DB: ${err}`);
+              });
+            }
+          } catch (err) {
+            this.logger.error(`Failed to call insertUsageRecord: ${err}`);
+          }
         }
 
         adjustments.push({

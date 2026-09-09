@@ -40,6 +40,11 @@ export interface VoiceCallMetricRecord {
     | undefined;
   passengerRefusedConfirmation?: boolean | undefined;
 
+  // Projected Evidence Facts (SD §13.2 / SA §10.2: 無人有效受理率由確認證據、durable order、派遣受理／結果與實際結果播報 ack 聯合計算)
+  hasConfirmationEvidence?: boolean | undefined;
+  hasDurableOrder?: boolean | undefined;
+  playbackAckReceived?: boolean | undefined;
+
   // Self-Service Outcome
   selfServiceOutcome?:
     | "booking_completed"
@@ -336,10 +341,10 @@ export class VoiceBookingMetricsService {
 
     const rawRecordsCount = matched.length;
 
-    // 2. Stable Deduplication by providerCallId (SA §10.2: 同一通來電與同一訂單使用穩定識別去重)
+    // 2. Stable Deduplication by provider + providerAccountId + providerCallId (SA §10.2: 同一通來電與同一訂單使用穩定識別去重)
     const uniqueCallsMap = new Map<string, VoiceCallMetricRecord>();
     for (const r of matched) {
-      const stableKey = r.providerCallId || r.callId;
+      const stableKey = `${r.provider ?? "unknown"}#${r.providerAccountId ?? "default"}#${r.providerCallId || r.callId}`;
       if (!uniqueCallsMap.has(stableKey)) {
         uniqueCallsMap.set(stableKey, r);
       }
@@ -406,9 +411,14 @@ export class VoiceBookingMetricsService {
       (r) =>
         r.expressedIntent === "new_booking" && r.isSupportedBusinessNeed,
     );
-    const validBookingIntakes = expressedBookingIntentCalls.filter(
-      (r) => r.bookingIntakeCompleted === true,
-    );
+    const validBookingIntakes = expressedBookingIntentCalls.filter((r) => {
+      if (r.bookingIntakeCompleted !== true) return false;
+      // SD §13.2: 無人有效受理率由確認證據、durable order、派遣受理／結果與實際結果播報 ack 聯合計算，不能直接把 outcome=auto_booking_created 當成功
+      if (r.hasConfirmationEvidence === false) return false;
+      if (r.hasDurableOrder === false) return false;
+      if (r.playbackAckReceived === false) return false;
+      return true;
+    });
     const callerHangupsAfterIntent = expressedBookingIntentCalls.filter(
       (r) => r.bookingIntakeDropReason === "caller_hangup",
     ).length;
@@ -461,12 +471,13 @@ export class VoiceBookingMetricsService {
 
     // 8. Metric 5: 無人派車完成率 (Dedup by unique order ID)
     // 分子: 取得至少一次司機接單的唯一訂單
-    // 分母: AI 建立且要求即時派遣的唯一訂單
+    // 分母: AI 建立且要求即時派遣的唯一訂單 (獨立自 durable order/dispatch facts 派生，不限於 validBookingIntakes)
     const uniqueOrdersMap = new Map<string, VoiceCallMetricRecord>();
-    for (const r of validBookingIntakes) {
-      if (r.orderId && r.dispatchRequested) {
-        if (!uniqueOrdersMap.has(r.orderId)) {
-          uniqueOrdersMap.set(r.orderId, r);
+    for (const r of realCalls) {
+      if ((r.orderId || r.orderCreated) && r.dispatchRequested) {
+        const orderKey = r.orderId || `${r.providerAccountId}#${r.callId}`;
+        if (!uniqueOrdersMap.has(orderKey)) {
+          uniqueOrdersMap.set(orderKey, r);
         }
       }
     }
@@ -528,7 +539,7 @@ export class VoiceBookingMetricsService {
     const allIngressHumanCalls = realCalls.filter(
       (r) =>
         r.requiredHumanIntervention === true ||
-        r.humanInterventionSource !== "none",
+        (Boolean(r.humanInterventionSource) && r.humanInterventionSource !== "none"),
     );
     const preAiTriage = allIngressHumanCalls.filter(
       (r) => r.humanInterventionSource === "pre_ai_triage",
@@ -1016,5 +1027,77 @@ export class VoiceBookingMetricsService {
     }
 
     return alerts;
+  }
+
+  // ============================================================================
+  // In-Memory Call Record Aggregation & Session Projection (SD §13.2)
+  // ============================================================================
+
+  private readonly callRecords: VoiceCallMetricRecord[] = [];
+
+  public recordCallMetric(record: VoiceCallMetricRecord): void {
+    this.callRecords.push(record);
+  }
+
+  public getCallRecords(): VoiceCallMetricRecord[] {
+    return [...this.callRecords];
+  }
+
+  public recordCallMetricFromSession(
+    session: {
+      voiceSessionId: string;
+      callId: string;
+      providerAccountId: string;
+      providerCallId: string;
+      resourceScopeId: string;
+      lineBindingId: string;
+      routeProfileId: string;
+      routeProfileVersion: number;
+      dialogState: string;
+      mediaState: string;
+      controlOwner: string;
+      leaseEpoch: number;
+      sessionVersion: number;
+      commitStatus: string;
+      recordingState: string;
+      confirmationState: string;
+      outcome: string | null;
+      createdAt: string | Date;
+    },
+    extra?: Partial<VoiceCallMetricRecord>,
+  ): VoiceCallMetricRecord {
+    const isConfirmed = session.confirmationState === "confirmed";
+    const isCommitted = session.commitStatus === "committed";
+
+    const record: VoiceCallMetricRecord = {
+      callId: session.callId,
+      providerCallId: session.providerCallId,
+      providerAccountId: session.providerAccountId,
+      receivedAt:
+        typeof session.createdAt === "string"
+          ? session.createdAt
+          : session.createdAt.toISOString(),
+      lineBindingId: session.lineBindingId,
+      brandId: session.resourceScopeId,
+      language: extra?.language ?? "zh-TW",
+      product: extra?.product ?? "ordinary_taxi",
+      routeProfileVersion: session.routeProfileVersion,
+      policyVersion: extra?.policyVersion ?? "uv-policy-v1",
+      provider: extra?.provider ?? "twm",
+      admissionOutcome: "admitted",
+      enteredAi: true,
+      intentDiscernible: session.dialogState !== "closed" || Boolean(session.outcome),
+      expressedIntent: extra?.expressedIntent ?? "new_booking",
+      isSupportedBusinessNeed: true,
+      bookingIntakeCompleted: isConfirmed,
+      hasConfirmationEvidence: isConfirmed,
+      hasDurableOrder: isCommitted,
+      playbackAckReceived: session.dialogState === "closed",
+      totalCallCost: extra?.totalCallCost ?? 0,
+      ...extra,
+    };
+
+    this.recordCallMetric(record);
+    return record;
   }
 }

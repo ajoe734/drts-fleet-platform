@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import type {
@@ -9,6 +9,8 @@ import {
   VoiceSessionRepository,
   type SessionControlPatch,
 } from "./voice-session.repository";
+import { VoiceUsageService } from "./voice-usage.service";
+import { VoiceBookingMetricsService } from "../../observability/voice-booking-metrics.service";
 
 /**
  * SD §5: the session state machine, ordered-event application and
@@ -89,7 +91,13 @@ const DIALOG_STATE_TRANSITIONS: Readonly<Record<string, readonly string[]>> = {
 
 @Injectable()
 export class VoiceSessionService {
-  constructor(private readonly repository: VoiceSessionRepository) {}
+  private readonly logger = new Logger(VoiceSessionService.name);
+
+  constructor(
+    private readonly repository: VoiceSessionRepository,
+    @Optional() private readonly usageService?: VoiceUsageService,
+    @Optional() private readonly metricsService?: VoiceBookingMetricsService,
+  ) {}
 
   /**
    * SD §5.3: "新命令受理前比較 leaseEpoch、draftVersion、inputEpoch 與當前
@@ -515,6 +523,37 @@ export class VoiceSessionService {
         "Session revision changed while closing; retry.",
       );
     }
+
+    if (this.usageService) {
+      try {
+        const durationSec = Math.max(
+          1,
+          Math.round(
+            (Date.now() - new Date(updated.createdAt).getTime()) / 1000,
+          ),
+        );
+        this.usageService.recordUsage({
+          providerAccountId: updated.providerAccountId,
+          voiceSessionId: updated.voiceSessionId,
+          provider: updated.routeProfileId || "twm",
+          serviceType: "telephony",
+          billingUnit: "second",
+          quantity: durationSec,
+          brandId: updated.resourceScopeId,
+        });
+      } catch (err) {
+        this.logger.warn(`Failed to record session usage on close: ${err}`);
+      }
+    }
+
+    if (this.metricsService) {
+      try {
+        this.metricsService.recordCallMetricFromSession(updated);
+      } catch (err) {
+        this.logger.warn(`Failed to record session metric on close: ${err}`);
+      }
+    }
+
     return updated;
   }
 
