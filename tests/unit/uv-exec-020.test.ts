@@ -9,12 +9,9 @@ import {
   VoiceOperationPolicyService,
   type OrderQueryPolicyRequest,
   type ActiveOrderCheckRequest,
-  type MultiVehiclePolicyRequest,
-  type CancelEligibilityRequest,
   type ExecuteCancelCommand,
 } from "../../apps/api/src/modules/voice-booking/voice-operation-policy.service";
 import {
-  VoiceCapabilityRegistry,
   VoiceIntentRouter,
   IntentRoutingGuard,
 } from "../../apps/voice-media-worker/src/dialogue/intent-routing";
@@ -76,16 +73,17 @@ function createMockOrder(overrides: Partial<OwnedOrderRecord> = {}): OwnedOrderR
       validationReference: "val-ref-020",
     },
     bookingId: null,
-    bookingType: "instant",
+    bookingType: "oneway",
     etaSnapshot: {
       etaMinutes: 6,
-      generatedAt: "2026-09-09T12:00:00.000Z",
+      calculatedAt: "2026-09-09T12:00:00.000Z",
     },
     callId: CALL_ID,
+    recordingId: null,
     voiceIntentId: "intent-020",
     aggregateVersion: 1,
     ...overrides,
-  };
+  } as unknown as OwnedOrderRecord;
 }
 
 function buildServiceHarness(options: {

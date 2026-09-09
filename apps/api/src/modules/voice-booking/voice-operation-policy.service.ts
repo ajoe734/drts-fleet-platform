@@ -40,24 +40,26 @@ export const DEFAULT_CAPABILITY_REGISTRY_CONFIG: CapabilityRegistryConfig = {
 export interface OrderQueryPolicyRequest {
   voiceSessionId: string;
   resourceScopeId: string;
-  targetOrderId?: string;
-  callerPhone?: string;
-  identityProof?: {
-    method: "bound_session" | "otp" | "passenger_proof" | "access_code";
-    proofId: string;
-    verifiedPhone?: string;
-  };
+  targetOrderId?: string | undefined;
+  callerPhone?: string | undefined;
+  identityProof?:
+    | {
+        method: "bound_session" | "otp" | "passenger_proof" | "access_code";
+        proofId: string;
+        verifiedPhone?: string | undefined;
+      }
+    | undefined;
 }
 
 export interface MinimalDisclosedOrderInfo {
   orderId: string;
   status: string;
-  vehiclePlate?: string | null;
-  etaMinutes?: number | null;
-  driverNameMasked?: string | null;
-  maskedPassengerPhone?: string | null;
-  pickupMasked?: string | null;
-  dropoffMasked?: string | null;
+  vehiclePlate?: string | null | undefined;
+  etaMinutes?: number | null | undefined;
+  driverNameMasked?: string | null | undefined;
+  maskedPassengerPhone?: string | null | undefined;
+  pickupMasked?: string | null | undefined;
+  dropoffMasked?: string | null | undefined;
 }
 
 export interface OrderQueryPolicyResult {
@@ -68,10 +70,10 @@ export interface OrderQueryPolicyResult {
     | "scope_denied"
     | "order_not_found";
   disclosureLevel: "none" | "minimal";
-  disclosedOrder?: MinimalDisclosedOrderInfo;
-  requiresChallenge?: boolean;
-  handoffReason?: string;
-  messageZh?: string;
+  disclosedOrder?: MinimalDisclosedOrderInfo | undefined;
+  requiresChallenge?: boolean | undefined;
+  handoffReason?: string | undefined;
+  messageZh?: string | undefined;
 }
 
 export interface ActiveOrderCheckRequest {
@@ -82,35 +84,37 @@ export interface ActiveOrderCheckRequest {
 
 export interface ActiveOrderCheckResult {
   hasActiveOrder: boolean;
-  activeOrderId?: string;
-  orderStatus?: string;
+  activeOrderId?: string | undefined;
+  orderStatus?: string | undefined;
   policyAction: "proceed" | "divert_duplicate";
-  messageZh?: string;
+  messageZh?: string | undefined;
 }
 
 export interface MultiVehiclePolicyRequest {
-  vehicleCount?: number;
-  passengerCount?: number;
-  multiVehicleRequested?: boolean;
+  vehicleCount?: number | undefined;
+  passengerCount?: number | undefined;
+  multiVehicleRequested?: boolean | undefined;
 }
 
 export interface MultiVehiclePolicyResult {
   supported: boolean;
   action: "proceed" | "handoff";
-  reason?: string;
-  messageZh?: string;
+  reason?: string | undefined;
+  messageZh?: string | undefined;
 }
 
 export interface CancelEligibilityRequest {
   voiceSessionId: string;
   resourceScopeId: string;
   orderId: string;
-  callerPhone?: string;
-  identityProof?: {
-    method: "bound_session" | "otp" | "passenger_proof";
-    proofId: string;
-    verifiedPhone?: string;
-  };
+  callerPhone?: string | undefined;
+  identityProof?:
+    | {
+        method: "bound_session" | "otp" | "passenger_proof";
+        proofId: string;
+        verifiedPhone?: string | undefined;
+      }
+    | undefined;
 }
 
 export interface CancelEligibilityResult {
@@ -119,16 +123,17 @@ export interface CancelEligibilityResult {
     | "capability_disabled"
     | "identity_unverified"
     | "order_not_cancelable"
-    | "order_not_found";
+    | "order_not_found"
+    | undefined;
   action: "proceed" | "handoff" | "reject";
-  orderId?: string;
-  orderVersion?: number;
-  assignmentVersion?: number;
-  driverStatus?: string;
-  cancellationFee?: number;
-  feeCurrency?: string;
-  requiresConfirmation?: boolean;
-  messageZh?: string;
+  orderId?: string | undefined;
+  orderVersion?: number | undefined;
+  assignmentVersion?: number | undefined;
+  driverStatus?: string | undefined;
+  cancellationFee?: number | undefined;
+  feeCurrency?: string | undefined;
+  requiresConfirmation?: boolean | undefined;
+  messageZh?: string | undefined;
 }
 
 export interface ExecuteCancelCommand {
@@ -136,19 +141,21 @@ export interface ExecuteCancelCommand {
   resourceScopeId: string;
   orderId: string;
   expectedOrderVersion: number;
-  expectedAssignmentVersion?: number;
+  expectedAssignmentVersion?: number | undefined;
   cancelConfirmationProof: {
     confirmationId: string;
     confirmedAt: string;
     snapshotHash: string;
     acknowledgedFee: number;
   };
-  identityProof?: {
-    method: "bound_session" | "otp" | "passenger_proof" | "access_code";
-    proofId: string;
-    verifiedPhone?: string;
-  };
-  reason?: string;
+  identityProof?:
+    | {
+        method: "bound_session" | "otp" | "passenger_proof" | "access_code";
+        proofId: string;
+        verifiedPhone?: string | undefined;
+      }
+    | undefined;
+  reason?: string | undefined;
 }
 
 export interface CancelExecutionResult {
@@ -158,10 +165,10 @@ export interface CancelExecutionResult {
   orderVersion: number;
   cancellationFee: number;
   cancelledAt: string;
-  stateRace?: boolean;
-  currentOrderVersion?: number;
-  currentDriverStatus?: string;
-  errorMessage?: string;
+  stateRace?: boolean | undefined;
+  currentOrderVersion?: number | undefined;
+  currentDriverStatus?: string | undefined;
+  errorMessage?: string | undefined;
 }
 
 export const ACTIVE_ORDER_STATUSES: readonly OwnedOrderStatus[] = [

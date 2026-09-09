@@ -6,16 +6,16 @@ import {
 import { voiceNumericReadback } from "../dialogue-state";
 
 export interface IntentRoutingContext {
-  callerPhone?: string;
-  callerPhoneVerified?: boolean;
-  hasActiveOrder?: boolean;
-  activeOrderId?: string;
-  multiVehicleRequested?: boolean;
-  vehicleCount?: number;
-  scheduledTimeIsoUtc?: string;
-  specialRequirements?: string[];
-  specialRequirementServiceable?: boolean;
-  cancelFee?: number;
+  callerPhone?: string | undefined;
+  callerPhoneVerified?: boolean | undefined;
+  hasActiveOrder?: boolean | undefined;
+  activeOrderId?: string | undefined;
+  multiVehicleRequested?: boolean | undefined;
+  vehicleCount?: number | undefined;
+  scheduledTimeIsoUtc?: string | undefined;
+  specialRequirements?: string[] | undefined;
+  specialRequirementServiceable?: boolean | undefined;
+  cancelFee?: number | undefined;
 }
 
 export interface RoutedIntentResult {
@@ -30,13 +30,15 @@ export interface RoutedIntentResult {
     | "multi_vehicle_unsupported"
     | "reservation_not_enabled"
     | "special_product_unsupported"
-    | "identity_unverified";
+    | "identity_unverified"
+    | undefined;
   handoffReason?:
     | "customer_requested"
     | "urgent_safety"
     | "service_unsupported"
     | "location_unresolved"
-    | "provider_unavailable";
+    | "provider_unavailable"
+    | undefined;
 }
 
 export class VoiceIntentRouter {

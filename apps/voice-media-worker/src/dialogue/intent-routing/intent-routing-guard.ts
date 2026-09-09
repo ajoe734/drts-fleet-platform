@@ -32,7 +32,7 @@ export class IntentRoutingGuard {
   ): {
     guardedOutput: VoiceDialogueOutput;
     diverted: boolean;
-    divertReason?: string;
+    divertReason?: string | undefined;
   } {
     const routed = this.router.route(output, context);
 
@@ -48,7 +48,9 @@ export class IntentRoutingGuard {
       return {
         guardedOutput,
         diverted: true,
-        divertReason: routed.divertReason,
+        ...(routed.divertReason !== undefined
+          ? { divertReason: routed.divertReason }
+          : {}),
       };
     }
 
@@ -97,7 +99,7 @@ export class IntentRoutingGuard {
     return {
       guardedOutput,
       diverted: hasBlockedTool,
-      divertReason: hasBlockedTool ? "capability_disabled" : undefined,
+      ...(hasBlockedTool ? { divertReason: "capability_disabled" } : {}),
     };
   }
 
