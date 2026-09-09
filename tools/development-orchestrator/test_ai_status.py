@@ -357,6 +357,76 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertNotIn("waiting_for", task)
         self.assertEqual(state["blockers"][0]["status"], "resolved")
 
+    @mock.patch.object(ai_status, "append_log")
+    def test_helper_backed_resume_rejects_new_blocker_without_mutation(self, _log: mock.Mock) -> None:
+        state = self.state()
+        parent = self.task(state)
+        parent.update(status="blocked", waiting_for="Claude", next="Routing still missing")
+        state["tasks"].append({
+            "id": "HELPER-001", "task_class": "unblock", "status": "done",
+            "helper_parent": parent["id"], "resolved_parent_status": "todo",
+            "resolved_parent_at": "2026-09-09T01:00:00Z",
+            "last_update": "2026-09-09T03:00:00Z",
+        })
+        state["blockers"] = [{"task_id": parent["id"], "status": "open", "created_at": "2026-09-09T02:00:00Z"}]
+        with mock.patch.dict(os.environ, {"AI_NAME": "Supervisor", "TASK_RESUME_HELPER_ID": "HELPER-001"}, clear=True):
+            with self.assertRaisesRegex(SystemExit, "open blocker newer"):
+                ai_status.command_resume_blocked(state, [parent["id"], "todo", "Retry old helper"])
+        self.assertEqual(parent["status"], "blocked")
+        self.assertEqual(parent["next"], "Routing still missing")
+        self.assertEqual(parent["waiting_for"], "Claude")
+        self.assertEqual(state["blockers"][0]["status"], "open")
+        _log.assert_not_called()
+
+    @mock.patch.object(ai_status, "append_log")
+    def test_helper_backed_resume_accepts_fresh_resolution(self, _log: mock.Mock) -> None:
+        state = self.state()
+        parent = self.task(state)
+        parent["status"] = "blocked"
+        state["tasks"].append({
+            "id": "HELPER-001", "task_class": "unblock", "status": "done",
+            "helper_parent": parent["id"], "resolved_parent_status": "todo",
+            "last_update": "2026-09-09T03:00:00Z",
+        })
+        state["blockers"] = [{"task_id": parent["id"], "status": "open", "created_at": "2026-09-09T02:00:00Z"}]
+        with mock.patch.dict(os.environ, {"AI_NAME": "Supervisor", "TASK_RESUME_HELPER_ID": "HELPER-001"}, clear=True):
+            ai_status.command_resume_blocked(state, [parent["id"], "todo", "Repair verified"])
+        self.assertEqual(parent["status"], "todo")
+        self.assertEqual(state["blockers"][0]["status"], "resolved")
+
+    @mock.patch.object(ai_status, "append_log")
+    def test_helper_backed_resume_requires_matching_completed_resolved_helper(self, _log: mock.Mock) -> None:
+        for overrides in ({"status": "review"}, {"helper_parent": "OTHER-001"}, {"resolved_parent_status": "blocked"}):
+            with self.subTest(overrides=overrides):
+                state = self.state()
+                parent = self.task(state)
+                parent["status"] = "blocked"
+                helper = {"id": "HELPER-001", "task_class": "unblock", "status": "done", "helper_parent": parent["id"], "last_update": "2026-09-09T03:00:00Z"}
+                helper.update(overrides)
+                state["tasks"].append(helper)
+                with mock.patch.dict(os.environ, {"AI_NAME": "Supervisor", "TASK_RESUME_HELPER_ID": helper["id"]}, clear=True):
+                    with self.assertRaisesRegex(SystemExit, "Cannot resume"):
+                        ai_status.command_resume_blocked(state, [parent["id"], "todo", "Retry"])
+                self.assertEqual(parent["status"], "blocked")
+        _log.assert_not_called()
+
+    @mock.patch.object(ai_status, "append_log")
+    def test_merge_preserves_recorded_blocked_parent_disposition(self, _log: mock.Mock) -> None:
+        state = self.state(task_class="unblock")
+        helper = self.task(state)
+        helper.update(helper_parent="PARENT-001", resolved_parent_status="blocked",
+                      resolved_parent_next="Implement scoped routing first", resolved_parent_waiting_for="Claude")
+        parent = {"id": "PARENT-001", "owner": "Gemini", "reviewer": "Claude", "status": "blocked"}
+        state["tasks"].append(parent)
+        with mock.patch.dict(os.environ, {"AI_NAME": "Supervisor"}, clear=True):
+            ai_status.transition_after_merge(state, helper, message="Planning merged", timestamp="2026-09-09T03:00:00Z")
+        self.assertEqual(helper["status"], "done")
+        self.assertEqual(helper["resolved_parent_at"], "2026-09-09T03:00:00Z")
+        self.assertEqual(parent["status"], "blocked")
+        self.assertEqual(parent["next"], "Implement scoped routing first")
+        self.assertEqual(parent["waiting_for"], "Claude")
+        self.assertFalse(any(h.get("status") == "pending" for h in state["handoffs"]))
+
     @mock.patch.object(ai_status, "archive_task_bodies")
     @mock.patch.object(ai_status, "_retention_keeps", return_value={"handoffs": 1, "tasks": 1, "blockers": 1})
     def test_canonical_writer_prunes_closed_history(
