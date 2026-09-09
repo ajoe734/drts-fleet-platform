@@ -1,5 +1,14 @@
 # SR-BANK-002 — 銀行角色金額／PII／匯出一致隔離
 
+## 2026-09-09T02:04Z resumed dispatch verification
+
+- Fetched `origin/dev` base: `7d04833053b63558c10fb678a422dff3522e0150`; tested checkpoint: `b43535ae0870ab4b9a7ea2824f6e083eafe2835f`. Candidate remains unset.
+- `git rebase origin/dev`: exit 1 at duplicate `dbec26678`, six task-file conflicts. `git rebase --abort`: exit 0, preserving published history. All tests below ran after abort.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/common/auth/auth.policy.ts apps/bank-console-web/lib/bank-dev-read-models.ts apps/bank-console-web/app/api/statements/export/route.ts`: exit 0; the three defect sources still match current fetched dev.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-bank-002/`: exit 1; inner matrix 49 passed / 5 failed. Both settlement routes lack financial scope; two upstream-403 loads return seed statements; Contoso CSV outage returns ACME rows. `pnpm --filter @drts/bank-console-web typecheck`: exit 0. `git diff --check`: exit 0.
+- Resources: `tenant-demo-001`, `tenant-contoso-001`, period `2026-03`, leaked seed sentinel `STM-ACME-202606`. These are synthetic upstream tests using real application handlers and cookie signing, not live financial-data evidence. No product server, browser/device, live, CI, merge, or deployment acceptance ran.
+- Dispatch still specifies the original branch and original six write scopes/two dependencies. Supervisor must register the replacement delivery branch described in the merged history helper, authorize shared loader/export scope with overlapping-writer dependencies, and assign canonical IAM policy integration. The helper explicitly does not grant shared-file permissions or resolve the five failures. No product changes or handoff; this checkpoint preserves fresh evidence only.
+
 ## 2026-09-08T23:57Z resumed dispatch verification
 
 - Fetched `origin/dev` base: `32b6dde7db730a8524004a5e87d94d5a2a6d7853`; tested checkpoint: `87d655a63a905c9ac0a4c56421771583ef65b949`. No candidate established.
