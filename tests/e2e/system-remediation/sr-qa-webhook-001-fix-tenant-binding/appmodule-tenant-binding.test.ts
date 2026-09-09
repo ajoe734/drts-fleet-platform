@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StoredTenantApiKeyRecord } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import type { AppModule as AppModuleType } from "../../../../apps/api/src/app.module";
@@ -51,6 +51,7 @@ interface INestAppLike {
   useGlobalInterceptors(...interceptors: unknown[]): void;
   useGlobalGuards(...guards: unknown[]): void;
   listen(port: number | string, ...args: any[]): Promise<any>;
+  init(): Promise<unknown>;
   getUrl(): Promise<string>;
   close(): Promise<void>;
 }
@@ -127,14 +128,18 @@ const { AuditNotificationService } = apiRequire(
   AuditNotificationService: typeof AuditNotificationServiceType;
 };
 
-const hasDatabaseUrl = Boolean(
-  process.env.DATABASE_URL &&
-  (process.env.DATABASE_URL.startsWith("postgres://") ||
-    process.env.DATABASE_URL.startsWith("postgresql://")),
-);
+// Ordinary unit/smoke jobs expose an unmigrated shared DATABASE_URL.
+// Acceptance must explicitly select a migrated, dedicated test database.
+const acceptanceDatabaseUrl = process.env.DRTS_TENANT_BINDING_DATABASE_URL;
+if (process.env.DRTS_WEBHOOK_AUTH_EVIDENCE && !acceptanceDatabaseUrl) {
+  throw new Error("Acceptance evidence requires DRTS_TENANT_BINDING_DATABASE_URL");
+}
 
 describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   it("verifies AppModule composition, controller binding, and real DI wiring without requiring server startup", async () => {
+    vi.stubEnv("DATABASE_URL", undefined);
     // 1. Verify AppModule composition
     const imports = Reflect.getMetadata("imports", AppModule) || [];
     expect(imports.length).toBeGreaterThan(0);
@@ -241,10 +246,12 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
     }
   });
 
-  it.runIf(hasDatabaseUrl)(
+  it.runIf(Boolean(acceptanceDatabaseUrl))(
     "C111: Full AppModule with two real tenant JWTs rejects cross-tenant GET, rejects mutations, and preserves same-tenant lifecycle",
     async () => {
-      const url = new URL(process.env.DATABASE_URL!);
+      const url = new URL(acceptanceDatabaseUrl!);
+      expect(["postgres:", "postgresql:"]).toContain(url.protocol);
+      vi.stubEnv("DATABASE_URL", acceptanceDatabaseUrl);
       expect(["127.0.0.1", "localhost"]).toContain(url.hostname);
 
       vi.stubEnv(
@@ -269,17 +276,11 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
       const service = app.get(TenantPartnerService);
 
       try {
+        await app.init();
         const victimTenantId = `qa-victim-${randomUUID()}`;
         const otherTenantId = `qa-other-${randomUUID()}`;
         const victimPrincipalId = `qa-victim-principal-${randomUUID()}`;
         const otherPrincipalId = `qa-other-principal-${randomUUID()}`;
-
-        // 1. Seed initial key for victim tenant
-        const initialKey = await service.issueApiKey(victimTenantId, {
-          keyName: "Victim Initial Key",
-          scopes: ["tenant:read"],
-        });
-        const victimKeyId = initialKey.apiKey.apiKeyId;
 
         // 2. Issue authentic sessions with trusted MFA fixtures
         const now = new Date().toISOString();
@@ -348,6 +349,15 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         const otherIdentity = jwt.toRequestIdentity(
           (await jwt.verifyAccessToken(otherSession.token))!,
         );
+
+        // Seed with the verified victim actor required by security-event auditing.
+        const initialKey = await service.issueApiKey(
+          victimTenantId,
+          { keyName: "Victim Initial Key", scopes: ["tenant:read"] },
+          undefined,
+          victimIdentity,
+        );
+        const victimKeyId = initialKey.apiKey.apiKeyId;
 
         await app.listen(0, "127.0.0.1");
         const endpoint = `${await app.getUrl()}/api/tenant/api-keys`;

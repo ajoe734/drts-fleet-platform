@@ -168,3 +168,34 @@ Takeover verification:
 - `git diff --check`: passed.
 - Additional `pnpm exec tsc --noEmit`: failed on missing workspace modules in unrelated web apps (`@drts/api-client`, `@drts/ui-tokens`, `@drts/ui-web/canvas-tokens`) and `pg` in `uv-exec-010-checkpoint.integration.test.ts`; two downstream implicit-any errors accompanied the missing API client. This is not recorded as a passing root check.
 - Local dependency links initially pointed through shared canonical `node_modules` into the removed `codex-sr-deps-report-font-001` worktree. Only this worker's API/contracts/control-plane-auth dependency directories were isolated and relinked to existing pnpm packages and this checkout's workspace packages before the successful run. No tracked dependency files or canonical links were changed.
+
+## 6. Follow-up CI harness isolation (2026-09-09)
+
+Candidate `ec545b0771bfb215de20a827acc2c3bfc19421bd` failed the
+[integration unit job](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34307459031/job/102327226301):
+the composition check connected to the shared, unmigrated CI database and failed
+on `iam.identity_role_bindings`; the HTTP fixture seeded a privileged API key
+without an authenticated actor and received `AUTHENTICATION_REQUIRED`.
+The smoke workflow likewise runs root tests before migrations.
+
+The composition check now clears `DATABASE_URL` for its application context and
+restores environment stubs after each test. HTTP acceptance explicitly uses
+`DRTS_TENANT_BINDING_DATABASE_URL`, pointing to a dedicated, migrated localhost
+PostgreSQL database. It initializes the full application before issuing sessions
+and seeds the victim key with the identity from its verified JWT. Supplying an
+evidence output path without the dedicated database now fails collection instead
+of producing a misleading successful skipped acceptance run.
+
+Allowed-environment acceptance command (not permitted on this worker VM):
+
+```bash
+# First provision a dedicated localhost test database and apply repository migrations.
+# Set DRTS_TENANT_BINDING_DATABASE_URL to its PostgreSQL URL.
+DRTS_WEBHOOK_AUTH_EVIDENCE=/tmp/tenant-binding-evidence.json \
+  pnpm exec vitest run tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/ \
+  --no-file-parallelism --maxConcurrency=1
+```
+
+This supersedes the earlier DATABASE_URL-only invocation. Both tests must pass
+without skips on the candidate; ordinary CI checks with the HTTP case skipped
+are not full AppModule HTTP/SQL acceptance. External acceptance remains required.
