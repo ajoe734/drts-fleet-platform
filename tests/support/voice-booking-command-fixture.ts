@@ -14,7 +14,9 @@ export function voiceCommandFixture() {
   const checkpointId = randomUUID();
   const playbackId = randomUUID();
   const place = (address: string) => ({
+    rawText: address,
     selectedCandidateId: randomUUID(),
+    entranceId: null,
     resolutionVersion: "v1",
     validUntil: expiry,
     address: {
@@ -22,6 +24,8 @@ export function voiceCommandFixture() {
       normalizedAddress: address,
       lat: 25.03,
       lng: 121.56,
+      geocodeConfidence: "exact" as const,
+      resolvedAt: now,
       coordinateSource: "provider_candidate" as const,
     },
   });
@@ -80,7 +84,7 @@ export function voiceCommandFixture() {
     controlCutoff: { mediaEpoch: 0, controlSequence: 1 },
   };
   const authority = {
-    brandId: "test-brand",
+    brandId: `test-brand-${scopeId}`,
     resourceScopeId: scopeId,
     providerAccountId: "test-provider",
     actorId: "voice-principal",

@@ -92,3 +92,24 @@ step. The workflow addition is preparation until a completed run supplies
 actual results; record its run URL, exact tested SHA and test output before
 candidate handoff. This does not replace independent review or the remaining
 same-candidate integration checks.
+
+
+### First hosted result and fixture repair
+
+Run https://github.com/ajoe734/drts-fleet-platform/actions/runs/34301680410
+executed SHA 392dc5a84fe47a4dab4082da5e9bbd7ed7b32d67 against real
+PostgreSQL: 14 cases ran, 1 passed, 13 failed, none skipped. The concurrent
+receipt/order case passed. The remaining cases all failed during fixture
+setup at uq_voice_resource_scope_active because every fixture reused the same
+brand with an active scope. The fixture now gives each scenario its own brand;
+the production unique constraint is preserved. CI root typecheck also found
+missing rawText and entranceId in the resolved-address fixture; local root
+typechecking then exposed missing geocodeConfidence and resolvedAt. The fixture
+now supplies all fields required by VoiceResolvedLocation/ResolvedAddressPayload.
+Local root typechecking also reports unrelated duplicate ApiClient declarations
+through shared-worktree dependency symlinks; the hosted checkout remains the
+authority for the complete root typecheck.
+
+The affected local unit regression command covering UV-EXEC-015/014/007 passed
+all 103 cases after this fixture repair. A new hosted matrix run is still
+required; the first run is failure evidence, not acceptance.
