@@ -437,6 +437,246 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
       "This slice defines the retention and access policy but does not reopen proof-capture runtime owned by OPX-CM-001 surfaces.",
     ],
   },
+  {
+    family: "voice_booking_evidence",
+    authorityModule: "voice-booking",
+    description:
+      "Unattended voice booking confirmation receipts, draft snapshots, and recording checkpoints.",
+    hotRetentionDays: 90,
+    archiveAfterDays: 90,
+    archiveRetentionDays: 640,
+    archiveTier: "warm_archive",
+    accessRules: [
+      {
+        realms: ["system"],
+        actorTypes: ["system"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["platform"],
+        actorTypes: ["platform_admin"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["ops"],
+        actorTypes: ["ops_user"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+    ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Secondary views expose confirmationId and snapshotHash with masked character previews.",
+      },
+      {
+        surface: "audit_log",
+        rule: "Audit logs record booking confirmation receipts and metadata, omitting complete unmasked slot payloads.",
+      },
+    ],
+    downloadControl: NO_DOWNLOAD_CONTROL,
+    legalHold: DEFAULT_LEGAL_HOLD_POLICY,
+    deletionException:
+      "Confirmation receipts and manifests remain undeletable while linked trip, order, or complaint is open.",
+    auditAction: "view_voice_booking_evidence",
+    notes: [
+      "SD §9.2: confirmation/command/manifest metadata preserved 730 days; refs and hashes only.",
+    ],
+  },
+  {
+    family: "voice_transcript",
+    authorityModule: "voice-booking",
+    description:
+      "Detailed conversation transcripts, interim/final turns, and handoff summaries.",
+    hotRetentionDays: 30,
+    archiveAfterDays: 30,
+    archiveRetentionDays: 150,
+    archiveTier: "warm_archive",
+    accessRules: [
+      {
+        realms: ["system"],
+        actorTypes: ["system"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["platform"],
+        actorTypes: ["platform_admin"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["ops"],
+        actorTypes: ["ops_user"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+    ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Spoken payment card numbers, CVVs, passwords, PINs, and OTP secrets are strictly redacted/masked.",
+      },
+      {
+        surface: "audit_log",
+        rule: "Audit entries record transcript turn identifiers and metadata without raw spoken secrets.",
+      },
+      {
+        surface: "download",
+        rule: "Exported evaluation datasets must be de-identified and stripped of direct passenger contact identifiers.",
+      },
+    ],
+    downloadControl: CONTROLLED_DOWNLOAD_15_MINUTES,
+    legalHold: DEFAULT_LEGAL_HOLD_POLICY,
+    deletionException:
+      "Transcripts remain undeletable while linked complaint escalation, dispute, or legal hold is active.",
+    auditAction: "access_voice_transcript",
+    notes: [
+      "SD §9.2: Upper limit 180 days, encrypted operational access only; third-party AI training forbidden.",
+    ],
+  },
+  {
+    family: "voice_recording_audio",
+    authorityModule: "voice-booking",
+    description:
+      "Raw bidirectional audio recordings and audio segment media files stored in CTI or object storage.",
+    hotRetentionDays: 30,
+    archiveAfterDays: 30,
+    archiveRetentionDays: 150,
+    archiveTier: "cold_archive",
+    accessRules: [
+      {
+        realms: ["system"],
+        actorTypes: ["system"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["platform"],
+        actorTypes: ["platform_admin"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["ops"],
+        actorTypes: ["ops_user"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+    ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Audio identifiers masked; direct storage paths and bucket credentials are never exposed.",
+      },
+      {
+        surface: "download",
+        rule: "Audio media accessible exclusively via short-lived signed URLs with mandatory access auditing.",
+      },
+    ],
+    downloadControl: CONTROLLED_DOWNLOAD_15_MINUTES,
+    legalHold: DEFAULT_LEGAL_HOLD_POLICY,
+    deletionException:
+      "Raw audio recordings remain undeletable while linked dispute, complaint, or regulatory inquiry is active.",
+    auditAction: "download_voice_recording_audio",
+    notes: [
+      "SD §9.2: 180-day provider retention policy; signed short-lived download URLs with per-access auditing.",
+    ],
+  },
+  {
+    family: "voice_live_buffer",
+    authorityModule: "voice-booking",
+    description:
+      "In-memory or transient streaming audio frames and interim ASR subtitle buffers.",
+    hotRetentionDays: 1,
+    archiveAfterDays: null,
+    archiveRetentionDays: null,
+    archiveTier: "hot_only",
+    accessRules: [
+      {
+        realms: ["system"],
+        actorTypes: ["system"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+    ],
+    maskingRules: [
+      {
+        surface: "storage",
+        rule: "Transient live audio buffer is cleared upon session close and disconnect recovery window timeout.",
+      },
+      {
+        surface: "audit_log",
+        rule: "Live audio frames and unconfirmed interim text are never logged to application logs or audit logs.",
+      },
+    ],
+    downloadControl: NO_DOWNLOAD_CONTROL,
+    legalHold: {
+      supported: false,
+      placementActors: [],
+      releaseActors: [],
+      deletionSuppressed: false,
+      notes: [
+        "Live transient buffers cannot be held; finalized recordings and transcripts are held under their respective families.",
+      ],
+    },
+    deletionException:
+      "Transient buffer is deleted automatically upon call termination and disconnect timeout.",
+    auditAction: "purge_voice_live_buffer",
+    notes: [
+      "SD §9.2: Live buffer / transient subtitles are cleared after disconnect recovery window; never written to application logs.",
+    ],
+  },
+  {
+    family: "voice_telemetry",
+    authorityModule: "voice-booking",
+    description:
+      "Aggregated call admission metrics, duration and quality analytics, and cost ledger records.",
+    hotRetentionDays: 180,
+    archiveAfterDays: 180,
+    archiveRetentionDays: 550,
+    archiveTier: "warm_archive",
+    accessRules: [
+      {
+        realms: ["system"],
+        actorTypes: ["system"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["platform"],
+        actorTypes: ["platform_admin"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+      {
+        realms: ["ops"],
+        actorTypes: ["ops_user"],
+        requiredScopes: [],
+        tenantScoped: false,
+      },
+    ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Metrics and telemetry labels are de-identified and must not contain passenger phone numbers, street addresses, or transcripts.",
+      },
+      {
+        surface: "audit_log",
+        rule: "Aggregated cost and performance telemetry is audited at batch/reporting boundaries.",
+      },
+    ],
+    downloadControl: NO_DOWNLOAD_CONTROL,
+    legalHold: DEFAULT_LEGAL_HOLD_POLICY,
+    deletionException:
+      "Telemetry records remain undeletable while regulatory filing or financial reconciliation is pending.",
+    auditAction: "view_voice_telemetry",
+    notes: [
+      "SD §9.2 / §13.3: De-identified aggregation; telemetry labels exclude phone numbers, addresses, and transcript excerpts.",
+    ],
+  },
 ] as const;
 
 const LEGAL_HOLD_WORKFLOW = [
@@ -528,6 +768,14 @@ export function getEvidenceRetentionPolicy(family: EvidenceRetentionFamily) {
       {
         family,
       },
+    );
+  }
+  if (!policy.hotRetentionDays || policy.hotRetentionDays <= 0) {
+    throw new ApiRequestError(
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      "UNDEFINED_RETENTION_PERIOD_REJECTED",
+      "Evidence policies cannot default to indefinite or undefined retention.",
+      { family },
     );
   }
   return clonePolicy(policy);
