@@ -4,7 +4,84 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
-Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`.
+### Q-SR-PUSH-001 — provider/device contract and shared writer authorization
+
+Supervisor/Chairman must route the passenger push provider and pseudonymous
+subject-to-device contract to the product/contract decision owner; an adapter
+worker cannot infer this from Identity Service's driver/session device binding.
+SR-CONTRACT-001 owner Codex must receive explicitly authorized receipt/claim
+contract and migration-allocation scope before implementing that follow-up.
+Supervisor must authorize the parent's service/repository writes and sequence
+overlapping writers. UV-EXEC-006 is already done; it is not the remaining blocker.
+Keep SR-PUSH-001 blocked pending these recorded decisions, retain C023/N10 and
+the separate SR-LIVE-PUSH-001 device evidence gate. No scope cut or provider
+selection is approved by this routing record. See the
+[decision packet and concrete resume steps](support/unblock/SR-PUSH-001/SR-PUSH-001-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-QA-WEBHOOK-TENANT-BINDING-001 — repair scope authorization pending
+
+Supervisor/Claude must authorize product write scopes and IAM/tenant overlap
+sequencing for `SR-QA-WEBHOOK-001-FIX-TENANT-BINDING` (owner Codex, reviewer
+Gemini), and add the repair as a dependency of `SR-QA-WEBHOOK-001` acceptance.
+The required cross-tenant rejection remains unchanged; no scope cut or new
+entitlement is approved. Keep the repair blocked with `waiting_for: Claude`
+until machine truth records the authorization. This is follow-up on the existing
+repair task, not a new implementation assignment. See the
+[decision, proposed scopes, and resume gate](support/unblock/SR-QA-WEBHOOK-001-FIX-TENANT-BINDING/SR-QA-WEBHOOK-001-FIX-TENANT-BINDING-UNBLOCK-PLANNING-DECISION.md).
+
+
+### Q-SR-ENV-COPY-001 — runtime source and integration scope routing
+
+Supervisor/Chairman must authorize the runtime badge wiring scopes and sequence
+overlapping shell/deployment work for parent `SR-ENV-COPY-001` (Codex / Codex2).
+The existing task contract already requires authoritative runtime environment,
+no domain guessing, and no production/healthy claim for unknown data. Retain
+that acceptance. The parent can resume authorized catalog cleanup and scoped
+resolver work; full acceptance still requires actual render integration.
+Before wiring, record the existing deployment configuration producer, its
+server/client delivery boundary and allowed values; unresolved source selection
+returns to Supervisor/Chairman, not an invented environment variable.
+This is a follow-up on the existing parent, not a new implementation task or
+scope grant. See [decision, paths and resume gate](support/unblock/SR-ENV-COPY-001/SR-ENV-COPY-001-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-QA-TENANT-001 — UAT provisioning follow-up, no product scope cut
+
+The planning triage found no unresolved product/contract choice in the reported
+blocker. PRD §9.1.2, service contracts §3.2 and the parent execution task retain
+the full tenant acceptance matrix. Supervisor/Gemini must coordinate provisioned
+disposable tenants and legitimate writable/read-only identities. The current parent
+uses `DRTS_UAT_ENV`, `DRTS_UAT_API_URL` (origin), tenant A/B IDs and tokens,
+and `DRTS_UAT_USER_EMAIL`; record deployment SHA, identity expiry/refresh and
+DB teardown ownership. Current parent owner Codex2 and reviewer Codex resume
+scoped test development and, once access exists, real write/readback verification.
+This remains an open environment follow-up on the registered parent, not a new
+implementation task or scope grant. Preserve useful in-progress test work; helper
+merge cannot clear the live acceptance gate. See the [planning decision and resume conditions](support/unblock/SR-QA-TENANT-001/SR-QA-TENANT-001-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-QA-WEBHOOK-001 — tenant repair scope and webhook deadline
+
+Existing tenant isolation rules already forbid the API key metadata exposure
+reported by `SR-QA-WEBHOOK-001`; no product waiver is implied. Supervisor/Claude
+must authorize and sequence the existing P0
+`SR-QA-WEBHOOK-001-FIX-TENANT-BINDING`, add it to the parent's dependencies,
+and route the still-unspecified default webhook transport deadline contract.
+Codex owns parent/repair execution; Gemini reviews them. Preserve all C111–C115
+acceptance and the parent's blocked state, including usage and external evidence
+gates. See the [contract basis, proposed scope and resume steps](support/unblock/SR-QA-WEBHOOK-001/SR-QA-WEBHOOK-001-UNBLOCK-PLANNING-DECISION.md).
+
+Open remediation follow-ups as of 2026-09-08: `Q-SR-OPS-SHELL-001`, `Q-SR-BANK-002`, `Q-SR-ENTERPRISE-SEARCH-001`, `Q-SR-FLEET-DATA-001`, `Q-SR-DRIVER-WEB-001`, `Q-SR-ENTERPRISE-FORM-001`, `Q-SR-ENTERPRISE-DATA-001`, `Q-SR-PROOF-001`, `Q-SR-REPORT-001`.
+
+### Q-SR-ENTERPRISE-FORM-001 — theme precedence and shared scope authorization
+
+Supervisor/Chairman must confirm whether enterprise canvas branding or tenant
+realm tokens govern the shared enterprise theme, then authorize the theme and
+three existing translation keys with overlap/dependency sequencing. Parent owner
+Codex2 and reviewer Codex preserve full acceptance and the blocked state until
+that authorization or an accepted, merged shared-theme producer exists.
+`SR-DESIGN-001` covers leave/academy/Host contracts and is not an established
+theme dependency. This is an explicit follow-up on the existing parent, not a
+scope grant or a new registered implementation task. See the
+[decision routing and resume gate](support/unblock/SR-ENTERPRISE-FORM-001/SR-ENTERPRISE-FORM-001-UNBLOCK-PLANNING-DECISION.md).
 
 The original fifteen questions on this board were answered. Worth noting how, because the
 distribution was not what the board implied: of the fifteen, four were closed by
@@ -72,6 +149,60 @@ The parent remains blocked until authorization. See the
 [decision and continuation record](support/unblock/SR-DRIVER-WEB-001/SR-DRIVER-WEB-001-UNBLOCK-PLANNING-DECISION.md)
 for source evidence, exact proposed path and validation gates. No new product
 semantics or acceptance scope cut is approved.
+
+### Q-SR-ENTERPRISE-DATA-001 — shared scope and contact contract routing pending
+
+Owner: Codex2 (parent); reviewer: Codex. Supervisor/Chairman must adjudicate
+the shared detail 404, support action, and theme scopes and record dependency
+ordering before parent UI completion. Contract reviewer Codex must confirm an
+authorized driver/support contact source or route an explicit unavailable-contact
+acceptance decision. Passenger/onsite contact is not driver contact. Preserve
+the full parent acceptance; history repair does not grant scope or clear this
+gate. The parent remains blocked pending these decisions, tracked on the
+existing parent task rather than an unregistered producer. See the
+[routing record and concrete resume gate](support/unblock/SR-ENTERPRISE-DATA-001/SR-ENTERPRISE-DATA-001-UNBLOCK-PLANNING-DECISION.md).
+
+### Q-SR-PROOF-001 — proof contract and scope routing pending
+
+Supervisor/Chairman must authorize repository/module/proof storage-scanner
+scopes, record SR-CONTRACT-001 ordering or an explicit reviewed alternative,
+route the missing proof UI states, and select an unused recovery branch.
+Parent owner Codex and reviewer Gemini retain all proof validation, readback,
+concurrency and durable receipt acceptance. PRD §9.8.4 and service contracts
+§3.11 already establish product ownership; this open item concerns the missing
+implementation allocation, not permission to accept arbitrary proof IDs.
+SR-CONTRACT-001 is currently todo; its owner Gemini must supply the reviewed
+contract/persistence allocation before dependent implementation. The parent is
+`blocked` as of 2026-09-08T16:35:21Z, waiting for Gemini to route the remaining
+authorizations to Supervisor/Chairman; history recovery did not supply them.
+The [resume gate](support/unblock/SR-PROOF-001/SR-PROOF-001-UNBLOCK-PLANNING-DECISION.md)
+still applies to dependent implementation. This follow-up is tracked on the existing parent; any separate
+producer must first be registered by the supervisor in machine truth.
+
+### Q-SR-REPORT-001 — ordinary report shared-file scope pending
+
+Supervisor/Chairman must authorize the parent's shared format declaration in
+`packages/contracts/src/index.ts` and affected assertions in
+`tests/unit/reporting-filing.test.ts`, with overlapping writer dependencies,
+or register a coordinated producer. Parent owner Codex and reviewer Gemini retain
+full CSV/XLSX/PDF acceptance under PRD §9.5.6 and the filing-byte exclusion under
+§9.10.2. No product scope cut is needed. Keep SR-REPORT-001 blocked until scope
+and sequencing are recorded in machine truth; history recovery alone does not
+satisfy that gate. See the [evidence, routing decision and resume gate](support/unblock/SR-REPORT-001/SR-REPORT-001-UNBLOCK-PLANNING-DECISION.md).
+This is an explicit follow-up on the existing parent, not authorization to edit
+shared files or a claim that a new producer task already exists.
+
+### Q-SR-OPS-PROOF-001 — preparation handoff and live resource sequencing pending
+
+Supervisor/Chairman must record the preparation-versus-live acceptance boundary
+for SR-OPS-PROOF-001 (Codex / Codex2) and route isolated resource preparation
+through Gemini, owner of SR-LIVE-OPS-001. LIVE-OPS already depends on OPS-PROOF;
+do not add the reverse dependency or require completed live receipts to begin
+resource coordination. Preserve both acceptance sets until the supervisor records
+a reviewed allocation; no preparation-only scope cut is approved by this helper.
+The parent remains blocked pending that decision and retrievable authorized
+inputs. This is follow-up on the existing parent, not a new unregistered task.
+See the [decision route and resume gate](support/unblock/SR-OPS-PROOF-001/SR-OPS-PROOF-001-UNBLOCK-PLANNING-DECISION.md).
 
 ## Resolved Items
 
