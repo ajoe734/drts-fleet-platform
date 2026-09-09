@@ -1,3 +1,13 @@
+## 2026-09-09 dispatch 核實（Owner Codex / Reviewer Codex2）
+
+- 本次 fresh origin/dev base：`add6694278b3287bb42215b24d4c91039d0c6645`；保留的 branch HEAD：`17f4da0b2054f502bb8a91d18791bd28003d9463`。尚無 handoff candidate。
+- `git fetch origin` exit 0；`git rebase origin/dev` exit 1，重播重複提交 `903969279` 時，page、task test、task evidence 三處衝突。`git rebase --abort` exit 0；工作樹恢復乾淨，沒有 force push 或遺失提交。
+- 直接讀取上述 origin/dev 的 controller：GET tenant/bookings 仍只接 tenant/request headers；service `listTenantBookings` 第 2118 行仍只有 tenantId，pagination 固定 page 1；enterprise wrapper 第 59 行仍是無參數 listBookings()。頁面仍是 EnterpriseBookingHistory 包裝。這是目前 base 的程式核實，並非舊 audit 推論。
+- current-release `ai-status.sh show SR-BOOKING-VERIFY` exit 1：Task not found。parent slice 仍 depends_on=[]，write_scopes 未包含 API/contracts/client/wrapper。
+- 已讀 merged helper `support/unblock/SR-ENTERPRISE-SEARCH-001/SR-ENTERPRISE-SEARCH-001-UNBLOCK-HISTORY-REPAIR.md`：其明定 parent remains blocked on backend capability planning；恢復路徑要求 supervisor 指定 clean replacement worktree，並先解除 producer/shared-scope gate。helper done 並未實作後端 filter。
+- 請 supervisor 登錄真正後端篩選 producer 及 parent dependency、授權必要 shared scopes，並指定不改寫已發布歷史的 replacement branch/worktree。不能把 history helper done 自動視為功能 gate 已解除。
+- 本次僅更新阻擋證據，未改 UI；未重跑既有 synthetic tests（不能證明缺失的 API），未啟動任何 server、live API、瀏覽器或真機驗證；無實際 query/total/資源 ID。不宣稱驗收完成。保存 commit SHA 由 machine status 記錄。
+
 # SR-ENTERPRISE-SEARCH-001 — 企業歷史查詢條件與結果一致
 
 ## 2026-09-09 02:13 UTC resume 核實（本次最新）
