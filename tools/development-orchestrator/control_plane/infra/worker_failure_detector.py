@@ -226,6 +226,13 @@ def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
     payload_type = str(payload.get("type") or "").strip().lower()
     if payload_type in {"assistant", "user"}:
         return None
+    if payload_type in {"item.started", "item.updated", "item.completed"}:
+        item = payload.get("item")
+        # Codex items contain tool output and assistant-authored text. A chair
+        # reading another lane's 401 evidence must not pause its own identity.
+        # Only an explicit error item can represent a provider failure here.
+        if not isinstance(item, dict) or item.get("type") != "error":
+            return None
     candidates = _iter_json_string_values(payload)
     candidates = [*candidates, line]
     for candidate in candidates:
