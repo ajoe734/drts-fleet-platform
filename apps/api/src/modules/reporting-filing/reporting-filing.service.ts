@@ -183,6 +183,16 @@ const MAX_EXPORT_PURPOSE_LENGTH = 500;
 const MAX_EXPORT_IDEMPOTENCY_KEY_LENGTH = 200;
 const MAX_EXPORT_QUERY_LENGTH = 200;
 
+export type ReportArtifactResult = {
+  buffer: Buffer;
+  contentType: string;
+  fileName: string;
+} & Promise<{
+  buffer: Buffer;
+  contentType: string;
+  fileName: string;
+}>;
+
 @Injectable()
 export class ReportingFilingService implements OnModuleInit {
   private reportJobs: StoredReportJob[] = [];
@@ -795,9 +805,7 @@ export class ReportingFilingService implements OnModuleInit {
     requestId?: string,
     identity?: EvidenceAccessIdentity | null,
     tenantScopeId?: string | null,
-  ):
-    | { buffer: Buffer; contentType: string; fileName: string }
-    | Promise<{ buffer: Buffer; contentType: string; fileName: string }> {
+  ): ReportArtifactResult {
     const job = this.requireGenericReportJob(jobId);
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
     if (normalizedTenantScopeId) {
@@ -815,6 +823,15 @@ export class ReportingFilingService implements OnModuleInit {
         "REPORT_ARTIFACT_NOT_READY",
         `Report job ${jobId} is ${job.status}; there is nothing to download yet.`,
         { jobId, status: job.status },
+      );
+    }
+
+    if (job.jobType === "vehicle_roster" && (job.format === "xlsx" || job.format === "pdf")) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_IMPLEMENTED,
+        "REPORT_FORMAT_NOT_IMPLEMENTED",
+        `Report format "${job.format}" has no renderer for ${job.jobType}.`,
+        { jobId, format: job.format },
       );
     }
 
@@ -851,14 +868,15 @@ export class ReportingFilingService implements OnModuleInit {
         normalizedTenantScopeId,
       );
 
-      return {
+      const result = {
         buffer: rendered,
         contentType: renderer.contentType,
         fileName: `${job.jobType}-${job.jobId}.${job.format}`,
       };
+      return Object.assign(Promise.resolve(result), result) as ReportArtifactResult;
     }
 
-    return (async () => {
+    const promise = (async () => {
       const buffer = await rendered;
       this.recordArtifactAccessAudit(
         {
@@ -885,9 +903,11 @@ export class ReportingFilingService implements OnModuleInit {
         fileName: `${job.jobType}-${job.jobId}.${job.format}`,
       };
     })();
+
+    return promise as unknown as ReportArtifactResult;
   }
 
-  private assertReportFormatRenders(format: string) {
+  private assertReportFormatRenders(format: string, jobType?: string) {
     if (!Object.hasOwn(this.reportArtifactRenderers, format)) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -896,7 +916,10 @@ export class ReportingFilingService implements OnModuleInit {
         { format, supportedFormats: this.listRenderableFormats() },
       );
     }
-    if (!this.reportArtifactRenderers[format as ReportOutputFormat]) {
+    if (
+      !this.reportArtifactRenderers[format as ReportOutputFormat] ||
+      (jobType === "vehicle_roster" && (format === "xlsx" || format === "pdf"))
+    ) {
       throw new ApiRequestError(
         HttpStatus.NOT_IMPLEMENTED,
         "REPORT_FORMAT_NOT_IMPLEMENTED",
@@ -930,7 +953,7 @@ export class ReportingFilingService implements OnModuleInit {
   ): ReportJobAccepted {
     this.assertNonBlank(command.jobType, "jobType");
     this.assertReportTypeProducesRows(command.jobType);
-    this.assertReportFormatRenders(command.format);
+    this.assertReportFormatRenders(command.format, command.jobType);
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
     this.assertReportTypeIsAvailableToScope(
       command.jobType,

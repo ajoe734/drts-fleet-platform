@@ -48,7 +48,10 @@
 - `reportArtifactRenderers.pdf` 配置 `pdfkit` 實作（MIME: `application/pdf`）。
 - `reportArtifactRenderers.zip` 保留 `null`：一般報表不提供 filing ZIP；若收到 `zip` 格式，`assertReportFormatRenders` 明確拋出 501 `REPORT_FORMAT_NOT_IMPLEMENTED`。
 - 若收到未知格式（如 `tar` 或 `xml`），拋出 400 `REPORT_FORMAT_UNKNOWN`。
-- `renderReportArtifact` 支援非同步與同步渲染，下載稽核確實記錄產出檔案之位元組數。
+- `renderReportArtifact` 回傳型別使用交集型別 `ReportArtifactResult`（`{ buffer, contentType, fileName } & Promise<{ buffer, contentType, fileName }>`），完全向下相容既有同步呼叫端（如 `tests/unit/reporting-filing.test.ts` 既有測試），同步讀取與非同步 `await` 皆能無型別或執行期錯誤運作。
+- `vehicle_roster` 依 PRD 9.10.1 規範維持僅提供 CSV 格式，若指定 `xlsx` 或 `pdf` 嚴格回傳 501 `REPORT_FORMAT_NOT_IMPLEMENTED`。
+- `renderReportArtifact` 下載稽核確實記錄產出檔案之位元組數。
+- 測試輔助解析器 `extractPdfText` 支援 CJK ToUnicode CMap 解析以及 CI Runner 無 Noto 字型時之 fallback 解析，並修正 ESLint `no-useless-escape`，確保本機與 GitHub Actions 測試環境皆通過。
 
 ### 3. 更新 `reporting-filing.controller.ts`
 
@@ -99,15 +102,30 @@ Generating route types...
 ```
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-report-001
 
- ✓ tests/unit/system-remediation/sr-report-001/report-formats.test.ts (15 tests)
-
  Test Files  1 passed (1)
       Tests  15 passed (15)
-   Start at  00:28:34
-   Duration  2.54s
+   Start at  00:56:08
+   Duration  2.41s
 ```
 
-### 5. 測試涵蓋與比對驗證項目
+### 5. `pnpm exec vitest run tests/unit/reporting-filing.test.ts`（相容性回歸驗證）
+```
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-report-001
+
+ Test Files  1 passed (1)
+      Tests  30 passed (30)
+   Start at  00:56:14
+   Duration  6.68s
+```
+
+### 6. `pnpm lint:root`
+```
+exit code: 0
+> drts-fleet-platform@0.1.0 lint:root
+> eslint eslint.config.mjs playwright*.config.ts vitest.config.ts tests --max-warnings=0
+```
+
+### 7. 測試涵蓋與比對驗證項目
 
 - **CJK / 繁體中文保全**：
   - 輸入姓名「王小明」、部門「營運一部」、備註「客戶滿意度調查及後續跟進」。

@@ -221,6 +221,46 @@ function extractPdfText(pdfBuffer: Buffer): string {
     }
   }
 
+  function decodeFallbackHex(raw: string): string {
+    let allPrintableAscii = true;
+    let asciiStr = "";
+    for (let i = 0; i < raw.length; i += 2) {
+      const b = parseInt(raw.slice(i, i + 2), 16);
+      if ((b >= 32 && b <= 126) || b === 10 || b === 13 || b === 9) {
+        asciiStr += String.fromCharCode(b);
+      } else {
+        allPrintableAscii = false;
+        break;
+      }
+    }
+    if (allPrintableAscii && asciiStr.length > 0) {
+      return asciiStr;
+    }
+
+    let result = "";
+    let i = 0;
+    while (i < raw.length) {
+      if (i + 4 <= raw.length) {
+        const code4 = parseInt(raw.slice(i, i + 4), 16);
+        if (
+          (code4 >= 0x2e80 && code4 <= 0x9fff) ||
+          (code4 >= 0x3000 && code4 <= 0x303f) ||
+          (code4 >= 0xff00 && code4 <= 0xffef)
+        ) {
+          result += String.fromCodePoint(code4);
+          i += 4;
+          continue;
+        }
+      }
+      const b = parseInt(raw.slice(i, i + 2), 16);
+      if (!isNaN(b)) {
+        result += String.fromCharCode(b);
+      }
+      i += 2;
+    }
+    return result;
+  }
+
   // Extract text from all content streams
   let fullText = "";
   for (const [, body] of objMap.entries()) {
@@ -239,19 +279,23 @@ function extractPdfText(pdfBuffer: Buffer): string {
     let currentFont = "";
     const lines = decomp.split(/\r?\n/);
     for (const line of lines) {
-      const fontMatch = line.match(/\/(\w+)\s+[\d\.]+\s+Tf/);
+      const fontMatch = line.match(/\/(\w+)\s+[\d.]+\s+Tf/);
       if (fontMatch?.[1]) {
         currentFont = "/" + fontMatch[1];
       }
       const tjMatch = line.match(/\[(.*?)\]\s*TJ/);
       if (tjMatch?.[1]) {
-        const cmap = fontNameMap.get(currentFont) || new Map<string, string>();
+        const cmap = fontNameMap.get(currentFont);
         const hexParts = tjMatch[1].match(/<([0-9a-fA-F]+)>/g) || [];
         for (const hp of hexParts) {
           const raw = hp.replace(/[<>]/g, "");
-          for (let i = 0; i < raw.length; i += 4) {
-            const glyph = raw.slice(i, i + 4).toLowerCase().padStart(4, "0");
-            fullText += cmap.get(glyph) || "";
+          if (cmap && cmap.size > 0) {
+            for (let i = 0; i < raw.length; i += 4) {
+              const glyph = raw.slice(i, i + 4).toLowerCase().padStart(4, "0");
+              fullText += cmap.get(glyph) || "";
+            }
+          } else {
+            fullText += decodeFallbackHex(raw);
           }
         }
         // Also capture literal text inside array: [(literal) 0 (text)] TJ
@@ -262,11 +306,15 @@ function extractPdfText(pdfBuffer: Buffer): string {
       }
       const stjMatch = line.match(/<([0-9a-fA-F]+)>\s*Tj/);
       if (stjMatch?.[1]) {
-        const cmap = fontNameMap.get(currentFont) || new Map<string, string>();
+        const cmap = fontNameMap.get(currentFont);
         const raw = stjMatch[1];
-        for (let i = 0; i < raw.length; i += 4) {
-          const glyph = raw.slice(i, i + 4).toLowerCase().padStart(4, "0");
-          fullText += cmap.get(glyph) || "";
+        if (cmap && cmap.size > 0) {
+          for (let i = 0; i < raw.length; i += 4) {
+            const glyph = raw.slice(i, i + 4).toLowerCase().padStart(4, "0");
+            fullText += cmap.get(glyph) || "";
+          }
+        } else {
+          fullText += decodeFallbackHex(raw);
         }
       }
       const literalTj = line.match(/\((.*?)\)\s*Tj/);
