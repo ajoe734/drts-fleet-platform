@@ -242,7 +242,23 @@ export class OwnedAutonomousDispatchExecutorService {
 
     // Try candidates in order
     for (const candidate of availableCandidates) {
+      let provisionalReservation: { reservationId: string } | null = null;
+      let createdAssignmentId: string | null = null;
+      const previousOrderSnapshot = { ...order };
+      const previousJobSnapshot = job ? { ...job } : undefined;
+
       try {
+        // SD §7.6: In non-DB mode, pre-reserve driver and vehicle capacity before creating assignment
+        // so that (1) capacity conflict is caught before any mutating side effects, and
+        // (2) concurrent requests cannot race to pick the same candidate.
+        if (!this.ownedMobilityRepository?.isEnabled()) {
+          provisionalReservation = this.preReserveInMem(
+            order.orderId,
+            candidate.driverId,
+            candidate.vehicleId,
+          );
+        }
+
         const assignmentResult =
           await this.ownedMobilityService.createDispatchAssignment(
             job,
@@ -253,6 +269,8 @@ export class OwnedAutonomousDispatchExecutorService {
             options?.requestId,
             { dispatchAttemptSequence: round },
           );
+
+        createdAssignmentId = assignmentResult.assignmentId;
 
         const assignment = this.ownedMobilityService.requireAssignment(
           assignmentResult.assignmentId,
@@ -265,13 +283,11 @@ export class OwnedAutonomousDispatchExecutorService {
         (assignment as unknown as { assignmentVersion?: number }).assignmentVersion =
           round;
 
-        // In-memory reservation ledger when repository is not in real DB mode
-        if (!this.ownedMobilityRepository?.isEnabled()) {
-          this.reserveInMem(
-            order.orderId,
+        // In-memory reservation ledger: bind provisional reservation to actual assignment
+        if (!this.ownedMobilityRepository?.isEnabled() && provisionalReservation) {
+          this.bindProvisionalInMem(
+            provisionalReservation.reservationId,
             assignment.assignmentId,
-            candidate.driverId,
-            candidate.vehicleId,
             assignment.acceptanceDeadline,
           );
         }
@@ -334,6 +350,16 @@ export class OwnedAutonomousDispatchExecutorService {
 
         return offerResult;
       } catch (error) {
+        if (provisionalReservation) {
+          this.releaseProvisionalInMem(provisionalReservation.reservationId);
+        }
+        if (createdAssignmentId) {
+          this.ownedMobilityService.rollbackDispatchAssignmentInMem?.(
+            createdAssignmentId,
+            previousOrderSnapshot,
+            previousJobSnapshot,
+          );
+        }
         if (
           error instanceof DispatchResourceReservationConflictError ||
           (error as { name?: string })?.name ===
@@ -352,6 +378,12 @@ export class OwnedAutonomousDispatchExecutorService {
     }
 
     // All available candidates collided
+    job.status = "failed";
+    job.updatedAt = new Date().toISOString();
+    order.status = "redispatch_required";
+    order.updatedAt = new Date().toISOString();
+    order.lastDispatchFailureReason = "reservation_conflicts_exhausted";
+
     const noSupplyResult: AutonomousDispatchOfferResult = {
       status: "no_supply",
       orderId,
@@ -693,19 +725,18 @@ export class OwnedAutonomousDispatchExecutorService {
 
   // --- In-Memory Capacity Reservation Ledger (for non-DB/unit modes) ---
 
-  private reserveInMem(
+  private preReserveInMem(
     orderId: string,
-    assignmentId: string,
     driverId: string,
     vehicleId: string,
-    expiresAt?: string | null,
-  ) {
+    excludeAssignmentId?: string,
+  ): { reservationId: string } {
     const driverConflict = this.inMemReservations.find(
       (r) =>
         r.resourceType === "driver" &&
         r.resourceId === driverId &&
         ["held", "occupied"].includes(r.status) &&
-        r.assignmentId !== assignmentId,
+        (!excludeAssignmentId || r.assignmentId !== excludeAssignmentId),
     );
     if (driverConflict) {
       throw new DispatchResourceReservationConflictError("driver", driverId);
@@ -716,20 +747,21 @@ export class OwnedAutonomousDispatchExecutorService {
         r.resourceType === "vehicle" &&
         r.resourceId === vehicleId &&
         ["held", "occupied"].includes(r.status) &&
-        r.assignmentId !== assignmentId,
+        (!excludeAssignmentId || r.assignmentId !== excludeAssignmentId),
     );
     if (vehicleConflict) {
       throw new DispatchResourceReservationConflictError("vehicle", vehicleId);
     }
 
+    const reservationGroupId = randomUUID();
     this.inMemReservations.push({
       reservationId: randomUUID(),
       resourceType: "driver",
       resourceId: driverId,
       orderId,
-      assignmentId,
+      assignmentId: `provisional:${reservationGroupId}`,
       status: "held",
-      expiresAt: expiresAt ?? null,
+      expiresAt: null,
       version: 1,
     });
     this.inMemReservations.push({
@@ -737,11 +769,56 @@ export class OwnedAutonomousDispatchExecutorService {
       resourceType: "vehicle",
       resourceId: vehicleId,
       orderId,
-      assignmentId,
+      assignmentId: `provisional:${reservationGroupId}`,
       status: "held",
-      expiresAt: expiresAt ?? null,
+      expiresAt: null,
       version: 1,
     });
+
+    return { reservationId: reservationGroupId };
+  }
+
+  private bindProvisionalInMem(
+    provisionalId: string,
+    assignmentId: string,
+    expiresAt?: string | null,
+  ) {
+    const provisionalKey = `provisional:${provisionalId}`;
+    for (const r of this.inMemReservations) {
+      if (r.assignmentId === provisionalKey) {
+        r.assignmentId = assignmentId;
+        r.expiresAt = expiresAt ?? null;
+      }
+    }
+  }
+
+  private releaseProvisionalInMem(provisionalId: string) {
+    const provisionalKey = `provisional:${provisionalId}`;
+    for (let i = this.inMemReservations.length - 1; i >= 0; i--) {
+      if (this.inMemReservations[i]?.assignmentId === provisionalKey) {
+        this.inMemReservations.splice(i, 1);
+      }
+    }
+  }
+
+  private reserveInMem(
+    orderId: string,
+    assignmentId: string,
+    driverId: string,
+    vehicleId: string,
+    expiresAt?: string | null,
+  ) {
+    const provisional = this.preReserveInMem(
+      orderId,
+      driverId,
+      vehicleId,
+      assignmentId,
+    );
+    this.bindProvisionalInMem(
+      provisional.reservationId,
+      assignmentId,
+      expiresAt,
+    );
   }
 
   private occupyInMem(assignmentId: string) {

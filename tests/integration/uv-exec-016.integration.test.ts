@@ -380,8 +380,8 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       expect(heldRound2).toBeDefined();
     });
 
-    it("rolls back on resource reservation conflict and deterministically advances to next candidate", async () => {
-      const { executor, createOrder } = createHarness();
+    it("rolls back on resource reservation conflict and deterministically advances to next candidate without leaving orphan active assignments", async () => {
+      const { executor, ownedMobilityService, createOrder } = createHarness();
 
       // Order A takes candidate 1
       const orderA = createOrder({ passengerName: "Order A" });
@@ -396,6 +396,94 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       // Verify Order B did not collide with Order A's driver/vehicle
       expect(offerB.driverId).not.toBe(offerA.driverId);
       expect(offerB.vehicleId).not.toBe(offerA.vehicleId);
+
+      // Regression check (SD §7.6 losing-transaction rollback):
+      // Verify Order B has EXACTLY ONE assignment (candidate 2), with NO orphan active assignment for candidate 1
+      const orderBAssignments = ownedMobilityService.getDispatchAssignmentsForOrder(orderB.orderId);
+      expect(orderBAssignments).toHaveLength(1);
+      expect(orderBAssignments[0]?.assignmentId).toBe(offerB.assignmentId);
+      expect(orderBAssignments[0]?.driverId).toBe(offerB.driverId);
+
+      const activeOrderBAssignment = ownedMobilityService.getActiveDispatchAssignmentForOrder(orderB.orderId);
+      expect(activeOrderBAssignment?.assignmentId).toBe(offerB.assignmentId);
+
+      // Candidate 1's active driver task belongs ONLY to Order A, NOT Order B
+      const candidate1ActiveTask = ownedMobilityService.getActiveDriverTaskForAssignment(offerA.assignmentId);
+      expect(candidate1ActiveTask?.driverId).toBe(offerA.driverId);
+      expect(candidate1ActiveTask?.orderId).toBe(orderA.orderId);
+    });
+
+    it("rolls back cleanly with no orphan active assignments when all candidates encounter reservation conflicts (SD §7.6 losing-transaction rollback)", async () => {
+      const { executor, ownedMobilityService, projectionService, createOrder } = createHarness();
+
+      // Take all 3 candidates with orders A, B, C
+      const orderA = createOrder({ passengerName: "Order A" });
+      const offerA = await executor.requestDispatch(orderA.orderId);
+      expect(offerA.status).toBe("offered");
+
+      const orderB = createOrder({ passengerName: "Order B" });
+      const offerB = await executor.requestDispatch(orderB.orderId);
+      expect(offerB.status).toBe("offered");
+
+      const orderC = createOrder({ passengerName: "Order C" });
+      const offerC = await executor.requestDispatch(orderC.orderId);
+      expect(offerC.status).toBe("offered");
+
+      // Verify each order took a distinct driver
+      const takenDrivers = new Set([offerA.driverId, offerB.driverId, offerC.driverId]);
+      expect(takenDrivers.size).toBe(3);
+
+      // Order D now requests dispatch: all 3 candidates collide
+      const orderD = createOrder({ passengerName: "Order D" });
+      const offerD = await executor.requestDispatch(orderD.orderId);
+      expect(offerD.status).toBe("no_supply");
+      expect(offerD.candidateCount).toBe(0);
+
+      // Verify SD §7.6 losing-transaction rollback:
+      // Order D must have ZERO active or orphan assignments
+      const orderDAssignments = ownedMobilityService.getDispatchAssignmentsForOrder(orderD.orderId);
+      expect(orderDAssignments).toHaveLength(0);
+
+      const activeOrderDAssignment = ownedMobilityService.getActiveDispatchAssignmentForOrder(orderD.orderId);
+      expect(activeOrderDAssignment).toBeNull();
+
+      // None of the 3 drivers have any task for Order D
+      for (const driverId of takenDrivers) {
+        const orderDTasks = (ownedMobilityService as unknown as { driverTasks: { orderId: string; driverId: string }[] })
+          .driverTasks.filter((t) => t.orderId === orderD.orderId && t.driverId === driverId);
+        expect(orderDTasks).toHaveLength(0);
+      }
+
+      // Voice projection reflects 'retrying' with no driver/vehicle assigned
+      const projectionD = await projectionService.projectDispatch(orderD.orderId);
+      expect(projectionD.projection).toBe("retrying");
+      expect(projectionD.assignmentId).toBeNull();
+      expect(projectionD.driverId).toBeNull();
+      expect(projectionD.vehicleId).toBeNull();
+      expect(projectionD.announcement).toBe("仍在找車或重新安排");
+    });
+
+    it("explicitly rolls back in-memory assignment, task, outbox, and restores order/job state via rollbackDispatchAssignmentInMem", async () => {
+      const { executor, ownedMobilityService, createOrder } = createHarness();
+      const order = createOrder({ passengerName: "Order Rollback Test" });
+      const previousOrder = { ...order };
+
+      const offer = await executor.requestDispatch(order.orderId);
+      expect(offer.status).toBe("offered");
+      expect(ownedMobilityService.getDispatchAssignmentsForOrder(order.orderId)).toHaveLength(1);
+
+      // Execute explicit rollback
+      ownedMobilityService.rollbackDispatchAssignmentInMem(offer.assignmentId, previousOrder);
+
+      // Verify assignment and task are removed
+      expect(ownedMobilityService.getDispatchAssignmentsForOrder(order.orderId)).toHaveLength(0);
+      expect(ownedMobilityService.getActiveDispatchAssignmentForOrder(order.orderId)).toBeNull();
+      expect(ownedMobilityService.getActiveDriverTaskForAssignment(offer.assignmentId)).toBeNull();
+      expect(() => ownedMobilityService.requireTask(offer.taskId!)).toThrow();
+
+      // Verify order state was restored
+      const restoredOrder = ownedMobilityService.requireOrder(order.orderId);
+      expect(restoredOrder.status).toBe(previousOrder.status);
     });
 
     it("transitions to no_supply when candidate supply is exhausted", async () => {

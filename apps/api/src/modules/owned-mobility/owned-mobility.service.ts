@@ -4892,6 +4892,57 @@ export class OwnedMobilityService
     );
   }
 
+  /**
+   * SD §7.6: Losing-transaction rollback in non-DB mode.
+   * Reverts mutations created by applyDispatchAssignmentBundle when an assignment fails or conflicts.
+   */
+  rollbackDispatchAssignmentInMem(
+    assignmentId: string,
+    previousOrderSnapshot?: OwnedOrderRecord,
+    previousJobSnapshot?: DispatchJobRecord,
+  ): void {
+    const assignment = this.dispatchAssignments.find(
+      (a) => a.assignmentId === assignmentId,
+    );
+    if (!assignment) {
+      return;
+    }
+    this.dispatchAssignments = this.dispatchAssignments.filter(
+      (a) => a.assignmentId !== assignmentId,
+    );
+    this.driverTasks = this.driverTasks.filter(
+      (t) => t.assignmentId !== assignmentId,
+    );
+    this.dispatchTraceLogs = this.dispatchTraceLogs.filter(
+      (log) =>
+        (log.details as Record<string, unknown> | undefined)?.assignmentId !==
+        assignmentId,
+    );
+    this.passengerDisclosureSnapshots = this.passengerDisclosureSnapshots.filter(
+      (snapshot) => snapshot.assignmentId !== assignmentId,
+    );
+    this.consumerNotificationOutbox = this.consumerNotificationOutbox.filter(
+      (record) =>
+        (record.payload as Record<string, unknown>)?.assignmentId !==
+        assignmentId,
+    );
+
+    if (previousOrderSnapshot) {
+      this.orders = [
+        this.cloneOrder(previousOrderSnapshot),
+        ...this.orders.filter((o) => o.orderId !== previousOrderSnapshot.orderId),
+      ];
+    }
+    if (previousJobSnapshot) {
+      this.dispatchJobs = [
+        { ...previousJobSnapshot },
+        ...this.dispatchJobs.filter(
+          (j) => j.dispatchJobId !== previousJobSnapshot.dispatchJobId,
+        ),
+      ];
+    }
+  }
+
   async cancelOwnedOrder(
     orderId: string,
     command: CancelOwnedOrderCommand,
