@@ -199,3 +199,11 @@ DRTS_WEBHOOK_AUTH_EVIDENCE=/tmp/tenant-binding-evidence.json \
 This supersedes the earlier DATABASE_URL-only invocation. Both tests must pass
 without skips on the candidate; ordinary CI checks with the HTTP case skipped
 are not full AppModule HTTP/SQL acceptance. External acceptance remains required.
+
+Follow-up local verification:
+
+- Scoped unit + AppModule harness with database/evidence variables unset:
+  **6 passed, 1 skipped**, 2 files passed (46.25 seconds); HTTP/SQL skipped.
+- `pnpm --filter @drts/api typecheck`: passed.
+- Scoped harness ESLint and `git diff --check`: passed.
+- No HTTP server, browser server, or Docker Compose was started.
