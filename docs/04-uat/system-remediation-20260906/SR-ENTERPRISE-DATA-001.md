@@ -1,5 +1,15 @@
 # SR-ENTERPRISE-DATA-001 — baseline and screen requirements
 
+## Dispatch after 02:22:05Z resume (2026-09-09)
+
+- Canonical `start`: exit 0. Task still has the original six write scopes, no dependencies and no supplied missing-screen/contact decision. The completed history helper explicitly leaves product prerequisites unresolved.
+- `git fetch origin`: exit 0; current dev base `add6694278b3287bb42215b24d4c91039d0c6645`; dispatch/verification head `c1e630825e2f45f0351968d5c8ae3d6e48f55243`. `git rebase origin/dev`: exit 1 at patch 10/52, add/add conflict in this evidence document while replaying `4ad450bbd`. `git rebase --abort`: exit 0, restoring the clean published task head. No claim of successful rebase; supervisor history adjudication is needed before implementation resumes.
+- `git diff origin/dev -- apps/enterprise-dispatch-web/app/page.tsx apps/enterprise-dispatch-web/app/trip/ apps/enterprise-dispatch-web/components/enterprise-booking-lifecycle.tsx docs/05-ui/drts-design-canvas/ent-screens-2.jsx docs/05-ui/drts-design-canvas/ent-states.jsx packages/ui-tokens/src/realms.ts`: exit 0, empty output. Thus the inspected product defects and missing canonical states below also exist at the current dev base; this is source comparison, not live acceptance.
+- Re-read execution/spec, R08/R09/R16, C013/C017/C018/C093/C108/C119, helper report, trip canvas/gates and tenant tokens. Fixture selection, fixed progress, inert contact controls and shared 404-to-degraded classification remain. The explicit dispatch design STOP applies; existing screen requirements below remain the required design input.
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0. `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`: exit 1, `No test files found`; no regression-suite pass is claimed. `git diff --check`: exit 0 before this entry.
+- Resource `EB-7K2E1D` is fixture-only; live existence and authorized contacts were not verified. Implementation candidate: none. Evidence-only commit/push are recorded in machine truth. No product changes, live API, browser, phone/true-device, CI, acceptance or deployment checks were performed.
+- Resume only after canonical missing states, authorized contact source and shared scope/dependency decisions are supplied. History-helper completion alone must not clear this product blocker.
+
 ## Dispatch after 02:11:45Z resume (2026-09-09)
 
 - Canonical `start`: exit 0. Current task still has six original write scopes and no dependencies. History-helper completion explicitly preserves the product scope blocker; no missing-screen/contact decision was supplied.
