@@ -159,3 +159,12 @@ The allowed acceptance environment must run this harness with PostgreSQL and
 `DRTS_WEBHOOK_AUTH_EVIDENCE` set on the exact candidate, then retain the passing
 test log and generated evidence. Same-candidate review, CI, merge, and external
 acceptance remain lifecycle gates.
+
+Takeover verification:
+
+- `env -u DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-qa-webhook-001-fix-tenant-binding/ tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/ --no-file-parallelism --maxConcurrency=1`: **6 passed, 1 skipped**, two files passed; 36.93 seconds. The HTTP/PG case was the skipped test.
+- `pnpm --filter @drts/api typecheck`: passed.
+- Scoped ESLint (controller, service, unit and E2E directories): passed.
+- `git diff --check`: passed.
+- Additional `pnpm exec tsc --noEmit`: failed on missing workspace modules in unrelated web apps (`@drts/api-client`, `@drts/ui-tokens`, `@drts/ui-web/canvas-tokens`) and `pg` in `uv-exec-010-checkpoint.integration.test.ts`; two downstream implicit-any errors accompanied the missing API client. This is not recorded as a passing root check.
+- Local dependency links initially pointed through shared canonical `node_modules` into the removed `codex-sr-deps-report-font-001` worktree. Only this worker's API/contracts/control-plane-auth dependency directories were isolated and relinked to existing pnpm packages and this checkout's workspace packages before the successful run. No tracked dependency files or canonical links were changed.
