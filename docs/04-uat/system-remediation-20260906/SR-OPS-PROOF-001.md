@@ -1,5 +1,36 @@
 # SR-OPS-PROOF-001 — isolated restore and workload-proof preparation
 
+## 2026-09-09 02:15 UTC dispatch — resume gate unchanged
+
+Fetched base: `fb2ea6e2ed3c2937d7d65d601967d183b0257048`.
+Tested published anchor: `b59b09b8278714d5b5a9d3b34d206b967d43cb41`;
+no handoff candidate is locked. The dispatch still assigns the original branch.
+The replacement `codex/sr-ops-proof-001-history-recovered` is absent locally
+and remotely. Current dev's history-repair artifact still requires supervisor
+replacement routing, and Q-SR-OPS-PROOF-001 still requires a reviewed boundary
+decision and authorized isolated inputs. Helper completion alone supplies neither.
+
+| Actual command | Exit / result |
+| --- | --- |
+| `git fetch origin` | 0 |
+| `git rebase origin/dev` | 1; e2aef3803 add/add conflicts in the same three task files |
+| `git rebase --abort` | 0; original clean anchor restored |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-ops-proof-001` | 0; 4 files, 35 tests |
+| `pnpm exec eslint tests/unit/system-remediation/sr-ops-proof-001` | 0 |
+| `bash -n tools/system-remediation/ops-proof/ops-proof.sh` | 0 |
+| `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` | 1; six historical invalid subjects remain |
+| `bash tools/system-remediation/ops-proof/ops-proof.sh inventory --output /tmp/SR-OPS-PROOF-001-inventory-20260909T0215.json` | 0; local inventory only |
+
+Receipt: `tools/system-remediation/ops-proof/evidence/inventory-20260909T0215.json`.
+Its candidateSha denotes the tested anchor only. PostgreSQL clients are missing;
+deployment resource is null. No product server or Docker infrastructure started.
+No real restore/load, cloud deployment, health, rollback or device acceptance ran.
+Supervisor must dispatch the documented replacement branch and resolve the
+existing boundary/resource gate (trusted dump, independent manifest, isolated
+DB/API IDs, authenticated workload and applicable cloud authorization).
+This update preserves evidence with an ordinary push and records blocked;
+it does not claim preparation or live acceptance completion.
+
 ## 2026-09-09 resumed dispatch — recovery assignment still blocked
 
 Fresh `git fetch origin` and `git ls-remote origin refs/heads/dev` both identify
