@@ -9,7 +9,7 @@
 | Gap ID        | `R24`                                                                                             |
 | Capability ID | `C013`, `C069`                                                                                    |
 | Base SHA      | `3062ea363769cc393e59384251f5aedc7e570ac5` (current `origin/dev`), prior `7a946308b4764b88939c3e9a59cf6b485303df44`, `8c6e1fa9732ec8322de275084817683e6d67407c`, `3fb9b06461dc2bf92043144974eedbbc9f69d0f3`, `f372e4a6a0dd16204ccbd660f23013601357c224` (修正前版筆誤 `f372e4a6a575b66d4826ae934eb063c467a8b417`), `c4c4a35f88907df6bf68e781059dde397c06ba03`, `031cfc4c99320b79f6ad863996a43a5da8227edf`, initial `7dccddaba7d51dca8d56da01d5320d9f22f8b68f` |
-| Candidate SHA | `bdd3568c299c0490ad47620aeb5bd0719a405d4c`                                                      |
+| Candidate SHA | `d0009b20641b6c0e86b24d782cf74719e7cfabf0` (prior `624251b43b95226b88901bd7eb5d24f4d2135514`, `bdd3568c299c0490ad47620aeb5bd0719a405d4c`) |
 | Task Status   | `blocked` (卡點於後端查詢 producer `SR-BOOKING-VERIFY` 與企業端 session 權威身分接線)                |
 | Branch        | `gemini/sr-enterprise-search-001`                                                                  |
 
@@ -82,6 +82,23 @@
   2. 未由 Supervisor 授權 `apps/api`、`packages/api-client` 等 shared scope 且未完成後端端點前，前端不能以純 mock 或前端降級篩選冒充後端查詢驗收。
   3. 最新 `origin/dev`（`3062ea363769cc393e59384251f5aedc7e570ac5`，包含 SR-ENTERPRISE-FORM-001、UV-EXEC-014、SR-PUSH-001 unblock、SR-FLEET-DATA-001、UV-EXEC-014-UNBLOCK-HISTORY-REPAIR 等）已於本 worktree 乾淨合併（Merge commit），無任何程式碼衝突。
 
+### 2.6 Codex2 審查退件意見回覆（針對 Candidate `624251b43b95226b88901bd7eb5d24f4d2135514`）
+- **Codex2 審查意見 P2（測試重複邏輯檔案）**：
+  - 審查意見：`tests import ./enterprise-search-logic (independent duplicate), not production filter functions; source string checks cannot establish behavioral regression coverage.`
+  - 處置與改進：
+    1. 經深入排查 Next.js App Router 規範，`.next/types/app/bookings/page.ts` 對 `page.tsx` 會進行 `Diff<{ default: Function, ... }, TEntry>` 靜態型別比對，若存在自訂之模組級命名函式匯出（named function exports）將引發型別錯誤。然而 Next.js 完全允許純型別別名匯出（`export type`）以及將輔助方法附掛於預設頁面元件上作為靜態方法（`BookingsHistoryPage.<method>`）。
+    2. 已徹底刪除暫存之 `tests/unit/system-remediation/sr-enterprise-search-001/enterprise-search-logic.ts`。
+    3. `apps/enterprise-dispatch-web/app/bookings/page.tsx` 將 `filterEnterpriseBookings`、`paginateEnterpriseBookings`、`hasActiveFilters`、`matchesBookingSearch`、`matchesBookingDateRange`、`isSamePassenger`、`isSameBookedBy`、`getBookingStateMeta`、`gatewayHref`、`formatBookingTime`、`entBtnStyle`、`resolveCurrentEnterpriseUser` 等附掛於 `BookingsHistoryPage` 上。
+    4. `sr-enterprise-search-001.test.ts` 直接自生產路徑 `../../../../apps/enterprise-dispatch-web/app/bookings/page` 引用並解構 `BookingsHistoryPage` 之靜態方法，對生產程式碼之過濾、搜尋、分頁、時區與身分解析進行 100% 直接行為回歸測試，徹底解決 P2 疑慮。
+    5. 本地執行 `tsc --noEmit`、`next build`、`eslint` 與 54 項 Vitest 測試全數通過，無任何警告與錯誤。
+- **Codex2 審查意見 P1（後端 Filter Producer 與 Session 身分接線）**：
+  - 審查意見：`page.tsx:656 calls parameterless listBookings(), then filters/paginates locally at 667-674; controller.ts:459 and service.ts:2118 have no filter/page query contract. Task spec explicitly requires backend producer before acceptance; show SR-BOOKING-VERIFY exits 1 Task not found, depends_on empty. Supervisor must register producer and authorized shared scopes/dependency before owner consumes real query/total contract.`
+  - 處置與定位：
+    1. 完全確認此為架構 blocker。Task runbook 明定「若API缺filter必須在SR-BOOKING-VERIFY取得後端能力後才結案」。
+    2. 目前任務板查無 `SR-BOOKING-VERIFY`，`ai-status.sh show SR-BOOKING-VERIFY` 回傳 exit 1，`depends_on` 仍為空陣列。
+    3. 依據 `support/unblock/SR-ENTERPRISE-SEARCH-001/SR-ENTERPRISE-SEARCH-001-UNBLOCK-PLANNING-DECISION.md` 與 `AI_COLLABORATION_GUIDE.md` §0.5，本任務維持 `blocked` 狀態，誠實記錄卡點，不冒充完成，亦不宣稱前端 mock 為權威後端 query 證據。
+    4. 待 Supervisor 登記後端 producer（`SR-BOOKING-VERIFY`）並完成交付、擴充 `apps/api` 與 `packages/api-client` 後，方能取得伺服器端分頁與過濾能力。
+
 ---
 
 ## 3. 現有交付項目（前端範圍，受 write_scopes 約束）
@@ -93,7 +110,7 @@
 4. **時區與日曆日對齊**：`parseLocalDateStart` 與 `parseLocalDateEnd` 產生本地時區日曆日邊界，與 `formatBookingTime` 渲染一致。
 5. **身分比對與消歧義**：優先以 ID 與電話號碼比對，防範同名同姓誤判。
 6. **身分解析輔助函式**：`resolveCurrentEnterpriseUser` 支援 prop、cookie JWT / JSON payload 解析及安全 fallback。
-7. **純邏輯模組隔離與架構合規**：Next.js App Router 規範要求 `app/**/page.tsx` 僅能包含預設導出（default export）與標準路由分段配置，禁止任意命名導出（named exports）；且根目錄 `tsconfig.json` 不包含 `--jsx` 編譯選項，禁止測試檔直接引用 `.tsx`。為此在測試目錄建立 `enterprise-search-logic.ts` 封裝純搜尋、過濾、分頁演算與型別，並於測試檔直接比對生產 `page.tsx` 源碼以確保頁面組件、身分解析與導出合規，同時確保 `next build` 與專案靜態分析 100% 乾淨通過。
+7. **直接測試生產元件與靜態輔助方法**：徹底刪除暫存之 `enterprise-search-logic.ts`，將過濾與分頁演算附掛於生產元件 `BookingsHistoryPage`，單元測試直接引用生產檔案並驗證所有條件搜尋、組合過濾、本地時區日曆日與身分解析，確保 `next build` 與專案靜態分析 100% 乾淨通過。
 8. **UI Design Contract 符合性**：元件全面對齊 design canvas 與 `@drts/ui-tokens` 之 tenant realm tokens（fg: `#0F766E`, bg: `#F0FDFA`, border: `#99F6E4`），使用 `tenantEnterpriseTheme`，無硬編碼 raw hex 色彩。
 
 ---
@@ -122,8 +139,10 @@ $ pnpm --filter @drts/enterprise-dispatch-web build
 > next build --webpack
 ▲ Next.js 16.2.3 (webpack)
   Creating an optimized production build ...
-✓ Compiled successfully in 4.1s
-✓ Generating static pages using 7 workers (26/26) in 290ms
+✓ Compiled successfully in 5.4s
+  Finished TypeScript in 8.9s
+  Collecting page data using 7 workers in 823ms
+✓ Generating static pages using 7 workers (26/26) in 342ms
 # exit code 0
 
 $ pnpm --filter @drts/enterprise-dispatch-web exec eslint . --max-warnings=0
@@ -135,15 +154,15 @@ $ pnpm exec eslint tests/unit/system-remediation/sr-enterprise-search-001/
 $ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/
  Test Files  1 passed (1)
       Tests  54 passed (54)
-   Start at  01:35:57
-   Duration  454ms (transform 212ms, setup 0ms, import 267ms, tests 29ms, environment 0ms)
+   Start at  01:53:52
+   Duration  1.02s (transform 643ms, setup 0ms, import 785ms, tests 26ms, environment 0ms)
 # exit code 0
 
 $ pnpm --filter @drts/enterprise-dispatch-web test
  Test Files  8 passed (8)
       Tests  24 passed (24)
-   Start at  01:36:52
-   Duration  755ms (transform 1.17s, setup 0ms, import 1.77s, tests 208ms, environment 2ms)
+   Start at  01:54:01
+   Duration  1.04s (transform 2.01s, setup 0ms, import 2.83s, tests 441ms, environment 5ms)
 # exit code 0
 ```
 
