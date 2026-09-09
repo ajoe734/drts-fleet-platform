@@ -1,5 +1,36 @@
 # SR-PUSH-001 — current-dev reproduction and scope blocker
 
+## Dispatch verification — 2026-09-09 02:04 UTC
+
+- Fresh fetched `origin/dev`: `7d04833053b63558c10fb678a422dff3522e0150`.
+  Tested branch SHA: `439d67dc000dedd503e901e0b8149a250fd6c8ab`.
+  Implementation candidate SHA: null; this update is an evidence anchor.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1, duplicate
+  historical add/add conflicts in the evidence and regression test at `8b015a460`.
+  `git rebase --abort`: exit 0, restoring the published branch. No force push.
+- `git diff origin/dev HEAD -- apps/api/src/modules/multi-taxi/`: exit 0,
+  empty. Regression results therefore cover matching push source, but do not
+  claim that the entire branch was rebased onto fresh dev.
+- `git merge-base --is-ancestor 6de31c41fa49d7089d87d42aa8f22378caa07858 origin/dev`:
+  exit 0. History helper merge reachability is now verified locally. Its packet
+  still requires supervisor successor routing and separately preserves product
+  scope/protocol/claim-receipt gates. The current dispatch assigns the old branch.
+- Canonical `show SR-PUSH-001` still grants only five original paths and
+  UV-EXEC-006 dependency. The completed helper did not grant service/repository
+  writes or approve the provider/device and durable claim/receipt contract.
+  Apply the existing planning decision's routed actions; do not create another
+  history helper or resume this parent solely because that helper is done.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-push-001/`: exit 0,
+  4 passed / 2 expected failures, 6 total, 4.04 seconds. Duplicate send and
+  swallowed persistence failure remain unresolved acceptance defects.
+- `pnpm --filter @drts/api typecheck`: exit 2, missing generated contracts and
+  control-plane-auth declarations with downstream errors.
+  `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api typecheck`:
+  exit 0. `git diff --check`: exit 0 before this evidence update.
+- Test resource IDs remain those listed below. Real provider account/message,
+  authorized device, controlled receiver and PostgreSQL resource IDs remain null.
+  No product server, provider send, receiver or live/device acceptance was run.
+
 ## Dispatch verification — 2026-09-09 01:41 UTC
 
 - Fresh fetched dev reference: `3062ea363769cc393e59384251f5aedc7e570ac5`.
