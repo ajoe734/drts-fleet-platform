@@ -8,6 +8,7 @@ import { VoiceCapabilityGuard } from "../../common/auth/voice-capability.guard";
 import { assertVoiceCapabilityScope } from "../../common/auth/voice-capability.service";
 import { VoiceBookingRepository } from "./voice-booking.repository";
 import { VoiceBookingAuthorizationService } from "./voice-booking-authorization.service";
+import type { VoiceOperationPolicyService } from "./voice-operation-policy.service";
 
 /** Trusted domain adapters must revalidate scope, service area, draft freshness
  * and CAS control ownership at their read/transaction boundary. No generic
@@ -43,6 +44,7 @@ export class VoiceToolGatewayService {
       deadline: number;
       signal: AbortSignal;
     },
+    private readonly policy?: VoiceOperationPolicyService,
   ) {}
 
   async execute(raw: unknown): Promise<unknown[]> {
@@ -127,6 +129,13 @@ export class VoiceToolGatewayService {
               controller.signal.throwIfAborted();
             };
             await assertCurrent();
+            if (this.policy) {
+              if (proposal.name === "resolve_location") {
+                this.policy.assertCapabilityEnabled("order_create");
+              } else if (proposal.name === "get_bound_booking_status") {
+                this.policy.assertCapabilityEnabled("order_query");
+              }
+            }
             assertVoiceCapabilityScope(claims, "session_execute");
             assertVoiceCapabilityScope(
               claims,

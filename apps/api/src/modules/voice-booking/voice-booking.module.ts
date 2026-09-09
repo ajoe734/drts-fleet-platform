@@ -20,6 +20,7 @@ import { VoiceHandoffService } from "./voice-handoff.service";
 import { VoiceSessionService } from "./voice-session.service";
 import { VoiceSessionRepository } from "./voice-session.repository";
 import { VoiceHandoffQueueService } from "../callcenter/voice-handoff-queue.service";
+import { VoiceOperationPolicyService } from "./voice-operation-policy.service";
 import { VoiceContactService } from "./voice-contact.service";
 import { VoiceCallbackService } from "./voice-callback.service";
 import { VoicePolicyService } from "./voice-policy.service";
@@ -51,6 +52,7 @@ import { VoiceRetentionService } from "./voice-retention.service";
     VoiceSessionService,
     VoiceHandoffQueueService,
     VoiceHandoffService,
+    VoiceOperationPolicyService,
     VoiceContactService,
     VoiceCallbackService,
     VoicePolicyService,
@@ -70,6 +72,7 @@ import { VoiceRetentionService } from "./voice-retention.service";
     VoiceSessionService,
     VoiceHandoffQueueService,
     VoiceHandoffService,
+    VoiceOperationPolicyService,
     VoiceContactService,
     VoiceCallbackService,
     VoicePolicyService,
