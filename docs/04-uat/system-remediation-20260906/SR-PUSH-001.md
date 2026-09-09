@@ -1,5 +1,34 @@
 # SR-PUSH-001 — current-dev reproduction and scope blocker
 
+## Redispatch verification — 2026-09-09 after history repair
+
+- Fetched `origin/dev`: `6de31c41fa49d7089d87d42aa8f22378caa07858` (exit 0).
+  Tested branch SHA: `6f683d4ef3de7c98bc3825220d459ea334bee406`.
+  `git diff origin/dev HEAD --` for passenger-push.port.ts, multi-taxi.module.ts,
+  multi-taxi.service.ts and multi-taxi.repository.ts (all under
+  apps/api/src/modules/multi-taxi) returned no differences, exit 0.
+- `git rebase origin/dev`: exit 1, add/add conflicts in this evidence file and
+  outbox-boundary.test.ts while replaying published anchors. `git rebase --abort`:
+  exit 0; published ancestry retained. No force push or conflict-side replacement.
+- History repair `aef3c7571a034b44db36cc9ae39dbf23b3bd2c6d` only changes its
+  support packet citation. It supplies no product implementation or scope grant.
+  Current task slice still grants only the original five paths and UV-EXEC-006
+  dependency. The planning packet's provider/claim/receipt resume gates remain unmet.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-push-001/`: exit 0,
+  4 passed, 2 expected failures, 6 total (5.62 seconds). Duplicate send and false
+  durable delivery remain reproducible; expected failures are not acceptance.
+- `pnpm --filter @drts/api typecheck`: exit 2, missing generated declarations for
+  @drts/contracts and @drts/control-plane-auth with cascading errors. This run
+  does not claim a passing typecheck. `git diff --check`: exit 0.
+- Readiness still records missing provider account and authorized device.
+  Resource IDs remain the test-only IDs below; live provider/message/device,
+  controlled receiver and PostgreSQL resource IDs remain null. No live send,
+  receiver, database integration or device validation was performed.
+- Implementation candidate SHA remains null. This update is an evidence anchor;
+  supervisor must grant service/repository scopes and dependencies and route the
+  approved provider/device and durable claim/receipt contracts before implementation.
+  History reconciliation alone must not release these product resume gates.
+
 ## Redispatch verification — 2026-09-08 after PR #1828
 
 - Fresh `origin/dev` base: `a24045986ac29231d34657df3a343b02d9fbb770`.
