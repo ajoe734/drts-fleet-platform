@@ -1,5 +1,33 @@
 # SR-PROOF-001 — Fresh-base regression evidence and unresolved implementation scope
 
+## 2026-09-09 02:23 UTC dispatch verification
+
+- `git fetch origin`: exit 0. Base `origin/dev`:
+  `add6694278b3287bb42215b24d4c91039d0c6645`; tested HEAD:
+  `a69c16290e1ac83cefd08abb55e36e046fb3d4a2`. Candidate: none.
+- `git rebase origin/dev`: exit 1 at `ac1076708` (test add/add conflict).
+  `git rebase --abort`: exit 0; published history restored.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/modules/billing-settlement/billing-settlement.service.ts apps/api/src/modules/billing-settlement/billing-settlement.repository.ts`:
+  exit 0; tested implementation equals fetched dev.
+- `git merge-base --is-ancestor 99858938fa2f6f38f23afcf3f7a2204c10e402d1 origin/dev`:
+  exit 0. The merged helper explicitly leaves parent routing prerequisites open.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`:
+  exit 1, 1 passed / 2 failed, duration 5.66s. Fabricated proof becomes paid;
+  pending persistence returns paid. Unapproved rejection passes.
+  Isolated IDs: `sr-proof-001-batch-a`, `sr-proof-001-driver-a`,
+  `sr-proof-001-statement-a`, `sr-proof-001-nonexistent-proof`.
+- `git diff --check`: exit 0 before evidence edit. No product source changed;
+  typechecks were not rerun for this documentation-only update.
+
+Current parent machine truth still grants only the original five write scopes
+and ARTIFACT/INVOICE dependencies. Supervisor must apply the existing helper's
+repository/module/proof storage/scanner scope allocation, contract dependency
+or reviewed exception, canvas routing, and recovery-branch selection before
+redispatch. The existing screen-requirements note below remains applicable.
+This evidence anchor is not an implementation candidate or successful acceptance.
+Live upload/scanning/readback, PostgreSQL concurrency, durable receipts,
+browser/device checks, and real payments were not performed; no servers started.
+
 ## 2026-09-09 02:12 UTC dispatch verification
 
 - `git fetch origin`: exit 0. Base `origin/dev`:
