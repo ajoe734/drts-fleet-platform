@@ -499,6 +499,22 @@ export function filterDriversForTab(
   });
 }
 
+export function getDriverNoticeBody(
+  key: "trainingIncomplete" | "missingDocs",
+  locale: string,
+): string {
+  if (locale === "zh") {
+    if (key === "trainingIncomplete") {
+      return "駕駛教育訓練資料尚未串接後端 API，目前欄位標記為未串接，不以假資料篩選排除人員。";
+    }
+    return "駕駛文件審查資料尚未串接後端 API，目前欄位標記為未串接，不以假資料篩選排除人員。";
+  }
+  if (key === "trainingIncomplete") {
+    return "Driver training status is not yet integrated with the fleet API. Showing drivers without assuming completed training.";
+  }
+  return "Driver document review is not yet integrated with the fleet API. Showing drivers without assuming complete documents.";
+}
+
 // --- vehicles ---------------------------------------------------------------
 
 export interface VehiclesView {

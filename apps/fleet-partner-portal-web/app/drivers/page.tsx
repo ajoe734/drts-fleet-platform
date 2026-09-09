@@ -9,6 +9,7 @@ import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import {
   computeDriverTabCounts,
   filterDriversForTab,
+  getDriverNoticeBody,
   loadDrivers,
   scopeDriverRows,
 } from "@/lib/fleet-portal-data.server";
@@ -150,11 +151,7 @@ export default async function FleetDriversPage({
             tone="info"
             icon="warn"
             title={t("drivers.tabTrainingIncomplete", locale)}
-            body={
-              locale === "zh"
-                ? "駕駛教育訓練資料尚未串接後端 API，目前欄位標記為未串接，不以假資料篩選排除人員。"
-                : "Driver training status is not yet integrated with the fleet API. Showing drivers without assuming completed training."
-            }
+            body={getDriverNoticeBody("trainingIncomplete", locale)}
           />
         ) : null}
         {activeTabKey === "missingDocs" && !docsAvailable ? (
@@ -163,11 +160,7 @@ export default async function FleetDriversPage({
             tone="info"
             icon="warn"
             title={t("drivers.tabMissingDocs", locale)}
-            body={
-              locale === "zh"
-                ? "駕駛文件審查資料尚未串接後端 API，目前欄位標記為未串接，不以假資料篩選排除人員。"
-                : "Driver document review is not yet integrated with the fleet API. Showing drivers without assuming complete documents."
-            }
+            body={getDriverNoticeBody("missingDocs", locale)}
           />
         ) : null}
         <form

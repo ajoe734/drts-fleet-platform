@@ -39,6 +39,7 @@ import {
   filterDriversForTab,
   filterTripsForService,
   getCurrentPeriodMonth,
+  getDriverNoticeBody,
   loadCases,
   loadDashboard,
   loadDrivers,
@@ -1138,6 +1139,13 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
         const lines = csvBody.trim().split("\n");
         expect(lines).toHaveLength(3);
         expect(csvBody).not.toContain("ord-003");
+      });
+
+      it("getDriverNoticeBody returns authoritative bilingual copy without violating i18n guard", () => {
+        expect(getDriverNoticeBody("trainingIncomplete", "zh")).toContain("駕駛教育訓練資料尚未串接後端 API");
+        expect(getDriverNoticeBody("trainingIncomplete", "en")).toContain("Driver training status is not yet integrated");
+        expect(getDriverNoticeBody("missingDocs", "zh")).toContain("駕駛文件審查資料尚未串接後端 API");
+        expect(getDriverNoticeBody("missingDocs", "en")).toContain("Driver document review is not yet integrated");
       });
     });
   });

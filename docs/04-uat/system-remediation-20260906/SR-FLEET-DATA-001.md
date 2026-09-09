@@ -148,19 +148,34 @@
 
 ---
 
+### 3.8 CI i18n-guard 回歸修復 (CI i18n-guard Remediation)
+
+針對候選版本 `df1c135b74afa080f131bf522cf1cb6c4a60cf6e` 於 GitHub Actions CI 之 `i18n-guard` 階段回報的 2 處 `[locale-ternary-copy]` 違規進行專項修復：
+
+1. **根本原因與單一寫入權限紀律 (Root Cause & Single-Writer Discipline)**:
+   - 前版候選為落實 Codex2 P2 審查意見（提示教育訓練與文件審查未串接警語），在 `apps/fleet-partner-portal-web/app/drivers/page.tsx:154,167` 使用了 inline locale ternary（`locale === "zh" ? "..." : "..."`），觸發 `node tools/ci/i18n-guard.mjs` 檢查失敗（Exit Code 1）。
+   - 盤點寫入權限：`apps/fleet-partner-portal-web/lib/translations.ts` 屬於平行進行中任務 `SR-ENV-COPY-001` 之專屬 `write_scopes`，依據協作規範不得跨任務未授權修改共用翻譯檔以避免衝突。
+2. **修復方案**:
+   - 在本任務 write_scope 內的 `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` 實作 `getDriverNoticeBody(key, locale)` 權威文案解析函式，支援 `"trainingIncomplete"` 與 `"missingDocs"` 之中英雙語輸出。
+   - `apps/fleet-partner-portal-web/app/drivers/page.tsx` 引入並改調用 `getDriverNoticeBody`，徹底移除頁面中的 inline ternary，符合 i18n-guard AST 規範。
+   - 執行 `pnpm run i18n:guard` 驗證，全庫 519 檔案通過檢查，違規數歸零（0 violations）。
+   - 新增第 32 項單元測試，驗證雙語警語回傳正確性。
+
+---
+
 ## 4. 驗收標準對照與驗證證據 (Acceptance Criteria Mapping & Evidence)
 
 | 驗收條件 | 實作現況與驗證結果 | 相關資源 ID / 檔案 |
 | :--- | :--- | :--- |
 | **首頁/list/detail/CSV數量與scope相同** | `loadDashboard()` 與 `loadTrips()` 統一預設月份為 `getCurrentPeriodMonth()`，完全杜絕跨月回溯差異；首頁/列表/總覽 CSV/行程 CSV 預設與指定月份 scope 均精確對齊（當月無資料時一致為 0 筆）；導航連結與篩選保留明確 `period`；行程與司機頁籤徽章由 `scopeTripRows` / `scopeDriverRows` 在同等 q/status/period 範圍下計算，All 徽章與清單/CSV 筆數完全一致；Canvas 規範未定義獨立 trip detail screen，清單與匯出筆數嚴格對齊，未自創非規範畫面 | `apps/fleet-partner-portal-web/app/trips/export/route.ts`, `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts`, `apps/fleet-partner-portal-web/app/trips/page.tsx` (測試資源: `fp-test-001`, `ord-001`, `ord-002`, `ord-003`, `ord-previous-month`) |
-| **filter改變query與結果，空資料與讀取失敗分開** | 司機/車輛/行程頁籤與搜尋均寫入 URL query string，並過濾列表 rows；司機可接單頁籤對齊 `dispatchEligible` 資格；未串接之教育訓練與文件審查顯式標記 unavailable（徽章為 "—"），不以假完成狀態篩選排除人員，並顯示明確未串接橫幅；行程頁籤支援 `svc`, `status`, `q`, `period`；正常 0 筆空資料渲染中性提示卡與數字 "0"，API 錯誤渲染 Danger 警告橫幅與 "—" 無法取得標記，保留各來源錯誤原因 | `apps/fleet-partner-portal-web/app/drivers/page.tsx`, `apps/fleet-partner-portal-web/app/vehicles/page.tsx`, `apps/fleet-partner-portal-web/app/trips/page.tsx` |
+| **filter改變query與結果，空資料與讀取失敗分開** | 司機/車輛/行程頁籤與搜尋均寫入 URL query string，並過濾列表 rows；司機可接單頁籤對齊 `dispatchEligible` 資格；未串接之教育訓練與文件審查顯式標記 unavailable（徽章為 "—"），不以假完成狀態篩選排除人員，並由 `getDriverNoticeBody` 渲染未串接橫幅且符合 i18n 規範；行程頁籤支援 `svc`, `status`, `q`, `period`；正常 0 筆空資料渲染中性提示卡與數字 "0"，API 錯誤渲染 Danger 警告橫幅與 "—" 無法取得標記，保留各來源錯誤原因 | `apps/fleet-partner-portal-web/app/drivers/page.tsx`, `apps/fleet-partner-portal-web/app/vehicles/page.tsx`, `apps/fleet-partner-portal-web/app/trips/page.tsx` |
 | **無效按鈕接線與未串接標記** | 首頁與車輛頁「新增車輛」導向 `/supply/vehicles/new`；首頁與司機頁「招募司機」導向 `/supply/drivers/new`；首頁「查看行程」導向 `/trips?period=...`；匯出按鈕導向 `/trips/export`；未串接之教育訓練與案件回傳 `connected: false` 並顯式註明未接線 | `apps/fleet-partner-portal-web/app/page.tsx`, `apps/fleet-partner-portal-web/app/vehicles/page.tsx`, `apps/fleet-partner-portal-web/app/drivers/page.tsx` |
 | **證據包含 SHA、測試結果、界線說明** | 記錄完整 Base SHA、Candidate SHA、測試 Exit Code 與邊界說明 | `docs/04-uat/system-remediation-20260906/SR-FLEET-DATA-001.md` |
 
 ### 4.1 驗證界線與未進行之 Live / 真機項目說明
 
 - **已完成驗證範圍**:
-  - 本地 Vitest 單元/整合測試（31/31 通過），驗證資料層權威來源整合、假數據移除、空資料與異常讀取分離、未串接端點防呆、CSV 匯出筆數與篩選連動（含 q 關鍵字搜尋與 compound 複合過濾）、千分位分組數值引號包裹防護（防止欄位數錯置）、司機 `dispatchEligible` 資格與狀態分離、個別來源異常獨立追蹤、部分失敗防護及 aggregate 異常時即時推導營收、預設月份 scope 統一與跨月空資料回歸，以及未串接教育訓練與文件審查之未知資料紀律（標記 unavailable、徽章顯示 "—"、不隱藏人員、未串接提示橫幅）與行程頁籤 scope 先行過濾機制。
+  - 本地 Vitest 單元/整合測試（32/32 通過），驗證資料層權威來源整合、假數據移除、空資料與異常讀取分離、未串接端點防呆、CSV 匯出筆數與篩選連動（含 q 關鍵字搜尋與 compound 複合過濾）、千分位分組數值引號包裹防護（防止欄位數錯置）、司機 `dispatchEligible` 資格與狀態分離、個別來源異常獨立追蹤、部分失敗防護及 aggregate 異常時即時推導營收、預設月份 scope 統一與跨月空資料回歸、未串接教育訓練與文件審查之未知資料紀律（標記 unavailable、徽章顯示 "—"、不隱藏人員、未串接提示橫幅與 i18n 文案防護）、行程頁籤 scope 先行過濾機制，以及全庫 `pnpm run i18n:guard` 通過。
   - Next.js 靜態型別檢查（`next typegen && tsc --noEmit`），驗證所有頁面與 Route Handlers 型別安全。
   - 解耦 `fleet-portal-data.server.ts` 與 `fleet-portal-fixtures.ts`，直接宣告純資料結構與回退常數，避免根目錄 `tsconfig.json`（無 `--jsx`）在編譯 `tests/**/*.ts` 時傳遞解析 `@drts/ui-web` TSX 模組而產生 `TS6142` 錯誤。
   - Git diff 格式檢查與 write_scopes 邊界檢查。
@@ -177,7 +192,7 @@
 
 ### 5.1 自動化單元測試
 
-新建 Vitest 測試套件 `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts`，涵蓋 31 個核心場景：
+新建 Vitest 測試套件 `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts`，涵蓋 32 個核心場景：
 
 - **Requirement 1 & Capability C063**:
   1. `dashboard reflects live driver list counts rather than 128/96 fake stats`: 驗證總覽指標與列表真實筆數一致，完全無 128/96 假數字。
@@ -216,6 +231,8 @@
   29. `scopeDriverRows and computeDriverTabCounts scope tab counts and results when search q filter is applied`: 驗證搜尋關鍵字 `q` 即時收斂司機頁籤筆數與列表結果。
   30. `scopeTripRows and computeTripTabCounts with q=ord-001 scope All badge and service badge to 1, exactly matching list and CSV export`: 驗證行程關鍵字 `q=ord-001` 先行過濾 scope，使 All 徽章收斂為 1，與列表 (1) 及 CSV 匯出 (1) 筆數完全一致。
   31. `scopeTripRows and computeTripTabCounts with status=completed scope All badge to completed trips before service grouping`: 驗證行程狀態 `status=completed` 先行收斂 scope，使 All 徽章精確對齊已完成趟次數 (2)，排除 cancelled 項目。
+- **CI Remediation (Round 4 Candidate df1c135b7 i18n-guard Remediation)**:
+  32. `getDriverNoticeBody returns authoritative bilingual copy without violating i18n guard`: 驗證未串接雙語警語輸出正確，且不觸發 inline locale ternary。
 
 執行結果：
 
@@ -223,9 +240,9 @@
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-fleet-data-001
 
  Test Files  1 passed (1)
-      Tests  31 passed (31)
-   Start at  17:29:52
-   Duration  534ms (transform 199ms, setup 0ms, import 305ms, tests 64ms, environment 0ms)
+      Tests  32 passed (32)
+   Start at  00:02:24
+   Duration  493ms (transform 183ms, setup 0ms, import 269ms, tests 62ms, environment 0ms)
 Exit Code:  0
 ```
 
@@ -245,7 +262,19 @@ Exit Code:  0
 針對根目錄 `pnpm typecheck:root` (`tsc -p tsconfig.json --noEmit`) 進行全域嚴格型別檢查：
 - `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` 錯誤數為 0。
 
-### 5.3 檔案規範與 Git 檢查
+### 5.3 國際化文案檢查 (i18n Guard)
+
+執行 `pnpm run i18n:guard` (`node tools/ci/i18n-guard.mjs`)：
+
+```
+> drts-fleet-platform@0.1.0 i18n:guard /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-fleet-data-001
+> node tools/ci/i18n-guard.mjs
+
+i18n-guard: OK (519 files scanned across 10 apps, 55 exemption(s) from i18n-guard-baseline.json)
+Exit Code:  0
+```
+
+### 5.4 檔案規範與 Git 檢查
 
 執行 `git diff --check`：
 
@@ -256,11 +285,11 @@ Exit Code:  0
 
 ## 6. 變更檔案清單 (Modified Files Summary)
 
-- `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` (移除假資料、整合權威來源、錯誤/空資料分離、未接線標記、對齊 `dispatchEligible` 資格欄位、各來源錯誤獨立追蹤、營收權威推導、預設月份統一、未串接 docs/training 顯式標記 unavailable、新增司機與行程 tab scope 及過濾共用函式)
+- `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` (移除假資料、整合權威來源、錯誤/空資料分離、未接線標記、對齊 `dispatchEligible` 資格欄位、各來源錯誤獨立追蹤、營收權威推導、預設月份統一、未串接 docs/training 顯式標記 unavailable、新增司機與行程 tab scope 及過濾共用函式、提供 `getDriverNoticeBody` 解決 i18n-guard 違規)
 - `apps/fleet-partner-portal-web/app/trips/export/route.ts` (新增 CSV 匯出 API Route，實作 `escapeCsvCell` 防護分組數字與特殊字元，阻擋 partial failure 與無法取得狀態之偽造匯出)
 - `apps/fleet-partner-portal-web/app/page.tsx` (權威總覽頁、按鈕串接、時間維度、未串接提示、錯誤橫幅)
 - `apps/fleet-partner-portal-web/app/trips/page.tsx` (頁籤/關鍵字/狀態篩選、行程 scope 先行過濾、頁籤筆數與清單/CSV 嚴格對齊、CSV 匯出按鈕串接、錯誤處理)
-- `apps/fleet-partner-portal-web/app/drivers/page.tsx` (頁籤/關鍵字篩選、未串接 docs/training 徽章顯示 "—" 與橫幅警語、未知資料不排除人員、可接單對齊 `dispatchEligible`、招募按鈕導向、錯誤處理)
+- `apps/fleet-partner-portal-web/app/drivers/page.tsx` (頁籤/關鍵字篩選、未串接 docs/training 徽章顯示 "—" 與橫幅警語、未知資料不排除人員、可接單對齊 `dispatchEligible`、招募按鈕導向、調用 `getDriverNoticeBody` 移除 inline ternary、錯誤處理)
 - `apps/fleet-partner-portal-web/app/vehicles/page.tsx` (頁籤/關鍵字篩選、新增車輛按鈕導向、錯誤處理)
-- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` (31 個完整驗證測試，含 Codex2 P1/P2 審查修復與 CI 嚴格型別防護)
+- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` (32 個完整驗證測試，含 Codex2 P1/P2 審查修復、CI 嚴格型別防護與 i18n-guard 雙語驗證)
 - `docs/04-uat/system-remediation-20260906/SR-FLEET-DATA-001.md` (驗證報告)
