@@ -37,7 +37,6 @@ const task = getDocument({
   data: new Uint8Array(pdfBuffer),
   useSystemFonts: false,
   disableFontFace: true,
-  isEvalSupported: false,
 });
 try {
   const pdf = await task.promise;

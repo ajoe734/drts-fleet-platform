@@ -29,7 +29,6 @@ async function extract(data: Uint8Array): Promise<string[]> {
     data,
     useSystemFonts: false,
     disableFontFace: true,
-    isEvalSupported: false,
   });
   try {
     const pdf = await task.promise;
@@ -72,7 +71,7 @@ describe("SR-DEPS-REPORT-FONT-001", () => {
         "LICENSE",
         "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2",
       ],
-    ];
+    ] as const;
     expect(provenance.files).toHaveLength(expected.length);
     for (const [file, upstream, sha256] of expected) {
       expect(provenance.files).toContainEqual({
