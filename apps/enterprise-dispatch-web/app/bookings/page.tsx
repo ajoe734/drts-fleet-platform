@@ -10,7 +10,8 @@ import React, {
 import Link from "next/link";
 import type { BookingRecord } from "@drts/contracts";
 import { enterpriseTenant, enterpriseUser } from "../../lib/enterprise-fixtures";
-import { enterpriseTheme as t, type EntTheme } from "../../lib/enterprise-theme";
+import { tenantEnterpriseTheme as t } from "../../components/booking-form/theme";
+import type { EntTheme } from "../../lib/enterprise-theme";
 import { t as translate, type TranslationKey } from "../../lib/translations";
 
 const h = React.createElement;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ApiClientError } from "../../../../packages/api-client/src";
 import BookingsHistoryPage, {
   DEFAULT_BOOKING_FILTER_CRITERIA,
+  entBtnStyle,
   filterEnterpriseBookings,
   formatBookingTime,
   gatewayHref,
@@ -17,6 +18,8 @@ import BookingsHistoryPage, {
   type EnterpriseCurrentUser,
   type EnterpriseUserIdentity,
 } from "../../../../apps/enterprise-dispatch-web/app/bookings/page";
+import { tenantEnterpriseTheme } from "../../../../apps/enterprise-dispatch-web/components/booking-form/theme";
+import { REALM_COLORS } from "../../../../packages/ui-tokens/src/realms";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { BookingRecord } from "@drts/contracts";
@@ -920,6 +923,27 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
     it("falls back to default enterprise fixture user when no session or prop is available", () => {
       expect(resolveCurrentEnterpriseUser()).toBe("林宜君");
       expect(resolveCurrentEnterpriseUser(undefined)).toBe("林宜君");
+    });
+  });
+
+  describe("14. UI Design Contract Conformance (Realm Tokens)", () => {
+    it("conforms to tenant realm tokens from @drts/ui-tokens", () => {
+      expect(tenantEnterpriseTheme.primary).toBe(REALM_COLORS.tenant.light.fg);
+      expect(tenantEnterpriseTheme.primary).toBe("#0F766E");
+      expect(tenantEnterpriseTheme.primaryBg).toBe(
+        REALM_COLORS.tenant.light.bg,
+      );
+      expect(tenantEnterpriseTheme.primaryBd).toBe(
+        REALM_COLORS.tenant.light.border,
+      );
+    });
+
+    it("applies tenant realm primary color in entBtnStyle for primary variant", () => {
+      const primaryBtn = entBtnStyle(tenantEnterpriseTheme, {
+        variant: "primary",
+      });
+      expect(primaryBtn.background).toBe("#0F766E");
+      expect(primaryBtn.border).toBe("1px solid #0F766E");
     });
   });
 });
