@@ -1032,24 +1032,12 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
         }
 
         const copy: any = { ...schema };
+        // OAS 3.0.3 Section 4.7.24.2: nullable is only valid when type is specified
+        // in the same Schema Object. Translating nullable ONLY when type exists in the same object.
         if (copy.nullable) {
           delete copy.nullable;
-          if (
-            copy.type &&
-            typeof copy.type === "string" &&
-            !copy.allOf &&
-            !copy.oneOf &&
-            !copy.anyOf
-          ) {
+          if (copy.type && typeof copy.type === "string") {
             copy.type = [copy.type, "null"];
-          } else {
-            const nonNullBranch: any = {};
-            for (const [k, v] of Object.entries(copy)) {
-              nonNullBranch[k] = transformOpenApiToAjv(v);
-            }
-            return {
-              oneOf: [nonNullBranch, { type: "null" }],
-            };
           }
         }
         for (const [k, v] of Object.entries(copy)) {
@@ -1393,36 +1381,50 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
         assertNoRefSiblings(openapiDoc);
       });
 
-      it("reproduces OAS 3.0 reference semantics: raw $ref sibling ignores nullable whereas allOf wrapper allows null", () => {
-        // Raw invalid OAS 3.0 pattern: $ref sibling is ignored by OAS reference semantics
+      it("validates OAS 3.0.3 reference semantics and standards-compliant nullable object schemas", () => {
+        // 1. Raw invalid OAS 3.0 pattern: $ref sibling is ignored by OAS reference semantics
         const invalidOasSchema = {
-          $ref: "#/components/schemas/HostVehicleContractPeriod",
+          $ref: "#/components/schemas/ApiMeta",
           nullable: true,
         };
         const transformedInvalid = transformOpenApiToAjv(invalidOasSchema);
         expect(transformedInvalid).toEqual({
-          $ref: "#/components/schemas/HostVehicleContractPeriod",
+          $ref: "#/components/schemas/ApiMeta",
         });
         const validateInvalid = ajv.compile(transformedInvalid);
         // Under OAS reference semantics, nullable was ignored on the $ref sibling, so null fails:
         expect(validateInvalid(null)).toBe(false);
 
-        // Valid OAS 3.0 pattern: allOf wrapper with nullable
-        const validOasSchema = {
-          allOf: [{ $ref: "#/components/schemas/HostVehicleContractPeriod" }],
+        // 2. allOf wrapper referencing non-nullable schema fails in OAS 3.0.3
+        // because allOf subschema constraints remain independently enforced:
+        const allOfNonNullable = {
+          allOf: [{ $ref: "#/components/schemas/ApiMeta" }],
           nullable: true,
         };
-        const transformedValid = transformOpenApiToAjv(validOasSchema);
-        const validateValid = ajv.compile(transformedValid);
-        expect(validateValid(null)).toBe(true);
+        const transformedAllOf = transformOpenApiToAjv(allOfNonNullable);
+        const validateAllOf = ajv.compile(transformedAllOf);
+        expect(validateAllOf(null)).toBe(false);
+
+        // 3. Standards-compliant OAS 3.0.3 pattern: dedicated component/inline schema
+        // defines type: object and nullable: true in the same Schema Object (OAS 3.0.3 Section 4.7.24.2).
+        // HostVehicleContractPeriod is defined with type: object, nullable: true, required, and properties:
+        const compliantRef = {
+          $ref: "#/components/schemas/HostVehicleContractPeriod",
+        };
+        const transformedCompliant = transformOpenApiToAjv(compliantRef);
+        const validateCompliant = ajv.compile(transformedCompliant);
+        // Legal null is accepted:
+        expect(validateCompliant(null)).toBe(true);
+        // Valid populated object is accepted:
         expect(
-          validateValid({
+          validateCompliant({
             startAt: "2026-01-01T00:00:00Z",
             endAt: "2026-12-31T23:59:59Z",
             status: "active",
           }),
         ).toBe(true);
-        expect(validateValid({})).toBe(false);
+        // Empty object missing required properties is rejected:
+        expect(validateCompliant({})).toBe(false);
       });
     });
   });

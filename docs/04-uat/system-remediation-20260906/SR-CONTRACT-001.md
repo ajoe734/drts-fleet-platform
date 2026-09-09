@@ -27,14 +27,15 @@ Owner：Gemini；Reviewer：Codex2。日期：2026-09-09 UTC。
 
 所有檢查均自隔離工作樹執行，完全符合派工範圍限制，未修改 `write_scopes` 以外之任何檔案。
 
-| 檢查項目 / 指令                                                       | Exit Code | 耗時  | 實際結果摘要                                               |
-| :-------------------------------------------------------------------- | :-------: | :---: | :--------------------------------------------------------- |
-| `git diff --check`                                                    |     0     | 0.05s | 無任何 whitespace error 或格式異常                         |
-| `pnpm lint:root`                                                      |     0     | 3.2s  | ESLint 根目錄與單元測試檢查零警告零錯誤                    |
-| `pnpm --filter @drts/contracts typecheck`                             |     0     | 2.1s  | `@drts/contracts` TypeScript 編譯檢查通過（無 emit 錯誤）  |
-| `pnpm --filter @drts/api-client typecheck`                            |     0     | 2.2s  | `@drts/api-client` TypeScript 編譯檢查通過（無 emit 錯誤） |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/` |     0     | 0.85s | 1 test file, 32 passed (100% 通過，0 失敗)                 |
-| `pnpm exec vitest run tests/unit/api-client-dispatch-queue.test.ts`   |     0     | 0.55s | 既有 api-client / contracts 測試回歸守護通過 (2 passed)    |
+| 檢查項目 / 指令                                                                                     | Exit Code | 耗時  | 實際結果摘要                                                    |
+| :-------------------------------------------------------------------------------------------------- | :-------: | :---: | :-------------------------------------------------------------- |
+| `git diff --check origin/dev...HEAD`                                                                |     0     | 0.05s | 無任何 whitespace error 或格式異常                              |
+| `git diff --check`                                                                                  |     0     | 0.05s | 工作目錄零 whitespace error                                     |
+| `pnpm lint:root`                                                                                    |     0     | 3.2s  | ESLint 根目錄與單元測試檢查零警告零錯誤                         |
+| `pnpm --filter @drts/contracts typecheck`                                                           |     0     | 2.1s  | `@drts/contracts` TypeScript 編譯檢查通過（無 emit 錯誤）       |
+| `pnpm --filter @drts/api-client typecheck`                                                           |     0     | 2.2s  | `@drts/api-client` TypeScript 編譯檢查通過（無 emit 錯誤）      |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/`                               |     0     | 0.85s | 1 test file, 32 passed (100% 通過，0 失敗)                      |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/ tests/unit/api-client-dispatch-queue.test.ts` |     0     | 1.05s | 2 test files, 34 passed (100% 通過，包含既有回歸測試)          |
 
 ### 測試覆蓋矩陣 (32 Unit Tests in Suite)
 
@@ -64,13 +65,18 @@ Owner：Gemini；Reviewer：Codex2。日期：2026-09-09 UTC。
 4. **OpenAPI 規格對齊與 Ajv 正負向驗證 (`openapi-spec.yaml`)**：
    - 包含所有 15 個新增 path operations 與 4 個新增 Tags (`DriverLeave`, `DriverAcademy`, `FleetPartnerTraining`, `HostVehicles`)。
    - 包含所有對應之請求／回應 Schemas、Envelope 結構與 `MethodNotAllowed` (HTTP 405) 回應定義。
-   - **Codex2 P2 審查修復：OAS 3.0.3 Reference Object 語義與 nullable 引用規格對齊**：
-     - OpenAPI 3.0.3 Section 4.7.2.3 明定 Reference Object 不可包含額外兄弟屬性，若有則應被忽略。先前 `contractPeriod` 與 `ContractOperationalViewRecord` 7 個條款欄位將 `nullable: true` 與 `$ref` 並列為兄弟屬性，在標準 OAS 語意下導致 `nullable` 被忽略而拒絕合法 `null`。
-     - 全面改為 OAS 3.0 標準相容模式：外層使用 `allOf: [ { $ref: ... } ]` 搭配 `nullable: true`。經由自動化遍歷腳本確認全份 `openapi-spec.yaml` 中 `$ref` 兄弟屬性違規數為 0。
-     - 測試端 `transformOpenApiToAjv` 嚴格遵循 OAS 3.0.3 引用語意：遭遇 `schema.$ref` 時僅回傳 `{ $ref: schema.$ref }`，徹底杜絕掩蓋無效兄弟屬性的行為。
-     - 新增單元回歸測試：遍歷驗證 `openapi-spec.yaml` 全檔無任何 `$ref` 兄弟屬性。
-     - 新增單元回歸測試：精確重現 OAS 參考語義，證明裸 `$ref` 兄弟屬性會拒絕 `null`，而 `allOf` 包裝器能正確允許 `null` 且依然拒絕空物件 `{}`。
-     - 新增單元回歸測試：針對 `ContractOperationalViewRecord` 7 個條款欄位與 `HostVehicleSummary.contractPeriod`，驗證傳入空物件 `{}` 必定被拒絕且明確指出缺漏之必要巢狀欄位。
+   - **Codex2 P2 審查修復：標準 OAS 3.0.3 Nullable Object Schemas 與 Reference Semantics 對齊**：
+     - 依據 OpenAPI 3.0.3 Section 4.7.24.2 規範，`nullable: true` 必須在同一個 Schema Object 中搭配 `type` 使用；且 `allOf` 之子 schema 約束會獨立強制檢驗。若外層使用 `allOf: [ { $ref: nonNullableSchema } ]` 搭配 `nullable: true`，在標準 OAS 3.0.3 驗證下，子 schema 依然會因要求 object 而拒絕 legal null。
+     - 全面修復為符合 OAS 3.0.3 標準之 nullable object schemas：
+       - `HostVehicleContractPeriod` 組件 schema 定義 `type: object`、`nullable: true`、`required` 與完整 `properties`。
+       - `ContractOperationalModifiableWindow`, `ContractOperationalProofRequirements`, `ContractOperationalWaitingRule`, `ContractOperationalNoShowRule`, `ContractOperationalSlaProfile`, `ContractOperationalEffectiveVersion`, `ContractOperationalAuthMode` 等 7 個組件 schema 皆定義 `type: object`、`nullable: true`、`required` 與完整 `properties`。
+       - `HostVehicleSummary.properties.contractPeriod` 與 `ContractOperationalViewRecord` 之 7 個條款欄位直接使用標準 `$ref` 引用上述組件 schema，無任何無效之 `allOf` 包裝器或兄弟屬性。
+     - 測試端移除寬鬆之 `oneOf` 轉換 fallback，`transformOpenApiToAjv` 僅在同一 Schema Object 具備 `type` 時轉換 `nullable: true` 為 `[type, "null"]`，並保留 `allOf`。
+     - 經由獨立 Ajv 驗證腳本與單元測試確認：
+       - `HostVehicleSummary.contractPeriod` 與 `ContractOperationalViewRecord` 7 個條款欄位均正確接受合法 `null`（`nullAccepted = true`）。
+       - 7 個條款欄位與 `contractPeriod` 傳入空物件 `{}` 時必定被嚴格拒絕（提示缺漏之必要欄位）。
+       - 傳入完整有效物件時通過驗證。
+       - 全檔 `openapi-spec.yaml` 無任何 `$ref` 兄弟屬性違規。
 
 ---
 

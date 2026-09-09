@@ -4638,6 +4638,7 @@ components:
     # =========================================================================
     HostVehicleContractPeriod:
       type: object
+      nullable: true
       required:
         - startAt
         - endAt
@@ -4681,9 +4682,7 @@ components:
         operatingFleetName:
           type: string
         contractPeriod:
-          allOf:
-            - $ref: "#/components/schemas/HostVehicleContractPeriod"
-          nullable: true
+          $ref: "#/components/schemas/HostVehicleContractPeriod"
     HostVehicleEarningsSummary:
       type: object
       required:
@@ -4975,6 +4974,7 @@ components:
           $ref: "#/components/schemas/ContractOperationalDataStatus"
     ContractOperationalModifiableWindow:
       type: object
+      nullable: true
       required:
         - leadTimeMinutes
         - cutoffMinutes
@@ -4987,6 +4987,7 @@ components:
           type: string
     ContractOperationalProofRequirements:
       type: object
+      nullable: true
       required:
         - requiredDocuments
         - signatureRequired
@@ -5002,6 +5003,7 @@ components:
           type: boolean
     ContractOperationalWaitingRule:
       type: object
+      nullable: true
       required:
         - gracePeriodMinutes
       properties:
@@ -5011,6 +5013,7 @@ components:
           type: integer
     ContractOperationalNoShowRule:
       type: object
+      nullable: true
       required:
         - thresholdMinutes
         - feeApplicable
@@ -5021,6 +5024,7 @@ components:
           type: boolean
     ContractOperationalSlaProfile:
       type: object
+      nullable: true
       required:
         - profileId
         - targetResponseMinutes
@@ -5036,6 +5040,7 @@ components:
           type: string
     ContractOperationalEffectiveVersion:
       type: object
+      nullable: true
       required:
         - versionNumber
         - versionTag
@@ -5055,6 +5060,7 @@ components:
           nullable: true
     ContractOperationalAuthMode:
       type: object
+      nullable: true
       required:
         - mode
       properties:
@@ -5103,33 +5109,19 @@ components:
         contractId:
           type: string
         modifiableWindow:
-          allOf:
-            - $ref: "#/components/schemas/ContractOperationalModifiableWindow"
-          nullable: true
+          $ref: "#/components/schemas/ContractOperationalModifiableWindow"
         proofRequirements:
-          allOf:
-            - $ref: "#/components/schemas/ContractOperationalProofRequirements"
-          nullable: true
+          $ref: "#/components/schemas/ContractOperationalProofRequirements"
         waitingRule:
-          allOf:
-            - $ref: "#/components/schemas/ContractOperationalWaitingRule"
-          nullable: true
+          $ref: "#/components/schemas/ContractOperationalWaitingRule"
         noShowRule:
-          allOf:
-            - $ref: "#/components/schemas/ContractOperationalNoShowRule"
-          nullable: true
+          $ref: "#/components/schemas/ContractOperationalNoShowRule"
         slaProfile:
-          allOf:
-            - $ref: "#/components/schemas/ContractOperationalSlaProfile"
-          nullable: true
+          $ref: "#/components/schemas/ContractOperationalSlaProfile"
         effectiveVersion:
-          allOf:
-            - $ref: "#/components/schemas/ContractOperationalEffectiveVersion"
-          nullable: true
+          $ref: "#/components/schemas/ContractOperationalEffectiveVersion"
         authMode:
-          allOf:
-            - $ref: "#/components/schemas/ContractOperationalAuthMode"
-          nullable: true
+          $ref: "#/components/schemas/ContractOperationalAuthMode"
         dataStatus:
           $ref: "#/components/schemas/ContractOperationalFieldStatusMap"
     ContractOperationalTermsEnvelope:
