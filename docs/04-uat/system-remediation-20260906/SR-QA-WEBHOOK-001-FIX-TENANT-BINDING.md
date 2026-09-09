@@ -84,7 +84,11 @@ Executes without server or compose dependencies per VM restriction:
 
 ### 3.2 Full AppModule E2E Test Suite (`tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/appmodule-tenant-binding.test.ts`)
 - Verifies complete NestJS `AppModule` structure and route metadata.
-- Prepares the complete two-tenant authentic JWT + PostgreSQL HTTP integration test harness ready to execute with `DATABASE_URL` in live environments.
+- Configures full `AppModule` DI wiring (`DatabaseService`, `JwtAuthService`, `StepUpProofService`, `TenantPartnerRepository`, `TenantPartnerService`) and production `APP_GUARD`, `APP_INTERCEPTOR` (`SnakeCaseInterceptor`), and `APP_FILTER`.
+- Issues authentic two-tenant JWTs with trusted MFA fixtures (`amr: ["mfa", "totp"]`, `acr: "aal2"`).
+- Tests cross-tenant mutations (`issue`, `rotate`, `revoke`) with valid caller-bound step-up proofs, asserting HTTP 403 `TENANT_SCOPE_MISMATCH` and verifying DB state immutability.
+- Tests same-tenant HTTP lifecycle with wire `snake_case` serialization (`api_key.api_key_id`).
+- Asserts SQL readback states for all credential lifecycles (`active`, `overlap_active`, `revoked`) and timestamps.
 
 ### 3.3 Verification Commands Run & Results
 ```bash
@@ -92,11 +96,19 @@ Executes without server or compose dependencies per VM restriction:
 pnpm exec vitest run tests/unit/system-remediation/sr-qa-webhook-001-fix-tenant-binding/ --no-file-parallelism --maxConcurrency=1
 # Output: 5 passed (5)
 
-# 2. Typecheck:
+# 2. E2E tests (AppModule structure / mock-isolated per VM restriction):
+pnpm exec vitest run tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/ --no-file-parallelism --maxConcurrency=1
+# Output: 1 passed, 1 skipped (2)
+
+# 3. Typecheck:
 pnpm --filter @drts/api typecheck
 # Output: tsc -p tsconfig.json --noEmit (Exit status 0)
 
-# 3. Git diff check:
+# 4. ESLint check:
+pnpm exec eslint tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/ tests/unit/system-remediation/sr-qa-webhook-001-fix-tenant-binding/ apps/api/src/modules/tenant-partner/tenant-partner.controller.ts apps/api/src/modules/tenant-partner/tenant-partner.service.ts
+# Output: clean (Exit status 0)
+
+# 5. Git diff check:
 git diff --check
 # Output: clean (Exit status 0)
 ```
