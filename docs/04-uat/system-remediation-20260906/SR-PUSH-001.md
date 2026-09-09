@@ -1,5 +1,39 @@
 # SR-PUSH-001 — current-dev reproduction and scope blocker
 
+## Dispatch verification — 2026-09-09 01:41 UTC
+
+- Fresh fetched dev reference: `3062ea363769cc393e59384251f5aedc7e570ac5`.
+  Tested branch SHA: `4e5abe74cb2c1c532daa051eab6c978a7b33ab1c`.
+  Implementation candidate SHA: null; this is an evidence anchor only.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1, duplicate
+  historical evidence/test add-add conflicts at `8b015a460`.
+  `git rebase --abort`: exit 0; original published branch restored cleanly.
+  No force push, stash, or replacement of newer dev content occurred.
+- The merged history-repair packet at `6de31c41fa49d7089d87d42aa8f22378caa07858`
+  describes a supervisor-routed successor branch. This dispatch still explicitly
+  assigns the existing branch and worktree. Supervisor must apply that routing;
+  another history investigation is unnecessary. Product gates remain separate.
+- `git diff origin/dev HEAD -- apps/api/src/modules/multi-taxi/multi-taxi.service.ts apps/api/src/modules/multi-taxi/multi-taxi.repository.ts apps/api/src/modules/multi-taxi/passenger-push.port.ts apps/api/src/modules/multi-taxi/multi-taxi.module.ts`:
+  exit 0, empty. These inspected push sources match fresh dev. Tests below ran
+  at the branch SHA, not a fully rebased dev checkout.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-push-001/`: exit 0,
+  4 passed / 2 expected failures, 6 total, 3.12 seconds. Duplicate delivery and
+  swallowed persistence failure remain unresolved acceptance defects.
+- Initial `pnpm --filter @drts/api typecheck`: exit 2, missing generated contracts
+  and control-plane-auth declarations, with downstream errors.
+  `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api typecheck`:
+  exit 0. `git diff --check`: exit 0 before this evidence update.
+- Canonical task readback still permits only the original five scopes and
+  depends only on UV-EXEC-006. Before implementation, supervisor must grant
+  service/repository scopes with writer sequencing and route the approved
+  provider/device contract and durable claim/receipt allocation described in
+  the existing planning packet. A completed history helper does not grant them.
+- Test resource IDs remain those listed below. Real provider account/message,
+  authorized device, controlled receiver and PostgreSQL integration resource
+  IDs remain null. No live/device/receiver verification or product server was
+  run. The readiness snapshot still lists missing provider/device evidence.
+
+
 ## Redispatch verification — 2026-09-09 after history repair
 
 - Fetched `origin/dev`: `6de31c41fa49d7089d87d42aa8f22378caa07858` (exit 0).
