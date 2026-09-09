@@ -1,132 +1,67 @@
-# SR-ENV-COPY-001 — 各 app 環境標示與使用者文案清理：完成證據
+# SR-ENV-COPY-001 — 接續修正與未完成驗證
 
-- Task: `SR-ENV-COPY-001`
-- Owner: `Gemini`
-- Reviewer: `Codex2`
-- Base SHA (`origin/dev`): `add6694278b3287bb42215b24d4c91039d0c6645`
-- Merge Base SHA: `fb2ea6e2ed3c2937d7d65d601967d183b0257048`
-- Candidate SHA: 於 `handoff` 時以 `git rev-parse HEAD` 寫入（見 task board 與 machine truth）
-- Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-env-copy-001`
-- Branch: `gemini/sr-env-copy-001-scoped-20260909`
+本頁取代前一版「完成證據」：任務尚未完成，不可依前版全數通過的敘述結案。
 
----
+- Owner: Codex；Reviewer: Codex2。
+- 2026-09-09 本輪 `git fetch origin` 後 `origin/dev`: `9b57f767047825fe116b2231aa22900ce408897a`。
+- 接手時本地／remote head: `9e35f6f1426755f97a81826b66edaf14d1ff56f6`，工作樹乾淨。
+- 本輪程式 anchor: `ff99b6e69`，已普通 push；後續本頁與測試之 anchor SHA 由 machine-truth progress/blocker 記錄。
+- Candidate SHA: **未鎖定**；目前仍有 scope 與驗證阻礙，未 handoff。
+- Branch: `gemini/sr-env-copy-001-scoped-20260909`。
+- Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-env-copy-001`。
+- 既有 PR: https://github.com/ajoe734/drts-fleet-platform/pull/1851 。不 rebase/amend/force-push；未因 dev 前進而同步或改寫既有歷史。
 
-## 1. 問題根因盤點（R27 / C110）
+## 來源與實際重現
 
-本次修復依據 2026-09-06 UAT 盤點（R27）與平臺治理能力（C110），徹底解決以下環境標示與文案瑕疵：
+追溯 `source/findings.json` R27、`source/capabilities.json` C110、execution tasks 主規則及 task runbook。R27 要求由部署設定產生環境標記並清理工程文案；歷史 9/6 audit 並非當前程式真值。
 
-1. **R27: dev/mock 畫面誤標正式環境或 PRODUCTION**
-   - 過去各 app shell 的環境標籤部分硬編碼（例如 `FleetPortalShell` 硬編碼 `env="production"`、`bank-console-web` 導覽硬編碼 `BANK_CONSOLE_ENV = "preview"`）。
-   - 依賴 `NODE_ENV` 判斷環境，但 Next.js `next build` 固定注入 `NODE_ENV=production`，導致無論部署至 dev、staging 或 preview，皆被誤認或回退為正式環境。
-   - 部分邏輯透過 hostname / URL 猜測環境，缺乏單一權威來源。
+`gh pr view 1851 --json reviews,comments` 回傳兩者皆空。前次 worker-result `codex-20260908T180951Z-cedc7af1.json` 的分支／scope 阻礙部分已由本輪指派解除。實際 CI 阻礙由 `gh run view 34304203659 --log-failed` 讀回：i18n guard 在 bank、fleet、platform-admin 三個 shell 報 21 處 locale ternary 違規。
 
-2. **R27: 使用者文案混入內部工程術語（ActionIntent、submissionId、例外代碼）**
-   - `ops-console-web` 助理空態提示過去含有 `ActionIntent` 等工程術語（如 `...解析 ActionIntent`）。
-   - `fleet-partner-portal-web` 司機與車輛欄位顯示 `submissionId`（如 `偏好車輛 submissionId`、`目前司機 submissionId`）。
-   - `platform-admin-web` 審核原因與 banner 錯誤混雜英文代碼（如 `vehicle_unsupported`、`license_invalid`、`SUBMISSION_REVISION_CONFLICT`、`REVIEWER_SELF_APPROVAL_DENIED`）。
+- CI resource: run `34304203659`，job `102317844633`。
+- https://github.com/ajoe734/drts-fleet-platform/actions/runs/34304203659/job/102317844633
+- 以上 CI 屬舊 head `9e35f6f14`，不是新 anchor 的成功證據。
 
-3. **C110: 環境真值、來源時間與健康未知狀態正確性**
-   - 過去 API health check 遇到未定義、null、空字串或未識別狀態時，直接預設為 `healthy`，導致正式或未知部署將未確認的服務狀態誤標為健康。
+以 `git show origin/dev:<path>` 讀回以下三個檔案，用 TypeScript AST 抽出實際 `normalizeHealthStatus`，`ts.transpileModule` 後執行 `normalizeHealthStatus(undefined, true)` 與 `normalizeHealthStatus("future-status", true)`。Node 指令 exit 0；三者兩種輸入都得到 **healthy**：
 
----
-
-## 2. 核心修復說明
-
-### 2.1 共用 EnvironmentBadge 與權威解析器（`packages/ui-web/src/environment-badge/` & `packages/ui-web/src/index.tsx`）
-
-- `normalizeServerRuntimeEnv(rawEnv)`：
-  - 僅接受明確合法環境值（`development/dev`、`staging/stage`、`production/prod`、`preview`、`test`），支援大小寫與前後空白清理。
-  - 嚴格拒絕 URL、網域名稱（含 `/`、`http:`、`https:`、`.com`、`.io`、`.internal` 等），凡命中一律正規化為 `unknown`。
-  - 未設定、空值或未識別值一律回傳 `unknown`，絕不預設為 `production`。
-- `resolveRuntimeEnvironmentTier(source)`：
-  - 嚴格要求單獨之 `NODE_ENV=production` 必須回傳 `unknown`，不可作為正式環境真值。
-  - `DRTS_ENV` 具最高優先權，次為 `APP_ENV`。
-  - `RUNTIME_ENVIRONMENT_TIER_TONE.unknown` 設為 `warning`，確保未知環境具有警示效果，非 neutral 亦非 success。
-- `resolveRuntimeHealth(input)`：
-  - 當 status 為 undefined、null、空值或未識別時，回傳 `unknown`。
-  - 當 HTTP responseOk 為 false 時，強制判定為 `down`。
-- `EnvironmentBadge`：
-  - 遵循 `@drts/ui-tokens` 規範與 realm token 顏色，支援 `comfortable` 與 `compact` 密度，以及 `light` 與 `dark` 模式。
-  - 包含完整的 `data-testid="environment-badge"`、`data-environment` 與 `data-environment-tier` 屬性。
-- `packages/ui-web/src/index.tsx`：
-  - 正式匯出 `EnvironmentBadge`、`normalizeServerRuntimeEnv`、`resolveRuntimeEnvironment`、`resolveRuntimeHealth` 等型別與函式。
-
-### 2.2 六大 Web 應用程式 Layout 與 Shell 權威環境串接
-
-1. **`apps/platform-admin-web`**:
-   - `app/layout.tsx`: server layout 讀取 `normalizeServerRuntimeEnv(process.env.DRTS_ENV)`，將可序列化正規化值傳入 `AdminShell`。
-   - `components/admin-shell.tsx`: 接收 `env` prop，由 `resolveAdminEnvLabel` 解析雙語標籤，並於 `data-testid="platform-admin-env-chip"` 標記 `data-environment`。
-   - `lib/translations.ts`: 提供 `resolveAuthoritativeAdminShellEnv`；清理 `supplyReview` 中的內部代碼與 `submissionId` 雜訊，繁中化為「無效的申請編號」、「找不到該筆供給審核紀錄」、「版本衝突 · 請重新載入」、「拒絕自身審核」等。
-2. **`apps/ops-console-web`**:
-   - `app/layout.tsx`: server layout 讀取 `DRTS_ENV` 並正規化，傳入 `OpsShell` 的 `env` 屬性。
-   - `lib/translations.ts`: 新增 `opsShell.health.unknown`（`API 未知` / `API unknown`）及 `app.environment.*`；將 `opsAssistant.bridge.empty` 繁中「可用動作解析 `ActionIntent`」清理為「針對該資源解析可執行的動作」，英文相應清理為「resolve available actions against that resource」。
-3. **`apps/tenant-console-web`**:
-   - `app/layout.tsx`: server layout 讀取 `DRTS_ENV` 正規化後傳入 `TenantShell`。
-   - `components/tenant-shell.tsx`: 接收 `env` prop，由 `resolveTenantEnvLabel` 解析環境；API 健康狀態以 `resolveRuntimeHealth` 取代過去寫死之 `healthy` 回退，並加入 `unknown` 狀態對應 `shell.health.unknown`（`API 未知`）。
-   - `lib/navigation.ts`: `TENANT_CONSOLE_ENV` 回退值改為 `"unknown"`，不再預設 `"production"`。
-   - `lib/translations.ts`: 提供 `resolveAuthoritativeShellEnv`，字典加入 `shell.health.unknown` 與環境標籤，清理訂單逾時與派車錯誤文案。
-4. **`apps/fleet-partner-portal-web`**:
-   - `app/layout.tsx`: server layout 讀取 `DRTS_ENV` 正規化後傳入 `FleetPortalShell`。
-   - `components/fleet-portal-shell.tsx`: 消除硬編碼之 `env="production"`，接收 `env` prop 並以 `resolveFleetPortalEnvLabel` 解析；外層容器附帶 `data-testid="fleet-portal-shell"` 與 `data-environment`。
-   - `lib/translations.ts`: 提供 `resolveAuthoritativeFleetShellEnv`；字典加入 `shell.api.unknown` 與環境標籤；清理 `preferredVehicleSubmissionId`（`偏好車輛申請編號` / `Preferred vehicle application ID`）與 `currentDriverSubmissionId`（`目前司機申請編號` / `Current driver application ID`）。
-5. **`apps/bank-console-web`**:
-   - `app/layout.tsx`: server layout 讀取 `DRTS_ENV` 正規化後傳入 `BankShell`。
-   - `lib/navigation.ts`: `BANK_CONSOLE_ENV` 消除硬編碼 `"preview"`，改為自環境變數讀取並預設回退 `"unknown"`。
-   - `components/bank-shell.tsx`: 接收 `env` prop，由 `resolveBankEnvLabel` 解析環境；外層容器附帶 `data-testid="bank-console-shell"` 與 `data-environment`。
-   - `lib/translations.ts`: 提供 `resolveAuthoritativeBankShellEnv`；字典加入 `shell.health.unknown` 與環境標籤。
-6. **`apps/enterprise-dispatch-web`**:
-   - `app/layout.tsx`: server layout 讀取 `DRTS_ENV` 正規化後傳入 `EnterpriseAppFrame`。
-   - `components/enterprise-app-frame.tsx`: 接收 `env` prop 並轉傳至 `EnterpriseShell`。
-   - `components/enterprise-shell.tsx`: 接收 `env` prop，於 `EnterpriseShellControls` 渲染環境 Chip（`data-testid="enterprise-env-chip"`）；健康狀態整合 `resolveRuntimeHealth` 支援 `unknown`（`API 未知`）。
-   - `lib/translations.ts`: 提供 `resolveAuthoritativeEnterpriseShellEnv`；字典加入 `shell.health.unknown` 與環境標籤。
-
----
-
-## 3. 測試與驗證結果
-
-依 task brief 與 runbook 要求，執行所有驗證指令並記錄 exit code：
-
-| 指令                                                                                                                                                                | 結果   | 說明                                  |
-| :------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :----- | :------------------------------------ |
-| `git diff --check`                                                                                                                                                  | Exit 0 | 無空白、換行或格式瑕疵                |
-| `pnpm --filter @drts/bank-console-web typecheck`                                                                                                                    | Exit 0 | Next.js typegen + TypeScript 編譯通過 |
-| `pnpm --filter @drts/enterprise-dispatch-web typecheck`                                                                                                             | Exit 0 | Next.js typegen + TypeScript 編譯通過 |
-| `pnpm --filter @drts/fleet-partner-portal-web typecheck`                                                                                                            | Exit 0 | Next.js typegen + TypeScript 編譯通過 |
-| `pnpm --filter @drts/ops-console-web typecheck`                                                                                                                     | Exit 0 | Next.js typegen + TypeScript 編譯通過 |
-| `pnpm --filter @drts/platform-admin-web typecheck`                                                                                                                  | Exit 0 | Next.js typegen + TypeScript 編譯通過 |
-| `pnpm --filter @drts/tenant-console-web typecheck`                                                                                                                  | Exit 0 | Next.js typegen + TypeScript 編譯通過 |
-| `pnpm --filter @drts/ui-web typecheck`                                                                                                                              | Exit 0 | TypeScript 編譯通過                   |
-| `pnpm --filter @drts/ui-web test`                                                                                                                                   | Exit 0 | 4 測試檔全數通過（52 測試）           |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/ packages/ui-web/tests/unit/environment-badge.test.ts --no-file-parallelism --maxConcurrency=1` | Exit 0 | 15 測試全數通過                       |
-
----
-
-## 4. 變更檔案清單與 Scope 守衛
-
-所有改動嚴格限制於 Supervisor 授權之 `write_scopes` 清單，絕無修改未列出之中央 test config、lockfile、全域 routes 或共用設定：
-
-- `apps/platform-admin-web/lib/translations.ts`
-- `apps/ops-console-web/lib/translations.ts`
-- `apps/tenant-console-web/lib/translations.ts`
-- `apps/fleet-partner-portal-web/lib/translations.ts`
-- `apps/bank-console-web/lib/translations.ts`
-- `apps/enterprise-dispatch-web/lib/translations.ts`
-- `packages/ui-web/src/environment-badge/`
-- `tests/unit/system-remediation/sr-env-copy-001/`
-- `docs/04-uat/system-remediation-20260906/SR-ENV-COPY-001.md`
-- `apps/platform-admin-web/app/layout.tsx`
-- `apps/ops-console-web/app/layout.tsx`
-- `apps/tenant-console-web/app/layout.tsx`
-- `apps/fleet-partner-portal-web/app/layout.tsx`
-- `apps/bank-console-web/app/layout.tsx`
-- `apps/enterprise-dispatch-web/app/layout.tsx`
 - `apps/platform-admin-web/components/admin-shell.tsx`
-- `apps/tenant-console-web/components/tenant-shell.tsx`
-- `apps/tenant-console-web/lib/navigation.ts`
-- `apps/fleet-partner-portal-web/components/fleet-portal-shell.tsx`
-- `apps/bank-console-web/components/bank-shell.tsx`
-- `apps/bank-console-web/lib/navigation.ts`
-- `apps/enterprise-dispatch-web/components/enterprise-app-frame.tsx`
-- `apps/enterprise-dispatch-web/components/enterprise-shell.tsx`
-- `packages/ui-web/src/index.tsx`
-- `packages/ui-web/tests/unit/environment-badge.test.ts`
+- `apps/ops-console-web/components/ops-health-footer.tsx`
+- `apps/fleet-partner-portal-web/components/fleet-portal-health-footer.tsx`
+
+因此未知健康誤標仍存在於本輪 dev，不能當成歷史已修。
+
+## 已提交修正
+
+- bank／fleet／platform-admin shell 的 21 處內嵌文案改用既有 translations keys；缺值或不識別的 shell env label 回退為本地化 unknown。
+- platform-admin 健康 adapter 使用 `resolveRuntimeHealth`，新增 unknown 顯示；HTTP 失敗優先為 down。未知狀態使用現有中性 theme token，未新增 palette、字型或改版。
+- 新增 `admin-health.test.ts`：執行實際 shell adapter，驗證缺值、null、空字串、不識別字串、物件、陣列，以及明確健康／降級與 HTTP 失敗優先權；檢查雙語 unknown 文案。
+- 視覺參照已讀 `packages/ui-tokens/src/realms.ts`、`status.ts`、canvas 的 `Platform Admin.html`、`Bank Console.html`、`Fleet Partner Portal.html`、`mgmt-shell.jsx`。保留既有 chrome 與 realm theme。
+- 既有六個 dynamic server layouts 讀取 `DRTS_ENV` 的成果保留。dev workflow frontend env_vars 有 `DRTS_ENV=development`；未執行部署值 live readback，不能推論 staging/prod frontend 已供應值。
+
+## 本輪實際指令結果
+
+| 指令 | Exit | 結果 |
+| --- | --- | --- |
+| `git diff --check` | 0 | 通過 |
+| `git diff 9e35f6f14 --check` | 0 | 本輪累積差異通過 |
+| `pnpm run i18n:guard` | 0 | 525 files、10 apps，21 處違規已消除 |
+| `pnpm --filter @drts/bank-console-web typecheck` | 0 | 通過 |
+| `pnpm --filter @drts/enterprise-dispatch-web typecheck` | 0 | 通過 |
+| `pnpm --filter @drts/fleet-partner-portal-web typecheck` | 0 | 通過 |
+| `pnpm --filter @drts/platform-admin-web typecheck` | 0 | 通過 |
+| `pnpm --filter @drts/tenant-console-web typecheck` | 0 | 通過 |
+| `pnpm --filter @drts/ui-web typecheck` | 0 | 通過 |
+| `pnpm --filter @drts/ops-console-web typecheck` | 2 | 無法解析 `@drts/control-plane-auth`，另 proxy route:144 unknown 不可指派 string |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/ packages/ui-web/tests/unit/environment-badge.test.ts --no-file-parallelism --maxConcurrency=1` | 0 | 2 files / 23 tests；root config 沒有執行 package badge test，不能把它算作通過 |
+| `pnpm --filter @drts/ui-web test` | 1 | 2 files passed / 14 tests；另外 2 suites 無法解析 `react/jsx-dev-runtime` |
+| `pnpm --filter @drts/ui-web exec vitest run tests/unit/environment-badge.test.ts` | 1 | 無法解析 `@drts/ui-tokens`，0 tests |
+| `git push origin gemini/sr-env-copy-001-scoped-20260909` | 0 | `9e35f6f14..ff99b6e69` 普通推送 |
+
+依賴診斷：本 worktree 根 node_modules 是 canonical root 的 symlink；ops 的 `@drts/control-plane-auth` 與 ui-web 的 React symlink 指向 `codex-sr-deps-report-font-001` 相對 worktree 路徑。這是觀察到的解析障礙；未修改 shared node_modules、package manifests 或 lockfile。
+
+## 未完成項目與 Supervisor 所需動作
+
+1. **擴充 scope 並檢查 writer 相依**：授權 `apps/ops-console-web/components/ops-health-footer.tsx` 與 `apps/fleet-partner-portal-web/components/fleet-portal-health-footer.tsx`，才能消除已重現的未知健康誤標。兩檔目前不在 write_scopes，owner 未修改。
+2. 後續完成既有環境 helpers 的整體一致性稽核：translations helpers 仍有 APP_ENV／NEXT_PUBLIC／NODE_ENV fallback，應依 task 指定的 DRTS_ENV server producer 收斂；tenant／enterprise 缺值 fallback 也需核對。這些授權範圍內的剩餘工作尚未宣稱完成。
+3. 修復或提供可用的 isolated dependency tree，重跑失敗的 ops typecheck 與 package tests。
+4. 未啟動任何產品／preview server、Playwright 或 Docker；未做 live、瀏覽器、真機、Cloud Run runtime readback。沒有本輪 live resource ID，以上 PR／CI IDs 僅為版本及歷史 CI 證據。
+5. 完成以上實作與驗證後才鎖定新的 candidate，獨立 reviewer、同 SHA CI／merge 通過後方可結案。目前 anchors 僅保留進度。
