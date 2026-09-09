@@ -421,6 +421,7 @@ describe("UV-EXEC-021 Data Retention, Access Audit, Versioning & Emergency Suspe
         actorId: "partner-001",
         realm: "partner",
         scopes: [],
+        tenantId: null,
       };
 
       expect(() =>
@@ -441,6 +442,7 @@ describe("UV-EXEC-021 Data Retention, Access Audit, Versioning & Emergency Suspe
         actorId: "admin-audit-01",
         realm: "platform",
         scopes: [],
+        tenantId: null,
       };
 
       const result = retentionService.authorizeEvidenceAccess({
