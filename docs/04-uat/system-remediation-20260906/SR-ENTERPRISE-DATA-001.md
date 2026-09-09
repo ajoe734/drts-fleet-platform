@@ -7,8 +7,8 @@
 | 追溯來源      | R08（首頁/行程示意資料、假 ETA、詳情 404 誤說暫時不穩）、R09（聯絡司機/客服按鈕無動作）、R16（統計混淆載入/錯誤/無資料/真實0，本任務僅套用其分類原則） |
 | 能力來源      | C013、C017、C018、C093、C108、C119                                                              |
 | Owner         | `Gemini`                                                                                       |
-| Reviewer      | `Codex`                                                                                        |
-| Base SHA      | `3b60a3757238663572f16f010c94f446f2c71eaa`（`origin/dev` tip at task start，本 worktree 分支起點） |
+| Reviewer      | `Codex2`                                                                                       |
+| Base SHA      | `32b6dde7db730a8524004a5e87d94d5a2a6d7853`（目前 `origin/dev` 最新 SHA；分支起點 `3b60a3757238663572f16f010c94f446f2c71eaa`） |
 | Candidate SHA | 於 `handoff` 時以 `git rev-parse HEAD` 記錄                                                     |
 | Worktree      | `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-data-001` |
 | Branch        | `gemini/sr-enterprise-data-001`                                                                |
@@ -174,6 +174,15 @@ $ pnpm run i18n:guard
 > node tools/ci/i18n-guard.mjs
 
 i18n-guard: OK (520 files scanned across 10 apps, 55 exemption(s) from i18n-guard-baseline.json)
+(exit code: 0)
+```
+
+### 4.6 ESLint 檢查（修復未使用 import，確保 CI lint 綠燈）
+
+```bash
+$ pnpm --filter @drts/enterprise-dispatch-web lint
+> @drts/enterprise-dispatch-web@0.1.0 lint /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-data-001/apps/enterprise-dispatch-web
+> eslint . --max-warnings=0
 (exit code: 0)
 ```
 

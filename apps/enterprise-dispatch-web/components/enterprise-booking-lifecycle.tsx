@@ -1,7 +1,6 @@
 "use client";
 
 import type { BookingRecord } from "@drts/contracts";
-import { ApiClientError } from "@drts/api-client";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
