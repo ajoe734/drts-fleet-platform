@@ -15,6 +15,13 @@ dispatch them. Do not repair legacy lifecycle fields manually.
 
 Never call `done` directly. Never use branch-only, a merged commit message, or a stale CI run as a substitute for candidate evidence.
 
+During `acceptance` or after `done`, owner `progress` reports behave as `note`:
+they update the message while preserving the candidate, review, CI, merge,
+acceptance evidence and outstanding gates. `start` rejects those states so a
+stale owner dispatch cannot silently reopen completed implementation. Use
+`record-acceptance` to record verified gates; if code changes are required, ask
+the reviewer to explicitly `reopen` the candidate before starting implementation.
+
 For an unblock helper, completing the helper does not erase later parent
 blockers. If a planning or recovery delivery leaves routing or implementation
 work outstanding, record `resolved_parent_status: blocked`,
