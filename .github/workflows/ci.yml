@@ -255,7 +255,11 @@ jobs:
         # The root `test:unit` only covers tests/unit/**; the apps/api package
         # also owns package-local tests, including DB-backed regressions that
         # must run against the migrated schema to match ci-integ coverage.
-        run: pnpm --filter @drts/api test
+        # All files use this job's one database. Running files concurrently lets
+        # another test's background outbox consumer claim the Stage1 gate's rows,
+        # changing its replay snapshot or consuming its delivery without a sink.
+        # Keep every test and assertion, but serialize access to the shared DB.
+        run: pnpm --filter @drts/api test --no-file-parallelism --maxConcurrency=1
 
   smoke-acceptance:
     name: Smoke acceptance
