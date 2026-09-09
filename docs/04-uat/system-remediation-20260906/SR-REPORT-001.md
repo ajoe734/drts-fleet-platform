@@ -8,8 +8,8 @@
 | Gap ID              | N05                                               |
 | Capability ID       | C091                                              |
 | Owner               | Gemini                                            |
-| Reviewer            | Gemini2                                           |
-| Base SHA            | `7dccddaba`（origin/dev 基準）                    |
+| Reviewer            | Codex2                                            |
+| Base SHA            | `32b6dde7db730a8524004a5e87d94d5a2a6d7853`（origin/dev 基準） |
 | Candidate SHA       | 完成實作後由 `git rev-parse HEAD` 記錄            |
 | Branch              | `gemini/sr-report-001`                            |
 | Candidate 狀態      | 待 handoff → review                              |
@@ -81,13 +81,12 @@ exit code: 0 (no whitespace errors)
 
 ### `pnpm --filter @drts/api typecheck`
 ```
-只剩 voice-capability / callcenter 預存錯誤（與本 task 無關，pre-existing）
-reporting-filing / report-renderers 無 TS error
+exit code: 0 (clean, no TypeScript errors)
 ```
 
 ### `pnpm --filter @drts/ops-console-web typecheck`
 ```
-exit code: 0 — Types generated successfully
+exit code: 0 — Types generated successfully, tsc clean
 ```
 
 ### `pnpm exec vitest run tests/unit/system-remediation/sr-report-001/`
@@ -96,8 +95,13 @@ RUN  v4.1.4
 
  Test Files  1 passed (1)
       Tests  17 passed (17)
-   Start at  15:42:46
-   Duration  1.15s
+   Start at  00:14:07
+   Duration  879ms
+```
+
+### `pnpm exec eslint tests/unit/system-remediation/sr-report-001/report-formats.test.ts`
+```
+exit code: 0 (0 errors, 0 warnings)
 ```
 
 ---

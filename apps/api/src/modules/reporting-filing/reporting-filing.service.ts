@@ -790,12 +790,14 @@ export class ReportingFilingService implements OnModuleInit {
    * act than describing it, not a weaker one, and the audit trail records the
    * download rather than the intent to download.
    */
-  async renderReportArtifact(
+  renderReportArtifact(
     jobId: string,
     requestId?: string,
     identity?: EvidenceAccessIdentity | null,
     tenantScopeId?: string | null,
-  ): Promise<{ buffer: Buffer; contentType: string; fileName: string }> {
+  ):
+    | { buffer: Buffer; contentType: string; fileName: string }
+    | Promise<{ buffer: Buffer; contentType: string; fileName: string }> {
     const job = this.requireGenericReportJob(jobId);
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
     if (normalizedTenantScopeId) {
@@ -828,31 +830,61 @@ export class ReportingFilingService implements OnModuleInit {
       );
     }
 
-    const buffer = await renderer.render(job);
-    this.recordArtifactAccessAudit(
-      {
-        actionName: "download_report_artifact",
-        resourceType: "report_artifact",
-        resourceId: job.artifact?.artifactId ?? null,
-        newValuesSummary: {
-          jobId: job.jobId,
-          jobType: job.jobType,
-          format: job.format,
-          rowCount: job.rows.length,
-          byteLength: buffer.byteLength,
-          tenantId: normalizedTenantScopeId,
+    const rendered = renderer.render(job);
+    if (Buffer.isBuffer(rendered)) {
+      this.recordArtifactAccessAudit(
+        {
+          actionName: "download_report_artifact",
+          resourceType: "report_artifact",
+          resourceId: job.artifact?.artifactId ?? null,
+          newValuesSummary: {
+            jobId: job.jobId,
+            jobType: job.jobType,
+            format: job.format,
+            rowCount: job.rows.length,
+            byteLength: rendered.byteLength,
+            tenantId: normalizedTenantScopeId,
+          },
         },
-      },
-      requestId,
-      identity,
-      normalizedTenantScopeId,
-    );
+        requestId,
+        identity,
+        normalizedTenantScopeId,
+      );
 
-    return {
-      buffer,
-      contentType: renderer.contentType,
-      fileName: `${job.jobType}-${job.jobId}.${job.format}`,
-    };
+      return {
+        buffer: rendered,
+        contentType: renderer.contentType,
+        fileName: `${job.jobType}-${job.jobId}.${job.format}`,
+      };
+    }
+
+    return (async () => {
+      const buffer = await rendered;
+      this.recordArtifactAccessAudit(
+        {
+          actionName: "download_report_artifact",
+          resourceType: "report_artifact",
+          resourceId: job.artifact?.artifactId ?? null,
+          newValuesSummary: {
+            jobId: job.jobId,
+            jobType: job.jobType,
+            format: job.format,
+            rowCount: job.rows.length,
+            byteLength: buffer.byteLength,
+            tenantId: normalizedTenantScopeId,
+          },
+        },
+        requestId,
+        identity,
+        normalizedTenantScopeId,
+      );
+
+      return {
+        buffer,
+        contentType: renderer.contentType,
+        fileName: `${job.jobType}-${job.jobId}.${job.format}`,
+      };
+    })();
   }
 
   private assertReportFormatRenders(format: string) {

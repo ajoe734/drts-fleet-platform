@@ -12,7 +12,7 @@
  * the in-memory state starts empty and we drive it directly.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   IMPLEMENTED_REPORT_OUTPUT_FORMATS,
   REPORT_OUTPUT_FORMATS,
