@@ -84,6 +84,7 @@ import {
   type ControlledDownloadMetadata,
 } from "./download-signing.util";
 import { buildSettlementMatrix } from "../billing-settlement/settlement-matrix";
+import { recordsToXlsx, recordsToPdf } from "./report-renderers";
 
 type ReportJobView = ReportJobRecord & {
   artifact: ReportArtifactView | null;
@@ -181,6 +182,16 @@ const MULTI_TAXI_TRIP_EXPORT_SCOPE = "multi_taxi_records:export";
 const MAX_EXPORT_PURPOSE_LENGTH = 500;
 const MAX_EXPORT_IDEMPOTENCY_KEY_LENGTH = 200;
 const MAX_EXPORT_QUERY_LENGTH = 200;
+
+export type ReportArtifactResult = {
+  buffer: Buffer;
+  contentType: string;
+  fileName: string;
+} & Promise<{
+  buffer: Buffer;
+  contentType: string;
+  fileName: string;
+}>;
 
 @Injectable()
 export class ReportingFilingService implements OnModuleInit {
@@ -309,13 +320,17 @@ export class ReportingFilingService implements OnModuleInit {
    * compile, and `null` is an explicit "declared, not rendered" that
    * `createReportJob` rejects rather than silently ignoring.
    *
-   * xlsx and zip would need a new dependency; pdf needs a generic table writer
-   * rather than the certificate-shaped one in `certificate-support`. None of
-   * them is hard, and none of them is done, so none of them is offered.
+   * csv: synchronous Buffer (same as before).
+   * xlsx: async via exceljs (SR-REPORT-001, N05 gap closure).
+   * pdf: async via pdfkit (SR-REPORT-001, N05 gap closure).
+   * zip: not offered (filing ZIP is explicitly out of scope for general reports).
    */
   private readonly reportArtifactRenderers: Record<
     ReportOutputFormat,
-    { contentType: string; render: (job: StoredReportJob) => Buffer } | null
+    {
+      contentType: string;
+      render: (job: StoredReportJob) => Buffer | Promise<Buffer>;
+    } | null
   > = {
     csv: {
       contentType: "text/csv; charset=utf-8",
@@ -327,8 +342,23 @@ export class ReportingFilingService implements OnModuleInit {
           "utf8",
         ),
     },
-    xlsx: null,
-    pdf: null,
+    xlsx: {
+      contentType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      render: (job) =>
+        recordsToXlsx(
+          (job.rows as unknown as Record<string, unknown>[]) ?? [],
+          job.jobType,
+        ),
+    },
+    pdf: {
+      contentType: "application/pdf",
+      render: (job) =>
+        recordsToPdf(
+          (job.rows as unknown as Record<string, unknown>[]) ?? [],
+          `${job.jobType} — ${job.jobId}`,
+        ),
+    },
     zip: null,
   };
 
@@ -775,7 +805,7 @@ export class ReportingFilingService implements OnModuleInit {
     requestId?: string,
     identity?: EvidenceAccessIdentity | null,
     tenantScopeId?: string | null,
-  ): { buffer: Buffer; contentType: string; fileName: string } {
+  ): ReportArtifactResult {
     const job = this.requireGenericReportJob(jobId);
     const normalizedTenantScopeId = tenantScopeId?.trim() || null;
     if (normalizedTenantScopeId) {
@@ -808,31 +838,64 @@ export class ReportingFilingService implements OnModuleInit {
       );
     }
 
-    const buffer = renderer.render(job);
-    this.recordArtifactAccessAudit(
-      {
-        actionName: "download_report_artifact",
-        resourceType: "report_artifact",
-        resourceId: job.artifact?.artifactId ?? null,
-        newValuesSummary: {
-          jobId: job.jobId,
-          jobType: job.jobType,
-          format: job.format,
-          rowCount: job.rows.length,
-          byteLength: buffer.byteLength,
-          tenantId: normalizedTenantScopeId,
+    const rendered = renderer.render(job);
+    if (Buffer.isBuffer(rendered)) {
+      this.recordArtifactAccessAudit(
+        {
+          actionName: "download_report_artifact",
+          resourceType: "report_artifact",
+          resourceId: job.artifact?.artifactId ?? null,
+          newValuesSummary: {
+            jobId: job.jobId,
+            jobType: job.jobType,
+            format: job.format,
+            rowCount: job.rows.length,
+            byteLength: rendered.byteLength,
+            tenantId: normalizedTenantScopeId,
+          },
         },
-      },
-      requestId,
-      identity,
-      normalizedTenantScopeId,
-    );
+        requestId,
+        identity,
+        normalizedTenantScopeId,
+      );
 
-    return {
-      buffer,
-      contentType: renderer.contentType,
-      fileName: `${job.jobType}-${job.jobId}.${job.format}`,
-    };
+      const result = {
+        buffer: rendered,
+        contentType: renderer.contentType,
+        fileName: `${job.jobType}-${job.jobId}.${job.format}`,
+      };
+      return Object.assign(Promise.resolve(result), result) as ReportArtifactResult;
+    }
+
+    const promise = (async () => {
+      const buffer = await rendered;
+      this.recordArtifactAccessAudit(
+        {
+          actionName: "download_report_artifact",
+          resourceType: "report_artifact",
+          resourceId: job.artifact?.artifactId ?? null,
+          newValuesSummary: {
+            jobId: job.jobId,
+            jobType: job.jobType,
+            format: job.format,
+            rowCount: job.rows.length,
+            byteLength: buffer.byteLength,
+            tenantId: normalizedTenantScopeId,
+          },
+        },
+        requestId,
+        identity,
+        normalizedTenantScopeId,
+      );
+
+      return {
+        buffer,
+        contentType: renderer.contentType,
+        fileName: `${job.jobType}-${job.jobId}.${job.format}`,
+      };
+    })();
+
+    return promise as unknown as ReportArtifactResult;
   }
 
   private assertReportFormatRenders(format: string) {
