@@ -115,6 +115,66 @@ class ProviderPauseCliTests(unittest.TestCase):
             written = json.loads((root / ".orchestrator" / "state.json").read_text())
             self.assertIn(f"identity:claude2:{FINGERPRINT}", written["provider_pauses"])
 
+    def test_clear_preserves_shared_quota_pool_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root, config_file = self._root(
+                tmpdir,
+                pauses={
+                    "pool:claude:shared": {
+                        "schema": 3,
+                        "scope": "quota_pool",
+                        "lane_id": "claude",
+                        "quota_pool": "claude:shared",
+                        "kind": "quota",
+                        "resume_at": 9_999_999_999,
+                        "reason": "quota reset in the future",
+                    }
+                },
+                report=self._report(),
+            )
+            report = self._report()
+            report["providers"]["claude"]["identity"]["quota_pool"] = "claude:shared"
+            (root / ".orchestrator" / "provider_capabilities.json").write_text(
+                json.dumps(report), encoding="utf-8"
+            )
+
+            result = self._run(config_file, "clear", "claude")
+
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("preserved by default", result.stderr)
+            written = json.loads((root / ".orchestrator" / "state.json").read_text())
+            self.assertIn("pool:claude:shared", written["provider_pauses"])
+
+    def test_include_shared_still_refuses_a_future_quota_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root, config_file = self._root(
+                tmpdir,
+                pauses={
+                    "pool:claude:shared": {
+                        "schema": 3,
+                        "scope": "quota_pool",
+                        "lane_id": "claude",
+                        "quota_pool": "claude:shared",
+                        "kind": "quota",
+                        "resume_at": 9_999_999_999,
+                        "reason": "quota reset in the future",
+                    }
+                },
+                report=self._report(),
+            )
+            report = self._report()
+            report["providers"]["claude"]["identity"]["quota_pool"] = "claude:shared"
+            (root / ".orchestrator" / "provider_capabilities.json").write_text(
+                json.dumps(report), encoding="utf-8"
+            )
+
+            result = self._run(config_file, "clear", "claude", "--include-shared")
+
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("has not reached resume_at", result.stderr)
+            written = json.loads((root / ".orchestrator" / "state.json").read_text())
+            self.assertIn("pool:claude:shared", written["provider_pauses"])
+
     def test_it_refuses_rather_than_answer_from_an_unreadable_report(self) -> None:
         """Without the report no fingerprint resolves, so every identity-scoped
         pause quietly stops matching and both commands answer confidently and
