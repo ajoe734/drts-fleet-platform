@@ -27,7 +27,7 @@ Disposition: verified non-destructive recovery path; parent product gates remain
 - `git rev-list --left-right --count origin/dev...origin/codex2/sr-push-001`
   reports `4 6`. All six parent-only commits are SR-PUSH-001 anchors/merge.
   The net PR diff is exactly two added files, 224 lines: the parent UAT evidence
-  and `tests/unit/system-remediation/sr-push-001/outbox-boundary.test.ts`.
+  and the [outbox regression on the pinned parent](https://github.com/ajoe734/drts-fleet-platform/blob/6f683d4ef3de7c98bc3825220d459ea334bee406/tests/unit/system-remediation/sr-push-001/outbox-boundary.test.ts).
   No unrelated product/control-plane files occur in that diff.
 
 Thus the observed contamination is duplicate pre/post-rebase anchor history,
@@ -96,6 +96,10 @@ the pinned Git objects and is not delivery evidence. No product tests, provider
 send, server, database or real-device acceptance were run by this documentation
 helper. Parent evidence remains historical. Final helper commit, ordinary push,
 PR and exact-SHA handoff are recorded in the PR and canonical task lifecycle.
+
+The initial canonical-consistency check flagged the parent-only regression as
+a missing local citation. It is now linked to its pinned parent Git object;
+the recovery command intentionally still names that parent-only path.
 
 Parent next step: supervisor routes the fresh successor and resolves the scope/
 protocol/contract gates in
