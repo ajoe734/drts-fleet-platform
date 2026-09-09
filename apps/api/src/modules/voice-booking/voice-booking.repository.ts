@@ -826,6 +826,27 @@ export class VoiceBookingRepository {
     return row ? mapConfirmationRow(row) : null;
   }
 
+  async findConfirmationById(
+    confirmationId: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceConfirmationRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<VoiceConfirmationRow>(
+      `
+        SELECT * FROM voice.confirmation
+        WHERE confirmation_id = $1
+        LIMIT 1
+      `,
+      [confirmationId],
+    );
+    const row = result.rows[0];
+    return row ? mapConfirmationRow(row) : null;
+  }
+
   /**
    * SD §7.2: reconciliation lookup by the durable action key, so a caller
    * that lost the original response can recover the receipt without a

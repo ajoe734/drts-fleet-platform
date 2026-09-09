@@ -264,6 +264,52 @@ export class OwnedMobilityRepository {
       : null;
   }
 
+  async findActiveOrderByPassengerPhone(
+    phone: string,
+    activeStatuses: readonly string[] = [
+      "created",
+      "recording_pending",
+      "ready_for_dispatch",
+      "preassigned",
+      "assigned",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+      "proof_pending",
+      "redispatch_required",
+      "delayed_queue",
+      "exception_hold",
+    ],
+  ): Promise<OwnedOrderRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM ops.phase1_owned_orders
+        WHERE status = ANY($1)
+          AND (
+            record->'passenger'->>'phone' = $2
+            OR record->'passenger'->>'mobile' = $2
+            OR record->'bookingRequirements'->'passengerContact'->>'phone' = $2
+          )
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1
+      `,
+      [activeStatuses, phone],
+    );
+    const row = result.rows[0];
+    return row
+      ? this.parseRecord<OwnedOrderRecord>(
+          row.record,
+          "ops.phase1_owned_orders",
+        )
+      : null;
+  }
+
   async loadState(): Promise<OwnedMobilityState> {
     if (!this.isEnabled()) {
       return {
