@@ -1,5 +1,17 @@
 # SR-QA-TENANT-001 — 租戶驗收進度證據
 
+## 2026-09-09 dispatch：history repair 後仍需 recovery routing 與環境
+
+本輪 `git fetch origin` exit 0；base `origin/dev` 為 `3062ea363769cc393e59384251f5aedc7e570ac5`，檢查時 task HEAD 為 `eeb4bc9bcda49ccbed28660a93e36913b39dcd65`。尚無 candidate，未 handoff。
+
+`git rebase origin/dev` exit 1：55 筆重播至第 12 筆 `f2e49cdf5`，directory.spec.ts add/add 衝突。`git rebase --abort` exit 0；`git rev-list --left-right --count HEAD...origin/codex/sr-qa-tenant-001` exit 0，結果 `0 0`。已保留已發布 refs，未 merge 舊 ancestry。依 current dev 的 HISTORY-REPAIR helper，請 supervisor 路由從 current dev 建立的 recovery branch，套用經核對的 task cumulative patch，並核對舊 PR #1769 的不同 branch；helper done 不代表 parent 的 recovery routing 或 provisioning 已完成。
+
+`printenv | cut -d= -f1 | rg '^DRTS_TENANT_UAT_'` exit 1：仍無六項環境變數，僅檢查名稱，未輸出秘密。`pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001/ --max-warnings=0` exit 0；`git diff --check` exit 0。這些只證明靜態檢查結果，不代表能力通過。
+
+本次 dispatch 明令 VM 不可執行 Playwright、產品／預覽伺服器或 Docker Compose，因此本輪沒有執行 Playwright，也不沿用歷史失敗數冒充本輪結果。HTTP calls：0；資源 ID：無。live HTTP、DB 持久性、mail、瀏覽器與未完成能力矩陣均未驗收；unit/typecheck 本輪未重跑。
+
+恢復條件：supervisor 安排 recovery branch；Gemini/provisioner 提供允許執行 live 驗收的環境，以及 API URL、可拋棄 A/B 租戶、A/B 可寫 bearer、A 唯讀 bearer 六項既述設定，附非機密來源、有效期與 teardown 責任。此輪僅提交可追溯阻礙證據，正式狀態寫入 blocker，不交接不完整驗收。
+
 ## 2026-09-08 dispatch：history helper 後的實際阻塞
 
 本輪 fetch 的 `origin/dev` 為 `d44bd28142f238ef9d40507685a9423ef5c814f7`；測試執行 SHA 為 `f860556973ea31dc4c7945db7a27632abeb18d0d`，未鎖定 candidate。`git fetch origin` exit 0；`git rebase origin/dev` exit 1，重播 53 筆提交至第 12 筆 `f2e49cdf5` 時 directory.spec.ts 發生 add/add 衝突。`git rebase --abort` exit 0，恢復已發布分支；`git rev-list --left-right --count HEAD...origin/codex/sr-qa-tenant-001` exit 0，結果 `0 0`。未強推或合併舊 ancestry。
