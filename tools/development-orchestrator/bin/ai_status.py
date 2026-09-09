@@ -1954,6 +1954,8 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     reviewer = canonical_agent_name(task.get("reviewer"))
     if actor not in {owner, reviewer}:
         raise SystemExit(f"Only the owner ({owner}) or reviewer ({reviewer}) can reopen {task_id}")
+    if task.get("status") in {"acceptance", "done"} and actor != reviewer:
+        raise SystemExit(f"Only the reviewer ({reviewer}) can reopen {task_id} from {task['status']}")
     timestamp = iso_now()
     task["status"] = "in_progress"
     clear_candidate_evidence(task)

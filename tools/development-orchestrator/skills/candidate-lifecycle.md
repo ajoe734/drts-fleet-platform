@@ -21,6 +21,9 @@ acceptance evidence and outstanding gates. `start` rejects those states so a
 stale owner dispatch cannot silently reopen completed implementation. Use
 `record-acceptance` to record verified gates; if code changes are required, ask
 the reviewer to explicitly `reopen` the candidate before starting implementation.
+Only the assigned reviewer may `reopen` from `acceptance` or `done`; an owner
+attempt is rejected without changing state or recording a log entry. Other
+implementation states retain the existing owner/reviewer reopen permissions.
 
 For an unblock helper, completing the helper does not erase later parent
 blockers. If a planning or recovery delivery leaves routing or implementation
