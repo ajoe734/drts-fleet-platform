@@ -113,3 +113,20 @@ authority for the complete root typecheck.
 The affected local unit regression command covering UV-EXEC-015/014/007 passed
 all 103 cases after this fixture repair. A new hosted matrix run is still
 required; the first run is failure evidence, not acceptance.
+
+
+### Second hosted result
+
+Run https://github.com/ajoe734/drts-fleet-platform/actions/runs/34302128509
+executed SHA 4d2ab2b5d5e2171b360623903fe7c5686caed255. Its uploaded PostgreSQL
+JSON reports 14 total, 14 passed, 0 failed and 0 pending/skipped, including all
+five order crash points, both lost acknowledgements, hangup/lease recovery,
+concurrent duplicates and lock timeout. The hosted typecheck job also passed.
+
+The subsequent existing API integration suite reported 271 passed and one
+failure: the UV-EXEC-002 exact schema inventory lacked booking_command_proof
+and booking_audit_intent, both intentionally created by V0092. Supervisor
+includes that exact existing test file in this task's integration scope and
+adds those two expected names, preserving the strict full inventory assertion.
+A fresh same-SHA CI result and independent review remain required before
+acceptance; the overall second workflow is not claimed green.
