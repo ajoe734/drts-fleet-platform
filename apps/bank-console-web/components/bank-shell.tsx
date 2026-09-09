@@ -1,12 +1,7 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
-import {
-  Suspense,
-  useEffect,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { Suspense, useEffect, type CSSProperties, type ReactNode } from "react";
 import {
   CanvasShell,
   ManagementThemeProvider,
@@ -72,10 +67,45 @@ const bankIssuerStyle = {
   "--bank-gold-soft": "rgba(168, 119, 27, 0.14)",
 } as CSSProperties;
 
-export function BankShell({ children }: { children: ReactNode }) {
+export function resolveBankEnvLabel(
+  env: string | undefined,
+  locale: Locale,
+): string {
+  const normalized = env ? env.trim().toLowerCase() : "";
+  if (normalized === "production" || normalized === "prod") {
+    return locale === "zh" ? "正式環境" : "production";
+  }
+  if (normalized === "staging" || normalized === "stage") {
+    return locale === "zh" ? "預發環境" : "staging";
+  }
+  if (normalized === "preview") {
+    return locale === "zh" ? "預覽環境" : "preview";
+  }
+  if (normalized === "sandbox") {
+    return locale === "zh" ? "沙盒環境" : "sandbox";
+  }
+  if (normalized === "development" || normalized === "dev") {
+    return locale === "zh" ? "開發環境" : "development";
+  }
+  if (normalized === "test" || normalized === "mock") {
+    return locale === "zh" ? "模擬資料" : "mock data";
+  }
+  if (normalized === "unknown") {
+    return locale === "zh" ? "未知環境" : "unknown";
+  }
+  return BANK_CONSOLE_ENV;
+}
+
+export function BankShell({
+  children,
+  env,
+}: {
+  children: ReactNode;
+  env?: string | undefined;
+}) {
   return (
     <Suspense fallback={<div className="bank-runtime-shell" />}>
-      <BankShellContent>{children}</BankShellContent>
+      <BankShellContent env={env}>{children}</BankShellContent>
     </Suspense>
   );
 }
@@ -107,7 +137,13 @@ function SignedOutBoundary({
   );
 }
 
-function BankShellContent({ children }: { children: ReactNode }) {
+function BankShellContent({
+  children,
+  env,
+}: {
+  children: ReactNode;
+  env?: string | undefined;
+}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const locale = resolveLocale(searchParams.get("locale"));
@@ -116,6 +152,7 @@ function BankShellContent({ children }: { children: ReactNode }) {
   const navEntries = buildBankNavEntries(locale, searchParams.toString());
   const activeItem = findNavItem(pathname, navEntries);
   const activeKey = activeItem?.key;
+  const envLabel = resolveBankEnvLabel(env, locale);
 
   useEffect(() => {
     document.documentElement.lang = getLocaleTag(locale);
@@ -123,7 +160,12 @@ function BankShellContent({ children }: { children: ReactNode }) {
 
   return (
     <ManagementThemeProvider defaultDark defaultDensity="compact">
-      <div className="bank-runtime-shell" style={bankIssuerStyle}>
+      <div
+        className="bank-runtime-shell"
+        data-testid="bank-console-shell"
+        data-environment={env ?? "unknown"}
+        style={bankIssuerStyle}
+      >
         <CanvasShell
           theme={bankCanvasTheme}
           nav={navEntries}
@@ -134,7 +176,7 @@ function BankShellContent({ children }: { children: ReactNode }) {
             getBankTenantContext(bank, locale),
             activeItem?.label ?? t("shell.breadcrumb.home", locale),
           ]}
-          env={BANK_CONSOLE_ENV}
+          env={envLabel}
           versionLabel={BANK_CONSOLE_VERSION}
           searchPlaceholder={t("shell.search", locale)}
           searchWidth={260}

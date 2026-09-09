@@ -5,7 +5,8 @@ export const BANK_CONSOLE_BRAND = "DRTS";
 export const BANK_CONSOLE_BRAND_SUB = "BANK CONSOLE";
 // Issuer tenant identity (data layer only); chrome stays on the tenant realm.
 export const BANK_CONSOLE_CONTEXT = "艾克米銀行 · ACME ISSUER";
-export const BANK_CONSOLE_ENV = "preview";
+export const BANK_CONSOLE_ENV =
+  process.env.NEXT_PUBLIC_BANK_CONSOLE_ENV ?? "unknown";
 export const BANK_CONSOLE_VERSION = "v0.1.0";
 export const BANK_CONSOLE_SEARCH_PLACEHOLDER = t("shell.search");
 

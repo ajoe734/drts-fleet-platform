@@ -13,6 +13,7 @@ import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
 import type { TranslationKey } from "@/lib/translations";
+import { resolveRuntimeHealth } from "@drts/ui-web";
 
 const TENANT_MARK = "鴻";
 
@@ -37,7 +38,7 @@ function topLinkStyle(active: boolean): CSSProperties {
 
 // ── workspace top nav (S1) ───────────────────────────────────────────────────
 
-type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down";
+type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down" | "unknown";
 
 type EnterpriseTr = (
   key: TranslationKey,
@@ -48,18 +49,7 @@ function normalizeHealthStatus(
   value: unknown,
   responseOk: boolean,
 ): ApiHealthStatus {
-  if (!responseOk) {
-    return "degraded";
-  }
-
-  const normalized = String(value ?? "healthy").toLowerCase();
-  if (normalized === "down" || normalized === "unhealthy") {
-    return "down";
-  }
-  if (normalized === "degraded" || normalized === "warning") {
-    return "degraded";
-  }
-  return "healthy";
+  return resolveRuntimeHealth({ status: value, responseOk });
 }
 
 function useApiHealth() {
@@ -109,16 +99,49 @@ function formatCheckedAt(date: Date | null, locale: "en" | "zh") {
   });
 }
 
+export function resolveEnterpriseEnvLabel(
+  env: string | undefined,
+  locale: "zh" | "en",
+  tr: EnterpriseTr,
+): string {
+  const normalized = env ? env.trim().toLowerCase() : "";
+  if (normalized === "production" || normalized === "prod") {
+    return tr("shell.env.production");
+  }
+  if (normalized === "staging" || normalized === "stage") {
+    return tr("shell.env.staging");
+  }
+  if (normalized === "preview") {
+    return tr("shell.env.preview");
+  }
+  if (normalized === "sandbox") {
+    return tr("shell.env.sandbox");
+  }
+  if (normalized === "development" || normalized === "dev") {
+    return tr("shell.env.dev");
+  }
+  if (normalized === "test" || normalized === "mock") {
+    return tr("shell.env.mock");
+  }
+  if (normalized === "unknown") {
+    return tr("shell.env.unknown");
+  }
+  return tr("shell.env");
+}
+
 function EnterpriseShellControls({
   locale,
   setLocale,
   tr,
+  env,
 }: {
   locale: "en" | "zh";
   setLocale: (locale: "en" | "zh") => void;
   tr: EnterpriseTr;
+  env?: string | undefined;
 }) {
   const { status, lastCheckedAt } = useApiHealth();
+  const envLabel = resolveEnterpriseEnvLabel(env, locale, tr);
   const statusCopy = {
     checking: {
       label: tr("shell.health.checking"),
@@ -144,6 +167,12 @@ function EnterpriseShellControls({
       bg: "rgba(239,68,68,.12)",
       border: "rgba(239,68,68,.32)",
     },
+    unknown: {
+      label: tr("shell.health.unknown"),
+      fg: t.muted,
+      bg: t.surface,
+      border: t.line,
+    },
   } satisfies Record<
     ApiHealthStatus,
     { label: string; fg: string; bg: string; border: string }
@@ -153,6 +182,18 @@ function EnterpriseShellControls({
 
   return (
     <div style={controlGroupStyle}>
+      <div
+        data-testid="enterprise-env-chip"
+        data-environment={env ?? "unknown"}
+        style={{
+          ...healthPillStyle,
+          color: t.ink2,
+          background: t.surface,
+          borderColor: t.line,
+        }}
+      >
+        <span>{envLabel}</span>
+      </div>
       <div
         aria-label={current.label}
         title={`${current.label}${
@@ -184,7 +225,13 @@ function EnterpriseShellControls({
   );
 }
 
-export function EnterpriseShell({ children }: { children: ReactNode }) {
+export function EnterpriseShell({
+  children,
+  env,
+}: {
+  children: ReactNode;
+  env?: string | undefined;
+}) {
   const { t: tr, locale, setLocale } = useTranslation();
   const pathname = usePathname() ?? "/";
   const tenant = enterpriseTenant;
@@ -200,6 +247,8 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
 
   return (
     <div
+      data-testid="enterprise-shell"
+      data-environment={env ?? "unknown"}
       style={{
         minHeight: "100dvh",
         display: "flex",
@@ -289,6 +338,7 @@ export function EnterpriseShell({ children }: { children: ReactNode }) {
               locale={locale}
               setLocale={setLocale}
               tr={tr}
+              env={env}
             />
             <span
               style={{

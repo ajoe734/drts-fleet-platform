@@ -1,5 +1,75 @@
 export type Locale = "en" | "zh";
 
+/**
+ * Resolves the authoritative runtime environment label for enterprise shell display.
+ * Derives strictly from runtime environment variables (DRTS_ENV, APP_ENV,
+ * NEXT_PUBLIC_DRTS_ENV, NEXT_PUBLIC_APP_ENV), rejecting URL/domain guessing
+ * and never treating NODE_ENV=production alone as proof of production.
+ */
+export function resolveAuthoritativeEnterpriseShellEnv(
+  locale: Locale = "zh",
+): string {
+  const envVar =
+    (typeof process !== "undefined" && process?.env
+      ? process.env.DRTS_ENV ||
+        process.env.APP_ENV ||
+        process.env.NEXT_PUBLIC_DRTS_ENV ||
+        process.env.NEXT_PUBLIC_APP_ENV ||
+        process.env.NEXT_PUBLIC_ENV
+      : undefined) ?? "";
+
+  const trimmed = envVar.trim().toLowerCase();
+
+  // Reject URL / domain guessing
+  if (
+    trimmed &&
+    (trimmed.includes("/") ||
+      trimmed.includes("http:") ||
+      trimmed.includes("https:") ||
+      trimmed.includes(".com") ||
+      trimmed.includes(".io") ||
+      trimmed.includes(".internal"))
+  ) {
+    return locale === "zh" ? "未知環境" : "unknown";
+  }
+
+  if (trimmed === "prod" || trimmed === "production") {
+    return locale === "zh" ? "正式環境" : "production";
+  }
+  if (trimmed === "stage" || trimmed === "staging") {
+    return locale === "zh" ? "預發環境" : "staging";
+  }
+  if (trimmed === "preview") {
+    return locale === "zh" ? "預覽環境" : "preview";
+  }
+  if (trimmed === "sandbox") {
+    return locale === "zh" ? "沙盒環境" : "sandbox";
+  }
+  if (trimmed === "dev" || trimmed === "development" || trimmed === "local") {
+    return locale === "zh" ? "開發環境" : "development";
+  }
+  if (trimmed === "mock" || trimmed === "fixture" || trimmed === "test") {
+    return locale === "zh" ? "模擬資料" : "mock data";
+  }
+
+  const nodeEnv = (
+    typeof process !== "undefined" && process?.env?.NODE_ENV
+      ? process.env.NODE_ENV
+      : ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (nodeEnv === "development" || nodeEnv === "dev" || nodeEnv === "local") {
+    return locale === "zh" ? "開發環境" : "development";
+  }
+  if (nodeEnv === "test") {
+    return locale === "zh" ? "模擬資料" : "mock data";
+  }
+
+  return locale === "zh" ? "未知環境" : "unknown";
+}
+
 type Params = Record<string, string | number>;
 
 const en = {
@@ -39,7 +109,23 @@ const en = {
   "shell.health.healthy": "API healthy",
   "shell.health.degraded": "API degraded",
   "shell.health.down": "API down",
+  "shell.health.unknown": "API unknown",
   "shell.health.lastChecked": "last checked",
+  "shell.env": resolveAuthoritativeEnterpriseShellEnv("en"),
+  "shell.env.production": "production",
+  "shell.env.staging": "staging",
+  "shell.env.preview": "preview",
+  "shell.env.sandbox": "sandbox",
+  "shell.env.dev": "development",
+  "shell.env.mock": "mock data",
+  "shell.env.unknown": "unknown",
+  "app.environment.production": "production",
+  "app.environment.staging": "staging",
+  "app.environment.preview": "preview",
+  "app.environment.sandbox": "sandbox",
+  "app.environment.dev": "development",
+  "app.environment.mock": "mock data",
+  "app.environment.unknown": "unknown",
   "shell.language.switch": "Switch language",
   "shell.language.en": "English",
   "shell.language.zh": "繁體中文",
@@ -651,7 +737,23 @@ const zh: Record<TranslationKey, string> = {
   "shell.health.healthy": "API 正常",
   "shell.health.degraded": "API 降級",
   "shell.health.down": "API 中斷",
+  "shell.health.unknown": "API 未知",
   "shell.health.lastChecked": "最近檢查",
+  "shell.env": resolveAuthoritativeEnterpriseShellEnv("zh"),
+  "shell.env.production": "正式環境",
+  "shell.env.staging": "預發環境",
+  "shell.env.preview": "預覽環境",
+  "shell.env.sandbox": "沙盒環境",
+  "shell.env.dev": "開發環境",
+  "shell.env.mock": "模擬資料",
+  "shell.env.unknown": "未知環境",
+  "app.environment.production": "正式環境",
+  "app.environment.staging": "預發環境",
+  "app.environment.preview": "預覽環境",
+  "app.environment.sandbox": "沙盒環境",
+  "app.environment.dev": "開發環境",
+  "app.environment.mock": "模擬資料",
+  "app.environment.unknown": "未知環境",
   "shell.language.switch": "切換語言",
   "shell.language.en": "English",
   "shell.language.zh": "繁體中文",
@@ -1182,6 +1284,9 @@ export function t(
   params?: Params,
   locale: Locale = "zh",
 ): string {
+  if (key === "shell.env") {
+    return resolveAuthoritativeEnterpriseShellEnv(locale);
+  }
   const template = translations[locale][key] ?? translations.zh[key] ?? key;
   if (!params) {
     return template;

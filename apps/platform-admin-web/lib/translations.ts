@@ -7,6 +7,78 @@ import type {
 
 export type Locale = "en" | "zh";
 
+/**
+ * Resolves the authoritative runtime environment label for platform admin shell display.
+ * Derives strictly from runtime environment variables (DRTS_ENV, APP_ENV,
+ * NEXT_PUBLIC_DRTS_ENV, NEXT_PUBLIC_APP_ENV), rejecting URL/domain guessing
+ * and never treating NODE_ENV=production alone as proof of production.
+ */
+export function resolveAuthoritativeAdminShellEnv(
+  locale: Locale = "zh",
+): string {
+  const envVar =
+    (typeof process !== "undefined" && process?.env
+      ? process.env.DRTS_ENV ||
+        process.env.APP_ENV ||
+        process.env.NEXT_PUBLIC_DRTS_ENV ||
+        process.env.NEXT_PUBLIC_APP_ENV ||
+        process.env.NEXT_PUBLIC_ENV
+      : undefined) ?? "";
+
+  const trimmed = envVar.trim().toLowerCase();
+
+  // Reject URL / domain guessing
+  if (
+    trimmed &&
+    (trimmed.includes("/") ||
+      trimmed.includes("http:") ||
+      trimmed.includes("https:") ||
+      trimmed.includes(".com") ||
+      trimmed.includes(".io") ||
+      trimmed.includes(".internal"))
+  ) {
+    return locale === "zh" ? "未知環境" : "unknown";
+  }
+
+  if (trimmed === "prod" || trimmed === "production") {
+    return locale === "zh" ? "正式環境" : "production";
+  }
+  if (trimmed === "stage" || trimmed === "staging") {
+    return locale === "zh" ? "預發環境" : "staging";
+  }
+  if (trimmed === "preview") {
+    return locale === "zh" ? "預覽環境" : "preview";
+  }
+  if (trimmed === "sandbox") {
+    return locale === "zh" ? "沙盒環境" : "sandbox";
+  }
+  if (trimmed === "dev" || trimmed === "development" || trimmed === "local") {
+    return locale === "zh" ? "開發環境" : "development";
+  }
+  if (trimmed === "mock" || trimmed === "fixture" || trimmed === "test") {
+    return locale === "zh" ? "模擬資料" : "mock data";
+  }
+
+  // If no primary env var was provided, check NODE_ENV for dev/test only
+  const nodeEnv = (
+    typeof process !== "undefined" && process?.env?.NODE_ENV
+      ? process.env.NODE_ENV
+      : ""
+  )
+    .trim()
+    .toLowerCase();
+
+  if (nodeEnv === "development" || nodeEnv === "dev" || nodeEnv === "local") {
+    return locale === "zh" ? "開發環境" : "development";
+  }
+  if (nodeEnv === "test") {
+    return locale === "zh" ? "模擬資料" : "mock data";
+  }
+
+  // NODE_ENV=production alone or missing/unrecognized resolves to unknown
+  return locale === "zh" ? "未知環境" : "unknown";
+}
+
 const supplyReviewEn = {
   // ── Supply Review Queue & Detail (S1F-ADM-001) ──
   "supplyReview.status.draft": "Draft",
@@ -395,46 +467,41 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.type.object": "物件",
 
   // Reason Codes
-  "supplyReview.reason.manual_screening": "人工初審 · manual_screening",
-  "supplyReview.reason.all_documents_valid":
-    "文件齊全且合規 · all_documents_valid",
-  "supplyReview.reason.document_expired": "文件過期需更新 · document_expired",
-  "supplyReview.reason.document_missing": "缺必要文件 · document_missing",
-  "supplyReview.reason.information_mismatch":
-    "資料與證件不符 · information_mismatch",
-  "supplyReview.reason.vehicle_unsupported":
-    "車款不符合資格 · vehicle_unsupported",
-  "supplyReview.reason.license_invalid": "執照失效 · license_invalid",
-  "supplyReview.reason.other_revision_required":
-    "其他需補正事項 · other_revision_required",
-  "supplyReview.reason.other_rejection_reason":
-    "其他駁回原因 · other_rejection_reason",
+  "supplyReview.reason.manual_screening": "人工初審",
+  "supplyReview.reason.all_documents_valid": "文件齊全且合規",
+  "supplyReview.reason.document_expired": "文件過期需更新",
+  "supplyReview.reason.document_missing": "缺必要文件",
+  "supplyReview.reason.information_mismatch": "資料與證件不符",
+  "supplyReview.reason.vehicle_unsupported": "車款不符合資格",
+  "supplyReview.reason.license_invalid": "執照失效",
+  "supplyReview.reason.other_revision_required": "其他需補正事項",
+  "supplyReview.reason.other_rejection_reason": "其他駁回原因",
 
   // Diff Row Labels & Values
-  "supplyReview.diff.plateNo": "車牌號碼 · plate no",
-  "supplyReview.diff.licenseType": "牌照類型 · license type",
-  "supplyReview.diff.brandModel": "廠牌車型 · brand/model",
-  "supplyReview.diff.seatCount": "座位數 · seat count",
-  "supplyReview.diff.luggage": "行李容量 · luggage",
-  "supplyReview.diff.businessArea": "營業區域 · business area",
-  "supplyReview.diff.products": "支援產品 · products",
-  "supplyReview.diff.insuranceUntil": "保險到期 · insurance until",
-  "supplyReview.diff.driverName": "司機姓名 · name",
-  "supplyReview.diff.mobile": "行動電話 · mobile",
-  "supplyReview.diff.licenseNo": "職業駕照號碼 · license no",
-  "supplyReview.diff.licenseExpiry": "駕照到期日 · license expiry",
-  "supplyReview.diff.registrationNo": "執照號碼 · registration no",
-  "supplyReview.diff.registrationArea": "執照區域 · registration area",
+  "supplyReview.diff.plateNo": "車牌號碼",
+  "supplyReview.diff.licenseType": "牌照類型",
+  "supplyReview.diff.brandModel": "廠牌車型",
+  "supplyReview.diff.seatCount": "座位數",
+  "supplyReview.diff.luggage": "行李容量",
+  "supplyReview.diff.businessArea": "營業區域",
+  "supplyReview.diff.products": "支援產品",
+  "supplyReview.diff.insuranceUntil": "保險到期",
+  "supplyReview.diff.driverName": "司機姓名",
+  "supplyReview.diff.mobile": "行動電話",
+  "supplyReview.diff.licenseNo": "職業駕照號碼",
+  "supplyReview.diff.licenseExpiry": "駕照到期日",
+  "supplyReview.diff.registrationNo": "執照號碼",
+  "supplyReview.diff.registrationArea": "執照區域",
   "supplyReview.diff.notCreated": "— (未建立)",
   "supplyReview.diff.expired": "已過期",
 
   // Document Types & Statuses
-  "supplyReview.docType.doc": "文件 · document",
-  "supplyReview.docType.registration": "行照 · registration",
-  "supplyReview.docType.insurance": "保險保單 · insurance",
-  "supplyReview.docType.contract": "加盟合約 · contract",
-  "supplyReview.docType.driver_license": "職業駕照 · license",
-  "supplyReview.docType.taxi_registration": "執照登記證 · taxi reg",
+  "supplyReview.docType.doc": "文件",
+  "supplyReview.docType.registration": "行照",
+  "supplyReview.docType.insurance": "保險保單",
+  "supplyReview.docType.contract": "加盟合約",
+  "supplyReview.docType.driver_license": "職業駕照",
+  "supplyReview.docType.taxi_registration": "執照登記證",
   "supplyReview.docStatus.approved": "已核可",
   "supplyReview.docStatus.rejected": "已駁回",
   "supplyReview.docStatus.expired": "已過期",
@@ -442,26 +509,24 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
 
   // Errors & Banners
   "supplyReview.err.defaultFailed": "操作失敗，請稍後重試。",
-  "supplyReview.err.invalidId": "無效的 submissionId",
-  "supplyReview.err.notFound": "找不到該筆 supply submission 紀錄",
-  "supplyReview.err.startReviewFailed": "無法開始審核 submission {id}: {msg}",
+  "supplyReview.err.invalidId": "無效的申請編號",
+  "supplyReview.err.notFound": "找不到該筆供給審核紀錄",
+  "supplyReview.err.startReviewFailed": "無法開始審核申請 {id}: {msg}",
   "supplyReview.err.loadQueueFailed": "載入佇列失敗: {msg}",
   "supplyReview.err.loadDetailFailed": "載入詳情失敗: {msg}",
-  "supplyReview.err.selectReasonRequired": "退回補正需選擇 reason code",
-  "supplyReview.err.commentRequired": "退回補正需填寫說明 (comment)",
-  "supplyReview.err.rejectReasonRequired": "駁回需選擇 reason code",
-  "supplyReview.err.rejectCommentRequired": "駁回需填寫說明 (comment)",
-  "supplyReview.banner.conflictTitle": "SUBMISSION_REVISION_CONFLICT · 409",
+  "supplyReview.err.selectReasonRequired": "退回補正需選擇原因代碼",
+  "supplyReview.err.commentRequired": "退回補正需填寫說明",
+  "supplyReview.err.rejectReasonRequired": "駁回需選擇原因代碼",
+  "supplyReview.err.rejectCommentRequired": "駁回需填寫說明",
+  "supplyReview.banner.conflictTitle": "版本衝突 · 請重新載入",
   "supplyReview.banner.conflictBody":
-    "此 submission 已被更新（revision {rev}）。請重新載入後再審，系統不允許盲蓋。",
-  "supplyReview.banner.selfApprovalTitle": "REVIEWER_SELF_APPROVAL_DENIED",
+    "此申請已被更新（版本 {rev}）。請重新載入後再審，系統不允許盲蓋。",
+  "supplyReview.banner.selfApprovalTitle": "拒絕自身審核",
   "supplyReview.banner.selfApprovalBody":
-    "審核人不得核可自己以車行身分提交的資料（REVIEWER_SELF_APPROVAL_DENIED）。",
-  "supplyReview.banner.loadingBody":
-    "正在從伺服器載入 supply submission 詳情...",
+    "審核人不得核可自己以車行身分提交的資料（拒絕利益衝突審核）。",
+  "supplyReview.banner.loadingBody": "正在從伺服器載入供給審核詳情...",
   "supplyReview.banner.processing": "正在處理，請稍候...",
-  "supplyReview.banner.loadDetailFailedSubtitle":
-    "無法讀取此筆 supply submission 資料",
+  "supplyReview.banner.loadDetailFailedSubtitle": "無法讀取此筆供給審核資料",
 
   // Validations
   "supplyReview.validation.completeBody":
@@ -2073,7 +2138,14 @@ const en = {
   "adminShell.breadcrumb.detail": "Detail",
   "adminShell.notifications": "Notifications",
   "adminShell.realm": "PLATFORM",
-  "adminShell.environment": "production",
+  "adminShell.environment": resolveAuthoritativeAdminShellEnv("en"),
+  "adminShell.environment.production": "production",
+  "adminShell.environment.staging": "staging",
+  "adminShell.environment.preview": "preview",
+  "adminShell.environment.sandbox": "sandbox",
+  "adminShell.environment.dev": "development",
+  "adminShell.environment.mock": "mock data",
+  "adminShell.environment.unknown": "unknown",
   "adminShell.language.zh": "中文",
   "adminShell.language.en": "English",
 
@@ -5110,7 +5182,14 @@ const zh: typeof en = {
   "adminShell.breadcrumb.detail": "詳情",
   "adminShell.notifications": "通知",
   "adminShell.realm": "平台",
-  "adminShell.environment": "正式環境",
+  "adminShell.environment": resolveAuthoritativeAdminShellEnv("zh"),
+  "adminShell.environment.production": "正式環境",
+  "adminShell.environment.staging": "預發環境",
+  "adminShell.environment.preview": "預覽環境",
+  "adminShell.environment.sandbox": "沙盒環境",
+  "adminShell.environment.dev": "開發環境",
+  "adminShell.environment.mock": "模擬資料",
+  "adminShell.environment.unknown": "未知環境",
   "adminShell.language.zh": "中文",
   "adminShell.language.en": "English",
 
@@ -7865,6 +7944,9 @@ export function t(
   locale: Locale,
   params?: Record<string, string | number>,
 ): string {
+  if (key === "adminShell.environment") {
+    return resolveAuthoritativeAdminShellEnv(locale);
+  }
   const dict = translations[locale] ?? translations.en;
   let value =
     (dict as Record<string, string>)[key] ??

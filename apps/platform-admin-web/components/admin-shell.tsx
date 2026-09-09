@@ -75,6 +75,7 @@ const theme = {
 
 type AdminShellProps = {
   children: ReactNode;
+  env?: string | undefined;
 };
 
 type NavRoute = {
@@ -626,16 +627,53 @@ function SearchBox({ locale }: { locale: Locale }) {
   );
 }
 
-function IdentityChip({ locale }: { locale: Locale }) {
+function resolveAdminEnvLabel(env: string | undefined, locale: Locale): string {
+  const normalized = env ? env.trim().toLowerCase() : "";
+  if (normalized === "production" || normalized === "prod") {
+    return locale === "zh" ? "正式環境" : "production";
+  }
+  if (normalized === "staging" || normalized === "stage") {
+    return locale === "zh" ? "預發環境" : "staging";
+  }
+  if (normalized === "preview") {
+    return locale === "zh" ? "預覽環境" : "preview";
+  }
+  if (normalized === "sandbox") {
+    return locale === "zh" ? "沙盒環境" : "sandbox";
+  }
+  if (normalized === "development" || normalized === "dev") {
+    return locale === "zh" ? "開發環境" : "development";
+  }
+  if (normalized === "test" || normalized === "mock") {
+    return locale === "zh" ? "測試環境" : "test";
+  }
+  if (normalized === "unknown") {
+    return locale === "zh" ? "未知環境" : "unknown";
+  }
+  return labelFor(locale, "adminShell.environment");
+}
+
+function IdentityChip({
+  locale,
+  env,
+}: {
+  locale: Locale;
+  env?: string | undefined;
+}) {
+  const envLabel = resolveAdminEnvLabel(env, locale);
   return (
-    <div style={identityChipStyle}>
+    <div style={identityChipStyle} data-testid="platform-admin-identity">
       <div style={realmChipStyle}>
         <span style={accentDotStyle} />
         {labelFor(locale, "adminShell.realm")}
       </div>
-      <div style={envChipStyle}>
+      <div
+        style={envChipStyle}
+        data-testid="platform-admin-env-chip"
+        data-environment={env ?? "unknown"}
+      >
         <span style={envDotStyle} />
-        {labelFor(locale, "adminShell.environment")}
+        {envLabel}
       </div>
       <div style={actorChipStyle}>
         <div style={actorAvatarStyle}>PA</div>
@@ -651,10 +689,12 @@ function Topbar({
   activeRoute,
   pathname,
   locale,
+  env,
 }: {
   activeRoute: NavRoute;
   pathname: string;
   locale: Locale;
+  env?: string | undefined;
 }) {
   const activeSection = sections.find(
     (section) => section.key === activeRoute.section,
@@ -704,12 +744,12 @@ function Topbar({
       >
         <Bell size={15} />
       </button>
-      <IdentityChip locale={locale} />
+      <IdentityChip locale={locale} env={env} />
     </header>
   );
 }
 
-export function AdminShell({ children }: AdminShellProps) {
+export function AdminShell({ children, env }: AdminShellProps) {
   const rawPathname = usePathname();
   const pathname = rawPathname || "/";
   const { locale, setLocale } = useTranslation();
@@ -717,7 +757,14 @@ export function AdminShell({ children }: AdminShellProps) {
 
   return (
     <PlatformAdminAssistantProvider>
-      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden" }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          height: "100dvh",
+          overflow: "hidden",
+        }}
+      >
         <BreakGlassBanner />
         <div style={shellStyle}>
           <Sidebar
@@ -725,7 +772,12 @@ export function AdminShell({ children }: AdminShellProps) {
             locale={locale}
             setLocale={setLocale}
           />
-          <Topbar activeRoute={activeRoute} pathname={pathname} locale={locale} />
+          <Topbar
+            activeRoute={activeRoute}
+            pathname={pathname}
+            locale={locale}
+            env={env}
+          />
           <main style={mainStyle}>{children}</main>
           <PlatformAssistantOverlay />
         </div>

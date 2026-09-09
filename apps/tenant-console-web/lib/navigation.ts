@@ -3,7 +3,7 @@ import { t as defaultTranslate } from "@/lib/translations";
 
 export const TENANT_CONSOLE_BRAND = "DRTS";
 export const TENANT_CONSOLE_ENV =
-  process.env.NEXT_PUBLIC_TENANT_CONSOLE_ENV ?? "production";
+  process.env.NEXT_PUBLIC_TENANT_CONSOLE_ENV ?? "unknown";
 export const TENANT_CONSOLE_VERSION = "v0.1.0";
 
 type Translate = (key: string) => string;
