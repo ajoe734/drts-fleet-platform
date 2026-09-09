@@ -11,6 +11,9 @@ import { VoiceBookingRepository } from "./voice-booking.repository";
 import { VoiceLineScopeService } from "./voice-line-scope.service";
 import { VoiceCheckpointRepository } from "./voice-checkpoint.repository";
 import { VoiceEvidenceService } from "./voice-evidence.service";
+import { VoiceBookingCommandService } from "./voice-booking-command.service";
+import { VoiceCommandRunnerService } from "./voice-command-runner.service";
+import { OwnedMobilityRepository } from "../owned-mobility/owned-mobility.repository";
 
 /**
  * UV-EXEC-003 built VoiceBookingRepository/VoiceBookingAuthorizationService/
@@ -23,6 +26,9 @@ import { VoiceEvidenceService } from "./voice-evidence.service";
 @Module({
   imports: [DatabaseModule, GeoModule, ServiceAreaModule, ServiceProductModule],
   providers: [
+    OwnedMobilityRepository,
+    VoiceBookingCommandService,
+    VoiceCommandRunnerService,
     VoiceBookingDraftService,
     VoiceConfirmationService,
     VoiceCheckpointRepository,
@@ -32,6 +38,8 @@ import { VoiceEvidenceService } from "./voice-evidence.service";
     VoiceLineScopeService,
   ],
   exports: [
+    VoiceBookingCommandService,
+    VoiceCommandRunnerService,
     VoiceBookingDraftService,
     VoiceConfirmationService,
     VoiceEvidenceService,
