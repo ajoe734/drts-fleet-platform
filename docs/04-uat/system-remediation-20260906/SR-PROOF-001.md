@@ -1,5 +1,38 @@
 # SR-PROOF-001 — Fresh-base regression evidence and unresolved implementation scope
 
+## 2026-09-09 resumed dispatch verification
+
+- Fetched base: `3062ea363769cc393e59384251f5aedc7e570ac5` (`origin/dev`).
+  Tested branch head: `47e60d0386c4e54c8842e2690088349edffef1e3`.
+  No implementation candidate is submitted.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1 at duplicate
+  published anchor `ac1076708`, with an add/add conflict in the task test.
+  `git rebase --abort`: exit 0; original published head restored, clean tree.
+  No force push or repeated merge of rebased anchors was performed. Supervisor
+  must select a fresh recovery branch per the merged history-repair procedure;
+  the dispatch still selects the historical `codex2/sr-proof-001` branch.
+- `git diff origin/dev -- apps/api/src/modules/billing-settlement/billing-settlement.service.ts apps/api/src/modules/billing-settlement/billing-settlement.repository.ts`:
+  exit 0, empty output. These two tested product files match the fetched base;
+  this is not a claim that the entire test run used a rebased checkout.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`: exit 1,
+  1 passed / 2 failed, 3.37 seconds. The nonexistent proof still produces paid
+  for `sr-proof-001-batch-a` / `sr-proof-001-driver-a` /
+  `sr-proof-001-statement-a`, and paid still returns before persistence resolves.
+  Proof ID: `sr-proof-001-nonexistent-proof`; all IDs are isolated test inputs.
+- The current task slice still excludes repository/module/proof adapter and
+  migration scopes and still lists only ARTIFACT and INVOICE dependencies.
+  The merged HISTORY-REPAIR report explicitly says it did not resolve scope,
+  dependency or canvas routing. Its recommended recovery branch is also not
+  the branch assigned by this dispatch. Supervisor action remains necessary:
+  allocate the proof persistence/contract dependency and write scopes, route
+  the existing canvas requirements, and select the recovery branch.
+- No product changes, typecheck reruns, live upload/scanner/download, database
+  concurrency, browser/server, real payment or device checks were performed
+  this dispatch. Earlier typecheck results below are historical evidence.
+
+The evidence-only anchor is published on the assigned branch; it is not ready
+for handoff, independent review, merge or acceptance closure.
+
 Date: 2026-09-08. Owner: Codex2; Reviewer: Codex.
 
 ## Redispatch verification — 2026-09-09 00:18 UTC
