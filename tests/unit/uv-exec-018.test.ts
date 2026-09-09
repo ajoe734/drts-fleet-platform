@@ -1,13 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
-import {
-  VoiceContactService,
-  type ContactRole,
-} from "../../apps/api/src/modules/voice-booking/voice-contact.service";
-import {
-  VoiceCallbackService,
-  type CallbackTaskStatus,
-} from "../../apps/api/src/modules/voice-booking/voice-callback.service";
+import { VoiceContactService } from "../../apps/api/src/modules/voice-booking/voice-contact.service";
+import { VoiceCallbackService } from "../../apps/api/src/modules/voice-booking/voice-callback.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 
@@ -181,8 +174,8 @@ describe("UV-EXEC-018 Contact Roles, Consented Callbacks, & Terminal Race CAS", 
       // Filtered history by role
       const passengerHistory = service.getRevisionHistory(VOICE_SESSION_ID, "passenger");
       expect(passengerHistory).toHaveLength(2);
-      expect(passengerHistory[0].phone).toBe("0922000222");
-      expect(passengerHistory[1].phone).toBe("0933333444");
+      expect(passengerHistory[0]?.phone).toBe("0922000222");
+      expect(passengerHistory[1]?.phone).toBe("0933333444");
     });
 
     it("verifies linkOrderToCallSession does NOT overwrite callerPhone with passenger.phone", () => {
@@ -202,6 +195,7 @@ describe("UV-EXEC-018 Contact Roles, Consented Callbacks, & Terminal Race CAS", 
         callId: session.callId,
         callType: "booking",
         callerPhone: "0922000222", // Passenger phone passed in order link
+        agentId: "ops-001",
         linkedOrderId: "ORD-UV-018-001",
         recordingId: "rec-018-001",
       });
@@ -461,6 +455,7 @@ describe("UV-EXEC-018 Contact Roles, Consented Callbacks, & Terminal Race CAS", 
         operatorId: "operator-1",
         expectedVersion: 1,
       });
+      expect(claimed.status).toBe("claimed");
 
       // Scenario A: Task is completed
       const completed = service.completeCallback({
@@ -588,8 +583,8 @@ describe("UV-EXEC-018 Contact Roles, Consented Callbacks, & Terminal Race CAS", 
 
       // Verify the in-flight attempt is marked for reconciliation
       const attempts = service.getAttempts(task.taskId);
-      expect(attempts[0].dialStatus).toBe("reconcile_required");
-      expect(attempts[0].hangupConfirmed).toBe(false);
+      expect(attempts[0]?.dialStatus).toBe("reconcile_required");
+      expect(attempts[0]?.hangupConfirmed).toBe(false);
 
       // Later, the telephony provider CTI webhook reports the physical line has finally cleared
       const reconciled = service.reconcileInFlightDial(
