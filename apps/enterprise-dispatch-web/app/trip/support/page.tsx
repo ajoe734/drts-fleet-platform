@@ -22,7 +22,7 @@ import {
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { useTranslation } from "@/lib/i18n";
 
-export function TripSupportContent({
+function TripSupportContent({
   apiSubmitFn,
 }: {
   apiSubmitFn?: SupportApiSubmitFn;

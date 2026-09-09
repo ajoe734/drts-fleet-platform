@@ -50,12 +50,16 @@
    - **(1) P1 R08/C119 未竟（詳情頁 404 誤報暫時不穩）**：`components/enterprise-booking-lifecycle.tsx:175-181` catches `getBooking` 404 via `gatewayHref(null)` then defaults `degraded`（「服務暫時不穩定」），首頁/行程僅修復 `listBookings`，詳情頁查無預約時仍誤導為暫時性故障。然而 `components/enterprise-booking-lifecycle.tsx` 屬於跨 task 共用檔，不在 `write_scopes` 內；審查明確指出「Shared component is outside write_scopes: supervisor must expand scope/add dependency or supply same-candidate regression evidence from an authorized producer; owner must not edit it without scope approval」。
    - **(2) UI 設計合約未決**：證據文件第 2.5 節承認畫布無線上工單表單，卻自行在 `app/trip/support/page.tsx:173-315` 建立新表單；違反了畫布缺乏畫面時需撰寫 screen-requirements note 並 STOP 的原則。且證據文件錯誤聲稱採用 `@drts/ui-tokens` tenant realm teal `#0F766E`，而實際上 `enterprise-theme.ts` 採用畫布專屬 accent `#2457D6` 與自帶調色盤。
    - **(3) P2 誠實不可用文案不完整**：`enterprise-fixtures.ts:877-890` 引導緊急使用者使用線上留言並承諾專員處理/簡訊/電話更新，但線上工單在生產環境並無 API 支持且處於不可用狀態。要求：入場前即顯示明確不可用狀態、移除未支援的處理承諾與對無效表單之緊急指引、補上頁面渲染之行為回歸測試。
-5. **本次（第五輪）嚴格修復與治理卡點報告**：
+5. **第五輪嚴格修復與治理卡點報告**：
    - **移除未開通環境下之非權威互動表單**：在 `app/trip/support/page.tsx` 中，當未注入 `apiSubmitFn` 時，入場直接渲染 `data-testid="support-inquiry-unavailable"` 誠實未開通提示卡，不展示包含輸入框、下拉選單與送出按鈕之無效表單，徹底杜絕無功能表單誤導。
    - **清理所有未支援之處理承諾與緊急指引**：在 `lib/enterprise-fixtures.ts` 中，將 `unauthorizedHelp` 修正為引導聯繫企業管理員轉接營運中心（ROC），移除對線上表單的緊急指引；移除 `driverEscalationNotice` 中「專員以簡訊或電話回報」之不實承諾；將 `inquirySubtitle` 修正為明確標示通道未開通。
    - **更正 UI 設計規範與 Token 真實記錄**：在證據文件中誠實說明 `apps/enterprise-dispatch-web` 採用其畫布專屬之 `ent-kit.jsx`（`lib/enterprise-theme.ts`，accent `#2457D6`），消除錯誤宣稱 `@drts/ui-tokens` tenant teal `#0F766E` 的陳述；若需將主題統一至 `@drts/ui-tokens`，須由 supervisor 擴充 `lib/enterprise-theme.ts` 之 write scope。
    - **新增頁面渲染結構與行為回歸測試**：在 `tests/unit/system-remediation/sr-enterprise-data-001/sr-enterprise-data-001.test.ts` 新增頁面合約與不可用狀態檢核，全套測試擴增至 47/47 通過。
    - **提報治理卡點（Scope Blocker）**：針對 `components/enterprise-booking-lifecycle.tsx:175-181` 的 404 處理，確認該檔案不在本 task `write_scopes` 內；遵守「只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫」，不違規偷改，由 supervisor 擴充 scope 或指派相依後收斂。
+6. **CI Reconciled 反饋與 Next.js Page Export 合約修復（針對 candidate `d2ec71ce72cc`）**：
+   - **CI 失敗原因**：GitHub Actions PR #1650 執行 `build` job（run 34296171494）時，Next.js 16.2.3 於 `app/trip/support/page.tsx` 報告：`Page "app/trip/support/page.tsx" does not match the required types of a Next.js Page. "TripSupportContent" is not a valid Page export field.`
+   - **修復**：移除 `TripSupportContent` 前方的 `export` 關鍵字，使其成為頁面內部私有組件（僅保留 Next.js 頁面合約允許之 `export default function TripSupportPage()`）。
+   - **驗證**：本地完整執行 `pnpm --filter @drts/enterprise-dispatch-web build`，所有 27 條靜態/動態路由建置成功，exit code 0。
 
 ---
 
@@ -240,6 +244,22 @@ i18n-guard: OK (521 files scanned across 10 apps, 55 exemption(s) from i18n-guar
 $ pnpm --filter @drts/enterprise-dispatch-web lint
 > @drts/enterprise-dispatch-web@0.1.0 lint /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-data-001/apps/enterprise-dispatch-web
 > eslint . --max-warnings=0
+(exit code: 0)
+```
+
+### 4.7 Production Build 檢查（Next.js Production Build）
+
+```bash
+$ pnpm --filter @drts/enterprise-dispatch-web build
+> @drts/enterprise-dispatch-web@0.1.0 build /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-data-001/apps/enterprise-dispatch-web
+> next build --webpack
+▲ Next.js 16.2.3 (webpack)
+  Creating an optimized production build ...
+✓ Compiled successfully
+✓ Finished TypeScript
+✓ Generating static pages (27/27)
+✓ Collecting build traces
+✓ Finalizing page optimization
 (exit code: 0)
 ```
 
