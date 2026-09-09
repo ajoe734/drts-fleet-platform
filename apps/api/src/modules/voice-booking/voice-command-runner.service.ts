@@ -196,7 +196,7 @@ export class VoiceCommandRunnerService {
         ],
       );
       for (const type of [
-        "dispatch_owned_order",
+        "request_dispatch",
         "notify_booking_result",
         "publish_booking_audit",
       ])

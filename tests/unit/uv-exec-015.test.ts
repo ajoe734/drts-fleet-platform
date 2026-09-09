@@ -55,6 +55,13 @@ function replayHarness(status: "pending" | "succeeded" | "rejected") {
 }
 
 describe("UV-EXEC-015 command boundary", () => {
+  it("recovers a receipt committed while another request was preparing", async () => {
+    const h = replayHarness("succeeded");
+    h.repository.findReceiptByActionKey.mockResolvedValueOnce(null as never);
+    expect(await h.commands.accept("reader", h.request)).toEqual(h.receipt);
+    expect(h.access.authorizeAccept).toHaveBeenCalledOnce();
+    expect(h.repository.findReceiptByActionKey).toHaveBeenCalledTimes(2);
+  });
   it.each(["pending", "succeeded", "rejected"] as const)(
     "replays %s before consumed/expired ticket or owner validation",
     async (status) => {

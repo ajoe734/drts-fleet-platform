@@ -23,13 +23,8 @@ const migration = (name: string) =>
     "utf8",
   );
 
-it("UV-EXEC-015 PostgreSQL evidence requires UV_BOOKING_TEST_DATABASE_URL", () => {
-  expect(
-    connectionString,
-    "Set a PostgreSQL test admin URL with CREATEDB; mock tests do not establish atomicity",
-  ).toBeTruthy();
-});
-
+// Opt-in like the checkpoint journal integration suite. A skipped suite is
+// explicitly NOT postgres_atomic_booking_evidence for candidate acceptance.
 describe.skipIf(!connectionString)(
   "UV-EXEC-015 real PostgreSQL transaction/crash matrix",
   () => {
@@ -159,8 +154,13 @@ describe.skipIf(!connectionString)(
       );
       await pool.query(
         `INSERT INTO voice.session_event (event_id,voice_session_id,source,provider_account_id,source_event_id,
-      occurred_at,sequence,lease_epoch,event_type,payload) VALUES ($1,$2,'test',$3,$1,now(),1,1,'dtmf','{}')`,
-        [eventId, f.request.voiceSessionId, f.authority.providerAccountId],
+      occurred_at,sequence,lease_epoch,event_type,payload) VALUES ($1,$2,'test',$3,$4,now(),1,1,'dtmf','{}')`,
+        [
+          eventId,
+          f.request.voiceSessionId,
+          f.authority.providerAccountId,
+          eventId,
+        ],
       );
       await pool.query(
         `INSERT INTO voice.recording_checkpoint (checkpoint_id,call_id,recording_id,manifest_version,manifest,manifest_hash,coverage,policy_version,verified_at)
@@ -284,10 +284,10 @@ describe.skipIf(!connectionString)(
         [accepted[0].commandId],
       );
       expect(work.rows).toEqual([
-        { work_type: "dispatch_owned_order", status: "pending" },
         { work_type: "execute_booking_command", status: "completed" },
         { work_type: "notify_booking_result", status: "pending" },
         { work_type: "publish_booking_audit", status: "pending" },
+        { work_type: "request_dispatch", status: "pending" },
       ]);
       await f.close();
       await pool.query(
@@ -433,10 +433,16 @@ describe.skipIf(!connectionString)(
         "succeeded",
       );
     });
-    it("expired scheduling lease recovers a closed session and fences stale releases", async () => {
+    it("expired scheduling lease recovers a closed session", async () => {
       const f = await fixture();
       const accepted = await f.accept();
       await f.close();
+      // Other matrix cases deliberately leave pending receipts. Isolate this
+      // scheduler assertion without deleting their immutable crash evidence.
+      await pool.query(
+        "UPDATE voice.work_item SET run_after=now()+interval '1 day' WHERE command_id<>$1 AND status='pending'",
+        [accepted.commandId],
+      );
       await pool.query(
         "UPDATE voice.work_item SET status='leased',leased_until=now()-interval '1 second',lease_epoch=5 WHERE command_id=$1",
         [accepted.commandId],
