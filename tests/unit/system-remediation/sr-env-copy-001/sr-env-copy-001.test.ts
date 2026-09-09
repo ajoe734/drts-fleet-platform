@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -273,4 +273,34 @@ describe("SR-ENV-COPY-001 — 各 app 環境標示與使用者文案清理", () 
       );
     });
   });
+});
+
+describe("catalogs cannot substitute build variables for server runtime", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each(["production", "development", "test"])(
+    "keeps missing runtime unknown despite %s ambient variables",
+    (value) => {
+      for (const name of [
+        "DRTS_ENV",
+        "APP_ENV",
+        "NODE_ENV",
+        "NEXT_PUBLIC_DRTS_ENV",
+        "NEXT_PUBLIC_APP_ENV",
+        "NEXT_PUBLIC_ENV",
+      ]) {
+        vi.stubEnv(name, value);
+      }
+      for (const resolve of [
+        resolveAuthoritativeAdminShellEnv,
+        resolveTenantShellEnv,
+        resolveAuthoritativeFleetShellEnv,
+        resolveAuthoritativeBankShellEnv,
+        resolveAuthoritativeEnterpriseShellEnv,
+      ]) {
+        expect(resolve("zh")).toBe("未知環境");
+        expect(resolve("en")).toBe("unknown");
+      }
+    },
+  );
 });

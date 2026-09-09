@@ -5,7 +5,7 @@
 - Owner: Codex；Reviewer: Codex2。
 - 2026-09-09 本輪 `git fetch origin` 後 `origin/dev`: `9b57f767047825fe116b2231aa22900ce408897a`。
 - 接手時本地／remote head: `9e35f6f1426755f97a81826b66edaf14d1ff56f6`，工作樹乾淨。
-- 本輪程式 anchor: `ff99b6e69`，已普通 push；後續本頁與測試之 anchor SHA 由 machine-truth progress/blocker 記錄。
+- 本輪程式 anchors: `ff99b6e69`、`4c66973ac`，證據／測試 anchor `93794808c`，均已普通 push；最後證據 anchor SHA 由 machine-truth progress/blocker 記錄。
 - Candidate SHA: **未鎖定**；目前仍有 scope 與驗證阻礙，未 handoff。
 - Branch: `gemini/sr-env-copy-001-scoped-20260909`。
 - Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex-sr-env-copy-001`。
@@ -33,11 +33,14 @@
 
 - bank／fleet／platform-admin shell 的 21 處內嵌文案改用既有 translations keys；缺值或不識別的 shell env label 回退為本地化 unknown。
 - platform-admin 健康 adapter 使用 `resolveRuntimeHealth`，新增 unknown 顯示；HTTP 失敗優先為 down。未知狀態使用現有中性 theme token，未新增 palette、字型或改版。
+- 五個翻譯模組停止讀取 APP_ENV／NEXT_PUBLIC／NODE_ENV 等 ambient variables；兼容 label helpers 在沒有 server value 時固定回傳本地化 unknown。bank／tenant navigation 常數亦不再讀取 build-time env，tenant／enterprise shell 缺值使用明確 unknown key。新增 ambient env 汙染回歸。
 - 新增 `admin-health.test.ts`：執行實際 shell adapter，驗證缺值、null、空字串、不識別字串、物件、陣列，以及明確健康／降級與 HTTP 失敗優先權；檢查雙語 unknown 文案。
-- 視覺參照已讀 `packages/ui-tokens/src/realms.ts`、`status.ts`、canvas 的 `Platform Admin.html`、`Bank Console.html`、`Fleet Partner Portal.html`、`mgmt-shell.jsx`。保留既有 chrome 與 realm theme。
+- 視覺參照已讀 `packages/ui-tokens/src/realms.ts`、`status.ts`、canvas 的 `Platform Admin.html`、`Bank Console.html`、`Fleet Partner Portal.html`、`Tenant Console.html`、`Ops Console.html`、`ent-shell.jsx`、`mgmt-shell.jsx`。保留既有 chrome 與 realm theme。
 - 既有六個 dynamic server layouts 讀取 `DRTS_ENV` 的成果保留。dev workflow frontend env_vars 有 `DRTS_ENV=development`；未執行部署值 live readback，不能推論 staging/prod frontend 已供應值。
 
 ## 本輪實際指令結果
+
+以下第一輪執行於 `ff99b6e69` 程式及新增 admin adapter 測試，不能代替最後 anchor 的完整驗證。
 
 | 指令 | Exit | 結果 |
 | --- | --- | --- |
@@ -56,12 +59,24 @@
 | `pnpm --filter @drts/ui-web exec vitest run tests/unit/environment-badge.test.ts` | 1 | 無法解析 `@drts/ui-tokens`，0 tests |
 | `git push origin gemini/sr-env-copy-001-scoped-20260909` | 0 | `9e35f6f14..ff99b6e69` 普通推送 |
 
-依賴診斷：本 worktree 根 node_modules 是 canonical root 的 symlink；ops 的 `@drts/control-plane-auth` 與 ui-web 的 React symlink 指向 `codex-sr-deps-report-font-001` 相對 worktree 路徑。這是觀察到的解析障礙；未修改 shared node_modules、package manifests 或 lockfile。
+在 `4c66973ac` 加入 catalog fallback 修正後，重跑 `pnpm run i18n:guard` exit 0；重跑同一 root vitest 指令 **exit 1**，兩個 suites 均在 import 時因 `@drts/ui-tokens` 無法解析而停止，0 tests。先前 23 tests 成功不代表最終 26 tests 成功。
+
+最終重跑以下五個指令均 **exit 2**（覆蓋上表第一輪通過記錄）：
+
+- `pnpm --filter @drts/bank-console-web typecheck`
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`
+- `pnpm --filter @drts/fleet-partner-portal-web typecheck`
+- `pnpm --filter @drts/platform-admin-web typecheck`
+- `pnpm --filter @drts/tenant-console-web typecheck`
+
+共同錯誤：contracts 的 booking-requirements、unattended-voice、voice-dialogue 無法解析 `zod`。platform-admin 另無法解析 `lucide-react` 與 `@drts/ui-web/canvas-tokens`。
+
+依賴診斷：本 worktree 根 node_modules 及 `packages/ui-web/node_modules` 都是 canonical root 的 symlink；ops 的 `@drts/control-plane-auth` 與 ui-web 的 React symlink 指向 `codex-sr-deps-report-font-001` 相對 worktree 路徑。這是觀察到的解析障礙；未修改 shared node_modules、package manifests 或 lockfile。
 
 ## 未完成項目與 Supervisor 所需動作
 
 1. **擴充 scope 並檢查 writer 相依**：授權 `apps/ops-console-web/components/ops-health-footer.tsx` 與 `apps/fleet-partner-portal-web/components/fleet-portal-health-footer.tsx`，才能消除已重現的未知健康誤標。兩檔目前不在 write_scopes，owner 未修改。
-2. 後續完成既有環境 helpers 的整體一致性稽核：translations helpers 仍有 APP_ENV／NEXT_PUBLIC／NODE_ENV fallback，應依 task 指定的 DRTS_ENV server producer 收斂；tenant／enterprise 缺值 fallback 也需核對。這些授權範圍內的剩餘工作尚未宣稱完成。
+2. 翻譯 helpers／navigation／shell 缺值 fallback 已在 `4c66973ac` 收斂；新增回歸須待依賴修復後驗證。共用 legacy tier resolver 的 APP_ENV／NODE_ENV 相容行為仍需 reviewer 核對；六個 server layouts 使用的是嚴格的 `normalizeServerRuntimeEnv(process.env.DRTS_ENV)` 路徑。
 3. 修復或提供可用的 isolated dependency tree，重跑失敗的 ops typecheck 與 package tests。
 4. 未啟動任何產品／preview server、Playwright 或 Docker；未做 live、瀏覽器、真機、Cloud Run runtime readback。沒有本輪 live resource ID，以上 PR／CI IDs 僅為版本及歷史 CI 證據。
 5. 完成以上實作與驗證後才鎖定新的 candidate，獨立 reviewer、同 SHA CI／merge 通過後方可結案。目前 anchors 僅保留進度。
