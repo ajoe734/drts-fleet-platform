@@ -1,3 +1,4 @@
+import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
 import {
   applyVoiceBookingQualification,
   type QualifiedVoiceBookingSnapshot,
@@ -534,9 +535,13 @@ export class OwnedMobilityService
     // preserves every existing positional-arg unit-test harness.
     @Optional()
     private readonly voiceBookingRepository?: VoiceBookingRepository,
+    @Optional()
+    @Inject(forwardRef(() => OwnedAutonomousDispatchExecutorService))
+    private readonly autonomousDispatchExecutor?: OwnedAutonomousDispatchExecutorService,
   ) {}
 
   private _fallbackIdempotencyService?: IdempotencyService;
+  private _fallbackAutonomousDispatchExecutor?: OwnedAutonomousDispatchExecutorService;
 
   getIdempotencyService(): IdempotencyService {
     if (this.idempotencyService) {
@@ -550,11 +555,95 @@ export class OwnedMobilityService
     return this._fallbackIdempotencyService;
   }
 
+  getAutonomousDispatchExecutor(): OwnedAutonomousDispatchExecutorService {
+    if (this.autonomousDispatchExecutor) {
+      return this.autonomousDispatchExecutor;
+    }
+    if (!this._fallbackAutonomousDispatchExecutor) {
+      this._fallbackAutonomousDispatchExecutor =
+        new OwnedAutonomousDispatchExecutorService(
+          this,
+          this.ownedMobilityRepository,
+          this.ownedMobilityTaskEventsService,
+          this.opsDispatchEventsService,
+          this.getIdempotencyService(),
+        );
+    }
+    return this._fallbackAutonomousDispatchExecutor;
+  }
+
   getDispatchJob(dispatchJobId: string): DispatchJobRecord | null {
     return (
       this.dispatchJobs.find(
         (candidateJob) => candidateJob.dispatchJobId === dispatchJobId,
       ) ?? null
+    );
+  }
+
+  getActiveDispatchJobForOrder(orderId: string): DispatchJobRecord | null {
+    return (
+      this.dispatchJobs.find(
+        (candidateJob) =>
+          candidateJob.orderId === orderId &&
+          ["matching", "assigned", "reserved"].includes(candidateJob.status),
+      ) ?? null
+    );
+  }
+
+  getLatestDispatchJobForOrder(orderId: string): DispatchJobRecord | null {
+    return (
+      this.dispatchJobs.find(
+        (candidateJob) => candidateJob.orderId === orderId,
+      ) ?? null
+    );
+  }
+
+  getActiveDispatchAssignmentForOrder(
+    orderId: string,
+  ): DispatchAssignmentRecord | null {
+    return (
+      this.dispatchAssignments.find(
+        (assignment) =>
+          assignment.orderId === orderId &&
+          ["assigned", "accepted"].includes(assignment.status),
+      ) ?? null
+    );
+  }
+
+  getActiveDriverTaskForAssignment(
+    assignmentId: string,
+  ): DriverTaskRecord | null {
+    return (
+      this.driverTasks.find(
+        (task) =>
+          task.assignmentId === assignmentId &&
+          !["completed", "cancelled", "rejected"].includes(task.status),
+      ) ?? null
+    );
+  }
+
+  getDispatchAssignmentsForOrder(orderId: string): DispatchAssignmentRecord[] {
+    return this.dispatchAssignments.filter(
+      (assignment) => assignment.orderId === orderId,
+    );
+  }
+
+  getDriverTasksForOrder(orderId: string): DriverTaskRecord[] {
+    return this.driverTasks.filter((task) => task.orderId === orderId);
+  }
+
+  listEligibleDispatchCandidatesForOrder(orderId: string): DispatchCandidate[] {
+    const order = this.requireOrder(orderId);
+    return this.listEligibleDispatchCandidates(order);
+  }
+
+  executeAutoDispatch(
+    orderId: string,
+    options?: { requestId?: string; idempotencyKey?: string },
+  ) {
+    return this.getAutonomousDispatchExecutor().requestDispatch(
+      orderId,
+      options,
     );
   }
 
@@ -4571,7 +4660,7 @@ export class OwnedMobilityService
     return { assignment: closedAssignment, task: closedTask };
   }
 
-  private createDispatchAssignment(
+  createDispatchAssignment(
     dispatchJob: DispatchJobRecord,
     order: OwnedOrderRecord,
     vehicleId: string,
@@ -10469,7 +10558,7 @@ export class OwnedMobilityService
     };
   }
 
-  private requireOrder(orderId: string) {
+  requireOrder(orderId: string) {
     const order = this.orders.find(
       (candidateOrder) => candidateOrder.orderId === orderId,
     );
@@ -10506,7 +10595,7 @@ export class OwnedMobilityService
     return order;
   }
 
-  private requireDispatchJob(dispatchJobId: string) {
+  requireDispatchJob(dispatchJobId: string) {
     const dispatchJob = this.dispatchJobs.find(
       (candidateJob) => candidateJob.dispatchJobId === dispatchJobId,
     );
@@ -10523,7 +10612,7 @@ export class OwnedMobilityService
     return dispatchJob;
   }
 
-  private requireAssignment(assignmentId: string) {
+  requireAssignment(assignmentId: string) {
     const assignment = this.dispatchAssignments.find(
       (candidateAssignment) =>
         candidateAssignment.assignmentId === assignmentId,
@@ -10541,7 +10630,7 @@ export class OwnedMobilityService
     return assignment;
   }
 
-  private requireTask(taskId: string) {
+  requireTask(taskId: string) {
     const task = this.driverTasks.find(
       (candidateTask) => candidateTask.taskId === taskId,
     );

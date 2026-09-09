@@ -11,6 +11,7 @@ import { VoiceBookingRepository } from "./voice-booking.repository";
 import { VoiceLineScopeService } from "./voice-line-scope.service";
 import { VoiceCheckpointRepository } from "./voice-checkpoint.repository";
 import { VoiceEvidenceService } from "./voice-evidence.service";
+import { VoiceDispatchProjectionService } from "./voice-dispatch-projection.service";
 import { VoiceBookingCommandService } from "./voice-booking-command.service";
 import { VoiceCommandRunnerService } from "./voice-command-runner.service";
 import { OwnedMobilityRepository } from "../owned-mobility/owned-mobility.repository";
@@ -36,6 +37,7 @@ import { OwnedMobilityRepository } from "../owned-mobility/owned-mobility.reposi
     VoiceBookingRepository,
     VoiceBookingAuthorizationService,
     VoiceLineScopeService,
+    VoiceDispatchProjectionService,
   ],
   exports: [
     VoiceBookingCommandService,
@@ -46,6 +48,8 @@ import { OwnedMobilityRepository } from "../owned-mobility/owned-mobility.reposi
     VoiceBookingRepository,
     VoiceBookingAuthorizationService,
     VoiceLineScopeService,
+    VoiceDispatchProjectionService,
   ],
 })
 export class VoiceBookingModule {}
+
