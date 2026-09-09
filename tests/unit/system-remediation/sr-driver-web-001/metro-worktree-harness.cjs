@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-unused-vars */
 const Module = require('module');
 const originalLoad = Module._load;
 Module._load = function(id, parent, main) {
