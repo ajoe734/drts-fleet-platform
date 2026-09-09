@@ -118,12 +118,10 @@ function buildTestHarness(options: {
       status: "active",
     })),
     findReceiptByActionKey: vi.fn(
-      async (
-        _brandId: string,
-        _callId: string,
-        _intentId: string,
-        _action: string,
-      ) => pendingReceipts[0] ?? null,
+      async (...args: [string, string, string, string]) => {
+        void args;
+        return pendingReceipts[0] ?? null;
+      },
     ),
   };
 
