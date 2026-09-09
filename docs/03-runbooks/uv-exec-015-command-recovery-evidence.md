@@ -75,3 +75,20 @@ needed or permitted in the assigned VM.
 Keep the task out of candidate handoff until these tests have actually run and
 any resulting failures are fixed. Commit and push the resulting candidate,
 then hand off its exact SHA to Gemini through `ai-status.sh`; do not use `done`.
+
+
+## GitHub-hosted PostgreSQL verification
+
+Supervisor authorized the exact `.github/workflows/ci-integ.yml` integration
+job extension on 2026-09-09. The job's existing ephemeral PostGIS service
+supplies the CREATEDB test connection; no shared or production database and no
+VM-hosted development infrastructure is used. The matrix runs before the
+unrelated full migration/integration suites, creates and drops its own random
+database, and uploads its JSON results under the workflow commit SHA.
+
+The step requires at least the current 14 cases, all passed, none pending or
+skipped. A normal unit run that skips this opt-in suite cannot satisfy that
+step. The workflow addition is preparation until a completed run supplies
+actual results; record its run URL, exact tested SHA and test output before
+candidate handoff. This does not replace independent review or the remaining
+same-candidate integration checks.
