@@ -12,3 +12,4 @@ export * from "./language/language-router";
 export * from "./dialogue/voice-dialogue-provider";
 export * from "./dialogue/dialogue-state";
 export * from "./dialogue/dialogue-engine";
+export * from "./handoff";
