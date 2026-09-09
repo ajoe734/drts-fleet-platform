@@ -7,7 +7,9 @@ import {
   formatBookingWindowLabel,
   getAuthorizedSupportContact,
   getDriverAssignedNotice,
+  getTripNotFoundNotice,
   getTripProgressStageIndex,
+  getTripSupportCopy,
   isInProgressTripState,
   isUpcomingTripState,
   mapBookingRecordToTripSummary,
@@ -302,16 +304,17 @@ describe("SR-ENTERPRISE-DATA-001: getDriverAssignedNotice", () => {
 });
 
 describe("SR-ENTERPRISE-DATA-001: getAuthorizedSupportContact", () => {
-  it("defaults to honest unauthorized in-app support (/help) without leaking fixture phone", () => {
+  it("defaults to honest unauthorized in-app support destination (/trip/support) without leaking fixture phone", () => {
     const originalEnv = process.env.NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE;
     delete process.env.NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE;
     try {
       const contact = getAuthorizedSupportContact("zh");
       expect(contact.isAuthorized).toBe(false);
       expect(contact.phone).toBeNull();
-      expect(contact.href).toBe("/help");
+      expect(contact.href).toBe("/trip/support");
       expect(contact.sourceType).toBe("in_app_support");
       expect(contact.notice).toContain("直撥電話尚未取得租戶授權設定");
+      expect(contact.notice).not.toContain("0800-200-118");
     } finally {
       if (originalEnv !== undefined) {
         process.env.NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE = originalEnv;
@@ -339,8 +342,8 @@ describe("SR-ENTERPRISE-DATA-001: getAuthorizedSupportContact", () => {
   });
 });
 
-describe("SR-ENTERPRISE-DATA-001: 404 BOOKING_NOT_FOUND error classification (C119 / R08)", () => {
-  it("classifies 404 BOOKING_NOT_FOUND as not-found, NEVER degraded", () => {
+describe("SR-ENTERPRISE-DATA-001: 4xx / 5xx error classification (C119 / R08 / Codex2 P1)", () => {
+  it("classifies true 404 BOOKING_NOT_FOUND as not-found, NEVER degraded", () => {
     const err404 = new ApiClientError({
       statusCode: 404,
       code: "BOOKING_NOT_FOUND",
@@ -352,27 +355,36 @@ describe("SR-ENTERPRISE-DATA-001: 404 BOOKING_NOT_FOUND error classification (C1
     expect(resolveBookingGatewayState(err404)).toBe("not-found");
     expect(bookingGatewayHref(err404)).toBe("/not-found");
 
-    // Exact reproduction test from Codex review:
-    // candidate used: (gatewayHref(error)?.slice(1) as GatewayState) ?? "degraded"
+    // Exact reproduction test:
     const resolvedState =
       (bookingGatewayHref(err404)?.slice(1) as string | undefined) ?? "degraded";
     expect(resolvedState).toBe("not-found");
     expect(resolvedState).not.toBe("degraded");
   });
 
-  it("classifies 5xx server errors as degraded", () => {
-    const err500 = new ApiClientError({
-      statusCode: 500,
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Internal Server Error",
-      retryable: true,
-      rawBody: '{"code":"INTERNAL_SERVER_ERROR"}',
+  it("classifies 401 Unauthorized and 403 Forbidden as auth-required, NOT not-found", () => {
+    const err401 = new ApiClientError({
+      statusCode: 401,
+      code: "AUTHENTICATION_REQUIRED",
+      message: "Session expired or unauthorized",
+      retryable: false,
+      rawBody: '{"code":"AUTHENTICATION_REQUIRED"}',
     });
-    expect(resolveBookingGatewayState(err500)).toBe("degraded");
-    expect(bookingGatewayHref(err500)).toBe("/degraded");
+    expect(resolveBookingGatewayState(err401)).toBe("auth-required");
+    expect(bookingGatewayHref(err401)).toBe("/auth-required");
+
+    const err403 = new ApiClientError({
+      statusCode: 403,
+      code: "FORBIDDEN",
+      message: "Permission denied",
+      retryable: false,
+      rawBody: '{"code":"FORBIDDEN"}',
+    });
+    expect(resolveBookingGatewayState(err403)).toBe("auth-required");
+    expect(bookingGatewayHref(err403)).toBe("/auth-required");
   });
 
-  it("classifies quota errors as quota-blocked", () => {
+  it("classifies 403 quota/policy errors as quota-blocked, NOT not-found", () => {
     const errQuota = new ApiClientError({
       statusCode: 403,
       code: "TENANT_QUOTA_EXCEEDED",
@@ -384,7 +396,7 @@ describe("SR-ENTERPRISE-DATA-001: 404 BOOKING_NOT_FOUND error classification (C1
     expect(bookingGatewayHref(errQuota)).toBe("/quota-blocked");
   });
 
-  it("classifies supply errors as no-supply", () => {
+  it("classifies 409 vehicle supply errors as no-supply", () => {
     const errSupply = new ApiClientError({
       statusCode: 409,
       code: "VEHICLE_UNAVAILABLE",
@@ -394,5 +406,85 @@ describe("SR-ENTERPRISE-DATA-001: 404 BOOKING_NOT_FOUND error classification (C1
     });
     expect(resolveBookingGatewayState(errSupply)).toBe("no-supply");
     expect(bookingGatewayHref(errSupply)).toBe("/no-supply");
+  });
+
+  it("classifies 409 state conflict errors as conflict, NOT not-found", () => {
+    const errConflict = new ApiClientError({
+      statusCode: 409,
+      code: "BOOKING_STATE_CONFLICT",
+      message: "Booking was modified concurrently",
+      retryable: false,
+      rawBody: '{"code":"BOOKING_STATE_CONFLICT"}',
+    });
+    expect(resolveBookingGatewayState(errConflict)).toBe("conflict");
+    expect(bookingGatewayHref(errConflict)).toBe("/degraded");
+  });
+
+  it("classifies 429 Too Many Requests as rate-limited, NOT not-found", () => {
+    const err429 = new ApiClientError({
+      statusCode: 429,
+      code: "RATE_LIMIT_EXCEEDED",
+      message: "Too many requests",
+      retryable: true,
+      rawBody: '{"code":"RATE_LIMIT_EXCEEDED"}',
+    });
+    expect(resolveBookingGatewayState(err429)).toBe("rate-limited");
+    expect(bookingGatewayHref(err429)).toBe("/degraded");
+  });
+
+  it("classifies other 4xx client errors (e.g. 400 Bad Request) as degraded, NEVER not-found", () => {
+    const err400 = new ApiClientError({
+      statusCode: 400,
+      code: "VALIDATION_FAILED",
+      message: "Invalid request payload",
+      retryable: false,
+      rawBody: '{"code":"VALIDATION_FAILED"}',
+    });
+    expect(resolveBookingGatewayState(err400)).toBe("degraded");
+    expect(bookingGatewayHref(err400)).toBe("/degraded");
+  });
+
+  it("classifies 5xx server errors and network errors as degraded", () => {
+    const err500 = new ApiClientError({
+      statusCode: 500,
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Internal Server Error",
+      retryable: true,
+      rawBody: '{"code":"INTERNAL_SERVER_ERROR"}',
+    });
+    expect(resolveBookingGatewayState(err500)).toBe("degraded");
+    expect(bookingGatewayHref(err500)).toBe("/degraded");
+
+    expect(resolveBookingGatewayState(new Error("Network connection lost"))).toBe("degraded");
+    expect(bookingGatewayHref(new Error("Network connection lost"))).toBe("/degraded");
+  });
+});
+
+describe("SR-ENTERPRISE-DATA-001: getTripNotFoundNotice", () => {
+  it("provides clear non-retryable 404 guidance in Chinese and English", () => {
+    const zh = getTripNotFoundNotice("zh");
+    expect(zh.title).toContain("404");
+    expect(zh.body).toContain("不可作為暫時故障重試");
+    expect(zh.action).toContain("返回預約列表");
+
+    const en = getTripNotFoundNotice("en");
+    expect(en.title).toContain("404");
+    expect(en.body).toContain("not a temporary fault");
+    expect(en.action).toContain("Return to bookings");
+  });
+});
+
+describe("SR-ENTERPRISE-DATA-001: getTripSupportCopy", () => {
+  it("provides comprehensive support copy without unauthorized fixture phone leaks", () => {
+    const copyZh = getTripSupportCopy("zh");
+    expect(copyZh.pageTitle).toBe("企業客服支援中心");
+    expect(copyZh.unauthorizedNotice).not.toContain("0800-200-118");
+    expect(copyZh.driverDesc).toContain("最小權限原則");
+    expect(copyZh.topicOptions.length).toBeGreaterThanOrEqual(4);
+
+    const copyEn = getTripSupportCopy("en");
+    expect(copyEn.pageTitle).toBe("Enterprise Support Center");
+    expect(copyEn.unauthorizedNotice).not.toContain("0800-200-118");
+    expect(copyEn.driverDesc).toContain("least-privilege principles");
   });
 });

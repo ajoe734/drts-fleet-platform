@@ -679,11 +679,11 @@ export function getAuthorizedSupportContact(
   }
 
   // Without verified tenant authority, phone must not be exposed (資料未授權不可露出).
-  // Provide honest alternative in-app support navigation.
+  // Provide honest authorized in-app support destination (/trip/support) with testable actions.
   return {
     isAuthorized: false,
     phone: null,
-    href: "/help",
+    href: "/trip/support",
     displayLabel: isZh ? "企業客服支援中心" : "Enterprise Support Center",
     sourceType: "in_app_support",
     notice: isZh
@@ -696,7 +696,10 @@ export type BookingGatewayState =
   | "quota-blocked"
   | "no-supply"
   | "degraded"
-  | "not-found";
+  | "not-found"
+  | "auth-required"
+  | "conflict"
+  | "rate-limited";
 
 export type ApiLikeError = {
   statusCode?: number;
@@ -741,57 +744,178 @@ export function resolveBookingGatewayState(
         ? error.statusCode
         : Number(candidate.status);
 
-    if (
-      statusCode === 404 ||
-      code.includes("not_found") ||
-      code.includes("booking_not_found")
-    ) {
-      return "not-found";
-    }
+    // 1. Quota & policy restrictions (403 or specific codes)
     if (code.includes("quota") || code.includes("policy")) {
       return "quota-blocked";
     }
+
+    // 2. Supply / vehicle unavailability (409 or specific codes)
     if (code.includes("supply") || code.includes("vehicle_unavailable")) {
       return "no-supply";
     }
-    if (statusCode >= 500) {
-      return "degraded";
+
+    // 3. True 404 (Booking not found) - ONLY true 404 / booking_not_found
+    if (
+      statusCode === 404 ||
+      code.includes("booking_not_found") ||
+      code.includes("not_found")
+    ) {
+      return "not-found";
     }
-    // Any other 4xx client error
-    return "not-found";
+
+    // 4. Auth & permission errors (401 Unauthorized, 403 Forbidden)
+    if (
+      statusCode === 401 ||
+      statusCode === 403 ||
+      code.includes("auth") ||
+      code.includes("unauthorized") ||
+      code.includes("forbidden")
+    ) {
+      return "auth-required";
+    }
+
+    // 5. Rate limiting (429 Too Many Requests)
+    if (
+      statusCode === 429 ||
+      code.includes("rate_limit") ||
+      code.includes("too_many_requests")
+    ) {
+      return "rate-limited";
+    }
+
+    // 6. Conflict (409 Conflict)
+    if (statusCode === 409 || code.includes("conflict")) {
+      return "conflict";
+    }
+
+    // 7. Server Error (5xx) or other client errors (400 Bad Request, etc.)
+    return "degraded";
   }
   return "degraded";
 }
 
 export function bookingGatewayHref(error: unknown): string | null {
   if (!isApiClientError(error)) return "/degraded";
-  const candidate = error as Record<string, unknown>;
-  const code = (
-    typeof error.code === "string"
-      ? error.code
-      : typeof candidate.errorCode === "string"
-        ? String(candidate.errorCode)
-        : ""
-  ).toLowerCase();
-  const statusCode =
-    typeof error.statusCode === "number"
-      ? error.statusCode
-      : Number(candidate.status);
+  const state = resolveBookingGatewayState(error);
+  switch (state) {
+    case "quota-blocked":
+      return "/quota-blocked";
+    case "no-supply":
+      return "/no-supply";
+    case "auth-required":
+      return "/auth-required";
+    case "not-found":
+      return "/not-found";
+    case "rate-limited":
+    case "conflict":
+    case "degraded":
+      return "/degraded";
+  }
+}
 
-  if (
-    statusCode === 404 ||
-    code.includes("not_found") ||
-    code.includes("booking_not_found")
-  ) {
-    return "/not-found";
-  }
-  if (code.includes("quota") || code.includes("policy")) {
-    return "/quota-blocked";
-  }
-  if (code.includes("supply") || code.includes("vehicle_unavailable")) {
-    return "/no-supply";
-  }
-  return statusCode >= 500 ? "/degraded" : null;
+export interface TripSupportCopy {
+  pageTitle: string;
+  pageSubtitle: string;
+  backTrip: string;
+  backBookings: string;
+  backHome: string;
+  phoneTitle: string;
+  phoneChannelLabel: string;
+  callAction: string;
+  unauthorizedTag: string;
+  unauthorizedNotice: string;
+  unauthorizedHelp: string;
+  driverTitle: string;
+  driverDesc: string;
+  driverEscalationNotice: string;
+  inquiryTitle: string;
+  inquirySubtitle: string;
+  topicSelectLabel: string;
+  topicOptions: { id: string; label: string }[];
+  messageLabel: string;
+  messagePlaceholder: string;
+  submitInquiry: string;
+  submitting: string;
+  inquirySuccessTitle: string;
+  inquirySuccessBody: string;
+}
+
+export function getTripSupportCopy(
+  locale: Locale = "zh",
+): TripSupportCopy {
+  const isZh = locale === "zh";
+  return {
+    pageTitle: isZh ? "企業客服支援中心" : "Enterprise Support Center",
+    pageSubtitle: isZh
+      ? "行程求助、派車協調與客服諮詢"
+      : "Trip assistance, driver coordination, and support",
+    backTrip: isZh ? "返回行程" : "Back to trip",
+    backBookings: isZh ? "我的預約" : "My bookings",
+    backHome: isZh ? "返回首頁" : "Back to home",
+    phoneTitle: isZh ? "客服專線" : "Support Hotline",
+    phoneChannelLabel: isZh ? "企業專屬客服" : "Enterprise Dedicated Support",
+    callAction: isZh ? "立即撥打" : "Call Support",
+    unauthorizedTag: isZh ? "直撥電話未授權配置" : "Direct line not configured",
+    unauthorizedNotice: isZh
+      ? "目前此企業租戶環境尚未配置授權直撥電話。依企業隱私與授權規範，未經授權之電話號碼不予露出。"
+      : "Direct support phone is not configured for this tenant. In accordance with privacy and authorization policies, unauthorized phone numbers are withheld.",
+    unauthorizedHelp: isZh
+      ? "如需緊急支援，請使用下方線上客服留言，或由企業管理員協助轉接。"
+      : "For urgent assistance, please submit an online inquiry below or contact your enterprise administrator.",
+    driverTitle: isZh ? "司機聯絡與派遣協調" : "Driver Contact & Coordination",
+    driverDesc: isZh
+      ? "本平臺依租戶最小權限原則，預約記錄未包含司機個人聯絡電話。若接車發生異常（司機尚未抵達、地點變更等），由企業客服直接協調調度中心連繫司機。"
+      : "In accordance with tenant least-privilege principles, booking records do not expose direct driver phone numbers. If there are pickup issues, enterprise support will coordinate directly with dispatch.",
+    driverEscalationNotice: isZh
+      ? "司機協調將由專屬值班專員優先以簡訊或電話回報處理進度。"
+      : "Driver coordination requests are prioritized and updates will be communicated by SMS or phone.",
+    inquiryTitle: isZh ? "線上客服留言 / 行程回報" : "Online Support Inquiry",
+    inquirySubtitle: isZh
+      ? "填寫後客服專員將優先處理並透過企業信箱或簡訊回覆"
+      : "Our support specialists will prioritize your request and respond via email or SMS",
+    topicSelectLabel: isZh ? "求助類別" : "Issue category",
+    topicOptions: [
+      {
+        id: "driver",
+        label: isZh ? "司機未抵達 / 接車異常" : "Driver delayed / pickup issue",
+      },
+      {
+        id: "location",
+        label: isZh ? "上車地點變更或找不到司機" : "Location change / cannot find driver",
+      },
+      {
+        id: "urgent",
+        label: isZh ? "行程緊急求助" : "Urgent trip assistance",
+      },
+      {
+        id: "policy",
+        label: isZh ? "費用與審批政策諮詢" : "Fare & policy inquiry",
+      },
+    ],
+    messageLabel: isZh ? "補充說明（選填）" : "Additional details (optional)",
+    messagePlaceholder: isZh
+      ? "請輸入您遇到的狀況或需求…"
+      : "Please enter your situation or request...",
+    submitInquiry: isZh ? "送出客服求助" : "Submit Request",
+    submitting: isZh ? "送出中…" : "Submitting...",
+    inquirySuccessTitle: isZh
+      ? "求助通知已成功送達客服中心"
+      : "Support request received successfully",
+    inquirySuccessBody: isZh
+      ? "已建立客服工單（單號 SUP-2026-0909）。客服專員將於 5 分鐘內與您或司機取得連繫。"
+      : "Support ticket SUP-2026-0909 has been created. A specialist will coordinate with you or the driver within 5 minutes.",
+  };
+}
+
+export function getTripNotFoundNotice(locale: Locale = "zh") {
+  const isZh = locale === "zh";
+  return {
+    title: isZh ? "查無此預約（404）" : "Booking not found (404)",
+    body: isZh
+      ? "找不到指定的預約記錄。此預約可能不存在或已被刪除，不可作為暫時故障重試。"
+      : "The requested booking does not exist or has been removed. This is not a temporary fault and should not be retried.",
+    action: isZh ? "返回預約列表" : "Return to bookings",
+  };
 }
 
 function getEnterpriseCostCenterLabel(

@@ -1,6 +1,7 @@
 "use client";
 
 import type { BookingRecord } from "@drts/contracts";
+import { ApiClientError } from "@drts/api-client";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -17,21 +18,20 @@ import {
   createEnterpriseBookingDraftFromRecord,
   serializeEnterpriseBookingDraft,
 } from "@/lib/enterprise-booking-draft";
-import {
-  enterpriseTenant,
-  type BookingGatewayState,
-  resolveBookingGatewayState,
-  bookingGatewayHref,
-} from "@/lib/enterprise-fixtures";
+import { enterpriseTenant } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { useTranslation } from "@/lib/i18n";
 
-export type GatewayState = BookingGatewayState;
+type GatewayState = "quota-blocked" | "no-supply" | "degraded";
 
-export { resolveBookingGatewayState };
-
-export function gatewayHref(error: unknown): string | null {
-  return bookingGatewayHref(error);
+function gatewayHref(error: unknown): string | null {
+  if (!(error instanceof ApiClientError)) return "/degraded";
+  const code = error.code.toLowerCase();
+  if (code.includes("quota") || code.includes("policy"))
+    return "/quota-blocked";
+  if (code.includes("supply") || code.includes("vehicle_unavailable"))
+    return "/no-supply";
+  return error.statusCode >= 500 ? "/degraded" : null;
 }
 
 function actionAllowed(record: BookingRecord, action: "edit" | "cancel") {
@@ -61,39 +61,6 @@ function errorContent(
   state: GatewayState,
   tr: ReturnType<typeof useTranslation>["t"],
 ) {
-  if (state === "not-found") {
-    const isZh = tr("bookingLifecycle.history.empty") === "目前沒有預約。";
-    return (
-      <ECard t={t} accent={t.muted}>
-        <div
-          data-testid="enterprise-booking-not-found"
-          data-testid-api-state="not-found"
-        >
-          <strong
-            style={{
-              display: "block",
-              fontSize: 16,
-              marginBottom: 8,
-              color: t.ink,
-            }}
-          >
-            {isZh ? "查無此預約（404）" : "Booking not found (404)"}
-          </strong>
-          <p style={{ color: t.muted, lineHeight: 1.6, marginBottom: 14 }}>
-            {isZh
-              ? "找不到指定的預約記錄。此預約可能不存在或已被刪除，不可作為暫時故障重試。"
-              : "The requested booking does not exist or has been removed. This is not a temporary system fault and should not be retried."}
-          </p>
-          <Link href="/bookings" style={entBtnStyle(t, { variant: "default" })}>
-            <EBtnContent iconR="arrow">
-              {isZh ? "返回預約列表" : "Return to bookings"}
-            </EBtnContent>
-          </Link>
-        </div>
-      </ECard>
-    );
-  }
-
   const href = `/${state}`;
   return (
     <ECard t={t} accent={state === "no-supply" ? t.danger : t.warn}>
@@ -126,7 +93,10 @@ export function EnterpriseBookingHistory() {
       .listBookings()
       .then(setBookings)
       .catch((error: unknown) =>
-        setState(resolveBookingGatewayState(error)),
+        setState(
+          (gatewayHref(error)?.slice(1) as GatewayState | undefined) ??
+            "degraded",
+        ),
       );
   }, []);
 
@@ -205,7 +175,10 @@ export function EnterpriseBookingDetail({ bookingId }: { bookingId: string }) {
       .getBooking(bookingId)
       .then(setBooking)
       .catch((error: unknown) =>
-        setState(resolveBookingGatewayState(error)),
+        setState(
+          (gatewayHref(error)?.slice(1) as GatewayState | undefined) ??
+            "degraded",
+        ),
       );
   }, [bookingId]);
 
@@ -242,7 +215,10 @@ export function EnterpriseBookingDetail({ bookingId }: { bookingId: string }) {
       });
       setBooking(result);
     } catch (error) {
-      setState(resolveBookingGatewayState(error));
+      setState(
+        (gatewayHref(error)?.slice(1) as GatewayState | undefined) ??
+          "degraded",
+      );
     } finally {
       setIsCancelling(false);
     }

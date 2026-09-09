@@ -22,9 +22,12 @@ import {
   getEnterpriseTenant,
   getEnterpriseUser,
   getPolicyNotes,
+  getTripNotFoundNotice,
   isInProgressTripState,
   isUpcomingTripState,
   mapBookingRecordToTripSummary,
+  resolveBookingGatewayState,
+  type BookingGatewayState,
 } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { useTranslation } from "@/lib/i18n";
@@ -36,8 +39,10 @@ type LoadState = "loading" | "ready" | "error";
 export default function HomePage() {
   const { locale, t: tr } = useTranslation();
   const supportContact = getAuthorizedSupportContact(locale);
+  const notFoundNotice = getTripNotFoundNotice(locale);
   const [summaries, setSummaries] = useState<EnterpriseTripSummary[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [gatewayState, setGatewayState] = useState<BookingGatewayState | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,8 +59,9 @@ export default function HomePage() {
         );
         setLoadState("ready");
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (cancelled) return;
+        setGatewayState(resolveBookingGatewayState(err));
         setLoadState("error");
       });
 
@@ -152,14 +158,81 @@ export default function HomePage() {
         style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {loadState === "error" && (
-            <ECard t={t} accent={t.warn}>
-              <div data-testid="enterprise-home-api-state">
+          {loadState === "error" && gatewayState === "not-found" && (
+            <ECard t={t} accent={t.muted}>
+              <div
+                data-testid="enterprise-home-api-state"
+                data-testid-api-state="not-found"
+              >
+                <strong
+                  style={{
+                    display: "block",
+                    fontSize: 16,
+                    marginBottom: 8,
+                    color: t.ink,
+                  }}
+                >
+                  {notFoundNotice.title}
+                </strong>
+                <p style={{ color: t.muted, lineHeight: 1.6, marginBottom: 14 }}>
+                  {notFoundNotice.body}
+                </p>
+                <Link
+                  href="/bookings"
+                  style={entBtnStyle(t, { variant: "default" })}
+                >
+                  <EBtnContent iconR="arrow">
+                    {notFoundNotice.action}
+                  </EBtnContent>
+                </Link>
+              </div>
+            </ECard>
+          )}
+
+          {loadState === "error" && gatewayState !== "not-found" && (
+            <ECard
+              t={t}
+              accent={
+                gatewayState === "no-supply"
+                  ? t.danger
+                  : gatewayState === "auth-required"
+                    ? t.primary
+                    : t.warn
+              }
+            >
+              <div
+                data-testid="enterprise-home-api-state"
+                data-testid-api-state={gatewayState ?? "degraded"}
+              >
+                <strong
+                  style={{
+                    display: "block",
+                    fontSize: 16,
+                    marginBottom: 8,
+                    color: t.ink,
+                  }}
+                >
+                  {gatewayState === "auth-required"
+                    ? tr("gate.authRequired.title")
+                    : gatewayState === "quota-blocked"
+                      ? tr("gate.quotaBlocked.title")
+                      : gatewayState === "no-supply"
+                        ? tr("gate.noSupply.title")
+                        : tr("gate.degraded.title")}
+                </strong>
                 <p style={{ color: t.muted, lineHeight: 1.6 }}>
                   {tr("bookingLifecycle.gateway.body")}
                 </p>
                 <Link
-                  href="/degraded"
+                  href={
+                    gatewayState === "auth-required"
+                      ? "/auth-required"
+                      : gatewayState === "quota-blocked"
+                        ? "/quota-blocked"
+                        : gatewayState === "no-supply"
+                          ? "/no-supply"
+                          : "/degraded"
+                  }
                   style={entBtnStyle(t, { variant: "default" })}
                 >
                   <EBtnContent>{tr("bookingLifecycle.gateway.action")}</EBtnContent>
@@ -448,7 +521,7 @@ export default function HomePage() {
               </a>
             ) : (
               <Link
-                href="/help"
+                href={supportContact.href}
                 data-testid="enterprise-home-contact-support"
                 style={{
                   marginTop: 14,
