@@ -3,7 +3,8 @@
 - Task: `SR-ENTERPRISE-FORM-001`
 - Owner: `Gemini`
 - Reviewer: `Codex2`
-- Base SHA (`origin/dev`): `ea4599197479708ca672922765ec1d24fc28b80e`
+- Base SHA (`origin/dev`): `ea459919798953604f8e9fedebeaf4692f10e388`
+- Candidate SHA: 於 `handoff` 時以 `git rev-parse HEAD` 寫入（見 task board 與 machine truth）
 - Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-form-001`
 - Branch: `gemini/sr-enterprise-form-001`
 
@@ -39,6 +40,10 @@
 5. **CI Lint 與審批按鈕狀態守衛修復（Round 4 CI 修復）**
    - Candidate `7ff140019` 在 CI lint 階段因 `booking-submit-button.tsx` 宣告未使用的 `approvalRequired` 參數而失敗（`@typescript-eslint/no-unused-vars`）。
    - 本次將 `approvalRequired` 正式套用於確認送出按鈕之文案解析：當審批需求為 true 時，在正常態顯示「送出並送審（Submit for Approval）」，在時間失效態顯示「送出並送審（時間已過期）（Submit for Approval (Time Expired)）」，與 `review/page.tsx` 之停用態按鈕語意完全一致，同時徹底解決 ESLint 警示並強化按鈕狀態可讀性。
+
+6. **Base SHA 與候選 Provenance 修正（Codex2 審查意見）**
+   - 修正 Base SHA 記錄為完整之 `ea459919798953604f8e9fedebeaf4692f10e388`（對齊 `git rev-parse origin/dev` 與 `git merge-base origin/dev HEAD`），消除前版筆誤 SHA 無法被 `git cat-file -t` 解析之問題。
+   - 所有測試驗證均在當前候選分支 HEAD 上執行並通過，候選 SHA 於 handoff 時自動寫入 machine truth。
 
 ---
 
@@ -235,7 +240,7 @@ exit code: 0
 ### 4.9 Commit Trailers 格式與審查身分檢查
 ```text
 $ python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD
-check_commit_trailers: 8 commit(s) OK.
+check_commit_trailers: 10 commit(s) OK.
 
 exit code: 0
 ```
