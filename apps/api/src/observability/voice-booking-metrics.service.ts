@@ -312,7 +312,7 @@ export class VoiceBookingMetricsService {
     const windowStartMs = new Date(filter.windowStart).getTime();
     const windowEndMs = new Date(filter.windowEnd).getTime();
 
-    let matched = records.filter((r) => {
+    const matched = records.filter((r) => {
       const recMs = new Date(r.receivedAt).getTime();
       if (recMs < windowStartMs || recMs > windowEndMs) return false;
       if (filter.language && r.language !== filter.language) return false;

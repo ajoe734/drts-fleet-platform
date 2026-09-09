@@ -1,7 +1,6 @@
 import {
   REALM_COLORS,
   STATUS_TONES,
-  type RealmName,
   type ToneRamp,
 } from "@drts/ui-tokens";
 

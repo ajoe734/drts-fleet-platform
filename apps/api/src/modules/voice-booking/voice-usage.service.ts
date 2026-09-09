@@ -493,7 +493,6 @@ export class VoiceUsageService {
         estimatedCost = this.computeEstimatedCostFromRateCard(
           rateCard,
           input.quantity,
-          input.billingUnit,
         );
       } else {
         estimatedCost = 0;
@@ -948,7 +947,6 @@ export class VoiceUsageService {
   private computeEstimatedCostFromRateCard(
     card: VoiceRateCardRecord,
     quantity: number,
-    _billingUnit: BillingUnit,
   ): number {
     let effectiveQty = quantity;
 
