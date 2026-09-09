@@ -4,11 +4,11 @@
 | ------------- | ------------------------------------------------------------------------------------------------- |
 | Task spec     | `docs/03-runbooks/system-remediation-20260906/SR-ENTERPRISE-SEARCH-001.md`                        |
 | Owner         | Gemini                                                                                            |
-| Reviewer      | Codex                                                                                             |
+| Reviewer      | Codex2                                                                                            |
 | Depends on    | 無 (`[]`) — 待 Supervisor 登記後端 producer 並納入相依                                              |
 | Gap ID        | `R24`                                                                                             |
 | Capability ID | `C013`, `C069`                                                                                    |
-| Base SHA      | `3fb9b06461dc2bf92043144974eedbbc9f69d0f3` (current `origin/dev`), prior `f372e4a6a0dd16204ccbd660f23013601357c224` (修正前版筆誤 `f372e4a6a575b66d4826ae934eb063c467a8b417`), `c4c4a35f88907df6bf68e781059dde397c06ba03`, `031cfc4c99320b79f6ad863996a43a5da8227edf`, initial `7dccddaba7d51dca8d56da01d5320d9f22f8b68f` |
+| Base SHA      | `8c6e1fa9732ec8322de275084817683e6d67407c` (current `origin/dev`), prior `3fb9b06461dc2bf92043144974eedbbc9f69d0f3`, `f372e4a6a0dd16204ccbd660f23013601357c224` (修正前版筆誤 `f372e4a6a575b66d4826ae934eb063c467a8b417`), `c4c4a35f88907df6bf68e781059dde397c06ba03`, `031cfc4c99320b79f6ad863996a43a5da8227edf`, initial `7dccddaba7d51dca8d56da01d5320d9f22f8b68f` |
 | Task Status   | `blocked` (卡點於後端查詢 producer `SR-BOOKING-VERIFY` 與企業端 session 權威身分接線)                |
 | Branch        | `gemini/sr-enterprise-search-001`                                                                  |
 
@@ -29,14 +29,15 @@
 
 ### 1.2 Base SHA 重現與後端 API 現狀核實
 
-在 Base SHA (`3fb9b06461dc2bf92043144974eedbbc9f69d0f3`) 檢查現狀：
+在最新 Base SHA (`8c6e1fa9732ec8322de275084817683e6d67407c`, current `origin/dev`) 檢查現狀：
 
-1. **前端現況**：`apps/enterprise-dispatch-web/app/bookings/page.tsx` 原先僅 6 行，直接渲染 `<EnterpriseBookingHistory />`。該元件無乘客關鍵字搜尋、起訖日期篩選、狀態過濾、本人/代訂頁籤，亦無翻頁與空狀態。
+1. **前端現況**：`apps/enterprise-dispatch-web/app/bookings/page.tsx` 在 dev trunk 原先僅 6 行，直接渲染 `<EnterpriseBookingHistory />`。該元件無乘客關鍵字搜尋、起訖日期篩選、狀態過濾、本人/代訂頁籤，亦無翻頁與空狀態。目前在本分支已實作完整之組合搜尋、條件清除、全域篩選後分頁與空狀態處理。
 2. **後端 API 核實（關鍵卡點）**：
    - 檢查 `apps/api/src/modules/owned-mobility/owned-mobility.controller.ts:459` 之 `@Get("tenant/bookings")`：僅接收 `x-tenant-id` 與 `x-request-id` 標頭，呼叫 `this.ownedMobilityService.listTenantBookings(tenantId)`。
-   - 檢查 `owned-mobility.service.ts:2048`：回傳該租戶之全量預約清單，分頁固定為 `{ page: 1, pageSize: items.length, totalItems: items.length, totalPages: items.length > 0 ? 1 : 0 }`。
+   - 檢查 `owned-mobility.service.ts:2118`：回傳該租戶之全量預約清單，分頁固定為 `{ page: 1, pageSize: items.length, totalItems: items.length, totalPages: items.length > 0 ? 1 : 0 }`。
    - 後端完全**未暴露**查詢參數（如 `q`, `status`, `dateFrom`, `dateTo`, `page`, `pageSize`）。
-   - Client 端點 `packages/api-client/src/index.ts:1192` 與 `apps/enterprise-dispatch-web/lib/api-client.ts:59` 之 `listBookings()` 均為無參數方法，回傳全量陣列。
+   - Client 端點 `packages/api-client/src/index.ts:1193` 與 `apps/enterprise-dispatch-web/lib/api-client.ts:59` 之 `listBookings()` 均為無參數方法，回傳全量陣列。
+   - 查詢目前任務系統：`ai-status.sh show SR-BOOKING-VERIFY` 回傳 `Task not found: SR-BOOKING-VERIFY`，`SR-ENTERPRISE-SEARCH-001` 之 `depends_on` 仍為空陣列 `[]`。
 3. **任務規範之硬性限制**：
    - Task spec 明白規定：「先核實目前API已有filter能力；實作日期/乘客/狀態與分頁，避免只篩目前頁假裝全域。若API缺filter必須在SR-BOOKING-VERIFY取得後端能力後才結案。」
    - 且本任務 `write_scopes` 僅包含：
@@ -71,7 +72,14 @@
 ### 2.4 P2 Base SHA 修正
 - **Codex 審查意見**：記錄之 Base SHA `f372e4a6a575b66d4826ae934eb063c467a8b417` 無法解析（git cat-file exit 128），實際 `origin/dev` 為 `f372e4a6a0dd16204ccbd660f23013601357c224`。
 - **現階段處置與更正**：
-  - 本次已同步更新至最新 `origin/dev`：`3fb9b06461dc2bf92043144974eedbbc9f69d0f3`，並更正了歷史記錄中的字元筆誤。
+  - 同步更新至最新 `origin/dev`：`8c6e1fa9732ec8322de275084817683e6d67407c`，並記錄歷史修復演進。
+
+### 2.5 Unblock 輔助任務結論與最新基準合併
+- Unblock 輔助任務 `SR-ENTERPRISE-SEARCH-001-UNBLOCK-PLANNING-DECISION`、`SR-ENTERPRISE-SEARCH-001-UNBLOCK-MANUAL-UNBLOCK`（PR #1787）與 `SR-ENTERPRISE-SEARCH-001-UNBLOCK-HISTORY-REPAIR`（PR #1792）已正式合併至 `origin/dev`。
+- 該等審查結論明確確認：
+  1. 母任務 `SR-ENTERPRISE-SEARCH-001` 因後端缺少 list filter/page 查詢參數且未指派/完成 producer，依然處於 `blocked` 狀態。
+  2. 未由 Supervisor 授權 `apps/api`、`packages/api-client` 等 shared scope 且未完成後端端點前，前端不能以純 mock 或前端降級篩選冒充後端查詢驗收。
+  3. 最新 `origin/dev`（`8c6e1fa9732ec8322de275084817683e6d67407c`）已於本 worktree 乾淨合併（Merge commit），無任何程式碼衝突。
 
 ---
 
@@ -110,15 +118,15 @@ $ pnpm --filter @drts/enterprise-dispatch-web typecheck
 $ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/
  Test Files  1 passed (1)
       Tests  52 passed (52)
-   Start at  16:02:51
-   Duration  787ms
+   Start at  00:21:41
+   Duration  1.97s (transform 1.05s, setup 0ms, import 1.32s, tests 42ms, environment 0ms)
 # exit code 0
 
 $ pnpm --filter @drts/enterprise-dispatch-web test
  Test Files  8 passed (8)
       Tests  24 passed (24)
-   Start at  16:02:57
-   Duration  848ms
+   Start at  00:22:04
+   Duration  2.21s (transform 2.61s, setup 0ms, import 3.94s, tests 815ms, environment 7ms)
 # exit code 0
 ```
 
@@ -126,7 +134,7 @@ $ pnpm --filter @drts/enterprise-dispatch-web test
 
 ## 5. 阻擋原因與後續銜接（Blocker & Next Actions）
 
-本任務依規範轉換為 `blocked` 狀態，不冒充交付完成：
+本任務依規範維持 `blocked` 狀態，不冒充交付完成：
 
 1. **阻擋項目 1：缺少後端查詢過濾 Producer (`SR-BOOKING-VERIFY`)**：
    - 後端端點 `@Get("tenant/bookings")` 缺少 query 參數接收與資料庫過濾能力。
@@ -140,3 +148,7 @@ $ pnpm --filter @drts/enterprise-dispatch-web test
 3. **外部未執行的 Live/真機部分**：
    - 尚未在已部署之 GCP Cloud Run Dev 環境對真實後端資料庫進行 live HTTP query 驗證。
    - 尚未在真機 iOS / Android Webview 進行觸控與手勢操作測試。
+
+4. **後續銜接動作（Resume Gate）**：
+   - Supervisor 在任務板註冊後端過濾 Producer 並授權 shared contract/client scope，更新母任務 `depends_on`。
+   - 待該 Producer 獲審查通過並合併至 `origin/dev` 後，Owner (Gemini) 將 rebase 最新 dev，對接正式 query API，驗證伺服器端條件過濾與總數計算，並產出 live 查詢與資源 ID 驗證證據後再行提交 Review。
