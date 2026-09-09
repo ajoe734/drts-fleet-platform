@@ -8,7 +8,7 @@
 | Depends on    | 無 (`[]`) — 待 Supervisor 登記後端 producer 並納入相依                                              |
 | Gap ID        | `R24`                                                                                             |
 | Capability ID | `C013`, `C069`                                                                                    |
-| Base SHA      | `8c6e1fa9732ec8322de275084817683e6d67407c` (current `origin/dev`), prior `3fb9b06461dc2bf92043144974eedbbc9f69d0f3`, `f372e4a6a0dd16204ccbd660f23013601357c224` (修正前版筆誤 `f372e4a6a575b66d4826ae934eb063c467a8b417`), `c4c4a35f88907df6bf68e781059dde397c06ba03`, `031cfc4c99320b79f6ad863996a43a5da8227edf`, initial `7dccddaba7d51dca8d56da01d5320d9f22f8b68f` |
+| Base SHA      | `7a946308b4764b88939c3e9a59cf6b485303df44` (current `origin/dev`), prior `8c6e1fa9732ec8322de275084817683e6d67407c`, `3fb9b06461dc2bf92043144974eedbbc9f69d0f3`, `f372e4a6a0dd16204ccbd660f23013601357c224` (修正前版筆誤 `f372e4a6a575b66d4826ae934eb063c467a8b417`), `c4c4a35f88907df6bf68e781059dde397c06ba03`, `031cfc4c99320b79f6ad863996a43a5da8227edf`, initial `7dccddaba7d51dca8d56da01d5320d9f22f8b68f` |
 | Task Status   | `blocked` (卡點於後端查詢 producer `SR-BOOKING-VERIFY` 與企業端 session 權威身分接線)                |
 | Branch        | `gemini/sr-enterprise-search-001`                                                                  |
 
@@ -29,7 +29,7 @@
 
 ### 1.2 Base SHA 重現與後端 API 現狀核實
 
-在最新 Base SHA (`8c6e1fa9732ec8322de275084817683e6d67407c`, current `origin/dev`) 檢查現狀：
+在最新 Base SHA (`7a946308b4764b88939c3e9a59cf6b485303df44`, current `origin/dev`) 檢查現狀：
 
 1. **前端現況**：`apps/enterprise-dispatch-web/app/bookings/page.tsx` 在 dev trunk 原先僅 6 行，直接渲染 `<EnterpriseBookingHistory />`。該元件無乘客關鍵字搜尋、起訖日期篩選、狀態過濾、本人/代訂頁籤，亦無翻頁與空狀態。目前在本分支已實作完整之組合搜尋、條件清除、全域篩選後分頁與空狀態處理。
 2. **後端 API 核實（關鍵卡點）**：
@@ -72,14 +72,14 @@
 ### 2.4 P2 Base SHA 修正
 - **Codex 審查意見**：記錄之 Base SHA `f372e4a6a575b66d4826ae934eb063c467a8b417` 無法解析（git cat-file exit 128），實際 `origin/dev` 為 `f372e4a6a0dd16204ccbd660f23013601357c224`。
 - **現階段處置與更正**：
-  - 同步更新至最新 `origin/dev`：`8c6e1fa9732ec8322de275084817683e6d67407c`，並記錄歷史修復演進。
+  - 同步更新至最新 `origin/dev`：`7a946308b4764b88939c3e9a59cf6b485303df44`，並記錄歷史修復演進。
 
 ### 2.5 Unblock 輔助任務結論與最新基準合併
 - Unblock 輔助任務 `SR-ENTERPRISE-SEARCH-001-UNBLOCK-PLANNING-DECISION`、`SR-ENTERPRISE-SEARCH-001-UNBLOCK-MANUAL-UNBLOCK`（PR #1787）與 `SR-ENTERPRISE-SEARCH-001-UNBLOCK-HISTORY-REPAIR`（PR #1792）已正式合併至 `origin/dev`。
 - 該等審查結論明確確認：
   1. 母任務 `SR-ENTERPRISE-SEARCH-001` 因後端缺少 list filter/page 查詢參數且未指派/完成 producer，依然處於 `blocked` 狀態。
   2. 未由 Supervisor 授權 `apps/api`、`packages/api-client` 等 shared scope 且未完成後端端點前，前端不能以純 mock 或前端降級篩選冒充後端查詢驗收。
-  3. 最新 `origin/dev`（`8c6e1fa9732ec8322de275084817683e6d67407c`）已於本 worktree 乾淨合併（Merge commit），無任何程式碼衝突。
+  3. 最新 `origin/dev`（`7a946308b4764b88939c3e9a59cf6b485303df44`，包含 UV-EXEC-014、SR-PUSH-001 unblock、SR-FLEET-DATA-001、UV-EXEC-014-UNBLOCK-HISTORY-REPAIR 等）已於本 worktree 乾淨合併（Merge commit），無任何程式碼衝突。
 
 ---
 
@@ -107,7 +107,7 @@ $ git diff --check
 $ pnpm run i18n:guard
 > drts-fleet-platform@0.1.0 i18n:guard
 > node tools/ci/i18n-guard.mjs
-i18n-guard: OK (520 files scanned across 10 apps, 55 exemption(s) from i18n-guard-baseline.json)
+i18n-guard: OK (521 files scanned across 10 apps, 55 exemption(s) from i18n-guard-baseline.json)
 # exit code 0
 
 $ pnpm --filter @drts/enterprise-dispatch-web typecheck
@@ -118,15 +118,15 @@ $ pnpm --filter @drts/enterprise-dispatch-web typecheck
 $ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/
  Test Files  1 passed (1)
       Tests  52 passed (52)
-   Start at  00:21:41
-   Duration  1.97s (transform 1.05s, setup 0ms, import 1.32s, tests 42ms, environment 0ms)
+   Start at  00:41:51
+   Duration  771ms (transform 462ms, setup 0ms, import 574ms, tests 21ms, environment 0ms)
 # exit code 0
 
 $ pnpm --filter @drts/enterprise-dispatch-web test
  Test Files  8 passed (8)
       Tests  24 passed (24)
-   Start at  00:22:04
-   Duration  2.21s (transform 2.61s, setup 0ms, import 3.94s, tests 815ms, environment 7ms)
+   Start at  00:41:53
+   Duration  732ms (transform 1.30s, setup 0ms, import 1.88s, tests 205ms, environment 1ms)
 # exit code 0
 ```
 
