@@ -590,12 +590,16 @@ describe("ReportingFilingService — formats, MIME types, rejection & scope", ()
 
     const artifactPdf = await service.renderReportArtifact(acceptedPdf.jobId);
     const pdfText = await extractPdfText(artifactPdf.buffer);
-    console.info("SR-REPORT-001 unit resources", JSON.stringify(
-      [accepted, acceptedXlsx, acceptedPdf].map(({ jobId }) => ({
-        jobId,
-        artifactId: service.getReportJob(jobId).artifact?.artifactId,
-      })),
-    ));
+    process.stdout.write(
+      "SR-REPORT-001 unit resources " +
+        JSON.stringify(
+          [accepted, acceptedXlsx, acceptedPdf].map(({ jobId }) => ({
+            jobId,
+            artifactId: service.getReportJob(jobId).artifact?.artifactId,
+          })),
+        ) +
+        "\n",
+    );
 
     // Number of filtered rows matches between CSV and XLSX
     expect(csvRows).toEqual(xlsxRows);

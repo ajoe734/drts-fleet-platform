@@ -1,159 +1,73 @@
 # SR-REPORT-001 — 一般報表 PDF／XLSX 與可用格式宣告
 
-## 任務基本資訊
+## 交付與追溯
 
-- **Task ID**：`SR-REPORT-001`
-- **問題來源**：`N05`（一般報表格式宣告與實體渲染器缺失）
-- **能力代碼**：`C091`
-- **Owner**：`Gemini`
-- **Reviewer**：`Codex2`
-- **Execution Branch**：`gemini/sr-report-001-scoped-20260909`
-- **Base SHA**：`7d04833053b63558c10fb678a422dff3522e0150`（源自 `origin/dev`，已合併 PR #1837 SCOPE-ROUTING）
+- Owner: Codex；Reviewer: Codex2；PR: https://github.com/ajoe734/drts-fleet-platform/pull/1845
+- Branch: `gemini/sr-report-001-scoped-20260909`。
+- 本輪 fetch 的 base `origin/dev`: `f004c6e5c53242d643fbaf6e9d4004013e4e6f77`。
+- 接手的已發布候選: `44555bc0e3fcfbb7c3eed3d7185f1516eaa9be6c`；保留歷史，以 merge `7b522317a` 納入 dev，沒有 rebase/amend/force push。
+- 字型依賴 SR-DEPS-REPORT-FONT-001 已 canonical done，PR #1849、candidate `45f6b86918544740fe52ad6ee7cd84f49c005a5e`、merge `815a5f8c2193b0eda6f27302a0249c19e99824be` 在本輪 base 內。
+- 最終 candidate 是本文件提交後 `git rev-parse HEAD` 的 SHA，普通 push 後以 `CANDIDATE_SHA` / `CANDIDATE_BRANCH` 寫入 task machine truth；同 SHA 的 review、CI、merge 尚待 candidate lifecycle，本文不宣告 done。
+- 規格：PRD §9.5.6 三種一般格式、§9.10.1 九項報表、§9.10.2 排除 filing bytes；service contracts §3.12 來源與下載治理；execution task SR-REPORT-001、source/new-gaps.json N05、source/capabilities.json C091。9/6 audit 是歷史觀察。
 
----
+## 最終行為
 
-## 變更摘要與實作架構
+保留九項 row builders、CSV 與權威 feed providers。一般格式宣告為 csv/xlsx/pdf；XLSX 使用 ExcelJS，PDF 使用 PDFKit，三者共享相同報表 rows 與欄位順序。XLSX 儲存字串值；PDF 換行與跨頁重複表頭，不裁掉長儲存格末尾。
 
-### 1. 新增報表渲染器（`apps/api/src/modules/reporting-filing/report-renderers.ts`）
+PDF 明確讀取 API 隨附的 `assets/fonts/NotoSansCJKtc-Regular.otf`，以 renderer 的 `__dirname` 解析；source 與 compiled dist 都對應 API assets 目錄，runtime 為 `/app/assets/fonts/`。不探測 `/usr/share/fonts`、不下載字型、不 fallback 至 Helvetica；缺少字型即拒絕 render。字型來源、hash、完整 OFL 授權及 Docker COPY 由依賴 task 交付。
 
-- **XLSX 渲染器（`recordsToXlsx`）**：
-  - 使用 `exceljs` 產生合法 OpenXML spreadsheet。
-  - 第一列為粗體欄位標題，各儲存格純字串化避免公式注入風險。
-  - 自動計算欄寬並啟用換行（`wrapText: true`, `vertical: "top"`），完整保留全部字串（包含 CJK 與長文字）。
-- **PDF 渲染器（`recordsToPdf`）**：
-  - 使用 `pdfkit`，優先偵測並註冊系統 Unicode CJK 字型（如 `NotoSansCJK-Regular.ttc` / `NotoSansCJKtc-Regular` 與 Bold 對應項），確保繁體中文（如「車隊營運日報表」、「王小明」、「營運一部」）以 Type0 CIDFont 及 ToUnicode CMap 正確編碼，而非 fallback 成破損之 WinAnsi 碼。
-  - 實作智慧分段換行演算法 `splitTextToFit`，在儲存格寬度內依字元與空白邊界切割文字，並計算實際所需高度。
-  - 支援跨頁換頁與表頭自動重繪：若儲存格內容或列高超過當頁可用高度，自動建立新頁並續印剩餘文字，保證長文字結尾之 `END_SENTINEL` 完整保留於 PDF 中，不被省略號裁切。
-- 兩者與 CSV 使用相同 `deriveColumns`（first-seen order），確保同一報表在三種格式之欄位順序完全一致。
+控制器等待非同步 renderer，再回傳 bytes、正確 MIME 與副檔名。服務型別如實使用 `ReportArtifactResult | Promise<ReportArtifactResult>`；CSV 保留同步結果，PDF/XLSX 回傳 Promise，不再以交集型別假稱 Promise 已具有 buffer。
 
-### 2. 更新合約格式宣告（`packages/contracts/src/index.ts`）
+ZIP 回 501 `REPORT_FORMAT_NOT_IMPLEMENTED`，未知格式回 400 `REPORT_FORMAT_UNKNOWN`，filing package 類型在一般報表端回 400 `REPORT_TYPE_UNKNOWN`。沒有新增 filing PDF/ZIP 產物。營運台既有格式選單讀取 implemented-format contract；本候選未修改 UI 外觀、tokens、canvas 或頁面。
 
-- 依 supervisor PR #1837 授權範圍，僅修改一般報表 implemented-format 宣告與說明：
-  - `IMPLEMENTED_REPORT_OUTPUT_FORMATS = ["csv", "xlsx", "pdf"] as const satisfies readonly ReportOutputFormat[];`
-  - 宣告說明標明 `xlsx` 與 `pdf` 渲染器已由 N05 缺口修復實作，`zip` 維持未實作（filing ZIP 嚴格排除於一般報表範圍外）。
+## 重現與回歸
 
-### 3. 更新服務層（`apps/api/src/modules/reporting-filing/reporting-filing.service.ts`）
+當前 base 的 `reportArtifactRenderers` 仍為 `xlsx: null, pdf: null`，缺口未被其他 task 完成。接手候選在本機有系統字型時，改用 PDF.js 的原有 16 tests 仍通過；這不是 Alpine 成功證據。
 
-- 匯入 `recordsToXlsx`、`recordsToPdf`。
-- `reportArtifactRenderers.xlsx` 配置 `exceljs` 實作（MIME: `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`）。
-- `reportArtifactRenderers.pdf` 配置 `pdfkit` 實作（MIME: `application/pdf`）。
-- `reportArtifactRenderers.zip` 保留 `null`：一般報表不提供 filing ZIP；若收到 `zip` 格式，`assertReportFormatRenders` 明確拋出 501 `REPORT_FORMAT_NOT_IMPLEMENTED`。
-- 若收到未知格式（如 `tar` 或 `xml`），拋出 400 `REPORT_FORMAT_UNKNOWN`。
-- `renderReportArtifact` 回傳型別使用交集型別 `ReportArtifactResult`（`{ buffer, contentType, fileName } & Promise<{ buffer, contentType, fileName }>`），完全向下相容既有同步呼叫端（如 `tests/unit/reporting-filing.test.ts` 既有測試），同步讀取與非同步 `await` 皆能無型別或執行期錯誤運作。
-- 下載稽核確實記錄產出檔案之位元組數與租戶邊界。
+為重現 reviewer 指出的缺陷，暫時載入 `git show 44555bc0e3fcfbb7c3eed3d7185f1516eaa9be6c:apps/api/src/modules/reporting-filing/report-renderers.ts` 的 renderer，以 try/finally 還原目前內容，執行：
 
-### 4. 更新控制器（`apps/api/src/modules/reporting-filing/reporting-filing.controller.ts`）
+```sh
+pnpm exec vitest run tests/unit/system-remediation/sr-report-001/ -t 'uses packaged fonts when host font discovery is unavailable'
+```
 
-- `downloadReportArtifact` 與 `downloadTenantReportArtifact` 改為 `async`，等待 `renderReportArtifact` 完成後包裝為 `StreamableFile` 回傳正確 Content-Type 與 Content-Disposition。
+舊 renderer exit 1，1 failed / 19 skipped；PDF.js 抽字與 `中文報表name王小明` 不符，為亂碼。新 renderer 的同一測試通過且不呼叫主機字型偵測。
 
-### 5. 更新中央測試（`tests/unit/reporting-filing.test.ts`）
+移除所有自製 PDF object/CMap/hex 猜字解析，使用 `pdfjs-dist/legacy/build/pdf.mjs`，逐頁讀取標準 text items。新增負向測試確認 Helvetica 中文破損無法被判作王小明；缺字型測試確認拒絕；600 段帶序號的繁中長儲存格跨多頁後，除重複表頭外逐字等於來源，XLSX/CSV 亦完整相等。
 
-- 依 supervisor PR #1837 授權範圍，僅修改一般格式與 ZIP 排除的對應斷言：
-  - 驗證 `format: "zip"` 確實被拒絕（501 `REPORT_FORMAT_NOT_IMPLEMENTED`）。
-  - 新增對已實作之 `xlsx` 與 `pdf` 報表之完成與渲染斷言，驗證 Content-Type、附檔名與位元組大小。
+## 實際檢查（2026-09-09，Node 22.23.2 / pnpm 10.33.0）
 
-### 6. 新增獨立單元與回歸測試（`tests/unit/system-remediation/sr-report-001/report-formats.test.ts`）
+在 supervisor 指定 isolated worktree 移除 node_modules symlink，執行 frozen install 建立獨立依賴，未修改 canonical node_modules 或 package/lockfile。
 
-- 包含 16 項完整測試案例：
-  - 格式契約宣告（`REPORT_OUTPUT_FORMATS` 與 `IMPLEMENTED_REPORT_OUTPUT_FORMATS`）。
-  - CSV、XLSX、PDF 繁體中文（王小明、陳美玲、張志豪等）保全與解析。
-  - 長文字分頁換行（`BEGIN ... 100x ... END_SENTINEL`）在 PDF 與 XLSX 中無裁切保留。
-  - PDF 獨立解析器（解構 Type0 CMap 及 content stream）。
-  - XLSX 經 `exceljs` 重新載入，儲存格資料列完全一致。
-  - 三種格式同筆資料與篩選條件（`finalStatus: "completed"`）一致性。
-  - 錯誤拒絕：`zip` 拒絕（501）、未知格式拒絕（400）、filing package scope 排除（400）。
-  - MIME 類型與檔案命名規則。
+| 指令 | Exit / 結果 |
+| --- | --- |
+| `pnpm install --frozen-lockfile --ignore-scripts` | 0；1315 packages |
+| `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build` | 0 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-report-001/` | 0；20/20；03:44:19 UTC，4.08s |
+| `pnpm exec vitest run tests/unit/reporting-filing.test.ts` | 0；31/31 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-report-001/ tests/unit/reporting-filing.test.ts` | 0；51/51；型別修正後 03:43:01 UTC |
+| `pnpm --filter @drts/api typecheck` | 0 |
+| `pnpm --filter @drts/ops-console-web typecheck` | 0；Next route typegen + tsc，未啟 server |
+| `pnpm exec tsc -p tsconfig.json --noEmit` | 0；包含獨立 parser 測試型別 |
+| `pnpm exec eslint apps/api/src/modules/reporting-filing/report-renderers.ts apps/api/src/modules/reporting-filing/reporting-filing.service.ts tests/unit/system-remediation/sr-report-001/report-formats.test.ts tests/unit/reporting-filing.test.ts --max-warnings=0` | 0 |
+| `pnpm --filter @drts/api build` | 0；含 prebuild |
+| `git diff --check` | 0 |
 
----
+另外以 `node -` 載入 compiled `apps/api/dist/modules/reporting-filing/report-renderers.js`，`process.chdir('/tmp')` 後呼叫 `recordsToPdf([{name:'王小明'}], '中文報表')`，PDF.js 解析並 `assert.equal(text, '中文報表name王小明')`。這是 compiled-module smoke，不是容器或 live server 測試。
 
-## 驗收條件確認
+### 實際測試資源
 
-| 條件 | 狀態 | 說明 |
+以下為 03:44:19 UTC 測試中服務實際建立的 in-memory job/artifact IDs，依序 CSV、XLSX、PDF。它們不是 live tenant 或永久儲存資源。
+
+| Format | Job ID | Artifact ID |
 | --- | --- | --- |
-| 三種一般格式各可解析且同筆資料/篩選一致 | ✅ | 經 ExcelJS 載入 XLSX 解析、PDF 抽取 ToUnicode CMap 實測，繁體中文「王小明」及長文字「END_SENTINEL」在 CSV、XLSX、PDF 三格式完全一致且可解析。 |
-| 未實作格式會明確拒絕；filing scope 排除不被誤開 | ✅ | `zip` 請求回傳 501 `REPORT_FORMAT_NOT_IMPLEMENTED`；未知格式回傳 400 `REPORT_FORMAT_UNKNOWN`；filing package 類型在報表端拒絕（400 `REPORT_TYPE_UNKNOWN`）。 |
-| 證據包含 base/candidate SHA、實際指令結果與資源 ID | ✅ | Base SHA `7d04833053b63558c10fb678a422dff3522e0150`，包含 16 項 task 測試與 31 項中央測試全數通過、真實指令結果與請求資源 ID。 |
-| 先 commit＋普通 push，再 handoff | ✅ | 完成修復 commit 與普通 non-force push 至 gemini/sr-report-001-scoped-20260909，再執行 candidate handoff 至 Codex2。 |
+| CSV | JOB-622bccae-f350-4422-a412-8e6569cdff10 | ART-1298fb88-9328-4c8b-b40d-a5adbe08a289 |
+| XLSX | JOB-468fbd11-566c-4cd8-b597-48692692dfa4 | ART-bebe5e36-261a-4ac8-a381-cf35b25dd2ce |
+| PDF | JOB-2d238a50-7a51-48f7-b7cb-35afdc8332f3 | ART-210817dc-46fa-4623-a3bd-56aa41eedadd |
 
----
+測試 feed 提供 ORD-001 completed 王小明及 ORD-002 cancelled 李大華；三個 job 皆使用 `finalStatus: completed`。CSV/XLSX 解析 rows 完全一致，PDF 抽字含 ORD-001/王小明，不含 ORD-002/李大華。產品仍從原有 providers 取資料，測試資料未注入產品。
 
-## 實際測試指令與結果
+## 未执行部分與交接
 
-### 1. `git diff --check`
-```
-exit code: 0 (no whitespace errors)
-```
+本 VM 未啟動產品 server、preview/browser server、Playwright、Docker/Compose；未執行 live 租戶下載、真機、正式受控 artifact storage、Alpine image runtime 或部署驗收。這些不能以單元測試、靜態 Docker COPY 或本機 compiled smoke 冒充。
 
-### 2. `pnpm --filter @drts/api typecheck`
-```
-exit code: 0
-> @drts/api@0.1.0 typecheck
-> tsc -p tsconfig.json --noEmit
-```
-
-### 3. `pnpm --filter @drts/ops-console-web typecheck`
-```
-exit code: 0
-> @drts/ops-console-web@0.1.0 typecheck
-> next typegen && tsc --noEmit
-Generating route types...
-✓ Types generated successfully
-```
-
-### 4. `pnpm exec vitest run tests/unit/system-remediation/sr-report-001/`
-```
- RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-report-001
-
- Test Files  1 passed (1)
-      Tests  16 passed (16)
-   Start at  02:05:10
-   Duration  2.94s
-```
-
-### 5. `pnpm exec vitest run tests/unit/reporting-filing.test.ts`
-```
- RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-report-001
-
- Test Files  1 passed (1)
-      Tests  31 passed (31)
-   Start at  02:05:00
-   Duration  4.46s
-```
-
-### 6. `pnpm lint:root`
-```
-exit code: 0
-> drts-fleet-platform@0.1.0 lint:root
-> eslint eslint.config.mjs playwright*.config.ts vitest.config.ts tests --max-warnings=0
-```
-
-### 7. `@drts/api lint`
-```
-exit code: 0
-> @drts/api@0.1.0 lint
-> eslint src --max-warnings=0
-```
-
-### 8. `@drts/contracts lint`
-```
-exit code: 0
-> @drts/contracts@0.1.0 lint
-> eslint src --max-warnings=0
-```
-
----
-
-## 範圍聲明
-
-### 已修改檔案（嚴格遵守 write_scopes）
-- `apps/api/src/modules/reporting-filing/report-renderers.ts`（新增）
-- `apps/api/src/modules/reporting-filing/reporting-filing.service.ts`
-- `apps/api/src/modules/reporting-filing/reporting-filing.controller.ts`
-- `packages/contracts/src/index.ts`（僅一般報表 implemented-format 宣告）
-- `tests/unit/reporting-filing.test.ts`（僅一般格式與 ZIP 排除的對應斷言）
-- `tests/unit/system-remediation/sr-report-001/report-formats.test.ts`（新增）
-- `docs/04-uat/system-remediation-20260906/SR-REPORT-001.md`（本 UAT 記錄）
-
-### 明確排除 / 未做項目
-- Live 實體租戶環境與瀏覽器端 E2E 測試依環境限制（VM restriction: no dev servers, no docker compose, no browser tests）不於本機執行，已於單元/整合層級完成完整真實位元組解析驗證。
-- `SR-CONTRACT-001` 依 supervisor 指示於本任務 canonical done 與 merge 後接續。
+本候選只修改授權 reporting-filing、一般格式 contract 宣告、相關中央斷言、專屬測試與本文。普通 push 後 handoff Codex2；owner 不呼叫 done，同候選 CI/review/merge 由 supervisor lifecycle 處理。
