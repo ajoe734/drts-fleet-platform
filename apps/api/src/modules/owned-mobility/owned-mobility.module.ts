@@ -19,6 +19,7 @@ import { OwnedMobilityRepository } from "./owned-mobility.repository";
 import { ReferralBindingScaffoldService } from "./referral-binding.scaffold.service";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
+import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
 
 @Module({
   imports: [
@@ -42,8 +43,13 @@ import { OwnedMobilityService } from "./owned-mobility.service";
     OwnedMobilityService,
     OwnedMobilityTaskEventsService,
     ReferralBindingScaffoldService,
+    OwnedAutonomousDispatchExecutorService,
   ],
-  exports: [OwnedMobilityService, ReferralBindingScaffoldService],
+  exports: [
+    OwnedMobilityService,
+    ReferralBindingScaffoldService,
+    OwnedAutonomousDispatchExecutorService,
+  ],
 })
 export class OwnedMobilityModule implements OnModuleInit {
   constructor(
