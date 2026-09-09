@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "wave_id": "system-remediation-20260906",
+  "task_id": "SR-CONTRACT-001",
+  "allocated_at": "2026-09-09T22:07:02Z",
+  "base_sha": "396904179665a3b602d25931c4db6a2d006fb812",
+  "description": "Canonical database schema migration allocation and boundary rules for system remediation wave",
+  "last_canonical_migration_before_allocation": {
+    "version": "V0093",
+    "filename": "V0093__voice_retention_and_legal_hold.sql",
+    "wave": "unattended-voice-booking-20260906"
+  },
+  "allocations": [
+    {
+      "task_id": "SR-LEAVE-BE-001",
+      "version": "V0094",
+      "migration_filename": "V0094__sr_driver_leave.sql",
+      "domain": "driver_leave",
+      "target_schema": "ops",
+      "primary_tables": ["ops.phase1_driver_leave_requests"],
+      "referenced_tables": [
+        "ops.phase1_driver_shifts",
+        "ops.phase1_driver_matching_suppressions"
+      ],
+      "description": "請假資料與審核／班次連動服務 migration",
+      "downstream_tasks": [
+        "SR-LEAVE-FE-001",
+        "SR-WIRE-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
+    },
+    {
+      "task_id": "SR-ACADEMY-BE-001",
+      "version": "V0095",
+      "migration_filename": "V0095__sr_driver_academy.sql",
+      "domain": "driver_academy",
+      "target_schema": "reg",
+      "primary_tables": [
+        "reg.phase1_driver_academy_courses",
+        "reg.phase1_driver_academy_modules",
+        "reg.phase1_driver_quiz_questions",
+        "reg.phase1_driver_quiz_attempts"
+      ],
+      "referenced_tables": [
+        "reg.driver_training_records",
+        "reg.driver_reg_profiles",
+        "reg.drivers"
+      ],
+      "description": "課程、測驗、完訓與重訓資料服務 migration",
+      "downstream_tasks": [
+        "SR-ACADEMY-FE-001",
+        "SR-WIRE-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
+    },
+    {
+      "task_id": "SR-HOST-BE-001",
+      "version": "V0096",
+      "migration_filename": "V0096__sr_host_vehicle_access.sql",
+      "domain": "host_vehicle_access",
+      "target_schema": "ops",
+      "primary_views_or_tables": ["ops.phase1_host_vehicle_projections"],
+      "referenced_tables": [
+        "reg.vehicles",
+        "ops.phase1_maintenance_logs",
+        "crm.phase1_complaint_cases",
+        "ops.phase1_platform_earnings_ledger",
+        "ops.phase1_owned_orders"
+      ],
+      "description": "Host 自車受限 read model 與所有權授權 migration",
+      "downstream_tasks": [
+        "SR-HOST-FE-001",
+        "SR-WIRE-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
+    }
+  ],
+  "boundary_invariants": {
+    "anti_collision_rule": "Migrations V0086 through V0093 are exclusively reserved for Unattended Voice Booking (UV-EXEC); SR migrations strictly begin at V0094 and increment sequentially without collision.",
+    "root_module_wiring_rule": "Root app.module.ts wiring is exclusively reserved for SR-WIRE-001; leaf BE tasks only export standalone NestJS modules.",
+    "interface_consumption_rule": "Frontend (FE) and Backend (BE) tasks may only consume interfaces approved and exported by @drts/contracts and @drts/api-client.",
+    "authoritative_model_rule": "No fixture, hardcoded percentages (such as FX_FLEET_TRAINING), dummy signatures, or mock delivery may substitute real authoritative state.",
+    "financial_policy_hold_rule": "Host vehicle commission split and net earnings remain null / pending_policy in Phase 1; downstream SR-HOST-BE-001 must not fabricate pseudo financial algorithms."
+  }
+}
