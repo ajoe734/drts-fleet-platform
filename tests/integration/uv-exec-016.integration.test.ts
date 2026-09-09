@@ -408,7 +408,7 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       expect(activeOrderBAssignment?.assignmentId).toBe(offerB.assignmentId);
 
       // Candidate 1's active driver task belongs ONLY to Order A, NOT Order B
-      const candidate1ActiveTask = ownedMobilityService.getActiveDriverTaskForAssignment(offerA.assignmentId);
+      const candidate1ActiveTask = ownedMobilityService.getActiveDriverTaskForAssignment(offerA.assignmentId!);
       expect(candidate1ActiveTask?.driverId).toBe(offerA.driverId);
       expect(candidate1ActiveTask?.orderId).toBe(orderA.orderId);
     });
@@ -473,12 +473,12 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       expect(ownedMobilityService.getDispatchAssignmentsForOrder(order.orderId)).toHaveLength(1);
 
       // Execute explicit rollback
-      ownedMobilityService.rollbackDispatchAssignmentInMem(offer.assignmentId, previousOrder);
+      ownedMobilityService.rollbackDispatchAssignmentInMem(offer.assignmentId!, previousOrder);
 
       // Verify assignment and task are removed
       expect(ownedMobilityService.getDispatchAssignmentsForOrder(order.orderId)).toHaveLength(0);
       expect(ownedMobilityService.getActiveDispatchAssignmentForOrder(order.orderId)).toBeNull();
-      expect(ownedMobilityService.getActiveDriverTaskForAssignment(offer.assignmentId)).toBeNull();
+      expect(ownedMobilityService.getActiveDriverTaskForAssignment(offer.assignmentId!)).toBeNull();
       expect(() => ownedMobilityService.requireTask(offer.taskId!)).toThrow();
 
       // Verify order state was restored
