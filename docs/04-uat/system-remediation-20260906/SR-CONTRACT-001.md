@@ -33,36 +33,44 @@ Owner：Gemini；Reviewer：Codex2。日期：2026-09-09 UTC。
 | `pnpm lint:root`                                                      |     0     | 3.2s  | ESLint 根目錄與單元測試檢查零警告零錯誤                    |
 | `pnpm --filter @drts/contracts typecheck`                             |     0     | 2.1s  | `@drts/contracts` TypeScript 編譯檢查通過（無 emit 錯誤）  |
 | `pnpm --filter @drts/api-client typecheck`                            |     0     | 2.2s  | `@drts/api-client` TypeScript 編譯檢查通過（無 emit 錯誤） |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/` |     0     | 0.61s | 1 test file, 24 passed (100% 通過，0 失敗)                 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/` |     0     | 0.75s | 1 test file, 30 passed (100% 通過，0 失敗)                 |
 | `pnpm exec vitest run tests/unit/api-client-dispatch-queue.test.ts`   |     0     | 0.55s | 既有 api-client / contracts 測試回歸守護通過 (2 passed)    |
 
-### 測試覆蓋矩陣 (24 Unit Tests)
+### 測試覆蓋矩陣 (30 Unit Tests in Suite)
 
 1. **Schema Allocation Invariants (`schema-allocation.json`)**：
    - 驗證 `schema-allocation.json` 存在且格式符合規範。
    - 驗證 migration 編號自 `V0094` 連續遞增（`V0094` Driver Leave、`V0095` Driver Academy、`V0096` Host Vehicles），與 UV-EXEC (`V0086`–`V0093`) 零衝突。
+   - 實作安全之磁碟防碰撞檢核：驗證分配版本嚴格大於 `V0093`，且磁碟上若存在對應序號之檔案時，檔名必須精確吻合核定檔名（`V0094__sr_driver_leave.sql`、`V0095__sr_driver_academy.sql`、`V0096__sr_host_vehicle_access.sql`），避免依賴任務交付 migration 時破壞根單元 CI。
    - 驗證明確記載邊界不變量（`app.module.ts` 註冊保留予 `SR-WIRE-001`）與治理規則。
 2. **`@drts/contracts` 型別與常數不變量**：
-   - 匯出完整請假類型 (`annual`, `sick`, `personal`, `bereavement`, `emergency`) 與狀態 (`pending`, `approved`, `rejected`, `withdrawn`, `cancelled`)。
+   - 匯出完整請假類型 (`annual`, `sick`, `personal`, `bereavement`, `emergency`) 與狀態 (`pending`, `approved`, `rejected`, `withdrawn`)。
    - 匯出培訓狀態 (`not_started`, `in_progress`, `passed`, `failed`, `expired`) 與模組分類。
    - 匯出車主車輛維護狀態與案件分類/狀態枚舉。
    - 匯出完整的 `SYSTEM_REMEDIATION_ERROR_CODES`，含括 4 大領域之錯誤代碼。
    - 嚴格守護 `IMPLEMENTED_REPORT_OUTPUT_FORMATS` 包含 `csv`, `xlsx`, `pdf`。
-   - 結構型別斷言：`DriverLeaveRecord`, `AcademyCourseDetail`, `HostVehicleSummary`, `HostVehicleEarningsSummary`。
+   - 結構型別斷言：`DriverLeaveRecord`, `AcademyCourseDetail`, `HostVehicleSummary`, `HostVehicleEarningsSummary`, `ContractOperationalViewRecord`。
    - 車主收益模型斷言：Phase 1 `fleetCommission` 與 `netEarnings` 必須維持 `null`，`settlementStatus` 為 `pending_policy`，杜絕虛構分潤演算法。
    - 車輛 VIN 斷言：強制符合遮罩格式（例如前 8 碼星號 `********AB123456`）。
 3. **`@drts/api-client` 傳輸層與方法契約**：
+   - 於 `ApiClient` 實作 18 個型別安全方法，並支援清單封套與詳細資料模型。
    - `createDriverLeave` 發送 `POST /api/driver-leave/requests` 並解包回應資料。
    - `listDriverLeaves` 正確序列化分頁與篩選參數，並支援清單封套與一般封套。
    - `withdrawDriverLeave` (`POST /withdraw`) 與 `reviewDriverLeave` (`POST /review`) 正確路由至特定子路徑。
-   - `getAcademyCourses`, `getAcademyCourse`, `submitQuizAttempt`, `getQuizAttempt`, `getFleetTrainingSummary` 正確分發並傳遞 payload。
-   - `getHostOwnedVehicles`, `getHostVehicleDetail`, `getHostVehicleEarnings` 正確路由並支援查詢條件。
+   - `listAcademyCourses`, `getAcademyCourse`, `submitQuiz`, `getDriverQuizAttempt`, `getFleetTrainingSummary`, `listFleetDriverRoster`, `getFleetDriverQuizAttempt` 正確分發並傳遞 payload。
+   - `listHostVehicles`, `getHostVehicleEarnings`, `listHostVehicleMaintenance`, `listHostVehicleTrips`, `listHostVehicleCases` 正確路由並支援查詢條件。
    - `createHostClient` 工廠方法正確設定 partner realm 與 actor 標頭。
-   - 獨立 functional adapters (`createDriverLeaveRequest`, `listDriverLeaveRequests`, `getAcademyCourses`, `getHostOwnedVehicles`) 正常操作。
-4. **OpenAPI 規格對齊 (`openapi-spec.yaml`)**：
-   - 包含所有 15 個新增 path operations。
-   - 包含新增 Tags：`DriverLeave`, `DriverAcademy`, `FleetPartnerTraining`, `HostVehicles`。
+   - 獨立 functional adapters (`createDriverLeaveRequest`, `listDriverLeaveRequests`, `getAcademyCourses`, `getHostOwnedVehicles` 等) 正常操作。
+4. **OpenAPI 規格對齊與 Ajv 正負向驗證 (`openapi-spec.yaml`)**：
+   - 包含所有 15 個新增 path operations 與 4 個新增 Tags (`DriverLeave`, `DriverAcademy`, `FleetPartnerTraining`, `HostVehicles`)。
    - 包含所有對應之請求／回應 Schemas、Envelope 結構與 `MethodNotAllowed` (HTTP 405) 回應定義。
+   - **Codex2 審查修復：巢狀結構與必要 nullable 欄位嚴格對齊**：
+     - 新增 `ContractOperationalModifiableWindow`, `ContractOperationalProofRequirements`, `ContractOperationalWaitingRule`, `ContractOperationalNoShowRule`, `ContractOperationalSlaProfile`, `ContractOperationalEffectiveVersion`, `ContractOperationalAuthMode`, `ContractOperationalFieldStatusMap` 等具體約束 Schema，取代無約束之 `type: object`。
+     - 於各模型 `required` 清單中納入所有在 TS 契約為必要之 nullable 欄位（例如 `DriverLeaveRecord` 之 `reviewedByPrincipalId`/`reviewedAt`/`reviewNotes`、`HostVehicleSummary` 之 `contractPeriod`、`DriverTrainingRecord` 之 `highestScore`/`completedAt`/`expiresAt`/`lastAttemptAt`、`FleetDriverRosterItem` 之 `score`/`completedAt`/`latestAttemptId`、`ContractOperationalTerms` 之各項條款欄位）。
+   - **Ajv 8.x 架構級正負向回歸驗證**：
+     - 正向檢驗：完整資料 payload 與具備合法 `null` 之 payload 均通過 schema 驗證。
+     - 負向檢驗：精確重現並阻擋未受約束的空物件（如 `{contractId: "contract-1", dataStatus: {}, modifiableWindow: {}}` 必定拒絕並回報遺漏必要屬性）。
+     - 負向檢驗：缺漏必要 nullable 欄位（如遺漏 `reviewedByPrincipalId`、`contractPeriod`、`highestScore` 等）必定判定為非合法 payload。
 
 ---
 
@@ -95,7 +103,7 @@ Owner：Gemini；Reviewer：Codex2。日期：2026-09-09 UTC。
     },
     {
       "sequence": "V0096",
-      "filename": "V0096__sr_driver_host_access.sql",
+      "filename": "V0096__sr_host_vehicle_access.sql",
       "task": "SR-HOST-BE-001",
       "domain": "Host Vehicle Restricted Projections",
       "targetTables": ["ops.phase1_host_vehicle_projections"]
@@ -115,7 +123,7 @@ Owner：Gemini；Reviewer：Codex2。日期：2026-09-09 UTC。
 3. `packages/contracts/src/system-remediation.ts`：定義領域模型、枚舉、錯誤碼與唯讀投影契約。
 4. `packages/contracts/src/index.ts`：匯出 system-remediation 契約。
 5. `packages/api-client/src/system-remediation.ts`：定義 API Client 介面與功能適配器。
-6. `packages/api-client/src/index.ts`：於 `ApiClient` 實作 15 個型別安全方法與 `createHostClient`。
+6. `packages/api-client/src/index.ts`：於 `ApiClient` 實作 18 個型別安全方法與 `createHostClient`。
 7. `tests/unit/system-remediation/sr-contract-001/sr-contract-001.test.ts`：完整的自動化單元測試。
 8. `docs/04-uat/system-remediation-20260906/SR-CONTRACT-001.md`：本執行與回歸證據文件。
 

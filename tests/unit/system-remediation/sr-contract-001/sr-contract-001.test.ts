@@ -1,6 +1,47 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
+
+const requireMod = createRequire(path.resolve(process.cwd(), "package.json"));
+
+function resolvePnpmModule(name: string, preferredVersion?: string): any {
+  if (!preferredVersion) {
+    try {
+      return requireMod(name);
+    } catch {
+      // fallback to pnpm search
+    }
+  }
+  const candidates = [
+    path.resolve(process.cwd(), "node_modules/.pnpm"),
+    path.resolve(process.cwd(), "../../node_modules/.pnpm"),
+    "/home/lupin/workspace/drts-fleet-platform/node_modules/.pnpm",
+  ];
+  for (const base of candidates) {
+    if (!fs.existsSync(base)) continue;
+    const entries = fs.readdirSync(base);
+    if (preferredVersion) {
+      const exact = entries.find((e) =>
+        e.startsWith(`${name}@${preferredVersion}`),
+      );
+      if (exact) {
+        const modPath = path.join(base, exact, "node_modules", name);
+        if (fs.existsSync(modPath)) return requireMod(modPath);
+      }
+    }
+    const matches = entries
+      .filter((e) => e.startsWith(`${name}@`))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    for (const match of matches) {
+      const modPath = path.join(base, match, "node_modules", name);
+      if (fs.existsSync(modPath)) {
+        return requireMod(modPath);
+      }
+    }
+  }
+  throw new Error(`Cannot find module '${name}'`);
+}
 import {
   ApiClient,
   createHostClient,
@@ -101,18 +142,30 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
           path.join(migrationsDir, "V0093__voice_retention_and_legal_hold.sql"),
         ),
       ).toBe(true);
-      // Ensure V0094-V0096 are not yet checked into dev
-      expect(
-        fs.existsSync(path.join(migrationsDir, "V0094__sr_driver_leave.sql")),
-      ).toBe(false);
-      expect(
-        fs.existsSync(path.join(migrationsDir, "V0095__sr_driver_academy.sql")),
-      ).toBe(false);
-      expect(
-        fs.existsSync(
-          path.join(migrationsDir, "V0096__sr_host_vehicle_access.sql"),
-        ),
-      ).toBe(false);
+
+      // Verify anti-collision and versioning invariants on disk:
+      // None of the allocated filenames may collide with pre-allocation migrations (V0001-V0093).
+      // If an allocated migration file exists on disk (delivered by dependent BE tasks),
+      // its filename must match the approved allocation exactly (no divergent filenames for V0094-V0096).
+      if (fs.existsSync(migrationsDir)) {
+        const diskFiles = fs.readdirSync(migrationsDir);
+        for (const alloc of allocations) {
+          // Verify allocated version is strictly beyond V0093
+          const verNum = parseInt(alloc.version.replace(/^V0*/, ""), 10);
+          expect(verNum).toBeGreaterThan(93);
+
+          // Find any files on disk matching this version prefix
+          const prefix = `${alloc.version}_`;
+          const matchingFiles = diskFiles.filter((f: string) =>
+            f.startsWith(prefix),
+          );
+
+          // If files exist for this version, they must match the allocated filename exactly
+          for (const match of matchingFiles) {
+            expect(match).toBe(alloc.migration_filename);
+          }
+        }
+      }
     });
 
     it("records boundary invariants and governance rules", () => {
@@ -942,12 +995,325 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
         "HostVehicleTripItem:",
         "HostVehicleCaseItem:",
         "ContractOperationalTerms:",
+        "ContractOperationalModifiableWindow:",
+        "ContractOperationalProofRequirements:",
+        "ContractOperationalWaitingRule:",
+        "ContractOperationalNoShowRule:",
+        "ContractOperationalSlaProfile:",
+        "ContractOperationalEffectiveVersion:",
+        "ContractOperationalAuthMode:",
+        "ContractOperationalFieldStatusMap:",
         "ContractOperationalViewRecord:",
+        "ContractOperationalTermsEnvelope:",
+        "ContractOperationalViewEnvelope:",
       ];
 
       for (const s of requiredSchemas) {
         expect(content).toContain(s);
       }
+    });
+
+    describe("Schema-based Positive and Negative Regression Validation (Ajv)", () => {
+      const YAML = resolvePnpmModule("yaml");
+      const Ajv = resolvePnpmModule("ajv");
+      const AjvClass = Ajv.default || Ajv;
+      const ajv = new AjvClass({ strict: false, allErrors: true });
+
+      function transformOpenApiToAjv(schema: any): any {
+        if (!schema || typeof schema !== "object") return schema;
+        if (Array.isArray(schema)) return schema.map(transformOpenApiToAjv);
+        const copy: any = { ...schema };
+        if (copy.nullable) {
+          if (copy.type && typeof copy.type === "string") {
+            copy.type = [copy.type, "null"];
+          } else if (copy.$ref) {
+            const ref = copy.$ref;
+            delete copy.$ref;
+            delete copy.nullable;
+            copy.oneOf = [{ $ref: ref }, { type: "null" }];
+          }
+        }
+        for (const [k, v] of Object.entries(copy)) {
+          copy[k] = transformOpenApiToAjv(v);
+        }
+        return copy;
+      }
+
+      const openapiDoc = YAML.parse(fs.readFileSync(openapiPath, "utf8"));
+      for (const [name, s] of Object.entries(openapiDoc.components.schemas)) {
+        ajv.addSchema(
+          transformOpenApiToAjv(s),
+          `#/components/schemas/${name}`,
+        );
+      }
+
+      const validateView = ajv.getSchema(
+        "#/components/schemas/ContractOperationalViewRecord",
+      )!;
+      const validateTerms = ajv.getSchema(
+        "#/components/schemas/ContractOperationalTerms",
+      )!;
+      const validateLeave = ajv.getSchema(
+        "#/components/schemas/DriverLeaveRecord",
+      )!;
+      const validateHost = ajv.getSchema(
+        "#/components/schemas/HostVehicleSummary",
+      )!;
+      const validateTraining = ajv.getSchema(
+        "#/components/schemas/DriverTrainingRecord",
+      )!;
+      const validateRoster = ajv.getSchema(
+        "#/components/schemas/FleetDriverRosterItem",
+      )!;
+
+      it("compiles all required validators without error", () => {
+        expect(validateView).toBeDefined();
+        expect(validateTerms).toBeDefined();
+        expect(validateLeave).toBeDefined();
+        expect(validateHost).toBeDefined();
+        expect(validateTraining).toBeDefined();
+        expect(validateRoster).toBeDefined();
+      });
+
+      it("validates ContractOperationalViewRecord with positive and negative regression fixtures (addressing Codex2 P2 finding)", () => {
+        // Positive fixture 1: fully populated valid record
+        const completeValidPayload: ContractOperationalViewRecord = {
+          contractId: "contract-corp-001",
+          modifiableWindow: {
+            leadTimeMinutes: 60,
+            cutoffMinutes: 30,
+            description: "Standard advance booking window",
+          },
+          proofRequirements: {
+            requiredDocuments: ["passenger_id", "booking_confirmation"],
+            signatureRequired: true,
+            digitalProofAllowed: true,
+          },
+          waitingRule: {
+            gracePeriodMinutes: 10,
+            chargeableIntervalMinutes: 5,
+          },
+          noShowRule: {
+            thresholdMinutes: 15,
+            feeApplicable: true,
+          },
+          slaProfile: {
+            profileId: "sla_enterprise_gold",
+            targetResponseMinutes: 5,
+            pickupWindowMinutes: 15,
+            businessDispatchSubtype: "metro_executive",
+          },
+          effectiveVersion: {
+            versionNumber: 2,
+            versionTag: "v2.1",
+            effectiveFrom: "2026-09-01T00:00:00Z",
+            effectiveTo: null,
+          },
+          authMode: {
+            mode: "corporate_saml",
+            eligibilityMode: "strict_allowlist",
+          },
+          dataStatus: {
+            modifiableWindow: "available",
+            proofRequirements: "available",
+            waitingRule: "available",
+            noShowRule: "available",
+            slaProfile: "available",
+            effectiveVersion: "available",
+            authMode: "available",
+          },
+        };
+        expect(validateView(completeValidPayload)).toBe(true);
+
+        // Positive fixture 2: nullable fields set to null with appropriate dataStatus
+        const validNullsPayload: ContractOperationalViewRecord = {
+          contractId: "contract-corp-002",
+          modifiableWindow: null,
+          proofRequirements: null,
+          waitingRule: null,
+          noShowRule: null,
+          slaProfile: null,
+          effectiveVersion: null,
+          authMode: null,
+          dataStatus: {
+            modifiableWindow: "missing_data",
+            proofRequirements: "missing_data",
+            waitingRule: "not_applicable",
+            noShowRule: "not_applicable",
+            slaProfile: "missing_data",
+            effectiveVersion: "missing_data",
+            authMode: "not_applicable",
+          },
+        };
+        expect(validateView(validNullsPayload)).toBe(true);
+
+        // Negative fixture 1 (Codex2's exact reproduced failure):
+        // Unconstrained empty objects lacking required term/status fields
+        const unconstrainedPayload = {
+          contractId: "contract-1",
+          dataStatus: {},
+          modifiableWindow: {},
+        };
+        expect(validateView(unconstrainedPayload)).toBe(false);
+        const errMessages = (validateView.errors || []).map(
+          (e: any) => e.message,
+        );
+        expect(
+          errMessages.some(
+            (m: string) =>
+              m.includes("proofRequirements") ||
+              m.includes("leadTimeMinutes") ||
+              m.includes("dataStatus"),
+          ),
+        ).toBe(true);
+
+        // Negative fixture 2: missing required dataStatus sub-properties
+        const missingDataStatusFields = {
+          ...completeValidPayload,
+          dataStatus: {
+            modifiableWindow: "available",
+            // missing proofRequirements, waitingRule, etc.
+          },
+        };
+        expect(validateView(missingDataStatusFields)).toBe(false);
+
+        // Negative fixture 3: missing required modifiableWindow sub-properties
+        const missingModifiableWindowFields = {
+          ...completeValidPayload,
+          modifiableWindow: {
+            leadTimeMinutes: 60,
+            // missing cutoffMinutes
+          },
+        };
+        expect(validateView(missingModifiableWindowFields)).toBe(false);
+      });
+
+      it("validates DriverLeaveRecord required nullable fields with positive and negative fixtures", () => {
+        const validLeave: DriverLeaveRecord = {
+          leaveId: "c18375e8-5b12-4c6e-8d8a-6b83f58a74e1",
+          driverId: "drv-001",
+          leaveType: "annual",
+          startTime: "2026-09-10T08:00:00Z",
+          endTime: "2026-09-10T17:00:00Z",
+          reason: "annual leave",
+          status: "pending",
+          reviewedByPrincipalId: null,
+          reviewedAt: null,
+          reviewNotes: null,
+          impactedShiftIds: [],
+          createdAt: "2026-09-09T08:00:00Z",
+          updatedAt: "2026-09-09T08:00:00Z",
+        };
+        expect(validateLeave(validLeave)).toBe(true);
+
+        // Negative: omitting reviewedByPrincipalId must fail
+        const missingReviewedBy = { ...validLeave };
+        delete (missingReviewedBy as any).reviewedByPrincipalId;
+        expect(validateLeave(missingReviewedBy)).toBe(false);
+
+        // Negative: omitting reviewedAt must fail
+        const missingReviewedAt = { ...validLeave };
+        delete (missingReviewedAt as any).reviewedAt;
+        expect(validateLeave(missingReviewedAt)).toBe(false);
+
+        // Negative: omitting reviewNotes must fail
+        const missingReviewNotes = { ...validLeave };
+        delete (missingReviewNotes as any).reviewNotes;
+        expect(validateLeave(missingReviewNotes)).toBe(false);
+      });
+
+      it("validates HostVehicleSummary required nullable contractPeriod with positive and negative fixtures", () => {
+        const validHost: HostVehicleSummary = {
+          vehicleId: "veh-001",
+          plateNo: "ABC-1234",
+          vinMasked: "1HGCR2F83HA******",
+          vehicleForm: "sedan",
+          licenseClass: "multi_taxi",
+          energyType: "hybrid",
+          currentStatus: "active",
+          operatingFleetName: "Taipei DRTS Fleet",
+          contractPeriod: null,
+        };
+        expect(validateHost(validHost)).toBe(true);
+
+        // Positive with active contractPeriod
+        const validHostWithPeriod: HostVehicleSummary = {
+          ...validHost,
+          contractPeriod: {
+            startAt: "2026-01-01T00:00:00Z",
+            endAt: "2026-12-31T23:59:59Z",
+            status: "active",
+          },
+        };
+        expect(validateHost(validHostWithPeriod)).toBe(true);
+
+        // Negative: omitting contractPeriod must fail
+        const missingContractPeriod = { ...validHost };
+        delete (missingContractPeriod as any).contractPeriod;
+        expect(validateHost(missingContractPeriod)).toBe(false);
+      });
+
+      it("validates DriverTrainingRecord and FleetDriverRosterItem nullable fields with positive and negative fixtures", () => {
+        const validTraining = {
+          recordId: "rec-001",
+          driverId: "drv-001",
+          courseId: "crs-001",
+          courseCode: "SEC-101",
+          courseTitle: "Safety Regulations",
+          status: "not_started",
+          highestScore: null,
+          passed: false,
+          attemptsCount: 0,
+          completedAt: null,
+          expiresAt: null,
+          isOverdue: false,
+          lastAttemptAt: null,
+        };
+        expect(validateTraining(validTraining)).toBe(true);
+
+        // Negative: omitting highestScore must fail
+        const missingHighestScore = { ...validTraining };
+        delete (missingHighestScore as any).highestScore;
+        expect(validateTraining(missingHighestScore)).toBe(false);
+
+        // Positive roster item with nulls
+        const validRoster = {
+          driverId: "drv-001",
+          driverName: "Wang Xiao-Ming",
+          courseCode: "SEC-101",
+          status: "not_started",
+          score: null,
+          completedAt: null,
+          isOverdue: false,
+          latestAttemptId: null,
+        };
+        expect(validateRoster(validRoster)).toBe(true);
+
+        // Negative: omitting score must fail
+        const missingScore = { ...validRoster };
+        delete (missingScore as any).score;
+        expect(validateRoster(missingScore)).toBe(false);
+      });
+
+      it("validates ContractOperationalTerms required nullable fields with positive and negative fixtures", () => {
+        const validTerms = {
+          contractId: "contract-001",
+          modifiableWindowMinutes: null,
+          proofRequirements: null,
+          waitingRuleMinutes: null,
+          noShowRuleMinutes: null,
+          slaProfileCode: null,
+          effectiveVersion: null,
+          authMode: null,
+          status: "missing_data",
+        };
+        expect(validateTerms(validTerms)).toBe(true);
+
+        // Negative: omitting modifiableWindowMinutes must fail
+        const missingModifiableWindowMinutes = { ...validTerms };
+        delete (missingModifiableWindowMinutes as any).modifiableWindowMinutes;
+        expect(validateTerms(missingModifiableWindowMinutes)).toBe(false);
+      });
     });
   });
 });

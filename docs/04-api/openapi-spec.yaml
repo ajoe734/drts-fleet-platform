@@ -4100,6 +4100,9 @@ components:
         - endTime
         - reason
         - status
+        - reviewedByPrincipalId
+        - reviewedAt
+        - reviewNotes
         - impactedShiftIds
         - createdAt
         - updatedAt
@@ -4271,6 +4274,7 @@ components:
         - title
         - category
         - isRequired
+        - validityDays
         - passingScore
         - version
         - modulesCount
@@ -4398,9 +4402,13 @@ components:
         - courseCode
         - courseTitle
         - status
+        - highestScore
         - passed
         - attemptsCount
+        - completedAt
+        - expiresAt
         - isOverdue
+        - lastAttemptAt
       properties:
         recordId:
           type: string
@@ -4493,7 +4501,10 @@ components:
         - driverName
         - courseCode
         - status
+        - score
+        - completedAt
         - isOverdue
+        - latestAttemptId
       properties:
         driverId:
           type: string
@@ -4651,6 +4662,7 @@ components:
         - energyType
         - currentStatus
         - operatingFleetName
+        - contractPeriod
       properties:
         vehicleId:
           type: string
@@ -4679,6 +4691,8 @@ components:
         - currency
         - grossRevenue
         - platformFee
+        - fleetCommission
+        - netEarnings
         - tripsCount
         - operatingDays
         - settlementStatus
@@ -4718,6 +4732,10 @@ components:
         - type
         - description
         - status
+        - scheduledAt
+        - completedAt
+        - cost
+        - notesSummary
       properties:
         maintenanceId:
           type: string
@@ -4749,6 +4767,7 @@ components:
         - tripId
         - vehicleId
         - startedAt
+        - completedAt
         - areaSummary
         - distanceKm
         - fareAmount
@@ -4787,6 +4806,8 @@ components:
         - category
         - status
         - reportedAt
+        - resolvedAt
+        - resolutionSummary
       properties:
         caseId:
           type: string
@@ -4915,6 +4936,13 @@ components:
       type: object
       required:
         - contractId
+        - modifiableWindowMinutes
+        - proofRequirements
+        - waitingRuleMinutes
+        - noShowRuleMinutes
+        - slaProfileCode
+        - effectiveVersion
+        - authMode
         - status
       properties:
         contractId:
@@ -4944,34 +4972,175 @@ components:
           nullable: true
         status:
           $ref: "#/components/schemas/ContractOperationalDataStatus"
+    ContractOperationalModifiableWindow:
+      type: object
+      required:
+        - leadTimeMinutes
+        - cutoffMinutes
+      properties:
+        leadTimeMinutes:
+          type: integer
+        cutoffMinutes:
+          type: integer
+        description:
+          type: string
+    ContractOperationalProofRequirements:
+      type: object
+      required:
+        - requiredDocuments
+        - signatureRequired
+        - digitalProofAllowed
+      properties:
+        requiredDocuments:
+          type: array
+          items:
+            type: string
+        signatureRequired:
+          type: boolean
+        digitalProofAllowed:
+          type: boolean
+    ContractOperationalWaitingRule:
+      type: object
+      required:
+        - gracePeriodMinutes
+      properties:
+        gracePeriodMinutes:
+          type: integer
+        chargeableIntervalMinutes:
+          type: integer
+    ContractOperationalNoShowRule:
+      type: object
+      required:
+        - thresholdMinutes
+        - feeApplicable
+      properties:
+        thresholdMinutes:
+          type: integer
+        feeApplicable:
+          type: boolean
+    ContractOperationalSlaProfile:
+      type: object
+      required:
+        - profileId
+        - targetResponseMinutes
+        - pickupWindowMinutes
+      properties:
+        profileId:
+          type: string
+        targetResponseMinutes:
+          type: integer
+        pickupWindowMinutes:
+          type: integer
+        businessDispatchSubtype:
+          type: string
+    ContractOperationalEffectiveVersion:
+      type: object
+      required:
+        - versionNumber
+        - versionTag
+        - effectiveFrom
+        - effectiveTo
+      properties:
+        versionNumber:
+          type: integer
+        versionTag:
+          type: string
+        effectiveFrom:
+          type: string
+          format: date-time
+        effectiveTo:
+          type: string
+          format: date-time
+          nullable: true
+    ContractOperationalAuthMode:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+        eligibilityMode:
+          type: string
+    ContractOperationalFieldStatusMap:
+      type: object
+      required:
+        - modifiableWindow
+        - proofRequirements
+        - waitingRule
+        - noShowRule
+        - slaProfile
+        - effectiveVersion
+        - authMode
+      properties:
+        modifiableWindow:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+        proofRequirements:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+        waitingRule:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+        noShowRule:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+        slaProfile:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+        effectiveVersion:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
+        authMode:
+          $ref: "#/components/schemas/ContractOperationalDataStatus"
     ContractOperationalViewRecord:
       type: object
       required:
         - contractId
+        - modifiableWindow
+        - proofRequirements
+        - waitingRule
+        - noShowRule
+        - slaProfile
+        - effectiveVersion
+        - authMode
         - dataStatus
       properties:
         contractId:
           type: string
         modifiableWindow:
-          type: object
+          $ref: "#/components/schemas/ContractOperationalModifiableWindow"
           nullable: true
         proofRequirements:
-          type: object
+          $ref: "#/components/schemas/ContractOperationalProofRequirements"
           nullable: true
         waitingRule:
-          type: object
+          $ref: "#/components/schemas/ContractOperationalWaitingRule"
           nullable: true
         noShowRule:
-          type: object
+          $ref: "#/components/schemas/ContractOperationalNoShowRule"
           nullable: true
         slaProfile:
-          type: object
+          $ref: "#/components/schemas/ContractOperationalSlaProfile"
           nullable: true
         effectiveVersion:
-          type: object
+          $ref: "#/components/schemas/ContractOperationalEffectiveVersion"
           nullable: true
         authMode:
-          type: object
+          $ref: "#/components/schemas/ContractOperationalAuthMode"
           nullable: true
         dataStatus:
-          type: object
+          $ref: "#/components/schemas/ContractOperationalFieldStatusMap"
+    ContractOperationalTermsEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/ContractOperationalTerms"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    ContractOperationalViewEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/ContractOperationalViewRecord"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
