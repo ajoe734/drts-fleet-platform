@@ -225,6 +225,35 @@ jobs:
             cache-dependency-path: pnpm-lock.yaml,
           }
       - run: pnpm install --frozen-lockfile
+      - name: Run voice booking command PostgreSQL crash matrix
+        env:
+          UV_BOOKING_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: |
+          pnpm --filter @drts/contracts build
+          pnpm --filter @drts/control-plane-auth build
+          mkdir -p .artifacts/voice-booking-command
+          pnpm exec vitest run tests/integration/uv-exec-015.integration.test.ts \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/voice-booking-command/postgres-results.json
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('.artifacts/voice-booking-command/postgres-results.json').read_text())
+          total = report.get('numTotalTests', 0)
+          passed = report.get('numPassedTests', 0)
+          pending = report.get('numPendingTests', 0)
+          if total < 14 or passed != total or pending or not report.get('success'):
+              raise SystemExit(f'PostgreSQL matrix incomplete: total={total}, passed={passed}, pending={pending}')
+          print(f'PostgreSQL command/crash matrix: {passed} passed, none skipped')
+          PY_GATE
+      - name: Upload voice booking command PostgreSQL evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-booking-command-postgres-${{ github.sha }}
+          path: .artifacts/voice-booking-command/postgres-results.json
+          if-no-files-found: warn
       - name: Apply migrations
         run: pnpm db:migrate
       - name: Run integration tests
