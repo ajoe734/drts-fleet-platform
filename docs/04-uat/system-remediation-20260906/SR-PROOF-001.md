@@ -1,5 +1,31 @@
 # SR-PROOF-001 — Fresh-base regression evidence and unresolved implementation scope
 
+## 2026-09-09 02:03 UTC dispatch verification
+
+- Fetched `origin/dev`: `7d04833053b63558c10fb678a422dff3522e0150`;
+  tested HEAD: `8f8ddaab466a588952701e7762a16e8a56d2bfb8`. Candidate: none.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1 at
+  `ac1076708`, add/add conflict in payment-gate.test.ts.
+  `git rebase --abort`: exit 0; published branch restored without force push.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/modules/billing-settlement/billing-settlement.service.ts apps/api/src/modules/billing-settlement/billing-settlement.repository.ts`:
+  exit 0, empty; these tested product files equal the fetched base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`:
+  exit 1, 1 passed / 2 failed, duration 7.97s. Fabricated proof becomes paid;
+  unresolved persistence returns paid. Unapproved rejection passes.
+  Isolated resource inputs: `sr-proof-001-batch-a`, `sr-proof-001-driver-a`,
+  `sr-proof-001-statement-a`, `sr-proof-001-nonexistent-proof`.
+- Rechecked N09/C081/C125, merged planning/history reports, platform realm
+  tokens and reimbursement canvas. Current parent still lacks the requested
+  repository/module/proof storage/scanner scopes and contract dependency;
+  canvas still lacks upload/scan/reject/readback states. The existing screen
+  requirements below remain the design handoff. No helper was recreated.
+- Supervisor must apply those existing routing actions and select the recovery
+  branch before redispatch. HISTORY-REPAIR completion only documents recovery;
+  it does not supply these authorizations or fix the payment gate.
+- No product changes or typecheck reruns in this dispatch. Live upload,
+  scanning/download, database concurrency, durable receipt, browser/device and
+  real payment checks remain unperformed. No servers or infrastructure started.
+
 ## 2026-09-09 resumed dispatch verification
 
 - Fetched base: `3062ea363769cc393e59384251f5aedc7e570ac5` (`origin/dev`).
