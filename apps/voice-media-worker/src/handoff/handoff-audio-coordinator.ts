@@ -2,7 +2,6 @@ import { type PcmFormat } from "../media/audio-codec";
 import {
   type VoiceMediaAccess,
   type VoiceMediaOutputFence,
-  type VoiceOutputOwner,
 } from "../media/output-fence";
 
 export type VoiceHangupReason =

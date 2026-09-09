@@ -1,11 +1,6 @@
-import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
-import {
-  VoiceHandoffQueueService,
-  type HandoffQueueItem,
-} from "../../apps/api/src/modules/callcenter/voice-handoff-queue.service";
+import { VoiceHandoffQueueService } from "../../apps/api/src/modules/callcenter/voice-handoff-queue.service";
 import {
   VoiceCtiAdapter,
   type VoiceCtiProviderAdapter,
@@ -23,13 +18,9 @@ import type {
   VoiceConfirmationRecord,
   VoiceSessionRecord,
 } from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
-import {
-  HandoffAudioCoordinator,
-  type VoiceHangupReason,
-} from "../../apps/voice-media-worker/src/handoff";
+import { HandoffAudioCoordinator } from "../../apps/voice-media-worker/src/handoff";
 import {
   VoiceMediaOutputFence,
-  type VoiceMediaAccess,
   type VoiceMediaOutputSink,
 } from "../../apps/voice-media-worker/src/media/output-fence";
 
@@ -370,7 +361,7 @@ describe("UV-EXEC-017: 真人轉接 coordinator 與排隊控制權移交", () =>
     });
 
     it("streams wait audio during queueing, clears hold audio before bridge, and keeps pending if bridge is unconfirmed", async () => {
-      const { coordinator, aiAccess, sink } = buildAudioFence();
+      const { coordinator, aiAccess } = buildAudioFence();
       const isolation = coordinator.isolateAiAudio(aiAccess);
       expect(isolation.success).toBe(true);
       const coordAccess = isolation.coordinatorAccess!;

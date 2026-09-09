@@ -8,7 +8,6 @@ import {
 } from "../callcenter/voice-handoff-queue.service";
 import type { VoiceHangupReason } from "../callcenter/voice-cti.adapter";
 import type {
-  VoiceCommandReceiptRecord,
   VoiceSessionRecord,
 } from "./voice-booking.repository";
 import { VoiceBookingRepository } from "./voice-booking.repository";
@@ -592,7 +591,7 @@ export class VoiceHandoffService {
       );
     }
 
-    const dropOutcome = this.handoffQueueService.handleCallDrop(
+    this.handoffQueueService.handleCallDrop(
       command.handoffId,
       command.hangupReason,
       command.callerStillConnected,
