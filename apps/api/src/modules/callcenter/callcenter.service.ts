@@ -26,8 +26,10 @@ import {
 } from "../../common/evidence-governance";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { VoiceBookingRepository } from "../voice-booking/voice-booking.repository";
+import { VoiceCallbackService } from "../voice-booking/voice-callback.service";
 import { resolveVoiceOrderFence } from "../voice-booking/voice-order-fence";
 import { CallcenterRepository } from "./callcenter.repository";
+import { VoiceHandoffQueueService } from "./voice-handoff-queue.service";
 
 type RecordingAttachmentEvent = {
   callId: string;
@@ -81,6 +83,16 @@ type RecordingPendingCommand = {
 
 type RecordingFailedCommand = RecordingPendingCommand;
 
+export type CallcenterCallbackTaskRecord = CallbackTaskRecord & {
+  assignedOperatorId?: string | null;
+  attemptCount?: number;
+  lastOutcome?: string | null;
+  brandId?: string | null;
+  contactRole?: string | null;
+  contactName?: string | null;
+  consentRef?: string | null;
+};
+
 @Injectable()
 export class CallcenterService implements OnModuleInit {
   private callSequence = 1;
@@ -99,6 +111,8 @@ export class CallcenterService implements OnModuleInit {
     private readonly auditNotificationService: AuditNotificationService,
     @Optional() private readonly callcenterRepository?: CallcenterRepository,
     @Optional() private readonly voiceBookingRepository?: VoiceBookingRepository,
+    @Optional() private readonly voiceCallbackService?: VoiceCallbackService,
+    @Optional() private readonly voiceHandoffQueueService?: VoiceHandoffQueueService,
   ) {}
 
   async onModuleInit() {
@@ -137,13 +151,15 @@ export class CallcenterService implements OnModuleInit {
     this.assertCallerPhone(command.callerPhone);
 
     const now = new Date().toISOString();
-    const session: CallSessionRecord = {
+    const session: any = {
       callId: this.nextCallId(),
       callType: command.callType,
       callerPhone: command.callerPhone,
       agentId: command.agentId ?? null,
       agentIdentityAnnounced: Boolean(command.agentIdentityAnnounced),
       agentIdentityAnnouncedAt: command.agentIdentityAnnounced ? now : null,
+      brandId: (command as any).brandId ?? null,
+      aiMetadata: (command as any).aiMetadata ?? null,
       status: "active",
       startedAt: now,
       endedAt: null,
@@ -264,63 +280,137 @@ export class CallcenterService implements OnModuleInit {
   getCallSession(
     callId: string,
     requestId?: string,
-    identity?: EvidenceAccessIdentity | null,
+    identity?: (EvidenceAccessIdentity & { roles?: string[] }) | null,
   ) {
-    const policy = assertEvidenceAccess({
-      family: "call_recording",
-      identity,
-    });
-    const session = this.cloneSession(this.requireSession(callId));
-    this.recordAudit(
-      {
-        actorId: identity?.actorId ?? null,
-        actorType:
-          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
-          "system",
-        tenantId: identity?.tenantId ?? null,
-        moduleName: "callcenter",
-        actionName: policy.auditAction,
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "read", {
-          linkedOrderId: session.linkedOrderId,
-          hasRecordingId: Boolean(session.recordingId),
-          hasRecordingUrl: Boolean(session.recordingUrl),
-        }),
-      },
-      requestId,
+    const rawSession = this.requireSession(callId);
+    if (
+      identity?.tenantId &&
+      (rawSession as any).brandId &&
+      (rawSession as any).brandId !== identity.tenantId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "UNAUTHORIZED_BRAND",
+        `Access to call session '${callId}' under brand '${(rawSession as any).brandId}' is not authorized.`,
+      );
+    }
+
+    const isTenant =
+      identity?.realm === "tenant" ||
+      (identity?.actorType as string) === "tenant_admin" ||
+      (identity?.actorType as string) === "tenant_user";
+
+    if (isTenant) {
+      assertEvidenceAccess({
+        family: "call_recording",
+        identity,
+      });
+    }
+
+    const session = this.cloneSession(rawSession);
+    let policy: ReturnType<typeof assertEvidenceAccess> | null = null;
+    const isRecordingUnauthorized = Boolean(
+      (identity as any)?.roles?.includes("guest_viewer"),
     );
+
+    if (isRecordingUnauthorized) {
+      session.recordingId = null;
+      session.providerRecordingRef = null;
+      session.recordingUrl = null;
+      session.recordingState = "missing";
+    } else {
+      try {
+        policy = assertEvidenceAccess({
+          family: "call_recording",
+          identity,
+        });
+      } catch {
+        // Mask recording details if identity does not have call_recording evidence access
+        session.recordingId = null;
+        session.providerRecordingRef = null;
+        session.recordingUrl = null;
+        session.recordingState = "missing";
+      }
+    }
+
+    if (policy) {
+      this.recordAudit(
+        {
+          actorId: identity?.actorId ?? null,
+          actorType:
+            (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+            "system",
+          tenantId: identity?.tenantId ?? null,
+          moduleName: "callcenter",
+          actionName: policy.auditAction,
+          resourceType: "call_session",
+          resourceId: session.callId,
+          newValuesSummary: buildEvidenceAccessAuditSummary(policy, "read", {
+            linkedOrderId: session.linkedOrderId,
+            hasRecordingId: Boolean(session.recordingId),
+            hasRecordingUrl: Boolean(session.recordingUrl),
+          }),
+        },
+        requestId,
+      );
+    }
     return session;
   }
 
   listCallSessions(
     requestId?: string,
-    identity?: EvidenceAccessIdentity | null,
+    identity?: (EvidenceAccessIdentity & { roles?: string[] }) | null,
   ) {
-    const policy = assertEvidenceAccess({
-      family: "call_recording",
-      identity,
+    let sourceSessions = this.callSessions;
+    if (identity?.tenantId) {
+      sourceSessions = sourceSessions.filter(
+        (session) =>
+          !(session as any).brandId ||
+          (session as any).brandId === identity.tenantId,
+      );
+    }
+
+    let policy: ReturnType<typeof assertEvidenceAccess> | null = null;
+    let recordingAuthorized = true;
+    try {
+      policy = assertEvidenceAccess({
+        family: "call_recording",
+        identity,
+      });
+    } catch {
+      recordingAuthorized = false;
+    }
+
+    const items = sourceSessions.map((session) => {
+      const cloned = this.cloneSession(session);
+      if (!recordingAuthorized) {
+        cloned.recordingId = null;
+        cloned.providerRecordingRef = null;
+        cloned.recordingUrl = null;
+        cloned.recordingState = "missing";
+      }
+      return cloned;
     });
-    const items = this.callSessions.map((session) =>
-      this.cloneSession(session),
-    );
-    this.recordAudit(
-      {
-        actorId: identity?.actorId ?? null,
-        actorType:
-          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
-          "system",
-        tenantId: identity?.tenantId ?? null,
-        moduleName: "callcenter",
-        actionName: "list_call_recording_evidence",
-        resourceType: "call_session",
-        resourceId: null,
-        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
-          itemCount: items.length,
-        }),
-      },
-      requestId,
-    );
+
+    if (policy) {
+      this.recordAudit(
+        {
+          actorId: identity?.actorId ?? null,
+          actorType:
+            (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+            "system",
+          tenantId: identity?.tenantId ?? null,
+          moduleName: "callcenter",
+          actionName: "list_call_recording_evidence",
+          resourceType: "call_session",
+          resourceId: null,
+          newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
+            itemCount: items.length,
+          }),
+        },
+        requestId,
+      );
+    }
     return items;
   }
 
@@ -818,6 +908,281 @@ export class CallcenterService implements OnModuleInit {
     return this.cloneCallbackTask(session.callbackTask);
   }
 
+  claimCallbackTask(
+    callbackTaskId: string,
+    operatorId: string,
+    expectedVersion?: number,
+    requestId?: string,
+  ) {
+    const session = this.findSessionByCallbackTaskId(callbackTaskId);
+    if (!session.callbackTask) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "CALLBACK_TASK_NOT_FOUND",
+        "Callback task not found.",
+        { callbackTaskId },
+      );
+    }
+
+    if (
+      session.callbackTask.status === "completed" ||
+      (session.callbackTask.status as string) === "cancelled"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "CALLBACK_TERMINAL",
+        `Cannot claim callback task in terminal state '${session.callbackTask.status}'.`,
+      );
+    }
+
+    const now = new Date().toISOString();
+    const updatedTask: CallcenterCallbackTaskRecord = {
+      ...session.callbackTask,
+      agentId: operatorId,
+      assignedOperatorId: operatorId,
+      status: "claimed" as any,
+      updatedAt: now,
+    };
+    session.callbackTask = updatedTask;
+    this.persistSessions([session], "claim_callback_task");
+
+    if (this.voiceCallbackService) {
+      try {
+        this.voiceCallbackService.claimCallback({
+          taskId: callbackTaskId,
+          operatorId,
+          expectedVersion: expectedVersion ?? 1,
+        });
+      } catch {
+        // Voice callback service sync fallback
+      }
+    }
+
+    this.recordAudit(
+      {
+        actorId: operatorId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "callcenter",
+        actionName: "claim_callback_task",
+        resourceType: "callback_task",
+        resourceId: updatedTask.callbackTaskId,
+        newValuesSummary: {
+          callId: session.callId,
+          status: updatedTask.status,
+          operatorId,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneCallbackTask(updatedTask);
+  }
+
+  recordCallbackAttempt(
+    callbackTaskId: string,
+    command: {
+      operatorId: string;
+      outcome: string;
+      notes?: string;
+      hangupConfirmed?: boolean;
+    },
+    requestId?: string,
+  ) {
+    const session = this.findSessionByCallbackTaskId(callbackTaskId);
+    if (!session.callbackTask) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "CALLBACK_TASK_NOT_FOUND",
+        "Callback task not found.",
+        { callbackTaskId },
+      );
+    }
+
+    if (
+      session.callbackTask.status === "completed" ||
+      (session.callbackTask.status as string) === "cancelled"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "CALLBACK_TERMINAL",
+        `Cannot record attempt on callback task in terminal state '${session.callbackTask.status}'.`,
+      );
+    }
+
+    const now = new Date().toISOString();
+    const newStatus =
+      command.outcome === "succeeded" || command.outcome === "answered"
+        ? "in_progress"
+        : "pending";
+    const currentAttemptCount =
+      ((session.callbackTask as any).attemptCount ?? 0) + 1;
+    const updatedTask: CallcenterCallbackTaskRecord = {
+      ...session.callbackTask,
+      note: command.notes ?? session.callbackTask.note,
+      status: newStatus as any,
+      attemptCount: currentAttemptCount,
+      lastOutcome: command.outcome,
+      updatedAt: now,
+    };
+    session.callbackTask = updatedTask;
+    this.persistSessions([session], "record_callback_attempt");
+
+    if (this.voiceCallbackService) {
+      try {
+        this.voiceCallbackService.recordAttempt({
+          taskId: callbackTaskId,
+          operatorId: command.operatorId,
+          expectedVersion: 1,
+          outcome: command.outcome as any,
+          notes: command.notes,
+          hangupConfirmed: command.hangupConfirmed,
+        });
+      } catch {
+        // Voice callback service sync fallback
+      }
+    }
+
+    this.recordAudit(
+      {
+        actorId: command.operatorId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "callcenter",
+        actionName: "record_callback_attempt",
+        resourceType: "callback_task",
+        resourceId: updatedTask.callbackTaskId,
+        newValuesSummary: {
+          callId: session.callId,
+          outcome: command.outcome,
+          status: updatedTask.status,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneCallbackTask(updatedTask);
+  }
+
+  cancelCallbackTask(
+    callbackTaskId: string,
+    command: { reason: string; expectedVersion?: number; operatorId?: string },
+    requestId?: string,
+  ) {
+    const session = this.findSessionByCallbackTaskId(callbackTaskId);
+    if (!session.callbackTask) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "CALLBACK_TASK_NOT_FOUND",
+        "Callback task not found.",
+        { callbackTaskId },
+      );
+    }
+
+    if (session.callbackTask.status === "completed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "CALLBACK_TERMINAL",
+        "Cannot cancel already completed callback task.",
+      );
+    }
+
+    const now = new Date().toISOString();
+    const updatedTask: CallcenterCallbackTaskRecord = {
+      ...session.callbackTask,
+      note: command.reason ?? session.callbackTask.note,
+      status: "cancelled" as any,
+      updatedAt: now,
+    };
+    session.callbackTask = updatedTask;
+    this.removeFlag(session, "callback_pending");
+    this.persistSessions([session], "cancel_callback_task");
+
+    if (this.voiceCallbackService) {
+      try {
+        this.voiceCallbackService.cancelCallback({
+          taskId: callbackTaskId,
+          reason: command.reason,
+          expectedVersion: command.expectedVersion ?? 1,
+          operatorId: command.operatorId,
+        });
+      } catch {
+        // Voice callback service sync fallback
+      }
+    }
+
+    this.recordAudit(
+      {
+        actorId: command.operatorId ?? session.agentId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "callcenter",
+        actionName: "cancel_callback_task",
+        resourceType: "callback_task",
+        resourceId: updatedTask.callbackTaskId,
+        newValuesSummary: {
+          callId: session.callId,
+          status: updatedTask.status,
+          reason: command.reason,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneCallbackTask(updatedTask);
+  }
+
+  takeoverAiCallSession(
+    callId: string,
+    command: { operatorId: string; reason?: string },
+    requestId?: string,
+  ) {
+    const session = this.requireSession(callId);
+    if (session.status === "closed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "SESSION_CLOSED",
+        `Cannot takeover closed call session '${callId}'.`,
+      );
+    }
+
+    session.agentId = command.operatorId;
+    this.addFlag(session, "human_takeover");
+    this.removeFlag(session, "ai_session_autonomous");
+    this.persistSessions([session], "takeover_ai_session");
+
+    if (this.voiceHandoffQueueService) {
+      try {
+        this.voiceHandoffQueueService.claimSession({
+          callId,
+          operatorId: command.operatorId,
+        });
+      } catch {
+        // Voice handoff queue sync fallback
+      }
+    }
+
+    this.recordAudit(
+      {
+        actorId: command.operatorId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "callcenter",
+        actionName: "takeover_ai_session",
+        resourceType: "call_session",
+        resourceId: session.callId,
+        newValuesSummary: {
+          callId: session.callId,
+          operatorId: command.operatorId,
+          reason: command.reason ?? "human_takeover",
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneSession(session);
+  }
+
   linkOrderToCallSession(input: PhoneOrderSessionInput) {
     const now = new Date().toISOString();
     const recordingId = input.recordingId?.trim() || null;
@@ -1135,7 +1500,7 @@ export class CallcenterService implements OnModuleInit {
     }
   }
 
-  private cloneCallbackTask(callbackTask: CallbackTaskRecord) {
+  private cloneCallbackTask<T extends CallbackTaskRecord>(callbackTask: T): T {
     return {
       ...callbackTask,
     };

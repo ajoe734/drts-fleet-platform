@@ -116,24 +116,24 @@ export interface RecordCallbackAttemptInput {
   operatorId: string;
   expectedVersion: number;
   outcome: CallbackOutcome;
-  dialOperationKey?: string;
-  dialStatus?: "dialing" | "bridged" | "hung_up";
-  hangupConfirmed?: boolean;
-  notes?: string;
+  dialOperationKey?: string | undefined;
+  dialStatus?: ("dialing" | "bridged" | "hung_up") | undefined;
+  hangupConfirmed?: boolean | undefined;
+  notes?: string | undefined;
 }
 
 export interface CompleteVoiceCallbackInput {
   taskId: string;
   operatorId: string;
   expectedVersion: number;
-  resolutionNotes?: string;
+  resolutionNotes?: string | undefined;
 }
 
 export interface CancelVoiceCallbackInput {
   taskId: string;
   reason: string;
   expectedVersion: number;
-  operatorId?: string;
+  operatorId?: string | undefined;
 }
 
 export interface CancelVoiceCallbackResult {

@@ -70,6 +70,15 @@ import {
 } from "./map-booking";
 import { CallcenterInteractiveMap } from "./callcenter-interactive-map";
 import { resolveOpsMapTileUrlTemplate } from "../dispatch/ops-map-board";
+import {
+  deriveDispatchPresentation,
+  deriveTtsPresentation,
+  isNormalAiCallSession,
+  buildCallbackActionsForRecord,
+  buildAiSessionActions,
+  type ExtendedCallSessionRecord,
+  type ExtendedCallbackTaskRecord,
+} from "./callcenter-ai-exceptions";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -114,7 +123,7 @@ type CallcenterListEnvelope<T> = {
   health?: UiHealthEnvelope;
 };
 
-type QueueView = "sessions" | "callback" | "recording";
+type QueueView = "sessions" | "exceptions" | "callback" | "recording";
 
 type OutcomeNotice = {
   tone: "success" | "warning";
@@ -573,6 +582,10 @@ function getActionLabel(
     quote_eta: "callcenter.action.quoteEta",
     create_callback: "callcenter.action.createCallback",
     complete_callback: "callcenter.action.completeCallback",
+    claim_callback: "callcenter.action.claimCallback",
+    contact_callback: "callcenter.action.contactCallback",
+    cancel_callback: "callcenter.action.cancelCallback",
+    takeover_ai_session: "callcenter.action.takeoverAiSession",
     create_phone_booking: "callcenter.action.createPhoneBooking",
     link_existing_order: "callcenter.action.linkExistingOrder",
     transfer_to_complaint: "callcenter.action.transferToComplaint",
@@ -741,6 +754,7 @@ function buildSessionActions(
   const hasLinkedOrder = Boolean(session.linkedOrderId);
   const hasComplaint = Boolean(session.linkedCaseNo);
   const hasPendingCallback = session.callbackTask?.status === "pending";
+  const extSession = session as ExtendedCallSessionRecord;
 
   const createDescriptor = (
     action: string,
@@ -755,6 +769,12 @@ function buildSessionActions(
     ...(disabledReasonCode ? { disabledReasonCode } : {}),
     ...(requiresReason ? { requiresReason: true } : {}),
   });
+
+  const callbackActions = buildCallbackActionsForRecord(
+    session.callbackTask,
+    isClosed,
+  );
+  const aiActions = buildAiSessionActions(session, extSession.aiMetadata);
 
   return [
     createDescriptor(
@@ -781,20 +801,12 @@ function buildSessionActions(
     ),
     createDescriptor(
       "create_callback",
-      !isClosed,
+      !hasPendingCallback,
       "low",
-      isClosed ? "session_closed" : undefined,
+      hasPendingCallback ? "callback_already_pending" : undefined,
     ),
-    createDescriptor(
-      "complete_callback",
-      !isClosed && hasPendingCallback,
-      "low",
-      isClosed
-        ? "session_closed"
-        : hasPendingCallback
-          ? undefined
-          : "callback_missing",
-    ),
+    ...callbackActions,
+    ...aiActions,
     createDescriptor(
       "create_phone_booking",
       !isClosed && !hasLinkedOrder && !hasComplaint,
@@ -1105,6 +1117,11 @@ export default function CallcenterPage() {
   const [callbackDueAt, setCallbackDueAt] = useState("");
   const [callbackNote, setCallbackNote] = useState("");
   const [callbackCompleteNote, setCallbackCompleteNote] = useState("");
+  const [callbackClaimOperator, setCallbackClaimOperator] = useState("AGENT-OPS-001");
+  const [callbackAttemptOutcome, setCallbackAttemptOutcome] = useState("connected");
+  const [callbackAttemptNotes, setCallbackAttemptNotes] = useState("");
+  const [callbackCancelReason, setCallbackCancelReason] = useState("");
+  const takeoverReason = "human_intervention";
   const [transferForm, setTransferForm] = useState(
     INITIAL_COMPLAINT_TRANSFER_FORM,
   );
@@ -1252,6 +1269,13 @@ export default function CallcenterPage() {
   const recordingQueue = filteredSessions.filter(
     (session) => session.recordingState !== "ready",
   );
+  const exceptionSessions = filteredSessions.filter(
+    (session) =>
+      Boolean((session as ExtendedCallSessionRecord).aiMetadata?.hasException) ||
+      session.flags.includes("exception") ||
+      session.flags.includes("ai_exception") ||
+      Boolean((session as ExtendedCallSessionRecord).aiMetadata?.exceptionDetails),
+  );
   const callbackQueue = [...callbacks].sort(
     (left, right) =>
       new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime(),
@@ -1301,6 +1325,11 @@ export default function CallcenterPage() {
       id: "sessions" as const,
       label: t("callcenter.tab.sessions"),
       badge: activeSessions.length,
+    },
+    {
+      id: "exceptions" as const,
+      label: t("callcenter.tab.exceptions"),
+      badge: exceptionSessions.length,
     },
     {
       id: "callback" as const,
@@ -1558,6 +1587,21 @@ export default function CallcenterPage() {
   const completeCallbackAction = selectedSession
     ? getActionDescriptor(selectedSession.availableActions, "complete_callback")
     : undefined;
+  const claimCallbackAction = selectedSession
+    ? getActionDescriptor(selectedSession.availableActions, "claim_callback")
+    : undefined;
+  const contactCallbackAction = selectedSession
+    ? getActionDescriptor(selectedSession.availableActions, "contact_callback")
+    : undefined;
+  const cancelCallbackAction = selectedSession
+    ? getActionDescriptor(selectedSession.availableActions, "cancel_callback")
+    : undefined;
+  const takeoverAiAction = selectedSession
+    ? getActionDescriptor(
+        selectedSession.availableActions,
+        "takeover_ai_session",
+      )
+    : undefined;
   const createBookingAction = selectedSession
     ? getActionDescriptor(
         selectedSession.availableActions,
@@ -1688,6 +1732,41 @@ export default function CallcenterPage() {
           {formatOpsCodeLabel(currentLocale, session.recordingState)}
         </CanvasPill>
       ),
+    },
+  ];
+
+  const exceptionColumns: CanvasTableColumn<SessionResource>[] = [
+    {
+      h: t("callcenter.col.session"),
+      r: (session) => {
+        const ext = session as ExtendedCallSessionRecord;
+        return (
+          <button
+            type="button"
+            style={queueButtonStyle}
+            onClick={() => setSelectedCallId(session.callId)}
+          >
+            <div style={{ fontWeight: 600 }}>{session.callId}</div>
+            <div style={subtleTextStyle}>
+              {session.callerPhone} ·{" "}
+              {ext.aiMetadata?.exceptionDetails?.category ??
+                formatOpsCodeLabel(currentLocale, session.callType)}
+            </div>
+          </button>
+        );
+      },
+    },
+    {
+      h: t("callcenter.exception.nextParty"),
+      r: (session) => {
+        const ext = session as ExtendedCallSessionRecord;
+        return (
+          <CanvasPill theme={theme} tone="danger">
+            {ext.aiMetadata?.exceptionDetails?.nextResponsibleParty ??
+              "human_operator"}
+          </CanvasPill>
+        );
+      },
     },
   ];
 
@@ -2065,20 +2144,47 @@ export default function CallcenterPage() {
           <div style={columnStackStyle}>
             <CanvasCard
               theme={theme}
-              title={t("callcenter.waitingList.title")}
+              title={
+                queueView === "exceptions"
+                  ? t("callcenter.tab.exceptions")
+                  : t("callcenter.waitingList.title")
+              }
               subtitle={
                 queueView === "sessions"
                   ? t("callcenter.waitingList.subtitle.sessions")
-                  : queueView === "callback"
-                    ? t("callcenter.waitingList.subtitle.callback")
-                    : t("callcenter.waitingList.subtitle.recording")
+                  : queueView === "exceptions"
+                    ? t("callcenter.tab.exceptions")
+                    : queueView === "callback"
+                      ? t("callcenter.waitingList.subtitle.callback")
+                      : t("callcenter.waitingList.subtitle.recording")
               }
               actions={
-                <CanvasPill theme={theme}>{waitingSessions.length}</CanvasPill>
+                <CanvasPill theme={theme}>
+                  {queueView === "exceptions"
+                    ? exceptionSessions.length
+                    : waitingSessions.length}
+                </CanvasPill>
               }
               padding={0}
             >
-              {waitingSessions.length > 0 ? (
+              {queueView === "exceptions" ? (
+                exceptionSessions.length > 0 ? (
+                  <CanvasTable
+                    theme={theme}
+                    columns={exceptionColumns}
+                    rows={exceptionSessions}
+                  />
+                ) : (
+                  <div style={{ padding: 16 }}>
+                    <CanvasEmptyState
+                      theme={theme}
+                      tone="neutral"
+                      title={t("callcenter.waitingList.empty.title")}
+                      body={t("callcenter.waitingList.empty.body")}
+                    />
+                  </div>
+                )
+              ) : waitingSessions.length > 0 ? (
                 <CanvasTable
                   theme={theme}
                   columns={waitingColumns}
@@ -2213,6 +2319,180 @@ export default function CallcenterPage() {
                       />
                     </CanvasField>
                   </div>
+                  {((selectedSession as ExtendedCallSessionRecord).recordingAuthorized === false ||
+                    selectedSession.flags.includes("recording_unauthorized")) && (
+                    <div style={{ marginBottom: 12 }}>
+                      <CanvasBanner
+                        theme={theme}
+                        tone="warn"
+                        body={t("callcenter.recording.unauthorized")}
+                      />
+                    </div>
+                  )}
+                  {(() => {
+                    const ext = selectedSession as ExtendedCallSessionRecord;
+                    const aiMeta = ext.aiMetadata;
+                    const isAi =
+                      (selectedSession.callType as string) === "ai_booking" ||
+                      Boolean(aiMeta) ||
+                      selectedSession.flags.includes("ai_session");
+                    const isNormal = isNormalAiCallSession(ext);
+                    const dispatchPres = deriveDispatchPresentation(
+                      aiMeta?.dispatchState,
+                    );
+                    const ttsPres = deriveTtsPresentation(aiMeta?.ttsState);
+
+                    if (!isAi) {
+                      return null;
+                    }
+
+                    return (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 10,
+                          marginTop: 12,
+                          marginBottom: 12,
+                        }}
+                      >
+                        {isNormal ? (
+                          <CanvasBanner
+                            theme={theme}
+                            tone="info"
+                            title={t("callcenter.ai.autonomousTitle")}
+                            body={t("callcenter.ai.noApprovalRequired")}
+                          />
+                        ) : (
+                          <>
+                            <CanvasBanner
+                              theme={theme}
+                              tone="danger"
+                              title={t("callcenter.exception.title")}
+                              body={`${t("callcenter.exception.category")}: ${aiMeta?.exceptionDetails?.category ?? "exception"} · ${t("callcenter.exception.nextParty")}: ${aiMeta?.exceptionDetails?.nextResponsibleParty ?? "human_operator"}${aiMeta?.exceptionDetails?.reason ? ` · ${aiMeta.exceptionDetails.reason}` : ""}`}
+                            />
+                            {(aiMeta?.exceptionDetails?.unknownOperation ||
+                              aiMeta?.exceptionDetails?.category ===
+                                "command_pending_reconciliation") && (
+                              <CanvasBanner
+                                theme={theme}
+                                tone="danger"
+                                title={t("callcenter.exception.unknownOpTitle")}
+                                body={`${t("callcenter.exception.unknownOpWarning")} · ${t("callcenter.exception.retryBlocked")}`}
+                              />
+                            )}
+                          </>
+                        )}
+
+                        <CanvasDL
+                          theme={theme}
+                          items={[
+                            {
+                              label: t("callcenter.ai.step"),
+                              value: aiMeta?.step ?? "booking",
+                            },
+                            {
+                              label: t("callcenter.ai.language"),
+                              value: aiMeta?.language ?? "zh-TW",
+                            },
+                            {
+                              label: t("callcenter.ai.providerVersion"),
+                              value: `${aiMeta?.providerVersion ?? "v1.2"} (route ${aiMeta?.routeProfileVersion ?? 1})`,
+                            },
+                            {
+                              label: t("callcenter.ai.latencies"),
+                              value: `ASR ${aiMeta?.latencies?.asrMs ?? 120}ms · LLM ${aiMeta?.latencies?.llmMs ?? 450}ms · TTS ${aiMeta?.latencies?.ttsMs ?? 180}ms · E2E ${aiMeta?.latencies?.endToEndMs ?? 850}ms`,
+                            },
+                            {
+                              label: t("callcenter.ai.controlOwner"),
+                              value: aiMeta?.controlOwner ?? "ai",
+                            },
+                            {
+                              label: t("callcenter.dispatch.title"),
+                              value: dispatchPres.displayText,
+                            },
+                            {
+                              label: t("callcenter.tts.title"),
+                              value: ttsPres.displayText,
+                            },
+                            ...(aiMeta?.confirmedData?.confirmedPickup
+                              ? [
+                                  {
+                                    label: t(
+                                      "callcenter.exception.confirmedData",
+                                    ),
+                                    value: `${aiMeta.confirmedData.confirmedPickup} → ${aiMeta.confirmedData.confirmedDropoff ?? "—"}`,
+                                  },
+                                ]
+                              : []),
+                            ...(aiMeta?.confirmedData?.callerUtterance
+                              ? [
+                                  {
+                                    label: t(
+                                      "callcenter.exception.rawUtterance",
+                                    ),
+                                    value: aiMeta.confirmedData.callerUtterance,
+                                  },
+                                ]
+                              : []),
+                            ...(aiMeta?.confirmedData?.lastUnresolvedQuestion
+                              ? [
+                                  {
+                                    label: t(
+                                      "callcenter.exception.unresolvedQuestion",
+                                    ),
+                                    value:
+                                      aiMeta.confirmedData
+                                        .lastUnresolvedQuestion,
+                                  },
+                                ]
+                              : []),
+                          ]}
+                        />
+
+                        {takeoverAiAction?.enabled && (
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              alignItems: "center",
+                            }}
+                          >
+                            <ActionButton
+                              theme={theme}
+                              disabled={!takeoverAiAction.enabled}
+                              helper={getActionHelper(t, takeoverAiAction)}
+                              busy={busyKey === "takeover-ai"}
+                              label={getActionLabel(t, "takeover_ai_session")}
+                              variant="primary"
+                              onClick={() =>
+                                void runGuardedAction(
+                                  "takeover-ai",
+                                  takeoverAiAction,
+                                  async () => {
+                                    await getOpsClient().takeoverAiCallSession(
+                                      selectedSession.callId,
+                                      {
+                                        operatorId: callcenterActorId,
+                                        reason: takeoverReason,
+                                      },
+                                    );
+                                    setOutcomeNotice({
+                                      tone: "success",
+                                      message: t(
+                                        "callcenter.ai.takeoverSuccess",
+                                      ),
+                                    });
+                                    await loadData(selectedSession.callId);
+                                  },
+                                )
+                              }
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <CanvasDL
                     theme={theme}
                     items={[
@@ -2907,6 +3187,141 @@ export default function CallcenterPage() {
                     />
                   </form>
 
+                  {selectedSession?.status === "closed" &&
+                    Boolean(selectedSession.callbackTask) && (
+                      <CanvasBanner
+                        theme={theme}
+                        tone="info"
+                        body={t("callcenter.callback.closedCallNotice")}
+                      />
+                    )}
+                  {(selectedSession?.callbackTask as ExtendedCallbackTaskRecord)
+                    ?.contactRole === "booker" && (
+                    <CanvasBanner
+                      theme={theme}
+                      tone="info"
+                      title={t("callcenter.callback.contactRole")}
+                      body={t("callcenter.callback.bookerVsPassenger")}
+                    />
+                  )}
+
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (!selectedSession?.callbackTask) {
+                        return;
+                      }
+                      void runGuardedAction(
+                        "claim-callback",
+                        claimCallbackAction,
+                        async () => {
+                          await getOpsClient().claimCallbackTask(
+                            selectedSession.callbackTask!.callbackTaskId,
+                            { operatorId: callbackClaimOperator },
+                          );
+                          setOutcomeNotice({
+                            tone: "success",
+                            message: t("callcenter.callback.claimSuccess"),
+                          });
+                          await loadData(selectedSession.callId);
+                        },
+                      );
+                    }}
+                  >
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.action.claimCallback")}
+                    >
+                      <input
+                        type="text"
+                        required
+                        value={callbackClaimOperator}
+                        onChange={(event) =>
+                          setCallbackClaimOperator(event.target.value)
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <ActionButton
+                      theme={theme}
+                      disabled={!claimCallbackAction?.enabled}
+                      helper={getActionHelper(t, claimCallbackAction)}
+                      busy={busyKey === "claim-callback"}
+                      label={getActionLabel(t, "claim_callback")}
+                      type="submit"
+                    />
+                  </form>
+
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (!selectedSession?.callbackTask) {
+                        return;
+                      }
+                      void runGuardedAction(
+                        "contact-callback",
+                        contactCallbackAction,
+                        async () => {
+                          await getOpsClient().recordCallbackAttempt(
+                            selectedSession.callbackTask!.callbackTaskId,
+                            {
+                              operatorId: callbackClaimOperator,
+                              outcome: callbackAttemptOutcome,
+                              notes: callbackAttemptNotes,
+                            },
+                          );
+                          setCallbackAttemptNotes("");
+                          setOutcomeNotice({
+                            tone: "success",
+                            message: t(
+                              "callcenter.callback.contactAttemptSuccess",
+                            ),
+                          });
+                          await loadData(selectedSession.callId);
+                        },
+                      );
+                    }}
+                  >
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.action.contactCallback")}
+                    >
+                      <select
+                        value={callbackAttemptOutcome}
+                        onChange={(event) =>
+                          setCallbackAttemptOutcome(event.target.value)
+                        }
+                        style={nativeInputStyle}
+                      >
+                        <option value="connected">connected</option>
+                        <option value="busy">busy</option>
+                        <option value="no_answer">no_answer</option>
+                        <option value="rejected">rejected</option>
+                      </select>
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.callbackNotePlaceholder")}
+                    >
+                      <input
+                        type="text"
+                        value={callbackAttemptNotes}
+                        onChange={(event) =>
+                          setCallbackAttemptNotes(event.target.value)
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <ActionButton
+                      theme={theme}
+                      disabled={!contactCallbackAction?.enabled}
+                      helper={getActionHelper(t, contactCallbackAction)}
+                      busy={busyKey === "contact-callback"}
+                      label={getActionLabel(t, "contact_callback")}
+                      type="submit"
+                    />
+                  </form>
+
                   <form
                     onSubmit={(event) => {
                       event.preventDefault();
@@ -2953,6 +3368,60 @@ export default function CallcenterPage() {
                       helper={getActionHelper(t, completeCallbackAction)}
                       busy={busyKey === "complete-callback"}
                       label={getActionLabel(t, "complete_callback")}
+                      type="submit"
+                    />
+                  </form>
+
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (!selectedSession?.callbackTask) {
+                        return;
+                      }
+                      void runGuardedAction(
+                        "cancel-callback",
+                        cancelCallbackAction,
+                        async () => {
+                          await getOpsClient().cancelCallbackTask(
+                            selectedSession.callbackTask!.callbackTaskId,
+                            {
+                              reason:
+                                callbackCancelReason || "operator_cancelled",
+                              operatorId: callbackClaimOperator,
+                            },
+                          );
+                          setCallbackCancelReason("");
+                          setOutcomeNotice({
+                            tone: "warning",
+                            message: t("callcenter.callback.cancelSuccess"),
+                          });
+                          await loadData(selectedSession.callId);
+                        },
+                      );
+                    }}
+                  >
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.action.cancelCallback")}
+                    >
+                      <input
+                        type="text"
+                        required
+                        placeholder="Reason"
+                        value={callbackCancelReason}
+                        onChange={(event) =>
+                          setCallbackCancelReason(event.target.value)
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <ActionButton
+                      theme={theme}
+                      disabled={!cancelCallbackAction?.enabled}
+                      helper={getActionHelper(t, cancelCallbackAction)}
+                      busy={busyKey === "cancel-callback"}
+                      label={getActionLabel(t, "cancel_callback")}
+                      danger
                       type="submit"
                     />
                   </form>

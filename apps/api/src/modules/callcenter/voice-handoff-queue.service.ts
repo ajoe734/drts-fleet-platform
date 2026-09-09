@@ -114,6 +114,17 @@ export class VoiceHandoffQueueService {
     return { ...item };
   }
 
+  claimSession(input: { callId: string; operatorId: string }): HandoffQueueItem | null {
+    const item = [...this.items.values()].find((i) => i.callId === input.callId);
+    if (!item) {
+      return null;
+    }
+    item.assignedAgentId = input.operatorId;
+    item.status = "assigned";
+    item.updatedAt = new Date().toISOString();
+    return { ...item };
+  }
+
   /**
    * Request CTI warm transfer / bridge to agent leg.
    * Acceptance rule: CTI clear/bridge 不確定時保留 pending 而非宣稱已接通.
