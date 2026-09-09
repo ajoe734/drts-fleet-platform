@@ -477,7 +477,7 @@ jobs:
           # ephemeral runner before installing browser dependencies.
           sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
             \( -iname "*google*" -o -iname "*chrome*" \) \
-            -exec mv "{}" "{}.disabled" \\; || true
+            -exec mv "{}" "{}.disabled" \; || true
           pnpm exec playwright install --with-deps chromium
           pnpm exec playwright test -c playwright.deterministic-route-suite.config.ts
 
