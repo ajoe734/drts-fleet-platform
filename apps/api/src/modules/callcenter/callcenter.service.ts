@@ -270,7 +270,7 @@ export class CallcenterService implements OnModuleInit {
   getCallSession(
     callId: string,
     requestId?: string,
-    identity?: EvidenceAccessIdentity | null,
+    identity?: (EvidenceAccessIdentity & { roles?: string[] }) | null,
   ) {
     const rawSession = this.requireSession(callId);
     if (
@@ -349,7 +349,7 @@ export class CallcenterService implements OnModuleInit {
 
   listCallSessions(
     requestId?: string,
-    identity?: EvidenceAccessIdentity | null,
+    identity?: (EvidenceAccessIdentity & { roles?: string[] }) | null,
   ) {
     let sourceSessions = this.callSessions;
     if (identity?.tenantId) {
@@ -1490,7 +1490,7 @@ export class CallcenterService implements OnModuleInit {
     }
   }
 
-  private cloneCallbackTask(callbackTask: CallbackTaskRecord) {
+  private cloneCallbackTask<T extends CallbackTaskRecord>(callbackTask: T): T {
     return {
       ...callbackTask,
     };
