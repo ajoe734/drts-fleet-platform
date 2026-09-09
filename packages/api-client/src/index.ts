@@ -1841,6 +1841,51 @@ export class ApiClient {
     );
   }
 
+  async claimCallbackTask(
+    callbackTaskId: string,
+    command: { operatorId: string; expectedVersion?: number },
+  ) {
+    return this.post<CallbackTaskRecord>(
+      `/api/callcenter/callbacks/${encodeURIComponent(callbackTaskId)}/claim`,
+      { body: command },
+    );
+  }
+
+  async recordCallbackAttempt(
+    callbackTaskId: string,
+    command: {
+      operatorId: string;
+      outcome: string;
+      notes?: string;
+      hangupConfirmed?: boolean;
+    },
+  ) {
+    return this.post<CallbackTaskRecord>(
+      `/api/callcenter/callbacks/${encodeURIComponent(callbackTaskId)}/attempt`,
+      { body: command },
+    );
+  }
+
+  async cancelCallbackTask(
+    callbackTaskId: string,
+    command: { reason: string; expectedVersion?: number; operatorId?: string },
+  ) {
+    return this.post<CallbackTaskRecord>(
+      `/api/callcenter/callbacks/${encodeURIComponent(callbackTaskId)}/cancel`,
+      { body: command },
+    );
+  }
+
+  async takeoverAiCallSession(
+    callId: string,
+    command: { operatorId: string; reason?: string },
+  ) {
+    return this.post<CallSessionRecord>(
+      `/api/callcenter/sessions/${encodeURIComponent(callId)}/takeover`,
+      { body: command },
+    );
+  }
+
   async transferCallToComplaint(
     callId: string,
     command: TransferCallToComplaintCommand,
