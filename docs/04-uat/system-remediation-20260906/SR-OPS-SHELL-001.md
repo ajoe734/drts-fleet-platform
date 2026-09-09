@@ -4,8 +4,8 @@
 - Owner: `Gemini`
 - Reviewer: `Codex`
 - Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json`
-- Base SHA (`origin/dev` at merge): `3062ea363769cc393e59384251f5aedc7e570ac5` (前次 base: `6f4ac8c74ae3618b6109efd010014365a85d36d8`, 歷史 audit SHA: `6bbeaaa45`, 原始實作 base: `f759582305ca7ff1b17a0225d3dd54db22ee9a18`)
-- Current Local Head: `git merge origin/dev` completed cleanly with zero conflicts
+- Base SHA (`origin/dev` at merge): `7d04833053b63558c10fb678a422dff3522e0150` (前次 base: `3062ea363769cc393e59384251f5aedc7e570ac5`, `6f4ac8c74ae3618b6109efd010014365a85d36d8`, 歷史 audit SHA: `6bbeaaa45`, 原始實作 base: `f759582305ca7ff1b17a0225d3dd54db22ee9a18`)
+- Current Local Head: `git merge origin/dev` completed cleanly with zero conflicts (merge commit `6047adde7`)
 - PR #1648 URL: https://github.com/ajoe734/drts-fleet-platform/pull/1648
 - Worktree: `.artifacts/worktrees/auto/gemini-sr-ops-shell-001`
 - Branch: `gemini/sr-ops-shell-001`
@@ -68,18 +68,18 @@ Codex 審查 candidate `5a0320b21` 時提出兩項 reopen 判定：
 
 ### 1.4 2026-09-09 Dispatch 診斷、Trunk Merge 與卡點分析
 
-在 2026-09-09T01:41Z 收到 supervisor dispatch（`Availability-first reassignment: Gemini claimed SR-OPS-SHELL-001`）後，進行深入核驗與診斷：
+在 2026-09-09T01:41Z 與 02:01Z 收到 supervisor dispatch（`Chairman resumed after SR-OPS-SHELL-001-UNBLOCK-HISTORY-REPAIR`）後，進行深入核驗與診斷：
 
 1. **Trunk 整合 (`origin/dev`)**：
-   - 本地成功執行 `git merge --no-edit origin/dev`（base `3062ea363769cc393e59384251f5aedc7e570ac5`），無任何衝突（exit 0）。
+   - 本地成功執行 `git merge --no-edit origin/dev`（base `7d04833053b63558c10fb678a422dff3522e0150`，前次 base `3062ea363769cc393e59384251f5aedc7e570ac5`），無任何衝突（exit 0，merge commit `6047adde7`）。
    - 驗證套件全部通過：
      - `git diff --check`: exit 0
      - `pnpm --filter @drts/ops-console-web typecheck`: exit 0 (`next typegen && tsc --noEmit` 通過)
-     - `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/`: exit 0（2 test files, 41/41 passed, 775ms）
+     - `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/`: exit 0（2 test files, 41/41 passed, 877ms）
      - `pnpm --filter @drts/ops-console-web lint`: exit 0 (`--max-warnings=0` 通過)
 
 2. **卡點 1：CI Commit Trailers 格式失敗與遠端祖先非強制推送政策衝突**：
-   - 經檢查 PR #1648 之 GitHub Actions checks，共 24 項通過、僅 1 項失敗：`CI/Commit trailers (pull_request)`。
+   - 經檢查 PR #1648 之 GitHub Actions checks，共 24 項通過、僅 1 項失敗：`CI/Commit trailers (pull_request)`（run ID `34300724683`）。
    - 本地重現指令：`python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` 報錯：
      `commit fe3d92cbaa12: subject must be '<TASK-ID>: <summary>', got: 'test(SR-OPS-SHELL-001): resolve review rejection P2 with realistic hit-testing and domain IDs'`
    - 根因：前一輪 commit `fe3d92cba` 之 commit subject 使用了 `test(...)` 前綴。而 `tools/ci/git/check_commit_trailers.py` 第 31 行正則表達式 `SUBJECT_RE` 僅允許 `(?:wip|fix|feat|refactor|docs|chore|style)` 或無 prefix 格式，不接受 `test`。
