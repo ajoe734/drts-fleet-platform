@@ -1704,11 +1704,21 @@ export class TenantPartnerController {
   listApiKeys(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
+    const resolvedTenantId = this.requireTenantId(tenantId);
+    const resolvedIdentity =
+      identity ??
+      (typeof requestId === "object"
+        ? (requestId as IdentityContext | null)
+        : undefined);
+    const resolvedRequestId =
+      typeof requestId === "string" ? requestId : undefined;
     const items = this.tenantPartnerService.listApiKeys(
-      this.requireTenantId(tenantId),
+      resolvedTenantId,
+      resolvedIdentity,
     );
-    return toApiSuccessEnvelope(toApiListData(items), requestId);
+    return toApiSuccessEnvelope(toApiListData(items), resolvedRequestId);
   }
 
   @Post("tenant/api-keys")
