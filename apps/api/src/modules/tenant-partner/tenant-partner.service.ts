@@ -1317,10 +1317,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private readonly identityRepository: IdentityRepository | undefined;
 
   constructor(
+    @Inject(AuditNotificationService)
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
+    @Inject(TenantPartnerRepository)
     private readonly tenantPartnerRepository?: TenantPartnerRepository,
     @Optional()
+    @Inject(WebhookDispatchService)
     private readonly webhookDispatchService: WebhookDispatchService = new WebhookDispatchService(),
     @Optional()
     @Inject(PARTNER_INGRESS_CREDENTIAL_SEEDS)
@@ -1332,8 +1335,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       new ReferenceTokenEligibilityAdapter(),
     ],
     @Optional()
+    @Inject(PartnerUserIdentityLinkRepository)
     private readonly partnerUserIdentityLinkRepository: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
     @Optional()
+    @Inject(ReferralEmbedHandoffRepository)
     private readonly referralEmbedHandoffRepository: ReferralEmbedHandoffRepository = new ReferralEmbedHandoffRepository(),
     @Optional()
     @Inject(SecurityEventsService)
@@ -1342,6 +1347,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     @Inject(IdentityRepository)
     identityRepository?: IdentityRepository,
     @Optional()
+    @Inject(TenantInvitationDeliveryService)
     private readonly tenantInvitationDelivery: TenantInvitationDeliveryService = new TenantInvitationDeliveryService(),
   ) {
     this.securityEventsService =
@@ -7091,7 +7097,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  listApiKeys(tenantId: string) {
+  listApiKeys(tenantId: string, identity?: IdentityContext | null) {
+    this.assertTenantAccessScope(tenantId, identity, "read");
     return this.apiKeys
       .filter((apiKey) => apiKey.tenantId === tenantId)
       .map((apiKey) => {
@@ -9361,9 +9368,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private assertTenantMutationScope(
+  private assertTenantAccessScope(
     targetTenantId: string,
     identity?: IdentityContext | null,
+    action: "read" | "mutation" | "access" = "access",
   ) {
     if (!identity) {
       return;
@@ -9384,13 +9392,22 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       throw new ApiRequestError(
         HttpStatus.FORBIDDEN,
         "TENANT_SCOPE_MISMATCH",
-        "Cross-tenant identity mutation is forbidden. Principal tenantId does not match target tenantId.",
+        action === "read"
+          ? "Cross-tenant identity access is forbidden. Principal tenantId does not match target tenantId."
+          : "Cross-tenant identity mutation is forbidden. Principal tenantId does not match target tenantId.",
         {
           targetTenantId,
           principalTenantId: identity.tenantId ?? null,
         },
       );
     }
+  }
+
+  private assertTenantMutationScope(
+    targetTenantId: string,
+    identity?: IdentityContext | null,
+  ) {
+    this.assertTenantAccessScope(targetTenantId, identity, "mutation");
   }
 
   private requireSecurityEventActor(
