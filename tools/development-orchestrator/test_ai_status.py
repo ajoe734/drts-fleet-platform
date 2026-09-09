@@ -359,6 +359,92 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertEqual(state["blockers"][0]["status"], "resolved")
 
     @mock.patch.object(ai_status, "append_log")
+    def test_acceptance_progress_preserves_candidate_and_pending_gates(self, _log: mock.Mock) -> None:
+        for status in ("acceptance", "done"):
+            with self.subTest(status=status):
+                state = self.state()
+                task = self.task(state)
+                task.update(status=status, candidate_sha="abc123", candidate_branch="codex/task-001",
+                            reviewed_sha="abc123", ci_sha="abc123", ci_status="success",
+                            ci_run_url="https://ci.example/1", pr_url="https://pr.example/1", merge_sha="def456",
+                            required_acceptance=["live_probe", "another_gate"], acceptance_evidence={"another_gate": "verified"})
+                if status == "done":
+                    task["acceptance_evidence"]["live_probe"] = "verified"
+                state["handoffs"] = [{"task_id": task["id"], "to": "Codex", "status": "pending"}]
+                state["blockers"] = [{"task_id": task["id"], "status": "open", "message": "Live probe pending"}]
+                before = copy.deepcopy(state)
+                with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True):
+                    ai_status.command_progress(state, [task["id"], "Read-only verification in progress"])
+                self.assertEqual(task["next"], "Read-only verification in progress")
+                for key in before["tasks"][0]:
+                    if key not in {"next", "last_update"}:
+                        self.assertEqual(task[key], before["tasks"][0][key], key)
+                self.assertEqual(state["handoffs"], before["handoffs"])
+                self.assertEqual(state["blockers"], before["blockers"])
+
+    @mock.patch.object(ai_status, "append_log")
+    def test_start_cannot_reopen_acceptance_or_completed_tasks(self, log: mock.Mock) -> None:
+        for status in ("acceptance", "done"):
+            with self.subTest(status=status):
+                state = self.state()
+                task = self.task(state)
+                task.update(status=status, candidate_sha="abc123", reviewed_sha="abc123", merge_sha="def456")
+                before = copy.deepcopy(state)
+                with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True):
+                    with self.assertRaisesRegex(SystemExit, "explicit reviewer reopen"):
+                        ai_status.command_start(state, [task["id"], "Start stale owner dispatch"])
+                self.assertEqual(state, before)
+        log.assert_not_called()
+
+    @mock.patch.object(ai_status, "append_log")
+    def test_owner_cannot_reopen_acceptance_or_done_without_reviewer(self, log: mock.Mock) -> None:
+        for status in ("acceptance", "done"):
+            with self.subTest(status=status):
+                state = self.state(required_acceptance=["live_probe"])
+                task = self.task(state)
+                task.update(status=status, candidate_sha="abc123", reviewed_sha="abc123",
+                            ci_sha="abc123", ci_status="success", merge_sha="def456",
+                            acceptance_evidence={"live_probe": "verified"}, waiting_for="Claude")
+                state["blockers"] = [{"task_id": task["id"], "status": "open"}]
+                state["handoffs"] = [{"task_id": task["id"], "status": "pending"}]
+                before = copy.deepcopy(state)
+                with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True):
+                    with self.assertRaisesRegex(SystemExit, "Only the reviewer"):
+                        ai_status.command_reopen(state, [task["id"], "Restart implementation"])
+                self.assertEqual(state, before)
+        log.assert_not_called()
+
+    @mock.patch.object(ai_status, "append_log")
+    def test_reviewer_can_reopen_acceptance_and_done(self, log: mock.Mock) -> None:
+        for status in ("acceptance", "done"):
+            with self.subTest(status=status):
+                state = self.state()
+                task = self.task(state)
+                task.update(status=status, candidate_sha="abc123", reviewed_sha="abc123",
+                            ci_sha="abc123", ci_status="success", merge_sha="def456")
+                with mock.patch.dict(os.environ, {"AI_NAME": "Claude"}, clear=True):
+                    ai_status.command_reopen(state, [task["id"], "Code correction required"])
+                self.assertEqual(task["status"], "in_progress")
+                for key in ("candidate_sha", "reviewed_sha", "ci_sha", "ci_status", "merge_sha"):
+                    self.assertNotIn(key, task)
+                self.assertEqual(state["handoffs"][-1]["to"], "Codex")
+                self.assertEqual(state["handoffs"][-1]["status"], "pending")
+                self.assertEqual(log.call_args.args[0]["type"], "reopen")
+
+    @mock.patch.object(ai_status, "append_log")
+    def test_owner_reopen_other_states_is_unchanged(self, _log: mock.Mock) -> None:
+        for status in ("backlog", "todo", "in_progress", "review", "integrating", "blocked"):
+            with self.subTest(status=status):
+                state = self.state()
+                task = self.task(state)
+                task.update(status=status, candidate_sha="abc123", reviewed_sha="abc123")
+                with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True):
+                    ai_status.command_reopen(state, [task["id"], "Revise implementation"])
+                self.assertEqual(task["status"], "in_progress")
+                self.assertNotIn("candidate_sha", task)
+                self.assertNotIn("reviewed_sha", task)
+
+    @mock.patch.object(ai_status, "append_log")
     def test_helper_backed_resume_rejects_new_blocker_without_mutation(self, _log: mock.Mock) -> None:
         state = self.state()
         parent = self.task(state)
