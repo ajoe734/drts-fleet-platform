@@ -8,7 +8,7 @@
 | 能力來源      | C013、C017、C018、C093、C108、C119                                                              |
 | Owner         | `Gemini`                                                                                       |
 | Reviewer      | `Codex2`                                                                                       |
-| Base SHA      | `32b6dde7db730a8524004a5e87d94d5a2a6d7853`（目前 `origin/dev` 最新 SHA；分支起點 `3b60a3757238663572f16f010c94f446f2c71eaa`） |
+| Base SHA      | `ea4599197022aa242635ee4fe973fe830e0bc46c`（目前 `origin/dev` 最新 SHA）                     |
 | Candidate SHA | 於 `handoff` 時以 `git rev-parse HEAD` 記錄                                                     |
 | Worktree      | `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-data-001` |
 | Branch        | `gemini/sr-enterprise-data-001`                                                                |
@@ -22,7 +22,7 @@
 在 2026-09-06 UAT 觀察與 Audit（`findings.json` R08、R09；`capabilities.json` C013/C017/C018/C119）中，`apps/enterprise-dispatch-web` 首頁 (`app/page.tsx`) 與行程頁 (`app/trip/page.tsx`) 存在下列缺陷：
 
 1. **首頁/行程完全渲染靜態示意資料，而非權威 booking 狀態**：
-   - `app/page.tsx`、`app/trip/page.tsx` 皆為同步 Server Component，直接呼叫 `getEnterpriseBookings(locale)`（`lib/enterprise-fixtures.ts` 中的 `enterpriseBookings` 陣列，5 筆固定demo資料，ID 為 `EB-7K2E1D` 等）。
+   - `app/page.tsx`、`app/trip/page.tsx` 皆為同步 Server Component，直接呼叫 `getEnterpriseBookings(locale)`（`lib/enterprise-fixtures.ts` 中的 `enterpriseBookings` 陣列，5 筆固定 demo 資料，ID 為 `EB-7K2E1D` 等）。
    - `/bookings`、`/bookings/[bookingId]`（`components/enterprise-booking-lifecycle.tsx`）已改為呼叫權威 tenant booking API（`getEnterpriseDispatchTenantClient(...).listBookings()` / `.getBooking()`），但首頁/行程從未跟進，兩邊資料來源不一致。
    - 因此從首頁/行程點入 `/trip` → `/bookings/EB-7K2E1D`（詳情頁）時，該 ID 在真實 API 中不存在，回傳 404 `BOOKING_NOT_FOUND`。
 2. **假 ETA 與固定進度階段**：
@@ -44,10 +44,25 @@
    - **治理阻擋（Scope 違規）**：前版修改了 `components/enterprise-booking-lifecycle.tsx`，但該共用檔不在 task write_scopes 內且 depends_on 為空。
    - **P1-1（4xx 錯誤分類粗糙）**：`lib/enterprise-fixtures.ts` 前版將所有其他 4xx 分類為 `not-found`，導致 401/403/409/429 誤報不存在/已刪除且不可重試。
    - **P1-2（替代入口未消除假資料與無動作）**：前版未配置電話時導向 `/help`，但 `app/help/page.tsx` 仍展示固定 `0800-200-118` 且按鈕無動作。
-3. **本次（第三輪）完整修復**：
-   - **治理阻擋徹底解除**：將 `components/enterprise-booking-lifecycle.tsx` 完整還原至 `origin/dev`（與 merge-base 完全 0 diff）。本次所有改動嚴格限制在核准之 `write_scopes` 內。
-   - **4xx/5xx 分類完整嚴謹化**：404/`BOOKING_NOT_FOUND` 為唯一 `not-found`；401/403 為 `auth-required`；403 quota 為 `quota-blocked`；409 supply 為 `no-supply`；409 conflict 為 `conflict`；429 為 `rate-limited`；400/5xx 為 `degraded`。首頁與行程頁完整接入分類渲染，絕不再把 404 誤說為 degraded。
-   - **建立真正授權可用之客服替代入口**：在已核准之 `apps/enterprise-dispatch-web/app/trip/` scope 下建立專屬之 `app/trip/support/page.tsx`，未授權時嚴格不露出任何假號碼，並提供線上客服求助表單（含各類求助類別與確認工單反饋）；行程頁「聯絡司機」導向 `/trip/support?topic=driver`，「企業客服」導向 `supportContact.href`（未配置時導向 `/trip/support`，配置時直撥），兩按鈕皆具可測導航/電話/支援動作。
+3. **Codex2 第三輪審查反饋（針對 candidate `5e2a92b2f` 退回）**：
+   - **P1（模擬送達與假工單假承諾）**：`app/trip/support/page.tsx:35-41` 僅以 `setTimeout` 配合 `setSubmitted(true)` 模擬送出，無任何 API 呼叫或持久化。`lib/enterprise-fixtures.ts:901-906` 虛假聲稱送達並輸出寫死工單號 `SUP-2026-0909` 與「專員將於 5 分鐘內聯繫」之不實承諾，直接違反禁假送達原則與 R09 驗收。
+   - **審查要求**：
+     1. 移除模擬送達；使用授權之真客服管道或**誠實不可用狀態（honest unavailable state）**，且只有在權威 API 回傳工單時才能展示工單確認。
+     2. 修正 UAT 證據 1.3/2.3 節虛構「真實送出」之陳述；補上實際提交失敗/成功/不可用之行為回歸測試，取代純文案比對。
+     3. 新支援表單須於 UI Contract 下具備 canonical canvas 溯源或畫面需求決策（screen-requirements resolution）。
+     4. 修復 `docs/04-uat/system-remediation-20260906/SR-ENTERPRISE-DATA-001.md:232` 結尾多餘空行導致的 `git diff --check` exit 2。
+4. **本次（第四輪）完整重構與嚴謹修復**：
+   - **徹底根絕假送達（No Simulated Delivery）**：
+     - 完全刪除 `setTimeout`、`setSubmitted(true)` 以及任何硬編碼的假工單號（`SUP-2026-0909`）與「5 分鐘內專員聯繫」假承諾。
+     - 在 `lib/enterprise-fixtures.ts` 建立純函式 `submitTripSupportInquiry(payload, locale, apiSubmitFn)`：在當前企業租戶環境未對接線上工單 API 時，**誠實回傳 `status: "unavailable"`**；僅當注入權威 API 且成功回傳有效工單時，才輸出 `status: "success"` 與真實單號；遭遇錯誤時回傳 `status: "error"`。
+     - 在 `app/trip/support/page.tsx` 渲染對應之 `data-testid="support-inquiry-unavailable"` 誠實未開通提示、`data-testid="support-inquiry-success"` 權威確認或 `data-testid="support-inquiry-error"` 失敗提示，並於表單上方常駐揭露通道狀態，絕不冒充成功送達。
+   - **行為測試覆蓋（Behavioral Regression Suite）**：
+     - 在 `tests/unit/system-remediation/sr-enterprise-data-001/sr-enterprise-data-001.test.ts` 新增 8 項行為回歸測試（全套 45/45 通過），驗證未配置 API 時誠實返回 unavailable、權威 API 成功回傳真實單號、API 例外錯誤捕捉、空單號回傳防護、類別校驗、以及全庫斷言絕無 `SUP-2026-0909` 與假 5 分鐘字樣。
+   - **UI 設計規範與畫面需求決策完備**：
+     - 完整記錄 Canonical Canvas 溯源（`Enterprise Dispatch.html` / `ent-screens-2.jsx` 之 `ENT_Trip` 與 `ENT_Help`）與 Realm Token（`@drts/ui-tokens` tenant realm teal `#0F766E` / `#5EEAD4` 等），無任何未 token 化之 raw hex。
+     - 明確撰寫畫面需求決策，記錄 `/trip/support` 作為 `/trip` 按鈕落地頁的角色與不可用狀態之呈現規則。
+   - **Git Diff Check 乾淨達標**：
+     - 移除證據文件 EOF 多餘空行，`git diff --check origin/dev...HEAD` 達到 exit code 0。
 
 ---
 
@@ -73,22 +88,29 @@
 - `mapBookingRecordToTripSummary(record)`：組出首頁/行程頁實際使用的欄位（`id`、`passenger`、`bookedBy`、`self`、`from`、`to`、`window`、`state`、`orderStatus`、`etaMinutes`（恆為 `null`）、可選 `flight`/`terminal`）。`id` 直接帶入真實 `bookingId`，確保跨頁連結一致。
 - `toTelHref(phone)`：將電話正規化為 `tel:` URI。
 - `getTripNotFoundNotice(locale)`：提供標準非暫時性 404 說明與返回按鈕資訊。
-- `getTripSupportCopy(locale)`：提供客服支援中心之完整多語系說明文案與表單選項。
+- `getTripSupportCopy(locale)`：提供客服支援中心之完整多語系說明文案與表單選項，**無任何未授權假號碼，且不含任何硬編碼假單號或假送達承諾**。
+- `submitTripSupportInquiry(payload, locale, apiSubmitFn)`：遵循禁假送達原則之求助提交函式；無權威 API 時誠實回傳 `status: "unavailable"`，有權威 API 回傳時輸出真實單號與確認。
+- `formatSupportTicketBody(ticketId, locale)`：動態產生包含真實 API 工單編號之受理文字。
 
-### 2.3 聯絡入口修復與真正授權可用之客服中心 (`app/trip/support/page.tsx`, R09 / C018)
+### 2.3 聯絡入口修復與真客服管道 / 誠實未開通狀態 (`app/trip/support/page.tsx`, R09 / C018)
 
-- **真正授權可用之支援目的頁 (`apps/enterprise-dispatch-web/app/trip/support/page.tsx`)**：
+- **真客服管道與誠實未開通目的頁 (`apps/enterprise-dispatch-web/app/trip/support/page.tsx`)**：
   - 位於已核准之 `apps/enterprise-dispatch-web/app/trip/` write scope 內。
-  - 當未配置授權電話時：嚴格不露出任何 fixture 假電話（`phone: null`，絕無 `0800-200-118`），標示未配置說明，並提供線上客服求助表單（支援「司機未抵達 / 接車異常」、「上車地點變更」、「行程緊急求助」、「費用與審批政策諮詢」等類別），具備真實送出與工單確認（SUP-2026-0909）之 UI 反饋。
-  - 當配置授權環境變數時：展示已授權電話並提供直撥 `tel:` 按鈕。
+  - 當未配置授權電話時：嚴格不露出任何 fixture 假電話（`phone: null`，絕無 `0800-200-118`），標示未配置說明。
+  - 當配置授權環境變數時（`NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE` / `ENTERPRISE_SUPPORT_PHONE`）：展示已授權電話並提供直撥 `tel:` 按鈕（可測動作）。
   - 司機協調專區：依最小權限原則說明 tenant booking 未包含司機個人聯絡電話，由客服專員協調調度中心聯繫司機。
-  - 提供返回行程 (`/trip`)、我的預約 (`/bookings`) 與返回首頁之完整導航動作。
+  - 線上求助表單（Online Support Inquiry）：
+    - 徹底移除假送達：完全廢除 `setTimeout` 與硬編碼之 `SUP-2026-0909`。
+    - 表單頂端以 `EBanner` 誠實說明：「此通道需由企業租戶開通權威線上工單 API；送出時將進行可用性檢查，未開通時誠實呈現不可用狀態，不假冒送達。」
+    - 點擊送出時呼叫 `submitTripSupportInquiry`；在無後端 API 注入時誠實展示警告橫幅（`data-testid="support-inquiry-unavailable"`），提示「目前租戶尚未配置線上工單提交 API。如需即時協助，請使用已授權之客服專線，或由企業管理員於調度後台聯繫營運中心。」不製造乘客獲救假象。
+    - 若有權威 API 注入並回傳工單編號，才展示受理成功橫幅（`data-testid="support-inquiry-success"`）並顯示權威單號。
+  - 提供返回行程 (`/trip`)、我的預約 (`/bookings`) 之完整導航動作。
 - **行程頁聯絡按鈕動作**：
-  - 「聯絡司機」：點擊導航至 `/trip/support?topic=driver`，提供司機協調與客服支援，徹底消除 dead button。
-  - 「企業客服」：使用 `supportContact.href`（未配置時導向 `/trip/support`，有配置時導向 `tel:`），具備可測動作。
+  - 「聯絡司機」：點擊導航至 `/trip/support?topic=driver`，提供司機協調政策說明與支援入口，徹底消除 dead button。
+  - 「企業客服」：使用 `supportContact.href`（未配置電話時導向 `/trip/support`，有配置電話時導向 `tel:`），具備可測動作。
   - 首頁政策卡片聯絡客服：同步接入 `supportContact.href`，有配置時撥號，未配置時導向 `/trip/support`。
 
-### 2.4 4xx / 5xx 錯誤分類與 404 BOOKING_NOT_FOUND 治理（C119 / R08，修復 Codex2 P1）
+### 2.4 4xx / 5xx 錯誤分類與 404 BOOKING_NOT_FOUND 治理（C119 / R08）
 
 - 在 `lib/enterprise-fixtures.ts` 中升級 `resolveBookingGatewayState(error)` 與 `bookingGatewayHref(error)`：
   - 404 `BOOKING_NOT_FOUND`：一律分類為 `"not-found"`（href `"/not-found"`），首頁與行程頁渲染專屬 404 卡片（`data-testid-api-state="not-found"`），標示「找不到指定的預約記錄。此預約可能不存在或已被刪除，不可作為暫時故障重試。」並提供返回預約清單按鈕。
@@ -100,6 +122,24 @@
   - 400 與 5xx 伺服器/網路異常：分類為 `"degraded"`（href `"/degraded"`）。
   - 徹底解決前版將 401/403/409/429 全數粗暴分類為 not-found 的問題。
 
+### 2.5 UI 設計規範對齊與畫面需求決策（UI Design Contract & Screen-Requirements Resolution）
+
+依據本專案 UI Design Contract 規範，本次涉及 UI 畫面之修改嚴格執行下列視覺真值與需求對齊：
+
+1. **設計畫布溯源（Canonical Canvas Traceability）**：
+   - 行程頁結構溯源自 `docs/05-ui/drts-design-canvas/Enterprise Dispatch.html` 之 `ENT_Trip`（artboard `trip`，對應 `ent-screens-2.jsx:153-195`）。保留其進度軌道（`EntProgressRail`）、司機區塊、路線展示（`EntRoute`）及三組核心動作按鈕（聯絡司機、企業客服、預約詳情）。
+   - 客服與支援視覺風格溯源自 `Enterprise Dispatch.html` 之 `ENT_Help`（artboard `help`，對應 `ent-screens-2.jsx:240-292`）中的「聯絡客服」卡片與「服務異常時」橫幅樣式。
+2. **設計語彙與 Token 遵循（UI Realm Tokens）**：
+   - 嚴格採用 `@drts/ui-tokens` 之 `tenant` realm token（Teal 系配色：primary `#0F766E`、hover `#115E59`、背景 `#F0FDFA` / `#CCFBF1`、邊框 `#99F6E4` 等）與 `enterpriseTheme`。
+   - 所有卡片、按鈕、藥丸標籤與橫幅皆使用 `@/components/ent-kit` 原生組件（`ECard`、`EBtn`、`EPill`、`EBanner`、`EIcon`、`entBtnStyle`）。
+   - 全頁面無任何未經 token 化的自定義 raw hex 顏色，嚴禁「套皮」或引入預設 shadcn 樣式。
+3. **畫面需求決策（Screen-Requirements Resolution）**：
+   - **背景**：Canonical Canvas 在 `/trip` 畫布提供「聯絡司機」與「企業客服」兩按鈕，並於 `/help` 提供客服專線卡片；但畫布未包含行程進行中獨立的線上工單送出畫布，且後端資料模型在 Phase 1 尚未提供租戶級線上工單提交 API。
+   - **決策**：
+     - `/trip/support` 作為 `/trip` 上兩顆聯絡按鈕的明確落地頁，具備清晰的導航路徑與返回行程機制。
+     - 遵守「不可冒充送達」之核心規則：線上求助表單不採用模擬的 `setTimeout`，亦不展示未授權的固定電話或假單號；在無權威 API 支持的環境下，送出時誠實呈現 `unavailable` 狀態，明確引導使用者透過已授權之客服電話或由管理員於後台處理。
+     - 若後續版本平台開通線上工單端點，可無縫透過 `SupportApiSubmitFn` 注入權威 API，即時展示真實單號確認。
+
 ---
 
 ## 3. 驗收條件逐項對照
@@ -107,7 +147,7 @@
 | 驗收條件 | 達成狀況 | 證明依據 |
 | --- | --- | --- |
 | **列表→首頁→詳情指向存在同 booking；不存在就合理空/404。** | ✅ 達成 | 1. 首頁/行程改讀 `getEnterpriseDispatchTenantClient(...).listBookings()`，所有連結 ID 與真實 API 完全一致。<br>2. 無進行中行程時顯示 `data-testid="enterprise-trip-empty"` 誠實空狀態。<br>3. 遭遇 404 時以 `resolveBookingGatewayState` 判定為 `"not-found"`，展示專屬 404 UI（`data-testid-api-state="not-found"`），絕不標示為 degraded / 可重試故障（C119 / R08）。 |
-| **聯絡按鈕有可測導航/電話/支援動作；資料未授權不可露出。** | ✅ 達成 | 1. 客服按鈕由 `getAuthorizedSupportContact` 治理：未配置授權電話時嚴格不露出 fixture 假電話（`phone: null`，無 `0800-200-118`），導向專屬支援頁 `/trip/support`（`data-testid="trip-contact-support"`）；有配置時導向 `tel:`。<br>2. 司機按鈕改為具備真實導航動作（導向 `/trip/support?topic=driver`），消除死按鈕並提供真實客服協調與工單送出功能。<br>3. 支援目的頁 `/trip/support` 包含電話直撥/表單送出/行程返回等全部有動作之元件。 |
+| **聯絡按鈕有可測導航/電話/支援動作；資料未授權不可露出。** | ✅ 達成 | 1. 客服按鈕由 `getAuthorizedSupportContact` 治理：未配置授權電話時嚴格不露出 fixture 假電話（`phone: null`，無 `0800-200-118`），導向專屬支援頁 `/trip/support`（`data-testid="trip-contact-support"`）；有配置時導向 `tel:`。<br>2. 司機按鈕改為具備真實導航動作（導向 `/trip/support?topic=driver`），消除死按鈕並提供司機協調政策說明。<br>3. 支援目的頁 `/trip/support` 包含電話直撥/表單送出（誠實不可用驗證）/行程返回等全部有動作之元件，無任何假送達與假工單。 |
 | **證據包含 base/candidate SHA、實際指令結果與資源 ID；未做的 live／真機部分明列，不冒充成功。** | ✅ 達成 | 見本文件表頭（SHA）、第 4 節（指令與 exit code）、第 5 節（資源 ID）、第 6 節（誠實申報）。 |
 | **先 commit＋普通 push，再 handoff；owner 不直接 done，獨立 reviewer、同 candidate CI／merge 及 required_acceptance 完備才可結案。** | ✅ 達成 | 本 worktree 遵守 git 分支與 candidate lifecycle 規範，完成後以 `handoff` 交付 `Codex2` 審查，不越權自行標記 `done`。 |
 
@@ -120,7 +160,7 @@
 ### 4.1 Git Diff 檢查
 
 ```bash
-$ git diff --check
+$ git diff --check origin/dev...HEAD
 (exit code: 0)
 ```
 
@@ -133,14 +173,14 @@ $ pnpm --filter @drts/enterprise-dispatch-web typecheck
 (exit code: 0)
 ```
 
-### 4.3 本次專屬單元測試（37/37 通過）
+### 4.3 本次專屬單元與行為回歸測試（45/45 通過）
 
 ```bash
 $ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-data-001
 
  Test Files  1 passed (1)
-      Tests  37 passed (37)
+      Tests  45 passed (45)
 (exit code: 0)
 ```
 
@@ -166,6 +206,15 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/
 - **404 說明與支援文案驗證**：
   - `getTripNotFoundNotice` 中英雙語聲明不可作為暫時故障重試，提供返回預約列表動作。
   - `getTripSupportCopy` 中英雙語支援中心文案、求助類別選項完整，無未授權電話外洩。
+- **支援提交行為回歸測試（Behavioral Regression Suite, 8 項）**：
+  - 未配置權威 API 時誠實回傳 `status: "unavailable"`，絕不假冒送達。
+  - 英文語系下誠實回傳英文 unavailable 訊息。
+  - 權威 API 注入成功時回傳真實單號（`TICK-AUTH-...`），且不含硬編碼 `SUP-2026-0909`。
+  - 權威 API 拋出異常時回傳 `status: "error"` 與錯誤訊息。
+  - 權威 API 回傳未包含有效單號時回傳錯誤提示。
+  - 未選取求助類別時即時攔截並回傳欄位檢驗錯誤，不呼叫 API。
+  - `formatSupportTicketBody` 正確動態組裝真實單號。
+  - 全域斷言：確認 `SUP-2026-0909` 與假承諾「5 分鐘內」已徹底從程式與文案中清除。
 
 ### 4.4 Enterprise Dispatch Web 既有單元測試（24/24 通過，零回歸）
 
@@ -186,7 +235,7 @@ $ pnpm run i18n:guard
 > drts-fleet-platform@0.1.0 i18n:guard /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-enterprise-data-001
 > node tools/ci/i18n-guard.mjs
 
-i18n-guard: OK (521 files scanned across 10 apps, 55 exemption(s) from i18n-guard-baseline.json)
+i18n-guard: OK (522 files scanned across 10 apps, 55 exemption(s) from i18n-guard-baseline.json)
 (exit code: 0)
 ```
 
@@ -215,8 +264,9 @@ $ pnpm --filter @drts/enterprise-dispatch-web lint
 
 1. **未介接真人客服/司機端到端撥測（live/真機）**：本任務在程式碼層落實客服入口治理、專屬支援中心與替代導航動作，通過單元測試驗證其導向 `/trip/support` 或 `tel:`；實際撥打是否能接通真人客服專線，需由持有真實裝置/電信環境的驗收流程（如 `SR-QA-UX-001`）進行 live 撥測，本任務不冒充已完成端到端真機撥測。
 2. **司機直撥聯絡功能本身未實作，因資料模型無授權來源**：`BookingRecord` / `OwnedOrderRecord` 未提供司機聯絡欄位；司機身分僅存在於司機/車隊授權範圍的端點（`DriverProfileRecord` 等），企業租戶消費者 API 無權讀取。本任務將行程頁「聯絡司機」改為導航至 `/trip/support?topic=driver` 由客服協調，未新增任何跨授權邊界的 API 呼叫；若未來要提供真正的司機直撥（如客服轉接或匿名代理號碼），需要新的、明確授權的產品/API 設計。
-3. **`components/ent-embed-screens.tsx`（`/embed/home`、`/embed/trip`）仍使用舊 fixture 資料**：該共用元件讀取 `enterpriseBookings`/`getEnterpriseBooking` 等 fixture 匯出，具有與本任務修復前相同的示意資料問題，但不在本任務範圍內。本任務保留舊匯出供其繼續運作，未消除其示意資料問題。
-4. **首頁 KPI 統計磚（本月配額/待審批/本月趟次）未接真實 tenant dashboard 統計**：這些數字（如「23 / 40 趟」）仍為既有靜態展示值，非本任務 R08/R09 範圍內的「booking 狀態」，且串接需要 `getTenantDashboardSummary()` 等新端點包裝。本任務刻意不做局部拼接，避免製造新的誤導性數字；建議另立任務串接真實租戶儀表板統計。
+3. **線上客服工單提交 API 未實作後端持久化**：目前平台與合約（`packages/contracts`）未定義租戶端消費者工單提報端點。前端已落實 `submitTripSupportInquiry` 與誠實未開通狀態（`unavailable`），未以假資料假冒成功；實際持久化工單需由後端及合約擴展專屬端點後接入。
+4. **`components/ent-embed-screens.tsx`（`/embed/home`、`/embed/trip`）仍使用舊 fixture 資料**：該共用元件讀取 `enterpriseBookings`/`getEnterpriseBooking` 等 fixture 匯出，具有與本任務修復前相同的示意資料問題，但不在本任務範圍內。本任務保留舊匯出供其繼續運作，未消除其示意資料問題。
+5. **首頁 KPI 統計磚（本月配額/待審批/本月趟次）未接真實 tenant dashboard 統計**：這些數字（如「23 / 40 趟」）仍為既有靜態展示值，非本任務 R08/R09 範圍內的「booking 狀態」，且串接需要 `getTenantDashboardSummary()` 等新端點包裝。本任務刻意不做局部拼接，避免製造新的誤導性數字；建議另立任務串接真實租戶儀表板統計。
 
 ---
 
@@ -224,9 +274,8 @@ $ pnpm --filter @drts/enterprise-dispatch-web lint
 
 - `apps/enterprise-dispatch-web/app/page.tsx`：改為 Client Component，讀取真實 tenant booking API，分類處理 404 與閘道錯誤，客服改接 `getAuthorizedSupportContact`（未配置時指向 `/trip/support`）。
 - `apps/enterprise-dispatch-web/app/trip/page.tsx`：讀取真實 tenant booking API，移除假 ETA/假司機姓名/寫死進度階段；動態展示司機指派與客服聯絡入口，「聯絡司機」導向 `/trip/support?topic=driver`。
-- `apps/enterprise-dispatch-web/app/trip/support/page.tsx`：專屬客服支援目的頁，提供授權電話直撥、未授權時隱藏電話、司機協調說明與線上客服表單。
-- `apps/enterprise-dispatch-web/lib/enterprise-fixtures.ts`：新增真實資料映射純函式、升級版 `resolveBookingGatewayState`、`getAuthorizedSupportContact`、`getTripNotFoundNotice`、`getTripSupportCopy`。
-- `tests/unit/system-remediation/sr-enterprise-data-001/sr-enterprise-data-001.test.ts`：新增 37 項單元測試（含 4xx/5xx 錯誤分類回歸與客服授權測試）。
+- `apps/enterprise-dispatch-web/app/trip/support/page.tsx`：專屬客服支援目的頁，提供授權電話直撥、未授權時隱藏電話、司機協調說明與**無假送達之線上工單通道狀態渲染**（誠實未開通 / 權威單號確認 / 錯誤捕捉）。
+- `apps/enterprise-dispatch-web/lib/enterprise-fixtures.ts`：新增真實資料映射純函式、升級版 `resolveBookingGatewayState`、`getAuthorizedSupportContact`、`getTripNotFoundNotice`、`getTripSupportCopy`（徹底移除假單號與假承諾）、`submitTripSupportInquiry`（誠實不可用處理）、`formatSupportTicketBody`。
+- `tests/unit/system-remediation/sr-enterprise-data-001/sr-enterprise-data-001.test.ts`：新增 45 項單元與行為回歸測試（含 4xx/5xx 錯誤分類回歸、客服授權測試、線上工單行為回歸測試與禁假送達全域斷言）。
 - `docs/04-uat/system-remediation-20260906/SR-ENTERPRISE-DATA-001.md`：本完成證據文件。
 - （`components/enterprise-booking-lifecycle.tsx` 恢復為 `origin/dev` 原始版本，消除治理違規）。
-

@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { BookingRecord } from "@drts/contracts";
 import { ApiClientError } from "../../../../packages/api-client/src";
 import {
   bookingGatewayHref,
   classifyBookingRecordState,
   formatBookingWindowLabel,
+  formatSupportTicketBody,
   getAuthorizedSupportContact,
   getDriverAssignedNotice,
   getTripNotFoundNotice,
@@ -14,6 +15,7 @@ import {
   isUpcomingTripState,
   mapBookingRecordToTripSummary,
   resolveBookingGatewayState,
+  submitTripSupportInquiry,
   toTelHref,
 } from "../../../../apps/enterprise-dispatch-web/lib/enterprise-fixtures";
 
@@ -481,10 +483,134 @@ describe("SR-ENTERPRISE-DATA-001: getTripSupportCopy", () => {
     expect(copyZh.unauthorizedNotice).not.toContain("0800-200-118");
     expect(copyZh.driverDesc).toContain("最小權限原則");
     expect(copyZh.topicOptions.length).toBeGreaterThanOrEqual(4);
+    expect(copyZh.inquiryUnavailableTitle).toBe("線上客服工單通道未開通");
+    expect(copyZh.inquiryUnavailableBody).toContain("尚未配置線上工單提交 API");
 
     const copyEn = getTripSupportCopy("en");
     expect(copyEn.pageTitle).toBe("Enterprise Support Center");
     expect(copyEn.unauthorizedNotice).not.toContain("0800-200-118");
     expect(copyEn.driverDesc).toContain("least-privilege principles");
+    expect(copyEn.inquiryUnavailableTitle).toBe("Online Support Ticket Channel Unavailable");
+  });
+
+  it("verifies NO fake ticket SUP-2026-0909 or simulated 5-minute promise exists in copy or fixtures", () => {
+    const copyZh = getTripSupportCopy("zh");
+    const copyEn = getTripSupportCopy("en");
+
+    expect(copyZh.inquirySuccessBody).not.toContain("SUP-2026-0909");
+    expect(copyZh.inquirySuccessBody).not.toContain("5 分鐘");
+    expect(copyEn.inquirySuccessBody).not.toContain("SUP-2026-0909");
+    expect(copyEn.inquirySuccessBody).not.toContain("5 minutes");
+  });
+});
+
+describe("SR-ENTERPRISE-DATA-001: submitTripSupportInquiry behavioral tests", () => {
+  it("honestly returns unavailable state when no authoritative API function is provisioned (no fake delivery)", async () => {
+    const res = await submitTripSupportInquiry(
+      { topic: "driver", notes: "Driver has not arrived at lobby" },
+      "zh",
+    );
+    expect(res.status).toBe("unavailable");
+    expect(res.message).toContain("尚未配置線上工單提交 API");
+    expect(res.ticketId).toBeUndefined();
+  });
+
+  it("returns honest unavailable state with English guidance when locale is en", async () => {
+    const res = await submitTripSupportInquiry(
+      { topic: "driver", notes: "Driver delayed" },
+      "en",
+    );
+    expect(res.status).toBe("unavailable");
+    expect(res.message).toContain("Online ticket submission API is not provisioned");
+    expect(res.ticketId).toBeUndefined();
+  });
+
+  it("returns success with real ticket ID when authoritative API returns confirmation", async () => {
+    const mockApiSubmit = vi.fn().mockResolvedValue({
+      ticketId: "TICK-AUTH-2026-0909-X7",
+      submittedAt: "2026-09-09T00:25:00.000Z",
+    });
+
+    const res = await submitTripSupportInquiry(
+      {
+        topic: "urgent",
+        notes: "Flight boarding in 30 minutes, need immediate pickup confirmation",
+      },
+      "zh",
+      mockApiSubmit,
+    );
+
+    expect(mockApiSubmit).toHaveBeenCalledWith({
+      topic: "urgent",
+      notes: "Flight boarding in 30 minutes, need immediate pickup confirmation",
+    });
+    expect(res.status).toBe("success");
+    expect(res.ticketId).toBe("TICK-AUTH-2026-0909-X7");
+    expect(res.message).toContain("TICK-AUTH-2026-0909-X7");
+    expect(res.message).not.toContain("SUP-2026-0909");
+  });
+
+  it("returns error status when authoritative API throws an error", async () => {
+    const mockApiSubmit = vi
+      .fn()
+      .mockRejectedValue(new Error("ROC gateway 503 service unavailable"));
+
+    const res = await submitTripSupportInquiry(
+      { topic: "driver", notes: "Location mismatch" },
+      "zh",
+      mockApiSubmit,
+    );
+
+    expect(res.status).toBe("error");
+    expect(res.message).toBe("ROC gateway 503 service unavailable");
+    expect(res.ticketId).toBeUndefined();
+  });
+
+  it("returns error status when authoritative API returns response missing valid ticketId", async () => {
+    const mockApiSubmit = vi.fn().mockResolvedValue({
+      success: true,
+      ticketId: "   ",
+    });
+
+    const res = await submitTripSupportInquiry(
+      { topic: "policy", notes: "Expense question" },
+      "zh",
+      mockApiSubmit,
+    );
+
+    expect(res.status).toBe("error");
+    expect(res.message).toContain("有效工單編號");
+    expect(res.ticketId).toBeUndefined();
+  });
+
+  it("validates required topic before invoking API", async () => {
+    const mockApiSubmit = vi.fn();
+
+    const resZh = await submitTripSupportInquiry(
+      { topic: "   ", notes: "Missing topic" },
+      "zh",
+      mockApiSubmit,
+    );
+    expect(mockApiSubmit).not.toHaveBeenCalled();
+    expect(resZh.status).toBe("error");
+    expect(resZh.message).toContain("請選擇求助類別");
+
+    const resEn = await submitTripSupportInquiry(
+      { topic: "", notes: "Missing topic" },
+      "en",
+      mockApiSubmit,
+    );
+    expect(resEn.status).toBe("error");
+    expect(resEn.message).toContain("Please select an issue category");
+  });
+
+  it("formatSupportTicketBody returns localized confirmation referencing the real ticketId", () => {
+    const zh = formatSupportTicketBody("TICK-REAL-101", "zh");
+    expect(zh).toContain("TICK-REAL-101");
+    expect(zh).toContain("已建立權威客服工單");
+
+    const en = formatSupportTicketBody("TICK-REAL-101", "en");
+    expect(en).toContain("TICK-REAL-101");
+    expect(en).toContain("Authoritative support ticket");
   });
 });

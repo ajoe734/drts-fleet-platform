@@ -830,6 +830,8 @@ export interface TripSupportCopy {
   driverEscalationNotice: string;
   inquiryTitle: string;
   inquirySubtitle: string;
+  inquiryChannelStatusTitle: string;
+  inquiryChannelStatusBody: string;
   topicSelectLabel: string;
   topicOptions: { id: string; label: string }[];
   messageLabel: string;
@@ -838,6 +840,19 @@ export interface TripSupportCopy {
   submitting: string;
   inquirySuccessTitle: string;
   inquirySuccessBody: string;
+  inquiryUnavailableTitle: string;
+  inquiryUnavailableBody: string;
+  inquiryErrorTitle: string;
+}
+
+export function formatSupportTicketBody(
+  ticketId: string,
+  locale: Locale = "zh",
+): string {
+  if (locale === "zh") {
+    return `已建立權威客服工單（單號：${ticketId}）。系統已記錄您的求助內容。`;
+  }
+  return `Authoritative support ticket (${ticketId}) has been confirmed. Your request has been recorded.`;
 }
 
 export function getTripSupportCopy(
@@ -871,8 +886,14 @@ export function getTripSupportCopy(
       : "Driver coordination requests are prioritized and updates will be communicated by SMS or phone.",
     inquiryTitle: isZh ? "線上客服留言 / 行程回報" : "Online Support Inquiry",
     inquirySubtitle: isZh
-      ? "填寫後客服專員將優先處理並透過企業信箱或簡訊回覆"
-      : "Our support specialists will prioritize your request and respond via email or SMS",
+      ? "填寫後客服專員將依租戶規範處理並回覆"
+      : "Our support team will process your request according to tenant policy",
+    inquiryChannelStatusTitle: isZh
+      ? "線上客服工單通道狀態"
+      : "Online Support Ticket Channel",
+    inquiryChannelStatusBody: isZh
+      ? "此通道需由企業租戶開通權威線上工單 API；送出時將進行可用性檢查，未開通時誠實呈現不可用狀態，不假冒送達。"
+      : "This channel requires an authoritative tenant ticket API. Channel availability is verified on submission without simulated delivery.",
     topicSelectLabel: isZh ? "求助類別" : "Issue category",
     topicOptions: [
       {
@@ -899,11 +920,97 @@ export function getTripSupportCopy(
     submitInquiry: isZh ? "送出客服求助" : "Submit Request",
     submitting: isZh ? "送出中…" : "Submitting...",
     inquirySuccessTitle: isZh
-      ? "求助通知已成功送達客服中心"
-      : "Support request received successfully",
+      ? "客服工單已成功受理"
+      : "Support Ticket Confirmed",
     inquirySuccessBody: isZh
-      ? "已建立客服工單（單號 SUP-2026-0909）。客服專員將於 5 分鐘內與您或司機取得連繫。"
-      : "Support ticket SUP-2026-0909 has been created. A specialist will coordinate with you or the driver within 5 minutes.",
+      ? "已建立客服工單。客服專員將依租戶規範處理您的求助需求。"
+      : "Support ticket has been confirmed. A specialist will coordinate your request according to tenant policy.",
+    inquiryUnavailableTitle: isZh
+      ? "線上客服工單通道未開通"
+      : "Online Support Ticket Channel Unavailable",
+    inquiryUnavailableBody: isZh
+      ? "目前租戶尚未配置線上工單提交 API。如需即時協助，請使用已授權之客服專線，或由企業管理員於調度後台聯繫營運中心。"
+      : "Online ticket submission API is not provisioned for this tenant. For immediate assistance, please use an authorized support phone line or have your enterprise admin contact the ROC.",
+    inquiryErrorTitle: isZh
+      ? "客服求助送出失敗"
+      : "Support Request Failed",
+  };
+}
+
+export interface TripSupportInquiryPayload {
+  bookingId?: string | null;
+  topic: string;
+  notes: string;
+  requesterName?: string;
+  tenantId?: string;
+}
+
+export interface TripSupportInquiryResult {
+  status: "success" | "unavailable" | "error";
+  ticketId?: string;
+  message: string;
+}
+
+export type SupportApiSubmitFn = (
+  payload: TripSupportInquiryPayload,
+) => Promise<{ ticketId?: string; [key: string]: unknown }>;
+
+export async function submitTripSupportInquiry(
+  payload: TripSupportInquiryPayload,
+  locale: Locale = "zh",
+  apiSubmitFn?: SupportApiSubmitFn,
+): Promise<TripSupportInquiryResult> {
+  const isZh = locale === "zh";
+
+  if (!payload.topic || !payload.topic.trim()) {
+    return {
+      status: "error",
+      message: isZh ? "請選擇求助類別" : "Please select an issue category",
+    };
+  }
+
+  if (typeof apiSubmitFn === "function") {
+    try {
+      const response = await apiSubmitFn(payload);
+      if (
+        response &&
+        typeof response.ticketId === "string" &&
+        response.ticketId.trim()
+      ) {
+        return {
+          status: "success",
+          ticketId: response.ticketId.trim(),
+          message: formatSupportTicketBody(response.ticketId.trim(), locale),
+        };
+      }
+      return {
+        status: "error",
+        message: isZh
+          ? "權威 API 回傳未包含有效工單編號"
+          : "Authoritative API did not return a valid ticket ID",
+      };
+    } catch (err: unknown) {
+      const errorMsg =
+        err instanceof Error
+          ? err.message
+          : isZh
+            ? "送出求助時發生系統錯誤"
+            : "A system error occurred while submitting support request";
+      return {
+        status: "error",
+        message: errorMsg,
+      };
+    }
+  }
+
+  // Explicit no-fake-delivery: without authoritative API implementation, do NOT
+  // simulate delivery with setTimeout or hardcoded ticket numbers. Return honest
+  // unavailable state.
+  return {
+    status: "unavailable",
+    message: isZh
+      ? "目前租戶尚未配置線上工單提交 API。如需即時協助，請使用已授權之客服專線，或由企業管理員於調度後台聯繫營運中心。"
+      : "Online ticket submission API is not provisioned for this tenant. For immediate assistance, please use an authorized support phone line or have your enterprise admin contact the ROC.",
   };
 }
 

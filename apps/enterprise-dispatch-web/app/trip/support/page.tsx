@@ -15,11 +15,18 @@ import { EntPageHead } from "@/components/enterprise-shell";
 import {
   getAuthorizedSupportContact,
   getTripSupportCopy,
+  submitTripSupportInquiry,
+  type SupportApiSubmitFn,
+  type TripSupportInquiryResult,
 } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
 import { useTranslation } from "@/lib/i18n";
 
-function TripSupportContent() {
+export function TripSupportContent({
+  apiSubmitFn,
+}: {
+  apiSubmitFn?: SupportApiSubmitFn;
+} = {}) {
   const { locale } = useTranslation();
   const searchParams = useSearchParams();
   const initialTopic = searchParams.get("topic") || "driver";
@@ -29,16 +36,33 @@ function TripSupportContent() {
 
   const [selectedTopic, setSelectedTopic] = useState(initialTopic);
   const [notes, setNotes] = useState("");
-  const [submitted, setSubmitted] = useState(false);
+  const [submissionResult, setSubmissionResult] =
+    useState<TripSupportInquiryResult | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setIsSubmitting(true);
-    setTimeout(() => {
+    try {
+      const result = await submitTripSupportInquiry(
+        {
+          topic: selectedTopic,
+          notes,
+        },
+        locale,
+        apiSubmitFn,
+      );
+      setSubmissionResult(result);
+    } catch (err: unknown) {
+      const errMsg =
+        err instanceof Error ? err.message : copy.inquiryErrorTitle;
+      setSubmissionResult({
+        status: "error",
+        message: errMsg,
+      });
+    } finally {
       setIsSubmitting(false);
-      setSubmitted(true);
-    }, 150);
+    }
   }
 
   return (
@@ -149,21 +173,49 @@ function TripSupportContent() {
           title={copy.inquiryTitle}
           sub={copy.inquirySubtitle}
         >
-          {submitted ? (
-            <div data-testid="support-inquiry-success">
-              <EBanner
-                t={t}
-                tone="success"
-                icon="check"
-                title={copy.inquirySuccessTitle}
-                body={copy.inquirySuccessBody}
-              />
+          {submissionResult ? (
+            <div>
+              {submissionResult.status === "success" && (
+                <div data-testid="support-inquiry-success">
+                  <EBanner
+                    t={t}
+                    tone="success"
+                    icon="check"
+                    title={copy.inquirySuccessTitle}
+                    body={submissionResult.message}
+                  />
+                </div>
+              )}
+              {submissionResult.status === "unavailable" && (
+                <div data-testid="support-inquiry-unavailable">
+                  <EBanner
+                    t={t}
+                    tone="warn"
+                    icon="alert"
+                    title={copy.inquiryUnavailableTitle}
+                    body={submissionResult.message}
+                  />
+                </div>
+              )}
+              {submissionResult.status === "error" && (
+                <div data-testid="support-inquiry-error">
+                  <EBanner
+                    t={t}
+                    tone="danger"
+                    icon="alert"
+                    title={copy.inquiryErrorTitle}
+                    body={submissionResult.message}
+                  />
+                </div>
+              )}
               <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
                 <button
                   type="button"
                   onClick={() => {
-                    setSubmitted(false);
-                    setNotes("");
+                    setSubmissionResult(null);
+                    if (submissionResult.status === "success") {
+                      setNotes("");
+                    }
                   }}
                   style={entBtnStyle(t, { variant: "default", size: "sm" })}
                 >
@@ -181,6 +233,14 @@ function TripSupportContent() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <EBanner
+                t={t}
+                tone="info"
+                icon="info"
+                title={copy.inquiryChannelStatusTitle}
+                body={copy.inquiryChannelStatusBody}
+              />
+
               <div>
                 <label
                   htmlFor="topic-select"
