@@ -13,6 +13,7 @@ import {
   Res,
   StreamableFile,
   Optional,
+  Inject,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
@@ -138,13 +139,21 @@ const PARTNER_INGRESS_HANDOFF_EXPIRES_IN: JwtExpiresIn = "15m";
 @Controller()
 export class TenantPartnerController {
   constructor(
+    @Inject(TenantPartnerService)
     private readonly tenantPartnerService: TenantPartnerService,
+    @Inject(BillingSettlementService)
     private readonly billingSettlementService: BillingSettlementService,
+    @Inject(OwnedMobilityService)
     private readonly ownedMobilityService: OwnedMobilityService,
+    @Inject(JwtAuthService)
     private readonly jwtAuthService: JwtAuthService,
+    @Inject(IdempotencyService)
     private readonly idempotencyService: IdempotencyService,
-    @Optional() private readonly identityRepository?: IdentityRepository,
     @Optional()
+    @Inject(IdentityRepository)
+    private readonly identityRepository?: IdentityRepository,
+    @Optional()
+    @Inject(AuditNotificationService)
     private readonly auditNotificationService?: AuditNotificationService,
   ) {}
 

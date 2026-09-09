@@ -12,6 +12,11 @@ import { TenantPartnerController } from "../../../../apps/api/src/modules/tenant
 import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { TenantPartnerRepository } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import type { StoredTenantApiKeyRecord } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
+import { BillingSettlementService } from "../../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
+import { OwnedMobilityService } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import { IdempotencyService } from "../../../../apps/api/src/common/idempotency";
+import { IdentityRepository } from "../../../../apps/api/src/modules/identity/identity.repository";
+import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 
 const apiRequire = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
@@ -20,6 +25,21 @@ apiRequire("reflect-metadata");
 const { NestFactory } = apiRequire(
   "@nestjs/core",
 ) as typeof import("../../../../apps/api/node_modules/@nestjs/core");
+const { Module } = apiRequire(
+  "@nestjs/common",
+) as typeof import("@nestjs/common");
+
+let AppModuleToUse: typeof AppModule = AppModule;
+try {
+  const distAppModule = apiRequire(
+    "../../../../apps/api/dist/app.module.js",
+  ) as { AppModule?: typeof AppModule };
+  if (distAppModule?.AppModule) {
+    AppModuleToUse = distAppModule.AppModule;
+  }
+} catch {
+  // fallback to source AppModule
+}
 
 const hasDatabaseUrl = Boolean(
   process.env.DATABASE_URL &&
@@ -28,16 +48,108 @@ const hasDatabaseUrl = Boolean(
 );
 
 describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness", () => {
-  it("verifies AppModule composition, controller binding, and guard wiring without requiring server startup", () => {
-    // Reflect on AppModule imports and controllers to verify complete integration
-    const imports = Reflect.getMetadata("imports", AppModule) || [];
+  it("verifies AppModule composition, controller binding, and real DI wiring without requiring server startup", async () => {
+    // 1. Verify AppModule composition
+    const imports =
+      Reflect.getMetadata("imports", AppModuleToUse) ||
+      Reflect.getMetadata("imports", AppModule) ||
+      [];
     expect(imports.length).toBeGreaterThan(0);
 
+    // 2. Verify controller prototypes
     const controllerPrototype = TenantPartnerController.prototype;
     expect(controllerPrototype.listApiKeys).toBeDefined();
     expect(controllerPrototype.issueApiKey).toBeDefined();
     expect(controllerPrototype.rotateApiKey).toBeDefined();
     expect(controllerPrototype.revokeApiKey).toBeDefined();
+
+    // 3. Assert constructor dependency injection metadata (self:paramtypes)
+    // Ensures Nest DI can resolve dependencies even without TypeScript runtime metadata emission
+    const controllerSelfParams: Array<{ index: number; param: unknown }> =
+      Reflect.getMetadata("self:paramtypes", TenantPartnerController) || [];
+    expect(
+      controllerSelfParams.some(
+        (p) => p.index === 0 && p.param === TenantPartnerService,
+      ),
+    ).toBe(true);
+    expect(
+      controllerSelfParams.some(
+        (p) => p.index === 1 && p.param === BillingSettlementService,
+      ),
+    ).toBe(true);
+    expect(
+      controllerSelfParams.some(
+        (p) => p.index === 2 && p.param === OwnedMobilityService,
+      ),
+    ).toBe(true);
+    expect(
+      controllerSelfParams.some(
+        (p) => p.index === 3 && p.param === JwtAuthService,
+      ),
+    ).toBe(true);
+    expect(
+      controllerSelfParams.some(
+        (p) => p.index === 4 && p.param === IdempotencyService,
+      ),
+    ).toBe(true);
+    expect(
+      controllerSelfParams.some(
+        (p) => p.index === 5 && p.param === IdentityRepository,
+      ),
+    ).toBe(true);
+    expect(
+      controllerSelfParams.some(
+        (p) => p.index === 6 && p.param === AuditNotificationService,
+      ),
+    ).toBe(true);
+
+    // 4. Assert service constructor dependency injection metadata
+    const serviceSelfParams: Array<{ index: number; param: unknown }> =
+      Reflect.getMetadata("self:paramtypes", TenantPartnerService) || [];
+    expect(
+      serviceSelfParams.some(
+        (p) => p.index === 0 && p.param === AuditNotificationService,
+      ),
+    ).toBe(true);
+    expect(
+      serviceSelfParams.some(
+        (p) => p.index === 1 && p.param === TenantPartnerRepository,
+      ),
+    ).toBe(true);
+
+    // 5. Assert real Nest DI container resolution and instantiation
+    const mockPartnerService = { isMockService: true };
+
+    @Module({
+      controllers: [TenantPartnerController],
+      providers: [
+        { provide: TenantPartnerService, useValue: mockPartnerService },
+        { provide: BillingSettlementService, useValue: {} },
+        { provide: OwnedMobilityService, useValue: {} },
+        { provide: JwtAuthService, useValue: {} },
+        { provide: IdempotencyService, useValue: {} },
+        { provide: IdentityRepository, useValue: {} },
+        { provide: AuditNotificationService, useValue: {} },
+      ],
+    })
+    class DiVerificationModule {}
+
+    const appCtx = await NestFactory.createApplicationContext(
+      DiVerificationModule,
+      { logger: false },
+    );
+    try {
+      const resolvedController = appCtx.get(TenantPartnerController);
+      expect(resolvedController).toBeDefined();
+      expect((resolvedController as unknown as { tenantPartnerService: unknown }).tenantPartnerService).toBe(
+        mockPartnerService,
+      );
+      expect(
+        (resolvedController as unknown as { tenantPartnerService: { isMockService: boolean } }).tenantPartnerService.isMockService,
+      ).toBe(true);
+    } finally {
+      await appCtx.close();
+    }
   });
 
   it.runIf(hasDatabaseUrl)(
@@ -50,7 +162,7 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
       vi.stubEnv("JWT_ALGORITHMS", "HS256");
 
       // Launch full AppModule instance with real registered DI services, guards, filters, and interceptors
-      const app = await NestFactory.create(AppModule, {
+      const app = await NestFactory.create(AppModuleToUse, {
         logger: false,
         abortOnError: false,
       });

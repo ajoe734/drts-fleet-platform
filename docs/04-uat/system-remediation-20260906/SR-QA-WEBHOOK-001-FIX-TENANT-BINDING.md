@@ -48,6 +48,7 @@ Minimal, surgical repairs strictly adhering to the authorized write scopes (`app
 - Added `@CurrentIdentity() identity?: IdentityContext | null` to `listApiKeys`.
 - Maintained backward compatibility for direct TypeScript calls (`controller.listApiKeys(tenantId, requestId, identity)` or `controller.listApiKeys(tenantId, requestId)`).
 - Forwarded the resolved identity to `tenantPartnerService.listApiKeys(resolvedTenantId, resolvedIdentity)`.
+- Decorated all constructor parameters with explicit `@Inject(...)` tokens (`@Inject(TenantPartnerService)`, `@Inject(BillingSettlementService)`, etc.) to ensure robust NestJS DI dependency resolution under environments without runtime decorator metadata emission (e.g. Vite/Vitest).
 
 ### 2.2 `apps/api/src/modules/tenant-partner/tenant-partner.service.ts`
 - Updated `listApiKeys(tenantId: string, identity?: IdentityContext | null)` to accept the caller's identity context.
@@ -56,6 +57,7 @@ Minimal, surgical repairs strictly adhering to the authorized write scopes (`app
   - If `identity` is platform admin or system actor (`realm: "platform" | "system"`, `actorType: "platform_admin" | "system"`), permits cross-tenant access.
   - If `identity.tenantId !== targetTenantId`, throws `ApiRequestError(HttpStatus.FORBIDDEN, "TENANT_SCOPE_MISMATCH", "Cross-tenant identity access is forbidden. Principal tenantId does not match target tenantId.", { targetTenantId, principalTenantId })`.
 - Delegated `assertTenantMutationScope(targetTenantId, identity)` to `assertTenantAccessScope(targetTenantId, identity, "mutation")`, maintaining exact error codes, status, and messages for existing mutation endpoints.
+- Decorated constructor parameters with explicit `@Inject(...)` tokens (`@Inject(AuditNotificationService)`, `@Inject(TenantPartnerRepository)`, etc.) for deterministic DI resolution.
 
 ---
 
@@ -83,7 +85,10 @@ Executes without server or compose dependencies per VM restriction:
   - Internal and legacy callers without `identity` context continue to function seamlessly.
 
 ### 3.2 Full AppModule E2E Test Suite (`tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/appmodule-tenant-binding.test.ts`)
-- Verifies complete NestJS `AppModule` structure and route metadata.
+- Dynamically resolves compiled `AppModule` (`apps/api/dist/app.module.js`) with full TypeScript decorator metadata emission, falling back to source `AppModule`.
+- Verifies complete NestJS `AppModule` structure, route metadata, and real DI wiring without server startup:
+  - Asserts constructor self-declared dependency injection metadata (`self:paramtypes`) on `TenantPartnerController` and `TenantPartnerService`.
+  - Creates a Nest application context and asserts real DI container resolution and injection of `tenantPartnerService` into `TenantPartnerController`.
 - Configures full `AppModule` DI wiring (`DatabaseService`, `JwtAuthService`, `StepUpProofService`, `TenantPartnerRepository`, `TenantPartnerService`) and production `APP_GUARD`, `APP_INTERCEPTOR` (`SnakeCaseInterceptor`), and `APP_FILTER`.
 - Issues authentic two-tenant JWTs with trusted MFA fixtures (`amr: ["mfa", "totp"]`, `acr: "aal2"`).
 - Tests cross-tenant mutations (`issue`, `rotate`, `revoke`) with valid caller-bound step-up proofs, asserting HTTP 403 `TENANT_SCOPE_MISMATCH` and verifying DB state immutability.
@@ -96,7 +101,7 @@ Executes without server or compose dependencies per VM restriction:
 pnpm exec vitest run tests/unit/system-remediation/sr-qa-webhook-001-fix-tenant-binding/ --no-file-parallelism --maxConcurrency=1
 # Output: 5 passed (5)
 
-# 2. E2E tests (AppModule structure / mock-isolated per VM restriction):
+# 2. E2E tests (AppModule structure and real DI verification / mock-isolated per VM restriction):
 pnpm exec vitest run tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/ --no-file-parallelism --maxConcurrency=1
 # Output: 1 passed, 1 skipped (2)
 

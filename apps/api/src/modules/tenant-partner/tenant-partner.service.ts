@@ -1317,10 +1317,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private readonly identityRepository: IdentityRepository | undefined;
 
   constructor(
+    @Inject(AuditNotificationService)
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
+    @Inject(TenantPartnerRepository)
     private readonly tenantPartnerRepository?: TenantPartnerRepository,
     @Optional()
+    @Inject(WebhookDispatchService)
     private readonly webhookDispatchService: WebhookDispatchService = new WebhookDispatchService(),
     @Optional()
     @Inject(PARTNER_INGRESS_CREDENTIAL_SEEDS)
@@ -1332,8 +1335,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       new ReferenceTokenEligibilityAdapter(),
     ],
     @Optional()
+    @Inject(PartnerUserIdentityLinkRepository)
     private readonly partnerUserIdentityLinkRepository: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
     @Optional()
+    @Inject(ReferralEmbedHandoffRepository)
     private readonly referralEmbedHandoffRepository: ReferralEmbedHandoffRepository = new ReferralEmbedHandoffRepository(),
     @Optional()
     @Inject(SecurityEventsService)
@@ -1342,6 +1347,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     @Inject(IdentityRepository)
     identityRepository?: IdentityRepository,
     @Optional()
+    @Inject(TenantInvitationDeliveryService)
     private readonly tenantInvitationDelivery: TenantInvitationDeliveryService = new TenantInvitationDeliveryService(),
   ) {
     this.securityEventsService =
