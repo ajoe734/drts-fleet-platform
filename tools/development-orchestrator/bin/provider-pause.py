@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 _TOOL_ROOT = Path(__file__).resolve().parent.parent
@@ -76,11 +77,49 @@ def command_list(config: dict, state: dict, report: dict) -> int:
     return 0
 
 
-def command_clear(config: dict, state: dict, report: dict, lane: str) -> int:
+def command_clear(
+    config: dict,
+    state: dict,
+    report: dict,
+    lane: str,
+    *,
+    include_shared: bool = False,
+) -> int:
     pauses = provider_pause_registry(state)
-    doomed = [key for key, entry in pauses.items()
-              if isinstance(entry, dict) and pause_covers_lane(config, report, entry, lane)]
+    skipped_shared: list[str] = []
+    skipped_future: list[str] = []
+    now = datetime.now(timezone.utc).timestamp()
+    doomed: list[str] = []
+    for key, entry in pauses.items():
+        if not isinstance(entry, dict) or not pause_covers_lane(config, report, entry, lane):
+            continue
+        # A quota-pool pause can cover several lanes. Clearing it while its
+        # reset horizon is still in the future just sends work into a known
+        # quota failure. The ordinary repair command leaves shared quota
+        # state alone; an operator may opt in after verifying recovery.
+        if str(entry.get("scope") or "lane") == "quota_pool":
+            if not include_shared:
+                skipped_shared.append(key)
+                continue
+            resume_at = entry.get("resume_at")
+            if resume_at is not None and float(resume_at) > now:
+                skipped_future.append(key)
+                continue
+        doomed.append(key)
     if not doomed:
+        if skipped_shared:
+            print(
+                f"shared quota pause covers {lane}; preserved by default. "
+                "Re-run with --include-shared only after verifying quota recovery.",
+                file=sys.stderr,
+            )
+            return 2
+        if skipped_future:
+            print(
+                f"shared quota pause for {lane} has not reached resume_at; preserved.",
+                file=sys.stderr,
+            )
+            return 2
         print(f"no pause covers {lane}; nothing to clear.", file=sys.stderr)
         return 1
 
@@ -97,6 +136,12 @@ def command_clear(config: dict, state: dict, report: dict, lane: str) -> int:
             print(f"note: the capability probe still reports {lane_id} unhealthy; "
                   "expect it to pause again on the next real failure.", file=sys.stderr)
     print(f"cleared {len(doomed)} pause(s); released: {', '.join(sorted(freed)) or lane}")
+    if skipped_shared:
+        print(
+            f"preserved {len(skipped_shared)} shared quota pause(s); "
+            "use --include-shared only after verifying quota recovery.",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -108,6 +153,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list", help="show every pause and the lanes it stops")
     clear = sub.add_parser("clear", help="clear the pauses that stop a lane")
     clear.add_argument("lane", help="lane id, e.g. claude")
+    clear.add_argument(
+        "--include-shared",
+        action="store_true",
+        help="also clear shared quota-pool pauses (only after verifying recovery)",
+    )
     args = parser.parse_args(argv)
 
     config = load_config(args.config)
@@ -119,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.command == "list":
         return command_list(config, state, report)
-    return command_clear(config, state, report, args.lane)
+    return command_clear(config, state, report, args.lane, include_shared=args.include_shared)
 
 
 if __name__ == "__main__":
