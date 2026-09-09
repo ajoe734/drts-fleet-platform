@@ -2,6 +2,45 @@
 
 Date: 2026-09-08. Owner: Codex2; Reviewer: Codex.
 
+## Redispatch verification — 2026-09-09 00:18 UTC
+
+Fetched base: `8c6e1fa9732ec8322de275084817683e6d67407c`.
+Tested HEAD: `2fe411b05d39d8cd122d1a5b35ee432e18ca10d1`.
+Candidate SHA: none; this is blocked regression evidence, not implementation.
+
+- `git fetch origin`: exit 0.
+- `git rebase origin/dev`: exit 1 at historical `ac1076708`, add/add conflict
+  in `payment-gate.test.ts`; `git rebase --abort`: succeeded, original HEAD
+  and clean working tree restored. No history rewrite or additional merge.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/modules/billing-settlement`:
+  exit 0; tested billing implementation equals the fetched base.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`: exit 1;
+  3 executed, 1 passed, 2 failed: fabricated proof becomes paid and unresolved
+  persistence returns paid. Unapproved rejection passes.
+- `pnpm --filter @drts/api typecheck`: exit 2; missing control-plane-auth
+  declarations and voice/booking contract exports/properties outside task scope.
+- `pnpm --filter @drts/platform-admin-web typecheck`: exit 0.
+- `git diff --check`: exit 0.
+
+Read the merged helper at
+`support/unblock/SR-PROOF-001/SR-PROOF-001-UNBLOCK-HISTORY-REPAIR.md`.
+It explicitly requires preserving parent blocked status until supervisor
+allocates repository/module and dedicated proof storage/scanner scopes,
+SR-CONTRACT-001 dependency or authorized exception, missing canvas states,
+and a selected recovery branch. Current task slice still has only the original
+five scopes and two dependencies. Helper completion did not supply these.
+Rechecked platform realm tokens and `PA_Reimbursements` /
+`PA_ReimbursementDetail`: proof upload/scan/reject/readback states remain absent;
+the screen requirements below remain applicable. No UI was invented.
+
+Supervisor action: apply those routing prerequisites before redispatching;
+repeating the history-helper done check alone cannot unblock implementation.
+Resource IDs are isolated inputs `sr-proof-001-batch-a`,
+`sr-proof-001-driver-a`, `sr-proof-001-statement-a`, and
+`sr-proof-001-nonexistent-proof`. Live upload/scanner/download, PostgreSQL
+concurrency, durable receipts, browser/device acceptance and real payment
+remain unverified. No prohibited servers or infrastructure were started.
+
 ## Redispatch verification — 2026-09-08 23:58 UTC
 
 Fetched base: `32b6dde7db730a8524004a5e87d94d5a2a6d7853`.
