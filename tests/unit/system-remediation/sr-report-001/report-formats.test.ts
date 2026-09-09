@@ -15,7 +15,7 @@
  * 9. Downloaded artifacts have correct MIME types and file extensions.
  */
 
-import zlib from "node:zlib";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { describe, it, expect } from "vitest";
 import ExcelJS from "exceljs";
 import {
@@ -114,220 +114,25 @@ async function parseXlsx(
   return { sheetName: sheet.name, headers, rows };
 }
 
-/**
- * Robustly parses and extracts text from a PDFKit-generated PDF buffer.
- *
- * Handles both Standard 14 8-bit fonts (Latin text) and Type0 CID fonts with
- * embedded `/ToUnicode` CMaps (CJK text).
- */
-function extractPdfText(pdfBuffer: Buffer): string {
-  const latin = pdfBuffer.toString("latin1");
-
-  // Extract all indirect PDF objects
-  const objMap = new Map<string, string>();
-  const objRegex = /(\d+)\s+(\d+)\s+obj([\s\S]*?)endobj/g;
-  let objMatch: RegExpExecArray | null;
-  while ((objMatch = objRegex.exec(latin)) !== null) {
-    const id = objMatch[1] ?? "";
-    const body = objMatch[3] ?? "";
-    objMap.set(id, body);
+/** Extract actual displayed text using an independent standards-based parser. */
+async function extractPdfText(pdfBuffer: Buffer): Promise<string> {
+  const task = getDocument({
+    data: new Uint8Array(pdfBuffer),
+    useSystemFonts: false,
+    disableFontFace: true,
+  });
+  try {
+    const pdf = await task.promise;
+    const text: string[] = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      text.push(content.items.map((item) => "str" in item ? item.str : "").join(""));
+    }
+    return text.join("");
+  } finally {
+    await task.destroy();
   }
-
-  // Parse ToUnicode CMaps for each font object
-  const fontToCMap = new Map<string, Map<string, string>>();
-  for (const [id, body] of objMap.entries()) {
-    if (body.includes("/Type /Font") && body.includes("/ToUnicode")) {
-      const toUnicodeMatch = body.match(/\/ToUnicode\s+(\d+)\s+\d+\s+R/);
-      if (toUnicodeMatch?.[1]) {
-        const cmapStreamObj = objMap.get(toUnicodeMatch[1]);
-        if (cmapStreamObj) {
-          const streamMatch = cmapStreamObj.match(
-            /stream\r?\n([\s\S]*?)\r?\nendstream/,
-          );
-          if (streamMatch?.[1]) {
-            let decomp: string;
-            try {
-              decomp = zlib
-                .inflateSync(Buffer.from(streamMatch[1], "latin1"))
-                .toString("latin1");
-            } catch {
-              decomp = streamMatch[1];
-            }
-
-            const charMap = new Map<string, string>();
-            const bfrangeRe = /beginbfrange\r?\n([\s\S]*?)\r?\nendbfrange/g;
-            let bfrMatch: RegExpExecArray | null;
-            while ((bfrMatch = bfrangeRe.exec(decomp)) !== null) {
-              const lines = (bfrMatch[1] ?? "").trim().split(/\r?\n/);
-              for (const line of lines) {
-                const arrMatch = line.match(
-                  /<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>\s*\[([^\]]+)\]/,
-                );
-                if (arrMatch?.[1] && arrMatch[3]) {
-                  const start = parseInt(arrMatch[1], 16);
-                  const codes = arrMatch[3].match(/<([0-9a-fA-F]+)>/g) || [];
-                  codes.forEach((c, idx) => {
-                    const hex = c.replace(/[<>]/g, "");
-                    const glyph = (start + idx)
-                      .toString(16)
-                      .toLowerCase()
-                      .padStart(4, "0");
-                    charMap.set(
-                      glyph,
-                      String.fromCodePoint(parseInt(hex, 16)),
-                    );
-                  });
-                  continue;
-                }
-                const rangeMatch = line.match(
-                  /<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>/,
-                );
-                if (rangeMatch?.[1] && rangeMatch[2] && rangeMatch[3]) {
-                  const start = parseInt(rangeMatch[1], 16);
-                  const end = parseInt(rangeMatch[2], 16);
-                  let code = parseInt(rangeMatch[3], 16);
-                  for (let g = start; g <= end; g++) {
-                    const glyph = g
-                      .toString(16)
-                      .toLowerCase()
-                      .padStart(4, "0");
-                    charMap.set(glyph, String.fromCodePoint(code++));
-                  }
-                }
-              }
-            }
-            fontToCMap.set(id, charMap);
-          }
-        }
-      }
-    }
-  }
-
-  // Map font resource tags (e.g. /F1) to their respective charMap
-  const fontNameMap = new Map<string, Map<string, string>>();
-  for (const [, body] of objMap.entries()) {
-    const fontDictMatch = body.match(/\/Font\s*<<([^>]+)>>/);
-    if (fontDictMatch?.[1]) {
-      const entries =
-        fontDictMatch[1].match(/\/(\w+)\s+(\d+)\s+\d+\s+R/g) || [];
-      for (const entry of entries) {
-        const m = entry.match(/\/(\w+)\s+(\d+)\s+\d+\s+R/);
-        if (m?.[1] && m[2]) {
-          const fontTag = "/" + m[1];
-          const fontObjId = m[2];
-          const cMap = fontToCMap.get(fontObjId);
-          if (cMap) {
-            fontNameMap.set(fontTag, cMap);
-          }
-        }
-      }
-    }
-  }
-
-  function decodeFallbackHex(raw: string): string {
-    let allPrintableAscii = true;
-    let asciiStr = "";
-    for (let i = 0; i < raw.length; i += 2) {
-      const b = parseInt(raw.slice(i, i + 2), 16);
-      if ((b >= 32 && b <= 126) || b === 10 || b === 13 || b === 9) {
-        asciiStr += String.fromCharCode(b);
-      } else {
-        allPrintableAscii = false;
-        break;
-      }
-    }
-    if (allPrintableAscii && asciiStr.length > 0) {
-      return asciiStr;
-    }
-
-    let result = "";
-    let i = 0;
-    while (i < raw.length) {
-      if (i + 4 <= raw.length) {
-        const code4 = parseInt(raw.slice(i, i + 4), 16);
-        if (
-          (code4 >= 0x2e80 && code4 <= 0x9fff) ||
-          (code4 >= 0x3000 && code4 <= 0x303f) ||
-          (code4 >= 0xff00 && code4 <= 0xffef)
-        ) {
-          result += String.fromCodePoint(code4);
-          i += 4;
-          continue;
-        }
-      }
-      const b = parseInt(raw.slice(i, i + 2), 16);
-      if (!isNaN(b)) {
-        result += String.fromCharCode(b);
-      }
-      i += 2;
-    }
-    return result;
-  }
-
-  // Extract text from all content streams
-  let fullText = "";
-  for (const [, body] of objMap.entries()) {
-    const streamMatch = body.match(/stream\r?\n([\s\S]*?)\r?\nendstream/);
-    if (!streamMatch?.[1]) continue;
-    let decomp: string;
-    try {
-      decomp = zlib
-        .inflateSync(Buffer.from(streamMatch[1], "latin1"))
-        .toString("latin1");
-    } catch {
-      continue;
-    }
-    if (!decomp.includes("BT")) continue;
-
-    let currentFont = "";
-    const lines = decomp.split(/\r?\n/);
-    for (const line of lines) {
-      const fontMatch = line.match(/\/(\w+)\s+[\d.]+\s+Tf/);
-      if (fontMatch?.[1]) {
-        currentFont = "/" + fontMatch[1];
-      }
-      const tjMatch = line.match(/\[(.*?)\]\s*TJ/);
-      if (tjMatch?.[1]) {
-        const cmap = fontNameMap.get(currentFont);
-        const hexParts = tjMatch[1].match(/<([0-9a-fA-F]+)>/g) || [];
-        for (const hp of hexParts) {
-          const raw = hp.replace(/[<>]/g, "");
-          if (cmap && cmap.size > 0) {
-            for (let i = 0; i < raw.length; i += 4) {
-              const glyph = raw.slice(i, i + 4).toLowerCase().padStart(4, "0");
-              fullText += cmap.get(glyph) || "";
-            }
-          } else {
-            fullText += decodeFallbackHex(raw);
-          }
-        }
-        // Also capture literal text inside array: [(literal) 0 (text)] TJ
-        const literalParts = tjMatch[1].match(/\((.*?)\)/g) || [];
-        for (const lp of literalParts) {
-          fullText += lp.slice(1, -1);
-        }
-      }
-      const stjMatch = line.match(/<([0-9a-fA-F]+)>\s*Tj/);
-      if (stjMatch?.[1]) {
-        const cmap = fontNameMap.get(currentFont);
-        const raw = stjMatch[1];
-        if (cmap && cmap.size > 0) {
-          for (let i = 0; i < raw.length; i += 4) {
-            const glyph = raw.slice(i, i + 4).toLowerCase().padStart(4, "0");
-            fullText += cmap.get(glyph) || "";
-          }
-        } else {
-          fullText += decodeFallbackHex(raw);
-        }
-      }
-      const literalTj = line.match(/\((.*?)\)\s*Tj/);
-      if (literalTj?.[1]) {
-        fullText += literalTj[1];
-      }
-    }
-  }
-
-  return fullText;
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +247,7 @@ describe("recordsToPdf — parsed text, CJK font, and text wrapping / pagination
     expect(buf).toBeInstanceOf(Buffer);
     expect(buf.subarray(0, 4).toString("ascii")).toBe("%PDF");
 
-    const parsedText = extractPdfText(buf);
+    const parsedText = await extractPdfText(buf);
 
     // 1. Chinese characters in title & cells are intact (CJK Unicode font loaded)
     expect(parsedText).toContain("車隊營運日報表");
@@ -469,7 +274,7 @@ describe("recordsToPdf — parsed text, CJK font, and text wrapping / pagination
 
   it("handles empty rows without throwing and renders No data", async () => {
     const buf = await recordsToPdf([], "EmptyTest");
-    const parsedText = extractPdfText(buf);
+    const parsedText = await extractPdfText(buf);
     expect(parsedText).toContain("EmptyTest");
     expect(parsedText).toContain("No data.");
   });
@@ -493,7 +298,7 @@ describe("Cross-format data consistency (CSV, XLSX, PDF)", () => {
     const { rows: xlsxParsedRows } = await parseXlsx(xlsxBuf);
 
     const pdfBuf = await recordsToPdf(rows, "CrossFormatConsistency");
-    const pdfText = extractPdfText(pdfBuf);
+    const pdfText = await extractPdfText(pdfBuf);
 
     for (let i = 0; i < rows.length; i++) {
       const src = rows[i]!;
@@ -722,7 +527,7 @@ describe("ReportingFilingService — formats, MIME types, rejection & scope", ()
     await flushBackgroundWork();
 
     const artifactPdf = await service.renderReportArtifact(acceptedPdf.jobId);
-    const pdfText = extractPdfText(artifactPdf.buffer);
+    const pdfText = await extractPdfText(artifactPdf.buffer);
 
     // Number of filtered rows matches between CSV and XLSX
     expect(csvRows.length).toBe(xlsxRows.length);

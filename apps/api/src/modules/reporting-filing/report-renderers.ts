@@ -14,7 +14,7 @@
  * SR-REPORT-001 — N05 gap closure.
  */
 
-import fs from "node:fs";
+import path from "node:path";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 
@@ -45,61 +45,12 @@ export function cellText(value: unknown): string {
 // Font resolution for PDF (CJK support)
 // ---------------------------------------------------------------------------
 
-interface FontCandidate {
-  path: string;
-  family?: string;
-}
-
-const CJK_REGULAR_CANDIDATES: readonly FontCandidate[] = [
-  {
-    path: "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    family: "NotoSansCJKtc-Regular",
-  },
-  {
-    path: "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    family: "NotoSansCJKtc-Regular",
-  },
-  {
-    path: "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    family: "NotoSansCJKtc-Regular",
-  },
-  {
-    path: "/usr/share/fonts/opentype/noto/NotoSansTC-Regular.otf",
-  },
-  {
-    path: "/usr/share/fonts/truetype/noto/NotoSansTC-Regular.ttf",
-  },
-];
-
-const CJK_BOLD_CANDIDATES: readonly FontCandidate[] = [
-  {
-    path: "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-    family: "NotoSansCJKtc-Bold",
-  },
-  {
-    path: "/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc",
-    family: "NotoSansCJKtc-Bold",
-  },
-  {
-    path: "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
-    family: "NotoSansCJKtc-Bold",
-  },
-  {
-    path: "/usr/share/fonts/opentype/noto/NotoSansTC-Bold.otf",
-  },
-  {
-    path: "/usr/share/fonts/truetype/noto/NotoSansTC-Bold.ttf",
-  },
-];
-
-function findFirstExistingFont(candidates: readonly FontCandidate[]): FontCandidate | null {
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate.path)) {
-      return candidate;
-    }
-  }
-  return null;
-}
+// Both src/modules/reporting-filing and dist/modules/reporting-filing resolve
+// to the API's packaged assets directory, independent of the process cwd.
+const REPORT_FONT_PATH = path.resolve(
+  __dirname,
+  "../../../assets/fonts/NotoSansCJKtc-Regular.otf",
+);
 
 // ---------------------------------------------------------------------------
 // XLSX renderer
@@ -215,7 +166,7 @@ function splitTextToFit(
 /**
  * Renders rows as a PDF table buffer.
  *
- * - Uses Unicode CJK fonts (NotoSansCJK) when available so Chinese report values
+ * - Uses the packaged Unicode CJK font (NotoSansCJK) so Chinese report values
  *   (e.g. driver names, case details) are properly encoded with standard ToUnicode
  *   CMaps rather than corrupted under built-in 8-bit WinAnsi fonts.
  * - Draws a structured table with header row and zebra-striped data rows.
@@ -245,32 +196,11 @@ export function recordsToPdf(
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    // Font registration: resolve CJK fonts or fall back to standard Helvetica.
-    const cjkReg = findFirstExistingFont(CJK_REGULAR_CANDIDATES);
-    const cjkBold = findFirstExistingFont(CJK_BOLD_CANDIDATES);
-
-    let fontRegular = "Helvetica";
-    let fontBold = "Helvetica-Bold";
-
-    if (cjkReg) {
-      if (cjkReg.family) {
-        doc.registerFont("NotoSansCJKtc", cjkReg.path, cjkReg.family);
-      } else {
-        doc.registerFont("NotoSansCJKtc", cjkReg.path);
-      }
-      fontRegular = "NotoSansCJKtc";
-    }
-
-    if (cjkBold) {
-      if (cjkBold.family) {
-        doc.registerFont("NotoSansCJKtc-Bold", cjkBold.path, cjkBold.family);
-      } else {
-        doc.registerFont("NotoSansCJKtc-Bold", cjkBold.path);
-      }
-      fontBold = "NotoSansCJKtc-Bold";
-    } else if (cjkReg) {
-      fontBold = fontRegular;
-    }
+    // Missing/corrupt packaged fonts reject the render; never emit corrupt CJK
+    // through a silent Helvetica fallback. Regular also serves table headings.
+    const fontRegular = "NotoSansCJKtc";
+    const fontBold = fontRegular;
+    doc.registerFont(fontRegular, REPORT_FONT_PATH);
 
     // Title.
     const reportTitle = title ?? "Report";
