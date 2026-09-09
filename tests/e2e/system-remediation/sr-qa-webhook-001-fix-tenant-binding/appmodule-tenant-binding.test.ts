@@ -23,8 +23,8 @@ const { NestFactory } = apiRequire(
 
 const hasDatabaseUrl = Boolean(
   process.env.DATABASE_URL &&
-    (process.env.DATABASE_URL.startsWith("postgres://") ||
-      process.env.DATABASE_URL.startsWith("postgresql://")),
+  (process.env.DATABASE_URL.startsWith("postgres://") ||
+    process.env.DATABASE_URL.startsWith("postgresql://")),
 );
 
 describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness", () => {
@@ -163,15 +163,18 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         });
         expect(crossTenantRead.status).toBe(403);
         const crossTenantPayload = await crossTenantRead.json();
-        const exposedVictimKeyId = JSON.stringify(crossTenantPayload).includes(victimKeyId);
+        const exposedVictimKeyId =
+          JSON.stringify(crossTenantPayload).includes(victimKeyId);
         expect(exposedVictimKeyId).toBe(false);
-        expect(JSON.stringify(crossTenantPayload)).toContain("TENANT_SCOPE_MISMATCH");
+        expect(JSON.stringify(crossTenantPayload)).toContain(
+          "TENANT_SCOPE_MISMATCH",
+        );
 
         // 5. CROSS-TENANT MUTATIONS VERIFICATION
         // Capture DB state before attacks
-        const dbStateBeforeAttacks = (await repository.loadState()).apiKeys.filter(
-          (k) => k.tenantId === victimTenantId,
-        );
+        const dbStateBeforeAttacks = (
+          await repository.loadState()
+        ).apiKeys.filter((k) => k.tenantId === victimTenantId);
         expect(dbStateBeforeAttacks).toHaveLength(1);
         expect(dbStateBeforeAttacks[0]?.apiKeyId).toBe(victimKeyId);
         expect(dbStateBeforeAttacks[0]?.status).toBe("active");
@@ -196,7 +199,9 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         });
         expect(crossIssue.status).toBe(403);
         const crossIssuePayload = await crossIssue.json();
-        expect(JSON.stringify(crossIssuePayload)).toContain("TENANT_SCOPE_MISMATCH");
+        expect(JSON.stringify(crossIssuePayload)).toContain(
+          "TENANT_SCOPE_MISMATCH",
+        );
 
         // Rotate attempt with authentic caller-bound valid proof
         const otherRotateProof = proofs.createProof(otherIdentity, {
@@ -215,7 +220,9 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         });
         expect(crossRotate.status).toBe(403);
         const crossRotatePayload = await crossRotate.json();
-        expect(JSON.stringify(crossRotatePayload)).toContain("TENANT_SCOPE_MISMATCH");
+        expect(JSON.stringify(crossRotatePayload)).toContain(
+          "TENANT_SCOPE_MISMATCH",
+        );
 
         // Revoke attempt with authentic caller-bound valid proof
         const otherRevokeProof = proofs.createProof(otherIdentity, {
@@ -234,12 +241,14 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         });
         expect(crossRevoke.status).toBe(403);
         const crossRevokePayload = await crossRevoke.json();
-        expect(JSON.stringify(crossRevokePayload)).toContain("TENANT_SCOPE_MISMATCH");
+        expect(JSON.stringify(crossRevokePayload)).toContain(
+          "TENANT_SCOPE_MISMATCH",
+        );
 
         // DB state for victim tenant remains untouched by cross-tenant attacks (complete record comparison)
-        const dbStateAfterAttacks = (await repository.loadState()).apiKeys.filter(
-          (k) => k.tenantId === victimTenantId,
-        );
+        const dbStateAfterAttacks = (
+          await repository.loadState()
+        ).apiKeys.filter((k) => k.tenantId === victimTenantId);
         expect(dbStateAfterAttacks).toEqual(dbStateBeforeAttacks);
 
         // 6. SAME-TENANT LIFECYCLE & SQL READBACK VERIFICATION
@@ -255,7 +264,10 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         expect(JSON.stringify(selfPayload)).toContain(victimKeyId);
 
         // Post with step-up proof
-        const postWithProof = async (path: string, body: Record<string, unknown>) => {
+        const postWithProof = async (
+          path: string,
+          body: Record<string, unknown>,
+        ) => {
           const proof = proofs.createProof(victimIdentity, {
             method: "POST",
             path: `/api/tenant/api-keys${path}`,
@@ -269,7 +281,9 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
             body: JSON.stringify(body),
           });
           expect(response.status).toBe(201);
-          const json = (await response.json()) as { data: Record<string, unknown> };
+          const json = (await response.json()) as {
+            data: Record<string, unknown>;
+          };
           return json.data;
         };
 
@@ -280,7 +294,8 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
           api_key?: { api_key_id?: string };
           apiKey?: { apiKeyId?: string };
         };
-        const createdId = created.api_key?.api_key_id ?? created.apiKey?.apiKeyId;
+        const createdId =
+          created.api_key?.api_key_id ?? created.apiKey?.apiKeyId;
         expect(createdId).toBeDefined();
 
         const rotated = (await postWithProof(`/${createdId}/rotate`, {
@@ -290,7 +305,8 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
           api_key?: { api_key_id?: string };
           apiKey?: { apiKeyId?: string };
         };
-        const rotatedId = rotated.api_key?.api_key_id ?? rotated.apiKey?.apiKeyId;
+        const rotatedId =
+          rotated.api_key?.api_key_id ?? rotated.apiKey?.apiKeyId;
         expect(rotatedId).toBeDefined();
 
         await postWithProof(`/${rotatedId}/revoke`, {});
@@ -314,22 +330,27 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         expect(rowMap.has(rotatedId!)).toBe(true);
 
         const initialRow = rowMap.get(victimKeyId)!;
-        const initialRecord = initialRow.record as StoredTenantApiKeyRecord;
+        const initialRecord =
+          initialRow.record as unknown as StoredTenantApiKeyRecord;
         expect(initialRecord.status).toBe("active");
         expect(initialRow.revoked_at).toBeNull();
 
         const createdRow = rowMap.get(createdId!)!;
-        const createdRecord = createdRow.record as StoredTenantApiKeyRecord;
+        const createdRecord =
+          createdRow.record as unknown as StoredTenantApiKeyRecord;
         expect(createdRecord.status).toBe("overlap_active");
 
         const rotatedRow = rowMap.get(rotatedId!)!;
-        const rotatedRecord = rotatedRow.record as StoredTenantApiKeyRecord;
+        const rotatedRecord =
+          rotatedRow.record as unknown as StoredTenantApiKeyRecord;
         expect(rotatedRecord.status).toBe("revoked");
         expect(rotatedRow.revoked_at).not.toBeNull();
 
         if (process.env.DRTS_WEBHOOK_AUTH_EVIDENCE) {
           const evidence = {
-            baseSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+            baseSha: execFileSync("git", ["rev-parse", "HEAD"], {
+              encoding: "utf8",
+            }).trim(),
             recordedAt: new Date().toISOString(),
             scope: "Full AppModule with real auth guard/JWT and PostgreSQL",
             victimTenantId,

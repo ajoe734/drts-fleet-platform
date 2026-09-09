@@ -10,6 +10,7 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
   const TENANT_B = "qa-tenant-attacker-bbb";
 
   const tenantAIdentity: IdentityContext = {
+    authMode: "jwt_bearer",
     actorType: "tenant_admin",
     actorId: "usr-tenant-a-admin",
     principalId: "usr-tenant-a-admin",
@@ -18,10 +19,11 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
     roleFamilies: ["tenant"],
     roles: ["tenant_admin"],
     scopes: ["tenant:read", "tenant:write"],
-    requestId: "req-init-a",
+    supportedExecutionModes: ["supervisor_managed_execution"],
   };
 
   const tenantBIdentity: IdentityContext = {
+    authMode: "jwt_bearer",
     actorType: "tenant_admin",
     actorId: "usr-tenant-b-admin",
     principalId: "usr-tenant-b-admin",
@@ -30,10 +32,11 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
     roleFamilies: ["tenant"],
     roles: ["tenant_admin"],
     scopes: ["tenant:read", "tenant:write"],
-    requestId: "req-init-b",
+    supportedExecutionModes: ["supervisor_managed_execution"],
   };
 
   const platformAdminIdentity: IdentityContext = {
+    authMode: "jwt_bearer",
     actorType: "platform_admin",
     actorId: "usr-platform-super",
     principalId: "usr-platform-super",
@@ -42,10 +45,11 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
     roleFamilies: ["platform"],
     roles: ["platform_admin"],
     scopes: ["tenant:read", "tenant:write"],
-    requestId: "req-platform",
+    supportedExecutionModes: ["supervisor_managed_execution"],
   };
 
   const systemIdentity: IdentityContext = {
+    authMode: "jwt_bearer",
     actorType: "system",
     actorId: "sys-internal-daemon",
     principalId: "sys-internal-daemon",
@@ -54,7 +58,7 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
     roleFamilies: ["platform"],
     roles: ["system"],
     scopes: [],
-    requestId: "req-system",
+    supportedExecutionModes: ["supervisor_managed_execution"],
   };
 
   function createHarness() {
@@ -95,10 +99,14 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
       controllerThrew = true;
       expect(err).toBeInstanceOf(ApiRequestError);
       const apiErr = err as ApiRequestError;
-      expect(apiErr.status).toBe(403);
+      expect(apiErr.getStatus()).toBe(403);
       expect(apiErr.code).toBe("TENANT_SCOPE_MISMATCH");
-      const resp = apiErr.getResponse() as { error: { message: string; details?: unknown } };
-      expect(resp.error.message).toContain("Cross-tenant identity access is forbidden");
+      const resp = apiErr.getResponse() as {
+        error: { message: string; details?: unknown };
+      };
+      expect(resp.error.message).toContain(
+        "Cross-tenant identity access is forbidden",
+      );
       expect(resp.error.details).toMatchObject({
         targetTenantId: TENANT_A,
         principalTenantId: TENANT_B,
@@ -114,13 +122,17 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
       serviceThrew = true;
       expect(err).toBeInstanceOf(ApiRequestError);
       const apiErr = err as ApiRequestError;
-      expect(apiErr.status).toBe(403);
+      expect(apiErr.getStatus()).toBe(403);
       expect(apiErr.code).toBe("TENANT_SCOPE_MISMATCH");
     }
     expect(serviceThrew).toBe(true);
 
     // 3. Verify Tenant B own query returns ONLY Tenant B key, no Tenant A key
-    const listB = controller.listApiKeys(TENANT_B, "req-self-read", tenantBIdentity);
+    const listB = controller.listApiKeys(
+      TENANT_B,
+      "req-self-read",
+      tenantBIdentity,
+    );
     const itemIdsB = listB.data.items.map((k) => k.apiKeyId);
     expect(itemIdsB).toContain(issuedB.apiKey.apiKeyId);
     expect(itemIdsB).not.toContain(issuedA.apiKey.apiKeyId);
@@ -150,7 +162,7 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
       issueThrew = true;
       expect(err).toBeInstanceOf(ApiRequestError);
       const apiErr = err as ApiRequestError;
-      expect(apiErr.status).toBe(403);
+      expect(apiErr.getStatus()).toBe(403);
       expect(apiErr.code).toBe("TENANT_SCOPE_MISMATCH");
     }
     expect(issueThrew).toBe(true);
@@ -172,7 +184,7 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
       rotateHeaderThrew = true;
       expect(err).toBeInstanceOf(ApiRequestError);
       const apiErr = err as ApiRequestError;
-      expect(apiErr.status).toBe(403);
+      expect(apiErr.getStatus()).toBe(403);
       expect(apiErr.code).toBe("TENANT_SCOPE_MISMATCH");
     }
     expect(rotateHeaderThrew).toBe(true);
@@ -191,7 +203,7 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
       rotateKeyThrew = true;
       expect(err).toBeInstanceOf(ApiRequestError);
       const apiErr = err as ApiRequestError;
-      expect(apiErr.status).toBe(404);
+      expect(apiErr.getStatus()).toBe(404);
       expect(apiErr.code).toBe("API_KEY_NOT_FOUND");
     }
     expect(rotateKeyThrew).toBe(true);
@@ -216,7 +228,7 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
       revokeHeaderThrew = true;
       expect(err).toBeInstanceOf(ApiRequestError);
       const apiErr = err as ApiRequestError;
-      expect(apiErr.status).toBe(403);
+      expect(apiErr.getStatus()).toBe(403);
       expect(apiErr.code).toBe("TENANT_SCOPE_MISMATCH");
     }
     expect(revokeHeaderThrew).toBe(true);
@@ -234,7 +246,7 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
       revokeKeyThrew = true;
       expect(err).toBeInstanceOf(ApiRequestError);
       const apiErr = err as ApiRequestError;
-      expect(apiErr.status).toBe(404);
+      expect(apiErr.getStatus()).toBe(404);
       expect(apiErr.code).toBe("API_KEY_NOT_FOUND");
     }
     expect(revokeKeyThrew).toBe(true);
@@ -261,7 +273,11 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
     expect(issueRes.data.plaintextKey).toMatch(/^tk_[a-z0-9_]+/);
 
     // 2. List
-    const listRes = controller.listApiKeys(TENANT_A, "req-same-list", tenantAIdentity);
+    const listRes = controller.listApiKeys(
+      TENANT_A,
+      "req-same-list",
+      tenantAIdentity,
+    );
     expect(listRes.data).toBeDefined();
     const listedKeys = listRes.data.items;
     expect(listedKeys.some((k) => k.apiKeyId === originalKeyId)).toBe(true);
@@ -279,9 +295,17 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
     expect(rotatedKeyId).not.toBe(originalKeyId);
 
     // Check list after rotation: old key is in overlap_active, new key is active
-    const listAfterRotate = controller.listApiKeys(TENANT_A, "req-same-list-2", tenantAIdentity);
-    const oldKey = listAfterRotate.data.items.find((k) => k.apiKeyId === originalKeyId);
-    const newKey = listAfterRotate.data.items.find((k) => k.apiKeyId === rotatedKeyId);
+    const listAfterRotate = controller.listApiKeys(
+      TENANT_A,
+      "req-same-list-2",
+      tenantAIdentity,
+    );
+    const oldKey = listAfterRotate.data.items.find(
+      (k) => k.apiKeyId === originalKeyId,
+    );
+    const newKey = listAfterRotate.data.items.find(
+      (k) => k.apiKeyId === rotatedKeyId,
+    );
     expect(oldKey?.status).toBe("overlap_active");
     expect(newKey?.status).toBe("active");
 
@@ -294,8 +318,14 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
     );
     expect(revokeRes.data).toBeDefined();
 
-    const listAfterRevoke = controller.listApiKeys(TENANT_A, "req-same-list-3", tenantAIdentity);
-    const revokedKey = listAfterRevoke.data.items.find((k) => k.apiKeyId === rotatedKeyId);
+    const listAfterRevoke = controller.listApiKeys(
+      TENANT_A,
+      "req-same-list-3",
+      tenantAIdentity,
+    );
+    const revokedKey = listAfterRevoke.data.items.find(
+      (k) => k.apiKeyId === rotatedKeyId,
+    );
     expect(revokedKey?.status).toBe("revoked");
     expect(revokedKey?.revokedAt).toBeDefined();
   });
@@ -314,7 +344,11 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
       "req-plat-read",
       platformAdminIdentity,
     );
-    expect(platformList.data.items.some((k) => k.apiKeyId === seeded.apiKey.apiKeyId)).toBe(true);
+    expect(
+      platformList.data.items.some(
+        (k) => k.apiKeyId === seeded.apiKey.apiKeyId,
+      ),
+    ).toBe(true);
 
     // System identity reads Tenant A keys
     const systemList = controller.listApiKeys(
@@ -322,7 +356,9 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: C111 API key tenant header bindi
       "req-sys-read",
       systemIdentity,
     );
-    expect(systemList.data.items.some((k) => k.apiKeyId === seeded.apiKey.apiKeyId)).toBe(true);
+    expect(
+      systemList.data.items.some((k) => k.apiKeyId === seeded.apiKey.apiKeyId),
+    ).toBe(true);
   });
 
   it("backward compatibility: listApiKeys works when identity is not provided (internal/unauthenticated harness)", () => {
