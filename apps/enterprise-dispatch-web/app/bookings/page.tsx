@@ -16,11 +16,11 @@ import { t as translate, type TranslationKey } from "../../lib/translations";
 
 const h = React.createElement;
 
-export type GatewayState = "quota-blocked" | "no-supply" | "degraded";
+type GatewayState = "quota-blocked" | "no-supply" | "degraded";
 
-export type EnterpriseSearchScope = "all" | "mine" | "byme";
+type EnterpriseSearchScope = "all" | "mine" | "byme";
 
-export type EnterpriseBookingStatusFilter =
+type EnterpriseBookingStatusFilter =
   | "all"
   | "reserved"
   | "approval"
@@ -30,16 +30,16 @@ export type EnterpriseBookingStatusFilter =
   | "cancelled"
   | "nosupply";
 
-export interface EnterpriseUserIdentity {
+interface EnterpriseUserIdentity {
   id?: string | null;
   name?: string | null;
   email?: string | null;
   phone?: string | null;
 }
 
-export type EnterpriseCurrentUser = string | EnterpriseUserIdentity;
+type EnterpriseCurrentUser = string | EnterpriseUserIdentity;
 
-export interface EnterpriseBookingFilterCriteria {
+interface EnterpriseBookingFilterCriteria {
   scope: EnterpriseSearchScope;
   q: string;
   status: EnterpriseBookingStatusFilter;
@@ -48,7 +48,7 @@ export interface EnterpriseBookingFilterCriteria {
   dateField: "reservationStart" | "createdAt";
 }
 
-export const DEFAULT_BOOKING_FILTER_CRITERIA: EnterpriseBookingFilterCriteria = {
+const DEFAULT_BOOKING_FILTER_CRITERIA: EnterpriseBookingFilterCriteria = {
   scope: "all",
   q: "",
   status: "all",
@@ -57,7 +57,7 @@ export const DEFAULT_BOOKING_FILTER_CRITERIA: EnterpriseBookingFilterCriteria = 
   dateField: "reservationStart",
 };
 
-export function gatewayHref(error: unknown): string | null {
+function gatewayHref(error: unknown): string | null {
   if (!error || typeof error !== "object") return "/degraded";
   const err = error as { code?: string; statusCode?: number; name?: string };
   const code = (err.code ?? "").toLowerCase();
@@ -69,7 +69,7 @@ export function gatewayHref(error: unknown): string | null {
     : err.name === "ApiClientError" ? null : "/degraded";
 }
 
-export function getBookingStateMeta(record: BookingRecord): {
+function getBookingStateMeta(record: BookingRecord): {
   key: EnterpriseBookingStatusFilter;
   label: string;
   tone: "neutral" | "primary" | "success" | "warn" | "danger" | "info";
@@ -115,7 +115,7 @@ export function getBookingStateMeta(record: BookingRecord): {
   };
 }
 
-export function isSamePassenger(
+function isSamePassenger(
   passenger: BookingRecord["passenger"] | null | undefined,
   user: EnterpriseCurrentUser | null | undefined,
 ): boolean {
@@ -148,7 +148,7 @@ export function isSamePassenger(
   return false;
 }
 
-export function isSameBookedBy(
+function isSameBookedBy(
   bookedBy: BookingRecord["bookedBy"] | null | undefined,
   user: EnterpriseCurrentUser | null | undefined,
 ): boolean {
@@ -171,7 +171,7 @@ export function isSameBookedBy(
   return false;
 }
 
-export function matchesBookingSearch(
+function matchesBookingSearch(
   record: BookingRecord,
   query: string,
 ): boolean {
@@ -213,7 +213,7 @@ function parseLocalDateEnd(dateStr: string): number {
   return new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
 }
 
-export function matchesBookingDateRange(
+function matchesBookingDateRange(
   record: BookingRecord,
   dateFrom: string,
   dateTo: string,
@@ -239,7 +239,7 @@ export function matchesBookingDateRange(
   return true;
 }
 
-export function hasActiveFilters(
+function hasActiveFilters(
   criteria: EnterpriseBookingFilterCriteria,
 ): boolean {
   return Boolean(
@@ -251,7 +251,7 @@ export function hasActiveFilters(
   );
 }
 
-export function filterEnterpriseBookings(
+function filterEnterpriseBookings(
   bookings: BookingRecord[],
   criteria: EnterpriseBookingFilterCriteria,
   currentUser: EnterpriseCurrentUser = enterpriseUser.name,
@@ -307,7 +307,7 @@ export function filterEnterpriseBookings(
     });
 }
 
-export function paginateEnterpriseBookings<T>(
+function paginateEnterpriseBookings<T>(
   items: T[],
   page: number,
   pageSize: number,
@@ -331,7 +331,7 @@ export function paginateEnterpriseBookings<T>(
   };
 }
 
-export function formatBookingTime(isoString: string): string {
+function formatBookingTime(isoString: string): string {
   if (!isoString) return "-";
   try {
     const d = new Date(isoString);
@@ -362,7 +362,7 @@ const ENT_ICONS: Record<string, string> = {
   flag: "M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7",
 };
 
-export function entBtnStyle(
+function entBtnStyle(
   th: EntTheme,
   opts: {
     variant?: "primary" | "default" | "soft" | "ghost" | "danger";
@@ -569,9 +569,6 @@ function errorContent(
   );
 }
 
-export interface BookingsHistoryPageProps {
-  currentUser?: EnterpriseCurrentUser;
-}
 
 /**
  * Resolves the active enterprise user identity.
@@ -583,7 +580,7 @@ export interface BookingsHistoryPageProps {
  * session tokens (drts_session JWT payload, enterprise_user cookie) if present,
  * before falling back to the default fixture user.
  */
-export function resolveCurrentEnterpriseUser(
+function resolveCurrentEnterpriseUser(
   explicitUser?: EnterpriseCurrentUser,
 ): EnterpriseCurrentUser {
   if (explicitUser !== undefined && explicitUser !== null) {
@@ -632,19 +629,17 @@ export function resolveCurrentEnterpriseUser(
   return enterpriseUser.name;
 }
 
-export default function BookingsHistoryPage({
-  currentUser: explicitUser,
-}: BookingsHistoryPageProps = {}) {
+export default function BookingsHistoryPage() {
   const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
     translate(key, params, "zh");
 
   const [currentUser, setCurrentUser] = useState<EnterpriseCurrentUser>(() =>
-    resolveCurrentEnterpriseUser(explicitUser),
+    resolveCurrentEnterpriseUser(),
   );
 
   useEffect(() => {
-    setCurrentUser(resolveCurrentEnterpriseUser(explicitUser));
-  }, [explicitUser]);
+    setCurrentUser(resolveCurrentEnterpriseUser());
+  }, []);
 
   const [bookings, setBookings] = useState<BookingRecord[] | null>(null);
   const [state, setState] = useState<GatewayState | null>(null);

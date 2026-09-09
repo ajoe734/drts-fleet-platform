@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiClientError } from "../../../../packages/api-client/src";
-import BookingsHistoryPage, {
+import {
   DEFAULT_BOOKING_FILTER_CRITERIA,
   entBtnStyle,
   filterEnterpriseBookings,
@@ -17,7 +17,7 @@ import BookingsHistoryPage, {
   type EnterpriseBookingFilterCriteria,
   type EnterpriseCurrentUser,
   type EnterpriseUserIdentity,
-} from "../../../../apps/enterprise-dispatch-web/app/bookings/page";
+} from "./enterprise-search-logic";
 import { tenantEnterpriseTheme } from "../../../../apps/enterprise-dispatch-web/components/booking-form/theme";
 import { REALM_COLORS } from "../../../../packages/ui-tokens/src/realms";
 import { readFileSync } from "node:fs";
@@ -331,7 +331,7 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
         ...DEFAULT_BOOKING_FILTER_CRITERIA,
         scope: "all",
       });
-      expect(res.map((b) => b.bookingId)).toEqual([
+      expect(res.map((b: BookingRecord) => b.bookingId)).toEqual([
         "EB-4",
         "EB-3",
         "EB-2",
@@ -348,7 +348,7 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
         },
         "林宜君",
       );
-      expect(res.map((b) => b.bookingId)).toEqual(["EB-4", "EB-1"]);
+      expect(res.map((b: BookingRecord) => b.bookingId)).toEqual(["EB-4", "EB-1"]);
     });
 
     it("filters by scope: byme returns bookings made for others", () => {
@@ -360,7 +360,7 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
         },
         "林宜君",
       );
-      expect(res.map((b) => b.bookingId)).toEqual(["EB-2"]);
+      expect(res.map((b: BookingRecord) => b.bookingId)).toEqual(["EB-2"]);
     });
 
     it("filters by status category", () => {
@@ -368,19 +368,19 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
         ...DEFAULT_BOOKING_FILTER_CRITERIA,
         status: "cancelled",
       });
-      expect(cancelled.map((b) => b.bookingId)).toEqual(["EB-3"]);
+      expect(cancelled.map((b: BookingRecord) => b.bookingId)).toEqual(["EB-3"]);
 
       const completed = filterEnterpriseBookings(allBookings, {
         ...DEFAULT_BOOKING_FILTER_CRITERIA,
         status: "completed",
       });
-      expect(completed.map((b) => b.bookingId)).toEqual(["EB-2"]);
+      expect(completed.map((b: BookingRecord) => b.bookingId)).toEqual(["EB-2"]);
 
       const approval = filterEnterpriseBookings(allBookings, {
         ...DEFAULT_BOOKING_FILTER_CRITERIA,
         status: "approval",
       });
-      expect(approval.map((b) => b.bookingId)).toEqual(["EB-4"]);
+      expect(approval.map((b: BookingRecord) => b.bookingId)).toEqual(["EB-4"]);
     });
 
     it("combines scope, search keyword, and date range", () => {
@@ -396,7 +396,7 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
         },
         "林宜君",
       );
-      expect(res.map((b) => b.bookingId)).toEqual(["EB-2"]);
+      expect(res.map((b: BookingRecord) => b.bookingId)).toEqual(["EB-2"]);
     });
 
     it("reports active filters correctly with hasActiveFilters", () => {
@@ -666,6 +666,7 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
 
       expect(isSamePassenger(bAliceA.passenger, userA)).toBe(true);
       expect(isSamePassenger(bAliceB.passenger, userA)).toBe(false);
+      expect(isSameBookedBy(bAliceA.bookedBy, userA)).toBe(false);
 
       const res = filterEnterpriseBookings(
         [bAliceA, bAliceB],
@@ -720,8 +721,14 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
       expect(resMine[0]!.bookingId).toBe("EB-SELF");
     });
 
-    it("verifies BookingsHistoryPage exports and accepts currentUser prop", () => {
-      expect(typeof BookingsHistoryPage).toBe("function");
+    it("verifies BookingsHistoryPage exports default component and wires session identity", () => {
+      const pagePath = resolve(
+        process.cwd(),
+        "apps/enterprise-dispatch-web/app/bookings/page.tsx",
+      );
+      const pageSrc = readFileSync(pagePath, "utf8");
+      expect(pageSrc).toContain("export default function BookingsHistoryPage");
+      expect(pageSrc).toContain("resolveCurrentEnterpriseUser");
     });
   });
 
@@ -885,7 +892,7 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
         q: "CC-PRD-01",
       });
       expect(filtered.length).toBe(3);
-      expect(filtered.map((b) => b.bookingId)).toEqual([
+      expect(filtered.map((b: BookingRecord) => b.bookingId)).toEqual([
         "booking-authoritative-005",
         "booking-authoritative-003",
         "booking-authoritative-001",
@@ -897,7 +904,7 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
       expect(page1.totalPages).toBe(2);
       expect(page1.page).toBe(1);
       expect(page1.items.length).toBe(2);
-      expect(page1.items.map((b) => b.bookingId)).toEqual([
+      expect(page1.items.map((b: BookingRecord) => b.bookingId)).toEqual([
         "booking-authoritative-005",
         "booking-authoritative-003",
       ]);
@@ -912,12 +919,14 @@ describe("SR-ENTERPRISE-SEARCH-001: Enterprise Booking Search, Filter, and Pagin
 
   describe("13. Current User Identity Resolution (Cookie, Prop, Fallback)", () => {
     it("returns explicit user if provided as string or object", () => {
-      expect(resolveCurrentEnterpriseUser("Alice")).toBe("Alice");
+      const explicitStr: EnterpriseCurrentUser = "Alice";
+      expect(resolveCurrentEnterpriseUser(explicitStr)).toBe("Alice");
       const userObj: EnterpriseUserIdentity = {
         id: "usr_alice_1",
         name: "Alice",
       };
-      expect(resolveCurrentEnterpriseUser(userObj)).toEqual(userObj);
+      const explicitObj: EnterpriseCurrentUser = userObj;
+      expect(resolveCurrentEnterpriseUser(explicitObj)).toEqual(userObj);
     });
 
     it("falls back to default enterprise fixture user when no session or prop is available", () => {

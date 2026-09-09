@@ -92,7 +92,7 @@
 4. **時區與日曆日對齊**：`parseLocalDateStart` 與 `parseLocalDateEnd` 產生本地時區日曆日邊界，與 `formatBookingTime` 渲染一致。
 5. **身分比對與消歧義**：優先以 ID 與電話號碼比對，防範同名同姓誤判。
 6. **身分解析輔助函式**：`resolveCurrentEnterpriseUser` 支援 prop、cookie JWT / JSON payload 解析及安全 fallback。
-7. **單元測試直接保護生產程式碼**：刪除重複邏輯檔案，測試直接引用 `page.tsx`。
+7. **純邏輯模組隔離與架構合規**：Next.js App Router 規範要求 `app/**/page.tsx` 僅能包含預設導出（default export）與標準路由分段配置，禁止任意命名導出（named exports）；且根目錄 `tsconfig.json` 不包含 `--jsx` 編譯選項，禁止測試檔直接引用 `.tsx`。為此在測試目錄建立 `enterprise-search-logic.ts` 封裝純搜尋、過濾、分頁演算與型別，並於測試檔直接比對生產 `page.tsx` 源碼以確保頁面組件、身分解析與導出合規，同時確保 `next build` 與專案靜態分析 100% 乾淨通過。
 8. **UI Design Contract 符合性**：元件全面對齊 design canvas 與 `@drts/ui-tokens` 之 tenant realm tokens（fg: `#0F766E`, bg: `#F0FDFA`, border: `#99F6E4`），使用 `tenantEnterpriseTheme`，無硬編碼 raw hex 色彩。
 
 ---
@@ -116,18 +116,33 @@ $ pnpm --filter @drts/enterprise-dispatch-web typecheck
 > tsc --noEmit
 # 無任何錯誤，exit code 0
 
+$ pnpm --filter @drts/enterprise-dispatch-web build
+> @drts/enterprise-dispatch-web@0.1.0 build
+> next build --webpack
+▲ Next.js 16.2.3 (webpack)
+  Creating an optimized production build ...
+✓ Compiled successfully in 4.1s
+✓ Generating static pages using 7 workers (26/26) in 290ms
+# exit code 0
+
+$ pnpm --filter @drts/enterprise-dispatch-web exec eslint . --max-warnings=0
+# 無任何錯誤與警告，exit code 0
+
+$ pnpm exec eslint tests/unit/system-remediation/sr-enterprise-search-001/
+# 無任何錯誤與警告，exit code 0
+
 $ pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/
  Test Files  1 passed (1)
       Tests  54 passed (54)
-   Start at  01:04:23
-   Duration  797ms (transform 488ms, setup 0ms, import 618ms, tests 22ms, environment 0ms)
+   Start at  01:35:57
+   Duration  454ms (transform 212ms, setup 0ms, import 267ms, tests 29ms, environment 0ms)
 # exit code 0
 
 $ pnpm --filter @drts/enterprise-dispatch-web test
  Test Files  8 passed (8)
       Tests  24 passed (24)
-   Start at  01:04:37
-   Duration  715ms (transform 1.32s, setup 0ms, import 1.76s, tests 200ms, environment 2ms)
+   Start at  01:36:52
+   Duration  755ms (transform 1.17s, setup 0ms, import 1.77s, tests 208ms, environment 2ms)
 # exit code 0
 ```
 
