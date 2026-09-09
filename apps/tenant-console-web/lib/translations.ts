@@ -240,7 +240,7 @@ const en = {
   "bookingDetail.hero.eyebrow": "Booking detail",
   "bookingDetail.hero.unavailableTitle": "{bookingId} unavailable",
   "bookingDetail.hero.unavailableDescription":
-    "This tenant detail route implements the shared EmptyReason states so each empty, missing, or unavailable case stays explicit.",
+    "Booking details are unavailable. Check the reason below for your next step.",
   "bookingDetail.hero.description":
     "The booking detail follows the Tenant Console canvas: editability, approval state, driver assignment, audit subset, refresh tier, and action descriptors stay together on one tenant-owned screen.",
   "bookingDetail.loading.title": "Loading tenant booking detail",
@@ -287,7 +287,7 @@ const en = {
     "The booking still exists, but the current driver eligibility state prevents showing a complete live assignment snapshot.",
   "bookingDetail.empty.driverNotEligible.cta": "Open audit",
   "bookingDetail.empty.restoreLive": "Restore live detail",
-  "bookingDetail.empty.reason": "EmptyReason",
+  "bookingDetail.empty.reason": "Reason",
   "bookingDetail.command.acceptedTitle":
     "Command accepted · awaiting external confirmation · {actionId}",
   "bookingDetail.command.acceptedHelp":
@@ -4276,7 +4276,7 @@ const zh: Record<keyof typeof en, string> = {
   "bookingDetail.hero.eyebrow": "訂單明細",
   "bookingDetail.hero.unavailableTitle": "{bookingId} 無法使用",
   "bookingDetail.hero.unavailableDescription":
-    "租戶明細路由實作共用 EmptyReason 狀態，讓每種空、未就緒或不可用情況都維持明確。",
+    "目前無法顯示訂單明細，請查看下方原因與處理方式。",
   "bookingDetail.hero.description":
     "訂單明細遵循 Tenant Console canvas：可編輯截止、審批狀態、司機指派、audit 子集、更新層級與動作描述子，都集中在同一個租戶擁有的畫面。",
   "bookingDetail.loading.title": "載入租戶訂單明細",

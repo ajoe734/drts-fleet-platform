@@ -162,7 +162,7 @@ const en = {
     "Boundary, provider, takeover, and safety-governance exceptions emitted from sandbox ROC.",
   "avFallback.exceptions.banner.title": "Exceptions remain backend-authored",
   "avFallback.exceptions.banner.body":
-    "Severity, status, and write CTAs come from ROC alert read models and availableActions. The table below does not invent fallback authority.",
+    "Alert severity, status, and permitted actions reflect the latest information from the service.",
   "avFallback.exceptions.empty.title": "No sandbox exceptions",
   "avFallback.exceptions.empty.body":
     "ROC did not return any sandbox exception alerts for the current identity.",
@@ -272,7 +272,7 @@ const en = {
   "opsAssistant.bridge.reasonRequired":
     "Existing confirmation flow requires a reason.",
   "opsAssistant.bridge.availableFlow":
-    "Resolve via availableActions, then reuse the existing page action flow.",
+    "Choose an available action and follow the confirmation steps on the page.",
   "opsAssistant.bridge.disabled": "Disabled: {reason}",
   "opsAssistant.bridge.disabledFallback": "unavailable",
   "opsAssistant.bridge.pendingIntent": "Pending intent · {action}",
@@ -280,7 +280,7 @@ const en = {
   "opsAssistant.bridge.openConfirmation": "Open confirmation",
   "opsAssistant.bridge.dismiss": "Dismiss",
   "opsAssistant.bridge.empty":
-    "Focus a supported detail view to let the assistant resolve `ActionIntent` against that resource's available actions.",
+    "Focus a supported detail view so the assistant can match this resource's available actions.",
   "opsAssistant.actions.title": "Assistant actions",
   "opsAssistant.actions.askLabel": "Ask assistant",
   "opsAssistant.actions.placeholder":
@@ -333,7 +333,7 @@ const en = {
   "opsAssistant.help.scope.message":
     "Scoped to {kind}:{id}. The assistant is constrained to this visible resource and can only reuse the page's registered actions.",
   "opsAssistant.help.scope.meta":
-    "Scope: {kind}:{id} | availableActions: {actions}",
+    "Scope: {kind}:{id} | Available actions: {actions}",
   "opsAssistant.help.scope.riskRequiresReason": "{riskLevel} / reason",
   "opsAssistant.help.scope.disabled": "disabled:{reason}",
   "opsAssistant.help.scope.actionSummary": "{action} ({risk}, {availability})",
@@ -627,7 +627,7 @@ const en = {
   "vehicles.list.helper.visible": "{visible} visible / {total} total",
   "vehicles.list.helper.generated": "Generated",
   "vehicles.list.helper.actionsHint":
-    "Supporting actions come from availableActions",
+    "Only permitted actions are available.",
   "vehicles.list.summary.registered": "Registered",
   "vehicles.list.summary.registeredSub": "Vehicle master rows",
   "vehicles.list.summary.dispatchable": "Dispatchable",
@@ -1233,7 +1233,7 @@ const en = {
   "contracts.filters.visibleSummary": "{visible} visible / {total} total",
   "contracts.filters.generatedAt": "generated",
   "contracts.filters.availableActionsHint":
-    "supporting actions come from availableActions",
+    "Only permitted actions are available.",
   "contracts.registry.title": "Contract registry",
   "contracts.registry.subtitle":
     "Counterparty, kind, term, and key operating terms feeding dispatch and billing — read-only at ops scope.",
@@ -1381,8 +1381,8 @@ const en = {
     "Read-only visibility only; changes happen in the source management surface.",
   "flags.boundary.deepLink":
     "Cross-app deep links open the owning workflow without duplicating controls.",
-  "flags.boundary.availableActions": "availableActions",
-  "flags.boundary.emptyReasons": "EmptyReason x6",
+  "flags.boundary.availableActions": "Available actions",
+  "flags.boundary.emptyReasons": "Six empty-state reasons",
   "flags.boundary.crossAppLinks": "cross-app deep links",
   "flags.registryTableTitle": "Operational flag registry",
   "flags.registrySummaryV2":
@@ -1675,8 +1675,8 @@ const en = {
   "dispatch.banner.exception.unknownReason": "unknown",
   "dispatch.actions.emptyTitle": "No available actions",
   "dispatch.actions.emptyBody":
-    "This work item is read-only, or the backend has not emitted `availableActions` yet.",
-  "dispatch.actions.availableActionsCta": "CTA emitted from availableActions.",
+    "This work item is read-only, or no actions are currently available.",
+  "dispatch.actions.availableActionsCta": "Only permitted actions are available.",
   "dispatch.actions.none": "No actions",
   "dispatch.freshness.stale": "Dispatch snapshot is stale",
   "dispatch.freshness.degraded": "Dispatch freshness is degraded",
@@ -2095,7 +2095,7 @@ const en = {
     "Matching is healthy but no candidate has surfaced for this work item yet.",
   "dispatch.detail.refresh.generated": "generated",
   "dispatch.detail.refresh.availableActionsHint":
-    "CTAs come from availableActions",
+    "Only permitted actions are available.",
   "dispatch.detail.refresh.tier": "T2 · 5s",
   "dispatch.workflow.candidateLocation.fresh": "Fresh location",
   "dispatch.workflow.candidateLocation.stale": "Stale location",
@@ -2364,7 +2364,7 @@ const en = {
   "dispatch.detail.refresh.snapshot":
     "Snapshot {generatedAt} UTC from {source}.",
   "dispatch.detail.refresh.generatedAt": "Generated",
-  "dispatch.detail.refresh.ctaSource": "CTAs come from availableActions",
+  "dispatch.detail.refresh.ctaSource": "Only permitted actions are available.",
   "dispatch.detail.smoke.subtitle":
     "Smoke fallback workspace for route parity verification.",
   "dispatch.detail.smoke.candidateBoard": "Candidate board",
@@ -2550,7 +2550,7 @@ const en = {
   "maintenance.loading": "Loading work orders...",
   "maintenance.emptyReasonLabel": "emptyReason",
   "maintenance.footer.supportingActions":
-    "Supporting actions come from availableActions",
+    "Only permitted actions are available.",
   "maintenance.footer.generated": "Generated",
   "maintenance.footer.generatedAt": "{value} UTC",
   "maintenance.toast.completed": "Work order {id} marked completed.",
@@ -2760,7 +2760,7 @@ const en = {
   "incidents.detail.banner.assignedTo": "Assigned to {assignedTo}",
   "incidents.detail.readOnlyByContract": "Read-only by contract",
   "incidents.detail.actionHint":
-    "Actions are backend-driven via availableActions. Medium and high-risk actions keep confirmation semantics; high-risk actions require a reason.",
+    "Available actions require confirmation when their risk is medium or high. High-risk actions also require a reason.",
   "incidents.detail.coordinationActive":
     "{severity} incident coordination is active",
   "incidents.detail.refresh.banner.title": "Snapshot is {freshness}",
@@ -4739,7 +4739,7 @@ const zh: Record<keyof typeof en, string> = {
     "來自 sandbox ROC 的邊界、供應商、接管與安全治理例外。",
   "avFallback.exceptions.banner.title": "例外資料由後端決定",
   "avFallback.exceptions.banner.body":
-    "嚴重度、狀態與可寫 CTA 都來自 ROC alert read model 與 availableActions；這個表格不自行發明 fallback 權限。",
+    "告警嚴重度、狀態與可用操作依服務提供的最新資訊顯示。",
   "avFallback.exceptions.empty.title": "目前沒有沙盒例外",
   "avFallback.exceptions.empty.body":
     "ROC 沒有針對目前身分回傳任何 sandbox exception alert。",
@@ -4802,7 +4802,7 @@ const zh: Record<keyof typeof en, string> = {
   "opsAssistant.bridge.title": "動作橋接",
   "opsAssistant.bridge.reasonRequired": "現有確認流程需要填寫原因。",
   "opsAssistant.bridge.availableFlow":
-    "先透過 availableActions 判定，再重用現有頁面動作流程。",
+    "選擇可用操作，並依頁面步驟確認。",
   "opsAssistant.bridge.disabled": "已停用：{reason}",
   "opsAssistant.bridge.disabledFallback": "不可用",
   "opsAssistant.bridge.pendingIntent": "待處理意圖 · {action}",
@@ -4810,7 +4810,7 @@ const zh: Record<keyof typeof en, string> = {
   "opsAssistant.bridge.openConfirmation": "開啟確認流程",
   "opsAssistant.bridge.dismiss": "關閉",
   "opsAssistant.bridge.empty":
-    "聚焦到支援的詳情頁後，助理才能針對該資源的可用動作解析 `ActionIntent`。",
+    "聚焦到支援的詳情頁後，助理才能判斷該資源目前有哪些可用動作。",
   "opsAssistant.actions.title": "助理動作",
   "opsAssistant.actions.askLabel": "詢問助理",
   "opsAssistant.actions.placeholder":
@@ -4862,7 +4862,7 @@ const zh: Record<keyof typeof en, string> = {
   "opsAssistant.help.scope.message":
     "目前範圍為 {kind}:{id}。助理僅限於這個可見資源，且只能重用頁面已註冊的動作。",
   "opsAssistant.help.scope.meta":
-    "範圍：{kind}:{id} | availableActions：{actions}",
+    "範圍：{kind}:{id} | 可用操作：{actions}",
   "opsAssistant.help.scope.riskRequiresReason": "{riskLevel} / 需原因",
   "opsAssistant.help.scope.disabled": "已停用：{reason}",
   "opsAssistant.help.scope.actionSummary": "{action}（{risk}，{availability}）",
@@ -5144,7 +5144,7 @@ const zh: Record<keyof typeof en, string> = {
   "vehicles.list.filter.reset": "重設",
   "vehicles.list.helper.visible": "目前顯示 {visible} / 總數 {total}",
   "vehicles.list.helper.generated": "生成時間",
-  "vehicles.list.helper.actionsHint": "畫面 CTA 以 availableActions 為準",
+  "vehicles.list.helper.actionsHint": "僅提供目前允許的操作。",
   "vehicles.list.summary.registered": "已登記",
   "vehicles.list.summary.registeredSub": "車輛主檔筆數",
   "vehicles.list.summary.dispatchable": "可派遣",
@@ -5707,7 +5707,7 @@ const zh: Record<keyof typeof en, string> = {
   "contracts.filters.reset": "重設",
   "contracts.filters.visibleSummary": "目前顯示 {visible} / 總數 {total}",
   "contracts.filters.generatedAt": "生成時間",
-  "contracts.filters.availableActionsHint": "畫面 CTA 以 availableActions 為準",
+  "contracts.filters.availableActionsHint": "僅提供目前允許的操作。",
   "contracts.registry.title": "合約登記清單",
   "contracts.registry.subtitle":
     "在同一張表整合交易對手、類型、合約期間與關鍵營運條款，提供派車與帳務參考；ops 端僅可讀。",
@@ -5848,7 +5848,7 @@ const zh: Record<keyof typeof en, string> = {
     "這裡只提供唯讀可見性；實際修改仍在來源管理介面進行。",
   "flags.boundary.deepLink":
     "交叉 app 深連結可開啟擁有者工作流，而不重複提供控制入口。",
-  "flags.boundary.availableActions": "availableActions",
+  "flags.boundary.availableActions": "可用操作",
   "flags.boundary.emptyReasons": "空狀態原因 ×6",
   "flags.boundary.crossAppLinks": "跨應用深層連結",
   "flags.registryTableTitle": "營運旗標註冊表",
@@ -6083,9 +6083,9 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.banner.exception.unknownReason": "未知",
   "dispatch.actions.emptyTitle": "目前沒有可用動作",
   "dispatch.actions.emptyBody":
-    "這個 work item 目前是 read-only，或後端尚未提供 `availableActions`。",
+    "此工作項目目前為唯讀，或暫無可用操作。",
   "dispatch.actions.availableActionsCta":
-    "由 availableActions 驅動的可執行 CTA。",
+    "僅提供目前允許的操作。",
   "dispatch.actions.none": "無動作",
   "dispatch.freshness.stale": "資料已過期",
   "dispatch.freshness.degraded": "資料新鮮度未知",
@@ -6495,7 +6495,7 @@ const zh: Record<keyof typeof en, string> = {
     "matching 正常，但此工作項目目前還沒有評分出候選。",
   "dispatch.detail.refresh.generated": "生成時間",
   "dispatch.detail.refresh.availableActionsHint":
-    "畫面 CTA 以 availableActions 為準",
+    "僅提供目前允許的操作。",
   "dispatch.detail.refresh.tier": "T2 · 5s",
   "dispatch.workflow.loadCandidatesFailed": "載入候選人失敗",
   "dispatch.workflow.eligibility.includeIneligible": "顯示被排除候選",
@@ -6744,7 +6744,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.refresh.snapshot":
     "快照於 {generatedAt} UTC 產生，來源 {source}。",
   "dispatch.detail.refresh.generatedAt": "生成時間",
-  "dispatch.detail.refresh.ctaSource": "畫面 CTA 以 availableActions 為準",
+  "dispatch.detail.refresh.ctaSource": "僅提供目前允許的操作。",
   "dispatch.detail.smoke.subtitle": "供 smoke parity 驗證使用的備援工作區。",
   "dispatch.detail.smoke.candidateBoard": "候選面板",
   "dispatch.detail.smoke.dispatchId": "派遣編號",
@@ -6919,7 +6919,7 @@ const zh: Record<keyof typeof en, string> = {
   "maintenance.filter.searchPlaceholder": "工單、車輛、技師",
   "maintenance.loading": "載入工單中...",
   "maintenance.emptyReasonLabel": "空狀態",
-  "maintenance.footer.supportingActions": "畫面 CTA 以 availableActions 為準",
+  "maintenance.footer.supportingActions": "僅提供目前允許的操作。",
   "maintenance.footer.generated": "生成時間",
   "maintenance.footer.generatedAt": "{value} UTC",
   "maintenance.toast.completed": "工單 {id} 已標記完成。",
@@ -7120,7 +7120,7 @@ const zh: Record<keyof typeof en, string> = {
   "incidents.detail.banner.assignedTo": "目前由 {assignedTo} 處理",
   "incidents.detail.readOnlyByContract": "依 contract 唯讀",
   "incidents.detail.actionHint":
-    "所有 CTA 由 availableActions 驅動；中高風險動作維持確認語意，高風險動作必須填寫原因。",
+    "中高風險操作須經確認，高風險操作另須填寫原因。",
   "incidents.detail.coordinationActive": "{severity}事故協調進行中",
   "incidents.detail.refresh.banner.title": "資料快照目前為 {freshness}",
   "incidents.detail.refresh.banner.unavailableTitle": "缺少刷新中繼資料",
