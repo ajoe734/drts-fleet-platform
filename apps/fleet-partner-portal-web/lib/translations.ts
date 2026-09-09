@@ -5,72 +5,13 @@
 export type Locale = "zh" | "en";
 
 /**
- * Resolves the authoritative runtime environment label for fleet portal shell display.
- * Derives strictly from runtime environment variables (DRTS_ENV, APP_ENV,
- * NEXT_PUBLIC_DRTS_ENV, NEXT_PUBLIC_APP_ENV), rejecting URL/domain guessing
- * and never treating NODE_ENV=production alone as proof of production.
+ * Compatibility label for callers without the server-provided environment.
+ * Translation catalogs never read deployment/build variables. The server
+ * layout supplies normalized DRTS_ENV to the shell for its explicit label.
  */
 export function resolveAuthoritativeFleetShellEnv(
   locale: Locale = "zh",
 ): string {
-  const envVar =
-    (typeof process !== "undefined" && process?.env
-      ? process.env.DRTS_ENV ||
-        process.env.APP_ENV ||
-        process.env.NEXT_PUBLIC_DRTS_ENV ||
-        process.env.NEXT_PUBLIC_APP_ENV ||
-        process.env.NEXT_PUBLIC_ENV
-      : undefined) ?? "";
-
-  const trimmed = envVar.trim().toLowerCase();
-
-  // Reject URL / domain guessing
-  if (
-    trimmed &&
-    (trimmed.includes("/") ||
-      trimmed.includes("http:") ||
-      trimmed.includes("https:") ||
-      trimmed.includes(".com") ||
-      trimmed.includes(".io") ||
-      trimmed.includes(".internal"))
-  ) {
-    return locale === "zh" ? "未知環境" : "unknown";
-  }
-
-  if (trimmed === "prod" || trimmed === "production") {
-    return locale === "zh" ? "正式環境" : "production";
-  }
-  if (trimmed === "stage" || trimmed === "staging") {
-    return locale === "zh" ? "預發環境" : "staging";
-  }
-  if (trimmed === "preview") {
-    return locale === "zh" ? "預覽環境" : "preview";
-  }
-  if (trimmed === "sandbox") {
-    return locale === "zh" ? "沙盒環境" : "sandbox";
-  }
-  if (trimmed === "dev" || trimmed === "development" || trimmed === "local") {
-    return locale === "zh" ? "開發環境" : "development";
-  }
-  if (trimmed === "mock" || trimmed === "fixture" || trimmed === "test") {
-    return locale === "zh" ? "模擬資料" : "mock data";
-  }
-
-  const nodeEnv = (
-    typeof process !== "undefined" && process?.env?.NODE_ENV
-      ? process.env.NODE_ENV
-      : ""
-  )
-    .trim()
-    .toLowerCase();
-
-  if (nodeEnv === "development" || nodeEnv === "dev" || nodeEnv === "local") {
-    return locale === "zh" ? "開發環境" : "development";
-  }
-  if (nodeEnv === "test") {
-    return locale === "zh" ? "模擬資料" : "mock data";
-  }
-
   return locale === "zh" ? "未知環境" : "unknown";
 }
 

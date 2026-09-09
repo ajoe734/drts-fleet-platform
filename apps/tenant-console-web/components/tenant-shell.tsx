@@ -899,7 +899,7 @@ export function resolveTenantEnvLabel(
   if (normalized === "unknown") {
     return t("shell.env.unknown");
   }
-  return t("shell.env");
+  return t("shell.env.unknown");
 }
 
 export function TenantShell({

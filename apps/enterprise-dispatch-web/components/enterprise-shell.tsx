@@ -126,7 +126,7 @@ export function resolveEnterpriseEnvLabel(
   if (normalized === "unknown") {
     return tr("shell.env.unknown");
   }
-  return tr("shell.env");
+  return tr("shell.env.unknown");
 }
 
 function EnterpriseShellControls({
