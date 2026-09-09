@@ -1,5 +1,14 @@
 # SR-ENTERPRISE-DATA-001 — baseline and screen requirements
 
+## Redispatch verification (2026-09-09)
+
+- Canonical `progress`: exit 0. Task still has six original write scopes and no dependencies; no missing-screen or contact-source decision was supplied.
+- `git fetch origin`: exit 0; base `3062ea363769cc393e59384251f5aedc7e570ac5`. Required `git rebase origin/dev` initially exited 1 on duplicate historical evidence conflicts. Resolved only this document retaining already-replayed content; final `GIT_EDITOR=true git rebase --continue`: exit 0, head `6322b0e5bed5a3f74f7d7dec040137ad7982ac5f`. Ordinary `git merge --no-ff origin/codex/sr-enterprise-data-001` with task trailers: exit 0; verification head `200610b501cd8837862b6378831f0467b2d7d171`. Prior evidence content is unchanged.
+- Re-read execution/spec, R08/R09/R16, C013/C017/C018/C093/C108/C119, history-helper report, enterprise canvas and realm tokens. Home/trip still select fixtures; trip still renders fixed progress and inert contact controls. Shared detail still maps normal 404 to degraded. The missing trip-not-found/unavailable-contact designs described below remain absent. The explicit dispatch design STOP continues to apply.
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0 (`tsc --noEmit`). `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`: exit 1 (`No test files found`); no passing regression suite is claimed. `git diff --check`: exit 0 before commit.
+- Resource `EB-7K2E1D` remains a source fixture reference, not a live-verified booking. No product/browser server or infrastructure was started. Live API, browser, contact and true-device checks were not performed. Implementation candidate SHA: none; evidence anchor and ordinary push are recorded in machine truth.
+- Supervisor must supply canonical missing screens and resolve shared lifecycle/theme/help scopes with dependencies plus the permitted contact source. Preserve blocked state until these prerequisites are recorded. No implementation handoff, CI, merge acceptance or deployment is claimed.
+
 ## Redispatch verification (2026-09-08T23:19:49Z)
 
 - Recorded canonical `start`; task still has six original write scopes, no dependencies and no new screen/contact decision. Re-read the execution/spec, R08/R09/R16, all six capability records, history-helper report, tenant realm tokens, ENT_Home/ENT_Trip, ENT_GATES and EEmpty.
