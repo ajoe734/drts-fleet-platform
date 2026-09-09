@@ -1,5 +1,19 @@
 # SR-ENTERPRISE-SEARCH-001 — 企業歷史查詢條件與結果一致
 
+## 2026-09-09 02:03 UTC dispatch 核實（本次最新）
+
+- Owner Codex；Reviewer Codex2；branch `codex/sr-enterprise-search-001`。Fetched base `origin/dev`: `7d04833053b63558c10fb678a422dff3522e0150`；受測工作 HEAD: `681bc2fd025837ab1531feb1ec32c04866a1e2da`。尚無 candidate SHA；本次為 blocker evidence anchor，不能作 handoff candidate。
+- 已讀 collaboration guide、execution ref、task spec、R24／C013／C069 與 dispatch report。Scope 仍只有 page、專屬 tests、本文。
+- `git fetch origin` exit 0；`git rebase origin/dev` exit 1，歷史 `903969279` 在 page、test、evidence 衝突；`git rebase --abort` exit 0。沒有保留衝突或改寫已發布歷史。分支尚未完成整合最新 dev，後續候選仍須解決 rebase。
+- 使用 `git show origin/dev:<path>` 核對最新 API（各次讀取 exit 0）：`apps/api/src/modules/owned-mobility/owned-mobility.controller.ts:461` 只接 tenant/request headers；service 同目錄 `owned-mobility.service.ts:2118` 只按 tenant 過濾，固定 page 1、pageSize/totalItems 為 items.length；`packages/api-client/src/index.ts:1192` 的 `listTenantBookings()` 沒有 query 參數；enterprise `lib/api-client.ts:59` wrapper 亦無參數。後端日期／乘客／狀態 query 與分頁能力仍缺。
+- `AI_NAME=Codex /home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh show SR-BOOKING-VERIFY` exit 1：`Task not found: SR-BOOKING-VERIFY`。
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck` exit 0。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/` exit 0：1 file、50 tests passed，02:02:38 UTC，2.93s。這是上述工作 HEAD 的 synthetic unit regression，非最新 dev 或 live API 驗收；本次依賴錯誤未再出現。
+- `git diff --check` exit 0。此次只更新本文，沒有 UI 修改。
+- 未啟動產品／瀏覽器伺服器或 Docker；未做 live API／真機／部署，沒有實際 query、response total 或資源 ID。既有 synthetic IDs 不冒充實際資源。
+
+解除阻擋需要 supervisor 指定或登錄後端 filter producer（task spec 的 SR-BOOKING-VERIFY 目前不存在），加入依賴並擴充必要 API／contract／client／wrapper scope。此前不能以本地陣列篩選代替要求的 API query／total。本次 commit、普通 push 後記錄 blocker，不 handoff、不 done。
+
 ## 2026-09-08 21:19 UTC dispatch 核實（最新，取代先前成功驗證推論）
 
 - Owner Codex；Reviewer Codex2。Fetched origin/dev：`e97653b7ffb962a6c4d688e8706711d860fa3604`；工作分支受測 HEAD：`7e2edeeccb9eaeddc2f2bed9b6435955835eebee`。無 handoff candidate。
