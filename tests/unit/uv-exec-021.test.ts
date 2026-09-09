@@ -5,7 +5,6 @@ import {
 } from "../../apps/api/src/modules/voice-booking/voice-policy.service";
 import { VoiceRetentionService } from "../../apps/api/src/modules/voice-booking/voice-retention.service";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
-import { getEvidenceRetentionPolicy } from "../../apps/api/src/common/evidence-governance";
 import type { EvidenceAccessIdentity } from "../../apps/api/src/common/evidence-governance";
 
 describe("UV-EXEC-021 Data Retention, Access Audit, Versioning & Emergency Suspension", () => {
