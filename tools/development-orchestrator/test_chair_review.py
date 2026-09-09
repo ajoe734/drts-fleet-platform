@@ -597,6 +597,7 @@ class ChairmanFlowTests(unittest.TestCase):
                     "task_class": "unblock",
                     "helper_parent": "ADM-UI-RD-006",
                     "helper_kind": "history_repair",
+                    "resolved_parent_at": "2026-09-09T03:00:00Z",
                     "next": "Repair route documented and pushed.",
                 },
             ]
@@ -739,6 +740,7 @@ class ChairmanFlowTests(unittest.TestCase):
                     "task_class": "unblock",
                     "helper_parent": "ADM-UI-RD-006",
                     "helper_kind": "history_repair",
+                    "resolved_parent_at": "2026-09-09T03:00:00Z",
                     "next": "Repair route documented and pushed.",
                 },
             ]
