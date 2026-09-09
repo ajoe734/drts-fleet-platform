@@ -143,6 +143,11 @@ export interface ExecuteCancelCommand {
     snapshotHash: string;
     acknowledgedFee: number;
   };
+  identityProof?: {
+    method: "bound_session" | "otp" | "passenger_proof" | "access_code";
+    proofId: string;
+    verifiedPhone?: string;
+  };
   reason?: string;
 }
 
@@ -456,10 +461,17 @@ export class VoiceOperationPolicyService {
     // 3. If real DB is connected, search for active orders
     if (this.ownedMobilityRepository?.isEnabled()) {
       try {
-        // Query recent active order by caller phone
-        const recentOrder = await this.ownedMobilityRepository.findOrderById(
-          callerPhone, // or lookup method
-        );
+        let recentOrder: OwnedOrderRecord | null = null;
+        if (
+          typeof (this.ownedMobilityRepository as any)
+            .findActiveOrderByPassengerPhone === "function"
+        ) {
+          recentOrder =
+            await this.ownedMobilityRepository.findActiveOrderByPassengerPhone(
+              callerPhone,
+              ACTIVE_ORDER_STATUSES,
+            );
+        }
         if (recentOrder && ACTIVE_ORDER_STATUSES.includes(recentOrder.status)) {
           return {
             hasActiveOrder: true,
@@ -510,6 +522,17 @@ export class VoiceOperationPolicyService {
   }
 
   // --- 4. Conditional Cancellation Policy & State Race (SD §12.2, §12.4, UV-AC-015, UV-AC-016) ---
+
+  computeCancellationFee(order: OwnedOrderRecord): number {
+    if (
+      ["driver_accepted", "enroute_pickup", "arrived_pickup"].includes(
+        order.status,
+      )
+    ) {
+      return 50; // TWD 50 cancellation fee per SD §12.2 / UV-AC-015
+    }
+    return 0;
+  }
 
   async evaluateCancelEligibility(
     request: CancelEligibilityRequest,
@@ -593,14 +616,7 @@ export class VoiceOperationPolicyService {
 
     // Fee evaluation (SD §12.2 / UV-AC-015):
     // If driver already accepted / en route / arrived -> cancellation fee applies
-    let cancellationFee = 0;
-    if (
-      ["driver_accepted", "enroute_pickup", "arrived_pickup"].includes(
-        order.status,
-      )
-    ) {
-      cancellationFee = 50; // TWD 50 cancellation fee
-    }
+    const cancellationFee = this.computeCancellationFee(order);
 
     const orderVersion = order.aggregateVersion ?? 1;
     const assignmentVersion = (order as unknown as { assignmentVersion?: number })
@@ -631,36 +647,130 @@ export class VoiceOperationPolicyService {
       expectedOrderVersion,
       expectedAssignmentVersion,
       cancelConfirmationProof,
+      identityProof,
       reason,
     } = command;
 
     this.assertCapabilityEnabled("order_cancel");
 
-    // Check proof
+    // 1. Validate voiceSessionId & resourceScopeId
+    if (!voiceSessionId || !resourceScopeId) {
+      throw new ApiRequestError(
+        400,
+        "VOICE_INVALID_REQUEST",
+        "voiceSessionId and resourceScopeId are required to execute cancellation.",
+      );
+    }
+
+    const session = await this.repository.findSessionById(voiceSessionId);
+    if (!session) {
+      throw new ApiRequestError(
+        403,
+        "VOICE_SESSION_NOT_OWNER",
+        "Voice session not found for this capability.",
+      );
+    }
+
+    if (session.resourceScopeId !== resourceScopeId) {
+      throw new ApiRequestError(
+        403,
+        "VOICE_SCOPE_DENIED",
+        "Session does not belong to authorized resource scope.",
+      );
+    }
+
+    // 2. Validate cancelConfirmationProof format and non-negative acknowledgedFee
     if (
       !cancelConfirmationProof ||
       !cancelConfirmationProof.confirmationId ||
-      !cancelConfirmationProof.snapshotHash
+      !cancelConfirmationProof.snapshotHash ||
+      typeof cancelConfirmationProof.acknowledgedFee !== "number" ||
+      Number.isNaN(cancelConfirmationProof.acknowledgedFee) ||
+      cancelConfirmationProof.acknowledgedFee < 0
     ) {
       throw new ApiRequestError(
         400,
         "VOICE_INVALID_PROOF",
-        "A valid cancel confirmation proof is required to execute cancellation.",
+        "A valid cancel confirmation proof with non-negative acknowledgedFee is required to execute cancellation.",
       );
     }
 
+    // If repository has stored confirmation record, fail-closed check session & hash binding
+    if (typeof (this.repository as any).findConfirmationById === "function") {
+      const storedConf = await (this.repository as any).findConfirmationById(
+        cancelConfirmationProof.confirmationId,
+      );
+      if (storedConf) {
+        if (storedConf.voiceSessionId !== voiceSessionId) {
+          throw new ApiRequestError(
+            403,
+            "VOICE_SCOPE_DENIED",
+            "Confirmation proof was not issued to this voice session.",
+          );
+        }
+        if (storedConf.snapshotHash !== cancelConfirmationProof.snapshotHash) {
+          throw new ApiRequestError(
+            400,
+            "VOICE_INVALID_PROOF",
+            "Confirmation proof snapshot hash does not match recorded proof.",
+          );
+        }
+      }
+    }
+
+    // 3. Resolve order
     const order = await this.findOrder(orderId);
     if (!order) {
       throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
     }
 
+    // 4. Validate session / caller authorization for this order
+    const boundOrderId = await this.authorization
+      .resolveBoundOrderId(voiceSessionId, resourceScopeId)
+      .catch(() => null);
+
+    const isBoundOrder = boundOrderId === orderId;
+    const isCallOrder = Boolean(
+      order.callId && session.callId && order.callId === session.callId,
+    );
+    const passengerPhone =
+      order.passenger?.phone ??
+      order.bookingRequirements?.passengerContact?.phone;
+    const isVerifiedPassenger = Boolean(
+      identityProof &&
+        (identityProof.method === "otp" ||
+          identityProof.method === "passenger_proof" ||
+          identityProof.method === "bound_session" ||
+          identityProof.method === "access_code") &&
+        identityProof.verifiedPhone &&
+        passengerPhone &&
+        passengerPhone === identityProof.verifiedPhone,
+    );
+
+    if (!isBoundOrder && !isCallOrder && !isVerifiedPassenger) {
+      throw new ApiRequestError(
+        403,
+        "VOICE_SCOPE_DENIED",
+        "Voice session is not authorized to cancel this order.",
+      );
+    }
+
+    // 5. Check order status cancelability
+    if (["completed", "cancelled"].includes(order.status)) {
+      throw new ApiRequestError(
+        409,
+        "VOICE_ORDER_NOT_CANCELABLE",
+        `Order is in terminal state '${order.status}' and cannot be cancelled.`,
+      );
+    }
+
+    // 6. State race detection (SD §12.2, UV-AC-016):
+    // If driver accepted, trip started, or order version changed between confirmation & execute
     const currentOrderVersion = order.aggregateVersion ?? 1;
     const currentAssignmentVersion =
       (order as unknown as { assignmentVersion?: number }).assignmentVersion ??
       1;
 
-    // State race detection (SD §12.2, UV-AC-016):
-    // If driver accepted, trip started, or order version changed between confirmation & execute
     if (
       currentOrderVersion !== expectedOrderVersion ||
       (expectedAssignmentVersion !== undefined &&
@@ -685,7 +795,26 @@ export class VoiceOperationPolicyService {
       );
     }
 
-    // Atomic update
+    // 7. Cancellation Fee Binding (SD §12.2, UV-AC-015)
+    // Bind acknowledgedFee to current required cancellation fee; fail closed on mismatch
+    const currentCancellationFee = this.computeCancellationFee(order);
+    if (cancelConfirmationProof.acknowledgedFee !== currentCancellationFee) {
+      this.logger.warn(
+        `Cancellation fee mismatch on order ${orderId}: acknowledged ${cancelConfirmationProof.acknowledgedFee} vs current ${currentCancellationFee}`,
+      );
+      throw new ApiRequestError(
+        409,
+        "VOICE_CANCELLATION_FEE_MISMATCH",
+        `Cancellation fee has changed or does not match passenger confirmation (acknowledged: ${cancelConfirmationProof.acknowledgedFee}, current: ${currentCancellationFee}). Please refresh terms and re-confirm.`,
+        {
+          orderId,
+          acknowledgedFee: cancelConfirmationProof.acknowledgedFee,
+          currentCancellationFee,
+        },
+      );
+    }
+
+    // 8. Atomic update
     const now = new Date().toISOString();
     order.status = "cancelled";
     order.cancelledAt = now;
@@ -699,7 +828,7 @@ export class VoiceOperationPolicyService {
       orderId,
       status: "cancelled",
       orderVersion: order.aggregateVersion,
-      cancellationFee: cancelConfirmationProof.acknowledgedFee,
+      cancellationFee: currentCancellationFee,
       cancelledAt: now,
     };
   }

@@ -22,6 +22,7 @@ import { VoiceToolGatewayService } from "../../apps/api/src/modules/voice-bookin
 import type { VoiceCapabilityGuard } from "../../apps/api/src/common/auth/voice-capability.guard";
 import type { VoiceBookingRepository } from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import type { VoiceBookingAuthorizationService } from "../../apps/api/src/modules/voice-booking/voice-booking-authorization.service";
+import { OwnedMobilityRepository } from "../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 
 // --- Test Fixtures & Helpers ---
@@ -92,6 +93,8 @@ function buildServiceHarness(options: {
   sessionRecord?: Record<string, unknown>;
   initialOrders?: OwnedOrderRecord[];
   capabilityConfig?: Partial<Record<string, "enabled" | "disabled" | "conditional">>;
+  ownedMobilityRepository?: any;
+  confirmations?: Map<string, any>;
 } = {}) {
   const boundId = options.boundOrderId !== undefined ? options.boundOrderId : ORDER_ID;
   const session = {
@@ -118,6 +121,9 @@ function buildServiceHarness(options: {
       voiceSessionId: SESSION_ID,
       boundOrderId: boundId,
     })),
+    findConfirmationById: vi.fn(async (id: string) =>
+      options.confirmations?.get(id) ?? null,
+    ),
   };
 
   const authorization = {
@@ -135,7 +141,7 @@ function buildServiceHarness(options: {
   const service = new VoiceOperationPolicyService(
     repository as unknown as VoiceBookingRepository,
     authorization as unknown as VoiceBookingAuthorizationService,
-    undefined,
+    options.ownedMobilityRepository,
     undefined,
     options.capabilityConfig ? { capabilities: options.capabilityConfig as never } : undefined,
   );
@@ -736,6 +742,411 @@ describe("UV-EXEC-020: 查單、重複來電及條件能力安全分流", () => 
         code: "VOICE_CAPABILITY_DISABLED",
       });
       expect(executePort).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
+  // 5. Codex Review Blocker Regressions: Repository Phone Lookup, Scope & Fee Binding
+  // =========================================================================
+  describe("Codex Review Blocker Regressions: Phone Lookup, Cancel Auth & Fee Binding", () => {
+    describe("checkActiveOrderDuplicate with OwnedMobilityRepository phone lookup", () => {
+      it("queries repository findActiveOrderByPassengerPhone and diverts when active order exists", async () => {
+        const activeDbOrder = createMockOrder({
+          orderId: "order-db-active-001",
+          status: "driver_accepted",
+          passenger: { name: "李阿姨", phone: "0988776655" },
+        });
+
+        const mockRepo = {
+          isEnabled: vi.fn(() => true),
+          findActiveOrderByPassengerPhone: vi.fn(async (phone: string) => {
+            if (phone === "0988776655") {
+              return activeDbOrder;
+            }
+            return null;
+          }),
+        };
+
+        const h = buildServiceHarness({
+          boundOrderId: null,
+          ownedMobilityRepository: mockRepo,
+        });
+
+        const result = await h.service.checkActiveOrderDuplicate({
+          callerPhone: "0988776655",
+          resourceScopeId: SCOPE_ID,
+          voiceSessionId: SESSION_ID,
+        });
+
+        expect(mockRepo.findActiveOrderByPassengerPhone).toHaveBeenCalledWith(
+          "0988776655",
+          expect.anything(),
+        );
+        expect(result.hasActiveOrder).toBe(true);
+        expect(result.activeOrderId).toBe("order-db-active-001");
+        expect(result.policyAction).toBe("divert_duplicate");
+      });
+
+      it("returns proceed when repository findActiveOrderByPassengerPhone finds no active order", async () => {
+        const mockRepo = {
+          isEnabled: vi.fn(() => true),
+          findActiveOrderByPassengerPhone: vi.fn(async () => null),
+        };
+
+        const h = buildServiceHarness({
+          boundOrderId: null,
+          ownedMobilityRepository: mockRepo,
+        });
+
+        const result = await h.service.checkActiveOrderDuplicate({
+          callerPhone: "0911000111",
+          resourceScopeId: SCOPE_ID,
+          voiceSessionId: SESSION_ID,
+        });
+
+        expect(result.hasActiveOrder).toBe(false);
+        expect(result.policyAction).toBe("proceed");
+      });
+
+      it("OwnedMobilityRepository.findActiveOrderByPassengerPhone queries DB with activeStatuses and phone", async () => {
+        const query = vi.fn().mockResolvedValue({
+          rows: [{ record: createMockOrder({ orderId: "order-db-123" }) }],
+        });
+        const repo = new OwnedMobilityRepository({
+          isEnabled: () => true,
+          query,
+        } as never);
+
+        const order = await repo.findActiveOrderByPassengerPhone("0912345678");
+        expect(order?.orderId).toBe("order-db-123");
+        expect(query).toHaveBeenCalledWith(
+          expect.stringContaining("ops.phase1_owned_orders"),
+          expect.arrayContaining([expect.any(Array), "0912345678"]),
+        );
+      });
+    });
+
+    describe("executeCancel fail-closed voiceSessionId / resourceScopeId authorization", () => {
+      it("rejects when voiceSessionId or resourceScopeId is missing", async () => {
+        const h = buildServiceHarness({
+          capabilityConfig: { order_cancel: "enabled" },
+        });
+
+        const commandNoSession: ExecuteCancelCommand = {
+          voiceSessionId: "",
+          resourceScopeId: SCOPE_ID,
+          orderId: ORDER_ID,
+          expectedOrderVersion: 1,
+          cancelConfirmationProof: {
+            confirmationId: "conf-1",
+            confirmedAt: new Date().toISOString(),
+            snapshotHash: "hash-1",
+            acknowledgedFee: 50,
+          },
+        };
+
+        await expect(h.service.executeCancel(commandNoSession)).rejects.toMatchObject({
+          code: "VOICE_INVALID_REQUEST",
+        });
+
+        const commandNoScope: ExecuteCancelCommand = {
+          ...commandNoSession,
+          voiceSessionId: SESSION_ID,
+          resourceScopeId: "",
+        };
+
+        await expect(h.service.executeCancel(commandNoScope)).rejects.toMatchObject({
+          code: "VOICE_INVALID_REQUEST",
+        });
+      });
+
+      it("rejects with VOICE_SESSION_NOT_OWNER when session does not exist", async () => {
+        const h = buildServiceHarness({
+          capabilityConfig: { order_cancel: "enabled" },
+        });
+
+        const command: ExecuteCancelCommand = {
+          voiceSessionId: "non-existent-session",
+          resourceScopeId: SCOPE_ID,
+          orderId: ORDER_ID,
+          expectedOrderVersion: 1,
+          cancelConfirmationProof: {
+            confirmationId: "conf-1",
+            confirmedAt: new Date().toISOString(),
+            snapshotHash: "hash-1",
+            acknowledgedFee: 50,
+          },
+        };
+
+        await expect(h.service.executeCancel(command)).rejects.toMatchObject({
+          code: "VOICE_SESSION_NOT_OWNER",
+        });
+      });
+
+      it("rejects with VOICE_SCOPE_DENIED when resourceScopeId does not match session", async () => {
+        const h = buildServiceHarness({
+          capabilityConfig: { order_cancel: "enabled" },
+        });
+
+        const command: ExecuteCancelCommand = {
+          voiceSessionId: SESSION_ID,
+          resourceScopeId: "scope-other-cross-tenant",
+          orderId: ORDER_ID,
+          expectedOrderVersion: 1,
+          cancelConfirmationProof: {
+            confirmationId: "conf-1",
+            confirmedAt: new Date().toISOString(),
+            snapshotHash: "hash-1",
+            acknowledgedFee: 50,
+          },
+        };
+
+        await expect(h.service.executeCancel(command)).rejects.toMatchObject({
+          code: "VOICE_SCOPE_DENIED",
+        });
+      });
+
+      it("rejects with VOICE_SCOPE_DENIED when caller/session is not authorized to cancel foreign order", async () => {
+        const foreignOrder = createMockOrder({
+          orderId: "order-foreign-999",
+          callId: "call-different-other-user",
+          status: "driver_accepted",
+          passenger: { name: "陳某某", phone: "0933999888" },
+        });
+
+        const h = buildServiceHarness({
+          boundOrderId: "order-own-111", // Bound to a different order!
+          initialOrders: [foreignOrder],
+          capabilityConfig: { order_cancel: "enabled" },
+        });
+
+        const command: ExecuteCancelCommand = {
+          voiceSessionId: SESSION_ID,
+          resourceScopeId: SCOPE_ID,
+          orderId: "order-foreign-999",
+          expectedOrderVersion: 1,
+          cancelConfirmationProof: {
+            confirmationId: "conf-foreign",
+            confirmedAt: new Date().toISOString(),
+            snapshotHash: "hash-foreign",
+            acknowledgedFee: 50,
+          },
+        };
+
+        // Unauthorized caller cannot cancel foreign order
+        await expect(h.service.executeCancel(command)).rejects.toMatchObject({
+          code: "VOICE_SCOPE_DENIED",
+        });
+      });
+
+      it("rejects with VOICE_SCOPE_DENIED when confirmation proof belongs to a different session", async () => {
+        const order = createMockOrder({
+          orderId: "order-conf-mismatch-1",
+          status: "driver_accepted",
+          aggregateVersion: 1,
+        });
+
+        const confirmations = new Map<string, any>([
+          [
+            "conf-session-diff",
+            {
+              confirmationId: "conf-session-diff",
+              voiceSessionId: "other-session-777", // Different session!
+              snapshotHash: "hash-conf",
+            },
+          ],
+        ]);
+
+        const h = buildServiceHarness({
+          boundOrderId: "order-conf-mismatch-1",
+          initialOrders: [order],
+          capabilityConfig: { order_cancel: "enabled" },
+          confirmations,
+        });
+
+        const command: ExecuteCancelCommand = {
+          voiceSessionId: SESSION_ID,
+          resourceScopeId: SCOPE_ID,
+          orderId: "order-conf-mismatch-1",
+          expectedOrderVersion: 1,
+          cancelConfirmationProof: {
+            confirmationId: "conf-session-diff",
+            confirmedAt: new Date().toISOString(),
+            snapshotHash: "hash-conf",
+            acknowledgedFee: 50,
+          },
+        };
+
+        await expect(h.service.executeCancel(command)).rejects.toMatchObject({
+          code: "VOICE_SCOPE_DENIED",
+        });
+      });
+
+      it("succeeds when verified passenger proof is supplied for order cancellation", async () => {
+        const order = createMockOrder({
+          orderId: "order-verified-proof-01",
+          callId: "prior-call-id",
+          status: "driver_accepted",
+          aggregateVersion: 1,
+          passenger: { name: "王乘客", phone: "0922333444" },
+        });
+
+        const h = buildServiceHarness({
+          boundOrderId: null, // Not bound to session
+          initialOrders: [order],
+          capabilityConfig: { order_cancel: "enabled" },
+        });
+
+        const command: ExecuteCancelCommand = {
+          voiceSessionId: SESSION_ID,
+          resourceScopeId: SCOPE_ID,
+          orderId: "order-verified-proof-01",
+          expectedOrderVersion: 1,
+          cancelConfirmationProof: {
+            confirmationId: "conf-otp-verified",
+            confirmedAt: new Date().toISOString(),
+            snapshotHash: "hash-otp",
+            acknowledgedFee: 50,
+          },
+          identityProof: {
+            method: "otp",
+            proofId: "otp-proof-123",
+            verifiedPhone: "0922333444",
+          },
+        };
+
+        const result = await h.service.executeCancel(command);
+        expect(result.succeeded).toBe(true);
+        expect(result.status).toBe("cancelled");
+        expect(result.cancellationFee).toBe(50);
+      });
+    });
+
+    describe("executeCancel fail-closed cancellation fee binding", () => {
+      it("rejects with VOICE_INVALID_PROOF when acknowledgedFee is invalid or negative", async () => {
+        const h = buildServiceHarness({
+          capabilityConfig: { order_cancel: "enabled" },
+        });
+
+        const invalidProofs = [
+          { acknowledgedFee: -10 },
+          { acknowledgedFee: NaN },
+          { acknowledgedFee: undefined as unknown as number },
+        ];
+
+        for (const proof of invalidProofs) {
+          const command: ExecuteCancelCommand = {
+            voiceSessionId: SESSION_ID,
+            resourceScopeId: SCOPE_ID,
+            orderId: ORDER_ID,
+            expectedOrderVersion: 1,
+            cancelConfirmationProof: {
+              confirmationId: "conf-fee-invalid",
+              confirmedAt: new Date().toISOString(),
+              snapshotHash: "hash-fee",
+              ...proof,
+            },
+          };
+
+          await expect(h.service.executeCancel(command)).rejects.toMatchObject({
+            code: "VOICE_INVALID_PROOF",
+          });
+        }
+      });
+
+      it("rejects with VOICE_CANCELLATION_FEE_MISMATCH when passenger acknowledged 0 but driver accepted (fee 50)", async () => {
+        const order = createMockOrder({
+          orderId: "order-fee-50",
+          status: "driver_accepted", // Fee is 50
+          aggregateVersion: 1,
+        });
+
+        const h = buildServiceHarness({
+          boundOrderId: "order-fee-50",
+          initialOrders: [order],
+          capabilityConfig: { order_cancel: "enabled" },
+        });
+
+        const command: ExecuteCancelCommand = {
+          voiceSessionId: SESSION_ID,
+          resourceScopeId: SCOPE_ID,
+          orderId: "order-fee-50",
+          expectedOrderVersion: 1,
+          cancelConfirmationProof: {
+            confirmationId: "conf-fee-0",
+            confirmedAt: new Date().toISOString(),
+            snapshotHash: "hash-fee-0",
+            acknowledgedFee: 0, // Passenger acknowledged 0 fee, but fee is 50!
+          },
+        };
+
+        await expect(h.service.executeCancel(command)).rejects.toMatchObject({
+          code: "VOICE_CANCELLATION_FEE_MISMATCH",
+        });
+      });
+
+      it("rejects with VOICE_CANCELLATION_FEE_MISMATCH when passenger acknowledged 50 but order is pre-assignment (fee 0)", async () => {
+        const order = createMockOrder({
+          orderId: "order-fee-0",
+          status: "ready_for_dispatch", // Fee is 0
+          aggregateVersion: 1,
+        });
+
+        const h = buildServiceHarness({
+          boundOrderId: "order-fee-0",
+          initialOrders: [order],
+          capabilityConfig: { order_cancel: "enabled" },
+        });
+
+        const command: ExecuteCancelCommand = {
+          voiceSessionId: SESSION_ID,
+          resourceScopeId: SCOPE_ID,
+          orderId: "order-fee-0",
+          expectedOrderVersion: 1,
+          cancelConfirmationProof: {
+            confirmationId: "conf-fee-50",
+            confirmedAt: new Date().toISOString(),
+            snapshotHash: "hash-fee-50",
+            acknowledgedFee: 50, // Passenger acknowledged 50, but actual fee is 0!
+          },
+        };
+
+        await expect(h.service.executeCancel(command)).rejects.toMatchObject({
+          code: "VOICE_CANCELLATION_FEE_MISMATCH",
+        });
+      });
+
+      it("succeeds and binds cancellationFee when acknowledgedFee matches current fee exactly", async () => {
+        const order = createMockOrder({
+          orderId: "order-fee-free",
+          status: "ready_for_dispatch", // Fee is 0
+          aggregateVersion: 1,
+        });
+
+        const h = buildServiceHarness({
+          boundOrderId: "order-fee-free",
+          initialOrders: [order],
+          capabilityConfig: { order_cancel: "enabled" },
+        });
+
+        const command: ExecuteCancelCommand = {
+          voiceSessionId: SESSION_ID,
+          resourceScopeId: SCOPE_ID,
+          orderId: "order-fee-free",
+          expectedOrderVersion: 1,
+          cancelConfirmationProof: {
+            confirmationId: "conf-free-ok",
+            confirmedAt: new Date().toISOString(),
+            snapshotHash: "hash-free-ok",
+            acknowledgedFee: 0,
+          },
+        };
+
+        const result = await h.service.executeCancel(command);
+        expect(result.succeeded).toBe(true);
+        expect(result.cancellationFee).toBe(0);
+        expect(result.status).toBe("cancelled");
+      });
     });
   });
 });
