@@ -1,5 +1,35 @@
 # SR-PUSH-001 — current-dev reproduction and scope blocker
 
+## Dispatch verification — 2026-09-09 02:25 UTC
+
+- `git fetch origin`: exit 0; current base is
+  `add6694278b3287bb42215b24d4c91039d0c6645`. Tested branch SHA:
+  `512802ffd741e91781097c0829a753644241a662`; implementation candidate: null.
+- `git rebase origin/dev`: exit 1, duplicate historical anchor `8b015a460`
+  conflicts in evidence and regression files. `git rebase --abort`: exit 0.
+  `git diff origin/dev -- apps/api/src/modules/multi-taxi/passenger-push.port.ts apps/api/src/modules/multi-taxi/multi-taxi.module.ts apps/api/src/modules/multi-taxi/multi-taxi.service.ts apps/api/src/modules/multi-taxi/multi-taxi.repository.ts`:
+  exit 0 with no differences; tested push code matches current dev.
+- `git merge-base --is-ancestor 6de31c41fa49d7089d87d42aa8f22378caa07858 origin/dev`:
+  exit 0. Read its history-repair packet from origin/dev: supervisor must route
+  the successor branch and preserve the existing product gates. This dispatch
+  still assigns the original branch, five scopes and only UV-EXEC-006 dependency.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-push-001/`: exit 0,
+  4 passed / 2 expected failures, 6 total, 3.32 seconds. Duplicate delivery and
+  swallowed persistence failure remain defects, not accepted behavior.
+- `pnpm --filter @drts/api typecheck`: exit 2, missing generated contracts and
+  control-plane-auth declarations. After building these dependencies,
+  `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api typecheck`:
+  exit 0. `git diff --check`: exit 0.
+- Blocking action remains supervisor routing under the existing planning packet:
+  grant service/repository scopes and writer dependencies, approve provider/device
+  protocol, and allocate durable claim/receipt contracts. Q-SR-PUSH-001 still
+  explicitly preserves these gates. Do not dispatch another history helper as
+  a substitute for those decisions.
+- Resource IDs are the test-only IDs documented below. Readiness still records
+  missing provider account and authorized device; live provider/message/device,
+  controlled receiver and PostgreSQL resource IDs remain null. No server,
+  controlled receiver, external send, database integration or device test ran.
+
 ## Dispatch verification — 2026-09-09 02:13 UTC
 
 - `git fetch origin`: exit 0; base `fb2ea6e2ed3c2937d7d65d601967d183b0257048`.
