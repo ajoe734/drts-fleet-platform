@@ -2,6 +2,28 @@
 
 Status: partial implementation; web export blocked. No review candidate locked.
 
+## Codex2 dispatch recheck — 2026-09-09 03:45 UTC
+
+- Fetched `origin/dev` base: `f004c6e5c53242d643fbaf6e9d4004013e4e6f77`. Tested/published task head: `984aca61ab1cb93cc2dd1632ab6e19204430ef3a`. Candidate SHA: **unassigned**; this report's anchor is not a review candidate.
+- `git fetch origin`: exit 0. `git rev-list --left-right --count HEAD...origin/codex2/sr-driver-web-001`: exit 0, `0 0`. `gh pr list --head codex2/sr-driver-web-001 --state all --json number,state,headRefOid,url` and `gh run list --branch codex2/sr-driver-web-001 --limit 3 --json databaseId,headSha,status,conclusion`: exit 0, both `[]`. No rebase, merge, history rewrite or application change performed.
+- `git diff --exit-code origin/dev -- apps/driver-app ':!apps/driver-app/components/driver-trip-map.web.tsx'`: exit 0. All existing driver application files, including the native map, match the current base. The task adds the web map entry and regression resources. `git ls-tree origin/dev apps/driver-app/metro.config.js`: exit 0, no entry.
+- `pnpm --filter @drts/driver-app typecheck`: exit 0 (`tsc --noEmit`). `pnpm exec vitest run tests/unit/system-remediation/sr-driver-web-001/`: exit 0, 1 file / 5 tests. `git diff --check`: exit 0.
+- Existing repair regressions freshly rerun, exit 0, 11 files / 91 tests:
+
+  ```sh
+  pnpm --filter @drts/driver-app exec vitest run tests/unit/driver-navigation.test.ts tests/unit/driver-trip-map.test.ts tests/unit/driver-root-navigator.test.ts tests/unit/driver-bottom-tab-bar.test.ts tests/unit/driver-auth-token-lifecycle.test.ts tests/unit/driver-auth-states.test.ts tests/unit/driver-sos-no-os-dialer.test.ts tests/unit/driver-sos-end-to-end-platform.test.ts tests/unit/keyboard-avoiding-container.test.ts tests/unit/responsive-layout-and-overflow.test.ts tests/unit/driver-route-guards-and-feature-entries.test.ts
+  ```
+
+- Actual offline export command (no preview server), exit **1**:
+
+  ```sh
+  NODE_OPTIONS=--require="$PWD/tests/unit/system-remediation/sr-driver-web-001/metro-worktree-harness.cjs" pnpm --filter @drts/driver-app exec expo export --platform web --max-workers 2 --source-maps --output-dir /tmp/sr-driver-web-001-web-20260909-codex2 > /tmp/sr-driver-web-001-web-20260909-codex2.log 2>&1
+  ```
+
+  Metro reports `Unable to resolve module ./../codex-sr-report-001/node_modules/.pnpm/expo-router@6.0.23_@expo+metro-runtime@6.1.2_@types+react-dom@19.1.11_@types+react@19.1_49d441bdf3339537ae8dad2db01591da/node_modules/expo-router/entry.js` from the assigned worktree root. This fails before the historical SQLite WASM error; that error is not freshly reproduced. Ephemeral log resource ID: `/tmp/sr-driver-web-001-web-20260909-codex2.log`. `readlink -f apps/driver-app/node_modules/react` also resolves into `codex-sr-report-001/node_modules/.pnpm/react@19.1.0/node_modules/react`.
+- Current canonical task still permits only the four original write scopes and has no dependencies. Supervisor must repair the supplied dependency/Metro visibility environment, then authorize the shared Metro configuration scope with dependency reconciliation or assign a bundler producer. Owner reassignment does not authorize these changes. No shared dependency links or configuration were modified.
+- Browser `/`, `/onboarding`, `/sos` remain unverified; product/preview/browser servers are prohibited on this VM. Native exports were not rerun; native import behavior was covered only by unit tests this dispatch. No live API/order/incident IDs, SOS transmission, device builds, physical-device checks, review, same-candidate CI, merge, deployment or acceptance success is claimed.
+
 ## Dispatch recheck — 2026-09-09 00:19 UTC
 
 - Fresh fetched `origin/dev` base: `8c6e1fa9732ec8322de275084817683e6d67407c`; tested head: `db077da1a1d30ee6e395b9e5660054154bfcfb9f`. Candidate remains unassigned.
