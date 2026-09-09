@@ -1,3 +1,5 @@
+import { buildOrderFixture } from "./voice-order-fixture";
+
 import { randomUUID } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -63,7 +65,7 @@ async function seedSessionChain(
     [
       orderId,
       `ON-${orderId}`,
-      JSON.stringify({
+      JSON.stringify(buildOrderFixture({
         orderId,
         status: "ready_for_dispatch",
         callId,
@@ -73,7 +75,7 @@ async function seedSessionChain(
           voiceSessionId,
           principalId: "svc-uvexec002",
         },
-      }),
+      })),
     ],
   );
 

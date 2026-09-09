@@ -54,6 +54,12 @@ pnpm exec vitest run tests/unit/system-remediation/sr-admin-adapter-001/
 
 ## 追溯來源
 
+### 2026-09-08 planning recovery routing
+
+[本次決策與後續工作](../../../support/unblock/SR-ADMIN-ADAPTER-001/SR-ADMIN-ADAPTER-001-UNBLOCK-PLANNING-DECISION.md) 記錄目前 scope 缺口與 owner 可立即續做的下一步。舊 PR #1671 的兩檔擴 scope／三表單 scope cut 尚未成為授權；本任務原驗收不變。
+
+Owner 可依 history-recovery packet 續做既有 scope 內 notice/i18n 修復與回歸證據。Supervisor 必須先以 canonical task-board 命令記錄 repository、adapter contract、獨立 migration 的 reviewed scope／必要相依，並處理尚缺的表單設計與 expiry/mutation contract，再執行共享檔案修改。`serial_resources` 不能替代相依與授權；本 routing 文件不直接擴張 write scope。
+
 - [原30問題](../../04-uat/system-remediation-20260906/source/findings.json)
 - [新增14工作卡](../../04-uat/system-remediation-20260906/source/new-gaps.json)
 - [134能力](../../04-uat/system-remediation-20260906/source/capabilities.json)

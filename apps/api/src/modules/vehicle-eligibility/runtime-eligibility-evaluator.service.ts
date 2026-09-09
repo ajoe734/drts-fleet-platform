@@ -1,3 +1,5 @@
+import { bookingRequirementFailures } from "./booking-requirements";
+import type { BookingRequirements } from "@drts/contracts";
 import { randomUUID } from "node:crypto";
 
 import { Injectable, Optional } from "@nestjs/common";
@@ -27,6 +29,7 @@ export type OverrideSoftEligibilityCommand = {
 
 export type EvaluateRuntimeEligibilityCommand =
   ResolveRuntimeEligibilityContextCommand & {
+    bookingRequirements?: BookingRequirements;
     softReasonCodes?: string[];
     missingRequirements?: string[];
     overrideSoftEligibility?: OverrideSoftEligibilityCommand;
@@ -63,6 +66,37 @@ export class RuntimeEligibilityEvaluator {
     @Optional() private readonly repository?: VehicleEligibilityRepository,
   ) {}
 
+  /** No persistence or override inside the assignment transaction. Recompute
+   * all conditions from current registry facts before reserving supply. */
+  assessAutonomous(
+    command: EvaluateRuntimeEligibilityCommand,
+  ): EligibilityDecision {
+    const context = this.eligibilityContextResolver.resolve(command);
+    const hard = this.collectHardReasonCodes(context);
+    if (command.bookingRequirements)
+      hard.push(
+        ...bookingRequirementFailures(
+          command.bookingRequirements,
+          context.vehicleCapability,
+        ),
+      );
+    if (hard.length) return "ineligible";
+    if (
+      context.vehicleCapability.conditionallyAllowed ||
+      this.collectSoftReasonCodes(
+        context,
+        this.classifyLocationState(context),
+        command.softReasonCodes ?? [],
+      ).length ||
+      this.collectMissingRequirements(
+        context,
+        command.missingRequirements ?? [],
+      ).length
+    )
+      return "conditionally_eligible";
+    return "eligible";
+  }
+
   async evaluate(
     command: EvaluateRuntimeEligibilityCommand,
   ): Promise<EvaluateRuntimeEligibilityResult> {
@@ -70,6 +104,13 @@ export class RuntimeEligibilityEvaluator {
       command.resolvedContext ??
       this.eligibilityContextResolver.resolve(command);
     const hardReasonCodes = this.collectHardReasonCodes(context);
+    if (command.bookingRequirements)
+      hardReasonCodes.push(
+        ...bookingRequirementFailures(
+          command.bookingRequirements,
+          context.vehicleCapability,
+        ),
+      );
     const locationState = this.classifyLocationState(context);
     const softReasonCodes = this.collectSoftReasonCodes(
       context,
@@ -178,7 +219,10 @@ export class RuntimeEligibilityEvaluator {
     const hardReasonCodes: string[] = [];
     if (!context.driverReadiness.ready) {
       hardReasonCodes.push(
-        ...this.normalizeReasons(context.driverReadiness.reasonCodes, "DRIVER_NOT_READY"),
+        ...this.normalizeReasons(
+          context.driverReadiness.reasonCodes,
+          "DRIVER_NOT_READY",
+        ),
       );
     }
     if (!context.vehicleReadiness.ready) {
@@ -304,7 +348,11 @@ export class RuntimeEligibilityEvaluator {
       missingRequirements.push("permit");
     }
 
-    return [...new Set(missingRequirements.map((item) => item.trim()).filter(Boolean))];
+    return [
+      ...new Set(
+        missingRequirements.map((item) => item.trim()).filter(Boolean),
+      ),
+    ];
   }
 
   private normalizeReasons(reasons: string[], fallback: string) {

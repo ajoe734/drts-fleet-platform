@@ -1,9 +1,16 @@
+import { VoiceConfirmationService } from "./voice-confirmation.service";
+import { GeoModule } from "../geo/geo.module";
+import { ServiceAreaModule } from "../service-area/service-area.module";
+import { ServiceProductModule } from "../service-product/service-product.module";
+import { VoiceBookingDraftService } from "./voice-booking-draft.service";
 import { Module } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
 import { VoiceBookingAuthorizationService } from "./voice-booking-authorization.service";
 import { VoiceBookingRepository } from "./voice-booking.repository";
 import { VoiceLineScopeService } from "./voice-line-scope.service";
+import { VoiceCheckpointRepository } from "./voice-checkpoint.repository";
+import { VoiceEvidenceService } from "./voice-evidence.service";
 
 /**
  * UV-EXEC-003 built VoiceBookingRepository/VoiceBookingAuthorizationService/
@@ -14,13 +21,20 @@ import { VoiceLineScopeService } from "./voice-line-scope.service";
  * (SD §7.4/§7.5).
  */
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, GeoModule, ServiceAreaModule, ServiceProductModule],
   providers: [
+    VoiceBookingDraftService,
+    VoiceConfirmationService,
+    VoiceCheckpointRepository,
+    VoiceEvidenceService,
     VoiceBookingRepository,
     VoiceBookingAuthorizationService,
     VoiceLineScopeService,
   ],
   exports: [
+    VoiceBookingDraftService,
+    VoiceConfirmationService,
+    VoiceEvidenceService,
     VoiceBookingRepository,
     VoiceBookingAuthorizationService,
     VoiceLineScopeService,
