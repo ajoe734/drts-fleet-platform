@@ -25,6 +25,14 @@ const distAppModuleUrl = new URL(
   import.meta.url,
 );
 const distAppModulePath = fileURLToPath(distAppModuleUrl);
+// CI unit/smoke jobs collect this harness before the separate API build job.
+// Build this checkout on every run so missing or stale dist cannot determine
+// acceptance results. This compiles only; it does not start an HTTP server.
+execFileSync("pnpm", ["--filter", "@drts/api...", "build"], {
+  cwd: fileURLToPath(new URL("../../../../", import.meta.url)),
+  stdio: "pipe",
+  timeout: 120_000,
+});
 if (!existsSync(distAppModulePath)) {
   throw new Error(
     `Candidate compiled build not found at ${distAppModulePath}. Run 'pnpm --filter @drts/api build' before running full AppModule E2E tests.`,

@@ -1,7 +1,7 @@
 # SR-QA-WEBHOOK-001-FIX-TENANT-BINDING — C111 API Key Tenant Header Binding Repair
 
 - **Task ID**: `SR-QA-WEBHOOK-001-FIX-TENANT-BINDING`
-- **Owner**: `Gemini`
+- **Owner**: `Codex` (reassigned from Gemini on 2026-09-09)
 - **Reviewer**: `Codex2`
 - **Wave / Phase**: `system-remediation-20260906`
 - **Capability ID**: `C111`
@@ -95,6 +95,7 @@ Executes without server or compose dependencies per VM restriction:
 ### 3.2 Full AppModule E2E Test Suite (`tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/appmodule-tenant-binding.test.ts`)
 
 - Consistently loads candidate compiled `AppModule` (`apps/api/dist/app.module.js`) and all runtime DI class tokens (`DatabaseService`, `JwtAuthService`, `StepUpProofService`, `TenantPartnerRepository`, `TenantPartnerService`, `TenantPartnerController`, etc.) via `apiRequire` anchored to `apps/api/package.json`.
+- Compiles the current checkout with `pnpm --filter '@drts/api...' build` before loading those tokens, including workspace dependencies. Compilation is bounded to 120 seconds and failures propagate; existing dist is never accepted without rebuilding.
 - Fails explicitly with actionable error instructions if candidate compiled artifacts are missing, preventing silent fallback to uncompiled source.
 - Verifies complete NestJS `AppModule` structure, route metadata, and real DI wiring without server startup:
   - Asserts constructor self-declared dependency injection metadata (`self:paramtypes`) as well as TypeScript emitted metadata (`design:paramtypes`) on `TenantPartnerController` and `TenantPartnerService`.
@@ -138,3 +139,23 @@ git diff --check
 - `tests/unit/system-remediation/sr-qa-webhook-001-fix-tenant-binding/tenant-binding.test.ts`
 - `tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/appmodule-tenant-binding.test.ts`
 - `docs/04-uat/system-remediation-20260906/SR-QA-WEBHOOK-001-FIX-TENANT-BINDING.md`
+
+## 5. Codex takeover: CI repair (2026-09-09)
+
+PR1841 head `5b6178d4bff1b08c76b147e55a211cbecd2a4ffa` failed both
+[integration unit](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34304726797/job/102319286045)
+and [product smoke](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34304726830/job/102319059629)
+at collection: the harness required `apps/api/dist/app.module.js`, but those jobs
+do not build the API first. Both logs show the five scoped unit tests passing.
+The harness now compiles before requiring the emitted AppModule, preserving
+real Nest metadata and using current source even when an old dist exists.
+No workflow or product source changes were needed for this repair.
+
+Full two-tenant JWT HTTP/PostgreSQL acceptance remains outstanding. This worker
+VM prohibits HTTP servers and Compose; local harness checks must unset
+`DATABASE_URL` and run only the application-context test. A skipped HTTP test
+does not satisfy `full_appmodule_two_tenant_jwt_http_sql_candidate_evidence`.
+The allowed acceptance environment must run this harness with PostgreSQL and
+`DRTS_WEBHOOK_AUTH_EVIDENCE` set on the exact candidate, then retain the passing
+test log and generated evidence. Same-candidate review, CI, merge, and external
+acceptance remain lifecycle gates.
