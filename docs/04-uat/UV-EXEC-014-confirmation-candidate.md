@@ -1,9 +1,9 @@
 # UV-EXEC-014 confirmation candidate
 
-Owner: Codex. Independent reviewer: Codex2. Dispatch changed the owner from
-Gemini2 to Codex because that lane was capacity paused; this records the routing
-fallback, not a change to role policy. All five prerequisite tasks were `done`
-at implementation start.
+Owner: Gemini. Independent reviewer: Codex2. Availability-first reassignment:
+Gemini claimed UV-EXEC-014 while Codex was unavailable or occupied; this records
+the routing fallback, not a change to role policy. All five prerequisite tasks
+were `done` at implementation start.
 
 ## Delivered boundary
 
@@ -80,7 +80,7 @@ Checks: task + UV-EXEC-007/009/010/012/013 unit suites; API and media-worker
 TypeScript checks; scoped ESLint and formatting checks. Exact final counts and
 candidate SHA are recorded in the machine-truth handoff.
 
-Final local verification on 2026-09-08 UTC: all six suites passed, 212 tests
-(including 62 task cases); API and media-worker typechecks passed after building
-contracts/control-plane-auth; scoped ESLint, Prettier and `git diff --check`
-passed. The new-epoch unapplied-tail negative case is included.
+Final local verification on 2026-09-09 UTC: all six suites passed, 271 tests
+(including 71 task cases); root typecheck, API and media-worker typechecks passed;
+scoped ESLint, Prettier and `git diff --check` passed. Historical control event
+fixture narrowing and new-epoch unapplied-tail negative cases are verified.
