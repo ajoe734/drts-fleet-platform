@@ -15,6 +15,7 @@
  */
 
 import path from "node:path";
+import fs from "node:fs";
 import ExcelJS from "exceljs";
 import PDFDocument from "pdfkit";
 
@@ -23,7 +24,9 @@ import PDFDocument from "pdfkit";
 // ---------------------------------------------------------------------------
 
 /** Returns columns in first-seen order across all rows (matches recordsToCsv). */
-export function deriveColumns(rows: readonly Record<string, unknown>[]): string[] {
+export function deriveColumns(
+  rows: readonly Record<string, unknown>[],
+): string[] {
   const columns: string[] = [];
   for (const row of rows) {
     for (const key of Object.keys(row)) {
@@ -181,6 +184,7 @@ export function recordsToPdf(
   title?: string,
 ): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
+    const fontBuffer = fs.readFileSync(REPORT_FONT_PATH);
     const columns = deriveColumns(rows);
     const landscape = columns.length > 4;
 
@@ -200,7 +204,7 @@ export function recordsToPdf(
     // through a silent Helvetica fallback. Regular also serves table headings.
     const fontRegular = "NotoSansCJKtc";
     const fontBold = fontRegular;
-    doc.registerFont(fontRegular, REPORT_FONT_PATH);
+    doc.registerFont(fontRegular, fontBuffer);
 
     // Title.
     const reportTitle = title ?? "Report";
@@ -229,10 +233,12 @@ export function recordsToPdf(
       for (let ci = 0; ci < columns.length; ci++) {
         const x = startX + ci * colW;
         doc.rect(x, y, colW, headerH).fillAndStroke("#E2E8F0", "#94A3B8");
-        doc.fillColor("black").text(columns[ci] ?? "", x + cellPad, y + cellPad + 2, {
-          width: cellTextW,
-          lineBreak: false,
-        });
+        doc
+          .fillColor("black")
+          .text(columns[ci] ?? "", x + cellPad, y + cellPad + 2, {
+            width: cellTextW,
+            lineBreak: false,
+          });
       }
       y += headerH;
     };
@@ -285,12 +291,10 @@ export function recordsToPdf(
           doc.rect(x, y, colW, sliceH).fillAndStroke(fill, "#CBD5E1");
           const text = currentSlices[ci];
           if (text) {
-            doc
-              .fillColor("black")
-              .text(text, x + cellPad, y + cellPad, {
-                width: cellTextW,
-                lineBreak: true,
-              });
+            doc.fillColor("black").text(text, x + cellPad, y + cellPad, {
+              width: cellTextW,
+              lineBreak: true,
+            });
           }
         }
 

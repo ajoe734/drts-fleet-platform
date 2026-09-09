@@ -16,7 +16,9 @@
  */
 
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import PDFDocument from "pdfkit";
+import { describe, it, expect, vi } from "vitest";
 import ExcelJS from "exceljs";
 import {
   REPORT_OUTPUT_FORMATS,
@@ -127,7 +129,9 @@ async function extractPdfText(pdfBuffer: Buffer): Promise<string> {
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
-      text.push(content.items.map((item) => "str" in item ? item.str : "").join(""));
+      text.push(
+        content.items.map((item) => ("str" in item ? item.str : "")).join(""),
+      );
     }
     return text.join("");
   } finally {
@@ -239,6 +243,64 @@ describe("recordsToXlsx — parsed workbook values and CJK preservation", () => 
 // ---------------------------------------------------------------------------
 
 describe("recordsToPdf — parsed text, CJK font, and text wrapping / pagination", () => {
+  it("uses packaged fonts when host font discovery is unavailable", async () => {
+    const hostDiscovery = vi.spyOn(fs, "existsSync").mockReturnValue(false);
+    try {
+      const pdf = await recordsToPdf([{ name: "王小明" }], "中文報表");
+      expect(await extractPdfText(pdf)).toContain("中文報表name王小明");
+      expect(hostDiscovery).not.toHaveBeenCalled();
+    } finally {
+      hostDiscovery.mockRestore();
+    }
+  });
+
+  it("rejects missing packaged font instead of returning corrupted bytes", async () => {
+    const originalRead = fs.readFileSync;
+    const read = vi.spyOn(fs, "readFileSync").mockImplementation((...args) => {
+      if (String(args[0]).endsWith("NotoSansCJKtc-Regular.otf")) {
+        throw new Error("ENOENT: packaged report font missing");
+      }
+      return originalRead(...args);
+    });
+    try {
+      await expect(
+        recordsToPdf([{ name: "王小明" }]).then(() => "rendered"),
+      ).rejects.toThrow("packaged report font missing");
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it("independent parser does not mistake Helvetica CJK corruption for Chinese", async () => {
+    const doc = new PDFDocument();
+    const chunks: Buffer[] = [];
+    const result = new Promise<Buffer>((resolve, reject) => {
+      doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+    });
+    doc.font("Helvetica").text("王小明");
+    doc.end();
+    expect(await extractPdfText(await result)).not.toContain("王小明");
+  });
+
+  it("preserves every Chinese value and long-cell segment through multiple pages", async () => {
+    const segments = Array.from(
+      { length: 600 },
+      (_, index) =>
+        `第${String(index).padStart(3, "0")}筆王小明龜山區臺灣繁體中文`,
+    );
+    const source = segments.join("") + "長尾END_SENTINEL";
+    const pdf = await recordsToPdf([{ note: source }], "跨頁報表");
+    const parsed = await extractPdfText(pdf);
+    // Repeated table headers are layout, everything else must be exact.
+    expect(parsed.replace("跨頁報表", "").replaceAll("note", "")).toBe(source);
+    expect(parsed.match(/note/g)!.length).toBeGreaterThan(1);
+    const xlsx = await parseXlsx(await recordsToXlsx([{ note: source }]));
+    expect(xlsx.rows).toEqual([[source]]);
+    expect(parseCsv(recordsToCsv([{ note: source }])).rows).toEqual([[source]]);
+  });
+
   it("produces valid PDF with CJK Unicode font preserving Chinese and sentinels", async () => {
     const buf = await recordsToPdf(
       CJK_SAMPLE_ROWS as unknown as Record<string, unknown>[],
