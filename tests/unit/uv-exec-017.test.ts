@@ -117,7 +117,14 @@ function buildTestHarness(options: {
       brandId: "brand-a",
       status: "active",
     })),
-    findReceiptByActionKey: vi.fn(async () => pendingReceipts[0] ?? null),
+    findReceiptByActionKey: vi.fn(
+      async (
+        _brandId: string,
+        _callId: string,
+        _intentId: string,
+        _action: string,
+      ) => pendingReceipts[0] ?? null,
+    ),
   };
 
   const auditLogs: unknown[] = [];
@@ -558,11 +565,11 @@ describe("UV-EXEC-017: 真人轉接 coordinator 與排隊控制權移交", () =>
         controlSequence: 10,
         leaseEpoch: 1,
         recordingCheckpointId: "chk-1",
-        status: "accepted",
+        evidence: null,
+        state: "accepted",
+        consumedCommandId: null,
         confirmedAt: "2026-09-06T00:01:00.000Z",
         expiresAt: "2026-09-06T00:03:00.000Z",
-        createdAt: "2026-09-06T00:01:00.000Z",
-        updatedAt: "2026-09-06T00:01:00.000Z",
       };
 
       const h = buildTestHarness({
@@ -637,8 +644,6 @@ describe("UV-EXEC-017: 真人轉接 coordinator 與排隊控制權移交", () =>
         resultVersion: 1,
         errorCode: null,
         errorReason: null,
-        createdAt: "2026-09-06T00:00:00.000Z",
-        updatedAt: "2026-09-06T00:00:00.000Z",
       };
 
       const h = buildTestHarness({ pendingReceipts: [pendingCommand] });
@@ -678,7 +683,9 @@ describe("UV-EXEC-017: 真人轉接 coordinator 與排隊控制權移交", () =>
         controlSequence: 5,
         leaseEpoch: 1,
         recordingCheckpointId: "chk-1",
-        status: "accepted",
+        evidence: null,
+        state: "accepted",
+        consumedCommandId: null,
         confirmedAt: "2026-09-06T00:00:00.000Z",
         expiresAt: "2026-09-06T00:02:00.000Z",
         createdAt: "2026-09-06T00:00:00.000Z",
