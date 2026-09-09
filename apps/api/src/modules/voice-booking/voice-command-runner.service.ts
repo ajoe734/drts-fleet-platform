@@ -43,6 +43,7 @@ export interface VoiceWorkItemRecord {
 export interface VoiceWorkExecutionResult {
   workId: string;
   workType: string;
+  commandId?: string | null | undefined;
   success: boolean;
   result?: unknown;
   error?: string;
@@ -432,6 +433,7 @@ export class VoiceCommandRunnerService {
       return {
         workId: record.workId,
         workType: record.workType,
+        commandId: record.commandId,
         success: true,
         result,
       };
@@ -443,6 +445,7 @@ export class VoiceCommandRunnerService {
         return {
           workId: record.workId,
           workType: record.workType,
+          commandId: record.commandId,
           success: false,
           fenced: true,
           error: error.message,
@@ -471,6 +474,7 @@ export class VoiceCommandRunnerService {
       return {
         workId: record.workId,
         workType: record.workType,
+        commandId: record.commandId,
         success: false,
         error: errorMsg,
       };

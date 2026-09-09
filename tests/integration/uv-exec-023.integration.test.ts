@@ -8,7 +8,11 @@ import {
 import { VoiceCallbackService } from "../../apps/api/src/modules/voice-booking/voice-callback.service";
 import type { VoiceBookingCommandService } from "../../apps/api/src/modules/voice-booking/voice-booking-command.service";
 import type { OwnedMobilityRepository } from "../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
-import type { VoiceQueryExecutor } from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
+import type {
+  VoiceQueryExecutor,
+  VoiceCommandReceiptRecord,
+} from "../../apps/api/src/modules/voice-booking/voice-booking.repository";
+import type { QueryResult, QueryResultRow } from "pg";
 
 // In-memory mock database / query executor for hermetic integration testing
 interface MockWorkItemRow {
@@ -67,10 +71,18 @@ class MockVoiceWorkDatabase {
 
   createMockQueryExecutor(): VoiceQueryExecutor {
     return {
-      query: async <T = unknown>(
+      query: async <T extends QueryResultRow = QueryResultRow>(
         sql: string,
-        values?: unknown[],
-      ): Promise<{ rows: T[]; rowCount: number }> => {
+        values?: readonly unknown[],
+      ): Promise<QueryResult<T>> => {
+        const wrapResult = (rows: T[]): QueryResult<T> => ({
+          command: "SELECT",
+          rowCount: rows.length,
+          oid: 0,
+          fields: [],
+          rows,
+        });
+
         // Query for candidate work items (lease claim)
         if (
           sql.includes("WITH candidate AS") ||
@@ -95,24 +107,21 @@ class MockVoiceWorkDatabase {
               item.lease_epoch += 1;
               item.leased_until = new Date(now.getTime() + 30_000);
 
-              return {
-                rows: [
-                  {
-                    work_id: item.work_id,
-                    command_id: item.command_id,
-                    voice_session_id: item.voice_session_id,
-                    work_type: item.work_type,
-                    dedupe_key: item.dedupe_key,
-                    payload_ref: item.payload_ref,
-                    lease_epoch: item.lease_epoch,
-                    attempt: item.attempt,
-                  } as T,
-                ],
-                rowCount: 1,
-              };
+              return wrapResult([
+                {
+                  work_id: item.work_id,
+                  command_id: item.command_id,
+                  voice_session_id: item.voice_session_id,
+                  work_type: item.work_type,
+                  dedupe_key: item.dedupe_key,
+                  payload_ref: item.payload_ref,
+                  lease_epoch: item.lease_epoch,
+                  attempt: item.attempt,
+                } as unknown as T,
+              ]);
             }
           }
-          return { rows: [], rowCount: 0 };
+          return wrapResult([]);
         }
 
         // CAS update for completing work item
@@ -132,10 +141,10 @@ class MockVoiceWorkDatabase {
             item.status = "completed";
             item.leased_until = null;
             item.last_error = null;
-            return { rows: [{ work_id: workId } as T], rowCount: 1 };
+            return wrapResult([{ work_id: workId } as unknown as T]);
           }
           // Fencing: lease epoch mismatch or not leased
-          return { rows: [], rowCount: 0 };
+          return wrapResult([]);
         }
 
         // Generic error/retry update
@@ -153,12 +162,12 @@ class MockVoiceWorkDatabase {
             item.status = item.attempt >= maxAttempts ? "failed" : "pending";
             item.leased_until = null;
             item.last_error = lastError;
-            return { rows: [], rowCount: 1 };
+            return wrapResult([]);
           }
-          return { rows: [], rowCount: 0 };
+          return wrapResult([]);
         }
 
-        return { rows: [], rowCount: 0 };
+        return wrapResult([]);
       },
     };
   }
@@ -206,6 +215,7 @@ describe("UV-EXEC-023: 獨立媒體部署、持續背景工作及回退", () => 
         brandId: "brand-1",
         callId: "call-1",
         voiceSessionId: "session-1",
+        resourceScopeId: "scope-1",
         contactPhone: "0911000111",
         consentRef: "consent-ref-123",
         reason: "driver_delayed",
@@ -218,24 +228,25 @@ describe("UV-EXEC-023: 獨立媒體部署、持續背景工作及回退", () => 
       db.insertWorkItem({
         workId: "work-cmd-1",
         commandId,
+        voiceSessionId: "session-1",
         workType: "execute_booking_command",
-        dedupeKey: `${commandId}:execute_booking_command`,
+        dedupeKey: `cmd:${commandId}:execute`,
       });
 
-      // 2. driver dispatch deadline / timeout
+      // 2. driver dispatch deadline
       db.insertWorkItem({
         workId: "work-timeout-1",
         commandId: null,
+        voiceSessionId: "session-1",
         workType: "dispatch_timeout",
-        dedupeKey: "dispatch:order-123:round-1:timeout",
+        dedupeKey: "dispatch_timeout:order-123:round-1",
         payloadRef: JSON.stringify({
           orderId: "order-123",
-          targetAssignmentId: "assign-1",
-          round: 1,
+          targetAssignmentId: "asg-1",
         }),
       });
 
-      // 3. recording finalization for closed call
+      // 3. recording finalize work item
       db.insertWorkItem({
         workId: "work-rec-1",
         commandId: null,
@@ -256,7 +267,7 @@ describe("UV-EXEC-023: 獨立媒體部署、持續背景工作及回退", () => 
       });
 
       // Mock execute(commandId) to simulate order creation on pending receipt
-      runner.execute = async (id: string) => {
+      runner.execute = async (id: string): Promise<VoiceCommandReceiptRecord> => {
         const receipt = db.receipts.get(id);
         if (receipt) {
           receipt.status = "succeeded";
@@ -266,7 +277,7 @@ describe("UV-EXEC-023: 獨立媒體部署、持續背景工作及回退", () => 
           commandId: id,
           status: "succeeded",
           orderId: "order-created-999",
-        };
+        } as unknown as VoiceCommandReceiptRecord;
       };
 
       // Ensure 0 active customer calls exist (idle environment)
