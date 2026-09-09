@@ -1,5 +1,13 @@
 # SR-ENTERPRISE-DATA-001 — baseline and screen requirements
 
+## Dispatch after 02:46:29Z resume (2026-09-09)
+
+- Canonical `start`: exit 0. Original six write scopes and empty dependencies remain; the completed history helper explicitly does not clear product prerequisites. No new missing-screen or authorized-contact decision accompanied this dispatch.
+- `git fetch origin`: exit 0; current base `074faad1400ee568c39ef046bbeb4aff3890f9c9`; verification head `5724d15b66028eb79ced9f0b04b94fb906a704c0`. `git rebase origin/dev`: exit 1 at 10/53, add/add conflict in this evidence file replaying `4ad450bbd`. `git rebase --abort`: exit 0; restored published branch without discarding evidence.
+- `git diff origin/dev -- apps/enterprise-dispatch-web/app/page.tsx apps/enterprise-dispatch-web/app/trip/ apps/enterprise-dispatch-web/components/enterprise-booking-lifecycle.tsx docs/05-ui/drts-design-canvas/ent-screens-2.jsx docs/05-ui/drts-design-canvas/ent-states.jsx packages/ui-tokens/src/realms.ts`: exit 0, empty. Current dev still has the inspected fixture selection, fixed progress, inert contact buttons, shared 404 fallback, and missing trip-not-found/unavailable-contact canvas states. Re-read execution/spec, source findings/capabilities, history report, trip/gate canvas and realm tokens. The explicit dispatch design STOP remains applicable; screen requirements and supervisor requests below remain unresolved.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`: exit 1, `No test files found`, not a pass. `git diff --check`: exit 0 before this update. Typecheck result is recorded in the canonical blocker note after completion.
+- Resource `EB-7K2E1D` remains fixture-only, without live existence/contact verification. Implementation candidate: none. No product edits or live/browser/telephone/true-device checks, CI, merge acceptance or deployment performed. This documentation anchor is not a handoff candidate. Supervisor must resolve the existing design/contact/shared-scope prerequisites before redispatch; history-helper completion alone cannot resolve them.
+
 ## Dispatch after 02:22:05Z resume (2026-09-09)
 
 - Canonical `start`: exit 0. Task still has the original six write scopes, no dependencies and no supplied missing-screen/contact decision. The completed history helper explicitly leaves product prerequisites unresolved.
