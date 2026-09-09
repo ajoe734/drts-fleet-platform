@@ -1,3 +1,15 @@
+## 2026-09-09 02:47 UTC dispatch 核實（最新）
+
+- Owner Codex / Reviewer Codex2；fresh base `074faad1400ee568c39ef046bbeb4aff3890f9c9`；受測工作 HEAD 與遠端 task branch 同為 `efd92ab1439c3aae347ad1e0ded8ab5dc1b6afa5`。尚無 handoff candidate。
+- `git fetch origin && git rebase origin/dev` exit 1：第 7/17 筆舊提交 `903969279` 在 page、test、evidence 衝突。`git rebase --abort` exit 0，恢復原已發布歷史；`git log --oneline --left-right HEAD...origin/codex/sr-enterprise-search-001` 無輸出、exit 0。不得把本輪結果描述為已整合最新 dev。
+- `git show origin/dev:apps/api/src/modules/owned-mobility/owned-mobility.controller.ts` 與 service、enterprise `lib/api-client.ts` 讀取成功：controller 只接 headers；`listTenantBookings(tenantId)` 只按租戶篩選，固定 page 1、totalItems=items.length；`listBookings()` 無參數。最新 dev 仍缺日期／乘客／狀態 query 與伺服器分頁契約。
+- `git merge-base --is-ancestor e2df37f821ce76d8a3639ceaac6d253299c0a31c origin/dev` exit 0。已讀該 helper 報告：history repair 不授權 shared scope，仍要求 supervisor 登錄 backend producer。current-release `ai-status.sh show SR-BOOKING-VERIFY` exit 1：Task not found；parent `depends_on=[]`，scope 未擴充。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/` exit 0：1 file / 50 tests，02:47:27 UTC，1.31s。這是工作 HEAD 的 synthetic unit regression，不是最新 dev 或 HTTP query 驗收。
+- 未修改 UI，未啟動任何 server／Docker；live API、瀏覽器、真機未執行，無實際 query／response total／資源 ID。保存證據的 anchor SHA 及普通 push 結果記入 machine status，不作 candidate。
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck` exit 0（tsc --noEmit）；`git diff --check` exit 0。
+
+阻擋仍需 supervisor 指定真正 backend filter producer、登錄依賴與必要 API/contracts/client/wrapper scope，並依已合併 helper 指派乾淨 replacement branch/worktree。請勿僅因 history helper done 重派為能力已就緒；本輪不 handoff、不 done。
+
 ## 2026-09-09 dispatch 核實（Owner Codex / Reviewer Codex2）
 
 - 本次 fresh origin/dev base：`add6694278b3287bb42215b24d4c91039d0c6645`；保留的 branch HEAD：`17f4da0b2054f502bb8a91d18791bd28003d9463`。尚無 handoff candidate。
