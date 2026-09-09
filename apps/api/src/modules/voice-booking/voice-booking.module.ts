@@ -21,6 +21,8 @@ import { VoiceSessionService } from "./voice-session.service";
 import { VoiceSessionRepository } from "./voice-session.repository";
 import { VoiceHandoffQueueService } from "../callcenter/voice-handoff-queue.service";
 import { VoiceOperationPolicyService } from "./voice-operation-policy.service";
+import { VoiceContactService } from "./voice-contact.service";
+import { VoiceCallbackService } from "./voice-callback.service";
 
 /**
  * UV-EXEC-003 built VoiceBookingRepository/VoiceBookingAuthorizationService/
@@ -49,6 +51,8 @@ import { VoiceOperationPolicyService } from "./voice-operation-policy.service";
     VoiceHandoffQueueService,
     VoiceHandoffService,
     VoiceOperationPolicyService,
+    VoiceContactService,
+    VoiceCallbackService,
   ],
   exports: [
     VoiceBookingCommandService,
@@ -65,6 +69,8 @@ import { VoiceOperationPolicyService } from "./voice-operation-policy.service";
     VoiceHandoffQueueService,
     VoiceHandoffService,
     VoiceOperationPolicyService,
+    VoiceContactService,
+    VoiceCallbackService,
   ],
 })
 export class VoiceBookingModule {}

@@ -856,7 +856,11 @@ export class CallcenterService implements OnModuleInit {
     }
 
     existingSession.callType = input.callType;
-    existingSession.callerPhone = input.callerPhone;
+    // SD §6.4: assertedCallerPhone is immutable during retention period;
+    // cannot be overwritten by passenger.phone or linked order phone.
+    if (!existingSession.callerPhone) {
+      existingSession.callerPhone = input.callerPhone;
+    }
     existingSession.agentId = input.agentId ?? existingSession.agentId;
     existingSession.linkedOrderId = input.linkedOrderId;
     existingSession.recordingId = recordingId || existingSession.recordingId;
