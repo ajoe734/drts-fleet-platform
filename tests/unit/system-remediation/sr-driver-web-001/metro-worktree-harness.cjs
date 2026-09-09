@@ -14,9 +14,6 @@ Module._load = function(id, parent, main) {
       config.resolver.nodeModulesPaths = [
         '/home/lupin/workspace/drts-fleet-platform/apps/driver-app/node_modules',
         '/home/lupin/workspace/drts-fleet-platform/node_modules'];
-      if (!config.resolver.assetExts.includes('wasm')) {
-        config.resolver.assetExts.push('wasm');
-      }
       return config;
     };
     value.__srWatchFolders = true;
