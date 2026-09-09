@@ -9,6 +9,7 @@
 | Gap ID        | `R24`                                                                                             |
 | Capability ID | `C013`, `C069`                                                                                    |
 | Base SHA      | `3062ea363769cc393e59384251f5aedc7e570ac5` (current `origin/dev`), prior `7a946308b4764b88939c3e9a59cf6b485303df44`, `8c6e1fa9732ec8322de275084817683e6d67407c`, `3fb9b06461dc2bf92043144974eedbbc9f69d0f3`, `f372e4a6a0dd16204ccbd660f23013601357c224` (修正前版筆誤 `f372e4a6a575b66d4826ae934eb063c467a8b417`), `c4c4a35f88907df6bf68e781059dde397c06ba03`, `031cfc4c99320b79f6ad863996a43a5da8227edf`, initial `7dccddaba7d51dca8d56da01d5320d9f22f8b68f` |
+| Candidate SHA | `bdd3568c299c0490ad47620aeb5bd0719a405d4c`                                                      |
 | Task Status   | `blocked` (卡點於後端查詢 producer `SR-BOOKING-VERIFY` 與企業端 session 權威身分接線)                |
 | Branch        | `gemini/sr-enterprise-search-001`                                                                  |
 
