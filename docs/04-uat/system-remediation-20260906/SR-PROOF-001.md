@@ -1,5 +1,31 @@
 # SR-PROOF-001 — Fresh-base regression evidence and unresolved implementation scope
 
+## 2026-09-09 02:47 UTC dispatch verification
+
+- `git fetch origin`: exit 0. Base `origin/dev`:
+  `074faad1400ee568c39ef046bbeb4aff3890f9c9`; tested HEAD:
+  `0bbf3218bd822eeac53c3232655fecc606b3da6a`. Candidate: none.
+- `git rebase origin/dev`: exit 1 at `ac1076708`, task test add/add conflict.
+  `git rebase --abort`: exit 0; published branch restored without force push.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/modules/billing-settlement/billing-settlement.service.ts apps/api/src/modules/billing-settlement/billing-settlement.repository.ts`:
+  exit 0; tested service/repository match fetched dev.
+- `git merge-base --is-ancestor 99858938fa2f6f38f23afcf3f7a2204c10e402d1 origin/dev`:
+  exit 0. Helper is reachable, but explicitly leaves scope/dependency/canvas routing open.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`:
+  exit 1; 1 passed, 2 failed, duration 3.88s. Fabricated proof becomes paid;
+  unresolved persistence returns paid. Unapproved batch rejection passes.
+  Isolated IDs: `sr-proof-001-batch-a`, `sr-proof-001-driver-a`,
+  `sr-proof-001-statement-a`, `sr-proof-001-nonexistent-proof`.
+- Current task slice still has the original five scopes and ARTIFACT/INVOICE
+  dependencies. Supervisor must allocate repository/module and proof storage/scanner
+  scopes, contract dependency or explicit exception, missing upload/scan/reject/readback
+  canvas states, and the recovery branch documented by the existing helper.
+  Existing screen requirements below remain applicable; no child was recreated.
+- No product changes or typecheck reruns. Live upload/scanning/download,
+  PostgreSQL concurrency, durable receipt, browser/device and real payments remain
+  unverified. No prohibited servers or infrastructure started.
+
+
 ## 2026-09-09 02:23 UTC dispatch verification
 
 - `git fetch origin`: exit 0. Base `origin/dev`:
