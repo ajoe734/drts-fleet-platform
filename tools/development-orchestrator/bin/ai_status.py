@@ -1887,6 +1887,11 @@ def command_start(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Unknown task: {task_id}")
     if task.get("owner") != actor:
         raise SystemExit(f"Only the owner ({task.get('owner')}) can start {task_id}")
+    if task.get("status") in {"acceptance", "done"}:
+        raise SystemExit(
+            f"Cannot start {task_id} from {task['status']}; use note/progress for a status report, "
+            "record-acceptance for evidence, or an explicit reviewer reopen for code changes"
+        )
     timestamp = iso_now()
     task["status"] = "in_progress"
     task["last_update"] = timestamp
@@ -1906,8 +1911,14 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Unknown task: {task_id}")
     if task.get("owner") != actor:
         raise SystemExit(f"Only the owner ({task.get('owner')}) can progress {task_id}")
+    if task.get("status") in {"acceptance", "done"}:
+        # Acceptance workers report verification progress without changing the
+        # already merged candidate. Reopening implementation is a separate
+        # reviewer action; a status report must never discard its provenance.
+        command_note(state, args)
+        return
     timestamp = iso_now()
-    if task["status"] in {"backlog", "todo", "integrating", "acceptance"}:
+    if task["status"] in {"backlog", "todo", "integrating"}:
         task["status"] = "in_progress"
         clear_candidate_evidence(task)
     task["last_update"] = timestamp
@@ -1943,6 +1954,8 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     reviewer = canonical_agent_name(task.get("reviewer"))
     if actor not in {owner, reviewer}:
         raise SystemExit(f"Only the owner ({owner}) or reviewer ({reviewer}) can reopen {task_id}")
+    if task.get("status") in {"acceptance", "done"} and actor != reviewer:
+        raise SystemExit(f"Only the reviewer ({reviewer}) can reopen {task_id} from {task['status']}")
     timestamp = iso_now()
     task["status"] = "in_progress"
     clear_candidate_evidence(task)
