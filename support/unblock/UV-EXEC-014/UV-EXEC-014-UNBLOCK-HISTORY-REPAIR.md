@@ -29,7 +29,7 @@ being committed into the parent.
 The remote/local exclusive counts are 6/8. The other two local commits are
 the merged helper documentation `32b6dde7d` and the new fixture fix
 `5ade24c09`. Endpoint diff contains only the prior helper report and four
-changed lines in `tests/unit/uv-exec-014.test.ts`: capture `h.events[0]`,
+changed lines in the [parent test fixture at preserved commit 5ade24c09](https://github.com/ajoe734/drts-fleet-platform/blob/5ade24c09c6c4b1e9981ab8b67ca1745f295c5eb/tests/unit/uv-exec-014.test.ts): capture `h.events[0]`,
 throw when absent, then spread the narrowed event. Product directories
 `apps`, `packages`, and `tests` are identical between the remote candidate
 and pre-fix rebased head `6e6563ae5`. Another ordinary push to the old remote
@@ -90,13 +90,26 @@ Do not repair this by editing unrelated test types or mutating the shared
 dependency tree. Provision a workspace-local dependency installation (replace
 only a confirmed workspace-local symlink, never recursively delete its target),
 build required workspace packages, and verify resolved package paths remain
-inside that workspace. Then run `pnpm typecheck:root`,
-`pnpm exec vitest run tests/unit/uv-exec-014.test.ts`, and
-`pnpm --filter @drts/api typecheck`. The parent's recorded 71/71 tests and API
+inside that workspace. Run these commands in the recovered parent workspace
+(the parent test fixture is not yet present on dev or this helper branch):
+
+```bash
+pnpm typecheck:root
+pnpm exec vitest run tests/unit/uv-exec-014.test.ts
+pnpm --filter @drts/api typecheck
+```
+
+The parent's recorded 71/71 tests and API
 typecheck pass are prior-run evidence only; this documentation helper did not
 rerun them. Product servers, browser tests and Docker remain prohibited here.
 
 ## Helper verification and delivery
+
+2026-09-09 CI follow-up: PR #1834 candidate `f934f3f6b49ced60583cc75877191f96d7d7e2c2`
+failed Canonical consistency because the historical parent-only fixture was
+interpreted as a current-tree path citation. Qualify that evidence with its
+preserved commit and scope the validation commands to the recovered parent
+workspace. No product files or shared branch history are changed by this fix.
 
 Verified fetched refs, PR head/state, reflog, patch-equivalent pairs, exclusive
 commit counts, endpoint diff, product-tree parity, current-dev ancestry,
