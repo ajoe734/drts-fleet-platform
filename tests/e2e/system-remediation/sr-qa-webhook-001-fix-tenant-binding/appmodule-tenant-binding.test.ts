@@ -35,9 +35,33 @@ const apiRequire = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
 );
 apiRequire("reflect-metadata");
-const { NestFactory } = apiRequire(
-  "@nestjs/core",
-) as typeof import("@nestjs/core");
+interface INestAppLike {
+  get<T = any>(token: unknown): T;
+  setGlobalPrefix(prefix: string): void;
+  useGlobalPipes(...pipes: unknown[]): void;
+  useGlobalFilters(...filters: unknown[]): void;
+  useGlobalInterceptors(...interceptors: unknown[]): void;
+  useGlobalGuards(...guards: unknown[]): void;
+  listen(port: number | string, ...args: any[]): Promise<any>;
+  getUrl(): Promise<string>;
+  close(): Promise<void>;
+}
+
+const { NestFactory } = apiRequire("@nestjs/core") as {
+  NestFactory: {
+    createApplicationContext(
+      moduleCls: unknown,
+      options?: { logger?: boolean },
+    ): Promise<{
+      get<T = any>(token: unknown): T;
+      close(): Promise<void>;
+    }>;
+    create(
+      moduleCls: unknown,
+      options?: { logger?: boolean; abortOnError?: boolean },
+    ): Promise<INestAppLike>;
+  };
+};
 
 // Load candidate compiled module and all DI tokens consistently to ensure emitted decorator metadata is used
 const { AppModule } = apiRequire("./dist/app.module.js") as {
@@ -347,7 +371,9 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         // Capture DB state before attacks
         const dbStateBeforeAttacks = (
           await repository.loadState()
-        ).apiKeys.filter((k) => k.tenantId === victimTenantId);
+        ).apiKeys.filter(
+          (k: StoredTenantApiKeyRecord) => k.tenantId === victimTenantId,
+        );
         expect(dbStateBeforeAttacks).toHaveLength(1);
         expect(dbStateBeforeAttacks[0]?.apiKeyId).toBe(victimKeyId);
         expect(dbStateBeforeAttacks[0]?.status).toBe("active");
@@ -421,7 +447,9 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         // DB state for victim tenant remains untouched by cross-tenant attacks (complete record comparison)
         const dbStateAfterAttacks = (
           await repository.loadState()
-        ).apiKeys.filter((k) => k.tenantId === victimTenantId);
+        ).apiKeys.filter(
+          (k: StoredTenantApiKeyRecord) => k.tenantId === victimTenantId,
+        );
         expect(dbStateAfterAttacks).toEqual(dbStateBeforeAttacks);
 
         // 6. SAME-TENANT LIFECYCLE & SQL READBACK VERIFICATION
@@ -485,37 +513,38 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         await postWithProof(`/${rotatedId}/revoke`, {});
 
         // Verify SQL persistence and record state (active, overlap_active, revoked)
-        const persisted = await db.query<{
+        interface Phase1ApiKeyRow {
           api_key_id: string;
           tenant_id: string;
           revoked_at: string | null;
           created_at: string;
-          record: Record<string, unknown>;
-        }>(
+          record: StoredTenantApiKeyRecord;
+        }
+
+        const persisted = (await db.query(
           "SELECT api_key_id, tenant_id, revoked_at, created_at, record FROM admin.phase1_tenant_api_keys WHERE tenant_id = $1 ORDER BY created_at ASC",
           [victimTenantId],
-        );
+        )) as { rows: Phase1ApiKeyRow[] };
         expect(persisted.rows.length).toBeGreaterThanOrEqual(3);
 
-        const rowMap = new Map(persisted.rows.map((r) => [r.api_key_id, r]));
+        const rowMap = new Map<string, Phase1ApiKeyRow>(
+          persisted.rows.map((r: Phase1ApiKeyRow) => [r.api_key_id, r]),
+        );
         expect(rowMap.has(victimKeyId)).toBe(true);
         expect(rowMap.has(createdId!)).toBe(true);
         expect(rowMap.has(rotatedId!)).toBe(true);
 
         const initialRow = rowMap.get(victimKeyId)!;
-        const initialRecord =
-          initialRow.record as unknown as StoredTenantApiKeyRecord;
+        const initialRecord = initialRow.record;
         expect(initialRecord.status).toBe("active");
         expect(initialRow.revoked_at).toBeNull();
 
         const createdRow = rowMap.get(createdId!)!;
-        const createdRecord =
-          createdRow.record as unknown as StoredTenantApiKeyRecord;
+        const createdRecord = createdRow.record;
         expect(createdRecord.status).toBe("overlap_active");
 
         const rotatedRow = rowMap.get(rotatedId!)!;
-        const rotatedRecord =
-          rotatedRow.record as unknown as StoredTenantApiKeyRecord;
+        const rotatedRecord = rotatedRow.record;
         expect(rotatedRecord.status).toBe("revoked");
         expect(rotatedRow.revoked_at).not.toBeNull();
 

@@ -16,7 +16,7 @@
 ### 1.1 Source & Reproduction
 
 - **Source**: `SR-QA-WEBHOOK-001` / `C111`.
-- **Historical Reproduction**: Commit `6b9de8287abb48e5770524c3addf5e5e41f8f663` and evidence recorded in `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-auth-http.json` (`9d77ea52e88d8bb3b5421d2a689624c8c9d8f492`).
+- **Historical Reproduction**: Commit `6b9de8287abb48e5770524c3addf5e5e41f8f663` and historical regression evidence recorded in commit `9d77ea52e88d8bb3b5421d2a689624c8c9d8f492` (evidence ref: `sr-qa-webhook-001:evidence-auth-http.json`).
 - **Defect Description**:
   When an authenticated caller with a valid JWT for Tenant B sent a request to `GET /api/tenant/api-keys` with header `x-tenant-id: <Tenant A>`, the server returned HTTP 200 along with Tenant A's active API keys and key metadata.
   This represented a critical cross-tenant data leakage vulnerability: the endpoint was trusting the unverified `x-tenant-id` request header without validating that the authenticated principal's tenant identity matched the requested tenant scope.
