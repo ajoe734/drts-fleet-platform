@@ -1,5 +1,14 @@
 # SR-ENTERPRISE-DATA-001 — baseline and screen requirements
 
+## Dispatch after 02:11:45Z resume (2026-09-09)
+
+- Canonical `start`: exit 0. Current task still has six original write scopes and no dependencies. History-helper completion explicitly preserves the product scope blocker; no missing-screen/contact decision was supplied.
+- `git fetch origin`: exit 0; base `fb2ea6e2ed3c2937d7d65d601967d183b0257048`. `git rebase origin/dev`: initially exit 1 on repeated historical evidence conflicts. Resolved only this document by retaining the complete dispatch-head version; final `git -c core.editor=true rebase --continue`: exit 0. `git diff 8f3be7b98079e625c533faa48169dc2ef6caedc2 -- docs/04-uat/system-remediation-20260906/SR-ENTERPRISE-DATA-001.md` was empty. Ordinary `git merge --no-ff origin/codex/sr-enterprise-data-001` with task trailers: exit 0, verification head `b6baa0828bad287ef27ed256aafc963e74ff1f29`.
+- Re-read execution/spec, R08/R09/R16, all six capability records, history-helper report, enterprise canvas and tenant realm tokens. Current home/trip still select fixture bookings; trip uses fixed progress and inert contact controls. Shared detail still maps normal 404 to degraded. Canonical trip-not-found and unavailable-contact states remain missing; the dispatch's explicit design STOP applies. No product files were changed.
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck`: exit 0 (`tsc --noEmit`). `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-data-001/`: exit 1 (`No test files found`), not a passing regression suite. `git diff --check`: exit 0 before this entry.
+- Resource `EB-7K2E1D` is fixture-only; live existence was not verified. Implementation candidate SHA: none; evidence anchor and ordinary push are recorded in machine truth. No live API, browser, phone/true-device check, product server, Docker infrastructure, CI, acceptance or deployment was performed.
+- Supervisor must supply canonical missing states and adjudicate shared lifecycle/theme/help scopes and dependencies plus the authorized contact source. Preserve blocked status until these product prerequisites are resolved; history repair alone does not satisfy them.
+
 ## Dispatch after 02:01:36Z resume (2026-09-09)
 
 - Canonical `start`: exit 0. Task still has six original write scopes and no dependencies. The completed history-helper explicitly preserves the product scope blocker; no new canonical screen/contact decision was provided.
