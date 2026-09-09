@@ -471,6 +471,13 @@ jobs:
             -c 'CREATE DATABASE drts_route_suite;'
           pnpm db:migrate
           pnpm db:seed
+          # ubuntu-latest can expose a stale Google Chrome apt index whose hash
+          # mismatch prevents Playwright dependency installation. Chromium uses
+          # Ubuntu packages here, so disable that unrelated source in this
+          # ephemeral runner before installing browser dependencies.
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname "*google*" -o -iname "*chrome*" \) \
+            -exec mv "{}" "{}.disabled" \; || true
           pnpm exec playwright install --with-deps chromium
           pnpm exec playwright test -c playwright.deterministic-route-suite.config.ts
 
