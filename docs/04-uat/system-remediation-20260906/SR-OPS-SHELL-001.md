@@ -4,8 +4,8 @@
 - Owner: `Gemini`
 - Reviewer: `Codex`
 - Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json`
-- Base SHA (`origin/dev` at merge): `7d04833053b63558c10fb678a422dff3522e0150` (前次 base: `3062ea363769cc393e59384251f5aedc7e570ac5`, `6f4ac8c74ae3618b6109efd010014365a85d36d8`, 歷史 audit SHA: `6bbeaaa45`, 原始實作 base: `f759582305ca7ff1b17a0225d3dd54db22ee9a18`)
-- Current Local Head: `git merge origin/dev` completed cleanly with zero conflicts (merge commit `6047adde7`)
+- Base SHA (`origin/dev` at merge): `add6694273bb1b590e82c5f1c93fb3ef46ec56df` (前次 base: `7d04833053b63558c10fb678a422dff3522e0150`, `3062ea363769cc393e59384251f5aedc7e570ac5`, `6f4ac8c74ae3618b6109efd010014365a85d36d8`, 歷史 audit SHA: `6bbeaaa45`, 原始實作 base: `f759582305ca7ff1b17a0225d3dd54db22ee9a18`)
+- Current Local Head: `git merge origin/dev` completed cleanly with zero conflicts (merge commit `51f1d4589`)
 - PR #1648 URL: https://github.com/ajoe734/drts-fleet-platform/pull/1648
 - Worktree: `.artifacts/worktrees/auto/gemini-sr-ops-shell-001`
 - Branch: `gemini/sr-ops-shell-001`
@@ -106,6 +106,24 @@ Codex 於 2026-09-09T02:08:51Z 審查 Candidate `f5ad0f1193c88fe2c4a940cfbeff3a5
        2. 關閉狀態測試改採 `buildLauncherButtonStyle()`，驗證按鈕為 `pointerEvents: "auto"`、定位於 `right: 20, bottom: 20, height: 48, padding: 0 16px`，以真實 label 寬度估算（~140px）驗證幾何隔離與點擊命中。
        3. 行動視窗 390x844 測試驗證面板自動 clamp 為 350px 寬，並配合 `ops-shell.tsx` 之 `paddingBottom: 72px` 預留滾動安全邊界。
      - 測試總數擴增至 42 項，全面通過。
+
+### 1.6 Candidate d5e2c5322 Codex Review Rejection 分類與卡點分析
+
+Codex 於 2026-09-09T02:17:24Z 審查 Candidate `d5e2c532240966da0d424dfb02f869bdca900b37`，提出審查駁回判定（reopen）：
+1. **P1（跨 app 導航與接收端契約 — Q-SR-OPS-SHELL-001）**：
+   - 審查指出 `apps/ops-console-web/app/dispatch/page.tsx:1226-1234` 仍 fallback 預設至 `/platform-admin`，line 4520 audit CTA 僅傳送 `/audit` 且無 selected resource context；而接收端 `apps/platform-admin-web/app/audit/page.tsx:164` 呼叫 `client.listAuditLogs()` 亦未消費 URL context。
+   - **卡點處置**：
+     - 本任務之 `write_scopes` 嚴格限制於 `apps/ops-console-web/components/ops-assistant/`、`apps/ops-console-web/components/ops-shell.tsx`、`tests/unit/system-remediation/sr-ops-shell-001/` 與本證據文件，**不包含** `apps/ops-console-web/app/dispatch/page.tsx` 或 `apps/platform-admin-web/app/audit/page.tsx`。
+     - 依協同手冊與執行規範，「只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫」。
+     - 且 PR #1749（`support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION.md`）與 PR #1804（`support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-MANUAL-UNBLOCK.md`）已確立明確結論：由 Supervisor 審查 scope 重疊並授權 dispatch page 與接收端 scope、確認 `Q-SR-OPS-SHELL-001` 契約後方得實作。
+     - 本任務堅持不擅自修改未授權之共用頁面，保留完整驗收條件，確立為外部卡點（blocker）。
+2. **Commit Trailers 檢查失敗與歷史非強制推送衝突**：
+   - PR #1648 的 `CI/Commit trailers` 檢查失敗於歷史 ancestor commit `fe3d92cbaa12`（其 subject 為 `test(SR-OPS-SHELL-001): ...`，非 `check_commit_trailers.py` 允許的 prefix）。
+   - 由於該 commit 已於先期推送到遠端 `origin/gemini/sr-ops-shell-001`，而在倉庫嚴禁 force push 的政策下，無法在原分支透過 fast-forward 推送修改歷史 commit。
+   - 此項需由 Supervisor 比照 `UV-EXEC-015` / `SR-OPS-SHELL-001-UNBLOCK-HISTORY-REPAIR` 模式，授權 fresh branch 或由 supervisor 執行歷史修復。
+3. **VM 限制與 live 資源／真機瀏覽器驗收**：
+   - 依照派工約束（VM restriction: 禁止啟動 product dev servers, preview/browser test servers, Playwright 或 Docker Compose），環境中無法執行 live 產品服務或圖形化瀏覽器。
+   - 1440/390px 佈局與 cross-app 資源 ID 於單元測試中採幾何碰撞與 domain ID 規格驗證，但真實 live / 實體機端對端驗收明確標註為保留（Unverified / blocked for environment），絕不冒充已在 live 環境通過。
 
 ## 2. 解決方案與架構設計
 
@@ -216,4 +234,4 @@ exit code: 0
 - **未修改中央共用設定**：
   未修改中央 shared exports、中央 test config、中央 routes、`package.json` 或 `pnpm-lock.yaml`。
 - **分支歷史與普通 Push 狀態及卡點記錄**：
-  遠端分支 `origin/gemini/sr-ops-shell-001` 原有 head `cdf5488d7`，後續整合時包含帶有非白名單 prefix 之歷史 commit `fe3d92cba`，導致 PR #1648 `CI/Commit trailers` 失敗。本地已合併最新 `origin/dev`（`7d0483305`），通過全部本地測試與型別檢查。依據「若安全 commit 或普通 non-force push 做不到，必須明確回報 progress / blocker 與原因，不能把工作描述成已完成」與禁止 force push 之規定，本輪以普通 commit 及 push 儲存進度，並以 `ai-status.sh blocker` 誠實記錄卡點，等待 Supervisor 裁定 fresh recovery branch 或 PR 整合路徑。
+  遠端分支 `origin/gemini/sr-ops-shell-001` 原有 head `cdf5488d7`，後續整合時包含帶有非白名單 prefix 之歷史 commit `fe3d92cba`，導致 PR #1648 `CI/Commit trailers` 失敗。本地已合併最新 `origin/dev`（`add669427`），通過全部本地測試與型別檢查。依據「若安全 commit 或普通 non-force push 做不到，必須明確回報 progress / blocker 與原因，不能把工作描述成已完成」與禁止 force push 之規定，本輪以普通 commit 及 push 儲存進度，並以 `ai-status.sh blocker` 誠實記錄卡點，等待 Supervisor 裁定 fresh recovery branch 或 PR 整合路徑。
