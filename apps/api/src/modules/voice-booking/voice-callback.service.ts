@@ -55,6 +55,7 @@ export interface VoiceCallbackTaskRecord {
   updatedAt: string;
   closedAt: string | null;
   cancellationReason?: string | null;
+  dialReconcileRequired?: boolean;
 }
 
 export interface VoiceCallbackAttemptRecord {
@@ -284,6 +285,7 @@ export class VoiceCallbackService {
       createdAt: now,
       updatedAt: now,
       closedAt: null,
+      dialReconcileRequired: false,
     };
 
     const receipt: CallbackCommandReceipt = {
@@ -593,12 +595,17 @@ export class VoiceCallbackService {
 
     // Terminal CAS checks
     if (task.status === "cancelled") {
+      const inFlightAttempt = this.getUnresolvedDialAttempt(task.taskId);
+      const dialReconcileRequired = inFlightAttempt ? true : !!task.dialReconcileRequired;
+      const actualPhoneHungUp = !inFlightAttempt && !task.dialReconcileRequired;
+
       return {
         task: this.cloneTask(task),
         status: "cancelled",
         replayed: true,
-        actualPhoneHungUp: true,
-        dialReconcileRequired: false,
+        actualPhoneHungUp,
+        dialReconcileRequired,
+        inFlightAttemptId: inFlightAttempt?.attemptId,
       };
     }
 
@@ -629,10 +636,7 @@ export class VoiceCallbackService {
     const now = new Date().toISOString();
 
     // Check for in-flight dial attempts
-    const attempts = this.attempts.get(task.taskId) ?? [];
-    const inFlightAttempt = [...attempts]
-      .reverse()
-      .find((a) => !a.hangupConfirmed && (a.dialStatus === "dialing" || a.dialStatus === "bridged"));
+    const inFlightAttempt = this.getUnresolvedDialAttempt(task.taskId);
 
     let actualPhoneHungUp = true;
     let dialReconcileRequired = false;
@@ -649,6 +653,7 @@ export class VoiceCallbackService {
 
     task.status = "cancelled";
     task.cancellationReason = input.reason;
+    task.dialReconcileRequired = dialReconcileRequired;
     task.closedAt = now;
     task.version += 1;
     task.updatedAt = now;
@@ -702,6 +707,9 @@ export class VoiceCallbackService {
       attempt.notes = `${attempt.notes ? attempt.notes + "; " : ""}${hangupEvent.operatorNote}`;
     }
 
+    const remainingUnresolved = this.getUnresolvedDialAttempt(taskId);
+    task.dialReconcileRequired = !!remainingUnresolved;
+
     // Terminal task status remains unchanged ("terminal 不復活")!
     task.updatedAt = new Date().toISOString();
 
@@ -709,6 +717,22 @@ export class VoiceCallbackService {
       task: this.cloneTask(task),
       attempt: { ...attempt },
     };
+  }
+
+  /**
+   * Helper to retrieve any in-flight / unresolved dial attempt for a task.
+   */
+  private getUnresolvedDialAttempt(taskId: string): VoiceCallbackAttemptRecord | undefined {
+    const attempts = this.attempts.get(taskId) ?? [];
+    return [...attempts]
+      .reverse()
+      .find(
+        (a) =>
+          !a.hangupConfirmed &&
+          (a.dialStatus === "dialing" ||
+            a.dialStatus === "bridged" ||
+            a.dialStatus === "reconcile_required"),
+      );
   }
 
   /**

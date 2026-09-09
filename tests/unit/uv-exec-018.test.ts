@@ -586,6 +586,18 @@ describe("UV-EXEC-018 Contact Roles, Consented Callbacks, & Terminal Race CAS", 
       expect(attempts[0]?.dialStatus).toBe("reconcile_required");
       expect(attempts[0]?.hangupConfirmed).toBe(false);
 
+      // Replay cancelCallback BEFORE reconciliation: must NOT falsely report phone hung up!
+      const replayBeforeReconcile = service.cancelCallback({
+        taskId: task.taskId,
+        reason: "replay_cancel_request",
+        expectedVersion: 4,
+      });
+      expect(replayBeforeReconcile.status).toBe("cancelled");
+      expect(replayBeforeReconcile.replayed).toBe(true);
+      expect(replayBeforeReconcile.actualPhoneHungUp).toBe(false);
+      expect(replayBeforeReconcile.dialReconcileRequired).toBe(true);
+      expect(replayBeforeReconcile.inFlightAttemptId).toBe(attempt.attemptId);
+
       // Later, the telephony provider CTI webhook reports the physical line has finally cleared
       const reconciled = service.reconcileInFlightDial(
         task.taskId,
@@ -604,6 +616,92 @@ describe("UV-EXEC-018 Contact Roles, Consented Callbacks, & Terminal Race CAS", 
 
       // Task remains cancelled ("terminal 不復活")
       expect(reconciled.task.status).toBe("cancelled");
+
+      // Replay cancelCallback AFTER reconciliation: now reports phone hung up and no reconcile required!
+      const replayAfterReconcile = service.cancelCallback({
+        taskId: task.taskId,
+        reason: "replay_cancel_request_after_reconcile",
+        expectedVersion: 4,
+      });
+      expect(replayAfterReconcile.status).toBe("cancelled");
+      expect(replayAfterReconcile.replayed).toBe(true);
+      expect(replayAfterReconcile.actualPhoneHungUp).toBe(true);
+      expect(replayAfterReconcile.dialReconcileRequired).toBe(false);
+      expect(replayAfterReconcile.inFlightAttemptId).toBeUndefined();
+    });
+
+    it("persists and re-derives unresolved dial reconciliation state across cancelCallback replays (Codex review blocker regression)", async () => {
+      const service = new VoiceCallbackService();
+
+      const { task } = await service.createCallback({
+        voiceSessionId: VOICE_SESSION_ID,
+        resourceScopeId: RESOURCE_SCOPE_ID,
+        brandId: BRAND_ID,
+        callId: CALL_ID,
+        contactPhone: "0911000111",
+        consentRef: "consent-replay-fence-002",
+        reason: "replay_dial_reconciliation_test",
+      });
+
+      // Claim and start dial attempt (bridged, in-flight)
+      service.claimCallback({
+        taskId: task.taskId,
+        operatorId: "operator-replayer",
+        expectedVersion: 1,
+      });
+
+      const { attempt } = service.recordAttempt({
+        taskId: task.taskId,
+        operatorId: "operator-replayer",
+        expectedVersion: 2,
+        outcome: "answered",
+        dialStatus: "bridged",
+        hangupConfirmed: false,
+      });
+
+      // Initial cancel while dial is in-flight
+      const cancel1 = service.cancelCallback({
+        taskId: task.taskId,
+        reason: "cancel_inflight",
+        expectedVersion: 3,
+      });
+      expect(cancel1.replayed).toBe(false);
+      expect(cancel1.actualPhoneHungUp).toBe(false);
+      expect(cancel1.dialReconcileRequired).toBe(true);
+      expect(cancel1.inFlightAttemptId).toBe(attempt.attemptId);
+      expect(cancel1.task.dialReconcileRequired).toBe(true);
+
+      // Multiple replays before physical line hung up: must maintain actualPhoneHungUp=false
+      for (let i = 0; i < 3; i++) {
+        const replay = service.cancelCallback({
+          taskId: task.taskId,
+          reason: "cancel_replay",
+          expectedVersion: 4,
+        });
+        expect(replay.replayed).toBe(true);
+        expect(replay.actualPhoneHungUp).toBe(false);
+        expect(replay.dialReconcileRequired).toBe(true);
+        expect(replay.inFlightAttemptId).toBe(attempt.attemptId);
+      }
+
+      // Reconcile line
+      service.reconcileInFlightDial(task.taskId, attempt.attemptId, {
+        hungUpAt: new Date().toISOString(),
+        dialOutcome: "answered",
+        operatorNote: "Physical call ended",
+      });
+
+      // Replays after reconciliation: physical line is now cleared
+      const replayResolved = service.cancelCallback({
+        taskId: task.taskId,
+        reason: "cancel_replay_post_reconcile",
+        expectedVersion: 4,
+      });
+      expect(replayResolved.replayed).toBe(true);
+      expect(replayResolved.actualPhoneHungUp).toBe(true);
+      expect(replayResolved.dialReconcileRequired).toBe(false);
+      expect(replayResolved.inFlightAttemptId).toBeUndefined();
+      expect(replayResolved.task.dialReconcileRequired).toBe(false);
     });
 
     it("verifies call closed does not mean callback task is terminated (call closed 不等於工作已結案)", async () => {
