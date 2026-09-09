@@ -163,6 +163,25 @@
 
 ---
 
+### 3.9 審查回饋修復五 (Codex2 Candidate 69b045e08 Remediation - P2 R10/C063 Dashboard MissingDocs & docsAvailable Alignment)
+
+針對 Codex2 審查候選版本 `69b045e08fd7a9a4fb1f39ee13a0b66d4c6a4c02` 所指出的 P2 R10/C063 缺件司機未知狀態與徽章不一致進行專項修復：
+
+1. **根本原因分析 (Root Cause Analysis)**:
+   - `fleet-portal-data.server.ts:1013-1023` 原使用 `d.docs !== "complete"` 計算 `missingDocsDrivers`，且未檢查 `docsAvailable`。
+   - 由於後端 API 目前尚未提供證件審查資料，`mapDriver` 已將 live 司機的 `docs` 設為 `"unavailable"` 並設定 `docsAvailable: false`。
+   - 這導致所有執照有效的司機在首頁 `app/page.tsx:151` 仍被誤算為缺件司機（如 2 位），但司機列表頁的 `missingDocs` 頁籤徽章依 `docsAvailable ? ... : "—"` 顯示為 `"—”`，造成總覽與列表徽章矛盾。
+2. **修復方案**:
+   - `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts`:
+     - `loadDashboard()` 顯式檢查 `driversView.docsAvailable`：當 `docsAvailable` 為 false 或司機讀取失敗時，`supplemental.missingDocsDrivers` 一律標記為 `"—”`（無法取得），絕不將未知文件狀態誤算為缺件，嚴格對齊司機列表頁徽章。
+     - `computeDriverTabCounts()` 與 `loadDashboard()` 中，即使 `docsAvailable` 為 true，亦明確排除 `d.docs === "unavailable"`，僅在 `d.license !== "valid" || (d.docs !== "complete" && d.docs !== "unavailable")` 時計入缺件。
+   - `apps/fleet-partner-portal-web/app/page.tsx`:
+     - 當 `dashboard.supplemental.missingDocsDrivers === "—"` 時，`CanvasKPI` 的 `delta` 設為 `undefined`，避免在未知資料標記旁渲染誤導性的缺件警語。
+   - `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts`:
+     - 新增第 33、34 項測試，精確重現 Codex2 指出之 `drv-review-01/02` 場景，驗證 `docsAvailable === false` 時列表徽章與首頁總覽指標一致為 `"—”`，並驗證 `docsAvailable === true` 時未知狀態亦不計入缺件。
+
+---
+
 ## 4. 驗收標準對照與驗證證據 (Acceptance Criteria Mapping & Evidence)
 
 | 驗收條件 | 實作現況與驗證結果 | 相關資源 ID / 檔案 |
@@ -175,7 +194,7 @@
 ### 4.1 驗證界線與未進行之 Live / 真機項目說明
 
 - **已完成驗證範圍**:
-  - 本地 Vitest 單元/整合測試（32/32 通過），驗證資料層權威來源整合、假數據移除、空資料與異常讀取分離、未串接端點防呆、CSV 匯出筆數與篩選連動（含 q 關鍵字搜尋與 compound 複合過濾）、千分位分組數值引號包裹防護（防止欄位數錯置）、司機 `dispatchEligible` 資格與狀態分離、個別來源異常獨立追蹤、部分失敗防護及 aggregate 異常時即時推導營收、預設月份 scope 統一與跨月空資料回歸、未串接教育訓練與文件審查之未知資料紀律（標記 unavailable、徽章顯示 "—"、不隱藏人員、未串接提示橫幅與 i18n 文案防護）、行程頁籤 scope 先行過濾機制，以及全庫 `pnpm run i18n:guard` 通過。
+  - 本地 Vitest 單元/整合測試（34/34 通過），驗證資料層權威來源整合、假數據移除、空資料與異常讀取分離、未串接端點防呆、CSV 匯出筆數與篩選連動（含 q 關鍵字搜尋與 compound 複合過濾）、千分位分組數值引號包裹防護（防止欄位數錯置）、司機 `dispatchEligible` 資格與狀態分離、個別來源異常獨立追蹤、部分失敗防護及 aggregate 異常時即時推導營收、預設月份 scope 統一與跨月空資料回歸、未串接教育訓練與文件審查之未知資料紀律（標記 unavailable、徽章顯示 "—"、不隱藏人員、未串接提示橫幅與 i18n 文案防護）、行程頁籤 scope 先行過濾機制、缺件司機尊重 docsAvailable 與未知文件狀態排除，以及全庫 `pnpm run i18n:guard` 通過。
   - Next.js 靜態型別檢查（`next typegen && tsc --noEmit`），驗證所有頁面與 Route Handlers 型別安全。
   - 解耦 `fleet-portal-data.server.ts` 與 `fleet-portal-fixtures.ts`，直接宣告純資料結構與回退常數，避免根目錄 `tsconfig.json`（無 `--jsx`）在編譯 `tests/**/*.ts` 時傳遞解析 `@drts/ui-web` TSX 模組而產生 `TS6142` 錯誤。
   - Git diff 格式檢查與 write_scopes 邊界檢查。
@@ -192,7 +211,7 @@
 
 ### 5.1 自動化單元測試
 
-新建 Vitest 測試套件 `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts`，涵蓋 32 個核心場景：
+新建 Vitest 測試套件 `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts`，涵蓋 34 個核心場景：
 
 - **Requirement 1 & Capability C063**:
   1. `dashboard reflects live driver list counts rather than 128/96 fake stats`: 驗證總覽指標與列表真實筆數一致，完全無 128/96 假數字。
@@ -233,6 +252,9 @@
   31. `scopeTripRows and computeTripTabCounts with status=completed scope All badge to completed trips before service grouping`: 驗證行程狀態 `status=completed` 先行收斂 scope，使 All 徽章精確對齊已完成趟次數 (2)，排除 cancelled 項目。
 - **CI Remediation (Round 4 Candidate df1c135b7 i18n-guard Remediation)**:
   32. `getDriverNoticeBody returns authoritative bilingual copy without violating i18n guard`: 驗證未串接雙語警語輸出正確，且不觸發 inline locale ternary。
+- **Review Remediation (Round 5 Codex2 Candidate 69b045e08 P2 Remediation)**:
+  33. `dashboard supplemental missingDocsDrivers respects docsAvailable and aligns with driver tab badge (Codex2 reproduction)`: 精確重現 Codex2 提出之 `fp-review-001`、`drv-review-01/02` 場景（licensesValid=true, docsAvailable=false, docs=[unavailable, unavailable]），驗證列表徽章與首頁總覽指標一致為 `"—”`。
+  34. `computeDriverTabCounts excludes unavailable doc status from missing count even when docsAvailable is true`: 驗證當 `docsAvailable` 為 true 時，未知文件狀態（`docs: "unavailable"`）與未知教育訓練狀態亦不計入缺件，確保資料紀律精確。
 
 執行結果：
 
@@ -240,9 +262,9 @@
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-fleet-data-001
 
  Test Files  1 passed (1)
-      Tests  32 passed (32)
-   Start at  00:02:24
-   Duration  493ms (transform 183ms, setup 0ms, import 269ms, tests 62ms, environment 0ms)
+      Tests  34 passed (34)
+   Start at  00:10:16
+   Duration  558ms (transform 201ms, setup 0ms, import 304ms, tests 76ms, environment 0ms)
 Exit Code:  0
 ```
 
@@ -285,11 +307,11 @@ Exit Code:  0
 
 ## 6. 變更檔案清單 (Modified Files Summary)
 
-- `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` (移除假資料、整合權威來源、錯誤/空資料分離、未接線標記、對齊 `dispatchEligible` 資格欄位、各來源錯誤獨立追蹤、營收權威推導、預設月份統一、未串接 docs/training 顯式標記 unavailable、新增司機與行程 tab scope 及過濾共用函式、提供 `getDriverNoticeBody` 解決 i18n-guard 違規)
+- `apps/fleet-partner-portal-web/lib/fleet-portal-data.server.ts` (移除假資料、整合權威來源、錯誤/空資料分離、未接線標記、對齊 `dispatchEligible` 資格欄位、各來源錯誤獨立追蹤、營收權威推導、預設月份統一、未串接 docs/training 顯式標記 unavailable、缺件司機尊重 docsAvailable 與排除 unavailable、新增司機與行程 tab scope 及過濾共用函式、提供 `getDriverNoticeBody` 解決 i18n-guard 違規)
 - `apps/fleet-partner-portal-web/app/trips/export/route.ts` (新增 CSV 匯出 API Route，實作 `escapeCsvCell` 防護分組數字與特殊字元，阻擋 partial failure 與無法取得狀態之偽造匯出)
-- `apps/fleet-partner-portal-web/app/page.tsx` (權威總覽頁、按鈕串接、時間維度、未串接提示、錯誤橫幅)
+- `apps/fleet-partner-portal-web/app/page.tsx` (權威總覽頁、按鈕串接、時間維度、未串接提示、錯誤橫幅、缺件司機未知狀態時隱藏 delta 避免誤導)
 - `apps/fleet-partner-portal-web/app/trips/page.tsx` (頁籤/關鍵字/狀態篩選、行程 scope 先行過濾、頁籤筆數與清單/CSV 嚴格對齊、CSV 匯出按鈕串接、錯誤處理)
 - `apps/fleet-partner-portal-web/app/drivers/page.tsx` (頁籤/關鍵字篩選、未串接 docs/training 徽章顯示 "—" 與橫幅警語、未知資料不排除人員、可接單對齊 `dispatchEligible`、招募按鈕導向、調用 `getDriverNoticeBody` 移除 inline ternary、錯誤處理)
 - `apps/fleet-partner-portal-web/app/vehicles/page.tsx` (頁籤/關鍵字篩選、新增車輛按鈕導向、錯誤處理)
-- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` (32 個完整驗證測試，含 Codex2 P1/P2 審查修復、CI 嚴格型別防護與 i18n-guard 雙語驗證)
+- `tests/unit/system-remediation/sr-fleet-data-001/sr-fleet-data-001.test.ts` (34 個完整驗證測試，含 Codex2 P1/P2 審查修復、CI 嚴格型別防護、i18n-guard 雙語驗證與 docsAvailable 一致性回歸)
 - `docs/04-uat/system-remediation-20260906/SR-FLEET-DATA-001.md` (驗證報告)

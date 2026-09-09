@@ -149,7 +149,11 @@ export default async function FleetPortalIndex({
             theme={theme}
             label={t("dashboard.kpi.missingDocs", locale)}
             value={dashboard.supplemental.missingDocsDrivers}
-            delta={t("dashboard.kpi.missingDocsDelta", locale)}
+            delta={
+              dashboard.supplemental.missingDocsDrivers === "—"
+                ? undefined
+                : t("dashboard.kpi.missingDocsDelta", locale)
+            }
             deltaTone="down"
           />
           <CanvasKPI

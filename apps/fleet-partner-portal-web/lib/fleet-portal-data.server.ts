@@ -453,11 +453,16 @@ export function computeDriverTabCounts(
     ).length,
     missingDocs: docsAvailable
       ? scopedRows.filter(
-          (r) => r.docs !== "complete" || r.license !== "valid",
+          (r) =>
+            r.license !== "valid" ||
+            (r.docs !== "complete" && r.docs !== "unavailable"),
         ).length
       : "—",
     trainingIncomplete: trainingAvailable
-      ? scopedRows.filter((r) => r.training !== "complete").length
+      ? scopedRows.filter(
+          (r) =>
+            r.training !== "complete" && r.training !== "unavailable",
+        ).length
       : "—",
   };
 }
@@ -1010,16 +1015,19 @@ export async function loadDashboard(
         })
       : [];
 
+  const docsAvailable = driversView.docsAvailable ?? false;
   const missingDocsDrivers =
-    driversError === null
+    driversError === null && docsAvailable
       ? driversView.rows.filter(
-          (d) => d.license !== "valid" || d.docs !== "complete",
+          (d) =>
+            d.license !== "valid" ||
+            (d.docs !== "complete" && d.docs !== "unavailable"),
         ).length
-      : 0;
+      : null;
 
   const supplemental: FleetDashboardSupplemental = {
     missingDocsDrivers:
-      driversError === null ? String(missingDocsDrivers) : "—",
+      missingDocsDrivers !== null ? String(missingDocsDrivers) : "—",
     openCases: "—", // cases endpoint not yet integrated
     trainingCompletion: "—", // training endpoint not yet integrated
   };

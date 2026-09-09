@@ -48,6 +48,7 @@ import {
   loadVehicles,
   scopeDriverRows,
   scopeTripRows,
+  type FleetDriver,
 } from "../../../../apps/fleet-partner-portal-web/lib/fleet-portal-data.server";
 
 import { GET as exportHandler } from "../../../../apps/fleet-partner-portal-web/app/trips/export/route";
@@ -216,6 +217,7 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
       const dashboard = await loadDashboard();
       expect(dashboard.supplemental.openCases).toBe("—");
       expect(dashboard.supplemental.trainingCompletion).toBe("—");
+      expect(dashboard.supplemental.missingDocsDrivers).toBe("—");
     });
   });
 
@@ -1146,6 +1148,122 @@ describe("SR-FLEET-DATA-001: Fleet Data Source Unification and Error Handling", 
         expect(getDriverNoticeBody("trainingIncomplete", "en")).toContain("Driver training status is not yet integrated");
         expect(getDriverNoticeBody("missingDocs", "zh")).toContain("駕駛文件審查資料尚未串接後端 API");
         expect(getDriverNoticeBody("missingDocs", "en")).toContain("Driver document review is not yet integrated");
+      });
+
+      it("dashboard supplemental missingDocsDrivers respects docsAvailable and aligns with driver tab badge (Codex2 reproduction)", async () => {
+        mockDrivers.mockResolvedValue([
+          {
+            driverId: "drv-review-01",
+            name: "張駕駛",
+            currentVehiclePlateNo: "ABC-1234",
+            workState: "available",
+            licensesValid: true,
+            supportedServiceBuckets: ["standard_taxi"],
+            dispatchEligible: true,
+          },
+          {
+            driverId: "drv-review-02",
+            name: "李駕駛",
+            currentVehiclePlateNo: "XYZ-5678",
+            workState: "available",
+            licensesValid: true,
+            supportedServiceBuckets: ["standard_taxi"],
+            dispatchEligible: true,
+          },
+        ]);
+        mockVehicles.mockResolvedValue([]);
+        mockTrips.mockResolvedValue([]);
+        mockDashboard.mockResolvedValue(null);
+
+        const [driversView, dashboard] = await Promise.all([
+          loadDrivers(),
+          loadDashboard(),
+        ]);
+
+        const tabCounts = computeDriverTabCounts(driversView.rows, {
+          docsAvailable: driversView.docsAvailable,
+          trainingAvailable: driversView.trainingAvailable,
+        });
+
+        // When docs are unavailable from API, both driver list badge and dashboard indicator must be "—"
+        expect(driversView.docsAvailable).toBe(false);
+        expect(tabCounts.missingDocs).toBe("—");
+        expect(dashboard.supplemental.missingDocsDrivers).toBe("—");
+        expect(dashboard.supplemental.missingDocsDrivers).toBe(tabCounts.missingDocs);
+      });
+
+      it("computeDriverTabCounts excludes unavailable doc status from missing count even when docsAvailable is true", () => {
+        const rows: FleetDriver[] = [
+          {
+            id: "drv-01",
+            name: "張駕駛",
+            plate: "ABC-1234",
+            status: "available",
+            license: "valid",
+            docs: "complete",
+            training: "complete",
+            trips30: 10,
+            rating: 4.9,
+            svc: ["realtime"],
+            dispatchEligible: true,
+            docsAvailable: true,
+            trainingAvailable: true,
+          },
+          {
+            id: "drv-02",
+            name: "李駕駛",
+            plate: "DEF-5678",
+            status: "available",
+            license: "expires_30d",
+            docs: "complete",
+            training: "complete",
+            trips30: 5,
+            rating: 4.8,
+            svc: ["realtime"],
+            dispatchEligible: true,
+            docsAvailable: true,
+            trainingAvailable: true,
+          },
+          {
+            id: "drv-03",
+            name: "王駕駛",
+            plate: "GHI-9012",
+            status: "available",
+            license: "valid",
+            docs: "missing_1",
+            training: "complete",
+            trips30: 2,
+            rating: 4.7,
+            svc: ["realtime"],
+            dispatchEligible: true,
+            docsAvailable: true,
+            trainingAvailable: true,
+          },
+          {
+            id: "drv-04",
+            name: "趙駕駛",
+            plate: "JKL-3456",
+            status: "available",
+            license: "valid",
+            docs: "unavailable",
+            training: "unavailable",
+            trips30: 0,
+            rating: 0,
+            svc: ["realtime"],
+            dispatchEligible: true,
+            docsAvailable: true,
+            trainingAvailable: true,
+          },
+        ];
+
+        const tabCounts = computeDriverTabCounts(rows, {
+          docsAvailable: true,
+          trainingAvailable: true,
+        });
+        // drv-02 (expires_30d) and drv-03 (missing_1) are missing docs. drv-04 (docs: "unavailable") is unknown, not missing.
+        expect(tabCounts.missingDocs).toBe(2);
+        // drv-04 (training: "unavailable") is unknown, not counted as incomplete training.
+        expect(tabCounts.trainingIncomplete).toBe(0);
       });
     });
   });
