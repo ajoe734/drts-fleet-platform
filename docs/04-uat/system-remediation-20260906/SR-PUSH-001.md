@@ -1,5 +1,35 @@
 # SR-PUSH-001 — current-dev reproduction and scope blocker
 
+## Dispatch verification — 2026-09-09 02:13 UTC
+
+- `git fetch origin`: exit 0; base `fb2ea6e2ed3c2937d7d65d601967d183b0257048`.
+  Tested branch SHA `3dd772a85104c42e6b815a96781bb4cfd649b07c`.
+  Implementation candidate SHA remains null; this is an evidence anchor.
+- `git rebase origin/dev`: exit 1 at historical anchor `8b015a460`, with
+  evidence/test add-add conflicts. `git rebase --abort`: exit 0; published
+  history restored. `git diff --quiet origin/dev HEAD -- apps/api/src/modules/multi-taxi/`:
+  exit 0, so inspected push source matches fresh dev despite branch ancestry.
+- `git merge-base --is-ancestor 6de31c41fa49d7089d87d42aa8f22378caa07858 origin/dev`:
+  exit 0. Read the merged history packet directly from origin/dev: it requires
+  supervisor successor routing and explicitly preserves product gates. This
+  dispatch still assigns the old branch and the original five write scopes.
+  Do not create another history helper; apply the existing planning routing.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-push-001/`: exit 0,
+  4 passed / 2 expected failures, 6 total, 5.18 seconds. Duplicate send and
+  swallowed persistence failure still reproduce; these are unresolved defects.
+- `pnpm --filter @drts/api typecheck`: exit 2, missing generated contracts and
+  control-plane-auth declarations with cascading errors.
+  `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api typecheck`:
+  exit 0. `git diff --check`: exit 0 after this update.
+- Supervisor must grant service/repository writes and writer dependencies,
+  obtain the approved provider/device protocol, and route durable claim/receipt
+  allocation through the existing planning decision before implementation.
+  Helper completion alone does not satisfy these resume conditions.
+- Resource IDs remain the test-only IDs below. Readiness still lists missing
+  provider account and authorized device. Real provider/message/device,
+  controlled receiver and PostgreSQL resource IDs are null. No server, live
+  send, controlled receiver or real-device verification was run.
+
 ## Dispatch verification — 2026-09-09 02:04 UTC
 
 - Fresh fetched `origin/dev`: `7d04833053b63558c10fb678a422dff3522e0150`.
