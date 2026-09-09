@@ -73,16 +73,11 @@ import { resolveOpsMapTileUrlTemplate } from "../dispatch/ops-map-board";
 import {
   deriveDispatchPresentation,
   deriveTtsPresentation,
-  filterSessionsByBrandAuthorization,
-  applyRecordingAuthorization,
   isNormalAiCallSession,
   buildCallbackActionsForRecord,
   buildAiSessionActions,
   type ExtendedCallSessionRecord,
   type ExtendedCallbackTaskRecord,
-  type AiCallSessionMetadata,
-  type VoiceDispatchState,
-  type VoiceTtsState,
 } from "./callcenter-ai-exceptions";
 
 const theme = buildCanvasTheme({
@@ -1126,7 +1121,7 @@ export default function CallcenterPage() {
   const [callbackAttemptOutcome, setCallbackAttemptOutcome] = useState("connected");
   const [callbackAttemptNotes, setCallbackAttemptNotes] = useState("");
   const [callbackCancelReason, setCallbackCancelReason] = useState("");
-  const [takeoverReason, setTakeoverReason] = useState("human_intervention");
+  const takeoverReason = "human_intervention";
   const [transferForm, setTransferForm] = useState(
     INITIAL_COMPLAINT_TRANSFER_FORM,
   );

@@ -296,8 +296,9 @@ export function applyRecordingAuthorization<T extends CallSessionRecord>(
  */
 export function buildCallbackActionsForRecord(
   callback: CallbackTaskRecord | null | undefined,
-  isCallClosed: boolean,
+  isCallClosed?: boolean,
 ): ResourceActionDescriptor[] {
+  void isCallClosed;
   if (!callback) {
     return [
       {
