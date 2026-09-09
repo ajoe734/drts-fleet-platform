@@ -14,6 +14,7 @@
 ## 1. Issue Background & Root Cause Analysis
 
 ### 1.1 Source & Reproduction
+
 - **Source**: `SR-QA-WEBHOOK-001` / `C111`.
 - **Historical Reproduction**: Commit `6b9de8287abb48e5770524c3addf5e5e41f8f663` and evidence recorded in `tests/e2e/system-remediation/sr-qa-webhook-001/evidence-auth-http.json` (`9d77ea52e88d8bb3b5421d2a689624c8c9d8f492`).
 - **Defect Description**:
@@ -21,7 +22,9 @@
   This represented a critical cross-tenant data leakage vulnerability: the endpoint was trusting the unverified `x-tenant-id` request header without validating that the authenticated principal's tenant identity matched the requested tenant scope.
 
 ### 1.2 Root Cause
+
 In `TenantPartnerController`:
+
 ```typescript
 @Get("tenant/api-keys")
 listApiKeys(
@@ -34,6 +37,7 @@ listApiKeys(
   return toApiSuccessEnvelope(toApiListData(items), requestId);
 }
 ```
+
 1. `listApiKeys` did not inject `@CurrentIdentity()` and did not pass the caller's identity context down to the service layer.
 2. `TenantPartnerService.listApiKeys(tenantId)` filtered `this.apiKeys` strictly by the `tenantId` parameter from the header, without asserting tenant boundary against the caller's authenticated identity.
 3. In contrast, tenant mutation endpoints (`issueApiKey`, `rotateApiKey`, `revokeApiKey`) were already receiving `identity` and invoking `assertTenantMutationScope`, but read operations lacked tenant binding checks.
@@ -45,12 +49,14 @@ listApiKeys(
 Minimal, surgical repairs strictly adhering to the authorized write scopes (`apps/api/src/modules/tenant-partner/`):
 
 ### 2.1 `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts`
+
 - Added `@CurrentIdentity() identity?: IdentityContext | null` to `listApiKeys`.
 - Maintained backward compatibility for direct TypeScript calls (`controller.listApiKeys(tenantId, requestId, identity)` or `controller.listApiKeys(tenantId, requestId)`).
 - Forwarded the resolved identity to `tenantPartnerService.listApiKeys(resolvedTenantId, resolvedIdentity)`.
 - Decorated all constructor parameters with explicit `@Inject(...)` tokens (`@Inject(TenantPartnerService)`, `@Inject(BillingSettlementService)`, etc.) to ensure robust NestJS DI dependency resolution under environments without runtime decorator metadata emission (e.g. Vite/Vitest).
 
 ### 2.2 `apps/api/src/modules/tenant-partner/tenant-partner.service.ts`
+
 - Updated `listApiKeys(tenantId: string, identity?: IdentityContext | null)` to accept the caller's identity context.
 - Implemented `assertTenantAccessScope(targetTenantId, identity, action = "access")`:
   - If `!identity`, permits internal/test calls without identity context.
@@ -64,7 +70,9 @@ Minimal, surgical repairs strictly adhering to the authorized write scopes (`app
 ## 3. Verification & Acceptance Evidence
 
 ### 3.1 Unit Test Suite (`tests/unit/system-remediation/sr-qa-webhook-001-fix-tenant-binding/tenant-binding.test.ts`)
+
 Executes without server or compose dependencies per VM restriction:
+
 - **Cross-tenant GET**:
   - Tenant B identity with Tenant A `x-tenant-id` throws 403 `TENANT_SCOPE_MISMATCH`.
   - Direct service call `service.listApiKeys(TENANT_A, tenantBIdentity)` throws 403 `TENANT_SCOPE_MISMATCH`.
@@ -85,10 +93,12 @@ Executes without server or compose dependencies per VM restriction:
   - Internal and legacy callers without `identity` context continue to function seamlessly.
 
 ### 3.2 Full AppModule E2E Test Suite (`tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/appmodule-tenant-binding.test.ts`)
-- Dynamically resolves compiled `AppModule` (`apps/api/dist/app.module.js`) with full TypeScript decorator metadata emission, falling back to source `AppModule`.
+
+- Consistently loads candidate compiled `AppModule` (`apps/api/dist/app.module.js`) and all runtime DI class tokens (`DatabaseService`, `JwtAuthService`, `StepUpProofService`, `TenantPartnerRepository`, `TenantPartnerService`, `TenantPartnerController`, etc.) via `apiRequire` anchored to `apps/api/package.json`.
+- Fails explicitly with actionable error instructions if candidate compiled artifacts are missing, preventing silent fallback to uncompiled source.
 - Verifies complete NestJS `AppModule` structure, route metadata, and real DI wiring without server startup:
-  - Asserts constructor self-declared dependency injection metadata (`self:paramtypes`) on `TenantPartnerController` and `TenantPartnerService`.
-  - Creates a Nest application context and asserts real DI container resolution and injection of `tenantPartnerService` into `TenantPartnerController`.
+  - Asserts constructor self-declared dependency injection metadata (`self:paramtypes`) as well as TypeScript emitted metadata (`design:paramtypes`) on `TenantPartnerController` and `TenantPartnerService`.
+  - Creates a real full `AppModule` application context (`NestFactory.createApplicationContext(AppModule, { logger: false })`) and asserts real DI container resolution of all providers and injection of `tenantPartnerService` into `TenantPartnerController`.
 - Configures full `AppModule` DI wiring (`DatabaseService`, `JwtAuthService`, `StepUpProofService`, `TenantPartnerRepository`, `TenantPartnerService`) and production `APP_GUARD`, `APP_INTERCEPTOR` (`SnakeCaseInterceptor`), and `APP_FILTER`.
 - Issues authentic two-tenant JWTs with trusted MFA fixtures (`amr: ["mfa", "totp"]`, `acr: "aal2"`).
 - Tests cross-tenant mutations (`issue`, `rotate`, `revoke`) with valid caller-bound step-up proofs, asserting HTTP 403 `TENANT_SCOPE_MISMATCH` and verifying DB state immutability.
@@ -96,12 +106,13 @@ Executes without server or compose dependencies per VM restriction:
 - Asserts SQL readback states for all credential lifecycles (`active`, `overlap_active`, `revoked`) and timestamps.
 
 ### 3.3 Verification Commands Run & Results
+
 ```bash
 # 1. Unit tests:
 pnpm exec vitest run tests/unit/system-remediation/sr-qa-webhook-001-fix-tenant-binding/ --no-file-parallelism --maxConcurrency=1
 # Output: 5 passed (5)
 
-# 2. E2E tests (AppModule structure and real DI verification / mock-isolated per VM restriction):
+# 2. E2E tests (real full AppModule DI verification without server startup / PG test gated by DATABASE_URL):
 pnpm exec vitest run tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/ --no-file-parallelism --maxConcurrency=1
 # Output: 1 passed, 1 skipped (2)
 
@@ -121,6 +132,7 @@ git diff --check
 ---
 
 ## 4. Modified Artifacts
+
 - `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts`
 - `apps/api/src/modules/tenant-partner/tenant-partner.service.ts`
 - `tests/unit/system-remediation/sr-qa-webhook-001-fix-tenant-binding/tenant-binding.test.ts`

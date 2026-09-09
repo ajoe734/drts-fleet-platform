@@ -1,22 +1,35 @@
 import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
-import { AppModule } from "../../../../apps/api/src/app.module";
-import { DatabaseService } from "../../../../apps/api/src/common/db";
-import { JwtAuthService } from "../../../../apps/api/src/common/auth/jwt-auth.service";
-import { StepUpProofService } from "../../../../apps/api/src/common/auth/step-up-proof.service";
-import { TenantPartnerController } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
-import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
-import { TenantPartnerRepository } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import type { StoredTenantApiKeyRecord } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
-import { BillingSettlementService } from "../../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
-import { OwnedMobilityService } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
-import { IdempotencyService } from "../../../../apps/api/src/common/idempotency";
-import { IdentityRepository } from "../../../../apps/api/src/modules/identity/identity.repository";
-import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import type { AppModule as AppModuleType } from "../../../../apps/api/src/app.module";
+import type { DatabaseService as DatabaseServiceType } from "../../../../apps/api/src/common/db";
+import type { JwtAuthService as JwtAuthServiceType } from "../../../../apps/api/src/common/auth/jwt-auth.service";
+import type { StepUpProofService as StepUpProofServiceType } from "../../../../apps/api/src/common/auth/step-up-proof.service";
+import type { TenantPartnerController as TenantPartnerControllerType } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
+import type { TenantPartnerService as TenantPartnerServiceType } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+import type { TenantPartnerRepository as TenantPartnerRepositoryType } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
+import type { BillingSettlementService as BillingSettlementServiceType } from "../../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
+import type { OwnedMobilityService as OwnedMobilityServiceType } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import type { IdempotencyService as IdempotencyServiceType } from "../../../../apps/api/src/common/idempotency";
+import type { IdentityRepository as IdentityRepositoryType } from "../../../../apps/api/src/modules/identity/identity.repository";
+import type { AuditNotificationService as AuditNotificationServiceType } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
+
+const distAppModuleUrl = new URL(
+  "../../../../apps/api/dist/app.module.js",
+  import.meta.url,
+);
+const distAppModulePath = fileURLToPath(distAppModuleUrl);
+if (!existsSync(distAppModulePath)) {
+  throw new Error(
+    `Candidate compiled build not found at ${distAppModulePath}. Run 'pnpm --filter @drts/api build' before running full AppModule E2E tests.`,
+  );
+}
 
 const apiRequire = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
@@ -24,22 +37,63 @@ const apiRequire = createRequire(
 apiRequire("reflect-metadata");
 const { NestFactory } = apiRequire(
   "@nestjs/core",
-) as typeof import("../../../../apps/api/node_modules/@nestjs/core");
-const { Module } = apiRequire(
-  "@nestjs/common",
-) as typeof import("@nestjs/common");
+) as typeof import("@nestjs/core");
 
-let AppModuleToUse: typeof AppModule = AppModule;
-try {
-  const distAppModule = apiRequire(
-    "../../../../apps/api/dist/app.module.js",
-  ) as { AppModule?: typeof AppModule };
-  if (distAppModule?.AppModule) {
-    AppModuleToUse = distAppModule.AppModule;
-  }
-} catch {
-  // fallback to source AppModule
-}
+// Load candidate compiled module and all DI tokens consistently to ensure emitted decorator metadata is used
+const { AppModule } = apiRequire("./dist/app.module.js") as {
+  AppModule: typeof AppModuleType;
+};
+const { DatabaseService } = apiRequire("./dist/common/db") as {
+  DatabaseService: typeof DatabaseServiceType;
+};
+const { JwtAuthService } = apiRequire(
+  "./dist/common/auth/jwt-auth.service.js",
+) as {
+  JwtAuthService: typeof JwtAuthServiceType;
+};
+const { StepUpProofService } = apiRequire(
+  "./dist/common/auth/step-up-proof.service.js",
+) as {
+  StepUpProofService: typeof StepUpProofServiceType;
+};
+const { TenantPartnerController } = apiRequire(
+  "./dist/modules/tenant-partner/tenant-partner.controller.js",
+) as {
+  TenantPartnerController: typeof TenantPartnerControllerType;
+};
+const { TenantPartnerService } = apiRequire(
+  "./dist/modules/tenant-partner/tenant-partner.service.js",
+) as {
+  TenantPartnerService: typeof TenantPartnerServiceType;
+};
+const { TenantPartnerRepository } = apiRequire(
+  "./dist/modules/tenant-partner/tenant-partner.repository.js",
+) as {
+  TenantPartnerRepository: typeof TenantPartnerRepositoryType;
+};
+const { BillingSettlementService } = apiRequire(
+  "./dist/modules/billing-settlement/billing-settlement.service.js",
+) as {
+  BillingSettlementService: typeof BillingSettlementServiceType;
+};
+const { OwnedMobilityService } = apiRequire(
+  "./dist/modules/owned-mobility/owned-mobility.service.js",
+) as {
+  OwnedMobilityService: typeof OwnedMobilityServiceType;
+};
+const { IdempotencyService } = apiRequire("./dist/common/idempotency") as {
+  IdempotencyService: typeof IdempotencyServiceType;
+};
+const { IdentityRepository } = apiRequire(
+  "./dist/modules/identity/identity.repository.js",
+) as {
+  IdentityRepository: typeof IdentityRepositoryType;
+};
+const { AuditNotificationService } = apiRequire(
+  "./dist/modules/audit-notification/audit-notification.service.js",
+) as {
+  AuditNotificationService: typeof AuditNotificationServiceType;
+};
 
 const hasDatabaseUrl = Boolean(
   process.env.DATABASE_URL &&
@@ -50,10 +104,7 @@ const hasDatabaseUrl = Boolean(
 describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness", () => {
   it("verifies AppModule composition, controller binding, and real DI wiring without requiring server startup", async () => {
     // 1. Verify AppModule composition
-    const imports =
-      Reflect.getMetadata("imports", AppModuleToUse) ||
-      Reflect.getMetadata("imports", AppModule) ||
-      [];
+    const imports = Reflect.getMetadata("imports", AppModule) || [];
     expect(imports.length).toBeGreaterThan(0);
 
     // 2. Verify controller prototypes
@@ -103,6 +154,17 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
       ),
     ).toBe(true);
 
+    // Also assert TypeScript emitted design:paramtypes
+    const controllerDesignParams: unknown[] =
+      Reflect.getMetadata("design:paramtypes", TenantPartnerController) || [];
+    expect(controllerDesignParams[0]).toBe(TenantPartnerService);
+    expect(controllerDesignParams[1]).toBe(BillingSettlementService);
+    expect(controllerDesignParams[2]).toBe(OwnedMobilityService);
+    expect(controllerDesignParams[3]).toBe(JwtAuthService);
+    expect(controllerDesignParams[4]).toBe(IdempotencyService);
+    expect(controllerDesignParams[5]).toBe(IdentityRepository);
+    expect(controllerDesignParams[6]).toBe(AuditNotificationService);
+
     // 4. Assert service constructor dependency injection metadata
     const serviceSelfParams: Array<{ index: number; param: unknown }> =
       Reflect.getMetadata("self:paramtypes", TenantPartnerService) || [];
@@ -117,38 +179,33 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
       ),
     ).toBe(true);
 
-    // 5. Assert real Nest DI container resolution and instantiation
-    const mockPartnerService = { isMockService: true };
-
-    @Module({
-      controllers: [TenantPartnerController],
-      providers: [
-        { provide: TenantPartnerService, useValue: mockPartnerService },
-        { provide: BillingSettlementService, useValue: {} },
-        { provide: OwnedMobilityService, useValue: {} },
-        { provide: JwtAuthService, useValue: {} },
-        { provide: IdempotencyService, useValue: {} },
-        { provide: IdentityRepository, useValue: {} },
-        { provide: AuditNotificationService, useValue: {} },
-      ],
-    })
-    class DiVerificationModule {}
-
-    const appCtx = await NestFactory.createApplicationContext(
-      DiVerificationModule,
-      { logger: false },
+    // 5. Assert real full AppModule DI container resolution without server startup
+    vi.stubEnv(
+      "CONTROLLED_DOWNLOAD_SIGNING_SECRET",
+      "test-secret-that-is-at-least-32-chars-long",
     );
+    vi.stubEnv("JWT_SECRET", "test-secret-that-is-at-least-32-chars-long");
+
+    const fullAppCtx = await NestFactory.createApplicationContext(AppModule, {
+      logger: false,
+    });
     try {
-      const resolvedController = appCtx.get(TenantPartnerController);
+      const resolvedController = fullAppCtx.get(TenantPartnerController);
       expect(resolvedController).toBeDefined();
-      expect((resolvedController as unknown as { tenantPartnerService: unknown }).tenantPartnerService).toBe(
-        mockPartnerService,
-      );
+      const resolvedService = fullAppCtx.get(TenantPartnerService);
+      expect(resolvedService).toBeDefined();
+      expect(fullAppCtx.get(DatabaseService)).toBeDefined();
+      expect(fullAppCtx.get(JwtAuthService)).toBeDefined();
+      expect(fullAppCtx.get(TenantPartnerRepository)).toBeDefined();
+      expect(fullAppCtx.get(StepUpProofService)).toBeDefined();
+
+      // Verify real DI container injected dependencies
       expect(
-        (resolvedController as unknown as { tenantPartnerService: { isMockService: boolean } }).tenantPartnerService.isMockService,
-      ).toBe(true);
+        (resolvedController as unknown as { tenantPartnerService: unknown })
+          .tenantPartnerService,
+      ).toBe(resolvedService);
     } finally {
-      await appCtx.close();
+      await fullAppCtx.close();
     }
   });
 
@@ -158,11 +215,15 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
       const url = new URL(process.env.DATABASE_URL!);
       expect(["127.0.0.1", "localhost"]).toContain(url.hostname);
 
+      vi.stubEnv(
+        "CONTROLLED_DOWNLOAD_SIGNING_SECRET",
+        randomUUID() + randomUUID(),
+      );
       vi.stubEnv("JWT_SECRET", randomUUID() + randomUUID());
       vi.stubEnv("JWT_ALGORITHMS", "HS256");
 
       // Launch full AppModule instance with real registered DI services, guards, filters, and interceptors
-      const app = await NestFactory.create(AppModuleToUse, {
+      const app = await NestFactory.create(AppModule, {
         logger: false,
         abortOnError: false,
       });
