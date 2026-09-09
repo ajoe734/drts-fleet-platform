@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { resolveRuntimeHealth, type RuntimeHealthStatus } from "@drts/ui-web";
 import {
   PLATFORM_ADMIN_ROUTE_REGISTRY,
   PlatformAdminAssistantProvider,
@@ -90,7 +91,7 @@ type NavSection = {
   labelKey: string;
 };
 
-type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down";
+type ApiHealthStatus = RuntimeHealthStatus;
 
 const sections: NavSection[] = [
   { key: "workspace", labelKey: "adminShell.section.workspace" },
@@ -346,18 +347,7 @@ function normalizeHealthStatus(
   value: unknown,
   responseOk: boolean,
 ): ApiHealthStatus {
-  if (!responseOk) {
-    return "degraded";
-  }
-
-  const normalized = String(value ?? "healthy").toLowerCase();
-  if (normalized === "down" || normalized === "unhealthy") {
-    return "down";
-  }
-  if (normalized === "degraded" || normalized === "warning") {
-    return "degraded";
-  }
-  return "healthy";
+  return resolveRuntimeHealth({ status: value, responseOk });
 }
 
 function formatCheckedAt(date: Date | null, locale: Locale) {
@@ -419,6 +409,13 @@ function AdminHealthFooter({
     checking: {
       label: labelFor(locale, "adminShell.health.checking"),
       short: "checking",
+      fg: theme.textMuted,
+      bg: theme.neutralBg,
+      border: theme.neutralBorder,
+    },
+    unknown: {
+      label: labelFor(locale, "adminShell.health.unknown"),
+      short: "unknown",
       fg: theme.textMuted,
       bg: theme.neutralBg,
       border: theme.neutralBorder,
@@ -630,27 +627,27 @@ function SearchBox({ locale }: { locale: Locale }) {
 function resolveAdminEnvLabel(env: string | undefined, locale: Locale): string {
   const normalized = env ? env.trim().toLowerCase() : "";
   if (normalized === "production" || normalized === "prod") {
-    return locale === "zh" ? "正式環境" : "production";
+    return labelFor(locale, "adminShell.environment.production");
   }
   if (normalized === "staging" || normalized === "stage") {
-    return locale === "zh" ? "預發環境" : "staging";
+    return labelFor(locale, "adminShell.environment.staging");
   }
   if (normalized === "preview") {
-    return locale === "zh" ? "預覽環境" : "preview";
+    return labelFor(locale, "adminShell.environment.preview");
   }
   if (normalized === "sandbox") {
-    return locale === "zh" ? "沙盒環境" : "sandbox";
+    return labelFor(locale, "adminShell.environment.sandbox");
   }
   if (normalized === "development" || normalized === "dev") {
-    return locale === "zh" ? "開發環境" : "development";
+    return labelFor(locale, "adminShell.environment.dev");
   }
   if (normalized === "test" || normalized === "mock") {
-    return locale === "zh" ? "測試環境" : "test";
+    return labelFor(locale, "adminShell.environment.mock");
   }
   if (normalized === "unknown") {
-    return locale === "zh" ? "未知環境" : "unknown";
+    return labelFor(locale, "adminShell.environment.unknown");
   }
-  return labelFor(locale, "adminShell.environment");
+  return labelFor(locale, "adminShell.environment.unknown");
 }
 
 function IdentityChip({

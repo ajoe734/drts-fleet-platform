@@ -8,7 +8,7 @@ import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import { useTranslation } from "@/lib/i18n";
 import {
   type Locale,
-  resolveAuthoritativeFleetShellEnv,
+  t,
 } from "@/lib/translations";
 
 export function resolveFleetPortalEnvLabel(
@@ -17,27 +17,27 @@ export function resolveFleetPortalEnvLabel(
 ): string {
   const normalized = env ? env.trim().toLowerCase() : "";
   if (normalized === "production" || normalized === "prod") {
-    return locale === "zh" ? "正式環境" : "production";
+    return t("shell.env.production", locale);
   }
   if (normalized === "staging" || normalized === "stage") {
-    return locale === "zh" ? "預發環境" : "staging";
+    return t("shell.env.staging", locale);
   }
   if (normalized === "preview") {
-    return locale === "zh" ? "預覽環境" : "preview";
+    return t("shell.env.preview", locale);
   }
   if (normalized === "sandbox") {
-    return locale === "zh" ? "沙盒環境" : "sandbox";
+    return t("shell.env.sandbox", locale);
   }
   if (normalized === "development" || normalized === "dev") {
-    return locale === "zh" ? "開發環境" : "development";
+    return t("shell.env.dev", locale);
   }
   if (normalized === "test" || normalized === "mock") {
-    return locale === "zh" ? "模擬資料" : "mock data";
+    return t("shell.env.mock", locale);
   }
   if (normalized === "unknown") {
-    return locale === "zh" ? "未知環境" : "unknown";
+    return t("shell.env.unknown", locale);
   }
-  return resolveAuthoritativeFleetShellEnv(locale);
+  return t("shell.env.unknown", locale);
 }
 
 export function FleetPortalShell({
