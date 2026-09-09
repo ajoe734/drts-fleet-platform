@@ -1429,6 +1429,11 @@ export const EVIDENCE_RETENTION_FAMILIES = [
   "webhook_delivery",
   "eligibility_verification",
   "proof_bundle",
+  "voice_booking_evidence",
+  "voice_transcript",
+  "voice_recording_audio",
+  "voice_live_buffer",
+  "voice_telemetry",
 ] as const;
 export type EvidenceRetentionFamily =
   (typeof EVIDENCE_RETENTION_FAMILIES)[number];
