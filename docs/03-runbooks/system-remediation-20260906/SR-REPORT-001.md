@@ -21,6 +21,8 @@
 - `apps/api/src/modules/reporting-filing/`
 - `apps/ops-console-web/app/reports/`
 - `tests/unit/system-remediation/sr-report-001/`
+- `packages/contracts/src/index.ts`（僅一般報表 implemented-format 宣告與相關說明）
+- `tests/unit/reporting-filing.test.ts`（僅一般格式與 ZIP／filing 排除的對應斷言）
 - 待建立：docs/04-uat/system-remediation-20260906/SR-REPORT-001.md
 
 清單內尚不存在的 module／leaf 檔是新增目標；實際 repo 路徑變動由 supervisor 更新 reviewed scope。Migration 使用 SR-CONTRACT 分配的專屬檔名。沒有列出的共用檔不得順手修改。
@@ -39,6 +41,7 @@ git diff --check
 pnpm --filter @drts/api typecheck
 pnpm --filter @drts/ops-console-web typecheck
 pnpm exec vitest run tests/unit/system-remediation/sr-report-001/
+pnpm exec vitest run tests/unit/reporting-filing.test.ts
 ```
 
 - 在上述task目錄新增 .test.ts，root Vitest可發現；不使用passWithNoTests掩蓋空測試。
@@ -47,7 +50,11 @@ pnpm exec vitest run tests/unit/system-remediation/sr-report-001/
 
 ## 整合与結案
 
-測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。
+測試依 task ID 獨立檔案；2026-09-09 supervisor 明確授權上述兩個共用檔案的窄幅修改，落實已合併的 SR-REPORT-001-UNBLOCK-PLANNING-DECISION。不得改其他 shared exports、中央 test config、lockfile 或全域 routes。
+
+SR-CONTRACT-001 是目前另一個共用 contracts index writer，必須等待本任務 canonical done 與 merge 後接續；本任務保留 SR-ARTIFACT-001、SR-DEPS-001 前置，不反向依賴 SR-CONTRACT-001。格式宣告、renderer、中央測試必須在同一候選交付，不能先公開尚未實作的格式。
+
+Supervisor 指派新的 execution_branch，從當前 origin/dev 開始；保留舊發布 refs。舊 renderer／測試可逐檔檢查後移植，不重播重複 evidence anchors。必須以獨立解析器驗證中文 PDF 文字與 XLSX 內容，不沿用把 bytes 假解碼成成功的測試。ZIP 與 filing bytes 排除維持原規格。
 
 此任務在獨立worktree執行。根節點不需要等整波；相依task必須是canonical done並含正確merge證據。若issue當前已修，保留回歸與來源證據，不重造功能。
 
