@@ -1,5 +1,32 @@
 # SR-REPORT-001 — baseline and scope dependency
 
+## Dispatch verification — 2026-09-09 01:43 UTC
+
+- Fetched origin/dev base: `3062ea363769cc393e59384251f5aedc7e570ac5`;
+  tested dispatched HEAD: `90a7e83a60c32a0575549d3604882f85b443d6c7`.
+- Canonical task still grants only the original four write scopes and two
+  dependencies. The planning decision's resume gate remains unmet. Supervisor
+  must authorize focused writes to `packages/contracts/src/index.ts` and
+  `tests/unit/reporting-filing.test.ts`, record writer sequencing/dependencies,
+  and synchronize the task spec, or deliver a coordinated producer.
+- Rechecked execution rule 4, N05/C091, PRD 9.5.6/9.10.2 and the planning
+  helper decision. Renderers remain null for PDF/XLSX; shared declaration is
+  CSV-only; central tests require rejection. Reporting module and central tests
+  match fetched origin/dev; contracts differ only in unrelated booking/voice
+  changes. No product or UI files changed.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1 at step 9/47,
+  add/add conflict in this evidence document replaying `85b005b48`.
+  `git rebase --abort`: exit 0. Published history preserved; this branch is
+  not claimed rebased onto current dev.
+- `pnpm exec vitest run tests/unit/reporting-filing.test.ts`: exit 0;
+  30 tests / 1 file passed in 2.76s on dispatched HEAD. In-memory order event
+  resource: `4736a89d-1952-428d-a17b-7de3a2ba973d`. This reproduces existing
+  rejection, not successful PDF/XLSX acceptance. `git diff --check`: exit 0.
+- No implementation candidate exists. No live resources, browser/device tests,
+  development servers, deployment, typechecks, or renderer parsing acceptance
+  were run. The evidence anchor SHA and ordinary push result are recorded in
+  canonical blocker status; no handoff or done is claimed.
+
 ## Dispatch verification — 2026-09-08 22:43 UTC
 
 - Fetched origin/dev base: `eb684f176b1d3b46553a0f6f0556c79452fbac3c`;
