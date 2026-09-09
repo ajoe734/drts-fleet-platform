@@ -114,7 +114,7 @@ pnpm exec vitest run tests/integration/unattended-voice-postgres.integration.tes
 
 ### Supporting Regressions & Unit Verification
 
-- `tests/unit/uv-exec-014.test.ts`, `tests/unit/uv-exec-015.test.ts`, `tests/unit/uv-exec-016.test.ts`, `tests/unit/uv-exec-017.test.ts`, `tests/unit/uv-exec-018.test.ts`, `tests/unit/uv-exec-023.test.ts`: **4 test files, 105 passed, 0 failed**.
+- `tests/unit/uv-exec-014.test.ts`, `tests/unit/uv-exec-015.test.ts`, `tests/integration/uv-exec-016.integration.test.ts`, `tests/unit/uv-exec-017.test.ts`, `tests/unit/uv-exec-018.test.ts`, `tests/integration/uv-exec-023.integration.test.ts`: **6 test files, 105 passed, 0 failed**.
 - `@drts/api typecheck`: Passed (`tsc -p tsconfig.json --noEmit` exited with 0).
 - Scoped ESLint: Passed with 0 errors and 0 warnings.
 - Prettier: Formatted and verified clean.

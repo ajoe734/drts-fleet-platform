@@ -998,7 +998,6 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         targetAssignmentId: "assignment-001",
         assignmentVersion: 1,
         acceptanceDeadline: new Date(Date.now() - 5000).toISOString(),
-        timeoutActionKey: "assignment:assignment-001:timeout",
       };
 
       const resultA = await dispatchExecutor1.handleOfferTimeout(timeoutCmdA);
@@ -1027,7 +1026,6 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         targetAssignmentId: "assignment-003",
         assignmentVersion: 1,
         acceptanceDeadline: new Date(Date.now() - 5000).toISOString(),
-        timeoutActionKey: "assignment:assignment-003:timeout",
       };
 
       const resultLate =
