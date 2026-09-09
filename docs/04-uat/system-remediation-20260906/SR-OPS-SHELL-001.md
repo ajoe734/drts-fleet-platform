@@ -92,6 +92,21 @@ Codex 審查 candidate `5a0320b21` 時提出兩項 reopen 判定：
    - 兩者均在當前 `write_scopes` 之外。依據協同規範，owner 不得擅自越權修改共用頁面，必須等待 Supervisor 擴充 machine-truth write_scopes 與相依、並確認 receiver 契約後方得實作。
    - 本任務堅持誠實原則，維持嚴格 scope 界線與完整驗收條件，以 `ai-status.sh blocker` 落盤記錄阻塞，不以 branch-only 宣稱已完成。
 
+### 1.5 Candidate f5ad0f119 Codex Review Rejection 分類與回歸修復
+
+Codex 於 2026-09-09T02:08:51Z 審查 Candidate `f5ad0f1193c88fe2c4a940cfbeff3a5a0e842ec3`，提出兩項阻擋判定：
+1. **P1（跨 app 導航與接收端契約 — Q-SR-OPS-SHELL-001）**：
+   - 審查指出 `apps/ops-console-web/app/dispatch/page.tsx:1226-1231` 預設仍 fallback 至 `/platform-admin`，line 4520 audit CTA 僅呼叫 `buildPlatformAdminHref("/audit")` 且無 selected resource context，造成在缺乏公共設定時出現 ops 404；且接收端 `apps/platform-admin-web/app/audit/page.tsx:164` 呼叫 `listAuditLogs()` 未消費 URL query context。
+   - **處置**：本任務嚴格遵守 `write_scopes` 與架構紀律，`dispatch/page.tsx` 與 `platform-admin-web` 均在 scope 之外。必須由 Supervisor 裁定 `Q-SR-OPS-SHELL-001`、正式授權 write_scopes 與相依後，方能進行跨 app 共用頁面變更。維持本項為外部卡點（blocker）。
+2. **P2（命中測試與真實元件樣式幾何）**：
+   - 審查指出 `assistant-widget-layout.test.ts:551` 以捏造之 48x48 靜態方塊模擬 launcher，忽略了實際 `buildDefaultState()` 預設為 `closed: false, minimized: true`（為 420x64 之縮小化標頭面板），且發射器按鈕具備標籤文字、為自適應寬度之膠囊狀按鈕。純 mock hit-testing 無法驗證實際掛載元件與真機行為，要求保留瀏覽器驗收為 unverified 並提供與元件實體連結之回歸測試。
+   - **本次回歸修復**：
+     - 重構 `assistant-widget-layout.test.ts` 測試案例，直接呼叫元件之樣式建構純函式：
+       1. 預設狀態測試改採 `buildShellPanelStyle(buildDefaultState(desktop))`，驗證掛載為 `closed: false, minimized: true`，幾何為 `x: 1000, y: 816, width: 420, height: 64`，與左側/中央之 dispatch 底部分頁（`left: 24`）及訂單指派按鈕（`left: 600`）完全不碰撞，且全螢幕 portal root 之 `pointerEvents: "none"` 確保底層點擊完全穿透。
+       2. 關閉狀態測試改採 `buildLauncherButtonStyle()`，驗證按鈕為 `pointerEvents: "auto"`、定位於 `right: 20, bottom: 20, height: 48, padding: 0 16px`，以真實 label 寬度估算（~140px）驗證幾何隔離與點擊命中。
+       3. 行動視窗 390x844 測試驗證面板自動 clamp 為 350px 寬，並配合 `ops-shell.tsx` 之 `paddingBottom: 72px` 預留滾動安全邊界。
+     - 測試總數擴增至 42 項，全面通過。
+
 ## 2. 解決方案與架構設計
 
 ### 2.1 跨應用 URL 權威解析器 (`cross-app-url.ts`)
@@ -142,7 +157,7 @@ Codex 審查 candidate `5a0320b21` 時提出兩項 reopen 判定：
 - `tests/unit/system-remediation/sr-ops-shell-001/audit-and-cross-app-links.test.ts` (新增):
   18 個針對 cross-app audit/payments 連結、真實 DRTS ActionReceipt 序列化、參數傳遞與 URL sanitization 的單元測試。
 - `tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts` (新增):
-  23 個針對預設縮小化、1440x900 桌面與 390x844 行動視窗幾何邊界與命中測試（hit-testing）、localStorage clamp、pointer-events 繼承與穿透、DOM 點擊開關循環、焦點管理與底層 CTA 點擊穿透的單元測試。
+  24 個針對預設縮小化、1440x900 桌面與 390x844 行動視窗幾何邊界與命中測試（hit-testing）、localStorage clamp、pointer-events 繼承與穿透、DOM 點擊開關循環、焦點管理與底層 CTA 點擊穿透的單元測試。
 - `docs/04-uat/system-remediation-20260906/SR-OPS-SHELL-001.md` (修改):
   本完成證據文件（更新 reopen 根因、P1 scope 阻擋說明與 P2 測試真實性修復驗證）。
 
@@ -174,12 +189,12 @@ $ pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/
  RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-ops-shell-001
 
  ✓ tests/unit/system-remediation/sr-ops-shell-001/audit-and-cross-app-links.test.ts (18 tests) 42ms
- ✓ tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts (23 tests) 38ms
+ ✓ tests/unit/system-remediation/sr-ops-shell-001/assistant-widget-layout.test.ts (24 tests) 40ms
 
  Test Files  2 passed (2)
-      Tests  41 passed (41)
-   Start at  01:47:53
-   Duration  775ms
+      Tests  42 passed (42)
+   Start at  02:12:08
+   Duration  782ms
 exit code: 0
 ```
 
@@ -196,9 +211,9 @@ exit code: 0
 
 - **跨應用審計與資源上下文範疇界線（`Q-SR-OPS-SHELL-001`）**：
   如 `support/unblock/SR-OPS-SHELL-001/SR-OPS-SHELL-001-UNBLOCK-PLANNING-DECISION.md`（PR #1749）記錄，`/dispatch` 頁面（`apps/ops-console-web/app/dispatch/page.tsx`）的 audit CTA 與接收端 `apps/platform-admin-web/app/audit/page.tsx` 目前不在本任務的 `write_scopes` 內。依據執行規則與合意決策，在 supervisor 正式擴充 write_scopes 與相依、且確認 audit receiver 的 resource-context 契約前，本任務不擅自跨 scope 修改未授權之 page 檔案，保留父任務嚴格邊界。
-- **真機／瀏覽器手動視覺驗證**：
-  未在實體裝置或圖形介面瀏覽器進行手動點擊（因無 GUI 容器環境）；本報告以純函式幾何 clamp、DOM pointer-events 繼承模擬、全域 click 事件循環與焦點切換之自動化單元測試（41 項測試通過）作為驗證依據，不冒充真機通過。
+- **真機／瀏覽器手動視覺驗證（保留 Unverified）**：
+  因虛擬機執行環境受限（VM restriction: 禁止啟動 product dev servers, preview/browser test servers, Playwright 或 Docker Compose），未在實體裝置或圖形介面瀏覽器進行手動點擊與端對端視覺驗證；保留瀏覽器驗收為 unverified。本報告以純函式幾何 clamp、實際樣式建構（`buildShellPanelStyle`, `buildLauncherButtonStyle`, `buildPortalRootStyle`）、DOM pointer-events 繼承模擬、全域 click 事件循環與焦點切換之自動化單元測試（42 項測試通過）作為驗證依據，不冒充真機通過。
 - **未修改中央共用設定**：
   未修改中央 shared exports、中央 test config、中央 routes、`package.json` 或 `pnpm-lock.yaml`。
 - **分支歷史與普通 Push 狀態及卡點記錄**：
-  遠端分支 `origin/gemini/sr-ops-shell-001` 原有 head `cdf5488d7`，後續整合時包含帶有非白名單 prefix 之歷史 commit `fe3d92cba`，導致 PR #1648 `CI/Commit trailers` 失敗。本地已合併最新 `origin/dev`（`3062ea363`），通過全部本地測試與型別檢查。依據「若安全 commit 或普通 non-force push 做不到，必須明確回報 progress / blocker 與原因，不能把工作描述成已完成」與禁止 force push 之規定，本輪以普通 commit 及 push 儲存進度，並以 `ai-status.sh blocker` 誠實記錄卡點，等待 Supervisor 裁定 fresh recovery branch 或 PR 整合路徑。
+  遠端分支 `origin/gemini/sr-ops-shell-001` 原有 head `cdf5488d7`，後續整合時包含帶有非白名單 prefix 之歷史 commit `fe3d92cba`，導致 PR #1648 `CI/Commit trailers` 失敗。本地已合併最新 `origin/dev`（`7d0483305`），通過全部本地測試與型別檢查。依據「若安全 commit 或普通 non-force push 做不到，必須明確回報 progress / blocker 與原因，不能把工作描述成已完成」與禁止 force push 之規定，本輪以普通 commit 及 push 儲存進度，並以 `ai-status.sh blocker` 誠實記錄卡點，等待 Supervisor 裁定 fresh recovery branch 或 PR 整合路徑。

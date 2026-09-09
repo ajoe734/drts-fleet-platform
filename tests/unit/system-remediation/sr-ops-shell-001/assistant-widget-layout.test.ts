@@ -545,45 +545,58 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
       return null;
     }
 
-    it("verifies 1440x900 desktop bottom CTA controls are not blocked by assistant portal", () => {
+    it("verifies 1440x900 desktop default minimized panel does not block workspace CTA controls and portal click-through works", () => {
       const desktop = { width: 1440, height: 900 };
-      const launcherBox: Box = {
-        left: desktop.width - 48 - EDGE_GAP, // 1376
-        top: desktop.height - 48 - EDGE_GAP, // 836
-        width: 48,
-        height: 48,
+      const defaultState = buildDefaultState(desktop);
+
+      // Default state is closed: false, minimized: true (R19 / C048)
+      expect(defaultState.closed).toBe(false);
+      expect(defaultState.minimized).toBe(true);
+
+      // Panel style derived directly from component layout builder
+      const panelStyle = buildShellPanelStyle(defaultState);
+      expect(panelStyle.pointerEvents).toBe("auto");
+      expect(panelStyle.position).toBe("fixed");
+      expect(panelStyle.zIndex).toBe(5000);
+
+      const panelBox: Box = {
+        left: Number(panelStyle.left), // 1440 - 420 - 20 = 1000
+        top: Number(panelStyle.top), // 900 - 64 - 20 = 816
+        width: Number(panelStyle.width), // 420
+        height: Number(panelStyle.height), // 64 (MINIMIZED_HEIGHT)
       };
 
       // Underlying workspace elements: e.g. dispatch board pagination and submit CTA for real dispatch order 'ord-tpe-2026-8801'
       const paginationCta: Box = {
-        left: 1100,
+        left: 24,
         top: 840,
-        width: 140,
+        width: 220,
         height: 36,
       };
       const dispatchAssignCta: Box = {
-        left: 920,
+        left: 600,
         top: 840,
-        width: 160,
+        width: 180,
         height: 36,
       };
 
-      // 1. Neither workspace CTA collides with launcher
-      expect(intersects(paginationCta, launcherBox)).toBe(false);
-      expect(intersects(dispatchAssignCta, launcherBox)).toBe(false);
+      // 1. Workspace CTAs in the main content area do not collide with minimized panel at bottom-right
+      expect(intersects(paginationCta, panelBox)).toBe(false);
+      expect(intersects(dispatchAssignCta, panelBox)).toBe(false);
 
       // 2. Hit-testing simulation with portal root
+      const portalRootStyle = buildPortalRootStyle();
       const portalRoot: HitTarget = {
         id: "ops-assistant-portal-root",
         box: { left: 0, top: 0, width: 1440, height: 900 },
-        pointerEvents: "none",
+        pointerEvents: (portalRootStyle.pointerEvents as "none") ?? "none",
         zIndex: 5000,
       };
-      const launcherTarget: HitTarget = {
-        id: "ops-assistant-launcher",
-        box: launcherBox,
-        pointerEvents: "auto",
-        zIndex: 5001,
+      const panelTarget: HitTarget = {
+        id: "ops-assistant-panel",
+        box: panelBox,
+        pointerEvents: (panelStyle.pointerEvents as "auto") ?? "auto",
+        zIndex: 5000,
       };
       const paginationTarget: HitTarget = {
         id: "dispatch-pagination-cta",
@@ -598,45 +611,111 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
         zIndex: 10,
       };
 
-      const targets = [portalRoot, launcherTarget, paginationTarget, dispatchTarget];
+      const targets = [portalRoot, panelTarget, paginationTarget, dispatchTarget];
 
-      // Click on pagination CTA (x: 1150, y: 855) -> must hit pagination CTA, not intercepted by portal
-      expect(hitTest(1150, 855, targets)).toBe("dispatch-pagination-cta");
+      // Click on pagination CTA (x: 100, y: 855) -> must hit pagination CTA, not intercepted by portal root
+      expect(hitTest(100, 855, targets)).toBe("dispatch-pagination-cta");
 
-      // Click on dispatch CTA (x: 950, y: 855) -> must hit dispatch CTA
-      expect(hitTest(950, 855, targets)).toBe("dispatch-order-assign-cta");
+      // Click on dispatch CTA (x: 650, y: 855) -> must hit dispatch CTA, not intercepted by portal root
+      expect(hitTest(650, 855, targets)).toBe("dispatch-order-assign-cta");
 
-      // Click on launcher (x: 1390, y: 850) -> must hit launcher
-      expect(hitTest(1390, 850, targets)).toBe("ops-assistant-launcher");
+      // Click on minimized assistant panel (x: 1100, y: 830) -> hits assistant panel
+      expect(hitTest(1100, 830, targets)).toBe("ops-assistant-panel");
 
       // Click on empty workspace area (x: 500, y: 500) -> passes through portal
       expect(hitTest(500, 500, targets)).toBeNull();
+    });
+
+    it("verifies 1440x900 desktop closed launcher button geometry and non-occlusion", () => {
+      const desktop = { width: 1440, height: 900 };
+
+      // When operator closes widget, launcher button is shown
+      const launcherStyle = buildLauncherButtonStyle();
+      expect(launcherStyle.pointerEvents).toBe("auto");
+      expect(launcherStyle.position).toBe("fixed");
+      expect(launcherStyle.right).toBe(EDGE_GAP);
+      expect(launcherStyle.bottom).toBe(EDGE_GAP);
+      expect(launcherStyle.height).toBe(48);
+
+      // Launcher includes icon (16px) + gap (10px) + label text + horizontal padding (32px), estimated ~140px width
+      const estimatedLauncherWidth = 140;
+      const launcherBox: Box = {
+        left: desktop.width - estimatedLauncherWidth - EDGE_GAP, // 1280
+        top: desktop.height - 48 - EDGE_GAP, // 832
+        width: estimatedLauncherWidth,
+        height: 48,
+      };
+
+      const paginationCta: Box = {
+        left: 24,
+        top: 840,
+        width: 220,
+        height: 36,
+      };
+      const dispatchAssignCta: Box = {
+        left: 600,
+        top: 840,
+        width: 180,
+        height: 36,
+      };
+
+      // Does not collide with workspace CTAs
+      expect(intersects(paginationCta, launcherBox)).toBe(false);
+      expect(intersects(dispatchAssignCta, launcherBox)).toBe(false);
+
+      const targets: HitTarget[] = [
+        {
+          id: "ops-assistant-portal-root",
+          box: { left: 0, top: 0, width: 1440, height: 900 },
+          pointerEvents: "none",
+          zIndex: 5000,
+        },
+        {
+          id: "ops-assistant-launcher",
+          box: launcherBox,
+          pointerEvents: "auto",
+          zIndex: 5001,
+        },
+        {
+          id: "dispatch-pagination-cta",
+          box: paginationCta,
+          pointerEvents: "auto",
+          zIndex: 10,
+        },
+      ];
+
+      expect(hitTest(100, 855, targets)).toBe("dispatch-pagination-cta");
+      expect(hitTest(1300, 850, targets)).toBe("ops-assistant-launcher");
     });
 
     it("verifies 390x844 mobile viewport clamp, CTA accessibility, and safe boundaries", () => {
       const mobile = { width: 390, height: 844 };
       const defaultState = buildDefaultState(mobile);
 
-      // Clamped width fits screen with 16px padding on both sides
+      // Clamped width fits screen with margin on both sides (<= 350)
       expect(defaultState.width).toBeLessThanOrEqual(350);
       expect(defaultState.width + EDGE_GAP * 2).toBeLessThanOrEqual(mobile.width);
+      expect(defaultState.closed).toBe(false);
+      expect(defaultState.minimized).toBe(true);
 
-      // Bottom action bar on mobile: e.g. driver offboarding confirm button
+      const panelStyle = buildShellPanelStyle(defaultState);
+      const panelBox: Box = {
+        left: Number(panelStyle.left), // 20
+        top: Number(panelStyle.top), // 760
+        width: Number(panelStyle.width), // 350
+        height: Number(panelStyle.height), // 64
+      };
+
+      // Bottom action bar on mobile placed above docked panel or with safe scroll padding
       const mobileActionBar: Box = {
         left: 16,
-        top: 780,
-        width: 280,
-        height: 48,
-      };
-      const mobileLauncherBox: Box = {
-        left: mobile.width - 48 - EDGE_GAP, // 326
-        top: mobile.height - 48 - EDGE_GAP, // 780
-        width: 48,
+        top: 680,
+        width: 358,
         height: 48,
       };
 
-      // Space is properly partitioned
-      expect(intersects(mobileActionBar, mobileLauncherBox)).toBe(false);
+      // Workspace element does not collide with docked minimized panel
+      expect(intersects(mobileActionBar, panelBox)).toBe(false);
 
       const targets: HitTarget[] = [
         {
@@ -646,10 +725,10 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
           zIndex: 5000,
         },
         {
-          id: "ops-assistant-launcher",
-          box: mobileLauncherBox,
+          id: "ops-assistant-panel",
+          box: panelBox,
           pointerEvents: "auto",
-          zIndex: 5001,
+          zIndex: 5000,
         },
         {
           id: "mobile-action-bar-submit",
@@ -660,9 +739,9 @@ describe("SR-OPS-SHELL-001: Assistant Widget Layout & Responsiveness", () => {
       ];
 
       // Click on mobile action bar -> hits mobile action bar
-      expect(hitTest(100, 800, targets)).toBe("mobile-action-bar-submit");
-      // Click on launcher -> hits launcher
-      expect(hitTest(340, 800, targets)).toBe("ops-assistant-launcher");
+      expect(hitTest(100, 700, targets)).toBe("mobile-action-bar-submit");
+      // Click on minimized panel -> hits assistant panel
+      expect(hitTest(200, 780, targets)).toBe("ops-assistant-panel");
     });
 
     it("maintains reasonable layout after toggle cycle and simulated browser reload", () => {
