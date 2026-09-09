@@ -221,7 +221,6 @@ export function recordsToPdf(
       doc.page.width - doc.page.margins.left - doc.page.margins.right;
     const colW = Math.floor(printW / columns.length);
     const startX = doc.page.margins.left;
-    const headerH = 22;
     const cellPad = 4;
     const cellTextW = colW - cellPad * 2;
     const pageBottom = doc.page.height - doc.page.margins.bottom;
@@ -230,14 +229,27 @@ export function recordsToPdf(
 
     const drawHeader = () => {
       doc.fontSize(9).font(fontBold);
+      // Narrow columns can wrap long labels onto multiple lines. Measure the
+      // labels before the first data row is positioned, otherwise its fill can
+      // cover the lower part of a wrapped header.
+      const headerH = Math.max(
+        22,
+        ...columns.map(
+          (column) =>
+            doc.heightOfString(column, { width: cellTextW }) + cellPad * 2,
+        ),
+      );
       for (let ci = 0; ci < columns.length; ci++) {
         const x = startX + ci * colW;
         doc.rect(x, y, colW, headerH).fillAndStroke("#E2E8F0", "#94A3B8");
+      }
+      for (let ci = 0; ci < columns.length; ci++) {
+        const x = startX + ci * colW;
         doc
           .fillColor("black")
           .text(columns[ci] ?? "", x + cellPad, y + cellPad + 2, {
             width: cellTextW,
-            lineBreak: false,
+            lineBreak: true,
           });
       }
       y += headerH;
