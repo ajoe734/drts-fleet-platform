@@ -189,6 +189,58 @@ export type DispatchResourceReservationRecord = {
   version: number;
 };
 
+export type VoiceCallAdmissionRecord = {
+  admissionId: string;
+  providerAccountId: string;
+  providerCallId: string;
+  receivedAt: string;
+  lineBindingId: string | null;
+  brandId: string | null;
+  outcome: "admitted" | "overflow" | "failed";
+  reason: string | null;
+  voiceSessionId: string | null;
+  createdAt: string;
+};
+
+export type VoiceUsageRowRecord = {
+  usageId: string;
+  providerAccountId: string;
+  providerUsageRef: string | null;
+  admissionId: string | null;
+  voiceSessionId: string | null;
+  provider: string;
+  model: string | null;
+  modelVersion: string | null;
+  billingUnit: string;
+  quantity: number;
+  currency: string;
+  rateCardId: string | null;
+  rateCardVersion: number | null;
+  estimatedCost: number | null;
+  actualCost: number | null;
+  invoiceRef: string | null;
+  brandId: string | null;
+  usageDate: string;
+  createdAt: string;
+};
+
+export type VoiceRateCardRowRecord = {
+  rateCardId: string;
+  version: number;
+  provider: string;
+  currency: string;
+  taxInclusive: boolean;
+  unitPrice: number;
+  billingUnit: string;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  roundingRule: string | null;
+  minimumCharge: number | null;
+  conditions: unknown;
+  reconciliationStatus: string;
+  createdAt: string;
+};
+
 type VoiceSessionRow = QueryResultRow & {
   voice_session_id: string;
   call_id: string;
@@ -1092,6 +1144,105 @@ export class VoiceBookingRepository {
     );
     const row = result.rows[0];
     return row ? mapReservationRow(row) : null;
+  }
+
+  async findCallAdmissionById(
+    admissionId: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceCallAdmissionRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<QueryResultRow>(
+      `SELECT * FROM voice.call_admission WHERE admission_id = $1 LIMIT 1`,
+      [admissionId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      admissionId: String(row.admission_id),
+      providerAccountId: String(row.provider_account_id),
+      providerCallId: String(row.provider_call_id),
+      receivedAt: new Date(row.received_at as string | number | Date).toISOString(),
+      lineBindingId: row.line_binding_id ? String(row.line_binding_id) : null,
+      brandId: row.brand_id ? String(row.brand_id) : null,
+      outcome: row.outcome as "admitted" | "overflow" | "failed",
+      reason: row.reason ? String(row.reason) : null,
+      voiceSessionId: row.voice_session_id ? String(row.voice_session_id) : null,
+      createdAt: new Date(row.created_at as string | number | Date).toISOString(),
+    };
+  }
+
+  async findUsageRecordsBySession(
+    voiceSessionId: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceUsageRowRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<QueryResultRow>(
+      `SELECT * FROM voice.usage_record WHERE voice_session_id = $1 ORDER BY created_at ASC`,
+      [voiceSessionId],
+    );
+    return result.rows.map((row) => ({
+      usageId: String(row.usage_id),
+      providerAccountId: String(row.provider_account_id),
+      providerUsageRef: row.provider_usage_ref ? String(row.provider_usage_ref) : null,
+      admissionId: row.admission_id ? String(row.admission_id) : null,
+      voiceSessionId: row.voice_session_id ? String(row.voice_session_id) : null,
+      provider: String(row.provider),
+      model: row.model ? String(row.model) : null,
+      modelVersion: row.model_version ? String(row.model_version) : null,
+      billingUnit: String(row.billing_unit),
+      quantity: Number(row.quantity),
+      currency: String(row.currency),
+      rateCardId: row.rate_card_id ? String(row.rate_card_id) : null,
+      rateCardVersion: row.rate_card_version ? Number(row.rate_card_version) : null,
+      estimatedCost: row.estimated_cost !== null && row.estimated_cost !== undefined ? Number(row.estimated_cost) : null,
+      actualCost: row.actual_cost !== null && row.actual_cost !== undefined ? Number(row.actual_cost) : null,
+      invoiceRef: row.invoice_ref ? String(row.invoice_ref) : null,
+      brandId: row.brand_id ? String(row.brand_id) : null,
+      usageDate: String(row.usage_date),
+      createdAt: new Date(row.created_at as string | number | Date).toISOString(),
+    }));
+  }
+
+  async findRateCard(
+    rateCardId: string,
+    version: number,
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceRateCardRowRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<QueryResultRow>(
+      `SELECT * FROM voice.rate_card WHERE rate_card_id = $1 AND version = $2 LIMIT 1`,
+      [rateCardId, version],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      rateCardId: String(row.rate_card_id),
+      version: Number(row.version),
+      provider: String(row.provider),
+      currency: String(row.currency),
+      taxInclusive: Boolean(row.tax_inclusive),
+      unitPrice: Number(row.unit_price),
+      billingUnit: String(row.billing_unit),
+      effectiveFrom: new Date(row.effective_from as string | number | Date).toISOString(),
+      effectiveUntil: row.effective_until ? new Date(row.effective_until as string | number | Date).toISOString() : null,
+      roundingRule: row.rounding_rule ? String(row.rounding_rule) : null,
+      minimumCharge: row.minimum_charge !== null && row.minimum_charge !== undefined ? Number(row.minimum_charge) : null,
+      conditions: row.conditions,
+      reconciliationStatus: String(row.reconciliation_status),
+      createdAt: new Date(row.created_at as string | number | Date).toISOString(),
+    };
   }
 
   private requireDatabase(): VoiceQueryExecutor {

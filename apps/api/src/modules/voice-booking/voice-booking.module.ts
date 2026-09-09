@@ -25,6 +25,7 @@ import { VoiceContactService } from "./voice-contact.service";
 import { VoiceCallbackService } from "./voice-callback.service";
 import { VoicePolicyService } from "./voice-policy.service";
 import { VoiceRetentionService } from "./voice-retention.service";
+import { VoiceUsageService } from "./voice-usage.service";
 
 /**
  * UV-EXEC-003 built VoiceBookingRepository/VoiceBookingAuthorizationService/
@@ -57,6 +58,7 @@ import { VoiceRetentionService } from "./voice-retention.service";
     VoiceCallbackService,
     VoicePolicyService,
     VoiceRetentionService,
+    VoiceUsageService,
   ],
   exports: [
     VoiceBookingCommandService,
@@ -77,6 +79,7 @@ import { VoiceRetentionService } from "./voice-retention.service";
     VoiceCallbackService,
     VoicePolicyService,
     VoiceRetentionService,
+    VoiceUsageService,
   ],
 })
 export class VoiceBookingModule {}
