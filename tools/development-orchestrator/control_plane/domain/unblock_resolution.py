@@ -28,7 +28,11 @@ def parent_resume_blocker(
     disposition = str(helper.get("resolved_parent_status") or "").lower()
     if disposition and disposition not in {"todo", "backlog", "in_progress"}:
         return f"helper keeps parent {disposition}"
-    completed_at = _timestamp(helper.get("resolved_parent_at") or helper.get("last_update"))
+    # Legacy last_update is mutable even after completion (note/progress).
+    # Without a resolution clock, the helper cannot prove it covers a blocker.
+    completed_at = _timestamp(helper.get("resolved_parent_at"))
+    if completed_at is None:
+        return "helper has no verifiable parent resolution time"
     for blocker in status.get("blockers", []) or []:
         if not isinstance(blocker, dict) or blocker.get("task_id") != parent.get("id") or blocker.get("status") != "open":
             continue
