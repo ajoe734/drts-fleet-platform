@@ -1,8 +1,5 @@
 import { Injectable, Optional, Logger } from "@nestjs/common";
-import type {
-  OwnedOrderRecord,
-  OwnedOrderStatus,
-} from "@drts/contracts";
+import type { OwnedOrderRecord, OwnedOrderStatus } from "@drts/contracts";
 import { ApiRequestError } from "../../common/api-envelope";
 import { VoiceBookingRepository } from "./voice-booking.repository";
 import { VoiceBookingAuthorizationService } from "./voice-booking-authorization.service";
@@ -217,9 +214,10 @@ export class VoiceOperationPolicyService {
   constructor(
     private readonly repository: VoiceBookingRepository,
     private readonly authorization: VoiceBookingAuthorizationService,
-    @Optional() private readonly ownedMobilityRepository?: OwnedMobilityRepository,
+    @Optional()
+    private readonly ownedMobilityRepository?: OwnedMobilityRepository,
     @Optional() private readonly ownedMobilityService?: OwnedMobilityService,
-    config?: Partial<CapabilityRegistryConfig>,
+    @Optional() config?: Partial<CapabilityRegistryConfig>,
   ) {
     this.capabilities = {
       ...DEFAULT_CAPABILITY_REGISTRY_CONFIG.capabilities,
@@ -229,7 +227,9 @@ export class VoiceOperationPolicyService {
 
   // --- Capability Registry Management ---
 
-  getCapabilityStatus(capability: VoiceOperationCapability): VoiceCapabilityStatus {
+  getCapabilityStatus(
+    capability: VoiceOperationCapability,
+  ): VoiceCapabilityStatus {
     return this.capabilities[capability] ?? "disabled";
   }
 
@@ -350,7 +350,8 @@ export class VoiceOperationPolicyService {
 
     // Verified OTP or passenger proof
     if (
-      (identityProof.method === "otp" || identityProof.method === "passenger_proof") &&
+      (identityProof.method === "otp" ||
+        identityProof.method === "passenger_proof") &&
       identityProof.verifiedPhone
     ) {
       if (!targetOrderId) {
@@ -438,8 +439,7 @@ export class VoiceOperationPolicyService {
           activeOrderId: order.orderId,
           orderStatus: order.status,
           policyAction: "divert_duplicate",
-          messageZh:
-            "系統核對發現本通通話已綁定進行中之行程，不直接重複下單。",
+          messageZh: "系統核對發現本通通話已綁定進行中之行程，不直接重複下單。",
         };
       }
     }
@@ -616,7 +616,8 @@ export class VoiceOperationPolicyService {
         reason: "order_not_cancelable",
         action: "reject",
         orderId,
-        messageZh: "車輛已在行程中（on_trip），無法透過電話取消，請聯絡司機或客服。",
+        messageZh:
+          "車輛已在行程中（on_trip），無法透過電話取消，請聯絡司機或客服。",
       };
     }
 
@@ -625,8 +626,9 @@ export class VoiceOperationPolicyService {
     const cancellationFee = this.computeCancellationFee(order);
 
     const orderVersion = order.aggregateVersion ?? 1;
-    const assignmentVersion = (order as unknown as { assignmentVersion?: number })
-      .assignmentVersion ?? 1;
+    const assignmentVersion =
+      (order as unknown as { assignmentVersion?: number }).assignmentVersion ??
+      1;
 
     return {
       permitted: true,
@@ -645,7 +647,9 @@ export class VoiceOperationPolicyService {
     };
   }
 
-  async executeCancel(command: ExecuteCancelCommand): Promise<CancelExecutionResult> {
+  async executeCancel(
+    command: ExecuteCancelCommand,
+  ): Promise<CancelExecutionResult> {
     const {
       voiceSessionId,
       resourceScopeId,
@@ -744,13 +748,13 @@ export class VoiceOperationPolicyService {
       order.bookingRequirements?.passengerContact?.phone;
     const isVerifiedPassenger = Boolean(
       identityProof &&
-        (identityProof.method === "otp" ||
-          identityProof.method === "passenger_proof" ||
-          identityProof.method === "bound_session" ||
-          identityProof.method === "access_code") &&
-        identityProof.verifiedPhone &&
-        passengerPhone &&
-        passengerPhone === identityProof.verifiedPhone,
+      (identityProof.method === "otp" ||
+        identityProof.method === "passenger_proof" ||
+        identityProof.method === "bound_session" ||
+        identityProof.method === "access_code") &&
+      identityProof.verifiedPhone &&
+      passengerPhone &&
+      passengerPhone === identityProof.verifiedPhone,
     );
 
     if (!isBoundOrder && !isCallOrder && !isVerifiedPassenger) {
@@ -851,7 +855,9 @@ export class VoiceOperationPolicyService {
     return null;
   }
 
-  private sanitizeOrderMinimal(order: OwnedOrderRecord): MinimalDisclosedOrderInfo {
+  private sanitizeOrderMinimal(
+    order: OwnedOrderRecord,
+  ): MinimalDisclosedOrderInfo {
     const passengerPhone =
       order.passenger?.phone ??
       order.bookingRequirements?.passengerContact?.phone;
@@ -859,7 +865,8 @@ export class VoiceOperationPolicyService {
     return {
       orderId: order.orderId,
       status: order.status,
-      vehiclePlate: (order as unknown as { vehiclePlate?: string }).vehiclePlate ?? null,
+      vehiclePlate:
+        (order as unknown as { vehiclePlate?: string }).vehiclePlate ?? null,
       etaMinutes: order.etaSnapshot?.etaMinutes ?? null,
       driverNameMasked: (order as unknown as { driverName?: string }).driverName
         ? `${(order as unknown as { driverName?: string }).driverName![0]} * 司機`
