@@ -294,8 +294,7 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
         fleetPartnerId: "fp-001",
         rows: [
           {
-            courseCode: "platform_basics",
-            zh: "基礎安全培訓",
+            course: "基礎安全培訓",
             en: "Platform Basics",
             completed: 10,
             total: 10,
@@ -311,6 +310,7 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
       };
       expect(view.source).toBe("authoritative");
       expect(view.summary.completionPct).toBe("100%");
+      expect(view.rows[0]?.course).toBe("基礎安全培訓");
     });
 
     it("validates HostVehicleEarningsSummary with null financial split invariants", () => {
