@@ -1,5 +1,21 @@
 # SR-QA-TENANT-001 — 租戶驗收進度證據
 
+## 2026-09-09 本次 owned_ready_dispatch：恢復條件仍未具備
+
+`git fetch origin` exit 0；本輪 origin/dev base 為 `add6694278b3287bb42215b24d4c91039d0c6645`，檢查 HEAD 為 `510333b53a452d9b0dacba0d1a76948a8d1ee128`。無 candidate，未 handoff。已重讀 current-dev HISTORY-REPAIR：helper 要求保留 provisioning blocker，且由 supervisor 路由 current-dev recovery branch、核對 task cumulative patch 及舊 PR #1769 關聯。
+
+| 本輪實際指令 | exit | 結果 |
+| --- | --- | --- |
+| `git rebase origin/dev` | 1 | 57 筆重播第 12 筆 f2e49cdf5，directory.spec.ts add/add 衝突 |
+| `git rebase --abort` | 0 | 恢復原任務分支 |
+| `git rev-list --left-right --count HEAD...origin/codex/sr-qa-tenant-001` | 0 | 0 / 0 |
+| `printenv \| cut -d= -f1 \| rg '^DRTS_TENANT_UAT_'` | 1 | 無 UAT 設定名稱；未讀出憑證值 |
+| `pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001/ --max-warnings=0` | 0 | 現有四份 spec 靜態檢查通過 |
+
+本輪遵守 VM 禁令，未執行 Playwright、產品或瀏覽器伺服器、Docker Compose。HTTP calls 0、資源 ID 無；live、DB、mail、瀏覽器及完整能力矩陣未驗收，unit/typecheck 未重跑。未修改測試或業務碼，不以歷史測試結果當成本輪驗收。
+
+恢復需 supervisor 指定 recovery branch 並核對 cumulative patch；Gemini/provisioner 提供允許執行驗收的環境與前述六項設定，附非機密來源、身份有效期及 teardown 責任。此次僅 anchor 並普通 push 阻礙證據，canonical 狀態應維持 blocked；helper done 或重新派工均非上述條件完成證據。
+
 ## 2026-09-09 resumed dispatch：重驗 recovery 與 provisioning 前置
 
 本輪 fetch exit 0；origin/dev base `fb2ea6e2ed3c2937d7d65d601967d183b0257048`，檢查 HEAD `d70f4b7c2895d00bc065545da96acfcb74122535`。尚無 candidate，未 handoff。重新讀取 current-dev HISTORY-REPAIR：helper 完成不代表 recovery routing 或 provisioned access 完成。
