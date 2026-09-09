@@ -1,5 +1,21 @@
 # SR-QA-TENANT-001 — 租戶驗收進度證據
 
+## 2026-09-09 resumed dispatch：重驗 recovery 與 provisioning 前置
+
+本輪 fetch exit 0；origin/dev base `fb2ea6e2ed3c2937d7d65d601967d183b0257048`，檢查 HEAD `d70f4b7c2895d00bc065545da96acfcb74122535`。尚無 candidate，未 handoff。重新讀取 current-dev HISTORY-REPAIR：helper 完成不代表 recovery routing 或 provisioned access 完成。
+
+| 本輪實際指令 | exit | 結果 |
+| --- | --- | --- |
+| `git rebase origin/dev` | 1 | 56 筆重播第 12 筆 f2e49cdf5，directory.spec.ts add/add 衝突 |
+| `git rebase --abort` | 0 | 恢復已發布 task 分支 |
+| `git rev-list --left-right --count HEAD...origin/codex/sr-qa-tenant-001` | 0 | 0 / 0 |
+| `printenv \| cut -d= -f1 \| rg '^DRTS_TENANT_UAT_'` | 1 | 六項設定皆未注入；僅檢查名稱 |
+| `pnpm exec eslint tests/e2e/system-remediation/sr-qa-tenant-001/ --max-warnings=0` | 0 | 靜態 lint 通過 |
+
+遵守本次 VM 禁令，未執行 Playwright、產品／瀏覽器伺服器或 Docker Compose。HTTP calls 0、資源 ID 無；live、DB、mail、瀏覽器及完整能力矩陣均未驗收，unit/typecheck 未重跑。未修改業務碼或測試。
+
+請 supervisor 按已合併 helper 路由 current-dev recovery branch 與經核對 cumulative patch，並處理舊 PR #1769 關聯；Gemini/provisioner 提供允許執行的驗收環境、六項設定及非機密來源、有效期、teardown 責任。保留現有 refs，不 force push、不 merge 舊 ancestry。此次只提交阻礙證據，canonical blocker 保留上述前置。
+
 ## 2026-09-09 dispatch：history repair 後仍需 recovery routing 與環境
 
 本輪 `git fetch origin` exit 0；base `origin/dev` 為 `3062ea363769cc393e59384251f5aedc7e570ac5`，檢查時 task HEAD 為 `eeb4bc9bcda49ccbed28660a93e36913b39dcd65`。尚無 candidate，未 handoff。
