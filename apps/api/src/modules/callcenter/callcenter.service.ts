@@ -285,19 +285,42 @@ export class CallcenterService implements OnModuleInit {
       );
     }
 
-    const session = this.cloneSession(rawSession);
-    let policy: ReturnType<typeof assertEvidenceAccess> | null = null;
-    try {
-      policy = assertEvidenceAccess({
+    const isTenant =
+      identity?.realm === "tenant" ||
+      (identity?.actorType as string) === "tenant_admin" ||
+      (identity?.actorType as string) === "tenant_user";
+
+    if (isTenant) {
+      assertEvidenceAccess({
         family: "call_recording",
         identity,
       });
-    } catch {
-      // Mask recording details if identity does not have call_recording evidence access
+    }
+
+    const session = this.cloneSession(rawSession);
+    let policy: ReturnType<typeof assertEvidenceAccess> | null = null;
+    const isRecordingUnauthorized = Boolean(
+      (identity as any)?.roles?.includes("guest_viewer"),
+    );
+
+    if (isRecordingUnauthorized) {
       session.recordingId = null;
       session.providerRecordingRef = null;
       session.recordingUrl = null;
       session.recordingState = "missing";
+    } else {
+      try {
+        policy = assertEvidenceAccess({
+          family: "call_recording",
+          identity,
+        });
+      } catch {
+        // Mask recording details if identity does not have call_recording evidence access
+        session.recordingId = null;
+        session.providerRecordingRef = null;
+        session.recordingUrl = null;
+        session.recordingState = "missing";
+      }
     }
 
     if (policy) {
@@ -903,13 +926,14 @@ export class CallcenterService implements OnModuleInit {
     }
 
     const now = new Date().toISOString();
-    session.callbackTask = {
+    const updatedTask: CallbackTaskRecord = {
       ...session.callbackTask,
       agentId: operatorId,
       assignedOperatorId: operatorId,
       status: "claimed" as any,
       updatedAt: now,
     } as any;
+    session.callbackTask = updatedTask;
     this.persistSessions([session], "claim_callback_task");
 
     if (this.voiceCallbackService) {
@@ -932,17 +956,17 @@ export class CallcenterService implements OnModuleInit {
         moduleName: "callcenter",
         actionName: "claim_callback_task",
         resourceType: "callback_task",
-        resourceId: session.callbackTask.callbackTaskId,
+        resourceId: updatedTask.callbackTaskId,
         newValuesSummary: {
           callId: session.callId,
-          status: session.callbackTask.status,
+          status: updatedTask.status,
           operatorId,
         },
       },
       requestId,
     );
 
-    return this.cloneCallbackTask(session.callbackTask);
+    return this.cloneCallbackTask(updatedTask);
   }
 
   recordCallbackAttempt(
@@ -983,7 +1007,7 @@ export class CallcenterService implements OnModuleInit {
         : "pending";
     const currentAttemptCount =
       ((session.callbackTask as any).attemptCount ?? 0) + 1;
-    session.callbackTask = {
+    const updatedTask: CallbackTaskRecord = {
       ...session.callbackTask,
       note: command.notes ?? session.callbackTask.note,
       status: newStatus as any,
@@ -991,6 +1015,7 @@ export class CallcenterService implements OnModuleInit {
       lastOutcome: command.outcome,
       updatedAt: now,
     } as any;
+    session.callbackTask = updatedTask;
     this.persistSessions([session], "record_callback_attempt");
 
     if (this.voiceCallbackService) {
@@ -1016,17 +1041,17 @@ export class CallcenterService implements OnModuleInit {
         moduleName: "callcenter",
         actionName: "record_callback_attempt",
         resourceType: "callback_task",
-        resourceId: session.callbackTask.callbackTaskId,
+        resourceId: updatedTask.callbackTaskId,
         newValuesSummary: {
           callId: session.callId,
           outcome: command.outcome,
-          status: session.callbackTask.status,
+          status: updatedTask.status,
         },
       },
       requestId,
     );
 
-    return this.cloneCallbackTask(session.callbackTask);
+    return this.cloneCallbackTask(updatedTask);
   }
 
   cancelCallbackTask(
@@ -1053,12 +1078,13 @@ export class CallcenterService implements OnModuleInit {
     }
 
     const now = new Date().toISOString();
-    session.callbackTask = {
+    const updatedTask: CallbackTaskRecord = {
       ...session.callbackTask,
       note: command.reason ?? session.callbackTask.note,
       status: "cancelled" as any,
       updatedAt: now,
     };
+    session.callbackTask = updatedTask;
     this.removeFlag(session, "callback_pending");
     this.persistSessions([session], "cancel_callback_task");
 
@@ -1083,17 +1109,17 @@ export class CallcenterService implements OnModuleInit {
         moduleName: "callcenter",
         actionName: "cancel_callback_task",
         resourceType: "callback_task",
-        resourceId: session.callbackTask.callbackTaskId,
+        resourceId: updatedTask.callbackTaskId,
         newValuesSummary: {
           callId: session.callId,
-          status: session.callbackTask.status,
+          status: updatedTask.status,
           reason: command.reason,
         },
       },
       requestId,
     );
 
-    return this.cloneCallbackTask(session.callbackTask);
+    return this.cloneCallbackTask(updatedTask);
   }
 
   takeoverAiCallSession(
