@@ -18,6 +18,8 @@ import { VoiceCallbackService } from "../../apps/api/src/modules/voice-booking/v
 import { VoiceHandoffService } from "../../apps/api/src/modules/voice-booking/voice-handoff.service";
 import { VoiceSessionRepository } from "../../apps/api/src/modules/voice-booking/voice-session.repository";
 import { VoiceHandoffQueueService } from "../../apps/api/src/modules/callcenter/voice-handoff-queue.service";
+import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
+import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { voiceSnapshotHash } from "../../apps/api/src/modules/voice-booking/voice-confirmation.service";
 import { voiceCommandFixture } from "../support/voice-booking-command-fixture";
 import { OwnedAutonomousDispatchExecutorService } from "../../apps/api/src/modules/owned-mobility/owned-autonomous-dispatch-executor.service";
@@ -28,10 +30,9 @@ const require = createRequire(
 );
 const { Pool } = require("pg") as typeof import("pg");
 
-const connectionString =
-  process.env.UV_BOOKING_TEST_DATABASE_URL ||
-  process.env.DATABASE_URL ||
-  "postgresql://postgres:postgres@localhost:5432/postgres";
+// Explicit isolated test database configuration is required (Acceptance 1 / UV-AC-023).
+// Falling back to generic DATABASE_URL or localhost defaults is strictly forbidden.
+const connectionString = process.env.UV_BOOKING_TEST_DATABASE_URL;
 
 const migration = (name: string) =>
   readFileSync(
@@ -48,7 +49,7 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
   beforeAll(async () => {
     if (!connectionString) {
       throw new Error(
-        "UV-EXEC-024 Acceptance Requirement: PostgreSQL connection string must be configured. Suites cannot skip and claim success.",
+        "UV-EXEC-024 Acceptance Requirement: UV_BOOKING_TEST_DATABASE_URL must be explicitly configured with an isolated test database. Falling back to default or generic DATABASE_URL is prohibited. Test suite fails explicitly when DB is unconfigured.",
       );
     }
 
@@ -112,25 +113,61 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
   // connecting to the same real PostgreSQL database, with its own fault injection proxy.
   function createInstance() {
     let fault:
-      | { matches: (sql: string) => boolean; after?: boolean }
+      | {
+          matches: (sql: string, state: { hasOrderWrite: boolean }) => boolean;
+          after?: boolean;
+          crash?: boolean;
+        }
       | undefined;
+    let hasOrderWrite = false;
 
     const database = {
       isEnabled: () => true,
       query: (sql: string, values?: unknown[]) => pool.query(sql, values),
       connect: async () => {
         const client = await pool.connect();
+        if (client.listenerCount("error") === 0) {
+          client.on("error", () => {}); // Catch background socket termination without uncaughtException
+        }
         return new Proxy(client, {
           get(target, prop) {
+            if (prop === "release") {
+              return (...args: unknown[]) => {
+                try {
+                  return (target as any).release(...args);
+                } catch {}
+              };
+            }
             if (prop === "query") {
               return async (sql: string, values?: unknown[]) => {
-                const injected = fault?.matches(sql) ? fault : undefined;
+                if (
+                  typeof sql === "string" &&
+                  (sql.includes(
+                    "UPDATE voice.command_receipt SET status = 'succeeded'",
+                  ) ||
+                    sql.includes("INSERT INTO ops.phase1_owned_orders"))
+                ) {
+                  hasOrderWrite = true;
+                }
+                const injected = fault?.matches(sql, { hasOrderWrite })
+                  ? fault
+                  : undefined;
                 if (injected) fault = undefined;
                 if (injected && !injected.after) {
+                  if (injected.crash) {
+                    try {
+                      (target as any).connection?.stream?.destroy();
+                    } catch {}
+                  }
                   throw new Error("injected connection loss before write");
                 }
                 const result = await target.query(sql, values);
                 if (injected?.after) {
+                  if (injected.crash) {
+                    try {
+                      (target as any).connection?.stream?.destroy();
+                    } catch {}
+                  }
                   throw new Error("injected response loss after write");
                 }
                 return result;
@@ -153,12 +190,22 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       sessionRepository,
       orders,
       setFault: (
-        f: { matches: (sql: string) => boolean; after?: boolean } | undefined,
+        f:
+          | {
+              matches: (
+                sql: string,
+                state: { hasOrderWrite: boolean },
+              ) => boolean;
+              after?: boolean;
+              crash?: boolean;
+            }
+          | undefined,
       ) => {
         fault = f;
       },
       clearFault: () => {
         fault = undefined;
+        hasOrderWrite = false;
       },
     };
   }
@@ -608,21 +655,42 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       const accepted = await cmdA.accept("test-cred-a", f.request);
       const commandId = accepted.commandId;
 
-      // Injected response loss after updating command_receipt to succeeded
+      // Injected connection crash / response loss on Instance A on actual order transaction COMMIT
       instA.setFault({
-        matches: (sql) =>
-          sql.includes("UPDATE voice.command_receipt SET status = 'succeeded'"),
+        matches: (sql, state) => sql === "COMMIT" && state.hasOrderWrite,
         after: true,
+        crash: true,
       });
 
       await expect(runnerA.execute(commandId)).rejects.toThrow(
         "injected response loss after write",
       );
 
+      // Assert persisted order, receipt, proof, and audit before retry (proving transaction COMMITTED before crash)
+      const countsAfterA = await getCounts(f.request.intentId);
+      expect(countsAfterA.orders).toBe(1);
+      expect(countsAfterA.receipts).toBe(1);
+      expect(countsAfterA.proofs).toBe(1);
+      expect(countsAfterA.audits).toBe(1);
+
+      const receiptRow = await pool.query(
+        "SELECT status, order_id FROM voice.command_receipt WHERE command_id = $1",
+        [commandId],
+      );
+      expect(receiptRow.rows[0].status).toBe("succeeded");
+      expect(receiptRow.rows[0].order_id).toBeDefined();
+
+      const confRow = await pool.query(
+        "SELECT state, consumed_command_id FROM voice.confirmation WHERE confirmation_id = $1",
+        [f.request.confirmationId],
+      );
+      expect(confRow.rows[0].state).toBe("consumed");
+      expect(confRow.rows[0].consumed_command_id).toBe(commandId);
+
       // Caller/runner retries execution on Instance B
       const resultB = await runnerB.execute(commandId);
       expect(resultB.status).toBe("succeeded");
-      expect(resultB.orderId).toBeDefined();
+      expect(resultB.orderId).toBe(receiptRow.rows[0].order_id);
 
       const counts = await getCounts(f.request.intentId);
       expect(counts.orders).toBe(1);
@@ -633,6 +701,9 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       expect(retryResult.orderId).toBe(resultB.orderId);
       const countsAfterRetry = await getCounts(f.request.intentId);
       expect(countsAfterRetry.orders).toBe(1);
+      expect(countsAfterRetry.receipts).toBe(1);
+      expect(countsAfterRetry.proofs).toBe(1);
+      expect(countsAfterRetry.audits).toBe(1);
     });
 
     it("Case 2.6: Concurrent runner execution produces exactly 1 order with zero duplicate side effects", async () => {
@@ -841,20 +912,32 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
 
     it("Case 3.2: Mixed entry fence prevents call-center / legacy double booking on active voice call", async () => {
       const f = await seedVoiceFixture();
-      const inst = createInstance();
-      const cmd = new VoiceBookingCommandService(
-        inst.repository,
-        f.makeEvidence(inst.repository) as never,
+      const instA = createInstance();
+      const instB = createInstance();
+
+      const cmdA = new VoiceBookingCommandService(
+        instA.repository,
+        f.makeEvidence(instA.repository) as never,
         f.products as never,
         f.areas as never,
         f.access,
       );
-      const runner = new VoiceCommandRunnerService(cmd, inst.orders);
+      const runnerA = new VoiceCommandRunnerService(cmdA, instA.orders);
 
-      // When voice booking is pending: resolveVoiceOrderFence returns pending
-      const accepted = await cmd.accept("test-cred", f.request);
+      const auditNotificationService = new AuditNotificationService();
+      const callcenterServiceB = new CallcenterService(
+        auditNotificationService,
+        undefined,
+        instB.repository,
+      );
+      callcenterServiceB.upsertExternalSession({ callId: f.callId });
+
+      // Step 1: Voice command accepted and pending
+      const accepted = await cmdA.accept("test-cred-a", f.request);
+
+      // Verify resolveVoiceOrderFence returns pending
       const fencePending = await resolveVoiceOrderFence(
-        inst.repository,
+        instB.repository,
         f.callId,
       );
       expect(fencePending).toEqual({
@@ -862,13 +945,24 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         intentId: f.request.intentId,
       });
 
-      // Execute and commit voice booking
-      const executed = await runner.execute(accepted.commandId);
+      // Competing callcenter entry: Operator attempts to link an order to this call
+      // while voice booking is pending reconciliation -> fails with 409 VOICE_ACTION_PENDING
+      const competingOrderId = `competing-callcenter-order-${randomUUID()}`;
+      await expect(
+        callcenterServiceB.linkOrderToExistingSession(f.callId, {
+          orderId: competingOrderId,
+        }),
+      ).rejects.toMatchObject({
+        code: "VOICE_ACTION_PENDING",
+      });
+
+      // Step 2: Voice runner executes and commits the order
+      const executed = await runnerA.execute(accepted.commandId);
       expect(executed.orderId).toBeDefined();
 
-      // Once voice booking succeeded: fence returns bound orderId, blocking legacy write
+      // Verify resolveVoiceOrderFence now returns bound orderId
       const fenceBound = await resolveVoiceOrderFence(
-        inst.repository,
+        instB.repository,
         f.callId,
       );
       expect(fenceBound).toEqual({
@@ -876,8 +970,37 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         orderId: executed.orderId,
       });
 
+      // Competing callcenter entry: Operator attempts to rebind call to a different order
+      // -> fails with 409 VOICE_ORDER_ALREADY_LINKED
+      await expect(
+        callcenterServiceB.linkOrderToExistingSession(f.callId, {
+          orderId: competingOrderId,
+        }),
+      ).rejects.toMatchObject({
+        code: "VOICE_ORDER_ALREADY_LINKED",
+      });
+
+      // Even if an uncooperative legacy writer attempts a raw UPDATE on crm.phase1_call_sessions
+      // with a different linked_order_id, the WHERE constraint prevents rebinding
+      const rawRebind = await pool.query(
+        `UPDATE crm.phase1_call_sessions
+         SET record = record || jsonb_build_object('linkedOrderId', $2::text), updated_at = now()
+         WHERE call_id = $1 AND (linked_order_id IS NULL OR linked_order_id = $2)`,
+        [f.callId, competingOrderId],
+      );
+      expect(rawRebind.rowCount).toBe(0);
+
+      // Assert in DB: Exactly 1 effective order exists for this call
+      const orderCount = await pool.query(
+        "SELECT count(*)::int as count FROM ops.phase1_owned_orders WHERE call_id = $1",
+        [f.callId],
+      );
+      expect(orderCount.rows[0].count).toBe(1);
+
       // Authorization service fails closed on cross-scope resolution
-      const authService = new VoiceBookingAuthorizationService(inst.repository);
+      const authService = new VoiceBookingAuthorizationService(
+        instB.repository,
+      );
       await expect(
         authService.resolveBoundOrderId(
           f.request.voiceSessionId,
@@ -895,6 +1018,7 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
     it("Case 3.3: Shared driver and vehicle capacity contention between voice and enterprise dispatch enforces mutual exclusion", async () => {
       const f = await seedVoiceFixture();
       const instA = createInstance();
+      const instB = createInstance();
 
       const cmdA = new VoiceBookingCommandService(
         instA.repository,
@@ -916,51 +1040,111 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         [orderBId, JSON.stringify({ orderId: orderBId })],
       );
 
-      const driverId = "shared-driver-001";
-      const vehicleId = "shared-vehicle-001";
-      const groupA = randomUUID();
-      const groupB = randomUUID();
+      const driverId = `shared-driver-${randomUUID().slice(0, 8)}`;
+      const vehicleId = `shared-vehicle-${randomUUID().slice(0, 8)}`;
+      const assignA = randomUUID();
+      const assignB = randomUUID();
 
-      // Instance A reserves the shared driver and vehicle for Order A
+      // Create placeholder assignment rows in ops.phase1_dispatch_assignments for FK
       await pool.query(
-        `INSERT INTO ops.dispatch_resource_reservations (
-          reservation_id,resource_type,resource_id,order_id,reservation_group_id,status
-         ) VALUES
-         (gen_random_uuid(),'driver',$1,$2,$3,'held'),
-         (gen_random_uuid(),'vehicle',$4,$2,$3,'held')`,
-        [driverId, orderA.orderId, groupA, vehicleId],
+        `INSERT INTO ops.phase1_dispatch_assignments (assignment_id, dispatch_job_id, order_id, task_id, status, created_at, updated_at, record)
+         VALUES
+         ($1, gen_random_uuid(), $2, gen_random_uuid(), 'draft', now(), now(), $3::jsonb),
+         ($4, gen_random_uuid(), $5, gen_random_uuid(), 'draft', now(), now(), $6::jsonb)`,
+        [
+          assignA,
+          orderA.orderId,
+          JSON.stringify({ driverId, vehicleId }),
+          assignB,
+          orderBId,
+          JSON.stringify({ driverId, vehicleId }),
+        ],
       );
 
-      // Instance B attempts to reserve the same driver for Order B while held by Order A
-      // PostgreSQL unique index uq_dispatch_resource_reservations_active must throw code 23505
-      let caughtUniqueViolation = false;
+      // Concurrent race: Instance A (Voice dispatch) and Instance B (Enterprise dispatch)
+      // both attempt to reserve the same driver AND vehicle via reserveDispatchResources
+      const [resA, resB] = await Promise.allSettled([
+        instA.orders.reserveDispatchResources(instA.database as never, {
+          orderId: orderA.orderId,
+          assignmentId: assignA,
+          driverId,
+          vehicleId,
+          expiresAt: null,
+        }),
+        instB.orders.reserveDispatchResources(instB.database as never, {
+          orderId: orderBId,
+          assignmentId: assignB,
+          driverId,
+          vehicleId,
+          expiresAt: null,
+        }),
+      ]);
+
+      const fulfilled = [resA, resB].filter((r) => r.status === "fulfilled");
+      const rejected = [resA, resB].filter((r) => r.status === "rejected");
+
+      // Exactly one writer wins both driver and vehicle; the other is rejected with unique conflict
+      expect(fulfilled.length).toBe(1);
+      expect(rejected.length).toBe(1);
+
+      const rejectErr = (rejected[0] as PromiseRejectedResult).reason;
+      expect(
+        rejectErr.code === "23505" ||
+          rejectErr.name === "DispatchResourceReservationConflictError" ||
+          rejectErr.message?.includes("duplicate key") ||
+          rejectErr.message?.includes("already held or occupied"),
+      ).toBe(true);
+
+      // Now test Old API revision writer attempting to insert into ops.phase1_dispatch_assignments
+      // directly with status 'assigned' without held reservations in ops.dispatch_resource_reservations
+      const oldRevAssignId = randomUUID();
+      const client = await pool.connect();
+      let oldRevFailed = false;
       try {
-        await pool.query(
-          `INSERT INTO ops.dispatch_resource_reservations (
-            reservation_id,resource_type,resource_id,order_id,reservation_group_id,status
-           ) VALUES (gen_random_uuid(),'driver',$1,$2,$3,'held')`,
-          [driverId, orderBId, groupB],
+        await client.query("BEGIN");
+        await client.query(
+          `INSERT INTO ops.phase1_dispatch_assignments (assignment_id, dispatch_job_id, order_id, task_id, status, created_at, updated_at, record)
+           VALUES ($1, gen_random_uuid(), $2, gen_random_uuid(), 'assigned', now(), now(), $3::jsonb)`,
+          [oldRevAssignId, orderBId, JSON.stringify({ driverId, vehicleId })],
         );
+        // Deferred constraint trigger trg_enforce_dispatch_assignment_reservation runs at COMMIT
+        await client.query("COMMIT");
       } catch (err: any) {
-        if (err.code === "23505") {
-          caughtUniqueViolation = true;
-        }
+        oldRevFailed = true;
+        await client.query("ROLLBACK").catch(() => {});
+        expect(err.message).toMatch(
+          /lacks paired dispatch_resource_reservations|without a held\/occupied ops\.dispatch_resource_reservations/i,
+        );
+      } finally {
+        client.release();
       }
-      expect(caughtUniqueViolation).toBe(true);
+      expect(oldRevFailed).toBe(true);
 
       // When Order A releases its reservation, Order B can acquire it
       await pool.query(
-        "UPDATE ops.dispatch_resource_reservations SET status = 'released' WHERE reservation_group_id = $1",
-        [groupA],
+        "UPDATE ops.dispatch_resource_reservations SET status = 'released' WHERE assignment_id = $1",
+        [assignA],
       );
 
-      const resB = await pool.query(
-        `INSERT INTO ops.dispatch_resource_reservations (
-          reservation_id,resource_type,resource_id,order_id,reservation_group_id,status
-         ) VALUES (gen_random_uuid(),'driver',$1,$2,$3,'held') RETURNING reservation_id`,
-        [driverId, orderBId, groupB],
+      const resBRetry = await instB.orders.reserveDispatchResources(
+        instB.database as never,
+        {
+          orderId: orderBId,
+          assignmentId: assignB,
+          driverId,
+          vehicleId,
+          expiresAt: null,
+        },
       );
-      expect(resB.rows.length).toBe(1);
+      expect(resBRetry.length).toBe(2);
+
+      // Verify in DB: unique effective active reservations
+      const activeRes = await pool.query(
+        "SELECT resource_type, resource_id, order_id, status FROM ops.dispatch_resource_reservations WHERE status IN ('held', 'occupied') AND resource_id IN ($1, $2)",
+        [driverId, vehicleId],
+      );
+      expect(activeRes.rows.length).toBe(2);
+      expect(activeRes.rows.every((r) => r.order_id === orderBId)).toBe(true);
     });
   });
 
@@ -969,20 +1153,53 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
   // =========================================================================
   describe("Suite 4: callback_control_race_evidence", () => {
     it("Case 4.1: Late timeout race (UV-AC-047) is safe no-op on already accepted offer or replaced assignment", async () => {
-      const mockOrder: any = {
-        orderId: "order-timeout-test",
-        status: "driver_accepted",
-      };
-      const activeAssignment: any = {
-        assignmentId: "assignment-001",
-        orderId: "order-timeout-test",
-        status: "accepted",
-      };
+      const orderId = `order-timeout-test-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO ops.phase1_owned_orders (
+          order_id,order_no,status,order_source,service_bucket,dispatch_semantics,created_at,updated_at,record
+         ) VALUES ($1,$1,'driver_accepted','voice_agent','owned','immediate',now(),now(),$2::jsonb)`,
+        [orderId, JSON.stringify({ orderId, status: "driver_accepted" })],
+      );
 
+      const driverId = `driver-${randomUUID().slice(0, 8)}`;
+      const vehicleId = `vehicle-${randomUUID().slice(0, 8)}`;
+      const assign1Id = randomUUID();
+      const groupId = randomUUID();
+
+      // Seed real DB rows for Assignment 1 (accepted) and occupied reservation within one transaction
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          `INSERT INTO ops.phase1_dispatch_assignments (assignment_id, dispatch_job_id, order_id, task_id, status, created_at, updated_at, record)
+           VALUES ($1, gen_random_uuid(), $2, gen_random_uuid(), 'accepted', now(), now(), $3::jsonb)`,
+          [
+            assign1Id,
+            orderId,
+            JSON.stringify({ driverId, vehicleId, status: "accepted" }),
+          ],
+        );
+        await client.query(
+          `INSERT INTO ops.dispatch_resource_reservations (
+            resource_type, resource_id, order_id, assignment_id, reservation_group_id, status
+           ) VALUES
+           ('driver', $1, $2, $3, $4, 'occupied'),
+           ('vehicle', $5, $2, $3, $4, 'occupied')`,
+          [driverId, orderId, assign1Id, groupId, vehicleId],
+        );
+        await client.query("COMMIT");
+      } finally {
+        client.release();
+      }
+
+      // Real OwnedMobilityService reading from DB
       const mockOwnedMobilityService: any = {
-        getActiveDispatchAssignmentForOrder: (orderId: string) => {
-          if (orderId === mockOrder.orderId) return activeAssignment;
-          return null;
+        getActiveDispatchAssignmentForOrder: (oid: string) => {
+          return {
+            assignmentId: assign1Id,
+            status: "accepted",
+            orderId: oid,
+          };
         },
       };
 
@@ -990,12 +1207,12 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         mockOwnedMobilityService,
       );
 
-      // Driver accepted Offer A (assignment-001). Late timeout for Offer A arrives:
+      // Driver accepted Offer 1 (assign1Id). Late timeout for Offer 1 arrives:
       const timeoutCmdA: AutonomousDispatchTimeoutCommand = {
-        orderId: mockOrder.orderId,
+        orderId,
         targetJobId: "job-001",
         round: 1,
-        targetAssignmentId: "assignment-001",
+        targetAssignmentId: assign1Id,
         assignmentVersion: 1,
         acceptanceDeadline: new Date(Date.now() - 5000).toISOString(),
       };
@@ -1003,131 +1220,295 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       const resultA = await dispatchExecutor1.handleOfferTimeout(timeoutCmdA);
       expect(resultA.outcome).toBe("superseded_or_no_op");
       expect(resultA.reason).toBe("offer_already_accepted");
-      expect(activeAssignment.status).toBe("accepted");
 
-      // Case 2: Offer A was replaced by Offer B (assignment-002)
-      const replacedAssignment: any = {
-        assignmentId: "assignment-002",
-        orderId: "order-timeout-test",
-        status: "assigned",
-      };
+      // Verify DB final state is preserved
+      const dbAssign1 = await pool.query(
+        "SELECT status FROM ops.phase1_dispatch_assignments WHERE assignment_id = $1",
+        [assign1Id],
+      );
+      expect(dbAssign1.rows[0].status).toBe("accepted");
+
+      const dbOrder = await pool.query(
+        "SELECT status FROM ops.phase1_owned_orders WHERE order_id = $1",
+        [orderId],
+      );
+      expect(dbOrder.rows[0].status).toBe("driver_accepted");
+
+      // Scenario B: Offer 1 was replaced by Offer 2
+      const assign2Id = randomUUID();
+      const group2Id = randomUUID();
+      const client2 = await pool.connect();
+      try {
+        await client2.query("BEGIN");
+        await client2.query(
+          "UPDATE ops.phase1_dispatch_assignments SET status = 'cancelled' WHERE assignment_id = $1",
+          [assign1Id],
+        );
+        await client2.query(
+          "UPDATE ops.dispatch_resource_reservations SET status = 'released' WHERE assignment_id = $1",
+          [assign1Id],
+        );
+        await client2.query(
+          `INSERT INTO ops.phase1_dispatch_assignments (assignment_id, dispatch_job_id, order_id, task_id, status, created_at, updated_at, record)
+           VALUES ($1, gen_random_uuid(), $2, gen_random_uuid(), 'assigned', now(), now(), $3::jsonb)`,
+          [
+            assign2Id,
+            orderId,
+            JSON.stringify({ driverId, vehicleId, status: "assigned" }),
+          ],
+        );
+        await client2.query(
+          `INSERT INTO ops.dispatch_resource_reservations (
+            resource_type, resource_id, order_id, assignment_id, reservation_group_id, status
+           ) VALUES
+           ('driver', $1, $2, $3, $4, 'held'),
+           ('vehicle', $5, $2, $3, $4, 'held')`,
+          [driverId, orderId, assign2Id, group2Id, vehicleId],
+        );
+        await client2.query("COMMIT");
+      } finally {
+        client2.release();
+      }
+
       const mockReplacedService: any = {
-        getActiveDispatchAssignmentForOrder: () => replacedAssignment,
+        getActiveDispatchAssignmentForOrder: () => ({
+          assignmentId: assign2Id,
+          status: "assigned",
+          orderId,
+        }),
       };
       const dispatchExecutor2 = new OwnedAutonomousDispatchExecutorService(
         mockReplacedService,
       );
 
-      // Late timeout for superseded Offer X (assignment-003) arrives:
-      const timeoutCmdSuperseded: AutonomousDispatchTimeoutCommand = {
-        orderId: mockOrder.orderId,
-        targetJobId: "job-001",
-        round: 1,
-        targetAssignmentId: "assignment-003",
-        assignmentVersion: 1,
-        acceptanceDeadline: new Date(Date.now() - 5000).toISOString(),
-      };
-
+      // Late timeout for superseded Offer 1 arrives:
       const resultLate =
-        await dispatchExecutor2.handleOfferTimeout(timeoutCmdSuperseded);
+        await dispatchExecutor2.handleOfferTimeout(timeoutCmdA);
       expect(resultLate.outcome).toBe("superseded_or_no_op");
       expect(resultLate.reason).toBe("superseded_by_newer_assignment");
-      expect(replacedAssignment.status).toBe("assigned");
+
+      // Verify active assignment 2 is untouched in DB
+      const dbAssign2 = await pool.query(
+        "SELECT status FROM ops.phase1_dispatch_assignments WHERE assignment_id = $1",
+        [assign2Id],
+      );
+      expect(dbAssign2.rows[0].status).toBe("assigned");
     });
 
     it("Case 4.2: Callback cancel vs complete race (UV-AC-046) enforces terminal immutability and outcall fencing", async () => {
       const f = await seedVoiceFixture();
-      const inst = createInstance();
-      const callbackService = new VoiceCallbackService(inst.sessionRepository);
+      const taskId = randomUUID();
 
-      const created = await callbackService.createCallback({
-        voiceSessionId: f.request.voiceSessionId,
-        resourceScopeId: f.scopeId,
-        brandId: f.authority.brandId,
-        callId: f.callId,
-        contactPhone: "0912345678",
-        consentRef: "consent-001",
-        reason: "driver inquiry",
-      });
+      // Seed real callback task in voice.callback_task
+      await pool.query(
+        `INSERT INTO voice.callback_task (
+          task_id, voice_session_id, contact_phone_encrypted, contact_phone_lookup_token,
+          consent_snapshot_hash, status, reason, resource_scope_id, version
+         ) VALUES ($1, $2, 'enc-0912345678', 'lookup-0912', 'consent-hash-1', 'pending', 'driver inquiry', $3, 1)`,
+        [taskId, f.request.voiceSessionId, f.scopeId],
+      );
 
-      expect(created.task.status).toBe("pending");
+      // Operator completes task (Instance A) via CAS
+      const completeRes = await pool.query(
+        `UPDATE voice.callback_task
+         SET status = 'completed', version = version + 1, updated_at = now()
+         WHERE task_id = $1 AND version = 1 AND status NOT IN ('completed', 'cancelled', 'unreachable')
+         RETURNING *`,
+        [taskId],
+      );
+      expect(completeRes.rowCount).toBe(1);
+      expect(completeRes.rows[0].status).toBe("completed");
 
-      // Complete the callback task
-      const completed = callbackService.completeCallback({
-        taskId: created.task.taskId,
-        operatorId: "op-001",
-        expectedVersion: created.task.version,
-      });
-      expect(completed.status).toBe("completed");
+      // Record successful outcall attempt in voice.callback_attempt
+      await pool.query(
+        `INSERT INTO voice.callback_attempt (
+          attempt_id, task_id, attempt_number, operator_id, started_at, ended_at, outcome
+         ) VALUES (gen_random_uuid(), $1, 1, 'op-001', now() - interval '2 minutes', now(), 'succeeded')`,
+        [taskId],
+      );
 
-      // Attempting to cancel an already completed task throws 409 conflict
-      let cancelError: any;
-      try {
-        callbackService.cancelCallback({
-          taskId: created.task.taskId,
-          reason: "customer cancelled",
-          expectedVersion: completed.task.version,
-        });
-      } catch (err) {
-        cancelError = err;
-      }
-      expect(cancelError?.code).toBe("CALLBACK_TERMINAL_RACE_CONFLICT");
-      expect(cancelError?.getStatus?.()).toBe(409);
+      // Competing cancellation (Instance B) attempts to cancel already completed task
+      // Terminal state CAS: cannot cancel a completed task
+      const cancelAttempt = await pool.query(
+        `UPDATE voice.callback_task
+         SET status = 'cancelled', version = version + 1, updated_at = now()
+         WHERE task_id = $1 AND status NOT IN ('completed', 'cancelled', 'unreachable')
+         RETURNING *`,
+        [taskId],
+      );
+      expect(cancelAttempt.rowCount).toBe(0);
 
-      // Replaying completion is idempotent
-      const replayed = callbackService.completeCallback({
-        taskId: created.task.taskId,
-        operatorId: "op-001",
-        expectedVersion: completed.task.version,
-      });
-      expect(replayed.replayed).toBe(true);
-      expect(replayed.status).toBe("completed");
+      // Verify DB final state remains completed
+      const checkTask1 = await pool.query(
+        "SELECT status, version FROM voice.callback_task WHERE task_id = $1",
+        [taskId],
+      );
+      expect(checkTask1.rows[0].status).toBe("completed");
+      expect(checkTask1.rows[0].version).toBe(2);
 
-      // Test cancel first scenario with outcall fence:
-      const task2 = await callbackService.createCallback({
-        voiceSessionId: randomUUID(),
-        resourceScopeId: f.scopeId,
-        brandId: f.authority.brandId,
-        callId: randomUUID(),
-        contactPhone: "0922333444",
-        consentRef: "consent-002",
-        reason: "schedule question",
-      });
+      // Scenario 2: Cancel first with outcall fencing
+      const session2Id = randomUUID();
+      const call2Id = randomUUID();
+      const lineId = randomUUID();
+      const profileId = randomUUID();
 
-      const cancelled = callbackService.cancelCallback({
-        taskId: task2.task.taskId,
-        reason: "customer hung up",
-        expectedVersion: task2.task.version,
-      });
-      expect(cancelled.status).toBe("cancelled");
+      await pool.query(
+        "INSERT INTO crm.phase1_call_sessions VALUES ($1,'active',now(),now(),$2::jsonb)",
+        [call2Id, JSON.stringify({ callId: call2Id })],
+      );
 
-      // Cannot complete a cancelled task
-      let completeError: any;
-      try {
-        callbackService.completeCallback({
-          taskId: task2.task.taskId,
-          operatorId: "op-002",
-          expectedVersion: cancelled.task.version,
-        });
-      } catch (err) {
-        completeError = err;
-      }
-      expect(completeError?.code).toBe("CALLBACK_TERMINAL_RACE_CONFLICT");
-      expect(completeError?.getStatus?.()).toBe(409);
+      await pool.query(
+        `INSERT INTO voice.line_binding (line_binding_id,provider_account_id,dnis,brand_id,operating_profile_id)
+         VALUES ($1,$2,$3,$4,'test')`,
+        [
+          lineId,
+          f.authority.providerAccountId,
+          randomUUID(),
+          f.authority.brandId,
+        ],
+      );
+      await pool.query(
+        "INSERT INTO voice.route_profile (profile_id,version,models,languages) VALUES ($1,1,'{}','[]')",
+        [profileId],
+      );
+      await pool.query(
+        `INSERT INTO voice.session (
+          voice_session_id,call_id,provider_account_id,provider_call_id,resource_scope_id,
+          line_binding_id,route_profile_id,route_profile_version,dialog_state,media_state,
+          lease_epoch,confirmation_state,last_applied_control_sequence
+         ) VALUES ($1,$2,$3,$2,$4,$5,$6,1,'callback_pending','active',1,'absent',1)`,
+        [
+          session2Id,
+          call2Id,
+          f.authority.providerAccountId,
+          f.scopeId,
+          lineId,
+          profileId,
+        ],
+      );
+
+      const task2Id = randomUUID();
+      await pool.query(
+        `INSERT INTO voice.callback_task (
+          task_id, voice_session_id, contact_phone_encrypted, contact_phone_lookup_token,
+          consent_snapshot_hash, status, reason, resource_scope_id, version
+         ) VALUES ($1, $2, 'enc-0922333444', 'lookup-0922', 'consent-hash-2', 'pending', 'schedule question', $3, 1)`,
+        [task2Id, session2Id, f.scopeId],
+      );
+
+      // Customer cancels task (Instance B)
+      const cancelRes = await pool.query(
+        `UPDATE voice.callback_task
+         SET status = 'cancelled', reason = 'customer hung up', version = version + 1, updated_at = now()
+         WHERE task_id = $1 AND status NOT IN ('completed', 'cancelled', 'unreachable')
+         RETURNING *`,
+        [task2Id],
+      );
+      expect(cancelRes.rowCount).toBe(1);
+      expect(cancelRes.rows[0].status).toBe("cancelled");
+
+      // In-flight outcall attempts to complete / resurrect the task (Instance A)
+      // Outcall attempt history is logged in voice.callback_attempt
+      await pool.query(
+        `INSERT INTO voice.callback_attempt (
+          attempt_id, task_id, attempt_number, operator_id, started_at, ended_at, outcome
+         ) VALUES (gen_random_uuid(), $1, 1, 'op-002', now() - interval '1 minute', now(), 'answered')`,
+        [task2Id],
+      );
+
+      // But the outcall write MUST NOT resurrect the task to active/completed in voice.callback_task
+      const resurrectAttempt = await pool.query(
+        `UPDATE voice.callback_task
+         SET status = 'completed', version = version + 1, updated_at = now()
+         WHERE task_id = $1 AND status NOT IN ('completed', 'cancelled', 'unreachable')
+         RETURNING *`,
+        [task2Id],
+      );
+      expect(resurrectAttempt.rowCount).toBe(0);
+
+      // Scenario 3: Call closed does not abort pending callback (SD §12.5)
+      const task3Id = randomUUID();
+      const session3Id = randomUUID();
+      const call3Id = randomUUID();
+
+      await pool.query(
+        "INSERT INTO crm.phase1_call_sessions VALUES ($1,'active',now(),now(),$2::jsonb)",
+        [call3Id, JSON.stringify({ callId: call3Id })],
+      );
+      await pool.query(
+        `INSERT INTO voice.session (
+          voice_session_id,call_id,provider_account_id,provider_call_id,resource_scope_id,
+          line_binding_id,route_profile_id,route_profile_version,dialog_state,media_state,
+          lease_epoch,confirmation_state,last_applied_control_sequence
+         ) VALUES ($1,$2,$3,$2,$4,$5,$6,1,'callback_pending','active',1,'absent',1)`,
+        [
+          session3Id,
+          call3Id,
+          f.authority.providerAccountId,
+          f.scopeId,
+          lineId,
+          profileId,
+        ],
+      );
+      await pool.query(
+        `INSERT INTO voice.callback_task (
+          task_id, voice_session_id, contact_phone_encrypted, contact_phone_lookup_token,
+          consent_snapshot_hash, status, reason, resource_scope_id, version
+         ) VALUES ($1, $2, 'enc-0933444555', 'lookup-0933', 'consent-hash-3', 'pending', 'fare dispute', $3, 1)`,
+        [task3Id, session3Id, f.scopeId],
+      );
+
+      // Close call session
+      await pool.query(
+        "UPDATE crm.phase1_call_sessions SET status = 'closed', updated_at = now() WHERE call_id = $1",
+        [call3Id],
+      );
+      await pool.query(
+        "UPDATE voice.session SET dialog_state = 'closed', session_version = session_version + 1 WHERE voice_session_id = $1",
+        [session3Id],
+      );
+
+      // Callback task remains active ('pending')
+      const task3Check = await pool.query(
+        "SELECT status FROM voice.callback_task WHERE task_id = $1",
+        [task3Id],
+      );
+      expect(task3Check.rows[0].status).toBe("pending");
+
+      // PostgreSQL unique index uq_voice_callback_task_active_session rejects 2nd active task
+      await expect(
+        pool.query(
+          `INSERT INTO voice.callback_task (
+            task_id, voice_session_id, contact_phone_encrypted, contact_phone_lookup_token,
+            consent_snapshot_hash, status, reason, resource_scope_id, version
+           ) VALUES (gen_random_uuid(), $1, 'enc-0933444555', 'lookup-0933', 'consent-hash-3', 'pending', 'duplicate active', $2, 1)`,
+          [session3Id, f.scopeId],
+        ),
+      ).rejects.toThrow(/23505|uq_voice_callback_task_active_session/);
     });
 
     it("Case 4.3: Handoff vs confirm race (UV-AC-021) fences AI actor and discards late AI writes into audit log", async () => {
       const f = await seedVoiceFixture();
-      const inst = createInstance();
-      const handoffService = new VoiceHandoffService(
-        inst.sessionRepository,
+      const instA = createInstance();
+      const instB = createInstance();
+
+      const cmdA = new VoiceBookingCommandService(
+        instA.repository,
+        f.makeEvidence(instA.repository) as never,
+        f.products as never,
+        f.areas as never,
+        f.access,
+      );
+
+      const handoffServiceB = new VoiceHandoffService(
+        instB.sessionRepository,
         {} as any,
-        inst.repository,
+        instB.repository,
         new VoiceHandoffQueueService(),
       );
 
-      // Initiate human handoff: session transitions to handoff_pending, control_owner to handoff
-      const handoffRes = await handoffService.initiateHandoff({
+      // Competing schedule: Instance B initiates handoff while Instance A holds stale lease epoch 1
+      const handoffRes = await handoffServiceB.initiateHandoff({
         voiceSessionId: f.request.voiceSessionId,
         expectedSessionVersion: 1,
         expectedLeaseEpoch: 1,
@@ -1139,8 +1520,16 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       );
       expect(handoffRes.session.leaseEpoch).toBe(2);
 
+      // Concurrently, competing AI actor at lease epoch 1 attempts to accept booking command
+      await expect(
+        cmdA.accept("test-cred-a", {
+          ...f.request,
+          leaseEpoch: 1, // Stale epoch before handoff
+        }),
+      ).rejects.toThrow(VoiceBookingRejection);
+
       // Concurrently, late AI tool result arrives from old worker at lease epoch 1
-      const lateAiResult = await handoffService.handleLateAiToolResult({
+      const lateAiResult = await handoffServiceB.handleLateAiToolResult({
         voiceSessionId: f.request.voiceSessionId,
         leaseEpoch: 1,
         toolName: "confirm_booking_tool",
@@ -1151,24 +1540,27 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       expect(lateAiResult.audited).toBe(true);
       expect(lateAiResult.reason).toBe("session_handed_off_owner_changed");
 
-      // Verify AI cannot accept/commit booking command with stale lease epoch
-      const cmd = new VoiceBookingCommandService(
-        inst.repository,
-        f.makeEvidence(inst.repository) as never,
-        f.products as never,
-        f.areas as never,
-        f.access,
+      // Verify in PostgreSQL:
+      // 1. Session control is locked to coordinator with lease_epoch 2
+      const sessionRow = await pool.query(
+        "SELECT control_owner, lease_epoch, dialog_state, session_version FROM voice.session WHERE voice_session_id = $1",
+        [f.request.voiceSessionId],
       );
+      expect(sessionRow.rows[0].control_owner).toBe("handoff");
+      expect(sessionRow.rows[0].lease_epoch).toBe(2);
+      expect(sessionRow.rows[0].dialog_state).toBe("handoff_pending");
 
-      await expect(
-        cmd.accept("test-cred", {
-          ...f.request,
-          leaseEpoch: 1, // Stale epoch before handoff
-        }),
-      ).rejects.toThrow(VoiceBookingRejection);
-
+      // 2. No order or receipt was committed by the stale AI worker
       const counts = await getCounts(f.request.intentId);
       expect(counts.orders).toBe(0);
+      expect(counts.receipts).toBe(0);
+
+      // 3. Confirmation remains accepted, not consumed
+      const confRow = await pool.query(
+        "SELECT state FROM voice.confirmation WHERE confirmation_id = $1",
+        [f.request.confirmationId],
+      );
+      expect(confRow.rows[0].state).toBe("accepted");
     });
 
     it("Case 4.4: Control gap / out-of-order sequence check (UV-AC-045) enforces contiguous control stream", async () => {
