@@ -1,5 +1,14 @@
 # SR-ENV-COPY-001 — partial implementation and scope blocker
 
+## Follow-up dispatch, 2026-09-09 — resumed task still lacks recovery routing
+
+- Fetched `origin/dev` base: `3062ea363769cc393e59384251f5aedc7e570ac5`; preserved implementation HEAD: `920e7e59c155fffd72e31272c4f08d8f8ad3728d`. Candidate SHA: none. This evidence anchor's SHA is recorded through canonical task status after ordinary push.
+- Canonical `show SR-ENV-COPY-001` and `start SR-ENV-COPY-001` exited 0. Dispatch still assigns `codex/sr-env-copy-001`, the original scopes and no dependencies. Read both merged recovery/planning artifacts from the fetched base: recovery routing or a reviewed alternative and runtime scope/dependency authorization remain required. Helper completion does not supply either prerequisite.
+- `git fetch origin`: exit 0. `git rebase origin/dev`: exit 1 replaying duplicate `13bce75ab`, with add/add conflicts in this evidence file, runtime resolver and scoped regression. `git rebase --abort`: exit 0. `git status --short`: exit 0, empty; original HEAD restored. `git rev-list --left-right --count HEAD...origin/codex/sr-env-copy-001`: exit 0, `0 0`.
+- Current-base reproduction: `git grep -n 'env="production"' origin/dev -- apps/fleet-partner-portal-web/components/fleet-portal-shell.tsx` exited 0 (line 36 literal production); `git grep -n 'env=' origin/dev -- apps/ops-console-web/app/layout.tsx` exited 0 (line 61 production catalog key); `git grep -n BANK_CONSOLE_ENV origin/dev -- apps/bank-console-web/lib/navigation.ts` exited 0 (line 8 literal preview). `git grep -n 'ActionIntent' origin/dev -- apps/ops-console-web/lib/translations.ts` exited 0 (English/Chinese display values at lines 283/4813). These defects remain on this base; existing branch copy fixes have not become current-dev acceptance evidence.
+- Required next action: Supervisor/Chairman must apply the merged recovery routing (or record a reviewed alternative), then authorize the runtime consumers/producers and legacy test handling with overlap dependencies. The producer inventory below already identifies the concrete files and configuration sources. No new product changes were made on the unrecovered branch.
+- Resource IDs: SR-ENV-COPY-001, R27, C110, Q-SR-ENV-COPY-001, history helper merge `52e8096e4441386901e57415ba06f6a2aabe4d0e`; PR #1738 was not remotely revalidated. No business resources created. Product tests/typechecks were not repeated for this evidence-only update; browser/live/device checks, fresh candidate CI, review, merge and deployment verification were not performed. No completion handoff.
+
 ## Follow-up dispatch, 2026-09-08 18:52 UTC — recovery and scope gate revalidated
 
 - Fetched base: `d4f54ef94e059a981bf2be1f7b944e815870e117`; tested implementation: `a7ba15972f6769c3416ad0a534ca41ee204c5396`. No acceptance candidate or handoff. Resource IDs: SR-ENV-COPY-001, R27, C110, Q-SR-ENV-COPY-001; existing PR #1738 was not remotely revalidated.
