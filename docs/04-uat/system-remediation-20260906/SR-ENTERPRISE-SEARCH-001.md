@@ -1,5 +1,18 @@
 # SR-ENTERPRISE-SEARCH-001 — 企業歷史查詢條件與結果一致
 
+## 2026-09-09 02:13 UTC resume 核實（本次最新）
+
+- Owner Codex；Reviewer Codex2。`git fetch origin` exit 0；最新 base `origin/dev` 為 `fb2ea6e2ed3c2937d7d65d601967d183b0257048`。本次受測工作 HEAD 為 `abff392fd6a645233c9514e5d8a98af8327f448c`，尚無 handoff candidate。
+- `git rebase origin/dev` exit 1：第 7/15 筆重播 `903969279` 時 page、test、evidence 衝突；`git rebase --abort` exit 0。原已發布分支保留，沒有 force push；最新 dev 尚未整合至工作分支。
+- `git show origin/dev:apps/api/src/modules/owned-mobility/owned-mobility.controller.ts`、同目錄 `owned-mobility.service.ts`、`git show origin/dev:apps/enterprise-dispatch-web/lib/api-client.ts` 均 exit 0。controller:461 仍僅接 headers；service:2118 只接 tenantId、固定 page 1、totalItems 為全量 items.length；wrapper:59 的 listBookings 仍無 query 參數。最新 base 的後端篩選／分頁缺口仍在。
+- Current-release `ai-status.sh show SR-ENTERPRISE-SEARCH-001-UNBLOCK-HISTORY-REPAIR` exit 0，helper 為 done、merge `e2df37f821ce76d8a3639ceaac6d253299c0a31c`。已讀其 support/unblock 報告：明列 parent remains blocked on backend capability planning，且 helper grants no scope expansion；合併只新增歷史修復文件，並未交付後端能力。
+- `AI_NAME=Codex /home/lupin/workspace/drts-fleet-platform/tools/development-orchestrator/bin/ai-status.sh show SR-BOOKING-VERIFY` exit 1：`Task not found: SR-BOOKING-VERIFY`。Parent depends_on 仍空，write_scopes 仍不含 API/client/wrapper。
+- `pnpm --filter @drts/enterprise-dispatch-web typecheck` exit 0。
+- `pnpm exec vitest run tests/unit/system-remediation/sr-enterprise-search-001/` exit 0：1 file / 50 tests passed，02:12:59 UTC，1.35s。僅證明上述工作 HEAD 的 synthetic unit regression，不是最新 dev 或 HTTP query 驗收。
+- 本次僅新增本文證據；未變更 UI。未做 live API、瀏覽器、真機或部署，沒有實際 query／response total／資源 ID；未啟動任何產品或測試伺服器。
+
+解除條件仍是 supervisor 登錄／指定真正後端 filter producer、補入相依並授權必要共用 scope。不要因 history helper done 再將本任務視為後端已就緒；本次保存證據後記錄 blocked，不 handoff 或 done。Anchor SHA 與普通 push 結果由 task board 記錄。
+
 ## 2026-09-09 02:03 UTC dispatch 核實（本次最新）
 
 - Owner Codex；Reviewer Codex2；branch `codex/sr-enterprise-search-001`。Fetched base `origin/dev`: `7d04833053b63558c10fb678a422dff3522e0150`；受測工作 HEAD: `681bc2fd025837ab1531feb1ec32c04866a1e2da`。尚無 candidate SHA；本次為 blocker evidence anchor，不能作 handoff candidate。
