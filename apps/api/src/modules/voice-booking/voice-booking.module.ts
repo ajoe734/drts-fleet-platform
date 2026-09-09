@@ -16,6 +16,11 @@ import { VoiceBookingCommandService } from "./voice-booking-command.service";
 import { VoiceCommandRunnerService } from "./voice-command-runner.service";
 import { OwnedMobilityRepository } from "../owned-mobility/owned-mobility.repository";
 
+import { VoiceHandoffService } from "./voice-handoff.service";
+import { VoiceSessionService } from "./voice-session.service";
+import { VoiceSessionRepository } from "./voice-session.repository";
+import { VoiceHandoffQueueService } from "../callcenter/voice-handoff-queue.service";
+
 /**
  * UV-EXEC-003 built VoiceBookingRepository/VoiceBookingAuthorizationService/
  * VoiceLineScopeService as free-standing injectables with no module wiring
@@ -38,6 +43,10 @@ import { OwnedMobilityRepository } from "../owned-mobility/owned-mobility.reposi
     VoiceBookingAuthorizationService,
     VoiceLineScopeService,
     VoiceDispatchProjectionService,
+    VoiceSessionRepository,
+    VoiceSessionService,
+    VoiceHandoffQueueService,
+    VoiceHandoffService,
   ],
   exports: [
     VoiceBookingCommandService,
@@ -49,6 +58,10 @@ import { OwnedMobilityRepository } from "../owned-mobility/owned-mobility.reposi
     VoiceBookingAuthorizationService,
     VoiceLineScopeService,
     VoiceDispatchProjectionService,
+    VoiceSessionRepository,
+    VoiceSessionService,
+    VoiceHandoffQueueService,
+    VoiceHandoffService,
   ],
 })
 export class VoiceBookingModule {}

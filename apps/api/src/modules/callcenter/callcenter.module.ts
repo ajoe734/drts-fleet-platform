@@ -9,6 +9,7 @@ import { CallcenterController } from "./callcenter.controller";
 import { CallcenterRepository } from "./callcenter.repository";
 import { SandboxWebhookAdapter } from "./sandbox-webhook.adapter";
 import { CallcenterService } from "./callcenter.service";
+import { VoiceHandoffQueueService } from "./voice-handoff-queue.service";
 
 @Module({
   imports: [
@@ -19,7 +20,12 @@ import { CallcenterService } from "./callcenter.service";
     VoiceBookingModule,
   ],
   controllers: [CallcenterController],
-  providers: [CallcenterRepository, CallcenterService, SandboxWebhookAdapter],
-  exports: [CallcenterService],
+  providers: [
+    CallcenterRepository,
+    CallcenterService,
+    SandboxWebhookAdapter,
+    VoiceHandoffQueueService,
+  ],
+  exports: [CallcenterService, VoiceHandoffQueueService],
 })
 export class CallcenterModule {}
