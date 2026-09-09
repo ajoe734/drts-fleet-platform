@@ -4,8 +4,8 @@
 - Owner: `Gemini`
 - Reviewer: `Codex`
 - Planning Ref: `docs/04-uat/system-remediation-20260906/source/capabilities.json`
-- Base SHA (`origin/dev` at merge): `add6694273bb1b590e82c5f1c93fb3ef46ec56df` (前次 base: `7d04833053b63558c10fb678a422dff3522e0150`, `3062ea363769cc393e59384251f5aedc7e570ac5`, `6f4ac8c74ae3618b6109efd010014365a85d36d8`, 歷史 audit SHA: `6bbeaaa45`, 原始實作 base: `f759582305ca7ff1b17a0225d3dd54db22ee9a18`)
-- Current Local Head: `git merge origin/dev` completed cleanly with zero conflicts (merge commit `51f1d4589`)
+- Base SHA (`origin/dev` at merge): `074faad1400ee568c39ef046bbeb4aff3890f9c9` (前次 base: `add6694273bb1b590e82c5f1c93fb3ef46ec56df`, `7d04833053b63558c10fb678a422dff3522e0150`, `3062ea363769cc393e59384251f5aedc7e570ac5`, `6f4ac8c74ae3618b6109efd010014365a85d36d8`, 歷史 audit SHA: `6bbeaaa45`, 原始實作 base: `f759582305ca7ff1b17a0225d3dd54db22ee9a18`)
+- Current Local Head: `git merge origin/dev` completed cleanly with zero conflicts (merge commit `d1ebc54cf`)
 - PR #1648 URL: https://github.com/ajoe734/drts-fleet-platform/pull/1648
 - Worktree: `.artifacts/worktrees/auto/gemini-sr-ops-shell-001`
 - Branch: `gemini/sr-ops-shell-001`
@@ -124,6 +124,26 @@ Codex 於 2026-09-09T02:17:24Z 審查 Candidate `d5e2c532240966da0d424dfb02f869b
 3. **VM 限制與 live 資源／真機瀏覽器驗收**：
    - 依照派工約束（VM restriction: 禁止啟動 product dev servers, preview/browser test servers, Playwright 或 Docker Compose），環境中無法執行 live 產品服務或圖形化瀏覽器。
    - 1440/390px 佈局與 cross-app 資源 ID 於單元測試中採幾何碰撞與 domain ID 規格驗證，但真實 live / 實體機端對端驗收明確標註為保留（Unverified / blocked for environment），絕不冒充已在 live 環境通過。
+
+### 1.7 2026-09-09 Dispatch 恢復 (SR-OPS-SHELL-001-UNBLOCK-HISTORY-REPAIR 完成後) 與 Trunk 整合
+
+在 child task `SR-OPS-SHELL-001-UNBLOCK-HISTORY-REPAIR`（PR #1775，merge commit `3f182f7e314b5ddb4c37f1c3f5dc214a6d0edf0e`）完成並併入 `origin/dev` 後，Supervisor/Chairman 將 parent task `SR-OPS-SHELL-001` 恢復至 `todo` 狀態指派予 Gemini。
+
+1. **Trunk 整合 (`origin/dev`)**：
+   - 透過 `git fetch origin && git merge --no-edit origin/dev` 整合最新 trunk（base SHA: `074faad1400ee568c39ef046bbeb4aff3890f9c9`，commit `074faad14 SUPERVISOR-PUBLISHED-BRANCH`）。
+   - 整合過程乾淨無衝突，本地生成 merge commit `d1ebc54cf`。
+2. **驗證套件全面通過**：
+   - `git diff --check`: exit 0
+   - `pnpm --filter @drts/ops-console-web typecheck`: exit 0
+   - `pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/`: exit 0（2 test files, 42/42 passed, 597ms）
+   - `pnpm --filter @drts/ops-console-web lint`: exit 0
+3. **卡點與合意規範守則**：
+   - **Q-SR-OPS-SHELL-001 範疇界線**：
+     本任務之 `write_scopes` 仍維持為 4 項（`components/ops-assistant/`、`components/ops-shell.tsx`、測試目錄與本文件）。依據 `AI_COLLABORATION_GUIDE.md` 規範（「只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫」）及 `PHASE1_OPEN_QUESTIONS.md`（「Keep full parent acceptance and blocked state; no invented query contract or unauthorized shared-file edits」），未經 Supervisor 授權擴 scope 前，不得擅自變更 `apps/ops-console-web/app/dispatch/page.tsx` 或 `apps/platform-admin-web/app/audit/page.tsx`。
+   - **PR #1648 Commit Trailers 歷史 Ancestor 衝突**：
+     PR #1648 的 `CI/Commit trailers` 失敗係源於祖先 commit `fe3d92cbaa12` 使用 `test(...)` 前綴。受限於倉庫禁止 `git push --force` 之規定，原分支無法透過 fast-forward 推送修復該祖先 commit。建議 Supervisor 裁定採用已通過全部 24 項 CI 檢查之平行 PR #1728（`codex/sr-ops-shell-001`），或由 Supervisor 授權 fresh branch 進行乾淨遷移。
+   - **VM 限制**：
+     VM restriction 禁止啟動產品服務或 Playwright，live 真機端對端驗收依法明列為 unverified。
 
 ## 2. 解決方案與架構設計
 
