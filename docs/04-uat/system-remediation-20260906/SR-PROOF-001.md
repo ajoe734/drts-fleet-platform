@@ -1,5 +1,31 @@
 # SR-PROOF-001 — Fresh-base regression evidence and unresolved implementation scope
 
+## 2026-09-09 02:12 UTC dispatch verification
+
+- `git fetch origin`: exit 0. Base `origin/dev`:
+  `fb2ea6e2ed3c2937d7d65d601967d183b0257048`; tested HEAD:
+  `ee2ea222f12022175b67a08a04a8f1b66ba0fa25`. Candidate: none.
+- `git rebase origin/dev`: exit 1 at `ac1076708`, add/add conflict in
+  `payment-gate.test.ts`; `git rebase --abort`: exit 0, clean tree restored.
+- `git diff --exit-code origin/dev HEAD -- apps/api/src/modules/billing-settlement/billing-settlement.service.ts apps/api/src/modules/billing-settlement/billing-settlement.repository.ts`:
+  exit 0; the tested service/repository match the fetched base.
+- `git merge-base --is-ancestor 99858938fa2f6f38f23afcf3f7a2204c10e402d1 origin/dev`:
+  exit 0. HISTORY-REPAIR is reachable, but its remaining routing requirements
+  have not been applied to the current parent task slice.
+- `pnpm exec vitest run tests/unit/system-remediation/sr-proof-001/`:
+  exit 1; 1 passed, 2 failed, duration 7.68s. Fabricated proof becomes paid;
+  unresolved persistence returns paid. Unapproved rejection passes.
+  Isolated resource IDs: `sr-proof-001-batch-a`, `sr-proof-001-driver-a`,
+  `sr-proof-001-statement-a`, `sr-proof-001-nonexistent-proof`.
+- Rechecked N09/C081/C125, platform realm tokens and reimbursement canvas.
+  Supervisor must allocate repository/module and proof storage/scanner scopes,
+  contract dependency or reviewed exception, missing upload/scan/reject/readback
+  canvas states, and a recovery branch as specified by the existing helper.
+  No child task was recreated; the screen requirements below still apply.
+- No product changes or typecheck reruns. Live upload/scanning/download,
+  PostgreSQL concurrency, durable receipt, browser/device and real payments
+  remain unverified. No prohibited servers or infrastructure were started.
+
 ## 2026-09-09 02:03 UTC dispatch verification
 
 - Fetched `origin/dev`: `7d04833053b63558c10fb678a422dff3522e0150`;
