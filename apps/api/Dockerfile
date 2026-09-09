@@ -52,6 +52,9 @@ COPY --from=build /deploy/api/package.json ./package.json
 # Built API output from the build stage (pnpm deploy doesn't include dist)
 COPY --from=build /workspace/apps/api/dist ./dist
 
+# Bundle the unmodified TC font, original distribution license and provenance.
+COPY apps/api/assets/fonts/NotoSansCJKtc-Regular.otf apps/api/assets/fonts/LICENSE apps/api/assets/fonts/provenance.json /app/assets/fonts/
+
 EXPOSE 3001
 HEALTHCHECK --interval=10s --timeout=3s --retries=12 CMD node -e "require('http').get('http://127.0.0.1:'+process.env.API_PORT+'/health',res=>{process.exit(res.statusCode===200?0:1)}).on('error',()=>process.exit(1))"
 

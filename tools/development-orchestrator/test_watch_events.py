@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -233,6 +234,64 @@ class RenderWakeupMessageTests(unittest.TestCase):
         self.assertIn(str(watch_events.task_board_cli_path()), rendered)
         self.assertIn("tools/development-orchestrator/skills/worker-anchor-commit.md", rendered)
         self.assertNotIn("{{branch_protocol}}", rendered)
+
+    def test_owner_protocol_preserves_published_branch_and_pending_candidate(self) -> None:
+        config = self._config(agent_id="codex2")
+        event = {
+            "task_id": "UV-EXEC-015",
+            "target_agent": "codex2",
+            "reason": "owned_in_progress_dispatch",
+            "task": {"id": "UV-EXEC-015", "execution_branch": "codex2/uv-exec-015"},
+        }
+        with mock.patch.object(watch_events, "selected_shared_files", return_value=[]):
+            rendered = watch_events.render_wakeup_message(config, event, "codex2")
+
+        self.assertIn("refs/remotes/origin/codex2/uv-exec-015", rendered)
+        self.assertIn("--track origin/codex2/uv-exec-015", rendered)
+        self.assertIn("正在 review 或 CI 的候選保留原 SHA 等待結果", rendered)
+        self.assertIn("包括 anchor commit）不得 rebase/amend 或 force push", rendered)
+        self.assertIn("git merge origin/dev", rendered)
+        self.assertIn("只有確認從未發布、沒有 PR/candidate", rendered)
+        self.assertNotIn("git fetch origin && git rebase", rendered)
+
+    def test_branch_setup_recovers_remote_anchor_when_local_branch_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            remote, checkout = root / "remote.git", root / "checkout"
+            subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+            subprocess.run(["git", "init", "-b", "dev", str(checkout)], check=True, capture_output=True)
+
+            def git(*args: str) -> str:
+                return subprocess.check_output(["git", "-C", str(checkout), *args], stderr=subprocess.PIPE, text=True).strip()
+
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Test")
+            git("commit", "--allow-empty", "-m", "base")
+            git("remote", "add", "origin", str(remote))
+            git("push", "origin", "dev")
+            git("switch", "-c", "codex2/uv-exec-015")
+            git("commit", "--allow-empty", "-m", "published anchor")
+            anchor = git("rev-parse", "HEAD")
+            git("push", "origin", "codex2/uv-exec-015")
+            git("switch", "dev")
+            git("branch", "-D", "codex2/uv-exec-015")
+            block = watch_events.build_branch_protocol_block(
+                task_id="UV-EXEC-015", lane="codex2", branch="codex2/uv-exec-015", base_branch="dev"
+            )
+            script = block.split("```bash\n", 1)[1].split("```", 1)[0]
+            subprocess.run(["bash", "-e", "-c", script], cwd=checkout, check=True, capture_output=True)
+            self.assertEqual(git("rev-parse", "HEAD"), anchor)
+            self.assertEqual(git("branch", "--show-current"), "codex2/uv-exec-015")
+            self.assertEqual(git("rev-parse", "@{upstream}"), anchor)
+            git("switch", "dev")
+            task_worktree = root / "task worktree"
+            git("worktree", "add", str(task_worktree), "codex2/uv-exec-015")
+            recovered = subprocess.run(
+                ["bash", "-e", "-c", script + "\ngit rev-parse --show-toplevel\ngit rev-parse HEAD\n"],
+                cwd=checkout, check=True, capture_output=True, text=True,
+            )
+            self.assertEqual(recovered.stdout.strip().splitlines()[-2:], [str(task_worktree), anchor])
+            self.assertEqual(git("branch", "--show-current"), "dev")
 
     def test_frontend_task_routes_to_frontend_trunk(self) -> None:
         config = self._config(agent_id="gemini2")
