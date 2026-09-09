@@ -286,7 +286,31 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
       };
       expect(course.isRequired).toBe(true);
       expect(course.modules).toHaveLength(1);
-      expect(course.questions[0].options).toHaveLength(2);
+      expect(course.questions[0]!.options).toHaveLength(2);
+    });
+
+    it("validates structural typing of FleetTrainingView", () => {
+      const view: FleetTrainingView = {
+        fleetPartnerId: "fp-001",
+        rows: [
+          {
+            courseCode: "platform_basics",
+            zh: "基礎安全培訓",
+            en: "Platform Basics",
+            completed: 10,
+            total: 10,
+            pct: 100,
+          },
+        ],
+        summary: {
+          completionPct: "100%",
+          pendingHeadcount: "0",
+          overdueIncomplete: 0,
+        },
+        source: "authoritative",
+      };
+      expect(view.source).toBe("authoritative");
+      expect(view.summary.completionPct).toBe("100%");
     });
 
     it("validates HostVehicleEarningsSummary with null financial split invariants", () => {
@@ -374,7 +398,7 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
         url: string;
         method: string;
         headers: Headers;
-        body?: string;
+        body?: string | undefined;
       }) => {
         status: number;
         body: any;
@@ -495,7 +519,7 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
       expect(interceptedUrl).toContain("page=1");
       expect(interceptedUrl).toContain("pageSize=20");
       expect(res.items).toHaveLength(1);
-      expect(res.items[0].leaveId).toBe("lv-101");
+      expect(res.items[0]!.leaveId).toBe("lv-101");
     });
 
     it("withdrawDriverLeave and reviewDriverLeave invoke proper sub-routes", async () => {
@@ -609,7 +633,7 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
       });
 
       const courses = await client.listAcademyCourses();
-      expect(courses.items[0].courseId).toBe("crs-1");
+      expect(courses.items[0]!.courseId).toBe("crs-1");
 
       const quizRes = await client.submitQuiz("crs-1", {
         courseVersion: 1,
@@ -688,8 +712,8 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
       });
 
       const vehicles = await client.listHostVehicles();
-      expect(vehicles.items[0].vehicleId).toBe("veh-1");
-      expect(vehicles.items[0].vinMasked).toBe("1HGCR2F83HA******");
+      expect(vehicles.items[0]!.vehicleId).toBe("veh-1");
+      expect(vehicles.items[0]!.vinMasked).toBe("1HGCR2F83HA******");
 
       const earnings = await client.getHostVehicleEarnings("veh-1", {
         month: "2026-08",
@@ -723,30 +747,128 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
     });
 
     it("functional adapters execute properly on ApiClient instance", async () => {
-      const client = createMockClient(() => ({
-        status: 200,
-        body: {
-          data: {
-            items: [
-              {
-                vehicle_id: "veh-1",
-                plate_no: "TDC-8888",
-                vin_masked: "1HG******",
+      const client = createMockClient((req) => {
+        if (
+          req.url.includes("/driver-leave/requests") &&
+          req.method === "POST"
+        ) {
+          return {
+            status: 201,
+            body: {
+              data: {
+                leave_id: "lv-created",
+                driver_id: "drv-1",
+                leave_type: "annual",
+                start_time: "2026-09-15T08:00:00.000Z",
+                end_time: "2026-09-15T17:00:00.000Z",
+                reason: "vacation",
+                status: "pending",
+                impacted_shift_ids: [],
+                created_at: "2026-09-09T22:00:00.000Z",
+                updated_at: "2026-09-09T22:00:00.000Z",
               },
-            ],
-            page_info: {
-              page: 1,
-              page_size: 20,
-              total_items: 1,
-              total_pages: 1,
+              meta: { requestId: "r", timestamp: "t" },
             },
+          };
+        }
+        if (req.url.includes("/driver-leave/requests")) {
+          return {
+            status: 200,
+            body: {
+              data: {
+                items: [
+                  {
+                    leave_id: "lv-1",
+                    driver_id: "drv-1",
+                    leave_type: "annual",
+                    start_time: "2026-09-15T08:00:00.000Z",
+                    end_time: "2026-09-15T17:00:00.000Z",
+                    reason: "vacation",
+                    status: "pending",
+                    impacted_shift_ids: [],
+                    created_at: "2026-09-09T22:00:00.000Z",
+                    updated_at: "2026-09-09T22:00:00.000Z",
+                  },
+                ],
+                page_info: {
+                  page: 1,
+                  page_size: 20,
+                  total_items: 1,
+                  total_pages: 1,
+                },
+              },
+              meta: { requestId: "r", timestamp: "t" },
+            },
+          };
+        }
+        if (req.url.includes("/driver-academy/courses")) {
+          return {
+            status: 200,
+            body: {
+              data: {
+                items: [
+                  {
+                    course_id: "crs-1",
+                    course_code: "platform_basics",
+                    title: "Platform Basics",
+                    category: "compliance",
+                    is_required: true,
+                    validity_days: 365,
+                    passing_score: 80,
+                    version: 1,
+                    modules_count: 1,
+                  },
+                ],
+                page_info: {
+                  page: 1,
+                  page_size: 20,
+                  total_items: 1,
+                  total_pages: 1,
+                },
+              },
+              meta: { requestId: "r", timestamp: "t" },
+            },
+          };
+        }
+        return {
+          status: 200,
+          body: {
+            data: {
+              items: [
+                {
+                  vehicle_id: "veh-1",
+                  plate_no: "TDC-8888",
+                  vin_masked: "1HG******",
+                },
+              ],
+              page_info: {
+                page: 1,
+                page_size: 20,
+                total_items: 1,
+                total_pages: 1,
+              },
+            },
+            meta: { requestId: "r", timestamp: "t" },
           },
-          meta: { requestId: "r", timestamp: "t" },
-        },
-      }));
+        };
+      });
 
       const res = await getHostOwnedVehicles(client);
-      expect(res.items[0].vehicleId).toBe("veh-1");
+      expect(res.items[0]!.vehicleId).toBe("veh-1");
+
+      const leaveRes = await listDriverLeaveRequests(client);
+      expect(leaveRes.items[0]!.leaveId).toBe("lv-1");
+
+      const createRes = await createDriverLeaveRequest(client, {
+        leaveType: "annual",
+        startTime: "2026-09-15T08:00:00.000Z",
+        endTime: "2026-09-15T17:00:00.000Z",
+        reason: "vacation",
+      });
+      expect(createRes.leaveId).toBe("lv-created");
+
+      const coursesRes = await getAcademyCourses(client);
+      expect(coursesRes.items[0]!.courseId).toBe("crs-1");
     });
   });
 

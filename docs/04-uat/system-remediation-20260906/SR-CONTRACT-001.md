@@ -30,12 +30,13 @@ Owner：Gemini；Reviewer：Codex2。日期：2026-09-09 UTC。
 | 檢查項目 / 指令                                                       | Exit Code | 耗時  | 實際結果摘要                                               |
 | :-------------------------------------------------------------------- | :-------: | :---: | :--------------------------------------------------------- |
 | `git diff --check`                                                    |     0     | 0.05s | 無任何 whitespace error 或格式異常                         |
+| `pnpm lint:root`                                                      |     0     | 3.2s  | ESLint 根目錄與單元測試檢查零警告零錯誤                    |
 | `pnpm --filter @drts/contracts typecheck`                             |     0     | 2.1s  | `@drts/contracts` TypeScript 編譯檢查通過（無 emit 錯誤）  |
 | `pnpm --filter @drts/api-client typecheck`                            |     0     | 2.2s  | `@drts/api-client` TypeScript 編譯檢查通過（無 emit 錯誤） |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/` |     0     | 0.68s | 1 test file, 23 passed (100% 通過，0 失敗)                 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/` |     0     | 0.61s | 1 test file, 24 passed (100% 通過，0 失敗)                 |
 | `pnpm exec vitest run tests/unit/api-client-dispatch-queue.test.ts`   |     0     | 0.55s | 既有 api-client / contracts 測試回歸守護通過 (2 passed)    |
 
-### 測試覆蓋矩陣 (23 Unit Tests)
+### 測試覆蓋矩陣 (24 Unit Tests)
 
 1. **Schema Allocation Invariants (`schema-allocation.json`)**：
    - 驗證 `schema-allocation.json` 存在且格式符合規範。
