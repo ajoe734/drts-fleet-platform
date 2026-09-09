@@ -167,13 +167,28 @@ export function TripSupportContent({
           </div>
         </ECard>
 
-        {/* Online Support Inquiry / Trip Issue Form */}
+        {/* Online Support Inquiry / Channel Status */}
         <ECard
           t={t}
           title={copy.inquiryTitle}
           sub={copy.inquirySubtitle}
         >
-          {submissionResult ? (
+          {!apiSubmitFn ? (
+            <div data-testid="support-inquiry-unavailable">
+              <EBanner
+                t={t}
+                tone="warn"
+                icon="alert"
+                title={copy.inquiryUnavailableTitle}
+                body={copy.inquiryUnavailableBody}
+              />
+              <div style={{ marginTop: 14 }}>
+                <p style={{ color: t.muted, fontSize: 12.5, lineHeight: 1.6, margin: 0 }}>
+                  {copy.inquiryChannelStatusBody}
+                </p>
+              </div>
+            </div>
+          ) : submissionResult ? (
             <div>
               {submissionResult.status === "success" && (
                 <div data-testid="support-inquiry-success">

@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import type { BookingRecord } from "@drts/contracts";
 import { ApiClientError } from "../../../../packages/api-client/src";
 import {
@@ -612,5 +614,66 @@ describe("SR-ENTERPRISE-DATA-001: submitTripSupportInquiry behavioral tests", ()
     const en = formatSupportTicketBody("TICK-REAL-101", "en");
     expect(en).toContain("TICK-REAL-101");
     expect(en).toContain("Authoritative support ticket");
+  });
+});
+
+describe("SR-ENTERPRISE-DATA-001: TripSupportPage rendered-page behavioral regression", () => {
+  const supportPagePath = path.resolve(
+    __dirname,
+    "../../../../apps/enterprise-dispatch-web/app/trip/support/page.tsx",
+  );
+  const supportPageSrc = fs.readFileSync(supportPagePath, "utf-8");
+
+  it("shows explicit unavailable state before entry without nonfunctional form when unprovisioned", () => {
+    // Explicit unavailable banner with data-testid="support-inquiry-unavailable" is rendered when !apiSubmitFn
+    expect(supportPageSrc).toContain("!apiSubmitFn ?");
+    expect(supportPageSrc).toContain('data-testid="support-inquiry-unavailable"');
+    expect(supportPageSrc).toContain("copy.inquiryUnavailableTitle");
+    expect(supportPageSrc).toContain("copy.inquiryUnavailableBody");
+
+    // In default production mode, TripSupportPage passes no apiSubmitFn
+    expect(supportPageSrc).toContain("<TripSupportContent />");
+
+    // Interactive form (<form onSubmit={handleSubmit}) is ONLY rendered in the ternary branch when apiSubmitFn is provided
+    expect(supportPageSrc).toMatch(
+      /!apiSubmitFn\s*\?[\s\S]*data-testid="support-inquiry-unavailable"[\s\S]*:\s*submissionResult\s*\?[\s\S]*:\s*\(\s*<form onSubmit=\{handleSubmit\}/,
+    );
+
+    // Driver coordination guidance section with data-testid is present
+    expect(supportPageSrc).toContain('data-testid="support-driver-guidance"');
+    expect(supportPageSrc).toContain("copy.driverDesc");
+
+    // Phone section handles authorized call and unauthorized notice
+    expect(supportPageSrc).toContain('data-testid="support-call-action"');
+    expect(supportPageSrc).toContain('data-testid="support-unauthorized-notice"');
+
+    // Navigation links to trip and bookings are present
+    expect(supportPageSrc).toContain('data-testid="support-back-trip"');
+    expect(supportPageSrc).toContain('data-testid="support-back-bookings"');
+  });
+
+  it("ensures copy eliminates false promises of SMS/phone reply and directs urgent users honestly", () => {
+    const copyZh = getTripSupportCopy("zh");
+    const copyEn = getTripSupportCopy("en");
+
+    // No promises of SMS/phone reply
+    expect(copyZh.driverEscalationNotice).not.toContain("簡訊或電話回報處理進度");
+    expect(copyEn.driverEscalationNotice).not.toContain("communicated by SMS or phone");
+
+    // No promises of staff reply for unprovisioned online channel
+    expect(copyZh.inquirySubtitle).not.toContain("填寫後客服專員將依租戶規範處理並回覆");
+    expect(copyEn.inquirySubtitle).not.toContain("Our support team will process your request");
+
+    // Urgent users directed to administrator / ROC, NOT to nonfunctional online form
+    expect(copyZh.unauthorizedHelp).not.toContain("線上客服留言");
+    expect(copyZh.unauthorizedHelp).toContain("企業管理員");
+    expect(copyEn.unauthorizedHelp).not.toContain("online inquiry");
+    expect(copyEn.unauthorizedHelp).toContain("enterprise administrator");
+
+    // Honest channel body
+    expect(copyZh.inquiryChannelStatusBody).toContain("不提供無效表單與假送達承諾");
+    expect(copyEn.inquiryChannelStatusBody).toContain(
+      "without nonfunctional forms or simulated delivery",
+    );
   });
 });

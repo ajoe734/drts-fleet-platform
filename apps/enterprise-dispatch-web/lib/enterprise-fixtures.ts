@@ -875,25 +875,25 @@ export function getTripSupportCopy(
       ? "目前此企業租戶環境尚未配置授權直撥電話。依企業隱私與授權規範，未經授權之電話號碼不予露出。"
       : "Direct support phone is not configured for this tenant. In accordance with privacy and authorization policies, unauthorized phone numbers are withheld.",
     unauthorizedHelp: isZh
-      ? "如需緊急支援，請使用下方線上客服留言，或由企業管理員協助轉接。"
-      : "For urgent assistance, please submit an online inquiry below or contact your enterprise administrator.",
+      ? "如需緊急支援，請聯繫企業管理員於調度後台轉接營運中心（ROC）。"
+      : "For urgent assistance, please contact your enterprise administrator to coordinate with the ROC dispatch center.",
     driverTitle: isZh ? "司機聯絡與派遣協調" : "Driver Contact & Coordination",
     driverDesc: isZh
       ? "本平臺依租戶最小權限原則，預約記錄未包含司機個人聯絡電話。若接車發生異常（司機尚未抵達、地點變更等），由企業客服直接協調調度中心連繫司機。"
       : "In accordance with tenant least-privilege principles, booking records do not expose direct driver phone numbers. If there are pickup issues, enterprise support will coordinate directly with dispatch.",
     driverEscalationNotice: isZh
-      ? "司機協調將由專屬值班專員優先以簡訊或電話回報處理進度。"
-      : "Driver coordination requests are prioritized and updates will be communicated by SMS or phone.",
-    inquiryTitle: isZh ? "線上客服留言 / 行程回報" : "Online Support Inquiry",
+      ? "預約記錄未包含司機個人電話，現場若有接車異常，請由企業管理員於後台協調。"
+      : "Booking records do not expose direct driver phone numbers. For pickup issues, please coordinate via enterprise administration.",
+    inquiryTitle: isZh ? "線上客服工單通道" : "Online Support Ticket Channel",
     inquirySubtitle: isZh
-      ? "填寫後客服專員將依租戶規範處理並回覆"
-      : "Our support team will process your request according to tenant policy",
+      ? "此企業租戶目前尚未開通線上工單端點"
+      : "Online ticketing endpoint is not provisioned for this tenant",
     inquiryChannelStatusTitle: isZh
       ? "線上客服工單通道狀態"
       : "Online Support Ticket Channel",
     inquiryChannelStatusBody: isZh
-      ? "此通道需由企業租戶開通權威線上工單 API；送出時將進行可用性檢查，未開通時誠實呈現不可用狀態，不假冒送達。"
-      : "This channel requires an authoritative tenant ticket API. Channel availability is verified on submission without simulated delivery.",
+      ? "目前租戶尚未配置線上工單提交 API。此通道誠實呈現未開通狀態，不提供無效表單與假送達承諾。"
+      : "Online ticket submission API is not provisioned for this tenant. The channel honestly reflects an unavailable state without nonfunctional forms or simulated delivery.",
     topicSelectLabel: isZh ? "求助類別" : "Issue category",
     topicOptions: [
       {
@@ -930,7 +930,7 @@ export function getTripSupportCopy(
       : "Online Support Ticket Channel Unavailable",
     inquiryUnavailableBody: isZh
       ? "目前租戶尚未配置線上工單提交 API。如需即時協助，請使用已授權之客服專線，或由企業管理員於調度後台聯繫營運中心。"
-      : "Online ticket submission API is not provisioned for this tenant. For immediate assistance, please use an authorized support phone line or have your enterprise admin contact the ROC.",
+      : "Online ticket submission API is not provisioned for this tenant. For immediate assistance, please use an authorized support phone line or contact your enterprise administrator.",
     inquiryErrorTitle: isZh
       ? "客服求助送出失敗"
       : "Support Request Failed",
