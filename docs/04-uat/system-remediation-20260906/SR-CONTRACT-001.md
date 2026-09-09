@@ -33,10 +33,10 @@ Owner：Gemini；Reviewer：Codex2。日期：2026-09-09 UTC。
 | `pnpm lint:root`                                                      |     0     | 3.2s  | ESLint 根目錄與單元測試檢查零警告零錯誤                    |
 | `pnpm --filter @drts/contracts typecheck`                             |     0     | 2.1s  | `@drts/contracts` TypeScript 編譯檢查通過（無 emit 錯誤）  |
 | `pnpm --filter @drts/api-client typecheck`                            |     0     | 2.2s  | `@drts/api-client` TypeScript 編譯檢查通過（無 emit 錯誤） |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/` |     0     | 0.75s | 1 test file, 30 passed (100% 通過，0 失敗)                 |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/` |     0     | 0.85s | 1 test file, 32 passed (100% 通過，0 失敗)                 |
 | `pnpm exec vitest run tests/unit/api-client-dispatch-queue.test.ts`   |     0     | 0.55s | 既有 api-client / contracts 測試回歸守護通過 (2 passed)    |
 
-### 測試覆蓋矩陣 (30 Unit Tests in Suite)
+### 測試覆蓋矩陣 (32 Unit Tests in Suite)
 
 1. **Schema Allocation Invariants (`schema-allocation.json`)**：
    - 驗證 `schema-allocation.json` 存在且格式符合規範。
@@ -64,13 +64,13 @@ Owner：Gemini；Reviewer：Codex2。日期：2026-09-09 UTC。
 4. **OpenAPI 規格對齊與 Ajv 正負向驗證 (`openapi-spec.yaml`)**：
    - 包含所有 15 個新增 path operations 與 4 個新增 Tags (`DriverLeave`, `DriverAcademy`, `FleetPartnerTraining`, `HostVehicles`)。
    - 包含所有對應之請求／回應 Schemas、Envelope 結構與 `MethodNotAllowed` (HTTP 405) 回應定義。
-   - **Codex2 審查修復：巢狀結構與必要 nullable 欄位嚴格對齊**：
-     - 新增 `ContractOperationalModifiableWindow`, `ContractOperationalProofRequirements`, `ContractOperationalWaitingRule`, `ContractOperationalNoShowRule`, `ContractOperationalSlaProfile`, `ContractOperationalEffectiveVersion`, `ContractOperationalAuthMode`, `ContractOperationalFieldStatusMap` 等具體約束 Schema，取代無約束之 `type: object`。
-     - 於各模型 `required` 清單中納入所有在 TS 契約為必要之 nullable 欄位（例如 `DriverLeaveRecord` 之 `reviewedByPrincipalId`/`reviewedAt`/`reviewNotes`、`HostVehicleSummary` 之 `contractPeriod`、`DriverTrainingRecord` 之 `highestScore`/`completedAt`/`expiresAt`/`lastAttemptAt`、`FleetDriverRosterItem` 之 `score`/`completedAt`/`latestAttemptId`、`ContractOperationalTerms` 之各項條款欄位）。
-   - **Ajv 8.x 架構級正負向回歸驗證**：
-     - 正向檢驗：完整資料 payload 與具備合法 `null` 之 payload 均通過 schema 驗證。
-     - 負向檢驗：精確重現並阻擋未受約束的空物件（如 `{contractId: "contract-1", dataStatus: {}, modifiableWindow: {}}` 必定拒絕並回報遺漏必要屬性）。
-     - 負向檢驗：缺漏必要 nullable 欄位（如遺漏 `reviewedByPrincipalId`、`contractPeriod`、`highestScore` 等）必定判定為非合法 payload。
+   - **Codex2 P2 審查修復：OAS 3.0.3 Reference Object 語義與 nullable 引用規格對齊**：
+     - OpenAPI 3.0.3 Section 4.7.2.3 明定 Reference Object 不可包含額外兄弟屬性，若有則應被忽略。先前 `contractPeriod` 與 `ContractOperationalViewRecord` 7 個條款欄位將 `nullable: true` 與 `$ref` 並列為兄弟屬性，在標準 OAS 語意下導致 `nullable` 被忽略而拒絕合法 `null`。
+     - 全面改為 OAS 3.0 標準相容模式：外層使用 `allOf: [ { $ref: ... } ]` 搭配 `nullable: true`。經由自動化遍歷腳本確認全份 `openapi-spec.yaml` 中 `$ref` 兄弟屬性違規數為 0。
+     - 測試端 `transformOpenApiToAjv` 嚴格遵循 OAS 3.0.3 引用語意：遭遇 `schema.$ref` 時僅回傳 `{ $ref: schema.$ref }`，徹底杜絕掩蓋無效兄弟屬性的行為。
+     - 新增單元回歸測試：遍歷驗證 `openapi-spec.yaml` 全檔無任何 `$ref` 兄弟屬性。
+     - 新增單元回歸測試：精確重現 OAS 參考語義，證明裸 `$ref` 兄弟屬性會拒絕 `null`，而 `allOf` 包裝器能正確允許 `null` 且依然拒絕空物件 `{}`。
+     - 新增單元回歸測試：針對 `ContractOperationalViewRecord` 7 個條款欄位與 `HostVehicleSummary.contractPeriod`，驗證傳入空物件 `{}` 必定被拒絕且明確指出缺漏之必要巢狀欄位。
 
 ---
 

@@ -1022,15 +1022,34 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
       function transformOpenApiToAjv(schema: any): any {
         if (!schema || typeof schema !== "object") return schema;
         if (Array.isArray(schema)) return schema.map(transformOpenApiToAjv);
+
+        // OAS 3.0.3 Section 4.7.2.3 Reference Object semantics:
+        // A Reference Object cannot be extended with additional properties and any
+        // properties added SHALL be ignored. Preserving reference semantics ensures
+        // that invalid siblings (e.g. nullable: true on $ref) are strictly dropped.
+        if (schema.$ref) {
+          return { $ref: schema.$ref };
+        }
+
         const copy: any = { ...schema };
         if (copy.nullable) {
-          if (copy.type && typeof copy.type === "string") {
+          delete copy.nullable;
+          if (
+            copy.type &&
+            typeof copy.type === "string" &&
+            !copy.allOf &&
+            !copy.oneOf &&
+            !copy.anyOf
+          ) {
             copy.type = [copy.type, "null"];
-          } else if (copy.$ref) {
-            const ref = copy.$ref;
-            delete copy.$ref;
-            delete copy.nullable;
-            copy.oneOf = [{ $ref: ref }, { type: "null" }];
+          } else {
+            const nonNullBranch: any = {};
+            for (const [k, v] of Object.entries(copy)) {
+              nonNullBranch[k] = transformOpenApiToAjv(v);
+            }
+            return {
+              oneOf: [nonNullBranch, { type: "null" }],
+            };
           }
         }
         for (const [k, v] of Object.entries(copy)) {
@@ -1186,6 +1205,30 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
           },
         };
         expect(validateView(missingModifiableWindowFields)).toBe(false);
+
+        // Negative fixture 4: rejection of empty nested objects for each of the 7 operational terms
+        const emptyTermPayloads = [
+          { field: "modifiableWindow", expectedProp: "leadTimeMinutes" },
+          { field: "proofRequirements", expectedProp: "requiredDocuments" },
+          { field: "waitingRule", expectedProp: "gracePeriodMinutes" },
+          { field: "noShowRule", expectedProp: "thresholdMinutes" },
+          { field: "slaProfile", expectedProp: "profileId" },
+          { field: "effectiveVersion", expectedProp: "versionNumber" },
+          { field: "authMode", expectedProp: "mode" },
+        ];
+        for (const { field, expectedProp } of emptyTermPayloads) {
+          const payloadWithEmptyTerm = {
+            ...completeValidPayload,
+            [field]: {},
+          };
+          expect(validateView(payloadWithEmptyTerm)).toBe(false);
+          const errors = (validateView.errors || []).map((e: any) => e.message);
+          expect(
+            errors.some(
+              (m: string) => m.includes(expectedProp) || m.includes("required"),
+            ),
+          ).toBe(true);
+        }
       });
 
       it("validates DriverLeaveRecord required nullable fields with positive and negative fixtures", () => {
@@ -1251,6 +1294,21 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
         const missingContractPeriod = { ...validHost };
         delete (missingContractPeriod as any).contractPeriod;
         expect(validateHost(missingContractPeriod)).toBe(false);
+
+        // Negative: empty contractPeriod must fail due to missing required sub-properties
+        const emptyContractPeriod = {
+          ...validHost,
+          contractPeriod: {},
+        };
+        expect(validateHost(emptyContractPeriod)).toBe(false);
+        const hostErrors = (validateHost.errors || []).map(
+          (e: any) => e.message,
+        );
+        expect(
+          hostErrors.some(
+            (m: string) => m.includes("startAt") || m.includes("required"),
+          ),
+        ).toBe(true);
       });
 
       it("validates DriverTrainingRecord and FleetDriverRosterItem nullable fields with positive and negative fixtures", () => {
@@ -1313,6 +1371,58 @@ describe("SR-CONTRACT-001: System Remediation Contracts & Allocation", () => {
         const missingModifiableWindowMinutes = { ...validTerms };
         delete (missingModifiableWindowMinutes as any).modifiableWindowMinutes;
         expect(validateTerms(missingModifiableWindowMinutes)).toBe(false);
+      });
+
+      it("strictly validates OAS 3.0.3 Reference Object semantics (no $ref siblings across openapi-spec.yaml)", () => {
+        function assertNoRefSiblings(node: any, currentPath = ""): void {
+          if (!node || typeof node !== "object") return;
+          if (Array.isArray(node)) {
+            node.forEach((item, idx) =>
+              assertNoRefSiblings(item, `${currentPath}[${idx}]`),
+            );
+            return;
+          }
+          if (node.$ref) {
+            const siblings = Object.keys(node).filter((k) => k !== "$ref");
+            expect(siblings).toEqual([]);
+          }
+          for (const [k, v] of Object.entries(node)) {
+            assertNoRefSiblings(v, `${currentPath}/${k}`);
+          }
+        }
+        assertNoRefSiblings(openapiDoc);
+      });
+
+      it("reproduces OAS 3.0 reference semantics: raw $ref sibling ignores nullable whereas allOf wrapper allows null", () => {
+        // Raw invalid OAS 3.0 pattern: $ref sibling is ignored by OAS reference semantics
+        const invalidOasSchema = {
+          $ref: "#/components/schemas/HostVehicleContractPeriod",
+          nullable: true,
+        };
+        const transformedInvalid = transformOpenApiToAjv(invalidOasSchema);
+        expect(transformedInvalid).toEqual({
+          $ref: "#/components/schemas/HostVehicleContractPeriod",
+        });
+        const validateInvalid = ajv.compile(transformedInvalid);
+        // Under OAS reference semantics, nullable was ignored on the $ref sibling, so null fails:
+        expect(validateInvalid(null)).toBe(false);
+
+        // Valid OAS 3.0 pattern: allOf wrapper with nullable
+        const validOasSchema = {
+          allOf: [{ $ref: "#/components/schemas/HostVehicleContractPeriod" }],
+          nullable: true,
+        };
+        const transformedValid = transformOpenApiToAjv(validOasSchema);
+        const validateValid = ajv.compile(transformedValid);
+        expect(validateValid(null)).toBe(true);
+        expect(
+          validateValid({
+            startAt: "2026-01-01T00:00:00Z",
+            endAt: "2026-12-31T23:59:59Z",
+            status: "active",
+          }),
+        ).toBe(true);
+        expect(validateValid({})).toBe(false);
       });
     });
   });

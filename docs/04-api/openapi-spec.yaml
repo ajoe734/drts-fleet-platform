@@ -4681,7 +4681,8 @@ components:
         operatingFleetName:
           type: string
         contractPeriod:
-          $ref: "#/components/schemas/HostVehicleContractPeriod"
+          allOf:
+            - $ref: "#/components/schemas/HostVehicleContractPeriod"
           nullable: true
     HostVehicleEarningsSummary:
       type: object
@@ -5102,25 +5103,32 @@ components:
         contractId:
           type: string
         modifiableWindow:
-          $ref: "#/components/schemas/ContractOperationalModifiableWindow"
+          allOf:
+            - $ref: "#/components/schemas/ContractOperationalModifiableWindow"
           nullable: true
         proofRequirements:
-          $ref: "#/components/schemas/ContractOperationalProofRequirements"
+          allOf:
+            - $ref: "#/components/schemas/ContractOperationalProofRequirements"
           nullable: true
         waitingRule:
-          $ref: "#/components/schemas/ContractOperationalWaitingRule"
+          allOf:
+            - $ref: "#/components/schemas/ContractOperationalWaitingRule"
           nullable: true
         noShowRule:
-          $ref: "#/components/schemas/ContractOperationalNoShowRule"
+          allOf:
+            - $ref: "#/components/schemas/ContractOperationalNoShowRule"
           nullable: true
         slaProfile:
-          $ref: "#/components/schemas/ContractOperationalSlaProfile"
+          allOf:
+            - $ref: "#/components/schemas/ContractOperationalSlaProfile"
           nullable: true
         effectiveVersion:
-          $ref: "#/components/schemas/ContractOperationalEffectiveVersion"
+          allOf:
+            - $ref: "#/components/schemas/ContractOperationalEffectiveVersion"
           nullable: true
         authMode:
-          $ref: "#/components/schemas/ContractOperationalAuthMode"
+          allOf:
+            - $ref: "#/components/schemas/ContractOperationalAuthMode"
           nullable: true
         dataStatus:
           $ref: "#/components/schemas/ContractOperationalFieldStatusMap"
