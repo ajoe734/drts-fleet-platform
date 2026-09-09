@@ -13,7 +13,7 @@ import {
   deriveCohortMetricsPresentation,
   deriveDimensionalAlertPresentation,
 } from "../../apps/ops-console-web/app/callcenter/callcenter-metrics-ledger";
-import { REALM_COLORS, STATUS_TONES } from "@drts/ui-tokens";
+import { REALM_COLORS, STATUS_TONES } from "../../packages/ui-tokens/src";
 
 describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alerts", () => {
   // ============================================================================
