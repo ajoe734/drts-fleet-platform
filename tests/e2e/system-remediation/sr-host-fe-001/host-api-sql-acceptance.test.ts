@@ -149,17 +149,58 @@ describe("SR-HOST-FE-001-ACCEPTANCE-RUNNER: real HTTP + SQL Host acceptance", ()
   }
 
   describe("Anonymous / unauthenticated access", () => {
-    it("rejects a request with no bootstrap headers as 401", async () => {
+    it("rejects a request with no bootstrap headers as 401 (guard-level AUTH_REQUIRED)", async () => {
+      // No identity headers at all: BootstrapAuthGuard itself rejects this
+      // before the request ever reaches HostViewController/Service — the
+      // controller's own HOST_UNAUTHORIZED code is a defense-in-depth check
+      // for an identity that resolves but is incomplete (see the next test),
+      // not for a wholly anonymous request.
       const { status, body } = await call("GET", "/api/host/vehicles", {});
       expect(status).toBe(401);
-      expect(JSON.stringify(body)).toContain("HOST_UNAUTHORIZED");
+      expect(JSON.stringify(body)).toContain("AUTH_REQUIRED");
     });
 
-    it("rejects a non-partner realm identity as 403", async () => {
+    it("rejects a non-partner realm identity as 403 (guard-level AUTH_REALM_DENIED)", async () => {
+      // HostViewController's own @RequireRealms("partner") means
+      // BootstrapAuthGuard rejects any other realm before
+      // HostViewService.resolvePartnerId's own (otherwise unreachable
+      // through this guarded route) "only partner realm" check ever runs.
       const { status, body } = await call(
         "GET",
         "/api/host/vehicles",
         hostHeaders(HOST_A_PARTNER_ID, { "x-realm": "ops" }),
+      );
+      expect(status).toBe(403);
+      expect(JSON.stringify(body)).toContain("AUTH_REALM_DENIED");
+    });
+
+    it("rejects a partner-realm identity with no partner id as 401 (service-level HOST_UNAUTHORIZED)", async () => {
+      // Realm is "partner" (passes the guard), but both x-actor-id and
+      // x-partner-id are withheld, so HostViewService.resolvePartnerId's own
+      // check is what actually rejects this — the one guard-level 401 above
+      // cannot reach.
+      const { status, body } = await call(
+        "GET",
+        "/api/host/vehicles",
+        hostHeaders(HOST_A_PARTNER_ID, {
+          "x-actor-id": undefined,
+          "x-partner-id": undefined,
+        }),
+      );
+      expect(status).toBe(401);
+      expect(JSON.stringify(body)).toContain("HOST_UNAUTHORIZED");
+    });
+
+    it("rejects a partner identity missing the required scope as 403 (service-level HOST_FORBIDDEN)", async () => {
+      // Realm is "partner" and the identity is otherwise complete (passes
+      // both the guard and resolvePartnerId's own identity checks), but the
+      // granted scope set omits "owned:read", which HostViewService.listVehicles
+      // requires — the one guard-level 403 above (wrong realm) cannot reach
+      // this scope-level check.
+      const { status, body } = await call(
+        "GET",
+        "/api/host/vehicles",
+        hostHeaders(HOST_A_PARTNER_ID, { "x-scopes": "reports:read" }),
       );
       expect(status).toBe(403);
       expect(JSON.stringify(body)).toContain("HOST_FORBIDDEN");

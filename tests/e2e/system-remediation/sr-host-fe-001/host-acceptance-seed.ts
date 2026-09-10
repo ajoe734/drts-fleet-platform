@@ -6,12 +6,19 @@
 // test-only shadow table. All identifiers are fictional per this task's
 // guardrails.
 
+// `pg` is only required lazily, inside pool() below, rather than at module
+// top level. This file's exported ID/helper constants are imported by both
+// the vitest HTTP/SQL suite AND the Playwright browser spec (via
+// host-acceptance-seed.ts's shared constants) — the browser spec never
+// calls seedHostAcceptanceFixtures/cleanupHostAcceptanceFixtures itself
+// (the standalone host-acceptance-server.ts process does that), but
+// Playwright's own TypeScript compilation is CommonJS-based, unlike
+// vitest's ESM/esbuild pipeline, and does not support the
+// `createRequire(import.meta.url)` pattern at module scope — deferring the
+// require into the function body means Playwright's compiler never needs
+// to evaluate it at all.
+import path from "node:path";
 import { createRequire } from "node:module";
-
-const require = createRequire(
-  new URL("../../../../apps/api/package.json", import.meta.url),
-);
-const { Pool } = require("pg") as typeof import("pg");
 
 export const HOST_A_PARTNER_ID = "a0000000-0000-4000-8000-00000000000a";
 export const HOST_B_PARTNER_ID = "a0000000-0000-4000-8000-00000000000b";
@@ -42,6 +49,10 @@ function pool() {
       "DATABASE_URL must be set for SR-HOST-FE-001-ACCEPTANCE-RUNNER seeding.",
     );
   }
+  const apiRequire = createRequire(
+    path.resolve(__dirname, "../../../../apps/api/package.json"),
+  );
+  const { Pool } = apiRequire("pg") as typeof import("pg");
   return new Pool({ connectionString: databaseUrl });
 }
 
