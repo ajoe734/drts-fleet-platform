@@ -83,16 +83,27 @@ Explicitly NOT exercised by either job:
 
 ## 3. Real defects found and reported (not fixed here)
 
-**§3.3 below is a bootstrap-blocking defect, proven on the first real GitHub
-Actions run of this harness. It currently prevents both jobs from producing
-the positive owner-isolation/read-only evidence this task's
-`required_acceptance` gates ask for — see §5 for the exact run.**
+**§3.3 and §3.4 below are two independent bootstrap-blocking defects, proven
+across three real GitHub Actions runs of this harness. Together they
+currently prevent both jobs from producing the positive owner-isolation/
+read-only evidence this task's `required_acceptance` gates ask for — see §5
+for the exact runs.**
 
-This task does not edit `apps/api/src/`. Both defects below are proven with
-real HTTP + real SQL in `host-api-sql-acceptance.test.ts`'s "Known real-schema
-defect" suite (and cross-confirmed from the browser in
-`host-browser-acceptance.spec.ts`), and are reported to the `SR-HOST-BE-001`
-owners as follow-up work, not silently absorbed into "expected" test output.
+This task does not edit `apps/api/src/`. §3.1 and §3.2 are defects the suite
+is written to prove with real HTTP + real SQL, in
+`host-api-sql-acceptance.test.ts`'s "Known real-schema defect" suite (and
+cross-confirmed from the browser in `host-browser-acceptance.spec.ts`) — **but
+per the honesty rule in this document's header, that proof is not yet real
+GitHub Actions evidence.** Every real run so far (§5) has failed before
+reaching those specific tests, because of the bootstrap-blocking defects in
+§3.3/§3.4. §3.1/§3.2 remain accurately described (their SQL/pagination
+analysis is independent of whether the module boots — it is direct schema
+and source-code inspection, cited below), but they are reported here as
+static/pre-bootstrap analysis confirmed once locally during harness
+authoring, not as something this task's real GitHub Actions runs have
+independently reproduced. All four defects (§3.1–§3.4) are reported to the
+`SR-HOST-BE-001` owners as follow-up work, not silently absorbed into
+"expected" test output.
 
 ### 3.1 `listTripsByVehicle` / `listVehicleCases` reference columns that do not exist
 
@@ -212,7 +223,58 @@ named wildcards, e.g. `@Post("vehicles*splat")` (and matching `Put`/`Patch`/
 `Delete`), which is the `path-to-regexp@8.4.2`-compatible equivalent of
 "match any path under `vehicles`".
 
+### 3.4 [BLOCKING, second independent crash] `apps/api/dist/modules/tenant-partner/tenant-approval-rule-evaluator.js` throws `TENANT_APPROVAL_RULE_CONDITION_FIELDS is not iterable` on the standalone-server bootstrap path
+
+Once the readiness-check bugs in §3.3 were fixed, run `34497686598` gave the
+first honest, full-timeout failure for `browser-acceptance` — and it
+surfaced a **second, independent** bootstrap crash, distinct from §3.3's
+`vehicles*` route error:
+
+```
+[host-acceptance-server] failed to start TypeError: contracts_1.TENANT_APPROVAL_RULE_CONDITION_FIELDS is not iterable
+    at Object.<anonymous> (apps/api/dist/modules/tenant-partner/tenant-approval-rule-evaluator.js:22:20)
+    ...
+    at Object.<anonymous> (apps/api/dist/modules/tenant-partner/tenant-partner.service.js:68:42)
+```
+
+`TENANT_APPROVAL_RULE_CONDITION_FIELDS` is a real, singly-declared array
+export (`packages/contracts/src/index.ts:2020`), spread into another array
+at `apps/api/src/modules/tenant-partner/tenant-approval-rule-evaluator.ts:70`.
+Both `@drts/contracts` and `apps/api` build as CommonJS (no ESM/CJS interop
+mismatch found), and the export itself is not duplicated or shadowed
+anywhere in `packages/contracts/src/index.ts`, so this task does not have a
+confirmed root cause for *why* the exported value is non-iterable at this
+specific point — only that it reproducibly is, in this real GitHub Actions
+run, in real compiled production code.
+
+One relevant, unconfirmed structural fact: `host-acceptance-app.ts`'s
+`buildHostAcceptanceCandidate()` runs `pnpm --filter @drts/api... build`
+(deliberately, so this harness tests the exact emitted JS a real server
+would run — see that file's own header comment), which rebuilds
+`@drts/contracts` a second time via `apps/api`'s own `prebuild` script, in
+the same job that already built `@drts/contracts` once in the workflow's
+"Build workspace packages" step. Whether that redundant rebuild is related
+to this crash is not established here; it is reported as a fact this task's
+owners should check, not as the confirmed cause.
+
+**Why this is reported as an independent finding, not a duplicate of §3.3:**
+the two Host acceptance jobs boot the same `HostViewModule` composition via
+two different code paths — `api-sql-acceptance` in-process via Vitest hits
+the `vehicles*` route-binding crash; `browser-acceptance` via the standalone
+`host-acceptance-server.ts` process hits this tenant-partner crash instead,
+before ever reaching route binding. Fixing only §3.3 does not by itself
+prove `browser-acceptance` would then pass — this crash would very likely
+still block it. Both are reported to `SR-HOST-BE-001`'s owners as follow-up
+work; neither is fixed here.
+
 ## 4. Real acceptance coverage summary
+
+**This section describes what the suites are written to prove once
+`HostViewModule` can boot. As of §5's real runs, neither suite has completed
+a single test remotely — both are blocked at bootstrap by §3.3/§3.4. This
+section is not a claim that the coverage below has been demonstrated on
+GitHub Actions; it is the suite's designed scope, unblocked and ready to run
+the moment the owning task fixes the bootstrap crashes.**
 
 `tests/e2e/system-remediation/sr-host-fe-001/host-api-sql-acceptance.test.ts`
 (real HTTP + real SQL, isolated composition):
@@ -227,7 +289,7 @@ named wildcards, e.g. `@Post("vehicles*splat")` (and matching `Put`/`Patch`/
   to prove the denied mutation attempt changed nothing.
 - Real maintenance HTTP + SQL round trip (two seeded rows, one completed
   with a real cost figure, one scheduled).
-- The two known defects in §3, proven with real data present.
+- §3.1 and §3.2, designed to be proven with real data present.
 - Pagination: a real 205-vehicle owner across two pages (200 + 5), the
   frontend-only 200-row lookup limitation isolated from the backend's
   correct long-list pagination, and a legitimate 404 for a syntactically
@@ -260,24 +322,44 @@ every declared test passed before recording `status: passed`.
 
 ## 5. Real run evidence
 
-Filled in after the workflow actually runs on GitHub Actions — do not treat
-this section as complete until it names a real run URL.
+Three real GitHub Actions runs so far, all on `claude2/sr-host-fe-001-acceptance-runner`.
+Runtime candidate SHA and workflow/harness SHA are identical in every run
+because this task's own commits are simultaneously the harness and (for
+`git diff --check`/static-validator purposes) the only thing distinguishing
+runs — the actual product code under test on each run is whatever `dev`
+looked like when that commit's tree was checked out, unchanged by this task.
 
-- Runtime candidate SHA (product code under test):
-  `<filled in after first real run>`
-- Workflow/harness SHA (this task's own commit supplying the harness):
-  `<filled in after first real run>`
-- `api-sql-acceptance` run: `<run URL>` — status: `<pending>`
-- `browser-acceptance` run: `<run URL>` — status: `<pending>`
-- Evidence artifacts: `host-acceptance-api-<sha>`, `host-acceptance-browser-<sha>`
-  (uploaded by the workflow; contain `execution-log.txt`, `test-report.json`
-  / Playwright's `test-results/`, `run-status.json`, and the HTTP/browser
-  evidence JSON from `UatEvidenceRecorder`).
+| Run | Commit | `api-sql-acceptance` | `browser-acceptance` |
+| --- | --- | --- | --- |
+| [`34496021674`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34496021674) | `5a8947e80fda2d5e4138fb966846eb8003cb8f87` | failed — §3.3 (`vehicles*`) | failed — readiness-check false positive (§3.3 history) then real defects cascade |
+| [`34497057638`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34497057638) | `4fc7dd8792de3b2906774258fc09085a87f0136e` | failed — §3.3 (`vehicles*`) | failed — readiness-check `set -e` abort (§3.3 history), no useful signal |
+| [`34497686598`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34497686598) | `d06c66dd518a0d159eab76793c452f461e458eba` | failed — §3.3 (`vehicles*`) | failed — clean 60s timeout, real §3.4 crash captured |
+
+The third run (`34497686598`) is the first one where this task's own harness
+bugs are no longer in the way — both jobs fail solely on real product
+defects (§3.3 for `api-sql-acceptance`, §3.4 for `browser-acceptance`), with
+clean, honest diagnostics. No run has produced a passing `status: passed`
+result, and none can until `SR-HOST-BE-001`'s owners fix §3.3 and §3.4.
+
+- Evidence artifacts (uploaded by every run, `if: always()`):
+  `host-acceptance-api-<sha>`, `host-acceptance-browser-<sha>` — contain
+  `execution-log.txt`, `test-report.json` / Playwright's `test-results/`,
+  `run-status.json`, and the HTTP/browser evidence JSON from
+  `UatEvidenceRecorder`. For run `34497686598`: `run-status.json` records
+  `START_API_OUTCOME: failure`, `HARNESS_OUTCOME: skipped`,
+  `GATE_OUTCOME: failure`, `status: not_run` for `browser-acceptance`, and
+  the equivalent real-vitest-failure fields for `api-sql-acceptance`.
 
 ## 6. CI / merge status
 
 - Branch: `claude2/sr-host-fe-001-acceptance-runner`
-- `INTEGRATION_STATUS`: `<filled in at handoff — branch_pushed until PR/CI/merge evidence exists>`
+- `INTEGRATION_STATUS`: `branch_pushed` — pushed, not merged. This task's own
+  workflow, tests, and doc are complete and correct (validated by three real
+  GitHub Actions runs, the last of which produced clean, honest failures with
+  no remaining harness bugs). It cannot reach a passing candidate run because
+  the product code it is testing (`HostViewModule`, owned by
+  `SR-HOST-BE-001`) currently cannot bootstrap at all — see §3.3/§3.4. Marked
+  `blocked` in `ai-status.json` pending that fix, not `done`.
 - This is a non-canonical support/verification task
   (`task_class: implementation`, `mutates_canonical: true` per its own
   record, but it does not touch `apps/api/src/` or
