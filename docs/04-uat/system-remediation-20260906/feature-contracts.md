@@ -318,7 +318,7 @@ stateDiagram-v2
 
 1. **多課程完訓率與分母收斂 (Fleet Multi-Course Metrics Invariants)**:
    - **司機身分契約 (Driver Identity Contract)**: 全學院體系（本表四張新表、`reg.driver_training_records`、`reg.driver_reg_profiles`）之 `driver_id` 一律採用 runtime 實際發放之文字 ID（`regulatory-registry.service.ts` 建立、持久化於 `reg.phase1_registry_drivers.driver_id`，`varchar(100)`），**不得**使用 `reg.drivers`（`uuid` PK）；該表無任何 runtime 寫入路徑，禁止 prefix 轉換、hash 或型別轉換發明對應關係。完整決策見 `academy-identity-decision.md`。
-   - **分母 ($N_{\text{total}}$)**: 該車行當前所有綁定之有效司機總人數，來源為 `admin.phase1_driver_fleet_affiliations`（依 `fleetPartnerId` 且 `effective_until` 為空或未到期過濾）與 `reg.phase1_registry_drivers` 之 join，即 `FleetPartnerService.listPortalDrivers()` 已採用之權威解析路徑；**不得**採用 `reg.drivers`（該表無寫入路徑，恆為空，會使分母恆為 0）。
+   - **分母 ($N_{\text{total}}$)**: 於單一 `asOfInstant`（同一次回應中 `summary` 與所有 `rows[]` 共用同一時間點，不得各自重算）下，`admin.phase1_driver_fleet_affiliations` 與 `reg.phase1_registry_drivers` 之 **inner join**、`DISTINCT driver_id` 結果：`fleet_partner_id = :fleetPartnerId AND effective_from <= :asOfInstant AND (effective_until IS NULL OR effective_until > :asOfInstant)`，且僅計入於 `reg.phase1_registry_drivers` 存在對應列之司機（孤兒 affiliation 不計入）。完整定義與邊界案例見 `academy-identity-decision.md` §2.2.1。**不得**採用 `reg.drivers`（該表無寫入路徑，恆為空，會使分母恆為 0），**亦不得**直接沿用 `FleetPartnerService.listPortalDrivers()` 作為分母來源——該方法僅依 `fleetPartnerId` 過濾、未套用生效區間、對重複 affiliation 不去重、且以 fallback 值容納無註冊身分之孤兒列，屬於車行入口顯示用途而非分母解析器；分母須改用 `academy-identity-decision.md` §2.2.1 所定義之獨立 read port（例如 `FleetPartnerService.resolveActiveDriverCohort(fleetPartnerId, asOfInstant)`）。
    - **必修課程集 ($M_{\text{required}}$)**: 所有標記 `isRequired: true` 之課程代碼集合。
    - **單門課程統計 (`rows[]`)**:
      - `completed`: 該課程狀態為 `passed` 且未過期（`!isOverdue`）之司機數。
@@ -604,6 +604,7 @@ export interface FleetDriverRosterItem {
 - **AC-ACAD-POS-2 (多課程看板聚合與邊界)**: 車行有多門必修課時，單一司機完成所有課程則完訓數計 1；若 1 位司機完成 2 門課，車行看板 `completionPct` 正確呈現 `100%`，`pendingHeadcount` 為 `"0"`，絕不溢出至 200% 或負數。
 - **AC-ACAD-POS-3 (監管紀錄與資格連動)**: 司機通過必修課程後，`reg.driver_training_records` 新增紀錄，且 `reg.driver_reg_profiles.training_status` 同步更新為 `'passed'`；`runtime-eligibility-evaluator` 檢查 `trainingRequired` 順利放行。
 - **AC-ACAD-POS-4 (完訓到期與可派阻擋)**: 課程超過有效期限後，狀態標記為 `expired`；`training_status` 降級為 `'expired'`，派單引擎於 `trainingRequired` 檢查時觸發 `softReasonCodes: ["DRIVER_TRAINING_INCOMPLETE"]` 阻擋派車。
+- **AC-ACAD-POS-5 (分母邊界：未來/過期/重複/孤兒 affiliation)**: 於同一 `asOfInstant` 下，車行分母 $N_{\text{total}}$（`academy-identity-decision.md` §2.2.1）：(a) `effective_from > asOfInstant` 之未來 affiliation 不計入；(b) `effective_until <= asOfInstant` 之過期 affiliation 不計入；(c) 同一司機於該車行有多筆同時有效 affiliation 時僅計入 1 次（`DISTINCT driver_id`）；(d) `driver_id` 於 `reg.phase1_registry_drivers` 無對應列之孤兒 affiliation 不計入。`summary.completionPct` 之分母與所有 `rows[].total` 於同一次回應中數值必須一致。
 - **AC-ACAD-NEG-1 (重複題號與缺漏作答阻擋)**: 司機提交 5 次相同題號之作答或遺漏題目，系統回傳 `400 QUIZ_INCOMPLETE_OR_DUPLICATE_SUBMISSION`，拒絕評分。
 - **AC-ACAD-NEG-2 (過期版本作答阻擋)**: 司機在題庫改版後以舊版版本號提交，系統回傳 `409 COURSE_VERSION_STALE`。
 - **AC-ACAD-NEG-3 (試卷防偷看)**: 學員拉取課程試卷 API，回應 JSON 嚴格不包含解答或正確選項標註。

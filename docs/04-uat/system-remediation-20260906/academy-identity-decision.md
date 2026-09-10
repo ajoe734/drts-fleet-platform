@@ -8,6 +8,15 @@ entry) that blocked `SR-ACADEMY-BE-001` implementation
 `d09cefae69816396c799c8e62fe78c0193e14e52`). This document does not implement the
 academy backend; it authorizes the identity model that the backend must use.
 
+**Revision note (2026-09-10, post-review):** `Codex2` failed the prior candidate
+(`4abf9db99ad98f6e71c15ca03c077482068806aa`) because §2.2's cohort definition
+filtered only `fleetPartnerId` and `effective_until`, omitting the
+`effective_from` lower bound and driver-level deduplication, and mischaracterized
+`listPortalDrivers` as the resolver itself. This revision replaces that
+definition with the exact resolver in §2.2.1, corrects the §1 description of
+`listPortalDrivers`, and adds explicit future/expired/duplicate/orphan boundary
+acceptance in §3. No other section's substance changed.
+
 ## 1. Reproduction (fresh `origin/dev`, `ccfbf3bfdcb878da0160091fc483d555505fae2a`)
 
 - `apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts:891` and
@@ -39,14 +48,39 @@ academy backend; it authorizes the identity model that the backend must use.
   active fleet driver cohort denominator source. Since `reg.drivers` is never
   written, that denominator would always resolve to zero — it cannot be
   authoritative.
-- An authoritative fleet↔driver cohort resolver already exists and is already
-  proven in production code:
+- The join pattern needed for the cohort (affiliations ⋈ registry drivers,
+  both by text `driverId`) already exists in production code at
   `apps/api/src/modules/fleet-partner/fleet-partner.service.ts:487-519`
-  (`listPortalDrivers`) joins `admin.phase1_driver_fleet_affiliations`
-  (`driver_id varchar(100)`, no FK — `infra/migrations/V0026__fleet_partner_revenue_share_runtime_snapshots.sql:14-22`),
-  filtered by `fleetPartnerId` and affiliation validity, against
-  `RegulatoryRegistryService.listDrivers()` (backed by
-  `reg.phase1_registry_drivers`) by the same text `driverId`.
+  (`listPortalDrivers`), against `admin.phase1_driver_fleet_affiliations`
+  (`driver_id varchar(100)`, no FK — `infra/migrations/V0026__fleet_partner_revenue_share_runtime_snapshots.sql:14-22`)
+  and `RegulatoryRegistryService.listDrivers()` (backed by
+  `reg.phase1_registry_drivers`). **`listPortalDrivers` is a portal-display
+  read, not an active-cohort resolver, and must not be reused verbatim for
+  the academy denominator.** As written it: (a) filters only on
+  `fleetPartnerId` (`fleet-partner.service.ts:488-490` `.filter((affiliation)
+  => affiliation.fleetPartnerId === fleetPartnerId)`), applying no
+  `effective_from`/`effective_until` window, so future and expired
+  affiliations are included; (b) keeps every matching affiliation row rather
+  than one row per driver, so a driver with two affiliation rows (e.g. a
+  renewed or re-affiliated driver) is counted twice; (c) left-joins the
+  registry and falls back to synthetic display values
+  (`fleet-partner.service.ts:497-506`, e.g. `name: driver?.name ??
+  affiliation.driverId`, `dispatchEligible: driver?.dispatchEligible ??
+  false`) when no `reg.phase1_registry_drivers` row exists, so an orphaned
+  affiliation (no matching registry identity) still yields a display row.
+  These are correct choices for a portal roster view (show what exists, degrade
+  gracefully) and wrong choices for a denominator (§2.2.1 below defines the
+  distinct, date-scoped, registry-verified query the academy backend must use
+  instead).
+- A read-only isolation probe (Node/TS, no DB, no file edits) executed
+  `listPortalDrivers`'s exact filter/map logic against five synthetic
+  affiliation rows for one fleet — one currently active driver with a
+  duplicate active row, one future-dated affiliation, one expired
+  affiliation, and one affiliation with no matching registry driver — and
+  confirmed the portal method returns 5 rows (all affiliations, as designed
+  for portal display) while the correct current unique active cohort for
+  that fleet is 1 driver. This confirms `listPortalDrivers` cannot be the
+  denominator source without the additional filtering in §2.2.1.
 
 ## 2. Decision
 
@@ -71,10 +105,58 @@ disclosure tables; it is not deleted and not written to by this decision.
 | :--- | :--- | :--- | :--- |
 | Driver identity minting | `reg.phase1_registry_drivers` | `regulatory-registry` | read-only |
 | Fleet↔driver active affiliation | `admin.phase1_driver_fleet_affiliations` | `fleet-partner` | read-only |
-| Active fleet driver cohort denominator ($N_{\text{total}}$) | join of the two rows above (same join `listPortalDrivers` already performs), scoped to `fleetPartnerId` and `effective_until IS NULL OR effective_until > now()` | `fleet-partner` (read), consumed by `driver-academy` | read-only |
+| Active fleet driver cohort denominator ($N_{\text{total}}$) | new dedicated query, §2.2.1 below (not `listPortalDrivers`) | `fleet-partner` (new read port), consumed by `driver-academy` | read-only |
 | Course/module/question/attempt data | `reg.phase1_driver_academy_courses`, `..._modules`, `reg.phase1_driver_quiz_questions`, `reg.phase1_driver_quiz_attempts` (`V0095`) | `driver-academy` (new) | owns |
 | Durable training qualification projection | `reg.driver_training_records` (insert on pass), `reg.driver_reg_profiles.training_status` (update on pass/expiry) | schema remains `reg` (regulatory-registry domain); write grant below | narrow write grant, see 2.3 |
 | `trainingRequired` dispatch-eligibility read | `reg.driver_reg_profiles.training_status` | `vehicle-eligibility` (`runtime-eligibility-evaluator.service.ts`) | out of scope — owned by `SR-WIRE-001` per `feature-contracts.md` §1.5; evaluator today only pushes a static `"training"` missing-requirement string and does not read `training_status` at all (confirmed at `apps/api/src/modules/vehicle-eligibility/runtime-eligibility-evaluator.service.ts:341-347`) |
+
+#### 2.2.1 Active fleet driver cohort — exact resolver definition
+
+The denominator is the set of **distinct driver ids** with a currently-active,
+registry-identified affiliation to the fleet, as of a single evaluation
+instant shared by every number in one response (summary, per-course rows,
+and roster). Given `fleetPartnerId` and `asOfInstant` (server "now" at the
+start of request handling — the same value must be reused for every row
+computed in that response so `summary` and `rows[]` never disagree):
+
+```sql
+SELECT DISTINCT a.driver_id
+FROM admin.phase1_driver_fleet_affiliations a
+INNER JOIN reg.phase1_registry_drivers d ON d.driver_id = a.driver_id
+WHERE a.fleet_partner_id = :fleetPartnerId
+  AND a.effective_from <= :asOfInstant
+  AND (a.effective_until IS NULL OR a.effective_until > :asOfInstant)
+```
+
+Required semantics, all four are the corrections this revision makes over
+the previously-approved (and review-rejected) definition:
+
+- **As-of instant, not "no end date"**: `a.effective_from <= :asOfInstant AND
+  (a.effective_until IS NULL OR a.effective_until > :asOfInstant)`. The prior
+  wording ("`effective_until` empty or not yet expired") omitted the
+  `effective_from` lower bound, so a future-dated affiliation (onboarding
+  scheduled but not yet started) was counted in the current cohort.
+- **Registry identity required (`INNER JOIN`, not left join with fallback)**:
+  an affiliation row whose `driver_id` has no matching
+  `reg.phase1_registry_drivers` row is excluded, not included with a
+  synthetic fallback display value. An orphaned affiliation is not a real
+  active driver for denominator purposes.
+- **`DISTINCT a.driver_id`**: a driver with more than one qualifying
+  affiliation row at the same instant (e.g. overlapping or re-affiliation
+  records) is counted once, never once per row.
+- **One `asOfInstant` per response, reused for every count**: `rows[].total`,
+  `summary.completionPct`'s denominator, and any roster listing derived from
+  this query in the same API response must all be computed from this exact
+  query result set, not independently re-derived, so they cannot diverge.
+
+This must be implemented as a new, explicitly-named read method (e.g.
+`FleetPartnerService.resolveActiveDriverCohort(fleetPartnerId, asOfInstant):
+string[]`, or an equivalent read port outside `fleet-partner` with the same
+query) — it is **not** `listPortalDrivers`, and `listPortalDrivers` itself
+must not be modified by this decision (it is a portal display read with its
+own, intentionally more permissive, contract; see §1). Allocating this method
+is listed in §2.3 for the supervisor to grant before backend implementation
+resumes.
 
 The task's `read_dependencies` list a stale path,
 `apps/api/src/modules/owned-mobility/runtime-eligibility-evaluator.service.ts`;
@@ -92,10 +174,12 @@ Beyond the four new tables it already owns, the backend needs:
 - **Write** (`UPDATE ... SET training_status`) to `reg.driver_reg_profiles`,
   restricted to the `training_status` column, driven only by required-course
   pass/expiry transitions (no other column of that table is in scope).
-- **Read** access to `RegulatoryRegistryService.listDrivers()` /
-  `reg.phase1_registry_drivers` and to `admin.phase1_driver_fleet_affiliations`
-  (via `FleetPartnerService` or an equivalent read port) for the cohort
-  denominator.
+- **Read** access to the new §2.2.1 cohort resolver (e.g.
+  `FleetPartnerService.resolveActiveDriverCohort(fleetPartnerId,
+  asOfInstant)` or an equivalent read port implementing that exact query)
+  against `admin.phase1_driver_fleet_affiliations` and
+  `reg.phase1_registry_drivers` for the denominator. This is a new method;
+  do not reuse or relax `listPortalDrivers` for this purpose (§2.2.1).
 - A `driver_reg_profiles` row does not currently exist for any `drv_<uuid>`
   runtime driver (no insert path populates it — see §1). The backend's
   first-pass-write must `INSERT ... ON CONFLICT (driver_id) DO UPDATE` (upsert)
@@ -158,6 +242,12 @@ that table's primary key; only its type and FK constraint change.
   `schema-allocation.json`).
 - Sourcing the cohort denominator from `reg.drivers` — always zero, silently
   wrong dashboards.
+- Reusing `listPortalDrivers` (or an affiliation-row count without
+  `effective_from`/`effective_until` filtering, registry-identity join, and
+  `DISTINCT driver_id`) as the denominator — over-counts future/expired
+  affiliations, double-counts drivers with multiple affiliation rows, and
+  counts orphaned affiliations with no registry identity (§2.2.1, confirmed
+  by the review counterexample probe in §1).
 
 ## 3. Required remote acceptance (not run here — VM restriction, no live DB)
 
@@ -173,12 +263,28 @@ Positive:
 - A driver who passes every `isRequired: true` course reads back
   `training_status = 'passed'`; a driver with one expired required course
   reads back `'expired'`.
-- Fleet cohort query (§2.2 join) run against a fleet with 0 courses/0 drivers
-  returns `total: 0`, `completionPct: "0%"` (or defined empty state), not a
-  division error.
+- Fleet cohort query (§2.2.1 resolver) run against a fleet with 0
+  affiliations/0 drivers returns `total: 0`, `completionPct: "0%"` (or
+  defined empty state), not a division error.
 - Existing rows (if any are manually seeded pre-migration) in
   `reg.driver_training_records` / `reg.driver_reg_profiles` are present with
   identical column values (other than `driver_id`'s type) after migration.
+- Cohort boundary cases (§2.2.1), all evaluated at the same `asOfInstant`
+  against one fleet:
+  - **Future affiliation**: an affiliation with `effective_from > asOfInstant`
+    is excluded from the cohort and from `total`.
+  - **Expired affiliation**: an affiliation with `effective_until <=
+    asOfInstant` is excluded from the cohort and from `total`.
+  - **Duplicate active affiliation**: a driver with two affiliation rows to
+    the same fleet, both currently active (e.g. overlapping validity
+    windows, or a closed-then-reopened affiliation pair where one row is
+    still open), is counted exactly once in `total` (`DISTINCT driver_id`).
+  - **Orphan affiliation**: an affiliation row whose `driver_id` has no
+    matching `reg.phase1_registry_drivers` row is excluded from the cohort
+    and from `total` (inner join, no fallback row).
+  - `summary.completionPct`'s denominator and every `rows[].total` in the
+    same API response are numerically identical (same `asOfInstant`, same
+    resolved driver-id set).
 
 Negative:
 
@@ -188,6 +294,11 @@ Negative:
   rejection — this must be explicit in the backend implementation task since
   the DB no longer enforces it structurally.
 - `reg.drivers`/`reg.vehicles` row counts are unchanged before/after `V0095`.
+- The cohort resolver (§2.2.1) is never called with a `driver_id`-count
+  shortcut (e.g. `COUNT(*)` over the affiliation table) that would silently
+  reintroduce double-counting if `DISTINCT` were dropped in a future edit;
+  the backend implementation task must test this explicitly (duplicate-row
+  fixture asserting count stays 1, not 2).
 
 ## 4. Cross-reference corrections made by this decision
 
@@ -196,8 +307,14 @@ Negative:
   the reserved `V0095__sr_driver_academy.sql`
   (`schema-allocation.json` already had `V0095` correct; only
   `feature-contracts.md`'s two prose references were stale), and the cohort
-  denominator source corrected from `reg.drivers` to the join described in
-  §2.2 of this document.
+  denominator source corrected from `reg.drivers` to the exact resolver
+  described in §2.2.1 of this document (as-of instant, `effective_from`/
+  `effective_until` window, registry-identity inner join, `DISTINCT
+  driver_id` — not `listPortalDrivers`).
+- `schema-allocation.json` line 51 (`referenced_tables_access`): corrected
+  from citing `listPortalDrivers()` as "the active fleet cohort source" to
+  naming the new §2.2.1 resolver and stating that `listPortalDrivers` is a
+  portal-display read that must not be reused for the denominator.
 - `feature-contracts.md` §3.3 invariant 4 and §3.7 `AC-ACAD-POS-3`: unchanged
   in effect (`reg.driver_training_records` insert,
   `reg.driver_reg_profiles.training_status` update) but now cross-reference
@@ -218,4 +335,4 @@ academy line was corrected.
 This is a design/schema contract correction only. `SR-ACADEMY-BE-001`
 (parent, owner Codex2) remains blocked pending independent review of this
 decision by `Codex2`, after which backend implementation may resume against
-the identity model in §2.1–§2.4.
+the identity model in §2.1–§2.4 (including the §2.2.1 cohort resolver).

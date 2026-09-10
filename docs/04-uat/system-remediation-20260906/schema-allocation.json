@@ -48,7 +48,7 @@
         "reg.phase1_registry_drivers",
         "admin.phase1_driver_fleet_affiliations"
       ],
-      "referenced_tables_access": "read-only; reg.phase1_registry_drivers is the driver identity source, admin.phase1_driver_fleet_affiliations is the active fleet cohort source (same join FleetPartnerService.listPortalDrivers() already performs)",
+      "referenced_tables_access": "read-only; reg.phase1_registry_drivers is the driver identity source, admin.phase1_driver_fleet_affiliations is the active fleet cohort source via a new dedicated resolver (academy-identity-decision.md §2.2.1: as-of instant, effective_from<=asOfInstant AND (effective_until IS NULL OR effective_until>asOfInstant), inner join on reg.phase1_registry_drivers, DISTINCT driver_id) — NOT FleetPartnerService.listPortalDrivers(), which is a portal-display read (no date filtering, no dedup, fallback rows for orphaned affiliations) and must not be reused for this denominator",
       "modifies_existing_tables": [
         {
           "table": "reg.driver_training_records",
