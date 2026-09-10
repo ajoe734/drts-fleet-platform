@@ -20,13 +20,13 @@ import type {
 const require = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
 );
-const { Pool } = require("pg") as typeof import("pg");
+const { Pool } = require("pg") as any;
 
 const connectionString =
   process.env.DRTS_ACADEMY_TEST_DATABASE_URL || process.env.DATABASE_URL;
 
 describe("SR-ACADEMY-BE-001 Real PostgreSQL Acceptance Suite", () => {
-  let pool: InstanceType<typeof Pool> | null = null;
+  let pool: any = null;
   let testApp: AcademyAcceptanceApp | null = null;
 
   beforeAll(async () => {
@@ -533,8 +533,8 @@ describe("SR-ACADEMY-BE-001 Real PostgreSQL Acceptance Suite", () => {
           expect(rosterRes.status).toBe(200);
           const rosterItems = rosterRes.body.data?.items ?? [];
           expect(rosterItems.length).toBe(1);
-          expect(rosterItems[0].driverId).toBe(activeDriver1);
-          expect(rosterItems[0].status).toBe("passed");
+          expect(rosterItems[0]?.driverId).toBe(activeDriver1);
+          expect(rosterItems[0]?.status).toBe("passed");
         } finally {
           client.release();
         }

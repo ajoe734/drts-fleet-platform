@@ -172,6 +172,13 @@ corrected shared regulatory tables (`reg.driver_training_records`,
   target the pushed candidate commit during push events while supporting manual dispatch overrides.
   Refined overlay step with `git status --porcelain -uall` and regex filtering to prevent false positives
   on untracked parent directories.
+- **Remediated root typecheck errors in acceptance test harness and integration suite.**
+  Remediated CI typecheck failures in `Product smoke acceptance` and `typecheck` jobs:
+  1. Corrected `tenantFleetAdminIdentity` `actorType` from `"tenant_user"` to `"tenant_admin"` in
+     `academy-acceptance-test-harness.ts` to match canonical `AuthActorType`.
+  2. Applied optional chaining on `rosterItems[0]?.driverId` and `rosterItems[0]?.status` in
+     `academy-remote-acceptance.integration.test.ts` to satisfy `noUncheckedIndexedAccess`.
+  3. Cleaned `Pool` type annotation to avoid TS2307 in environments where `@types/pg` is not hoisted.
 
 ## Executed checks
 

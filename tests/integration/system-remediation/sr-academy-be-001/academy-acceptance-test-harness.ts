@@ -76,7 +76,7 @@ export function tenantFleetAdminIdentity(
   actorId = "user_fleet_admin",
 ): MintTokenOptions {
   return {
-    actorType: "tenant_user",
+    actorType: "tenant_admin",
     actorId,
     realm: "tenant",
     tenantId,
