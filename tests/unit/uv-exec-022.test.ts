@@ -1823,4 +1823,481 @@ describe("UV-EXEC-022 All-Call Metrics, Complete Cost Ledger & Dimensional Alert
       expect(record.bookingIntakeCompleted).toBe(false);
     });
   });
+
+  describe("9. Codex2 Rejection Round 2: Result-Playback Correlation, Durable Driver Acceptance & Real Dimensions", () => {
+    function baseCommittedSession(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        voiceSessionId: "sess-r2-1",
+        callId: "call-r2-1",
+        providerAccountId: "twm-acc-1",
+        providerCallId: "twm-call-r2-1",
+        resourceScopeId: "brand-drts-01",
+        lineBindingId: "line-001",
+        routeProfileId: "rp-99",
+        routeProfileVersion: 3,
+        dialogState: "closed",
+        mediaState: "idle",
+        controlOwner: "completed",
+        leaseEpoch: 1,
+        sessionVersion: 1,
+        commitStatus: "committed",
+        recordingState: "stopped",
+        confirmationState: "confirmed",
+        outcome: "auto_booking_created",
+        inputEpoch: 1,
+        pendingInput: false,
+        lastResolvedInputEpoch: 1,
+        lastAppliedControlSequence: 2,
+        createdAt: "2026-09-07T09:00:00Z",
+        updatedAt: "2026-09-07T09:05:00Z",
+        ...overrides,
+      };
+    }
+
+    it("does not count the pre-commit readback playback as a result-playback ACK when the caller hangs up before hearing the result", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        listCallAdmissions: vi.fn().mockResolvedValue([
+          {
+            admissionId: "adm-r2-1",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-r2-1",
+            receivedAt: "2026-09-07T09:00:00Z",
+            outcome: "admitted",
+            reason: "ADMISSION_PERMITTED",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+            voiceSessionId: "sess-r2-1",
+          },
+        ]),
+        findSessionById: vi.fn().mockResolvedValue(baseCommittedSession()),
+        findUsageRecordsBySession: vi.fn().mockResolvedValue([]),
+        findActiveCreateIntent: vi.fn().mockResolvedValue({
+          intentId: "intent-r2-1",
+          action: "create_owned_order",
+          currentDraftVersion: 1,
+          boundOrderId: "order-r2-1",
+        }),
+        findActiveConfirmation: vi.fn().mockResolvedValue({
+          confirmationId: "conf-r2-1",
+          state: "accepted",
+          readbackCompletedEventId: "evt-readback-1",
+        }),
+        findConfirmationsForSession: vi.fn().mockResolvedValue([
+          {
+            confirmationId: "conf-r2-1",
+            readbackCompletedEventId: "evt-readback-1",
+          },
+        ]),
+        // Only the pre-commit readback ACK was ever recorded -- the call
+        // hung up before any result/outcome was played back.
+        listSessionEvents: vi.fn().mockResolvedValue([
+          {
+            eventId: "evt-readback-1",
+            eventType: "playback_completed",
+            payload: { outcome: "completed", readbackPlaybackId: "rb-1" },
+          },
+        ]),
+        findActiveReservationsForOrder: vi.fn().mockResolvedValue([]),
+      };
+
+      const metricsService = new VoiceBookingMetricsService(mockRepo as any);
+      const cohort = await metricsService.deriveCohortFromDurableEvidence({
+        windowStart: "2026-09-07T00:00:00Z",
+        windowEnd: "2026-09-07T23:59:59Z",
+        observationWindowClosed: true,
+      });
+
+      expect(cohort.unattendedEffectiveIntake.numeratorValidIntakes).toBe(0);
+    });
+
+    it("counts a distinct post-commit playback event as a real result-playback ACK", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        listCallAdmissions: vi.fn().mockResolvedValue([
+          {
+            admissionId: "adm-r2-2",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-r2-2",
+            receivedAt: "2026-09-07T09:00:00Z",
+            outcome: "admitted",
+            reason: "ADMISSION_PERMITTED",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+            voiceSessionId: "sess-r2-2",
+          },
+        ]),
+        findSessionById: vi.fn().mockResolvedValue(
+          baseCommittedSession({ voiceSessionId: "sess-r2-2", callId: "call-r2-2" }),
+        ),
+        findUsageRecordsBySession: vi.fn().mockResolvedValue([]),
+        findActiveCreateIntent: vi.fn().mockResolvedValue({
+          intentId: "intent-r2-2",
+          action: "create_owned_order",
+          currentDraftVersion: 1,
+          boundOrderId: "order-r2-2",
+        }),
+        findActiveConfirmation: vi.fn().mockResolvedValue({
+          confirmationId: "conf-r2-2",
+          state: "accepted",
+          readbackCompletedEventId: "evt-readback-2",
+        }),
+        findConfirmationsForSession: vi.fn().mockResolvedValue([
+          {
+            confirmationId: "conf-r2-2",
+            readbackCompletedEventId: "evt-readback-2",
+          },
+        ]),
+        // Readback ACK, then a second, distinct playback event -- the
+        // dispatch/order result actually being announced to the caller.
+        listSessionEvents: vi.fn().mockResolvedValue([
+          {
+            eventId: "evt-readback-2",
+            eventType: "playback_completed",
+            payload: { outcome: "completed", readbackPlaybackId: "rb-2" },
+          },
+          {
+            eventId: "evt-result-2",
+            eventType: "playback_completed",
+            payload: { outcome: "completed" },
+          },
+        ]),
+        findActiveReservationsForOrder: vi.fn().mockResolvedValue([]),
+      };
+
+      const metricsService = new VoiceBookingMetricsService(mockRepo as any);
+      const cohort = await metricsService.deriveCohortFromDurableEvidence({
+        windowStart: "2026-09-07T00:00:00Z",
+        windowEnd: "2026-09-07T23:59:59Z",
+        observationWindowClosed: true,
+      });
+
+      expect(cohort.unattendedEffectiveIntake.numeratorValidIntakes).toBe(1);
+    });
+
+    it("resolves driver acceptance from the real order id via durable dispatch projection, not the call id or resource holds", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        listCallAdmissions: vi.fn().mockResolvedValue([
+          {
+            admissionId: "adm-r2-3",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-r2-3",
+            receivedAt: "2026-09-07T09:00:00Z",
+            outcome: "admitted",
+            reason: "ADMISSION_PERMITTED",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+            voiceSessionId: "sess-r2-3",
+          },
+        ]),
+        findSessionById: vi.fn().mockResolvedValue(
+          baseCommittedSession({ voiceSessionId: "sess-r2-3", callId: "call-r2-3" }),
+        ),
+        findUsageRecordsBySession: vi.fn().mockResolvedValue([
+          { usageId: "u-r2-3", estimatedCost: 5, actualCost: null, provider: "twm" },
+        ]),
+        findActiveCreateIntent: vi.fn().mockResolvedValue({
+          intentId: "intent-r2-3",
+          action: "create_owned_order",
+          currentDraftVersion: 1,
+          // Real durable order id, distinct from the call id above.
+          boundOrderId: "order-real-999",
+        }),
+        findActiveConfirmation: vi.fn().mockResolvedValue({ state: "accepted" }),
+        listSessionEvents: vi.fn().mockResolvedValue([
+          { eventType: "playback_completed", payload: { outcome: "completed" } },
+        ]),
+        // A stale hold that must NOT by itself prove driver acceptance.
+        findActiveReservationsForOrder: vi.fn().mockResolvedValue([
+          { reservationId: "res-stale", status: "held" },
+        ]),
+      };
+      const dispatchProjectionService = {
+        projectDispatch: vi.fn().mockResolvedValue({
+          projection: "accepted",
+          acceptedAt: "2026-09-07T09:03:00Z",
+        }),
+      };
+
+      const metricsService = new VoiceBookingMetricsService(
+        mockRepo as any,
+        undefined,
+        dispatchProjectionService as any,
+      );
+      const cohort = await metricsService.deriveCohortFromDurableEvidence({
+        windowStart: "2026-09-07T00:00:00Z",
+        windowEnd: "2026-09-07T23:59:59Z",
+        observationWindowClosed: true,
+      });
+
+      expect(dispatchProjectionService.projectDispatch).toHaveBeenCalledWith(
+        "order-real-999",
+      );
+      expect(mockRepo.findActiveReservationsForOrder).not.toHaveBeenCalled();
+      expect(cohort.unattendedDispatchCompletion.numeratorDriverAcceptedUniqueOrders).toBe(1);
+    });
+
+    it("does not treat an active resource hold as driver acceptance when durable dispatch state says only offered", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        listCallAdmissions: vi.fn().mockResolvedValue([
+          {
+            admissionId: "adm-r2-4",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-r2-4",
+            receivedAt: "2026-09-07T09:00:00Z",
+            outcome: "admitted",
+            reason: "ADMISSION_PERMITTED",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+            voiceSessionId: "sess-r2-4",
+          },
+        ]),
+        findSessionById: vi.fn().mockResolvedValue(
+          baseCommittedSession({ voiceSessionId: "sess-r2-4", callId: "call-r2-4" }),
+        ),
+        findUsageRecordsBySession: vi.fn().mockResolvedValue([]),
+        findActiveCreateIntent: vi.fn().mockResolvedValue({
+          intentId: "intent-r2-4",
+          action: "create_owned_order",
+          currentDraftVersion: 1,
+          boundOrderId: "order-real-offered-1",
+        }),
+        findActiveConfirmation: vi.fn().mockResolvedValue({ state: "accepted" }),
+        listSessionEvents: vi.fn().mockResolvedValue([
+          { eventType: "playback_completed", payload: { outcome: "completed" } },
+        ]),
+        // Reservation is actively held (e.g. a candidate driver is being
+        // offered the job) but that is not the same as accepting it.
+        findActiveReservationsForOrder: vi.fn().mockResolvedValue([
+          { reservationId: "res-held", status: "held" },
+        ]),
+      };
+      const dispatchProjectionService = {
+        projectDispatch: vi.fn().mockResolvedValue({
+          projection: "offered",
+          acceptedAt: null,
+        }),
+      };
+
+      const metricsService = new VoiceBookingMetricsService(
+        mockRepo as any,
+        undefined,
+        dispatchProjectionService as any,
+      );
+      const cohort = await metricsService.deriveCohortFromDurableEvidence({
+        windowStart: "2026-09-07T00:00:00Z",
+        windowEnd: "2026-09-07T23:59:59Z",
+        observationWindowClosed: true,
+      });
+
+      expect(cohort.unattendedDispatchCompletion.numeratorDriverAcceptedUniqueOrders).toBe(0);
+    });
+
+    it("still recognizes driver acceptance once the order has moved past its dispatch reservation (released-after-acceptance)", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        listCallAdmissions: vi.fn().mockResolvedValue([
+          {
+            admissionId: "adm-r2-5",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-r2-5",
+            receivedAt: "2026-09-07T09:00:00Z",
+            outcome: "admitted",
+            reason: "ADMISSION_PERMITTED",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+            voiceSessionId: "sess-r2-5",
+          },
+        ]),
+        findSessionById: vi.fn().mockResolvedValue(
+          baseCommittedSession({ voiceSessionId: "sess-r2-5", callId: "call-r2-5" }),
+        ),
+        findUsageRecordsBySession: vi.fn().mockResolvedValue([]),
+        findActiveCreateIntent: vi.fn().mockResolvedValue({
+          intentId: "intent-r2-5",
+          action: "create_owned_order",
+          currentDraftVersion: 1,
+          boundOrderId: "order-real-arrived-1",
+        }),
+        findActiveConfirmation: vi.fn().mockResolvedValue({ state: "accepted" }),
+        listSessionEvents: vi.fn().mockResolvedValue([
+          { eventType: "playback_completed", payload: { outcome: "completed" } },
+        ]),
+        // The driver already picked up and moved on; the reservation is no
+        // longer held/occupied (would look like zero acceptance evidence to
+        // the old reservation-only heuristic).
+        findActiveReservationsForOrder: vi.fn().mockResolvedValue([]),
+      };
+      const dispatchProjectionService = {
+        projectDispatch: vi.fn().mockResolvedValue({
+          projection: "arrived",
+          acceptedAt: "2026-09-07T09:02:00Z",
+        }),
+      };
+
+      const metricsService = new VoiceBookingMetricsService(
+        mockRepo as any,
+        undefined,
+        dispatchProjectionService as any,
+      );
+      const cohort = await metricsService.deriveCohortFromDurableEvidence({
+        windowStart: "2026-09-07T00:00:00Z",
+        windowEnd: "2026-09-07T23:59:59Z",
+        observationWindowClosed: true,
+      });
+
+      expect(cohort.unattendedDispatchCompletion.numeratorDriverAcceptedUniqueOrders).toBe(1);
+    });
+
+    it("dedups repeated order references across distinct calls/sessions by the real order id, not the call id", async () => {
+      const session = (voiceSessionId: string, callId: string) =>
+        baseCommittedSession({ voiceSessionId, callId });
+
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        listCallAdmissions: vi.fn().mockResolvedValue([
+          {
+            admissionId: "adm-r2-6a",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-r2-6a",
+            receivedAt: "2026-09-07T09:00:00Z",
+            outcome: "admitted",
+            reason: "ADMISSION_PERMITTED",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+            voiceSessionId: "sess-r2-6a",
+          },
+          {
+            admissionId: "adm-r2-6b",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-r2-6b",
+            receivedAt: "2026-09-07T09:10:00Z",
+            outcome: "admitted",
+            reason: "ADMISSION_PERMITTED",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+            voiceSessionId: "sess-r2-6b",
+          },
+        ]),
+        findSessionById: vi.fn().mockImplementation(async (id: string) => {
+          if (id === "sess-r2-6a") return session("sess-r2-6a", "call-r2-6a");
+          if (id === "sess-r2-6b") return session("sess-r2-6b", "call-r2-6b");
+          return null;
+        }),
+        findUsageRecordsBySession: vi.fn().mockResolvedValue([]),
+        // Both calls resolved to the SAME durable order (e.g. a callback/retry
+        // re-bound to the original order) -- they must dedup to one order.
+        findActiveCreateIntent: vi.fn().mockResolvedValue({
+          intentId: "intent-r2-6",
+          action: "create_owned_order",
+          currentDraftVersion: 1,
+          boundOrderId: "order-shared-1",
+        }),
+        findActiveConfirmation: vi.fn().mockResolvedValue({ state: "accepted" }),
+        listSessionEvents: vi.fn().mockResolvedValue([
+          { eventType: "playback_completed", payload: { outcome: "completed" } },
+        ]),
+        findActiveReservationsForOrder: vi.fn().mockResolvedValue([
+          { reservationId: "res-shared", status: "occupied" },
+        ]),
+      };
+
+      const metricsService = new VoiceBookingMetricsService(mockRepo as any);
+      const cohort = await metricsService.deriveCohortFromDurableEvidence({
+        windowStart: "2026-09-07T00:00:00Z",
+        windowEnd: "2026-09-07T23:59:59Z",
+        observationWindowClosed: true,
+      });
+
+      expect(cohort.unattendedDispatchCompletion.denominatorImmediateDispatchOrders).toBe(1);
+      expect(cohort.unattendedDispatchCompletion.numeratorDriverAcceptedUniqueOrders).toBe(1);
+    });
+
+    it("derives provider from real per-session usage evidence, not the routing-profile id, so provider filters actually distinguish vendors", async () => {
+      const mockRepo = {
+        isEnabled: vi.fn().mockReturnValue(true),
+        listCallAdmissions: vi.fn().mockResolvedValue([
+          {
+            admissionId: "adm-r2-7a",
+            providerAccountId: "twm-acc-1",
+            providerCallId: "twm-call-r2-7a",
+            receivedAt: "2026-09-07T09:00:00Z",
+            outcome: "admitted",
+            reason: "ADMISSION_PERMITTED",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+            voiceSessionId: "sess-r2-7a",
+          },
+          {
+            admissionId: "adm-r2-7b",
+            providerAccountId: "twm-acc-2",
+            providerCallId: "twm-call-r2-7b",
+            receivedAt: "2026-09-07T09:10:00Z",
+            outcome: "admitted",
+            reason: "ADMISSION_PERMITTED",
+            brandId: "brand-drts-01",
+            lineBindingId: "line-001",
+            voiceSessionId: "sess-r2-7b",
+          },
+        ]),
+        findSessionById: vi.fn().mockImplementation(async (id: string) => {
+          // Both sessions share the same (irrelevant) routing profile id --
+          // the real vendor distinction must come from billed usage, not this.
+          if (id === "sess-r2-7a")
+            return baseCommittedSession({
+              voiceSessionId: "sess-r2-7a",
+              callId: "call-r2-7a",
+              routeProfileId: "rp-shared",
+            });
+          if (id === "sess-r2-7b")
+            return baseCommittedSession({
+              voiceSessionId: "sess-r2-7b",
+              callId: "call-r2-7b",
+              routeProfileId: "rp-shared",
+            });
+          return null;
+        }),
+        findUsageRecordsBySession: vi.fn().mockImplementation(async (id: string) => {
+          if (id === "sess-r2-7a")
+            return [{ usageId: "u-7a", estimatedCost: 1, actualCost: null, provider: "twm" }];
+          if (id === "sess-r2-7b")
+            return [{ usageId: "u-7b", estimatedCost: 1, actualCost: null, provider: "openai" }];
+          return [];
+        }),
+        findActiveCreateIntent: vi.fn().mockResolvedValue(null),
+        listSessionEvents: vi.fn().mockResolvedValue([
+          { eventType: "playback_completed", payload: { outcome: "completed" } },
+        ]),
+      };
+
+      const metricsService = new VoiceBookingMetricsService(mockRepo as any);
+      const window = {
+        windowStart: "2026-09-07T00:00:00Z",
+        windowEnd: "2026-09-07T23:59:59Z",
+        observationWindowClosed: true,
+      };
+
+      const twmOnly = await metricsService.deriveCohortFromDurableEvidence({
+        ...window,
+        provider: "twm",
+      });
+      expect(twmOnly.allCallCoverage.denominatorRealIngress).toBe(1);
+
+      const openaiOnly = await metricsService.deriveCohortFromDurableEvidence({
+        ...window,
+        provider: "openai",
+      });
+      expect(openaiOnly.allCallCoverage.denominatorRealIngress).toBe(1);
+
+      // If provider were still derived from the shared routing-profile id,
+      // both requests above would have matched both calls (or neither).
+      const routingProfileIdAsProvider = await metricsService.deriveCohortFromDurableEvidence({
+        ...window,
+        provider: "rp-shared",
+      });
+      expect(routingProfileIdAsProvider.allCallCoverage.denominatorRealIngress).toBe(0);
+    });
+  });
 });

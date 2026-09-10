@@ -7,6 +7,7 @@ import type {
   VoiceConfirmationRecord,
 } from "../modules/voice-booking/voice-booking.repository";
 import type { VoiceUsageService } from "../modules/voice-booking/voice-usage.service";
+import type { VoiceDispatchProjectionService } from "../modules/voice-booking/voice-dispatch-projection.service";
 
 export interface VoiceCallMetricRecord {
   callId: string;
@@ -304,6 +305,8 @@ export class VoiceBookingMetricsService {
   constructor(
     @Optional() private readonly repository?: VoiceBookingRepository,
     @Optional() private readonly usageService?: VoiceUsageService,
+    @Optional()
+    private readonly dispatchProjectionService?: VoiceDispatchProjectionService,
   ) {}
 
   // ============================================================================
@@ -1056,11 +1059,20 @@ export class VoiceBookingMetricsService {
   }
 
   /**
-   * Durable evidence of an actual result-playback ACK: the same
-   * `playback_completed` session event voice-confirmation.service.ts gates
-   * readback confirmation on (SD §13.2). `dialogState === "closed"` only
-   * proves the call leg ended, not that anything was played back to the
-   * caller, so it must never substitute for this.
+   * Durable evidence of an actual RESULT playback ACK -- distinct from the
+   * PRE-COMMIT readback ACK that voice-confirmation.service.ts:408-425 gates
+   * booking confirmation on. Both share the same `playback_completed` event
+   * type, so a caller who confirms/commits and then hangs up before hearing
+   * the dispatch/order result would otherwise still show a `playback_completed`
+   * event and be wrongly counted successful (SD §13.2). Every confirmation
+   * opened for the session pins its own readback event via
+   * `readbackCompletedEventId` (and the same id travels in the playback
+   * event's own payload, see voice-confirmation.service.ts:416); excluding
+   * those specific events means only a playback distinct from every known
+   * pre-commit readback can count as result-playback evidence.
+   * `dialogState === "closed"` only proves the call leg ended, not that
+   * anything was played back to the caller, so it must never substitute for
+   * this.
    */
   private async hasPlaybackCompletedEvidence(
     voiceSessionId: string,
@@ -1074,15 +1086,39 @@ export class VoiceBookingMetricsService {
     const events = await (this.repository as any).listSessionEvents(
       voiceSessionId,
     );
-    return (
-      Array.isArray(events) &&
-      events.some(
-        (e: any) =>
-          e.eventType === "playback_completed" &&
-          (e.payload as { outcome?: string } | undefined)?.outcome ===
-            "completed",
-      )
-    );
+    if (!Array.isArray(events)) {
+      return false;
+    }
+
+    const readbackEventIds = new Set<string>();
+    if (
+      typeof (this.repository as any).findConfirmationsForSession ===
+      "function"
+    ) {
+      const confirmations = await (
+        this.repository as any
+      ).findConfirmationsForSession(voiceSessionId);
+      if (Array.isArray(confirmations)) {
+        for (const c of confirmations) {
+          if (c?.readbackCompletedEventId) {
+            readbackEventIds.add(c.readbackCompletedEventId);
+          }
+        }
+      }
+    }
+
+    return events.some((e: any) => {
+      if (e.eventType !== "playback_completed") return false;
+      if ((e.payload as { outcome?: string } | undefined)?.outcome !== "completed")
+        return false;
+      if (e.eventId && readbackEventIds.has(e.eventId)) return false;
+      // Defense in depth when confirmation history isn't reachable: any
+      // playback event still carrying the confirmation's readback correlation
+      // id in its own payload is the pre-commit readback, never a result ACK.
+      if ((e.payload as { readbackPlaybackId?: string } | undefined)?.readbackPlaybackId)
+        return false;
+      return true;
+    });
   }
 
   public async recordCallMetricFromSession(
@@ -1219,7 +1255,7 @@ export class VoiceBookingMetricsService {
         // cost (e.g. IVR/overflow announcement legs) linked by admissionId;
         // join it instead of hardcoding zero (SA §10.2, SD §14.3).
         let failureCost = 0;
-        let failureProvider = "twm";
+        let failureProvider = "unknown";
         if (typeof this.repository.listUsageRecords === "function") {
           const admUsages = await this.repository.listUsageRecords({
             admissionId: adm.admissionId,
@@ -1240,11 +1276,16 @@ export class VoiceBookingMetricsService {
           lineBindingId: adm.lineBindingId ?? "unknown",
           brandId: adm.brandId ?? "unknown",
           // No durable per-call language capture exists yet (SA §10.2 gap);
-          // use the same fixed default as the in-memory path rather than the
+          // represent it as explicitly unknown rather than a fixed literal
+          // that could be mistaken for real attributed data, and never the
           // query filter, so a language filter cannot relabel/absorb calls.
-          language: "zh-TW",
+          language: "unknown",
           product: "ordinary_taxi",
-          routeProfileVersion: filter.routeProfileVersion ?? 1,
+          // No route profile is ever bound pre-session, so the version is
+          // genuinely unattributed; 0 is a distinct sentinel that can never
+          // equal a real profile version (never copy the query filter here --
+          // that would make a version filter relabel/absorb every failure).
+          routeProfileVersion: 0,
           policyVersion: "uv-policy-v1",
           provider: failureProvider,
           admissionOutcome: adm.outcome,
@@ -1272,7 +1313,7 @@ export class VoiceBookingMetricsService {
 
       if (!session) {
         let orphanCost = 0;
-        let orphanProvider = "twm";
+        let orphanProvider = "unknown";
         if (typeof this.repository.listUsageRecords === "function") {
           const admUsages = await this.repository.listUsageRecords({
             admissionId: adm.admissionId,
@@ -1292,9 +1333,12 @@ export class VoiceBookingMetricsService {
           receivedAt: adm.receivedAt,
           lineBindingId: adm.lineBindingId ?? "unknown",
           brandId: adm.brandId ?? "unknown",
-          language: "zh-TW",
+          language: "unknown",
           product: "ordinary_taxi",
-          routeProfileVersion: filter.routeProfileVersion ?? 1,
+          // No session/route profile was ever bound before the session went
+          // missing; 0 is the explicit unattributed sentinel (see the failed
+          // admission branch above) rather than the query filter.
+          routeProfileVersion: 0,
           policyVersion: "uv-policy-v1",
           provider: orphanProvider,
           admissionOutcome: "admitted",
@@ -1363,19 +1407,56 @@ export class VoiceBookingMetricsService {
           ? "query"
           : "new_booking";
 
+      // SA §10.2: resolve the real durable order id (bound onto the create
+      // intent once the order exists) instead of the call id -- reservations
+      // and dispatch state are keyed by order, not by call, and stamping the
+      // wrong id both breaks the lookup and collapses unique-order dedup
+      // back onto call id (`boundOrderId` is the repository's field; `orderId`
+      // is tolerated for callers/fixtures that surface it under that name).
+      const orderId: string | undefined =
+        (createIntent as { boundOrderId?: string | null } | null)
+          ?.boundOrderId ??
+        (createIntent as { orderId?: string | null } | null)?.orderId ??
+        undefined;
+
       let driverAccepted = false;
       let dispatchFailureReason: VoiceCallMetricRecord["dispatchFailureReason"] = undefined;
-      if (isCommitted) {
-        const reservations =
-          typeof this.repository.findActiveReservationsForOrder === "function"
-            ? await this.repository.findActiveReservationsForOrder(session.callId)
-            : [];
-        if (reservations.length > 0) {
-          driverAccepted = true;
-        } else if (session.outcome === "auto_no_service") {
+      if (isCommitted && orderId) {
+        // Prefer durable driver-acceptance history (order/assignment/task
+        // state, SD §7.6) over resource holds: a `held`/`occupied` reservation
+        // only proves a resource is currently claimed by *some* writer, not
+        // that a driver has actually accepted this order.
+        let acceptanceResolved = false;
+        if (this.dispatchProjectionService) {
+          try {
+            const projection =
+              await this.dispatchProjectionService.projectDispatch(orderId);
+            driverAccepted =
+              projection.projection === "accepted" ||
+              projection.projection === "arrived" ||
+              Boolean(projection.acceptedAt);
+            acceptanceResolved = true;
+          } catch {
+            // Order not found/projectable through this path; fall through to
+            // the reservation-hold signal below rather than asserting acceptance.
+          }
+        }
+        if (!acceptanceResolved) {
+          const reservations =
+            typeof this.repository.findActiveReservationsForOrder ===
+            "function"
+              ? await this.repository.findActiveReservationsForOrder(orderId)
+              : [];
+          driverAccepted = reservations.length > 0;
+        }
+        if (!driverAccepted && session.outcome === "auto_no_service") {
           dispatchFailureReason = "no_car_available";
         }
+      } else if (isCommitted && session.outcome === "auto_no_service") {
+        dispatchFailureReason = "no_car_available";
       }
+
+      const provider = usages[0]?.provider ?? "unknown";
 
       records.push({
         callId: session.callId,
@@ -1384,11 +1465,18 @@ export class VoiceBookingMetricsService {
         receivedAt: adm.receivedAt,
         lineBindingId: session.lineBindingId,
         brandId: session.resourceScopeId,
-        language: "zh-TW",
+        // No durable per-call language capture exists yet (SA §10.2 gap, see
+        // the failed/orphan branches above): represent it as explicitly
+        // unknown rather than a fixed literal that could be mistaken for
+        // real attributed data.
+        language: "unknown",
         product: "ordinary_taxi",
         routeProfileVersion: session.routeProfileVersion,
         policyVersion: "uv-policy-v1",
-        provider: session.routeProfileId || "twm",
+        // Real vendor billed for this session's usage (SA §10.2) -- never the
+        // routing config id, which is a different dimension (routeProfileId).
+        provider,
+        orderId,
         admissionOutcome: "admitted",
         enteredAi: true,
         intentDiscernible: Boolean(createIntent || session.outcome),

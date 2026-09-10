@@ -879,6 +879,33 @@ export class VoiceBookingRepository {
     return row ? mapConfirmationRow(row) : null;
   }
 
+  /**
+   * Every confirmation ever opened for a session, in every state (including
+   * `consumed`/`expired`/`rejected`) -- unlike `findActiveConfirmation`,
+   * which only sees the live states used to gate a new command. Metrics
+   * evidence (SD §13.2) needs the full history so it can identify which
+   * `playback_completed` events were the pre-commit readback ACK, not just
+   * whichever confirmation is currently live.
+   */
+  async findConfirmationsForSession(
+    voiceSessionId: string,
+    executor?: VoiceQueryExecutor,
+  ): Promise<VoiceConfirmationRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<VoiceConfirmationRow>(
+      `
+        SELECT * FROM voice.confirmation
+        WHERE voice_session_id = $1
+      `,
+      [voiceSessionId],
+    );
+    return result.rows.map(mapConfirmationRow);
+  }
+
   async findConfirmationById(
     confirmationId: string,
     executor?: VoiceQueryExecutor,
