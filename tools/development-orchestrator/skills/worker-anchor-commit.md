@@ -25,11 +25,13 @@ Working tree is **not** a staging area for design intent. Stash is **not** an al
 1. Confirm current branch matches `<lane>/<task-id-kebab>`. If not:
    ```bash
    git fetch origin
-   existing=$(git worktree list --porcelain | awk 'BEGIN{p=""} /^worktree /{p=substr($0,10)} /^branch refs\/heads\/<lane>\/<task-id-kebab>$/{print p; exit}')
+   existing=$(git worktree list --porcelain | awk -v branch='refs/heads/<lane>/<task-id-kebab>' 'BEGIN{p=""} /^worktree /{p=substr($0,10)} $0 == "branch " branch {print p; exit}')
    if [ -n "$existing" ]; then
      cd "$existing"
    elif git show-ref --verify --quiet refs/heads/<lane>/<task-id-kebab>; then
      git switch <lane>/<task-id-kebab>
+   elif git show-ref --verify --quiet refs/remotes/origin/<lane>/<task-id-kebab>; then
+     git switch -c <lane>/<task-id-kebab> --track origin/<lane>/<task-id-kebab>
    else
      git switch -c <lane>/<task-id-kebab> origin/dev
    fi
@@ -62,11 +64,17 @@ Working tree is **not** a staging area for design intent. Stash is **not** an al
 
 - **`git stash` is forbidden for design-intent diffs.** Acceptable only for tiny, throwaway, no-design-intent edits (e.g. a forgotten `console.log`). Any diff in a fragile surface above must become a commit, never a stash.
 - **If supervisor reassigns you mid-task**, anchor-commit _before_ yielding. Do not rely on supervisor stash. The supervisor's opt-in `worker_tree_guard` (OPS-GIT-WORKFLOW-006) will block reassignment when fragile-surface diffs are uncommitted; the correct response to that block is anchor-commit, not bypass.
-- **If `dev` advances while you were paused**, rebase the branch — never `git stash pop` onto a moved trunk:
-  ```bash
-  git fetch origin
-  git rebase origin/dev
-  ```
+- **If `dev` advances while you were paused**, fetch and inspect the remote branch,
+  existing PR, candidate and CI before deciding whether synchronization is needed.
+  Keep a candidate under review or CI at its exact SHA until its result is known;
+  trunk movement alone does not require a new candidate. Never rebase, amend or
+  force-push published commits, including pushed anchors. If synchronization is
+  necessary before candidate handoff, merge `origin/dev` in the owner task
+  worktree, resolve conflicts, validate and push normally. A new SHA needs fresh
+  review and CI. Rebase is allowed only for a branch confirmed never published,
+  with no PR or candidate. If local and published histories have already
+  diverged, preserve both refs and report the SHAs and diff for history recovery;
+  do not reset, force-push or rebase again. Never stash-pop onto a moved trunk.
 - **Anchor commits are not candidates.** They have a `wip:` prefix and exist only to preserve recoverable work. The candidate is the exact final branch head supplied to `ai-status.sh handoff`; any later push invalidates review and CI evidence.
 - **doc / skill / config changes** (per `branch-strategy.md` §11.5) always go branch → commit → push → PR. They must not accumulate in-session across supervisor cycles.
 

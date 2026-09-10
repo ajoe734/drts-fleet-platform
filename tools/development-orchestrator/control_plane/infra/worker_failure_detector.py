@@ -205,6 +205,45 @@ def _is_result_level_provider_blocker(candidate: str) -> bool:
     return any(marker in normalized for marker in markers)
 
 
+def _is_antigravity_result_event(payload: dict[str, Any]) -> bool:
+    """True only for agy's `--output-format stream-json` terminal event shape.
+
+    Shape: `{"event": "result", "result": {"status": "ERROR"|"DONE", ...}}` --
+    `result` must be a dict carrying a `status` key. Other providers/tools can
+    reuse `{"event": "result", ...}` with an unrelated shape (a plain string,
+    or a dict with no `status`, e.g. `{"error": "..."}`); those are not the
+    agy schema and must fall through to generic detection instead of being
+    swallowed as an (incorrectly) authoritative non-failure.
+    """
+    if payload.get("event") != "result":
+        return False
+    result = payload.get("result")
+    return isinstance(result, dict) and "status" in result
+
+
+def _detect_antigravity_result_signal(payload: dict[str, Any]) -> WorkerFailureSignal | None:
+    """Recognize agy's `--output-format stream-json` terminal event.
+
+    Shape: `{"event": "result", "result": {"status": "ERROR"|"DONE", ...}}`.
+    This is a different schema from the Claude/Codex `{"type": "result", ...}`
+    convention handled elsewhere in this module, and agy exits 0 even when the
+    turn ended in a structured ERROR (e.g. an interrupted stream with an empty
+    response and zero tokens), so process exit code alone cannot be trusted.
+
+    Callers must guard this with `_is_antigravity_result_event` first; this
+    function assumes `result` is already a dict with a `status` key.
+    """
+    result = payload.get("result")
+    status = str(result.get("status") or "").strip().upper()
+    if status not in {"ERROR", "FAILED"}:
+        return None
+    reason = str(result.get("error") or result.get("response") or "").strip()
+    if not reason:
+        reason = "Antigravity CLI stream ended with a structured ERROR result."
+    authorized = _is_result_level_provider_blocker(reason.lower()) or _extract_failure_candidate(reason) is not None
+    return WorkerFailureSignal(reason, "antigravity_stream_result_error", authorized)
+
+
 def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
     try:
         payload = json.loads(line)
@@ -212,6 +251,8 @@ def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
         return None
     if not isinstance(payload, dict) or payload.get("ts"):
         return None
+    if _is_antigravity_result_event(payload):
+        return _detect_antigravity_result_signal(payload)
     if payload.get("type") == "rate_limit_event":
         rate_info = payload.get("rate_limit_info") if isinstance(payload.get("rate_limit_info"), dict) else {}
         status = str(rate_info.get("status") or payload.get("status") or "").strip().lower()
@@ -226,6 +267,12 @@ def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
     payload_type = str(payload.get("type") or "").strip().lower()
     if payload_type in {"assistant", "user"}:
         return None
+    if payload_type in {"item.started", "item.updated", "item.completed"}:
+        item = payload.get("item")
+        # A worker inspecting another lane's limit must not pause itself.
+        # Tool output and assistant reasoning are not provider failure events.
+        if not isinstance(item, dict) or item.get("type") != "error":
+            return None
     candidates = _iter_json_string_values(payload)
     candidates = [*candidates, line]
     for candidate in candidates:
@@ -260,6 +307,14 @@ def detect_failure_signal_in_lines(lines: list[str]) -> WorkerFailureSignal | No
                 if detected and _is_result_level_provider_blocker(detected.reason):
                     return detected
                 return None
+            if isinstance(payload, dict) and _is_antigravity_result_event(payload):
+                # The terminal antigravity event is authoritative: a DONE/OK
+                # status must not be overturned by an earlier noisy
+                # step_update/error_message line, and an ERROR status must not
+                # be masked by a later heuristic falling through past it. A
+                # non-agy `event: result` shape (no dict `result.status`) is
+                # not this schema and must fall through below instead.
+                return _detect_antigravity_result_signal(payload)
             detected = _detect_json_worker_failure_signal(stripped)
             if detected:
                 if "an unexpected critical error occurred" in detected.reason.lower():

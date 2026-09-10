@@ -2459,7 +2459,11 @@ export class IdentityRepository implements OnModuleInit {
           display_name = EXCLUDED.display_name,
           account_status = EXCLUDED.account_status,
           updated_at = EXCLUDED.updated_at,
-          record = EXCLUDED.record
+          record = jsonb_set(
+            EXCLUDED.record,
+            '{principalId}',
+            to_jsonb(iam.identity_principals.principal_id)
+          )
         RETURNING record
       `,
       [
@@ -2516,7 +2520,11 @@ export class IdentityRepository implements OnModuleInit {
           invited_by_principal_id = EXCLUDED.invited_by_principal_id,
           invitation_id = EXCLUDED.invitation_id,
           updated_at = EXCLUDED.updated_at,
-          record = EXCLUDED.record
+          record = jsonb_set(
+            EXCLUDED.record,
+            '{membershipId}',
+            to_jsonb(iam.identity_memberships.membership_id)
+          )
         RETURNING record
       `,
       [
@@ -2570,7 +2578,11 @@ export class IdentityRepository implements OnModuleInit {
           valid_from = EXCLUDED.valid_from,
           valid_to = EXCLUDED.valid_to,
           updated_at = EXCLUDED.updated_at,
-          record = EXCLUDED.record
+          record = jsonb_set(
+            EXCLUDED.record,
+            '{roleBindingId}',
+            to_jsonb(iam.identity_role_bindings.role_binding_id)
+          )
         RETURNING record
       `,
       [
@@ -2636,7 +2648,11 @@ export class IdentityRepository implements OnModuleInit {
           accepted_at = EXCLUDED.accepted_at,
           revoked_at = EXCLUDED.revoked_at,
           updated_at = EXCLUDED.updated_at,
-          record = EXCLUDED.record
+          record = jsonb_set(
+            EXCLUDED.record,
+            '{invitationId}',
+            to_jsonb(iam.identity_invitations.invitation_id)
+          )
         RETURNING record
       `,
       [

@@ -6,6 +6,9 @@
  */
 
 import type {
+  AcademyCourseDetail,
+  AcademyCourseSummary,
+  ApiListData,
   AccidentCaseRecord,
   AccidentTimelineEntry,
   AcknowledgeOpsApprovalRequestBreachCommand,
@@ -37,6 +40,7 @@ import type {
   CompleteCallbackTaskCommand,
   ComputeGeoRouteCommand,
   CreateDriverMasterCommand,
+  CreateDriverLeaveCommand,
   CreateDriverFleetAffiliationCommand,
   CreateEvidenceDeletionExceptionCommand,
   CreateEvidenceLegalHoldCommand,
@@ -98,8 +102,14 @@ import type {
   DriverStartTaskCommand,
   DriverStatementRecord,
   DriverTaskRecord,
+  DriverLeaveQueryFilter,
+  DriverLeaveRecord,
+  DriverQuizAttemptDetail,
+  DriverTrainingRecord,
   UnifiedDriverTaskView,
   EmptyStateEnvelope,
+  FleetDriverRosterItem,
+  FleetTrainingView,
   FleetPartnerRecord,
   FleetPartnerPortalDashboardRecord,
   FleetPartnerPortalDriverRecord,
@@ -109,6 +119,15 @@ import type {
   FleetPartnerRevenueShareRuleRecord,
   DriverSupplyDraft,
   FleetPartnerStatementRecord,
+  HostVehicleCaseItem,
+  HostVehicleEarningsSummary,
+  HostVehicleMaintenanceItem,
+  HostVehicleSummary,
+  HostVehicleTripItem,
+  QuizResultRecord,
+  QuizSubmissionCommand,
+  ReviewDriverLeaveCommand,
+  WithdrawDriverLeaveCommand,
   ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
   EvidenceDiscrepancyCase,
@@ -1837,6 +1856,51 @@ export class ApiClient {
   ) {
     return this.post<CallbackTaskRecord>(
       `/api/callcenter/callbacks/${encodeURIComponent(callbackTaskId)}/complete`,
+      { body: command },
+    );
+  }
+
+  async claimCallbackTask(
+    callbackTaskId: string,
+    command: { operatorId: string; expectedVersion?: number },
+  ) {
+    return this.post<CallbackTaskRecord>(
+      `/api/callcenter/callbacks/${encodeURIComponent(callbackTaskId)}/claim`,
+      { body: command },
+    );
+  }
+
+  async recordCallbackAttempt(
+    callbackTaskId: string,
+    command: {
+      operatorId: string;
+      outcome: string;
+      notes?: string;
+      hangupConfirmed?: boolean;
+    },
+  ) {
+    return this.post<CallbackTaskRecord>(
+      `/api/callcenter/callbacks/${encodeURIComponent(callbackTaskId)}/attempt`,
+      { body: command },
+    );
+  }
+
+  async cancelCallbackTask(
+    callbackTaskId: string,
+    command: { reason: string; expectedVersion?: number; operatorId?: string },
+  ) {
+    return this.post<CallbackTaskRecord>(
+      `/api/callcenter/callbacks/${encodeURIComponent(callbackTaskId)}/cancel`,
+      { body: command },
+    );
+  }
+
+  async takeoverAiCallSession(
+    callId: string,
+    command: { operatorId: string; reason?: string },
+  ) {
+    return this.post<CallSessionRecord>(
+      `/api/callcenter/sessions/${encodeURIComponent(callId)}/takeover`,
       { body: command },
     );
   }
@@ -4400,6 +4464,271 @@ export class ApiClient {
       body: command,
     });
   }
+
+  // ============================================================================
+  // System Remediation (SR-CONTRACT-001): Driver Leave Workflow
+  // ============================================================================
+
+  async createDriverLeave(
+    command: CreateDriverLeaveCommand,
+    options?: RequestOptions,
+  ): Promise<DriverLeaveRecord> {
+    return this.post<DriverLeaveRecord>("/api/driver-leave/requests", {
+      ...options,
+      body: command,
+    });
+  }
+
+  async listDriverLeaves(
+    query?: DriverLeaveQueryFilter,
+    options?: RequestOptions,
+  ): Promise<ApiListData<DriverLeaveRecord>> {
+    const params = new URLSearchParams();
+    if (query?.driverId) params.set("driverId", query.driverId);
+    if (query?.status) params.set("status", query.status);
+    if (query?.startTimeFrom) params.set("startTimeFrom", query.startTimeFrom);
+    if (query?.endTimeTo) params.set("endTimeTo", query.endTimeTo);
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<DriverLeaveRecord>>(
+      `/api/driver-leave/requests${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async listDriverLeavesEnvelope(
+    query?: DriverLeaveQueryFilter,
+    options?: RequestOptions,
+  ): Promise<ApiSuccessEnvelope<ApiListData<DriverLeaveRecord>>> {
+    const params = new URLSearchParams();
+    if (query?.driverId) params.set("driverId", query.driverId);
+    if (query?.status) params.set("status", query.status);
+    if (query?.startTimeFrom) params.set("startTimeFrom", query.startTimeFrom);
+    if (query?.endTimeTo) params.set("endTimeTo", query.endTimeTo);
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.getEnvelope<ApiListData<DriverLeaveRecord>>(
+      `/api/driver-leave/requests${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async withdrawDriverLeave(
+    leaveId: string,
+    command?: WithdrawDriverLeaveCommand,
+    options?: RequestOptions,
+  ): Promise<DriverLeaveRecord> {
+    return this.post<DriverLeaveRecord>(
+      `/api/driver-leave/requests/${encodeURIComponent(leaveId)}/withdraw`,
+      {
+        ...options,
+        body: command ?? {},
+      },
+    );
+  }
+
+  async reviewDriverLeave(
+    leaveId: string,
+    command: ReviewDriverLeaveCommand,
+    options?: RequestOptions,
+  ): Promise<DriverLeaveRecord> {
+    return this.post<DriverLeaveRecord>(
+      `/api/driver-leave/requests/${encodeURIComponent(leaveId)}/review`,
+      {
+        ...options,
+        body: command,
+      },
+    );
+  }
+
+  // ============================================================================
+  // System Remediation (SR-CONTRACT-001): Driver Academy & Fleet Training
+  // ============================================================================
+
+  async listAcademyCourses(
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<AcademyCourseSummary>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<AcademyCourseSummary>>(
+      `/api/driver-academy/courses${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async getAcademyCourse(
+    courseId: string,
+    options?: RequestOptions,
+  ): Promise<AcademyCourseDetail> {
+    return this.get<AcademyCourseDetail>(
+      `/api/driver-academy/courses/${encodeURIComponent(courseId)}`,
+      options,
+    );
+  }
+
+  async submitQuiz(
+    courseId: string,
+    command: QuizSubmissionCommand,
+    options?: RequestOptions,
+  ): Promise<QuizResultRecord> {
+    return this.post<QuizResultRecord>(
+      `/api/driver-academy/courses/${encodeURIComponent(courseId)}/quiz/submit`,
+      {
+        ...options,
+        body: command,
+      },
+    );
+  }
+
+  async listDriverTrainingRecords(
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<DriverTrainingRecord>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<DriverTrainingRecord>>(
+      `/api/driver-academy/records${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async getDriverQuizAttempt(
+    courseId: string,
+    attemptId: string,
+    options?: RequestOptions,
+  ): Promise<DriverQuizAttemptDetail> {
+    return this.get<DriverQuizAttemptDetail>(
+      `/api/driver-academy/courses/${encodeURIComponent(courseId)}/attempts/${encodeURIComponent(attemptId)}`,
+      options,
+    );
+  }
+
+  async getFleetTrainingSummary(
+    options?: RequestOptions,
+  ): Promise<FleetTrainingView> {
+    return this.get<FleetTrainingView>(
+      "/api/fleet-partner/training/summary",
+      options,
+    );
+  }
+
+  async listFleetDriverRoster(
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<FleetDriverRosterItem>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<FleetDriverRosterItem>>(
+      `/api/fleet-partner/training/roster${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async getFleetDriverQuizAttempt(
+    driverId: string,
+    attemptId: string,
+    options?: RequestOptions,
+  ): Promise<DriverQuizAttemptDetail> {
+    return this.get<DriverQuizAttemptDetail>(
+      `/api/fleet-partner/training/drivers/${encodeURIComponent(driverId)}/attempts/${encodeURIComponent(attemptId)}`,
+      options,
+    );
+  }
+
+  // ============================================================================
+  // System Remediation (SR-CONTRACT-001): Host Vehicle Restricted Projection
+  // ============================================================================
+
+  async listHostVehicles(
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<HostVehicleSummary>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<HostVehicleSummary>>(
+      `/api/host/vehicles${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async getHostVehicleEarnings(
+    vehicleId: string,
+    query?: { month?: string },
+    options?: RequestOptions,
+  ): Promise<HostVehicleEarningsSummary> {
+    const params = new URLSearchParams();
+    if (query?.month) params.set("month", query.month);
+    const qs = params.toString();
+    return this.get<HostVehicleEarningsSummary>(
+      `/api/host/vehicles/${encodeURIComponent(vehicleId)}/earnings${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async listHostVehicleMaintenance(
+    vehicleId: string,
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<HostVehicleMaintenanceItem>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<HostVehicleMaintenanceItem>>(
+      `/api/host/vehicles/${encodeURIComponent(vehicleId)}/maintenance${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async listHostVehicleTrips(
+    vehicleId: string,
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<HostVehicleTripItem>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<HostVehicleTripItem>>(
+      `/api/host/vehicles/${encodeURIComponent(vehicleId)}/trips${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
+
+  async listHostVehicleCases(
+    vehicleId: string,
+    query?: { page?: number; pageSize?: number },
+    options?: RequestOptions,
+  ): Promise<ApiListData<HostVehicleCaseItem>> {
+    const params = new URLSearchParams();
+    if (query?.page !== undefined) params.set("page", String(query.page));
+    if (query?.pageSize !== undefined)
+      params.set("pageSize", String(query.pageSize));
+    const qs = params.toString();
+    return this.get<ApiListData<HostVehicleCaseItem>>(
+      `/api/host/vehicles/${encodeURIComponent(vehicleId)}/cases${qs ? `?${qs}` : ""}`,
+      options,
+    );
+  }
 }
 
 /**
@@ -4518,6 +4847,22 @@ export function createPlatformAdminClient(
     ...(options?.pathTransform ? { pathTransform: options.pathTransform } : {}),
   });
 }
+
+export function createHostClient(
+  baseUrl: string,
+  partnerId: string,
+  defaultHeaders?: Record<string, string>,
+): ApiClient {
+  return new ApiClient({
+    baseUrl,
+    defaultHeaders: {
+      "x-actor-type": "ops_user",
+      "x-realm": "partner",
+      "x-partner-id": partnerId,
+      ...defaultHeaders,
+    },
+  });
+}
 export type {
   VoiceSession,
   VoiceDraft,
@@ -4566,3 +4911,5 @@ export type {
   SpeechProof,
   DtmfProof,
 } from "@drts/contracts";
+
+export * from "./system-remediation";

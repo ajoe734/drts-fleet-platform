@@ -1,3 +1,5 @@
+import { buildOrderFixture } from "./voice-order-fixture";
+
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 
@@ -85,12 +87,12 @@ async function seedVoiceFixture(
       [
         boundOrderId,
         `ON-${boundOrderId}`,
-        JSON.stringify({
+        JSON.stringify(buildOrderFixture({
           orderId: boundOrderId,
           status: "ready_for_dispatch",
           callId,
           voiceIntentId: intentId,
-        }),
+        })),
       ],
     );
   }
@@ -192,75 +194,6 @@ async function purgeVoiceFixture(database: DatabaseService, fixture: VoiceFixtur
   ]);
 }
 
-function buildOrderFixture(overrides: Partial<OwnedOrderRecord> & { orderId: string }): OwnedOrderRecord {
-  const now = new Date().toISOString();
-  return {
-    orderNo: `ON-${overrides.orderId}`,
-    orderSource: "voice_agent",
-    orderDomain: "owned",
-    tenantId: null,
-    partnerId: null,
-    partnerProgramId: null,
-    partnerEntrySlug: null,
-    eligibilityVerificationId: null,
-    issuerAuthorizationRef: null,
-    passengerDisclosure: null,
-    serviceBucket: "standard_taxi",
-    dispatchSemantics: "immediate",
-    businessDispatchSubtype: null,
-    status: "ready_for_dispatch",
-    pickup: { address: "台北車站" },
-    dropoff: { address: "松山機場" },
-    passenger: { name: "UV-EXEC-005 Rider", phone: "0911000222" },
-    bookingId: null,
-    bookingType: null,
-    etaSnapshot: null,
-    callId: null,
-    voiceIntentId: null,
-    recordingId: null,
-    reservationWindowStart: null,
-    reservationWindowEnd: null,
-    recurrenceRule: null,
-    modifiableUntil: null,
-    cancelableUntil: null,
-    bookedBy: null,
-    onsiteContact: null,
-    costCenter: null,
-    vehiclePreference: null,
-    benefitReference: null,
-    direction: null,
-    flightNo: null,
-    terminal: null,
-    luggageCount: null,
-    notes: null,
-    fixedPrice: false,
-    quotedFare: null,
-    quotedFareSource: null,
-    quotedFareRuleVersion: null,
-    manualFareOverride: null,
-    exceptionHold: null,
-    proofRequirements: {
-      minPhotoCount: 0,
-      signoffRequired: false,
-      expenseProofRequired: false,
-    },
-    approvalState: "not_required",
-    approvalRequestIds: [],
-    complianceFlags: [],
-    cancelledAt: null,
-    cancelReason: null,
-    reservationHoldStatus: "none",
-    reservationHoldId: null,
-    reservationHoldExpiresAt: null,
-    dispatchAttemptCount: 0,
-    lastDispatchFailureReason: null,
-    noSupplyEscalation: null,
-    dispatchTimeout: null,
-    createdAt: now,
-    updatedAt: now,
-    ...overrides,
-  } as unknown as OwnedOrderRecord;
-}
 
 function createTestService(database: DatabaseService) {
   const auditNotificationService = new AuditNotificationService();

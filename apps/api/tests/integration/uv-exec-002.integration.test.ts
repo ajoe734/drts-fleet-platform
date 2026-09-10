@@ -1,3 +1,5 @@
+import { buildOrderFixture } from "./voice-order-fixture";
+
 import { randomUUID } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -63,7 +65,7 @@ async function seedSessionChain(
     [
       orderId,
       `ON-${orderId}`,
-      JSON.stringify({
+      JSON.stringify(buildOrderFixture({
         orderId,
         status: "ready_for_dispatch",
         callId,
@@ -73,7 +75,7 @@ async function seedSessionChain(
           voiceSessionId,
           principalId: "svc-uvexec002",
         },
-      }),
+      })),
     ],
   );
 
@@ -250,6 +252,8 @@ describe("UV-EXEC-002 voice-booking runtime schema", () => {
       `SELECT table_name FROM information_schema.tables WHERE table_schema = 'voice' ORDER BY table_name`,
     );
     expect(tables.rows.map((row) => row.table_name)).toEqual([
+      "booking_audit_intent",
+      "booking_command_proof",
       "call_admission",
       "call_leg",
       "callback_attempt",
@@ -259,11 +263,13 @@ describe("UV-EXEC-002 voice-booking runtime schema", () => {
       "draft_revision",
       "handoff",
       "intent",
+      "legal_hold",
       "line_binding",
       "passenger_proof",
       "rate_card",
       "recording_checkpoint",
       "resource_scope",
+      "retention_execution_log",
       "route_profile",
       "session",
       "session_event",
