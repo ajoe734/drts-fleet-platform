@@ -1,17 +1,15 @@
 # SR-ACADEMY-BE-001 — 課程、測驗、完訓與重訓資料服務
 
-Owner: Claude. Reviewer: Claude2. Date: 2026-09-10 UTC.
+Owner: Gemini (reassigned from Claude). Reviewer: Claude2. Date: 2026-09-10 UTC.
 
 ## State and provenance
 
 - Reassignment: availability-first reassignment picked this task up from
-  `codex2/sr-academy-be-001` (blocked checkpoint, see below) after the
-  identity/persistence contract blocker was independently resolved and merged
-  by `SR-ACADEMY-BE-001-IDENTITY-CONTRACT`
-  (`f36e788cf46038ca2e58c0d211bb99444c7a3cb4`, PR #1888).
-- Worktree: `.artifacts/worktrees/auto/claude-sr-academy-be-001`, branch
-  `claude/sr-academy-be-001`.
-- Base SHA (fresh `origin/dev` at start of this work): `f36e788cf46038ca2e58c0d211bb99444c7a3cb4`.
+  `claude/sr-academy-be-001` (PR #1894) to resolve CI failure on `iam-negative-matrix`
+  and apply supervisor-expanded write scope for `regulatory-registry.repository.ts`.
+- Worktree: `.artifacts/worktrees/auto/gemini-sr-academy-be-001`, branch
+  `gemini/sr-academy-be-001`.
+- Base SHA: `7953bab85ea5f361665b7c3f442fadc50e859720` (latest `origin/dev`).
 - Candidate SHA: recorded at handoff time via
   `git rev-parse HEAD` (see the `ai-status.sh handoff` call for this task).
 - Reused, unmodified: `academy-domain.ts` pure functions ported verbatim from
@@ -132,52 +130,30 @@ corrected shared regulatory tables (`reg.driver_training_records`,
   `reg.phase1_registry_drivers` before grading and returns
   `404 DRIVER_NOT_FOUND` for an unknown id; this is covered by a unit test,
   not a live-DB negative test.
-- **Pre-existing (not introduced by this task) `uuid = varchar` join risk
-  in `regulatory-registry.repository.ts`'s `runIdempotentBackfill()`.**
-  Reviewer flagged that after this migration converts
-  `reg.driver_reg_profiles.driver_id` to `varchar(100)`,
-  `RegulatoryRegistryRepository.runIdempotentBackfill()`
-  (`regulatory-registry.repository.ts:1074-1121`, called from
-  `RegulatoryRegistryService.onModuleInit()` on every boot when the DB is
-  enabled) joins `reg.drivers d` (`driver_id uuid`, `V0004`) against
-  `reg.driver_reg_profiles dp` via `d.driver_id = dp.driver_id` — now
-  `uuid = varchar(100)`, a comparison Postgres rejects without an explicit
-  cast on one side (`operator does not exist: uuid = character varying`).
-
-  Verified via `git log -p --follow` on that file: the same function's
-  adjacent join, `d.driver_id = dc.driver_id` against
-  `reg.driver_public_registration_credentials dc`, has had this identical
-  `uuid = varchar(100)` shape since the function was introduced in commit
-  `cb6f46f61` (PR #1117, P5-SUP-DRV-001) — that commit's own migration
-  (`V0055__p5_disclosure_ids_as_varchar.sql`) converted `dc.driver_id` to
-  `varchar(100)` in the same change that added this join. This defect
-  pattern therefore predates SR-ACADEMY-BE-001; this migration's `dp`
-  conversion adds a second instance of an already-existing bug, it does not
-  create a new one.
-
-  `regulatory-registry.repository.ts` is outside this task's
-  `write_scopes`, so it was not modified here. Per
-  `regulatory-registry.service.ts`, the failure mode if the join does error
-  is non-fatal — caught and logged via `reportPersistenceFailure`, no
-  crash — but it would silently skip that backfill's DB-state hydration on
-  every boot post-deploy, for both the pre-existing `dc` join and the new
-  `dp` join alike. No live Postgres was available in this VM to confirm
-  empirically whether Postgres rejects this comparison at parse time; the
-  above is static/historical evidence (git history), not an execution
-  result. Recommended follow-up: a separate task, or supervisor-authorized
-  scope expansion onto `regulatory-registry.repository.ts`, to add an
-  explicit cast (`d.driver_id::text = dp.driver_id` /
-  `d.driver_id::text = dc.driver_id`) to both joins together, since they
-  share the same root cause and neither is in this task's ownership.
+- **Remediated `uuid = varchar` join in `regulatory-registry.repository.ts`'s `runIdempotentBackfill()`.**
+  Reviewer flagged that after V0095 converts `reg.driver_reg_profiles.driver_id`
+  to `varchar(100)`, `RegulatoryRegistryRepository.runIdempotentBackfill()`
+  (`regulatory-registry.repository.ts:1074-1121`) joined `reg.drivers d` (`driver_id uuid`)
+  against `reg.driver_reg_profiles dp` via `d.driver_id = dp.driver_id` and
+  `reg.driver_public_registration_credentials dc` via `d.driver_id = dc.driver_id`.
+  Supervisor expanded `write_scopes` to include `regulatory-registry.repository.ts`.
+  Fixed by adding explicit `d.driver_id::text` casts to both joins and the SELECT list,
+  preventing `operator does not exist: uuid = character varying` during startup hydration.
+- **Remediated IAM realm/scope mismatch on `FleetPartnerTrainingController`.**
+  CI failed on `iam-negative-matrix` (`tests/security/iam-route-inventory.test.ts:458`)
+  because `summary`, `roster`, and `driverAttempt` declared both `reports:read` and `driver:read`
+  with realm `tenant`. In `iam-policy-catalog.ts`, `driver:read` allows only `["system", "platform", "ops", "driver"]`
+  (excluding `tenant`), and `tenant_ops_admin` role only possesses `reports:read`.
+  Fixed by scoping `FleetPartnerTrainingController` endpoints to `@RequireScopes("reports:read")`.
 
 ## Executed checks
 
 | Command | Exit | Result |
 | --- | --- | --- |
-| `pnpm --filter @drts/contracts build` | 0 | Refreshed stale contract build output (pre-existing unrelated typecheck errors elsewhere in `apps/api` disappeared after this; not caused by this task) |
-| `pnpm --filter @drts/api typecheck` | 0 | Clean, including the new module |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-academy-be-001/` | 0 | 3 files, 35 tests passed (`academy-domain.test.ts` — ported checkpoint domain tests, unchanged; `academy.service.test.ts` — new, fake-repository service tests; `academy.controller.test.ts` — new, IAM-boundary controller tests) |
-| `pnpm exec prettier --write apps/api/src/modules/driver-academy/*.ts tests/unit/system-remediation/sr-academy-be-001/*.ts` | 0 | Formatted owned files |
+| `pnpm --filter @drts/contracts build` | 0 | Refreshed contract build output |
+| `pnpm --filter @drts/api typecheck` | 0 | Clean, 0 errors across entire `@drts/api` |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-academy-be-001/` | 0 | 3 files, 35 tests passed (`academy-domain.test.ts`, `academy.service.test.ts`, `academy.controller.test.ts`) |
+| `pnpm exec vitest run tests/security/iam-route-inventory.test.ts` | 0 | 10/10 tests passed (zero unclassified routes, zero realm mismatches, zero unknown scopes) |
 | `git diff --check` | 0 | No whitespace errors |
 
 No PostgreSQL migration/transaction/concurrency test, HTTP/IAM integration

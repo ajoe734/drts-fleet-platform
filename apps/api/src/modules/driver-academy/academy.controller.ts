@@ -168,7 +168,7 @@ export class FleetPartnerTrainingController {
 
   @Get("summary")
   @RequireRealms("system", "platform", "tenant", "ops")
-  @RequireScopes("reports:read", "driver:read")
+  @RequireScopes("reports:read")
   async summary(
     @Query("fleetPartnerId") fleetPartnerId: string | undefined,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
@@ -183,7 +183,7 @@ export class FleetPartnerTrainingController {
 
   @Get("roster")
   @RequireRealms("system", "platform", "tenant", "ops")
-  @RequireScopes("reports:read", "driver:read")
+  @RequireScopes("reports:read")
   async roster(
     @Query("fleetPartnerId") fleetPartnerId: string | undefined,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
@@ -196,7 +196,7 @@ export class FleetPartnerTrainingController {
 
   @Get("drivers/:driverId/attempts/:attemptId")
   @RequireRealms("system", "platform", "tenant", "ops")
-  @RequireScopes("reports:read", "driver:read")
+  @RequireScopes("reports:read")
   async driverAttempt(
     @Param("driverId") driverId: string,
     @Param("attemptId") attemptId: string,
