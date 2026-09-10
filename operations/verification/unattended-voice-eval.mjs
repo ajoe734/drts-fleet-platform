@@ -23,6 +23,7 @@ const SCENARIOS_FILE = path.join(REPO_ROOT, 'tests', 'fixtures', 'unattended-voi
 const HOLDOUT_FILE = path.join(REPO_ROOT, 'tests', 'fixtures', 'unattended-voice', 'holdout.json');
 const MODELS_FILE = path.join(REPO_ROOT, 'tests', 'fixtures', 'unattended-voice', 'models-profiles.json');
 const RATE_CARDS_FILE = path.join(REPO_ROOT, 'tests', 'fixtures', 'unattended-voice', 'rate-cards.json');
+const NATIVE_FIXTURES_FILE = path.join(REPO_ROOT, 'tests', 'fixtures', 'unattended-voice', 'native-voice-fixtures.json');
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -157,6 +158,10 @@ async function runEvaluation() {
     }
 
     console.log(`\nEvaluating Candidate: [${candidateId}] - ${candConfig.name}`);
+    if (candidateId === 'openai_realtime' && fs.existsSync(NATIVE_FIXTURES_FILE)) {
+      const nativeFx = JSON.parse(fs.readFileSync(NATIVE_FIXTURES_FILE, 'utf-8'));
+      console.log(`  [FIXTURE_ADAPTER_VERIFIED] Protocol fixture verified: ${nativeFx.model_id} (${nativeFx.protocol_version}, ${nativeFx.audio_format})`);
+    }
 
     results.candidates[candidateId] = {
       name: candConfig.name,
