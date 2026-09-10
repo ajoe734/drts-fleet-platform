@@ -5,7 +5,6 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { isDriverIdentityMatching, normalizeDriverId } from "../../common/auth";
 import {
   DRIVER_LEAVE_ERROR_CODES,
-  DRIVER_LEAVE_STATUSES,
   DRIVER_LEAVE_TYPES,
   MAX_PAST_APPLICATION_GRACE_MS,
   type CreateDriverLeaveCommand,

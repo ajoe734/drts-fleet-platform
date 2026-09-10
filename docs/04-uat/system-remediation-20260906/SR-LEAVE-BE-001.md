@@ -51,8 +51,9 @@
 | 測試指令 | Exit Code | 耗時 | 實際結果摘要 |
 | :--- | :---: | :---: | :--- |
 | `git diff --check` | 0 | <0.1s | 格式與空白檢查 100% 通過，零錯誤 |
+| `pnpm run lint` | 0 | 449ms | ESLint / Turbo 全庫靜態檢查 100% 通過，零 warning / error |
 | `pnpm --filter @drts/api typecheck` | 0 | 25.8s | `@drts/api` 完整 TypeScript 型別檢查 100% 通過（無任何 emit 或型別錯誤） |
-| `pnpm exec vitest run tests/unit/system-remediation/sr-leave-be-001/` | 0 | 3.9s | 1 test file, 27 passed (100% 通過，0 失敗) |
+| `pnpm exec vitest run tests/unit/system-remediation/sr-leave-be-001/` | 0 | 3.8s | 1 test file, 28 passed (100% 通過，0 失敗) |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-contract-001/` | 0 | 4.4s | 1 test file, 32 passed (100% 通過，防碰撞與契約不變量相容) |
 
 ---
