@@ -1,4 +1,8 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import type { BookingRecord } from "@drts/contracts";
 import {
   EBtnContent,
   ECard,
@@ -8,38 +12,73 @@ import {
   entBtnStyle,
 } from "@/components/ent-kit";
 import { EntParty, EntRoute } from "@/components/ent-screen-bits";
+import { getEnterpriseDispatchTenantClient } from "@/lib/api-client";
 import {
   enterpriseQuotaSummary,
+  enterpriseTenant,
+  type EnterpriseTripSummary,
+  getAuthorizedSupportContact,
   getBookingStateMeta,
-  getEnterpriseBookings,
   getEnterpriseTenant,
   getEnterpriseUser,
   getPolicyNotes,
+  getTripNotFoundNotice,
+  isInProgressTripState,
+  isUpcomingTripState,
+  mapBookingRecordToTripSummary,
+  resolveBookingGatewayState,
+  type BookingGatewayState,
 } from "@/lib/enterprise-fixtures";
 import { enterpriseTheme as t } from "@/lib/enterprise-theme";
-import { getServerLocale } from "@/lib/server-locale";
-import { type TranslationKey, t as translate } from "@/lib/translations";
+import { useTranslation } from "@/lib/i18n";
 
 const POLICY_ICONS = ["bolt", "building", "clock"] as const;
 
-export default async function HomePage() {
-  const locale = await getServerLocale();
-  const tr = (key: TranslationKey, params?: Record<string, string | number>) =>
-    translate(key, params, locale);
-  const bookings = getEnterpriseBookings(locale);
-  const stateMeta = getBookingStateMeta(locale);
+type LoadState = "loading" | "ready" | "error";
+
+export default function HomePage() {
+  const { locale, t: tr } = useTranslation();
+  const supportContact = getAuthorizedSupportContact(locale);
+  const notFoundNotice = getTripNotFoundNotice(locale);
+  const [summaries, setSummaries] = useState<EnterpriseTripSummary[]>([]);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [gatewayState, setGatewayState] = useState<BookingGatewayState | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadState("loading");
+
+    getEnterpriseDispatchTenantClient(enterpriseTenant.id)
+      .listBookings()
+      .then((bookings: BookingRecord[]) => {
+        if (cancelled) return;
+        setSummaries(
+          bookings
+            .filter((booking) => booking.status === "active")
+            .map(mapBookingRecordToTripSummary),
+        );
+        setLoadState("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setGatewayState(resolveBookingGatewayState(err));
+        setLoadState("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const user = getEnterpriseUser(locale);
   const tenant = getEnterpriseTenant(locale);
   const policyNotes = getPolicyNotes(locale);
+  const stateMeta = getBookingStateMeta(locale);
 
-  const active = bookings.find(
-    (b) => b.state === "enroute" || b.state === "assigned",
-  );
-  const upcoming = bookings
-    .filter((b) =>
-      ["assigned", "enroute", "approval", "reserved"].includes(b.state),
-    )
-    .slice(0, 3);
+  // Same real tenant-booking records `/bookings` and `/bookings/[bookingId]`
+  // read; a booking shown here always resolves on the detail page (R08).
+  const active = summaries.find((b) => isInProgressTripState(b.state));
+  const upcoming = summaries.filter((b) => isUpcomingTripState(b.state)).slice(0, 3);
 
   return (
     <>
@@ -119,6 +158,89 @@ export default async function HomePage() {
         style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {loadState === "error" && gatewayState === "not-found" && (
+            <ECard t={t} accent={t.muted}>
+              <div
+                data-testid="enterprise-home-api-state"
+                data-testid-api-state="not-found"
+              >
+                <strong
+                  style={{
+                    display: "block",
+                    fontSize: 16,
+                    marginBottom: 8,
+                    color: t.ink,
+                  }}
+                >
+                  {notFoundNotice.title}
+                </strong>
+                <p style={{ color: t.muted, lineHeight: 1.6, marginBottom: 14 }}>
+                  {notFoundNotice.body}
+                </p>
+                <Link
+                  href="/bookings"
+                  style={entBtnStyle(t, { variant: "default" })}
+                >
+                  <EBtnContent iconR="arrow">
+                    {notFoundNotice.action}
+                  </EBtnContent>
+                </Link>
+              </div>
+            </ECard>
+          )}
+
+          {loadState === "error" && gatewayState !== "not-found" && (
+            <ECard
+              t={t}
+              accent={
+                gatewayState === "no-supply"
+                  ? t.danger
+                  : gatewayState === "auth-required"
+                    ? t.primary
+                    : t.warn
+              }
+            >
+              <div
+                data-testid="enterprise-home-api-state"
+                data-testid-api-state={gatewayState ?? "degraded"}
+              >
+                <strong
+                  style={{
+                    display: "block",
+                    fontSize: 16,
+                    marginBottom: 8,
+                    color: t.ink,
+                  }}
+                >
+                  {gatewayState === "auth-required"
+                    ? tr("gate.authRequired.title")
+                    : gatewayState === "quota-blocked"
+                      ? tr("gate.quotaBlocked.title")
+                      : gatewayState === "no-supply"
+                        ? tr("gate.noSupply.title")
+                        : tr("gate.degraded.title")}
+                </strong>
+                <p style={{ color: t.muted, lineHeight: 1.6 }}>
+                  {tr("bookingLifecycle.gateway.body")}
+                </p>
+                <Link
+                  href={
+                    gatewayState === "auth-required"
+                      ? "/auth-required"
+                      : gatewayState === "quota-blocked"
+                        ? "/quota-blocked"
+                        : gatewayState === "no-supply"
+                          ? "/no-supply"
+                          : "/degraded"
+                  }
+                  style={entBtnStyle(t, { variant: "default" })}
+                >
+                  <EBtnContent>{tr("bookingLifecycle.gateway.action")}</EBtnContent>
+                </Link>
+              </div>
+            </ECard>
+          )}
+
           {active && (
             <ECard
               t={t}
@@ -231,82 +353,92 @@ export default async function HomePage() {
             }
           >
             <div>
-              {upcoming.map((b, i) => (
-                <div
-                  key={b.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 14,
-                    padding: "14px 18px",
-                    borderTop: i ? "1px solid " + t.lineSoft : "none",
-                  }}
-                >
-                  <span
+              {loadState === "loading" ? (
+                <div style={{ padding: 18, color: t.muted }}>
+                  {tr("bookingLifecycle.history.loading")}
+                </div>
+              ) : upcoming.length === 0 ? (
+                <div style={{ padding: 18, color: t.muted }}>
+                  {tr("bookingLifecycle.history.empty")}
+                </div>
+              ) : (
+                upcoming.map((b, i) => (
+                  <div
+                    key={b.id}
                     style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 14,
-                      background: b.self ? t.primaryBg : t.surfaceLo,
-                      color: b.self ? t.primary : t.muted,
-                      border: "1px solid " + (b.self ? t.primaryBd : t.line),
-                      display: "inline-flex",
+                      display: "flex",
                       alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 14,
-                      fontWeight: 700,
-                      flexShrink: 0,
+                      gap: 14,
+                      padding: "14px 18px",
+                      borderTop: i ? "1px solid " + t.lineSoft : "none",
                     }}
                   >
-                    {b.passenger.slice(0, 1)}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 7 }}
+                    <span
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 14,
+                        background: b.self ? t.primaryBg : t.surfaceLo,
+                        color: b.self ? t.primary : t.muted,
+                        border: "1px solid " + (b.self ? t.primaryBd : t.line),
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 14,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
                     >
-                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>
-                        {b.passenger}
-                      </span>
-                      {!b.self && (
-                        <span style={{ fontSize: 11, color: t.warn }}>
-                          ·{" "}
-                          {tr("home.upcoming.delegateShort", {
-                            name: b.bookedBy,
-                          })}
+                      {b.passenger.slice(0, 1)}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{ display: "flex", alignItems: "center", gap: 7 }}
+                      >
+                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+                          {b.passenger}
                         </span>
-                      )}
+                        {!b.self && (
+                          <span style={{ fontSize: 11, color: t.warn }}>
+                            ·{" "}
+                            {tr("home.upcoming.delegateShort", {
+                              name: b.bookedBy,
+                            })}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: t.muted,
+                          marginTop: 1,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {b.from} → {b.to}
+                      </div>
                     </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: t.muted,
-                        marginTop: 1,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {b.from} → {b.to}
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 12.5,
+                          fontFamily: t.mono,
+                          color: t.ink2,
+                        }}
+                      >
+                        {b.window}
+                      </div>
+                      <div style={{ marginTop: 4 }}>
+                        <EPill t={t} tone={stateMeta[b.state].tone} dot>
+                          {stateMeta[b.state].label}
+                        </EPill>
+                      </div>
                     </div>
                   </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontFamily: t.mono,
-                        color: t.ink2,
-                      }}
-                    >
-                      {b.window}
-                    </div>
-                    <div style={{ marginTop: 4 }}>
-                      <EPill t={t} tone={stateMeta[b.state].tone} dot>
-                        {stateMeta[b.state].label}
-                      </EPill>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </ECard>
         </div>
@@ -367,25 +499,47 @@ export default async function HomePage() {
                 </div>
               ))}
             </div>
-            <div
-              style={{
-                marginTop: 14,
-                paddingTop: 12,
-                borderTop: "1px solid " + t.lineSoft,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <EIcon name="phone" size={14} style={{ color: t.muted }} />
-              <span style={{ fontSize: 12, color: t.muted }}>
-                {translate(
-                  "state.supportLine",
-                  { phone: tenant.supportPhone },
-                  locale,
-                )}
-              </span>
-            </div>
+            {supportContact.isAuthorized && supportContact.phone ? (
+              <a
+                href={supportContact.href}
+                data-testid="enterprise-home-contact-support"
+                style={{
+                  marginTop: 14,
+                  paddingTop: 12,
+                  borderTop: "1px solid " + t.lineSoft,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  color: "inherit",
+                  textDecoration: "none",
+                }}
+              >
+                <EIcon name="phone" size={14} style={{ color: t.muted }} />
+                <span style={{ fontSize: 12, color: t.muted }}>
+                  {tr("state.supportLine", { phone: supportContact.phone })}
+                </span>
+              </a>
+            ) : (
+              <Link
+                href={supportContact.href}
+                data-testid="enterprise-home-contact-support"
+                style={{
+                  marginTop: 14,
+                  paddingTop: 12,
+                  borderTop: "1px solid " + t.lineSoft,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  color: "inherit",
+                  textDecoration: "none",
+                }}
+              >
+                <EIcon name="phone" size={14} style={{ color: t.muted }} />
+                <span style={{ fontSize: 12, color: t.muted }}>
+                  {supportContact.displayLabel}
+                </span>
+              </Link>
+            )}
           </ECard>
         </div>
       </div>

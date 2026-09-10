@@ -1,5 +1,6 @@
+import type { BookingRecord, OwnedOrderStatus } from "@drts/contracts";
 import type { EnterpriseDispatchBookingFixture } from "./dispatch-fixture-adapter";
-import { type Locale, type TranslationKey, t } from "@/lib/translations";
+import { type Locale, type TranslationKey, t } from "./translations";
 
 export type BookingState =
   | "assigned"
@@ -446,6 +447,582 @@ export function getEnterpriseBooking(bookingId: string, locale?: Locale) {
   return locale
     ? getEnterpriseBookings(locale).find((item) => item.id === bookingId)
     : booking;
+}
+
+// --- Real tenant booking API -> home/trip display mapping (SR-ENTERPRISE-DATA-001) ---
+//
+// Home and trip previously rendered `enterpriseBookings` above, a static demo
+// array. Its IDs (e.g. EB-7K2E1D) do not exist against the real tenant
+// booking API, so following a link from home/trip into `/bookings/[id]`
+// 404'd. The functions below read the same `BookingRecord` shape that
+// `/bookings` and `/bookings/[bookingId]` already fetch from
+// `getEnterpriseDispatchTenantClient`, so home/trip/list/detail agree on the
+// same booking. `enterpriseBookings` and the getters above stay in place
+// because `components/ent-embed-screens.tsx` (outside this task's write
+// scope) still renders from them.
+
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+const NO_SUPPLY_ORDER_STATUSES: ReadonlySet<OwnedOrderStatus> = new Set([
+  "no_supply",
+  "dispatch_failed",
+  "dispatch_timeout",
+  "redispatch_required",
+]);
+
+const ASSIGNED_ORDER_STATUSES: ReadonlySet<OwnedOrderStatus> = new Set([
+  "assigned",
+  "driver_accepted",
+]);
+
+const ENROUTE_ORDER_STATUSES: ReadonlySet<OwnedOrderStatus> = new Set([
+  "enroute_pickup",
+  "arrived_pickup",
+  "on_trip",
+  "proof_pending",
+]);
+
+export interface EnterpriseTripSummary {
+  id: string;
+  passenger: string;
+  bookedBy: string;
+  self: boolean;
+  from: string;
+  to: string;
+  window: string;
+  state: BookingState;
+  orderStatus: OwnedOrderStatus;
+  // No live location/ETA feed is wired into the tenant booking API yet.
+  // Always null: callers must render the existing "—" fallback rather than
+  // inventing a countdown (this is what R08 flagged as a fabricated ETA).
+  etaMinutes: null;
+  flight?: string;
+  terminal?: string;
+}
+
+export function classifyBookingRecordState(
+  record: Pick<BookingRecord, "status" | "orderStatus" | "approvalState">,
+): BookingState {
+  if (record.status === "cancelled" || record.orderStatus === "cancelled") {
+    return "cancelled";
+  }
+  if (record.status === "completed" || record.orderStatus === "completed") {
+    return "completed";
+  }
+  if (NO_SUPPLY_ORDER_STATUSES.has(record.orderStatus)) {
+    return "nosupply";
+  }
+  if (record.approvalState === "pending") {
+    return "approval";
+  }
+  if (ASSIGNED_ORDER_STATUSES.has(record.orderStatus)) {
+    return "assigned";
+  }
+  if (ENROUTE_ORDER_STATUSES.has(record.orderStatus)) {
+    return "enroute";
+  }
+  return "reserved";
+}
+
+export function isInProgressTripState(state: BookingState): boolean {
+  return state === "assigned" || state === "enroute";
+}
+
+export function isUpcomingTripState(state: BookingState): boolean {
+  return (
+    state === "assigned" ||
+    state === "enroute" ||
+    state === "approval" ||
+    state === "reserved"
+  );
+}
+
+// 5-stage rail used on /trip: assigned -> enroute -> arrived -> in progress -> completed.
+export function getTripProgressStageIndex(orderStatus: OwnedOrderStatus): number {
+  switch (orderStatus) {
+    case "enroute_pickup":
+      return 1;
+    case "arrived_pickup":
+      return 2;
+    case "on_trip":
+      return 3;
+    case "proof_pending":
+    case "completed":
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+export function formatBookingWindowLabel(startIso: string): string {
+  const start = new Date(startIso);
+  if (Number.isNaN(start.getTime())) {
+    return "—";
+  }
+  const shifted = new Date(start.getTime() + TAIPEI_OFFSET_MS).toISOString();
+  return `${shifted.slice(5, 10).replace("-", "/")} ${shifted.slice(11, 16)}`;
+}
+
+export function mapBookingRecordToTripSummary(
+  record: BookingRecord,
+): EnterpriseTripSummary {
+  const bookedByName = record.bookedBy?.name ?? record.passenger.name;
+
+  return {
+    id: record.bookingId,
+    passenger: record.passenger.name,
+    bookedBy: bookedByName,
+    self: bookedByName === record.passenger.name,
+    from: record.pickup.address,
+    to: record.dropoff.address,
+    window: formatBookingWindowLabel(record.reservationWindowStart),
+    state: classifyBookingRecordState(record),
+    orderStatus: record.orderStatus,
+    etaMinutes: null,
+    ...(record.flightNo ? { flight: record.flightNo } : {}),
+    ...(record.terminal ? { terminal: record.terminal } : {}),
+  };
+}
+
+// Normalizes a display phone number (e.g. "0800-200-118") into a `tel:` URI.
+export function toTelHref(phone: string): string {
+  return `tel:${phone.replace(/[^\d+]/g, "")}`;
+}
+
+export interface DriverAssignedNotice {
+  title: string;
+  subtitle: string;
+  helpText: string;
+  isDriverAssigned: boolean;
+}
+
+export function getDriverAssignedNotice(
+  locale: Locale,
+  orderStatus?: string | null,
+): DriverAssignedNotice {
+  const isZh = locale === "zh";
+
+  if (
+    orderStatus === "no_supply" ||
+    orderStatus === "dispatch_failed" ||
+    orderStatus === "dispatch_timeout" ||
+    orderStatus === "redispatch_required"
+  ) {
+    return {
+      title: isZh ? "暫無可派車輛" : "No Vehicle Available",
+      subtitle: isZh ? "目前無法派車" : "Dispatch unavailable",
+      helpText: isZh
+        ? "目前無可派車輛，請聯繫企業客服或重新預約。"
+        : "No vehicle is currently available; please contact support or rebook.",
+      isDriverAssigned: false,
+    };
+  }
+
+  if (
+    orderStatus === "draft" ||
+    orderStatus === "submitted" ||
+    orderStatus === "matching" ||
+    orderStatus === "pending" ||
+    orderStatus === "ready_for_dispatch"
+  ) {
+    return {
+      title: isZh ? "司機媒合中" : "Finding Driver",
+      subtitle: isZh ? "尚未指派司機" : "No driver assigned yet",
+      helpText: isZh
+        ? "目前尚未指派司機，請稍候或聯繫企業客服。"
+        : "No driver assigned yet; please wait or contact enterprise support.",
+      isDriverAssigned: false,
+    };
+  }
+
+  return {
+    title: isZh ? "司機已指派" : "Driver assigned",
+    subtitle: isZh
+      ? "聯絡方式由企業客服提供"
+      : "Contact is routed through enterprise support",
+    helpText: isZh
+      ? "聯絡司機尚未提供直撥號碼，請改用企業客服。"
+      : "Direct driver calling isn't available yet — please use enterprise support.",
+    isDriverAssigned: true,
+  };
+}
+
+export interface AuthorizedSupportContact {
+  isAuthorized: boolean;
+  phone: string | null;
+  href: string;
+  displayLabel: string;
+  sourceType: "authorized_env" | "in_app_support";
+  notice: string;
+}
+
+export function getAuthorizedSupportContact(
+  locale: Locale = "zh",
+): AuthorizedSupportContact {
+  const isZh = locale === "zh";
+  const configuredPhone =
+    process.env.NEXT_PUBLIC_ENTERPRISE_SUPPORT_PHONE?.trim() ||
+    process.env.ENTERPRISE_SUPPORT_PHONE?.trim() ||
+    null;
+
+  if (configuredPhone) {
+    return {
+      isAuthorized: true,
+      phone: configuredPhone,
+      href: toTelHref(configuredPhone),
+      displayLabel: configuredPhone,
+      sourceType: "authorized_env",
+      notice: isZh
+        ? `企業客服專線：${configuredPhone}`
+        : `Enterprise Support: ${configuredPhone}`,
+    };
+  }
+
+  // Without verified tenant authority, phone must not be exposed (資料未授權不可露出).
+  // Provide honest authorized in-app support destination (/trip/support) with testable actions.
+  return {
+    isAuthorized: false,
+    phone: null,
+    href: "/trip/support",
+    displayLabel: isZh ? "企業客服支援中心" : "Enterprise Support Center",
+    sourceType: "in_app_support",
+    notice: isZh
+      ? "直撥電話尚未取得租戶授權設定，請透過企業客服支援中心尋求協助。"
+      : "Direct phone dialing is not configured; please use the Support Center for assistance.",
+  };
+}
+
+export type BookingGatewayState =
+  | "quota-blocked"
+  | "no-supply"
+  | "degraded"
+  | "not-found"
+  | "auth-required"
+  | "conflict"
+  | "rate-limited";
+
+export type ApiLikeError = {
+  statusCode?: number;
+  code?: string;
+  message?: string;
+};
+
+export function isApiClientError(
+  error: unknown,
+): error is ApiLikeError & { statusCode: number; code: string } {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as Record<string, unknown>;
+  const statusCode =
+    typeof candidate.statusCode === "number"
+      ? candidate.statusCode
+      : typeof candidate.status === "number"
+        ? candidate.status
+        : undefined;
+  const code =
+    typeof candidate.code === "string"
+      ? candidate.code
+      : typeof candidate.errorCode === "string"
+        ? candidate.errorCode
+        : undefined;
+  return typeof statusCode === "number" && typeof code === "string";
+}
+
+export function resolveBookingGatewayState(
+  error: unknown,
+): BookingGatewayState {
+  if (isApiClientError(error)) {
+    const candidate = error as Record<string, unknown>;
+    const code = (
+      typeof error.code === "string"
+        ? error.code
+        : typeof candidate.errorCode === "string"
+          ? String(candidate.errorCode)
+          : ""
+    ).toLowerCase();
+    const statusCode =
+      typeof error.statusCode === "number"
+        ? error.statusCode
+        : Number(candidate.status);
+
+    // 1. Quota & policy restrictions (403 or specific codes)
+    if (code.includes("quota") || code.includes("policy")) {
+      return "quota-blocked";
+    }
+
+    // 2. Supply / vehicle unavailability (409 or specific codes)
+    if (code.includes("supply") || code.includes("vehicle_unavailable")) {
+      return "no-supply";
+    }
+
+    // 3. True 404 (Booking not found) - ONLY true 404 / booking_not_found
+    if (
+      statusCode === 404 ||
+      code.includes("booking_not_found") ||
+      code.includes("not_found")
+    ) {
+      return "not-found";
+    }
+
+    // 4. Auth & permission errors (401 Unauthorized, 403 Forbidden)
+    if (
+      statusCode === 401 ||
+      statusCode === 403 ||
+      code.includes("auth") ||
+      code.includes("unauthorized") ||
+      code.includes("forbidden")
+    ) {
+      return "auth-required";
+    }
+
+    // 5. Rate limiting (429 Too Many Requests)
+    if (
+      statusCode === 429 ||
+      code.includes("rate_limit") ||
+      code.includes("too_many_requests")
+    ) {
+      return "rate-limited";
+    }
+
+    // 6. Conflict (409 Conflict)
+    if (statusCode === 409 || code.includes("conflict")) {
+      return "conflict";
+    }
+
+    // 7. Server Error (5xx) or other client errors (400 Bad Request, etc.)
+    return "degraded";
+  }
+  return "degraded";
+}
+
+export function bookingGatewayHref(error: unknown): string | null {
+  if (!isApiClientError(error)) return "/degraded";
+  const state = resolveBookingGatewayState(error);
+  switch (state) {
+    case "quota-blocked":
+      return "/quota-blocked";
+    case "no-supply":
+      return "/no-supply";
+    case "auth-required":
+      return "/auth-required";
+    case "not-found":
+      return "/not-found";
+    case "rate-limited":
+    case "conflict":
+    case "degraded":
+      return "/degraded";
+  }
+}
+
+export interface TripSupportCopy {
+  pageTitle: string;
+  pageSubtitle: string;
+  backTrip: string;
+  backBookings: string;
+  backHome: string;
+  phoneTitle: string;
+  phoneChannelLabel: string;
+  callAction: string;
+  unauthorizedTag: string;
+  unauthorizedNotice: string;
+  unauthorizedHelp: string;
+  driverTitle: string;
+  driverDesc: string;
+  driverEscalationNotice: string;
+  inquiryTitle: string;
+  inquirySubtitle: string;
+  inquiryChannelStatusTitle: string;
+  inquiryChannelStatusBody: string;
+  topicSelectLabel: string;
+  topicOptions: { id: string; label: string }[];
+  messageLabel: string;
+  messagePlaceholder: string;
+  submitInquiry: string;
+  submitting: string;
+  inquirySuccessTitle: string;
+  inquirySuccessBody: string;
+  inquiryUnavailableTitle: string;
+  inquiryUnavailableBody: string;
+  inquiryErrorTitle: string;
+}
+
+export function formatSupportTicketBody(
+  ticketId: string,
+  locale: Locale = "zh",
+): string {
+  if (locale === "zh") {
+    return `已建立權威客服工單（單號：${ticketId}）。系統已記錄您的求助內容。`;
+  }
+  return `Authoritative support ticket (${ticketId}) has been confirmed. Your request has been recorded.`;
+}
+
+export function getTripSupportCopy(
+  locale: Locale = "zh",
+): TripSupportCopy {
+  const isZh = locale === "zh";
+  return {
+    pageTitle: isZh ? "企業客服支援中心" : "Enterprise Support Center",
+    pageSubtitle: isZh
+      ? "行程求助、派車協調與客服諮詢"
+      : "Trip assistance, driver coordination, and support",
+    backTrip: isZh ? "返回行程" : "Back to trip",
+    backBookings: isZh ? "我的預約" : "My bookings",
+    backHome: isZh ? "返回首頁" : "Back to home",
+    phoneTitle: isZh ? "客服專線" : "Support Hotline",
+    phoneChannelLabel: isZh ? "企業專屬客服" : "Enterprise Dedicated Support",
+    callAction: isZh ? "立即撥打" : "Call Support",
+    unauthorizedTag: isZh ? "直撥電話未授權配置" : "Direct line not configured",
+    unauthorizedNotice: isZh
+      ? "目前此企業租戶環境尚未配置授權直撥電話。依企業隱私與授權規範，未經授權之電話號碼不予露出。"
+      : "Direct support phone is not configured for this tenant. In accordance with privacy and authorization policies, unauthorized phone numbers are withheld.",
+    unauthorizedHelp: isZh
+      ? "如需緊急支援，請聯繫企業管理員於調度後台轉接營運中心（ROC）。"
+      : "For urgent assistance, please contact your enterprise administrator to coordinate with the ROC dispatch center.",
+    driverTitle: isZh ? "司機聯絡與派遣協調" : "Driver Contact & Coordination",
+    driverDesc: isZh
+      ? "本平臺依租戶最小權限原則，預約記錄未包含司機個人聯絡電話。若接車發生異常（司機尚未抵達、地點變更等），由企業客服直接協調調度中心連繫司機。"
+      : "In accordance with tenant least-privilege principles, booking records do not expose direct driver phone numbers. If there are pickup issues, enterprise support will coordinate directly with dispatch.",
+    driverEscalationNotice: isZh
+      ? "預約記錄未包含司機個人電話，現場若有接車異常，請由企業管理員於後台協調。"
+      : "Booking records do not expose direct driver phone numbers. For pickup issues, please coordinate via enterprise administration.",
+    inquiryTitle: isZh ? "線上客服工單通道" : "Online Support Ticket Channel",
+    inquirySubtitle: isZh
+      ? "此企業租戶目前尚未開通線上工單端點"
+      : "Online ticketing endpoint is not provisioned for this tenant",
+    inquiryChannelStatusTitle: isZh
+      ? "線上客服工單通道狀態"
+      : "Online Support Ticket Channel",
+    inquiryChannelStatusBody: isZh
+      ? "目前租戶尚未配置線上工單提交 API。此通道誠實呈現未開通狀態，不提供無效表單與假送達承諾。"
+      : "Online ticket submission API is not provisioned for this tenant. The channel honestly reflects an unavailable state without nonfunctional forms or simulated delivery.",
+    topicSelectLabel: isZh ? "求助類別" : "Issue category",
+    topicOptions: [
+      {
+        id: "driver",
+        label: isZh ? "司機未抵達 / 接車異常" : "Driver delayed / pickup issue",
+      },
+      {
+        id: "location",
+        label: isZh ? "上車地點變更或找不到司機" : "Location change / cannot find driver",
+      },
+      {
+        id: "urgent",
+        label: isZh ? "行程緊急求助" : "Urgent trip assistance",
+      },
+      {
+        id: "policy",
+        label: isZh ? "費用與審批政策諮詢" : "Fare & policy inquiry",
+      },
+    ],
+    messageLabel: isZh ? "補充說明（選填）" : "Additional details (optional)",
+    messagePlaceholder: isZh
+      ? "請輸入您遇到的狀況或需求…"
+      : "Please enter your situation or request...",
+    submitInquiry: isZh ? "送出客服求助" : "Submit Request",
+    submitting: isZh ? "送出中…" : "Submitting...",
+    inquirySuccessTitle: isZh
+      ? "客服工單已成功受理"
+      : "Support Ticket Confirmed",
+    inquirySuccessBody: isZh
+      ? "已建立客服工單。客服專員將依租戶規範處理您的求助需求。"
+      : "Support ticket has been confirmed. A specialist will coordinate your request according to tenant policy.",
+    inquiryUnavailableTitle: isZh
+      ? "線上客服工單通道未開通"
+      : "Online Support Ticket Channel Unavailable",
+    inquiryUnavailableBody: isZh
+      ? "目前租戶尚未配置線上工單提交 API。如需即時協助，請使用已授權之客服專線，或由企業管理員於調度後台聯繫營運中心。"
+      : "Online ticket submission API is not provisioned for this tenant. For immediate assistance, please use an authorized support phone line or contact your enterprise administrator.",
+    inquiryErrorTitle: isZh
+      ? "客服求助送出失敗"
+      : "Support Request Failed",
+  };
+}
+
+export interface TripSupportInquiryPayload {
+  bookingId?: string | null;
+  topic: string;
+  notes: string;
+  requesterName?: string;
+  tenantId?: string;
+}
+
+export interface TripSupportInquiryResult {
+  status: "success" | "unavailable" | "error";
+  ticketId?: string;
+  message: string;
+}
+
+export type SupportApiSubmitFn = (
+  payload: TripSupportInquiryPayload,
+) => Promise<{ ticketId?: string; [key: string]: unknown }>;
+
+export async function submitTripSupportInquiry(
+  payload: TripSupportInquiryPayload,
+  locale: Locale = "zh",
+  apiSubmitFn?: SupportApiSubmitFn,
+): Promise<TripSupportInquiryResult> {
+  const isZh = locale === "zh";
+
+  if (!payload.topic || !payload.topic.trim()) {
+    return {
+      status: "error",
+      message: isZh ? "請選擇求助類別" : "Please select an issue category",
+    };
+  }
+
+  if (typeof apiSubmitFn === "function") {
+    try {
+      const response = await apiSubmitFn(payload);
+      if (
+        response &&
+        typeof response.ticketId === "string" &&
+        response.ticketId.trim()
+      ) {
+        return {
+          status: "success",
+          ticketId: response.ticketId.trim(),
+          message: formatSupportTicketBody(response.ticketId.trim(), locale),
+        };
+      }
+      return {
+        status: "error",
+        message: isZh
+          ? "權威 API 回傳未包含有效工單編號"
+          : "Authoritative API did not return a valid ticket ID",
+      };
+    } catch (err: unknown) {
+      const errorMsg =
+        err instanceof Error
+          ? err.message
+          : isZh
+            ? "送出求助時發生系統錯誤"
+            : "A system error occurred while submitting support request";
+      return {
+        status: "error",
+        message: errorMsg,
+      };
+    }
+  }
+
+  // Explicit no-fake-delivery: without authoritative API implementation, do NOT
+  // simulate delivery with setTimeout or hardcoded ticket numbers. Return honest
+  // unavailable state.
+  return {
+    status: "unavailable",
+    message: isZh
+      ? "目前租戶尚未配置線上工單提交 API。如需即時協助，請使用已授權之客服專線，或由企業管理員於調度後台聯繫營運中心。"
+      : "Online ticket submission API is not provisioned for this tenant. For immediate assistance, please use an authorized support phone line or have your enterprise admin contact the ROC.",
+  };
+}
+
+export function getTripNotFoundNotice(locale: Locale = "zh") {
+  const isZh = locale === "zh";
+  return {
+    title: isZh ? "查無此預約（404）" : "Booking not found (404)",
+    body: isZh
+      ? "找不到指定的預約記錄。此預約可能不存在或已被刪除，不可作為暫時故障重試。"
+      : "The requested booking does not exist or has been removed. This is not a temporary fault and should not be retried.",
+    action: isZh ? "返回預約列表" : "Return to bookings",
+  };
 }
 
 function getEnterpriseCostCenterLabel(
