@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -207,11 +208,30 @@ def retry_settings(
     return retry
 
 
+def _rejected_rate_limit_info(reason: str | None) -> dict[str, Any] | None:
+    """Read the provider event itself, never JSON quoted in another event."""
+    try:
+        payload = json.loads(str(reason or ""))
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("type") != "rate_limit_event":
+        return None
+    info = payload.get("rate_limit_info")
+    if not isinstance(info, dict) or info.get("status") != "rejected":
+        return None
+    return info
+
+
 def classify_failure(
     config: Mapping[str, Any], worker: Mapping[str, Any], reason: str | None
 ) -> FailureDecision:
     provider = str(worker.get("provider") or worker.get("agent_id") or "").strip().lower()
     normalized = str(reason or "").lower()
+    rate_info = _rejected_rate_limit_info(reason)
+    if rate_info is not None:
+        if str(rate_info.get("rateLimitType") or "") in {"five_hour", "seven_day"}:
+            return FailureDecision(FailureKind.QUOTA_TERMINAL, False, "quota/terminal")
+        return FailureDecision(FailureKind.CAPACITY, True, "capacity/429")
     transient_patterns = [
         str(pattern).lower()
         for pattern in retry_settings(config, str(worker.get("provider") or "")).get(
@@ -262,6 +282,16 @@ def infer_pause_resume_at(
 ) -> float | None:
     text = str(reason or "").strip()
     if not text:
+        return None
+
+    rate_info = _rejected_rate_limit_info(text)
+    if rate_info is not None:
+        # This is the reset of the rejected window. A later, non-exhausted
+        # unifiedWindows entry must not extend the pause to a different limit.
+        reset = rate_info.get("resetsAt")
+        if isinstance(reset, (int, float)) and not isinstance(reset, bool):
+            if 0 < reset < 253402300800:  # finite epoch seconds, before year 10000
+                return float(reset)
         return None
 
     iso_match = ISO_RESET_HINT_PATTERN.search(text)
