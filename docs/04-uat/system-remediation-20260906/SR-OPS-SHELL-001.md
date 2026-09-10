@@ -92,9 +92,9 @@
 ### 5. Remote Acceptance Workflow & Playwright Harness
 - `.github/workflows/ops-shell-acceptance.yml`:
   - Dedicated GitHub-hosted acceptance runner dispatched manually with required `candidate_sha` or on push to task branches.
-  - Validates full 40-character candidate SHA, checks out exact immutable commit SHA, installs Playwright chromium, builds apps, starts preview servers, executes acceptance suite, validates zero skips / non-zero pass, and uploads evidence bundle even on failure (`if: always()`).
-- `tools/ci/test_ops_shell_acceptance_workflow.py`:
-  - Automated Python contract tests verifying the workflow's dispatch trigger, branch scoping, candidate SHA verification, Playwright execution, and evidence upload steps.
+  - Validates full 40-character candidate SHA, checks out exact immutable commit SHA, installs Playwright chromium, builds prerequisite packages (@drts/contracts, @drts/control-plane-auth, @drts/ui-tokens) and applications, starts preview servers, executes acceptance suite, validates zero skips / non-zero pass, and uploads evidence bundle even on failure (`if: always()`).
+- `tests/unit/system-remediation/sr-ops-shell-001/ops-shell-and-assistant.test.ts`:
+  - Automated unit and workflow contract tests verifying the workflow's dispatch trigger, branch scoping, candidate SHA verification, package/app builds, Playwright execution, and evidence upload steps.
 - `tests/e2e/system-remediation/sr-ops-shell-001/ops-shell-acceptance.spec.ts`:
   - Playwright browser acceptance tests verifying:
     - `ops_widget_remote_viewport_keyboard`: 1440px desktop and 390px mobile viewport unobstructed layout, default minimized state, and keyboard focus restoration.
@@ -104,27 +104,24 @@
 
 ## 3. Verification & Test Evidence
 
-### 1. Vitest Unit Test Suite (42 tests pass)
+### 1. Vitest Unit & Acceptance Workflow Contract Test Suite (49 tests pass)
 ```bash
 $ pnpm exec vitest run tests/unit/system-remediation/sr-ops-shell-001/
 
- RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-ops-shell-001
+ RUN  v4.1.4 /home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude-sr-ops-shell-001
 
- ✓ tests/unit/system-remediation/sr-ops-shell-001/ops-shell-and-assistant.test.ts (42 tests) 27ms
+ ✓ tests/unit/system-remediation/sr-ops-shell-001/ops-shell-and-assistant.test.ts (49 tests) 28ms
 
  Test Files  1 passed (1)
-      Tests  42 passed (42)
-   Duration  604ms
+      Tests  49 passed (49)
+   Duration  661ms
 ```
 
-### 2. Python Acceptance Workflow Contract Test Suite (8 tests pass)
+### 2. Change Scope & Test Coverage Discovery Check
 ```bash
-$ python3 tools/ci/test_ops_shell_acceptance_workflow.py
-........
-----------------------------------------------------------------------
-Ran 8 tests in 0.001s
-
-OK
+$ python3 tools/ci/check_test_coverage.py
+check_test_coverage: all 64 test files yield tests CI runs.
+(exit code: 0)
 ```
 
 ### 3. Ops Console Web Next.js Typecheck
@@ -204,5 +201,5 @@ All changes are strictly confined to authorized write scopes:
 7. `apps/platform-admin-web/app/audit/page.tsx`
 8. `apps/platform-admin-web/lib/audit-resource-context.ts`
 9. `.github/workflows/ops-shell-acceptance.yml`
-10. `tools/ci/test_ops_shell_acceptance_workflow.py`
+10. `tools/ci/test_ops_shell_acceptance_workflow.py` (workflow contract tests consolidated into unit test suite to comply with repository test discovery gate `check_test_coverage.py`)
 11. `tests/e2e/system-remediation/sr-ops-shell-001/`

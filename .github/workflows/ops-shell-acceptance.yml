@@ -21,7 +21,6 @@ on:
       - gemini/sr-ops-shell-001
     paths:
       - .github/workflows/ops-shell-acceptance.yml
-      - tools/ci/test_ops_shell_acceptance_workflow.py
       - tests/e2e/system-remediation/sr-ops-shell-001/**
       - docs/04-uat/system-remediation-20260906/SR-OPS-SHELL-001.md
 
@@ -106,6 +105,9 @@ jobs:
         id: build-apps
         run: |
           set -o pipefail
+          pnpm --filter @drts/contracts build 2>&1 | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
+          pnpm --filter @drts/control-plane-auth build 2>&1 | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
+          pnpm --filter @drts/ui-tokens build 2>&1 | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
           pnpm --filter @drts/ops-console-web build 2>&1 | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
           pnpm --filter @drts/platform-admin-web build 2>&1 | tee -a .artifacts/ops-shell-acceptance/execution-log.txt
 

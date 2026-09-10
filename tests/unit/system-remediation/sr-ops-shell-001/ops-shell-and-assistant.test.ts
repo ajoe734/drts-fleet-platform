@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { CrossAppResourceLink } from "@drts/contracts";
 import {
@@ -731,5 +733,81 @@ describe("SR-OPS-SHELL-001: Dispatch Board Selected Record Resource Context Mapp
     const href = buildPlatformAdminAuditHref({ resourceType, resourceId });
     expect(href).toContain("resourceType=forwarded_order");
     expect(href).toContain("resourceId=FWD-MIRROR-20260906-999");
+  });
+});
+
+describe("SR-OPS-SHELL-001: Ops Shell Remote Acceptance Workflow Contract", () => {
+  const rootDir = path.resolve(__dirname, "../../../..");
+  const workflowPath = path.join(
+    rootDir,
+    ".github/workflows/ops-shell-acceptance.yml",
+  );
+  const specPath = path.join(
+    rootDir,
+    "tests/e2e/system-remediation/sr-ops-shell-001/ops-shell-acceptance.spec.ts",
+  );
+
+  it("ensures ops-shell-acceptance.yml exists and defines required manual dispatch with candidate_sha", () => {
+    expect(fs.existsSync(workflowPath)).toBe(true);
+    const text = fs.readFileSync(workflowPath, "utf-8");
+    expect(text).toContain("workflow_dispatch:");
+    expect(text).toContain("candidate_sha:");
+    const dispatchBlock = text.split("workflow_dispatch:")[1];
+    expect(dispatchBlock).toContain("required: true");
+  });
+
+  it("has a push trigger scoped to task branches and acceptance files", () => {
+    const text = fs.readFileSync(workflowPath, "utf-8");
+    const onBlock = text.split("permissions:")[0];
+    expect(onBlock).toContain("push:");
+    expect(onBlock).toContain("gemini2/sr-ops-shell-001");
+    expect(onBlock).toContain(".github/workflows/ops-shell-acceptance.yml");
+    expect(onBlock).toContain(
+      "tests/e2e/system-remediation/sr-ops-shell-001/**",
+    );
+    expect(onBlock).toContain(
+      "docs/04-uat/system-remediation-20260906/SR-OPS-SHELL-001.md",
+    );
+  });
+
+  it("validates candidate_sha 40-character commit SHA format", () => {
+    const text = fs.readFileSync(workflowPath, "utf-8");
+    expect(text).toContain("^[0-9a-f]{40}$");
+    expect(text).toContain("Validate candidate_sha input");
+  });
+
+  it("checkout uses candidate_sha with full depth and verifies resolved checkout", () => {
+    const text = fs.readFileSync(workflowPath, "utf-8");
+    expect(text).toContain("fetch-depth: 0");
+    expect(text).toContain("candidate_sha");
+    expect(text).toContain(
+      "Verify checkout resolved the exact immutable candidate",
+    );
+    expect(text).toContain("git rev-parse HEAD");
+  });
+
+  it("builds workspace dependencies and Next.js applications before running preview", () => {
+    const text = fs.readFileSync(workflowPath, "utf-8");
+    expect(text).toContain("pnpm --filter @drts/contracts build");
+    expect(text).toContain("pnpm --filter @drts/control-plane-auth build");
+    expect(text).toContain("pnpm --filter @drts/ui-tokens build");
+    expect(text).toContain("pnpm --filter @drts/ops-console-web build");
+    expect(text).toContain("pnpm --filter @drts/platform-admin-web build");
+  });
+
+  it("runs Playwright acceptance harness and always uploads evidence artifact bundle", () => {
+    const text = fs.readFileSync(workflowPath, "utf-8");
+    expect(text).toContain("playwright test");
+    expect(text).toContain("tests/e2e/system-remediation/sr-ops-shell-001/");
+    expect(text).toContain("actions/upload-artifact@v4");
+    expect(text).toContain(".artifacts/ops-shell-acceptance/");
+    expect(text).toContain("retention-days: 30");
+  });
+
+  it("browser spec exists and covers required acceptance keys", () => {
+    expect(fs.existsSync(specPath)).toBe(true);
+    const specText = fs.readFileSync(specPath, "utf-8");
+    expect(specText).toContain("ops_widget_remote_viewport_keyboard");
+    expect(specText).toContain("ops_cross_app_resource_navigation");
   });
 });
