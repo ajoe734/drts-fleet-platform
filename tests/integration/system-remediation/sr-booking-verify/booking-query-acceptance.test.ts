@@ -1,7 +1,6 @@
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
-import type { TenantBookingListQuery } from "@drts/contracts";
 import type { BootstrapRequestIdentity } from "../../../../apps/api/src/common/auth";
 import { DatabaseService } from "../../../../apps/api/src/common/db/database.service";
 import { OwnedMobilityController } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.controller";
@@ -9,16 +8,26 @@ import { OwnedMobilityModule } from "../../../../apps/api/src/modules/owned-mobi
 import { OwnedMobilityRepository } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { OwnedMobilityService } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 
+type PgPoolLike = {
+  query: <R extends Record<string, unknown> = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[],
+  ) => Promise<{ rows: R[]; rowCount: number | null }>;
+  end: () => Promise<void>;
+};
+
 const require = createRequire(
   new URL("../../../../apps/api/package.json", import.meta.url),
 );
-const { Pool } = require("pg") as typeof import("pg");
+const { Pool } = require("pg") as {
+  Pool: new (options?: { connectionString?: string | undefined }) => PgPoolLike;
+};
 
 function makeTenantIdentity(tenantId: string): BootstrapRequestIdentity {
   return {
     authMode: "jwt_bearer",
     realm: "tenant",
-    actorType: "tenant_user",
+    actorType: "tenant_admin",
     actorId: `user-${tenantId}`,
     tenantId,
     roleFamilies: ["tenant"],
@@ -50,103 +59,94 @@ describe("SR-BOOKING-VERIFY Integration Acceptance Suite", () => {
   });
 
   describe("Real PostgreSQL Acceptance Matrix", () => {
-    it.runIf(Boolean(dbUrl))(
+    const isDbConfigured = Boolean(dbUrl);
+
+    it.skipIf(!isDbConfigured)(
       "executes real PostgreSQL multi-tenant booking query with filtering, sorting, pagination, and second-instance mutation observation",
       async () => {
         const pool = new Pool({ connectionString: dbUrl });
 
         try {
-          // 1. Prepare schema and test table
-          await pool.query(`CREATE SCHEMA IF NOT EXISTS ops;`);
-          await pool.query(`
-            CREATE TABLE IF NOT EXISTS ops.phase1_owned_orders (
-              order_id varchar(100) PRIMARY KEY,
-              order_no varchar(100) NOT NULL UNIQUE,
-              status varchar(50) NOT NULL,
-              order_source varchar(50) NOT NULL,
-              service_bucket varchar(50) NOT NULL,
-              dispatch_semantics varchar(50) NOT NULL,
-              created_at timestamptz NOT NULL,
-              updated_at timestamptz NOT NULL,
-              record jsonb NOT NULL,
-              tenant_id varchar(100) GENERATED ALWAYS AS (NULLIF(record ->> 'tenantId', '')) STORED,
-              booking_id varchar(100) GENERATED ALWAYS AS (NULLIF(record ->> 'bookingId', '')) STORED
+          // Verify schema readiness
+          const tableCheck = await pool.query(
+            `SELECT 1 FROM information_schema.tables WHERE table_schema = 'ops' AND table_name = 'phase1_owned_orders'`,
+          );
+          if (tableCheck.rowCount === 0) {
+            throw new Error(
+              "ops.phase1_owned_orders does not exist. Migrations must be run before this test.",
             );
-            CREATE INDEX IF NOT EXISTS idx_phase1_owned_orders_tenant_booking
-              ON ops.phase1_owned_orders (tenant_id, booking_id, updated_at DESC)
-              WHERE booking_id IS NOT NULL;
-          `);
+          }
 
-          const TENANT_A = "corp-tenant-a";
-          const TENANT_B = "corp-tenant-b";
+          const TENANT_A = "tenant-integ-alpha";
+          const TENANT_B = "tenant-integ-beta";
 
-          // Clean up any test records from prior runs
+          // Clean up potential remnants
           await pool.query(
             `DELETE FROM ops.phase1_owned_orders WHERE tenant_id IN ($1, $2) OR order_id LIKE 'integ-ord-%'`,
             [TENANT_A, TENANT_B],
           );
 
-          // Seed test orders for Tenant A and Tenant B
+          // Seed 3 orders for Tenant A and 1 order for Tenant B
           const seedOrders = [
             {
               orderId: "integ-ord-1",
-              orderNo: "ORD-NO-001",
-              status: "dispatched",
-              tenantId: TENANT_A,
+              orderNo: "ORD-INTEG-001",
               bookingId: "bk-integ-001",
+              tenantId: TENANT_A,
+              status: "dispatched",
               passenger: {
                 passengerId: "pax-alice",
-                name: "Alice Wonderland",
-                phone: "+886911111111",
+                name: "Alice Smith",
+                phone: "+1555001",
               },
-              reservationWindowStart: "2026-09-10T10:00:00.000Z",
-              reservationWindowEnd: "2026-09-10T11:00:00.000Z",
-              createdAt: "2026-09-09T01:00:00.000Z",
+              reservationWindowStart: "2026-09-10T08:00:00.000Z",
+              reservationWindowEnd: "2026-09-10T09:00:00.000Z",
+              createdAt: "2026-09-09T10:00:00.000Z",
             },
             {
               orderId: "integ-ord-2",
-              orderNo: "ORD-NO-002",
-              status: "completed",
-              tenantId: TENANT_A,
+              orderNo: "ORD-INTEG-002",
               bookingId: "bk-integ-002",
+              tenantId: TENANT_A,
+              status: "completed",
               passenger: {
                 passengerId: "pax-bob",
-                name: "Bob Builder",
-                phone: "+886922222222",
+                name: "Bob Jones",
+                phone: "+1555002",
               },
-              reservationWindowStart: "2026-09-11T14:00:00.000Z",
-              reservationWindowEnd: "2026-09-11T15:00:00.000Z",
-              createdAt: "2026-09-09T02:00:00.000Z",
+              reservationWindowStart: "2026-09-11T09:00:00.000Z",
+              reservationWindowEnd: "2026-09-11T10:00:00.000Z",
+              createdAt: "2026-09-09T11:00:00.000Z",
             },
             {
               orderId: "integ-ord-3",
-              orderNo: "ORD-NO-003",
-              status: "cancelled",
-              tenantId: TENANT_A,
+              orderNo: "ORD-INTEG-003",
               bookingId: "bk-integ-003",
+              tenantId: TENANT_A,
+              status: "requested",
               passenger: {
                 passengerId: "pax-charlie",
-                name: "Charlie 100% Specialist",
-                phone: "+886933333333",
+                name: "Charlie 100% Guaranteed",
+                phone: "+1555003",
               },
-              reservationWindowStart: "2026-09-12T08:00:00.000Z",
-              reservationWindowEnd: "2026-09-12T09:00:00.000Z",
-              createdAt: "2026-09-09T03:00:00.000Z",
+              reservationWindowStart: "2026-09-12T14:00:00.000Z",
+              reservationWindowEnd: "2026-09-12T15:00:00.000Z",
+              createdAt: "2026-09-09T12:00:00.000Z",
             },
             {
               orderId: "integ-ord-4",
-              orderNo: "ORD-NO-004",
-              status: "assigned",
-              tenantId: TENANT_B,
+              orderNo: "ORD-INTEG-004",
               bookingId: "bk-integ-004",
+              tenantId: TENANT_B,
+              status: "dispatched",
               passenger: {
                 passengerId: "pax-david",
-                name: "David TenantB",
-                phone: "+886944444444",
+                name: "David Tenant B",
+                phone: "+1555004",
               },
-              reservationWindowStart: "2026-09-10T12:00:00.000Z",
-              reservationWindowEnd: "2026-09-10T13:00:00.000Z",
-              createdAt: "2026-09-09T04:00:00.000Z",
+              reservationWindowStart: "2026-09-10T08:00:00.000Z",
+              reservationWindowEnd: "2026-09-10T09:00:00.000Z",
+              createdAt: "2026-09-09T10:00:00.000Z",
             },
           ];
 
@@ -195,18 +195,7 @@ describe("SR-BOOKING-VERIFY Integration Acceptance Suite", () => {
             undefined as never,
             undefined as never,
             undefined as never,
-            undefined as never,
-            undefined as never,
-            undefined as never,
-            undefined as never,
-            undefined as never,
-            undefined as never,
-            undefined as never,
-            undefined as never,
-            undefined as never,
-            undefined as never,
-            undefined as never,
-            undefined as never,
+            undefined,
             repository,
           );
 

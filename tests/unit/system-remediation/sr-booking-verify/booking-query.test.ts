@@ -1,26 +1,36 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../../../apps/api/src/common/auth";
 import { OwnedMobilityController } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.controller";
 import { OwnedMobilityService } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import type { OwnedMobilityRepository } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import type {
-  BookingRecord,
   CreateTenantBookingCommand,
-  OwnedOrderRecord,
 } from "@drts/contracts";
 import {
-  BOOKING_STATUSES,
   convertCalendarRangeToInstantRange,
   DEFAULT_PRODUCT_TIMEZONE,
   isIso8601InstantWithTimezone,
 } from "@drts/contracts";
 import { DrtsApiClient } from "../../../../packages/api-client/src";
 
+function createTestService(
+  repository?: OwnedMobilityRepository,
+): OwnedMobilityService {
+  return new OwnedMobilityService(
+    undefined as never,
+    undefined as never,
+    undefined as never,
+    undefined as never,
+    undefined,
+    repository,
+  );
+}
+
 function makeTenantIdentity(
   tenantId: string,
   actorId = "user-001",
-  actorType = "tenant_admin",
+  actorType: BootstrapRequestIdentity["actorType"] = "tenant_admin",
   realm: "tenant" | "platform" = "tenant",
 ): BootstrapRequestIdentity {
   return {
@@ -64,23 +74,14 @@ function createSampleBookingCommand(
   overrides?: Partial<CreateTenantBookingCommand>,
 ): CreateTenantBookingCommand {
   return {
-    bookingType: "oneway",
     businessDispatchSubtype: "enterprise_dispatch",
     reservationWindowStart: "2026-09-10T10:00:00.000Z",
     reservationWindowEnd: "2026-09-10T11:00:00.000Z",
     pickup: {
       address: "100 Innovation Way, Taipei",
-      addressLine1: "100 Innovation Way",
-      city: "Taipei",
-      postalCode: "100",
-      country: "TW",
     },
     dropoff: {
       address: "200 Terminal Blvd, Taoyuan",
-      addressLine1: "200 Terminal Blvd",
-      city: "Taoyuan",
-      postalCode: "337",
-      country: "TW",
     },
     passenger: {
       passengerId: "pass-001",
@@ -126,7 +127,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
 
   describe("Tenant isolation & authentication", () => {
     it("rejects anonymous caller with 401 AUTH_REQUIRED", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const controller = new OwnedMobilityController(
         service,
         undefined as never,
@@ -148,7 +149,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("rejects mismatched tenant JWT with 403 TENANT_SCOPE_MISMATCH", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const controller = new OwnedMobilityController(
         service,
         undefined as never,
@@ -171,7 +172,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("rejects missing x-tenant-id header with 400 TENANT_ID_REQUIRED", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const controller = new OwnedMobilityController(
         service,
         undefined as never,
@@ -194,7 +195,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("allows valid same-tenant caller to query bookings", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const controller = new OwnedMobilityController(
         service,
         undefined as never,
@@ -219,7 +220,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("allows platform admin identity to access tenant bookings", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const controller = new OwnedMobilityController(
         service,
         undefined as never,
@@ -244,7 +245,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
 
   describe("Query parameter validation (HTTP 400s)", () => {
     it("rejects invalid dateField with 400 INVALID_DATE_FIELD", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const controller = new OwnedMobilityController(
         service,
         undefined as never,
@@ -266,7 +267,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("rejects ambiguous dateFrom without timezone offset with 400 INVALID_DATE_BOUNDS", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const controller = new OwnedMobilityController(
         service,
         undefined as never,
@@ -288,7 +289,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("rejects reversed date bounds (dateFrom >= dateTo) with 400 INVALID_DATE_RANGE", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const controller = new OwnedMobilityController(
         service,
         undefined as never,
@@ -313,7 +314,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("rejects non-integer or < 1 page with 400 INVALID_PAGE", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const controller = new OwnedMobilityController(
         service,
         undefined as never,
@@ -340,7 +341,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("rejects pageSize < 1 or > 100 with 400 INVALID_PAGE_SIZE", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const controller = new OwnedMobilityController(
         service,
         undefined as never,
@@ -367,7 +368,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("rejects unrecognized status value with 400 INVALID_STATUS", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const controller = new OwnedMobilityController(
         service,
         undefined as never,
@@ -391,7 +392,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
 
   describe("Query filtering, ordering, and pagination logic", () => {
     it("filters by date boundaries with start inclusive and end exclusive", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const identityA = makeTenantIdentity(TENANT_A);
 
       // Booking 1: 2026-09-10T10:00:00Z
@@ -434,7 +435,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("filters passenger by literal text and escapes wildcards", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const identityA = makeTenantIdentity(TENANT_A);
 
       await service.createTenantBooking(
@@ -460,7 +461,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("filters by booking status and distinguishes fulfillment status", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const identityA = makeTenantIdentity(TENANT_A);
 
       const futureStart = new Date(Date.now() + 86400000).toISOString();
@@ -506,7 +507,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("provides stable ordering: selected date DESC NULLS LAST, bookingId ASC", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const identityA = makeTenantIdentity(TENANT_A);
 
       const sameTime = "2026-09-10T10:00:00.000Z";
@@ -536,7 +537,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("handles out of range page by returning empty items with unchanged filtered total", async () => {
-      const service = new OwnedMobilityService();
+      const service = createTestService();
       const identityA = makeTenantIdentity(TENANT_A);
 
       await service.createTenantBooking(
@@ -557,8 +558,7 @@ describe("SR-BOOKING-VERIFY: Unit Tests", () => {
     });
 
     it("handles zero-result query with totalPages 0", async () => {
-      const service = new OwnedMobilityService();
-      const identityA = makeTenantIdentity(TENANT_A);
+      const service = createTestService();
 
       const emptyResult = service.listTenantBookings(TENANT_A, {
         q: "nonexistent_passenger_query",
