@@ -201,5 +201,5 @@ All changes are strictly confined to authorized write scopes:
 7. `apps/platform-admin-web/app/audit/page.tsx`
 8. `apps/platform-admin-web/lib/audit-resource-context.ts`
 9. `.github/workflows/ops-shell-acceptance.yml`
-10. `tools/ci/test_ops_shell_acceptance_workflow.py` (workflow contract tests consolidated into unit test suite to comply with repository test discovery gate `check_test_coverage.py`)
+10. Remote workflow contract verification consolidated into unit test suite (`tests/unit/system-remediation/sr-ops-shell-001/`) to comply with test discovery gate
 11. `tests/e2e/system-remediation/sr-ops-shell-001/`
