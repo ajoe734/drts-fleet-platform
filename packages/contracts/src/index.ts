@@ -3640,6 +3640,136 @@ export interface BookingRecord {
   updatedAt: string;
 }
 
+export type TenantBookingDateField = "reservationStart" | "createdAt";
+export const TENANT_BOOKING_DATE_FIELDS = [
+  "reservationStart",
+  "createdAt",
+] as const;
+
+export interface TenantBookingListQuery {
+  q?: string;
+  passenger?: string;
+  passengerId?: string;
+  status?: BookingStatus | BookingStatus[] | string;
+  bookingStatus?: BookingStatus | BookingStatus[] | string;
+  orderStatus?: OwnedOrderStatus | OwnedOrderStatus[] | string;
+  fulfillmentStatus?: OwnedOrderStatus | OwnedOrderStatus[] | string;
+  dateField?: TenantBookingDateField;
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number | string;
+  pageSize?: number | string;
+  serviceBucket?: string;
+  subtype?: string;
+}
+
+export interface TenantBookingsPageRecord {
+  items: BookingRecord[];
+  pagination: ApiPageInfo;
+  pageInfo?: ApiPageInfo;
+}
+
+export const DEFAULT_PRODUCT_TIMEZONE = "Asia/Taipei";
+
+export interface CalendarDateRangeOptions {
+  timeZone?: string;
+}
+
+/**
+ * Checks whether an ISO 8601 string contains explicit timezone information
+ * (e.g. trailing 'Z' or offset like '+08:00', '-05:00').
+ */
+export function isIso8601InstantWithTimezone(value: string): boolean {
+  if (!value || typeof value !== "string") {
+    return false;
+  }
+  const trimmed = value.trim();
+  const isoWithTimezoneRegex =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+  if (!isoWithTimezoneRegex.test(trimmed)) {
+    return false;
+  }
+  const date = new Date(trimmed);
+  return !Number.isNaN(date.getTime());
+}
+
+/**
+ * Converts a calendar date range (YYYY-MM-DD to YYYY-MM-DD inclusive) into
+ * explicit ISO 8601 instants where dateFrom is start-of-day inclusive
+ * and dateTo is next-day start-of-day exclusive in the selected timezone.
+ */
+export function convertCalendarRangeToInstantRange(
+  dateFromDateOnly: string,
+  dateToDateOnly: string,
+  options?: CalendarDateRangeOptions,
+): {
+  dateFrom: string;
+  dateTo: string;
+  timeZone: string;
+} {
+  const timeZone = options?.timeZone || DEFAULT_PRODUCT_TIMEZONE;
+  const fromTrimmed = dateFromDateOnly.trim();
+  const toTrimmed = dateToDateOnly.trim();
+
+  const dateOnlyRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateOnlyRegex.test(fromTrimmed)) {
+    throw new Error(
+      `Invalid dateFrom calendar date: expected YYYY-MM-DD, got ${dateFromDateOnly}`,
+    );
+  }
+  if (!dateOnlyRegex.test(toTrimmed)) {
+    throw new Error(
+      `Invalid dateTo calendar date: expected YYYY-MM-DD, got ${dateToDateOnly}`,
+    );
+  }
+
+  const parts = toTrimmed.split("-").map(Number);
+  const toY = parts[0] ?? 1970;
+  const toM = parts[1] ?? 1;
+  const toD = parts[2] ?? 1;
+  const nextDayDate = new Date(Date.UTC(toY, toM - 1, toD + 1));
+  const nextY = nextDayDate.getUTCFullYear();
+  const nextM = String(nextDayDate.getUTCMonth() + 1).padStart(2, "0");
+  const nextD = String(nextDayDate.getUTCDate()).padStart(2, "0");
+  const nextDateOnly = `${nextY}-${nextM}-${nextD}`;
+
+  const getOffsetString = (dateStr: string, tz: string): string => {
+    try {
+      const probe = new Date(`${dateStr}T12:00:00Z`);
+      const formatter = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        timeZoneName: "longOffset",
+      });
+      const parts = formatter.formatToParts(probe);
+      const tzPart = parts.find((p) => p.type === "timeZoneName");
+      if (tzPart) {
+        const match = tzPart.value.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/);
+        if (match) {
+          const sign = match[1] ?? "+";
+          const hours = (match[2] ?? "00").padStart(2, "0");
+          const mins = match[3] ?? "00";
+          return `${sign}${hours}:${mins}`;
+        }
+        if (tzPart.value === "GMT" || tzPart.value === "UTC") {
+          return "Z";
+        }
+      }
+    } catch {
+      // fallback
+    }
+    return "+08:00";
+  };
+
+  const fromOffset = getOffsetString(fromTrimmed, timeZone);
+  const toOffset = getOffsetString(nextDateOnly, timeZone);
+
+  return {
+    dateFrom: `${fromTrimmed}T00:00:00${fromOffset === "Z" ? "Z" : fromOffset}`,
+    dateTo: `${nextDateOnly}T00:00:00${toOffset === "Z" ? "Z" : toOffset}`,
+    timeZone,
+  };
+}
+
 // NOTE(integration 20260605): be-tenbiz-001 originally re-declared
 // `ServiceProductType = BusinessDispatchSubtype` as a stopgap because the
 // canonical SVC contracts were not yet on dev. The canonical 7-value union

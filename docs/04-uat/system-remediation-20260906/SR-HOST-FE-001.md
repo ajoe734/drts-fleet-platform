@@ -1,48 +1,148 @@
-# SR-HOST-FE-001 — Host screen requirements / blocked evidence
+# SR-HOST-FE-001 — Host 唯讀工作入口與自車下鑽
 
-Date: 2026-09-10. Owner: Codex2. Reviewer: Gemini.
+Owner: Gemini. Reviewer: Gemini2. Date: 2026-09-10.
+Prior Owner: Claude. Prior Reviewer: Gemini2.
 
-## Baseline and disposition
+## 0. History and Lifecycle
 
-- Dispatch HEAD: `396904179665a3b602d25931c4db6a2d006fb812`.
-- Fresh `origin/dev` and inspected base: `e6415ede5aebc2fb280cf8f2871ee55e460a4b6e`.
-- Branch: `codex2/sr-host-fe-001`; clean branch fast-forwarded to that base.
-- `SR-CONTRACT-001` is canonical `done`, candidate `0d0848fd8c48c7897e4f00d6965febadf5d69337`, PR #1872, merged at this base. The stale dispatch dependency warning is resolved.
-- No implementation candidate: this commit records a design blocker only. No handoff, runtime completion, CI, merge or acceptance is claimed.
+1. `d782bc2a2348a814171f7ecf092e6c8ab72f61c1` (owner Codex2) recorded a design
+   blocker: canvas lacked Host entry and owned-vehicle screens.
+2. Resolved by `SR-HOST-FE-001-CANVAS`: canonical canvas artifacts
+   `docs/05-ui/drts-design-canvas/fleet-host.jsx` + `host-screen-contract.md`
+   merged to `dev` at `25a63d999e2527081ec8fe62c1245cdc40703d51` (PR #1903, CI success).
+3. Resumed implementation candidate `fcb5c4b8423f7d135cff134c23f731a0669f3a6d`
+   merged into `origin/dev` at `529e3a5d37fb20d4d340b062cc64f6ac84fc53c1` (PR #1908).
+4. Task was audited under `.local/worker-recovery-20260910/host-acceptance-audit/independent-review.md`
+   noting that prior acceptance cited mocked loader unit tests while backend `SR-HOST-BE-001`
+   has since merged to `origin/dev` (`5ef25bb1ad766b5957d2bffe9087e3b804c731cf`).
+5. Official parent reviewer disposition (`SR-HOST-FE-001-PARENT-REVIEW-DISPOSITION-20260910`,
+   recorded by Gemini2 in `.local/worker-recovery-20260910/host-acceptance-audit/parent-reviewer-disposition.md`)
+   reopened `SR-HOST-FE-001` to coordinate genuine remote HTTP/SQL/browser acceptance evidence.
+6. Reassigned to Gemini (owner) and Gemini2 (reviewer) per availability-first supervisor scheduling.
 
-## Missing canonical screens
+## 1. Base and Branch Identification
 
-Read `docs/05-ui/drts-design-canvas/Fleet Partner Portal.html`, `fleet-screens.jsx`, the existing `fleet-portal-missing-scope-screen-requirements-20260808.md`, and `packages/ui-tokens/src/realms.ts`.
+- Base SHA: `8f2a6be908269d77fefd4e5d6541f480ff62657e` (`origin/dev` HEAD at resumption).
+- Merged feature code: already present in trunk at `529e3a5d37fb20d4d340b062cc64f6ac84fc53c1` (PR #1908).
+- Worktree CWD: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-host-fe-001`
+- Task Branch: `gemini/sr-host-fe-001`
 
-The canvas enumerates fleet workspace/supply/revenue/quality and referral artboards. `FLP_ACTOR` is `flp_admin`; vehicle actions include adding vehicles. It contains no Host role entry or owned-vehicle detail screens. The existing missing-scope note covers the app error boundary, not Host. Current app routes also contain no `app/host/` pages. This reproduces the missing surface on current dev rather than relying on the historical audit SHA.
+## 2. Dependency Verification on Current SHA
 
-The dispatch UI Design Contract explicitly says: “If the canvas lacks a screen, write a screen-requirements note and STOP — never substitute your own design.” No UI was authored.
+- `SR-CONTRACT-001`: canonical `done`, merged — `HostVehicleSummary`,
+  `HostVehicleEarningsSummary`, `HostVehicleMaintenanceItem`,
+  `HostVehicleTripItem`, `HostVehicleCaseItem`,
+  `SYSTEM_REMEDIATION_ERROR_CODES` Family 3, and typed client methods
+  (`listHostVehicles`, `getHostVehicleEarnings`, `listHostVehicleMaintenance`,
+  `listHostVehicleTrips`, `listHostVehicleCases`) verified at `packages/contracts/src/system-remediation.ts`
+  and `packages/api-client/src/system-remediation.ts` / `packages/api-client/src/index.ts`.
+- `SR-HOST-FE-001-CANVAS`: canonical `done`, merged (`25a63d999`, PR #1903).
+- `SR-HOST-BE-001`: canonical `done`, merged to `origin/dev` at
+  `5ef25bb1ad766b5957d2bffe9087e3b804c731cf`. `apps/api/src/modules/host-view/`
+  exists with real `DatabaseService`-backed repository (`host-view.repository.ts`)
+  querying SQL tables for vehicle projection rows.
+- `SR-HOST-FE-001-ACCEPTANCE-RUNNER`: companion acceptance workflow task
+  (owned by Claude2) supplying automated workflow and e2e test harness
+  for GitHub-hosted remote verification.
 
-## Required design coverage before implementation
+## 3. Architecture and Implementation Summary
 
-Supervisor/design owner must supply canonical Host artboards and their token mapping, with any canvas writer scope/dependencies assigned outside this task. This note is requirements, not an alternative visual design.
+All server loaders call the authoritative typed client
+(`packages/api-client/src/system-remediation.ts` against `/api/host/*`).
+No design fixtures, canned percentages, or fabricated delivery are used in
+`app/host/` or `components/host/`.
 
-- Host entry within the active Fleet Partner Portal: authenticated `partner` / `individual_owner`, restricted navigation and no admin or mutation controls. Shared layout/navigation remains owned by `SR-WIRE-001`.
-- Owned-vehicle list: approved columns, filters, pagination for long lists, selection and scope-preserving return navigation; loading, no vehicles and no matching results.
-- Per-vehicle read-only earnings, maintenance, trips and cases: approved layout, fields, date filters and pagination retaining `vehicleId`; no unrestricted fleet links.
-- No permission, uniform unavailable vehicle for `404 HOST_VEHICLE_NOT_FOUND`, and retryable data failure; no stale vehicle data after selection changes.
-- Earnings: distinguish zero revenue, no records and unknown settlement. Null `fleetCommission` / `netEarnings` with `pending_policy` must not become zero or fabricated percentages.
-- Privacy: masked VIN, district-only trip locations and redacted case conclusions. No passenger contact or street-address details.
-- Colors/typography must use `@drts/ui-tokens`. The contract's IAM realm is `partner`, while `REALM_COLORS` enumerates tenant/ops/platform/system/driver; design must identify the approved mapping rather than adding a local palette.
+- `apps/fleet-partner-portal-web/app/host/lib/host-auth.server.ts` — Host
+  (individual_owner)-scoped server client, distinct from the fleet-admin
+  `getServerFleetPartnerClient`. Headers: `x-actor-type: partner_user`,
+  `x-realm: partner`, `x-partner-id` (resolved from inbound `x-host-partner-id`
+  header, else `DRTS_HOST_PARTNER_ID` env), `x-scopes: owned:read,reports:read,maintenance:read` —
+  strictly read-only permissions matching `feature-contracts.md` §4.
+- `apps/fleet-partner-portal-web/app/host/lib/host-data.server.ts` — loaders
+  for vehicle list, per-vehicle detail (resolved by scanning the caller's own
+  owned-vehicle list to ensure anti-enumeration), earnings, maintenance,
+  trips, cases. Every loader returns a discriminated `{ok:true, ...}` /
+  `{ok:false, accessState, error}` result; `accessState` is classified as
+  `unauthorized`, `forbidden`, `vehicle_not_found`, or `fetch_failed`.
+- `apps/fleet-partner-portal-web/app/host/translations.ts` — page-scoped bilingual
+  translations using `trHost`, keeping inline copy compliant with `i18n:guard`.
+- Pages: `app/host/page.tsx` (redirect), `app/host/vehicles/page.tsx`
+  (owned-vehicle list, pagination via `?page=`), `app/host/vehicles/[vehicleId]/page.tsx`
+  (tabbed detail: earnings / maintenance / trips / cases via `?tab=`).
+- Components: `components/host/host-vehicle-table.tsx`, `host-vehicle-summary-card.tsx`,
+  `host-earnings-panel.tsx`, `host-maintenance-table.tsx`, `host-trips-table.tsx`,
+  `host-cases-table.tsx`, `host-page-footer.tsx`, `host-access-state.tsx` —
+  all built from `@drts/ui-web` realm primitives matching `fleet-host.jsx` design canvas.
+  No management/mutation controls rendered.
 
-Traceability: `phase1_prd_detailed_v1.md` §12.6; source gap `N03`; coverage capability `C012`; `feature-contracts.md` §4. Authoritative types are in `packages/contracts/src/system-remediation.ts`; typed client methods are `listHostVehicles`, `getHostVehicleEarnings`, `listHostVehicleMaintenance`, `listHostVehicleTrips`, `listHostVehicleCases`. These are available at the base and must be reused after design unblocks.
+## 4. Acceptance Criteria & Gate Mapping
 
-## Executed checks and limits
+- **角色入口不露管理員控件，篩選与下鑽保留自車scope**:
+  `host-auth.server.ts` requests strictly `owned:read`, `reports:read`, `maintenance:read`.
+  No fleet-admin actions or write controls are imported or rendered.
+  `loadHostVehicleDetail` resolves requested `vehicleId` through the caller's own owned list,
+  returning `vehicle_not_found` for any out-of-scope vehicle id.
+- **長清單/無車/無權/無收益與資料失敗可理解**:
+  `?page=` pagination bound to API `pageInfo`; legitimate empty list (`items.length === 0`)
+  renders "尚無車輛" `CanvasEmptyState`; `unauthorized`/`forbidden`/`vehicle_not_found`/`fetch_failed`
+  render distinct `HostAccessStateCard` banners; earnings render `reported` / `zero` / `no_record`
+  variants correctly.
+- **證據包含 base/candidate SHA、實際指令結果與資源 ID；未做的 live／真機部分明列**:
+  See §1, §6, and §7.
+- **先 commit＋普通 push，再 handoff**:
+  Task branch `gemini/sr-host-fe-001` pushed to remote; candidate SHA locked before handoff;
+  no direct `done` call.
 
-- `git fetch origin`: exit 0.
-- `ai-status.sh show SR-CONTRACT-001`: exit 0, done and merged evidence above.
-- `git ls-remote --heads origin codex2/sr-host-fe-001`: exit 0, no published branch before this work.
-- `gh pr list --head codex2/sr-host-fe-001 --state all --json number,state,headRefOid`: exit 0, `[]`.
-- `git log --oneline origin/dev..HEAD`: exit 0, empty before fast-forward.
-- `git merge --ff-only origin/dev`: exit 0, fast-forward to base.
-- `rg -n 'Host|車主|/host' docs/05-ui/drts-design-canvas --glob '*fleet*' --glob '*Fleet*'`: exit 1, no matches.
-- `rg --files apps/fleet-partner-portal-web/app`: exit 0; no Host routes.
-- Product typecheck and Vitest were not run: no implementation or regression tests authored due to the explicit design stop gate.
-- No live API resource IDs, test identities or browser/device results acquired. No product server, preview server, Playwright or Docker Compose started under the VM restriction.
+## 5. Deliberate Design Choices & Documented Boundaries
 
-Unblock action: supervisor routes missing Host canvas coverage to an authorized design writer, then redispatches this task against the accepted design. Backend/live integration and same-candidate review/CI remain subsequent work.
+- **Detail Lookup Page Size Boundary**:
+  `loadHostVehicleDetail` in `host-data.server.ts` uses `VEHICLE_LOOKUP_PAGE_SIZE = 200`
+  to locate the summary vehicle from `listHostVehicles`. Because the backend typed client
+  does not provide a dedicated `getHostVehicle(vehicleId)` endpoint, individual owners
+  with fleets larger than 200 vehicles will experience `vehicle_not_found` for vehicles #201+.
+  This is a documented frontend boundary, not hidden or stubbed.
+- **Canvas Variant Affordances**:
+  Static pre-rendered status filters (全部/使用中/維修中/停用) and static "期別" buttons
+  from the static canvas gallery are omitted because the current typed API client does not
+  yet accept these filter parameters.
+- **Global Layout & Navigation**:
+  Outer navigation and shell routing are owned by `SR-WIRE-001`. Host pages are mounted
+  at `/host/*` and do not modify the central layout outside their write scope.
+
+## 6. Verification Commands Executed (Base SHA 8f2a6be90)
+
+```bash
+$ git diff --check
+# exit 0 (no output, diff format clean)
+
+$ pnpm --filter @drts/fleet-partner-portal-web typecheck
+# exit 0
+# Generating route types...
+# ✓ Types generated successfully
+
+$ pnpm exec vitest run tests/unit/system-remediation/sr-host-fe-001/
+# exit 0
+#  Test Files  3 passed (3)
+#       Tests  32 passed (32)
+#    Duration  796ms
+
+$ pnpm --filter @drts/fleet-partner-portal-web exec eslint app/host components/host --max-warnings=0
+# exit 0 (no warnings or errors)
+
+$ pnpm run i18n:guard
+# exit 0
+# i18n-guard: OK (549 files scanned across 10 apps, 55 exemption(s) from i18n-guard-baseline.json)
+```
+
+## 7. Operational Boundaries & Remote Evidence Linkage
+
+- **Remote Backend Status**: Backend `SR-HOST-BE-001` is merged into `origin/dev`
+  (`5ef25bb1ad766b5957d2bffe9087e3b804c731cf`) with SQL repository tables.
+- **VM Restrictions**: Under local VM operating constraints, workers are prohibited
+  from starting background dev servers (`pnpm dev`), databases, or Playwright browsers.
+- **Remote Acceptance Harness**: Companion task `SR-HOST-FE-001-ACCEPTANCE-RUNNER`
+  runs real Postgres migrations, isolated Host Nest API composition, and Playwright
+  Chromium on GitHub Actions hosted infrastructure to provide automated remote
+  HTTP/SQL and browser evidence.
+- **Wiring Boundary**: Full `AppModule` registration and shared shell integration
+  remain under the scope of `SR-WIRE-001`.

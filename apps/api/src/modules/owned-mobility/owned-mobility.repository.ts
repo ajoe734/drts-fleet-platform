@@ -13,6 +13,7 @@ import type {
   ConsumerNotificationOutboxRecord,
   OwnedOrderRecord,
   PassengerDispatchDisclosureSnapshot,
+  TenantBookingListQuery,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -213,6 +214,10 @@ export class OwnedMobilityRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  isDatabaseEnabled() {
+    return this.isEnabled();
+  }
+
   async findOrderById(orderId: string): Promise<OwnedOrderRecord | null> {
     if (!this.isEnabled()) {
       return null;
@@ -262,6 +267,173 @@ export class OwnedMobilityRepository {
           "ops.phase1_owned_orders",
         )
       : null;
+  }
+
+  async queryTenantBookings(
+    tenantId: string,
+    query: TenantBookingListQuery,
+  ): Promise<{ items: OwnedOrderRecord[]; total: number }> {
+    if (!this.isEnabled()) {
+      return { items: [], total: 0 };
+    }
+
+    const conditions: string[] = ["tenant_id = $1", "booking_id IS NOT NULL"];
+    const values: unknown[] = [tenantId];
+    let paramIndex = 2;
+
+    // Optional exact passengerId
+    if (query.passengerId?.trim()) {
+      conditions.push(`record->'passenger'->>'passengerId' = $${paramIndex}`);
+      values.push(query.passengerId.trim());
+      paramIndex += 1;
+    }
+
+    // Passenger / query search text with escaped SQL wildcards
+    const queryText = (query.passenger ?? query.q)?.trim();
+    if (queryText) {
+      const escaped = queryText.replace(/([%_\\])/g, "\\$1");
+      const pattern = `%${escaped}%`;
+      conditions.push(`(
+        record->'passenger'->>'name' ILIKE $${paramIndex} ESCAPE '\\'
+        OR record->'passenger'->>'phone' ILIKE $${paramIndex} ESCAPE '\\'
+        OR record->'passenger'->>'mobile' ILIKE $${paramIndex} ESCAPE '\\'
+        OR record->'passenger'->>'email' ILIKE $${paramIndex} ESCAPE '\\'
+        OR record->'passenger'->>'passengerId' ILIKE $${paramIndex} ESCAPE '\\'
+        OR booking_id ILIKE $${paramIndex} ESCAPE '\\'
+        OR order_id ILIKE $${paramIndex} ESCAPE '\\'
+        OR record->>'costCenter' ILIKE $${paramIndex} ESCAPE '\\'
+      )`);
+      values.push(pattern);
+      paramIndex += 1;
+    }
+
+    // Booking status filter (active, completed, cancelled)
+    const rawBookingStatus = query.bookingStatus ?? query.status;
+    if (rawBookingStatus) {
+      const statuses = (
+        Array.isArray(rawBookingStatus)
+          ? rawBookingStatus
+          : String(rawBookingStatus).split(",")
+      )
+        .map((s) => String(s).trim())
+        .filter(Boolean);
+
+      const bookingStatusClauses: string[] = [];
+      for (const s of statuses) {
+        if (s === "cancelled") {
+          bookingStatusClauses.push("status = 'cancelled'");
+        } else if (s === "completed") {
+          bookingStatusClauses.push("status = 'completed'");
+        } else if (s === "active") {
+          bookingStatusClauses.push("status NOT IN ('cancelled', 'completed')");
+        }
+      }
+      if (bookingStatusClauses.length > 0) {
+        conditions.push(`(${bookingStatusClauses.join(" OR ")})`);
+      }
+    }
+
+    // Fulfillment / order status filter
+    const rawFulfillmentStatus = query.fulfillmentStatus ?? query.orderStatus;
+    if (rawFulfillmentStatus) {
+      const fulfillmentStatuses = (
+        Array.isArray(rawFulfillmentStatus)
+          ? rawFulfillmentStatus
+          : String(rawFulfillmentStatus).split(",")
+      )
+        .map((s) => String(s).trim())
+        .filter(Boolean);
+      if (fulfillmentStatuses.length > 0) {
+        conditions.push(`status = ANY($${paramIndex})`);
+        values.push(fulfillmentStatuses);
+        paramIndex += 1;
+      }
+    }
+
+    // Subtype / serviceBucket
+    if (query.subtype?.trim() && query.subtype !== "all") {
+      conditions.push(`record->>'businessDispatchSubtype' = $${paramIndex}`);
+      values.push(query.subtype.trim());
+      paramIndex += 1;
+    }
+    if (query.serviceBucket?.trim() && query.serviceBucket !== "all") {
+      conditions.push(`record->>'serviceBucket' = $${paramIndex}`);
+      values.push(query.serviceBucket.trim());
+      paramIndex += 1;
+    }
+
+    // Date field and bounds
+    const dateField =
+      query.dateField === "createdAt" ? "createdAt" : "reservationStart";
+    const dateColExpr =
+      dateField === "createdAt"
+        ? "created_at"
+        : "NULLIF(record->>'reservationWindowStart', '')::timestamptz";
+
+    if (query.dateFrom?.trim()) {
+      conditions.push(`${dateColExpr} >= $${paramIndex}::timestamptz`);
+      values.push(query.dateFrom.trim());
+      paramIndex += 1;
+    }
+    if (query.dateTo?.trim()) {
+      conditions.push(`${dateColExpr} < $${paramIndex}::timestamptz`);
+      values.push(query.dateTo.trim());
+      paramIndex += 1;
+    }
+
+    const whereClause = conditions.join(" AND ");
+
+    // 1. Authoritative filtered total count
+    const countSql = `
+      SELECT COUNT(*)::int AS total
+      FROM ops.phase1_owned_orders
+      WHERE ${whereClause}
+    `;
+    const countResult = await this.databaseService!.query<{ total: number }>(
+      countSql,
+      values,
+    );
+    const total = Number(countResult.rows[0]?.total ?? 0);
+
+    // 2. Pagination calculation
+    const pageNum = Math.max(1, Number(query.page ?? 1) || 1);
+    const pageSizeNum = Math.max(
+      1,
+      Math.min(100, Number(query.pageSize ?? 20) || 20),
+    );
+    const offset = (pageNum - 1) * pageSizeNum;
+
+    if (total === 0 || offset >= total) {
+      return { items: [], total };
+    }
+
+    // 3. Stable sort: selected date DESC NULLS LAST, bookingId ASC
+    const dataValues = [...values, pageSizeNum, offset];
+    const dataSql = `
+      SELECT record
+      FROM ops.phase1_owned_orders
+      WHERE ${whereClause}
+      ORDER BY ${dateColExpr} DESC NULLS LAST, booking_id ASC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+
+    const dataResult = await this.databaseService!.query<JsonRecordRow>(
+      dataSql,
+      dataValues,
+    );
+
+    const items: OwnedOrderRecord[] = [];
+    for (const row of dataResult.rows) {
+      const parsed = this.parseRecord<OwnedOrderRecord>(
+        row.record,
+        "ops.phase1_owned_orders",
+      );
+      if (parsed) {
+        items.push(parsed);
+      }
+    }
+
+    return { items, total };
   }
 
   async findActiveOrderByPassengerPhone(
