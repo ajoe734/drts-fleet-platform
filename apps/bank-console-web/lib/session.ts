@@ -4,11 +4,32 @@ import {
   type IapJwtPayload,
 } from "@drts/control-plane-auth";
 import type { BankRole as HomeRole } from "./home-data";
-import {
-  BANK_DEMO_TENANTS,
-  type BankDemoTenant,
-  type BankDemoTenantCode,
-} from "./demo-tenants";
+export type BankDemoTenantCode =
+  | "acme"
+  | "contoso"
+  | "fabrikam"
+  | "northwind"
+  | "tailspin";
+
+export type BankDemoTenant = {
+  code: BankDemoTenantCode;
+  issuerCode: string;
+  nameKey?: TranslationKey;
+  shortNameKey?: TranslationKey;
+  contextKey?: TranslationKey;
+  avatar?: string;
+  actorEmail?: string;
+  roleCode?: string;
+  tenantId?: string;
+};
+
+const BANK_DEMO_TENANT_CODES: readonly BankDemoTenantCode[] = [
+  "acme",
+  "contoso",
+  "fabrikam",
+  "northwind",
+  "tailspin",
+] as const;
 import { t, type Locale, type TranslationKey } from "./translations";
 
 export type BankConsoleRole =
@@ -257,7 +278,7 @@ export function deriveBankCodeFromIdentity(
 ): BankDemoTenantCode | null {
   if (headerTenant?.trim()) {
     const rawTenant = headerTenant.trim().toLowerCase();
-    for (const code of Object.keys(BANK_DEMO_TENANTS) as BankDemoTenantCode[]) {
+    for (const code of BANK_DEMO_TENANT_CODES) {
       if (rawTenant === code || rawTenant.includes(code)) {
         return code;
       }

@@ -19,7 +19,6 @@ import { join } from "node:path";
 // (correctly aliased) vitest config — see the same doc section.
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/translations", () => ({ t: (key: string) => key }));
-vi.mock("@/lib/demo-tenants", () => ({ BANK_DEMO_TENANTS: {} }));
 
 import {
   canViewSettlementAmounts,
