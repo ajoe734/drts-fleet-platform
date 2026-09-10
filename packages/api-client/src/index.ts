@@ -29,6 +29,9 @@ import type {
   ApiSuccessEnvelope,
   AttendanceRecord,
   BookingRecord,
+  TenantBookingDateField,
+  TenantBookingListQuery,
+  TenantBookingsPageRecord,
   CallbackTaskRecord,
   CallSessionRecord,
   ClockInCommand,
@@ -475,6 +478,32 @@ function buildReportQuery(query: Record<string, string | undefined>): string {
   for (const [key, value] of Object.entries(query)) {
     if (typeof value === "string" && value.trim()) {
       params.set(key, value.trim());
+    }
+  }
+  const serialized = params.toString();
+  return serialized ? `?${serialized}` : "";
+}
+
+function buildTenantBookingQueryParams(
+  query?: TenantBookingListQuery,
+): string {
+  if (!query) {
+    return "";
+  }
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null) {
+      continue;
+    }
+    if (Array.isArray(value)) {
+      if (value.length > 0) {
+        params.set(key, value.join(","));
+      }
+    } else {
+      const strVal = String(value).trim();
+      if (strVal) {
+        params.set(key, strVal);
+      }
     }
   }
   const serialized = params.toString();
@@ -1208,8 +1237,46 @@ export class ApiClient {
     });
   }
 
-  async listTenantBookings(): Promise<BookingRecord[]> {
-    return this.getList<BookingRecord>("/api/tenant/bookings");
+  async listTenantBookings(
+    query?: TenantBookingListQuery,
+    options?: RequestOptions,
+  ): Promise<BookingRecord[]> {
+    if (!query) {
+      // Legacy callers pass no query: page through all results to prevent silent truncation
+      let page = 1;
+      const allItems: BookingRecord[] = [];
+      while (true) {
+        const paged = await this.queryTenantBookings(
+          { page, pageSize: 100 },
+          options,
+        );
+        allItems.push(...paged.items);
+        if (
+          !paged.pagination ||
+          page >= paged.pagination.totalPages ||
+          paged.items.length === 0
+        ) {
+          break;
+        }
+        page += 1;
+      }
+      return allItems;
+    }
+
+    const paged = await this.queryTenantBookings(query, options);
+    return paged.items;
+  }
+
+  async queryTenantBookings(
+    query?: TenantBookingListQuery,
+    options?: RequestOptions,
+  ): Promise<TenantBookingsPageRecord> {
+    const search = buildTenantBookingQueryParams(query);
+    return this.request<TenantBookingsPageRecord>(
+      "GET",
+      `/api/tenant/bookings${search}`,
+      options,
+    );
   }
 
   async getTenantBooking(bookingId: string) {
@@ -4910,6 +4977,13 @@ export type {
   VoiceOutcome,
   SpeechProof,
   DtmfProof,
+  TenantBookingDateField,
+  TenantBookingListQuery,
+  TenantBookingsPageRecord,
+  DEFAULT_PRODUCT_TIMEZONE,
+  convertCalendarRangeToInstantRange,
+  isIso8601InstantWithTimezone,
 } from "@drts/contracts";
 
 export * from "./system-remediation";
+export { ApiClient as DrtsApiClient };
