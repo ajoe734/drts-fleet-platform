@@ -342,7 +342,7 @@ jobs:
             echo $! > ../../.artifacts/host-acceptance/browser/api-server.pid
           )
           for i in $(seq 1 60); do
-            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HOST_ACCEPTANCE_API_PORT}/api/host/vehicles" 2>/dev/null)"
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HOST_ACCEPTANCE_API_PORT}/api/host/vehicles" 2>/dev/null || true)"
             code="${code:-000}"
             if [ "$code" != "000" ]; then
               echo "Host acceptance API responded with HTTP $code after ${i}s"
@@ -367,7 +367,7 @@ jobs:
             echo $! > ../../.artifacts/host-acceptance/browser/portal-server.pid
           )
           for i in $(seq 1 90); do
-            code="$(curl -s -o /dev/null -w '%{http_code}' "${HOST_ACCEPTANCE_PORTAL_URL}/host/vehicles" 2>/dev/null)"
+            code="$(curl -s -o /dev/null -w '%{http_code}' "${HOST_ACCEPTANCE_PORTAL_URL}/host/vehicles" 2>/dev/null || true)"
             code="${code:-000}"
             if [ "$code" != "000" ]; then
               echo "fleet-partner-portal-web responded with HTTP $code after ${i}s"

@@ -175,17 +175,37 @@ cascade of this: the isolated API server process crashes at startup for the
 same reason, so `host-browser-acceptance.spec.ts` renders real empty/failed
 states against a dead backend rather than the intended data-backed states.
 This runner's own readiness-wait script (`.github/workflows/host-acceptance.yml`)
-had a second, independent bug that briefly masked this — `curl -s -o /dev/null
--w '%{http_code}' "$URL" || echo "000"` concatenates curl's own `000` output
-(printed on connection refusal) with the `|| echo "000"` fallback into
-`000000`, which is `!= "000"`, so the wait loop falsely reported the API
-"responding" after 1 second instead of failing loudly at the 60s timeout.
-That harness bug has been fixed in this same commit (`code="$(curl ... 2>/dev/null)"; code="${code:-000}"`,
-applied to both the API and portal readiness waits) so future runs fail fast
-and honestly instead of running Playwright against a server that never
-started. The bootstrap crash itself is a product defect in
-`apps/api/src/modules/host-view/host-view.controller.ts`, out of this task's
-write scope (owned by `SR-HOST-BE-001`), and is not fixed here.
+had two, independent bugs of its own that had to be fixed across two commits
+to get an honest failure signal instead of a misleading one:
+
+1. `curl -s -o /dev/null -w '%{http_code}' "$URL" || echo "000"` concatenates
+   curl's own `000` output (printed on connection refusal) with the
+   `|| echo "000"` fallback into `000000`, which is `!= "000"`, so the wait
+   loop falsely reported the API "responding" after 1 second instead of
+   failing loudly at the 60s timeout — proven by run `34496021674`, where
+   `browser-acceptance` ran all 9 Playwright specs against a dead backend
+   and failed with confusing `toBeVisible`/`element(s) not found` errors
+   instead of a clear "API did not start" message.
+2. The first fix (`code="$(curl ... 2>/dev/null)"; code="${code:-000}"`)
+   removed the concatenation but introduced a second problem: this script
+   runs under `bash -e`, and `code=$(curl ...)` — a plain command
+   substitution assignment — propagates curl's own non-zero exit status
+   (e.g. `7`, connection refused) to `set -e`, aborting the whole step on
+   the very first loop iteration instead of retrying for up to 60s. Proven
+   by run `34497057638`, whose `browser-acceptance` job's "Start isolated
+   Host acceptance API server" step failed in ~0.3s with a bare
+   "Process completed with exit code 7" instead of the intended 60-iteration
+   wait and diagnostic message.
+
+Both are fixed in this task's commits by neutralizing curl's exit status
+inside the substitution before applying the empty-string fallback:
+`code="$(curl -s -o /dev/null -w '%{http_code}' "$URL" 2>/dev/null || true)"; code="${code:-000}"`,
+applied to both the API and portal readiness waits. This was verified locally
+against a closed port under `bash -e` (correctly resolves to `code=000` and
+reaches the end of the script) before being pushed for a real re-run — see
+§5 for that run's result. The bootstrap crash itself remains a product
+defect in `apps/api/src/modules/host-view/host-view.controller.ts`, out of
+this task's write scope (owned by `SR-HOST-BE-001`), and is not fixed here.
 
 **Suggested fix for the owning task:** rename the four bare wildcards to
 named wildcards, e.g. `@Post("vehicles*splat")` (and matching `Put`/`Patch`/
