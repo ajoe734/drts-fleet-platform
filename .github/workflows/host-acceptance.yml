@@ -358,11 +358,31 @@ jobs:
         id: start_portal
         env:
           DRTS_API_URL: http://127.0.0.1:4101
+          # The shared root layout (app/layout.tsx, SR-WIRE-001's scope) calls
+          # loadNavBadges() -> getServerFleetPartnerClient() unconditionally
+          # on every route, including /host/*, and treats a missing
+          # fleet-partner identity as a fatal config error (not a soft
+          # fallback) — see fleet-portal-data.server.ts's isConfigError.
+          # Without this, EVERY /host/* request 500s before Host's own code
+          # ever runs. DRTS_FLEET_PARTNER_ID is api-client.server.ts's own
+          # documented "explicit env override for single-tenant deployments"
+          # escape hatch, so setting it here supplies a harmless, fictional
+          # id rather than touching the shared layout. The nav-badge reads it
+          # triggers then hit this isolated Host-only composition, which has
+          # no /api/fleet-partner/* routes; that 404s and is caught by each
+          # loader's existing non-config-error fallback path (source:
+          # "fallback"), so the shared shell renders emptily around the real
+          # Host content instead of crashing. This does NOT certify the
+          # shared layout/nav wiring itself — that gap is recorded in
+          # docs/04-uat/system-remediation-20260906/host-acceptance-runner.md
+          # as a boundary owned by SR-WIRE-001, not fixed or asserted
+          # complete by this runner.
+          DRTS_FLEET_PARTNER_ID: host-acceptance-runner-unwired-fleet-partner
         run: |
           set -o pipefail
           (
             cd apps/fleet-partner-portal-web
-            DRTS_API_URL="$DRTS_API_URL" pnpm exec next start --port 3007 \
+            DRTS_API_URL="$DRTS_API_URL" DRTS_FLEET_PARTNER_ID="$DRTS_FLEET_PARTNER_ID" pnpm exec next start --port 3007 \
               > ../../.artifacts/host-acceptance/browser/portal-server.log 2>&1 &
             echo $! > ../../.artifacts/host-acceptance/browser/portal-server.pid
           )

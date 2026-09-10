@@ -397,8 +397,13 @@ describe("SR-HOST-FE-001-ACCEPTANCE-RUNNER: real HTTP + SQL Host acceptance", ()
     });
   });
 
-  describe("Pagination edge cases: empty, long lists, and the >200-vehicle lookup limitation", () => {
-    it("supports a long list (205 vehicles) across pages, unlike the frontend's fixed-200 single lookup", async () => {
+  describe("Pagination edge cases: empty, long lists, and the >100-vehicle lookup limitation", () => {
+    it("supports a long list (205 vehicles) across pages, and reveals the backend's own 100-row pageSize clamp", async () => {
+      // HostViewService.paginate clamps pageSize to a hard max of 100
+      // (Math.min(100, ...)) regardless of what the caller requests. This is
+      // real, verified backend behavior — requesting pageSize=200 does not
+      // raise an error, it silently returns (and reports back via
+      // page_info.page_size) a 100-row page instead.
       const page1 = await call(
         "GET",
         "/api/host/vehicles?page=1&pageSize=200",
@@ -407,33 +412,50 @@ describe("SR-HOST-FE-001-ACCEPTANCE-RUNNER: real HTTP + SQL Host acceptance", ()
       expect(page1.status).toBe(200);
       const page1Envelope = page1.body as ApiEnvelope<{
         items: Array<{ vehicle_id: string }>;
-        page_info: { total_items: number; total_pages: number };
+        page_info: { page_size: number; total_items: number; total_pages: number };
       }>;
-      expect(page1Envelope.data.items).toHaveLength(200);
+      expect(page1Envelope.data.items).toHaveLength(100);
+      expect(page1Envelope.data.page_info.page_size).toBe(100);
       expect(page1Envelope.data.page_info.total_items).toBe(BULK_VEHICLE_COUNT);
 
       const page2 = await call(
         "GET",
-        "/api/host/vehicles?page=2&pageSize=200",
+        "/api/host/vehicles?page=2&pageSize=100",
         hostHeaders(HOST_BULK_PARTNER_ID),
       );
       expect(page2.status).toBe(200);
       const page2Envelope = page2.body as ApiEnvelope<{ items: Array<{ vehicle_id: string }> }>;
-      expect(page2Envelope.data.items).toHaveLength(BULK_VEHICLE_COUNT - 200);
-      const lastVehicleId = bulkVehicleId(BULK_VEHICLE_COUNT);
-      expect(page2Envelope.data.items.map((v) => v.vehicle_id)).toContain(lastVehicleId);
+      expect(page2Envelope.data.items).toHaveLength(100);
 
-      // The list endpoint itself paginates correctly past 200 (it fetches
-      // all owned rows, then paginates in memory — see
-      // HostViewService.paginate). The 200-row limitation documented in
-      // host-data.server.ts (VEHICLE_LOOKUP_PAGE_SIZE) is specifically in
-      // the FRONTEND's single-vehicle detail lookup, which always requests
-      // page=1/pageSize=200 and searches within that page only — see
-      // host-browser-acceptance.spec.ts for the real-browser proof of that
-      // narrower, frontend-only limitation.
+      const page3 = await call(
+        "GET",
+        "/api/host/vehicles?page=3&pageSize=100",
+        hostHeaders(HOST_BULK_PARTNER_ID),
+      );
+      expect(page3.status).toBe(200);
+      const page3Envelope = page3.body as ApiEnvelope<{ items: Array<{ vehicle_id: string }> }>;
+      expect(page3Envelope.data.items).toHaveLength(BULK_VEHICLE_COUNT - 200);
+      const lastVehicleId = bulkVehicleId(BULK_VEHICLE_COUNT);
+      expect(page3Envelope.data.items.map((v) => v.vehicle_id)).toContain(lastVehicleId);
+
+      // The list endpoint itself paginates correctly across as many 100-row
+      // pages as needed (it fetches all owned rows, then paginates in
+      // memory — see HostViewService.paginate). But the FRONTEND's
+      // loadHostVehicleDetail (host-data.server.ts) always requests a single
+      // page=1/pageSize=200 lookup and searches only within the rows that
+      // page actually returns. Because the backend clamps pageSize to 100,
+      // that single lookup only ever contains the first 100 owned vehicles —
+      // a host's vehicle #101+ is reported as vehicle_not_found on the
+      // detail page despite being genuinely owned and active. This is a more
+      // severe cutoff than host-data.server.ts's own "200-row" comment
+      // assumes, because it did not account for the backend's independent
+      // 100-row pageSize clamp. See host-browser-acceptance.spec.ts for the
+      // real-browser reproduction (vehicle #201, which is beyond both the
+      // frontend's assumed 200-row boundary and the backend's real 100-row
+      // clamp, so it is not found under either accounting).
       recorder.recordLiveLimitation(
         "host_frontend_200_row_detail_lookup",
-        "The backend GET /api/host/vehicles list endpoint paginates correctly past 200 rows (verified here). The FRONTEND's loadHostVehicleDetail (host-data.server.ts) always requests page=1/pageSize=200 and searches only within that page, so a host's vehicle #201+ is reported as vehicle_not_found on the detail page despite being genuinely owned and active. See host-browser-acceptance.spec.ts for the real-browser reproduction of this narrower, frontend-only limitation.",
+        "The backend GET /api/host/vehicles list endpoint paginates correctly past 100 rows across multiple pages (verified here), but HostViewService.paginate clamps any requested pageSize to a hard max of 100. The FRONTEND's loadHostVehicleDetail (host-data.server.ts) assumes a single page=1/pageSize=200 request returns up to 200 rows and searches only within that one response; because the backend silently clamps to 100, the real cutoff for the detail page is a host's vehicle #101, not #201 as host-data.server.ts's own comment assumes. See host-browser-acceptance.spec.ts for the real-browser reproduction of this limitation using vehicle #201 (beyond both boundaries).",
       );
     });
 
