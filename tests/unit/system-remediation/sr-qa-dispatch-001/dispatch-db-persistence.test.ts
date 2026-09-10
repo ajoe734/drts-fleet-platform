@@ -126,7 +126,9 @@ describe("SR-QA-DISPATCH-001: Real PostgreSQL Dispatch Job/Assignment/Task/Trace
     // sr-qa-concurrency-001/dispatch-reservation-concurrency.test.ts, which
     // never calls loadState()) leaves those two relations missing and
     // loadState() fails with `relation ... does not exist`.
-    await pool.query(migration("V0056__multi_taxi_runtime_compliance_closure.sql"));
+    await pool.query(
+      migration("V0056__multi_taxi_runtime_compliance_closure.sql"),
+    );
 
     const dbHandle: DatabaseService = {
       isEnabled: () => true,
