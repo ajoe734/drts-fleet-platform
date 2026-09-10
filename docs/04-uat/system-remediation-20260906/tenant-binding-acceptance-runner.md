@@ -708,3 +708,71 @@ A separate, unrelated packaging issue surfaced in the auth task's own CI
 run was being verified; that is tracked and being resolved inside the auth
 task itself and does not affect the runtime candidate SHA or the acceptance
 evidence recorded above.
+
+## 13. Workflow default candidate_sha was stale, causing a false-red PR check
+
+The §12 run correctly targeted the reviewed runtime candidate
+`87769096068d97cec7aa2edd60d4d6007da81566` by passing it as an explicit
+`workflow_dispatch` input. But the workflow's own fallback value — used by
+the `push` trigger (which has no `inputs`, see the `on.push` block) and
+therefore by every automatic check on PR
+[#1882](https://github.com/ajoe734/drts-fleet-platform/pull/1882) — was
+never updated off the *original* pre-fix parent
+`10123f6af00a5342f2634a01f4d9a0e7190c2173`. Concretely: the `candidate_sha`
+input's `default`, the `concurrency.group` key, the `CANDIDATE_SHA` env
+fallback, the checkout `ref` fallback, and the uploaded artifact's name
+fallback all still hardcoded the old SHA.
+
+This produced a **false-red** PR check: after the doc-only commit
+`d58ed9cb1` landed, the PR's automatic `acceptance` check ran (push trigger,
+no input) against the stale `10123f6a` candidate and failed — twice,
+reproducibly (run
+[34478943513](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34478943513/job/102876578720)
+and an independent re-dispatch,
+[34479780843](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34479780843)) — both at
+`IdentityRepository.syncLegacyTenantUserRole` → `upsertMembership`:
+`insert or update on table "identity_memberships" violates foreign key
+constraint "identity_memberships_principal_id_fkey"`. Traced to
+`apps/api/src/modules/identity/identity.repository.ts`'s `upsertPrincipal`:
+its `ON CONFLICT (source_ref) DO UPDATE` clause never updates the
+`principal_id` column, yet still overwrites the returned `record` JSONB with
+`EXCLUDED.record`, which carries the freshly-drafted (never-inserted)
+`principalId` from that call's `randomUUID()`. The second
+`syncIdentityTenantUserRole` for the same tenant user (create, then
+activate) hits that conflict path, gets back a `principal.principalId` that
+does not match the real `identity_principals` row, and the following
+`upsertMembership` FK-violates. This is a real defect, but it lives in the
+*old*, already-superseded `10123f6a` candidate's own code — out of reach of
+the reviewed `87769096` candidate this task is actually accepting, and out
+of this task's write scope (`apps/api/src/**` is product/runtime source) to
+patch regardless.
+
+**Fix** (commit `b137b46ef039c2ec904e4df10ca10b5e493d7ee1`, this branch):
+updated all 5 fallback occurrences in
+`.github/workflows/tenant-binding-acceptance.yml` from `10123f6a...` to
+`87769096068d97cec7aa2edd60d4d6007da81566`, and the matching
+`PARENT_CANDIDATE_SHA` fixture constant in
+`tools/ci/test_tenant_binding_acceptance_workflow.py` (all 25 contract tests
+still pass). No harness/product change.
+
+Re-running was not even necessary as a separate manual step: pushing this
+fix commit re-triggered the branch's own `push` acceptance check, which is
+exactly the automatic-PR-check path that had been silently misconfigured.
+It passed for real, on the correct candidate, run
+[34480264918](https://github.com/ajoe734/drts-fleet-platform/actions/runs/34480264918/job/102881005391):
+
+```
+candidate_sha: 87769096068d97cec7aa2edd60d4d6007da81566
+workflow_sha:  b137b46ef039c2ec904e4df10ca10b5e493d7ee1
+overlay/install/migrate/harness/gate: all success
+2/2 tests passed, 0 failed, 0 skipped
+```
+
+Raw evidence:
+`.local/worker-recovery-20260910/tenant-run-34480264918/tenant-binding-acceptance-87769096068d97cec7aa2edd60d4d6007da81566/{run-status.json,test-report.json,execution-log.txt,evidence-auth-http.json}`.
+
+This closes the false-red gap: the PR's own automatic `acceptance` check
+(not just a manually-dispatched one-off) now genuinely proves the reviewed
+runtime candidate on every push to this branch, matching the workflow's
+stated purpose. Acceptance evidence for the reviewed runtime candidate
+itself is unchanged from §12 (that candidate's code was never the problem).
