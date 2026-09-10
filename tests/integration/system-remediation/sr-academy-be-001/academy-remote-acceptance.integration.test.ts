@@ -379,6 +379,8 @@ describe("SR-ACADEMY-BE-001 Real PostgreSQL Acceptance Suite", () => {
             UPDATE reg.driver_training_records
             SET expires_at = now() - interval '2 days'
             WHERE driver_id = $1;
+          `, [driverPassId]);
+          await client.query(`
             UPDATE reg.phase1_driver_quiz_attempts
             SET attempted_at = now() - interval '400 days'
             WHERE driver_id = $1;
@@ -475,7 +477,14 @@ describe("SR-ACADEMY-BE-001 Real PostgreSQL Acceptance Suite", () => {
             ) ON CONFLICT (affiliation_id) DO NOTHING;
           `, [fleetId, orphanDriver4]);
 
-          // Ensure activeDriver1 has passed training record
+          // Ensure activeDriver1 has passed quiz attempt, training record, and profile
+          await client.query(`
+            INSERT INTO reg.phase1_driver_quiz_attempts (
+              attempt_id, course_id, course_version, driver_id, score, passed, attempted_at, answers_summary
+            ) VALUES (
+              'att_cohort_active_01', 'crs_basics_001', 1, $1, 100, true, now() - interval '1 day', '[]'::jsonb
+            ) ON CONFLICT (attempt_id) DO NOTHING;
+          `, [activeDriver1]);
           await client.query(`
             INSERT INTO reg.driver_training_records (driver_id, course_name, course_type, completed_at, expires_at, result)
             VALUES ($1, '平台合作基礎', 'compliance', now() - interval '1 day', now() + interval '364 days', 'passed')
