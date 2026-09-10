@@ -12,6 +12,10 @@ export default defineConfig({
         __dirname,
         "packages/control-plane-auth/src/index.ts",
       ),
+      "@drts/ui-tokens": path.resolve(
+        __dirname,
+        "packages/ui-tokens/src/index.ts",
+      ),
       "@": path.resolve(__dirname, "apps/tenant-console-web"),
     },
   },
@@ -26,6 +30,7 @@ export default defineConfig({
       "tests/security/**/*.test.ts",
       "tests/load/**/*.test.ts",
       "tests/e2e/**/*.test.ts",
+      "apps/*/tests/unit/**/*.test.ts",
     ],
   },
 });
