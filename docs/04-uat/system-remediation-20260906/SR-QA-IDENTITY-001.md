@@ -143,19 +143,25 @@
 
 ## 4. CI 診斷與歷史復原處置
 
-### 4.1 歷史候選 `f2ebedae9b34` 之 CI 失敗診斷
+### 4.1 候選提交與 CI 執行診斷
 
-1. **Commit Trailers Gate 失敗**：
-   - 候選提交主旨為 `test(SR-QA-IDENTITY-001): identity tenant session rbac uat suites`。
-   - `tools/ci/git/check_commit_trailers.py` 之 `SUBJECT_RE` 規則僅允許 `(?:(?:wip|fix|feat|refactor|docs|chore|style)\()?[A-Z][A-Z0-9-]*[A-Z0-9]\)?: \S` 或 `<TASK-ID>: <summary>`。`test(` 前綴不在允許名單中，導致 CI commit-trailers job 報錯退出（exit 1）。
-2. **Typecheck 失敗**：
-   - 原先測試檔案中存在 28 處 TypeScript 型別檢查錯誤（包括 OidcPkceService/TenantPartnerService 依賴構造函數、CanonicalIdentitySessionRecord record 欄位、IdentityContext 遺漏 supportedExecutionModes 等），現已全數修正完畢。
+1. **歷史候選 `f2ebedae9b34` 之 Commit Trailers Gate 失敗**：
+   - 提交主旨為 `test(SR-QA-IDENTITY-001): identity tenant session rbac uat suites`。
+   - `tools/ci/git/check_commit_trailers.py` 之 `SUBJECT_RE` 規則僅允許 `(?:(?:wip|fix|feat|refactor|docs|chore|style)\()?[A-Z][A-Z0-9-]*[A-Z0-9]\)?: \S` 或 `<TASK-ID>: <summary>`。`test(` 前綴不在允許名單中，導致 CI commit-trailers job 退出碼 1。
+2. **候選 `18a0ef94e45e` 之 CI 運行狀態 (PR #1941)**：
+   - `ci-integ.yml` (Run ID: 34520314512)：`candidate`、`changes`、`unit`、`typecheck`、`integration`、`lint`、`cross-surface-e2e`、`i18n-guard`、`iam-negative-matrix` 全數成功（success）。
+   - `ci.yml` (Run ID: 34520314394)：`Spec source archive`、`Change scope`、`Verify Internal Key Exceptions`、`No real financial-institution identifiers`、`BFF-only imports`、`Runtime mirror guard`、`Canonical consistency`、`i18n guard` 全數通過；唯獨 `Commit trailers` 門禁失敗，原因為 PR #1941 範圍包含歷史祖先 `f2ebedae9b34`。
 
 ### 4.2 非破壞性修復與交接路徑 (Non-Destructive Recovery)
 
 - 依據 `docs/ops/branch-strategy.md` §11.4 規範：已推送且開立 PR 之 commit 不得 rebase、amend 或 force-push。
 - 由於 PR #1941 的 revision 範圍包含 `f2ebedae9b34`，在該 branch 上疊加新 commit 依然無法讓 `check_commit_trailers.py` 忽視歷史 commit 的不符規格主旨。
-- 正確之非破壞性歷史復原流程（如 `SR-QA-WEBHOOK-001-UNBLOCK-HISTORY-REPAIR` 模式）：
+- 正確之非破壞性歷史復原流程（如 `SR-QA-WEBHOOK-001-UNBLOCK-HISTORY-REPAIR` 與 `UV-EXEC-015-UNBLOCK-HISTORY-REPAIR` 模式）：
   1. 保留 `f2ebedae9b34` 與 PR #1941 做為真實歷史觀察證據，不執行 force-push。
   2. 於當前 worktree 將已完成且型別無誤之變更進行 task anchor commit 並正常 push。
-  3. Supervisor 透過 recovery branch（或重開 PR）以合規 commit 主旨 `SR-QA-IDENTITY-001: identity tenant session rbac uat suites` 鎖定新候選 SHA。
+  3. Supervisor/Chair 透過 recovery branch（或重開 PR）以合規 commit 主旨 `SR-QA-IDENTITY-001: identity tenant session rbac uat suites` 鎖定新候選 SHA。
+
+### 4.3 具體卡點與交接說明 (Concrete Blockers)
+
+1. **Commit Trailers Gate 歷史祖先不可變**：PR #1941 祖先 `f2ebedae9b34` 主旨不合規，需 Supervisor/Chair 依歷史復原協議指派 `gemini2/sr-qa-identity-001-recovery` 乾淨分支鎖定合規 SHA。
+2. **VM 執行限制**：本機工作環境嚴禁啟動瀏覽器、Playwright 伺服器或 Docker Compose，Playwright 端到端驗收規格（`sr-qa-identity-001.spec.ts`）已具備完備 4 大情境與 27 步驟，需由外部 runner 或具備執行權限之 CI 環境執行。
