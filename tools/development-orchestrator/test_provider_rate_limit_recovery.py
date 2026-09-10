@@ -102,6 +102,33 @@ class ProviderRateLimitRecoveryTests(unittest.TestCase):
         self.assertIn("claude", state.get("provider_pauses", {}))
         self.assertGreaterEqual(state["provider_pauses"]["claude"]["resume_at"], before + 14400)
 
+    def test_textual_reset_preserves_terminal_fallback_floor(self):
+        state = {}
+        before = datetime.now(timezone.utc).timestamp()
+        with mock.patch.object(supervisor, "console_log"):
+            supervisor.maybe_pause_provider_for_terminal_failure(
+                {}, state, {"provider": "claude", "agent_id": "claude"},
+                "you have exhausted your capacity. Resets in 5m.")
+        self.assertGreaterEqual(state["provider_pauses"]["claude"]["resume_at"], before + 14400)
+
+    def test_textual_reset_preserves_floor_for_live_and_exited_workers(self):
+        for live in (True, False):
+            with self.subTest(live=live):
+                state = {}
+                before = datetime.now(timezone.utc).timestamp()
+                worker = {"provider": "claude", "agent_id": "claude", "pid": 12345}
+                signal = detect_failure_signal_in_lines([
+                    "reason: you have exhausted your capacity. Resets in 5m."])
+                self.assertIsNotNone(signal)
+                with (mock.patch.object(supervisor, "console_log"),
+                      mock.patch.object(supervisor, "terminate_worker_pid"),
+                      mock.patch.object(supervisor, "maybe_rotate_antigravity_lane", return_value=False),
+                      mock.patch.object(supervisor, "maybe_reassign_task_after_worker_failure", return_value=None),
+                      mock.patch.object(supervisor, "finalize_terminal_worker_outcome")):
+                    supervisor.handle_worker_failure_signal(
+                        {}, state, {}, worker, signal, current_mode="execution", live=live)
+                self.assertGreaterEqual(state["provider_pauses"]["claude"]["resume_at"], before + 14400)
+
     def test_live_and_exited_worker_paths_use_provider_reset(self):
         for live in (True, False):
             with self.subTest(live=live):

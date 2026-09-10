@@ -222,6 +222,19 @@ def _rejected_rate_limit_info(reason: str | None) -> dict[str, Any] | None:
     return info
 
 
+
+def infer_rejected_rate_limit_resume_at(reason: str | None) -> float | None:
+    """Only a native rejected event may override the terminal fallback floor."""
+    info = _rejected_rate_limit_info(reason)
+    if info is None:
+        return None
+    reset = info.get("resetsAt")
+    if isinstance(reset, (int, float)) and not isinstance(reset, bool):
+        if 0 < reset < 253402300800:  # finite epoch seconds, before year 10000
+            return float(reset)
+    return None
+
+
 def classify_failure(
     config: Mapping[str, Any], worker: Mapping[str, Any], reason: str | None
 ) -> FailureDecision:
@@ -288,11 +301,7 @@ def infer_pause_resume_at(
     if rate_info is not None:
         # This is the reset of the rejected window. A later, non-exhausted
         # unifiedWindows entry must not extend the pause to a different limit.
-        reset = rate_info.get("resetsAt")
-        if isinstance(reset, (int, float)) and not isinstance(reset, bool):
-            if 0 < reset < 253402300800:  # finite epoch seconds, before year 10000
-                return float(reset)
-        return None
+        return infer_rejected_rate_limit_resume_at(text)
 
     iso_match = ISO_RESET_HINT_PATTERN.search(text)
     if iso_match:
