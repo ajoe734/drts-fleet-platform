@@ -8,6 +8,7 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -82,10 +83,11 @@ import {
 import {
   deriveCohortMetricsPresentation,
   deriveCallbackSlaPresentation,
-  adaptCohortReportToUiView,
-  mapVoiceUsageRecordToUiItem,
+  buildDefaultVoiceObservationWindow,
+  loadVoiceCohortAndUsage,
   type UiCohortMetricsView,
   type UiCostLedgerItem,
+  type VoiceMetricsSectionStatus,
 } from "./callcenter-metrics-ledger";
 
 const theme = buildCanvasTheme({
@@ -740,6 +742,44 @@ function buildFallbackHealth(errorMessage: string | null): UiHealthEnvelope {
   };
 }
 
+function appendVoiceMetricsHealthDegradation(
+  health: UiHealthEnvelope,
+  metricsResult: {
+    cohortStatus: VoiceMetricsSectionStatus;
+    usageStatus: VoiceMetricsSectionStatus;
+    cohortErrorMessage: string | null;
+    usageErrorMessage: string | null;
+  },
+): UiHealthEnvelope {
+  const degradations: UiHealthEnvelope["degradedServices"] = [];
+  if (metricsResult.cohortStatus !== "fresh") {
+    degradations.push({
+      service: "voice-cohort-metrics",
+      impact: metricsResult.cohortErrorMessage ?? "cohort metrics unavailable",
+      severity:
+        metricsResult.cohortStatus === "unavailable" ? "critical" : "warning",
+    });
+  }
+  if (metricsResult.usageStatus !== "fresh") {
+    degradations.push({
+      service: "voice-usage-ledger",
+      impact: metricsResult.usageErrorMessage ?? "usage ledger unavailable",
+      severity:
+        metricsResult.usageStatus === "unavailable" ? "critical" : "warning",
+    });
+  }
+
+  if (degradations.length === 0) {
+    return health;
+  }
+
+  return {
+    ...health,
+    status: "degraded",
+    degradedServices: [...health.degradedServices, ...degradations],
+  };
+}
+
 function buildWorkspaceAction(
   hasActiveSession: boolean,
 ): ResourceActionDescriptor {
@@ -1073,6 +1113,17 @@ export default function CallcenterPage() {
   );
   const [usageRecords, setUsageRecords] = useState<UiCostLedgerItem[]>([]);
   const [serverCohort, setServerCohort] = useState<UiCohortMetricsView | null>(null);
+  const [cohortStatus, setCohortStatus] =
+    useState<VoiceMetricsSectionStatus>("unavailable");
+  const [usageStatus, setUsageStatus] =
+    useState<VoiceMetricsSectionStatus>("unavailable");
+  const [cohortErrorMessage, setCohortErrorMessage] = useState<string | null>(
+    null,
+  );
+  const [usageErrorMessage, setUsageErrorMessage] = useState<string | null>(
+    null,
+  );
+  const loadRequestSeqRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [queueView, setQueueView] = useState<QueueView>("sessions");
@@ -1604,51 +1655,46 @@ export default function CallcenterPage() {
       setLoading(true);
     }
 
+    const requestSeq = ++loadRequestSeqRef.current;
+
     try {
       const client = getOpsClient();
-      const [
-        nextSessionsEnvelope,
-        nextCallbacksEnvelope,
-        cohortResponse,
-        usageResponse,
-      ] = await Promise.all([
-        client.get<CallcenterListEnvelope<RuntimeSessionRecord>>(
-          "/api/callcenter/sessions",
-        ),
-        client.get<CallcenterListEnvelope<RuntimeCallbackRecord>>(
-          "/api/callcenter/callbacks",
-        ),
-        client
-          .get<any>("/api/callcenter/voice/metrics/cohort")
-          .catch(() => null),
-        client
-          .get<any>("/api/callcenter/voice/usage/records")
-          .catch(() => null),
-      ]);
+      const [nextSessionsEnvelope, nextCallbacksEnvelope, metricsResult] =
+        await Promise.all([
+          client.get<CallcenterListEnvelope<RuntimeSessionRecord>>(
+            "/api/callcenter/sessions",
+          ),
+          client.get<CallcenterListEnvelope<RuntimeCallbackRecord>>(
+            "/api/callcenter/callbacks",
+          ),
+          loadVoiceCohortAndUsage(
+            client,
+            buildDefaultVoiceObservationWindow(),
+            {},
+            { serverCohort, usageRecords },
+          ),
+        ]);
+
+      if (requestSeq !== loadRequestSeqRef.current) {
+        // A newer refresh already started; this response is stale, drop it.
+        return;
+      }
 
       const nextSessions = nextSessionsEnvelope.items ?? [];
       const nextCallbacks = nextCallbacksEnvelope.items ?? [];
-      const nextHealth =
+      const nextHealth = appendVoiceMetricsHealthDegradation(
         nextSessionsEnvelope.health ??
-        nextCallbacksEnvelope.health ??
-        buildFallbackHealth(null);
+          nextCallbacksEnvelope.health ??
+          buildFallbackHealth(null),
+        metricsResult,
+      );
 
-      if (cohortResponse) {
-        if ("allCallCoverage" in cohortResponse) {
-          setServerCohort(adaptCohortReportToUiView(cohortResponse));
-        } else if ("effectiveIntakeRateFormatted" in cohortResponse) {
-          setServerCohort(cohortResponse as UiCohortMetricsView);
-        }
-      }
-
-      if (usageResponse) {
-        const rawItems = Array.isArray(usageResponse)
-          ? usageResponse
-          : usageResponse?.items;
-        if (Array.isArray(rawItems)) {
-          setUsageRecords(rawItems.map(mapVoiceUsageRecordToUiItem));
-        }
-      }
+      setServerCohort(metricsResult.serverCohort);
+      setUsageRecords(metricsResult.usageRecords);
+      setCohortStatus(metricsResult.cohortStatus);
+      setUsageStatus(metricsResult.usageStatus);
+      setCohortErrorMessage(metricsResult.cohortErrorMessage);
+      setUsageErrorMessage(metricsResult.usageErrorMessage);
 
       setSessions(nextSessions);
       setCallbacks(nextCallbacks);
@@ -1679,13 +1725,18 @@ export default function CallcenterPage() {
         null;
       setSelectedCallId(fallbackSelection);
     } catch (nextError) {
+      if (requestSeq !== loadRequestSeqRef.current) {
+        return;
+      }
       const message = resolveErrorMessage(nextError);
       setError(message);
       setSessionRefresh(buildFallbackRefreshMetadata("degraded"));
       setCallbackRefresh(buildFallbackRefreshMetadata("degraded"));
       setHealth(buildFallbackHealth(message));
+      setCohortStatus(serverCohort ? "stale" : "unavailable");
+      setUsageStatus(usageRecords.length > 0 ? "stale" : "unavailable");
     } finally {
-      if (!silent) {
+      if (requestSeq === loadRequestSeqRef.current && !silent) {
         setLoading(false);
       }
     }
@@ -2155,6 +2206,28 @@ export default function CallcenterPage() {
             icon="warn"
             title={t("common.error")}
             body={error}
+          />
+        ) : null}
+
+        {cohortStatus !== "fresh" ? (
+          <CanvasBanner
+            theme={theme}
+            tone={cohortStatus === "unavailable" ? "danger" : "warn"}
+            icon="warn"
+            title="叫車受理/派車指標非最新"
+            body={
+              cohortErrorMessage ?? "指標查詢失敗，顯示的資料可能已過期"
+            }
+          />
+        ) : null}
+
+        {usageStatus !== "fresh" ? (
+          <CanvasBanner
+            theme={theme}
+            tone={usageStatus === "unavailable" ? "danger" : "warn"}
+            icon="warn"
+            title="成本 ledger 非最新"
+            body={usageErrorMessage ?? "成本明細查詢失敗，顯示的資料可能已過期"}
           />
         ) : null}
 
