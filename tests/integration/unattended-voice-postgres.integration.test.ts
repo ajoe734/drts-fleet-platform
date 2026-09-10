@@ -1134,16 +1134,21 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
          ) VALUES ($1,$1,'created','enterprise','standard_taxi','immediate',now(),now(),$2::jsonb)`,
         // `record` is the entire hydrated OwnedOrderRecord (OwnedMobilityRepository.parseRecord
         // returns it as-is, with no default-filling); OwnedMobilityService.cloneOrder
-        // unconditionally spreads `approvalRequestIds`/`complianceFlags` as arrays for
-        // EVERY order in the table, so any order row missing them throws
-        // "... is not iterable" out of onModuleInit()'s loadState() hydration for the
-        // whole suite database, not just this test (UV-EXEC-024 review finding).
+        // unconditionally spreads `approvalRequestIds`/`complianceFlags` as arrays and
+        // destructures `proofRequirements` for EVERY order in the table, so any order row
+        // missing them throws out of onModuleInit()'s loadState() hydration for the whole
+        // suite database, not just this test (UV-EXEC-024 review finding).
         [
           orderBId,
           JSON.stringify({
             orderId: orderBId,
             approvalRequestIds: [],
             complianceFlags: [],
+            proofRequirements: {
+              minPhotoCount: 0,
+              signoffRequired: false,
+              expenseProofRequired: false,
+            },
           }),
         ],
       );
@@ -1270,10 +1275,10 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
           order_id,order_no,status,order_source,service_bucket,dispatch_semantics,created_at,updated_at,record
          ) VALUES ($1,$1,'driver_accepted','voice_agent','owned','immediate',now(),now(),$2::jsonb)`,
         // See the Case 3.3 orderB seed above: every order row in this suite's
-        // shared database must carry `approvalRequestIds`/`complianceFlags` or
-        // OwnedMobilityService.onModuleInit() throws while hydrating this row,
-        // silently leaving every dispatch harness's cache empty for the rest
-        // of the file.
+        // shared database must carry `approvalRequestIds`/`complianceFlags`/
+        // `proofRequirements` or OwnedMobilityService.onModuleInit() throws while
+        // hydrating this row, silently leaving every dispatch harness's cache
+        // empty for the rest of the file.
         [
           orderId,
           JSON.stringify({
@@ -1281,6 +1286,11 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
             status: "driver_accepted",
             approvalRequestIds: [],
             complianceFlags: [],
+            proofRequirements: {
+              minPhotoCount: 0,
+              signoffRequired: false,
+              expenseProofRequired: false,
+            },
           }),
         ],
       );
@@ -1466,6 +1476,11 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
             status: "assigned",
             approvalRequestIds: [],
             complianceFlags: [],
+            proofRequirements: {
+              minPhotoCount: 0,
+              signoffRequired: false,
+              expenseProofRequired: false,
+            },
           }),
         ],
       );
@@ -1601,6 +1616,11 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
             status: "assigned",
             approvalRequestIds: [],
             complianceFlags: [],
+            proofRequirements: {
+              minPhotoCount: 0,
+              signoffRequired: false,
+              expenseProofRequired: false,
+            },
           }),
         ],
       );

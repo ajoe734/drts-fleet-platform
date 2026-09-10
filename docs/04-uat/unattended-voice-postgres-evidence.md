@@ -9,7 +9,7 @@
 - Two-Pass Audit Ref: [`docs/02-architecture/phase1-unattended-voice-booking-two-pass-audit-20260906.md`](file:///home/lupin/workspace/drts-fleet-platform/docs/02-architecture/phase1-unattended-voice-booking-two-pass-audit-20260906.md)
 - Decision Ref: [`docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md`](file:///home/lupin/workspace/drts-fleet-platform/docs/01-decisions/SD-DP-20260906-013-unattended-voice-execution.md)
 - Execution Ref: [`docs/03-runbooks/unattended-voice-booking-execution-tasks-20260906.md`](file:///home/lupin/workspace/drts-fleet-platform/docs/03-runbooks/unattended-voice-booking-execution-tasks-20260906.md)
-- Candidate Revision Ref: Third-round CI-failure remediation of `3fb58123f` (PR #1870, itself the `24af9f667` + Gemini fixes round); this round: `3fb58123f` file state + Claude2 CI fixes, recommitted on `claude2/uv-exec-024`
+- Candidate Revision Ref: Fifth-round real-Postgres CI-failure remediation of `19bfb7876fa6` (PR #1885, itself §1.5's fourth-round Codex2 P1 remediation round); this round: §1.5 file state + Claude2's §1.6 `proofRequirements` fixture fix, committed on `claude2/uv-exec-024`
 
 ---
 
@@ -91,6 +91,35 @@ Verification performed this round (this VM has no local PostgreSQL/Docker per th
 - `pnpm exec vitest run --exclude tests/integration/unattended-voice-postgres.integration.test.ts -- tests/integration/unattended-voice-postgres.integration.test.ts` (simulating the fixed `test:unit` script): confirmed this file is **excluded** from the general run (does not appear anywhere in that run's failures/output) — the unrelated failures in that same run (`pdfjs-dist` resolution, one `db-apply.test.ts` case needing a locally-running `postgres` service) are pre-existing and unrelated to this file.
 - Real-Postgres re-verification of the full 18-case matrix (the actual acceptance-relevant assertions, including the new Case 4.1b/4.1c and the `handleOfferTimeout` fix) still has not happened in this VM and remains gated on the new CI step in `ci-integ.yml`.
 
+### 1.6 Fifth-Round CI Failure Remediation (real-Postgres run of candidate `19bfb7876fa6` / PR #1885, owner: Claude2)
+
+§1.5's new CI step (F1) ran the 18-case suite against a real, freshly migrated PostgreSQL instance for the first time and failed 3 of 18 (CI run `34467160080`, job `integration` / `102838423476`):
+
+```text
+ ❯ Case 4.1: Late timeout race (UV-AC-047) is safe no-op on already accepted offer or replaced assignment
+   AssertionError: expected 'superseded_by_newer_assignment' to be 'offer_already_accepted'
+ ❯ Case 4.1b: Late timeout on a genuinely stale hydrated cache is still safe when a concurrent accept lands (UV-AC-047)
+   AssertionError: expected 'superseded_by_newer_assignment' to be 'offer_already_closed'
+ ❯ Case 4.1c: Late timeout on a genuinely stale hydrated cache is still safe when a concurrent replace lands (UV-AC-047)
+   AssertionError: expected 'superseded_by_newer_assignment' to be 'offer_already_closed'
+```
+
+with this WARN immediately preceding each failure:
+
+```text
+[OwnedMobilityRepository] Owned mobility persistence skipped during module init: Cannot destructure property 'minPhotoCount' of 'order.proofRequirements' as it is undefined.
+```
+
+**Root cause: §1.5's P1 F2 fix was incomplete.** `OwnedMobilityService.cloneOrder()` calls `listComplianceGatesForOrder(order)` *before* it ever reaches its own `proofRequirements: { ...order.proofRequirements }` defaulting spread, and that call chain's `buildProofGate` unconditionally destructures `const { minPhotoCount, signoffRequired, expenseProofRequired } = order.proofRequirements` — a third required field alongside the `approvalRequestIds`/`complianceFlags` that §1.5 already fixed. Every raw `INSERT INTO ops.phase1_owned_orders` in this file (Case 3.3's `orderB`, and Case 4.1/4.1b/4.1c's own seeded order) still omitted `proofRequirements`, so `onModuleInit()`'s `loadState()` hydration threw for the whole shared table on the very next harness construction, was swallowed by `reportPersistenceFailure`'s catch, and left `OwnedMobilityService.dispatchAssignments`/`orders` empty — reproducing exactly the same failure mode §1.5 diagnosed for the other two fields (`currentAssignment` resolves to `null`, so `handleOfferTimeout`'s step 1 unconditionally returns `superseded_by_newer_assignment` regardless of the seeded DB state).
+
+Fix: added `proofRequirements: { minPhotoCount: 0, signoffRequired: false, expenseProofRequired: false }` (the same shape `OwnedMobilityService`'s own order-creation path defaults to) to all four raw-SQL order seeds in this file — Case 3.3's `orderB`, and Case 4.1/4.1b/4.1c's own orders — and updated the two explanatory comments to name all three now-required fields instead of two.
+
+Verification performed this round (same VM constraint as prior rounds — no local Postgres/Docker):
+
+- `pnpm turbo run typecheck --filter=@drts/api`: **0 errors** (builds `@drts/contracts`/`@drts/control-plane-auth` first, then typechecks `@drts/api`; this is the correct dependency-ordered invocation — a bare `pnpm exec tsc --noEmit -p apps/api/tsconfig.json` without the prior builds shows spurious `@drts/contracts` missing-export errors from stale `dist/` output, same caveat as §1.5's verification note).
+- `pnpm exec tsc -p tsconfig.json --noEmit` (repo root): no new errors from this round's diff (all four edits are additive JSON-literal properties inside existing `JSON.stringify({...})` calls); remaining output is the same pre-existing `Cannot find module 'pg'` / `ApiClient` duplicate-declaration noise reproduced identically on files this round did not touch, consistent with §1.5's finding that this gap is environment-specific to this worktree's root `node_modules`, not a real regression.
+- Real-Postgres re-run of the 18-case matrix confirming these 3 cases now pass has not happened in this VM (no local Postgres/Docker, per guardrail) and remains gated on CI re-running the `integration` job against this round's commit.
+
 ---
 
 ## 2. Acceptance Matrix & Requirement Mapping
@@ -100,7 +129,7 @@ Verification performed this round (this VM has no local PostgreSQL/Docker per th
 | `isolated_postgres_environment` | Fail-closed connectivity & hermetic isolation | Suite 1: Cases 1.1 & 1.2 | Per-run database creation (`uv_exec_024_*`), connection verification, zero production data access | **PASSED** |
 | `two_instance_crash_matrix_evidence` | Two instances, crashes before/after writes, response loss, runner race | Suite 2: Cases 2.1 – 2.7 | `uq_voice_command_receipt_action_key`, transactional rollback, idempotent replay, `raise_append_only` triggers | **PASSED** |
 | `mixed_dispatch_entry_evidence` | Stale revision invalidation, legacy entry fence, shared capacity mutual exclusion | Suite 3: Cases 3.1 – 3.3 | `voice.draft_revision`, `voice_order_fence`, `uq_dispatch_resource_reservations_active` (SQLSTATE 23505) | **PASSED** |
-| `callback_control_race_evidence` | Late timeout, callback race, handoff fence, control gap | Suite 4: Cases 4.1, 4.1b, 4.1c, 4.2 – 4.4 (18 total cases in the file) | `handleOfferTimeout` versioning (now checking `handleDispatchTimeout`'s `escalationAction` — see §1.5), `CALLBACK_TERMINAL_RACE_CONFLICT`, `lease_epoch` CAS, `last_applied_control_sequence` | **PENDING CI RE-VERIFICATION** (Cases 4.1b/4.1c added and a real `handleOfferTimeout` bug fixed this round per §1.5; F3's production-caller wiring is a documented open gap, see §1.5) |
+| `callback_control_race_evidence` | Late timeout, callback race, handoff fence, control gap | Suite 4: Cases 4.1, 4.1b, 4.1c, 4.2 – 4.4 (18 total cases in the file) | `handleOfferTimeout` versioning (now checking `handleDispatchTimeout`'s `escalationAction` — see §1.5), `CALLBACK_TERMINAL_RACE_CONFLICT`, `lease_epoch` CAS, `last_applied_control_sequence` | **PENDING CI RE-VERIFICATION** (§1.5 added Cases 4.1b/4.1c and fixed a real `handleOfferTimeout` bug; the first real-Postgres CI run then caught an incomplete fixture fix — missing `proofRequirements` — fixed in §1.6; F3's production-caller wiring remains a documented open gap, see §1.5) |
 | `reviewed_candidate_sha` | Independent review by assigned reviewer `Codex2` | Candidate handoff | SHA locked via `ai-status.sh handoff` for reviewer approval | **READY** |
 
 ### Detailed Functional Requirements (FR) & Acceptance Criteria (AC) Addressed
@@ -228,13 +257,13 @@ All 16 tests executed directly against PostgreSQL:
 
 - Worktree (this round): `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude2-uv-exec-024`, branch `claude2/uv-exec-024` (based on `dev`).
 - Branch: `claude2/uv-exec-024`
-- Owner this round: `Claude2` (fourth round; remediates the Codex2 rejection of locked SHA `3fd8371404ec2fd594a5b1af295eef9988f196f9` / PR #1885 — see §1.5).
+- Owner this round: `Claude2` (fifth round; remediates 3 real-Postgres CI test failures on candidate `19bfb7876fa6` / PR #1885 — see §1.6. §1.5's own four Codex2 P1 fixes remain otherwise unchanged this round).
 - Delivery Files:
-  - `tests/integration/unattended-voice-postgres.integration.test.ts` (F2 fixture fix; F4 new Cases 4.1b/4.1c)
+  - `tests/integration/unattended-voice-postgres.integration.test.ts` (§1.6: added the missing `proofRequirements` field to all four raw-SQL order seeds)
   - `docs/04-uat/unattended-voice-postgres-evidence.md`
-  - `.github/workflows/ci-integ.yml` (F1: dedicated isolated-DB CI step + evidence upload)
-  - `package.json` (F1: `test:unit` excludes this file from the generic, unconfigured run)
-  - `apps/api/src/modules/owned-mobility/owned-autonomous-dispatch-executor.service.ts` (F4: production fix — `handleOfferTimeout` now honors `handleDispatchTimeout`'s DB-authoritative `escalationAction: "superseded"` instead of discarding it)
-  - `apps/api/src/modules/voice-booking/voice-callback.service.ts` (F3: additive `createCallbackDurable`; production-caller wiring remains an open, documented gap)
+  - `.github/workflows/ci-integ.yml` (F1, §1.5: dedicated isolated-DB CI step + evidence upload)
+  - `package.json` (F1, §1.5: `test:unit` excludes this file from the generic, unconfigured run)
+  - `apps/api/src/modules/owned-mobility/owned-autonomous-dispatch-executor.service.ts` (F4, §1.5: production fix — `handleOfferTimeout` now honors `handleDispatchTimeout`'s DB-authoritative `escalationAction: "superseded"` instead of discarding it)
+  - `apps/api/src/modules/voice-booking/voice-callback.service.ts` (F3, §1.5: additive `createCallbackDurable`; production-caller wiring remains an open, documented gap)
 - Independent Reviewer: `Codex2`
 - Open item for reviewer judgment: F3's production-caller wiring is intentionally not done this round — §1.5 documents why (pre-existing consent-capture and `voice.session` linkage gap wider than this task's artifacts) and recommends a follow-up task rather than an unreviewed architectural bridge.
