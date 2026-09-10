@@ -1089,7 +1089,7 @@ export class RegulatoryRegistryRepository {
         updated_at
       )
       SELECT 
-        d.driver_id,
+        d.driver_id::text,
         dp.taxi_registration_no,
         NULL,
         NULL,
@@ -1103,8 +1103,8 @@ export class RegulatoryRegistryRepository {
         1,
         now()
       FROM reg.drivers d
-      LEFT JOIN reg.driver_reg_profiles dp ON d.driver_id = dp.driver_id
-      LEFT JOIN reg.driver_public_registration_credentials dc ON d.driver_id = dc.driver_id
+      LEFT JOIN reg.driver_reg_profiles dp ON d.driver_id::text = dp.driver_id
+      LEFT JOIN reg.driver_public_registration_credentials dc ON d.driver_id::text = dc.driver_id
       WHERE dc.driver_id IS NULL
       ON CONFLICT (driver_id) DO NOTHING;
     `);
