@@ -18,7 +18,6 @@ import { Tokens } from "@/components/ui/tokens";
 import {
   formatDriverError,
   getDriverClient,
-  isDriverIdentityProvisioned,
 } from "@/lib/api-client";
 import {
   CourseCard,

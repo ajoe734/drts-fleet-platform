@@ -4,8 +4,6 @@ import type {
   DriverQuizAttemptDetail,
   FleetDriverRosterItem,
   FleetTrainingSummaryRow,
-  FleetTrainingView,
-  TrainingStatus,
 } from "@drts/contracts";
 
 import { getServerFleetPartnerClient } from "./api-client.server";

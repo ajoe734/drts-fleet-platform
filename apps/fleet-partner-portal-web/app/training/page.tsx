@@ -1,6 +1,5 @@
 import Link from "next/link";
 import {
-  CanvasBtn,
   CanvasCard,
   CanvasKPI,
   CanvasPageHeader,
@@ -19,6 +18,7 @@ import { BiLabel, DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import type { TrainingStatus } from "@drts/contracts";
+import { mapTrainingStatusLabel, trTraining } from "./translations";
 
 export const dynamic = "force-dynamic";
 
@@ -48,23 +48,6 @@ function mapStatusToTone(status: TrainingStatus): CanvasPillTone {
   }
 }
 
-function mapStatusLabel(status: TrainingStatus): string {
-  switch (status) {
-    case "passed":
-      return "已完訓 (Passed)";
-    case "in_progress":
-      return "學習中 (In Progress)";
-    case "not_started":
-      return "未開始 (Not Started)";
-    case "failed":
-      return "未通過 (Failed)";
-    case "expired":
-      return "已逾期 (Expired)";
-    default:
-      return status;
-  }
-}
-
 export default async function FleetTrainingPage({ searchParams }: PageProps) {
   const params = searchParams ? await searchParams : {};
   const locale = await getServerLocale();
@@ -86,10 +69,10 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
       : null;
 
   const tabDefs = [
-    { id: "all", label: "全部學員", count: tabCounts.all },
-    { id: "completed", label: "已完訓", count: tabCounts.completed },
-    { id: "pending", label: "待完成", count: tabCounts.pending },
-    { id: "overdue", label: "逾期名單", count: tabCounts.overdue },
+    { id: "all", label: trTraining("tabAll", locale), count: tabCounts.all },
+    { id: "completed", label: trTraining("tabCompleted", locale), count: tabCounts.completed },
+    { id: "pending", label: trTraining("tabPending", locale), count: tabCounts.pending },
+    { id: "overdue", label: trTraining("tabOverdue", locale), count: tabCounts.overdue },
   ];
 
   return (
@@ -124,7 +107,8 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
               fontSize: 13,
             }}
           >
-            連線狀態提示：{error}
+            <span>{trTraining("connAlert", locale)}</span>
+            <span>{error}</span>
           </div>
         )}
 
@@ -166,7 +150,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                 textAlign: "center",
               }}
             >
-              目前尚無課程進度統計資料
+              {trTraining("noCourseStats", locale)}
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -227,7 +211,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
         {attemptDetail && (
           <CanvasCard
             theme={theme}
-            title="測驗作答證據下鑽 · Quiz Attempt Evidence Detail"
+            title={trTraining("attemptDetailTitle", locale)}
           >
             <div
               style={{
@@ -248,7 +232,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
               >
                 <div>
                   <span style={{ color: theme.textMuted, marginRight: 8 }}>
-                    學員編號：
+                    {trTraining("driverIdLabel", locale)}
                   </span>
                   <span
                     style={{
@@ -266,7 +250,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                       marginRight: 8,
                     }}
                   >
-                    歷程識別碼：
+                    {trTraining("attemptIdLabel", locale)}
                   </span>
                   <span
                     style={{
@@ -285,7 +269,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                     color: theme.accent,
                   }}
                 >
-                  關閉證據檢視 ✕
+                  {trTraining("closeEvidence", locale)}
                 </Link>
               </div>
 
@@ -297,13 +281,13 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                 }}
               >
                 <div>
-                  <span style={{ color: theme.textMuted }}>課程代碼：</span>
+                  <span style={{ color: theme.textMuted }}>{trTraining("courseCodeLabel", locale)}</span>
                   <span style={{ fontWeight: 600, marginLeft: 4 }}>
                     {attemptDetail.courseId} (v{attemptDetail.courseVersion})
                   </span>
                 </div>
                 <div>
-                  <span style={{ color: theme.textMuted }}>測驗成績：</span>
+                  <span style={{ color: theme.textMuted }}>{trTraining("quizScoreLabel", locale)}</span>
                   <span
                     style={{
                       fontWeight: 700,
@@ -312,20 +296,20 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                       color: attemptDetail.passed ? theme.success : theme.danger,
                     }}
                   >
-                    {attemptDetail.score} 分
+                    {attemptDetail.score} {trTraining("ptsSuffix", locale)}
                   </span>
                 </div>
                 <div>
-                  <span style={{ color: theme.textMuted }}>判定結果：</span>
+                  <span style={{ color: theme.textMuted }}>{trTraining("verdictLabel", locale)}</span>
                   <CanvasPill
                     theme={theme}
                     tone={attemptDetail.passed ? "success" : "danger"}
                   >
-                    {attemptDetail.passed ? "合格 (Passed)" : "未合格 (Failed)"}
+                    {attemptDetail.passed ? trTraining("passedVerdict", locale) : trTraining("failedVerdict", locale)}
                   </CanvasPill>
                 </div>
                 <div>
-                  <span style={{ color: theme.textMuted }}>測驗時間：</span>
+                  <span style={{ color: theme.textMuted }}>{trTraining("attemptTimeLabel", locale)}</span>
                   <span
                     style={{
                       fontFamily: theme.monoFamily,
@@ -348,7 +332,8 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                     fontSize: 12,
                   }}
                 >
-                  回饋建議：{attemptDetail.feedback}
+                  <span>{trTraining("feedbackLabel", locale)}</span>
+                  <span>{attemptDetail.feedback}</span>
                 </div>
               )}
 
@@ -364,7 +349,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                         marginBottom: 6,
                       }}
                     >
-                      作答明細檢驗：
+                      {trTraining("answersDetailLabel", locale)}
                     </div>
                     <div
                       style={{
@@ -403,13 +388,14 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                                 fontFamily: theme.monoFamily,
                               }}
                             >
-                              選答：{ans.selectedOptionId}
+                              <span>{trTraining("selectedOptionLabel", locale)}</span>
+                              <span>{ans.selectedOptionId}</span>
                             </span>
                             <CanvasPill
                               theme={theme}
                               tone={ans.isCorrect ? "success" : "danger"}
                             >
-                              {ans.isCorrect ? "正解" : "錯誤"}
+                              {ans.isCorrect ? trTraining("correctVerdict", locale) : trTraining("incorrectVerdict", locale)}
                             </CanvasPill>
                           </div>
                         </div>
@@ -424,7 +410,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
         {/* Real Driver Training Roster Card (C071 / N02) */}
         <CanvasCard
           theme={theme}
-          title="車行真實完訓名單 · Driver Training Roster"
+          title={trTraining("rosterTitle", locale)}
         >
           {/* Navigation Tabs */}
           <div
@@ -494,7 +480,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                 type="text"
                 name="q"
                 defaultValue={params.q ?? ""}
-                placeholder="搜尋姓名、編號或歷程 ID..."
+                placeholder={trTraining("searchPlaceholder", locale)}
                 style={{
                   padding: "6px 10px",
                   fontSize: 12,
@@ -518,7 +504,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                   cursor: "pointer",
                 }}
               >
-                搜尋
+                {trTraining("searchBtn", locale)}
               </button>
             </form>
           </div>
@@ -534,8 +520,8 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
               }}
             >
               {roster.length === 0
-                ? "目前尚無司機完訓名單資料"
-                : "無符合條件的司機完訓名單"}
+                ? trTraining("noRosterData", locale)
+                : trTraining("noRosterMatch", locale)}
             </div>
           ) : (
             <div style={{ overflowX: "auto" }}>
@@ -554,13 +540,13 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                       textAlign: "left",
                     }}
                   >
-                    <th style={{ padding: "8px 12px" }}>司機姓名 / 編號</th>
-                    <th style={{ padding: "8px 12px" }}>課程代碼</th>
-                    <th style={{ padding: "8px 12px" }}>完訓狀態</th>
-                    <th style={{ padding: "8px 12px" }}>成績</th>
-                    <th style={{ padding: "8px 12px" }}>完訓時間</th>
-                    <th style={{ padding: "8px 12px" }}>狀態標記</th>
-                    <th style={{ padding: "8px 12px" }}>作答歷程</th>
+                    <th style={{ padding: "8px 12px" }}>{trTraining("colDriver", locale)}</th>
+                    <th style={{ padding: "8px 12px" }}>{trTraining("colCourse", locale)}</th>
+                    <th style={{ padding: "8px 12px" }}>{trTraining("colStatus", locale)}</th>
+                    <th style={{ padding: "8px 12px" }}>{trTraining("colScore", locale)}</th>
+                    <th style={{ padding: "8px 12px" }}>{trTraining("colCompletedAt", locale)}</th>
+                    <th style={{ padding: "8px 12px" }}>{trTraining("colTag", locale)}</th>
+                    <th style={{ padding: "8px 12px" }}>{trTraining("colHistory", locale)}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -596,7 +582,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                           theme={theme}
                           tone={mapStatusToTone(item.status)}
                         >
-                          {mapStatusLabel(item.status)}
+                          {mapTrainingStatusLabel(item.status, locale)}
                         </CanvasPill>
                       </td>
                       <td
@@ -612,7 +598,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                                 : theme.textMuted,
                         }}
                       >
-                        {item.score !== null ? `${item.score} 分` : "—"}
+                        {item.score !== null ? `${item.score} ${trTraining("ptsSuffix", locale)}` : "—"}
                       </td>
                       <td
                         style={{
@@ -631,13 +617,13 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                       <td style={{ padding: "10px 12px" }}>
                         {item.isOverdue ? (
                           <CanvasPill theme={theme} tone="danger" dot>
-                            逾期重訓
+                            {trTraining("overdueRetrain", locale)}
                           </CanvasPill>
                         ) : (
                           <span
                             style={{ fontSize: 12, color: theme.textMuted }}
                           >
-                            正常
+                            {trTraining("statusNormal", locale)}
                           </span>
                         )}
                       </td>
@@ -656,7 +642,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                               fontFamily: theme.monoFamily,
                             }}
                           >
-                            檢視歷程 ↗
+                            {trTraining("viewHistory", locale)}
                           </Link>
                         ) : (
                           <span
@@ -665,7 +651,7 @@ export default async function FleetTrainingPage({ searchParams }: PageProps) {
                               color: theme.textMuted,
                             }}
                           >
-                            尚未測驗
+                            {trTraining("notAttempted", locale)}
                           </span>
                         )}
                       </td>

@@ -1,7 +1,7 @@
 # SR-ACADEMY-FE-001 — 司機學院與車行真實完訓看板
 
 - **任務識別碼**：`SR-ACADEMY-FE-001`
-- **負責角色**：Owner: `Gemini`；Reviewer: `Codex2`
+- **負責角色**：Owner: `Gemini2`；Reviewer: `Gemini`
 - **所屬階段**：`system-remediation-20260906` (P2 / Implementation)
 - **追溯來源**：
   - 問題來源：`N02`（學院、測驗、完訓證據未落地）
@@ -12,9 +12,9 @@
 
 ## 1. 執行環境與基準 (Environment & Baseline)
 
-- **工作分支 (Branch)**：`gemini/sr-academy-fe-001`
+- **工作分支 (Branch)**：`gemini2/sr-academy-fe-001`
 - **基準 SHA (Base SHA)**：`6a2b7dabf0eeefbe834164b4c731e84a273297a7` (`origin/dev`)
-- **工作樹路徑 (Worker Cwd)**：`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini-sr-academy-fe-001`
+- **工作樹路徑 (Worker Cwd)**：`/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/gemini2-sr-academy-fe-001`
 - **受控可寫入範圍 (Write Scopes)**：
   - `apps/driver-app/components/academy/`
   - `apps/driver-app/app/academy.tsx`
@@ -74,6 +74,8 @@
 | `pnpm --filter @drts/driver-app typecheck` | 0 | `@drts/driver-app` TypeScript 編譯檢查通過（無 emit 錯誤） |
 | `pnpm --filter @drts/fleet-partner-portal-web typecheck` | 0 | `@drts/fleet-partner-portal-web` TypeScript 編譯檢查通過（無 emit 錯誤） |
 | `pnpm exec vitest run tests/unit/system-remediation/sr-academy-fe-001/` | 0 | 11 個單元與整合測試全部通過 (100% passed) |
+| `pnpm run i18n:guard` | 0 | i18n-guard 檢查通過，抽離所有 inline 文字與屬性 (527 files scanned, 0 violations) |
+| `pnpm run lint` | 0 | 全庫 ESLint 靜態代碼檢查通過 (21 packages successful) |
 
 ### 測試項目涵蓋清單 (Vitest Suite)
 1. `loads live training summary and driver roster without using fake fixtures`

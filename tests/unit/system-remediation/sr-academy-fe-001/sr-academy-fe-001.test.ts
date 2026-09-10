@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock server-only
 vi.mock("server-only", () => ({}));
@@ -33,7 +33,6 @@ vi.mock(
 import {
   computeRosterTabCounts,
   filterRosterByTab,
-  isConfigError,
   loadFleetDriverQuizAttempt,
   loadFleetTraining,
   scopeRosterRows,
@@ -41,14 +40,10 @@ import {
 
 import type {
   AcademyCourseDetail,
-  AcademyCourseSummary,
   DriverQuizAttemptDetail,
-  DriverTrainingRecord,
   FleetDriverRosterItem,
-  FleetTrainingSummaryRow,
   FleetTrainingView,
   QuizResultRecord,
-  QuizSubmissionCommand,
 } from "@drts/contracts";
 
 describe("SR-ACADEMY-FE-001: Driver Academy & Fleet Authoritative Training Board", () => {
@@ -137,8 +132,8 @@ describe("SR-ACADEMY-FE-001: Driver Academy & Fleet Authoritative Training Board
       expect(result.summary.overdueIncomplete).toBe(3);
       expect(result.rows).toHaveLength(2);
       expect(result.roster).toHaveLength(3);
-      expect(result.roster[0].driverName).toBe("張駕駛");
-      expect(result.roster[0].score).toBe(90);
+      expect(result.roster[0]!.driverName).toBe("張駕駛");
+      expect(result.roster[0]!.score).toBe(90);
     });
 
     it("handles legitimate empty data correctly as live zero state", async () => {
@@ -289,7 +284,7 @@ describe("SR-ACADEMY-FE-001: Driver Academy & Fleet Authoritative Training Board
     it("filters roster by tab: completed, pending, overdue", () => {
       const completed = filterRosterByTab(sampleRoster, "completed");
       expect(completed).toHaveLength(1);
-      expect(completed[0].driverId).toBe("drv_001");
+      expect(completed[0]!.driverId).toBe("drv_001");
 
       const pending = filterRosterByTab(sampleRoster, "pending");
       expect(pending).toHaveLength(2);
@@ -297,7 +292,7 @@ describe("SR-ACADEMY-FE-001: Driver Academy & Fleet Authoritative Training Board
 
       const overdue = filterRosterByTab(sampleRoster, "overdue");
       expect(overdue).toHaveLength(1);
-      expect(overdue[0].driverId).toBe("drv_004");
+      expect(overdue[0]!.driverId).toBe("drv_004");
 
       const all = filterRosterByTab(sampleRoster, "all");
       expect(all).toHaveLength(4);
@@ -306,15 +301,15 @@ describe("SR-ACADEMY-FE-001: Driver Academy & Fleet Authoritative Training Board
     it("scopes roster rows by query text and course code", () => {
       const byName = scopeRosterRows(sampleRoster, { q: "陳俊宏" });
       expect(byName).toHaveLength(1);
-      expect(byName[0].driverId).toBe("drv_002");
+      expect(byName[0]!.driverId).toBe("drv_002");
 
       const byAttempt = scopeRosterRows(sampleRoster, { q: "att_103" });
       expect(byAttempt).toHaveLength(1);
-      expect(byAttempt[0].driverId).toBe("drv_003");
+      expect(byAttempt[0]!.driverId).toBe("drv_003");
 
       const byCourse = scopeRosterRows(sampleRoster, { course: "SAFE-201" });
       expect(byCourse).toHaveLength(1);
-      expect(byCourse[0].driverId).toBe("drv_002");
+      expect(byCourse[0]!.driverId).toBe("drv_002");
     });
   });
 
