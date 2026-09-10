@@ -1,5 +1,16 @@
 export type Locale = "en" | "zh";
 
+/**
+ * Compatibility label for callers without the server-provided environment.
+ * Translation catalogs never read deployment/build variables. The server
+ * layout supplies normalized DRTS_ENV to the shell for its explicit label.
+ */
+export function resolveAuthoritativeEnterpriseShellEnv(
+  locale: Locale = "zh",
+): string {
+  return locale === "zh" ? "未知環境" : "unknown";
+}
+
 type Params = Record<string, string | number>;
 
 const en = {
@@ -39,7 +50,23 @@ const en = {
   "shell.health.healthy": "API healthy",
   "shell.health.degraded": "API degraded",
   "shell.health.down": "API down",
+  "shell.health.unknown": "API unknown",
   "shell.health.lastChecked": "last checked",
+  "shell.env": resolveAuthoritativeEnterpriseShellEnv("en"),
+  "shell.env.production": "production",
+  "shell.env.staging": "staging",
+  "shell.env.preview": "preview",
+  "shell.env.sandbox": "sandbox",
+  "shell.env.dev": "development",
+  "shell.env.mock": "mock data",
+  "shell.env.unknown": "unknown",
+  "app.environment.production": "production",
+  "app.environment.staging": "staging",
+  "app.environment.preview": "preview",
+  "app.environment.sandbox": "sandbox",
+  "app.environment.dev": "development",
+  "app.environment.mock": "mock data",
+  "app.environment.unknown": "unknown",
   "shell.language.switch": "Switch language",
   "shell.language.en": "English",
   "shell.language.zh": "繁體中文",
@@ -651,7 +678,23 @@ const zh: Record<TranslationKey, string> = {
   "shell.health.healthy": "API 正常",
   "shell.health.degraded": "API 降級",
   "shell.health.down": "API 中斷",
+  "shell.health.unknown": "API 未知",
   "shell.health.lastChecked": "最近檢查",
+  "shell.env": resolveAuthoritativeEnterpriseShellEnv("zh"),
+  "shell.env.production": "正式環境",
+  "shell.env.staging": "預發環境",
+  "shell.env.preview": "預覽環境",
+  "shell.env.sandbox": "沙盒環境",
+  "shell.env.dev": "開發環境",
+  "shell.env.mock": "模擬資料",
+  "shell.env.unknown": "未知環境",
+  "app.environment.production": "正式環境",
+  "app.environment.staging": "預發環境",
+  "app.environment.preview": "預覽環境",
+  "app.environment.sandbox": "沙盒環境",
+  "app.environment.dev": "開發環境",
+  "app.environment.mock": "模擬資料",
+  "app.environment.unknown": "未知環境",
   "shell.language.switch": "切換語言",
   "shell.language.en": "English",
   "shell.language.zh": "繁體中文",
@@ -1182,6 +1225,9 @@ export function t(
   params?: Params,
   locale: Locale = "zh",
 ): string {
+  if (key === "shell.env") {
+    return resolveAuthoritativeEnterpriseShellEnv(locale);
+  }
   const template = translations[locale][key] ?? translations.zh[key] ?? key;
   if (!params) {
     return template;
