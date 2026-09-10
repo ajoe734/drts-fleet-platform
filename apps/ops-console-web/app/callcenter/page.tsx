@@ -8,6 +8,7 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -79,6 +80,15 @@ import {
   type ExtendedCallSessionRecord,
   type ExtendedCallbackTaskRecord,
 } from "./callcenter-ai-exceptions";
+import {
+  deriveCohortMetricsPresentation,
+  deriveCallbackSlaPresentation,
+  buildDefaultVoiceObservationWindow,
+  loadVoiceCohortAndUsage,
+  type UiCohortMetricsView,
+  type UiCostLedgerItem,
+  type VoiceMetricsSectionStatus,
+} from "./callcenter-metrics-ledger";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -732,6 +742,44 @@ function buildFallbackHealth(errorMessage: string | null): UiHealthEnvelope {
   };
 }
 
+function appendVoiceMetricsHealthDegradation(
+  health: UiHealthEnvelope,
+  metricsResult: {
+    cohortStatus: VoiceMetricsSectionStatus;
+    usageStatus: VoiceMetricsSectionStatus;
+    cohortErrorMessage: string | null;
+    usageErrorMessage: string | null;
+  },
+): UiHealthEnvelope {
+  const degradations: UiHealthEnvelope["degradedServices"] = [];
+  if (metricsResult.cohortStatus !== "fresh") {
+    degradations.push({
+      service: "voice-cohort-metrics",
+      impact: metricsResult.cohortErrorMessage ?? "cohort metrics unavailable",
+      severity:
+        metricsResult.cohortStatus === "unavailable" ? "critical" : "warning",
+    });
+  }
+  if (metricsResult.usageStatus !== "fresh") {
+    degradations.push({
+      service: "voice-usage-ledger",
+      impact: metricsResult.usageErrorMessage ?? "usage ledger unavailable",
+      severity:
+        metricsResult.usageStatus === "unavailable" ? "critical" : "warning",
+    });
+  }
+
+  if (degradations.length === 0) {
+    return health;
+  }
+
+  return {
+    ...health,
+    status: "degraded",
+    degradedServices: [...health.degradedServices, ...degradations],
+  };
+}
+
 function buildWorkspaceAction(
   hasActiveSession: boolean,
 ): ResourceActionDescriptor {
@@ -1063,6 +1111,19 @@ export default function CallcenterPage() {
   const [outcomeNotice, setOutcomeNotice] = useState<OutcomeNotice | null>(
     null,
   );
+  const [usageRecords, setUsageRecords] = useState<UiCostLedgerItem[]>([]);
+  const [serverCohort, setServerCohort] = useState<UiCohortMetricsView | null>(null);
+  const [cohortStatus, setCohortStatus] =
+    useState<VoiceMetricsSectionStatus>("unavailable");
+  const [usageStatus, setUsageStatus] =
+    useState<VoiceMetricsSectionStatus>("unavailable");
+  const [cohortErrorMessage, setCohortErrorMessage] = useState<string | null>(
+    null,
+  );
+  const [usageErrorMessage, setUsageErrorMessage] = useState<string | null>(
+    null,
+  );
+  const loadRequestSeqRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [queueView, setQueueView] = useState<QueueView>("sessions");
@@ -1353,6 +1414,112 @@ export default function CallcenterPage() {
     (session) => session.linkedCaseNo,
   ).length;
 
+  const callbackSlaSummary = useMemo(() => {
+    const total = callbacks.length;
+    const completed = callbacks.filter((c) => c.status === "completed").length;
+    const breached = callbacks.filter(
+      (c) => c.status === "pending" && c.dueAt && Date.now() > new Date(c.dueAt).getTime(),
+    ).length;
+    const completedWithContact = callbacks.filter(
+      (c) => c.status === "completed" && c.updatedAt && c.createdAt,
+    );
+    const averageFirstContactSeconds =
+      completedWithContact.length > 0
+        ? completedWithContact.reduce((sum, c) => {
+            const diff =
+              (new Date(c.updatedAt).getTime() - new Date(c.createdAt).getTime()) /
+              1000;
+            return sum + Math.max(0, diff);
+          }, 0) / completedWithContact.length
+        : undefined;
+
+    return deriveCallbackSlaPresentation({
+      totalCallbacks: total,
+      completedCount: completed,
+      breachedCount: breached,
+      averageFirstContactSeconds,
+    });
+  }, [callbacks]);
+
+  const cohortMetrics = useMemo(() => {
+    if (serverCohort) {
+      return serverCohort;
+    }
+    const total = sessions.length;
+    const ai = sessions.filter(isNormalAiCallSession);
+    const validSessions = ai.filter((s) => {
+      const ext = s as ExtendedCallSessionRecord;
+      return (
+        (s.linkedOrderId !== null && s.linkedOrderId !== undefined) ||
+        ext.aiMetadata?.step === "booking" ||
+        ext.aiMetadata?.step === "dispatched" ||
+        ext.aiMetadata?.step === "completed" ||
+        Boolean(
+          ext.aiMetadata?.confirmedData?.confirmedPickup &&
+            ext.aiMetadata?.confirmedData?.confirmedDropoff,
+        )
+      );
+    });
+    const valid = validSessions.length;
+    const dispatched = ai.filter((s) => {
+      const ext = s as ExtendedCallSessionRecord;
+      return (
+        ext.aiMetadata?.dispatchState === "accepted" ||
+        ext.aiMetadata?.dispatchState === "arrived"
+      );
+    }).length;
+
+    const transferCalls = sessions.filter((s) => {
+      const ext = s as ExtendedCallSessionRecord;
+      return (
+        s.callType === "complaint" ||
+        ext.aiMetadata?.controlOwner === "human_operator" ||
+        ext.aiMetadata?.controlOwner === "human_queue" ||
+        ext.aiMetadata?.step === "handed_off"
+      );
+    }).length;
+
+    const errorBookings = sessions.filter((s) => {
+      const ext = s as ExtendedCallSessionRecord;
+      return (
+        Boolean(ext.aiMetadata?.hasException) &&
+        (ext.aiMetadata?.exceptionDetails?.category ===
+          "command_pending_reconciliation" ||
+          ext.aiMetadata?.exceptionDetails?.category ===
+            "recording_checkpoint_failed")
+      );
+    }).length;
+
+    const totalCostTwd = usageRecords.reduce(
+      (sum, u) => sum + (u.actualCost ?? u.estimatedCost ?? 0),
+      0,
+    );
+
+    const isWindowClosed =
+      sessions.length > 0 &&
+      sessions.every(
+        (s) =>
+          s.status === "closed" &&
+          (!s.endedAt ||
+            Date.now() - new Date(s.endedAt).getTime() > 15 * 60 * 1000),
+      );
+
+    return deriveCohortMetricsPresentation({
+      windowStart: new Date(Date.now() - 86400000).toISOString(),
+      windowEnd: new Date().toISOString(),
+      observationWindowClosed: isWindowClosed,
+      totalRealIngress: total,
+      callsEnteredAi: ai.length,
+      expressedBookingIntent: Math.max(valid, ai.length),
+      validBookingIntakes: valid,
+      immediateDispatchOrders: Math.max(dispatched, valid),
+      driverAcceptedOrders: dispatched,
+      transferCalls,
+      errorBookings,
+      totalCostTwd,
+    });
+  }, [sessions, serverCohort, usageRecords]);
+
   useEffect(() => {
     setOrderForm(INITIAL_ORDER_FORM);
     setPickupAddress(null);
@@ -1488,23 +1655,46 @@ export default function CallcenterPage() {
       setLoading(true);
     }
 
+    const requestSeq = ++loadRequestSeqRef.current;
+
     try {
       const client = getOpsClient();
-      const [nextSessionsEnvelope, nextCallbacksEnvelope] = await Promise.all([
-        client.get<CallcenterListEnvelope<RuntimeSessionRecord>>(
-          "/api/callcenter/sessions",
-        ),
-        client.get<CallcenterListEnvelope<RuntimeCallbackRecord>>(
-          "/api/callcenter/callbacks",
-        ),
-      ]);
+      const [nextSessionsEnvelope, nextCallbacksEnvelope, metricsResult] =
+        await Promise.all([
+          client.get<CallcenterListEnvelope<RuntimeSessionRecord>>(
+            "/api/callcenter/sessions",
+          ),
+          client.get<CallcenterListEnvelope<RuntimeCallbackRecord>>(
+            "/api/callcenter/callbacks",
+          ),
+          loadVoiceCohortAndUsage(
+            client,
+            buildDefaultVoiceObservationWindow(),
+            {},
+            { serverCohort, usageRecords },
+          ),
+        ]);
+
+      if (requestSeq !== loadRequestSeqRef.current) {
+        // A newer refresh already started; this response is stale, drop it.
+        return;
+      }
 
       const nextSessions = nextSessionsEnvelope.items ?? [];
       const nextCallbacks = nextCallbacksEnvelope.items ?? [];
-      const nextHealth =
+      const nextHealth = appendVoiceMetricsHealthDegradation(
         nextSessionsEnvelope.health ??
-        nextCallbacksEnvelope.health ??
-        buildFallbackHealth(null);
+          nextCallbacksEnvelope.health ??
+          buildFallbackHealth(null),
+        metricsResult,
+      );
+
+      setServerCohort(metricsResult.serverCohort);
+      setUsageRecords(metricsResult.usageRecords);
+      setCohortStatus(metricsResult.cohortStatus);
+      setUsageStatus(metricsResult.usageStatus);
+      setCohortErrorMessage(metricsResult.cohortErrorMessage);
+      setUsageErrorMessage(metricsResult.usageErrorMessage);
 
       setSessions(nextSessions);
       setCallbacks(nextCallbacks);
@@ -1535,13 +1725,18 @@ export default function CallcenterPage() {
         null;
       setSelectedCallId(fallbackSelection);
     } catch (nextError) {
+      if (requestSeq !== loadRequestSeqRef.current) {
+        return;
+      }
       const message = resolveErrorMessage(nextError);
       setError(message);
       setSessionRefresh(buildFallbackRefreshMetadata("degraded"));
       setCallbackRefresh(buildFallbackRefreshMetadata("degraded"));
       setHealth(buildFallbackHealth(message));
+      setCohortStatus(serverCohort ? "stale" : "unavailable");
+      setUsageStatus(usageRecords.length > 0 ? "stale" : "unavailable");
     } finally {
-      if (!silent) {
+      if (requestSeq === loadRequestSeqRef.current && !silent) {
         setLoading(false);
       }
     }
@@ -1913,6 +2108,26 @@ export default function CallcenterPage() {
               label={t("callcenter.kpi.complaintTransfers")}
               value={String(complaintTransferCount)}
             />
+            <CanvasKPI
+              theme={theme}
+              label="AI 叫車受理率"
+              value={cohortMetrics.effectiveIntakeRateFormatted}
+            />
+            <CanvasKPI
+              theme={theme}
+              label="司機派車完成率"
+              value={cohortMetrics.dispatchRateFormatted}
+            />
+            <CanvasKPI
+              theme={theme}
+              label="回撥 SLA 達成率"
+              value={callbackSlaSummary.complianceRateFormatted}
+            />
+            <CanvasKPI
+              theme={theme}
+              label="每筆有效受理成本"
+              value={cohortMetrics.costPerEffectiveIntakeFormatted}
+            />
           </div>
           <div style={formGridStyle}>
             <CanvasField theme={theme} label={t("callcenter.search")}>
@@ -1991,6 +2206,28 @@ export default function CallcenterPage() {
             icon="warn"
             title={t("common.error")}
             body={error}
+          />
+        ) : null}
+
+        {cohortStatus !== "fresh" ? (
+          <CanvasBanner
+            theme={theme}
+            tone={cohortStatus === "unavailable" ? "danger" : "warn"}
+            icon="warn"
+            title={t("callcenter.metrics.cohortStale.title")}
+            body={
+              cohortErrorMessage ?? t("callcenter.metrics.cohortStale.body")
+            }
+          />
+        ) : null}
+
+        {usageStatus !== "fresh" ? (
+          <CanvasBanner
+            theme={theme}
+            tone={usageStatus === "unavailable" ? "danger" : "warn"}
+            icon="warn"
+            title={t("callcenter.metrics.usageStale.title")}
+            body={usageErrorMessage ?? t("callcenter.metrics.usageStale.body")}
           />
         ) : null}
 
@@ -3580,7 +3817,21 @@ export default function CallcenterPage() {
               title={t("callcenter.callbackQueue.title")}
               subtitle={t("callcenter.callbackQueue.subtitle")}
               actions={
-                <CanvasPill theme={theme}>{pendingCallbacks.length}</CanvasPill>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <CanvasPill
+                    theme={theme}
+                    tone={
+                      callbackSlaSummary.statusTone === "danger"
+                        ? "danger"
+                        : callbackSlaSummary.statusTone === "warning"
+                          ? "warn"
+                          : "neutral"
+                    }
+                  >
+                    SLA {callbackSlaSummary.complianceRateFormatted}
+                  </CanvasPill>
+                  <CanvasPill theme={theme}>{pendingCallbacks.length}</CanvasPill>
+                </div>
               }
               padding={0}
             >

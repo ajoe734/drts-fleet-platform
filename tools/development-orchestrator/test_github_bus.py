@@ -786,6 +786,147 @@ class GitHubBusLabelTests(unittest.TestCase):
         self.assertFalse(repaired)
 
 
+
+class WorkflowRunProvenanceTests(unittest.TestCase):
+    HEAD = "a" * 40
+    BRANCH = "claude/acceptance"
+
+    def run_record(self, run_id, **updates):
+        record = {"id": run_id, "workflow_id": 7, "event": "pull_request",
+                  "head_branch": self.BRANCH, "head_sha": self.HEAD,
+                  "pull_requests": [{"number": 1916}],
+                  "created_at": f"2026-09-10T14:0{run_id}:00Z",
+                  "status": "completed", "conclusion": "success",
+                  "html_url": f"https://github.com/example/repo/actions/runs/{run_id}"}
+        record.update(updates)
+        return record
+
+    def check(self, run_id, name, **updates):
+        check = {"workflowName": "CI", "name": name, "status": "COMPLETED",
+                 "conclusion": "SUCCESS", "startedAt": f"2026-09-10T14:0{run_id}:01Z",
+                 "detailsUrl": f"https://github.com/example/repo/actions/runs/{run_id}/job/{run_id * 10}"}
+        check.update(updates)
+        return check
+
+    def observation(self):
+        # The replacement aggregate job has no CheckRun yet. Its earlier jobs
+        # have passed, while the canceled run's aggregate reported FAILURE.
+        return {"state": "OPEN", "headRefOid": self.HEAD, "headRefName": self.BRANCH,
+                "statusCheckRollup": [self.check(1, "Smoke acceptance", conclusion="FAILURE"),
+                                      self.check(2, "Change scope")],
+                "workflowRuns": [self.run_record(1, conclusion="cancelled"),
+                                 self.run_record(2, status="in_progress", conclusion=None)]}
+
+    def test_old_cancelled_aggregate_does_not_outvote_live_replacement(self):
+        self.assertEqual(github_bus.candidate_ci_status(self.observation())[0], "running")
+
+    def test_completed_replacement_can_prove_success(self):
+        observation = self.observation()
+        observation["workflowRuns"][1] = self.run_record(2)
+        self.assertEqual(github_bus.candidate_ci_status(observation)[0], "success")
+
+    def test_new_workflow_must_finish_even_when_all_visible_jobs_passed(self):
+        observation = self.observation()
+        observation["statusCheckRollup"] = [self.check(2, "Change scope")]
+        self.assertEqual(github_bus.candidate_ci_status(observation)[0], "running")
+
+    def test_latest_workflow_failure_is_not_masked(self):
+        observation = self.observation()
+        observation["workflowRuns"][1] = self.run_record(2, conclusion="failure")
+        self.assertEqual(github_bus.candidate_ci_status(observation)[0], "failure")
+
+    def test_latest_job_failure_is_not_masked_by_successful_run_metadata(self):
+        observation = self.observation()
+        observation["workflowRuns"][1] = self.run_record(2)
+        observation["statusCheckRollup"].append(self.check(2, "unit", conclusion="FAILURE"))
+        self.assertEqual(github_bus.candidate_ci_status(observation)[0], "failure")
+
+    def test_old_late_starting_aggregate_does_not_select_old_workflow(self):
+        observation = self.observation()
+        observation["statusCheckRollup"][0]["startedAt"] = "2026-09-10T14:09:00Z"
+        self.assertEqual(github_bus.candidate_ci_status(observation)[0], "running")
+
+    def test_other_workflow_or_event_or_pr_cannot_be_superseded(self):
+        for updates in ({"workflow_id": 8}, {"event": "workflow_dispatch"},
+                        {"pull_requests": [{"number": 1917}]}):
+            with self.subTest(updates=updates):
+                observation = self.observation()
+                observation["workflowRuns"][1] = self.run_record(2, **updates)
+                self.assertEqual(github_bus.candidate_ci_status(observation)[0], "failure")
+
+    def test_distinct_context_checks_are_not_collapsed_by_same_job_name(self):
+        observation = self.observation()
+        observation["workflowRuns"] = [self.run_record(1), self.run_record(2, event="workflow_dispatch")]
+        observation["statusCheckRollup"][1] = self.check(2, "Smoke acceptance")
+        self.assertEqual(github_bus.candidate_ci_status(observation)[0], "failure")
+
+    def test_same_run_rerun_uses_latest_attempt_job(self):
+        observation = self.observation()
+        observation["workflowRuns"][1] = self.run_record(2, run_attempt=2)
+        observation["statusCheckRollup"].extend([
+            self.check(2, "unit", conclusion="FAILURE", startedAt="2026-09-10T14:02:02Z"),
+            self.check(2, "unit", startedAt="2026-09-10T14:03:02Z"),
+        ])
+        self.assertEqual(github_bus.candidate_ci_status(observation)[0], "success")
+
+    def test_missing_or_foreign_provenance_never_proves_pass(self):
+        mutations = [lambda o: o.update(workflowRuns=[]),
+                     lambda o: o.update(workflowRunLookupFailed=True),
+                     lambda o: o["workflowRuns"][1].update(head_sha="b" * 40),
+                     lambda o: o["workflowRuns"][1].update(head_branch="other"),
+                     lambda o: o["workflowRuns"][1].update(pull_requests=None),
+                     lambda o: o["workflowRuns"][1].update(created_at="bad"),
+                     lambda o: o["workflowRuns"][1].update(status="completed", conclusion="unknown")]
+        for mutate in mutations:
+            observation = self.observation()
+            mutate(observation)
+            with self.subTest(observation=observation):
+                self.assertEqual(github_bus.candidate_ci_status(observation)[0], "running")
+
+    def test_non_actions_failure_is_preserved(self):
+        observation = self.observation()
+        observation["workflowRuns"][1] = self.run_record(2)
+        observation["statusCheckRollup"].append({"name": "external", "status": "COMPLETED",
+            "conclusion": "FAILURE", "detailsUrl": "https://ci.example.invalid/check/1"})
+        self.assertEqual(github_bus.candidate_ci_status(observation)[0], "failure")
+
+    def test_metadata_fetch_once_for_actions_and_uses_exact_head(self):
+        observation = self.observation()
+        runs = observation.pop("workflowRuns")
+        with mock.patch.object(github_bus, "gh_json", side_effect=[observation, [{"workflow_runs": runs}]]) as gh:
+            result = github_bus.candidate_pr_observation("example/repo", 1916)
+        self.assertEqual(result["workflowRuns"], runs)
+        self.assertEqual(gh.call_count, 2)
+        self.assertEqual(gh.call_args.args[0], ["api", f"repos/example/repo/actions/runs?head_sha={self.HEAD}&per_page=100", "--paginate", "--slurp"])
+        with mock.patch.object(github_bus, "gh_json", return_value={"state": "OPEN", "statusCheckRollup": [{"name": "external", "detailsUrl": "https://ci.example.invalid/1"}]}) as gh:
+            github_bus.candidate_pr_observation("example/repo", 1916)
+        self.assertEqual(gh.call_count, 1)
+
+    def test_unobserved_new_run_still_blocks_old_success(self):
+        observation = self.observation()
+        observation["statusCheckRollup"] = [self.check(1, "unit")]
+        observation["workflowRuns"][0] = self.run_record(1)
+        self.assertEqual(github_bus.candidate_ci_status(observation)[0], "running")
+
+    def test_unobserved_new_run_failure_is_not_masked(self):
+        observation = self.observation()
+        observation["statusCheckRollup"] = [self.check(1, "unit")]
+        observation["workflowRuns"][0] = self.run_record(1)
+        observation["workflowRuns"][1] = self.run_record(2, conclusion="failure")
+        self.assertEqual(github_bus.candidate_ci_status(observation)[0], "failure")
+
+    def test_conflicting_duplicate_metadata_stays_pending(self):
+        observation = self.observation()
+        observation["workflowRuns"].append(self.run_record(2))
+        self.assertEqual(github_bus.candidate_ci_status(observation)[0], "running")
+
+    def test_metadata_lookup_failure_stays_pending(self):
+        observation = self.observation()
+        observation.pop("workflowRuns")
+        with mock.patch.object(github_bus, "gh_json", side_effect=[observation, github_bus.GitHubBusError("unavailable")]):
+            result = github_bus.candidate_pr_observation("example/repo", 1916)
+        self.assertEqual(github_bus.candidate_ci_status(result)[0], "running")
+
 if __name__ == "__main__":
     unittest.main()
 

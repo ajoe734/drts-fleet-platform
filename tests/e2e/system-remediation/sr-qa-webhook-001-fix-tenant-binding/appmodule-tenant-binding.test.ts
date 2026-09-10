@@ -127,6 +127,11 @@ const { AuditNotificationService } = apiRequire(
 ) as {
   AuditNotificationService: typeof AuditNotificationServiceType;
 };
+const { getTenantRoleScopes } = apiRequire(
+  "./dist/common/auth/auth.constants.js",
+) as {
+  getTenantRoleScopes: (roleCode: string) => readonly string[] | null;
+};
 
 // Ordinary unit/smoke jobs expose an unmigrated shared DATABASE_URL.
 // Acceptance must explicitly select a migrated, dedicated test database.
@@ -279,8 +284,70 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
         await app.init();
         const victimTenantId = `qa-victim-${randomUUID()}`;
         const otherTenantId = `qa-other-${randomUUID()}`;
-        const victimPrincipalId = `qa-victim-principal-${randomUUID()}`;
-        const otherPrincipalId = `qa-other-principal-${randomUUID()}`;
+
+        // JwtAuthService.validateDurableState's "tenant" realm branch (see
+        // jwt-auth.service.ts) rejects any session whose principal does not
+        // resolve to an active TenantPartnerService tenant user with matching
+        // role-derived scopes and updatedAt-based tokenVersion. Seed real
+        // tenant users through the authoritative service/repository (not a
+        // mock) so the sessions issued below are durable-state valid, the way
+        // a production tenant admin session actually is. The identity used to
+        // perform this seeding is a system bootstrap actor, not a forged
+        // tenant identity and not a bypass of any auth check.
+        const bootstrapIdentity = {
+          actorType: "system" as const,
+          actorId: "qa-tenant-binding-harness-bootstrap",
+          realm: "system" as const,
+          authMode: "bootstrap_headers" as const,
+          roleFamilies: ["platform" as const],
+          roles: [],
+          scopes: [],
+          tenantId: null,
+        };
+
+        // iam.identity_invitations.issuer_principal_id has a real FK to
+        // iam.identity_principals, so the bootstrap actor must already be a
+        // registered principal before it can issue the tenant invitations
+        // created inside seedActiveTenantAdmin below. Establish that
+        // principal record the same authoritative way the tenant sessions
+        // below do (JwtAuthService.issueSessionToken with
+        // ensurePrincipal: true), not by writing to the table directly.
+        await jwt.issueSessionToken(bootstrapIdentity, {
+          principalId: bootstrapIdentity.actorId,
+          subject: `system:${bootstrapIdentity.actorId}`,
+          ensurePrincipal: true,
+          sessionId: `sid-bootstrap-${randomUUID()}`,
+          authTime: new Date().toISOString(),
+        });
+
+        const seedActiveTenantAdmin = async (
+          tenantId: string,
+          label: string,
+        ) => {
+          const created = await service.createTenantUser(
+            tenantId,
+            {
+              email: `${label}-${randomUUID()}@qa-tenant-binding.example`,
+              displayName: `QA ${label} Admin`,
+              roleCode: "tenant_admin",
+            },
+            `req-qa-${label}-seed-${randomUUID()}`,
+            bootstrapIdentity,
+          );
+          await service.updateTenantUserRole(
+            tenantId,
+            created.userId,
+            { roleCode: "tenant_admin", status: "active" },
+            `req-qa-${label}-activate-${randomUUID()}`,
+            bootstrapIdentity,
+          );
+          return service.findTenantUser(tenantId, created.userId)!;
+        };
+
+        const victimUser = await seedActiveTenantAdmin(victimTenantId, "victim");
+        const otherUser = await seedActiveTenantAdmin(otherTenantId, "other");
+        const victimPrincipalId = victimUser.userId;
+        const otherPrincipalId = otherUser.userId;
 
         // 2. Issue authentic sessions with trusted MFA fixtures
         const now = new Date().toISOString();
@@ -296,8 +363,9 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
             realm: "tenant",
             tenantId: victimTenantId,
             roleFamilies: ["tenant"],
-            roles: ["tenant_admin"],
-            scopes: ["tenant:read", "tenant:write"],
+            roles: [victimUser.roleCode],
+            scopes: [...getTenantRoleScopes(victimUser.roleCode)!],
+            tokenVersion: Date.parse(victimUser.updatedAt),
             requestId: null,
             sessionId: victimSessionId,
             authTime: now,
@@ -324,8 +392,9 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
             realm: "tenant",
             tenantId: otherTenantId,
             roleFamilies: ["tenant"],
-            roles: ["tenant_admin"],
-            scopes: ["tenant:read", "tenant:write"],
+            roles: [otherUser.roleCode],
+            scopes: [...getTenantRoleScopes(otherUser.roleCode)!],
+            tokenVersion: Date.parse(otherUser.updatedAt),
             requestId: null,
             sessionId: otherSessionId,
             authTime: now,
@@ -528,6 +597,36 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
           rotated.api_key?.api_key_id ?? rotated.apiKey?.apiKeyId;
         expect(rotatedId).toBeDefined();
 
+        // Verify intermediate lifecycle state right after rotation, before
+        // the new key's own explicit revoke below: the newly issued key is
+        // live, the rotated-from key holds its overlap window, and rotation
+        // legitimately retires every other still-live credential on this
+        // tenant (the pre-existing victim key from the attack phase) under
+        // the single-live-credential rotation policy in
+        // TenantPartnerService#rotateApiKey. This is a distinct, later,
+        // same-tenant mutation and does not affect the attack-phase
+        // immutability already proven by `dbStateAfterAttacks` above.
+        const stateAfterRotate = (
+          await repository.loadState()
+        ).apiKeys.filter(
+          (k: StoredTenantApiKeyRecord) => k.tenantId === victimTenantId,
+        );
+        const rotatedKeyAfterRotate = stateAfterRotate.find(
+          (k: StoredTenantApiKeyRecord) => k.apiKeyId === rotatedId,
+        );
+        expect(rotatedKeyAfterRotate?.status).toBe("active");
+        expect(rotatedKeyAfterRotate?.revokedAt).toBeNull();
+        const createdKeyAfterRotate = stateAfterRotate.find(
+          (k: StoredTenantApiKeyRecord) => k.apiKeyId === createdId,
+        );
+        expect(createdKeyAfterRotate?.status).toBe("overlap_active");
+        const victimKeyAfterRotate = stateAfterRotate.find(
+          (k: StoredTenantApiKeyRecord) => k.apiKeyId === victimKeyId,
+        );
+        expect(victimKeyAfterRotate?.status).toBe("revoked");
+        expect(victimKeyAfterRotate?.revokeReason).toBe("credential_rotated");
+        expect(victimKeyAfterRotate?.revokedAt).not.toBeNull();
+
         await postWithProof(`/${rotatedId}/revoke`, {});
 
         // Verify SQL persistence and record state (active, overlap_active, revoked)
@@ -554,8 +653,14 @@ describe("SR-QA-WEBHOOK-001-FIX-TENANT-BINDING: Full AppModule / PG E2E Harness"
 
         const initialRow = rowMap.get(victimKeyId)!;
         const initialRecord = initialRow.record;
-        expect(initialRecord.status).toBe("active");
-        expect(initialRow.revoked_at).toBeNull();
+        // Same-tenant rotation above legitimately retired this pre-existing
+        // key (see the post-rotate assertions above); assert the exact SQL
+        // timestamp/reason of that retirement rather than an untouched
+        // "active" state, so a real regression in rotation's retirement
+        // logic still fails this test instead of being silently accepted.
+        expect(initialRecord.status).toBe("revoked");
+        expect(initialRecord.revokeReason).toBe("credential_rotated");
+        expect(initialRow.revoked_at).not.toBeNull();
 
         const createdRow = rowMap.get(createdId!)!;
         const createdRecord = createdRow.record;

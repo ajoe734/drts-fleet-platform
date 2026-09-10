@@ -3409,6 +3409,12 @@ const en = {
   "callcenter.workspace.fresh": "Fresh",
   "callcenter.workspace.healthy": "Healthy",
   "callcenter.workspace.degraded": "Degraded",
+  "callcenter.metrics.cohortStale.title": "Intake/dispatch metrics not current",
+  "callcenter.metrics.cohortStale.body":
+    "Metrics query failed; the data shown may be stale",
+  "callcenter.metrics.usageStale.title": "Cost ledger not current",
+  "callcenter.metrics.usageStale.body":
+    "Cost ledger query failed; the data shown may be stale",
   "callcenter.kpi.openSessions": "Open call work sessions",
   "callcenter.kpi.pendingCallbacks": "Pending callbacks",
   "callcenter.kpi.recordingGaps": "Recording gaps",
@@ -7777,6 +7783,10 @@ const zh: Record<keyof typeof en, string> = {
   "callcenter.workspace.fresh": "最新",
   "callcenter.workspace.healthy": "健康",
   "callcenter.workspace.degraded": "降級中",
+  "callcenter.metrics.cohortStale.title": "叫車受理/派車指標非最新",
+  "callcenter.metrics.cohortStale.body": "指標查詢失敗，顯示的資料可能已過期",
+  "callcenter.metrics.usageStale.title": "成本 ledger 非最新",
+  "callcenter.metrics.usageStale.body": "成本明細查詢失敗，顯示的資料可能已過期",
   "callcenter.kpi.openSessions": "進行中的通話工作階段",
   "callcenter.kpi.pendingCallbacks": "待處理回撥",
   "callcenter.kpi.recordingGaps": "錄音缺口",

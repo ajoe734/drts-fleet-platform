@@ -1,0 +1,322 @@
+name: Tenant Binding Acceptance (SR-QA-WEBHOOK-001-FIX-TENANT-BINDING)
+
+# Dedicated, manually-dispatched acceptance runner for the C111 tenant-header
+# binding fix. It exists because the standard ci-integ `unit` job never sets
+# DRTS_TENANT_BINDING_DATABASE_URL, so the HTTP/SQL half of
+# tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/
+# appmodule-tenant-binding.test.ts always self-skips there (see
+# SR-QA-WEBHOOK-001-FIX-TENANT-BINDING `required_acceptance:
+# full_appmodule_two_tenant_jwt_http_sql_candidate_evidence`). This workflow
+# checks out one immutable candidate SHA, proves the checkout did not move,
+# runs the full-AppModule harness against a dedicated migrated PostgreSQL with
+# both tests required to pass with zero skips, and uploads evidence even when
+# the run fails. It does not run on every PR and is not part of ci-integ; it
+# is invoked once per candidate that needs this acceptance evidence.
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: "Immutable candidate commit SHA to verify (full 40-char SHA)"
+        required: true
+        default: "68583755566608e636642f80206a941c612502ab"
+  # Narrow push trigger, scoped to this task branch and these three files
+  # only. workflow_dispatch alone cannot be dispatched until this workflow
+  # file is registered on the repo's default branch (see the runbook's
+  # dispatch-registration section) -- push has no such registration
+  # requirement, so this is the actual runnable acceptance path while that
+  # bootstrap is pending. It always re-verifies the locked parent candidate
+  # below (see the candidate_sha fallback), never the pushed commit itself:
+  # pushing a workflow/test/doc edit here must not be mistaken for re-testing
+  # the tenant-binding fix.
+  push:
+    branches:
+      - claude2/sr-qa-webhook-001-acceptance-runner
+      - claude/sr-qa-webhook-001-acceptance-runner
+    paths:
+      - .github/workflows/tenant-binding-acceptance.yml
+      - tools/ci/test_tenant_binding_acceptance_workflow.py
+      - docs/04-uat/system-remediation-20260906/tenant-binding-acceptance-runner.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tenant-binding-acceptance-${{ github.event.inputs.candidate_sha || '68583755566608e636642f80206a941c612502ab' }}
+  cancel-in-progress: false
+
+env:
+  CI: true
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        # PostGIS-enabled image: the migration set enables the postgis
+        # extension, and db:migrate fails without it (see ci-integ.yml).
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      DRTS_TENANT_BINDING_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
+      DRTS_WEBHOOK_AUTH_EVIDENCE: ${{ github.workspace }}/.artifacts/tenant-binding-acceptance/evidence-auth-http.json
+      # Routed through env rather than interpolated directly into a `run:`
+      # script: a workflow_dispatch input is attacker-controllable text, and
+      # direct ${{ }} interpolation inside a shell block is substituted
+      # before the shell runs, which is a script-injection vector. Falls back
+      # to the locked parent candidate when this run was triggered by push
+      # (which has no workflow_dispatch input) rather than manual dispatch.
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha || '68583755566608e636642f80206a941c612502ab' }}
+      # The commit that actually supplied this workflow definition, recorded
+      # separately from CANDIDATE_SHA (the immutable candidate under test) so
+      # a push-triggered run's evidence never conflates "which commit changed
+      # the workflow" with "which commit is being accepted".
+      WORKFLOW_SHA: ${{ github.sha }}
+    steps:
+      - name: Validate candidate_sha input
+        run: |
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.candidate_sha || '68583755566608e636642f80206a941c612502ab' }}
+          fetch-depth: 0
+
+      - name: Verify checkout resolved the exact immutable candidate
+        # actions/checkout resolves `ref` at fetch time; a moving branch name
+        # would silently substitute a newer commit. Fail loudly instead of
+        # recording acceptance evidence for the wrong SHA.
+        run: |
+          resolved="$(git rev-parse HEAD)"
+          expected="$CANDIDATE_SHA"
+          echo "Resolved HEAD: $resolved"
+          echo "Expected candidate: $expected"
+          if [ "$resolved" != "$expected" ]; then
+            echo "::error::Checked-out HEAD ($resolved) does not match the requested candidate ($expected)."
+            exit 1
+          fi
+
+      - name: Prepare evidence directory
+        # actions/checkout empties the workspace before cloning, so this must
+        # run after checkout (not before) or checkout would wipe it. Created
+        # before install/migrate run (not only after) so a failure in either
+        # of those steps still leaves a directory for the run-status step
+        # below to write into. The run-status step also has a defensive
+        # mkdir of its own, for the case where an earlier step (candidate_sha
+        # validation, checkout itself) fails before this step ever runs.
+        run: mkdir -p .artifacts/tenant-binding-acceptance
+
+      - name: Overlay corrected harness test file from this workflow revision
+        # CANDIDATE_SHA above is the immutable PRODUCT RUNTIME under test and
+        # is never modified. Its own checked-in copy of this one harness file
+        # is broken: real run 34463084508 proved TypeError reading
+        # 'actorType' -- toRequestIdentity(null) because verifyAccessToken
+        # rejects a session whose principal was never seeded as an active
+        # TenantPartnerService tenant user (validateDurableState's "tenant"
+        # realm branch in jwt-auth.service.ts). WORKFLOW_SHA -- the commit
+        # that supplied this workflow revision -- carries the corrected
+        # fixture in this exact file and no other product/runtime change.
+        # `git show` reads that one blob out of the same fetch-depth:0 clone
+        # (no second checkout/network fetch needed) and overwrites only this
+        # path in the otherwise-untouched candidate checkout. The
+        # `git status --porcelain` check below fails the job loudly if
+        # anything besides this single file changed, so this step can never
+        # silently widen into a product-source overlay, and the run-status
+        # evidence below never lets this be read as an unchanged-original-
+        # harness execution. A candidate whose checked-in harness already
+        # matches WORKFLOW_SHA byte-for-byte (e.g. a candidate that itself
+        # carries the corrected harness) must also be accepted: `git show`
+        # then leaves the worktree unchanged and `git status --porcelain`
+        # reports nothing, which is a legitimate zero-diff overlay outcome,
+        # not a widened one.
+        id: overlay
+        env:
+          HARNESS_PATH: tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/appmodule-tenant-binding.test.ts
+        run: |
+          set -o pipefail
+          original_sha256="$(sha256sum "$HARNESS_PATH" | awk '{print $1}')"
+          git show "${WORKFLOW_SHA}:${HARNESS_PATH}" > "$HARNESS_PATH"
+          overlay_sha256="$(sha256sum "$HARNESS_PATH" | awk '{print $1}')"
+          status="$(git status --porcelain)"
+          if [ -n "$status" ] && [ "$status" != " M $HARNESS_PATH" ]; then
+            echo "::error::Overlay must touch exactly one file ($HARNESS_PATH), or none if the candidate's harness already matches; product/runtime source must stay identical to candidate $CANDIDATE_SHA."
+            printf '%s\n' "$status"
+            exit 1
+          fi
+          {
+            echo "HARNESS_PATH=$HARNESS_PATH"
+            echo "HARNESS_ORIGINAL_SHA256=$original_sha256"
+            echo "HARNESS_OVERLAY_SHA256=$overlay_sha256"
+          } >> "$GITHUB_ENV"
+          echo "Overlaid $HARNESS_PATH from workflow revision $WORKFLOW_SHA onto immutable runtime candidate $CANDIDATE_SHA (original sha256 $original_sha256 -> overlay sha256 $overlay_sha256); verified no other file changed." \
+            | tee -a .artifacts/tenant-binding-acceptance/execution-log.txt
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee -a .artifacts/tenant-binding-acceptance/execution-log.txt
+
+      - name: Apply migrations to the dedicated acceptance database
+        id: migrate
+        run: |
+          set -o pipefail
+          pnpm db:migrate 2>&1 | tee -a .artifacts/tenant-binding-acceptance/execution-log.txt
+
+      - name: Run full AppModule two-tenant JWT HTTP/SQL acceptance harness
+        id: harness
+        # `|| true` here would defeat the point of a gate; let the step fail
+        # normally so the job goes red, and rely on `if: always()` below to
+        # still capture and upload the log/report/evidence for a failed run.
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            tests/e2e/system-remediation/sr-qa-webhook-001-fix-tenant-binding/appmodule-tenant-binding.test.ts \
+            --no-file-parallelism --maxConcurrency=1 \
+            --reporter=default --reporter=json \
+            --outputFile.json=.artifacts/tenant-binding-acceptance/test-report.json \
+            2>&1 | tee -a .artifacts/tenant-binding-acceptance/execution-log.txt
+
+      - name: Gate on zero skips and both tests passed
+        id: gate
+        if: always()
+        run: |
+          python3 - <<'PY_GATE'
+          import json
+          from pathlib import Path
+
+          report_path = Path(".artifacts/tenant-binding-acceptance/test-report.json")
+          if not report_path.exists():
+              raise SystemExit(
+                  "Acceptance gate: no test report was produced "
+                  "(the harness likely failed before vitest could write one)."
+              )
+          report = json.loads(report_path.read_text())
+          total = report.get("numTotalTests", 0)
+          passed = report.get("numPassedTests", 0)
+          pending = report.get("numPendingTests", 0)
+          if total < 2 or passed != total or pending or not report.get("success"):
+              raise SystemExit(
+                  f"Tenant binding acceptance incomplete: total={total}, "
+                  f"passed={passed}, pending/skipped={pending}, "
+                  f"success={report.get('success')}. Both the composition test "
+                  "and the C111 two-tenant JWT HTTP/SQL test must pass with "
+                  "zero skips."
+              )
+          print(f"Tenant binding acceptance: {passed}/{total} passed, zero skips.")
+          PY_GATE
+
+      - name: Record run status
+        # Always runs, even when install/migrate/harness fail before the gate
+        # step above does. This never fabricates a pass: status is derived
+        # only from real step outcomes and whether a report file was actually
+        # written, so an early failure (e.g. `pnpm install` or `db:migrate`)
+        # still leaves an explicit failed/not_run record naming the candidate
+        # instead of silently uploading nothing but a warning.
+        if: always()
+        env:
+          OVERLAY_OUTCOME: ${{ steps.overlay.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          MIGRATE_OUTCOME: ${{ steps.migrate.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          python3 - <<'PY_STATUS'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path(".artifacts/tenant-binding-acceptance/test-report.json")
+          status_path = Path(".artifacts/tenant-binding-acceptance/run-status.json")
+          status_path.parent.mkdir(parents=True, exist_ok=True)
+
+          overlay_outcome = os.environ.get("OVERLAY_OUTCOME", "unknown")
+          install_outcome = os.environ.get("INSTALL_OUTCOME", "unknown")
+          migrate_outcome = os.environ.get("MIGRATE_OUTCOME", "unknown")
+          harness_outcome = os.environ.get("HARNESS_OUTCOME", "unknown")
+          gate_outcome = os.environ.get("GATE_OUTCOME", "unknown")
+
+          # "passed" requires every step that had to succeed to have actually
+          # succeeded, not just the gate step: the gate step only inspects the
+          # JSON report, and vitest's JSON reporter can still write a report
+          # with success=true even when the harness process itself exits
+          # non-zero (e.g. an unhandled error surfacing after tests finished),
+          # which makes steps.harness.outcome "failure" or "cancelled" while
+          # gate_outcome still reads "success". Deriving "passed" from
+          # gate_outcome/report alone would then falsely record success for a
+          # failed or cancelled harness step even though the job itself is red.
+          if (
+              install_outcome == "success"
+              and migrate_outcome == "success"
+              and harness_outcome == "success"
+              and gate_outcome == "success"
+              and report_path.exists()
+          ):
+              status = "passed"
+          elif install_outcome != "success" or migrate_outcome != "success":
+              status = "not_run"
+          else:
+              status = "failed"
+
+          status_path.write_text(json.dumps({
+              "candidate_sha": os.environ.get("CANDIDATE_SHA", ""),
+              "workflow_sha": os.environ.get("WORKFLOW_SHA", ""),
+              "status": status,
+              "overlay_outcome": overlay_outcome,
+              "install_outcome": install_outcome,
+              "migrate_outcome": migrate_outcome,
+              "harness_outcome": harness_outcome,
+              "gate_outcome": gate_outcome,
+              "report_present": report_path.exists(),
+              "harness_overlay": {
+                  "path": os.environ.get("HARNESS_PATH", ""),
+                  "original_sha256": os.environ.get("HARNESS_ORIGINAL_SHA256", ""),
+                  "overlay_sha256": os.environ.get("HARNESS_OVERLAY_SHA256", ""),
+              },
+          }, indent=2) + "\n")
+          print(f"Run status recorded: {status}")
+          PY_STATUS
+
+      - name: Upload execution log, test report, evidence, and run status
+        # Acceptance evidence for a failing candidate is as important as for a
+        # passing one: it is what lets the next lane diagnose without
+        # re-running. The evidence directory is created before install/
+        # migrate above, and the status file is always written, so this step
+        # always has real content to upload even when the candidate fails
+        # before the harness ever runs.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenant-binding-acceptance-${{ github.event.inputs.candidate_sha || '68583755566608e636642f80206a941c612502ab' }}
+          path: |
+            .artifacts/tenant-binding-acceptance/execution-log.txt
+            .artifacts/tenant-binding-acceptance/test-report.json
+            .artifacts/tenant-binding-acceptance/evidence-auth-http.json
+            .artifacts/tenant-binding-acceptance/run-status.json
+          if-no-files-found: warn
