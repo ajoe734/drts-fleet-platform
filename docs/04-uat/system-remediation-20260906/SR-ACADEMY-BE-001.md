@@ -1,15 +1,16 @@
 # SR-ACADEMY-BE-001 — 課程、測驗、完訓與重訓資料服務
 
-Owner: Gemini (reassigned from Claude). Reviewer: Claude2. Date: 2026-09-10 UTC.
+Owner: Gemini (reassigned from Claude). Reviewer: Gemini2 (reassigned from Claude2 due to quota pause). Date: 2026-09-10 UTC.
 
 ## State and provenance
 
 - Reassignment: availability-first reassignment picked this task up from
   `claude/sr-academy-be-001` (PR #1894) to resolve CI failure on `iam-negative-matrix`
   and apply supervisor-expanded write scope for `regulatory-registry.repository.ts`.
+  Reviewer subsequently reassigned from Claude2 to Gemini2 due to quota pause.
 - Worktree: `.artifacts/worktrees/auto/gemini-sr-academy-be-001`, branch
   `gemini/sr-academy-be-001`.
-- Base SHA: `7953bab85ea5f361665b7c3f442fadc50e859720` (latest `origin/dev`).
+- Base SHA: `59fa0af20e926562d57f5da4a15281c6d242b47e` (latest `origin/dev`, merged via `021c424250fab64c6d8a9b1806bee3883cfb772c`).
 - Candidate SHA: recorded at handoff time via
   `git rev-parse HEAD` (see the `ai-status.sh handoff` call for this task).
 - Reused, unmodified: `academy-domain.ts` pure functions ported verbatim from
@@ -181,7 +182,7 @@ corrected shared regulatory tables (`reg.driver_training_records`,
 | `pnpm exec vitest run tests/unit/system-remediation/sr-academy-be-001/` | 0 | 3 files, 35 tests passed (`academy-domain.test.ts`, `academy.service.test.ts`, `academy.controller.test.ts`) |
 | `pnpm exec vitest run tests/security/iam-route-inventory.test.ts` | 0 | 10/10 tests passed (zero unclassified routes, zero realm mismatches, zero unknown scopes) |
 | `python3 -m unittest tools/ci/test_academy_acceptance_workflow.py -v` | 0 | 16/16 contract tests passed |
-| `python3 tools/ci/check_test_coverage.py` | 0 | All 65 test files verified covered by CI |
+| `python3 tools/ci/check_test_coverage.py` | 0 | All 66 test files verified covered by CI |
 | `pnpm run lint:root` | 0 | ESLint clean across all tests and configs (0 warnings, 0 errors) |
 | `git diff --check` | 0 | No whitespace errors |
 
