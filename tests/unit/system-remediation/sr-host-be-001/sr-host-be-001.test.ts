@@ -6,6 +6,7 @@ import {
   HostViewRepository,
   HostViewService,
   HostViewController,
+  HostViewModule,
   maskVin,
   maskAreaSummary,
   mapComplaintCategory,
@@ -14,6 +15,23 @@ import {
   extractResolutionSummary,
   HOST_ERROR_CODES,
 } from "../../../../apps/api/src/modules/host-view";
+import { createRequire } from "node:module";
+const apiRequire = createRequire(
+  path.resolve(__dirname, "../../../../apps/api/package.json"),
+);
+const { NestFactory } = apiRequire("@nestjs/core") as {
+  NestFactory: {
+    create(
+      moduleCls: unknown,
+      options?: { logger?: boolean },
+    ): Promise<any>;
+  };
+};
+import {
+  evaluateTenantApprovalRules,
+  TENANT_APPROVAL_RULE_CONDITION_FIELDS,
+  CANONICAL_TENANT_APPROVAL_RULE_CONDITION_FIELDS,
+} from "../../../../apps/api/src/modules/tenant-partner/tenant-approval-rule-evaluator";
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../../../apps/api/src/common/auth/auth.types";
 
@@ -734,6 +752,118 @@ describe("SR-HOST-BE-001: Host Restricted Read Model & Vehicle Access Authorizat
       expect(res.meta.requestId).toBe("req_earnings_001");
       expect(res.data.vehicleId).toBe(VEHICLE_A1);
       expect(res.data.settlementStatus).toBe("pending_policy");
+    });
+  });
+
+  // ==========================================================================
+  // Suite 12: HostViewModule Bootstrap & Route Binding (SR-HOST-BE-001-POST-ACCEPTANCE-REPAIR-20260910)
+  // ==========================================================================
+  describe("Suite 12: HostViewModule Bootstrap & Route Binding", () => {
+    it("successfully boots Nest application with HostViewModule under path-to-regexp@8.4.2", async () => {
+      const app = await NestFactory.create(HostViewModule, { logger: false });
+      app.setGlobalPrefix("api");
+      await expect(app.init()).resolves.toBeDefined();
+
+      const server = app.getHttpAdapter().getInstance();
+      const routes = server.router.stack
+        .filter((l: any) => l.route)
+        .map((l: any) => ({
+          path: l.route.path,
+          methods: Object.keys(l.route.methods),
+        }));
+
+      // Verify that both exact vehicles path and wildcard subpath are registered for mutation rejections
+      const postRoutes = routes.filter((r: any) => r.methods.includes("post"));
+      const postPaths = postRoutes.map((r: any) => r.path);
+      expect(postPaths).toContain("/api/host/vehicles");
+      expect(postPaths).toContain("/api/host/vehicles/*splat");
+
+      // Verify route matching for mutation layers
+      const mutationLayers = server.router.stack.filter(
+        (l: any) => l.route && l.route.methods.post,
+      );
+      expect(mutationLayers.some((l: any) => l.match("/api/host/vehicles"))).toBe(true);
+      expect(mutationLayers.some((l: any) => l.match("/api/host/vehicles/"))).toBe(true);
+      expect(mutationLayers.some((l: any) => l.match("/api/host/vehicles/veh_123"))).toBe(true);
+      expect(mutationLayers.some((l: any) => l.match("/api/host/vehicles/veh_123/maintenance"))).toBe(true);
+      expect(mutationLayers.some((l: any) => l.match("/api/host/other"))).toBe(false);
+
+      await app.close();
+    });
+  });
+
+  // ==========================================================================
+  // Suite 13: Tenant Approval Rule Evaluator Contract & Bootstrap Resilience (SR-HOST-BE-001-POST-ACCEPTANCE-REPAIR-20260910)
+  // ==========================================================================
+  describe("Suite 13: Tenant Approval Rule Evaluator Contract & Bootstrap Resilience", () => {
+    it("guarantees TENANT_APPROVAL_RULE_CONDITION_FIELDS is an iterable array with 13 canonical fields", () => {
+      expect(Array.isArray(TENANT_APPROVAL_RULE_CONDITION_FIELDS)).toBe(true);
+      expect(TENANT_APPROVAL_RULE_CONDITION_FIELDS.length).toBe(13);
+      expect(Array.isArray(CANONICAL_TENANT_APPROVAL_RULE_CONDITION_FIELDS)).toBe(true);
+      expect(CANONICAL_TENANT_APPROVAL_RULE_CONDITION_FIELDS.length).toBe(13);
+
+      // Verify iterable via spread
+      const set = new Set([...TENANT_APPROVAL_RULE_CONDITION_FIELDS]);
+      expect(set.size).toBe(13);
+      expect(set.has("booking.amount_minor")).toBe(true);
+      expect(set.has("tenant.monthly_quota_remaining_percent")).toBe(true);
+    });
+
+    it("evaluates tenant approval rules cleanly using canonical condition fields", () => {
+      const result = evaluateTenantApprovalRules({
+        tenantId: "tenant_001",
+        subject: {
+          subjectType: "booking",
+          bookingId: "ord_test_001",
+          draftId: null,
+          operation: "create",
+        },
+        inputSnapshot: {
+          amountMinor: 50000,
+          currency: "TWD",
+          businessDispatchSubtype: "vip",
+          vehiclePreference: "sedan",
+          reservationWindowStart: "2026-09-10T12:00:00.000Z",
+          passengerRole: "employee",
+          passengerId: "usr_001",
+          costCenterCode: "CC-01",
+        },
+        rules: [
+          {
+            ruleId: "rule_001",
+            tenantId: "tenant_001",
+            ruleName: "High amount rule",
+            priority: 1,
+            action: "require_approval",
+            activeFlag: true,
+            effectiveFrom: null,
+            effectiveUntil: null,
+            approvalMode: "any_of",
+            approvers: [
+              {
+                principalType: "user",
+                principalId: "approver_001",
+                displayName: "Finance Approver",
+              },
+            ],
+            conditions: [
+              {
+                field: "booking.amount_minor",
+                operator: "gte",
+                value: 30000,
+              },
+            ],
+            createdAt: "2026-09-10T00:00:00.000Z",
+            updatedAt: "2026-09-10T00:00:00.000Z",
+          } as any,
+        ],
+        ruleVersionSnapshot: "v1",
+      });
+
+      expect(result).toBeDefined();
+      expect(result.outcome?.decision).toBe("require_approval");
+      expect(result.matchedRules.length).toBe(1);
+      expect(result.matchedRules[0]?.ruleId).toBe("rule_001");
     });
   });
 });

@@ -120,14 +120,13 @@ describe("SR-QA-DISPATCH-001: Real PostgreSQL Dispatch Job/Assignment/Task/Trace
     `);
     await pool.query(migration("V0011__phase1_runtime_snapshots.sql"));
     await pool.query(migration("V0087__dispatch_resource_reservations.sql"));
-    // OwnedMobilityRepository.loadState() unconditionally reads
-    // ops.passenger_dispatch_disclosure_snapshots and
-    // ops.consumer_notification_outbox (see persistChanges/loadState in
-    // owned-mobility.repository.ts), so both must exist even though this
-    // suite does not assert on their contents.
-    await pool.query(
-      migration("V0056__multi_taxi_runtime_compliance_closure.sql"),
-    );
+    // loadState() also reads ops.passenger_dispatch_disclosure_snapshots and
+    // ops.consumer_notification_outbox, both defined in V0056; the
+    // V0011+V0087 pair alone (the bootstrap proven by
+    // sr-qa-concurrency-001/dispatch-reservation-concurrency.test.ts, which
+    // never calls loadState()) leaves those two relations missing and
+    // loadState() fails with `relation ... does not exist`.
+    await pool.query(migration("V0056__multi_taxi_runtime_compliance_closure.sql"));
 
     const dbHandle: DatabaseService = {
       isEnabled: () => true,

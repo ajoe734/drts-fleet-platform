@@ -66,9 +66,38 @@ const ACTION_TO_DECISION: Record<TenantApprovalRuleAction, EvaluationDecision> =
     block: "block",
   };
 
-const KNOWN_CONDITION_FIELDS = new Set([
-  ...TENANT_APPROVAL_RULE_CONDITION_FIELDS,
-]);
+/**
+ * Canonical condition field whitelist for tenant approval rules.
+ * Serves as the guaranteed fallback and export contract if the upstream
+ * contracts export is undefined or non-iterable during module bootstrap.
+ */
+export const CANONICAL_TENANT_APPROVAL_RULE_CONDITION_FIELDS = [
+  "booking.amount_minor",
+  "booking.business_dispatch_subtype",
+  "booking.vehicle_preference",
+  "booking.direction",
+  "booking.flight_no_present",
+  "booking.reservation_window_start",
+  "booking.passenger.role",
+  "booking.passenger.id",
+  "cost_center.code",
+  "cost_center.monthly_quota_remaining_amount_minor",
+  "cost_center.monthly_quota_remaining_percent",
+  "tenant.monthly_quota_remaining_amount_minor",
+  "tenant.monthly_quota_remaining_percent",
+] as const;
+
+export const RESOLVED_TENANT_APPROVAL_RULE_CONDITION_FIELDS: readonly TenantApprovalRuleConditionField[] =
+  Array.isArray(TENANT_APPROVAL_RULE_CONDITION_FIELDS) &&
+  TENANT_APPROVAL_RULE_CONDITION_FIELDS.length > 0
+    ? TENANT_APPROVAL_RULE_CONDITION_FIELDS
+    : CANONICAL_TENANT_APPROVAL_RULE_CONDITION_FIELDS;
+
+export { RESOLVED_TENANT_APPROVAL_RULE_CONDITION_FIELDS as TENANT_APPROVAL_RULE_CONDITION_FIELDS };
+
+const KNOWN_CONDITION_FIELDS = new Set<TenantApprovalRuleConditionField>(
+  RESOLVED_TENANT_APPROVAL_RULE_CONDITION_FIELDS,
+);
 
 // Accessors for snapshot values
 const APPROVAL_RULE_FIELD_ACCESSORS: Record<
