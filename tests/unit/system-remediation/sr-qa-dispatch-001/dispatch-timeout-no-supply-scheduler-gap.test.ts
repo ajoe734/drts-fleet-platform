@@ -230,51 +230,64 @@ describe("SR-QA-DISPATCH-001 / C037 + C038: automatic wall-clock trigger gap (st
     );
   }
 
-  it("Documents: no @Cron/@Interval scheduler decorator exists anywhere in the dispatch module", () => {
+  it("Documents: SR-DISPATCH-SCHEDULER-001 deliberately used a bare setInterval sweep (matching this file's own pre-existing driver-completion-outbox pattern) instead of @nestjs/schedule's @Cron/@Interval decorators", () => {
     const sources = [
       readSource("owned-mobility.service.ts"),
       readSource("owned-autonomous-dispatch-executor.service.ts"),
       readSource("owned-mobility.module.ts"),
     ].join("\n");
 
-    // This assertion is an intentional tripwire: if it starts failing, a
-    // real scheduler has been wired up and C037/C038's "真觸發" gap in
-    // docs/04-uat/system-remediation-20260906/SR-QA-DISPATCH-001.md should
-    // be marked resolved, not silently accepted by loosening this test.
+    // No decorator-based scheduler was introduced -- see
+    // `runDispatchSchedulerSweep` / `startDispatchSchedulerPolling` below for
+    // the real automatic trigger, which reuses the same setInterval pattern
+    // as `startDriverCompletionOutboxRecoveryPolling` instead.
     expect(/@Cron\(|@Interval\(/.test(sources)).toBe(false);
   });
 
-  it("Documents: the one existing wall-clock setInterval sweep (driver-completion-outbox recovery) is unrelated to dispatch-timeout/reservation-hold escalation -- proving the sweep pattern is architecturally available but not applied to C037/C038", () => {
+  it("Resolved (SR-DISPATCH-SCHEDULER-001): a dedicated setInterval sweep now calls the real dispatch-timeout and reservation-hold escalation paths on its own", () => {
     const source = readSource("owned-mobility.service.ts");
-    // The pattern already exists in this codebase for a different resource
-    // (driver completion outbox delivery retries) -- adding an equivalent
-    // sweep for dispatch-timeout/reservation-hold is a scoping decision, not
-    // a technical blocker. It is NOT scoped to this verification-only task's
-    // write_scopes (tests/**, docs/04-uat/**) and belongs to a canonical
-    // implementation follow-up.
+    // The driver-completion-outbox recovery timer this file already had is
+    // still present and still unrelated to dispatch...
     expect(source).toContain("startDriverCompletionOutboxRecoveryPolling");
+    // ...but a second, dedicated setInterval sweep now exists specifically
+    // for dispatch-timeout/reservation-hold escalation, wired up from
+    // onApplicationBootstrap alongside the outbox recovery timer.
+    expect(source).toContain("startDispatchSchedulerPolling");
+    expect(source).toContain("runDispatchSchedulerSweep");
 
-    const intervalCallSites = [...source.matchAll(/setInterval\s*\(/g)].map(
-      (match) => match.index ?? -1,
+    const schedulerIntervalIndex = source.indexOf(
+      "this.dispatchSchedulerSweepTimer = setInterval(",
     );
-    expect(intervalCallSites.length).toBeGreaterThan(0);
+    expect(schedulerIntervalIndex).toBeGreaterThan(-1);
+    const window = source.slice(
+      schedulerIntervalIndex,
+      schedulerIntervalIndex + 400,
+    );
+    expect(window).toContain("runDispatchSchedulerSweep");
 
-    for (const index of intervalCallSites) {
-      const window = source.slice(index, index + 400);
-      expect(window).not.toContain("handleDispatchTimeout");
-      expect(window).not.toContain("transitionReservationHold");
-      expect(window).not.toContain("applyDispatchTimeout");
-    }
+    // And the sweep body itself -- not just the timer registration -- really
+    // does call the production timeout/escalation methods, not a stand-in.
+    const sweepBodyStart = source.indexOf("async runDispatchSchedulerSweep(");
+    expect(sweepBodyStart).toBeGreaterThan(-1);
+    const sweepBody = source.slice(sweepBodyStart, sweepBodyStart + 4000);
+    expect(sweepBody).toContain("this.handleDispatchTimeout(");
+    expect(sweepBody).toContain('"matching_timeout"');
+    expect(sweepBody).toContain('"acceptance_timeout"');
+    expect(sweepBody).toContain("this.dispatchOrder(");
   });
 
-  it("Documents: handleDispatchTimeout has no automatic caller besides explicit API/executor invocation", () => {
+  it("Resolved (SR-DISPATCH-SCHEDULER-001): handleDispatchTimeout now also has an automatic caller (the dispatch scheduler sweep), in addition to the explicit API/executor invocation this file documents", () => {
     const controllerSource = readSource("owned-mobility.controller.ts");
-    // The only production caller besides the explicit controller endpoint is
-    // the deterministic (non-timer-driven) autonomous dispatch executor,
-    // which itself is only invoked by requestDispatch/handleOfferTimeout --
-    // both explicit method calls, not a wall-clock sweep.
+    // The explicit controller endpoint documented by the original QA
+    // regression still exists unchanged...
     expect(controllerSource).toContain(
       '@Post("orders/:orderId/dispatch-timeout")',
     );
+    // ...and the service now also calls it automatically from the wall-clock
+    // sweep started in onApplicationBootstrap (see the previous test for the
+    // exact call sites), not just from that endpoint or the deterministic
+    // autonomous dispatch executor.
+    const source = readSource("owned-mobility.service.ts");
+    expect(source).toContain("runDispatchSchedulerSweep");
   });
 });

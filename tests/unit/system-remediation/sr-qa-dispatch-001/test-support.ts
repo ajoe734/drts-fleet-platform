@@ -13,6 +13,7 @@ import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-di
 import { OwnedMobilityTaskEventsService } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { ServiceProductService } from "../../../../apps/api/src/modules/service-product/service-product.service";
+import type { PlatformPresenceService } from "../../../../apps/api/src/modules/platform-presence/platform-presence.service";
 
 export type CandidateFixture = {
   driverId: string;
@@ -29,6 +30,7 @@ export function buildOwnedMobilityServiceForTest(options?: {
     destination?: { lat: number; lng: number } | null,
   ) => CandidateFixture[];
   vehicleDispatchable?: boolean;
+  platformPresenceService?: PlatformPresenceService;
 }) {
   const regulatoryRegistryService = {
     getEligibleCandidates: vi.fn(
@@ -92,6 +94,10 @@ export function buildOwnedMobilityServiceForTest(options?: {
     undefined, // sandboxDispatchGateService
     undefined, // serviceAreaService
     undefined, // fareAnomalyService
+    undefined, // idempotencyService
+    undefined, // voiceBookingRepository
+    undefined, // autonomousDispatchExecutor
+    options?.platformPresenceService, // platformPresenceService
   );
 
   return { service, auditNotificationService, regulatoryRegistryService };
