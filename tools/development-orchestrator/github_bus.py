@@ -877,6 +877,31 @@ def reconcile_candidate_lifecycle(
             continue
         observation = candidate_pr_observation(repo, number)
         head_sha = str(observation.get("headRefOid") or "").strip()
+        if head_sha != candidate_sha:
+            # A PR branch remains mutable after handoff.  Its next ordinary
+            # push is an owner checkpoint, not a new candidate: candidate
+            # lineage changes only through a fresh handoff transaction.
+            # Otherwise a WIP anchor can silently replace a reviewed SHA and
+            # cause CI or auto-merge to describe the wrong commit.
+            entry = task_bus_entry(bus_state, str(task["id"]))
+            mismatch = {"candidate_sha": candidate_sha, "head_sha": head_sha, "pr": number}
+            if entry.get("candidate_head_mismatch") != mismatch:
+                entry["candidate_head_mismatch"] = mismatch
+                write_activity_log(
+                    config,
+                    {
+                        "type": "github_candidate_head_mismatch",
+                        "task_id": task.get("id"),
+                        "candidate_sha": candidate_sha,
+                        "message": (
+                            f"PR #{number} head {head_sha[:12] or '-'} differs from handoff "
+                            f"candidate {candidate_sha[:12]}; awaiting a fresh handoff."
+                        ),
+                        "github_pr": number,
+                    },
+                )
+                changed = True
+            continue
         ci_status, ci_run_url = candidate_ci_status(observation)
         merge = observation.get("mergeCommit") or {}
         merge_sha = str(merge.get("oid") or "").strip() if isinstance(merge, dict) else ""
@@ -925,6 +950,7 @@ def reconcile_candidate_lifecycle(
             continue
         entry = task_bus_entry(bus_state, str(task["id"]))
         entry.pop("last_reconcile_error", None)
+        entry.pop("candidate_head_mismatch", None)
         entry["review_pr"] = {
             "number": number,
             "url": observation.get("url"),
@@ -959,6 +985,33 @@ def request_candidate_auto_merge(
             continue
         entry = task_bus_entry(bus_state, str(task["id"]))
         if entry.get("auto_merge_candidate_sha") == candidate_sha:
+            continue
+        try:
+            observation = candidate_pr_observation(repo, number)
+        except GitHubBusError as exc:
+            write_activity_log(
+                config,
+                {
+                    "type": "candidate_auto_merge_deferred",
+                    "task_id": task.get("id"),
+                    "message": trim_text(f"Cannot verify PR head: {exc}", 600),
+                    "github_pr": number,
+                },
+            )
+            continue
+        if str(observation.get("headRefOid") or "") != candidate_sha:
+            write_activity_log(
+                config,
+                {
+                    "type": "candidate_auto_merge_deferred",
+                    "task_id": task.get("id"),
+                    "message": (
+                        f"PR #{number} head no longer matches reviewed candidate "
+                        f"{candidate_sha[:12]}; awaiting a fresh handoff."
+                    ),
+                    "github_pr": number,
+                },
+            )
             continue
         # Everything above establishes that the candidate was green on its own
         # head. This asks the question those gates cannot: is it still green on
