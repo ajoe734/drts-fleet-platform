@@ -37,7 +37,8 @@ skipping.
 
 `.github/workflows/tenant-binding-acceptance.yml`, triggered by
 `workflow_dispatch` with a required `candidate_sha` input (defaults to the
-locked parent candidate `10123f6af00a5342f2634a01f4d9a0e7190c2173`):
+locked parent candidate `10123f6af00a5342f2634a01f4d9a0e7190c2173`), or by a
+narrow `push` trigger (see §6a):
 
 1. Validates `candidate_sha` is a full 40-character hex SHA. The input is
    routed through job-level `env: CANDIDATE_SHA` and read back as `$CANDIDATE_SHA`
@@ -71,12 +72,14 @@ locked parent candidate `10123f6af00a5342f2634a01f4d9a0e7190c2173`):
 6. Records a `run-status.json` file with `if: always()`, derived only from
    real step outcomes (`steps.install.outcome`, `steps.migrate.outcome`,
    `steps.harness.outcome`, `steps.gate.outcome`) and whether a test report
-   was actually produced. Status is `passed` only when the gate step
-   succeeded and a report exists; `not_run` when install or migration never
-   completed (harness never got to execute); otherwise `failed`. It always
-   includes `candidate_sha`. This step never infers or fabricates a pass —
-   see §5 for why an early install/migrate failure previously produced no
-   evidence at all.
+   was actually produced. Status is `passed` only when **all four** of
+   install, migrate, harness, and gate outcomes are `success` *and* a report
+   exists; `not_run` when install or migration never completed (harness never
+   got to execute); otherwise `failed`. It always includes `candidate_sha`
+   and, separately, `workflow_sha` (the commit that supplied the workflow
+   definition for this run — see §6a). This step never infers or fabricates a
+   pass — see §5 for why an early install/migrate failure previously produced
+   no evidence at all, and §7 for a real false-pass this logic previously had.
 7. Uploads the execution log, JSON test report, the
    `DRTS_WEBHOOK_AUTH_EVIDENCE` file, and `run-status.json` with
    `if: always()`, so a failing run — even one that fails before the harness
@@ -85,7 +88,7 @@ locked parent candidate `10123f6af00a5342f2634a01f4d9a0e7190c2173`):
 No product source is modified or written back; the job only reads the
 candidate and produces evidence artifacts.
 
-## 3. Structural contract test
+## 3. Structural contract test and behavioral status-script test
 
 `tools/ci/test_tenant_binding_acceptance_workflow.py` asserts (via plain
 text/regex parsing, matching `tools/ci/test_workflow_timeouts.py`'s existing
@@ -93,6 +96,12 @@ convention of not adding a YAML-parsing dependency to a check that runs in
 the same CI job it protects) that the workflow file keeps:
 
 - a required `candidate_sha` `workflow_dispatch` input,
+- the narrow `push` trigger scoped to this exact branch and the three
+  task-owned files (see §6a),
+- the `candidate_sha` fallback to the locked parent SHA on every context
+  that reads it (checkout `ref`, `concurrency` group, `CANDIDATE_SHA` env,
+  artifact `name`), and `WORKFLOW_SHA` recorded separately from
+  `CANDIDATE_SHA`,
 - a timeout on every job,
 - a checkout of that exact `ref` plus a HEAD-vs-input comparison,
 - the dedicated PostGIS service and `pnpm db:migrate` step,
@@ -105,6 +114,17 @@ the same CI job it protects) that the workflow file keeps:
 - an `if: always()` run-status step that derives status from real step
   outcomes (never a bare pass) and names the candidate, and creates the
   evidence directory before `pnpm install`/`pnpm db:migrate` run.
+
+`RunStatusScriptBehaviorTests` in the same file goes further than token
+presence: it extracts the `Record run status` step's `python3 - <<'PY_STATUS'`
+heredoc verbatim out of the YAML, dedents it into standalone runnable Python,
+and actually executes it in a scratch directory with crafted
+`INSTALL_OUTCOME`/`MIGRATE_OUTCOME`/`HARNESS_OUTCOME`/`GATE_OUTCOME` env vars
+and test-report fixtures, then asserts on the real `run-status.json` it
+writes. This is what caught, and now guards against regressing, the false-pass
+bug in §7 — a regex check that the script merely *mentions*
+`steps.harness.outcome` would not have caught the script reading that value
+into a variable it then never used in the status decision.
 
 ## 4. Why `.github/workflows/ci-integ.yml` also changed
 
@@ -143,7 +163,8 @@ PostgreSQL/HTTP run cannot be exercised here. What was verified locally:
 
 ```bash
 python3 -m unittest tools/ci/test_tenant_binding_acceptance_workflow.py -v
-# Ran 12 tests — OK
+# Ran 22 tests — OK (includes RunStatusScriptBehaviorTests, which extracts
+# and actually executes the embedded run-status script; see §3 and §7)
 
 python3 tools/ci/check_test_coverage.py
 # check_test_coverage: all 62 test files yield tests CI runs.
@@ -154,9 +175,11 @@ python3 -m unittest tools/ci/test_classify_change_scope.py \
 # Ran 33 tests — OK
 ```
 
-Both embedded `python3 - <<'PY_...'` heredocs (the zero-skip gate and the new
+Both embedded `python3 - <<'PY_...'` heredocs (the zero-skip gate and the
 run-status step) were extracted and byte-compiled locally to catch a syntax
-error before dispatch, since neither runs in this worker's own checks.
+error before dispatch, since neither runs directly in this worker's own
+checks; the run-status script is additionally exercised behaviorally by
+`RunStatusScriptBehaviorTests` (§3).
 
 ## 6. Dispatch registration — this workflow is not runnable from `dev` alone
 
@@ -210,8 +233,115 @@ workflow definition itself is dispatched from.
 
 That dispatch and its resulting run URL/log/evidence are the next step, and
 are what the parent task's acceptance lifecycle still needs before it can
-move past `acceptance`. The bootstrap PR to `main` is a prerequisite this
-task now depends on and is out of this worker's write scope to execute
-(pushing to `main` is not a normal task-branch push); it must be actioned by
-a lane authorized for direct-to-main changes before the workflow can be
-dispatched.
+move past `acceptance`. The bootstrap PR to `main` is a prerequisite for the
+`workflow_dispatch` path specifically and is out of this worker's write scope
+to execute (pushing to `main` is not a normal task-branch push); it must be
+actioned by a lane authorized for direct-to-main changes before that path is
+usable. §6a below is the runnable path that does not depend on it.
+
+## 6a. Push trigger — a runnable path that does not require the `main` bootstrap
+
+The Supervisor requires a runnable remote acceptance path as part of this
+task, not only the documented `main`-bootstrap blocker in §6. `push`-triggered
+workflows do not have `workflow_dispatch`'s default-branch registration
+requirement: GitHub evaluates and runs the workflow file *as it exists at the
+pushed commit*, on whatever branch that commit lands on, with no dependency
+on the file being present on the default branch first.
+
+The workflow's `on:` block therefore also declares:
+
+```yaml
+push:
+  branches:
+    - claude2/sr-qa-webhook-001-acceptance-runner
+  paths:
+    - .github/workflows/tenant-binding-acceptance.yml
+    - tools/ci/test_tenant_binding_acceptance_workflow.py
+    - docs/04-uat/system-remediation-20260906/tenant-binding-acceptance-runner.md
+```
+
+This is deliberately narrow: it only fires on a push to this task's own
+branch, and only when a push touches one of the three artifacts in this
+task's `write_scopes`. It does not add a trigger on `main`, `dev`, or any
+shared branch, and does not change any other workflow's gating.
+
+Because a `push` event has no `workflow_dispatch.inputs`, every place that
+previously read `github.event.inputs.candidate_sha` now falls back to the
+locked parent candidate when that input is absent:
+
+```
+github.event.inputs.candidate_sha || '10123f6af00a5342f2634a01f4d9a0e7190c2173'
+```
+
+applied identically to the checkout `ref`, the `concurrency` group, the
+`CANDIDATE_SHA` job env, and the uploaded artifact `name`. This means a push
+to this branch always re-verifies the same immutable parent candidate that
+`workflow_dispatch`'s default already targets — it never checks out or tests
+the pushed commit itself. The pushed commit's SHA is still recorded, but
+separately: job env `WORKFLOW_SHA: ${{ github.sha }}` is threaded into
+`run-status.json` as its own `workflow_sha` field, so evidence from a
+push-triggered run never conflates "which commit changed the workflow" with
+"which commit is being accepted".
+
+**Observing a push-triggered run**, once this branch is pushed with these
+files changed (local `gh` commands to list/watch GitHub-hosted runs are
+authorized; no product runtime is started):
+
+```bash
+gh run list --workflow=tenant-binding-acceptance.yml \
+  --branch=claude2/sr-qa-webhook-001-acceptance-runner --limit 5
+gh run watch <run-id>
+gh run view <run-id> --log
+gh run download <run-id>   # fetches execution-log.txt / test-report.json /
+                            # evidence-auth-http.json / run-status.json
+```
+
+The `main`-bootstrap path in §6 remains valid and still worth pursuing
+separately: it is what makes the workflow dispatchable on demand for *any*
+future candidate SHA, not just the one fixed value this push trigger falls
+back to. The two paths are complementary, not alternatives — §6a exists so
+this task does not have to block on §6's bootstrap PR landing first.
+
+## 7. Bug found and fixed: run-status could report "passed" for a failed harness
+
+Codex2 review (2026-09-10) reproduced a real false-pass in the run-status
+computation without starting any product/server/DB: vitest's JSON reporter
+can write `test-report.json` with `success: true` and both tests accounted
+for even when the harness process itself later exits non-zero (e.g. an
+unhandled error surfacing after the tests finished), which the GitHub Actions
+runtime records as `steps.harness.outcome: failure` (or `cancelled`, on a
+mid-step cancellation) while the report on disk still looks clean. The prior
+logic was:
+
+```python
+if gate_outcome == "success" and report_path.exists():
+    status = "passed"
+```
+
+— which never looked at `harness_outcome` at all, so a failed or cancelled
+harness step with a clean-looking report was recorded as `"passed"` even
+though the job itself was red. The fix requires all four tracked step
+outcomes to be `success`, not just the gate step's:
+
+```python
+if (
+    install_outcome == "success"
+    and migrate_outcome == "success"
+    and harness_outcome == "success"
+    and gate_outcome == "success"
+    and report_path.exists()
+):
+    status = "passed"
+elif install_outcome != "success" or migrate_outcome != "success":
+    status = "not_run"
+else:
+    status = "failed"
+```
+
+`RunStatusScriptBehaviorTests` (§3) covers this with behavioral regressions
+that execute the real script: genuine full success (`passed`), successful
+report with `harness=failure` (must be `failed`, not `passed` — the exact
+reproduced case), successful report with `harness=cancelled` (must be
+`failed`), successful report with `gate=failure` (must be `failed`), a
+missing report despite success-looking outcomes (must not be `passed`), and
+install/migrate failure (must be `not_run`).
