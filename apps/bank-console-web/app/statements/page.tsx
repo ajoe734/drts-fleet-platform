@@ -15,8 +15,10 @@ import {
   BANK_CONSOLE_ROLE_COOKIE,
   BANK_CONSOLE_SESSION_COOKIE,
   bankConsoleHref,
+  canViewSettlementAmounts,
   getBankConsoleSession,
   resolveServerSessionRole,
+  type BankConsoleRole,
 } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
 import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
@@ -65,6 +67,20 @@ function formatCurrency(amount: number, locale: Locale) {
     currency: "TWD",
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+// Non-digit placeholder so a restricted role can never infer a real figure's
+// length or shape from the rendered HTML.
+const RESTRICTED_AMOUNT_PLACEHOLDER = "••••••";
+
+function formatAmountForRole(
+  amount: number,
+  locale: Locale,
+  role: BankConsoleRole,
+) {
+  return canViewSettlementAmounts(role)
+    ? formatCurrency(amount, locale)
+    : RESTRICTED_AMOUNT_PLACEHOLDER;
 }
 
 export default async function StatementsPage({
@@ -155,7 +171,9 @@ export default async function StatementsPage({
         </div>
         <div>
           <span className="eyebrow">{t("statements.strip.total", locale)}</span>
-          <strong>{formatCurrency(totalIssuerPaid, locale)}</strong>
+          <strong>
+            {formatAmountForRole(totalIssuerPaid, locale, session.role)}
+          </strong>
         </div>
       </section>
 
@@ -235,7 +253,7 @@ export default async function StatementsPage({
         />
         <SurfaceCard
           kicker={t("statements.metrics.kicker", locale)}
-          title={formatCurrency(totalIssuerPaid, locale)}
+          title={formatAmountForRole(totalIssuerPaid, locale, session.role)}
           description={t("statements.metrics.issuerPays", locale)}
         />
       </section>
@@ -299,7 +317,11 @@ export default async function StatementsPage({
                 </div>
               </Td>
               <Td mono>
-                {formatCurrency(statement.totalIssuerPayableAmount, locale)}
+                {formatAmountForRole(
+                  statement.totalIssuerPayableAmount,
+                  locale,
+                  session.role,
+                )}
               </Td>
               <Td>
                 <CanvasPill tone={statementStatusTone[statement.status]} dot>
