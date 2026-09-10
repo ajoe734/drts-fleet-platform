@@ -37,6 +37,7 @@ class PreToolUseDecisionVocabularyTests(unittest.TestCase):
         buffer = io.StringIO()
         with mock.patch.object(permission_broker, "create_approval"), \
                 mock.patch.object(permission_broker, "log_event"), \
+                mock.patch.object(permission_broker, "_check_claude_allow_rules", return_value=False), \
                 mock.patch.object(permission_broker, "find_resume_override", return_value=None), \
                 mock.patch.object(permission_broker, "_matching_approval", return_value=(None, None)), \
                 redirect_stdout(buffer):

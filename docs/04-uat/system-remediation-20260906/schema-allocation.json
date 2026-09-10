@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "wave_id": "system-remediation-20260906",
+  "task_id": "SR-CONTRACT-001",
+  "allocated_at": "2026-09-09T22:07:02Z",
+  "base_sha": "396904179665a3b602d25931c4db6a2d006fb812",
+  "description": "Canonical database schema migration allocation and boundary rules for system remediation wave",
+  "last_canonical_migration_before_allocation": {
+    "version": "V0093",
+    "filename": "V0093__voice_retention_and_legal_hold.sql",
+    "wave": "unattended-voice-booking-20260906"
+  },
+  "allocations": [
+    {
+      "task_id": "SR-LEAVE-BE-001",
+      "version": "V0094",
+      "migration_filename": "V0094__sr_driver_leave.sql",
+      "domain": "driver_leave",
+      "target_schema": "ops",
+      "primary_tables": ["ops.phase1_driver_leave_requests"],
+      "referenced_tables": [
+        "ops.phase1_driver_shifts",
+        "ops.phase1_driver_matching_suppressions"
+      ],
+      "description": "請假資料與審核／班次連動服務 migration",
+      "downstream_tasks": [
+        "SR-LEAVE-FE-001",
+        "SR-WIRE-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
+    },
+    {
+      "task_id": "SR-ACADEMY-BE-001",
+      "version": "V0095",
+      "migration_filename": "V0095__sr_driver_academy.sql",
+      "domain": "driver_academy",
+      "target_schema": "reg",
+      "driver_identity_model": "runtime_text_id",
+      "driver_identity_decision_ref": "docs/04-uat/system-remediation-20260906/academy-identity-decision.md",
+      "primary_tables": [
+        "reg.phase1_driver_academy_courses",
+        "reg.phase1_driver_academy_modules",
+        "reg.phase1_driver_quiz_questions",
+        "reg.phase1_driver_quiz_attempts"
+      ],
+      "primary_tables_driver_id_type": "varchar(100), no FK (matches reg.phase1_registry_drivers.driver_id)",
+      "referenced_tables": [
+        "reg.phase1_registry_drivers",
+        "admin.phase1_driver_fleet_affiliations"
+      ],
+      "referenced_tables_access": "read-only; reg.phase1_registry_drivers is the driver identity source, admin.phase1_driver_fleet_affiliations is the active fleet cohort source via a new dedicated resolver (academy-identity-decision.md §2.2.1: as-of instant, effective_from<=asOfInstant AND (effective_until IS NULL OR effective_until>asOfInstant), inner join on reg.phase1_registry_drivers, DISTINCT driver_id) — NOT FleetPartnerService.listPortalDrivers(), which is a portal-display read (no date filtering, no dedup, fallback rows for orphaned affiliations) and must not be reused for this denominator",
+      "modifies_existing_tables": [
+        {
+          "table": "reg.driver_training_records",
+          "change": "ALTER COLUMN driver_id TYPE varchar(100) USING driver_id::text; DROP CONSTRAINT driver_training_records_driver_id_fkey (to reg.drivers)",
+          "access": "write (insert on course pass)",
+          "precedent": "V0055__p5_disclosure_ids_as_varchar.sql"
+        },
+        {
+          "table": "reg.driver_reg_profiles",
+          "change": "ALTER COLUMN driver_id TYPE varchar(100) USING driver_id::text; DROP CONSTRAINT driver_reg_profiles_driver_id_fkey (to reg.drivers); driver_id remains primary key",
+          "access": "write (upsert training_status column only, on pass/expiry transitions)",
+          "precedent": "V0055__p5_disclosure_ids_as_varchar.sql"
+        }
+      ],
+      "not_referenced": "reg.drivers (uuid PK) has no runtime write path in apps/api/src and must not be used as an identity target or cohort denominator; see driver_identity_decision_ref",
+      "description": "課程、測驗、完訓與重訓資料服務 migration",
+      "downstream_tasks": [
+        "SR-ACADEMY-FE-001",
+        "SR-WIRE-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
+    },
+    {
+      "task_id": "SR-HOST-BE-001",
+      "version": "V0096",
+      "migration_filename": "V0096__sr_host_vehicle_access.sql",
+      "domain": "host_vehicle_access",
+      "target_schema": "ops",
+      "primary_views_or_tables": ["ops.phase1_host_vehicle_projections"],
+      "referenced_tables": [
+        "reg.vehicles",
+        "ops.phase1_maintenance_logs",
+        "crm.phase1_complaint_cases",
+        "ops.phase1_platform_earnings_ledger",
+        "ops.phase1_owned_orders"
+      ],
+      "description": "Host 自車受限 read model 與所有權授權 migration",
+      "downstream_tasks": [
+        "SR-HOST-FE-001",
+        "SR-WIRE-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
+    }
+  ],
+  "boundary_invariants": {
+    "anti_collision_rule": "Migrations V0086 through V0093 are exclusively reserved for Unattended Voice Booking (UV-EXEC); SR migrations strictly begin at V0094 and increment sequentially without collision.",
+    "root_module_wiring_rule": "Root app.module.ts wiring is exclusively reserved for SR-WIRE-001; leaf BE tasks only export standalone NestJS modules.",
+    "interface_consumption_rule": "Frontend (FE) and Backend (BE) tasks may only consume interfaces approved and exported by @drts/contracts and @drts/api-client.",
+    "authoritative_model_rule": "No fixture, hardcoded percentages (such as FX_FLEET_TRAINING), dummy signatures, or mock delivery may substitute real authoritative state.",
+    "financial_policy_hold_rule": "Host vehicle commission split and net earnings remain null / pending_policy in Phase 1; downstream SR-HOST-BE-001 must not fabricate pseudo financial algorithms."
+  },
+  "amendments": [
+    {
+      "amended_by_task_id": "SR-ACADEMY-BE-001-IDENTITY-CONTRACT",
+      "amended_at": "2026-09-10",
+      "scope": "SR-ACADEMY-BE-001 allocation entry only",
+      "reason": "Original allocation referenced reg.drivers (uuid PK, no runtime write path) as a referenced table for driver identity, which blocked SR-ACADEMY-BE-001 implementation (docs/04-uat/system-remediation-20260906/SR-ACADEMY-BE-001.md checkpoint). Corrected to the runtime text driver-id model already used by reg.phase1_registry_drivers, following the V0055 precedent.",
+      "detail_ref": "docs/04-uat/system-remediation-20260906/academy-identity-decision.md"
+    }
+  ]
+}

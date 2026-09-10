@@ -1,5 +1,5 @@
 import { EStepper } from "@/components/ent-kit";
-import { EnterpriseBookingForm } from "@/components/enterprise-booking-form";
+import { EnterpriseBookingForm } from "@/components/booking-form";
 import { EntPageHead } from "@/components/enterprise-shell";
 import {
   createEnterpriseBookingDraft,
@@ -10,7 +10,7 @@ import {
   getEnterpriseCostCenters,
   getEnterprisePassengers,
 } from "@/lib/enterprise-fixtures";
-import { enterpriseTheme as t } from "@/lib/enterprise-theme";
+import { tenantEnterpriseTheme as t } from "@/components/booking-form/theme";
 import { getServerLocale } from "@/lib/server-locale";
 import { type TranslationKey, t as translate } from "@/lib/translations";
 
@@ -28,10 +28,11 @@ export default async function NewBookingPage({
   const bookingId = Array.isArray(resolvedSearchParams.bookingId)
     ? resolvedSearchParams.bookingId[0]
     : resolvedSearchParams.bookingId;
+
   const initialDraft =
     Object.keys(resolvedSearchParams).length > 0
       ? parseEnterpriseBookingDraft(resolvedSearchParams, locale)
-      : createEnterpriseBookingDraft(locale);
+      : createEnterpriseBookingDraft(locale, { entry: "self" });
 
   return (
     <>

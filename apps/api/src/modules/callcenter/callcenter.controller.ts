@@ -183,6 +183,82 @@ export class CallcenterController {
     );
   }
 
+  @Post("callbacks/:callbackTaskId/claim")
+  claimCallbackTask(
+    @Param("callbackTaskId") callbackTaskId: string,
+    @Body() command: { operatorId: string; expectedVersion?: number },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.callcenterService.claimCallbackTask(
+        callbackTaskId,
+        command.operatorId,
+        command.expectedVersion,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("callbacks/:callbackTaskId/attempt")
+  recordCallbackAttempt(
+    @Param("callbackTaskId") callbackTaskId: string,
+    @Body()
+    command: {
+      operatorId: string;
+      outcome: string;
+      notes?: string;
+      hangupConfirmed?: boolean;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.callcenterService.recordCallbackAttempt(
+        callbackTaskId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("callbacks/:callbackTaskId/cancel")
+  cancelCallbackTask(
+    @Param("callbackTaskId") callbackTaskId: string,
+    @Body()
+    command: {
+      reason: string;
+      expectedVersion?: number;
+      operatorId?: string;
+    },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.callcenterService.cancelCallbackTask(
+        callbackTaskId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("sessions/:callId/takeover")
+  takeoverAiCallSession(
+    @Param("callId") callId: string,
+    @Body() command: { operatorId: string; reason?: string },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.callcenterService.takeoverAiCallSession(
+        callId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Post("sessions/:callId/transfer-to-complaint")
   transferCallToComplaint(
     @Param("callId") callId: string,

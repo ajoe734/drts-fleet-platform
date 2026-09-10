@@ -13,9 +13,12 @@ spec:
       annotations:
         # Cloud SQL Auth Proxy built-in integration — socket at /cloudsql/<INSTANCE>
         run.googleapis.com/cloudsql-instances: "CLOUDSQL_INSTANCE_PLACEHOLDER"
-        autoscaling.knative.dev/minScale: "0"
+        # SD §3.4: Warm instance and unthrottled CPU (instance-based billing)
+        # Enables continuous execution of background voice runner jobs (pending receipts,
+        # driver deadlines, recording finalize, callbacks) even when idle (0 active HTTP requests).
+        autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/maxScale: "3"
-        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/cpu-throttling: "false"
     spec:
       serviceAccountName: SERVICE_ACCOUNT_PLACEHOLDER
       containers:

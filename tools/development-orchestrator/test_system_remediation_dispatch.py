@@ -64,8 +64,14 @@ class WaveTests(unittest.TestCase):
     def test_complete_coverage_and_parallel_roots(self):
         ordered = dispatch.validate_manifest(self.m, REPO)
         self.assertEqual(len(ordered), 71)
-        self.assertEqual(sum(not x['depends_on'] for x in ordered), 25)
+        self.assertEqual(sum(not x['depends_on'] for x in ordered), 24)
         self.assertEqual(sum(x['initial_status'] == 'blocked' for x in ordered), 9)
+
+    def test_environment_layout_waits_for_enterprise_form_writer(self):
+        environment = next(t for t in self.m['tasks'] if t['id'] == 'SR-ENV-COPY-001')
+        environment['depends_on'].remove('SR-ENTERPRISE-FORM-001')
+        with self.assertRaisesRegex(ValueError, 'Unordered shared writes SR-ENTERPRISE-FORM-001 / SR-ENV-COPY-001'):
+            dispatch.validate_manifest(self.m, REPO)
 
     def test_cycle_rejected(self):
         self.m['tasks'][0]['depends_on'].append('SR-MAIL-002')

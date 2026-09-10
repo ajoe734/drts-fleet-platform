@@ -706,14 +706,18 @@
         "apps/api/src/modules/reporting-filing/",
         "apps/ops-console-web/app/reports/",
         "tests/unit/system-remediation/sr-report-001/",
-        "docs/04-uat/system-remediation-20260906/SR-REPORT-001.md"
+        "docs/04-uat/system-remediation-20260906/SR-REPORT-001.md",
+        "packages/contracts/src/index.ts",
+        "tests/unit/reporting-filing.test.ts"
       ],
       "read_dependencies": [],
       "artifacts": [
         "apps/api/src/modules/reporting-filing/",
         "apps/ops-console-web/app/reports/",
         "tests/unit/system-remediation/sr-report-001/",
-        "docs/04-uat/system-remediation-20260906/SR-REPORT-001.md"
+        "docs/04-uat/system-remediation-20260906/SR-REPORT-001.md",
+        "packages/contracts/src/index.ts",
+        "tests/unit/reporting-filing.test.ts"
       ],
       "acceptance": [
         "三種一般格式各可解析且同筆資料/篩選一致。",
@@ -733,7 +737,8 @@
         "git diff --check",
         "pnpm --filter @drts/api typecheck",
         "pnpm --filter @drts/ops-console-web typecheck",
-        "pnpm exec vitest run tests/unit/system-remediation/sr-report-001/"
+        "pnpm exec vitest run tests/unit/system-remediation/sr-report-001/",
+        "pnpm exec vitest run tests/unit/reporting-filing.test.ts"
       ],
       "validation_plan": [
         "在上述task目錄新增 .test.ts，root Vitest可發現；不使用passWithNoTests掩蓋空測試。",
@@ -742,7 +747,7 @@
       ],
       "initial_status": "backlog",
       "serial_resources": ["reporting-filing"],
-      "integration_notes": "測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。",
+      "integration_notes": "測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。 Supervisor 2026-09-09 授權兩個精確共用檔案：contracts index 僅改一般報表 implemented-format 宣告與相關說明，中央 reporting-filing test 僅改對應斷言；不得改其他 shared exports。SR-CONTRACT-001 必須等 SR-REPORT-001 合併並 canonical done 後才寫共用 index。",
       "gate_reason": "",
       "waiting_for": "Gemini",
       "estimated_size": "1–2個可獨立審查PR；超過則由 supervisor 拆 child task 保留追溯",
@@ -1885,14 +1890,15 @@
     {
       "id": "SR-CONTRACT-001",
       "title": "一次整合新增功能契約與保留 migration 範圍",
-      "summary_zh": "先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 依feature-contracts新增leaf contracts與client typed methods，統一由此task改shared exports/OpenAPI。保留leave/academy/Host的獨立migration filenames並查現有編號；不得與UV schema爭用。根app.module留SR-WIRE-001獨寫。",
+      "summary_zh": "先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 依feature-contracts新增leaf contracts與client typed methods，新增功能的shared exports/OpenAPI由此task整合；一般報表格式宣告由前置SR-REPORT-001隨renderer同候選更新。保留leave/academy/Host的獨立migration filenames並查現有編號；不得與UV schema爭用。根app.module留SR-WIRE-001獨寫。",
       "owner": "Codex",
       "reviewer": "Codex2",
       "depends_on": [
         "SR-DESIGN-001",
         "UV-EXEC-001",
         "UV-EXEC-002",
-        "UV-EXEC-019"
+        "UV-EXEC-019",
+        "SR-REPORT-001"
       ],
       "write_scopes": [
         "docs/04-api/openapi-spec.yaml",
@@ -1940,7 +1946,7 @@
       ],
       "initial_status": "backlog",
       "serial_resources": ["contracts-client"],
-      "integration_notes": "測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。 共用 API-client index 與既有 UV-EXEC-019 的 src/ scope 重疊，必須等該 task canonical done；不得依初始 owner 或不同 worktree 假設可同寫。",
+      "integration_notes": "測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。 共用 API-client index 與既有 UV-EXEC-019 的 src/ scope 重疊，必須等該 task canonical done；不得依初始 owner 或不同 worktree 假設可同寫。 一般報表格式宣告由 SR-REPORT-001 在 renderer 同一候選內更新；本 task 等其 canonical done/merge 後接續並保留已實作格式，不得回退為 CSV-only。",
       "gate_reason": "",
       "waiting_for": "Codex",
       "estimated_size": "1–2個可獨立審查PR；超過則由 supervisor 拆 child task 保留追溯",
@@ -2450,10 +2456,10 @@
     {
       "id": "SR-ENV-COPY-001",
       "title": "各app環境標示與使用者文案清理",
-      "summary_zh": "先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 集中處理環境判斷与顯示文案，以實際env/source作真值；fixture/dev不叫正式。先掃描render位置，scope只允許列出的translations与共用badge；其他shell改動要求supervisor加入前置與範圍。",
+      "summary_zh": "先讀 execution_ref 中本 task 及追溯來源；從目前 origin/dev 記 base SHA並重現。9/6 audit SHA 是歷史觀察而非當前程式真值；已由其他任務修復時提交目前 SHA 的回歸證據，不重做或回退。只改 write_scopes；額外共用檔案必須由 supervisor 擴 scope 並加入相依後才能寫。沿用權威 API／資料模型，不以 fixture、固定百分比、假簽章或假送達代替完成。 集中處理環境判斷与顯示文案，以實際env/source作真值；fixture/dev不叫正式。依2026-09-09 supervisor scope 使用列出的六個server layouts與shell/frame/nav接線；保留其他端點/部署檔限制。DRTS_ENV來自runtime server producer，缺值不推論production。",
       "owner": "Claude2",
       "reviewer": "Claude",
-      "depends_on": [],
+      "depends_on": ["SR-ENTERPRISE-FORM-001"],
       "write_scopes": [
         "apps/platform-admin-web/lib/translations.ts",
         "apps/ops-console-web/lib/translations.ts",
@@ -2463,9 +2469,25 @@
         "apps/enterprise-dispatch-web/lib/translations.ts",
         "packages/ui-web/src/environment-badge/",
         "tests/unit/system-remediation/sr-env-copy-001/",
-        "docs/04-uat/system-remediation-20260906/SR-ENV-COPY-001.md"
+        "docs/04-uat/system-remediation-20260906/SR-ENV-COPY-001.md",
+        "apps/platform-admin-web/app/layout.tsx",
+        "apps/ops-console-web/app/layout.tsx",
+        "apps/tenant-console-web/app/layout.tsx",
+        "apps/fleet-partner-portal-web/app/layout.tsx",
+        "apps/bank-console-web/app/layout.tsx",
+        "apps/enterprise-dispatch-web/app/layout.tsx",
+        "apps/platform-admin-web/components/admin-shell.tsx",
+        "apps/tenant-console-web/components/tenant-shell.tsx",
+        "apps/tenant-console-web/lib/navigation.ts",
+        "apps/fleet-partner-portal-web/components/fleet-portal-shell.tsx",
+        "apps/bank-console-web/components/bank-shell.tsx",
+        "apps/bank-console-web/lib/navigation.ts",
+        "apps/enterprise-dispatch-web/components/enterprise-app-frame.tsx",
+        "apps/enterprise-dispatch-web/components/enterprise-shell.tsx",
+        "packages/ui-web/src/index.tsx",
+        "packages/ui-web/tests/unit/environment-badge.test.ts"
       ],
-      "read_dependencies": [],
+      "read_dependencies": [".github/workflows/deploy-dev.yml", ".github/workflows/deploy-staging.yml", ".github/workflows/deploy-prod.yml"],
       "artifacts": [
         "apps/platform-admin-web/lib/translations.ts",
         "apps/ops-console-web/lib/translations.ts",
@@ -2475,7 +2497,23 @@
         "apps/enterprise-dispatch-web/lib/translations.ts",
         "packages/ui-web/src/environment-badge/",
         "tests/unit/system-remediation/sr-env-copy-001/",
-        "docs/04-uat/system-remediation-20260906/SR-ENV-COPY-001.md"
+        "docs/04-uat/system-remediation-20260906/SR-ENV-COPY-001.md",
+        "apps/platform-admin-web/app/layout.tsx",
+        "apps/ops-console-web/app/layout.tsx",
+        "apps/tenant-console-web/app/layout.tsx",
+        "apps/fleet-partner-portal-web/app/layout.tsx",
+        "apps/bank-console-web/app/layout.tsx",
+        "apps/enterprise-dispatch-web/app/layout.tsx",
+        "apps/platform-admin-web/components/admin-shell.tsx",
+        "apps/tenant-console-web/components/tenant-shell.tsx",
+        "apps/tenant-console-web/lib/navigation.ts",
+        "apps/fleet-partner-portal-web/components/fleet-portal-shell.tsx",
+        "apps/bank-console-web/components/bank-shell.tsx",
+        "apps/bank-console-web/lib/navigation.ts",
+        "apps/enterprise-dispatch-web/components/enterprise-app-frame.tsx",
+        "apps/enterprise-dispatch-web/components/enterprise-shell.tsx",
+        "packages/ui-web/src/index.tsx",
+        "packages/ui-web/tests/unit/environment-badge.test.ts"
       ],
       "acceptance": [
         "中文/英文與正常/錯誤/空態無無意義ActionIntent等文字。",
@@ -2498,7 +2536,9 @@
         "pnpm --filter @drts/fleet-partner-portal-web typecheck",
         "pnpm --filter @drts/ops-console-web typecheck",
         "pnpm --filter @drts/platform-admin-web typecheck",
-        "pnpm --filter @drts/tenant-console-web typecheck"
+        "pnpm --filter @drts/tenant-console-web typecheck",
+        "pnpm exec vitest run tests/unit/system-remediation/sr-env-copy-001/ packages/ui-web/tests/unit/environment-badge.test.ts --no-file-parallelism --maxConcurrency=1",
+        "pnpm --filter @drts/ui-web typecheck"
       ],
       "validation_plan": [
         "先選出受影響 package 的現有 test/typecheck 指令；新增 meaningful regression 與必要 integration，不跑無關全庫測試。",
@@ -2506,7 +2546,7 @@
       ],
       "initial_status": "backlog",
       "serial_resources": ["copy-catalog"],
-      "integration_notes": "測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。",
+      "integration_notes": "測試依 task ID 獨立檔案；不得平行修改中央 test config、lockfile、shared exports、全域 routes。 Supervisor 2026-09-09 授權列出的 server layouts、shell/nav/frame 與 UI barrel/legacy test，僅環境值傳遞、顯示及未知健康狀態；不改 authentication、導覽行為、API URL 或部署流程。DRTS_ENV 由 server layout 讀取並傳可序列化已正規化值到 client shell；未設定/非法值保持 unknown，不回退 NODE_ENV/domain/翻譯字串。shared dev deploy 已供應 development；無其他部署 frontend producer readback 時保持 unknown。共用 index 僅匯出本 badge/resolver。當前 task scope overlap 已查無其他未完成 writer；新 overlap 必須先排相依。",
       "gate_reason": "",
       "waiting_for": "Claude2",
       "estimated_size": "1–2個可獨立審查PR；超過則由 supervisor 拆 child task 保留追溯",

@@ -7,6 +7,7 @@ import { LanguageProvider } from "@/lib/i18n";
 import { RuntimeConfigScript } from "@/lib/runtime-config";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
+import { normalizeServerRuntimeEnv } from "@drts/ui-web";
 
 import "./globals.css";
 
@@ -26,6 +27,7 @@ export default async function RootLayout({
   const locale = await getServerLocale();
   const badges = await loadNavBadges();
   const fleetNav = buildFleetPortalNav(locale, badges);
+  const env = normalizeServerRuntimeEnv(process.env.DRTS_ENV);
 
   return (
     <html lang={locale}>
@@ -38,6 +40,7 @@ export default async function RootLayout({
             fleetBrandSubLabel={t("app.sub", locale)}
             fleetBrandMark={t("app.brandMark", locale)}
             searchPlaceholder={t("common.search", locale)}
+            env={env}
           >
             {children}
           </FleetPortalShell>

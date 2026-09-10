@@ -23,6 +23,9 @@ interface ExtractIdentityOptions {
   requestUrl?: string | undefined;
 }
 
+// x-tenant-id is a tenant *resource selector*, not proof of identity: a
+// caller who sends only that header (no Bearer token, no other bootstrap
+// identity header) must not be treated as an authenticated bootstrap actor.
 function hasAuthSignal(headers: AuthBootstrapHeaders): boolean {
   return [
     "x-actor-type",
@@ -32,7 +35,6 @@ function hasAuthSignal(headers: AuthBootstrapHeaders): boolean {
     "x-role-families",
     "x-scopes",
     "x-auth-mode",
-    "x-tenant-id",
     "x-partner-id",
     "x-partner-program-id",
     "x-partner-entry-slug",

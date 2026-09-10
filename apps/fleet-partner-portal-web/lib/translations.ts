@@ -4,6 +4,17 @@
 
 export type Locale = "zh" | "en";
 
+/**
+ * Compatibility label for callers without the server-provided environment.
+ * Translation catalogs never read deployment/build variables. The server
+ * layout supplies normalized DRTS_ENV to the shell for its explicit label.
+ */
+export function resolveAuthoritativeFleetShellEnv(
+  locale: Locale = "zh",
+): string {
+  return locale === "zh" ? "未知環境" : "unknown";
+}
+
 type Dict = Record<string, string>;
 
 const en: Dict = {
@@ -20,8 +31,24 @@ const en: Dict = {
   "shell.api.healthy": "API healthy",
   "shell.api.degraded": "API degraded",
   "shell.api.down": "API down",
+  "shell.api.unknown": "API unknown",
   "shell.api.lastChecked": "checked",
   "shell.api.notChecked": "not checked",
+  "shell.env": resolveAuthoritativeFleetShellEnv("en"),
+  "shell.env.production": "production",
+  "shell.env.staging": "staging",
+  "shell.env.preview": "preview",
+  "shell.env.sandbox": "sandbox",
+  "shell.env.dev": "development",
+  "shell.env.mock": "mock data",
+  "shell.env.unknown": "unknown",
+  "app.environment.production": "production",
+  "app.environment.staging": "staging",
+  "app.environment.preview": "preview",
+  "app.environment.sandbox": "sandbox",
+  "app.environment.dev": "development",
+  "app.environment.mock": "mock data",
+  "app.environment.unknown": "unknown",
   "shell.locale.ariaZh": "Switch to Chinese",
   "shell.locale.ariaEn": "Switch to English",
   "shell.locale.zh": "中文",
@@ -124,7 +151,7 @@ const en: Dict = {
   "supply.driverField.registrationArea": "Registration area",
   "supply.driverField.registrationExpiry": "Registration expiry",
   "supply.driverField.preferredVehicleSubmissionId":
-    "Preferred vehicle submissionId",
+    "Preferred vehicle application ID",
   "supply.vehicleField.plateNo": "Plate number",
   "supply.vehicleField.licenseType": "License type",
   "supply.vehicleField.licenseTypeTaxi": "Taxi plate",
@@ -136,7 +163,7 @@ const en: Dict = {
   "supply.vehicleField.luggageCapacity": "Luggage capacity",
   "supply.vehicleField.businessArea": "Operating area",
   "supply.vehicleField.currentDriverSubmissionId":
-    "Current driver submissionId",
+    "Current driver application ID",
   "supply.vehicleField.doorCount": "Door count",
   "supply.vehicleField.color": "Color",
   "supply.vehicleField.airportTransferEligible": "Airport transfer eligible",
@@ -546,8 +573,24 @@ const zh: Dict = {
   "shell.api.healthy": "API 健康",
   "shell.api.degraded": "API 降級",
   "shell.api.down": "API 失聯",
+  "shell.api.unknown": "API 未知",
   "shell.api.lastChecked": "最後檢查",
   "shell.api.notChecked": "尚未檢查",
+  "shell.env": resolveAuthoritativeFleetShellEnv("zh"),
+  "shell.env.production": "正式環境",
+  "shell.env.staging": "預發環境",
+  "shell.env.preview": "預覽環境",
+  "shell.env.sandbox": "沙盒環境",
+  "shell.env.dev": "開發環境",
+  "shell.env.mock": "模擬資料",
+  "shell.env.unknown": "未知環境",
+  "app.environment.production": "正式環境",
+  "app.environment.staging": "預發環境",
+  "app.environment.preview": "預覽環境",
+  "app.environment.sandbox": "沙盒環境",
+  "app.environment.dev": "開發環境",
+  "app.environment.mock": "模擬資料",
+  "app.environment.unknown": "未知環境",
   "shell.locale.ariaZh": "切換為中文",
   "shell.locale.ariaEn": "切換為英文",
   "shell.locale.zh": "中文",
@@ -644,7 +687,7 @@ const zh: Dict = {
   "supply.driverField.registrationNo": "計程車登記證號",
   "supply.driverField.registrationArea": "登記區域",
   "supply.driverField.registrationExpiry": "登記證到期",
-  "supply.driverField.preferredVehicleSubmissionId": "偏好車輛 submissionId",
+  "supply.driverField.preferredVehicleSubmissionId": "偏好車輛申請編號",
   "supply.vehicleField.plateNo": "車牌",
   "supply.vehicleField.licenseType": "牌照類型",
   "supply.vehicleField.licenseTypeTaxi": "計程車牌照",
@@ -655,7 +698,7 @@ const zh: Dict = {
   "supply.vehicleField.seatCount": "座位數",
   "supply.vehicleField.luggageCapacity": "行李容量",
   "supply.vehicleField.businessArea": "營業區",
-  "supply.vehicleField.currentDriverSubmissionId": "目前司機 submissionId",
+  "supply.vehicleField.currentDriverSubmissionId": "目前司機申請編號",
   "supply.vehicleField.doorCount": "車門數",
   "supply.vehicleField.color": "顏色",
   "supply.vehicleField.airportTransferEligible": "機場接送資格",
@@ -1019,6 +1062,9 @@ export function t(
   locale: Locale,
   params?: Record<string, string | number>,
 ): string {
+  if (key === "shell.env") {
+    return resolveAuthoritativeFleetShellEnv(locale);
+  }
   const dict = translations[locale] ?? translations.en;
   let value = dict[key] ?? translations.en[key] ?? key;
 
