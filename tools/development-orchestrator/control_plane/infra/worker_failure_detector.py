@@ -267,6 +267,12 @@ def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
     payload_type = str(payload.get("type") or "").strip().lower()
     if payload_type in {"assistant", "user"}:
         return None
+    if payload_type in {"item.started", "item.updated", "item.completed"}:
+        item = payload.get("item")
+        # A worker inspecting another lane's limit must not pause itself.
+        # Tool output and assistant reasoning are not provider failure events.
+        if not isinstance(item, dict) or item.get("type") != "error":
+            return None
     candidates = _iter_json_string_values(payload)
     candidates = [*candidates, line]
     for candidate in candidates:
