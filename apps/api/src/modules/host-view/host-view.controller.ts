@@ -132,22 +132,22 @@ export class HostViewController {
   // AC-HOST-NEG-2: Mutation endpoints strictly prohibited (405 Method Not Allowed)
   // --------------------------------------------------------------------------
 
-  @Post("vehicles*")
+  @Post(["vehicles", "vehicles/*splat"])
   rejectPost(): never {
     return this.hostViewService.assertReadOnly();
   }
 
-  @Put("vehicles*")
+  @Put(["vehicles", "vehicles/*splat"])
   rejectPut(): never {
     return this.hostViewService.assertReadOnly();
   }
 
-  @Patch("vehicles*")
+  @Patch(["vehicles", "vehicles/*splat"])
   rejectPatch(): never {
     return this.hostViewService.assertReadOnly();
   }
 
-  @Delete("vehicles*")
+  @Delete(["vehicles", "vehicles/*splat"])
   rejectDelete(): never {
     return this.hostViewService.assertReadOnly();
   }
