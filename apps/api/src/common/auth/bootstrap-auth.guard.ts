@@ -121,6 +121,10 @@ function hasControlPlaneInnerBearer(
   return Boolean(header?.startsWith("Bearer "));
 }
 
+// x-tenant-id is a tenant *resource selector*, not an identity/auth header:
+// it must not trip the strict-environment bootstrap-header rejection, or a
+// valid Bearer-authenticated request carrying it (as tenant-scoped routes
+// require) would be rejected before the token is ever verified.
 function hasBootstrapAuthSignal(
   headers: Record<string, string | string[] | undefined>,
 ): boolean {
@@ -132,7 +136,6 @@ function hasBootstrapAuthSignal(
     "x-role-families",
     "x-scopes",
     "x-auth-mode",
-    "x-tenant-id",
     "x-partner-id",
     "x-partner-program-id",
     "x-partner-entry-slug",
