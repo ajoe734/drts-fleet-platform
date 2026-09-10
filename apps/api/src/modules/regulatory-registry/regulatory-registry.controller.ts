@@ -4,6 +4,7 @@ import {
   Get,
   Headers,
   HttpStatus,
+  Optional,
   Param,
   Post,
   Query,
@@ -27,18 +28,22 @@ import type {
   UpdateDriverWorkStateCommand,
   UpdateVehicleComplianceCommand,
   PassengerServiceRuntimeProfile,
+  SYSTEM_REMEDIATION_ERROR_CODES,
 } from "@drts/contracts";
 
 import {
   ApiRequestError,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { ContractOperationalViewService } from "./contract-operational-view.service";
 import { RegulatoryRegistryService } from "./regulatory-registry.service";
 
 @Controller("regulatory-registry")
 export class RegulatoryRegistryController {
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
+    @Optional()
+    private readonly contractOperationalViewService?: ContractOperationalViewService,
   ) {}
 
   @Get("summary")
@@ -292,6 +297,89 @@ export class RegulatoryRegistryController {
       this.regulatoryRegistryService.activateContract(contractId, command),
       requestId,
     );
+  }
+
+  @Get("contracts/:contractId/operational-view")
+  getContractOperationalView(
+    @Param("contractId") contractId: string,
+    @Headers("x-tenant-id") headerTenantId?: string,
+    @Headers("x-partner-id") headerPartnerId?: string,
+    @Headers("x-service-scope") headerServiceScope?: string,
+    @Query("tenantId") queryTenantId?: string,
+    @Query("partnerId") queryPartnerId?: string,
+    @Query("serviceScope") queryServiceScope?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const scopeContext = {
+      tenantId: headerTenantId || queryTenantId || undefined,
+      partnerId: headerPartnerId || queryPartnerId || undefined,
+      serviceScope: headerServiceScope || queryServiceScope || undefined,
+    };
+    const view =
+      this.requireContractOperationalViewService().getOperationalView(
+        contractId,
+        scopeContext,
+      );
+    return toApiSuccessEnvelope(view, requestId);
+  }
+
+  @Get("contracts/:contractId/operational-terms")
+  getContractOperationalTerms(
+    @Param("contractId") contractId: string,
+    @Headers("x-tenant-id") headerTenantId?: string,
+    @Headers("x-partner-id") headerPartnerId?: string,
+    @Headers("x-service-scope") headerServiceScope?: string,
+    @Query("tenantId") queryTenantId?: string,
+    @Query("partnerId") queryPartnerId?: string,
+    @Query("serviceScope") queryServiceScope?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const scopeContext = {
+      tenantId: headerTenantId || queryTenantId || undefined,
+      partnerId: headerPartnerId || queryPartnerId || undefined,
+      serviceScope: headerServiceScope || queryServiceScope || undefined,
+    };
+    const terms =
+      this.requireContractOperationalViewService().getOperationalTerms(
+        contractId,
+        scopeContext,
+      );
+    return toApiSuccessEnvelope(terms, requestId);
+  }
+
+  @Get("contracts/:contractId")
+  getContract(
+    @Param("contractId") contractId: string,
+    @Headers("x-tenant-id") headerTenantId?: string,
+    @Headers("x-partner-id") headerPartnerId?: string,
+    @Headers("x-service-scope") headerServiceScope?: string,
+    @Query("tenantId") queryTenantId?: string,
+    @Query("partnerId") queryPartnerId?: string,
+    @Query("serviceScope") queryServiceScope?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const scopeContext = {
+      tenantId: headerTenantId || queryTenantId || undefined,
+      partnerId: headerPartnerId || queryPartnerId || undefined,
+      serviceScope: headerServiceScope || queryServiceScope || undefined,
+    };
+    const contract =
+      this.requireContractOperationalViewService().validateContractScope(
+        contractId,
+        scopeContext,
+      );
+    return toApiSuccessEnvelope(contract, requestId);
+  }
+
+  private requireContractOperationalViewService(): ContractOperationalViewService {
+    if (!this.contractOperationalViewService) {
+      throw new ApiRequestError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        "SERVICE_UNAVAILABLE",
+        "Contract operational view service is not available.",
+      );
+    }
+    return this.contractOperationalViewService;
   }
 
   @Get("policies/expiring")
