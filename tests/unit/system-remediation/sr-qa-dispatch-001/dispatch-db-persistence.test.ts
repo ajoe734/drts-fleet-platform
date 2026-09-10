@@ -112,11 +112,22 @@ describe("SR-QA-DISPATCH-001: Real PostgreSQL Dispatch Job/Assignment/Task/Trace
       CREATE SCHEMA crm;
       CREATE SCHEMA admin;
       CREATE SCHEMA core;
+      CREATE SCHEMA reg;
+      CREATE SCHEMA billing;
+      CREATE SCHEMA reporting;
       CREATE FUNCTION admin.touch_updated_at() RETURNS trigger LANGUAGE plpgsql AS
       $$ BEGIN NEW.updated_at = now(); RETURN NEW; END $$;
     `);
     await pool.query(migration("V0011__phase1_runtime_snapshots.sql"));
     await pool.query(migration("V0087__dispatch_resource_reservations.sql"));
+    // OwnedMobilityRepository.loadState() unconditionally reads
+    // ops.passenger_dispatch_disclosure_snapshots and
+    // ops.consumer_notification_outbox (see persistChanges/loadState in
+    // owned-mobility.repository.ts), so both must exist even though this
+    // suite does not assert on their contents.
+    await pool.query(
+      migration("V0056__multi_taxi_runtime_compliance_closure.sql"),
+    );
 
     const dbHandle: DatabaseService = {
       isEnabled: () => true,

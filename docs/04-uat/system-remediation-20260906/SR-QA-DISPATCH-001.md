@@ -7,7 +7,7 @@
 - Reviewer: `Gemini`
 - Branch: `claude/sr-qa-dispatch-001`
 - Base SHA: `b671bfc72e8a9d969fed1c872b80abc8842ed6f9` (`origin/dev`)
-- Candidate SHA: recorded at handoff (see task-board `handoff` event)
+- Candidate SHA: recorded at handoff (see task-board `handoff` event); see §3.4 for the PR #1948 CI fail-closed fix applied on top of the prior candidate `d1ecc53022b8e40ccf6d0791c8d82903580bdbc1`
 - Planning Ref: [`docs/04-uat/system-remediation-20260906/source/capabilities.json`](file:///home/lupin/workspace/drts-fleet-platform/docs/04-uat/system-remediation-20260906/source/capabilities.json) (`C035`, `C036`, `C037`, `C038`, `C039`, `C040`, `C041`, `C042`, `C048`, `C134`)
 - Dependencies: `SR-UAT-HARNESS-001`, `SR-OPS-MAP-001`, `UV-EXEC-016`, `SR-OPS-CONTRACT-001`, `SR-OPS-SHELL-001` — all `done` as of task pickup.
 - Worktree: `/home/lupin/workspace/drts-fleet-platform/.artifacts/worktrees/auto/claude-sr-qa-dispatch-001`
@@ -20,18 +20,18 @@
 
 ### 1.1 能力範圍與現況
 
-| 能力 ID | 領域 | 能力／應完成工作 | 本任務判定 |
-| :--- | :--- | :--- | :--- |
-| **C035** | 調度與營運 | 任務清單→詳情→候選車查詢 | 已實作（`OwnedMobilityService.listDispatchJobs/listDispatchCandidates`），驗證完成 |
-| **C036** | 調度與營運 | 人工派車、改派、撤回及並發占用 | 已實作（`assignDispatch/reassignDispatch`），單一 order 流程驗證完成；跨 order 並發互斥已由 `SR-QA-CONCURRENCY-001` 驗證，不重複 |
-| **C037** | 調度與營運 | 時間到自動釋放預約／提醒／升級 | **驗收缺口屬實**：狀態機與 API 存在，但沒有背景排程自動觸發（見 §4） |
-| **C038** | 調度與營運 | 自動匹配、超時、無供給與恢復 | 狀態機與手動觸發 API 已驗證正確；**自動計時鏈路缺口屬實**（見 §4） |
-| **C039** | 調度與營運 | 排班佇列 check-in／out、順序與例外 | 已實作（event-sourced，經 `dispatchTraceLogs` 重建），驗證完成 |
-| **C040** | 調度與營運 | 可讀地圖、位置與車輛態勢 | 由 `SR-OPS-MAP-001`（`done`）修復，不在本任務 write_scopes 內重做 |
-| **C041** | 調度與營運 | presence 占用與回復可派狀態 | `platform-presence` 模組本身正確；**與派車候選完全未接線的缺口屬實**（見 §4） |
-| **C042** | 調度與營運 | 出勤、營收、維保看板 | 由既有 ops 閱讀入口覆蓋，非本任務新增範圍 |
-| **C048** | 調度與營運 | 跨應用追查與助理工作協作 | 由 `SR-OPS-SHELL-001`（`done`，PR #1939）修復 |
-| **C134** | 調度與營運 | 合約詳情可進入並提供執行條款 | 由 `SR-OPS-CONTRACT-001`（`done`，PR #1938）修復 |
+| 能力 ID  | 領域       | 能力／應完成工作                   | 本任務判定                                                                                                                       |
+| :------- | :--------- | :--------------------------------- | :------------------------------------------------------------------------------------------------------------------------------- |
+| **C035** | 調度與營運 | 任務清單→詳情→候選車查詢           | 已實作（`OwnedMobilityService.listDispatchJobs/listDispatchCandidates`），驗證完成                                               |
+| **C036** | 調度與營運 | 人工派車、改派、撤回及並發占用     | 已實作（`assignDispatch/reassignDispatch`），單一 order 流程驗證完成；跨 order 並發互斥已由 `SR-QA-CONCURRENCY-001` 驗證，不重複 |
+| **C037** | 調度與營運 | 時間到自動釋放預約／提醒／升級     | **驗收缺口屬實**：狀態機與 API 存在，但沒有背景排程自動觸發（見 §4）                                                             |
+| **C038** | 調度與營運 | 自動匹配、超時、無供給與恢復       | 狀態機與手動觸發 API 已驗證正確；**自動計時鏈路缺口屬實**（見 §4）                                                               |
+| **C039** | 調度與營運 | 排班佇列 check-in／out、順序與例外 | 已實作（event-sourced，經 `dispatchTraceLogs` 重建），驗證完成                                                                   |
+| **C040** | 調度與營運 | 可讀地圖、位置與車輛態勢           | 由 `SR-OPS-MAP-001`（`done`）修復，不在本任務 write_scopes 內重做                                                                |
+| **C041** | 調度與營運 | presence 占用與回復可派狀態        | `platform-presence` 模組本身正確；**與派車候選完全未接線的缺口屬實**（見 §4）                                                    |
+| **C042** | 調度與營運 | 出勤、營收、維保看板               | 由既有 ops 閱讀入口覆蓋，非本任務新增範圍                                                                                        |
+| **C048** | 調度與營運 | 跨應用追查與助理工作協作           | 由 `SR-OPS-SHELL-001`（`done`，PR #1939）修復                                                                                    |
+| **C134** | 調度與營運 | 合約詳情可進入並提供執行條款       | 由 `SR-OPS-CONTRACT-001`（`done`，PR #1938）修復                                                                                 |
 
 C040/C042/C048/C134 已由其依賴任務修復並合併至 `origin/dev`；本任務不重做，也未在 write_scopes 外新增這些能力的測試檔案（write_scopes 僅含 `tests/unit/system-remediation/sr-qa-dispatch-001/`、`tests/e2e/system-remediation/sr-qa-dispatch-001/`、本文件）。
 
@@ -78,16 +78,16 @@ C040/C042/C048/C134 已由其依賴任務修復並合併至 `origin/dev`；本�
 
 ### 3.1 驗證指令與結果
 
-| 檢查項目 | 執行指令 | Exit Code | 實際結果摘要 |
-| :--- | :--- | :--- | :--- |
-| **Git Diff 乾淨度** | `git diff --check` | `0` | 無空白/格式錯誤 |
-| **Contracts 建置** | `pnpm --filter @drts/contracts build` | `0` | 成功 |
-| **全庫型別檢查（root tsconfig，涵蓋 `tests/**`）** | `pnpm exec tsc --noEmit -p tsconfig.json` | non-zero（既有、與本任務無關的錯誤） | 本任務新增的 5 個 unit 檔 + 1 個 e2e 檔在輸出中**零筆**錯誤；殘留錯誤均為既有檔案（`apps/fleet-partner-portal-web/**`、其他既有 `tests/unit/**` 檔案）與本 isolated worktree 特有的 `packages/api-client` 型別重複宣告問題，與本任務改動無關，未新增亦未修復（超出 write_scopes） |
-| **ESLint（本任務新增檔案）** | `pnpm exec eslint tests/unit/system-remediation/sr-qa-dispatch-001 tests/e2e/system-remediation/sr-qa-dispatch-001 --max-warnings=0` | `0` | 0 errors, 0 warnings |
-| **Prettier（本任務新增檔案）** | `pnpm exec prettier --check tests/unit/system-remediation/sr-qa-dispatch-001 tests/e2e/system-remediation/sr-qa-dispatch-001` | `0` | All matched files use Prettier code style |
-| **Layer B 單元測試（可執行）** | `pnpm exec vitest run tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-candidates-and-assignment.test.ts tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-timeout-no-supply-scheduler-gap.test.ts tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-queue-checkin-checkout.test.ts tests/unit/system-remediation/sr-qa-dispatch-001/platform-presence-multiplatform-busy.test.ts` | `0` | **29 passed**，涵蓋 C035/C036/C037(結構性缺口)/C038/C039/C041 正常與關鍵負向案例 |
-| **Layer A 真實 PostgreSQL 測試（Fail-Closed，如實記錄）** | `pnpm exec vitest run tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-db-persistence.test.ts` | `1` | **如實 Fail-Closed**：本 VM 未提供 `DATABASE_URL`/`CONCURRENCY_TEST_DATABASE_URL`/`UV_BOOKING_TEST_DATABASE_URL`，`beforeAll` 立即拋出明確例外（6 tests skipped, 1 suite failed），與 `SR-QA-CONCURRENCY-001` 前例一致；**未偽裝成功**。程式碼已針對 `SR-QA-CONCURRENCY-001` 已驗證的相同 bootstrap 撰寫，邏輯與該任務的 Suite 2（`dispatch-reservation-concurrency.test.ts`）同構，但本次未在有 Postgres 的環境下實際執行過 |
-| **Playwright E2E** | `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-dispatch-001` | **未執行** | VM 限制：不得啟動 dev server / browser test server（見 §5），改以 `recordLiveLimitation` 如實揭露，不冒充執行 |
+| 檢查項目                                                  | 執行指令                                                                                                                                                                                                                                                                                                                                                                                                    | Exit Code                            | 實際結果摘要                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| :-------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Git Diff 乾淨度**                                       | `git diff --check`                                                                                                                                                                                                                                                                                                                                                                                          | `0`                                  | 無空白/格式錯誤                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Contracts 建置**                                        | `pnpm --filter @drts/contracts build`                                                                                                                                                                                                                                                                                                                                                                       | `0`                                  | 成功                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **全庫型別檢查（root tsconfig，涵蓋 `tests/**`）\*\*      | `pnpm exec tsc --noEmit -p tsconfig.json`                                                                                                                                                                                                                                                                                                                                                                   | non-zero（既有、與本任務無關的錯誤） | 本任務新增的 5 個 unit 檔 + 1 個 e2e 檔在輸出中**零筆**錯誤；殘留錯誤均為既有檔案（`apps/fleet-partner-portal-web/**`、其他既有 `tests/unit/**` 檔案）與本 isolated worktree 特有的 `packages/api-client` 型別重複宣告問題，與本任務改動無關，未新增亦未修復（超出 write_scopes）                                                                                                                                            |
+| **ESLint（本任務新增檔案）**                              | `pnpm exec eslint tests/unit/system-remediation/sr-qa-dispatch-001 tests/e2e/system-remediation/sr-qa-dispatch-001 --max-warnings=0`                                                                                                                                                                                                                                                                        | `0`                                  | 0 errors, 0 warnings                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **Prettier（本任務新增檔案）**                            | `pnpm exec prettier --check tests/unit/system-remediation/sr-qa-dispatch-001 tests/e2e/system-remediation/sr-qa-dispatch-001`                                                                                                                                                                                                                                                                               | `0`                                  | All matched files use Prettier code style                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Layer B 單元測試（可執行）**                            | `pnpm exec vitest run tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-candidates-and-assignment.test.ts tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-timeout-no-supply-scheduler-gap.test.ts tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-queue-checkin-checkout.test.ts tests/unit/system-remediation/sr-qa-dispatch-001/platform-presence-multiplatform-busy.test.ts` | `0`                                  | **29 passed**，涵蓋 C035/C036/C037(結構性缺口)/C038/C039/C041 正常與關鍵負向案例                                                                                                                                                                                                                                                                                                                                             |
+| **Layer A 真實 PostgreSQL 測試（Fail-Closed，如實記錄）** | `pnpm exec vitest run tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-db-persistence.test.ts`                                                                                                                                                                                                                                                                                                     | `1`                                  | **如實 Fail-Closed**：本 VM 未提供 `DATABASE_URL`/`CONCURRENCY_TEST_DATABASE_URL`/`UV_BOOKING_TEST_DATABASE_URL`，`beforeAll` 立即拋出明確例外（6 tests skipped, 1 suite failed），與 `SR-QA-CONCURRENCY-001` 前例一致；**未偽裝成功**。程式碼已針對 `SR-QA-CONCURRENCY-001` 已驗證的相同 bootstrap 撰寫，邏輯與該任務的 Suite 2（`dispatch-reservation-concurrency.test.ts`）同構，但本次未在有 Postgres 的環境下實際執行過 |
+| **Playwright E2E**                                        | `pnpm exec playwright test -c playwright.system-remediation.config.ts sr-qa-dispatch-001`                                                                                                                                                                                                                                                                                                                   | **未執行**                           | VM 限制：不得啟動 dev server / browser test server（見 §5），改以 `recordLiveLimitation` 如實揭露，不冒充執行                                                                                                                                                                                                                                                                                                                |
 
 ### 3.2 測試案例結構清單（Layer B，29 項，全數通過）
 
@@ -132,6 +132,37 @@ C040/C042/C048/C134 已由其依賴任務修復並合併至 `origin/dev`；本�
 - 派車：`dispatchJobId` → `assignmentId`（`status: assigned`）→ reassign 後舊 `assignmentId` 讀回 `status: cancelled`，新 `assignmentId` 讀回 `status: assigned`（見 `dispatch-candidates-and-assignment.test.ts` 最後一案）。
 - 佇列：`queueEntryId`（`site-a` scope）position 1/2，check-out 後 `status: checked_out`，重新 check-in 產生**新的** `queueEntryId`（非復用舊筆）。
 - 無供給升級：`noSupplyEscalation.escalationAction` 依序 `move_to_delayed_queue` → `escalate_to_ops`，`resolvedAt` 在 `cancel_with_notification` 後非 null。
+
+### 3.4 PR #1948 CI 發現的 Layer A bootstrap 缺陷與修復（本次 dispatch 新增）
+
+前次 handoff 時本 VM 無 `DATABASE_URL`，Layer A（`dispatch-db-persistence.test.ts`）只驗證了「未配置時明確 fail-closed」，未實際針對真實 Postgres 跑過（§3.1 已如實記錄此限制）。candidate `d1ecc53022b8e40ccf6d0791c8d82903580bdbc1` 推送後，PR #1948 的 GitHub Actions `CI` workflow（有 `postgres` service container，`DATABASE_URL=postgresql://postgres:postgres@localhost:5432/drts_fleet_platform`）**真正執行了 Layer A**，`Smoke acceptance` / `Product smoke acceptance` job 回報 3 個測試失敗：
+
+```
+run: https://github.com/ajoe734/drts-fleet-platform/actions/runs/34525822672/job/103034527004
+FAIL tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-db-persistence.test.ts
+  > C035/C036 Positive: dispatch job + assignment + attempt write-then-read back exactly ...
+  > C038 Positive: dispatch-timeout trace log write-then-read reconstructs the redispatch reason
+  > C039 Positive: queue check-in/check-out trace-log stream write-then-read ...
+error: relation "ops.consumer_notification_outbox" does not exist
+error: relation "ops.passenger_dispatch_disclosure_snapshots" does not exist
+```
+
+**根因**：`OwnedMobilityRepository.loadState()`（`apps/api/src/modules/owned-mobility/owned-mobility.repository.ts`）在同一個 `Promise.all` 中無條件讀取 `ops.passenger_dispatch_disclosure_snapshots` 與 `ops.consumer_notification_outbox`（見 repository 檔案第 554/573 行），這兩張表由 `infra/migrations/V0056__multi_taxi_runtime_compliance_closure.sql` 建立。測試的 `beforeAll` 沿用 `SR-QA-CONCURRENCY-001` 的 bootstrap（僅 `V0011` + `V0087`），該既有 bootstrap 從未觸發過這兩張表的讀取路徑，所以沿用時遺漏了 `V0056`；本 VM 在本機一直無法跑 Layer A，這個 gap 在 handoff 前未被捕捉到。
+
+**修復**（本次改動，僅限 `tests/unit/system-remediation/sr-qa-dispatch-001/` write_scope，未改動任何業務程式碼或 migration 檔）：
+
+- `dispatch-db-persistence.test.ts` 的 `beforeAll` 新增 `CREATE SCHEMA reg; CREATE SCHEMA billing; CREATE SCHEMA reporting;`（`V0056` 用到但先前未建立的 schema，均由 `V0001__bootstrap_extensions_and_schemas.sql` / `V0034__phase1_delta_supply_eligibility_mobile_reporting.sql` 定義，此處直接建立同名 schema 而非整支跑那兩個大型 migration，避免拉入無關依賴）。
+- 新增 `await pool.query(migration("V0056__multi_taxi_runtime_compliance_closure.sql"))`，緊接在 `V0087` 之後執行。已確認 `V0056` 第 5 行的 `ALTER TABLE ops.phase1_owned_orders ...` 依賴的表由已執行的 `V0011` 建立，`V0056` 本身不 `CREATE SCHEMA`、除 `reg.multi_taxi_operating_authorizations` 自參照外無其他外部 FK 依賴，因此在既有 bootstrap 之後套用是安全的。
+
+**本次驗證**（本 VM 仍無 `DATABASE_URL`，無法重跑 Layer A 本身；以下為可在本 VM 執行的驗證）：
+
+| 檢查項目                                                                 | 指令                                                                                                    | Exit Code                                                           | 結果                                                                                                                                                                             |
+| :----------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------ | :------------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Layer A fail-closed 行為未被破壞（仍在無 DB 時明確拋錯，非新的靜默略過） | `pnpm exec vitest run tests/unit/system-remediation/sr-qa-dispatch-001/dispatch-db-persistence.test.ts` | `1`（預期）                                                         | `beforeAll` 於 `CONCURRENCY_TEST_DATABASE_URL`/`UV_BOOKING_TEST_DATABASE_URL`/`DATABASE_URL` 均未設定時立即拋出同一個明確例外，6 tests skipped、1 suite failed，與修復前行為一致 |
+| Layer B 迴歸未受影響                                                     | `pnpm exec vitest run tests/unit/system-remediation/sr-qa-dispatch-001/`                                | 1 file failed（即上述預期中的 Layer A fail-closed）、4 files passed | 29 passed \| 6 skipped，與修復前相同，證明本次修改未影響其他測試檔                                                                                                               |
+| Migration 依賴鏈人工核對                                                 | 讀取 `infra/migrations/V0056__multi_taxi_runtime_compliance_closure.sql` 全文                           | n/a                                                                 | 確認唯一跨表依賴（`ops.phase1_owned_orders`）已由既有 bootstrap 的 `V0011` 建立，且 `V0056` 未 `CREATE SCHEMA`／無其他外部 FK                                                    |
+
+**未做（如實揭露，不冒充成功）**：本次修復**未在真實 Postgres 上重跑過 Layer A**——本 VM 依舊未配置可達的資料庫，VM 限制也不允許啟動 `docker compose`。修復是否讓 PR #1948 的 CI 轉綠，需由下一輪 CI 執行結果驗證（見 candidate lifecycle / PR #1948 checks），本文件與 handoff 不宣稱「CI 已通過」，只記錄「已識別根因並套用對應修復」。
 
 ---
 
