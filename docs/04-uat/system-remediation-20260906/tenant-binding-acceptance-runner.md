@@ -39,7 +39,14 @@ skipping.
 `workflow_dispatch` with a required `candidate_sha` input (defaults to the
 locked parent candidate `10123f6af00a5342f2634a01f4d9a0e7190c2173`):
 
-1. Validates `candidate_sha` is a full 40-character hex SHA.
+1. Validates `candidate_sha` is a full 40-character hex SHA. The input is
+   routed through job-level `env: CANDIDATE_SHA` and read back as `$CANDIDATE_SHA`
+   in every `run:` step rather than interpolated directly via `${{ }}` inside
+   the shell block — direct interpolation is textually substituted before the
+   shell runs, which is a script-injection vector for a `workflow_dispatch`
+   input. `with:`/`concurrency:`/artifact-`name:` usages of
+   `${{ github.event.inputs.candidate_sha }}` are unaffected: those contexts
+   are not shell and do not have this exposure.
 2. Checks out that exact `ref`, then runs `git rev-parse HEAD` and fails the
    job if it does not equal the requested SHA — `actions/checkout` resolves a
    moving ref at fetch time, so this guards against silently accepting a

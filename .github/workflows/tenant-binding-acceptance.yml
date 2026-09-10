@@ -55,10 +55,15 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       DRTS_TENANT_BINDING_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
       DRTS_WEBHOOK_AUTH_EVIDENCE: ${{ github.workspace }}/.artifacts/tenant-binding-acceptance/evidence-auth-http.json
+      # Routed through env rather than interpolated directly into a `run:`
+      # script: a workflow_dispatch input is attacker-controllable text, and
+      # direct ${{ }} interpolation inside a shell block is substituted
+      # before the shell runs, which is a script-injection vector.
+      CANDIDATE_SHA: ${{ github.event.inputs.candidate_sha }}
     steps:
       - name: Validate candidate_sha input
         run: |
-          sha="${{ github.event.inputs.candidate_sha }}"
+          sha="$CANDIDATE_SHA"
           if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::candidate_sha must be a full 40-character commit SHA, got: $sha"
             exit 1
@@ -75,7 +80,7 @@ jobs:
         # recording acceptance evidence for the wrong SHA.
         run: |
           resolved="$(git rev-parse HEAD)"
-          expected="${{ github.event.inputs.candidate_sha }}"
+          expected="$CANDIDATE_SHA"
           echo "Resolved HEAD: $resolved"
           echo "Expected candidate: $expected"
           if [ "$resolved" != "$expected" ]; then
